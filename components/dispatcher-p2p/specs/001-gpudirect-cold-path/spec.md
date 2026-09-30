@@ -171,9 +171,18 @@ The system keeps both DRAM and SSD tiers within configured utilization bounds wi
   batch produces more than one distinct `ServedBy` — a fixture where every key resolves
   identically satisfies all three while exercising one path.
 
-- **SC-008** *(New 2026-09-29)*: Reading the same cold key twice reports `Ssd` **both** times,
-  which distinguishes this component from `dispatcher` and is the observable consequence of
-  having no synchronous DRAM promotion.
+- **SC-008** *(New 2026-09-29, refined 2026-09-30)*: On an identical workload this component
+  reports a **higher `Ssd` share of served keys** than `components/dispatcher` does, which is
+  the observable consequence of having no synchronous DRAM promotion.
+
+  **Stated as an aggregate share rather than as "a repeat read reports `Ssd` twice", and the
+  correction matters.** The obvious per-key formulation is wrong, because this component *does*
+  backfill DRAM — asynchronously. A key read cold is therefore `Ssd` on that read and may
+  legitimately be `Dram` on a later one, once the backfill has landed. "Twice `Ssd`" holds only
+  within a window shorter than the backfill, which no black-box client can observe or control,
+  so a test asserting it would be measuring the scheduler's timing rather than this
+  requirement. What FR-014 actually claims is that the promotion is not on the serving path,
+  and a share comparison on one workload tests exactly that.
 
   **Not yet verified, and the reason is structural rather than an omission.** Dispatcher
   selection is a build-time `CERTUS_PROFILE` choice, so the two cannot be compared by flipping

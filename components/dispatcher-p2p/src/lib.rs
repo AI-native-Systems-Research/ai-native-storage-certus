@@ -199,6 +199,12 @@ define_component! {
             extent_manager_factory: Mutex<Option<ExtentManagerFactory>>,
             eviction_tx: Arc<Mutex<Option<crossbeam_channel::Sender<EvictionEvent>>>>,
             eviction_dropped: Arc<AtomicU64>,
+            // The route partition: served keys by how they were served. Recorded where
+            // `batch_lookup` derives its per-key `ServedBy`, so the aggregate and the
+            // per-key attribution for one batch cannot disagree.
+            route_dram: AtomicU64,
+            route_ssd: AtomicU64,
+            route_remote: AtomicU64,
         },
     }
 }
@@ -2107,6 +2113,14 @@ impl IDispatcher for DispatcherP2pComponent {
                     (Err(DispatcherError::InvalidParameter(_)), _) => ServedBy::SizeMismatch,
                     (Err(_), _) => ServedBy::Error,
                 };
+                match served_by {
+                    ServedBy::Dram => self.route_dram.fetch_add(1, Ordering::Relaxed),
+                    ServedBy::Ssd => self.route_ssd.fetch_add(1, Ordering::Relaxed),
+                    ServedBy::Remote => self.route_remote.fetch_add(1, Ordering::Relaxed),
+                    // Not served: the transport host owns miss and error totals. Counting
+                    // them here as well would double-count them.
+                    _ => 0,
+                };
                 LookupOutcome { served_by, result }
             })
             .collect()
@@ -2758,8 +2772,23 @@ impl IDispatcher for DispatcherP2pComponent {
     }
 
     fn tier_event_stats(&self) -> interfaces::TierEventStats {
-        // dispatcher-p2p does not track tier-movement counters; report zeroed.
-        interfaces::TierEventStats::default()
+        // This component still tracks no tier-MOVEMENT counters (promotions, evictions,
+        // store backpressure) -- those belong to paths it does not have. It does report
+        // the route partition, because it derives exactly the same per-key `ServedBy` the
+        // other dispatcher does, and an endpoint showing hits with no routes would imply
+        // every hit was unattributed.
+        //
+        // Reported here rather than left defaulted because leaving it defaulted is what
+        // happened, and a hardware run caught it: 5 526 hits against dram 0 / ssd 0 on a
+        // p2p server. Adding fields to `TierEventStats` is NOT compiler-enforced -- this
+        // `..default()` kept compiling -- which the dispatcher's spec 002 records as a
+        // caveat and which this was a live instance of.
+        interfaces::TierEventStats {
+            lookup_hits_dram: self.route_dram.load(Ordering::Relaxed),
+            lookup_hits_ssd: self.route_ssd.load(Ordering::Relaxed),
+            remote_lookup_hits: self.route_remote.load(Ordering::Relaxed),
+            ..Default::default()
+        }
     }
 }
 
@@ -3563,6 +3592,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         c.dispatch_map
             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
@@ -3700,6 +3732,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         c.dispatch_map
             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
@@ -3759,6 +3794,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
     }
 
@@ -3779,6 +3817,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher);
         assert!(d.is_some());
@@ -3801,6 +3842,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let config = DispatcherConfig {
@@ -3828,6 +3872,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let config = DispatcherConfig {
@@ -3856,6 +3903,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let mut buf = vec![0u8; 4096];
@@ -3884,6 +3934,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let err = d.check(42);
@@ -3907,6 +3960,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let err = d.remove(42);
@@ -3930,6 +3986,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let mut buf = vec![0u8; 4096];
@@ -3958,6 +4017,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         // Even though not initialized, zero-size check comes after init check.
@@ -3989,6 +4051,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         assert!(d.shutdown().is_ok());
@@ -4011,6 +4076,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         assert!(d.shutdown().is_ok());
@@ -4034,6 +4102,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         ));
 
         let handles: Vec<_> = (0..4)
@@ -4088,6 +4159,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         c.dispatch_map.connect(dm).unwrap();
         c.memory_tier.connect(mt).unwrap();
@@ -4121,6 +4195,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         c.dispatch_map.connect(dm).unwrap();
         c.logger.connect(logger).unwrap();
@@ -4198,6 +4275,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         c.dispatch_map.connect(dm).unwrap();
         c.logger.connect(logger).unwrap();
@@ -4340,6 +4420,40 @@ mod tests {
             .map(|(&k, buf)| (k, vec![make_handle(buf)]))
             .collect();
         (bufs, entries)
+    }
+
+    /// The route partition on THIS dispatcher — the test whose absence let a real defect
+    /// reach hardware.
+    ///
+    /// `tier_event_stats()` returned `TierEventStats::default()` here, so a p2p server
+    /// reported 5 526 hits against dram 0 / ssd 0: every hit unattributed, and nothing
+    /// caught it. The invariant test above passed, because per-key attribution was
+    /// correct all along — only the aggregate face of it was missing. Adding fields to
+    /// `TierEventStats` is not compiler-enforced, which spec 002 records as a caveat and
+    /// this was an instance of.
+    #[test]
+    fn the_route_counters_partition_the_served_keys() {
+        let fx = setup_initialized_with_remote(&[1, 3], PinProbe::new);
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        let (_bufs, entries) = remote_batch(&[1, 2, 3]);
+        let results = d.batch_lookup(&entries);
+        let served = results.iter().filter(|o| o.result.is_ok()).count() as u64;
+        assert!(
+            served > 0,
+            "fixture served nothing, so the partition is vacuous"
+        );
+
+        let t = d.tier_event_stats();
+        assert_eq!(
+            t.lookup_hits_dram + t.lookup_hits_ssd + t.remote_lookup_hits,
+            served,
+            "route counters must partition the served keys: dram {} + ssd {} + remote {} \
+             != served {served}",
+            t.lookup_hits_dram,
+            t.lookup_hits_ssd,
+            t.remote_lookup_hits
+        );
     }
 
     /// T114 / FR-027 for this dispatcher: the same three invariants `dispatcher` asserts.
@@ -4783,6 +4897,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
 
         // Capacity-1 subscriber, never drained: the first eviction event fills the
@@ -4835,6 +4952,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         c.dispatch_map
             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
