@@ -3,10 +3,10 @@
 # 12-turn ShareGPT replay workload and emit a side-by-side throughput table.
 #
 # Variants (run in this order):
-#   NoOffload      GPU-only baseline                 (image certus-nooffload-bench)
-#   CPUOffload     vLLM OffloadingConnector -> host RAM (image certus-cpu-offload-bench)
-#   SharedStorage  llmd_fs_backend RAID0/XFS         (image certus-sharedstorage-bench)
-#   Certus-SPDK    shmq client + certus-server-yaml  (image certus-shmq-bench + host server)
+#   NoOffload      GPU-only baseline                 (image certus-nooffload)
+#   CPUOffload     vLLM OffloadingConnector -> host RAM (image certus-cpu-offload)
+#   SharedStorage  llmd_fs_backend RAID0/XFS         (image certus-sharedstorage)
+#   Certus-SPDK    shmq client + certus-server-yaml  (image certus-shmq-connector + host server)
 #
 # Each variant is preflighted independently: ready ones run, the rest are marked
 # SKIPPED with a reason. Missing bench images are built only when --build is
@@ -54,10 +54,10 @@ SKIP=""
 LOGDIR=""
 
 # Image tags
-IMG_NOOFFLOAD="certus-nooffload-bench"
-IMG_CPU="certus-cpu-offload-bench"
-IMG_SHARED="certus-sharedstorage-bench"
-IMG_SHMQ="localhost/certus-shmq-bench"
+IMG_NOOFFLOAD="certus-nooffload"
+IMG_CPU="certus-cpu-offload"
+IMG_SHARED="certus-sharedstorage"
+IMG_SHMQ="localhost/certus-shmq-connector"
 
 DATASET_HOST="${SCRIPT_DIR}/../../data/sharegpt_12turn_450.json"
 SERVER_BIN="${REPO_ROOT}/target/release/certus-server-yaml"
@@ -217,13 +217,13 @@ fi
 # Reap stale bench containers (the earlier GPU-pin foot-gun).
 reap() {
     local names ids
-    names="$(command podman ps -a --format '{{.ID}} {{.Names}}' 2>/dev/null | grep -E 'certus-(nooffload|cpu-offload|sharedstorage|shmq)-bench|-bench$' | awk '{print $1}')"
+    names="$(command podman ps -a --format '{{.ID}} {{.Names}}' 2>/dev/null | grep -E 'certus-(nooffload|cpu-offload|sharedstorage)' | awk '{print $1}')"
     if [[ -n "$names" ]]; then
         warn "reaping stale bench containers: $(echo "$names" | tr '\n' ' ')"
         echo "$names" | xargs -r command podman rm -f >/dev/null 2>&1
     fi
     # Same for the shmq store.
-    ids="$(command podman --root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT" ps -a --format '{{.ID}} {{.Names}}' 2>/dev/null | grep -E 'shmq-bench|-bench$' | awk '{print $1}')"
+    ids="$(command podman --root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT" ps -a --format '{{.ID}} {{.Names}}' 2>/dev/null | grep -E 'certus-shmq-connector' | awk '{print $1}')"
     [[ -n "$ids" ]] && echo "$ids" | xargs -r command podman --root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT" rm -f >/dev/null 2>&1
 }
 reap
@@ -343,7 +343,7 @@ if want certus-spdk; then
             log "building ${IMG_SHMQ} into ${PODMAN_STORE}"
             command podman --root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT" build \
                 -f "${REPO_ROOT}/certus-shmq-connector/Dockerfile" \
-                -t certus-shmq-bench "$REPO_ROOT" \
+                -t certus-shmq-connector "$REPO_ROOT" \
                 > "${LOGDIR}/build-shmq.log" 2>&1 \
                 || cs_skip="shmq image build failed (see build-shmq.log)"
         else

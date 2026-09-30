@@ -1,5 +1,5 @@
 #!/bin/bash
-# Unified entrypoint for the KV-offload workload image (certus-offload-bench).
+# Unified entrypoint for the KV-offload workload image (certus-offload).
 #
 # One image, one driver (run_multiturn_offloading.py), three backends selected by
 # environment — this merges the former nooffload / cpu-offload / cputier

@@ -3,13 +3,13 @@
 # 12-turn ShareGPT replay workload and emit a side-by-side throughput table.
 #
 # Variants (run in this order):
-#   NoOffload      GPU-only baseline                 (image certus-offload-bench, OFFLOAD_MODE=none)
-#   Certus-SPDK    shmq client + certus-server-yaml  (image certus-shmq-bench + host server)
-#   CPUOffload     vLLM OffloadingConnector -> host RAM (image certus-offload-bench, default mode)
-#   SharedStorage  llmd_fs_backend on RAID0/XFS      (image certus-sharedstorage-bench)
+#   NoOffload      GPU-only baseline                 (image certus-offload, OFFLOAD_MODE=none)
+#   Certus-SPDK    shmq client + certus-server-yaml  (image certus-shmq-connector + host server)
+#   CPUOffload     vLLM OffloadingConnector -> host RAM (image certus-offload, default mode)
+#   SharedStorage  llmd_fs_backend on RAID0/XFS      (image certus-sharedstorage)
 #                  vLLM <= 0.23 path (native tiering not yet available)
 #   Tiered-CPU-FS  vLLM TieringOffloadingManager: CPU primary + FS secondary
-#                  vLLM >= 0.23 path (same certus-offload-bench + SECONDARY_TIER=fs; FS tier on RAID0/XFS)
+#                  vLLM >= 0.23 path (same certus-offload + SECONDARY_TIER=fs; FS tier on RAID0/XFS)
 #
 # Certus-SPDK runs first (of the storage backends) on purpose: it consumes the
 # boot-reserved 1G hugepage pool while it is still intact (no runtime realloc, no
@@ -138,11 +138,11 @@ LOGDIR=""
 # Dockerfile.offload (run_multiturn_offloading.py drives all three; the backend is
 # picked per-run by OFFLOAD_MODE / SECONDARY_TIER). IMG_NOOFFLOAD / IMG_CPU are
 # kept as override knobs but default to the same unified image.
-IMG_OFFLOAD="${IMG_OFFLOAD:-certus-offload-bench}"
+IMG_OFFLOAD="${IMG_OFFLOAD:-certus-offload}"
 IMG_NOOFFLOAD="${IMG_NOOFFLOAD:-$IMG_OFFLOAD}"
 IMG_CPU="${IMG_CPU:-$IMG_OFFLOAD}"
-IMG_SHARED="${IMG_SHARED:-certus-sharedstorage-bench}"
-IMG_SHMQ="${IMG_SHMQ:-localhost/certus-shmq-bench}"
+IMG_SHARED="${IMG_SHARED:-certus-sharedstorage}"
+IMG_SHMQ="${IMG_SHMQ:-localhost/certus-shmq-connector}"
 
 # Host copy of the replay dataset, used only for the preflight existence warn
 # (container runs bake their own copy). It lives in data/ but older layouts kept
@@ -268,7 +268,7 @@ Flags (all optional; defaults shown):
                                otherwise reused as-is). Without it, a missing image
                                is SKIPPED. All images build via their Dockerfiles;
                                Tiered-CPU-FS reuses the CPUOffload image;
-                               SharedStorage builds certus-sharedstorage-bench
+                               SharedStorage builds certus-sharedstorage
                                (needs FS_BACKEND_DIR).
   --vllm-version <x.y.z>       Pin the vLLM base-image version for ALL backends
                                (--build-arg VLLM_VERSION). Images are tagged
@@ -469,8 +469,8 @@ HUGEPAGES_1G_NODE="${RESOURCE_NUMA:-0}"
 #   label  — a distinct XFS label.
 # certus' teardown_raid_if_active acts on these same values (forwarded below), so it
 # only ever stops the shared-group RAID — never the model-fs array.
-SHARED_FS="/mnt/ss-kv"
-SS_XFS_LABEL="sskv"
+SHARED_FS="/mnt/fs-backend-bench"  # host-local (ru10): match configure-bench default MOUNT_POINT; no model-fs array here to collide with
+SS_XFS_LABEL="fs-bench"  # host-local (ru10): matches the label already on nvme0n1
 # Reuse an EXISTING md array only if one is mounted at the exact SharedStorage
 # mountpoint. Note: NO --target here. `findmnt --target <dir>` resolves the mount
 # that *contains* <dir>, walking UP to the parent when <dir> itself isn't a mount —
@@ -734,22 +734,55 @@ fi
 # check below so that check only flags usage we did not just clear.
 reap() {
     local names ids
-    names="$(command podman ps -a --format '{{.ID}} {{.Names}} {{.Image}}' 2>/dev/null | grep -E 'certus-(nooffload|cpu-offload|sharedstorage|shmq)-bench' | awk '{print $1}')"
+    names="$(command podman ps -a --format '{{.ID}} {{.Names}} {{.Image}}' 2>/dev/null | grep -E 'certus-(offload|sharedstorage)' | awk '{print $1}')"
     if [[ -n "$names" ]]; then
         warn "reaping stale bench containers: $(echo "$names" | tr '\n' ' ')"
         echo "$names" | xargs -r command podman rm -f >/dev/null 2>&1
     fi
     # Same for the shmq store.
-    ids="$(command podman --root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT" ps -a --format '{{.ID}} {{.Names}} {{.Image}}' 2>/dev/null | grep -E 'certus-shmq-bench|shmq-bench' | awk '{print $1}')"
+    ids="$(command podman --root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT" ps -a --format '{{.ID}} {{.Names}} {{.Image}}' 2>/dev/null | grep -E 'certus-shmq-connector' | awk '{print $1}')"
     [[ -n "$ids" ]] && echo "$ids" | xargs -r command podman --root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT" rm -f >/dev/null 2>&1
 }
 reap
 
+# ── nvidia-smi resolution ──
+# On nodes with a containerized NVIDIA driver (GPU-operator under
+# /run/nvidia/driver), the host often has no working nvidia-smi on PATH: the
+# driver's own binary can't resolve libnvidia-ml against the host RHCOS libc,
+# and a driver-version roll silently wipes whatever host symlink used to work
+# — which is exactly how GPU telemetry vanishes from a run. Resolve a working
+# invocation ONCE here. NVSMI is an array so it can carry a loader prefix; call
+# it as "${NVSMI[@]}" <args>. have_nvidia_smi replaces the old `command -v`
+# guards. Validated with `-L` so a broken on-PATH nvidia-smi is rejected in
+# favour of the container fallback.
+NVSMI=()
+_resolve_nvidia_smi() {
+    # 1) A working nvidia-smi already on PATH (host install, or the ru10
+    #    /var/home/core/bin wrapper).
+    if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
+        NVSMI=(nvidia-smi); return 0
+    fi
+    # 2) Containerized driver: run its nvidia-smi via its OWN dynamic loader and
+    #    lib path so every symbol resolves consistently (no chroot, no sudo, no
+    #    copied libs). Tracks the stable /run/nvidia/driver mount, so it survives
+    #    GPU-operator driver upgrades.
+    local drv=/run/nvidia/driver
+    local ldr="$drv/usr/lib64/ld-linux-x86-64.so.2"
+    local smi="$drv/usr/bin/nvidia-smi"
+    if [[ -x "$ldr" && -x "$smi" ]] \
+       && "$ldr" --library-path "$drv/usr/lib64" "$smi" -L >/dev/null 2>&1; then
+        NVSMI=("$ldr" --library-path "$drv/usr/lib64" "$smi"); return 0
+    fi
+    NVSMI=(); return 1
+}
+have_nvidia_smi() { [[ ${#NVSMI[@]} -gt 0 ]]; }
+_resolve_nvidia_smi || true
+
 # GPU-free check — after reaping our own stale containers, so it only flags usage
 # from a foreign process (which we must not kill). Informational: warns, does not
 # abort — the benchmark may still fit, or the user may want to intervene.
-if command -v nvidia-smi >/dev/null 2>&1; then
-    used="$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | sort -rn | head -1)"
+if have_nvidia_smi; then
+    used="$("${NVSMI[@]}" --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | sort -rn | head -1)"
     if [[ -n "$used" && "$used" -gt 1024 ]]; then
         warn "a GPU still has ${used} MiB in use after reaping bench containers — a foreign process may starve the benchmark"
     fi
@@ -769,9 +802,9 @@ fi
 # left pinned after the run.
 GPU_CLOCK_LOCKED=0
 lock_gpu_clocks() {
-    command -v nvidia-smi >/dev/null 2>&1 || return 0
+    have_nvidia_smi || return 0
     local maxsm
-    maxsm="$(nvidia-smi --query-gpu=clocks.max.sm --format=csv,noheader,nounits 2>/dev/null | sort -rn | head -1)"
+    maxsm="$("${NVSMI[@]}" --query-gpu=clocks.max.sm --format=csv,noheader,nounits 2>/dev/null | sort -rn | head -1)"
     if [[ ! "$maxsm" =~ ^[0-9]+$ ]]; then
         warn "could not read GPU max SM clock — leaving clocks on auto-boost (runs may drift ~10%)"
         return 0
@@ -782,8 +815,8 @@ lock_gpu_clocks() {
         warn "no sudo — cannot pin GPU clocks; generation throughput may drift across backends"
         return 0
     fi
-    if sudo -n nvidia-smi -pm 1 >/dev/null 2>&1 \
-       && sudo -n nvidia-smi -lgc "${maxsm},${maxsm}" >/dev/null 2>&1; then
+    if sudo -n "${NVSMI[@]}" -pm 1 >/dev/null 2>&1 \
+       && sudo -n "${NVSMI[@]}" -lgc "${maxsm},${maxsm}" >/dev/null 2>&1; then
         GPU_CLOCK_LOCKED=1
         log "pinned GPU SM clock to ${maxsm} MHz (persistence on) — stable cross-backend timing"
     else
@@ -793,7 +826,7 @@ lock_gpu_clocks() {
 unlock_gpu_clocks() {
     [[ "${GPU_CLOCK_LOCKED:-0}" == 1 ]] || return 0
     log "resetting GPU clocks to default (auto-boost)"
-    sudo -n nvidia-smi -rgc >/dev/null 2>&1 || warn "could not reset GPU clocks (sudo nvidia-smi -rgc)"
+    sudo -n "${NVSMI[@]}" -rgc >/dev/null 2>&1 || warn "could not reset GPU clocks (sudo nvidia-smi -rgc)"
     GPU_CLOCK_LOCKED=0
 }
 lock_gpu_clocks
@@ -807,14 +840,14 @@ lock_gpu_clocks
 GPU_SAMPLE_SEC="${GPU_SAMPLE_SEC:-2}"
 GPU_SAMPLER_PID=""
 start_gpu_sampler() {
-    command -v nvidia-smi >/dev/null 2>&1 || return 0
+    have_nvidia_smi || return 0
     [[ -n "${LOGDIR:-}" && -d "${LOGDIR:-}" ]] || return 0
     local tl="${LOGDIR}/gpu-timeline.csv"
     echo "epoch_s,gpu_idx,util_gpu_pct,util_mem_pct,mem_used_mib,sm_clock_mhz,temp_c,power_w" > "$tl"
     (
         while true; do
             ts="$(date +%s)"
-            nvidia-smi --query-gpu=index,utilization.gpu,utilization.memory,memory.used,clocks.sm,temperature.gpu,power.draw \
+            "${NVSMI[@]}" --query-gpu=index,utilization.gpu,utilization.memory,memory.used,clocks.sm,temperature.gpu,power.draw \
                 --format=csv,noheader,nounits 2>/dev/null \
                 | sed "s/^/${ts}, /; s/, /,/g" >> "$tl" || true
             sleep "$GPU_SAMPLE_SEC"
@@ -947,6 +980,7 @@ run_container_bench() {  # variant image extra-args...
         -e "HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}" \
         -e "TRANSFORMERS_OFFLINE=${TRANSFORMERS_OFFLINE:-1}" \
         -e "GPU_KV_GB=${GPU_KV_GB}" \
+        -e "TIER_DEBUG=${TIER_DEBUG:-0}" \
         -v "${HF_CACHE}:/root/.cache/huggingface:z" \
         "${wl[@]}" \
         "${extra[@]}" \

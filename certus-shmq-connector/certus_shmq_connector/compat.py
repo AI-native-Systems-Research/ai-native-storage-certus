@@ -22,10 +22,20 @@ Three techniques, each handling a different kind of change:
    touching vLLM's shapes directly. Each version branch lives in exactly one
    place.
 
-Supported (built + smoke-tested) versions: 0.20, 0.22, 0.23, 0.24, 0.26. Values in
-the matrix are seeded from the 0.20 baseline; each is confirmed or corrected as the
-version walk builds and smoke-tests that release. Entries still awaiting empirical
-confirmation on a given version are marked ``# TODO(verify @0.xx)``.
+Supported (built + smoke-tested) versions: 0.20, 0.22, 0.23, 0.24, 0.26, 0.29, 0.30.
+Values in the matrix are seeded from the 0.20 baseline; each is confirmed or corrected
+as the version walk builds and smoke-tests that release. Entries still awaiting
+empirical confirmation on a given version are marked ``# TODO(verify @0.xx)``.
+
+0.29/0.30 note: 0.30 was verified against real source (v0.30.1rc0-171-g2bc902eb0f).
+The 0.26 "consolidated base" rewrite (single OffloadingWorker, OffloadingConfig ctor,
+LookupResult enum, CanonicalKVCaches) still describes the connector's path on 0.29/0.30,
+so the existing ``>= (0, 26)`` flags carry forward unchanged. The one genuinely-new
+0.30 delta the connector can branch on is ``kvcache_layout_field`` (OffloadingConfig
+gained ``kv_cache_layout``). The material 0.30 *tiering* changes (backpressure detector,
+ParentManager, serve_external_requests(parent), kvcr tier) are NOT gated here because
+this connector is a top-level OffloadingSpec, not a SecondaryTierManager — see
+knowledge/contracts/MIGRATION-v026-to-v030.md.
 """
 
 from __future__ import annotations
@@ -42,6 +52,8 @@ SUPPORTED_VERSIONS: tuple[tuple[int, int], ...] = (
     (0, 23),
     (0, 24),
     (0, 26),
+    (0, 29),
+    (0, 30),
 )
 
 
@@ -161,6 +173,20 @@ FEATURES: dict[str, "callable"] = {
     # ``(num_blocks, page_size_bytes)`` int8 tensors + per-group refs) rather than
     # the raw kv_caches object ``get_handlers`` used to get.
     "canonical_kv_caches": lambda v: v >= (0, 26),
+    # ── 0.30 ──
+    # 0.30 added ``OffloadingConfig.kv_cache_layout`` (the resolved ``KVCacheLayout``
+    # enum NAME, e.g. "LBHNC", from ``vllm_config.cache_config.kv_cache_layout``) and
+    # a companion ``canonical_layout: bool``. Verified against real 0.30 source
+    # (vllm/v1/kv_offload/config.py; distributed/.../offloading/config.py:287). The
+    # ``kv_cache_layout_name`` adapter reads this off the config when the flag is set
+    # and returns None otherwise, so the connector can record/inspect the offload
+    # layout on 0.30 without touching the field on versions that lack it. Threshold
+    # is deliberately conservative at (0, 30): only 0.30 source was available, and
+    # reading the field on an older release that happened to predate it would raise —
+    # gating at 0.30 fails safe (falls back to None). The material 0.30 *tiering*
+    # deltas are intentionally NOT represented here (this connector is a top-level
+    # OffloadingSpec, not a SecondaryTierManager) — see MIGRATION-v026-to-v030.md.
+    "kvcache_layout_field": lambda v: v >= (0, 30),  # verified @0.30 (present); conservative floor
 }
 
 
@@ -177,6 +203,7 @@ class Caps:
     spec_config_object: bool
     lookup_returns_enum: bool
     canonical_kv_caches: bool
+    kvcache_layout_field: bool
 
 
 def caps_for(v: tuple[int, int]) -> Caps:
@@ -337,6 +364,7 @@ __all__ = [
     "extract_gpu_ptrs",
     "block_bytes_from_config",
     "block_bytes_from_offloading_config",
+    "kv_cache_layout_name",
     "gpu_block_ids",
     "new_request_offloading_context",
     "lookup_result",
@@ -565,6 +593,25 @@ def block_bytes_from_offloading_config(config) -> int:
         flush=True,
     )
     return block_bytes
+
+
+def kv_cache_layout_name(config) -> str | None:
+    """Resolved KV-cache layout name from the ``OffloadingConfig`` (0.30+).
+
+    * **0.30+** (``CAPS.kvcache_layout_field``): returns
+      ``config.kv_cache_layout`` — the resolved ``KVCacheLayout`` enum NAME
+      (e.g. ``"LBHNC"``) or ``None`` when vLLM did not pin one.
+    * **≤0.29**: the field does not exist on the config, so returns ``None``
+      without touching it (the connector offloads raw per-block bytes and does
+      not reinterpret layout, so ``None`` simply means "layout not recorded").
+
+    Isolated here so that if a later vLLM promotes the layout to a required
+    input, the single read lives in one place.
+    """
+    if not CAPS.kvcache_layout_field:
+        return None
+    layout = getattr(config, "kv_cache_layout", None)
+    return str(layout) if layout is not None else None
 
 
 def worker_base_class():

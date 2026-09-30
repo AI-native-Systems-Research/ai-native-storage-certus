@@ -372,6 +372,41 @@ def run_kani(harness, component_dir, cap, mem_mb=None, cap_max=None, escalate=Tr
     return ok, out, wall, rss_mb, timed_out, oomed
 
 
+_TOOL_CRASH_SIGS = [
+    r"CBMC failed with status \d+",
+    r"cbmc: .*(?:Assertion|assertion) `.*' failed",
+    r"Invariant check failed",
+    r"terminate called after throwing",
+    r"Segmentation fault",
+    r"std::bad_alloc",
+    r"kani-compiler.*panicked at",
+    r"internal compiler error",
+]
+
+
+def tool_crash(out):
+    """The FIRST tool-crash signature in `out`, else None.
+
+    WHY THIS EXISTS, and it is a soundness hole we shipped and then found:
+    Kani renders a CBMC crash as `VERIFICATION:- FAILED`. So a crash is indistinguishable, in the
+    verdict line, from an honest refutation. That is harmless for a base harness (a crash then reads
+    as "did not prove", which is conservative) and DANGEROUS for a mutant twin, because the
+    anti-vacuity rule is "the mutant MUST fail" — so a crashed mutant would be credited as evidence
+    that the proof has content, and the proof would be scored `proved` on the strength of a tool
+    failure.
+
+    Measured 2026-09-30 while testing the stub route: at 4x container capacity BOTH twins returned
+    `CBMC failed with status 6` after ~1090 s with no check counts. Read naively, the mutant "failed
+    correctly" and the base's failure would have been retried under levers — a crash laundered into a
+    verdict. Anything matching here is INCONCLUSIVE and must never be read as a verdict.
+    """
+    for sig in _TOOL_CRASH_SIGS:
+        m = re.search(sig, out or "", re.I)
+        if m:
+            return m.group(0)
+    return None
+
+
 def verdict_for(out, harness):
     """Did THIS harness verify? Not: did anything in the output verify?
 
@@ -443,9 +478,23 @@ def vacuity_check(pid, present, ctx, extra=None):
     mut = harness_id(pid) + "__mutant"
     if mut not in present:
         return None
-    mok, _, _, _, _, _ = run_kani(
+    mok, mout, _, _, mtimed, _ = run_kani(
         mut, ctx["component_dir"], ctx["cap"], ctx["mem_mb"], escalate=False, extra=extra)
     if not mok:
+        # "The mutant failed" only counts as evidence when it failed for the RIGHT reason. A tool
+        # crash or a timeout is not a refutation: Kani prints a CBMC crash as VERIFICATION:- FAILED,
+        # so a crashed twin would otherwise be credited as proof that the base has content.
+        crash = tool_crash(mout)
+        if crash:
+            return (f"INCONCLUSIVE, not vouched: the anti-vacuity twin '{mut}' did not fail on its "
+                    f"assertion — the tool crashed ({crash}). Kani renders a CBMC crash as "
+                    f"VERIFICATION:- FAILED, so this would otherwise be miscredited as a correct "
+                    f"refutation. Reduce the harness cost or the container capacity until the twin "
+                    f"fails on its assertion, then re-score.")
+        if mtimed:
+            return (f"INCONCLUSIVE, not vouched: the anti-vacuity twin '{mut}' TIMED OUT rather than "
+                    f"failing on its assertion, so it is no evidence that the proof has content. "
+                    f"Raise the cap for this property or shrink the harness, then re-score.")
         return None
     how = f" under the same flags as the proof ({' '.join(extra)})" if extra else ""
     return (f"VACUOUS: mutant harness '{mut}' also passed{how} — the proof holds no content. "
@@ -582,6 +631,17 @@ def score_property(p, ctx):
     # cargo never reached a proof, so nothing can be concluded about this property. Flag it as a
     # build fault and let the caller stop the whole stage: one accurate error beats N misleading
     # "fix your harness" verdicts against harnesses that were never compiled.
+    # A TOOL CRASH is not a verdict about the harness. Kani prints a CBMC crash as
+    # VERIFICATION:- FAILED, so without this the scorer would spend the whole lever battery trying to
+    # "rescue" a property whose tool fell over, and could then award a tool-boundary on a signature
+    # that is really a crash. Report it as the environment fault it is.
+    tc = tool_crash(out)
+    if tc:
+        return "UNRESOLVED", {"harness": named, "tool_crash": tc}, (
+            f"TOOL CRASH, not a harness or tool-limit verdict: {tc}. Kani renders this as "
+            f"VERIFICATION:- FAILED, which is why it must be matched explicitly. Nothing can be "
+            f"concluded: reduce the harness cost (container capacity, symbolic inputs) or the memory "
+            f"cap until the run completes, then re-score.")
     bf = build_failure(out)
     if bf:
         hint = ""
@@ -704,6 +764,33 @@ def score_property(p, ctx):
                                       "vacuity_checked_under_lever": True}, (
                         f"scorer-applied solver swap: PROVED under '{slv}' (full strength), and its "
                         f"mutant twin re-run under the same solver correctly FAILED")
+            continue
+        if lever == "loop_contract":
+            # STRONGEST available fallback, tried BEFORE nounwindcheck. -Z loop-contracts replaces
+            # unrolling with an invariant, so the body executes twice, the cost is decoupled from the
+            # iteration count, and the claim is UNBOUNDED. Measured on a 1024-iteration loop (see
+            # gate/case-studies/loop_contract_vs_nounwindcheck.rs): the nounwindcheck form "proved" in
+            # 0.034s AND its mutant also passed, i.e. vacuous; the contract form proved in 0.20s with
+            # the mutant correctly failing. It needs the agent to have written the invariant, so an
+            # absent variant is missing work rather than a tool limit.
+            lc_flags = ["-Z", "loop-contracts"]
+            for cand in (variant, named):
+                if cand and cand in present:
+                    sok, _, swall, srss, _, _ = run_kani(
+                        cand, ctx["component_dir"], ctx["cap"], ctx["mem_mb"],
+                        escalate=False, extra=lc_flags)
+                    if sok:
+                        vac = vacuity_check(pid, present, ctx, extra=lc_flags)
+                        if vac:
+                            return "UNRESOLVED", {"harness": cand, "lever": "loop_contract"}, vac
+                        return "proved", {"harness": cand, "result": "SUCCESS",
+                                          "wall_clock_s": swall, "peak_rss_mb": srss,
+                                          "lever": "loop_contract", "unbounded": True,
+                                          "vacuity_checked_under_lever": True}, (
+                            "scorer-applied loop contract (-Z loop-contracts): PROVED with NO unwind "
+                            "bound, so the claim covers every iteration count rather than a bounded "
+                            "prefix - full strength. Its mutant twin was re-run under the same flag "
+                            "and correctly FAILED.")
             continue
         if lever == "nounwindcheck":
             # Weakest admissible lever, tried only after the full-strength options failed.

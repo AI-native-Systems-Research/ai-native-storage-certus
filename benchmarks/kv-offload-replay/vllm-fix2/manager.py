@@ -57,6 +57,103 @@ from vllm.v1.kv_offload.tiering.base import (
 logger = init_logger(__name__)
 
 
+# ── TIER_DEBUG: promotion-fail (prepare_store/prepare_write -> None) counter ──
+# The tiered connector runs inside the EngineCore subprocess, which is *spawned*
+# (not forked) whenever CUDA is initialized in the driver — so a driver-side
+# monkeypatch is re-imported fresh in the child and never sees the patch. The
+# only place a counter is reliably seen is the vLLM source that the child
+# imports, i.e. this file (baked over the installed vLLM in the image).
+#
+# What this counts that nothing else does: a *secondary-tier HIT that is blocked
+# from promotion because the primary (DRAM) tier could not allocate a slot*
+# (_initiate_promotion -> primary.prepare_write() -> None -> return False). That
+# path is swallowed as a plain lookup MISS; the connector's ALLOCATION_FAILURE
+# stat only covers the store path, not this promotion path.
+#
+# Off by default (one env read at import). Emits to stderr (-> container logs)
+# on a ~10s throttle plus a final line atexit. Deliberately its own channel:
+# adding a vllm:-prefixed Prometheus counter (what the driver scrapes) would
+# require registering a metric in vLLM — invasive for a debug probe.
+import os as _os
+
+_TIER_DBG = _os.environ.get("TIER_DEBUG", "") not in ("", "0", "false", "False")
+if _TIER_DBG:
+    import atexit as _atexit
+    import sys as _sys
+
+    _tdbg = {"attempts": 0, "ok": 0, "blocked": 0, "cold": 0, "evicted": 0,
+             "promo_mem": 0, "promo_gpu": 0, "evict_mem": 0, "evict_ssd": 0,
+             "t0": time.monotonic(), "last": 0.0}
+
+    def _tier_dbg_emit(final=False):
+        a = _tdbg["attempts"]
+        ok = _tdbg["ok"]
+        bl = _tdbg["blocked"]
+        cold = _tdbg["cold"]
+        ev = _tdbg["evicted"]
+        pct = (100.0 * bl / a) if a else 0.0
+        m = cold + ev
+        epct = (100.0 * ev / m) if m else 0.0
+        tag = "FINAL" if final else "round"
+        # The trailing tier_* counters mirror the four Certus tier-movement
+        # counters so the tiered connector populates the same movement bars.
+        # tier_evictions_from_ssd is structurally 0 (see _tier_dbg_move).
+        print(f"[tier-dbg] {tag} promotion_attempts={a} promotion_ok={ok} "
+              f"promotion_blocked_dram_full={bl} ({pct:.1f}%) "
+              f"lookup_miss_cold={cold} lookup_miss_evicted={ev} "
+              f"({epct:.1f}% evicted) "
+              f"tier_promotions_to_memory={_tdbg['promo_mem']} "
+              f"tier_promotions_to_gpu={_tdbg['promo_gpu']} "
+              f"tier_evictions_from_memory={_tdbg['evict_mem']} "
+              f"tier_evictions_from_ssd={_tdbg['evict_ssd']}",
+              file=_sys.stderr, flush=True)
+
+    def _tier_dbg_maybe_emit():
+        now = time.monotonic()
+        if now - _tdbg["last"] >= 10.0:
+            _tdbg["last"] = now
+            _tier_dbg_emit()
+
+    def _tier_dbg_note(ok):
+        _tdbg["attempts"] += 1
+        _tdbg["ok" if ok else "blocked"] += 1
+        _tier_dbg_maybe_emit()
+
+    def _tier_dbg_miss(evicted):
+        # A lookup that missed EVERY tier. evicted=True if the block had been
+        # cascaded to a secondary tier before (so it was dropped by the bottom
+        # tier's LRU since); else it is a cold first-touch never stored anywhere.
+        _tdbg["evicted" if evicted else "cold"] += 1
+        _tier_dbg_maybe_emit()
+
+    def _tier_dbg_move(kind, n=1):
+        # Count a tier movement (in blocks) so the tiered connector populates
+        # the same movement bars as the Certus variant. kind is one of:
+        #   promo_mem  secondary(SSD)->DRAM promotion completed
+        #   promo_gpu  DRAM->GPU load completed
+        #   evict_mem  DRAM LRU eviction (base CPUOffloadingManager)
+        # evict_ssd is never incremented: the FS bottom tier has no eviction
+        # path (it only cascades stores in and never removes files during a
+        # run), and this manager never issues a secondary-tier removal — so SSD
+        # evictions are structurally zero and reported as a measured 0.
+        if n:
+            _tdbg[kind] += n
+            _tier_dbg_maybe_emit()
+
+    _atexit.register(_tier_dbg_emit, final=True)
+    logger.info("[tier-dbg] TIER_DEBUG on: counting promotion-blocked-dram-full "
+                "and cold-vs-evicted lookup misses")
+else:
+    def _tier_dbg_note(ok):  # no-op fast path
+        pass
+
+    def _tier_dbg_miss(evicted):  # no-op fast path
+        pass
+
+    def _tier_dbg_move(kind, n=1):  # no-op fast path
+        pass
+
+
 @dataclass
 class PendingPromotion:
     """Accumulator for blocks awaiting submit_load() for one (tier, request)."""
@@ -119,6 +216,21 @@ class CPUPrimaryTierOffloadingManager(CPUOffloadingManager):
         self.complete_write = self.complete_store
 
         self._kv_memoryview = mmap_region.create_kv_memoryview()
+
+    @override
+    def prepare_store(
+        self, keys: Collection[OffloadKey], req_context: ReqContext
+    ) -> PrepareStoreOutput | None:
+        # TIER_DEBUG: the base CPUOffloadingManager LRU-evicts DRAM blocks here
+        # when the tier is full, listing them in PrepareStoreOutput.evicted_keys.
+        # Count them so the tiered connector's DRAM-eviction bar populates. This
+        # is the single robust chokepoint for both eviction sources: making room
+        # for a GPU store, and making room for a secondary->DRAM promotion (which
+        # reaches here through the prepare_write alias bound in __init__).
+        result = super().prepare_store(keys, req_context)
+        if result is not None:
+            _tier_dbg_move("evict_mem", len(result.evicted_keys))
+        return result
 
     def get_kv_memoryview(self) -> memoryview:
         """Return the memoryview over the primary tier's KV cache buffer.
@@ -196,6 +308,13 @@ class TieringOffloadingManager(OffloadingManager):
         """
         self.primary_tier: CPUPrimaryTierOffloadingManager = primary_tier
         self.secondary_tiers = secondary_tiers or []
+
+        # TIER_DEBUG: set of keys ever cascaded to a secondary tier, so a lookup
+        # that misses EVERY tier can be split into cold (never stored) vs evicted
+        # (stored before, since dropped from the bottom tier). Only allocated when
+        # TIER_DEBUG is on; unbounded, so it is a debug-only probe. See
+        # _tier_dbg_miss and complete_store.
+        self._seen_keys: set | None = set() if _TIER_DBG else None
 
         self._job_id_counter: int = 0
         # Job tracking: maps job_id to metadata for all in-flight transfers.
@@ -278,6 +397,8 @@ class TieringOffloadingManager(OffloadingManager):
                         job_metadata.req_context,
                         completed_job.success,
                     )
+                    if completed_job.success:
+                        _tier_dbg_move("promo_mem", len(job_metadata.keys))
                 else:
                     # primary→secondary transfer completed.
                     # Decrement ref_cnt on primary blocks.
@@ -352,6 +473,11 @@ class TieringOffloadingManager(OffloadingManager):
             if req_state is not None and req_state.secondary_lookup_start_time is None:
                 req_state.secondary_lookup_start_time = lookup_start
             return LookupResult.RETRY
+        # True miss: the key is resident in no tier at all. Classify it as evicted
+        # (was stored before, since dropped from the bottom tier) vs cold (never
+        # stored). See _seen_keys / _tier_dbg_miss.
+        if self._seen_keys is not None:
+            _tier_dbg_miss(key in self._seen_keys)
         return LookupResult.MISS
 
     def _accumulate_lookup_sync_delay(
@@ -414,6 +540,7 @@ class TieringOffloadingManager(OffloadingManager):
         if primary_write_result is None:
             # Primary tier is full; caller should treat the block as unavailable
             # rather than retrying indefinitely.
+            _tier_dbg_note(False)
             return False
 
         store_spec = primary_write_result.store_spec
@@ -429,6 +556,7 @@ class TieringOffloadingManager(OffloadingManager):
         entry = tier_pending[ctx_id]
         entry.keys.extend(primary_write_result.keys_to_store)
         entry.block_ids.extend(store_spec.block_ids)
+        _tier_dbg_note(True)
         return True
 
     def _flush_pending_promotions(self) -> None:
@@ -503,6 +631,9 @@ class TieringOffloadingManager(OffloadingManager):
             req_context: Per-request context.
         """
         self.primary_tier.complete_load(keys, req_context)
+        # TIER_DEBUG: blocks that finished loading DRAM->GPU (a promotion into
+        # the compute tier), so the tiered connector's →GPU movement bar populates.
+        _tier_dbg_move("promo_gpu", len(keys))
 
     @override
     def prepare_store(
@@ -625,6 +756,11 @@ class TieringOffloadingManager(OffloadingManager):
             for tier in self.secondary_tiers:
                 job_metadata = self.create_store_job(keys, req_context)
                 tier.submit_store(job_metadata)
+
+            # TIER_DEBUG: remember every key cascaded to a secondary tier so a
+            # later total miss can be told apart as cold vs evicted.
+            if self._seen_keys is not None:
+                self._seen_keys.update(keys)
 
         # Note: The async transfers are now in flight. Their completion is
         # tracked via get_finished_jobs() / _maybe_process_finished_jobs().

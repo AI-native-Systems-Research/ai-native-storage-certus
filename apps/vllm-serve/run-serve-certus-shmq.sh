@@ -26,6 +26,12 @@
 #   MAX_MODEL_LEN=32768 ./run-serve-certus-shmq.sh             # native 32K window (no YaRN); default is 128K
 #   MODEL=Qwen/Qwen2.5-14B-Instruct GPU_MEM_UTIL=0.92 ./run-serve-certus-shmq.sh
 #   KV_CACHE_BYTES=4G ./run-serve-certus-shmq.sh              # cap GPU KV cache; spill reuse to the offload tier
+#   IMAGE=localhost/certus-shmq-connector:vllm0.28.0 ./run-serve-certus-shmq.sh   # pin a vLLM version (see below)
+#
+# IMAGE selects the vLLM/connector build; VLLM_FIX3=1 (default) applies the
+# scheduler crash fix in-place, self-adapting to whatever vLLM the image ships
+# (VLLM_FIX3=0 runs the stock, crash-prone scheduler). See the Container / store
+# and fix#3 sections below for building versioned images and the patch details.
 #
 # Clients then use:
 #   Base URL:  http://127.0.0.1:${PORT}/v1     (127.0.0.1 — podman publishes IPv4 only)
@@ -68,9 +74,20 @@ SHM_PATH="${SHM_PATH:-/dev/shm/certus-shmq}"   # mailbox file (shared into conta
 SLAB_SIZE_BYTES="${SLAB_SIZE_BYTES:-2097152}"  # offload block size — MUST match certus-server
 
 # ── Container / store ────────────────────────────────────────────────────────────
-# The shmq image lives in the /mnt/certus1 podman store, not the default store
-# (mirrors run-docker-otel-shmq.sh / run-docker-certus-shmq.sh).
-IMAGE="${IMAGE:-localhost/certus-otel-shmq-bench}"
+# Any shmq/otel-shmq client image works — this script only needs vLLM + the
+# certus_shmq_connector inside it, and drives it via `vllm serve`. The image lives
+# in the /mnt/certus1 podman store, not the default store (mirrors
+# run-docker-otel-shmq.sh / run-docker-certus-shmq.sh). Build one with either:
+#   certus-shmq-connector/build_connector_container.sh 0.26.0   # -> localhost/certus-shmq-connector:vllm0.26.0
+#   benchmarks/kv-offload-otel-replay/build-otel.sh             # -> localhost/certus-otel-shmq-connector:latest
+# build_connector_container.sh <ver> selects the vLLM base version (FULL patch
+# tag, e.g. 0.26.0 — not a bare 0.26); `--help` lists versions.
+# Default to the 0.26 connector image, matched to the cputier server's 0.26 base
+# for backend comparability; the fix#3 clamp below (VLLM_FIX3=1, default) is
+# load-bearing on 0.26. Override IMAGE= to pin another build:
+#   IMAGE=localhost/certus-shmq-connector:vllm0.30.0 ./run-serve-certus-shmq.sh
+#   IMAGE=localhost/certus-otel-shmq-connector       ./run-serve-certus-shmq.sh
+IMAGE="${IMAGE:-localhost/certus-shmq-connector:vllm0.26.0}"
 PODMAN_STORE="${PODMAN_STORE:-/mnt/certus1/podman/storage}"
 PODMAN_RUNROOT="${PODMAN_RUNROOT:-/mnt/certus1/podman/run}"
 STORE_FLAGS=(--root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT")
@@ -83,29 +100,42 @@ HF_CACHE="${HF_CACHE:-/mnt/certus1/hf-cache}"
 # The stock image's OffloadingConnector scheduler crashes the engine under load
 # on `assert len(offload_keys) == len(offload_block_ids)` in _build_store_jobs
 # (offload_keys advances every step; block_ids only grows on new allocations, so
-# a finishing request can cross an unbacked chunk boundary). This bind-mounts a
-# scheduler.py that clamps num_chunks to the chunks that have both a key and
-# backing GPU blocks. shmq-only variant — it deliberately does NOT carry fix#2's
-# mark_stores_submitted handshake (CertusShmqOffloadingSpec's manager lacks it).
-# Set VLLM_FIX3=0 to run the stock (crash-prone) scheduler.
+# a finishing request can cross an unbacked chunk boundary). The fix clamps
+# num_chunks to the chunks that have both a key and backing GPU blocks.
+#
+# We apply it with an IN-PLACE patcher (patches/apply_fix3.py) rather than the old
+# whole-file scheduler.py bind-mount: the mounted file was pinned to vLLM 0.26.0
+# and would drop a stale scheduler onto a drifted API on any other base image
+# (0.27+). The patcher instead locates the installed scheduler via importlib (no
+# hardcoded pythonX.Y site-packages path) and edits only the clamp in, anchored on
+# a block that is byte-stable across 0.26/0.27/0.28+, so it self-adapts to
+# whatever vLLM the image ships. It is non-fatal by contract (WARNING + stock
+# scheduler on any mismatch) and idempotent. This is the shmq-only fix — it does
+# NOT carry fix#2's mark_stores_submitted handshake (CertusShmqOffloadingSpec's
+# manager lacks it). Set VLLM_FIX3=0 to run the stock (crash-prone) scheduler.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VLLM_FIX3="${VLLM_FIX3:-1}"
-FIX3_SCHEDULER="${FIX3_SCHEDULER:-${SCRIPT_DIR}/patches/scheduler.fix3.py}"
-FIX3_TARGET=/usr/local/lib/python3.12/dist-packages/vllm/distributed/kv_transfer/kv_connector/v1/offloading/scheduler.py
+FIX3_PATCHER="${FIX3_PATCHER:-${SCRIPT_DIR}/patches/apply_fix3.py}"
+FIX3_PATCHER_IN_CONTAINER=/opt/certus/apply_fix3.py
 FIX3_MOUNT=()
+FIX3_ENABLED=0
 if [[ "$VLLM_FIX3" == "1" ]]; then
-  if [[ -f "$FIX3_SCHEDULER" ]]; then
-    FIX3_MOUNT=(-v "${FIX3_SCHEDULER}:${FIX3_TARGET}:ro,z")
-    echo "[serve] fix#3 scheduler patch: ${FIX3_SCHEDULER} -> in-container scheduler.py"
+  if [[ -f "$FIX3_PATCHER" ]]; then
+    FIX3_MOUNT=(-v "${FIX3_PATCHER}:${FIX3_PATCHER_IN_CONTAINER}:ro,z")
+    FIX3_ENABLED=1
+    echo "[serve] fix#3: patching the in-container vLLM scheduler via ${FIX3_PATCHER##*/} before serving"
   else
-    echo "warning: VLLM_FIX3=1 but patch not found at ${FIX3_SCHEDULER}; running STOCK scheduler (crash-prone under load)" >&2
+    echo "warning: VLLM_FIX3=1 but patcher not found at ${FIX3_PATCHER}; running STOCK scheduler (crash-prone under load)" >&2
   fi
 fi
 
 # ── Preflight ──────────────────────────────────────────────────────────────────
 if ! command podman "${STORE_FLAGS[@]}" image exists "$IMAGE"; then
   echo "error: image '$IMAGE' not found in store ${PODMAN_STORE}." >&2
-  echo "       build it first: bash benchmarks/kv-offload-otel-replay/build-otel.sh" >&2
+  echo "       build the default 0.26 connector image first, e.g.:" >&2
+  echo "         certus-shmq-connector/build_connector_container.sh 0.26.0   # -> certus-shmq-connector:vllm0.26.0" >&2
+  echo "         bash benchmarks/kv-offload-otel-replay/build-otel.sh        # -> certus-otel-shmq-connector (set IMAGE= to use)" >&2
+  echo "       (build_connector_container.sh --help lists supported vLLM versions)" >&2
   exit 1
 fi
 if [[ ! -e "$SHM_PATH" ]]; then
@@ -181,9 +211,22 @@ fi
 echo "[serve] ${IMAGE}: vllm serve ${MODEL} on ${HOST}:${PORT} (shm=${SHM_PATH}, slab=${SLAB_SIZE_BYTES})"
 echo "[serve] clients -> base_url http://127.0.0.1:${PORT}/v1   model ${SERVED_MODEL_NAME}"
 
+# Entrypoint. With fix#3 enabled we override the image's replay-driver entrypoint
+# with `bash -c`, run the in-place patcher, then exec the OpenAI API server. The
+# patcher is non-fatal (see apply_fix3.py): on any failure it prints a WARNING and
+# we still serve, just on the stock (crash-prone) scheduler. In `bash -c '…' A B…`
+# $0 is A (the patcher path) and "$@" is B… (the serve args). With fix#3 off we
+# override the entrypoint straight to `vllm` — no patch step.
+if [[ "$FIX3_ENABLED" == "1" ]]; then
+  RUN_ENTRY=(--entrypoint bash "$IMAGE" -c \
+    'python3 "$0" || echo "[serve] WARNING: fix#3 patch failed; serving on STOCK scheduler (crash-prone under sustained store load)" >&2; exec vllm serve "$@"' \
+    "$FIX3_PATCHER_IN_CONTAINER" "${SERVE_ARGS[@]}")
+else
+  RUN_ENTRY=(--entrypoint vllm "$IMAGE" serve "${SERVE_ARGS[@]}")
+fi
+
 # --ipc=host shares the mailbox + exposes CUDA IPC handles; -p publishes the API
-# port. --pull=never against the alt store. --entrypoint vllm overrides the
-# image's replay-driver entrypoint with the OpenAI API server.
+# port. --pull=never against the alt store.
 exec command podman "${STORE_FLAGS[@]}" run --rm --pull=never \
   --ipc=host \
   --device "nvidia.com/gpu=${GPU}" \
@@ -191,6 +234,4 @@ exec command podman "${STORE_FLAGS[@]}" run --rm --pull=never \
   -e "HF_HUB_OFFLINE=0" \
   -v "${HF_CACHE}:/root/.cache/huggingface:z" \
   "${FIX3_MOUNT[@]}" \
-  --entrypoint vllm \
-  "$IMAGE" \
-  serve "${SERVE_ARGS[@]}"
+  "${RUN_ENTRY[@]}"

@@ -25,7 +25,7 @@
 #
 #   BACKEND=cputier — vLLM-native CPU+fs tiering (OffloadingConnector). Skips
 #     steps 1-2 entirely: cputier is self-contained (no certus-server, no
-#     mailbox, default podman store, image certus-offload-bench-fix026).
+#     mailbox, default podman store, image certus-offload-fix026).
 #       3. VLLM     apps/vllm-serve/run-serve-cputier-multimodal-2gpu.sh
 #       4. CLIENT   apps/vllm-serve/run-guidellm-synthetic-multimodal.sh
 #
@@ -39,8 +39,8 @@
 #   * TTFT median AND mean (time_to_first_token_ms.successful.{median,mean}, ms + s)
 #
 # Prerequisites (same as running the steps by hand — this script does NOT do them):
-#   * The multimodal serve image(s) built: certus-otel-shmq-bench in the
-#     /mnt/certus1 store (certus), and/or certus-offload-bench-fix026 in the
+#   * The multimodal serve image(s) built: certus-otel-shmq-connector in the
+#     /mnt/certus1 store (certus), and/or certus-offload-fix026 in the
 #     default store (cputier).
 #   * BACKEND=certus only: NVMe devices bound to vfio-pci with 1G hugepages
 #     reserved (tools/configure-bench.sh) so certus-server can claim them.
@@ -134,11 +134,11 @@ if [[ "$BACKEND" == "certus" ]]; then
   # The shmq serve script runs its container out of the alternate /mnt/certus1 store.
   PODMAN_STORE="${PODMAN_STORE:-/mnt/certus1/podman/storage}"
   PODMAN_RUNROOT="${PODMAN_RUNROOT:-/mnt/certus1/podman/run}"
-  VLLM_IMAGE="${IMAGE:-localhost/certus-otel-shmq-bench}"
+  VLLM_IMAGE="${IMAGE:-localhost/certus-otel-shmq-connector}"
   STORE_FLAGS=(--root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT")
 else
   # cputier uses the DEFAULT podman store and the fix026 image.
-  VLLM_IMAGE="${IMAGE:-certus-offload-bench-fix026}"
+  VLLM_IMAGE="${IMAGE:-certus-offload-fix026}"
   STORE_FLAGS=()
 fi
 
