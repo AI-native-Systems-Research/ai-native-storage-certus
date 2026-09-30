@@ -230,20 +230,49 @@ Therefore: give each mutator one `#[ensures]` per clause, and **define every com
 the conjunction of its named halves**, so re-deriving the composite is a definitional unfolding.
 Measured: this took `pool_touch` from failing to proved, and `pool_register` from 3 open goals to 2.
 
-**But do not stop there.** With all 51 clauses separated, `pool_unlink` still failed 22 of 184 — yet
-every one of those 51 clauses proves when it is the ONLY clause on a function over the same body. So
-there is a second, independent effect: **a large number of goals in one why3 file degrades the harder
-ones**, because the `time`/`depth` budget is spent per file across a deeper split tree. If you are
-stuck with many goals in one file, split the FILE (or the function), not just the conjunction.
+**But separating them does not, by itself, close them** — and the reason is NOT what an earlier
+version of this section claimed. It said the residue was budget starvation ("many goals in one why3
+file degrade the harder ones"). **That was never measured, and it is wrong.** When `pool_unlink`'s 22
+remaining goals were finally closed, the causes were identified by decoding `proof.json` and were
+**four missing facts plus three collateral positions** — not starvation:
+- the two levers the starvation theory recommends were both tried and both **failed**. Raising the
+  budget (`-t 90 -d 20 -j 16`) on `pool_unlink` alone **ran 35 minutes without finishing** and had to
+  be killed; the gate's cap is 120-600 s, so that route is disqualified on cost. Dropping the composite
+  clauses would have removed only the 3 collateral positions (9 of 22) and left all 4 root causes
+  untouched, at the price of making ~40 driver modules unfold the invariant themselves.
+- what actually worked was **shape**, covered in the next section: positional provenance clauses on the
+  four container primitives (19 goals), plus putting the model's one existential behind a named
+  `#[logic]` predicate and supplying the witness term no prover invents (3 goals).
+
+So when goals survive the split, **decode which ones and why before reaching for a bigger budget.**
+The recipe: the first `split_vc` under `vc_<fn>` yields exactly one child per `#[ensures]` in source
+order, so `proof.json` tells you precisely which clause fails. Distinguish a root cause from a
+composite that merely contains one. Chasing budget first cost 35 minutes for nothing.
+
+One genuine budget caveat, separate from the above: a clause proving at 29.0 s against a 20 s budget
+passes only intermittently and will flip under load — which is why one helper read "2 open" rather
+than "1". If a goal's time is near the budget, treat it as failing.
 
 ### State a preservation postcondition in the SAME SHAPE as the invariant that consumes it
-A logically equivalent phrasing is **not** an equivalent hypothesis. Measured: the open goals on this
-component were **instantiation** failures, not missing facts — invariants discriminated entries by
-arena position via `_i` predicates, while the container primitives stated preservation as
-`forall<y:(u64,u32)> … y != x ==>`. Same facts, wrong shape, never instantiated. Adding goal-shaped
-clauses to the primitives took `pool_unlink` 31→22 and `pool_register` 3→2. The same principle
-unblocked three stale-handle refutations, which needed **frame** facts (slot reuse, key-index frame)
-rather than stronger ones.
+A logically equivalent phrasing is **not** an equivalent hypothesis, and this is the lever that
+actually closes invariant-preservation goals. **The rule, measured:**
+- an invariant that quantifies over a **POSITION** needs a **positional** preservation clause;
+- one that quantifies over a **VALUE** needs a **membership** clause;
+- a container primitive is used by both, so it needs **both**;
+- any `exists` belongs behind a **named `#[logic]` predicate**, with a wrapper that supplies the
+  witness term explicitly — a prover will not invent it.
+
+Measured on eviction-policy-session-lists: the existing clauses were all membership-shaped
+(`map_has_i`/`leaves_mem_i`), which is right for `leaf_in_set` and useless to `idx_ok`,
+`by_key_entries_live` and `session_entries_ok`, which quantify over a position — so the solver had to
+invent the position first. `map_insert` had no whole-range clause at all. Adding positional provenance
+to `map_insert`/`map_remove`/`leaves_insert`/`leaves_remove` took `pool_unlink` **22 → 8**; putting the
+one existential behind `free_covers` with a `free_push` wrapper supplying `free@.len()` closed the rest
+and took all three helpers to **0 open**. Side effect worth noting: one driver's proof went from 61
+recorded prover calls to 8 — the right shape is also far cheaper.
+
+The same principle unblocked three stale-handle refutations, which needed **frame** facts (slot reuse,
+key-index frame) rather than stronger ones.
 
 ### `cargo check` is necessary but NOT sufficient
 It does not reproduce pearlite-side errors: `Int as u32`, `Clone` ambiguous against the prelude glob,
@@ -253,6 +282,20 @@ builds" is never evidence. Still run `cargo check` — it caught two real Rust e
 moved value`, `cannot move out of index`). Derive-ambiguity fix: fully-qualified paths
 (`#[derive(::core::clone::Clone, ::core::marker::Copy)]`) **and** drop `PartialEq`/`Eq`, since
 deriving `PartialEq` additionally demands `DeepModel` while pearlite `==` is logical equality.
+
+### Driver goals that are NOT in the `#[ensures]` block — check here before blaming the helper
+A driver whose own `verify_<id>` module fails may not be failing on its postcondition at all. The
+top-level split children **before** the exit VC are the `#[requires]` obligations of the calls the
+driver makes. Measured on eviction-policy-session-lists: ~22 properties fail exactly there, on the
+arithmetic side conditions every state-layer operation requires and none re-establishes
+(`reads < u32::MAX-15`, `clock + n < u64::MAX-615`, `nodes.len() < u32::MAX-15`, log capacity). A driver
+chaining two operations therefore cannot discharge the second call's precondition.
+
+**The fix is contract exposure, not prover tuning:** have each state-layer operation ensure how much it
+consumed ("the arena grew by at most one", "the clock advanced by at most n", "reads grew by at most
+one"), so a chained caller can carry the bound forward. Recognise this class by reading WHICH split
+child failed — a missing precondition looks nothing like an unproved postcondition, but both surface as
+"module failed".
 
 ### Two measurement traps that produce WRONG NUMBERS you will be tempted to report
 - **`proof.json` is written incrementally.** A mid-run read is unreliable — `pool_register` read 0
