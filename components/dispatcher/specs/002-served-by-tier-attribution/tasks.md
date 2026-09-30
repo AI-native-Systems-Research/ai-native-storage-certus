@@ -363,23 +363,35 @@ step: an accounting identity that fails by a recognisable quantity names its own
 - [x] **T115** FR-029: run the suites under the `integrity-check` feature as well as default.
   Phase 1 never did this and recorded it as unaddressed.
 
-- [~] **T116 — ATTEMPTED, PARTLY BLOCKED, and the blockage is recorded rather than worked
-  around.** FR-014's cold-path difference — that `dispatcher-p2p` reports `Ssd` again on a
-  repeat read where `dispatcher` reports `Dram` — is **not verified**.
+- [~] **T116 — the p2p-native run now RUNS, and getting there found two real defects.**
+  Attempted 2026-09-30 at the user's direction. The verification itself is still open; what
+  the attempt produced is worth more than the task.
 
-  Three facts make it structural rather than an omission:
-  1. Dispatcher selection is a build-time `CERTUS_PROFILE` choice, so the two cannot be
-     compared by flipping a runtime flag in one test process.
-  2. `dispatcher-p2p`'s mock has a `MockEntryLocation::BlockDevice` variant that is **never
-     constructed** (the compiler says so), so its unit tests never reach the cold path at all.
-  3. The hardware runs in this feature used the `full-remote` profile, which builds
-     `dispatcher`, not `dispatcher-p2p`.
+  **Two defects, both pre-existing this task, both fixed (`e69bd306`):**
+  1. **`CERTUS_PROFILE=full-p2p` could not build the yaml server at all** — `EvictionEvent`
+     existed as two identical types, one per dispatcher, while the transport host hardcoded
+     `dispatcher`'s. Present on the base branch too, so not caused by this feature. The type
+     crosses a component boundary and now lives in `interfaces`, re-exported by both.
+  2. **The p2p server reported 5 526 hits with dram 0 and ssd 0.** Its `tier_event_stats()`
+     returned `TierEventStats::default()`. **This is the Phase 1 caveat materialising inside
+     the same feature**: adding fields to that struct is not compiler-enforced, so an
+     implementor silently under-reports. Per-key attribution had been correct all along —
+     only its aggregate face was missing, which is exactly why the invariant test passed and
+     nothing caught it. The missing test now exists in that component and is
+     mutation-verified against the precise defect.
 
-  What *is* verified: the taxonomy value itself (`Ssd`) and the three invariants, in this
-  component's own tests (T114). What is not: the persistence claim across a repeat read.
-  Closing it needs either a mock that models a real cold path or a `--features p2p-native`
-  run, and it is spec'd as `SC-008` in that component with the same caveat so the gap is
-  visible where a reader of that component will look.
+  **SC-008 was also wrong and is corrected.** It claimed a repeat read reports `Ssd` twice.
+  That cannot be right: this component backfills DRAM *asynchronously*, so a later read may
+  legitimately be `Dram`, and "twice `Ssd`" holds only inside a window shorter than the
+  backfill that no black-box client can observe. FR-014's actual claim is that promotion is
+  not on the *serving* path, whose observable form is a higher `Ssd` share than `dispatcher`
+  on one workload. **My first experiment design tested the wrong thing** and would have
+  produced a false refutation.
+
+  **Still open**: the share comparison itself. The p2p arm runs and its partition holds;
+  what remains is the `dispatcher` control arm on the same workload and seed, and a span
+  long enough to overflow the memory tier — at `--until 3` the tier absorbed everything and
+  `ssd` stayed 0, which makes the comparison vacuous rather than negative.
 
 ## Out of scope, decided 2026-09-29
 
