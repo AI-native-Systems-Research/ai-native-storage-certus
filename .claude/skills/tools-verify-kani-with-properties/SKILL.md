@@ -279,6 +279,34 @@ necessarily, because the mutant may be dropped the same way.
    symbolic index. If an assume silently dropped, that harness fails and tells you so. This is cheap
    (measured 5.08 s) and it is the only mechanism that catches the failure at all.
 
+### 🔴 A STUB CAN BLIND THE CODE — a vacuity source no mutant twin catches
+Stubbing a container to make a harness affordable can silently remove the behaviour under test, and
+then **the property AND its mutant both pass.** Proved, not theorised: with `BTreeSet` stubbed on
+`eviction-policy-session-lists`, a diagnostic harness asserting
+`p.leaves.len() == 2 && p.evict_oldest().is_none()` **PASSES** — the model holds two leaves while the
+operation that selects a victim returns `None`, because the read path (`leaves.iter().next()`) was
+never intercepted.
+
+Every obligation phrased as an **implication over a returned value** ("if a victim is returned it is a
+leaf", "a protected block is never chosen") is then vacuously true, and its mutant is vacuous for the
+same reason, so anti-vacuity cannot see it. **Applied carelessly, stubbing is worse than the bounded
+harnesses it replaces.**
+
+**Required whenever you stub:** a diagnostic harness asserting the stubbed path is still REACHED and
+still returns something — the analogue of `check_assumes_actually_bind`. If the operation can return
+"nothing" while the state says otherwise, every downstream implication is worthless.
+
+Also know what Kani will and will not let you stub, measured on 0.67.0:
+- A stub must repeat the target's generics **exactly**; a monomorphised stub is rejected
+  ("mismatch in the number of generic parameters"). So a stub **cannot own typed state**, which forces
+  a type-erased side table if you need per-instance state.
+- **External-crate trait impls cannot be stubbed at all**: `btree_set::Iter::next` → "unable to find
+  `next` inside struct"; `<Iter<'_,T> as Iterator>::next` → "unable to find implementation of
+  associated function". So any obligation whose only read path is an iterator is out by construction.
+- Per-instance stub state keyed on the receiver address works, but **a Rust move relocates the struct
+  and orphans the table** — so the object must be built in place and never moved. A
+  `Vec<Mutex<Pool>>` therefore cannot use the technique at all.
+
 ### The CAPACITY-SCALING check — a second, independent test that a proof is real
 The mutant twin catches a proof with no content. It does **not** catch a proof whose bound merely
 happened to be generous enough for the states the harness explores. So for any harness over a
