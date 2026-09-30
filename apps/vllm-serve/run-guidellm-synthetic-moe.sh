@@ -21,7 +21,7 @@
 # deepest same-shape multi-turn run that fits with no YaRN rope-scaling. Push turns
 # higher only alongside a larger served window (see the Mixtral serve wrappers).
 #
-#   ./run-guidellm-synthetic-moe.sh                               # 32 streams, 180s, Mixtral
+#   ./run-guidellm-synthetic-moe.sh                               # 32 streams, 1200s, Mixtral
 #   CONCURRENT_STREAMS=64 MAX_SECONDS=600 ./run-guidellm-synthetic-moe.sh
 #   MODEL=mixtral-8x7b PROCESSOR=RedHatAI/Mixtral-8x7B-Instruct-v0.1-FP8 ./run-guidellm-synthetic-moe.sh
 #   DATA="kind=synthetic_text,prompt_tokens=1024,output_tokens=256,turns=10" ./run-guidellm-synthetic-moe.sh
@@ -33,6 +33,6 @@ PROCESSOR="${PROCESSOR:-RedHatAI/Mixtral-8x7B-Instruct-v0.1-FP8}" \
 PORT="${PORT:-8000}" \
 RATE_TYPE="${RATE_TYPE:-concurrent}" \
 CONCURRENT_STREAMS="${CONCURRENT_STREAMS:-32}" \
-MAX_SECONDS="${MAX_SECONDS:-180}" \
+MAX_SECONDS="${MAX_SECONDS:-1200}" \
 DATA="${DATA:-kind=synthetic_text,prompt_tokens=512,output_tokens=128,turns=49}" \
   exec "${SCRIPT_DIR}/run-guidellm.sh"

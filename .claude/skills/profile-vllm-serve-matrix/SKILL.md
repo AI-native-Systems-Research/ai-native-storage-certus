@@ -32,7 +32,7 @@ storage/hardware incompatibility) gets an **`X`**.
 Dimensions:
   versions  : 0.26.0  0.27.0  0.28.0  0.29.0  0.30.0        (override with --versions)
   backends  : certus (SHMQ)   |   cputier (vLLM native tiering)
-  workloads : cc131k  |  mixtral  |  multimodal
+  workloads : cc131k  |  mixtral  |  mixtral-long  |  multimodal
   metrics   : throughput (total tok/s)  +  mean TTFT (ms)
 Fixed hardware config (per the operator's standing requirement):
   storage   : 4× SSD
@@ -55,10 +55,10 @@ Parse `$ARGUMENTS` (all optional):
 | flag | default | meaning |
 |------|---------|---------|
 | `--versions`  | `0.26.0,0.27.0,0.28.0,0.29.0,0.30.0` | vLLM patch tags (FULL tag, not `0.26`). |
-| `--workloads` | `cc131k,mixtral,multimodal` | subset of workloads to run. |
+| `--workloads` | `cc131k,mixtral,multimodal` | subset of workloads to run. `mixtral-long` is also selectable (heavy 131K-context KV-spill stress, opt-in — not in the default set). |
 | `--backends`  | `certus,cputier` | subset of backends. |
 | `--mem-tier`  | `60G` | memory tier size (**do not lower without being asked** — the requirement is 60G). |
-| `--max-seconds` | `1200` | per-cell guidellm run duration in seconds, applied uniformly to **every** workload's driver (overrides each driver's own default, e.g. cc131k/multimodal's 600s and moe's 180s). |
+| `--max-seconds` | `1200` | per-cell guidellm run duration in seconds, applied uniformly to **every** workload's driver (overrides each driver's own default — cc131k/multimodal 600s, moe 1200s). |
 | `--drives`    | `4` | SSD count for the certus SPDK server (**requirement: 4**). |
 | `--cputier-fs-path` | *(none — ask)* | host directory backing cputier's fs disk tier (`FS_TIER_HOST`). |
 | `--out`       | `/mnt/certus1/vllm-serve-matrix/<timestamp>` | results dir (**must be on /mnt/certus1, never /home**). |
@@ -113,16 +113,18 @@ this file: `extract_metrics.py`.
 | workload | model / served-name | serve env (both backends unless noted) | guidellm driver |
 |----------|---------------------|----------------------------------------|-----------------|
 | **cc131k** | `Qwen/Qwen2.5-14B-Instruct` / `qwen2.5-14b` | `MAX_MODEL_LEN=131072 TENSOR_PARALLEL=2 GPU=all GPU_MEM_UTIL=0.9 DTYPE=float16` (YaRN auto-enables) | `run-guidellm-cc131k.sh` (throughput, mooncake-131k trace, 600s) |
-| **mixtral** | `RedHatAI/Mixtral-8x7B-Instruct-v0.1-FP8` / `mixtral-8x7b` | `DTYPE=auto MAX_MODEL_LEN=32768 TENSOR_PARALLEL=2 GPU_MEM_UTIL=0.85` | `run-guidellm-synthetic-moe.sh` (concurrent=32, 180s) |
+| **mixtral** | `RedHatAI/Mixtral-8x7B-Instruct-v0.1-FP8` / `mixtral-8x7b` | `DTYPE=auto MAX_MODEL_LEN=32768 TENSOR_PARALLEL=2 GPU_MEM_UTIL=0.85` | `run-guidellm-synthetic-moe.sh` (concurrent=32, 1200s) |
+| **mixtral-long** | `RedHatAI/Mixtral-8x7B-Instruct-v0.1-FP8` / `mixtral-8x7b` | `DTYPE=auto MAX_MODEL_LEN=131072 TENSOR_PARALLEL=2 GPU_MEM_UTIL=0.85 EXTRA_SERVE_ARGS='--hf-overrides {"rope_scaling":{"rope_type":"yarn","factor":4.0,"original_max_position_embeddings":32768}}'` (forces YaRN — Mixtral ships none) | `run-guidellm-mixtral-long.sh` (concurrent=32, turns=196 ≈126K tok/conv, 1200s) |
 | **multimodal** | `Qwen/Qwen3-VL-32B-Instruct-FP8` / `qwen3-vl-32b` | `DTYPE=auto MAX_MODEL_LEN=32768 TENSOR_PARALLEL=2 GPU_MEM_UTIL=0.80 EXTRA_SERVE_ARGS='--limit-mm-per-prompt {"image":2,"video":0}'` | `run-guidellm-synthetic-multimodal.sh` (concurrent=32, 1080p, 600s) — needs `guidellm[vision]`/Pillow |
 
 The guidellm drivers set `TARGET=http://127.0.0.1:${PORT}` and the right
 `MODEL`/`PROCESSOR`; you only need the server up on `PORT` (default 8000). Each
 driver writes `OUTPUT` JSON + a `.metrics.txt`; capture the JSON path per cell.
 
-The per-driver run durations shown above (600s / 180s / 600s) are the drivers'
-own defaults; this skill overrides all of them with `MAX_SECONDS=$MAXSECS`
-(from `--max-seconds`, default 1200) so every cell runs for the same wall-clock.
+The per-driver run durations shown above (cc131k 600s / moe 1200s / multimodal
+600s) are the drivers' own defaults; this skill overrides all of them with
+`MAX_SECONDS=$MAXSECS` (from `--max-seconds`, default 1200) so every cell runs
+for the same wall-clock.
 
 ---
 
@@ -335,7 +337,7 @@ cell crashed before its own cleanup ran.
 
 ## 4. Output
 
-Render **three matrices** (one per workload) from `$OUT/results.tsv`, plus a
+Render **one matrix per selected workload** from `$OUT/results.tsv`, plus a
 config header. Print them to the chat AND save to `$OUT/MATRIX.md`. Format:
 
 ```
@@ -351,6 +353,9 @@ Metric cells: throughput total tok/s  /  mean TTFT ms   (X = did not run; see no
 | …     |            |             |             |              |
 
 ## mixtral   (Mixtral-8x7B-FP8, 32k, concurrent=32)
+| … same shape … |
+
+## mixtral-long   (Mixtral-8x7B-FP8, 131K YaRN, turns=196, concurrent=32)  [only if selected]
 | … same shape … |
 
 ## multimodal   (Qwen3-VL-32B-FP8, 1080p, concurrent=32)
@@ -386,6 +391,14 @@ explain:
   than hanging.
 - **certus & cputier, 0.30:** `apply_fix3.py` no-ops on 0.30 (the clamp is
   upstream) — this is correct, not a failure; 0.30 certus should run.
+- **mixtral-long (any backend):** serves at `MAX_MODEL_LEN=131072` with **forced
+  YaRN** (`--hf-overrides` rope_scaling factor 4). Two things to watch: (1) the
+  131K KV pool is tight for Mixtral-FP8 at `GPU_MEM_UTIL=0.85` — if vLLM fails the
+  startup KV-sizing check ("max seq len larger than KV cache"), bump to `0.9` or
+  it's `X` (`server-failed`); (2) YaRN degrades Mixtral output quality (untrained
+  long-context) — expected, this is a KV-spill stress workload, not a quality run.
+  The driver bakes `turns=196`; the server MUST carry the 131K+YaRN env or every
+  request 400s.
 
 ---
 
