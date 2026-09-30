@@ -164,7 +164,14 @@ fn drive_stub(how: &Behaviour, options: &RunOptions) -> Result<(DriveStats, Dura
         batch_keys: 64,
         extra_args: Vec::new(),
     }];
-    let mut agents = Agents::start_with(&NoLaunch, &specs, 8, false).expect("handshake");
+    let mut agents = Agents::start_with(
+        &NoLaunch,
+        &specs,
+        8,
+        false,
+        workload_wire::client::DEFAULT_READ_TIMEOUT,
+    )
+    .expect("handshake");
     let d: WorkloadDescription = DESCRIPTION.parse().unwrap();
     let started = Instant::now();
     let out = drive::run(&mut agents, &d, options, Arc::new(AtomicBool::new(false)));

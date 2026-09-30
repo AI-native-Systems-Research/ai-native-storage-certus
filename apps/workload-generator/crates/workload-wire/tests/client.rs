@@ -539,3 +539,71 @@ fn a_reap_leaves_the_socket_blocking_so_a_later_wait_still_waits() {
     assert_eq!(rest.len(), 1);
     assert_eq!(rest[0].resident, 5);
 }
+
+/// A read timeout must surface as `TimedOut`, never as an I/O failure.
+///
+/// **This is the test whose absence cost a four-attempt hardware investigation.** A
+/// timeout arrives from the OS as `EAGAIN`, and the old `Io` rendering called it "agent
+/// connection failed: Resource temporarily unavailable" — so a healthy agent doing slow
+/// work read as a dead one, and the search went looking for a connection fault that was
+/// never there.
+///
+/// Both kinds are asserted because which one appears is platform-dependent: Linux reports
+/// `WouldBlock` for an expired `SO_RCVTIMEO`, others report `TimedOut`.
+#[test]
+fn a_read_timeout_is_reported_as_a_timeout_and_names_the_deadline() {
+    use std::io::{self, Read, Write};
+    use std::time::Duration;
+
+    /// A transport that is open and healthy but never answers — exactly the shape of a
+    /// server whose work outlasts the deadline.
+    struct Silent(io::ErrorKind);
+    impl Read for Silent {
+        fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+            Err(io::Error::new(self.0, "deadline expired"))
+        }
+    }
+    impl Write for Silent {
+        fn write(&mut self, b: &[u8]) -> io::Result<usize> {
+            Ok(b.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    for kind in [io::ErrorKind::WouldBlock, io::ErrorKind::TimedOut] {
+        let mut c = Client::with_transport(Silent(kind), 8);
+        // Submit first, so a reply is genuinely outstanding: with nothing in flight
+        // `recv_outcome` reports `Unexpected` before it ever reads, and the test would
+        // pass or fail for the wrong reason.
+        c.submit(&turn(1, &[1]))
+            .expect("the silent transport still accepts writes");
+        let err = c
+            .recv_outcome()
+            .expect_err("a silent peer must not read as success");
+        match err {
+            ClientError::TimedOut { after } => {
+                assert_eq!(
+                    after,
+                    workload_wire::client::DEFAULT_READ_TIMEOUT,
+                    "the error must name the deadline that expired, so the message can \
+                     say what to raise"
+                );
+                let msg = format!("{err}");
+                assert!(
+                    msg.contains("read timeout") && msg.contains("--read-timeout"),
+                    "the message must name the deadline and the flag that changes it, \
+                     not just fail: {msg}"
+                );
+                assert!(
+                    !msg.contains("connection failed"),
+                    "a timeout must NOT claim the connection failed -- that wording is \
+                     the whole defect: {msg}"
+                );
+            }
+            other => panic!("{kind:?} must be TimedOut, got {other:?}"),
+        }
+    }
+    let _ = Duration::from_secs(0);
+}

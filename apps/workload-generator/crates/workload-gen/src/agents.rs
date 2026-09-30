@@ -697,7 +697,13 @@ impl Agents {
         specs: &[AgentSpec],
         depth: usize,
     ) -> Result<Self, String> {
-        Self::start_with(launcher, specs, depth, true)
+        Self::start_with(
+            launcher,
+            specs,
+            depth,
+            true,
+            workload_wire::client::DEFAULT_READ_TIMEOUT,
+        )
     }
 
     /// Start, optionally reusing whatever is already listening.
@@ -713,6 +719,7 @@ impl Agents {
         specs: &[AgentSpec],
         depth: usize,
         replace: bool,
+        read_timeout: Duration,
     ) -> Result<Self, String> {
         // What was launched before the failure, so it can be stopped again. Without this a
         // refused handshake left an agent listening with its mailbox channels claimed: nobody had
@@ -721,7 +728,7 @@ impl Agents {
         // restart clears them. Four refused runs against an eight-channel mailbox and the fifth
         // cannot start. Found by running the same smoke test five times.
         let mut launched: Vec<AgentSpec> = Vec::new();
-        match Self::start_inner(launcher, specs, depth, replace, &mut launched) {
+        match Self::start_inner(launcher, specs, depth, replace, read_timeout, &mut launched) {
             Ok(agents) => Ok(agents),
             Err(e) => {
                 // Only what **this** launcher started. `replace` false means the caller manages
@@ -750,6 +757,7 @@ impl Agents {
         specs: &[AgentSpec],
         depth: usize,
         replace: bool,
+        read_timeout: Duration,
         launched: &mut Vec<AgentSpec>,
     ) -> Result<Self, String> {
         assert!(depth > 0, "a pipelining depth of 0 could never send");
@@ -786,16 +794,16 @@ impl Agents {
                     // The port is already accepting, so a lane that cannot connect is a refusal —
                     // typically the agent having fewer channels than the run asked for, which the
                     // handshake's capacity check should have caught first.
-                    Client::<TcpStream>::connect(spec.address(), depth, Some(POLL * 5)).map_err(
-                        |e| {
+                    Client::<TcpStream>::connect(spec.address(), depth, Some(POLL * 5))
+                        .and_then(|c| c.with_read_timeout(read_timeout))
+                        .map_err(|e| {
                             format!(
                                 "instance {}: lane {lane} of {} could not connect: {e}. The \
                                  agent serves one connection per mailbox channel it claimed",
                                 spec.label(),
                                 spec.lanes
                             )
-                        },
-                    )?
+                        })?
                 };
                 // Every connection handshakes: `Hello` is mandatory per connection, and a
                 // provenance check on only the first would let a run be driven over connections

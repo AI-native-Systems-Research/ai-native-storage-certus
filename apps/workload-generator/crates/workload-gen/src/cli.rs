@@ -226,6 +226,15 @@ pub struct RunArgs {
     /// latency percentiles describe a schedule that was not kept.
     #[arg(long, default_value_t = crate::live::DEFAULT_LATENESS_TOLERANCE_US / 1_000)]
     pub lateness_tolerance_ms: u64,
+    /// How long to wait for an agent's reply before calling the turn timed out, in
+    /// milliseconds.
+    ///
+    /// Raise it when the server's own per-operation latency is legitimately high: a turn
+    /// does real work on the far side, and a deadline shorter than that work invalidates a
+    /// run that was never actually stuck. The failure it produces names the deadline and
+    /// this flag, rather than claiming the connection failed — which it did not.
+    #[arg(long, default_value_t = 30_000)]
+    pub read_timeout_ms: u64,
     /// Structured report destination.
     #[arg(long)]
     pub report: Option<PathBuf>,
@@ -1264,9 +1273,13 @@ fn live_run(args: &RunArgs) -> Result<(String, i32), Failure> {
     let depth = workload_wire::client::DEFAULT_DEPTH;
     let launcher = (!args.no_launch && local).then(crate::agents::LocalLauncher::default);
     let mut agents = match (&launcher, args.no_launch) {
-        (_, true) => {
-            crate::agents::Agents::start_with(&crate::agents::NoLaunch, &specs, depth, false)
-        }
+        (_, true) => crate::agents::Agents::start_with(
+            &crate::agents::NoLaunch,
+            &specs,
+            depth,
+            false,
+            std::time::Duration::from_millis(args.read_timeout_ms),
+        ),
         (Some(l), false) => crate::agents::Agents::start(l, &specs, depth),
         (None, false) => {
             crate::agents::Agents::start(&crate::agents::SshLauncher::default(), &specs, depth)
