@@ -1,5 +1,5 @@
 #!/bin/bash
-# run-serve-cc131k.sh — SERVER side of the 131K cc-traces KV-offload replay test.
+# run-serve-certus-shmq-cc131k.sh — SERVER side of the 131K cc-traces KV-offload replay test.
 #
 # Serves Qwen2.5-14B behind the Certus-SHMQ offload connector with a context
 # window large enough to replay the 128K-context cc/mooncake traces

@@ -22,6 +22,12 @@
 #                  for the O(1) LRU + TinyLFU eviction policy. The profile is
 #                  baked in at compile time, so it must be set for the build.
 #                  The build is always --release.
+#   --eviction-threshold F
+#                  Memory-tier utilization (0.0-1.0) at which background
+#                  DRAM->SSD demotion begins (maps to the server's
+#                  --memory-tier-eviction-threshold). Unset by default, so the
+#                  server keeps its own default (0.0 = demotion disabled,
+#                  DRAM-only tier). Set e.g. 0.8 to exercise the NVMe spill path.
 #
 set -euo pipefail
 
@@ -39,6 +45,7 @@ SERVER_ONLY=0
 BENCH_ONLY=0
 NO_BUILD=0
 CERTUS_PROFILE="full"
+EVICTION_THRESHOLD=""   # empty = don't pass; server keeps its default (0.0)
 
 # Benchmark defaults
 NUM_OBJECTS=64
@@ -62,6 +69,7 @@ while [[ $# -gt 0 ]]; do
         --bench-only)   BENCH_ONLY=1; shift ;;
         --no-build)     NO_BUILD=1; shift ;;
         --profile)      CERTUS_PROFILE="$2"; shift 2 ;;
+        --eviction-threshold) EVICTION_THRESHOLD="$2"; shift 2 ;;
         -h|--help)      sed -n '2,24p' "$0"; exit 0 ;;
         *)              echo "Unknown option: $1" >&2; exit 1 ;;
     esac
@@ -104,6 +112,7 @@ if [[ "$BENCH_ONLY" -eq 0 ]]; then
         --memory-tier-size "$MEMORY_TIER_SIZE"
     )
     [[ -n "$FORMAT_FLAG" ]] && SERVER_CMD+=("$FORMAT_FLAG")
+    [[ -n "$EVICTION_THRESHOLD" ]] && SERVER_CMD+=(--memory-tier-eviction-threshold "$EVICTION_THRESHOLD")
 
     log "  cmd: ${SERVER_CMD[*]}"
     "${SERVER_CMD[@]}" &

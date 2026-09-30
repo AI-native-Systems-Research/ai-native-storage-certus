@@ -1,14 +1,14 @@
 #!/bin/bash
 # run-guidellm-synthetic.sh — CLIENT side of the synthetic multi-turn KV-offload test.
 #
-# Drives the vLLM server started by run-serve-synthetic.sh with a CLOSED-LOOP
+# Drives the vLLM server started by run-serve-certus-shmq-synthetic.sh with a CLOSED-LOOP
 # concurrent load: CONCURRENT_STREAMS fixed in-flight streams, each a 30-turn
 # synthetic_text conversation (512-token prompts, 128-token replies), for MAX_SECONDS.
 # This is the workload previously wired up in run-client-1.sh; here it is a documented,
 # env-overridable wrapper paired with its serve script.
 #
 # The server must serve a window large enough for the accumulated 30-turn history
-# (~19K tokens) — run-serve-synthetic.sh serves 32768 for exactly that reason.
+# (~19K tokens) — run-serve-certus-shmq-synthetic.sh serves 32768 for exactly that reason.
 #
 #   ./run-guidellm-synthetic.sh                               # 32 streams, 600s
 #   CONCURRENT_STREAMS=64 ./run-guidellm-synthetic.sh         # heavier closed-loop

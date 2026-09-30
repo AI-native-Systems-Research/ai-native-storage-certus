@@ -37,11 +37,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ── Text side (synthetic_text -> "prompt"): a shared prefix per group gives the
 #    KV-offload read path something to reuse; the unique question + reply are the
 #    per-request work. Folded into synthetic_text by run-guidellm.sh.
-#    prefix_tokens=4096 (doubled from 2048): doubles the reusable prefix context
-#    length per request, doubling the KV working set that spills to / is re-read
-#    from the offload tier (working set ~ prefix_count * prefix_tokens). Stays
-#    well under MAX_MODEL_LEN=32768 (4096+256+128=4480 tokens/request).
-DATA="${DATA:-prompt_tokens=256,output_tokens=128,prefix_tokens=4096,prefix_count=32,turns=100}"
+#    prefix_tokens=8192, prefix_count=128: sized to force heavy KV-cache spilling.
+#    Reusable working set ~ prefix_count * prefix_tokens = 128 * 8192 = 1,048,576
+#    tokens ≈ 9.2x the measured HBM KV pool (~114k tokens at TP=2, GPU_MEM_UTIL=0.80),
+#    so the bulk of the reusable KV must live in / be re-read from the offload tier.
+#    Per-request stays under MAX_MODEL_LEN=32768 (8192+256+128=8576 tokens/request).
+DATA="${DATA:-prompt_tokens=256,output_tokens=128,prefix_tokens=8192,prefix_count=128,turns=100}"
 
 PATH="$HOME/venv_guidellm/bin:$PATH"
 HF_HOME=/mnt/certus1/hf-cache
@@ -58,7 +59,7 @@ MODEL="${MODEL:-qwen3-vl-32b}" \
 PROCESSOR="${PROCESSOR:-Qwen/Qwen3-VL-32B-Instruct}" \
 PORT="${PORT:-8000}" \
 RATE_TYPE="${RATE_TYPE:-concurrent}" \
-CONCURRENT_STREAMS="${CONCURRENT_STREAMS:-32}" \
+CONCURRENT_STREAMS="${CONCURRENT_STREAMS:-16}" \
 MAX_SECONDS="${MAX_SECONDS:-600}" \
 DATA="$DATA" \
 IMAGE_DATA="$IMAGE_DATA" \

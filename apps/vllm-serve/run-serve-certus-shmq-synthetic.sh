@@ -1,5 +1,5 @@
 #!/bin/bash
-# run-serve-synthetic.sh — SERVER side of the synthetic multi-turn KV-offload test.
+# run-serve-certus-shmq-synthetic.sh — SERVER side of the synthetic multi-turn KV-offload test.
 #
 # Serves Qwen2.5-14B behind the Certus-SHMQ offload connector for the concurrent
 # synthetic_text workload driven by run-guidellm-synthetic.sh (512-token prompts,

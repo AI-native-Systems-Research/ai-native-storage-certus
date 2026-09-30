@@ -1,14 +1,14 @@
 #!/bin/bash
 # run-guidellm-cc131k.sh — CLIENT side of the 131K cc-traces THROUGHPUT test.
 #
-# Drives the vLLM server started by run-serve-cc131k.sh at MAXIMUM throughput, using
+# Drives the vLLM server started by run-serve-certus-shmq-cc131k.sh at MAXIMUM throughput, using
 # the cc/mooncake trace as the prompt source. Unlike RATE_TYPE=replay, the throughput
 # profile ignores the trace's inter-arrival timing and keeps up to MAX_CONCURRENCY
 # requests in flight to find the server's saturation point. Prints guidellm's
 # throughput/latency tables and snapshots the KV-offload / prefix-cache counters.
 #
 # The server MUST serve at max_model_len >= the trace's longest input, or overflowing
-# rows come back as HTTP 400 (that is why run-serve-cc131k.sh serves the 131072
+# rows come back as HTTP 400 (that is why run-serve-certus-shmq-cc131k.sh serves the 131072
 # window). Bring the server up first.
 #
 #   ./run-guidellm-cc131k.sh                                  # throughput, 256 max in-flight, 600s

@@ -11,7 +11,7 @@
 #                 --memory-tier-eviction-threshold 0.9 --store-backpressure-ms 5000 \
 #                 --channels 64 --poller-base-cpu 2 --shmq-poller-cpu 6 --format
 #               (backgrounded; we wait for the shmq mailbox to appear)
-#   3. VLLM     apps/vllm-serve/run-serve-cc131k.sh
+#   3. VLLM     apps/vllm-serve/run-serve-certus-shmq-cc131k.sh
 #               (backgrounded; we wait for the OpenAI /v1/models endpoint)
 #   4. CLIENT   MAX_SECONDS=600 apps/vllm-serve/run-guidellm-cc131k.sh
 #
@@ -39,7 +39,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 VLLM_DIR="${VLLM_DIR:-${REPO_ROOT}/apps/vllm-serve}"
-SERVE_SCRIPT="${SERVE_SCRIPT:-${VLLM_DIR}/run-serve-cc131k.sh}"
+SERVE_SCRIPT="${SERVE_SCRIPT:-${VLLM_DIR}/run-serve-certus-shmq-cc131k.sh}"
 CLIENT_SCRIPT="${CLIENT_SCRIPT:-${VLLM_DIR}/run-guidellm-cc131k.sh}"
 
 # ── Run configuration (matches the requested invocation) ───────────────────────
