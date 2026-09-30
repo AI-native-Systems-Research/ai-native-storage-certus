@@ -33,12 +33,13 @@ mkdir -p "$OUTDIR"
 RUNS="${RUNS:-10}"
 
 # --- fixed canonical tiered-cpu-fs config (exported to run-docker-cputier.sh) ---
-# Stock certus-offload-bench (built by build_026.sh from Dockerfile.offload):
+# Stock certus-offload (build: IMAGE=certus-offload FIX_TIERING=0
+#   bash build_cputier_container.sh 0.26.0 — from Dockerfile.offload):
 # vLLM 0.26 + the tiering framework, tiering activated at run time by DISK_DIR /
 # SECONDARY_TIER. This is the AS-SHIPPED arm — it reproduces the upstream
-# _req_state KeyError crash. The patched arm uses certus-offload-bench-fix026
+# _req_state KeyError crash. The patched arm uses certus-offload-fix026
 # (see run_cputier_patched_stability.sh).
-export IMAGE="${IMAGE:-certus-offload-bench}"
+export IMAGE="${IMAGE:-certus-offload}"
 export CPU_BYTES="${CPU_BYTES:-$((13 * (1 << 30)))}"   # 13G CPU primary == certus DRAM tier
 export DISK_DIR_HOST="${DISK_DIR_HOST:-/mnt/certus1/kv-fs-tier}"
 export DISK_READ_THREADS="${DISK_READ_THREADS:-16}"

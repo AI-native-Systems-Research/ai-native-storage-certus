@@ -86,7 +86,7 @@ STATS_SETTLE=${STATS_SETTLE:-15}
 #   must ALREADY be running on the host (target/release/certus-server ...
 #   --shm-path /dev/shm/certus-shmq --channels 32 --format) — this script does NOT
 #   start it. Requires:
-#     * the connector-equipped image (certus-shmq-bench = vllm-openai + the
+#     * the connector-equipped image (certus-shmq-connector = vllm-openai + the
 #       certus_shmq_connector package). Its ENTRYPOINT runs the multiturn driver,
 #       so we reset it to `vllm serve` below.
 #     * --ipc=host, which does double duty: the host certus-server can open the
@@ -107,7 +107,7 @@ ENGINE=${ENGINE:-podman}
 # Connector-aware defaults: Certus needs the connector-equipped image (stock
 # vllm-openai lacks certus_shmq_connector) and its own result/container names.
 if [ "${CONNECTOR}" = "certus" ]; then
-    _def_server_image=localhost/certus-shmq-bench:latest
+    _def_server_image=localhost/certus-shmq-connector:latest
     _def_server_name=ldq-vllm-certus
     _def_results=$PWD/results/certus-smoke
 else
@@ -116,7 +116,7 @@ else
     _def_results=$PWD/results/llama3-smoke
 fi
 SERVER_IMAGE=${SERVER_IMAGE:-$_def_server_image}
-CLIENT_IMAGE=${CLIENT_IMAGE:-localhost/long-doc-qa-bench:latest}
+CLIENT_IMAGE=${CLIENT_IMAGE:-localhost/long-doc-qa:latest}
 SERVER_NAME=${SERVER_NAME:-$_def_server_name}
 HF_CACHE=${HF_CACHE:-$HOME/.cache/huggingface}
 RESULTS=${RESULTS:-$_def_results}

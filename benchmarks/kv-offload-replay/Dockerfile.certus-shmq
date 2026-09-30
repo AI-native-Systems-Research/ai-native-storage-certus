@@ -12,7 +12,7 @@
 # no grpcio, no protobuf, no wire codegen — just ctypes + mmap over /dev/shm.
 #
 # Build (context = repo root — needs certus-shmq-connector/ + the dataset):
-#   podman build -f certus-shmq-connector/Dockerfile -t certus-shmq-bench .
+#   podman build -f certus-shmq-connector/Dockerfile -t certus-shmq-connector .
 #
 # Run (server's mailbox reachable via --ipc=host; GPU exposed so the server can
 # open the CUDA IPC handles this container's vLLM process exports):
@@ -20,14 +20,14 @@
 #       -e SHM_PATH=/dev/shm/certus-shmq \
 #       -e HF_TOKEN=<token> \
 #       -v $HOME/.cache/huggingface:/root/.cache/huggingface \
-#       certus-shmq-bench
+#       certus-shmq-connector
 
 # vLLM base-image version. Supported (built + smoke-tested): 0.20.0, 0.22.0,
 # 0.23.0, 0.24.0, 0.26.0. The connector self-adapts at RUN time via
 # certus_shmq_connector.compat (version detection + capability matrix) — this
 # arg only selects the base image, no code keys off it. Build another version:
 #   podman build --build-arg VLLM_VERSION=0.22.0 -f certus-shmq-connector/Dockerfile \
-#       -t certus-shmq-bench:vllm0.22 .
+#       -t certus-shmq-connector:vllm0.22 .
 ARG VLLM_VERSION=0.23.0
 FROM docker.io/vllm/vllm-openai:v${VLLM_VERSION}
 ENTRYPOINT []

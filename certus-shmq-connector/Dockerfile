@@ -12,7 +12,7 @@
 # no grpcio, no protobuf, no wire codegen — just ctypes + mmap over /dev/shm.
 #
 # Build (context = repo root — needs certus-shmq-connector/ + the dataset):
-#   podman build -f certus-shmq-connector/Dockerfile -t certus-shmq-bench .
+#   podman build -f certus-shmq-connector/Dockerfile -t certus-shmq-connector .
 #
 # Run (server's mailbox reachable via --ipc=host; GPU exposed so the server can
 # open the CUDA IPC handles this container's vLLM process exports):
@@ -20,14 +20,15 @@
 #       -e SHM_PATH=/dev/shm/certus-shmq \
 #       -e HF_TOKEN=<token> \
 #       -v $HOME/.cache/huggingface:/root/.cache/huggingface \
-#       certus-shmq-bench
+#       certus-shmq-connector
 
-# vLLM base-image version. Supported (built + smoke-tested): 0.20.0, 0.22.0,
-# 0.23.0, 0.24.0, 0.26.0. The connector self-adapts at RUN time via
-# certus_shmq_connector.compat (version detection + capability matrix) — this
-# arg only selects the base image, no code keys off it. Build another version:
-#   podman build --build-arg VLLM_VERSION=0.22.0 -f certus-shmq-connector/Dockerfile \
-#       -t certus-shmq-bench:vllm0.22 .
+# vLLM base-image version. The connector's compat matrix
+# (certus_shmq_connector.compat SUPPORTED_VERSIONS) covers 0.20, 0.22, 0.23,
+# 0.24, 0.26, 0.29, 0.30; it self-adapts at RUN time via version detection +
+# capability predicates, so this arg only selects the base image — no code keys
+# off it. Build another version (use a published vllm/vllm-openai:v<X> tag):
+#   podman build --build-arg VLLM_VERSION=0.29.0 -f certus-shmq-connector/Dockerfile \
+#       -t certus-shmq-connector:vllm0.29 .
 ARG VLLM_VERSION=0.23.0
 FROM docker.io/vllm/vllm-openai:v${VLLM_VERSION}
 ENTRYPOINT []
@@ -77,9 +78,13 @@ COPY data/synth_multiturn.json.gz /workspace/data/synth_multiturn.json.gz
 # Editable install of the pure-Python connector. --no-index + --no-build-isolation
 # keep this offline-safe: the disconnected node has no PyPI, and the base image
 # already ships pip/setuptools/wheel, so build isolation (which would fetch build
-# deps from the index and hang) is neither needed nor possible here. The package
-# has no runtime deps beyond what the vLLM base already provides.
-RUN pip install --no-build-isolation --no-index --no-cache-dir -e /workspace/certus-shmq-connector
+# deps from the index and hang) is neither needed nor possible here. --no-deps is
+# REQUIRED: pyproject lists torch/numpy (they document what the connector needs),
+# but the vLLM base already provides them. Without --no-deps, pip re-resolves
+# torch's own transitive pins and, on CUDA-13 bases (vLLM >= 0.27), fails offline
+# on nvidia-nccl-cu13 (not on any --no-index mirror). The package has no runtime
+# deps beyond what the base provides, so skipping dep resolution is correct.
+RUN pip install --no-build-isolation --no-index --no-deps --no-cache-dir -e /workspace/certus-shmq-connector
 
 COPY certus-shmq-connector/docker-entrypoint.sh /usr/local/bin/certus-entrypoint
 RUN chmod +x /usr/local/bin/certus-entrypoint

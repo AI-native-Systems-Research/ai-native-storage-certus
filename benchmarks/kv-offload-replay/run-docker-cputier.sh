@@ -4,7 +4,7 @@
 #
 # This is the in-tree replacement for the SharedStorage (llmd_fs_backend)
 # solution, which no longer builds on vLLM 0.26.0 (upstream removed
-# vllm.v1.kv_offload.abstract). It reuses the unified certus-offload-bench image
+# vllm.v1.kv_offload.abstract). It reuses the unified certus-offload image
 # (which already ships vLLM 0.26 + the tiering framework) and bind-mounts the
 # repo copy of the driver over the baked one, so no rebuild is needed. Setting
 # DISK_DIR makes the driver take the tiering (CPU primary + fs secondary) path.
@@ -17,7 +17,7 @@
 #                 the rootless-mapped container uid, else stores silently fail).
 source "$(dirname "${BASH_SOURCE[0]}")/run-docker-common.sh"
 
-IMAGE="${IMAGE:-certus-offload-bench}"
+IMAGE="${IMAGE:-certus-offload}"
 CPU_BYTES="${CPU_BYTES:-$((8 * (1 << 30)))}"      # CPU primary tier (bytes)
 # TieringOffloadingSpec allocates its CPU primary tier as a /dev/shm mmap and
 # force-populates it with MADV_POPULATE_WRITE. Podman's default /dev/shm is 64M,

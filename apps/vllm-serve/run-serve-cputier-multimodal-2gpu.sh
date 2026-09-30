@@ -47,8 +47,9 @@
 # passed through the base script's EXTRA_SERVE_ARGS hook. JSON is compact (no
 # spaces) so it survives the base word-split.
 #
-# Prereqs: the certus-offload-bench-fix026 image in the DEFAULT podman store
-# (build_026.sh), both A100s free, and enough host RAM for the CPU tier. Unlike
+# Prereqs: the certus-offload-fix026 image in the DEFAULT podman store
+# (build_cputier_container.sh), both A100s free, and enough host RAM for the CPU
+# tier. Unlike
 # the shmq server there is NO external certus-server and NO mailbox — cputier is
 # self-contained. Pair with the multimodal guidellm driver once the server is up.
 #
@@ -65,7 +66,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MM_IMAGES="${MM_IMAGES:-2}"
 MM_ARGS="--limit-mm-per-prompt {\"image\":${MM_IMAGES}}"
 
-CPU_BYTES=$((30*(1<<30))) # 30GiB
+CPU_BYTES=${CPU_BYTES:-$((30*(1<<30)))} # 30GiB
 MODEL="${MODEL:-Qwen/Qwen3-VL-32B-Instruct-FP8}" \
 DTYPE="${DTYPE:-auto}" \
 SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-qwen3-vl-32b}" \

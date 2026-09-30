@@ -12,6 +12,20 @@
 //! `DT_RUNPATH`: `DT_RUNPATH` is consulted only for an object's *direct*
 //! dependencies, but `libzyre` pulls in `libczmq -> libzmq` transitively, and
 //! only `DT_RPATH` is honored for those transitive lookups from the executable.
+//!
+//! We emit TWO rpath entries: the absolute `deps/zyre-build/lib{,64}` derived
+//! from the manifest path, AND an `$ORIGIN`-relative path (`$ORIGIN/../../../
+//! deps/zyre-build/lib{,64}`, i.e. from `target/<profile>/deps/` back to the
+//! workspace's `deps/`). The absolute path is stable when the target dir is
+//! relocated; the `$ORIGIN`-relative one is stable when the *checkout* moves.
+//! The latter matters because a git-worktree build that shares the parent
+//! repo's `target/` bakes the worktree's (transient) absolute path into the
+//! rpath, poisoning the shared artifact for the main checkout once the worktree
+//! is removed — cargo treats the artifact as fresh (this script only reruns on
+//! `ZYRE_BUILD_DIR`), so the stale absolute rpath is never regenerated and the
+//! loader aborts with `libzyre.so.2: cannot open shared object file`. The
+//! `$ORIGIN`-relative entry resolves regardless of which checkout produced the
+//! binary, so the load succeeds even from a poisoned absolute path.
 
 use std::env;
 use std::path::PathBuf;
@@ -39,8 +53,18 @@ fn main() {
     // Applies to this crate's binary/test/bench/example targets (the test
     // binaries that link zyre transitively); the rlib itself ignores link args.
     println!("cargo:rustc-link-arg=-Wl,--disable-new-dtags");
+    // Absolute rpath (from the manifest path) — survives target-dir relocation.
     println!("cargo:rustc-link-arg=-Wl,-rpath,{}", lib_dir.display());
     println!("cargo:rustc-link-arg=-Wl,-rpath,{}", lib64_dir.display());
+    // `$ORIGIN`-relative rpath — survives checkout moves / worktree-shared
+    // target dirs. Test/bench/example binaries live in `target/<profile>/deps`
+    // (and `.../examples`), three levels below the workspace root, so `$ORIGIN/
+    // ../../../deps/zyre-build/lib{,64}` reaches the same `deps/` the absolute
+    // path names. The linker records `$ORIGIN` literally (no shell expansion);
+    // a nonexistent entry is simply skipped by the loader, so listing both is
+    // safe. See the module header for why the absolute entry can go stale.
+    println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN/../../../deps/zyre-build/lib");
+    println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN/../../../deps/zyre-build/lib64");
 
     println!("cargo:rerun-if-env-changed=ZYRE_BUILD_DIR");
 }

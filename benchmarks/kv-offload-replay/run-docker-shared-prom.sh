@@ -1,6 +1,6 @@
 #!/bin/bash
 # SharedStorage + Prometheus — llmd_fs_backend on a host filesystem (image
-# certus-sharedstorage-bench) with the bench's vLLM engine exposing Prometheus
+# certus-sharedstorage) with the bench's vLLM engine exposing Prometheus
 # metrics on port 8000.
 #
 # The bench drives vLLM through the offline LLM(...) engine (no OpenAI server),
@@ -15,7 +15,7 @@
 #
 # NOTE (vLLM 0.26.0): the sharedstorage image build currently FAILS (upstream
 # removed vllm.v1.kv_offload.abstract, which llmd_fs_backend imports), so the
-# certus-sharedstorage-bench tag is still the 0.20 image. prometheus_client is
+# certus-sharedstorage tag is still the 0.20 image. prometheus_client is
 # present there (run_fs_bench_450.py already reads its REGISTRY), so the exporter
 # works; only the vLLM metric names differ from newer releases.
 #
@@ -24,7 +24,7 @@
 # no-offload. See tools/configure-bench.sh for the RAID0/XFS + ownership setup.
 source "$(dirname "${BASH_SOURCE[0]}")/run-docker-common.sh"
 
-IMAGE="${IMAGE:-certus-sharedstorage-bench}"
+IMAGE="${IMAGE:-certus-sharedstorage}"
 SHARED_FS="${SHARED_FS:-/mnt/ss-kv}"
 DRAM="${DRAM:-$((32 * (1 << 30)))}"                 # host-RAM staging pool (bytes)
 DISK_DEV="${DISK_DEV:-$(findmnt -no SOURCE --target "$SHARED_FS" 2>/dev/null | xargs -r basename)}"

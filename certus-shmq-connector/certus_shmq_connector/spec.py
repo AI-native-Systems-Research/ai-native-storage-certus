@@ -30,6 +30,7 @@ from .compat import (
     block_bytes_from_config,
     block_bytes_from_offloading_config,
     extract_gpu_ptrs,
+    kv_cache_layout_name,
 )
 from .gpu import current_device, ipc_for_tensor
 from .handler import worker_class
@@ -153,6 +154,18 @@ class CertusShmqOffloadingSpec(OffloadingSpec):
             self._slab_size_bytes = int(self.extra_config.get("slab_size_bytes", 131072))
             # 0.26 hands the per-block bytes to us directly.
             self._block_bytes: int | None = block_bytes_from_offloading_config(config)
+            # 0.30+: OffloadingConfig also carries the resolved KVCacheLayout name
+            # (e.g. "LBHNC"). The connector offloads raw per-block bytes and does not
+            # reinterpret layout, so this is recorded for observability/parity only;
+            # the adapter returns None on ≤0.29 (field absent) so this stays a no-op
+            # on older versions. Gated entirely by CAPS.kvcache_layout_field.
+            self._kv_cache_layout: str | None = kv_cache_layout_name(config)
+            if self._kv_cache_layout is not None:
+                print(
+                    f"[certus-shmq] KV cache layout (vLLM 0.30+): "
+                    f"{self._kv_cache_layout}",
+                    flush=True,
+                )
         else:
             vllm_config, kv_cache_config = args
             super().__init__(vllm_config, kv_cache_config)
@@ -167,6 +180,8 @@ class CertusShmqOffloadingSpec(OffloadingSpec):
             self._block_bytes = block_bytes_from_config(
                 kv_cache_config, self.block_size_factor
             )
+            # kv_cache_layout is a 0.30+ OffloadingConfig field; absent here.
+            self._kv_cache_layout = None
 
         self._shm_path = str(self.extra_config.get("shm_path", "/dev/shm/certus-shmq"))
 

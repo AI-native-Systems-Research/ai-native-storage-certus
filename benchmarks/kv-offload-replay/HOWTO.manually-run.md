@@ -3,7 +3,7 @@
 Runs 12 rounds with open (barrier/sync) scheduling - you can see the experiment run for 12 rounds only. By default DISK_DIR_HOST=/mnt/certus1/kv-fs-tier which is where the spill happens. This defaults to shared GPT data.
 
 ```bash
-[dwaddington@node0 kv-offload-replay]$ IMAGE=certus-offload-bench-fix026 NUM_CONVS=200 OUTPUT_TOKENS=150 MAX_NUM_SEQS=64 GPU_MEM_UTIL=0.95 MODEL=NousResearch/Meta-Llama-3-8B HF_HUB_OFFLINE=1 ./run-docker-cputier.sh
+[dwaddington@node0 kv-offload-replay]$ IMAGE=certus-offload-fix026 NUM_CONVS=200 OUTPUT_TOKENS=150 MAX_NUM_SEQS=64 GPU_MEM_UTIL=0.95 MODEL=NousResearch/Meta-Llama-3-8B HF_HUB_OFFLINE=1 ./run-docker-cputier.sh
 ```
 
 On a single A100, the wall clock time is ~223s.
