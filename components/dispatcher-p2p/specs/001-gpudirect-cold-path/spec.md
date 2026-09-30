@@ -162,6 +162,68 @@ The system keeps both DRAM and SSD tiers within configured utilization bounds wi
   `KeyNotFound` after any remote attempt. A shared test would hide a divergence in either
   component, which is the failure two separate specs exist to prevent.
 
+## ROOT CAUSE FOUND 2026-09-30: the cold path panics when the P2P ring is absent
+
+Found while attempting the dispatcher's spec 002 T116. **Three defects, and the cold path
+appears never to have been exercised.**
+
+### Defect 1 — a promised fallback that does not exist
+
+`initialize` attempts `p2p_ring::P2pRing::new()`, and on `None` logs:
+
+> `dispatcher-p2p: P2P ring unavailable, cold reads use DRAM path`
+
+**No such DRAM path exists.** The only cold-path use of the ring (`src/lib.rs:1802`) is
+`p2p_ring_guard.as_ref().expect("dispatcher-p2p requires P2P ring; use full.yaml profile
+for DRAM path")`. So the component logs a fallback at startup and panics ~12 000 requests
+later when the first cold read arrives. Two contradictory statements about one condition.
+
+`P2pRing::new` returns `None` when **`cudaMalloc` fails** (`p2p_ring.rs:58`) — a CUDA
+allocation failure, unrelated to GDRCopy.
+
+### Defect 2 — a worker panic silently retires the thread
+
+Observed: **16 panics, one per shm-queue worker**, and the pool erodes to zero. The worker
+loop in `lib/shmq-dispatcher/src/serve.rs` replies in both the `Ok` and `Err` arms, but a
+**panic unwinds past both**, so no reply is written and `while let Ok(req) = rx.recv()`
+exits. The server then:
+
+- still answers `/metrics` and still checkpoints (poller and NVMe threads unaffected),
+- has an **empty** work queue, because no worker remains to take from it,
+- and leaves every client blocked forever on a reply that cannot come.
+
+Measured by the flow counters added for this: `taken 1520, enqueued 1519, dequeued 1519,
+replied 1503` — `deq->reply 16`, exactly the worker count. **`serve` must catch a worker
+panic, reply `STATUS_ERROR`, and restart or fail loudly.** A server that has lost its
+entire worker pool while reporting healthy is the worst available failure mode.
+
+**A deadline in `dispatch` would NOT fix this and was rejected as a band-aid**: the threads
+are dead, not slow. Considering one was a symptom of mistaking the panic for a hang.
+
+### Defect 3 — a composition error surfaces at first cold read, not at startup
+
+`expect` on a data-path resource defers a knowable startup condition by ~12 000 requests.
+The ring's availability is decidable in `initialize`; a profile that cannot supply it should
+fail there, where the operator can act on it.
+
+### Evidence the cold path has never been exercised
+
+1. The promised DRAM fallback is **unimplemented** — specified in a log message, never written.
+2. **No test reaches it.** This crate's mock `MockEntryLocation::BlockDevice` variant is
+   reported by the compiler as **never constructed**; its 72 unit tests cover warm hits and
+   remote delivery only.
+3. **`CERTUS_PROFILE=full-p2p` could not build the yaml server at all** before 2026-09-30
+   (duplicated `EvictionEvent`), so this stack had never run.
+4. On this hardware the ring **cannot allocate**, so the path is unreachable even composed.
+
+Not claimed: that it never worked on hardware where `cudaMalloc` succeeds. That cannot be
+determined from here. What is established is that nothing in the repository exercises it and
+this configuration cannot.
+
+**Consequence for FR-014 and SC-008**: the `Ssd`-share comparison against
+`components/dispatcher` remains unverifiable until Defect 1 is fixed, because the first cold
+read is what kills the server.
+
 ## Success Criteria *(mandatory)*
 
 ### Measurable Outcomes
