@@ -510,17 +510,53 @@ step: an accounting identity that fails by a recognisable quantity names its own
   workers rule out CPU starvation. **The generator is exonerated** — it is blocked exactly
   where it should be, on a socket read for a reply that is not coming.
 
+  **FLOW COUNTERS, 2026-09-30 — CAUSE LOCALISED: every worker is stuck inside `dispatch`.**
+  Four counters added at the serve path's hand-offs (`lib/shmq-dispatcher/src/serve.rs`),
+  reported every 2 s. At the stall (12 348 hits, 200 s), constant across every sample:
+
+  ```
+  shmq-flow taken 1520 enqueued 1519 dequeued 1519 replied 1503
+            gaps[take->enq 1, enq->deq 0, deq->reply 16]
+  ```
+
+  **`deq->reply 16` is the answer, and 16 is exactly the channel/worker count** (the agent
+  attaches with 16 channels). Sixteen requests were taken off the queue by workers and no
+  reply was ever written for any of them: **every worker is blocked inside
+  `Translator::dispatch` and none returns.** With all workers wedged, nothing drains the
+  queue, so `enq->deq` is 0 and the server *appears* idle — which is exactly what misled
+  the backtrace reading.
+
+  **This is a THIRD shape, not one of the two the backtraces suggested.** Neither "a
+  submission never enqueued" nor "a reply produced but not written" is right: the reply was
+  never *produced*, because the dispatch call never completed. `take->enq 1` is one request
+  the poller holds at the sampling instant and is not part of the fault.
+
+  **A correction to my own reading of the stacks.** I reported the server as idle with
+  workers parked on empty channels and concluded "lost request or lost completion". The
+  parked threads I attributed to tokio idling include workers blocked *inside* dispatch;
+  an idle-looking server was the symptom of all workers being stuck, not evidence against
+  it. The counters were necessary because the stacks were ambiguous in a way I did not
+  detect.
+
+  **Where to look next, now narrow**: `dispatcher-p2p`'s `batch_lookup` cold path — the
+  SSD → BAR1 → D2D route and its async DRAM backfill — for a completion that is awaited and
+  never signalled. `Translator::dispatch` has no internal deadline, so a single unsignalled
+  completion parks a worker permanently, and sixteen of them stop the server.
+
   **Recommended next actions, and they are no longer T116's:**
-  1. **File the lost-request/lost-completion defect against the shm-queue path under
-     `dispatcher-p2p`.** It reproduces in **4 minutes**, so instrumenting the enqueue and
-     reply-write sites with counters would separate the two shapes above cheaply — if
-     submissions-received exceeds work-items-enqueued, it is (1); if replies-produced
-     exceeds replies-written, it is (2).
-  2. **Bound the generator's submit-path wait.** `Client::submit` calls `recv_outcome` to
-     reclaim window credits, so a missing reply parks the lane indefinitely regardless of
-     `--read-timeout-ms`. FR-084 fixed how a timeout is *reported*; this is a separate gap.
-  3. The `full-p2p` profile did not build before today, so this is very likely
-     long-standing rather than a regression.
+  1. **File it against `dispatcher-p2p`** with this counter line and the reproduction (4
+     minutes, `/tmp/t116stall.sh`). The flow counters are committed and left on — four
+     relaxed loads and a log line every 2 s — so the next person sees the same evidence
+     without re-instrumenting.
+  2. **Bound the generator's submit-path wait** (`Client::submit` calls `recv_outcome`, so a
+     missing reply parks a lane regardless of `--read-timeout-ms`).
+  3. Consider a deadline inside `dispatch`: a worker that cannot complete should fail its
+     request, not retire from the pool. Sixteen silent retirements are how one hung
+     completion becomes a dead server.
+  4. **Latent hazard noticed in the same path**: `shm_queue::Server::reply` silently
+     truncates to `cap_resp` (`data.len().min(self.layout.cap_resp)`). Not this bug — 64
+     one-byte flags cannot overrun it — but an oversized reply would be clipped with no
+     error and the client would read a short frame.
 
 ## Out of scope, decided 2026-09-29
 
