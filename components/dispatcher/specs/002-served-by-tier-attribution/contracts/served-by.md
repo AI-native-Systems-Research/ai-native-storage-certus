@@ -142,7 +142,28 @@ treats a size mismatch as a miss by design (`size-mismatch = cache miss`), so it
 ### Compatibility
 
 - **`0` keeps its meaning exactly**, so every reader testing `byte != 0` classifies every key
-  as it did before. The Python connector reads it that way and needs no change.
+  as it did before. **Consumer sweep, 2026-09-29 — read, not assumed:**
+
+  | Reader | Predicate | Under the widened byte |
+  | --- | --- | --- |
+  | `certus-shmq-connector` `decode_ok_flags` | `payload[i] != 0` | safe, no change |
+  | `certus-connector` | does not speak this op | unaffected |
+  | `workload-node-agent` `split_by_lookup` | `*served == 1` | **BREAKS — must be fixed with this change** |
+
+  The agent is the one that breaks, and it is ours. It counted every non-`1` byte as a miss
+  **on purpose** — with a test asserting byte `2` is not a hit — because under the old
+  two-valued byte an unexpected value could only mean a key that was never delivered, and
+  treating it as a hit would leave a block unstored. That reasoning was right then and is
+  wrong now, so the predicate becomes `!= 0` and the test's intent moves to the unassigned
+  range (`4..=255`) where it still holds.
+
+  **A side channel was considered and rejected**, because it does not avoid this. Appending a
+  per-key tier array after the `ok` array would be invisible to the connector (it decodes
+  `len(chunk)` bytes and ignores the rest) but would **corrupt the agent**, which copies the
+  whole reply body and concatenates per-chunk replies: with chunking the payload becomes
+  `[ok×k][tier×k][ok×k]…` and its zip misaligns from the second chunk onward. So the side
+  channel costs a new framing and still requires the agent fix. Widening in place is
+  strictly cheaper, and `CHECK` already carries `0/1/2` in this exact reply shape.
 - **There is no "unspecified" value, deliberately.** The proto3 design needed one because
   proto3 reserves zero as a default and it doubled as version detection. Here `0` is already
   spoken for, and reserving it for "unknown" would silently reclassify every miss as an
@@ -155,6 +176,46 @@ treats a size mismatch as a miss by design (`size-mismatch = cache miss`), so it
   `IDispatcher::batch_lookup`'s return type makes every implementor and call site a compile
   error until updated. Writing the wrong `u8` compiles cleanly, which is why the attribution
   tests must be shown to fail against deliberately wrong attribution before being trusted.
+
+### Why `PENDING` is not a wire value on `LOOKUP` (decided 2026-09-29)
+
+A pending hit — a key we believe we have but cannot supply right now — is a real and useful
+answer, and vLLM 0.26+ has a native value for it (`LookupResult.HIT_PENDING`). It does **not**
+belong in this byte.
+
+**The byte's non-zero range means "data was delivered".** Every existing reader treats non-zero
+as served (`decode_ok_flags`: `payload[i] != 0`). A `PENDING` value placed there would tell the
+connector a block arrived that did not: it would store nothing and load nothing, which is the
+*fatal* failure `manager.py::_check_all_present(resident_only=True)` exists to avoid — a load
+that finds `NotExist` and fails the transfer. No numbering avoids this; the hazard is the
+non-zero range itself, not the number chosen.
+
+**It is already carried on `CHECK`, where it is safe**: `check_state::PENDING = 2`, decoded by
+`decode_states` into raw ints with no `!= 0` test anywhere in the path. `CHECK` is also where
+the decision belongs — it answers "do you have this", which is the question a pending answer
+qualifies.
+
+**`ServedBy` therefore gains no `Pending` variant, for a structural reason and not a stylistic
+one.** `pending_stores` is owned by the transport host (`lib/shmq-dispatcher`), not by the
+dispatcher. `IDispatcher::batch_lookup` — which produces `ServedBy` — cannot observe it and must
+not pretend to. Pending is a translator-level concept and stays one, exactly as it is today.
+
+**What is missing is a caller, not plumbing.** `compat.lookup_result_pending()` already returns
+`HIT_PENDING` on 0.26+ and `True` on ≤0.24, and has **zero callers**: the load path deliberately
+collapses `PENDING` to absent. Enabling it is a change to
+`_check_all_present(resident_only=True)` — return pending for a logical block whose shards are
+all RESIDENT-or-PENDING with at least one PENDING, and keep `MISS` when any shard is genuinely
+absent.
+
+**Deliberately out of scope for this feature.** Enabling `HIT_PENDING` changes vLLM's
+*scheduling* — it defers a request instead of recomputing — so it changes the hit rates any
+measurement reports. Landing it beside attribution would make the two inseparable in exactly the
+numbers attribution exists to produce. It needs its own change and its own before/after.
+
+Two facts that bound its risk, both checked rather than assumed: the reservation reaper
+reclaims entries "never committed/aborted within `timeout`", so a pending promise cannot
+outlive that timeout; and store *declines* happen at reserve, so a declined key never enters
+`pending_stores` at all.
 
 ### Scope on other operations
 

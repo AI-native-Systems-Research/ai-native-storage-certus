@@ -671,7 +671,7 @@ impl IDispatcher for MockDispatcher {
     fn batch_lookup(
         &self,
         _entries: &[(CacheKey, Vec<IpcHandle>)],
-    ) -> Vec<Result<(), DispatcherError>> {
+    ) -> Vec<interfaces::LookupOutcome> {
         unimplemented!("mock: IDispatcher::batch_lookup not needed by remote-lookup tests")
     }
 

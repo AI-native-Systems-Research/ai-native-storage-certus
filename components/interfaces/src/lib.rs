@@ -26,6 +26,8 @@ pub use idispatch_map::IDispatchMap;
 #[cfg(feature = "spdk")]
 pub use idispatch_map::LookupResult;
 pub use idispatcher::DispatcherConfig;
+pub use idispatcher::LookupOutcome;
+pub use idispatcher::ServedBy;
 pub use idispatcher::DispatcherError;
 #[cfg(feature = "spdk")]
 pub use idispatcher::IDispatcher;

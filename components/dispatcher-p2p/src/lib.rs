@@ -91,8 +91,8 @@ use component_framework::define_component;
 use interfaces::{
     CacheKey, ClientChannels, Command, Completion, DispatcherConfig, DispatcherError, DmaAllocFn,
     DmaBuffer, FormatParams, GpuStream, IBlockDevice, IBlockDeviceAdmin, IDispatchMap, IDispatcher,
-    IExtentManager, IGpuServices, ILogger, IMemoryTier, IRemoteLookup, IpcHandle, LookupResult,
-    PciAddress,
+    IExtentManager, IGpuServices, ILogger, IMemoryTier, IRemoteLookup, IpcHandle, LookupOutcome,
+    LookupResult, PciAddress, ServedBy,
 };
 
 use component_core::binding::bind;
@@ -1581,42 +1581,67 @@ impl IDispatcher for DispatcherP2pComponent {
         Ok(())
     }
 
-    fn batch_lookup(
-        &self,
-        entries: &[(CacheKey, Vec<IpcHandle>)],
-    ) -> Vec<Result<(), DispatcherError>> {
+    fn batch_lookup(&self, entries: &[(CacheKey, Vec<IpcHandle>)]) -> Vec<LookupOutcome> {
         if entries.is_empty() {
             return Vec::new();
         }
 
         let init_check = self.ensure_initialized();
         if let Err(e) = init_check {
-            return entries.iter().map(|_| Err(e.clone())).collect();
+            return entries
+                .iter()
+                .map(|_| LookupOutcome {
+                    served_by: ServedBy::Error,
+                    result: Err(e.clone()),
+                })
+                .collect();
         }
 
         let dm = match self.dispatch_map.get() {
             Ok(dm) => dm,
             Err(_) => {
                 let e = DispatcherError::NotInitialized("dispatch_map not bound".into());
-                return entries.iter().map(|_| Err(e.clone())).collect();
+                return entries
+                    .iter()
+                    .map(|_| LookupOutcome {
+                        served_by: ServedBy::Error,
+                        result: Err(e.clone()),
+                    })
+                    .collect();
             }
         };
         let mt = match self.memory_tier.get() {
             Ok(mt) => mt,
             Err(_) => {
                 let e = DispatcherError::NotInitialized("memory_tier not bound".into());
-                return entries.iter().map(|_| Err(e.clone())).collect();
+                return entries
+                    .iter()
+                    .map(|_| LookupOutcome {
+                        served_by: ServedBy::Error,
+                        result: Err(e.clone()),
+                    })
+                    .collect();
             }
         };
         let gpu = match self.gpu_services.get() {
             Ok(gpu) => gpu,
             Err(_) => {
                 let e = DispatcherError::NotInitialized("gpu_services not bound".into());
-                return entries.iter().map(|_| Err(e.clone())).collect();
+                return entries
+                    .iter()
+                    .map(|_| LookupOutcome {
+                        served_by: ServedBy::Error,
+                        result: Err(e.clone()),
+                    })
+                    .collect();
             }
         };
 
         let mut results: Vec<Option<Result<(), DispatcherError>>> = vec![None; entries.len()];
+        // Per-key serving tier. Same discipline as `dispatcher`: `None` by default,
+        // never defaulted to a tier at the end, so an unmarked served key breaks the
+        // `is_hit() <=> is_ok()` invariant loudly instead of reporting a plausible lie.
+        let mut tier: Vec<Option<ServedBy>> = vec![None; entries.len()];
 
         // Classify entries and handle fast paths inline.
         struct ColdEntry {
@@ -1715,9 +1740,15 @@ impl IDispatcher for DispatcherP2pComponent {
                         };
                         let _ = dm.release_read(key);
                         mt.touch(key);
+                        tier[i] = Some(ServedBy::Dram);
                         results[i] = Some(res);
                     }
                     LookupResult::BlockDevice { offset } => {
+                        // FR-014: this dispatcher's cold path is SSD -> GPU BAR1 ring ->
+                        // D2D with NO synchronous DRAM promotion, so a repeat read may
+                        // legitimately be `Ssd` again where `dispatcher` would say `Dram`.
+                        // The value is the same; what differs is how long it persists.
+                        tier[i] = Some(ServedBy::Ssd);
                         let _ = dm.release_read(key);
                         cold_entries.push(ColdEntry {
                             idx: i,
@@ -1951,6 +1982,7 @@ impl IDispatcher for DispatcherP2pComponent {
                 let mut submitted: Vec<usize> = Vec::with_capacity(not_found.len());
 
                 for (&pos, remote_res) in not_found.iter().zip(remote_results.into_iter()) {
+                    tier[pos] = Some(ServedBy::Remote);
                     let (key, regions) = &entries[pos];
                     let key = *key;
                     // Only single-region entries reach KeyNotFound (N>1 short-circuits
@@ -2057,7 +2089,27 @@ impl IDispatcher for DispatcherP2pComponent {
             }
         }
 
-        results.into_iter().map(|r| r.unwrap()).collect()
+        // Derived once, exactly as in `dispatcher`, so the error-to-taxonomy mapping
+        // lives in one shape in both and the two cannot drift (FR-032's concern applied
+        // to behaviour rather than to documents).
+        results
+            .into_iter()
+            .zip(tier)
+            .map(|(r, t)| {
+                let result = r.unwrap();
+                let served_by = match (&result, t) {
+                    (Ok(()), Some(t)) => t,
+                    (Ok(()), None) => {
+                        debug_assert!(false, "served a key with no recorded tier");
+                        ServedBy::Error
+                    }
+                    (Err(DispatcherError::KeyNotFound(_)), _) => ServedBy::Miss,
+                    (Err(DispatcherError::InvalidParameter(_)), _) => ServedBy::SizeMismatch,
+                    (Err(_), _) => ServedBy::Error,
+                };
+                LookupOutcome { served_by, result }
+            })
+            .collect()
     }
 
     fn lookup_async(
@@ -4305,7 +4357,7 @@ mod tests {
         let (bufs, entries) = remote_batch(&[1, 2]);
         let results = d.batch_lookup(&entries);
         assert!(
-            results.iter().all(|r| r.is_ok()),
+            results.iter().all(|r| r.result.is_ok()),
             "both remote keys should be delivered, got: {results:?}"
         );
 
@@ -4337,7 +4389,7 @@ mod tests {
 
         let (_bufs, entries) = remote_batch(&keys);
         let results = d.batch_lookup(&entries);
-        assert!(results.iter().all(|r| r.is_ok()), "got: {results:?}");
+        assert!(results.iter().all(|r| r.result.is_ok()), "got: {results:?}");
 
         assert_eq!(fx.probe.count(GpuEvent::SubmitH2d), 8);
         assert_eq!(
@@ -4360,9 +4412,9 @@ mod tests {
         let (bufs, entries) = remote_batch(&[1, 2, 3]);
         let results = d.batch_lookup(&entries);
 
-        assert!(results[0].is_ok(), "key 1: {:?}", results[0]);
-        assert!(results[1].is_err(), "key 2 is not held remotely");
-        assert!(results[2].is_ok(), "key 3: {:?}", results[2]);
+        assert!(results[0].result.is_ok(), "key 1: {:?}", results[0]);
+        assert!(results[1].result.is_err(), "key 2 is not held remotely");
+        assert!(results[2].result.is_ok(), "key 3: {:?}", results[2]);
 
         assert_eq!(bufs[0][0], MockRemoteLookup::fill_byte(1));
         assert_eq!(bufs[2][0], MockRemoteLookup::fill_byte(3));
@@ -4382,9 +4434,12 @@ mod tests {
         let (_bufs, entries) = remote_batch(&[1, 2, 3]);
         let results = d.batch_lookup(&entries);
 
-        assert!(results[0].is_ok(), "key 1: {:?}", results[0]);
-        assert!(results[1].is_err(), "key 2's submission was made to fail");
-        assert!(results[2].is_ok(), "key 3: {:?}", results[2]);
+        assert!(results[0].result.is_ok(), "key 1: {:?}", results[0]);
+        assert!(
+            results[1].result.is_err(),
+            "key 2's submission was made to fail"
+        );
+        assert!(results[2].result.is_ok(), "key 3: {:?}", results[2]);
 
         assert_eq!(fx.probe.count(GpuEvent::SubmitH2d), 3);
         assert_eq!(fx.probe.count(GpuEvent::Sync), 1);
@@ -4408,7 +4463,7 @@ mod tests {
         let results = d.batch_lookup(&entries);
 
         assert!(
-            results.iter().all(|r| r.is_err()),
+            results.iter().all(|r| r.result.is_err()),
             "a failed sync must not be reported as a hit, got: {results:?}"
         );
         assert_eq!(fx.dm.total_read_refs(), 0);
@@ -4429,7 +4484,7 @@ mod tests {
         let (bufs, entries) = remote_batch(&[1, 2]);
         let results = d.batch_lookup(&entries);
 
-        assert!(results.iter().all(|r| r.is_ok()), "got: {results:?}");
+        assert!(results.iter().all(|r| r.result.is_ok()), "got: {results:?}");
         assert_eq!(bufs[0][0], MockRemoteLookup::fill_byte(1));
         assert_eq!(bufs[1][0], MockRemoteLookup::fill_byte(2));
         assert_eq!(

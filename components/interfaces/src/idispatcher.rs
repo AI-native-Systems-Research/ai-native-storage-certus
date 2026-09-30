@@ -192,6 +192,94 @@ impl fmt::Display for DispatcherError {
 
 impl std::error::Error for DispatcherError {}
 
+/// How a looked-up key was served — the **route**, not the entry's residency after
+/// serving.
+///
+/// Exactly six values, and the value space is defined **here and only here**: any
+/// other document or crate references this type rather than restating it, because a
+/// taxonomy written down twice is a taxonomy that will disagree with itself.
+///
+/// Route, not residency, is the load-bearing distinction. In `dispatcher` an SSD hit
+/// is promoted into DRAM as part of being served, so "served from SSD" and "now in
+/// DRAM" are both true of one request; `Ssd` is the honest answer because it is what
+/// the request cost.
+///
+/// # Examples
+///
+/// ```
+/// use interfaces::ServedBy;
+///
+/// assert!(ServedBy::Dram.is_hit());
+/// assert!(ServedBy::Remote.is_hit());
+/// assert!(!ServedBy::Miss.is_hit());
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServedBy {
+    /// Local memory tier (DRAM) hit. The block was already resident.
+    Dram,
+    /// A local data drive was read to serve this request — whether it was then
+    /// promoted into DRAM (`dispatcher`) or delivered straight to the GPU with an
+    /// asynchronous DRAM backfill (`dispatcher-p2p`).
+    Ssd,
+    /// A peer served it.
+    ///
+    /// Deliberately **not** subdivided by the peer's tier. A responder promotes
+    /// disk-resident keys into its own memory tier before the RDMA read, so every
+    /// remotely served byte leaves a peer's DRAM and a `RemoteSsd` value could only
+    /// have meant "a peer's disk read was on this request's critical path" — an
+    /// advertisement rather than an observation, decaying on repeat access, at 0.81%
+    /// of hits. The peer's own disk work is counted on the peer instead, by
+    /// `IRemoteLookup::serve_stats`.
+    Remote,
+    /// Not found in any tier, local or remote.
+    Miss,
+    /// Present, but at a different size than requested. Distinct from `Miss`: the key
+    /// exists, so the caller's size model disagrees with what is stored rather than
+    /// needing to populate from scratch.
+    SizeMismatch,
+    /// Attempted and failed for some other reason. Deliberately flat — it does not
+    /// record which tier was attempted, because a failure's tier is not something a
+    /// caller can act on.
+    Error,
+}
+
+impl ServedBy {
+    /// True for the three values in which data reached the caller's destination.
+    ///
+    /// A hit is reported if and only if the lookup succeeded, so a consumer can
+    /// compute a hit rate as `hits / total` without knowing the error taxonomy.
+    pub fn is_hit(&self) -> bool {
+        matches!(self, Self::Dram | Self::Ssd | Self::Remote)
+    }
+}
+
+/// The per-key outcome of a batched lookup: what happened, and where it came from.
+///
+/// `served_by` is meaningful on every path, including the failures — which is what
+/// makes per-key attribution total.
+///
+/// **A struct, not `Result<ServedBy, DispatcherError>`.** The tier-on-`Ok` encoding
+/// cannot express `Miss`, `SizeMismatch` or `Error`, because those *are* the `Err`
+/// cases; it would push a third of the taxonomy into a per-server error-to-tier
+/// mapping, which is precisely how two servers reporting the same cache would drift
+/// apart.
+///
+/// # Examples
+///
+/// ```
+/// use interfaces::{LookupOutcome, ServedBy};
+///
+/// let served = LookupOutcome { served_by: ServedBy::Dram, result: Ok(()) };
+/// assert_eq!(served.served_by.is_hit(), served.result.is_ok());
+/// ```
+#[derive(Debug, Clone)]
+pub struct LookupOutcome {
+    /// How the key was served, or why it was not.
+    pub served_by: ServedBy,
+    /// The result the caller acts on. `is_ok()` if and only if `served_by.is_hit()`.
+    pub result: Result<(), DispatcherError>,
+}
+
 /// A cumulative snapshot of the dispatcher's KV-cache tier-movement counters.
 ///
 /// All fields are monotonic since process start; subtract two successive
@@ -386,7 +474,7 @@ component_macros::define_interface! {
         fn batch_lookup(
             &self,
             entries: &[(CacheKey, Vec<IpcHandle>)],
-        ) -> Vec<Result<(), DispatcherError>>;
+        ) -> Vec<LookupOutcome>;
 
         /// Check whether a cache entry exists without transferring data.
         ///

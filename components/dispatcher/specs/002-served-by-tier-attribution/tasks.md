@@ -3,8 +3,8 @@
 **Input**: Design documents from `specs/002-served-by-tier-attribution/`
 **Prerequisites**: spec.md (reconciled), plan.md (Phase 1 scope), research.md (R1–R5)
 
-**Scope**: Phase 1 only. No interface change, no wire change, `dispatcher` and
-`certus-server-yaml` only. Phases 2–4 are declared in plan.md and are not tasked here.
+**Scope**: Phases 1–4. Phase 1 (counters) is complete; Phases 2–4 were tasked on
+2026-09-29 when the decision to implement remote attribution was taken.
 
 **Tests**: Included. Two of the three defects below are *silent* — they drop information
 rather than fail — so a test that merely exercises the path proves nothing. Every test task
@@ -258,3 +258,87 @@ in Phase 2 because the compiler forces it to, leaving Phase 4 to own verificatio
 component specs. There is no longer an `IRemoteLookup` delta in any phase: the two remote
 taxonomy values were collapsed on 2026-09-29, so no tier crosses that interface. See plan.md's
 boundary note.
+
+---
+
+# Phase 2 — the `ServedBy` interface (tasked 2026-09-29)
+
+**Decided before tasking**: remote attribution is IN. Remote lookup serves 0.81% of hits, which
+is an argument for removing the *feature* later, not for declining to account for it while it is
+in the tree. `REMOTE` is one value (the `REMOTE_DRAM`/`REMOTE_SSD` split stays withdrawn).
+
+- [ ] **T101** Add `ServedBy` to `components/interfaces`: `Dram | Ssd | Remote | Miss |
+  SizeMismatch | Error`, with `is_hit()` true for the first three. Defined once here (FR-032);
+  no other crate may restate the value space.
+
+- [ ] **T102** Add `LookupOutcome { served_by, result }`. **Not** `Result<ServedBy, E>`: the
+  tier-on-`Ok` encoding cannot express `Miss`/`SizeMismatch`/`Error`, which are the `Err` cases,
+  and would push a third of the taxonomy into a per-server error→tier mapping — which is how the
+  two servers would drift.
+
+- [ ] **T103** Widen `IDispatcher::batch_lookup` to `Vec<LookupOutcome>`. Signature change, so
+  every implementor is a compile error until updated — all four, per plan.md's boundary note.
+
+- [ ] **T104** `components/dispatcher`: attribute at each resolution site. `MemoryTier` warm hit
+  → `Dram`; every cold sub-path (pooled read, inline fallback, staging post-pass, no-drives) →
+  `Ssd`; the remote-delivery arm → `Remote`; `KeyNotFound` after the remote attempt → `Miss`;
+  everything else → `Error`. The tier is already known at each site — this is propagation, not
+  new bookkeeping.
+
+- [ ] **T105** `components/dispatcher-p2p`: its SSD→GPU cold path attributes `Ssd` per FR-014
+  **even though it does not synchronously populate DRAM**. Not a placeholder — FR-014 already
+  fixes this value, and FR-027 forbids shipping a value no test can fail against.
+
+- [ ] **T106** The two mock implementors (`remote-lookup/src/seams.rs`,
+  `lib/shmq-dispatcher`'s test mock). Mocks must return a value consistent with what they
+  simulate, not a constant — a mock that always says `Dram` makes every attribution test vacuous
+  (FR-028).
+
+- [ ] **T107** Test the invariants of `contracts/idispatcher.md`: length and order,
+  `served_by.is_hit() ⇔ result.is_ok()`, and `Miss ⇔ Err(KeyNotFound)` after any remote attempt.
+  **Each must be shown to fail** against a deliberately wrong attribution.
+
+# Phase 3 — the wire byte
+
+- [ ] **T108** Widen `LOOKUP`'s per-key byte in `lib/shmq-dispatcher`: `0` not served, `1` Dram,
+  `2` Ssd, `3` Remote. `0` keeps its exact meaning. `PENDING` MUST NOT appear here — see
+  `contracts/served-by.md`; the non-zero range means "delivered", and a pending key was not.
+
+- [ ] **T109** Fix `workload-node-agent::split_by_lookup`: `*served == 1` → `!= 0`, and move its
+  byte-`2`-is-not-a-hit assertion to the unassigned range (`4..=255`), where the original
+  reasoning still holds. **This is the only reader that breaks**; the consumer sweep in
+  `contracts/served-by.md` records why the connector does not.
+
+- [ ] **T110** Test that a conforming server never emits a value outside `0..=3`, and that an
+  unknown non-zero value is read as *served, tier unknown* rather than not-served.
+
+- [ ] **T111** Render the per-tier hit counts the byte now permits, on both metrics paths —
+  `/metrics` and OTel, in step, per Phase 1's T009 lesson.
+
+# Phase 4 — verification and the component specs
+
+- [ ] **T112** Feature spec for attribution in `components/dispatcher-p2p/specs/`, covering
+  FR-014's cold-path difference. Verification-bearing, so it is a spec and not a comment.
+
+- [ ] **T113** Feature spec for `components/remote-lookup/specs/` covering what it contributes
+  to attribution. Note it contributes no *tier* — the delta is withdrawn — so this is narrower
+  than the original plan assumed.
+
+- [ ] **T114** FR-027/FR-028 tests in both dispatchers: every attribution value has a test that
+  fails if that value is mis-assigned, and the mocks are shown to model residency faithfully
+  enough that the assertions are not vacuous.
+
+- [ ] **T115** FR-029: run the suites under the `integrity-check` feature as well as default.
+  Phase 1 never did this and recorded it as unaddressed.
+
+- [ ] **T116** FR-014's cold path **cannot be tested by flipping a flag** — dispatcher selection
+  is a build-time `CERTUS_PROFILE` choice. Build the test construction that actually exercises
+  it, or record precisely why it cannot be done and what that leaves unverified.
+
+## Out of scope, decided 2026-09-29
+
+**`HIT_PENDING`.** The plumbing exists (`check_state::PENDING`, `CHECK_PENDING`,
+`compat.lookup_result_pending()`) and has no caller, because the load path deliberately collapses
+`PENDING` to absent. Enabling it changes vLLM's *scheduling*, so it changes the hit rates these
+phases exist to report — it needs its own change and its own before/after, not to be bundled
+here. Full reasoning and the bounding facts in `contracts/served-by.md`.
