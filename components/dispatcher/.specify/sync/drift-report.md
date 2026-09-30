@@ -2,8 +2,8 @@
 spec_sync_component: dispatcher
 spec_sync_drift_status: clean
 spec_sync_synced_at: 2026-09-29T00:00:00Z
-spec_sync_git_commit: 3b1cca02
-spec_sync_inputs_sha256: 58c590e9c8292d98872b5c90099144e370572f8f5b1ef79d5870b8b8389f4c4f
+spec_sync_git_commit: 7151fa16
+spec_sync_inputs_sha256: 775b5b6632b4e47172411195e6cfdfebdc16649e7757ff3db7f693237149781f
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Re-stamp 2026-09-29 (feature 002 Phase 1: counters, FR-058 sync, taxonomy
