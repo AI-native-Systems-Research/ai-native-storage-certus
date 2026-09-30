@@ -315,6 +315,38 @@ in the tree. `REMOTE` is one value (the `REMOTE_DRAM`/`REMOTE_SSD` split stays w
 - [x] **T111** Render the per-tier hit counts the byte now permits, on both metrics paths —
   `/metrics` and OTel, in step, per Phase 1's T009 lesson.
 
+## Phase 2/3 result: attribution measured on hardware, 2026-09-29
+
+4 instances (node2 + node5, one per NUMA domain), one RDMA group, `--until 10 --rate inf`,
+cold-formatted, both binaries rebuilt on both hosts.
+
+| | |
+|---|---|
+| served keys | **300 845** |
+| `lookup_hits_dram` | 239 677 — **79.6%** |
+| `lookup_hits_ssd` | 59 073 — **19.6%** |
+| `remote_lookup_hits` | 2 095 — **0.69%** |
+
+**Three independent checks close exactly**, which is what makes this trustworthy rather
+than merely plausible:
+1. **The partition holds per instance and in aggregate**: dram + ssd + remote == hits, on
+   all four servers separately (SC-017).
+2. **The server agrees with the client to the digit**: 300 845 served == the generator's
+   own independent count of keys that returned data.
+3. **FR-024 closes**: hits + misses == 959 167 == total key references.
+
+**THE RUN CAUGHT A REAL DEFECT THAT THE WHOLE UNIT SUITE MISSED.** The first attempt
+reported 300 845 served on the servers against **224 848** at the generator — short by
+*exactly* ssd + remote. A second `== 1` reading survived in
+`workload-node-agent::count_results` (the reporting path), besides the one already fixed
+in `split_by_lookup` (the store-decision path). Its unit test used `[1, 0, 1]`, which
+cannot distinguish `== 1` from `!= 0` — the same blind spot mutation testing found in the
+cold-serve counter, in a different file. **A fixture whose values are all 0 or 1 cannot
+test a tiered byte.** The test now uses `[1, 2, 3, 0]` and was mutation-verified.
+
+That the discrepancy equalled ssd + remote *precisely* is what identified the cause in one
+step: an accounting identity that fails by a recognisable quantity names its own defect.
+
 # Phase 4 — verification and the component specs
 
 - [ ] **T112** Feature spec for attribution in `components/dispatcher-p2p/specs/`, covering
