@@ -66,7 +66,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MM_IMAGES="${MM_IMAGES:-2}"
 MM_ARGS="--limit-mm-per-prompt {\"image\":${MM_IMAGES}}"
 
-CPU_BYTES=$((30*(1<<30))) # 30GiB
+CPU_BYTES=${CPU_BYTES:-$((30*(1<<30)))} # 30GiB
 MODEL="${MODEL:-Qwen/Qwen3-VL-32B-Instruct-FP8}" \
 DTYPE="${DTYPE:-auto}" \
 SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-qwen3-vl-32b}" \
