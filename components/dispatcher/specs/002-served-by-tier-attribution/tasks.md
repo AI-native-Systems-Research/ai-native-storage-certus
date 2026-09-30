@@ -416,21 +416,49 @@ step: an accounting identity that fails by a recognisable quantity names its own
   Whether that is a performance characteristic of the BAR1/D2D cold path or a defect is
   not established here and must not be asserted.
 
-  **What T116 needs next, in order:**
-  1. A **paced** p2p run (`--rate 0.02` was valid for four instances on the other
-     dispatcher) so the client deadline is not the binding constraint. This is the cheap
-     next step and may close T116 outright.
-  2. If pacing does not help, the timeout itself is the finding, and T116 becomes blocked
-     on a p2p performance question rather than on attribution.
-  3. Independently: fix the generator's timeout-versus-unreachable misattribution, which
-     has now misled this task three times.
+  **PACED RUN, 2026-09-30 — pacing does NOT help, which refutes the throughput
+  hypothesis.** Both arms paced at `--rate 0.02` (50x slower than real time):
 
-  **Also worth noting for interpretation**: `gdrdrv` is unloaded and `/dev/gdrdrv` absent
-  on *both* hosts, yet the p2p server runs — so `libgdrapi.so.2` is only a load-time link
-  dependency here and the GPUDirect path may be taking a fallback. If so, FR-014's
-  no-synchronous-promotion behaviour may not be exercised as the spec describes, which
-  would make even a completed share comparison weaker than it looks. Check this before
-  trusting a positive result.
+  | arm | rate | exit | hits | ssd share |
+  |---|---|---|---|---|
+  | p2p | `inf` | 3 | 12 246 | 0% |
+  | **p2p** | **0.02** | **3** | **13 011** | 0% |
+  | dispatcher | 0.02 | 0 | 324 328 | **27.12%** |
+
+  Delivering the workload **50x slower moved p2p from 12 246 hits to 13 011** — no
+  material change. So "`dispatcher-p2p` cannot sustain the arrival rate" is **refuted**;
+  the failure is tied to the work done, not to how fast it arrives.
+
+  **And the p2p server is HEALTHY at the point of failure.** Its log shows checkpoints
+  completing in ~2 ms (`54 722 extents, 3.6% used`) right up to the moment this script's own
+  teardown stopped it ("actor shutting down, 3 clients connected"). Nothing hung or crashed.
+  The generator's error is specifically an **agent** connection failure — `os error 11`
+  (EAGAIN) between generator and agent, not between agent and server.
+
+  **Refined hypothesis, NOT established: a per-operation latency spike in the p2p path
+  exceeds the generator↔agent deadline.** This is the one shape consistent with every
+  observation: pacing lowers the *arrival rate* but not per-operation latency, so it cannot
+  help a single slow operation breach a socket deadline. For scale, the *control* arm —
+  which passes — already shows `latency p50 734 µs, p99 214 ms, max 3.23 s`. A p2p tail
+  beyond the agent's read deadline needs only to be somewhat worse than that.
+
+  **A framing point that matters before anyone treats this as a regression: p2p has
+  apparently NEVER been exercised through the yaml server.** The `full-p2p` profile did not
+  build until the `EvictionEvent` fix earlier today, so there is no working baseline to A/B
+  against, and this behaviour may be long-standing and simply never reachable before.
+  Its unit tests pass; this is an integration-path finding.
+
+  **T116 stays OPEN, and the blocker is now specific and no longer about attribution.**
+  What is verified on p2p: the taxonomy value, the three interface invariants, and the route
+  partition — the last confirmed on hardware, twice, under load. What is not: the `Ssd` share
+  comparison, because p2p cannot complete a run.
+
+  **Next steps, in order:**
+  1. Instrument or trace the p2p agent path for a latency tail — the `--read-timeout`
+     the generator lacks would also make this diagnosable instead of inferable.
+  2. Fix the generator's timeout-vs-unreachable misattribution. It has now misdirected this
+     task four times and is the reason the throughput hypothesis survived as long as it did.
+  3. Only then retry the share comparison.
 
 ## Out of scope, decided 2026-09-29
 
