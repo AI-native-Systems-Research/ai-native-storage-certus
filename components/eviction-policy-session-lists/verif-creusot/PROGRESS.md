@@ -736,3 +736,22 @@ the edits are on disk only and will not appear in a commit.
 3. Optional: the 66 ids still carry a helper in `creusot.evidence.modules`. Un-naming is now cheap and
    safe (`python3 /tmp/unname_helper.py pool_register pool_unlink pool_batch_touch`) but buys nothing —
    the pair costs 1 m 37 s, well inside the cap.
+
+## FINAL CONFIRMATION on the committed source
+Whole crate again, after the last two fixes (`cargo creusot --why3find-arg=-f -j 20`):
+```
+Error: 95 unproved files
+  86 = every `*_mutant` twin              <- REQUIRED to fail
+   9 = every divergent `verify_<id>`      <- REQUIRED to fail, each has a PROVING `refute_<id>`:
+       batch_touch_invalid_handle_is_an_error   candidates_listed_in_eviction_order
+       clear_invalidates_existing_handles       inv_failed_operations_change_nothing
+       inv_handles_keep_naming_their_block      inv_recency_strictly_advances
+       remove_invalid_handle_is_an_error        touch_invalid_handle_is_an_error
+       track_session_comes_from_caller
+```
+Not one other module in the crate fails. **28 of 28 UNRESOLVED closed.**
+
+Timing note, so nobody mis-reads the wall clock: this confirmation ran in 31 s because why3find's
+prover cache was warm from the earlier sweeps. The honest cold-ish numbers are the ones above — whole
+crate 8 m 44 s, `pool_unlink`+`pool_register` 1 m 37 s — and every intermediate measurement in this
+pass was taken with `--why3find-arg=-f` after a source change, per trap #2.
