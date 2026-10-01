@@ -98,7 +98,7 @@ components/dispatcher/specs/002-served-by-tier-attribution/
 │   └── requirements.md
 └── contracts/
     ├── idispatcher.md   # the interface delta — Phase 2, not Phase 1
-    └── served-by.md     # taxonomy + control-plane surface; carries one open decision
+    └── served-by.md     # taxonomy + control-plane surface (projection decided 2026-09-29)
 ```
 
 ### Source Code (repository root)
@@ -133,9 +133,10 @@ the dispatcher derives from the per-key success of the remote pass it already ha
 revision of this plan implied. The question the split was reaching for is answered by a
 responder-side counter in `remote-lookup`, outside this feature's interface work entirely.
 
-**Phase 3 — the control plane.** Widen `LOOKUP`'s per-key byte. Carries the open decision in
-`contracts/served-by.md` about the five-value projection, which needs sign-off before it is
-built.
+**Phase 3 — the control plane.** Widen `LOOKUP`'s per-key byte. **DONE.** The projection
+decision it carried is **settled** (2026-09-29): `REMOTE_DRAM`/`REMOTE_SSD` collapsed to one
+`REMOTE`, so the wire carries four values (`0` not served, `1` DRAM, `2` SSD, `3` REMOTE)
+rather than five, with `4..=255` reserved and read as *served, tier unknown*.
 
 **Phase 4 — verification and the component specs, NOT "making the other dispatchers work".**
 They already work after Phase 2; what they lack is proof and specification. Phase 4 owns:
