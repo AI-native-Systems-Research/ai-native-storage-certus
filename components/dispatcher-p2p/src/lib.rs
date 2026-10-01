@@ -1207,7 +1207,7 @@ impl IDispatcher for DispatcherP2pComponent {
 
                     // Attempt P2P ring allocation (GPU BAR1 staging buffers).
                     match p2p_ring::P2pRing::new(&*gpu, chunk_size) {
-                        Some(ring) => {
+                        Ok(ring) => {
                             self.log_info(&format!(
                                 "dispatcher-p2p: P2P ring initialized ({} slots, {} KiB each, {} streams)",
                                 p2p_ring::P2P_RING_SLOTS,
@@ -1216,10 +1216,18 @@ impl IDispatcher for DispatcherP2pComponent {
                             ));
                             *self.p2p_ring.write() = Some(ring);
                         }
-                        None => {
-                            self.log_info(
-                                "dispatcher-p2p: P2P ring unavailable, cold reads use DRAM path",
-                            );
+                        Err(why) => {
+                            // The reason, not just the fact. This used to read "cold reads
+                            // use DRAM path", which was a promise of a fallback that does
+                            // not exist: the cold path expects the ring and panics without
+                            // it. Saying so here, at startup, is what lets an operator act
+                            // before the first cold read takes the server down.
+                            self.log_error(&format!(
+                                "dispatcher-p2p: P2P ring unavailable: {why}. THIS SERVER \
+                                 CANNOT SERVE COLD READS -- the cold path requires the ring \
+                                 and there is no DRAM fallback in this dispatcher. Use the \
+                                 `full` profile for a DRAM cold path, or fix the cause above."
+                            ));
                         }
                     }
 
