@@ -545,8 +545,14 @@ fn a_refusal_leaves_an_operators_own_agent_alone() {
     launcher.spawn(port, true);
     let specs = vec![spec(port)];
 
-    Agents::start_with(&workload_gen::agents::NoLaunch, &specs, 8, false)
-        .expect_err("a stale agent must be refused");
+    Agents::start_with(
+        &workload_gen::agents::NoLaunch,
+        &specs,
+        8,
+        false,
+        workload_wire::client::DEFAULT_READ_TIMEOUT,
+    )
+    .expect_err("a stale agent must be refused");
 
     assert!(
         std::net::TcpStream::connect(("127.0.0.1", port)).is_ok(),
