@@ -1,0 +1,17 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_header_pair": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_verify_dpm_inv_backup_mirrors_primary__mutant": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.032 },
+          { "prover": "alt-ergo", "time": 0.043 },
+          null
+        ]
+      },
+      "vc_write_gpt_trace": { "prover": "alt-ergo", "time": 0.014 }
+    }
+  }
+}

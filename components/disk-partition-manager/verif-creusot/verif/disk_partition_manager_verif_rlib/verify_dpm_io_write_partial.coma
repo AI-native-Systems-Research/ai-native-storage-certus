@@ -1,0 +1,61 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3465 0 3465 69 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3466 24 3466 25
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3467 21 3467 22
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3470 16 3470 30
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3469 16 3469 27
+let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3468 16 3468 30
+let%span slib'4 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3475 16 3475 17
+let%span slib'5 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3475 8 3475 17
+let%span slib'6 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3476 13 3476 14
+let%span slib'7 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3476 8 3476 14
+let%span slib'8 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3460 11 3460 24
+let%span slib'9 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3461 11 3461 30
+let%span slib'10 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3462 10 3462 29
+let%span slib'11 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3463 10 3463 38
+let%span slib'12 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3464 10 3464 28
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_dpm_io_write_partial [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3465 0 3465 69]
+  (nblocks: UInt64.t) (fail_at: UInt64.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:verify_dpm_io_write_partial requires] ([@stop_split] [@expl:verify_dpm_io_write_partial requires #0] [%#slib'8] UInt64.t'int nblocks
+    >= 1)
+  /\ ([@stop_split] [@expl:verify_dpm_io_write_partial requires #1] [%#slib'9] UInt64.t'int fail_at
+  < UInt64.t'int nblocks)}
+  (! bb0
+  [ bb0 = s0 [ s0 = [ &done' <- [%#slib] (0: UInt64.t) ] s1 | s1 = [ &i <- [%#slib'0] (0: UInt64.t) ] s2 | s2 = bb1 ]
+  | bb1 = bb1
+    [ bb1 = {[@expl:loop invariant #0] [%#slib'3] UInt64.t'int i <= UInt64.t'int nblocks}
+      {[@expl:loop invariant #1] [%#slib'2] UInt64.t'int done' = UInt64.t'int i}
+      {[@expl:loop invariant #2] [%#slib'1] UInt64.t'int i <= UInt64.t'int fail_at}
+      (! s0)
+      [ s0 = [ &_28 <- UInt64.lt i nblocks ] s1 | s1 = any [ br0 -> {_28 = false} (! bb6) | br1 -> {_28} (! bb3) ] ]
+      [ bb3 = s0 [ s0 = [ &_32 <- i = fail_at ] s1 | s1 = any [ br0 -> {_32 = false} (! bb5) | br1 -> {_32} (! bb4) ] ]
+      | bb5 = s0
+        [ s0 = UInt64.add [%#slib'5] {done'} {[%#slib'4] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &done' <- _x ] s1)
+        | s1 = UInt64.add [%#slib'7] {i} {[%#slib'6] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &i <- _x ] s2)
+        | s2 = bb1 ] ] ]
+  | bb4 = s0 [ s0 = [ &_ret <- done' ] s1 | s1 = return {_ret} ]
+  | bb6 = s0 [ s0 = [ &_ret <- done' ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l ()
+  | & nblocks: UInt64.t = nblocks
+  | & fail_at: UInt64.t = fail_at
+  | & done': UInt64.t = Any.any_l ()
+  | & i: UInt64.t = Any.any_l ()
+  | & _28: bool = Any.any_l ()
+  | & _32: bool = Any.any_l () ])
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:verify_dpm_io_write_partial ensures] ([@stop_split] [@expl:verify_dpm_io_write_partial ensures #0] [%#slib'10] UInt64.t'int result
+      = UInt64.t'int fail_at)
+    /\ ([@stop_split] [@expl:verify_dpm_io_write_partial ensures #1] [%#slib'11] UInt64.t'int fail_at > 0
+      -> UInt64.t'int result > 0)
+    /\ ([@stop_split] [@expl:verify_dpm_io_write_partial ensures #2] [%#slib'12] UInt64.t'int result
+    < UInt64.t'int nblocks)}
+    (! return {result}) ]

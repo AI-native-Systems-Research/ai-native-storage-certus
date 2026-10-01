@@ -1,0 +1,18 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_num_partitions_m": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_verify_dpm_numpart_post_count__mutant": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.029 },
+          {
+            "tactic": "split_vc",
+            "children": [ null, { "prover": "alt-ergo", "time": 0.035 } ]
+          }
+        ]
+      }
+    }
+  }
+}

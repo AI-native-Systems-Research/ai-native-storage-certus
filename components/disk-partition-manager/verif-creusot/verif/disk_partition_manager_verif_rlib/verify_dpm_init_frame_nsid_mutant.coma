@@ -1,0 +1,34 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2482 0 2482 83 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2483 5 2483 23
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2481 10 2481 32
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1299 10 1299 67
+
+use creusot.int.UInt32
+use creusot.prelude.Any
+
+type t_Option_u32 = None | Some UInt32.t
+
+let get_ns_id_m (st: t_Option_u32) (return (x: UInt32.t)) = any
+  [ return (result: UInt32.t) -> {[@stop_split] [@expl:get_ns_id_m ensures] [%#slib'1] match st with
+      | None -> UInt32.t'int result = 1
+      | Some v -> result = v
+      end}
+    (! return {result}) ]
+
+type tup2_u32_Option_u32 = { f0: UInt32.t; f1: t_Option_u32 }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_dpm_init_frame_nsid__mutant [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2482 0 2482 83]
+  (ns_st: t_Option_u32) (return (x: tup2_u32_Option_u32)) = (! bb0
+  [ bb0 = s0
+    [ s0 = get_ns_id_m [%#slib] {ns_st} (fun (_x: UInt32.t) -> [ &_3 <- _x ] s1)
+    | s1 = [ &_ret <- { f0 = _3; f1 = ns_st } ] s2
+    | s2 = return {_ret} ] ]
+  [ & _ret: tup2_u32_Option_u32 = Any.any_l () | & ns_st: t_Option_u32 = ns_st | & _3: UInt32.t = Any.any_l () ])
+  [ return (result: tup2_u32_Option_u32) ->
+  {[@stop_split] [@expl:verify_dpm_init_frame_nsid__mutant ensures] [%#slib'0] result.f1 = Some (1: UInt32.t)}
+    (! return {result}) ]

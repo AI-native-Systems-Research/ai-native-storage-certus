@@ -1,0 +1,29 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_partition_info_m": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_verify_dpm_pinfo_err_invalid_index__mutant": {
+        "tactic": "split_vc",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              {
+                "tactic": "compute_specified",
+                "children": [
+                  {
+                    "tactic": "split_vc",
+                    "children": [
+                      null, { "prover": "alt-ergo", "time": 0.029 }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_format_m": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_format_writes_sectors": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_verify_dpm_format_stale_cache": {
+        "prover": "alt-ergo",
+        "time": 0.025
+      }
+    }
+  }
+}

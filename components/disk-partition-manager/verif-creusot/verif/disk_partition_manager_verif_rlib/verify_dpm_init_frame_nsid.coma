@@ -1,0 +1,40 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2477 0 2477 75 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2479 5 2479 23
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2475 10 2475 27
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2476 10 2476 74
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1299 10 1299 67
+
+use creusot.int.UInt32
+use creusot.prelude.Any
+
+type t_Option_u32 = None | Some UInt32.t
+
+let get_ns_id_m (st: t_Option_u32) (return (x: UInt32.t)) = any
+  [ return (result: UInt32.t) -> {[@stop_split] [@expl:get_ns_id_m ensures] [%#slib'2] match st with
+      | None -> UInt32.t'int result = 1
+      | Some v -> result = v
+      end}
+    (! return {result}) ]
+
+type tup2_u32_Option_u32 = { f0: UInt32.t; f1: t_Option_u32 }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_dpm_init_frame_nsid [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2477 0 2477 75]
+  (ns_st: t_Option_u32) (return (x: tup2_u32_Option_u32)) = (! bb0
+  [ bb0 = s0
+    [ s0 = get_ns_id_m [%#slib] {ns_st} (fun (_x: UInt32.t) -> [ &_6 <- _x ] s1)
+    | s1 = [ &_ret <- { f0 = _6; f1 = ns_st } ] s2
+    | s2 = return {_ret} ] ]
+  [ & _ret: tup2_u32_Option_u32 = Any.any_l () | & ns_st: t_Option_u32 = ns_st | & _6: UInt32.t = Any.any_l () ])
+  [ return (result: tup2_u32_Option_u32) ->
+  {[@stop_split] [@expl:verify_dpm_init_frame_nsid ensures] ([@stop_split] [@expl:verify_dpm_init_frame_nsid ensures #0] [%#slib'0] result.f1
+      = ns_st)
+    /\ ([@stop_split] [@expl:verify_dpm_init_frame_nsid ensures #1] [%#slib'1] match ns_st with
+      | None -> UInt32.t'int result.f0 = 1
+      | Some v -> result.f0 = v
+      end)}
+    (! return {result}) ]

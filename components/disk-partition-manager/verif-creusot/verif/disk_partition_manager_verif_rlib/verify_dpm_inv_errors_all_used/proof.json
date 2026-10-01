@@ -1,0 +1,23 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_attempt_err": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_elim_Err": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_elim_Err'0": { "prover": "alt-ergo", "time": 0.012 },
+      "vc_elim_Err'1": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_elim_Err'2": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_initialize_m": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_layout_classify": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_layout_err_to_pt": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_partition_info_m": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_read_gpt_m": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_try_read_gpt_at_m": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_verify_dpm_inv_errors_all_used": {
+        "prover": "alt-ergo",
+        "time": 0.309
+      }
+    }
+  }
+}

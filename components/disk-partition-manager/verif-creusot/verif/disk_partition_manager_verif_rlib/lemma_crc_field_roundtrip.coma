@@ -1,0 +1,34 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 867 0 867 78 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 864 11 864 26
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 865 11 865 75
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 866 10 866 81
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 855 16 855 77
+
+use creusot.int.UInt8
+use seq.Seq
+use int.Int
+
+function set4 [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 854 0 854 75] (s: Seq.seq UInt8.t) (at': int) (b0: UInt8.t) (b1: UInt8.t) (b2: UInt8.t) (b3: UInt8.t) : Seq.seq UInt8.t
+ = [%#slib'2] Seq.set (Seq.set (Seq.set (Seq.set s at' b0) (at' + 1) b1) (at' + 2) b2) (at' + 3) b3
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant pre : Seq.seq UInt8.t
+
+constant b0 : UInt8.t
+
+constant b1 : UInt8.t
+
+constant b2 : UInt8.t
+
+constant b3 : UInt8.t
+
+function lemma_crc_field_roundtrip [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 867 0 867 78] (pre: Seq.seq UInt8.t) (b0: UInt8.t) (b1: UInt8.t) (b2: UInt8.t) (b3: UInt8.t) : ()
+
+goal vc_lemma_crc_field_roundtrip: ([%#slib] Seq.length pre >= 92)
+  -> ([%#slib'0] UInt8.t'int (Seq.get pre 16) = 0
+    /\ UInt8.t'int (Seq.get pre 17) = 0 /\ UInt8.t'int (Seq.get pre 18) = 0 /\ UInt8.t'int (Seq.get pre 19) = 0)
+  -> ([@stop_split] [@expl:lemma_crc_field_roundtrip ensures] [%#slib'1] Seq.(==) (set4 (set4 pre 16 b0 b1 b2 b3) 16 (0: UInt8.t) (0: UInt8.t) (0: UInt8.t) (0: UInt8.t)) pre)

@@ -1,0 +1,80 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2234 0 2234 69 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2235 18 2235 23
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2235 4 2235 31
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2234 41 2234 46
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2234 61 2234 69
+let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2232 10 2232 47
+let%span slib'4 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2233 10 2233 81
+let%span slib'5 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 163 35 163 40
+let%span slib'6 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 163 55 163 63
+let%span slib'7 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 157 10 157 38
+let%span slib'8 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 158 10 158 38
+let%span slib'9 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 159 10 159 41
+let%span slib'10 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 160 10 160 41
+let%span slib'11 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 161 10 161 94
+let%span slib'12 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 162 10 162 98
+let%span sarray = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/creusot/creusot-std/src/std/array.rs" 56 20 56 29
+let%span sarray'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/creusot/creusot-std/src/std/array.rs" 9 20 9 51
+
+use creusot.slice.Slice64
+use creusot.int.UInt8
+use seq.Seq
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+predicate inv_Seq_u8 [@inline:trivial] (_1: Seq.seq UInt8.t) = true
+
+meta "rewrite_def" predicate inv_Seq_u8
+
+predicate invariant_array_u8_16 (self: Slice64.array UInt8.t) =
+  [%#sarray'0] inv_Seq_u8 (Slice64.view self) /\ Seq.length (Slice64.view self) = UInt64.t'int (16: UInt64.t)
+
+predicate inv_array_u8_16 [@inline:trivial] (_1: Slice64.array UInt8.t) = invariant_array_u8_16 _1
+
+meta "rewrite_def" predicate inv_array_u8_16
+
+function index_array_u8_16 [@inline:trivial] (self: Slice64.array UInt8.t) (ix: int) : UInt8.t =
+  [%#sarray] Seq.get (Slice64.view self) ix
+
+meta "rewrite_def" function index_array_u8_16
+
+let generate_guid (opened: bool) (bytes: Slice64.array UInt8.t) (return (x: Slice64.array UInt8.t)) =
+{[@stop_split] [@expl:generate_guid 'bytes' type invariant] [%#slib'5] inv_array_u8_16 bytes}
+  any
+  [ return (result: Slice64.array UInt8.t) ->
+  {[@stop_split] [@expl:generate_guid ensures] ([@stop_split] [@expl:generate_guid result type invariant] [%#slib'6] inv_array_u8_16 result)
+    /\ ([@stop_split] [@expl:generate_guid ensures #0] [%#slib'7] UInt8.bw_and (index_array_u8_16 result 6) (240: UInt8.t)
+      = (64: UInt8.t))
+    /\ ([@stop_split] [@expl:generate_guid ensures #1] [%#slib'8] UInt8.bw_and (index_array_u8_16 result 8) (192: UInt8.t)
+      = (128: UInt8.t))
+    /\ ([@stop_split] [@expl:generate_guid ensures #2] [%#slib'9] not opened
+      -> index_array_u8_16 result 6 = (64: UInt8.t))
+    /\ ([@stop_split] [@expl:generate_guid ensures #3] [%#slib'10] not opened
+      -> index_array_u8_16 result 8 = (128: UInt8.t))
+    /\ ([@stop_split] [@expl:generate_guid ensures #4] [%#slib'11] not opened
+      -> (forall i: int. 0 <= i /\ i < 16 /\ i <> 6 /\ i <> 8 -> index_array_u8_16 result i = (0: UInt8.t)))
+    /\ ([@stop_split] [@expl:generate_guid ensures #5] [%#slib'12] opened
+    -> (forall i: int. 0 <= i /\ i < 16 /\ i <> 6 /\ i <> 8 -> index_array_u8_16 result i = index_array_u8_16 bytes i))}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let refute_dpm_format_post_guid_fresh [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2234 0 2234 69]
+  (bytes: Slice64.array UInt8.t) (return (x: Slice64.array UInt8.t)) =
+{[@stop_split] [@expl:refute_dpm_format_post_guid_fresh 'bytes' type invariant] [%#slib'1] inv_array_u8_16 bytes}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = generate_guid [%#slib'0] {[%#slib] false} {bytes} (fun (_x: Slice64.array UInt8.t) -> [ &_ret <- _x ] s1)
+    | s1 = return {_ret} ] ] [ & _ret: Slice64.array UInt8.t = Any.any_l () | & bytes: Slice64.array UInt8.t = bytes ])
+  [ return (result: Slice64.array UInt8.t) ->
+  {[@stop_split] [@expl:refute_dpm_format_post_guid_fresh ensures] ([@stop_split] [@expl:refute_dpm_format_post_guid_fresh result type invariant] [%#slib'2] inv_array_u8_16 result)
+    /\ ([@stop_split] [@expl:refute_dpm_format_post_guid_fresh ensures #0] [%#slib'3] UInt8.t'int (index_array_u8_16 result 6)
+        = 64
+      /\ UInt8.t'int (index_array_u8_16 result 8) = 128)
+    /\ ([@stop_split] [@expl:refute_dpm_format_post_guid_fresh ensures #1] [%#slib'4] forall i: int. 0 <= i
+        /\ i < 16 /\ i <> 6 /\ i <> 8 -> UInt8.t'int (index_array_u8_16 result i) = 0)}
+    (! return {result}) ]

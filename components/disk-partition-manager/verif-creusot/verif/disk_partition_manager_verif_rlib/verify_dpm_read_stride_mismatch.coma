@@ -1,0 +1,61 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3284 0 3284 93 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3285 16 3285 60
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3286 26 3286 40
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3286 17 3286 48
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3278 11 3278 67
+let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3279 10 3279 55
+let%span slib'4 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3280 10 3280 63
+let%span slib'5 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3282 10 3282 78
+let%span slib'6 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3283 10 3283 88
+let%span slib'7 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 41 0 41 29
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.ComputerDivision
+use int.Int
+
+constant const_GPT_ENTRY_SIZE: UInt32.t = [%#slib'7] (128: UInt32.t)
+
+type tup2_u64_u64 = { f0: UInt64.t; f1: UInt64.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_dpm_read_stride_mismatch [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3284 0 3284 93]
+  (decl_entries: UInt32.t) (decl_entry_size: UInt32.t) (return (x: tup2_u64_u64)) =
+{[@stop_split] [@expl:verify_dpm_read_stride_mismatch requires] [%#slib'2] UInt32.t'int decl_entries
+    * UInt32.t'int decl_entry_size
+  <= 18446744073709551615}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_19 <- UInt64.of_int (UInt32.t'int decl_entries) ] s1
+    | s1 = [ &_21 <- UInt64.of_int (UInt32.t'int decl_entry_size) ] s2
+    | s2 = UInt64.mul [%#slib] {_19} {_21} (fun (_x: UInt64.t) -> [ &bytes <- _x ] s3)
+    | s3 = [ &_25 <- UInt64.of_int (UInt32.t'int ([%#slib'0] const_GPT_ENTRY_SIZE)) ] s4
+    | s4 = [ &_26 <- _25 = ([%#slib'1] (0: UInt64.t)) ] s5
+    | s5 = {[@expl:division by zero] [%#slib'1] not _26} s6
+    | s6 = UInt64.div [%#slib'1] {bytes} {_25} (fun (_x: UInt64.t) -> [ &parsed <- _x ] s7)
+    | s7 = [ &_ret <- { f0 = bytes; f1 = parsed } ] s8
+    | s8 = return {_ret} ] ]
+  [ & _ret: tup2_u64_u64 = Any.any_l ()
+  | & decl_entries: UInt32.t = decl_entries
+  | & decl_entry_size: UInt32.t = decl_entry_size
+  | & bytes: UInt64.t = Any.any_l ()
+  | & _19: UInt64.t = Any.any_l ()
+  | & _21: UInt64.t = Any.any_l ()
+  | & parsed: UInt64.t = Any.any_l ()
+  | & _25: UInt64.t = Any.any_l ()
+  | & _26: bool = Any.any_l () ])
+  [ return (result: tup2_u64_u64) ->
+  {[@stop_split] [@expl:verify_dpm_read_stride_mismatch ensures] ([@stop_split] [@expl:verify_dpm_read_stride_mismatch ensures #0] [%#slib'3] UInt64.t'int result.f0
+      = UInt32.t'int decl_entries * UInt32.t'int decl_entry_size)
+    /\ ([@stop_split] [@expl:verify_dpm_read_stride_mismatch ensures #1] [%#slib'4] UInt64.t'int result.f1
+      = ComputerDivision.div (UInt32.t'int decl_entries * UInt32.t'int decl_entry_size) 128)
+    /\ ([@stop_split] [@expl:verify_dpm_read_stride_mismatch ensures #2] [%#slib'5] UInt32.t'int decl_entry_size = 256
+        /\ UInt32.t'int decl_entries = 128 -> UInt64.t'int result.f1 = 256)
+    /\ ([@stop_split] [@expl:verify_dpm_read_stride_mismatch ensures #3] [%#slib'6] UInt32.t'int decl_entry_size = 256
+      /\ UInt32.t'int decl_entries = 128 -> UInt64.t'int result.f1 <> UInt32.t'int decl_entries)}
+    (! return {result}) ]

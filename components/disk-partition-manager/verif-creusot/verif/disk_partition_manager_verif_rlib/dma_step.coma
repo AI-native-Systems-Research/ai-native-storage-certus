@@ -1,0 +1,38 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3351 0 3351 56 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3355 11 3355 15
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3353 38 3353 43
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3349 10 3349 69
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3350 10 3350 51
+
+use creusot.prelude.Any
+
+type t_PtErr = NoPartitionTable | CorruptTable | InvalidPartition | IoError | LayoutError | NotInitialized
+
+type t_Option_PtErr = None | Some t_PtErr
+
+type tup2_Option_PtErr_bool = { f0: t_Option_PtErr; f1: bool }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let dma_step [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3351 0 3351 56]
+  (alloc_ok: bool) (return (x: tup2_Option_PtErr_bool)) = (! bb0
+  [ bb0 = any [ br0 -> {alloc_ok = false} (! bb1) | br1 -> {alloc_ok} (! bb2) ]
+  | bb2 = s0 [ s0 = [ &_11 <- None ] s1 | s1 = [ &_ret <- { f0 = _11; f1 = ([%#slib] true) } ] s2 | s2 = return {_ret} ]
+  | bb1 = s0
+    [ s0 = [ &_10 <- IoError ] s1
+    | s1 = [ &_9 <- Some _10 ] s2
+    | s2 = [ &_ret <- { f0 = _9; f1 = ([%#slib'0] false) } ] s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: tup2_Option_PtErr_bool = Any.any_l ()
+  | & alloc_ok: bool = alloc_ok
+  | & _9: t_Option_PtErr = Any.any_l ()
+  | & _10: t_PtErr = Any.any_l ()
+  | & _11: t_Option_PtErr = Any.any_l () ])
+  [ return (result: tup2_Option_PtErr_bool) ->
+  {[@stop_split] [@expl:dma_step ensures] ([@stop_split] [@expl:dma_step ensures #0] [%#slib'1] not alloc_ok
+      -> result.f0 = Some (IoError) /\ not result.f1)
+    /\ ([@stop_split] [@expl:dma_step ensures #1] [%#slib'2] alloc_ok -> result.f0 = None /\ result.f1)}
+    (! return {result}) ]

@@ -1,0 +1,28 @@
+[package]
+name = "disk-partition-manager-verif"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+creusot-std = "0.12.0-dev"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(creusot)'] }
+non_snake_case = "allow"   # the `verify_<id>__mutant` anti-vacuity naming convention
+
+# creusot-std is not published. Resolve it from the local Creusot checkout through the
+# gitignored `components/disk-partition-manager/creusot` symlink, so the path is
+# CHECKOUT-RELATIVE and not tied to one machine.
+#
+# This patch lives HERE, in this crate's own manifest, and deliberately NOT in
+# components/disk-partition-manager/.cargo/config.toml. At component scope a cargo *config*
+# applies to EVERY cargo invocation whose cwd is inside the component -- including
+# `cargo kani` and the Kani scorer's `cargo metadata` preflight, which then die resolving a
+# crate they have no reason to load. That has happened twice on this project
+# (block-device-filesys, then eviction-policy-session-lists, where it would have aborted the
+# whole Kani gate). A manifest-level [patch] is scoped to this crate alone.
+[patch.crates-io]
+creusot-std = { path = "../creusot/creusot-std" }

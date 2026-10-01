@@ -1,0 +1,18 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_get_ns_id_m": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_set_ns_id_m": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_verify_dpm_nsid_field_domain__mutant": {
+        "tactic": "split_vc",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [ null, { "prover": "alt-ergo", "time": 0.025 } ]
+          }
+        ]
+      }
+    }
+  }
+}

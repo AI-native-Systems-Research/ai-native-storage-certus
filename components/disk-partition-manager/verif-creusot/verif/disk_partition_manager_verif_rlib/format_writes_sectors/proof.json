@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_format_writes_sectors": { "prover": "alt-ergo", "time": 0.013 }
+    }
+  }
+}

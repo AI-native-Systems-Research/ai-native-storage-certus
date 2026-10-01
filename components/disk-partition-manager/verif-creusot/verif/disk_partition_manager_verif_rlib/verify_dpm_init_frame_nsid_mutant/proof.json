@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_get_ns_id_m": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_verify_dpm_init_frame_nsid__mutant": null
+    }
+  }
+}

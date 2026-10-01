@@ -1,0 +1,35 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2916 0 2916 58 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2917 4 2917 19
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2914 10 2914 31
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2915 10 2915 43
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2908 10 2908 31
+let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2909 10 2909 43
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.prelude.Any
+use int.Int
+
+let count_as_u32 (n: UInt64.t) (return (x: UInt32.t)) = any
+  [ return (result: UInt32.t) ->
+  {[@stop_split] [@expl:count_as_u32 ensures] ([@stop_split] [@expl:count_as_u32 ensures #0] [%#slib'2] UInt32.t'int result
+      <= 4294967295)
+    /\ ([@stop_split] [@expl:count_as_u32 ensures #1] [%#slib'3] UInt64.t'int n > 4294967295
+    -> UInt32.t'int result <> UInt64.t'int n)}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_dpm_numpart_count_narrowing [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2916 0 2916 58]
+  (n: UInt64.t) (return (x: UInt32.t)) = (! bb0
+  [ bb0 = s0 [ s0 = count_as_u32 [%#slib] {n} (fun (_x: UInt32.t) -> [ &_ret <- _x ] s1) | s1 = return {_ret} ] ]
+  [ & _ret: UInt32.t = Any.any_l () | & n: UInt64.t = n ])
+  [ return (result: UInt32.t) ->
+  {[@stop_split] [@expl:verify_dpm_numpart_count_narrowing ensures] ([@stop_split] [@expl:verify_dpm_numpart_count_narrowing ensures #0] [%#slib'0] UInt32.t'int result
+      <= 4294967295)
+    /\ ([@stop_split] [@expl:verify_dpm_numpart_count_narrowing ensures #1] [%#slib'1] UInt64.t'int n > 4294967295
+    -> UInt32.t'int result <> UInt64.t'int n)}
+    (! return {result}) ]

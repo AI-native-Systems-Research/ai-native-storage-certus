@@ -1,0 +1,29 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 260 0 260 40 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 256 11 256 26
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 257 10 257 25
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 258 10 258 29
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 259 10 259 35
+let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 58 16 58 74
+
+use int.EuclideanDivision
+use int.Int
+
+function cdiv [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 57 0 57 34] (n: int) (d: int) : int
+ = [%#slib'3] EuclideanDivision.div n d + (if EuclideanDivision.mod n d = 0 then 0 else 1)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant n : int
+
+constant d : int
+
+function lemma_cdiv_nonneg [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 260 0 260 40] (n: int) (d: int) : ()
+
+goal vc_lemma_cdiv_nonneg: ([%#slib] n >= 0 /\ d > 0)
+  -> ([@stop_split] [@expl:lemma_cdiv_nonneg ensures] ([@stop_split] [@expl:lemma_cdiv_nonneg ensures #0] [%#slib'0] cdiv n d
+    >= 0)
+  /\ ([@stop_split] [@expl:lemma_cdiv_nonneg ensures #1] [%#slib'1] cdiv n d * d >= n)
+  /\ ([@stop_split] [@expl:lemma_cdiv_nonneg ensures #2] [%#slib'2] n > 0 -> cdiv n d >= 1))

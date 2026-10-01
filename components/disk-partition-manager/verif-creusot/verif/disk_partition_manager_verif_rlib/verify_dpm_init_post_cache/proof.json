@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_initialize_m": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_verify_dpm_init_post_cache": {
+        "prover": "alt-ergo",
+        "time": 0.056
+      }
+    }
+  }
+}

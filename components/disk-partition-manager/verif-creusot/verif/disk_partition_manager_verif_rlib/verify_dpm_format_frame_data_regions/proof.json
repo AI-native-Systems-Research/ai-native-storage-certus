@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_dpm_format_frame_data_regions": {
+        "prover": "alt-ergo",
+        "time": 0.066
+      },
+      "vc_write_gpt_trace": { "prover": "alt-ergo", "time": 0.018 }
+    }
+  }
+}

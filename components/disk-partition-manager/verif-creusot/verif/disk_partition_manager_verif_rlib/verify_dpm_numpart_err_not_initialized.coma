@@ -1,0 +1,68 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2847 0 2849 14 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2850 4 2850 45
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2844 11 2844 37
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2845 10 2845 82
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2846 10 2846 64
+let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1234 11 1234 37
+let%span slib'4 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1235 10 1235 49
+let%span slib'5 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1236 10 1236 82
+let%span slib'6 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1237 10 1237 97
+let%span svec = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+
+use creusot.int.UInt32
+use seq.Seq
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_PInfoM_Global
+
+type t_PtErr = NoPartitionTable | CorruptTable | InvalidPartition | IoError | LayoutError | NotInitialized
+
+type t_NpOutcome = Ok UInt32.t | Err t_PtErr | Panic
+
+type t_PInfoM = { index: UInt32.t; start_lba: UInt64.t; num_sectors: UInt64.t }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_PInfoM_Global (self: t_Vec_PInfoM_Global) : Seq.seq t_PInfoM
+
+axiom view_Vec_PInfoM_Global_spec:
+  forall self: t_Vec_PInfoM_Global [view_Vec_PInfoM_Global self]. [%#svec] Seq.length (view_Vec_PInfoM_Global self)
+    <= UInt64.t'int const_MAX
+
+let num_partitions_m (loaded: bool) (parts: t_Vec_PInfoM_Global) (poisoned: bool) (return (x: t_NpOutcome)) =
+{[@stop_split] [@expl:num_partitions_m requires] [%#slib'3] Seq.length (view_Vec_PInfoM_Global parts) <= 4294967295}
+  any
+  [ return (result: t_NpOutcome) ->
+  {[@stop_split] [@expl:num_partitions_m ensures] ([@stop_split] [@expl:num_partitions_m ensures #0] [%#slib'4] poisoned
+      -> result = Panic)
+    /\ ([@stop_split] [@expl:num_partitions_m ensures #1] [%#slib'5] not poisoned /\ not loaded
+      -> result = Err (NotInitialized))
+    /\ ([@stop_split] [@expl:num_partitions_m ensures #2] [%#slib'6] not poisoned /\ loaded
+    -> (exists c: UInt32.t. result = Ok c /\ UInt32.t'int c = Seq.length (view_Vec_PInfoM_Global parts)))}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_dpm_numpart_err_not_initialized [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2847 0 2849 14]
+  (loaded: bool) (parts: t_Vec_PInfoM_Global) (poisoned: bool) (return (x: t_NpOutcome)) =
+{[@stop_split] [@expl:verify_dpm_numpart_err_not_initialized requires] [%#slib'0] Seq.length (view_Vec_PInfoM_Global parts)
+  <= 4294967295}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = num_partitions_m [%#slib] {loaded} {parts} {poisoned} (fun (_x: t_NpOutcome) -> [ &_ret <- _x ] s1)
+    | s1 = return {_ret} ] ]
+  [ & _ret: t_NpOutcome = Any.any_l ()
+  | & loaded: bool = loaded
+  | & parts: t_Vec_PInfoM_Global = parts
+  | & poisoned: bool = poisoned ])
+  [ return (result: t_NpOutcome) ->
+  {[@stop_split] [@expl:verify_dpm_numpart_err_not_initialized ensures] ([@stop_split] [@expl:verify_dpm_numpart_err_not_initialized ensures #0] [%#slib'1] not poisoned
+        /\ not loaded -> result = Err (NotInitialized))
+    /\ ([@stop_split] [@expl:verify_dpm_numpart_err_not_initialized ensures #1] [%#slib'2] not poisoned /\ not loaded
+    -> result <> Ok (0: UInt32.t))}
+    (! return {result}) ]

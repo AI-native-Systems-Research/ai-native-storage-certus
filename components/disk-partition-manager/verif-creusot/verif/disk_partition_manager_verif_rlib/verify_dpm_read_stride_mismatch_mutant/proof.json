@@ -1,0 +1,16 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_dpm_read_stride_mismatch__mutant": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.038 },
+          { "prover": "alt-ergo", "time": 0.034 },
+          { "prover": "alt-ergo", "time": 0.038 },
+          null
+        ]
+      }
+    }
+  }
+}

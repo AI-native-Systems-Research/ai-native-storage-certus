@@ -1,0 +1,41 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3133 0 3135 38 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3136 5 3136 25
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3136 31 3136 36
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3132 10 3132 18
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1309 10 1309 27
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_Option_u32 = None | Some UInt32.t
+
+let set_ns_id_m (_prev: t_Option_u32) (v: UInt32.t) (return (x: t_Option_u32)) = any
+  [ return (result: t_Option_u32) -> {[@stop_split] [@expl:set_ns_id_m ensures] [%#slib'2] result = Some v}
+    (! return {result}) ]
+
+type t_TabM = { tag: UInt64.t; count: UInt32.t; sector_size: UInt32.t }
+
+type t_Option_TabM = None'0 | Some'0 t_TabM
+
+type tup3_Option_u32_Option_TabM_bool = { f0: t_Option_u32; f1: t_Option_TabM; f2: bool }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_dpm_nsid_frame__mutant [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3133 0 3135 38]
+  (st: t_Option_TabM) (prev: t_Option_u32) (v: UInt32.t) (return (x: tup3_Option_u32_Option_TabM_bool)) = (! bb0
+  [ bb0 = s0
+    [ s0 = set_ns_id_m [%#slib] {prev} {v} (fun (_x: t_Option_u32) -> [ &_5 <- _x ] s1)
+    | s1 = [ &_ret <- { f0 = _5; f1 = st; f2 = ([%#slib'0] false) } ] s2
+    | s2 = return {_ret} ] ]
+  [ & _ret: tup3_Option_u32_Option_TabM_bool = Any.any_l ()
+  | & st: t_Option_TabM = st
+  | & prev: t_Option_u32 = prev
+  | & v: UInt32.t = v
+  | & _5: t_Option_u32 = Any.any_l () ])
+  [ return (result: tup3_Option_u32_Option_TabM_bool) ->
+  {[@stop_split] [@expl:verify_dpm_nsid_frame__mutant ensures] [%#slib'1] result.f2}
+    (! return {result}) ]

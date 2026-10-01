@@ -1,0 +1,18 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_entry_sectors": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_len_u8": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_protective_mbr": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_verify_dpm_format_pre_sector_size__mutant": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.034 },
+          { "prover": "alt-ergo", "time": 0.035 },
+          null
+        ]
+      }
+    }
+  }
+}

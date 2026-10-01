@@ -1,0 +1,72 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3775 0 3775 80 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3776 38 3776 57
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3776 59 3776 76
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3776 5 3776 20
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3776 22 3776 36
+let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3773 11 3773 36
+let%span slib'4 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3774 10 3774 27
+let%span slib'5 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1697 10 1697 26
+let%span slib'6 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1698 10 1698 30
+let%span slib'7 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 88 11 88 18
+let%span slib'8 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 89 10 89 41
+let%span slib'9 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 42 0 42 30
+let%span slib'10 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 41 0 41 29
+let%span slib'11 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 85 16 85 31
+let%span slib'12 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 58 16 58 74
+
+use creusot.int.UInt32
+use int.EuclideanDivision
+use creusot.prelude.Any
+use int.Int
+
+let entry_array_bytes (return (x: UInt32.t)) = any
+  [ return (result: UInt32.t) ->
+  {[@stop_split] [@expl:entry_array_bytes ensures] ([@stop_split] [@expl:entry_array_bytes ensures #0] [%#slib'5] UInt32.t'int result
+      = 16384)
+    /\ ([@stop_split] [@expl:entry_array_bytes ensures #1] [%#slib'6] UInt32.t'int result = 128 * 128)}
+    (! return {result}) ]
+
+function cdiv [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 57 0 57 34] (n: int) (d: int) : int
+ = [%#slib'12] EuclideanDivision.div n d + (if EuclideanDivision.mod n d = 0 then 0 else 1)
+
+function entry_sectors_l [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 84 0 84 38] (ss: int) : int
+ = [%#slib'11] cdiv 16384 ss
+
+let entry_sectors (ss: UInt32.t) (return (x: UInt32.t)) =
+{[@stop_split] [@expl:entry_sectors requires] [%#slib'7] UInt32.t'int ss > 0}
+  any
+  [ return (result: UInt32.t) -> {[@stop_split] [@expl:entry_sectors ensures] [%#slib'8] UInt32.t'int result
+    = entry_sectors_l (UInt32.t'int ss)}
+    (! return {result}) ]
+
+type tup4_u32_u32_u32_u32 = { f0: UInt32.t; f1: UInt32.t; f2: UInt32.t; f3: UInt32.t }
+
+constant const_GPT_MAX_ENTRIES: UInt32.t = [%#slib'9] (128: UInt32.t)
+
+constant const_GPT_ENTRY_SIZE: UInt32.t = [%#slib'10] (128: UInt32.t)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_dpm_inv_entry_array_shape__mutant [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3775 0 3775 80]
+  (ss: UInt32.t) (return (x: tup4_u32_u32_u32_u32)) =
+{[@stop_split] [@expl:verify_dpm_inv_entry_array_shape__mutant requires] [%#slib'3] UInt32.t'int ss = 512
+  \/ UInt32.t'int ss = 4096}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = entry_array_bytes [%#slib] (fun (_x: UInt32.t) -> [ &_5 <- _x ] s1)
+    | s1 = entry_sectors [%#slib'0] {ss} (fun (_x: UInt32.t) -> [ &_6 <- _x ] s2)
+    | s2 = [ &_ret <- { f0 = ([%#slib'1] const_GPT_MAX_ENTRIES);
+                        f1 = ([%#slib'2] const_GPT_ENTRY_SIZE);
+                        f2 = _5;
+                        f3 = _6 } ] s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: tup4_u32_u32_u32_u32 = Any.any_l ()
+  | & ss: UInt32.t = ss
+  | & _5: UInt32.t = Any.any_l ()
+  | & _6: UInt32.t = Any.any_l () ])
+  [ return (result: tup4_u32_u32_u32_u32) ->
+  {[@stop_split] [@expl:verify_dpm_inv_entry_array_shape__mutant ensures] [%#slib'4] UInt32.t'int result.f2 = 8192}
+    (! return {result}) ]

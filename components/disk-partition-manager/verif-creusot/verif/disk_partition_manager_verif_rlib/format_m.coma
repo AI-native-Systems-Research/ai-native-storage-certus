@@ -1,0 +1,108 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1169 0 1175 28 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1160 10 1160 86
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1161 10 1161 90
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1162 10 1163 85
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1164 10 1165 96
+let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1166 10 1168 15
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.prelude.Any
+
+type t_TabM = { tag: UInt64.t; count: UInt32.t; sector_size: UInt32.t }
+
+type t_PtErr = NoPartitionTable | CorruptTable | InvalidPartition | IoError | LayoutError | NotInitialized
+
+type t_ReadRes = Ok t_TabM | Err t_PtErr
+
+let elim_Err (_x: t_ReadRes) (return (f0: t_PtErr)) = any
+  [ _k (f0: t_PtErr) -> {Err f0 = _x} (! return {f0})
+  | _chk -> (! {[@expl:elim Err] match _x with
+      | Err _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+type t_Outcome = Ok'0 t_TabM | Err'0 t_PtErr | Panic'0
+
+type t_Option_TabM = None | Some t_TabM
+
+type tup2_Outcome_Option_TabM = { f0: t_Outcome; f1: t_Option_TabM }
+
+let elim_Ok (_x: t_ReadRes) (return (f0'0: t_TabM)) = any
+  [ _k (f0'0: t_TabM) -> {Ok f0'0 = _x} (! return {f0'0})
+  | _chk -> (! {[@expl:elim Ok] match _x with
+      | Ok _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let format_m [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1169 0 1175 28]
+  (st: t_Option_TabM) (bound: bool) (chan_ok: bool) (wr: t_ReadRes) (poisoned: bool)
+  (return (x: tup2_Outcome_Option_TabM)) = (! bb0
+  [ bb0 = any [ br0 -> {bound = false} (! bb1) | br1 -> {bound} (! bb2) ]
+  | bb2 = any [ br0 -> {chan_ok = false} (! bb4) | br1 -> {chan_ok} (! bb3) ]
+  | bb3 = any [ br0 (x0: t_TabM) -> {wr = Ok x0} (! bb7) | br1 (x0: t_PtErr) -> {wr = Err x0} (! bb8) ]
+  | bb8 = s0
+    [ s0 = elim_Err {wr} (fun (r0: t_PtErr) -> [ &e <- r0 ] s1)
+    | s1 = [ &_43 <- Err'0 e ] s2
+    | s2 = [ &_ret <- { f0 = _43; f1 = st } ] s3
+    | s3 = return {_ret} ]
+  | bb7 = s0
+    [ s0 = elim_Ok {wr} (fun (r0: t_TabM) -> [ &t <- r0 ] s1)
+    | s1 = any [ br0 -> {poisoned = false} (! bb10) | br1 -> {poisoned} (! bb9) ] ]
+  | bb9 = s0 [ s0 = [ &_48 <- Panic'0 ] s1 | s1 = [ &_ret <- { f0 = _48; f1 = st } ] s2 | s2 = return {_ret} ]
+  | bb10 = s0
+    [ s0 = [ &_50 <- Ok'0 t ] s1
+    | s1 = [ &_52 <- Some t ] s2
+    | s2 = [ &_ret <- { f0 = _50; f1 = _52 } ] s3
+    | s3 = return {_ret} ]
+  | bb4 = s0
+    [ s0 = [ &_39 <- IoError ] s1
+    | s1 = [ &_38 <- Err'0 _39 ] s2
+    | s2 = [ &_ret <- { f0 = _38; f1 = st } ] s3
+    | s3 = return {_ret} ]
+  | bb1 = s0
+    [ s0 = [ &_33 <- NotInitialized ] s1
+    | s1 = [ &_32 <- Err'0 _33 ] s2
+    | s2 = [ &_ret <- { f0 = _32; f1 = st } ] s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: tup2_Outcome_Option_TabM = Any.any_l ()
+  | & st: t_Option_TabM = st
+  | & bound: bool = bound
+  | & chan_ok: bool = chan_ok
+  | & wr: t_ReadRes = wr
+  | & poisoned: bool = poisoned
+  | & _32: t_Outcome = Any.any_l ()
+  | & _33: t_PtErr = Any.any_l ()
+  | & _38: t_Outcome = Any.any_l ()
+  | & _39: t_PtErr = Any.any_l ()
+  | & e: t_PtErr = Any.any_l ()
+  | & _43: t_Outcome = Any.any_l ()
+  | & t: t_TabM = Any.any_l ()
+  | & _48: t_Outcome = Any.any_l ()
+  | & _50: t_Outcome = Any.any_l ()
+  | & _52: t_Option_TabM = Any.any_l () ])
+  [ return (result: tup2_Outcome_Option_TabM) ->
+  {[@stop_split] [@expl:format_m ensures] ([@stop_split] [@expl:format_m ensures #0] [%#slib] not bound
+      -> result.f0 = Err'0 (NotInitialized) /\ result.f1 = st)
+    /\ ([@stop_split] [@expl:format_m ensures #1] [%#slib'0] bound /\ not chan_ok
+      -> result.f0 = Err'0 (IoError) /\ result.f1 = st)
+    /\ ([@stop_split] [@expl:format_m ensures #2] [%#slib'1] match wr with
+        | Err e -> bound /\ chan_ok -> result.f0 = Err'0 e /\ result.f1 = st
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:format_m ensures #3] [%#slib'2] match wr with
+        | Ok t -> bound /\ chan_ok /\ poisoned -> result.f0 = Panic'0 /\ result.f1 = st
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:format_m ensures #4] [%#slib'3] match wr with
+      | Ok t -> bound /\ chan_ok /\ not poisoned -> result.f0 = Ok'0 t /\ result.f1 = Some t
+      | _ -> true
+      end)}
+    (! return {result}) ]

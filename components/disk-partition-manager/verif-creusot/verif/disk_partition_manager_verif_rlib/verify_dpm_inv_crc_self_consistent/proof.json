@@ -1,0 +1,11 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_dpm_inv_crc_self_consistent": {
+        "prover": "alt-ergo",
+        "time": 0.019
+      }
+    }
+  }
+}

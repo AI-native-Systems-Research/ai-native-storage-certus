@@ -1,0 +1,23 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_entry_array_bytes": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_serialize_padding_slot": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_verify_dpm_format_post_entry_array__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.031 },
+              { "prover": "alt-ergo", "time": 0.095 },
+              null
+            ]
+          }
+        ]
+      },
+      "vc_write_gpt_trace": { "prover": "alt-ergo", "time": 0.016 }
+    }
+  }
+}

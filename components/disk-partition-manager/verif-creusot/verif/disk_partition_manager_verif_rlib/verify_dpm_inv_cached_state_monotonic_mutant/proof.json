@@ -1,0 +1,10 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_format_m": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_initialize_m": { "prover": "alt-ergo", "time": 0.012 },
+      "vc_verify_dpm_inv_cached_state_monotonic__mutant": null
+    }
+  }
+}

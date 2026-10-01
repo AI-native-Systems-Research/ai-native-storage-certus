@@ -1,0 +1,88 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1906 0 1906 48 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1905 10 1905 11
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1901 11 1901 33
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1902 11 1902 67
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1903 10 1903 33
+let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1904 10 1904 37
+let%span slib'4 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 213 10 213 11
+let%span slib'5 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 212 11 212 33
+let%span slib'6 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 216 8 217 87
+let%span slib'7 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 226 10 226 11
+let%span slib'8 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 225 11 225 33
+let%span slib'9 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 229 8 233 9
+let%span slib'10 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 58 16 58 74
+let%span swell_founded = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+
+use creusot.int.UInt64
+use seq.Seq
+use int.EuclideanDivision
+use int.Int
+
+type t_SpecM = { size_bytes: UInt64.t; tg_zero: bool }
+
+function rest_count_l [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 214 0 214 49] (s: Seq.seq t_SpecM) (n: int) : int
+
+axiom rest_count_l_def: forall s: Seq.seq t_SpecM, n: int [rest_count_l s n]. ([%#slib'5] 0 <= n /\ n <= Seq.length s)
+    -> rest_count_l s n
+    = ([%#slib'6] if n = 0 then
+      0
+    else
+      rest_count_l s (n - 1) + (if UInt64.t'int (Seq.get s (n - 1)).size_bytes = 0 then 1 else 0)
+    )
+
+function cdiv [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 57 0 57 34] (n: int) (d: int) : int
+ = [%#slib'10] EuclideanDivision.div n d + (if EuclideanDivision.mod n d = 0 then 0 else 1)
+
+function fixed_sum_l [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 227 0 227 57] (s: Seq.seq t_SpecM) (n: int) (ss: int) : int
+
+axiom fixed_sum_l_def: forall s: Seq.seq t_SpecM, n: int, ss: int [fixed_sum_l s n ss]. ([%#slib'8] 0 <= n
+      /\ n <= Seq.length s)
+    -> fixed_sum_l s n ss
+    = ([%#slib'9] if n = 0 then
+      0
+    else
+      fixed_sum_l s (n - 1) ss
+      + (if UInt64.t'int (Seq.get s (n - 1)).size_bytes > 0 then
+        cdiv (UInt64.t'int (Seq.get s (n - 1)).size_bytes) ss
+      else
+        0
+      )
+    )
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant s : Seq.seq t_SpecM
+
+constant n : int
+
+function lemma_all_one_byte [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1906 0 1906 48] (s: Seq.seq t_SpecM) (n: int) : ()
+
+goal vc_lemma_all_one_byte: ([%#slib'0] 0 <= n /\ n <= Seq.length s)
+  -> ([%#slib'1] forall k: int. 0 <= k /\ k < n -> UInt64.t'int (Seq.get s k).size_bytes = 1)
+  -> (if n > 0 then
+    (([@stop_split] [@expl:lemma_all_one_byte requires] ([@stop_split] [@expl:lemma_all_one_byte requires #0] [%#slib'0] 0
+            <= n - 1
+          /\ n - 1 <= Seq.length s)
+        /\ ([@stop_split] [@expl:lemma_all_one_byte requires #1] [%#slib'1] forall k: int. 0 <= k /\ k < n - 1
+          -> UInt64.t'int (Seq.get s k).size_bytes = 1))
+      /\ ([@expl:variant decreases] well_founded_relation_Int ([%#slib] n) ([%#slib] n - 1)))
+    /\ (([@stop_split] [@expl:lemma_all_one_byte ensures] ([@stop_split] [@expl:lemma_all_one_byte ensures #0] [%#slib'2] rest_count_l s (n
+          - 1)
+        = 0)
+      /\ ([@stop_split] [@expl:lemma_all_one_byte ensures #1] [%#slib'3] fixed_sum_l s (n - 1) 512 = n - 1))
+    -> ([@stop_split] [@expl:lemma_all_one_byte ensures] ([@stop_split] [@expl:lemma_all_one_byte ensures #0] [%#slib'2] rest_count_l s n
+      = 0)
+    /\ ([@stop_split] [@expl:lemma_all_one_byte ensures #1] [%#slib'3] fixed_sum_l s n 512 = n)))
+  else
+    [@stop_split] [@expl:lemma_all_one_byte ensures] ([@stop_split] [@expl:lemma_all_one_byte ensures #0] [%#slib'2] rest_count_l s n
+      = 0)
+    /\ ([@stop_split] [@expl:lemma_all_one_byte ensures #1] [%#slib'3] fixed_sum_l s n 512 = n)
+  )

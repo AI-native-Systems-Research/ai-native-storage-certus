@@ -1,0 +1,84 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 705 0 705 52 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 706 13 706 30
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 707 16 707 17
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 707 16 707 22
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 708 20 708 21
+let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 708 15 708 21
+let%span slib'4 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 708 15 708 26
+let%span slib'5 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 708 29 708 30
+let%span slib'6 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 708 15 708 30
+let%span slib'7 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 701 11 701 36
+let%span slib'8 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 702 11 702 42
+let%span slib'9 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 703 10 703 42
+let%span slib'10 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 704 10 704 46
+let%span slib'11 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 88 11 88 18
+let%span slib'12 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 89 10 89 41
+let%span slib'13 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 85 16 85 31
+let%span slib'14 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 676 16 676 39
+let%span slib'15 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 682 16 682 48
+let%span slib'16 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 58 16 58 74
+
+use creusot.int.UInt32
+use int.EuclideanDivision
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+function cdiv [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 57 0 57 34] (n: int) (d: int) : int
+ = [%#slib'16] EuclideanDivision.div n d + (if EuclideanDivision.mod n d = 0 then 0 else 1)
+
+function entry_sectors_l [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 84 0 84 38] (ss: int) : int
+ = [%#slib'13] cdiv 16384 ss
+
+let entry_sectors (ss: UInt32.t) (return (x: UInt32.t)) =
+{[@stop_split] [@expl:entry_sectors requires] [%#slib'11] UInt32.t'int ss > 0}
+  any
+  [ return (result: UInt32.t) -> {[@stop_split] [@expl:entry_sectors ensures] [%#slib'12] UInt32.t'int result
+    = entry_sectors_l (UInt32.t'int ss)}
+    (! return {result}) ]
+
+type tup2_u64_u64 = { f0: UInt64.t; f1: UInt64.t }
+
+function first_usable_l [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 675 0 675 37] (ss: int) : int
+ = [%#slib'14] 2 + entry_sectors_l ss
+
+function last_usable_l [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 681 0 681 45] (ss: int) (ns: int) : int
+ = [%#slib'15] ns - 1 - entry_sectors_l ss - 1
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let usable_window [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 705 0 705 52]
+  (ss: UInt32.t) (ns: UInt64.t) (return (x: tup2_u64_u64)) =
+{[@stop_split] [@expl:usable_window requires] ([@stop_split] [@expl:usable_window requires #0] [%#slib'7] UInt32.t'int ss
+      = 512
+    \/ UInt32.t'int ss = 4096)
+  /\ ([@stop_split] [@expl:usable_window requires #1] [%#slib'8] UInt64.t'int ns
+  >= entry_sectors_l (UInt32.t'int ss) + 2)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = entry_sectors [%#slib] {ss} (fun (_x: UInt32.t) -> [ &_14 <- _x ] s1)
+    | s1 = [ &es <- UInt64.of_int (UInt32.t'int _14) ] s2
+    | s2 = UInt64.add [%#slib'1] {[%#slib'0] (2: UInt64.t)} {es} (fun (_x: UInt64.t) -> [ &first <- _x ] s3)
+    | s3 = UInt64.sub [%#slib'3] {ns} {[%#slib'2] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &_20 <- _x ] s4)
+    | s4 = UInt64.sub [%#slib'4] {_20} {es} (fun (_x: UInt64.t) -> [ &_19 <- _x ] s5)
+    | s5 = UInt64.sub [%#slib'6] {_19} {[%#slib'5] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &last <- _x ] s6)
+    | s6 = [ &_ret <- { f0 = first; f1 = last } ] s7
+    | s7 = return {_ret} ] ]
+  [ & _ret: tup2_u64_u64 = Any.any_l ()
+  | & ss: UInt32.t = ss
+  | & ns: UInt64.t = ns
+  | & es: UInt64.t = Any.any_l ()
+  | & _14: UInt32.t = Any.any_l ()
+  | & first: UInt64.t = Any.any_l ()
+  | & last: UInt64.t = Any.any_l ()
+  | & _19: UInt64.t = Any.any_l ()
+  | & _20: UInt64.t = Any.any_l () ])
+  [ return (result: tup2_u64_u64) ->
+  {[@stop_split] [@expl:usable_window ensures] ([@stop_split] [@expl:usable_window ensures #0] [%#slib'9] UInt64.t'int result.f0
+      = first_usable_l (UInt32.t'int ss))
+    /\ ([@stop_split] [@expl:usable_window ensures #1] [%#slib'10] UInt64.t'int result.f1
+    = last_usable_l (UInt32.t'int ss) (UInt64.t'int ns))}
+    (! return {result}) ]

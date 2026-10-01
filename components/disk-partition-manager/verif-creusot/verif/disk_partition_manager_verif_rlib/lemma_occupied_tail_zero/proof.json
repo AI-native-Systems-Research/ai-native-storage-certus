@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lemma_occupied_tail_zero": { "prover": "alt-ergo", "time": 0.024 }
+    }
+  }
+}

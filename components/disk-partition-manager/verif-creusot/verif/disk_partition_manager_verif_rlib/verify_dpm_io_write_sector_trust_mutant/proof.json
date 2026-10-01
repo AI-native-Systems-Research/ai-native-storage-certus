@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_dpm_io_write_sector_trust__mutant": {
+        "tactic": "split_vc",
+        "children": [ { "prover": "alt-ergo", "time": 0.027 }, null ]
+      },
+      "vc_write_bytes_acc": { "prover": "alt-ergo", "time": 0.016 }
+    }
+  }
+}

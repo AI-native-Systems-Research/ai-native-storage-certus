@@ -1,0 +1,116 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3427 0 3427 64 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3428 21 3428 43
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3429 28 3429 38
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3430 21 3430 22
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3433 16 3433 72
+let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3432 16 3432 32
+let%span slib'4 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3431 16 3431 33
+let%span slib'5 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3435 17 3435 24
+let%span slib'6 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3435 8 3435 25
+let%span slib'7 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3436 13 3436 14
+let%span slib'8 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3436 8 3436 14
+let%span slib'9 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3422 11 3422 36
+let%span slib'10 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3423 11 3423 20
+let%span slib'11 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3424 11 3424 57
+let%span slib'12 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3425 10 3425 42
+let%span slib'13 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3426 10 3426 80
+let%span slib'14 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 70 11 70 17
+let%span slib'15 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 71 10 71 33
+let%span slib'16 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 58 16 58 74
+let%span svec = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 102 18 102 36
+let%span svec'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span svec'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 116 18 116 48
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use int.EuclideanDivision
+use seq.Seq
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+function cdiv [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 57 0 57 34] (n: int) (d: int) : int
+ = [%#slib'16] EuclideanDivision.div n d + (if EuclideanDivision.mod n d = 0 then 0 else 1)
+
+let cdiv64 (n: UInt64.t) (d: UInt64.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:cdiv64 requires] [%#slib'14] UInt64.t'int d > 0}
+  any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:cdiv64 ensures] [%#slib'15] UInt64.t'int result
+    = cdiv (UInt64.t'int n) (UInt64.t'int d)}
+    (! return {result}) ]
+
+type t_Vec_u64_Global
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_u64_Global (self: t_Vec_u64_Global) : Seq.seq UInt64.t
+
+axiom view_Vec_u64_Global_spec:
+  forall self: t_Vec_u64_Global [view_Vec_u64_Global self]. [%#svec'0] Seq.length (view_Vec_u64_Global self)
+    <= UInt64.t'int const_MAX
+
+let new_u64 (return (x: t_Vec_u64_Global)) = any
+  [ return (result: t_Vec_u64_Global) ->
+  {[@stop_split] [@expl:new ensures] [%#svec] Seq.length (view_Vec_u64_Global result) = 0}
+    (! return {result}) ]
+
+let push_u64 (self_: MutBorrow.t t_Vec_u64_Global) (v: UInt64.t) (return (x: ())) = any
+  [ return (result: ()) -> {[@stop_split] [@expl:push ensures] [%#svec'1] view_Vec_u64_Global self_.final
+    = Seq.snoc (view_Vec_u64_Global self_.current) v}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let write_bytes_lbas [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3427 0 3427 64]
+  (ss: UInt32.t) (lba: UInt64.t) (len: UInt64.t) (return (x: t_Vec_u64_Global)) =
+{[@stop_split] [@expl:write_bytes_lbas requires] ([@stop_split] [@expl:write_bytes_lbas requires #0] [%#slib'9] UInt32.t'int ss
+      = 512
+    \/ UInt32.t'int ss = 4096)
+  /\ ([@stop_split] [@expl:write_bytes_lbas requires #1] [%#slib'10] UInt64.t'int len >= 1)
+  /\ ([@stop_split] [@expl:write_bytes_lbas requires #2] [%#slib'11] UInt64.t'int lba
+    + cdiv (UInt64.t'int len) (UInt32.t'int ss)
+  <= 18446744073709551615)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_19 <- UInt64.of_int (UInt32.t'int ss) ] s1
+    | s1 = cdiv64 [%#slib] {len} {_19} (fun (_x: UInt64.t) -> [ &num_blocks <- _x ] s2)
+    | s2 = new_u64 [%#slib'0] (fun (_x: t_Vec_u64_Global) -> [ &out <- _x ] s3)
+    | s3 = [ &i <- [%#slib'1] (0: UInt64.t) ] s4
+    | s4 = bb3 ]
+  | bb3 = bb3
+    [ bb3 = {[@expl:loop invariant #0] [%#slib'4] UInt64.t'int i <= UInt64.t'int num_blocks}
+      {[@expl:loop invariant #1] [%#slib'3] Seq.length (view_Vec_u64_Global out) = UInt64.t'int i}
+      {[@expl:loop invariant #2] [%#slib'2] forall q: int. 0 <= q /\ q < UInt64.t'int i
+        -> UInt64.t'int (Seq.get (view_Vec_u64_Global out) q) = UInt64.t'int lba + q}
+      (! s0)
+      [ s0 = [ &_36 <- UInt64.lt i num_blocks ] s1 | s1 = any [ br0 -> {_36 = false} (! bb7) | br1 -> {_36} (! bb5) ] ]
+      [ bb5 = s0
+        [ s0 = UInt64.add [%#slib'5] {lba} {i} (fun (_x: UInt64.t) -> [ &_41 <- _x ] s1)
+        | s1 = MutBorrow.borrow_mut <t_Vec_u64_Global> {out}
+            (fun (_bor: MutBorrow.t t_Vec_u64_Global) -> [ &_40 <- _bor ] [ &out <- _bor.final ] s2)
+        | s2 = push_u64 [%#slib'6] {_40} {_41} (fun (_x: ()) -> [ &_39 <- _x ] s3)
+        | s3 = UInt64.add [%#slib'8] {i} {[%#slib'7] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &i <- _x ] s4)
+        | s4 = bb3 ] ] ]
+  | bb7 = s0 [ s0 = [ &_ret <- out ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Vec_u64_Global = Any.any_l ()
+  | & ss: UInt32.t = ss
+  | & lba: UInt64.t = lba
+  | & len: UInt64.t = len
+  | & num_blocks: UInt64.t = Any.any_l ()
+  | & _19: UInt64.t = Any.any_l ()
+  | & out: t_Vec_u64_Global = Any.any_l ()
+  | & i: UInt64.t = Any.any_l ()
+  | & _36: bool = Any.any_l ()
+  | & _39: () = Any.any_l ()
+  | & _40: MutBorrow.t t_Vec_u64_Global = Any.any_l ()
+  | & _41: UInt64.t = Any.any_l () ])
+  [ return (result: t_Vec_u64_Global) ->
+  {[@stop_split] [@expl:write_bytes_lbas ensures] ([@stop_split] [@expl:write_bytes_lbas ensures #0] [%#slib'12] Seq.length (view_Vec_u64_Global result)
+      = cdiv (UInt64.t'int len) (UInt32.t'int ss))
+    /\ ([@stop_split] [@expl:write_bytes_lbas ensures #1] [%#slib'13] forall i: int. 0 <= i
+        /\ i < Seq.length (view_Vec_u64_Global result)
+      -> UInt64.t'int (Seq.get (view_Vec_u64_Global result) i) = UInt64.t'int lba + i)}
+    (! return {result}) ]

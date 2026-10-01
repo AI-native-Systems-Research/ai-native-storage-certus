@@ -1,0 +1,22 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_layout_place": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_refute_dpm_format_pre_max_128": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.053 },
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.035 },
+              { "prover": "alt-ergo", "time": 0.037 },
+              { "prover": "alt-ergo", "time": 0.031 }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

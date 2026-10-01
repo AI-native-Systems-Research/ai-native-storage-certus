@@ -1,0 +1,55 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 64 0 64 36 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 65 12 65 17
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 66 7 66 12
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 66 16 66 17
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 66 35 66 36
+let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 66 31 66 36
+let%span slib'4 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 62 11 62 17
+let%span slib'5 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 63 10 63 33
+let%span slib'6 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 58 16 58 74
+
+use creusot.int.UInt32
+use creusot.prelude.Any
+use int.EuclideanDivision
+use int.Int
+
+function cdiv [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 57 0 57 34] (n: int) (d: int) : int
+ = [%#slib'6] EuclideanDivision.div n d + (if EuclideanDivision.mod n d = 0 then 0 else 1)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let cdiv32 [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 64 0 64 36]
+  (n: UInt32.t) (d: UInt32.t) (return (x: UInt32.t)) = {[@stop_split] [@expl:cdiv32 requires] [%#slib'4] UInt32.t'int d
+  > 0}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_10 <- d ] s1
+    | s1 = [ &_11 <- _10 = ([%#slib] (0: UInt32.t)) ] s2
+    | s2 = {[@expl:division by zero] [%#slib] not _11} s3
+    | s3 = UInt32.div [%#slib] {n} {_10} (fun (_x: UInt32.t) -> [ &q <- _x ] s4)
+    | s4 = [ &_15 <- d ] s5
+    | s5 = [ &_16 <- _15 = ([%#slib'0] (0: UInt32.t)) ] s6
+    | s6 = {[@expl:remainder by zero] [%#slib'0] not _16} s7
+    | s7 = UInt32.rem [%#slib'0] {n} {_15} (fun (_x: UInt32.t) -> [ &_13 <- _x ] s8)
+    | s8 = [ &_12 <- _13 = ([%#slib'1] (0: UInt32.t)) ] s9
+    | s9 = any [ br0 -> {_12 = false} (! bb4) | br1 -> {_12} (! bb3) ] ]
+  | bb3 = s0 [ s0 = [ &_ret <- q ] s1 | s1 = return {_ret} ]
+  | bb4 = s0
+    [ s0 = UInt32.add [%#slib'3] {q} {[%#slib'2] (1: UInt32.t)} (fun (_x: UInt32.t) -> [ &_ret <- _x ] s1)
+    | s1 = return {_ret} ] ]
+  [ & _ret: UInt32.t = Any.any_l ()
+  | & n: UInt32.t = n
+  | & d: UInt32.t = d
+  | & q: UInt32.t = Any.any_l ()
+  | & _10: UInt32.t = Any.any_l ()
+  | & _11: bool = Any.any_l ()
+  | & _12: bool = Any.any_l ()
+  | & _13: UInt32.t = Any.any_l ()
+  | & _15: UInt32.t = Any.any_l ()
+  | & _16: bool = Any.any_l () ])
+  [ return (result: UInt32.t) -> {[@stop_split] [@expl:cdiv32 ensures] [%#slib'5] UInt32.t'int result
+    = cdiv (UInt32.t'int n) (UInt32.t'int d)}
+    (! return {result}) ]

@@ -1,0 +1,96 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 338 0 338 75 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 337 10 337 15
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 334 11 334 43
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 335 11 335 30
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 336 10 336 62
+let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 256 11 256 26
+let%span slib'4 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 257 10 257 25
+let%span slib'5 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 258 10 258 29
+let%span slib'6 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 259 10 259 35
+let%span slib'7 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 247 10 247 11
+let%span slib'8 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 246 11 246 33
+let%span slib'9 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 250 8 250 92
+let%span slib'10 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 260 41 260 43
+let%span slib'11 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 58 16 58 74
+let%span slib'12 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 240 16 240 81
+let%span swell_founded = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+
+use creusot.int.UInt64
+use seq.Seq
+use int.EuclideanDivision
+use int.Int
+
+type t_SpecM = { size_bytes: UInt64.t; tg_zero: bool }
+
+function cdiv [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 57 0 57 34] (n: int) (d: int) : int
+ = [%#slib'11] EuclideanDivision.div n d + (if EuclideanDivision.mod n d = 0 then 0 else 1)
+
+function demand_l [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 239 0 239 53] (sp: t_SpecM) (ss: int) (rest: int) : int
+ = [%#slib'12] if UInt64.t'int sp.size_bytes = 0 then rest else cdiv (UInt64.t'int sp.size_bytes) ss
+
+function placed_l [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 248 0 248 65] (s: Seq.seq t_SpecM) (n: int) (ss: int) (rest: int) : int
+
+axiom placed_l_def: forall s: Seq.seq t_SpecM, n: int, ss: int, rest: int [placed_l s n ss rest]. ([%#slib'8] 0 <= n
+      /\ n <= Seq.length s)
+    -> placed_l s n ss rest
+    = ([%#slib'9] if n = 0 then 0 else placed_l s (n - 1) ss rest + demand_l (Seq.get s (n - 1)) ss rest)
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+function lemma_cdiv_nonneg [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 260 0 260 40] (n: int) (d: int) : ()
+ = [%#slib'10] ()
+
+axiom lemma_cdiv_nonneg_spec: forall n: int, d: int. ([%#slib'3] n >= 0 /\ d > 0) -> ([%#slib'4] cdiv n d >= 0)
+
+axiom lemma_cdiv_nonneg_spec'0: forall n: int, d: int. ([%#slib'3] n >= 0 /\ d > 0) -> ([%#slib'5] cdiv n d * d >= n)
+
+axiom lemma_cdiv_nonneg_spec'1: forall n: int, d: int. ([%#slib'3] n >= 0 /\ d > 0)
+    -> ([%#slib'6] n > 0 -> cdiv n d >= 1)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant s : Seq.seq t_SpecM
+
+constant j : int
+
+constant k : int
+
+constant ss : int
+
+constant rest : int
+
+function lemma_placed_mono [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 338 0 338 75] (s: Seq.seq t_SpecM) (j: int) (k: int) (ss: int) (rest: int) : ()
+
+goal vc_lemma_placed_mono: ([%#slib'0] 0 <= j /\ j <= k /\ k <= Seq.length s)
+  -> ([%#slib'1] ss > 0 /\ rest >= 0)
+  -> (if j < k then
+    (([@stop_split] [@expl:lemma_placed_mono requires] ([@stop_split] [@expl:lemma_placed_mono requires #0] [%#slib'0] 0
+            <= j
+          /\ j <= k - 1 /\ k - 1 <= Seq.length s)
+        /\ ([@stop_split] [@expl:lemma_placed_mono requires #1] [%#slib'1] ss > 0 /\ rest >= 0))
+      /\ ([@expl:variant decreases] well_founded_relation_Int ([%#slib] k - j) ([%#slib] k - 1 - j)))
+    /\ (([@stop_split] [@expl:lemma_placed_mono ensures] [%#slib'2] placed_l s j ss rest <= placed_l s (k - 1) ss rest)
+    -> (let _ = lemma_placed_mono s j (k
+    - 1) ss rest in ([@stop_split] [@expl:lemma_cdiv_nonneg requires] [%#slib'3] UInt64.t'int (Seq.get s (k
+          - 1)).size_bytes
+        >= 0
+      /\ ss > 0)
+    /\ (([@stop_split] [@expl:lemma_cdiv_nonneg ensures] ([@stop_split] [@expl:lemma_cdiv_nonneg ensures #0] [%#slib'4] cdiv (UInt64.t'int (Seq.get s (k
+          - 1)).size_bytes) ss
+        >= 0)
+      /\ ([@stop_split] [@expl:lemma_cdiv_nonneg ensures #1] [%#slib'5] cdiv (UInt64.t'int (Seq.get s (k
+            - 1)).size_bytes) ss
+          * ss
+        >= UInt64.t'int (Seq.get s (k - 1)).size_bytes)
+      /\ ([@stop_split] [@expl:lemma_cdiv_nonneg ensures #2] [%#slib'6] UInt64.t'int (Seq.get s (k - 1)).size_bytes > 0
+      -> cdiv (UInt64.t'int (Seq.get s (k - 1)).size_bytes) ss >= 1))
+    -> ([@stop_split] [@expl:lemma_placed_mono ensures] [%#slib'2] placed_l s j ss rest <= placed_l s k ss rest))))
+  else
+    [@stop_split] [@expl:lemma_placed_mono ensures] [%#slib'2] placed_l s j ss rest <= placed_l s k ss rest
+  )

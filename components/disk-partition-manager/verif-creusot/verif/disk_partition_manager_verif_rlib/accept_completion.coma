@@ -1,0 +1,101 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3532 0 3532 60 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3524 10 3525 57
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3526 10 3526 81
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3527 10 3527 78
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3528 10 3528 83
+let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3529 10 3530 57
+let%span slib'4 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3531 10 3531 46
+let%span slib'5 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3514 8 3520 9
+
+use creusot.prelude.Any
+use creusot.int.UInt64
+
+type t_Comp = ReadDone bool | WriteDone bool | DevError | Other | RecvFailed
+
+type t_PtErr = NoPartitionTable | CorruptTable | InvalidPartition | IoError | LayoutError | NotInitialized
+
+type t_Option_PtErr = None | Some t_PtErr
+
+let elim_WriteDone (_x: t_Comp) (return (f0: bool)) = any
+  [ _k (f0: bool) -> {WriteDone f0 = _x} (! return {f0})
+  | _chk -> (! {[@expl:elim WriteDone] match _x with
+      | WriteDone _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+let elim_ReadDone (_x: t_Comp) (return (f0: bool)) = any
+  [ _k (f0: bool) -> {ReadDone f0 = _x} (! return {f0})
+  | _chk -> (! {[@expl:elim ReadDone] match _x with
+      | ReadDone _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+function accept_completion [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3512 0 3512 56] (c: t_Comp) : t_Option_PtErr
+ = [%#slib'5] match c with
+    | ReadDone ok -> if ok then None else Some (IoError)
+    | WriteDone ok -> if ok then None else Some (IoError)
+    | DevError -> Some (IoError)
+    | Other -> Some (IoError)
+    | RecvFailed -> Some (IoError)
+    end
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let accept_completion'0 [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3532 0 3532 60]
+  (c: t_Comp) (cid: UInt64.t) (return (x: t_Option_PtErr)) = (! bb0
+  [ bb0 = any
+    [ br0 (x0: bool) -> {c = ReadDone x0} (! bb10)
+    | br1 (x0: bool) -> {c = WriteDone x0} (! bb9)
+    | br2 -> {c = DevError} (! bb8)
+    | br3 -> {c = Other} (! bb7)
+    | br4 -> {c = RecvFailed} (! bb6) ]
+  | bb6 = s0 [ s0 = [ &_24 <- IoError ] s1 | s1 = [ &_ret <- Some _24 ] s2 | s2 = return {_ret} ]
+  | bb7 = s0 [ s0 = [ &_23 <- IoError ] s1 | s1 = [ &_ret <- Some _23 ] s2 | s2 = return {_ret} ]
+  | bb8 = s0 [ s0 = [ &_22 <- IoError ] s1 | s1 = [ &_ret <- Some _22 ] s2 | s2 = return {_ret} ]
+  | bb9 = s0
+    [ s0 = elim_WriteDone {c} (fun (r0: bool) -> [ &ok'0 <- r0 ] s1)
+    | s1 = any [ br0 -> {ok'0 = false} (! bb15) | br1 -> {ok'0} (! bb14) ] ]
+  | bb14 = s0 [ s0 = [ &_ret <- None ] s1 | s1 = return {_ret} ]
+  | bb15 = s0 [ s0 = [ &_21 <- IoError ] s1 | s1 = [ &_ret <- Some _21 ] s2 | s2 = return {_ret} ]
+  | bb10 = s0
+    [ s0 = elim_ReadDone {c} (fun (r0: bool) -> [ &ok <- r0 ] s1)
+    | s1 = any [ br0 -> {ok = false} (! bb12) | br1 -> {ok} (! bb11) ] ]
+  | bb11 = s0 [ s0 = [ &_ret <- None ] s1 | s1 = return {_ret} ]
+  | bb12 = s0 [ s0 = [ &_18 <- IoError ] s1 | s1 = [ &_ret <- Some _18 ] s2 | s2 = return {_ret} ] ]
+  [ & _ret: t_Option_PtErr = Any.any_l ()
+  | & c: t_Comp = c
+  | & ok: bool = Any.any_l ()
+  | & _18: t_PtErr = Any.any_l ()
+  | & ok'0: bool = Any.any_l ()
+  | & _21: t_PtErr = Any.any_l ()
+  | & _22: t_PtErr = Any.any_l ()
+  | & _23: t_PtErr = Any.any_l ()
+  | & _24: t_PtErr = Any.any_l () ])
+  [ return (result: t_Option_PtErr) ->
+  {[@stop_split] [@expl:accept_completion ensures] ([@stop_split] [@expl:accept_completion ensures #0] [%#slib] match c with
+        | ReadDone ok -> if ok then result = None else result = Some (IoError)
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:accept_completion ensures #1] [%#slib'0] match c with
+        | DevError -> result = Some (IoError)
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:accept_completion ensures #2] [%#slib'1] match c with
+        | Other -> result = Some (IoError)
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:accept_completion ensures #3] [%#slib'2] match c with
+        | RecvFailed -> result = Some (IoError)
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:accept_completion ensures #4] [%#slib'3] match c with
+        | WriteDone ok -> if ok then result = None else result = Some (IoError)
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:accept_completion ensures #5] [%#slib'4] result = accept_completion c)}
+    (! return {result}) ]

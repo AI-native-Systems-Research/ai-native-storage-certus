@@ -1,0 +1,15 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_elim_Ok": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_index_Vec_EntryM_Global": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_layout_place": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_num_sectors_wrapping": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_refute_dpm_inv_num_sectors_positive": {
+        "prover": "z3",
+        "time": 0.013
+      }
+    }
+  }
+}

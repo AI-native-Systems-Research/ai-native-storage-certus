@@ -1,0 +1,85 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3617 0 3617 59 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3618 4 3618 23
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3617 51 3617 59
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3613 10 3614 84
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3615 10 3616 54
+let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 884 41 884 49
+let%span slib'4 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 880 10 881 84
+let%span slib'5 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 882 10 883 54
+let%span sarray = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/creusot/creusot-std/src/std/array.rs" 56 20 56 29
+let%span sarray'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/creusot/creusot-std/src/std/array.rs" 9 20 9 51
+let%span svec = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+
+use creusot.slice.Slice64
+use creusot.int.UInt8
+use seq.Seq
+use creusot.int.UInt64
+use creusot.int.UInt16
+use int.ComputerDivision
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_u16_Global
+
+predicate inv_Seq_u8 [@inline:trivial] (_1: Seq.seq UInt8.t) = true
+
+meta "rewrite_def" predicate inv_Seq_u8
+
+predicate invariant_array_u8_72 (self: Slice64.array UInt8.t) =
+  [%#sarray'0] inv_Seq_u8 (Slice64.view self) /\ Seq.length (Slice64.view self) = UInt64.t'int (72: UInt64.t)
+
+predicate inv_array_u8_72 [@inline:trivial] (_1: Slice64.array UInt8.t) = invariant_array_u8_72 _1
+
+meta "rewrite_def" predicate inv_array_u8_72
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_u16_Global (self: t_Vec_u16_Global) : Seq.seq UInt16.t
+
+axiom view_Vec_u16_Global_spec:
+  forall self: t_Vec_u16_Global [view_Vec_u16_Global self]. [%#svec] Seq.length (view_Vec_u16_Global self)
+    <= UInt64.t'int const_MAX
+
+function index_array_u8_72 [@inline:trivial] (self: Slice64.array UInt8.t) (ix: int) : UInt8.t =
+  [%#sarray] Seq.get (Slice64.view self) ix
+
+meta "rewrite_def" function index_array_u8_72
+
+let encode_units (units: t_Vec_u16_Global) (return (x: Slice64.array UInt8.t)) = any
+  [ return (result: Slice64.array UInt8.t) ->
+  {[@stop_split] [@expl:encode_units ensures] ([@stop_split] [@expl:encode_units result type invariant] [%#slib'3] inv_array_u8_72 result)
+    /\ ([@stop_split] [@expl:encode_units ensures #0] [%#slib'4] forall k: int. 0 <= k
+          /\ k < 36 /\ k < Seq.length (view_Vec_u16_Global units)
+        -> UInt8.t'int (index_array_u8_72 result (2 * k))
+          = ComputerDivision.mod (UInt16.t'int (Seq.get (view_Vec_u16_Global units) k)) 256
+        /\ UInt8.t'int (index_array_u8_72 result (2 * k + 1))
+        = ComputerDivision.div (UInt16.t'int (Seq.get (view_Vec_u16_Global units) k)) 256)
+    /\ ([@stop_split] [@expl:encode_units ensures #1] [%#slib'5] forall k: int. Seq.length (view_Vec_u16_Global units)
+          <= k
+        /\ k < 36
+      -> UInt8.t'int (index_array_u8_72 result (2 * k)) = 0 /\ UInt8.t'int (index_array_u8_72 result (2 * k + 1)) = 0)}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_dpm_name_encode [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3617 0 3617 59]
+  (units: t_Vec_u16_Global) (return (x: Slice64.array UInt8.t)) = (! bb0
+  [ bb0 = s0
+    [ s0 = encode_units [%#slib] {units} (fun (_x: Slice64.array UInt8.t) -> [ &_ret <- _x ] s1)
+    | s1 = return {_ret} ] ] [ & _ret: Slice64.array UInt8.t = Any.any_l () | & units: t_Vec_u16_Global = units ])
+  [ return (result: Slice64.array UInt8.t) ->
+  {[@stop_split] [@expl:verify_dpm_name_encode ensures] ([@stop_split] [@expl:verify_dpm_name_encode result type invariant] [%#slib'0] inv_array_u8_72 result)
+    /\ ([@stop_split] [@expl:verify_dpm_name_encode ensures #0] [%#slib'1] forall k: int. 0 <= k
+          /\ k < 36 /\ k < Seq.length (view_Vec_u16_Global units)
+        -> UInt8.t'int (index_array_u8_72 result (2 * k))
+          = ComputerDivision.mod (UInt16.t'int (Seq.get (view_Vec_u16_Global units) k)) 256
+        /\ UInt8.t'int (index_array_u8_72 result (2 * k + 1))
+        = ComputerDivision.div (UInt16.t'int (Seq.get (view_Vec_u16_Global units) k)) 256)
+    /\ ([@stop_split] [@expl:verify_dpm_name_encode ensures #1] [%#slib'2] forall k: int. Seq.length (view_Vec_u16_Global units)
+          <= k
+        /\ k < 36
+      -> UInt8.t'int (index_array_u8_72 result (2 * k)) = 0 /\ UInt8.t'int (index_array_u8_72 result (2 * k + 1)) = 0)}
+    (! return {result}) ]

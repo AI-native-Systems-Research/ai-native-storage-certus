@@ -1,0 +1,131 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1804 0 1806 27 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1807 4 1807 44
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1800 11 1800 36
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1801 11 1801 29
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1802 11 1802 73
+let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1803 10 1803 89
+let%span slib'4 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 392 11 392 36
+let%span slib'5 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 393 11 393 29
+let%span slib'6 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 394 11 394 73
+let%span slib'7 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 395 10 398 1
+let%span slib'8 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 399 10 402 1
+let%span slib'9 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 403 10 406 1
+let%span slib'10 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 407 10 407 75
+let%span slib'11 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 226 10 226 11
+let%span slib'12 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 225 11 225 33
+let%span slib'13 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 229 8 233 9
+let%span slib'14 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 213 10 213 11
+let%span slib'15 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 212 11 212 33
+let%span slib'16 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 216 8 217 87
+let%span slib'17 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 58 16 58 74
+let%span svec = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use seq.Seq
+use int.EuclideanDivision
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_SpecM_Global
+
+type t_LayoutErr = MultiRest | Capacity | PerPartition
+
+type t_Result_u64_LayoutErr = Ok UInt64.t | Err t_LayoutErr
+
+type t_SpecM = { size_bytes: UInt64.t; tg_zero: bool }
+
+function cdiv [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 57 0 57 34] (n: int) (d: int) : int
+ = [%#slib'17] EuclideanDivision.div n d + (if EuclideanDivision.mod n d = 0 then 0 else 1)
+
+function fixed_sum_l [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 227 0 227 57] (s: Seq.seq t_SpecM) (n: int) (ss: int) : int
+
+axiom fixed_sum_l_def: forall s: Seq.seq t_SpecM, n: int, ss: int [fixed_sum_l s n ss]. ([%#slib'12] 0 <= n
+      /\ n <= Seq.length s)
+    -> fixed_sum_l s n ss
+    = ([%#slib'13] if n = 0 then
+      0
+    else
+      fixed_sum_l s (n - 1) ss
+      + (if UInt64.t'int (Seq.get s (n - 1)).size_bytes > 0 then
+        cdiv (UInt64.t'int (Seq.get s (n - 1)).size_bytes) ss
+      else
+        0
+      )
+    )
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_SpecM_Global (self: t_Vec_SpecM_Global) : Seq.seq t_SpecM
+
+axiom view_Vec_SpecM_Global_spec:
+  forall self: t_Vec_SpecM_Global [view_Vec_SpecM_Global self]. [%#svec] Seq.length (view_Vec_SpecM_Global self)
+    <= UInt64.t'int const_MAX
+
+function rest_count_l [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 214 0 214 49] (s: Seq.seq t_SpecM) (n: int) : int
+
+axiom rest_count_l_def: forall s: Seq.seq t_SpecM, n: int [rest_count_l s n]. ([%#slib'15] 0 <= n /\ n <= Seq.length s)
+    -> rest_count_l s n
+    = ([%#slib'16] if n = 0 then
+      0
+    else
+      rest_count_l s (n - 1) + (if UInt64.t'int (Seq.get s (n - 1)).size_bytes = 0 then 1 else 0)
+    )
+
+let layout_classify (specs: t_Vec_SpecM_Global) (ss: UInt32.t) (total_usable: UInt64.t)
+  (return (x: t_Result_u64_LayoutErr)) =
+{[@stop_split] [@expl:layout_classify requires] ([@stop_split] [@expl:layout_classify requires #0] [%#slib'4] UInt32.t'int ss
+      = 512
+    \/ UInt32.t'int ss = 4096)
+  /\ ([@stop_split] [@expl:layout_classify requires #1] [%#slib'5] UInt64.t'int total_usable >= 1)
+  /\ ([@stop_split] [@expl:layout_classify requires #2] [%#slib'6] fixed_sum_l (view_Vec_SpecM_Global specs) (Seq.length (view_Vec_SpecM_Global specs)) (UInt32.t'int ss)
+  <= 18446744073709551615)}
+  any
+  [ return (result: t_Result_u64_LayoutErr) ->
+  {[@stop_split] [@expl:layout_classify ensures] ([@stop_split] [@expl:layout_classify ensures #0] [%#slib'7] match result with
+        | Err (MultiRest) -> rest_count_l (view_Vec_SpecM_Global specs) (Seq.length (view_Vec_SpecM_Global specs)) > 1
+        | _ -> rest_count_l (view_Vec_SpecM_Global specs) (Seq.length (view_Vec_SpecM_Global specs)) <= 1
+        end)
+    /\ ([@stop_split] [@expl:layout_classify ensures #1] [%#slib'8] match result with
+        | Err (Capacity) -> fixed_sum_l (view_Vec_SpecM_Global specs) (Seq.length (view_Vec_SpecM_Global specs)) (UInt32.t'int ss)
+        > UInt64.t'int total_usable
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:layout_classify ensures #2] [%#slib'9] match result with
+        | Ok rest -> UInt64.t'int rest
+        = UInt64.t'int total_usable
+        - fixed_sum_l (view_Vec_SpecM_Global specs) (Seq.length (view_Vec_SpecM_Global specs)) (UInt32.t'int ss)
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:layout_classify ensures #3] [%#slib'10] match result with
+      | Err (PerPartition) -> false
+      | _ -> true
+      end)}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_dpm_format_err_layout_multi_grow__mutant [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1804 0 1806 27]
+  (specs: t_Vec_SpecM_Global) (ss: UInt32.t) (total_usable: UInt64.t) (return (x: t_Result_u64_LayoutErr)) =
+{[@stop_split] [@expl:verify_dpm_format_err_layout_multi_grow__mutant requires] ([@stop_split] [@expl:verify_dpm_format_err_layout_multi_grow__mutant requires #0] [%#slib'0] UInt32.t'int ss
+      = 512
+    \/ UInt32.t'int ss = 4096)
+  /\ ([@stop_split] [@expl:verify_dpm_format_err_layout_multi_grow__mutant requires #1] [%#slib'1] UInt64.t'int total_usable
+    >= 1)
+  /\ ([@stop_split] [@expl:verify_dpm_format_err_layout_multi_grow__mutant requires #2] [%#slib'2] fixed_sum_l (view_Vec_SpecM_Global specs) (Seq.length (view_Vec_SpecM_Global specs)) (UInt32.t'int ss)
+  <= 18446744073709551615)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = layout_classify [%#slib] {specs} {ss} {total_usable} (fun (_x: t_Result_u64_LayoutErr) -> [ &_ret <- _x ] s1)
+    | s1 = return {_ret} ] ]
+  [ & _ret: t_Result_u64_LayoutErr = Any.any_l ()
+  | & specs: t_Vec_SpecM_Global = specs
+  | & ss: UInt32.t = ss
+  | & total_usable: UInt64.t = total_usable ])
+  [ return (result: t_Result_u64_LayoutErr) ->
+  {[@stop_split] [@expl:verify_dpm_format_err_layout_multi_grow__mutant ensures] [%#slib'3] rest_count_l (view_Vec_SpecM_Global specs) (Seq.length (view_Vec_SpecM_Global specs))
+      = 1 -> result = Err (MultiRest)}
+    (! return {result}) ]

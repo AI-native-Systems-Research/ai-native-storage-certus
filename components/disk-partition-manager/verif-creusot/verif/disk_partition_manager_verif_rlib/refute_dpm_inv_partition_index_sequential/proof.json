@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_project": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_refute_dpm_inv_partition_index_sequential": {
+        "prover": "alt-ergo",
+        "time": 0.029
+      }
+    }
+  }
+}

@@ -1,0 +1,46 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2272 0 2272 48 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2272 23 2272 25
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2272 40 2272 48
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2271 10 2271 64
+let%span sarray = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/creusot/creusot-std/src/std/array.rs" 56 20 56 29
+let%span sarray'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/creusot/creusot-std/src/std/array.rs" 9 20 9 51
+
+use creusot.slice.Slice64
+use creusot.int.UInt8
+use creusot.prelude.Any
+use seq.Seq
+use creusot.int.UInt64
+use int.Int
+
+predicate inv_Seq_u8 [@inline:trivial] (_1: Seq.seq UInt8.t) = true
+
+meta "rewrite_def" predicate inv_Seq_u8
+
+predicate invariant_array_u8_16 (self: Slice64.array UInt8.t) =
+  [%#sarray'0] inv_Seq_u8 (Slice64.view self) /\ Seq.length (Slice64.view self) = UInt64.t'int (16: UInt64.t)
+
+predicate inv_array_u8_16 [@inline:trivial] (_1: Slice64.array UInt8.t) = invariant_array_u8_16 _1
+
+meta "rewrite_def" predicate inv_array_u8_16
+
+function index_array_u8_16 [@inline:trivial] (self: Slice64.array UInt8.t) (ix: int) : UInt8.t =
+  [%#sarray] Seq.get (Slice64.view self) ix
+
+meta "rewrite_def" function index_array_u8_16
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let entry_type_guid [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2272 0 2272 48]
+  (tg: Slice64.array UInt8.t) (return (x: Slice64.array UInt8.t)) =
+{[@stop_split] [@expl:entry_type_guid 'tg' type invariant] [%#slib] inv_array_u8_16 tg}
+  (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- tg ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: Slice64.array UInt8.t = Any.any_l () | & tg: Slice64.array UInt8.t = tg ])
+  [ return (result: Slice64.array UInt8.t) ->
+  {[@stop_split] [@expl:entry_type_guid ensures] ([@stop_split] [@expl:entry_type_guid result type invariant] [%#slib'0] inv_array_u8_16 result)
+    /\ ([@stop_split] [@expl:entry_type_guid ensures] [%#slib'1] forall k: int. 0 <= k /\ k < 16
+      -> index_array_u8_16 result k = index_array_u8_16 tg k)}
+    (! return {result}) ]

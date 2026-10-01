@@ -1,0 +1,41 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3903 0 3903 58 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3904 32 3904 35
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3904 15 3904 36
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3899 10 3899 26
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3900 10 3900 47
+let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3901 10 3901 26
+let%span slib'4 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3902 10 3902 25
+let%span slib'5 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3911 10 3911 26
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+let sector_size_used (cfg_ss: UInt32.t) (return (x: UInt32.t)) = any
+  [ return (result: UInt32.t) -> {[@stop_split] [@expl:sector_size_used ensures] [%#slib'5] result = cfg_ss}
+    (! return {result}) ]
+
+type tup2_u32_usize = { f0: UInt32.t; f1: UInt64.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let refute_dpm_inv_sector_size_domain [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3903 0 3903 58]
+  (return (x: tup2_u32_usize)) = (! bb0
+  [ bb0 = s0
+    [ s0 = sector_size_used [%#slib'0] {[%#slib] (256: UInt32.t)} (fun (_x: UInt32.t) -> [ &used <- _x ] s1)
+    | s1 = [ &mbr_len <- UInt64.of_int (UInt32.t'int used) ] s2
+    | s2 = [ &_ret <- { f0 = used; f1 = mbr_len } ] s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: tup2_u32_usize = Any.any_l () | & used: UInt32.t = Any.any_l () | & mbr_len: UInt64.t = Any.any_l () ])
+  [ return (result: tup2_u32_usize) ->
+  {[@stop_split] [@expl:refute_dpm_inv_sector_size_domain ensures] ([@stop_split] [@expl:refute_dpm_inv_sector_size_domain ensures #0] [%#slib'1] UInt32.t'int result.f0
+      = 256)
+    /\ ([@stop_split] [@expl:refute_dpm_inv_sector_size_domain ensures #1] [%#slib'2] UInt32.t'int result.f0 <> 512
+      /\ UInt32.t'int result.f0 <> 4096)
+    /\ ([@stop_split] [@expl:refute_dpm_inv_sector_size_domain ensures #2] [%#slib'3] UInt64.t'int result.f1 = 256)
+    /\ ([@stop_split] [@expl:refute_dpm_inv_sector_size_domain ensures #3] [%#slib'4] UInt64.t'int result.f1 < 512)}
+    (! return {result}) ]

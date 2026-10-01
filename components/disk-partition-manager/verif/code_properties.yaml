@@ -1,0 +1,1381 @@
+# Blind, code-only extraction of verifiable properties for the Certus component
+# disk-partition-manager. This pass read ONLY the two implementation files and the
+# IPartitionTable interface declaration; it did not read the component specification,
+# its README, or any other extraction. Doc-comments found in the sources were treated
+# as claims made by the code, not as requirements, and every place where a doc-comment
+# promises more than the code delivers is recorded as its own record below.
+# Neither source file contains a unit-test module, so no test-derived obligations exist.
+component:  disk-partition-manager
+source:     code
+artifact:
+  - components/disk-partition-manager/src/lib.rs
+  - components/disk-partition-manager/src/gpt.rs
+  - components/interfaces/src/ipartition_table.rs
+pin:        c788d07c
+method:     blind-extraction
+generated:  2026-09-29
+counts: {total: 124, methods: 4, verifiable: 114, not_verifiable: 10}
+properties:
+
+  # ---------------------------------------------------------------- initialize
+  - id:         DPM-INIT-PRE-BOUND
+    subject:    initialize
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      Reading the partition table may only be attempted once the manager's block-device
+      slot has actually been wired to a block device; the operation asks that slot for
+      the device before it does anything else, so a manager whose slot was never
+      connected cannot perform a read.
+    traces:     ["initialize lib.rs:69"]
+
+  - id:         DPM-INIT-POST-CACHE
+    subject:    initialize
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      When reading the partition table succeeds, the manager remembers a copy of the
+      table it just read and returns an identical copy to the caller, so that later
+      questions about how many partitions exist, or about one particular partition,
+      are answered from exactly the table that was returned.
+    traces:     ["initialize lib.rs:82", "initialize lib.rs:83"]
+
+  - id:         DPM-INIT-POST-SECTORSIZE
+    subject:    initialize
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The sector size reported in the table returned by a successful read is exactly the
+      sector size the connected device reported for the namespace being read, not a
+      guess or a constant.
+    traces:     ["initialize lib.rs:73", "try_read_gpt_at gpt.rs:148"]
+
+  - id:         DPM-INIT-ERR-UNBOUND
+    subject:    initialize
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If the manager's block-device slot has not been connected, reading the partition
+      table fails with a "not initialized" error whose message says the block device is
+      not connected, and nothing is read from any disk.
+    traces:     ["initialize lib.rs:69", "initialize lib.rs:70"]
+
+  - id:         DPM-INIT-ERR-GEOMETRY
+    subject:    initialize
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If the connected device cannot tell the manager its sector size or its total
+      number of sectors, reading the partition table fails with an input/output error
+      that carries the device's own explanation, and no partition data is read.
+    traces:     ["initialize lib.rs:73", "initialize lib.rs:76"]
+
+  - id:         DPM-INIT-ERR-CONNECT
+    subject:    initialize
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If the manager cannot open a command and completion channel pair to the block
+      device, reading the partition table fails with an input/output error carrying the
+      device's explanation.
+    traces:     ["initialize lib.rs:80", "GptManager::new gpt.rs:55"]
+
+  - id:         DPM-INIT-ERR-NOGPT
+    subject:    initialize
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If neither the partition table at the start of the disk nor the spare copy at the
+      end of the disk can be validated, reading fails with a "no partition table" error
+      stating that neither the primary nor the backup header is valid.
+    traces:     ["read_gpt gpt.rs:90", "read_gpt gpt.rs:92"]
+
+  - id:         DPM-INIT-ERR-MASKED-IO
+    subject:    initialize
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      SURPRISE - error masking. When the attempt to read the spare copy of the partition
+      table at the end of the disk fails, every possible cause is collapsed into the
+      single answer "no partition table", including a genuine hardware or channel
+      failure; a caller therefore cannot distinguish an unformatted disk from a disk the
+      manager simply failed to read, and the convenience entry point reacts to that
+      answer by reformatting the disk.
+    traces:     ["read_gpt gpt.rs:91", "initialize_or_format lib.rs:57"]
+
+  - id:         DPM-INIT-FRAME-STATE
+    subject:    initialize
+    kind:       frame
+    verifiable: true
+    statement:  >
+      If reading the partition table fails for any reason, the table the manager was
+      already remembering is left exactly as it was; the remembered table is replaced
+      only on the success path, so a failed read never leaves a half-updated cache.
+    traces:     ["initialize lib.rs:69", "initialize lib.rs:82"]
+
+  - id:         DPM-INIT-FRAME-NSID
+    subject:    initialize
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Reading the partition table never changes which NVMe namespace the manager is
+      configured to use; it only consults that setting.
+    traces:     ["initialize lib.rs:72", "get_ns_id lib.rs:34"]
+
+  - id:         DPM-INIT-FRAME-READONLY
+    subject:    initialize
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Reading the partition table never modifies the disk - it issues only read commands
+      and no write commands, whether it succeeds, falls back to the spare copy, or fails
+      outright.
+    traces:     ["read_gpt gpt.rs:66", "try_read_gpt_at gpt.rs:103", "read_bytes gpt.rs:464"]
+
+  - id:         DPM-INIT-ERR-POISON-PANIC
+    subject:    initialize
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      SURPRISE - a panic where an error is expected. The manager stores its remembered
+      table behind a lock that it unwraps without handling failure, so if any thread
+      panicked while holding that lock, a later read aborts the calling thread by
+      panicking instead of returning one of the declared partition-table errors.
+    traces:     ["initialize lib.rs:82", "partition_info lib.rs:98", "num_partitions lib.rs:114"]
+
+  # -------------------------------------------------------------------- format
+  - id:         DPM-FORMAT-PRE-BOUND
+    subject:    format
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      Writing a new partition table may only be attempted once the manager's
+      block-device slot has been wired to a block device; the slot is consulted before
+      any layout work is done.
+    traces:     ["format lib.rs:87"]
+
+  - id:         DPM-FORMAT-ERR-UNBOUND
+    subject:    format
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If the manager's block-device slot has not been connected, writing a new partition
+      table fails with a "not initialized" error and nothing at all is written to any
+      disk.
+    traces:     ["format lib.rs:87", "format lib.rs:88"]
+
+  - id:         DPM-FORMAT-PRE-SECTORSIZE
+    subject:    format
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      SURPRISE - missing guard and unchecked indexing. The caller must supply a sector
+      size that is non-zero and at least 512 bytes, because the code divides by the
+      sector size and writes to fixed byte positions 446 through 511 of a buffer whose
+      length is the sector size; nothing in the component ever checks the value, even
+      though the declared configuration documents it as being 512 or 4096, so a sector
+      size of zero divides by zero and any size below 512 writes past the end of the
+      buffer - both crash the caller instead of returning the declared layout error.
+    traces:     ["entry_sectors gpt.rs:326", "write_protective_mbr gpt.rs:330", "write_protective_mbr gpt.rs:351", "ipartition_table.rs:39"]
+
+  - id:         DPM-FORMAT-PRE-GEOMETRY
+    subject:    format
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      SURPRISE - arithmetic performed before the guard meant to validate it. The caller
+      must supply a total sector count large enough to hold two copies of the partition
+      entry array plus the two headers, because the last usable sector is computed by
+      subtracting those amounts from the total before the "device too small" check runs;
+      for a small total the subtraction goes below zero, which either crashes or wraps
+      around to a huge number that then slips past the very check intended to reject it.
+    traces:     ["write_gpt gpt.rs:158", "write_gpt gpt.rs:160"]
+
+  - id:         DPM-FORMAT-PRE-MAXPARTS
+    subject:    format
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      SURPRISE - missing guard leading to out-of-range writing. The caller must request
+      no more than 128 partitions, because the buffer the entries are written into is
+      sized for exactly 128 of them while the entry list is built with one element per
+      requested partition and only padded, never capped; asking for a 129th partition
+      writes past the end of that buffer and crashes rather than returning the declared
+      layout error.
+    traces:     ["compute_partition_layout gpt.rs:310", "serialize_entries gpt.rs:433", "serialize_entries gpt.rs:437"]
+
+  - id:         DPM-FORMAT-ERR-LAYOUT-TOOSMALL
+    subject:    format
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If the device does not leave at least one sector of usable space between the
+      partition table structures at the two ends of the disk, writing a new table fails
+      with a layout error saying the device is too small, and nothing is written.
+    traces:     ["write_gpt gpt.rs:160", "write_gpt gpt.rs:161"]
+
+  - id:         DPM-FORMAT-ERR-LAYOUT-MULTIREST
+    subject:    format
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If the request asks for more than one partition to take "all remaining space" by
+      giving its size as zero, writing a new table fails with a layout error saying at
+      most one partition may do so, and nothing is written.
+    traces:     ["compute_partition_layout gpt.rs:256", "compute_partition_layout gpt.rs:257"]
+
+  - id:         DPM-FORMAT-ERR-LAYOUT-OVERSUB
+    subject:    format
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If the explicitly sized partitions together need more sectors than the disk has
+      usable space for, writing a new table fails with a layout error that reports both
+      the number of sectors needed and the number available, and nothing is written.
+    traces:     ["compute_partition_layout gpt.rs:270", "compute_partition_layout gpt.rs:271"]
+
+  - id:         DPM-FORMAT-ERR-LAYOUT-UNREACHABLE
+    subject:    format
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      SURPRISE - a declared error that can never happen. The layout code contains a
+      per-partition check that reports "this partition needs N sectors but only M
+      remain", but it can never fire, because the total demand was already compared
+      against the usable space and the space-filling partition is given exactly the
+      leftover, so the running total can never exceed what remains; the message is
+      unreachable dead code and any test expecting it will never see it.
+    traces:     ["compute_partition_layout gpt.rs:286", "compute_partition_layout gpt.rs:270", "compute_partition_layout gpt.rs:277"]
+
+  - id:         DPM-FORMAT-POST-CONTIGUOUS
+    subject:    format
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      On success the partitions are laid out back to back with no gaps, in the same
+      order the caller listed them, with the first one starting at the first usable
+      sector and each later one starting on the sector immediately after the previous
+      one ends.
+    traces:     ["compute_partition_layout gpt.rs:247", "compute_partition_layout gpt.rs:293", "compute_partition_layout gpt.rs:305"]
+
+  - id:         DPM-FORMAT-POST-SIZE
+    subject:    format
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      On success every partition that was given an explicit size in bytes receives that
+      size rounded up to a whole number of sectors - never fewer sectors than requested,
+      and never more than one sector of rounding slack.
+    traces:     ["compute_partition_layout gpt.rs:283", "compute_partition_layout gpt.rs:267"]
+
+  - id:         DPM-FORMAT-POST-REST
+    subject:    format
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      On success the one partition asking for "all remaining space" receives exactly the
+      usable sectors left over after every explicitly sized partition has been satisfied,
+      so that the whole usable area of the disk is consumed and nothing is wasted.
+    traces:     ["compute_partition_layout gpt.rs:277", "compute_partition_layout gpt.rs:281"]
+
+  - id:         DPM-FORMAT-POST-WITHIN
+    subject:    format
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      On success every partition lies wholly inside the usable region of the disk, which
+      begins after the primary header and primary entry array and ends before the backup
+      entry array and backup header, so no partition ever overlaps the partition table
+      structures themselves.
+    traces:     ["write_gpt gpt.rs:157", "write_gpt gpt.rs:158", "compute_partition_layout gpt.rs:245"]
+
+  - id:         DPM-FORMAT-POST-WRITEORDER
+    subject:    format
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      On success the manager has written five things to the disk - a protective record
+      in the very first sector, the primary header in the second sector, the primary
+      table of entries starting in the third sector, a second copy of that table just
+      before the end of the disk, and the backup header in the very last sector - and it
+      writes them in that order.
+    traces:     ["write_gpt gpt.rs:204", "write_gpt gpt.rs:207", "write_gpt gpt.rs:210", "write_gpt gpt.rs:213", "write_gpt gpt.rs:216"]
+
+  - id:         DPM-FORMAT-POST-CRC
+    subject:    format
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      On success each header written to disk carries a checksum of its own first 92
+      bytes computed with the checksum field itself zeroed, plus a checksum of the entry
+      table bytes that were written, so that a later read of that same disk recomputes
+      both checksums and finds them matching.
+    traces:     ["write_gpt gpt.rs:171", "write_gpt gpt.rs:188", "serialize_header_with_crc gpt.rs:426", "try_read_gpt_at gpt.rs:109"]
+
+  - id:         DPM-FORMAT-POST-MIRROR
+    subject:    format
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      On success the spare copy of the entry table stored near the end of the disk is
+      byte-for-byte identical to the primary copy stored near the beginning.
+    traces:     ["write_gpt gpt.rs:210", "write_gpt gpt.rs:213"]
+
+  - id:         DPM-FORMAT-POST-HEADERPAIR
+    subject:    format
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      On success the two headers each record their own location and point at each other -
+      the primary says it lives in sector 1 and that its partner is the last sector,
+      while the backup says it lives in the last sector and that its partner is sector 1 -
+      and the two headers agree on every other field.
+    traces:     ["write_gpt gpt.rs:180", "write_gpt gpt.rs:181", "write_gpt gpt.rs:196", "write_gpt gpt.rs:199"]
+
+  - id:         DPM-FORMAT-POST-CACHE
+    subject:    format
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      When writing a new partition table succeeds, the manager remembers the newly
+      created table and returns an identical copy, so later questions about partitions
+      are answered from the table that was just written.
+    traces:     ["format lib.rs:93", "format lib.rs:94"]
+
+  - id:         DPM-FORMAT-POST-PADDING
+    subject:    format
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      On success the entry table written to disk always contains exactly 128 slots, with
+      every slot beyond the partitions the caller asked for filled entirely with zero
+      bytes.
+    traces:     ["compute_partition_layout gpt.rs:310", "compute_partition_layout gpt.rs:311", "serialize_entries gpt.rs:433"]
+
+  - id:         DPM-FORMAT-POST-MBR
+    subject:    format
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      On success the first sector of the disk holds a protective record marked as
+      non-bootable, describing a single region of type 0xEE that starts at sector 1 and
+      spans the rest of the disk capped at the largest value that fits in four bytes,
+      ending with the two signature bytes 0x55 and 0xAA at offsets 510 and 511, with
+      every other byte of that sector zero.
+    traces:     ["write_protective_mbr gpt.rs:334", "write_protective_mbr gpt.rs:339", "write_protective_mbr gpt.rs:345", "write_protective_mbr gpt.rs:347", "write_protective_mbr gpt.rs:351"]
+
+  - id:         DPM-FORMAT-POST-GUIDBITS
+    subject:    format
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Every identifier the component generates - the disk identifier and each
+      partition's own identifier - has its version marked as 4 and its variant marked as
+      1, matching the standard shape of a randomly generated universally unique
+      identifier.
+    traces:     ["generate_guid gpt.rs:571", "generate_guid gpt.rs:572"]
+
+  - id:         DPM-FORMAT-GUID-DEGRADED
+    subject:    format
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      SURPRISE - silently ignored failure with no uniqueness guarantee. The identifier
+      generator opens the system randomness source and throws away the result of reading
+      from it, so if that source cannot be opened or returns fewer bytes than asked for,
+      the generated identifier is a fixed almost-all-zero value; nothing in the component
+      ever checks that two generated identifiers differ, so a whole disk can end up with
+      every partition sharing one identifier.
+    traces:     ["generate_guid gpt.rs:566", "generate_guid gpt.rs:568"]
+
+  - id:         DPM-FORMAT-FRAME-STATE
+    subject:    format
+    kind:       frame
+    verifiable: true
+    statement:  >
+      If writing a new partition table fails for any reason, the table the manager was
+      already remembering is left untouched, because the remembered table is replaced
+      only after every disk write has succeeded.
+    traces:     ["format lib.rs:87", "format lib.rs:93"]
+
+  - id:         DPM-FORMAT-NO-ROLLBACK
+    subject:    format
+    kind:       frame
+    verifiable: true
+    statement:  >
+      SURPRISE - partial change left behind on the failure path. Writing a new partition
+      table performs five separate disk writes one after another and gives up at the
+      first one that fails, with no attempt to undo the writes that already landed, so a
+      failure part-way through leaves the disk in a mixed state - for example the
+      protective first sector and the primary header replaced while the backup header
+      still describes the old layout - and the caller is told only that a write failed.
+    traces:     ["write_gpt gpt.rs:204", "write_gpt gpt.rs:207", "write_gpt gpt.rs:216"]
+
+  - id:         DPM-FORMAT-STALE-CACHE
+    subject:    format
+    kind:       frame
+    verifiable: true
+    statement:  >
+      SURPRISE - a remembered answer that no longer matches the disk. Because the
+      remembered table is only replaced on full success, a formatting attempt that fails
+      after it has already overwritten part of the disk leaves the manager still handing
+      out the previous table, so questions about partitions are answered from a
+      description that the disk no longer matches.
+    traces:     ["format lib.rs:93", "partition_info lib.rs:99", "num_partitions lib.rs:115"]
+
+  - id:         DPM-FORMAT-IGNORES-DEVICE
+    subject:    format
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      SURPRISE - caller-supplied geometry is trusted without checking. Writing a new
+      partition table takes the sector size, total sector count and namespace number
+      from the caller's request and never compares them with what the connected device
+      actually reports, even though the read path does ask the device for exactly those
+      two numbers; a caller who overstates the disk size has a table written that
+      describes sectors the device does not have.
+    traces:     ["format lib.rs:91", "initialize lib.rs:73", "initialize lib.rs:76"]
+
+  - id:         DPM-FORMAT-NSID-DIVERGENCE
+    subject:    format
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      SURPRISE - two operations can act on two different namespaces. Reading the
+      partition table uses the namespace number configured on the manager, defaulting to
+      1, while writing a new table uses the namespace number carried inside the caller's
+      request and ignores the configured one entirely, so a table can be written to one
+      namespace and then read back from another with no warning that they differ.
+    traces:     ["initialize lib.rs:72", "format lib.rs:91", "set_ns_id lib.rs:30"]
+
+  - id:         DPM-FORMAT-ZEROGUID-DROPPED
+    subject:    format
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      SURPRISE - a requested partition silently disappears from the result. The table
+      returned after formatting lists only those entries whose type identifier is not all
+      zero bytes, so a caller who asks for a partition with an all-zero type identifier
+      has disk space reserved for it on the medium but receives a result that does not
+      mention it, and every later partition is reported under a different position than
+      the caller asked for.
+    traces:     ["write_gpt gpt.rs:222", "try_read_gpt_at gpt.rs:135"]
+
+  - id:         DPM-FORMAT-ZEROREST-UNDERFLOW
+    subject:    format
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      SURPRISE - subtraction below zero on a reachable path. If the caller asks for a
+      partition that takes all remaining space but the explicitly sized partitions
+      already consume the whole disk, that partition is given zero sectors and its end
+      sector is computed as one before its start; the later conversion of start and end
+      into a sector count then subtracts a larger number from a smaller one, which
+      crashes the caller rather than reporting a layout error.
+    traces:     ["compute_partition_layout gpt.rs:293", "write_gpt gpt.rs:226"]
+
+  - id:         DPM-FORMAT-SUM-OVERFLOW
+    subject:    format
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      SURPRISE - unguarded counter arithmetic. The total sector demand of the explicitly
+      sized partitions is accumulated by plain addition with no overflow check, so a
+      request combining very large byte sizes with a very small sector size - a
+      combination the component never rejects - can make that running total wrap around
+      or crash before the "does it fit" comparison is ever reached.
+    traces:     ["compute_partition_layout gpt.rs:263", "compute_partition_layout gpt.rs:268"]
+
+  - id:         DPM-FORMAT-NAME-TRUNCATED
+    subject:    format
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      SURPRISE - silent truncation where the documentation implies a limit. A partition
+      name is stored as at most 36 two-byte characters; the interface documents the name
+      as having a maximum of 36 characters but the code neither rejects nor reports a
+      longer name, it simply keeps the first 36 units and discards the rest, and cutting
+      at that point can split a character that needs two units, leaving a damaged
+      character that reads back as a replacement symbol.
+    traces:     ["encode_utf16le_name gpt.rs:578", "ipartition_table.rs:32", "decode_utf16le_name gpt.rs:594"]
+
+  # ------------------------------------------------------------ partition_info
+  - id:         DPM-PINFO-PRE-INIT
+    subject:    partition_info
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      Asking about one partition is only allowed after a successful read or a successful
+      format has given the manager a table to answer from.
+    traces:     ["partition_info lib.rs:99"]
+
+  - id:         DPM-PINFO-ERR-NOTINIT
+    subject:    partition_info
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If no partition table has been read or written yet, asking about one partition
+      fails with a "not initialized" error telling the caller to read the table first.
+    traces:     ["partition_info lib.rs:99", "partition_info lib.rs:101"]
+
+  - id:         DPM-PINFO-ERR-RANGE
+    subject:    partition_info
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If the position asked about is not smaller than the number of partitions the
+      manager knows about, the request fails with an "invalid partition" error whose
+      message repeats the position that was out of range.
+    traces:     ["partition_info lib.rs:104", "partition_info lib.rs:107"]
+
+  - id:         DPM-PINFO-POST
+    subject:    partition_info
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      For a position smaller than the number of known partitions, the request returns a
+      copy of exactly that entry of the remembered table, with the same start sector,
+      sector count, type identifier, unique identifier and name.
+    traces:     ["partition_info lib.rs:102", "partition_info lib.rs:105"]
+
+  - id:         DPM-PINFO-FRAME
+    subject:    partition_info
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Asking about one partition changes nothing - it neither alters the remembered
+      table nor the configured namespace, and it issues no command to the disk.
+    traces:     ["partition_info lib.rs:97", "partition_info lib.rs:105"]
+
+  - id:         DPM-PINFO-INDEX-MISMATCH
+    subject:    partition_info
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      SURPRISE - two different meanings of "index" that can disagree. The position
+      recorded inside each returned partition description is the slot number it occupied
+      in the on-disk table, while the position this operation accepts is a place in the
+      shorter list of non-empty partitions; when a leading slot is empty the two numbers
+      differ, so feeding a partition's own reported position straight back in can select
+      a different partition or fail as out of range.
+    traces:     ["try_read_gpt_at gpt.rs:137", "partition_info lib.rs:104"]
+
+  - id:         DPM-PINFO-SLOT-REUSE
+    subject:    partition_info
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      SURPRISE - a name that is only a position, over positions that get reused. A
+      partition can be referred to only by its position in the table, and formatting the
+      disk again writes a brand-new set of partitions into the same positions, so the
+      very same request can return a completely different partition before and after a
+      reformat with nothing in the answer marking the change; each partition does carry
+      a freshly generated unique identifier that could tell the two apart, but no
+      operation ever accepts or checks that identifier.
+    traces:     ["partition_info lib.rs:104", "compute_partition_layout gpt.rs:298", "ipartition_table.rs:11"]
+
+  # ----------------------------------------------------------- num_partitions
+  - id:         DPM-NUMPARTS-PRE-INIT
+    subject:    num_partitions
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      Asking how many partitions there are is only allowed after a successful read or a
+      successful format has given the manager a table to count.
+    traces:     ["num_partitions lib.rs:115"]
+
+  - id:         DPM-NUMPARTS-ERR-NOTINIT
+    subject:    num_partitions
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If no partition table has been read or written yet, asking how many partitions
+      exist fails with a "not initialized" error telling the caller to read the table
+      first.
+    traces:     ["num_partitions lib.rs:115", "num_partitions lib.rs:117"]
+
+  - id:         DPM-NUMPARTS-POST
+    subject:    num_partitions
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      When a table is available, the count returned is exactly the number of partitions
+      in the remembered table - the same table that supplies answers about individual
+      partitions.
+    traces:     ["num_partitions lib.rs:118"]
+
+  - id:         DPM-NUMPARTS-FRAME
+    subject:    num_partitions
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Asking how many partitions there are changes nothing - neither the remembered
+      table nor the configured namespace - and issues no command to the disk.
+    traces:     ["num_partitions lib.rs:113", "num_partitions lib.rs:118"]
+
+  - id:         DPM-NUMPARTS-CAST
+    subject:    num_partitions
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      SURPRISE - a narrowing conversion on the returned count. The number of remembered
+      partitions is held as a machine-sized count and handed back as a four-byte number
+      without any check, so a table holding more partitions than fits in four bytes
+      would be reported with a silently wrong, wrapped-around count; the read path places
+      no upper bound on how many partitions a disk may claim, so the count is not
+      guaranteed small by construction.
+    traces:     ["num_partitions lib.rs:118", "try_read_gpt_at gpt.rs:131"]
+
+  - id:         DPM-NUMPARTS-AGREES-WITH-PINFO
+    subject:    num_partitions
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The reported count and the per-partition lookup always agree - every position
+      below the reported count returns a partition, and every position at or above it is
+      rejected as out of range - because both answer from the same remembered table.
+    traces:     ["num_partitions lib.rs:118", "partition_info lib.rs:104"]
+
+  # ------------------------------------------------------ initialize_or_format
+  - id:         DPM-IOF-POST-FORCE
+    subject:    initialize_or_format
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      When the caller demands a fresh start, the convenience entry point writes a new
+      partition table without first reading the existing one, and reports that a new
+      table was created.
+    traces:     ["initialize_or_format lib.rs:50", "initialize_or_format lib.rs:52"]
+
+  - id:         DPM-IOF-POST-EXISTING
+    subject:    initialize_or_format
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      When the caller does not demand a fresh start and an existing partition table is
+      read successfully, the convenience entry point returns that table, reports that no
+      new table was created, and writes nothing to the disk.
+    traces:     ["initialize_or_format lib.rs:55", "initialize_or_format lib.rs:56"]
+
+  - id:         DPM-IOF-POST-FALLBACK
+    subject:    initialize_or_format
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      When reading the existing table reports either that there is no table or that the
+      table is corrupt, the convenience entry point writes a new table using the supplied
+      layout and reports that a new table was created.
+    traces:     ["initialize_or_format lib.rs:57", "initialize_or_format lib.rs:59"]
+
+  - id:         DPM-IOF-ERR-PROPAGATE
+    subject:    initialize_or_format
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Any failure from reading the existing table other than "no table" or "corrupt
+      table" - for example an unconnected device or an input/output failure - is passed
+      straight back to the caller unchanged, and no attempt is made to write a new table
+      in those cases.
+    traces:     ["initialize_or_format lib.rs:62"]
+
+  - id:         DPM-IOF-FLAG-MEANING
+    subject:    initialize_or_format
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The flag the convenience entry point returns is true exactly when it has written a
+      new partition table and false exactly when it returned a table that was already on
+      the disk, which is what lets callers decide whether the components layered above
+      must also rebuild their own on-disk structures.
+    traces:     ["initialize_or_format lib.rs:52", "initialize_or_format lib.rs:56", "initialize_or_format lib.rs:60"]
+
+  - id:         DPM-IOF-DESTRUCTIVE-FALLBACK
+    subject:    initialize_or_format
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      SURPRISE - automatic destruction of possibly live data. Because a corrupt table
+      and a merely unreadable backup copy both lead to the same answer, the convenience
+      entry point reformats the disk in both situations without asking anyone, so a disk
+      whose partition data is still present but temporarily unreadable is overwritten and
+      its contents become unreachable.
+    traces:     ["initialize_or_format lib.rs:57", "initialize_or_format lib.rs:59", "read_gpt gpt.rs:91"]
+
+  - id:         DPM-IOF-DOC-CLAIM
+    subject:    initialize_or_format
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      SURPRISE - the documentation understates what the code does. The comment above the
+      convenience entry point says a new table is created when a fresh start is demanded
+      or when no valid table exists, but the code also creates one when the table is
+      present and merely reports itself as corrupt, which is a destructive action the
+      comment does not mention.
+    traces:     ["initialize_or_format lib.rs:38", "initialize_or_format lib.rs:57"]
+
+  # --------------------------------------------------------- namespace setting
+  - id:         DPM-NSID-DEFAULT
+    subject:    set_ns_id
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      If the namespace number is never configured, every read of the partition table
+      uses namespace 1.
+    traces:     ["get_ns_id lib.rs:35", "initialize lib.rs:72"]
+
+  - id:         DPM-NSID-SET
+    subject:    set_ns_id
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      After the namespace number is configured to a particular value, every later read
+      of the partition table queries the device and reads sectors using that value, and
+      the most recent configuration wins over earlier ones.
+    traces:     ["set_ns_id lib.rs:31", "get_ns_id lib.rs:35", "initialize lib.rs:72"]
+
+  - id:         DPM-NSID-FRAME
+    subject:    set_ns_id
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Configuring the namespace number changes only that setting - it does not alter the
+      remembered partition table and it issues no command to the disk.
+    traces:     ["set_ns_id lib.rs:30", "set_ns_id lib.rs:31"]
+
+  - id:         DPM-NSID-UNVALIDATED
+    subject:    set_ns_id
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      SURPRISE - no validation of a value that has illegal cases. The namespace number
+      is accepted and stored without any check, including the value zero, which is not a
+      legal NVMe namespace identifier, so the failure surfaces only later as an
+      input/output error from the device rather than being rejected at the point it was
+      supplied.
+    traces:     ["set_ns_id lib.rs:30", "set_ns_id lib.rs:31"]
+
+  # ------------------------------------------------------------- read internals
+  - id:         DPM-READ-PRIMARY-FIRST
+    subject:    read_gpt
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Reading a partition table always tries the copy near the start of the disk first,
+      and only consults the spare copy near the end of the disk if the first attempt was
+      rejected.
+    traces:     ["read_gpt gpt.rs:68", "read_gpt gpt.rs:90"]
+
+  - id:         DPM-READ-FALLBACK-TRIGGER
+    subject:    read_gpt
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The spare copy is consulted for exactly two reasons - the first copy failed its
+      checksum, or the first copy did not carry the expected signature - while any other
+      failure such as an input/output error on the first copy is reported immediately
+      without touching the spare copy.
+    traces:     ["read_gpt gpt.rs:79", "read_gpt gpt.rs:83"]
+
+  - id:         DPM-READ-BACKUP-LOCATION
+    subject:    read_gpt
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The spare header is looked for in the very last sector of the disk and the spare
+      entry table in the sectors immediately before it, which is exactly where the
+      formatting path puts them, so a table this component wrote can always be recovered
+      from its spare copy.
+    traces:     ["read_gpt gpt.rs:87", "read_gpt gpt.rs:89", "write_gpt gpt.rs:194"]
+
+  - id:         DPM-READ-BACKUP-UNDERFLOW
+    subject:    read_gpt
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      SURPRISE - subtraction below zero with no guard at all. The location of the spare
+      copy is computed by subtracting one, and then the size of the entry table, from the
+      device's sector count, with nothing checking that the device is big enough; on a
+      device reporting zero sectors, or fewer sectors than the entry table needs, this
+      arithmetic crashes or wraps to an absurd sector number that is then read from.
+    traces:     ["read_gpt gpt.rs:87", "read_gpt gpt.rs:89"]
+
+  - id:         DPM-READ-ERR-SIGNATURE
+    subject:    parse_header
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If the first eight bytes of a header sector are not the expected partition-table
+      signature, parsing fails with a "no partition table" error that reports the value
+      actually found.
+    traces:     ["parse_header gpt.rs:363", "parse_header gpt.rs:364"]
+
+  - id:         DPM-READ-ERR-SHORT
+    subject:    parse_header
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If fewer than 92 bytes of header were obtained, parsing fails with a "corrupt
+      table" error saying the header is too short, and no byte beyond what was read is
+      touched - this is the check that makes all the fixed-offset reads that follow safe.
+    traces:     ["parse_header gpt.rs:358", "parse_header gpt.rs:362"]
+
+  - id:         DPM-READ-ERR-HEADERCRC
+    subject:    try_read_gpt_at
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If the checksum stored in a header does not match the checksum recomputed over the
+      header's first 92 bytes with the checksum field treated as zero, the read fails
+      with a "corrupt table" error reporting both the stored and the computed value.
+    traces:     ["try_read_gpt_at gpt.rs:107", "try_read_gpt_at gpt.rs:110"]
+
+  - id:         DPM-READ-ERR-ENTRYCRC
+    subject:    try_read_gpt_at
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If the checksum stored in the header for the table of partition entries does not
+      match the checksum recomputed over the entry bytes just read, the read fails with a
+      "corrupt table" error reporting both values, and no partition is reported.
+    traces:     ["try_read_gpt_at gpt.rs:123", "try_read_gpt_at gpt.rs:124"]
+
+  - id:         DPM-READ-POST-FILTER
+    subject:    try_read_gpt_at
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      A successful read reports one partition for every entry slot whose type identifier
+      is not all zero bytes, giving each the slot number it occupied, its start sector
+      taken from the entry, a sector count of the last sector minus the first plus one,
+      both identifiers as stored, and its name decoded from two-byte characters up to the
+      first zero character.
+    traces:     ["try_read_gpt_at gpt.rs:132", "try_read_gpt_at gpt.rs:139", "decode_utf16le_name gpt.rs:589"]
+
+  - id:         DPM-READ-ENTRYLBA-IGNORED
+    subject:    try_read_gpt_at
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      SURPRISE - a header field that is read but never used. The header records where its
+      table of partition entries lives, and the code parses that field and then ignores
+      it, always reading the primary entries from sector 2 and the spare entries from a
+      position computed from the disk size; a table written by any other tool that placed
+      its entries elsewhere would be read from the wrong sectors and rejected as corrupt.
+    traces:     ["parse_header gpt.rs:380", "read_gpt gpt.rs:68", "read_gpt gpt.rs:89"]
+
+  - id:         DPM-READ-COUNT-UNVALIDATED
+    subject:    try_read_gpt_at
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      SURPRISE - untrusted on-disk numbers used directly to size a read. The number of
+      entry slots and the size of each slot are taken from the header on the disk and
+      multiplied together to decide how many bytes to read, with no check against the 128
+      slots of 128 bytes each that this component itself always writes, so a damaged or
+      hostile header can make the component reserve an enormous buffer and issue an
+      enormous number of single-sector reads before any checksum is ever examined.
+    traces:     ["try_read_gpt_at gpt.rs:118", "try_read_gpt_at gpt.rs:120", "read_bytes gpt.rs:453"]
+
+  - id:         DPM-READ-STRIDE-MISMATCH
+    subject:    parse_entries
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      SURPRISE - two different entry sizes used in one operation. The number of bytes to
+      read is computed from the entry size declared in the header, but the code that
+      splits those bytes into entries always steps forward by a fixed 128 bytes and stops
+      early when it runs out of data; if a header declares any other entry size, the
+      entries are cut at the wrong boundaries and the partitions reported are nonsense
+      rather than an error.
+    traces:     ["parse_entries gpt.rs:390", "parse_entries gpt.rs:391", "try_read_gpt_at gpt.rs:119"]
+
+  - id:         DPM-READ-NO-OVERLAP-CHECK
+    subject:    try_read_gpt_at
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      SURPRISE - no sanity checking of the geometry that was read. Partitions read from
+      a disk are reported exactly as stored with no check that they stay inside the
+      usable region the header itself declares, that they do not overlap one another, or
+      that they appear in increasing order, so a table that passes its checksums but
+      describes overlapping partitions is accepted and handed to callers as valid.
+    traces:     ["try_read_gpt_at gpt.rs:132", "try_read_gpt_at gpt.rs:146", "parse_header gpt.rs:377"]
+
+  - id:         DPM-READ-ENDING-UNDERFLOW
+    subject:    try_read_gpt_at
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      SURPRISE - subtraction below zero driven by on-disk data. A partition's sector
+      count is computed as its last sector minus its first sector plus one, with no check
+      that the last is not smaller than the first; a checksum-valid table whose entry has
+      those two fields the wrong way round therefore crashes the read instead of being
+      reported as corrupt.
+    traces:     ["try_read_gpt_at gpt.rs:139", "write_gpt gpt.rs:226"]
+
+  - id:         DPM-READ-INDEX-CAST
+    subject:    try_read_gpt_at
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      SURPRISE - a narrowing conversion on a value derived from disk contents. Each
+      reported partition's slot number is converted from a machine-sized counter to a
+      four-byte number with no check; because the number of slots is taken unvalidated
+      from the header, a header claiming more slots than fit in four bytes yields
+      partitions whose reported slot numbers have silently wrapped around.
+    traces:     ["try_read_gpt_at gpt.rs:137", "try_read_gpt_at gpt.rs:118"]
+
+  - id:         DPM-READ-REVISION-UNCHECKED
+    subject:    parse_header
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      SURPRISE - declared constants that are never used as checks on the read path. The
+      component defines the expected format revision and the expected header length and
+      stamps both into every header it writes, yet when reading a header it parses those
+      two fields and never compares them with the expected values, so a header announcing
+      a different revision or length is accepted as long as its checksums happen to
+      match.
+    traces:     ["parse_header gpt.rs:372", "parse_header gpt.rs:373", "gpt.rs:9", "gpt.rs:10"]
+
+  - id:         DPM-READ-MYLBA-UNCHECKED
+    subject:    parse_header
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      SURPRISE - self-location fields that are parsed but never verified. Each header
+      records which sector it lives in and where its partner copy lives, and the read
+      path never checks either against the sector it actually read from, so a spare
+      header that has been copied into the wrong place, or a pair of headers that
+      disagree about each other, is accepted without complaint.
+    traces:     ["parse_header gpt.rs:375", "parse_header gpt.rs:376", "try_read_gpt_at gpt.rs:103"]
+
+  - id:         DPM-READ-FIELDS-DROPPED
+    subject:    try_read_gpt_at
+    kind:       frame
+    verifiable: true
+    statement:  >
+      SURPRISE - information read from the disk is thrown away. The whole-disk identifier
+      and each partition's attribute flags are parsed out of the disk and then never
+      surfaced in the table handed to callers, and the formatting path always writes
+      attribute flags of zero, so a table written by another tool loses its attribute
+      flags whenever this component rewrites it.
+    traces:     ["parse_header gpt.rs:379", "parse_entries gpt.rs:400", "compute_partition_layout gpt.rs:301", "try_read_gpt_at gpt.rs:146"]
+
+  - id:         DPM-READ-ZEROCOUNT-ACCEPTED
+    subject:    try_read_gpt_at
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      SURPRISE - an empty table counts as a successful read. A header that declares zero
+      entry slots leads to reading zero bytes of entries, whose checksum is the checksum
+      of nothing, so if the header happens to record that same value the read succeeds and
+      reports a partition table with no partitions at all rather than reporting that no
+      usable table was found.
+    traces:     ["try_read_gpt_at gpt.rs:118", "try_read_gpt_at gpt.rs:123", "read_bytes gpt.rs:452"]
+
+  - id:         DPM-READ-CRC-SPAN
+    subject:    try_read_gpt_at
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The header checksum is always computed over exactly the first 92 bytes of the
+      header sector, regardless of any different header length the header itself declares,
+      which is consistent with the length this component writes but means a longer
+      standards-conformant header from another tool is judged by the wrong span of bytes
+      and reported as corrupt.
+    traces:     ["try_read_gpt_at gpt.rs:107", "serialize_header_with_crc gpt.rs:426", "parse_header gpt.rs:373"]
+
+  # ------------------------------------------------------- low level I/O layer
+  - id:         DPM-IO-READ-LENGTH
+    subject:    read_bytes
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      A successful multi-sector read returns exactly the number of bytes requested,
+      assembled in order from single-sector reads of consecutive sectors starting at the
+      requested sector, with the final sector contributing only as many bytes as are
+      still needed.
+    traces:     ["read_bytes gpt.rs:452", "read_bytes gpt.rs:456", "read_bytes gpt.rs:474"]
+
+  - id:         DPM-IO-ERR-DMA
+    subject:    read_bytes
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If a sector-sized transfer buffer cannot be allocated, the read or write fails with
+      an input/output error carrying the allocation failure's own description, and no
+      command is sent to the device for that sector.
+    traces:     ["read_bytes gpt.rs:457", "write_bytes gpt.rs:509", "alloc_dma_buffer gpt.rs:556"]
+
+  - id:         DPM-IO-READ-ERR-SEND
+    subject:    read_bytes
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If the read command cannot be handed to the device's command queue, the operation
+      fails with an input/output error saying the read command could not be sent.
+    traces:     ["read_bytes gpt.rs:468"]
+
+  - id:         DPM-IO-READ-ERR-DEVICE
+    subject:    read_bytes
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If the device reports that the read itself failed, or reports a generic error for
+      the command, the operation fails with an input/output error carrying the device's
+      own description of the failure.
+    traces:     ["read_bytes gpt.rs:472", "read_bytes gpt.rs:478"]
+
+  - id:         DPM-IO-READ-ERR-UNEXPECTED
+    subject:    read_bytes
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If the device answers a read command with some other kind of completion than a read
+      result or an error, the operation fails with an input/output error saying the
+      completion type was unexpected.
+    traces:     ["read_bytes gpt.rs:481", "read_bytes gpt.rs:482"]
+
+  - id:         DPM-IO-READ-ERR-CHANNEL
+    subject:    read_bytes
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If the completion channel from the device is closed or broken while waiting for a
+      read result, the operation fails with an input/output error saying the completion
+      could not be received.
+    traces:     ["read_bytes gpt.rs:486", "read_bytes gpt.rs:487"]
+
+  - id:         DPM-IO-WRITE-PAD
+    subject:    write_bytes
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      A write of data that does not fill a whole number of sectors pads the final sector
+      with zero bytes, so no leftover contents of the transfer buffer are ever written to
+      the disk.
+    traces:     ["write_bytes gpt.rs:507", "write_bytes gpt.rs:514", "write_bytes gpt.rs:515"]
+
+  - id:         DPM-IO-WRITE-LENGTH
+    subject:    write_bytes
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      A successful write places the supplied bytes onto consecutive sectors starting at
+      the requested sector, using as many sectors as are needed to hold them, in order
+      and with no sector skipped.
+    traces:     ["write_bytes gpt.rs:502", "write_bytes gpt.rs:505", "write_bytes gpt.rs:506"]
+
+  - id:         DPM-IO-WRITE-ERR-SEND
+    subject:    write_bytes
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If the write command cannot be handed to the device's command queue, the operation
+      fails with an input/output error saying the write command could not be sent.
+    traces:     ["write_bytes gpt.rs:530"]
+
+  - id:         DPM-IO-WRITE-ERR-DEVICE
+    subject:    write_bytes
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If the device reports that the write itself failed, or reports a generic error for
+      the command, the operation fails with an input/output error carrying the device's
+      own description of the failure.
+    traces:     ["write_bytes gpt.rs:534", "write_bytes gpt.rs:536"]
+
+  - id:         DPM-IO-WRITE-ERR-UNEXPECTED
+    subject:    write_bytes
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If the device answers a write command with some other kind of completion than a
+      write result or an error, the operation fails with an input/output error saying the
+      completion type was unexpected.
+    traces:     ["write_bytes gpt.rs:539", "write_bytes gpt.rs:540"]
+
+  - id:         DPM-IO-WRITE-ERR-CHANNEL
+    subject:    write_bytes
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If the completion channel from the device is closed or broken while waiting for a
+      write result, the operation fails with an input/output error saying the completion
+      could not be received.
+    traces:     ["write_bytes gpt.rs:544", "write_bytes gpt.rs:545"]
+
+  - id:         DPM-IO-WRITE-PARTIAL
+    subject:    write_bytes
+    kind:       frame
+    verifiable: true
+    statement:  >
+      SURPRISE - partial change left behind on the failure path. A multi-sector write
+      issues one command per sector and stops at the first failure, so when it reports an
+      error some of the earlier sectors have already been changed on the disk while the
+      rest still hold their old contents, and the caller is given no indication of how
+      far the write got.
+    traces:     ["write_bytes gpt.rs:504", "write_bytes gpt.rs:534", "write_bytes gpt.rs:552"]
+
+  - id:         DPM-IO-COMPLETION-PAIRING
+    subject:    read_bytes
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      SURPRISE - completions are matched by arrival order rather than by identity. After
+      sending a command, the code takes the very next completion off the channel and
+      assumes it belongs to that command, discarding the identifying information the
+      completion carries, so if the same channel ever delivers a completion for some
+      other command the result is silently attributed to the wrong sector.
+    traces:     ["read_bytes gpt.rs:470", "read_bytes gpt.rs:471", "write_bytes gpt.rs:532"]
+
+  - id:         DPM-IO-WRITE-SECTOR-TRUST
+    subject:    write_sector
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      SURPRISE - a single-sector helper that does not enforce single-sector data. The
+      helper named for writing one sector simply forwards to the multi-sector write and
+      never checks that the data it was given is exactly one sector long, so passing more
+      than a sector's worth silently overwrites the sectors that follow.
+    traces:     ["write_sector gpt.rs:497", "write_sector gpt.rs:498", "write_gpt gpt.rs:207"]
+
+  # ---------------------------------------------------------- global invariants
+  - id:         DPM-INV-STATE-MONOTONIC
+    subject:    "global invariant: remembered table is never forgotten"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Once any read or format has succeeded, the manager holds a remembered table for the
+      rest of its life - no operation ever clears it - so after one success the
+      "not initialized" answer can never be given again, even if the disk is later
+      removed or every subsequent operation fails.
+    traces:     ["initialize lib.rs:82", "format lib.rs:93", "partition_info lib.rs:99"]
+
+  - id:         DPM-INV-ENTRY-SECTORS
+    subject:    "global invariant: entry-array size in sectors"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The number of sectors reserved for the table of partition entries is always the
+      space needed for 128 slots of 128 bytes each, rounded up to whole sectors, and the
+      same value is used when writing the table, when locating the spare copy, and when
+      deciding where usable space begins and ends - so the reading and writing paths can
+      never disagree about the layout.
+    traces:     ["entry_sectors gpt.rs:324", "entry_sectors gpt.rs:326", "write_gpt gpt.rs:157", "read_gpt gpt.rs:88"]
+
+  - id:         DPM-INV-SLOTS-128
+    subject:    "global invariant: fixed number of entry slots"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Every table this component writes contains exactly 128 partition entry slots of
+      exactly 128 bytes each, and both the primary and the spare copy are the same fixed
+      size, regardless of how many partitions the caller actually asked for.
+    traces:     ["gpt.rs:11", "gpt.rs:12", "write_gpt gpt.rs:186", "serialize_entries gpt.rs:433"]
+
+  - id:         DPM-INV-SECTORSIZE-CONSISTENT
+    subject:    "global invariant: one sector size governs all addressing"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Every table the component returns reports the same sector size that was used for
+      all of its own sector arithmetic and all of its transfers, so a caller can convert
+      the reported start sectors and sector counts into byte offsets using the reported
+      sector size and get the right answer.
+    traces:     ["GptManager::new gpt.rs:58", "try_read_gpt_at gpt.rs:148", "write_gpt gpt.rs:235"]
+
+  - id:         DPM-INV-PARTITIONS-DISJOINT
+    subject:    "global invariant: created partitions do not overlap"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      In any table this component creates, no two partitions share a sector - each one
+      begins exactly one sector after the previous one ends - and together they never
+      reach outside the usable region between the two copies of the partition table.
+    traces:     ["compute_partition_layout gpt.rs:293", "compute_partition_layout gpt.rs:305", "write_gpt gpt.rs:157"]
+
+  - id:         DPM-INV-NAME-ROUNDTRIP
+    subject:    "global invariant: partition names survive a write-then-read cycle"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      A partition name of at most 36 two-byte characters that contains no zero character
+      comes back unchanged when the table is written and then read again; any longer name
+      comes back shortened to its first 36 characters, and a name containing a zero
+      character comes back cut at that point.
+    traces:     ["encode_utf16le_name gpt.rs:578", "decode_utf16le_name gpt.rs:591", "decode_utf16le_name gpt.rs:592"]
+
+  - id:         DPM-INV-ENCODE-DEADBRANCH
+    subject:    "global invariant: name encoding stays inside its buffer"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Writing a name into its 72-byte slot never runs past the end of that slot, because
+      at most 36 two-byte characters are ever taken; the additional bounds test inside the
+      loop can therefore never trigger and is dead defensive code.
+    traces:     ["encode_utf16le_name gpt.rs:578", "encode_utf16le_name gpt.rs:581"]
+
+  - id:         DPM-INV-DECODE-INBOUNDS
+    subject:    "global invariant: name decoding stays inside its buffer"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Decoding a name reads exactly the 72 bytes of the slot it is given as 36 two-byte
+      characters and can never read outside it, and invalid character sequences are
+      replaced rather than causing a failure, so decoding never crashes on any byte
+      pattern from the disk.
+    traces:     ["decode_utf16le_name gpt.rs:590", "decode_utf16le_name gpt.rs:594"]
+
+  - id:         DPM-INV-STATE-TRANSITIONS
+    subject:    "global invariant: legal states of the manager"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The manager has exactly two states - holding no table, and holding one table - and
+      the only legal moves are from holding none to holding one and from holding one to
+      holding a different one, each caused by a fully successful read or format; there is
+      no move back to holding none and no state in which a partly built table is held.
+    traces:     ["lib.rs:21", "initialize lib.rs:82", "format lib.rs:93"]
+
+  - id:         DPM-INV-NSID-FIELD
+    subject:    "global invariant: legal values of the stored namespace setting"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The stored namespace setting is either absent, in which case 1 is used, or a value
+      that was supplied by a caller; the component never derives or changes it by itself,
+      and the value used for a read is therefore always either 1 or the last value a
+      caller supplied.
+    traces:     ["lib.rs:22", "set_ns_id lib.rs:31", "get_ns_id lib.rs:35"]
+
+  - id:         DPM-INV-PROVIDES-INTERFACE
+    subject:    "global invariant: the component exposes exactly the partition-table interface"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The component declares that it provides the partition-table interface and requires
+      exactly one connection, to a block device, and it implements all four operations of
+      that interface - reading a table, writing a new table, describing one partition and
+      counting the partitions - with no other interface offered.
+    traces:     ["lib.rs:16", "lib.rs:18", "lib.rs:67", "ipartition_table.rs:116"]
+
+  - id:         DPM-INV-ERRORS-ALL-USED
+    subject:    "global invariant: every declared error kind is actually producible"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      All six kinds of partition-table failure that the interface declares are actually
+      produced somewhere by this component - no table found, corrupt table, invalid
+      partition, input/output error, layout error and not initialized - so no declared
+      failure kind is unreachable at the level of the whole component, even though one
+      individual layout check inside the formatting path is unreachable.
+    traces:     ["ipartition_table.rs:60", "parse_header gpt.rs:364", "try_read_gpt_at gpt.rs:111", "partition_info lib.rs:107", "read_bytes gpt.rs:458", "write_gpt gpt.rs:161", "initialize lib.rs:70"]
+
+  # ------------------------------------------------- not-verifiable ledger
+  - id:         NV-1
+    scope:      "Blocking wait for a device completion - read_bytes gpt.rs:470 and write_bytes gpt.rs:532"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Each command is followed by a blocking wait for an answer from the block-device
+      actor. Whether that answer always eventually arrives is an unbounded liveness
+      question about another component and the operating system scheduler, so it cannot
+      be settled by checking this component alone.
+    traces:     ["read_bytes gpt.rs:470", "write_bytes gpt.rs:532"]
+
+  - id:         NV-2
+    scope:      "Durability of a completed write across power loss - write_gpt gpt.rs:204 to gpt.rs:216"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Whether the bytes reported as written are still on the medium after a sudden power
+      loss depends on the drive's own caching and flush behaviour, which this component
+      neither controls nor inspects - it never issues a flush of any kind.
+    traces:     ["write_gpt gpt.rs:216"]
+
+  - id:         NV-3
+    scope:      "Validity and alignment of the transfer buffers - alloc_dma_buffer gpt.rs:556"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      The transfer buffers are allocated by an external facility and handed to hardware.
+      That the memory is valid, correctly aligned and reachable by the device is an
+      assumption about the environment rather than a property of this code.
+    traces:     ["alloc_dma_buffer gpt.rs:557", "read_bytes gpt.rs:457"]
+
+  - id:         NV-4
+    scope:      "True uniqueness of generated identifiers - generate_guid gpt.rs:564"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Whether two generated identifiers really differ depends on the quality of the
+      operating system's randomness source, which is outside the component. The shape of
+      the identifier is checkable and is recorded as its own property; the randomness is
+      not.
+    traces:     ["generate_guid gpt.rs:566"]
+
+  - id:         NV-5
+    scope:      "Time taken by a partition-table read or write"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      The component sets no deadlines and measures no elapsed time, and how long a
+      device takes to answer is a wall-clock quantity that cannot be pinned down by
+      inspecting the code.
+    traces:     ["read_bytes gpt.rs:470", "write_bytes gpt.rs:532"]
+
+  - id:         NV-6
+    scope:      "Truthfulness of the device-reported sector size and sector count"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Every layout calculation rests on the two numbers the block device reports about
+      itself. Whether those numbers describe the real hardware is an assumption about
+      the device, not something this component can establish.
+    traces:     ["initialize lib.rs:73", "initialize lib.rs:76"]
+
+  - id:         NV-7
+    scope:      "Behaviour of the two internal locks when another thread panics"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      The remembered table and the namespace setting are each guarded by a lock that the
+      code assumes is healthy. What happens when a thread dies while holding one depends
+      on non-deterministic interleaving; the resulting crash on a later call is recorded
+      as its own property, but the interleaving itself is not checkable here.
+    traces:     ["initialize lib.rs:82", "set_ns_id lib.rs:31"]
+
+  - id:         NV-8
+    scope:      "Soundness of sharing a transfer buffer across threads - read_bytes gpt.rs:459 and write_bytes gpt.rs:521"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      The transfer buffer is wrapped for shared ownership, in one case with an explicit
+      suppression of the compiler's warning that the buffer is not safe to share between
+      threads. Whether that sharing is actually safe depends on the buffer type's own
+      internals and on the block-device actor's behaviour, both outside this component.
+    traces:     ["read_bytes gpt.rs:459", "write_bytes gpt.rs:520", "write_bytes gpt.rs:521"]
+
+  - id:         NV-9
+    scope:      "Correctness of the external checksum routine"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      All integrity checking delegates to an external checksum library. That the library
+      computes the checksum the partition-table standard prescribes is a property of that
+      library, not of this component; what is checkable here is only that the same span
+      of bytes is used when writing and when reading.
+    traces:     ["try_read_gpt_at gpt.rs:109", "serialize_header_with_crc gpt.rs:426"]
+
+  - id:         NV-10
+    scope:      "Interoperability with firmware and third-party partitioning tools"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Whether a table this component writes is accepted by system firmware or by other
+      partitioning tools can only be settled by trying those external consumers; it
+      cannot be decided from this source alone, even though several places where the
+      component departs from general practice are recorded above as properties.
+    traces:     ["write_gpt gpt.rs:152", "write_protective_mbr gpt.rs:329"]

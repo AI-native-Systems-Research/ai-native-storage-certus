@@ -1,0 +1,76 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2252 0 2255 28 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2258 4 2258 46
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2251 10 2251 81
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1160 10 1160 86
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1161 10 1161 90
+let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1162 10 1163 85
+let%span slib'4 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1164 10 1165 96
+let%span slib'5 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1166 10 1168 15
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.prelude.Any
+
+type t_TabM = { tag: UInt64.t; count: UInt32.t; sector_size: UInt32.t }
+
+type t_PtErr = NoPartitionTable | CorruptTable | InvalidPartition | IoError | LayoutError | NotInitialized
+
+type t_ReadRes = Ok t_TabM | Err t_PtErr
+
+type t_Option_TabM = None | Some t_TabM
+
+type t_Outcome = Ok'0 t_TabM | Err'0 t_PtErr | Panic'0
+
+type tup2_Outcome_Option_TabM = { f0: t_Outcome; f1: t_Option_TabM }
+
+let format_m (st: t_Option_TabM) (bound: bool) (chan_ok: bool) (wr: t_ReadRes) (poisoned: bool)
+  (return (x: tup2_Outcome_Option_TabM)) = any
+  [ return (result: tup2_Outcome_Option_TabM) ->
+  {[@stop_split] [@expl:format_m ensures] ([@stop_split] [@expl:format_m ensures #0] [%#slib'1] not bound
+      -> result.f0 = Err'0 (NotInitialized) /\ result.f1 = st)
+    /\ ([@stop_split] [@expl:format_m ensures #1] [%#slib'2] bound /\ not chan_ok
+      -> result.f0 = Err'0 (IoError) /\ result.f1 = st)
+    /\ ([@stop_split] [@expl:format_m ensures #2] [%#slib'3] match wr with
+        | Err e -> bound /\ chan_ok -> result.f0 = Err'0 e /\ result.f1 = st
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:format_m ensures #3] [%#slib'4] match wr with
+        | Ok t -> bound /\ chan_ok /\ poisoned -> result.f0 = Panic'0 /\ result.f1 = st
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:format_m ensures #4] [%#slib'5] match wr with
+      | Ok t -> bound /\ chan_ok /\ not poisoned -> result.f0 = Ok'0 t /\ result.f1 = Some t
+      | _ -> true
+      end)}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_dpm_format_post_sector_size_echo [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2252 0 2255 28]
+  (st: t_Option_TabM) (bound: bool) (chan_ok: bool) (cfg_ss: UInt32.t) (tag'0: UInt64.t) (count'0: UInt32.t)
+  (poisoned: bool) (return (x: tup2_Outcome_Option_TabM)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_11 <- { tag = tag'0; count = count'0; sector_size = cfg_ss } ] s1
+    | s1 = [ &wr <- Ok _11 ] s2
+    | s2 = format_m [%#slib] {st} {bound} {chan_ok} {wr} {poisoned}
+        (fun (_x: tup2_Outcome_Option_TabM) -> [ &_ret <- _x ] s3)
+    | s3 = return {_ret} ] ]
+  [ & _ret: tup2_Outcome_Option_TabM = Any.any_l ()
+  | & st: t_Option_TabM = st
+  | & bound: bool = bound
+  | & chan_ok: bool = chan_ok
+  | & cfg_ss: UInt32.t = cfg_ss
+  | & tag'0: UInt64.t = tag'0
+  | & count'0: UInt32.t = count'0
+  | & poisoned: bool = poisoned
+  | & wr: t_ReadRes = Any.any_l ()
+  | & _11: t_TabM = Any.any_l () ])
+  [ return (result: tup2_Outcome_Option_TabM) ->
+  {[@stop_split] [@expl:verify_dpm_format_post_sector_size_echo ensures] [%#slib'0] match result.f0 with
+      | Ok'0 t -> t.sector_size = cfg_ss
+      | _ -> true
+      end}
+    (! return {result}) ]

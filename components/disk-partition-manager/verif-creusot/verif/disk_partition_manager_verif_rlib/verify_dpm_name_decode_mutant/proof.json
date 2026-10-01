@@ -1,0 +1,17 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_decode_units": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_verify_dpm_name_decode__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [ { "prover": "alt-ergo", "time": 0.032 }, null ]
+          }
+        ]
+      }
+    }
+  }
+}

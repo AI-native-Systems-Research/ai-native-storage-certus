@@ -1,0 +1,16 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 953 9 953 29 *)
+
+(* <PtErr as std::clone::Clone> *)
+
+use creusot.prelude.Any
+
+type t_PtErr = NoPartitionTable | CorruptTable | InvalidPartition | IoError | LayoutError | NotInitialized
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_PtErr [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 953 9 953 29]
+  (self: t_PtErr) (return (x: t_PtErr)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_PtErr = Any.any_l () | & self: t_PtErr = self ]) [ return (result: t_PtErr) -> (! return {result}) ]

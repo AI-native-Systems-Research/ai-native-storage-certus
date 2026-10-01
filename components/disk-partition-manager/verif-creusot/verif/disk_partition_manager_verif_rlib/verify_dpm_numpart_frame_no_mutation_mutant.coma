@@ -1,0 +1,86 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2893 0 2895 60 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2896 12 2896 53
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2897 12 2897 53
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2898 19 2898 24
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2891 11 2891 37
+let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2892 10 2892 18
+let%span slib'4 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1234 11 1234 37
+let%span slib'5 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1235 10 1235 49
+let%span slib'6 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1236 10 1236 82
+let%span slib'7 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1237 10 1237 97
+let%span svec = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+
+use creusot.int.UInt32
+use seq.Seq
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_PInfoM_Global
+
+type t_PtErr = NoPartitionTable | CorruptTable | InvalidPartition | IoError | LayoutError | NotInitialized
+
+type t_NpOutcome = Ok UInt32.t | Err t_PtErr | Panic
+
+type t_PInfoM = { index: UInt32.t; start_lba: UInt64.t; num_sectors: UInt64.t }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_PInfoM_Global (self: t_Vec_PInfoM_Global) : Seq.seq t_PInfoM
+
+axiom view_Vec_PInfoM_Global_spec:
+  forall self: t_Vec_PInfoM_Global [view_Vec_PInfoM_Global self]. [%#svec] Seq.length (view_Vec_PInfoM_Global self)
+    <= UInt64.t'int const_MAX
+
+let num_partitions_m (loaded: bool) (parts: t_Vec_PInfoM_Global) (poisoned: bool) (return (x: t_NpOutcome)) =
+{[@stop_split] [@expl:num_partitions_m requires] [%#slib'4] Seq.length (view_Vec_PInfoM_Global parts) <= 4294967295}
+  any
+  [ return (result: t_NpOutcome) ->
+  {[@stop_split] [@expl:num_partitions_m ensures] ([@stop_split] [@expl:num_partitions_m ensures #0] [%#slib'5] poisoned
+      -> result = Panic)
+    /\ ([@stop_split] [@expl:num_partitions_m ensures #1] [%#slib'6] not poisoned /\ not loaded
+      -> result = Err (NotInitialized))
+    /\ ([@stop_split] [@expl:num_partitions_m ensures #2] [%#slib'7] not poisoned /\ loaded
+    -> (exists c: UInt32.t. result = Ok c /\ UInt32.t'int c = Seq.length (view_Vec_PInfoM_Global parts)))}
+    (! return {result}) ]
+
+type t_TabM = { tag: UInt64.t; count: UInt32.t; sector_size: UInt32.t }
+
+type t_Option_TabM = None | Some t_TabM
+
+type t_Option_u32 = None'0 | Some'0 UInt32.t
+
+type tup5_NpOutcome_Option_TabM_Option_u32_bool_NpOutcome = {
+  f0: t_NpOutcome;
+  f1: t_Option_TabM;
+  f2: t_Option_u32;
+  f3: bool;
+  f4: t_NpOutcome }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_dpm_numpart_frame_no_mutation__mutant [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2893 0 2895 60]
+  (st: t_Option_TabM) (ns_st: t_Option_u32) (loaded: bool) (parts: t_Vec_PInfoM_Global) (poisoned: bool)
+  (return (x: tup5_NpOutcome_Option_TabM_Option_u32_bool_NpOutcome)) =
+{[@stop_split] [@expl:verify_dpm_numpart_frame_no_mutation__mutant requires] [%#slib'2] Seq.length (view_Vec_PInfoM_Global parts)
+  <= 4294967295}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = num_partitions_m [%#slib] {loaded} {parts} {poisoned} (fun (_x: t_NpOutcome) -> [ &a <- _x ] s1)
+    | s1 = num_partitions_m [%#slib'0] {loaded} {parts} {poisoned} (fun (_x: t_NpOutcome) -> [ &b <- _x ] s2)
+    | s2 = [ &_ret <- { f0 = a; f1 = st; f2 = ns_st; f3 = ([%#slib'1] false); f4 = b } ] s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: tup5_NpOutcome_Option_TabM_Option_u32_bool_NpOutcome = Any.any_l ()
+  | & st: t_Option_TabM = st
+  | & ns_st: t_Option_u32 = ns_st
+  | & loaded: bool = loaded
+  | & parts: t_Vec_PInfoM_Global = parts
+  | & poisoned: bool = poisoned
+  | & a: t_NpOutcome = Any.any_l ()
+  | & b: t_NpOutcome = Any.any_l () ])
+  [ return (result: tup5_NpOutcome_Option_TabM_Option_u32_bool_NpOutcome) ->
+  {[@stop_split] [@expl:verify_dpm_numpart_frame_no_mutation__mutant ensures] [%#slib'3] result.f3}
+    (! return {result}) ]

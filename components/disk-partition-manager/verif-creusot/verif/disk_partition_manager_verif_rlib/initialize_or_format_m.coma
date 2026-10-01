@@ -1,0 +1,141 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1277 0 1277 85 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1281 48 1281 52
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1289 48 1289 52
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1286 44 1286 49
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1255 10 1257 54
+let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1258 10 1259 70
+let%span slib'4 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1260 10 1262 68
+let%span slib'5 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1263 10 1265 68
+let%span slib'6 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1266 10 1267 91
+let%span slib'7 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1268 10 1270 16
+let%span slib'8 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1271 10 1273 16
+let%span slib'9 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1274 10 1276 16
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.prelude.Any
+
+type t_TabM = { tag: UInt64.t; count: UInt32.t; sector_size: UInt32.t }
+
+type t_PtErr = NoPartitionTable | CorruptTable | InvalidPartition | IoError | LayoutError | NotInitialized
+
+type t_ReadRes = Ok t_TabM | Err t_PtErr
+
+let elim_Err (_x: t_ReadRes) (return (f0: t_PtErr)) = any
+  [ _k (f0: t_PtErr) -> {Err f0 = _x} (! return {f0})
+  | _chk -> (! {[@expl:elim Err] match _x with
+      | Err _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+type t_IofOutcome = Ok'0 t_TabM bool | Err'0 t_PtErr
+
+let elim_Ok (_x: t_ReadRes) (return (f0: t_TabM)) = any
+  [ _k (f0: t_TabM) -> {Ok f0 = _x} (! return {f0})
+  | _chk -> (! {[@expl:elim Ok] match _x with
+      | Ok _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let initialize_or_format_m [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1277 0 1277 85]
+  (force: bool) (init: t_ReadRes) (fmt: t_ReadRes) (return (x: t_IofOutcome)) = (! bb0
+  [ bb0 = any [ br0 -> {force = false} (! bb6) | br1 -> {force} (! bb1) ]
+  | bb1 = any [ br0 (x0: t_TabM) -> {fmt = Ok x0} (! bb5) | br1 (x0: t_PtErr) -> {fmt = Err x0} (! bb4) ]
+  | bb4 = s0
+    [ s0 = elim_Err {fmt} (fun (r0: t_PtErr) -> [ &e <- r0 ] s1) | s1 = [ &_ret <- Err'0 e ] s2 | s2 = return {_ret} ]
+  | bb5 = s0
+    [ s0 = elim_Ok {fmt} (fun (r0: t_TabM) -> [ &t <- r0 ] s1)
+    | s1 = [ &_ret <- Ok'0 t ([%#slib] true) ] s2
+    | s2 = return {_ret} ]
+  | bb6 = any [ br0 (x0: t_TabM) -> {init = Ok x0} (! bb13) | br1 (x0: t_PtErr) -> {init = Err x0} (! bb9) ]
+  | bb9 = elim_Err {init}
+      (fun (r0: t_PtErr) ->
+        any
+        [ br0 -> {r0 = NoPartitionTable} (! bb12)
+        | br1 -> {r0 = CorruptTable} (! bb12)
+        | br2 -> {r0 = InvalidPartition} (! bb10)
+        | br3 -> {r0 = IoError} (! bb10)
+        | br4 -> {r0 = LayoutError} (! bb10)
+        | br5 -> {r0 = NotInitialized} (! bb10) ])
+  | bb10 = s0
+    [ s0 = elim_Err {init} (fun (r0: t_PtErr) -> [ &e'1 <- r0 ] s1)
+    | s1 = [ &_ret <- Err'0 e'1 ] s2
+    | s2 = return {_ret} ]
+  | bb12 = any [ br0 (x0: t_TabM) -> {fmt = Ok x0} (! bb17) | br1 (x0: t_PtErr) -> {fmt = Err x0} (! bb16) ]
+  | bb16 = s0
+    [ s0 = elim_Err {fmt} (fun (r0: t_PtErr) -> [ &e'0 <- r0 ] s1)
+    | s1 = [ &_ret <- Err'0 e'0 ] s2
+    | s2 = return {_ret} ]
+  | bb17 = s0
+    [ s0 = elim_Ok {fmt} (fun (r0: t_TabM) -> [ &t'1 <- r0 ] s1)
+    | s1 = [ &_ret <- Ok'0 t'1 ([%#slib'0] true) ] s2
+    | s2 = return {_ret} ]
+  | bb13 = s0
+    [ s0 = elim_Ok {init} (fun (r0: t_TabM) -> [ &t'0 <- r0 ] s1)
+    | s1 = [ &_ret <- Ok'0 t'0 ([%#slib'1] false) ] s2
+    | s2 = return {_ret} ] ]
+  [ & _ret: t_IofOutcome = Any.any_l ()
+  | & force: bool = force
+  | & init: t_ReadRes = init
+  | & fmt: t_ReadRes = fmt
+  | & t: t_TabM = Any.any_l ()
+  | & e: t_PtErr = Any.any_l ()
+  | & t'0: t_TabM = Any.any_l ()
+  | & t'1: t_TabM = Any.any_l ()
+  | & e'0: t_PtErr = Any.any_l ()
+  | & e'1: t_PtErr = Any.any_l () ])
+  [ return (result: t_IofOutcome) ->
+  {[@stop_split] [@expl:initialize_or_format_m ensures] ([@stop_split] [@expl:initialize_or_format_m ensures #0] [%#slib'2] force
+      -> match fmt with
+        | Ok t -> result = Ok'0 t true
+        | Err e -> result = Err'0 e
+        end)
+    /\ ([@stop_split] [@expl:initialize_or_format_m ensures #1] [%#slib'3] not force
+      -> match init with
+        | Ok t -> result = Ok'0 t false
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:initialize_or_format_m ensures #2] [%#slib'4] not force
+      -> match init with
+        | Err (NoPartitionTable) -> match fmt with
+          | Ok t -> result = Ok'0 t true
+          | Err e -> result = Err'0 e
+          end
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:initialize_or_format_m ensures #3] [%#slib'5] not force
+      -> match init with
+        | Err (CorruptTable) -> match fmt with
+          | Ok t -> result = Ok'0 t true
+          | Err e -> result = Err'0 e
+          end
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:initialize_or_format_m ensures #4] [%#slib'6] not force
+      -> match init with
+        | Err (IoError) -> result = Err'0 (IoError)
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:initialize_or_format_m ensures #5] [%#slib'7] not force
+      -> match init with
+        | Err (NotInitialized) -> result = Err'0 (NotInitialized)
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:initialize_or_format_m ensures #6] [%#slib'8] not force
+      -> match init with
+        | Err (LayoutError) -> result = Err'0 (LayoutError)
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:initialize_or_format_m ensures #7] [%#slib'9] not force
+    -> match init with
+      | Err (InvalidPartition) -> result = Err'0 (InvalidPartition)
+      | _ -> true
+      end)}
+    (! return {result}) ]

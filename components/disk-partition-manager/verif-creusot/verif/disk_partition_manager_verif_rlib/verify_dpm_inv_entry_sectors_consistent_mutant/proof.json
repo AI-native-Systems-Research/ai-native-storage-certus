@@ -1,0 +1,20 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_entry_sectors": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_usable_window": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_verify_dpm_inv_entry_sectors_consistent__mutant": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.034 },
+          { "prover": "alt-ergo", "time": 0.034 },
+          { "prover": "alt-ergo", "time": 0.04 },
+          { "prover": "alt-ergo", "time": 0.041 },
+          { "prover": "alt-ergo", "time": 0.047 },
+          null
+        ]
+      }
+    }
+  }
+}

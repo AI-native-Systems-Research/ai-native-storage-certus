@@ -1,0 +1,122 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1128 0 1135 28 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1115 10 1115 68
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1116 10 1116 35
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1117 10 1117 90
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1118 10 1119 66
+let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1120 10 1121 96
+let%span slib'4 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1122 10 1124 15
+let%span slib'5 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1125 10 1127 75
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.prelude.Any
+
+type t_TabM = { tag: UInt64.t; count: UInt32.t; sector_size: UInt32.t }
+
+type t_PtErr = NoPartitionTable | CorruptTable | InvalidPartition | IoError | LayoutError | NotInitialized
+
+type t_ReadRes = Ok t_TabM | Err t_PtErr
+
+let elim_Err (_x: t_ReadRes) (return (f0: t_PtErr)) = any
+  [ _k (f0: t_PtErr) -> {Err f0 = _x} (! return {f0})
+  | _chk -> (! {[@expl:elim Err] match _x with
+      | Err _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+type t_Outcome = Ok'0 t_TabM | Err'0 t_PtErr | Panic'0
+
+type t_Option_TabM = None | Some t_TabM
+
+type tup2_Outcome_Option_TabM = { f0: t_Outcome; f1: t_Option_TabM }
+
+let elim_Ok (_x: t_ReadRes) (return (f0'0: t_TabM)) = any
+  [ _k (f0'0: t_TabM) -> {Ok f0'0 = _x} (! return {f0'0})
+  | _chk -> (! {[@expl:elim Ok] match _x with
+      | Ok _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let initialize_m [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1128 0 1135 28]
+  (st: t_Option_TabM) (bound: bool) (geom_ok: bool) (chan_ok: bool) (rd: t_ReadRes) (poisoned: bool)
+  (return (x: tup2_Outcome_Option_TabM)) = (! bb0
+  [ bb0 = any [ br0 -> {bound = false} (! bb1) | br1 -> {bound} (! bb2) ]
+  | bb2 = any [ br0 -> {geom_ok = false} (! bb4) | br1 -> {geom_ok} (! bb3) ]
+  | bb3 = any [ br0 -> {chan_ok = false} (! bb6) | br1 -> {chan_ok} (! bb5) ]
+  | bb5 = any [ br0 (x0: t_TabM) -> {rd = Ok x0} (! bb9) | br1 (x0: t_PtErr) -> {rd = Err x0} (! bb10) ]
+  | bb10 = s0
+    [ s0 = elim_Err {rd} (fun (r0: t_PtErr) -> [ &e <- r0 ] s1)
+    | s1 = [ &_60 <- Err'0 e ] s2
+    | s2 = [ &_ret <- { f0 = _60; f1 = st } ] s3
+    | s3 = return {_ret} ]
+  | bb9 = s0
+    [ s0 = elim_Ok {rd} (fun (r0: t_TabM) -> [ &t <- r0 ] s1)
+    | s1 = any [ br0 -> {poisoned = false} (! bb12) | br1 -> {poisoned} (! bb11) ] ]
+  | bb11 = s0 [ s0 = [ &_65 <- Panic'0 ] s1 | s1 = [ &_ret <- { f0 = _65; f1 = st } ] s2 | s2 = return {_ret} ]
+  | bb12 = s0
+    [ s0 = [ &_67 <- Ok'0 t ] s1
+    | s1 = [ &_69 <- Some t ] s2
+    | s2 = [ &_ret <- { f0 = _67; f1 = _69 } ] s3
+    | s3 = return {_ret} ]
+  | bb6 = s0
+    [ s0 = [ &_56 <- IoError ] s1
+    | s1 = [ &_55 <- Err'0 _56 ] s2
+    | s2 = [ &_ret <- { f0 = _55; f1 = st } ] s3
+    | s3 = return {_ret} ]
+  | bb4 = s0
+    [ s0 = [ &_50 <- IoError ] s1
+    | s1 = [ &_49 <- Err'0 _50 ] s2
+    | s2 = [ &_ret <- { f0 = _49; f1 = st } ] s3
+    | s3 = return {_ret} ]
+  | bb1 = s0
+    [ s0 = [ &_44 <- NotInitialized ] s1
+    | s1 = [ &_43 <- Err'0 _44 ] s2
+    | s2 = [ &_ret <- { f0 = _43; f1 = st } ] s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: tup2_Outcome_Option_TabM = Any.any_l ()
+  | & st: t_Option_TabM = st
+  | & bound: bool = bound
+  | & geom_ok: bool = geom_ok
+  | & chan_ok: bool = chan_ok
+  | & rd: t_ReadRes = rd
+  | & poisoned: bool = poisoned
+  | & _43: t_Outcome = Any.any_l ()
+  | & _44: t_PtErr = Any.any_l ()
+  | & _49: t_Outcome = Any.any_l ()
+  | & _50: t_PtErr = Any.any_l ()
+  | & _55: t_Outcome = Any.any_l ()
+  | & _56: t_PtErr = Any.any_l ()
+  | & e: t_PtErr = Any.any_l ()
+  | & _60: t_Outcome = Any.any_l ()
+  | & t: t_TabM = Any.any_l ()
+  | & _65: t_Outcome = Any.any_l ()
+  | & _67: t_Outcome = Any.any_l ()
+  | & _69: t_Option_TabM = Any.any_l () ])
+  [ return (result: tup2_Outcome_Option_TabM) ->
+  {[@stop_split] [@expl:initialize_m ensures] ([@stop_split] [@expl:initialize_m ensures #0] [%#slib] not bound
+      -> result.f0 = Err'0 (NotInitialized))
+    /\ ([@stop_split] [@expl:initialize_m ensures #1] [%#slib'0] not bound -> result.f1 = st)
+    /\ ([@stop_split] [@expl:initialize_m ensures #2] [%#slib'1] bound /\ not geom_ok
+      -> result.f0 = Err'0 (IoError) /\ result.f1 = st)
+    /\ ([@stop_split] [@expl:initialize_m ensures #3] [%#slib'2] bound /\ geom_ok /\ not chan_ok
+      -> result.f0 = Err'0 (IoError) /\ result.f1 = st)
+    /\ ([@stop_split] [@expl:initialize_m ensures #4] [%#slib'3] match rd with
+        | Err e -> bound /\ geom_ok /\ chan_ok -> result.f0 = Err'0 e /\ result.f1 = st
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:initialize_m ensures #5] [%#slib'4] match rd with
+        | Ok t -> bound /\ geom_ok /\ chan_ok /\ poisoned -> result.f0 = Panic'0 /\ result.f1 = st
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:initialize_m ensures #6] [%#slib'5] match rd with
+      | Ok t -> bound /\ geom_ok /\ chan_ok /\ not poisoned -> result.f0 = Ok'0 t /\ result.f1 = Some t
+      | _ -> true
+      end)}
+    (! return {result}) ]

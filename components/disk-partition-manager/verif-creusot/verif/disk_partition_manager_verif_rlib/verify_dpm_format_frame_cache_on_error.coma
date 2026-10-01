@@ -1,0 +1,138 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2376 0 2379 51 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2380 19 2380 61
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2381 19 2381 74
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2372 10 2372 73
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2373 10 2373 72
+let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2374 10 2374 73
+let%span slib'4 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2375 10 2375 72
+let%span slib'5 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1160 10 1160 86
+let%span slib'6 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1161 10 1161 90
+let%span slib'7 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1162 10 1163 85
+let%span slib'8 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1164 10 1165 96
+let%span slib'9 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1166 10 1168 15
+let%span slib'10 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1115 10 1115 68
+let%span slib'11 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1116 10 1116 35
+let%span slib'12 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1117 10 1117 90
+let%span slib'13 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1118 10 1119 66
+let%span slib'14 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1120 10 1121 96
+let%span slib'15 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1122 10 1124 15
+let%span slib'16 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1125 10 1127 75
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.prelude.Any
+
+type t_TabM = { tag: UInt64.t; count: UInt32.t; sector_size: UInt32.t }
+
+type t_Option_TabM = None | Some t_TabM
+
+type t_PtErr = NoPartitionTable | CorruptTable | InvalidPartition | IoError | LayoutError | NotInitialized
+
+type t_ReadRes = Ok t_TabM | Err t_PtErr
+
+type t_Outcome = Ok'0 t_TabM | Err'0 t_PtErr | Panic'0
+
+type tup2_Outcome_Option_TabM = { f0: t_Outcome; f1: t_Option_TabM }
+
+let format_m (st: t_Option_TabM) (bound: bool) (chan_ok: bool) (wr: t_ReadRes) (poisoned: bool)
+  (return (x: tup2_Outcome_Option_TabM)) = any
+  [ return (result: tup2_Outcome_Option_TabM) ->
+  {[@stop_split] [@expl:format_m ensures] ([@stop_split] [@expl:format_m ensures #0] [%#slib'5] not bound
+      -> result.f0 = Err'0 (NotInitialized) /\ result.f1 = st)
+    /\ ([@stop_split] [@expl:format_m ensures #1] [%#slib'6] bound /\ not chan_ok
+      -> result.f0 = Err'0 (IoError) /\ result.f1 = st)
+    /\ ([@stop_split] [@expl:format_m ensures #2] [%#slib'7] match wr with
+        | Err e -> bound /\ chan_ok -> result.f0 = Err'0 e /\ result.f1 = st
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:format_m ensures #3] [%#slib'8] match wr with
+        | Ok t -> bound /\ chan_ok /\ poisoned -> result.f0 = Panic'0 /\ result.f1 = st
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:format_m ensures #4] [%#slib'9] match wr with
+      | Ok t -> bound /\ chan_ok /\ not poisoned -> result.f0 = Ok'0 t /\ result.f1 = Some t
+      | _ -> true
+      end)}
+    (! return {result}) ]
+
+let initialize_m (st: t_Option_TabM) (bound: bool) (geom_ok: bool) (chan_ok: bool) (rd: t_ReadRes) (poisoned: bool)
+  (return (x: tup2_Outcome_Option_TabM)) = any
+  [ return (result: tup2_Outcome_Option_TabM) ->
+  {[@stop_split] [@expl:initialize_m ensures] ([@stop_split] [@expl:initialize_m ensures #0] [%#slib'10] not bound
+      -> result.f0 = Err'0 (NotInitialized))
+    /\ ([@stop_split] [@expl:initialize_m ensures #1] [%#slib'11] not bound -> result.f1 = st)
+    /\ ([@stop_split] [@expl:initialize_m ensures #2] [%#slib'12] bound /\ not geom_ok
+      -> result.f0 = Err'0 (IoError) /\ result.f1 = st)
+    /\ ([@stop_split] [@expl:initialize_m ensures #3] [%#slib'13] bound /\ geom_ok /\ not chan_ok
+      -> result.f0 = Err'0 (IoError) /\ result.f1 = st)
+    /\ ([@stop_split] [@expl:initialize_m ensures #4] [%#slib'14] match rd with
+        | Err e -> bound /\ geom_ok /\ chan_ok -> result.f0 = Err'0 e /\ result.f1 = st
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:initialize_m ensures #5] [%#slib'15] match rd with
+        | Ok t -> bound /\ geom_ok /\ chan_ok /\ poisoned -> result.f0 = Panic'0 /\ result.f1 = st
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:initialize_m ensures #6] [%#slib'16] match rd with
+      | Ok t -> bound /\ geom_ok /\ chan_ok /\ not poisoned -> result.f0 = Ok'0 t /\ result.f1 = Some t
+      | _ -> true
+      end)}
+    (! return {result}) ]
+
+type tup4_Outcome_Option_TabM_Outcome_Option_TabM = {
+  f0'0: t_Outcome;
+  f1'0: t_Option_TabM;
+  f2'0: t_Outcome;
+  f3'0: t_Option_TabM }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_dpm_format_frame_cache_on_error [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2376 0 2379 51]
+  (st: t_Option_TabM) (bound: bool) (chan_ok: bool) (geom_ok: bool) (wr: t_ReadRes) (rd: t_ReadRes) (poisoned: bool)
+  (return (x: tup4_Outcome_Option_TabM_Outcome_Option_TabM)) = (! bb0
+  [ bb0 = s0
+    [ s0 = format_m [%#slib] {st} {bound} {chan_ok} {wr} {poisoned}
+        (fun (_x: tup2_Outcome_Option_TabM) -> [ &_18 <- _x ] s1)
+    | s1 = [ &fo <- _18.f0 ] s2
+    | s2 = [ &fs <- _18.f1 ] s3
+    | s3 = initialize_m [%#slib'0] {st} {bound} {geom_ok} {chan_ok} {rd} {poisoned}
+        (fun (_x: tup2_Outcome_Option_TabM) -> [ &_26 <- _x ] s4)
+    | s4 = [ &io <- _26.f0 ] s5
+    | s5 = [ &is <- _26.f1 ] s6
+    | s6 = [ &_ret <- { f0'0 = fo; f1'0 = fs; f2'0 = io; f3'0 = is } ] s7
+    | s7 = return {_ret} ] ]
+  [ & _ret: tup4_Outcome_Option_TabM_Outcome_Option_TabM = Any.any_l ()
+  | & st: t_Option_TabM = st
+  | & bound: bool = bound
+  | & chan_ok: bool = chan_ok
+  | & geom_ok: bool = geom_ok
+  | & wr: t_ReadRes = wr
+  | & rd: t_ReadRes = rd
+  | & poisoned: bool = poisoned
+  | & fo: t_Outcome = Any.any_l ()
+  | & fs: t_Option_TabM = Any.any_l ()
+  | & _18: tup2_Outcome_Option_TabM = Any.any_l ()
+  | & io: t_Outcome = Any.any_l ()
+  | & is: t_Option_TabM = Any.any_l ()
+  | & _26: tup2_Outcome_Option_TabM = Any.any_l () ])
+  [ return (result: tup4_Outcome_Option_TabM_Outcome_Option_TabM) ->
+  {[@stop_split] [@expl:verify_dpm_format_frame_cache_on_error ensures] ([@stop_split] [@expl:verify_dpm_format_frame_cache_on_error ensures #0] [%#slib'1] match result.f0'0 with
+        | Err'0 _ -> result.f1'0 = st
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:verify_dpm_format_frame_cache_on_error ensures #1] [%#slib'2] match result.f0'0 with
+        | Panic'0 -> result.f1'0 = st
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:verify_dpm_format_frame_cache_on_error ensures #2] [%#slib'3] match result.f2'0 with
+        | Err'0 _ -> result.f3'0 = st
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:verify_dpm_format_frame_cache_on_error ensures #3] [%#slib'4] match result.f2'0 with
+      | Panic'0 -> result.f3'0 = st
+      | _ -> true
+      end)}
+    (! return {result}) ]

@@ -1,0 +1,21 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_entry_sectors": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_try_read_gpt_trace": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_verify_dpm_init_frame_read_only__mutant": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.034 },
+          { "prover": "alt-ergo", "time": 0.067 },
+          { "prover": "alt-ergo", "time": 0.048 },
+          { "prover": "alt-ergo", "time": 0.04 },
+          { "prover": "alt-ergo", "time": 0.056 },
+          { "prover": "alt-ergo", "time": 0.044 },
+          null
+        ]
+      }
+    }
+  }
+}

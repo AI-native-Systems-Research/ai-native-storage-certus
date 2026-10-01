@@ -1,0 +1,18 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 585 9 585 29 *)
+
+(* <PInfoM as std::clone::Clone> *)
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_PInfoM = { index: UInt32.t; start_lba: UInt64.t; num_sectors: UInt64.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_PInfoM [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 585 9 585 29]
+  (self: t_PInfoM) (return (x: t_PInfoM)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_PInfoM = Any.any_l () | & self: t_PInfoM = self ]) [ return (result: t_PInfoM) -> (! return {result}) ]

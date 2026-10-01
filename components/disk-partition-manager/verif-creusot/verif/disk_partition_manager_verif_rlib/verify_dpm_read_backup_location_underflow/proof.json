@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_entry_sectors": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_verify_dpm_read_backup_location_underflow": {
+        "prover": "alt-ergo",
+        "time": 0.044
+      },
+      "vc_wrapping_sub": { "prover": "alt-ergo", "time": 0.014 }
+    }
+  }
+}

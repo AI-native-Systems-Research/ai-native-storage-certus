@@ -1,0 +1,22 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lemma_occupied_mono": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.014 },
+          { "prover": "alt-ergo", "time": 0.018 },
+          { "prover": "alt-ergo", "time": 0.022 },
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.018 },
+              { "prover": "alt-ergo", "time": 0.017 }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

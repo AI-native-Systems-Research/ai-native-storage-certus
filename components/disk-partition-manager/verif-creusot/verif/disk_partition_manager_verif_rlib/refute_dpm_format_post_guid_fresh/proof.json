@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_generate_guid": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_refute_dpm_format_post_guid_fresh": {
+        "prover": "alt-ergo",
+        "time": 0.02
+      }
+    }
+  }
+}

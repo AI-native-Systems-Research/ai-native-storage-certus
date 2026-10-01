@@ -1,0 +1,17 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_dpm_format_sum_overflow__mutant": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.026 },
+          null,
+          { "prover": "alt-ergo", "time": 0.031 },
+          { "prover": "alt-ergo", "time": 0.033 }
+        ]
+      },
+      "vc_wrapping_add": { "prover": "alt-ergo", "time": 0.014 }
+    }
+  }
+}

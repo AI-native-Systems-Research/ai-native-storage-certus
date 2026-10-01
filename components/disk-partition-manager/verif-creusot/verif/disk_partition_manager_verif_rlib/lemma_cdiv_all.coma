@@ -1,0 +1,29 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1897 0 1897 29 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1892 11 1892 16
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1893 10 1893 51
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1894 10 1894 55
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1895 10 1895 59
+let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1896 10 1896 50
+let%span slib'4 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 58 16 58 74
+
+use int.EuclideanDivision
+use int.Int
+
+function cdiv [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 57 0 57 34] (n: int) (d: int) : int
+ = [%#slib'4] EuclideanDivision.div n d + (if EuclideanDivision.mod n d = 0 then 0 else 1)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant d : int
+
+function lemma_cdiv_all [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1897 0 1897 29] (d: int) : ()
+
+goal vc_lemma_cdiv_all: ([%#slib] d > 0)
+  -> ([@stop_split] [@expl:lemma_cdiv_all ensures] ([@stop_split] [@expl:lemma_cdiv_all ensures #0] [%#slib'0] forall n: int. n
+        >= 0 -> cdiv n d >= 0)
+  /\ ([@stop_split] [@expl:lemma_cdiv_all ensures #1] [%#slib'1] forall n: int. n >= 0 -> cdiv n d * d >= n)
+  /\ ([@stop_split] [@expl:lemma_cdiv_all ensures #2] [%#slib'2] forall n: int. n > 0 -> (cdiv n d - 1) * d < n)
+  /\ ([@stop_split] [@expl:lemma_cdiv_all ensures #3] [%#slib'3] forall n: int. n > 0 -> cdiv n d >= 1))

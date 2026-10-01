@@ -1,0 +1,66 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3200 0 3200 81 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3201 26 3201 27
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3201 21 3201 27
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3202 13 3202 30
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3203 4 3203 31
+let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3197 11 3197 36
+let%span slib'4 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3198 11 3198 19
+let%span slib'5 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3199 10 3199 58
+let%span slib'6 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 88 11 88 18
+let%span slib'7 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 89 10 89 41
+let%span slib'8 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 85 16 85 31
+let%span slib'9 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 58 16 58 74
+let%span snum = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/creusot/creusot-std/src/std/num.rs" 316 26 316 48
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use int.EuclideanDivision
+use creusot.prelude.Any
+use int.Int
+
+function cdiv [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 57 0 57 34] (n: int) (d: int) : int
+ = [%#slib'9] EuclideanDivision.div n d + (if EuclideanDivision.mod n d = 0 then 0 else 1)
+
+function entry_sectors_l [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 84 0 84 38] (ss: int) : int
+ = [%#slib'8] cdiv 16384 ss
+
+let entry_sectors (ss: UInt32.t) (return (x: UInt32.t)) =
+{[@stop_split] [@expl:entry_sectors requires] [%#slib'6] UInt32.t'int ss > 0}
+  any
+  [ return (result: UInt32.t) -> {[@stop_split] [@expl:entry_sectors ensures] [%#slib'7] UInt32.t'int result
+    = entry_sectors_l (UInt32.t'int ss)}
+    (! return {result}) ]
+
+let wrapping_sub (self_: UInt64.t) (rhs: UInt64.t) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:wrapping_sub ensures] [%#snum] result = UInt64.sub self_ rhs}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_dpm_read_backup_location_underflow__mutant [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3200 0 3200 81]
+  (ss: UInt32.t) (ns: UInt64.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:verify_dpm_read_backup_location_underflow__mutant requires] ([@stop_split] [@expl:verify_dpm_read_backup_location_underflow__mutant requires #0] [%#slib'3] UInt32.t'int ss
+      = 512
+    \/ UInt32.t'int ss = 4096)
+  /\ ([@stop_split] [@expl:verify_dpm_read_backup_location_underflow__mutant requires #1] [%#slib'4] UInt64.t'int ns
+  >= 1)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = UInt64.sub [%#slib'0] {ns} {[%#slib] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &backup_lba <- _x ] s1)
+    | s1 = entry_sectors [%#slib'1] {ss} (fun (_x: UInt32.t) -> [ &_13 <- _x ] s2)
+    | s2 = [ &es <- UInt64.of_int (UInt32.t'int _13) ] s3
+    | s3 = wrapping_sub [%#slib'2] {backup_lba} {es} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s4)
+    | s4 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l ()
+  | & ss: UInt32.t = ss
+  | & ns: UInt64.t = ns
+  | & backup_lba: UInt64.t = Any.any_l ()
+  | & es: UInt64.t = Any.any_l ()
+  | & _13: UInt32.t = Any.any_l () ])
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:verify_dpm_read_backup_location_underflow__mutant ensures] [%#slib'5] UInt64.t'int ns
+      < entry_sectors_l (UInt32.t'int ss) + 1 -> UInt64.t'int result < UInt64.t'int ns}
+    (! return {result}) ]

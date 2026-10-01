@@ -1,0 +1,30 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2351 0 2353 20 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2348 10 2348 28
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2349 10 2349 31
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2350 10 2350 28
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type tup3_u32_u64_u32 = { f0: UInt32.t; f1: UInt64.t; f2: UInt32.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_dpm_format_ignores_device_geometry [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2351 0 2353 20]
+  (cfg_ss: UInt32.t) (cfg_total: UInt64.t) (cfg_ns: UInt32.t) (dev_ss: UInt32.t) (dev_total: UInt64.t)
+  (dev_ns: UInt32.t) (return (x: tup3_u32_u64_u32)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- { f0 = cfg_ss; f1 = cfg_total; f2 = cfg_ns } ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: tup3_u32_u64_u32 = Any.any_l ()
+  | & cfg_ss: UInt32.t = cfg_ss
+  | & cfg_total: UInt64.t = cfg_total
+  | & cfg_ns: UInt32.t = cfg_ns ])
+  [ return (result: tup3_u32_u64_u32) ->
+  {[@stop_split] [@expl:verify_dpm_format_ignores_device_geometry ensures] ([@stop_split] [@expl:verify_dpm_format_ignores_device_geometry ensures #0] [%#slib] result.f0
+      = cfg_ss)
+    /\ ([@stop_split] [@expl:verify_dpm_format_ignores_device_geometry ensures #1] [%#slib'0] result.f1 = cfg_total)
+    /\ ([@stop_split] [@expl:verify_dpm_format_ignores_device_geometry ensures #2] [%#slib'1] result.f2 = cfg_ns)}
+    (! return {result}) ]

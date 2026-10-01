@@ -1,0 +1,14 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_entry_array_bytes": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_serialize_padding_slot": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_verify_dpm_format_post_entry_array": {
+        "prover": "alt-ergo",
+        "time": 0.061
+      },
+      "vc_write_gpt_trace": { "prover": "alt-ergo", "time": 0.016 }
+    }
+  }
+}

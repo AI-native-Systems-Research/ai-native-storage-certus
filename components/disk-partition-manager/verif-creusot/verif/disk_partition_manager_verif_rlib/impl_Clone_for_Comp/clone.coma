@@ -1,0 +1,16 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3502 9 3502 29 *)
+
+(* <Comp as std::clone::Clone> *)
+
+use creusot.prelude.Any
+
+type t_Comp = ReadDone bool | WriteDone bool | DevError | Other | RecvFailed
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_Comp [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3502 9 3502 29]
+  (self: t_Comp) (return (x: t_Comp)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Comp = Any.any_l () | & self: t_Comp = self ]) [ return (result: t_Comp) -> (! return {result}) ]

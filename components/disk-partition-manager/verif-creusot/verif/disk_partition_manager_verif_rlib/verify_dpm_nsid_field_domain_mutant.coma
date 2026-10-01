@@ -1,0 +1,51 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3163 0 3163 95 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3164 16 3164 34
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3165 12 3165 27
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3165 29 3165 47
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3162 10 3162 71
+let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1309 10 1309 27
+let%span slib'4 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1299 10 1299 67
+
+use creusot.int.UInt32
+use creusot.prelude.Any
+
+type t_Option_u32 = None | Some UInt32.t
+
+let set_ns_id_m (_prev: t_Option_u32) (v: UInt32.t) (return (x: t_Option_u32)) = any
+  [ return (result: t_Option_u32) -> {[@stop_split] [@expl:set_ns_id_m ensures] [%#slib'3] result = Some v}
+    (! return {result}) ]
+
+let get_ns_id_m (st: t_Option_u32) (return (x: UInt32.t)) = any
+  [ return (result: UInt32.t) -> {[@stop_split] [@expl:get_ns_id_m ensures] [%#slib'4] match st with
+      | None -> UInt32.t'int result = 1
+      | Some v -> result = v
+      end}
+    (! return {result}) ]
+
+type tup3_Option_u32_u32_u32 = { f0: t_Option_u32; f1: UInt32.t; f2: UInt32.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_dpm_nsid_field_domain__mutant [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3163 0 3163 95]
+  (st: t_Option_u32) (v: UInt32.t) (return (x: tup3_Option_u32_u32_u32)) = (! bb0
+  [ bb0 = s0
+    [ s0 = set_ns_id_m [%#slib] {st} {v} (fun (_x: t_Option_u32) -> [ &after <- _x ] s1)
+    | s1 = get_ns_id_m [%#slib'0] {st} (fun (_x: UInt32.t) -> [ &_9 <- _x ] s2)
+    | s2 = get_ns_id_m [%#slib'1] {after} (fun (_x: UInt32.t) -> [ &_11 <- _x ] s3)
+    | s3 = [ &_ret <- { f0 = after; f1 = _9; f2 = _11 } ] s4
+    | s4 = return {_ret} ] ]
+  [ & _ret: tup3_Option_u32_u32_u32 = Any.any_l ()
+  | & st: t_Option_u32 = st
+  | & v: UInt32.t = v
+  | & after: t_Option_u32 = Any.any_l ()
+  | & _9: UInt32.t = Any.any_l ()
+  | & _11: UInt32.t = Any.any_l () ])
+  [ return (result: tup3_Option_u32_u32_u32) ->
+  {[@stop_split] [@expl:verify_dpm_nsid_field_domain__mutant ensures] [%#slib'2] match st with
+      | None -> UInt32.t'int result.f1 = 0
+      | Some x -> result.f1 = x
+      end}
+    (! return {result}) ]

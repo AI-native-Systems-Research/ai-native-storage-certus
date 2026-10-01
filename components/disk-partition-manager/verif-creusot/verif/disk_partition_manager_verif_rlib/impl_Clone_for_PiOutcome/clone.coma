@@ -1,0 +1,23 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1194 9 1194 29 *)
+
+(* <PiOutcome as std::clone::Clone> *)
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_PInfoM = { index: UInt32.t; start_lba: UInt64.t; num_sectors: UInt64.t }
+
+type t_PtErr = NoPartitionTable | CorruptTable | InvalidPartition | IoError | LayoutError | NotInitialized
+
+type t_PiOutcome = Ok t_PInfoM | Err t_PtErr | Panic
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_PiOutcome [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1194 9 1194 29]
+  (self: t_PiOutcome) (return (x: t_PiOutcome)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_PiOutcome = Any.any_l () | & self: t_PiOutcome = self ])
+  [ return (result: t_PiOutcome) -> (! return {result}) ]

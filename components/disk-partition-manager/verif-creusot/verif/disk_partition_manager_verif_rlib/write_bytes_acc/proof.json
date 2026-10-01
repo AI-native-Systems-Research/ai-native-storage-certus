@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_cdiv64": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_write_bytes_acc": { "prover": "alt-ergo", "time": 0.019 }
+    }
+  }
+}

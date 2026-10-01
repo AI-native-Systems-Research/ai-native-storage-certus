@@ -1,0 +1,96 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 276 0 276 61 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 275 10 275 11
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 272 11 272 33
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 273 11 273 17
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 274 10 274 36
+let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 256 11 256 26
+let%span slib'4 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 257 10 257 25
+let%span slib'5 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 258 10 258 29
+let%span slib'6 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 259 10 259 35
+let%span slib'7 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 226 10 226 11
+let%span slib'8 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 225 11 225 33
+let%span slib'9 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 229 8 233 9
+let%span slib'10 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 260 41 260 43
+let%span slib'11 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 58 16 58 74
+let%span swell_founded = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+
+use creusot.int.UInt64
+use seq.Seq
+use int.EuclideanDivision
+use int.Int
+
+type t_SpecM = { size_bytes: UInt64.t; tg_zero: bool }
+
+function cdiv [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 57 0 57 34] (n: int) (d: int) : int
+ = [%#slib'11] EuclideanDivision.div n d + (if EuclideanDivision.mod n d = 0 then 0 else 1)
+
+function fixed_sum_l [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 227 0 227 57] (s: Seq.seq t_SpecM) (n: int) (ss: int) : int
+
+axiom fixed_sum_l_def: forall s: Seq.seq t_SpecM, n: int, ss: int [fixed_sum_l s n ss]. ([%#slib'8] 0 <= n
+      /\ n <= Seq.length s)
+    -> fixed_sum_l s n ss
+    = ([%#slib'9] if n = 0 then
+      0
+    else
+      fixed_sum_l s (n - 1) ss
+      + (if UInt64.t'int (Seq.get s (n - 1)).size_bytes > 0 then
+        cdiv (UInt64.t'int (Seq.get s (n - 1)).size_bytes) ss
+      else
+        0
+      )
+    )
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+function lemma_cdiv_nonneg [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 260 0 260 40] (n: int) (d: int) : ()
+ = [%#slib'10] ()
+
+axiom lemma_cdiv_nonneg_spec: forall n: int, d: int. ([%#slib'3] n >= 0 /\ d > 0) -> ([%#slib'4] cdiv n d >= 0)
+
+axiom lemma_cdiv_nonneg_spec'0: forall n: int, d: int. ([%#slib'3] n >= 0 /\ d > 0) -> ([%#slib'5] cdiv n d * d >= n)
+
+axiom lemma_cdiv_nonneg_spec'1: forall n: int, d: int. ([%#slib'3] n >= 0 /\ d > 0)
+    -> ([%#slib'6] n > 0 -> cdiv n d >= 1)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant s : Seq.seq t_SpecM
+
+constant n : int
+
+constant ss : int
+
+function lemma_fixed_sum_nonneg [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 276 0 276 61] (s: Seq.seq t_SpecM) (n: int) (ss: int) : ()
+
+goal vc_lemma_fixed_sum_nonneg: ([%#slib'0] 0 <= n /\ n <= Seq.length s)
+  -> ([%#slib'1] ss > 0)
+  -> (if n > 0 then
+    (([@stop_split] [@expl:lemma_fixed_sum_nonneg requires] ([@stop_split] [@expl:lemma_fixed_sum_nonneg requires #0] [%#slib'0] 0
+            <= n - 1
+          /\ n - 1 <= Seq.length s)
+        /\ ([@stop_split] [@expl:lemma_fixed_sum_nonneg requires #1] [%#slib'1] ss > 0))
+      /\ ([@expl:variant decreases] well_founded_relation_Int ([%#slib] n) ([%#slib] n - 1)))
+    /\ (([@stop_split] [@expl:lemma_fixed_sum_nonneg ensures] [%#slib'2] fixed_sum_l s (n - 1) ss >= 0)
+    -> (let _ = lemma_fixed_sum_nonneg s (n
+    - 1) ss in ([@stop_split] [@expl:lemma_cdiv_nonneg requires] [%#slib'3] UInt64.t'int (Seq.get s (n - 1)).size_bytes
+        >= 0
+      /\ ss > 0)
+    /\ (([@stop_split] [@expl:lemma_cdiv_nonneg ensures] ([@stop_split] [@expl:lemma_cdiv_nonneg ensures #0] [%#slib'4] cdiv (UInt64.t'int (Seq.get s (n
+          - 1)).size_bytes) ss
+        >= 0)
+      /\ ([@stop_split] [@expl:lemma_cdiv_nonneg ensures #1] [%#slib'5] cdiv (UInt64.t'int (Seq.get s (n
+            - 1)).size_bytes) ss
+          * ss
+        >= UInt64.t'int (Seq.get s (n - 1)).size_bytes)
+      /\ ([@stop_split] [@expl:lemma_cdiv_nonneg ensures #2] [%#slib'6] UInt64.t'int (Seq.get s (n - 1)).size_bytes > 0
+      -> cdiv (UInt64.t'int (Seq.get s (n - 1)).size_bytes) ss >= 1))
+    -> ([@stop_split] [@expl:lemma_fixed_sum_nonneg ensures] [%#slib'2] fixed_sum_l s n ss >= 0))))
+  else
+    [@stop_split] [@expl:lemma_fixed_sum_nonneg ensures] [%#slib'2] fixed_sum_l s n ss >= 0
+  )

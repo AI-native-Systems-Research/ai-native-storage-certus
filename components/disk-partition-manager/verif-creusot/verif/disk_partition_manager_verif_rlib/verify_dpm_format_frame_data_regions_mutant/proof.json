@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_dpm_format_frame_data_regions__mutant": {
+        "tactic": "split_vc",
+        "children": [ { "prover": "alt-ergo", "time": 0.035 }, null ]
+      },
+      "vc_write_gpt_trace": { "prover": "alt-ergo", "time": 0.014 }
+    }
+  }
+}

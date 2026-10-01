@@ -1,0 +1,10 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_num_sectors_wrapping": { "prover": "alt-ergo", "time": 0.042 },
+      "vc_wrapping_add": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_wrapping_sub": { "prover": "alt-ergo", "time": 0.011 }
+    }
+  }
+}

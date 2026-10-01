@@ -1,0 +1,90 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1738 0 1741 34 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1742 18 1742 60
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1743 12 1743 69
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1737 10 1737 29
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1160 10 1160 86
+let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1161 10 1161 90
+let%span slib'4 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1162 10 1163 85
+let%span slib'5 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1164 10 1165 96
+let%span slib'6 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1166 10 1168 15
+let%span slib'7 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1348 10 1348 71
+let%span slib'8 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1345 16 1345 56
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.prelude.Any
+
+type t_TabM = { tag: UInt64.t; count: UInt32.t; sector_size: UInt32.t }
+
+type t_Option_TabM = None | Some t_TabM
+
+type t_PtErr = NoPartitionTable | CorruptTable | InvalidPartition | IoError | LayoutError | NotInitialized
+
+type t_ReadRes = Ok t_TabM | Err t_PtErr
+
+type t_Outcome = Ok'0 t_TabM | Err'0 t_PtErr | Panic'0
+
+type tup2_Outcome_Option_TabM = { f0: t_Outcome; f1: t_Option_TabM }
+
+let format_m (st: t_Option_TabM) (bound: bool) (chan_ok: bool) (wr: t_ReadRes) (poisoned: bool)
+  (return (x: tup2_Outcome_Option_TabM)) = any
+  [ return (result: tup2_Outcome_Option_TabM) ->
+  {[@stop_split] [@expl:format_m ensures] ([@stop_split] [@expl:format_m ensures #0] [%#slib'2] not bound
+      -> result.f0 = Err'0 (NotInitialized) /\ result.f1 = st)
+    /\ ([@stop_split] [@expl:format_m ensures #1] [%#slib'3] bound /\ not chan_ok
+      -> result.f0 = Err'0 (IoError) /\ result.f1 = st)
+    /\ ([@stop_split] [@expl:format_m ensures #2] [%#slib'4] match wr with
+        | Err e -> bound /\ chan_ok -> result.f0 = Err'0 e /\ result.f1 = st
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:format_m ensures #3] [%#slib'5] match wr with
+        | Ok t -> bound /\ chan_ok /\ poisoned -> result.f0 = Panic'0 /\ result.f1 = st
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:format_m ensures #4] [%#slib'6] match wr with
+      | Ok t -> bound /\ chan_ok /\ not poisoned -> result.f0 = Ok'0 t /\ result.f1 = Some t
+      | _ -> true
+      end)}
+    (! return {result}) ]
+
+predicate format_writes_l [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1344 0 1344 90] (bound: bool) (chan_ok: bool) (geom_ok: bool) (layout_ok: bool) =
+  [%#slib'8] bound /\ chan_ok /\ geom_ok /\ layout_ok
+
+let format_writes_sectors (bound: bool) (chan_ok: bool) (geom_ok: bool) (layout_ok: bool) (return (x: bool)) = any
+  [ return (result: bool) -> {[@stop_split] [@expl:format_writes_sectors ensures] [%#slib'7] result
+    = format_writes_l bound chan_ok geom_ok layout_ok}
+    (! return {result}) ]
+
+type tup3_Outcome_Option_TabM_bool = { f0'0: t_Outcome; f1'0: t_Option_TabM; f2'0: bool }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_dpm_format_pre_device_bound__mutant [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1738 0 1741 34]
+  (st: t_Option_TabM) (bound: bool) (chan_ok: bool) (geom_ok: bool) (layout_ok: bool) (wr: t_ReadRes) (poisoned: bool)
+  (return (x: tup3_Outcome_Option_TabM_bool)) = (! bb0
+  [ bb0 = s0
+    [ s0 = format_m [%#slib] {st} {bound} {chan_ok} {wr} {poisoned}
+        (fun (_x: tup2_Outcome_Option_TabM) -> [ &_12 <- _x ] s1)
+    | s1 = [ &o <- _12.f0 ] s2'0
+    | s2'0 = [ &s2 <- _12.f1 ] s3
+    | s3 = format_writes_sectors [%#slib'0] {bound} {chan_ok} {geom_ok} {layout_ok} (fun (_x: bool) -> [ &w <- _x ] s4)
+    | s4 = [ &_ret <- { f0'0 = o; f1'0 = s2; f2'0 = w } ] s5
+    | s5 = return {_ret} ] ]
+  [ & _ret: tup3_Outcome_Option_TabM_bool = Any.any_l ()
+  | & st: t_Option_TabM = st
+  | & bound: bool = bound
+  | & chan_ok: bool = chan_ok
+  | & geom_ok: bool = geom_ok
+  | & layout_ok: bool = layout_ok
+  | & wr: t_ReadRes = wr
+  | & poisoned: bool = poisoned
+  | & o: t_Outcome = Any.any_l ()
+  | & s2: t_Option_TabM = Any.any_l ()
+  | & _12: tup2_Outcome_Option_TabM = Any.any_l ()
+  | & w: bool = Any.any_l () ])
+  [ return (result: tup3_Outcome_Option_TabM_bool) ->
+  {[@stop_split] [@expl:verify_dpm_format_pre_device_bound__mutant ensures] [%#slib'1] not bound -> result.f2'0}
+    (! return {result}) ]

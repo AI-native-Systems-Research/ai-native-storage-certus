@@ -1,0 +1,65 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1529 0 1529 42 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1532 4 1532 45
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1527 10 1527 57
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1528 10 1528 48
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1084 10 1084 81
+let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1085 10 1085 92
+let%span slib'4 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1086 10 1088 72
+let%span slib'5 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1089 10 1091 72
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.prelude.Any
+
+type t_TabM = { tag: UInt64.t; count: UInt32.t; sector_size: UInt32.t }
+
+type t_Attempt = Ok t_TabM | Corrupt | NoTable | Io
+
+type t_PtErr = NoPartitionTable | CorruptTable | InvalidPartition | IoError | LayoutError | NotInitialized
+
+type t_ReadRes = Ok'0 t_TabM | Err'0 t_PtErr
+
+let read_gpt_m (primary: t_Attempt) (backup: t_Attempt) (return (x: t_ReadRes)) = any
+  [ return (result: t_ReadRes) ->
+  {[@stop_split] [@expl:read_gpt_m ensures] ([@stop_split] [@expl:read_gpt_m ensures #0] [%#slib'2] match primary with
+        | Ok t -> result = Ok'0 t
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:read_gpt_m ensures #1] [%#slib'3] match primary with
+        | Io -> result = Err'0 (IoError)
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:read_gpt_m ensures #2] [%#slib'4] match primary with
+        | Corrupt -> match backup with
+          | Ok t -> result = Ok'0 t
+          | _ -> result = Err'0 (NoPartitionTable)
+          end
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:read_gpt_m ensures #3] [%#slib'5] match primary with
+      | NoTable -> match backup with
+        | Ok t -> result = Ok'0 t
+        | _ -> result = Err'0 (NoPartitionTable)
+        end
+      | _ -> true
+      end)}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let refute_dpm_init_err_io [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1529 0 1529 42]
+  (return (x: t_ReadRes)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_3 <- NoTable ] s1
+    | s1 = [ &_4 <- Io ] s2
+    | s2 = read_gpt_m [%#slib] {_3} {_4} (fun (_x: t_ReadRes) -> [ &_ret <- _x ] s3)
+    | s3 = return {_ret} ] ]
+  [ & _ret: t_ReadRes = Any.any_l () | & _3: t_Attempt = Any.any_l () | & _4: t_Attempt = Any.any_l () ])
+  [ return (result: t_ReadRes) ->
+  {[@stop_split] [@expl:refute_dpm_init_err_io ensures] ([@stop_split] [@expl:refute_dpm_init_err_io ensures #0] [%#slib'0] result
+      = Err'0 (NoPartitionTable))
+    /\ ([@stop_split] [@expl:refute_dpm_init_err_io ensures #1] [%#slib'1] result <> Err'0 (IoError))}
+    (! return {result}) ]

@@ -1,0 +1,61 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3585 0 3585 92 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3586 4 3586 37
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3582 11 3582 36
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3583 11 3583 20
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3584 10 3584 30
+let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 716 11 716 36
+let%span slib'4 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 717 11 717 20
+let%span slib'5 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 718 10 718 25
+let%span slib'6 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 719 10 719 25
+let%span slib'7 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 720 10 720 27
+let%span slib'8 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 721 10 721 44
+let%span slib'9 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 58 16 58 74
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use int.EuclideanDivision
+use creusot.prelude.Any
+use int.Int
+
+type t_Acc = { is_write: bool; ns: UInt32.t; lba: UInt64.t; sectors: UInt64.t }
+
+function cdiv [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 57 0 57 34] (n: int) (d: int) : int
+ = [%#slib'9] EuclideanDivision.div n d + (if EuclideanDivision.mod n d = 0 then 0 else 1)
+
+let write_bytes_acc (ns'0: UInt32.t) (ss: UInt32.t) (lba'0: UInt64.t) (len: UInt64.t) (return (x: t_Acc)) =
+{[@stop_split] [@expl:write_bytes_acc requires] ([@stop_split] [@expl:write_bytes_acc requires #0] [%#slib'3] UInt32.t'int ss
+      = 512
+    \/ UInt32.t'int ss = 4096)
+  /\ ([@stop_split] [@expl:write_bytes_acc requires #1] [%#slib'4] UInt64.t'int len >= 1)}
+  any
+  [ return (result: t_Acc) ->
+  {[@stop_split] [@expl:write_bytes_acc ensures] ([@stop_split] [@expl:write_bytes_acc ensures #0] [%#slib'5] result.is_write)
+    /\ ([@stop_split] [@expl:write_bytes_acc ensures #1] [%#slib'6] result.ns = ns'0)
+    /\ ([@stop_split] [@expl:write_bytes_acc ensures #2] [%#slib'7] result.lba = lba'0)
+    /\ ([@stop_split] [@expl:write_bytes_acc ensures #3] [%#slib'8] UInt64.t'int result.sectors
+    = cdiv (UInt64.t'int len) (UInt32.t'int ss))}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_dpm_io_write_sector_trust__mutant [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3585 0 3585 92]
+  (ns'0: UInt32.t) (ss: UInt32.t) (lba'0: UInt64.t) (len: UInt64.t) (return (x: t_Acc)) =
+{[@stop_split] [@expl:verify_dpm_io_write_sector_trust__mutant requires] ([@stop_split] [@expl:verify_dpm_io_write_sector_trust__mutant requires #0] [%#slib'0] UInt32.t'int ss
+      = 512
+    \/ UInt32.t'int ss = 4096)
+  /\ ([@stop_split] [@expl:verify_dpm_io_write_sector_trust__mutant requires #1] [%#slib'1] UInt64.t'int len >= 1)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = write_bytes_acc [%#slib] {ns'0} {ss} {lba'0} {len} (fun (_x: t_Acc) -> [ &_ret <- _x ] s1)
+    | s1 = return {_ret} ] ]
+  [ & _ret: t_Acc = Any.any_l ()
+  | & ns'0: UInt32.t = ns'0
+  | & ss: UInt32.t = ss
+  | & lba'0: UInt64.t = lba'0
+  | & len: UInt64.t = len ])
+  [ return (result: t_Acc) ->
+  {[@stop_split] [@expl:verify_dpm_io_write_sector_trust__mutant ensures] [%#slib'2] UInt64.t'int result.sectors = 1}
+    (! return {result}) ]

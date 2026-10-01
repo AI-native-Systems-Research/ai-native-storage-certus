@@ -1,0 +1,139 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3223 0 3226 27 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3228 8 3228 31
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3229 8 3230 47
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3219 10 3219 40
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3220 10 3220 48
+let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3221 10 3222 16
+let%span slib'4 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3209 10 3209 38
+let%span slib'5 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3210 10 3210 46
+let%span slib'6 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1030 10 1030 76
+let%span slib'7 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1031 10 1032 61
+let%span slib'8 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1033 10 1034 71
+let%span slib'9 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1035 10 1036 88
+let%span slib'10 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1037 10 1039 47
+let%span slib'11 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1040 10 1042 29
+let%span slib'12 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1044 10 1045 75
+let%span slib'13 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1046 10 1047 93
+let%span slib'14 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1010 8 1023 9
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.prelude.Any
+use int.Int
+
+type t_Option_u32 = None | Some UInt32.t
+
+let parse_header_guard (len: UInt64.t) (return (x: t_Option_u32)) = any
+  [ return (result: t_Option_u32) ->
+  {[@stop_split] [@expl:parse_header_guard ensures] ([@stop_split] [@expl:parse_header_guard ensures #0] [%#slib'4] UInt64.t'int len
+        < 92 -> result = None)
+    /\ ([@stop_split] [@expl:parse_header_guard ensures #1] [%#slib'5] UInt64.t'int len >= 92
+    -> result = Some (92: UInt32.t))}
+    (! return {result}) ]
+
+type t_IoRes = Ok | Fail
+
+type t_TabM = { tag: UInt64.t; count: UInt32.t; sector_size: UInt32.t }
+
+type t_Attempt = Ok'0 t_TabM | Corrupt'0 | NoTable'0 | Io'0
+
+function try_read_gpt_at [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1005 0 1008 12] (hdr_read: t_IoRes) (hdr_len_ok: bool) (sig_ok: bool) (hdr_crc_match: bool) (entry_read: t_IoRes) (entry_crc_match: bool) (tab: t_TabM) : t_Attempt
+ = [%#slib'14] match hdr_read with
+    | Fail -> Io'0
+    | Ok -> if not hdr_len_ok then
+      Corrupt'0
+    else
+      if not sig_ok then
+        NoTable'0
+      else
+        if not hdr_crc_match then
+          Corrupt'0
+        else
+          match entry_read with
+            | Fail -> Io'0
+            | Ok -> if not entry_crc_match then Corrupt'0 else Ok'0 tab
+            end
+      
+    
+    
+    end
+
+let try_read_gpt_at_m (hdr_read: t_IoRes) (hdr_len_ok: bool) (sig_ok: bool) (hdr_crc_match: bool) (entry_read: t_IoRes)
+  (entry_crc_match: bool) (tab: t_TabM) (return (x: t_Attempt)) = any
+  [ return (result: t_Attempt) ->
+  {[@stop_split] [@expl:try_read_gpt_at_m ensures] ([@stop_split] [@expl:try_read_gpt_at_m ensures #0] [%#slib'6] match hdr_read with
+        | Fail -> result = Io'0
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:try_read_gpt_at_m ensures #1] [%#slib'7] match hdr_read with
+        | Ok -> not hdr_len_ok -> result = Corrupt'0
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:try_read_gpt_at_m ensures #2] [%#slib'8] match hdr_read with
+        | Ok -> hdr_len_ok /\ not sig_ok -> result = NoTable'0
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:try_read_gpt_at_m ensures #3] [%#slib'9] match hdr_read with
+        | Ok -> hdr_len_ok /\ sig_ok /\ not hdr_crc_match -> result = Corrupt'0
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:try_read_gpt_at_m ensures #4] [%#slib'10] match entry_read with
+        | Fail -> match hdr_read with
+          | Ok -> hdr_len_ok /\ sig_ok /\ hdr_crc_match -> result = Io'0
+          | _ -> true
+          end
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:try_read_gpt_at_m ensures #5] [%#slib'11] match hdr_read with
+        | Ok -> match entry_read with
+          | Ok -> hdr_len_ok /\ sig_ok /\ hdr_crc_match /\ not entry_crc_match -> result = Corrupt'0
+          | _ -> true
+          end
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:try_read_gpt_at_m ensures #6] [%#slib'12] result
+      = try_read_gpt_at hdr_read hdr_len_ok sig_ok hdr_crc_match entry_read entry_crc_match tab)
+    /\ ([@stop_split] [@expl:try_read_gpt_at_m ensures #7] [%#slib'13] match result with
+      | Ok'0 t -> hdr_len_ok /\ sig_ok /\ hdr_crc_match /\ entry_crc_match /\ t.tag = tab.tag
+      | _ -> true
+      end)}
+    (! return {result}) ]
+
+type tup2_Option_u32_Attempt = { f0: t_Option_u32; f1: t_Attempt }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_dpm_read_err_short_header [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3223 0 3226 27]
+  (len: UInt64.t) (hdr_read: t_IoRes) (hdr_len_ok: bool) (sig_ok: bool) (hdr_crc_match: bool) (entry_read: t_IoRes)
+  (entry_crc_match: bool) (tab: t_TabM) (return (x: tup2_Option_u32_Attempt)) = (! bb0
+  [ bb0 = s0
+    [ s0 = parse_header_guard [%#slib] {len} (fun (_x: t_Option_u32) -> [ &_16 <- _x ] s1)
+    | s1 = try_read_gpt_at_m [%#slib'0] {hdr_read} {hdr_len_ok} {sig_ok} {hdr_crc_match} {entry_read} {entry_crc_match}
+        {tab} (fun (_x: t_Attempt) -> [ &_18 <- _x ] s2)
+    | s2 = [ &_ret <- { f0 = _16; f1 = _18 } ] s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: tup2_Option_u32_Attempt = Any.any_l ()
+  | & len: UInt64.t = len
+  | & hdr_read: t_IoRes = hdr_read
+  | & hdr_len_ok: bool = hdr_len_ok
+  | & sig_ok: bool = sig_ok
+  | & hdr_crc_match: bool = hdr_crc_match
+  | & entry_read: t_IoRes = entry_read
+  | & entry_crc_match: bool = entry_crc_match
+  | & tab: t_TabM = tab
+  | & _16: t_Option_u32 = Any.any_l ()
+  | & _18: t_Attempt = Any.any_l () ])
+  [ return (result: tup2_Option_u32_Attempt) ->
+  {[@stop_split] [@expl:verify_dpm_read_err_short_header ensures] ([@stop_split] [@expl:verify_dpm_read_err_short_header ensures #0] [%#slib'1] UInt64.t'int len
+        < 92 -> result.f0 = None)
+    /\ ([@stop_split] [@expl:verify_dpm_read_err_short_header ensures #1] [%#slib'2] UInt64.t'int len >= 92
+      -> result.f0 = Some (92: UInt32.t))
+    /\ ([@stop_split] [@expl:verify_dpm_read_err_short_header ensures #2] [%#slib'3] not hdr_len_ok
+    -> match hdr_read with
+      | Ok -> result.f1 = Corrupt'0
+      | _ -> true
+      end)}
+    (! return {result}) ]

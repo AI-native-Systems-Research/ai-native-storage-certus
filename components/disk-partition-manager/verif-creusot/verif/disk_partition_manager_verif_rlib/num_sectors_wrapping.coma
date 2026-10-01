@@ -1,0 +1,39 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 4019 0 4019 56 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 4020 4 4020 27
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 4020 41 4020 42
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 4020 4 4020 43
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 4018 10 4018 73
+let%span snum = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/creusot/creusot-std/src/std/num.rs" 316 26 316 48
+let%span snum'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/creusot/creusot-std/src/std/num.rs" 316 26 316 48
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.EuclideanDivision
+use int.Int
+
+let wrapping_sub (self_: UInt64.t) (rhs: UInt64.t) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:wrapping_sub ensures] [%#snum] result = UInt64.sub self_ rhs}
+    (! return {result}) ]
+
+let wrapping_add (self_: UInt64.t) (rhs: UInt64.t) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:wrapping_add ensures] [%#snum'0] result = UInt64.add self_ rhs}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let num_sectors_wrapping [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 4019 0 4019 56]
+  (start: UInt64.t) (end': UInt64.t) (return (x: UInt64.t)) = (! bb0
+  [ bb0 = s0
+    [ s0 = wrapping_sub [%#slib] {end'} {start} (fun (_x: UInt64.t) -> [ &_6 <- _x ] s1)
+    | s1 = wrapping_add [%#slib'1] {_6} {[%#slib'0] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s2)
+    | s2 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l ()
+  | & start: UInt64.t = start
+  | & end': UInt64.t = end'
+  | & _6: UInt64.t = Any.any_l () ])
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:num_sectors_wrapping ensures] [%#slib'2] UInt64.t'int result
+    = EuclideanDivision.mod (UInt64.t'int end' + 1 - UInt64.t'int start) 18446744073709551616}
+    (! return {result}) ]

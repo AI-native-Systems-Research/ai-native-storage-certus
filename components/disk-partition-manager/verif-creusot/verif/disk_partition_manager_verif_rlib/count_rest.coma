@@ -1,0 +1,133 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 351 0 351 46 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 352 23 352 24
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 353 23 353 24
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 357 14 357 25
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 356 16 356 24
+let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 355 16 355 46
+let%span slib'4 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 354 16 354 34
+let%span slib'5 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 358 24 358 63
+let%span slib'6 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 359 16 359 19
+let%span slib'7 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 359 34 359 35
+let%span slib'8 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 360 17 360 18
+let%span slib'9 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 360 12 360 18
+let%span slib'10 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 362 13 362 14
+let%span slib'11 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 362 8 362 14
+let%span slib'12 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 350 10 350 55
+let%span slib'13 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 213 10 213 11
+let%span slib'14 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 212 11 212 33
+let%span slib'15 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 216 8 217 87
+let%span slib'16 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 304 10 304 11
+let%span slib'17 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 301 11 301 33
+let%span slib'18 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 302 10 302 33
+let%span slib'19 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 303 10 303 33
+let%span slib'20 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 306 16 306 62
+let%span svec = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 112 18 112 40
+let%span svec'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span svec'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 193 19 193 38
+let%span svec'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 194 18 194 46
+let%span sslice = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/creusot/creusot-std/src/std/slice.rs" 148 20 148 37
+let%span sslice'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/creusot/creusot-std/src/std/slice.rs" 153 20 153 37
+
+use creusot.int.UInt64
+use seq.Seq
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_SpecM_Global
+
+type t_SpecM = { size_bytes: UInt64.t; tg_zero: bool }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_SpecM_Global (self: t_Vec_SpecM_Global) : Seq.seq t_SpecM
+
+axiom view_Vec_SpecM_Global_spec:
+  forall self: t_Vec_SpecM_Global [view_Vec_SpecM_Global self]. [%#svec'0] Seq.length (view_Vec_SpecM_Global self)
+    <= UInt64.t'int const_MAX
+
+let len_SpecM (self_: t_Vec_SpecM_Global) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:len ensures] [%#svec] UInt64.t'int result
+    = Seq.length (view_Vec_SpecM_Global self_)}
+    (! return {result}) ]
+
+function rest_count_l [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 214 0 214 49] (s: Seq.seq t_SpecM) (n: int) : int
+
+axiom rest_count_l_def: forall s: Seq.seq t_SpecM, n: int [rest_count_l s n]. ([%#slib'14] 0 <= n /\ n <= Seq.length s)
+    -> rest_count_l s n
+    = ([%#slib'15] if n = 0 then
+      0
+    else
+      rest_count_l s (n - 1) + (if UInt64.t'int (Seq.get s (n - 1)).size_bytes = 0 then 1 else 0)
+    )
+
+function lemma_rest_count_nonneg [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 305 0 305 53] (s: Seq.seq t_SpecM) (n: int) : ()
+
+axiom lemma_rest_count_nonneg_def: forall s: Seq.seq t_SpecM, n: int [lemma_rest_count_nonneg s n]. ([%#slib'17] 0 <= n
+      /\ n <= Seq.length s)
+    -> lemma_rest_count_nonneg s n = ([%#slib'20] if n > 0 then lemma_rest_count_nonneg s (n - 1) else ())
+
+axiom lemma_rest_count_nonneg_spec: forall s: Seq.seq t_SpecM, n: int. ([%#slib'17] 0 <= n /\ n <= Seq.length s)
+    -> ([%#slib'18] rest_count_l s n >= 0)
+
+axiom lemma_rest_count_nonneg_spec'0: forall s: Seq.seq t_SpecM, n: int. ([%#slib'17] 0 <= n /\ n <= Seq.length s)
+    -> ([%#slib'19] rest_count_l s n <= n)
+
+predicate in_bounds_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq t_SpecM) =
+  [%#sslice] UInt64.t'int self < Seq.length seq
+
+meta "rewrite_def" predicate in_bounds_usize
+
+predicate has_value_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq t_SpecM) (out: t_SpecM) =
+  [%#sslice'0] Seq.get seq (UInt64.t'int self) = out
+
+meta "rewrite_def" predicate has_value_usize
+
+let index_Vec_SpecM_Global (self_: t_Vec_SpecM_Global) (ix: UInt64.t) (return (x: t_SpecM)) =
+{[@stop_split] [@expl:index requires] [%#svec'1] in_bounds_usize ix (view_Vec_SpecM_Global self_)}
+  any
+  [ return (result: t_SpecM) ->
+  {[@stop_split] [@expl:index ensures] [%#svec'2] has_value_usize ix (view_Vec_SpecM_Global self_) result}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let count_rest [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 351 0 351 46]
+  (specs: t_Vec_SpecM_Global) (return (x: UInt64.t)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &n <- [%#slib] (0: UInt64.t) ] s1 | s1 = [ &i <- [%#slib'0] (0: UInt64.t) ] s2 | s2 = bb1 ]
+  | bb1 = bb1
+    [ bb1 = {[@expl:loop invariant #0] [%#slib'4] UInt64.t'int i <= Seq.length (view_Vec_SpecM_Global specs)}
+      {[@expl:loop invariant #1] [%#slib'3] UInt64.t'int n
+      = rest_count_l (view_Vec_SpecM_Global specs) (UInt64.t'int i)}
+      {[@expl:loop invariant #2] [%#slib'2] UInt64.t'int n <= UInt64.t'int i}
+      (! s0)
+      [ s0 = len_SpecM [%#slib'1] {specs} (fun (_x: UInt64.t) -> [ &_21 <- _x ] s1)
+      | s1 = [ &_19 <- UInt64.lt i _21 ] s2
+      | s2 = any [ br0 -> {_19 = false} (! bb9) | br1 -> {_19} (! bb4) ] ]
+      [ bb4 = s0
+        [ s0 =
+          {[@expl:assertion] [%#slib'5] let _ = lemma_rest_count_nonneg (view_Vec_SpecM_Global specs) (UInt64.t'int i
+          + 1) in true}
+          s1
+        | s1 = index_Vec_SpecM_Global [%#slib'6] {specs} {i} (fun (_x: t_SpecM) -> [ &_30 <- _x ] s2)
+        | s2 = [ &_28 <- _30.size_bytes = ([%#slib'7] (0: UInt64.t)) ] s3
+        | s3 = any [ br0 -> {_28 = false} (! bb8) | br1 -> {_28} (! bb6) ] ]
+      | bb6 = s0
+        [ s0 = UInt64.add [%#slib'9] {n} {[%#slib'8] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &n <- _x ] s1) | s1 = bb8 ]
+      | bb8 = s0
+        [ s0 = UInt64.add [%#slib'11] {i} {[%#slib'10] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &i <- _x ] s1)
+        | s1 = bb1 ] ] ]
+  | bb9 = s0 [ s0 = [ &_ret <- n ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l ()
+  | & specs: t_Vec_SpecM_Global = specs
+  | & n: UInt64.t = Any.any_l ()
+  | & i: UInt64.t = Any.any_l ()
+  | & _19: bool = Any.any_l ()
+  | & _21: UInt64.t = Any.any_l ()
+  | & _28: bool = Any.any_l ()
+  | & _30: t_SpecM = Any.any_l () ])
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:count_rest ensures] [%#slib'12] UInt64.t'int result
+    = rest_count_l (view_Vec_SpecM_Global specs) (Seq.length (view_Vec_SpecM_Global specs))}
+    (! return {result}) ]

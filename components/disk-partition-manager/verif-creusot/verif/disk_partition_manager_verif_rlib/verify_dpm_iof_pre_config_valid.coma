@@ -1,0 +1,110 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2938 0 2938 94 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2939 4 2939 44
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2930 10 2931 63
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2932 10 2934 81
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2935 10 2937 81
+let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1255 10 1257 54
+let%span slib'4 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1258 10 1259 70
+let%span slib'5 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1260 10 1262 68
+let%span slib'6 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1263 10 1265 68
+let%span slib'7 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1266 10 1267 91
+let%span slib'8 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1268 10 1270 16
+let%span slib'9 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1271 10 1273 16
+let%span slib'10 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1274 10 1276 16
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.prelude.Any
+
+type t_TabM = { tag: UInt64.t; count: UInt32.t; sector_size: UInt32.t }
+
+type t_PtErr = NoPartitionTable | CorruptTable | InvalidPartition | IoError | LayoutError | NotInitialized
+
+type t_ReadRes = Ok t_TabM | Err t_PtErr
+
+type t_IofOutcome = Ok'0 t_TabM bool | Err'0 t_PtErr
+
+let initialize_or_format_m (force: bool) (init: t_ReadRes) (fmt: t_ReadRes) (return (x: t_IofOutcome)) = any
+  [ return (result: t_IofOutcome) ->
+  {[@stop_split] [@expl:initialize_or_format_m ensures] ([@stop_split] [@expl:initialize_or_format_m ensures #0] [%#slib'3] force
+      -> match fmt with
+        | Ok t -> result = Ok'0 t true
+        | Err e -> result = Err'0 e
+        end)
+    /\ ([@stop_split] [@expl:initialize_or_format_m ensures #1] [%#slib'4] not force
+      -> match init with
+        | Ok t -> result = Ok'0 t false
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:initialize_or_format_m ensures #2] [%#slib'5] not force
+      -> match init with
+        | Err (NoPartitionTable) -> match fmt with
+          | Ok t -> result = Ok'0 t true
+          | Err e -> result = Err'0 e
+          end
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:initialize_or_format_m ensures #3] [%#slib'6] not force
+      -> match init with
+        | Err (CorruptTable) -> match fmt with
+          | Ok t -> result = Ok'0 t true
+          | Err e -> result = Err'0 e
+          end
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:initialize_or_format_m ensures #4] [%#slib'7] not force
+      -> match init with
+        | Err (IoError) -> result = Err'0 (IoError)
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:initialize_or_format_m ensures #5] [%#slib'8] not force
+      -> match init with
+        | Err (NotInitialized) -> result = Err'0 (NotInitialized)
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:initialize_or_format_m ensures #6] [%#slib'9] not force
+      -> match init with
+        | Err (LayoutError) -> result = Err'0 (LayoutError)
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:initialize_or_format_m ensures #7] [%#slib'10] not force
+    -> match init with
+      | Err (InvalidPartition) -> result = Err'0 (InvalidPartition)
+      | _ -> true
+      end)}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_dpm_iof_pre_config_valid [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2938 0 2938 94]
+  (force: bool) (init: t_ReadRes) (fmt: t_ReadRes) (return (x: t_IofOutcome)) = (! bb0
+  [ bb0 = s0
+    [ s0 = initialize_or_format_m [%#slib] {force} {init} {fmt} (fun (_x: t_IofOutcome) -> [ &_ret <- _x ] s1)
+    | s1 = return {_ret} ] ]
+  [ & _ret: t_IofOutcome = Any.any_l () | & force: bool = force | & init: t_ReadRes = init | & fmt: t_ReadRes = fmt ])
+  [ return (result: t_IofOutcome) ->
+  {[@stop_split] [@expl:verify_dpm_iof_pre_config_valid ensures] ([@stop_split] [@expl:verify_dpm_iof_pre_config_valid ensures #0] [%#slib'0] force
+      -> match fmt with
+        | Err (LayoutError) -> result = Err'0 (LayoutError)
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:verify_dpm_iof_pre_config_valid ensures #1] [%#slib'1] not force
+      -> match init with
+        | Err (NoPartitionTable) -> match fmt with
+          | Err (LayoutError) -> result = Err'0 (LayoutError)
+          | _ -> true
+          end
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:verify_dpm_iof_pre_config_valid ensures #2] [%#slib'2] not force
+    -> match init with
+      | Err (CorruptTable) -> match fmt with
+        | Err (LayoutError) -> result = Err'0 (LayoutError)
+        | _ -> true
+        end
+      | _ -> true
+      end)}
+    (! return {result}) ]

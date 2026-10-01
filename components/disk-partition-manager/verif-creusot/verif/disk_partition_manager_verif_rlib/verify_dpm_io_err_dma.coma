@@ -1,0 +1,37 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3361 0 3361 69 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3362 4 3362 22
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3359 10 3359 56
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3360 10 3360 33
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3349 10 3349 69
+let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3350 10 3350 51
+
+use creusot.prelude.Any
+
+type t_PtErr = NoPartitionTable | CorruptTable | InvalidPartition | IoError | LayoutError | NotInitialized
+
+type t_Option_PtErr = None | Some t_PtErr
+
+type tup2_Option_PtErr_bool = { f0: t_Option_PtErr; f1: bool }
+
+let dma_step (alloc_ok: bool) (return (x: tup2_Option_PtErr_bool)) = any
+  [ return (result: tup2_Option_PtErr_bool) ->
+  {[@stop_split] [@expl:dma_step ensures] ([@stop_split] [@expl:dma_step ensures #0] [%#slib'2] not alloc_ok
+      -> result.f0 = Some (IoError) /\ not result.f1)
+    /\ ([@stop_split] [@expl:dma_step ensures #1] [%#slib'3] alloc_ok -> result.f0 = None /\ result.f1)}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_dpm_io_err_dma [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3361 0 3361 69]
+  (alloc_ok: bool) (return (x: tup2_Option_PtErr_bool)) = (! bb0
+  [ bb0 = s0
+    [ s0 = dma_step [%#slib] {alloc_ok} (fun (_x: tup2_Option_PtErr_bool) -> [ &_ret <- _x ] s1)
+    | s1 = return {_ret} ] ] [ & _ret: tup2_Option_PtErr_bool = Any.any_l () | & alloc_ok: bool = alloc_ok ])
+  [ return (result: tup2_Option_PtErr_bool) ->
+  {[@stop_split] [@expl:verify_dpm_io_err_dma ensures] ([@stop_split] [@expl:verify_dpm_io_err_dma ensures #0] [%#slib'0] not alloc_ok
+      -> result.f0 = Some (IoError))
+    /\ ([@stop_split] [@expl:verify_dpm_io_err_dma ensures #1] [%#slib'1] not alloc_ok -> not result.f1)}
+    (! return {result}) ]

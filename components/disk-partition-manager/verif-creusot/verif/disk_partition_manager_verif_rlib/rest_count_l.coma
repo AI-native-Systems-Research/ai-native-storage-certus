@@ -1,0 +1,34 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 214 0 214 49 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 213 10 213 11
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 212 11 212 33
+let%span swell_founded = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+
+use creusot.int.UInt64
+use seq.Seq
+use int.Int
+
+type t_SpecM = { size_bytes: UInt64.t; tg_zero: bool }
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant s : Seq.seq t_SpecM
+
+constant n : int
+
+function rest_count_l [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 214 0 214 49] (s: Seq.seq t_SpecM) (n: int) : int
+
+goal vc_rest_count_l: ([%#slib'0] 0 <= n /\ n <= Seq.length s)
+  -> (if n = 0 then
+    true
+  else
+    ([@stop_split] [@expl:rest_count_l requires] [%#slib'0] 0 <= n - 1 /\ n - 1 <= Seq.length s)
+    /\ ([@expl:variant decreases] well_founded_relation_Int ([%#slib] n) ([%#slib] n - 1))
+  )

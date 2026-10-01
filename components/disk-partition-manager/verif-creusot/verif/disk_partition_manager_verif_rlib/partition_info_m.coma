@@ -1,0 +1,103 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1208 0 1213 14 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1220 23 1220 34
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1223 23 1223 37
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1202 10 1202 49
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1203 10 1203 82
+let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1204 10 1205 57
+let%span slib'4 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1206 10 1207 45
+let%span svec = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 112 18 112 40
+let%span svec'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 193 19 193 38
+let%span svec'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 194 18 194 46
+let%span svec'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sslice = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/creusot/creusot-std/src/std/slice.rs" 148 20 148 37
+let%span sslice'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/creusot/creusot-std/src/std/slice.rs" 153 20 153 37
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use seq.Seq
+use creusot.prelude.Any
+use int.Int
+
+type t_PInfoM = { index: UInt32.t; start_lba: UInt64.t; num_sectors: UInt64.t }
+
+type t_PtErr = NoPartitionTable | CorruptTable | InvalidPartition | IoError | LayoutError | NotInitialized
+
+type t_PiOutcome = Ok t_PInfoM | Err t_PtErr | Panic
+
+type t_Vec_PInfoM_Global
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_PInfoM_Global (self: t_Vec_PInfoM_Global) : Seq.seq t_PInfoM
+
+axiom view_Vec_PInfoM_Global_spec:
+  forall self: t_Vec_PInfoM_Global [view_Vec_PInfoM_Global self]. [%#svec'2] Seq.length (view_Vec_PInfoM_Global self)
+    <= UInt64.t'int const_MAX
+
+let len_PInfoM (self_: t_Vec_PInfoM_Global) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:len ensures] [%#svec] UInt64.t'int result
+    = Seq.length (view_Vec_PInfoM_Global self_)}
+    (! return {result}) ]
+
+predicate in_bounds_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq t_PInfoM) =
+  [%#sslice] UInt64.t'int self < Seq.length seq
+
+meta "rewrite_def" predicate in_bounds_usize
+
+predicate has_value_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq t_PInfoM) (out: t_PInfoM) =
+  [%#sslice'0] Seq.get seq (UInt64.t'int self) = out
+
+meta "rewrite_def" predicate has_value_usize
+
+let index_Vec_PInfoM_Global (self_: t_Vec_PInfoM_Global) (ix: UInt64.t) (return (x: t_PInfoM)) =
+{[@stop_split] [@expl:index requires] [%#svec'0] in_bounds_usize ix (view_Vec_PInfoM_Global self_)}
+  any
+  [ return (result: t_PInfoM) ->
+  {[@stop_split] [@expl:index ensures] [%#svec'1] has_value_usize ix (view_Vec_PInfoM_Global self_) result}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let partition_info_m [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1208 0 1213 14]
+  (loaded: bool) (parts: t_Vec_PInfoM_Global) (poisoned: bool) (idx: UInt32.t) (return (x: t_PiOutcome)) = (! bb0
+  [ bb0 = any [ br0 -> {poisoned = false} (! bb2) | br1 -> {poisoned} (! bb1) ]
+  | bb1 = s0 [ s0 = [ &_ret <- Panic ] s1 | s1 = return {_ret} ]
+  | bb2 = any [ br0 -> {loaded = false} (! bb4) | br1 -> {loaded} (! bb3) ]
+  | bb3 = s0
+    [ s0 = [ &_29 <- UInt64.of_int (UInt32.t'int idx) ] s1
+    | s1 = len_PInfoM [%#slib] {parts} (fun (_x: UInt64.t) -> [ &_31 <- _x ] s2)
+    | s2 = [ &_28 <- UInt64.ge _29 _31 ] s3
+    | s3 = any [ br0 -> {_28 = false} (! bb7) | br1 -> {_28} (! bb6) ] ]
+  | bb6 = s0 [ s0 = [ &_34 <- InvalidPartition ] s1 | s1 = [ &_ret <- Err _34 ] s2 | s2 = return {_ret} ]
+  | bb7 = s0
+    [ s0 = [ &_38 <- UInt64.of_int (UInt32.t'int idx) ] s1
+    | s1 = index_Vec_PInfoM_Global [%#slib'0] {parts} {_38} (fun (_x: t_PInfoM) -> [ &_36 <- _x ] s2)
+    | s2 = [ &_ret <- Ok _36 ] s3
+    | s3 = return {_ret} ]
+  | bb4 = s0 [ s0 = [ &_26 <- NotInitialized ] s1 | s1 = [ &_ret <- Err _26 ] s2 | s2 = return {_ret} ] ]
+  [ & _ret: t_PiOutcome = Any.any_l ()
+  | & loaded: bool = loaded
+  | & parts: t_Vec_PInfoM_Global = parts
+  | & poisoned: bool = poisoned
+  | & idx: UInt32.t = idx
+  | & _26: t_PtErr = Any.any_l ()
+  | & _28: bool = Any.any_l ()
+  | & _29: UInt64.t = Any.any_l ()
+  | & _31: UInt64.t = Any.any_l ()
+  | & _34: t_PtErr = Any.any_l ()
+  | & _36: t_PInfoM = Any.any_l ()
+  | & _38: UInt64.t = Any.any_l () ])
+  [ return (result: t_PiOutcome) ->
+  {[@stop_split] [@expl:partition_info_m ensures] ([@stop_split] [@expl:partition_info_m ensures #0] [%#slib'1] poisoned
+      -> result = Panic)
+    /\ ([@stop_split] [@expl:partition_info_m ensures #1] [%#slib'2] not poisoned /\ not loaded
+      -> result = Err (NotInitialized))
+    /\ ([@stop_split] [@expl:partition_info_m ensures #2] [%#slib'3] not poisoned
+        /\ loaded /\ UInt32.t'int idx >= Seq.length (view_Vec_PInfoM_Global parts) -> result = Err (InvalidPartition))
+    /\ ([@stop_split] [@expl:partition_info_m ensures #3] [%#slib'4] not poisoned
+      /\ loaded /\ UInt32.t'int idx < Seq.length (view_Vec_PInfoM_Global parts)
+    -> result = Ok (Seq.get (view_Vec_PInfoM_Global parts) (UInt32.t'int idx)))}
+    (! return {result}) ]

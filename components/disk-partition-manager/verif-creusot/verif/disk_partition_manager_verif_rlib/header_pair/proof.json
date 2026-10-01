@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_header_pair": { "prover": "alt-ergo", "time": 0.055 },
+      "vc_usable_window": { "prover": "alt-ergo", "time": 0.015 }
+    }
+  }
+}

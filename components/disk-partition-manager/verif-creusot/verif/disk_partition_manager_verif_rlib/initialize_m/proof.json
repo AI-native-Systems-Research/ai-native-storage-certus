@@ -1,0 +1,10 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_elim_Err": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_elim_Ok": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_initialize_m": { "prover": "alt-ergo", "time": 0.031 }
+    }
+  }
+}

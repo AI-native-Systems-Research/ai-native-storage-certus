@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_usable_window_wrapping": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_verify_dpm_format_pre_geometry_min": {
+        "prover": "alt-ergo",
+        "time": 0.024
+      }
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_decode_units": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_encode_units": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_verify_dpm_name_length_limit": {
+        "prover": "alt-ergo",
+        "time": 0.043
+      }
+    }
+  }
+}

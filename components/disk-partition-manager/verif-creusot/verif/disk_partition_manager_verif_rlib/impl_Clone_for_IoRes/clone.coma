@@ -1,0 +1,16 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 996 9 996 29 *)
+
+(* <IoRes as std::clone::Clone> *)
+
+use creusot.prelude.Any
+
+type t_IoRes = Ok | Fail
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_IoRes [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 996 9 996 29]
+  (self: t_IoRes) (return (x: t_IoRes)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_IoRes = Any.any_l () | & self: t_IoRes = self ]) [ return (result: t_IoRes) -> (! return {result}) ]

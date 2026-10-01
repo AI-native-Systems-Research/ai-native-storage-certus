@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_len_PInfoM": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_num_partitions_m": { "prover": "alt-ergo", "time": 0.02 }
+    }
+  }
+}

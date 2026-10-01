@@ -1,0 +1,113 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2784 0 2786 38 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2787 12 2787 58
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2788 12 2788 58
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2789 12 2789 53
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2778 11 2778 37
+let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2779 10 2779 30
+let%span slib'4 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2780 10 2781 92
+let%span slib'5 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2782 10 2783 87
+let%span slib'6 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1202 10 1202 49
+let%span slib'7 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1203 10 1203 82
+let%span slib'8 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1204 10 1205 57
+let%span slib'9 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1206 10 1207 45
+let%span slib'10 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1234 11 1234 37
+let%span slib'11 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1235 10 1235 49
+let%span slib'12 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1236 10 1236 82
+let%span slib'13 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1237 10 1237 97
+let%span svec = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use seq.Seq
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_PInfoM_Global
+
+type t_PInfoM = { index: UInt32.t; start_lba: UInt64.t; num_sectors: UInt64.t }
+
+type t_PtErr = NoPartitionTable | CorruptTable | InvalidPartition | IoError | LayoutError | NotInitialized
+
+type t_PiOutcome = Ok t_PInfoM | Err t_PtErr | Panic
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_PInfoM_Global (self: t_Vec_PInfoM_Global) : Seq.seq t_PInfoM
+
+axiom view_Vec_PInfoM_Global_spec:
+  forall self: t_Vec_PInfoM_Global [view_Vec_PInfoM_Global self]. [%#svec] Seq.length (view_Vec_PInfoM_Global self)
+    <= UInt64.t'int const_MAX
+
+let partition_info_m (loaded: bool) (parts: t_Vec_PInfoM_Global) (poisoned: bool) (idx: UInt32.t)
+  (return (x: t_PiOutcome)) = any
+  [ return (result: t_PiOutcome) ->
+  {[@stop_split] [@expl:partition_info_m ensures] ([@stop_split] [@expl:partition_info_m ensures #0] [%#slib'6] poisoned
+      -> result = Panic)
+    /\ ([@stop_split] [@expl:partition_info_m ensures #1] [%#slib'7] not poisoned /\ not loaded
+      -> result = Err (NotInitialized))
+    /\ ([@stop_split] [@expl:partition_info_m ensures #2] [%#slib'8] not poisoned
+        /\ loaded /\ UInt32.t'int idx >= Seq.length (view_Vec_PInfoM_Global parts) -> result = Err (InvalidPartition))
+    /\ ([@stop_split] [@expl:partition_info_m ensures #3] [%#slib'9] not poisoned
+      /\ loaded /\ UInt32.t'int idx < Seq.length (view_Vec_PInfoM_Global parts)
+    -> result = Ok (Seq.get (view_Vec_PInfoM_Global parts) (UInt32.t'int idx)))}
+    (! return {result}) ]
+
+type t_NpOutcome = Ok'0 UInt32.t | Err'0 t_PtErr | Panic'0
+
+let num_partitions_m (loaded: bool) (parts: t_Vec_PInfoM_Global) (poisoned: bool) (return (x: t_NpOutcome)) =
+{[@stop_split] [@expl:num_partitions_m requires] [%#slib'10] Seq.length (view_Vec_PInfoM_Global parts) <= 4294967295}
+  any
+  [ return (result: t_NpOutcome) ->
+  {[@stop_split] [@expl:num_partitions_m ensures] ([@stop_split] [@expl:num_partitions_m ensures #0] [%#slib'11] poisoned
+      -> result = Panic'0)
+    /\ ([@stop_split] [@expl:num_partitions_m ensures #1] [%#slib'12] not poisoned /\ not loaded
+      -> result = Err'0 (NotInitialized))
+    /\ ([@stop_split] [@expl:num_partitions_m ensures #2] [%#slib'13] not poisoned /\ loaded
+    -> (exists c: UInt32.t. result = Ok'0 c /\ UInt32.t'int c = Seq.length (view_Vec_PInfoM_Global parts)))}
+    (! return {result}) ]
+
+type tup3_PiOutcome_PiOutcome_NpOutcome = { f0: t_PiOutcome; f1: t_PiOutcome; f2: t_NpOutcome }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_dpm_pinfo_inv_consistent [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2784 0 2786 38]
+  (loaded: bool) (parts: t_Vec_PInfoM_Global) (poisoned: bool) (idx: UInt32.t)
+  (return (x: tup3_PiOutcome_PiOutcome_NpOutcome)) =
+{[@stop_split] [@expl:verify_dpm_pinfo_inv_consistent requires] [%#slib'2] Seq.length (view_Vec_PInfoM_Global parts)
+  <= 4294967295}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = partition_info_m [%#slib] {loaded} {parts} {poisoned} {idx} (fun (_x: t_PiOutcome) -> [ &a <- _x ] s1)
+    | s1 = partition_info_m [%#slib'0] {loaded} {parts} {poisoned} {idx} (fun (_x: t_PiOutcome) -> [ &b <- _x ] s2)
+    | s2 = num_partitions_m [%#slib'1] {loaded} {parts} {poisoned} (fun (_x: t_NpOutcome) -> [ &n <- _x ] s3)
+    | s3 = [ &_ret <- { f0 = a; f1 = b; f2 = n } ] s4
+    | s4 = return {_ret} ] ]
+  [ & _ret: tup3_PiOutcome_PiOutcome_NpOutcome = Any.any_l ()
+  | & loaded: bool = loaded
+  | & parts: t_Vec_PInfoM_Global = parts
+  | & poisoned: bool = poisoned
+  | & idx: UInt32.t = idx
+  | & a: t_PiOutcome = Any.any_l ()
+  | & b: t_PiOutcome = Any.any_l ()
+  | & n: t_NpOutcome = Any.any_l () ])
+  [ return (result: tup3_PiOutcome_PiOutcome_NpOutcome) ->
+  {[@stop_split] [@expl:verify_dpm_pinfo_inv_consistent ensures] ([@stop_split] [@expl:verify_dpm_pinfo_inv_consistent ensures #0] [%#slib'3] result.f0
+      = result.f1)
+    /\ ([@stop_split] [@expl:verify_dpm_pinfo_inv_consistent ensures #1] [%#slib'4] not poisoned /\ loaded
+      -> match result.f2 with
+        | Ok'0 c -> UInt32.t'int idx < UInt32.t'int c
+        -> match result.f0 with
+          | Ok _ -> true
+          | _ -> false
+          end
+        | _ -> false
+        end)
+    /\ ([@stop_split] [@expl:verify_dpm_pinfo_inv_consistent ensures #2] [%#slib'5] not poisoned /\ loaded
+    -> match result.f2 with
+      | Ok'0 c -> UInt32.t'int idx >= UInt32.t'int c -> result.f0 = Err (InvalidPartition)
+      | _ -> false
+      end)}
+    (! return {result}) ]

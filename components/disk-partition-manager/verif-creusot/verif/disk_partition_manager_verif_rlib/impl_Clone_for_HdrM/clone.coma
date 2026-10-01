@@ -1,0 +1,29 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1578 9 1578 29 *)
+
+(* <HdrM as std::clone::Clone> *)
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.prelude.Any
+
+type t_HdrM = {
+  signature: UInt64.t;
+  revision: UInt32.t;
+  header_size: UInt32.t;
+  my_lba: UInt64.t;
+  alternate_lba: UInt64.t;
+  first_usable_lba: UInt64.t;
+  last_usable_lba: UInt64.t;
+  partition_entry_lba: UInt64.t;
+  num_partition_entries: UInt32.t;
+  partition_entry_size: UInt32.t;
+  partition_entry_crc32: UInt32.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_HdrM [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 1578 9 1578 29]
+  (self: t_HdrM) (return (x: t_HdrM)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_HdrM = Any.any_l () | & self: t_HdrM = self ]) [ return (result: t_HdrM) -> (! return {result}) ]

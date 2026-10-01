@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_sector_size_used": { "prover": "alt-ergo", "time": 0.013 }
+    }
+  }
+}

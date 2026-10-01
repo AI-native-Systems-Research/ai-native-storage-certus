@@ -1,0 +1,24 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_count_rest": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_layout_classify": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.018 },
+              { "prover": "alt-ergo", "time": 0.021 },
+              { "prover": "alt-ergo", "time": 0.018 },
+              { "prover": "alt-ergo", "time": 0.021 },
+              { "prover": "alt-ergo", "time": 0.018 }
+            ]
+          }
+        ]
+      },
+      "vc_sum_fixed": { "prover": "alt-ergo", "time": 0.019 }
+    }
+  }
+}

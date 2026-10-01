@@ -1,0 +1,16 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lemma_rest_count_mono": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.017 },
+          { "prover": "alt-ergo", "time": 0.015 },
+          { "prover": "alt-ergo", "time": 0.021 },
+          { "prover": "alt-ergo", "time": 0.018 }
+        ]
+      }
+    }
+  }
+}

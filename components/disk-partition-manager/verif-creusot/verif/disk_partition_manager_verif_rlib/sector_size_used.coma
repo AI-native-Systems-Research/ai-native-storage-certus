@@ -1,0 +1,17 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3912 0 3912 43 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3911 10 3911 26
+
+use creusot.int.UInt32
+use creusot.prelude.Any
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let sector_size_used [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3912 0 3912 43]
+  (cfg_ss: UInt32.t) (return (x: UInt32.t)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- cfg_ss ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: UInt32.t = Any.any_l () | & cfg_ss: UInt32.t = cfg_ss ])
+  [ return (result: UInt32.t) -> {[@stop_split] [@expl:sector_size_used ensures] [%#slib] result = cfg_ss}
+    (! return {result}) ]

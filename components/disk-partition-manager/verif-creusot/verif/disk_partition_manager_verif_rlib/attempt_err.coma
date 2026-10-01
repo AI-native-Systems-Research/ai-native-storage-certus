@@ -1,0 +1,43 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 4113 0 4113 47 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 4109 10 4112 38
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.prelude.Any
+
+type t_TabM = { tag: UInt64.t; count: UInt32.t; sector_size: UInt32.t }
+
+type t_Attempt = Ok t_TabM | Corrupt | NoTable | Io
+
+type t_PtErr = NoPartitionTable | CorruptTable | InvalidPartition | IoError | LayoutError | NotInitialized
+
+type t_Option_PtErr = None | Some t_PtErr
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let attempt_err [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 4113 0 4113 47]
+  (a: t_Attempt) (return (x: t_Option_PtErr)) = (! bb0
+  [ bb0 = any
+    [ br0 (x0: t_TabM) -> {a = Ok x0} (! bb5)
+    | br1 -> {a = Corrupt} (! bb8)
+    | br2 -> {a = NoTable} (! bb7)
+    | br3 -> {a = Io} (! bb6) ]
+  | bb6 = s0 [ s0 = [ &_7 <- IoError ] s1 | s1 = [ &_ret <- Some _7 ] s2 | s2 = return {_ret} ]
+  | bb7 = s0 [ s0 = [ &_6 <- NoPartitionTable ] s1 | s1 = [ &_ret <- Some _6 ] s2 | s2 = return {_ret} ]
+  | bb8 = s0 [ s0 = [ &_5 <- CorruptTable ] s1 | s1 = [ &_ret <- Some _5 ] s2 | s2 = return {_ret} ]
+  | bb5 = s0 [ s0 = [ &_ret <- None ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Option_PtErr = Any.any_l ()
+  | & a: t_Attempt = a
+  | & _5: t_PtErr = Any.any_l ()
+  | & _6: t_PtErr = Any.any_l ()
+  | & _7: t_PtErr = Any.any_l () ])
+  [ return (result: t_Option_PtErr) -> {[@stop_split] [@expl:attempt_err ensures] [%#slib] match a with
+      | Corrupt -> result = Some (CorruptTable)
+      | NoTable -> result = Some (NoPartitionTable)
+      | Io -> result = Some (IoError)
+      | Ok _ -> result = None
+      end}
+    (! return {result}) ]

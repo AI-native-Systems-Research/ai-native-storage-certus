@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_layout_place": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_verify_dpm_inv_order_monotonic__mutant": {
+        "tactic": "split_vc",
+        "children": [ { "prover": "alt-ergo", "time": 0.038 }, null ]
+      }
+    }
+  }
+}

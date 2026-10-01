@@ -1,0 +1,39 @@
+(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3211 0 3211 52 *)
+
+let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3212 13 3212 28
+let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3215 9 3215 24
+let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3209 10 3209 38
+let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3210 10 3210 46
+let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 40 0 40 30
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+constant const_GPT_HEADER_SIZE: UInt32.t = [%#slib'3] (92: UInt32.t)
+
+type t_Option_u32 = None | Some UInt32.t
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let parse_header_guard [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3211 0 3211 52]
+  (len: UInt64.t) (return (x: t_Option_u32)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_9 <- UInt64.of_int (UInt32.t'int ([%#slib] const_GPT_HEADER_SIZE)) ] s1
+    | s1 = [ &_7 <- UInt64.lt len _9 ] s2
+    | s2 = any [ br0 -> {_7 = false} (! bb2) | br1 -> {_7} (! bb1) ] ]
+  | bb1 = s0 [ s0 = [ &_ret <- None ] s1 | s1 = return {_ret} ]
+  | bb2 = s0 [ s0 = [ &_ret <- Some ([%#slib'0] const_GPT_HEADER_SIZE) ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Option_u32 = Any.any_l ()
+  | & len: UInt64.t = len
+  | & _7: bool = Any.any_l ()
+  | & _9: UInt64.t = Any.any_l () ])
+  [ return (result: t_Option_u32) ->
+  {[@stop_split] [@expl:parse_header_guard ensures] ([@stop_split] [@expl:parse_header_guard ensures #0] [%#slib'1] UInt64.t'int len
+        < 92 -> result = None)
+    /\ ([@stop_split] [@expl:parse_header_guard ensures #1] [%#slib'2] UInt64.t'int len >= 92
+    -> result = Some (92: UInt32.t))}
+    (! return {result}) ]
