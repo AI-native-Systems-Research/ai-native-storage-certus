@@ -3,9 +3,9 @@
   "project": "dispatcher",
   "spec": "specs/001-dispatcher-cache-interface/spec.md",
   "branch": "certus-lookup-observability",
-  "git_commit": "f052992c",
+  "git_commit": "d7222e68",
   "drift_status": "resolved",
-  "inputs_sha256": "127cc2e8f652c053e6cbf2c73244ffaaa6807a7c0fee170315dcac0c9b7760b0",
+  "inputs_sha256": "f3e895dfb7a1641be202aadbf175934db7ea2bc5f65a4226d0d681ecb4f677e1",
   "summary": {
     "specs_analyzed": 2,
     "requirements_checked": 11,

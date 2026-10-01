@@ -155,6 +155,24 @@ The system keeps both DRAM and SSD tiers within configured utilization bounds wi
   identical residency, and it is a difference in *persistence*, not in the value chosen. A test
   asserting that a repeat read changes tier would be mis-specified against this component.
 
+- **FR-025a** *(New 2026-10-01 — drift found by sweep, previously unspecced.)* This component
+  MUST report the **route partition** through `IDispatcher::tier_event_stats()`:
+  `lookup_hits_dram`, `lookup_hits_ssd` and `remote_lookup_hits`, which MUST sum to the served
+  keys over any interval. It MUST NOT return `TierEventStats::default()` for these, which is
+  what it did until 2026-09-30.
+
+  It still reports **no tier-movement counters** (promotions, evictions, store backpressure) —
+  those belong to paths this component does not have — so those fields remain zero, and that is
+  intentional rather than an omission.
+
+  **Why this needed stating.** Returning zeros compiled and passed every test: adding fields to
+  `TierEventStats` is not compiler-enforced, because the other implementors build it with
+  `..Default::default()`. A p2p server therefore reported 5 526 hits with every route at zero,
+  and the per-key attribution was correct the whole time — only its aggregate face was missing,
+  which is exactly why the invariant tests passed and nothing caught it. The partition
+  assertion of FR-026 is what closes that, and it is required *in this component* for the same
+  reason.
+
 - **FR-026** *(New 2026-09-29.)* The three invariants of
   `dispatcher/specs/002-served-by-tier-attribution/contracts/idispatcher.md` MUST hold here
   and MUST be tested **in this component**, not by borrowing `dispatcher`'s tests: length and

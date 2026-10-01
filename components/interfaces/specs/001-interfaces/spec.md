@@ -172,7 +172,7 @@ The crate has two Cargo features:
 - **Method**: `shutdown(&self) -> Result<(), DispatcherError>` - Shut down, completing in-flight writes.
 - **Method**: `lookup(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError>` - Look up and DMA-copy to GPU memory.
 - **Method**: `lookup_async(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<GpuStream, DispatcherError>` - Async lookup returning CUDA stream.
-- **Method**: `batch_lookup(&self, entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), DispatcherError>>` - Concurrent batch lookup.
+- **Method**: `batch_lookup(&self, entries: &[(CacheKey, Vec<IpcHandle>)]) -> Vec<LookupOutcome>` *(Sync 2026-10-01 — CODE CHANGE, served_by Phase 2)* - Concurrent batch lookup. Returns one `LookupOutcome` per requested entry, in order, each carrying **how** the key was served as well as the result. Widened from `Vec<Result<(), DispatcherError>>`: the tier was previously lost at this boundary, so no consumer could distinguish a DRAM hit from an SSD read or a peer fetch.
 - **Method**: `check(&self, key: CacheKey) -> Result<bool, DispatcherError>` - Check entry existence.
 - **Method**: `remove(&self, key: CacheKey) -> Result<(), DispatcherError>` - Remove entry and free resources.
 - **Method**: `populate(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError>` - Populate cache from GPU memory.
@@ -344,6 +344,22 @@ The crate has two Cargo features:
 - `GpuIpcHandle`: CUDA IPC memory handle with state tracking (verified, pinned).
 - `GpuDmaBuffer`: GPU memory buffer with auto-close on drop.
 - `GpuStream`: Opaque CUDA stream handle.
+
+#### FR-023a: Supporting Types - Serving-Tier Attribution *(New 2026-10-01)*
+- `ServedBy`: 6-variant enum naming **how** a looked-up key was served — `Dram`, `Ssd`,
+  `Remote`, `Miss`, `SizeMismatch`, `Error` — with `is_hit()` true for the first three. **The
+  value space is defined here and only here**; every other document and crate references this
+  type rather than restating it, because a taxonomy written down twice is a taxonomy that will
+  disagree with itself. It describes the **route**, not the entry's residency afterwards: an SSD
+  hit that is promoted into DRAM as part of being served is `Ssd`, because that is what the
+  request cost.
+- `LookupOutcome`: the per-key result of `IDispatcher::batch_lookup` — `{ served_by: ServedBy,
+  result: Result<(), DispatcherError> }`, with the invariant `served_by.is_hit()` **if and only
+  if** `result.is_ok()`. A struct rather than `Result<ServedBy, DispatcherError>` deliberately:
+  the tier-on-`Ok` encoding cannot express `Miss`, `SizeMismatch` or `Error`, since those *are*
+  the `Err` cases, and would push a third of the taxonomy into a per-server error-to-tier
+  mapping — which is how two servers reporting the same cache would drift apart.
+- Owning feature: `components/dispatcher/specs/002-served-by-tier-attribution`.
 
 #### FR-023: Supporting Types - Remote
 - `RemoteLookupError`: 2-variant error enum (`NotFound`, `TransportError`).
