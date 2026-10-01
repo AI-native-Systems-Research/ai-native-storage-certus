@@ -233,9 +233,43 @@ read is what kills the server.
   batch produces more than one distinct `ServedBy` — a fixture where every key resolves
   identically satisfies all three while exercising one path.
 
-- **SC-008** *(New 2026-09-29, refined 2026-09-30)*: On an identical workload this component
-  reports a **higher `Ssd` share of served keys** than `components/dispatcher` does, which is
-  the observable consequence of having no synchronous DRAM promotion.
+- **SC-008** *(New 2026-09-29, refined 2026-09-30, **MY PREDICTION REFUTED AND CORRECTED
+  2026-10-01**)*: On an identical workload this component reports a **LOWER** `Ssd` share of
+  served keys than `components/dispatcher`.
+
+  **Measured, both arms valid, 2 instances on node2, `--until 10 --rate inf --seed 1`:**
+
+  | arm | hits | dram | ssd | ssd share |
+  |---|---|---|---|---|
+  | `dispatcher-p2p` | 330 280 | 269 540 | 60 740 | **18.39%** |
+  | `dispatcher` | 329 254 | 221 451 | 107 803 | **32.74%** |
+
+  Total work within 0.3%; the route partition exact in both.
+
+  **I predicted the opposite sign and was wrong.** The reasoning was that no synchronous DRAM
+  promotion means a repeat read stays SSD-attributed, so p2p should report *more* `Ssd`. It
+  reports far less, and the mechanism is one the prediction ignored: **this component does not
+  stage cold reads through the memory tier at all.** `dispatcher` promotes every cold read
+  into DRAM as part of serving it, consuming memory-tier slots and forcing evictions; p2p
+  stages in GPU BAR1 and backfills DRAM asynchronously, so it puts far less pressure on the
+  tier. A less-pressured tier retains more, so fewer later reads are cold at all — 48 089 more
+  DRAM hits on an identical workload. The `Ssd` share fell because there were fewer cold
+  reads, not because cold reads were attributed differently.
+
+  **FR-014 itself is VERIFIED**: this component does attribute its SSD-to-GPU cold path as
+  `Ssd` (60 740 of them), the three interface invariants hold, and the route partition closes
+  exactly. What was wrong was my *observable*, not the requirement.
+
+  **A share comparison is therefore the wrong test of FR-014 and this criterion should not be
+  read as one.** The share conflates two independent things — how a cold read is attributed,
+  and how many cold reads occur. Those move in opposite directions here, so the aggregate can
+  shift either way for reasons unrelated to attribution. A direct test needs a *fixed* set of
+  known-cold keys read once each, with the per-key `ServedBy` inspected, which the widened
+  `LOOKUP` byte now makes possible and which no existing harness does.
+
+  **Incidental finding worth more than the criterion**: p2p's cold path costs the DRAM tier
+  far less than the DRAM path does, which is a performance argument for it that this feature
+  was not looking for and did not set out to measure.
 
   **Stated as an aggregate share rather than as "a repeat read reports `Ssd` twice", and the
   correction matters.** The obvious per-key formulation is wrong, because this component *does*

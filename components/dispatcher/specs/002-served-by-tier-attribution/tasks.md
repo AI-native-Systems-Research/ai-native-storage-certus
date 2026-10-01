@@ -363,7 +363,9 @@ step: an accounting identity that fails by a recognisable quantity names its own
 - [x] **T115** FR-029: run the suites under the `integrity-check` feature as well as default.
   Phase 1 never did this and recorded it as unaddressed.
 
-- [~] **T116 — the p2p-native run now RUNS, and getting there found two real defects.**
+- [x] **T116 — CLOSED 2026-10-01: FR-014 verified; my predicted observable was refuted.** Full result in `dispatcher-p2p/specs/001-gpudirect-cold-path/spec.md` SC-008. p2p attributes cold reads `Ssd` (60 740), invariants hold, partition exact. Its `Ssd` *share* is LOWER than `dispatcher`'s (18.39% vs 32.74%) because it stages in GPU BAR1 rather than the memory tier, so fewer reads are cold at all — the opposite of what I predicted. Unblocked by loading `gdrdrv`. Original attempt notes follow.
+
+- [~] **T116 history — the p2p-native run now RUNS, and getting there found two real defects.**
   Attempted 2026-09-30 at the user's direction. The verification itself is still open; what
   the attempt produced is worth more than the task.
 
