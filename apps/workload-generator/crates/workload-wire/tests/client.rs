@@ -607,3 +607,66 @@ fn a_read_timeout_is_reported_as_a_timeout_and_names_the_deadline() {
     }
     let _ = Duration::from_secs(0);
 }
+
+/// A configured deadline must be the one reported, not the default.
+///
+/// **This is the test whose absence let a half-applied flag ship.** The variant and message
+/// were right; the plumbing reached only some connections, so a run launched with
+/// `--read-timeout-ms 600000` still failed at 30 s and reported the very default it had been
+/// told to override. Asserting merely "a timeout was reported" passes in that state — only
+/// asserting *which* deadline catches it.
+///
+/// Uses a real socket rather than an in-memory transport, deliberately: `with_read_timeout`
+/// sets `SO_RCVTIMEO` *and* records the value, and the bug was those two disagreeing. A fake
+/// transport cannot exercise that pairing at all.
+#[test]
+fn the_reported_deadline_is_the_configured_one() {
+    use std::net::TcpListener;
+    use std::time::{Duration, Instant};
+
+    // Short, so the test is quick, but NOT the default — a fixture equal to the default
+    // cannot detect the default leaking through, which is the whole failure mode.
+    let configured = Duration::from_millis(300);
+    assert_ne!(configured, workload_wire::client::DEFAULT_READ_TIMEOUT);
+
+    // Accepts and then says nothing: a healthy peer whose work outlasts the deadline.
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let _keeper = std::thread::spawn(move || {
+        let held = listener.accept();
+        std::thread::sleep(Duration::from_secs(5));
+        drop(held);
+    });
+
+    let mut c = Client::<std::net::TcpStream>::connect(&addr.to_string(), 8, None)
+        .expect("connect")
+        .with_read_timeout(configured)
+        .expect("set deadline");
+    c.submit(&turn(1, &[1])).expect("submit");
+
+    let started = Instant::now();
+    match c.recv_outcome().expect_err("a silent peer must not read as success") {
+        ClientError::TimedOut { after } => {
+            assert_eq!(
+                after, configured,
+                "the error must name the deadline actually in force, not the default"
+            );
+            let msg = format!("{}", ClientError::TimedOut { after });
+            assert!(
+                msg.contains("300"),
+                "and the message must show it, so an operator can tell whether the flag took \
+                 effect: {msg}"
+            );
+            // The socket option must agree with the recorded value, not merely be set to
+            // something: a recorded 300 ms over a socket still on 30 s would pass the
+            // assertions above and fail in production exactly as observed.
+            assert!(
+                started.elapsed() < workload_wire::client::DEFAULT_READ_TIMEOUT,
+                "it returned after {:?}, which means SO_RCVTIMEO kept the default while the \
+                 reported value changed",
+                started.elapsed()
+            );
+        }
+        other => panic!("expected TimedOut, got {other:?}"),
+    }
+}

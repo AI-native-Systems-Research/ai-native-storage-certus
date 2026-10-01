@@ -789,7 +789,7 @@ impl Agents {
             let mut ack = None;
             for lane in 0..spec.lanes {
                 let mut client = if lane == 0 {
-                    wait_for_port(launcher, spec, depth)?
+                    wait_for_port(launcher, spec, depth, read_timeout)?
                 } else {
                     // The port is already accepting, so a lane that cannot connect is a refusal —
                     // typically the agent having fewer channels than the run asked for, which the
@@ -1024,13 +1024,24 @@ fn wait_for_port<L: Launcher>(
     launcher: &L,
     spec: &AgentSpec,
     depth: usize,
+    read_timeout: Duration,
 ) -> Result<Client<TcpStream>, String> {
     let deadline = Instant::now() + START_TIMEOUT;
     let mut last: Option<ClientError> = None;
     let mut gone: Option<String> = None;
     while Instant::now() < deadline {
         match Client::<TcpStream>::connect(spec.address(), depth, Some(POLL * 5)) {
-            Ok(c) => return Ok(c),
+            // The deadline must be applied HERE too, not only at the sibling-lane connect
+            // below. This client becomes lane 0's -- it drives turns like any other -- so
+            // leaving it on `DEFAULT_READ_TIMEOUT` made `--read-timeout-ms` silently
+            // partial: a run launched with 600 000 ms still failed at 30 s, reporting the
+            // default it had been told to override. A flag that applies to some
+            // connections and not others is worse than no flag.
+            Ok(c) => {
+                return c
+                    .with_read_timeout(read_timeout)
+                    .map_err(|e| format!("instance {}: {e}", spec.label()))
+            }
             Err(e) => last = Some(e),
         }
         gone = launcher.why_not_listening(spec);
