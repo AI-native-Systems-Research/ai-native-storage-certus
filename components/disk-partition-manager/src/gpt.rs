@@ -593,3 +593,7 @@ fn decode_utf16le_name(data: &[u8; 72]) -> String {
         .collect();
     String::from_utf16_lossy(&chars)
 }
+
+#[cfg(kani)]
+#[path = "../verif-kani/harnesses.rs"]
+mod verification;

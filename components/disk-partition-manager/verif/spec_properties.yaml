@@ -1,0 +1,1034 @@
+# Blind, spec-only verifiable-property extraction for the Certus disk-partition-manager component.
+# This pass read ONLY the feature spec bundle plus the public interface declaration; no
+# implementation source was opened, so nothing here is influenced by how the component is written.
+# Subjects are the four public interface operations, the spec-mandated convenience operation, and the
+# named global invariants derived from the data fields and state transitions the spec describes.
+# The records below are the deliverable; the prose in this header is not a record.
+
+component:  disk-partition-manager
+source:     spec
+artifact:
+  - components/disk-partition-manager/specs/001-gpt-partition-management/spec.md
+  - components/disk-partition-manager/specs/001-gpt-partition-management/plan.md
+  - components/disk-partition-manager/specs/001-gpt-partition-management/tasks.md
+  - components/interfaces/src/ipartition_table.rs
+pin:        c788d07c
+method:     blind-extraction
+generated:  2026-09-29
+counts: {total: 100, methods: 4, verifiable: 82, not_verifiable: 18}
+
+properties:
+
+  # ---------------------------------------------------------------------------
+  # Subject: format  (write a new GPT with the requested partition layout)
+  # ---------------------------------------------------------------------------
+
+  - id:         DPM-FORMAT-PRE-SINGLE-GROW
+    subject:    format
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      Before formatting a drive succeeds, the requested layout may contain at most one partition whose
+      size is given as zero, because a size of zero means "take whatever space is left over" and two
+      such partitions would both be claiming the same leftover space.
+    traces:     [FR-005, "AS-US1-3"]
+
+  - id:         DPM-FORMAT-PRE-CAPACITY
+    subject:    format
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      Before formatting a drive succeeds, the combined size of all partitions that were given an
+      explicit size must fit inside the space the drive actually has available for partitions, after
+      setting aside the sectors reserved for the partition table itself.
+    traces:     [FR-006, "AS-US1-2"]
+
+  - id:         DPM-FORMAT-PRE-SECTOR-SIZE
+    subject:    format
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      The sector size supplied in the format request must be one of the two sizes the component
+      promises to support, namely 512 bytes or 4096 bytes.
+    traces:     [FR-011, "Key entity: PartitionConfig", "Implementation note: sector size"]
+
+  - id:         DPM-FORMAT-PRE-NAME-LENGTH
+    subject:    format
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      Every partition name supplied in the format request must be short enough to fit in the space the
+      partition table reserves for a name, which is 36 characters.
+    traces:     [FR-009, "Key entity: PartitionSpec"]
+
+  - id:         DPM-FORMAT-PRE-DEVICE-BOUND
+    subject:    format
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      Formatting can only be attempted once the component has been given a working storage device to
+      talk to, because every step of formatting writes sectors to that device.
+    traces:     [IR-002, "Dependencies: IBlockDevice interface"]
+
+  - id:         DPM-FORMAT-POST-TABLE
+    subject:    format
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      When formatting succeeds, the caller receives a description of the finished partition table that
+      contains exactly one entry for each partition that was requested, in the same order it was
+      requested, with each entry carrying that partition's starting position and length on the drive.
+    traces:     ["AS-US1-1", "Key entity: PartitionTable"]
+
+  - id:         DPM-FORMAT-POST-MBR
+    subject:    format
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      When formatting succeeds, the very first sector of the drive holds a decoy legacy partition
+      record marked with the special type value 0xEE, which tells older tools that the drive is managed
+      by the modern partitioning scheme and must not be touched.
+    traces:     [FR-007, "AS-US1-1"]
+
+  - id:         DPM-FORMAT-POST-PRIMARY-HEADER
+    subject:    format
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      When formatting succeeds, the main partition-table header is written to the second sector of the
+      drive and carries a checksum that matches its own contents, so a later reader can confirm the
+      header arrived intact.
+    traces:     [FR-001, FR-002, "AS-US1-1"]
+
+  - id:         DPM-FORMAT-POST-BACKUP-HEADER
+    subject:    format
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      When formatting succeeds, a second copy of the partition-table header is written to the very last
+      sector of the drive, so the table can still be recovered if the copy at the front of the drive is
+      damaged.
+    traces:     [FR-001, FR-003, "AS-US1-1"]
+
+  - id:         DPM-FORMAT-POST-ENTRY-ARRAY
+    subject:    format
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      When formatting succeeds, the drive holds two copies of the partition-entry list, one near the
+      front and one near the back, and each copy always contains 128 fixed-size slots of 128 bytes each
+      regardless of how many partitions were actually requested, with unused slots left blank.
+    traces:     [FR-001, "Implementation note: entry padding", "Plan disk layout"]
+
+  - id:         DPM-FORMAT-POST-RESTOFDISK
+    subject:    format
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      If one of the requested partitions was given a size of zero, that partition ends up covering all
+      of the drive space that is still free after every explicitly sized partition has been placed, so
+      no usable space is left stranded.
+    traces:     [FR-004, "AS-US1-1", "Plan design decision: rest-of-disk semantics"]
+
+  - id:         DPM-FORMAT-POST-FIXED-SIZE
+    subject:    format
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Each partition that was given an explicit size in bytes ends up with at least as many sectors as
+      are needed to hold that many bytes at the drive's sector size, so the caller never receives less
+      room than it asked for.
+    traces:     ["AS-US1-1", "Key entity: PartitionSpec"]
+
+  - id:         DPM-FORMAT-POST-GUID-V4
+    subject:    format
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      When formatting succeeds, the drive is stamped with a freshly generated random identifier, and so
+      is each individual partition, using the standard random-identifier format defined by the relevant
+      internet standard.
+    traces:     [FR-008]
+
+  - id:         DPM-FORMAT-POST-NAME-ENCODE
+    subject:    format
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Each partition name supplied by the caller is stored on the drive in the two-bytes-per-character
+      little-endian text encoding the partitioning standard requires, rather than being stored raw.
+    traces:     [FR-009]
+
+  - id:         DPM-FORMAT-POST-TYPE-GUID-ECHO
+    subject:    format
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The partition type identifier recorded for each finished partition is exactly the type identifier
+      the caller asked for, unchanged and not reordered.
+    traces:     ["AS-US1-1", "Key entity: PartitionSpec", "Well-known type GUIDs table"]
+
+  - id:         DPM-FORMAT-POST-SECTOR-SIZE-ECHO
+    subject:    format
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The partition table handed back after a successful format reports the same sector size that the
+      caller supplied in the format request, so callers can convert between sectors and bytes without
+      guessing.
+    traces:     ["Key entity: PartitionTable", FR-011]
+
+  - id:         DPM-FORMAT-POST-NSID
+    subject:    format
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      All of the sector writes performed during a format are directed at the storage namespace the
+      caller named in the format request, so that a drive presenting several namespaces has only the
+      chosen one modified.
+    traces:     [FR-010, "Key entity: PartitionConfig"]
+
+  - id:         DPM-FORMAT-POST-CACHE-STATE
+    subject:    format
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      After a format succeeds, the component remembers the table it just created, so an immediately
+      following request for a partition's details or for the partition count answers from the new table
+      rather than reporting that nothing has been set up yet.
+    traces:     [IR-001, "Implementation note: internal partition-table state"]
+
+  - id:         DPM-FORMAT-POST-IO-COUNT-O1
+    subject:    format
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The number of separate read and write operations a format performs does not grow as the drive
+      gets larger, because only the handful of sectors holding the partition table are touched and the
+      partition contents themselves are never written.
+    traces:     [PR-001]
+
+  - id:         DPM-FORMAT-ERR-LAYOUT-CAPACITY
+    subject:    format
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If the explicitly sized partitions in the request together need more room than the drive has
+      available, the format request fails with a layout error instead of silently truncating or
+      overlapping partitions.
+    traces:     [FR-006, "AS-US1-2"]
+
+  - id:         DPM-FORMAT-ERR-LAYOUT-MULTI-GROW
+    subject:    format
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If the request contains two or more partitions that each ask to take "all remaining space", the
+      format request fails with a layout error instead of arbitrarily choosing one of them.
+    traces:     [FR-005, "AS-US1-3"]
+
+  - id:         DPM-FORMAT-ERR-IO
+    subject:    format
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If the underlying storage device refuses or fails any of the sector writes a format needs, the
+      format request reports an input/output failure to the caller rather than claiming success.
+    traces:     ["Error variant: IoError", "Dependencies: IBlockDevice interface"]
+
+  - id:         DPM-FORMAT-FRAME-DATA-REGIONS
+    subject:    format
+    kind:       frame
+    verifiable: true
+    statement:  >
+      A format writes only the sectors that make up the partition table itself and never writes into
+      the areas of the drive that the partitions occupy, so existing file contents inside a partition
+      are not overwritten by the act of writing a new table.
+    traces:     [PR-001, "Plan data flow: format path"]
+
+  - id:         DPM-FORMAT-FRAME-NO-WRITE-ON-LAYOUT-ERROR
+    subject:    format
+    kind:       frame
+    verifiable: true
+    statement:  >
+      When a format request is rejected because the requested layout is impossible, nothing at all is
+      written to the drive, so a bad request cannot leave the drive in a half-formatted state.
+    traces:     ["AS-US1-2", "AS-US1-3", FR-005, FR-006]
+
+  - id:         DPM-FORMAT-FRAME-CACHE-ON-ERROR
+    subject:    format
+    kind:       frame
+    verifiable: true
+    statement:  >
+      When a format request fails, whatever partition table the component was already remembering stays
+      exactly as it was, so a failed format does not make previously answerable queries start failing.
+    traces:     ["AS-US1-2", "Implementation note: internal partition-table state"]
+
+  - id:         DPM-FORMAT-INV-USABLE-RANGE
+    subject:    format
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Every partition a format creates lies entirely inside the region of the drive that is available
+      for data, meaning it never begins before the space reserved for the decoy record, the header and
+      the entry list at the front, and never extends into the backup entry list and backup header at
+      the very end.
+    traces:     [FR-001, "Plan disk layout"]
+
+  # ---------------------------------------------------------------------------
+  # Subject: initialize  (read and validate the GPT already on the device)
+  # ---------------------------------------------------------------------------
+
+  - id:         DPM-INIT-PRE-DEVICE-BOUND
+    subject:    initialize
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      Reading the existing partition table can only be attempted once the component has been given a
+      working storage device to talk to, because the table has to be read from that device.
+    traces:     [IR-002, "Dependencies: IBlockDevice interface"]
+
+  - id:         DPM-INIT-PRE-GPT-PRESENT
+    subject:    initialize
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      Reading the existing partition table can only succeed if the drive already carries at least one
+      intact copy of the table, either the main copy at the front or the backup copy at the end.
+    traces:     [FR-003, "AS-US2-1", "AS-US2-3"]
+
+  - id:         DPM-INIT-POST-TABLE
+    subject:    initialize
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      When reading the existing table succeeds, the caller receives every partition that is recorded on
+      the drive, each with the position where it starts, how many sectors it spans, what kind of
+      partition it is, its own unique identifier, and its name.
+    traces:     ["AS-US2-1", "Key entity: PartitionInfo"]
+
+  - id:         DPM-INIT-POST-CRC-VALIDATION
+    subject:    initialize
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      A copy of the partition table is only accepted as good after two separate integrity checksums
+      have been recomputed and found to match, one covering the table header and one covering the whole
+      list of partition entries.
+    traces:     [FR-002, "Plan data flow: initialize path"]
+
+  - id:         DPM-INIT-POST-BACKUP-ON-CRC
+    subject:    initialize
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      If the main copy of the partition table fails its integrity check, the backup copy stored at the
+      last sector of the drive is tried instead, and if that copy is intact the read succeeds and
+      returns the partitions it describes.
+    traces:     [FR-003, "AS-US2-2", SC-002]
+
+  - id:         DPM-INIT-POST-BACKUP-ON-SIGNATURE
+    subject:    initialize
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      If the main copy of the partition table is damaged in the specific way that its identifying
+      marker at the start of the header is wrong or has been wiped to zeros, that also counts as
+      corruption and the backup copy at the end of the drive is tried, and the read succeeds when the
+      backup is intact.
+    traces:     [FR-003, "AS-US2-4"]
+
+  - id:         DPM-INIT-POST-NONEMPTY-ENTRIES
+    subject:    initialize
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Only the occupied slots in the on-disk list of partition entries are turned into results; the
+      blank padding slots that exist because the list is always a fixed 128 slots long are skipped and
+      do not appear as phantom partitions.
+    traces:     ["Plan data flow: initialize path", "Implementation note: entry padding"]
+
+  - id:         DPM-INIT-POST-NAME-DECODE
+    subject:    initialize
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Partition names read from the drive are converted from the two-bytes-per-character little-endian
+      text encoding used on disk back into ordinary text before they are handed to the caller.
+    traces:     [FR-009]
+
+  - id:         DPM-INIT-POST-SECTOR-SIZE
+    subject:    initialize
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The partition table handed back after a successful read reports the sector size of the device it
+      was read from, so callers can convert the returned sector positions into byte offsets.
+    traces:     ["Key entity: PartitionTable", FR-011]
+
+  - id:         DPM-INIT-POST-CACHE-STATE
+    subject:    initialize
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      After a successful read of the partition table, the component remembers that table, so later
+      requests for one partition's details or for the partition count are answered without going back
+      to the drive.
+    traces:     [IR-001, "Implementation note: internal partition-table state"]
+
+  - id:         DPM-INIT-POST-IO-COUNT
+    subject:    initialize
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Reading the partition table touches a fixed set of sectors — the one sector holding the header
+      plus the sectors holding the list of partition entries — and that number does not grow as the
+      drive gets larger.
+    traces:     [PR-002, PR-001]
+
+  - id:         DPM-INIT-POST-ENTRY-LBA2
+    subject:    initialize
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      When reading the main copy of the table, the list of partition entries is taken from the third
+      sector of the drive, which is where this system always writes it, rather than from whatever
+      location the header itself names.
+    traces:     ["Implementation note: read path assumes Certus-written layout", "Plan disk layout"]
+
+  - id:         DPM-INIT-ERR-NO-TABLE
+    subject:    initialize
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If neither the main copy nor the backup copy of the partition table can be accepted as intact,
+      the read fails with an error saying no partition table was found, which is also the answer given
+      for a completely blank drive.
+    traces:     ["AS-US2-3", FR-003]
+
+  - id:         DPM-INIT-ERR-IO
+    subject:    initialize
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If the underlying storage device fails one of the sector reads needed to load the partition
+      table, the read reports an input/output failure rather than pretending the table is missing or
+      corrupt.
+    traces:     ["Error variant: IoError", "Dependencies: IBlockDevice interface"]
+
+  - id:         DPM-INIT-FRAME-READ-ONLY
+    subject:    initialize
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Reading the existing partition table never writes anything to the drive, whether it succeeds or
+      fails, so simply inspecting a drive can never change it.
+    traces:     ["Plan data flow: initialize path", "AS-US2-4"]
+
+  - id:         DPM-INIT-FRAME-NO-REFORMAT
+    subject:    initialize
+    kind:       frame
+    verifiable: true
+    statement:  >
+      A drive whose main table copy is damaged but whose backup copy is intact is recovered from the
+      backup and is definitely not wiped and rewritten, so the data already on that drive survives.
+    traces:     ["AS-US2-4", FR-003]
+
+  - id:         DPM-INIT-INV-ROUNDTRIP
+    subject:    initialize
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      A drive that this component formatted and then read back reports exactly the same partition
+      starting positions and lengths that the format produced, so writing and reading a table are
+      faithful inverses of each other.
+    traces:     [SC-001]
+
+  # ---------------------------------------------------------------------------
+  # Subject: partition_info  (look up one partition by its index)
+  # ---------------------------------------------------------------------------
+
+  - id:         DPM-PINFO-PRE-INITIALIZED
+    subject:    partition_info
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      Asking for the details of one partition can only succeed after the component has already loaded a
+      partition table, either by reading the one on the drive or by writing a new one.
+    traces:     [IR-001, "Error variant: NotInitialized"]
+
+  - id:         DPM-PINFO-PRE-INDEX-RANGE
+    subject:    partition_info
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      Asking for the details of one partition can only succeed when the position asked for is inside the
+      range of partitions that actually exist, counting from zero for the first one.
+    traces:     ["Error variant: InvalidPartition", "Key entity: PartitionInfo"]
+
+  - id:         DPM-PINFO-POST-MATCH
+    subject:    partition_info
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      When the details of one partition are requested successfully, every field returned — its starting
+      position, its length in sectors, its kind, its unique identifier and its name — is identical to
+      what the currently loaded partition table records for that partition.
+    traces:     [IR-001, "Key entity: PartitionInfo"]
+
+  - id:         DPM-PINFO-POST-INDEX-ECHO
+    subject:    partition_info
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The partition description returned reports the same position number that the caller asked for, so
+      a caller can never be handed a different partition than the one it requested.
+    traces:     ["Key entity: PartitionInfo", IR-001]
+
+  - id:         DPM-PINFO-ERR-INVALID-INDEX
+    subject:    partition_info
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Asking for a partition at a position that does not exist, such as a position at or beyond the
+      number of partitions present, fails with an error saying the requested partition is invalid
+      instead of returning made-up or leftover data.
+    traces:     ["Error variant: InvalidPartition"]
+
+  - id:         DPM-PINFO-ERR-NOT-INITIALIZED
+    subject:    partition_info
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Asking for the details of a partition before any partition table has been loaded fails with an
+      error saying the component has not been initialized.
+    traces:     ["Error variant: NotInitialized", IR-001]
+
+  - id:         DPM-PINFO-FRAME-NO-MUTATION
+    subject:    partition_info
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Looking up a partition's details changes nothing — it does not alter the remembered partition
+      table and it does not read from or write to the drive — so it can be called any number of times
+      with the same effect as calling it once.
+    traces:     [IR-001, "Implementation note: internal partition-table state"]
+
+  - id:         DPM-PINFO-INV-CONSISTENT
+    subject:    partition_info
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      As long as no new table has been read or written in between, repeated lookups of the same
+      partition position always return exactly the same answer.
+    traces:     [IR-001, SC-001]
+
+  # ---------------------------------------------------------------------------
+  # Subject: num_partitions  (how many partitions the loaded table describes)
+  # ---------------------------------------------------------------------------
+
+  - id:         DPM-NUMPART-PRE-INITIALIZED
+    subject:    num_partitions
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      Asking how many partitions there are can only succeed after the component has already loaded a
+      partition table, either by reading the one on the drive or by writing a new one.
+    traces:     [IR-001, "Error variant: NotInitialized"]
+
+  - id:         DPM-NUMPART-POST-COUNT
+    subject:    num_partitions
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The count returned is exactly the number of partitions in the partition table the component
+      currently holds, so looking up every position from zero up to one less than that count always
+      succeeds and any position from the count upward always fails.
+    traces:     [IR-001, "Key entity: PartitionTable"]
+
+  - id:         DPM-NUMPART-POST-MATCHES-CONFIG
+    subject:    num_partitions
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Immediately after a drive has been formatted, the count returned equals the number of partitions
+      that the format request asked for — for example three, when metadata, extended-metadata and data
+      partitions were requested.
+    traces:     ["AS-US1-1", IR-001]
+
+  - id:         DPM-NUMPART-ERR-NOT-INITIALIZED
+    subject:    num_partitions
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Asking how many partitions there are before any partition table has been loaded fails with an
+      error saying the component has not been initialized, rather than answering zero.
+    traces:     ["Error variant: NotInitialized", IR-001]
+
+  - id:         DPM-NUMPART-FRAME-NO-MUTATION
+    subject:    num_partitions
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Asking how many partitions there are changes nothing — neither the remembered partition table nor
+      anything on the drive — so it is safe to call repeatedly.
+    traces:     [IR-001, "Implementation note: internal partition-table state"]
+
+  - id:         DPM-NUMPART-INV-MAX-128
+    subject:    num_partitions
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The number of partitions reported can never exceed 128, because the partitioning standard this
+      component implements provides exactly 128 slots for partition entries.
+    traces:     [FR-001]
+
+  # ---------------------------------------------------------------------------
+  # Subject: initialize_or_format  (spec-mandated read-or-create convenience op)
+  # ---------------------------------------------------------------------------
+
+  - id:         DPM-IOF-PRE-CONFIG-VALID
+    subject:    initialize_or_format
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      The combined read-or-create operation must be given a partition layout that would itself be
+      acceptable to a plain format request, because it may have to fall back to formatting the drive.
+    traces:     [IR-003, FR-005, FR-006]
+
+  - id:         DPM-IOF-POST-EXISTING-NOT-FORMATTED
+    subject:    initialize_or_format
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      When the caller has not demanded a fresh start and the drive already carries a usable partition
+      table, that existing table is returned and the accompanying flag reports that no formatting took
+      place.
+    traces:     ["AS-US3-1", IR-003, SC-004]
+
+  - id:         DPM-IOF-POST-MISSING-FORMATTED
+    subject:    initialize_or_format
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      When the caller has not demanded a fresh start but the drive carries no usable partition table, a
+      new table is written and the accompanying flag reports that formatting did take place.
+    traces:     ["AS-US3-2", IR-003]
+
+  - id:         DPM-IOF-POST-FORCE-FORMATTED
+    subject:    initialize_or_format
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      When the caller demands a fresh start, a brand-new partition table is written and the flag reports
+      that formatting took place, no matter what the drive contained beforehand and without the existing
+      table influencing the result.
+    traces:     ["AS-US3-3", IR-003]
+
+  - id:         DPM-IOF-POST-FLAG-PRESENT
+    subject:    initialize_or_format
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Every successful call of the combined read-or-create operation returns both the resulting
+      partition table and a separate yes-or-no indication of whether the drive had to be formatted, so
+      the caller can tell recovery apart from first-time setup.
+    traces:     [IR-003]
+
+  - id:         DPM-IOF-ERR-LAYOUT-PROPAGATE
+    subject:    initialize_or_format
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If the combined read-or-create operation has to format the drive and the requested layout is
+      impossible, the layout error is reported to the caller rather than being swallowed or reported as
+      a missing partition table.
+    traces:     [IR-003, FR-005, FR-006]
+
+  - id:         DPM-IOF-FRAME-PRESERVE-DATA
+    subject:    initialize_or_format
+    kind:       frame
+    verifiable: true
+    statement:  >
+      When the caller has not demanded a fresh start and a usable partition table is found, nothing is
+      written to the drive at all, which is what allows the data on a drive to survive a restart of the
+      system.
+    traces:     ["AS-US3-1", SC-004, "US-3"]
+
+  - id:         DPM-IOF-FRAME-NO-REFORMAT-ON-DAMAGED-PRIMARY
+    subject:    initialize_or_format
+    kind:       frame
+    verifiable: true
+    statement:  >
+      A drive whose main table copy is damaged but whose backup copy is intact is recovered from the
+      backup and is not reformatted by the combined read-or-create operation, so a partially failed
+      write can never escalate into destroying the drive's contents.
+    traces:     ["AS-US2-4", FR-003, IR-003]
+
+  # ---------------------------------------------------------------------------
+  # Named global invariants (derived from the data fields and state transitions)
+  # ---------------------------------------------------------------------------
+
+  - id:         DPM-INV-NO-OVERLAP
+    subject:    "Global invariant: partitions never overlap"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      No two partitions in a partition table ever cover the same sector of the drive, whether the table
+      was just created or was read back from the drive.
+    traces:     ["AS-US1-1", FR-004, "Plan disk layout"]
+
+  - id:         DPM-INV-ORDER-MONOTONIC
+    subject:    "Global invariant: partitions are laid out in request order"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Partitions are placed on the drive in the order they were listed in the request, so each
+      partition begins after the previous one ends and the positions increase steadily down the list.
+    traces:     ["Key entity: PartitionConfig", "AS-US1-1"]
+
+  - id:         DPM-INV-WITHIN-USABLE
+    subject:    "Global invariant: partitions stay inside the usable region"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Every partition lies entirely within the part of the drive set aside for data, never overlapping
+      the decoy legacy record, the main header, the main entry list, the backup entry list or the backup
+      header.
+    traces:     [FR-001, "Plan disk layout"]
+
+  - id:         DPM-INV-ENTRY-ARRAY-SHAPE
+    subject:    "Global invariant: the partition-entry list has a fixed shape"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The on-disk list of partition entries always consists of exactly 128 entries, each occupying
+      exactly 128 bytes, giving a fixed 16 kilobytes of entry data whatever the drive or layout.
+    traces:     [FR-001, "Implementation note: entry padding"]
+
+  - id:         DPM-INV-CRC-SELF-CONSISTENT
+    subject:    "Global invariant: written tables pass their own integrity checks"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Any partition table this component writes carries integrity checksums, over both the header and
+      the list of partition entries, that a subsequent reader recomputes and finds to match, so a
+      freshly formatted drive is never immediately judged corrupt.
+    traces:     [FR-002, SC-001]
+
+  - id:         DPM-INV-SIGNATURE-REVISION
+    subject:    "Global invariant: header identifying marker and version"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Every partition-table header this component writes begins with the standard eight-character
+      identifying marker required by the partitioning standard and declares version 1.0, and a header
+      read back that lacks the correct marker is treated as damaged rather than as valid.
+    traces:     [FR-001, FR-003]
+
+  - id:         DPM-INV-BACKUP-MIRRORS-PRIMARY
+    subject:    "Global invariant: the backup copy mirrors the main copy"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The backup partition-entry list holds the same partition entries as the main one, and the backup
+      header describes the same layout as the main header with only the positions of the two copies
+      exchanged, so recovering from the backup yields the same partitions as reading the main copy.
+    traces:     [FR-003, SC-002, "Plan disk layout"]
+
+  - id:         DPM-INV-GUID-V4-BITS
+    subject:    "Global invariant: generated identifiers are well-formed random identifiers"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Every identifier this component generates, for the drive as a whole and for each partition,
+      carries the marker bits that declare it a randomly generated identifier of the standard kind, so
+      other tools recognise its format.
+    traces:     [FR-008]
+
+  - id:         DPM-INV-GUID-DISTINCT
+    subject:    "Global invariant: partition identifiers are distinct"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Within a single formatted drive, no two partitions are given the same unique identifier, and no
+      partition shares the drive's own identifier.
+    traces:     [FR-008, "Key entity: PartitionInfo"]
+
+  - id:         DPM-INV-NAME-ROUNDTRIP-ASCII
+    subject:    "Global invariant: plain-text partition names survive a write-then-read cycle"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      A partition name made of ordinary English letters, digits and punctuation comes back exactly as
+      it went in after being written to the drive in the two-byte-per-character on-disk encoding and
+      read back again, with no characters lost, added or altered.
+    traces:     [SC-003, FR-009]
+
+  - id:         DPM-INV-NAME-MAX-36
+    subject:    "Global invariant: partition names fit the standard's 36-character limit"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      No partition name stored on the drive is longer than the 36 characters the partitioning standard
+      allows for a name, so a name can never spill over into the neighbouring fields of a partition
+      entry.
+    traces:     [FR-009, "Key entity: PartitionSpec"]
+
+  - id:         DPM-INV-SECTOR-SIZE-DOMAIN
+    subject:    "Global invariant: the sector size is one of the two supported values"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The sector size the component works with, and the sector size it reports back in a partition
+      table, is always either 512 bytes or 4096 bytes, the two sizes the component promises to support.
+    traces:     [FR-011, "Key entity: PartitionConfig", "Implementation note: sector size"]
+
+  - id:         DPM-INV-CACHED-STATE-MONOTONIC
+    subject:    "Global invariant: the remembered table is only ever set by a success"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The component starts out remembering no partition table, begins remembering one only when a read
+      or a format succeeds, and never goes back to remembering nothing, so queries that once worked do
+      not start reporting that the component is uninitialized.
+    traces:     ["Implementation note: internal partition-table state", IR-001]
+
+  - id:         DPM-INV-TYPE-GUID-CONSTANTS
+    subject:    "Global invariant: the well-known partition type identifiers are fixed"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The three partition kinds this system defines — the metadata region, the data region and the
+      extended-metadata region — each have one fixed published identifier value that never changes, so
+      a drive formatted by one version of the software is recognised by another.
+    traces:     ["Well-known type GUIDs table"]
+
+  - id:         DPM-INV-PARTITION-INDEX-SEQUENTIAL
+    subject:    "Global invariant: partition position numbers are sequential from zero"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The partitions in a returned partition table are numbered starting at zero and increasing by one
+      with no gaps and no repeats, so the numbering can be used directly to walk through them.
+    traces:     ["Key entity: PartitionInfo", IR-001]
+
+  - id:         DPM-INV-NUM-SECTORS-POSITIVE
+    subject:    "Global invariant: every partition has a non-zero length"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Every partition that appears in a partition table spans at least one sector; a zero-length
+      partition is never produced, including for the partition that was asked to take all the remaining
+      space when little space remains.
+    traces:     ["Key entity: PartitionInfo", FR-004]
+
+  - id:         DPM-INV-NSID-CONSISTENT
+    subject:    "Global invariant: all device access uses the configured namespace"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Every read and write the component issues is addressed to the storage namespace that was
+      configured for it, so on a drive that presents several namespaces the component never reads or
+      writes the wrong one.
+    traces:     [FR-010, "Key entity: PartitionConfig"]
+
+  # ---------------------------------------------------------------------------
+  # Not-verifiable ledger — every remaining unit of the spec bundle, accounted for
+  # ---------------------------------------------------------------------------
+
+  - id:         NV-1
+    scope:      "tasks.md checklist: review the backfilled spec"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      These are human review chores — check that the generated user stories are accurate, confirm the
+      requirements describe intended rather than merely current behavior, prune implementation notes,
+      add any missing requirements, and set the document status. They ask a person to make editorial
+      judgements about a document and place no obligation on the running software.
+    traces:     ["tasks.md: Review Backfilled Spec"]
+
+  - id:         NV-2
+    scope:      "tasks.md checklist: add unit tests"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      These entries call for tests to be written — a round-trip test, a backup-fallback test, two
+      layout-rejection tests, name-encoding tests and a decoy-record test. They describe work to be
+      done on the project, not behavior the software must exhibit; the behaviors they would cover are
+      already captured as properties in their own right.
+    traces:     ["tasks.md: Add Unit Tests"]
+
+  - id:         NV-3
+    scope:      "tasks.md checklist: documentation"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Writing a component readme with usage examples and documenting the meaning of the well-known
+      partition kinds are documentation chores. Nothing about the software's observable behavior can be
+      shown true or false by them.
+    traces:     ["tasks.md: Documentation"]
+
+  - id:         NV-4
+    scope:      "Implementation note: identifiers fall back to all zeros when the system randomness source cannot be opened"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Whether the operating system's randomness source can be opened is a property of the environment
+      the component runs in, not of the component, so the triggering condition cannot be produced or
+      checked by a verifier. This note also directly contradicts the requirement that identifiers are
+      always randomly generated, and that contradiction is a documentation or design defect to resolve
+      rather than an obligation to check.
+    traces:     ["Implementation note: GUIDs are generated from the system randomness source", FR-008]
+
+  - id:         NV-5
+    scope:      "Implementation note: input and output are performed with synchronous request messages over the block device channel"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      This describes the mechanism by which the component talks to the storage device rather than an
+      outcome a caller can observe. Which message type carries a read or a write, and whether it blocks
+      the calling thread, is an internal transport choice with no falsifiable statement about partition
+      tables attached to it.
+    traces:     ["Implementation note: synchronous command messages", "Plan design decision: synchronous I/O via client channels"]
+
+  - id:         NV-6
+    scope:      "Implementation note: the component is declared with the framework macro, one storage receptacle and a lock-protected optional table"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      This is a statement about how the component is wired together in source form — which macro
+      declares it and which container holds its state. It is a structural fact about the code's shape,
+      not a behavior with a possible counterexample; the behavior that depends on it, namely that a
+      table is remembered after a success, is captured separately.
+    traces:     ["Implementation note: component declaration and internal state", "Plan architecture: component layer"]
+
+  - id:         NV-7
+    scope:      "PR-002 detail: the exact number of device round-trips and the deferred batching optimization"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      The claim that reading the table costs thirty-three round-trips at the smaller sector size and
+      five at the larger one, and the accompanying decision to leave batching them into one multi-sector
+      request for a future performance task, is a performance characteristic and a planning decision. It
+      depends on how the transport splits requests rather than on the component's observable result; the
+      part that is checkable — that the cost does not grow with device size — is captured as a property.
+    traces:     [PR-002]
+
+  - id:         NV-8
+    scope:      "plan.md testing section: no dedicated test files exist and validation happens at integration level"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      This records the current state of the project's test suite and how the component is presently
+      exercised against real hardware. It is a fact about the repository and the development process,
+      not a promise about what the software does.
+    traces:     ["plan.md: Testing"]
+
+  - id:         NV-9
+    scope:      "plan.md future considerations: online growth, attribute flags, table repair, non-blocking input and output"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      These are ideas for features that do not exist yet — growing a partition in place, supporting
+      read-only or hidden markings, rebuilding one copy of the table from the other, and switching to a
+      non-blocking access path. There is no present behavior to confirm or refute.
+    traces:     ["plan.md: Future Considerations"]
+
+  - id:         NV-10
+    scope:      "plan.md design decision: simplicity is traded for blocking the calling thread during setup"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      This is a rationale about a trade-off in engineering effort and about how long a thread waits.
+      How long something takes is a timing matter rather than a state or result, so it cannot be settled
+      by examining the component's outputs.
+    traces:     ["plan.md: Key Design Decisions, item 1"]
+
+  - id:         NV-11
+    scope:      "dependencies section: the storage interface crate, the component framework and the checksum library"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Listing which other packages the component builds against is a build-configuration fact. The
+      behavior that matters — that the table carries checksums that validate, and that a storage device
+      is required before any access — is captured as properties in its own right.
+    traces:     ["spec.md: Dependencies", "plan.md: Technical Context"]
+
+  - id:         NV-12
+    scope:      "spec document metadata: the backfill notice, the status and last-synced stamps, and the drift-report bookkeeping"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      The warning that the document was generated from existing code, the dates of the synchronization
+      passes, and the record of which drift report was stamped clean for the build gate are all
+      bookkeeping about the document itself. They say nothing about the component's behavior.
+    traces:     ["spec.md: header and Backfill Notice"]
+
+  - id:         NV-13
+    scope:      "overview and user-story motivation prose"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      The explanations of why partitioning is wanted — so that checkpoint structures live apart from
+      user data, so that offsets can be recovered without reformatting, so that existing data survives
+      restarts — are motivations for the requirements. Each concrete promise inside them is captured as
+      a property; the motivation itself has no counterexample.
+    traces:     ["spec.md: Overview", "US-1", "US-2", "US-3"]
+
+  - id:         NV-14
+    scope:      "ambiguity: when a caller sees the corrupt-table error rather than the no-partition-table error"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      The document describes a corrupt-table error as one of the possible outcomes and says it is
+      produced internally when a checksum does not match, but it also says that when both copies fail
+      the caller is told no partition table was found. It never states any situation in which a caller
+      of the read operation actually receives the corrupt-table error, so there is no obligation here
+      precise enough to confirm or refute. This gap should be resolved in the specification.
+    traces:     [FR-003, "AS-US2-3", "Error variant: CorruptTable"]
+
+  - id:         NV-15
+    scope:      "plan.md design decision: partition management lives in its own component rather than inside the extent manager"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      This is an architectural placement decision, justified by wanting several components to be able
+      to ask about partition offsets independently. Where code lives is not an observable behavior of
+      the running component.
+    traces:     ["plan.md: Key Design Decisions, item 4"]
+
+  - id:         NV-16
+    scope:      "well-known type identifier table: the usage column, including one kind reserved for future use"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      The descriptions of what each partition kind is meant to be used for, and the note that one of
+      them is reserved for later, express intent about how other components should interpret a
+      partition. The identifier values themselves are captured as a property; their intended meaning
+      cannot be confirmed or refuted by inspecting this component.
+    traces:     ["Well-known type GUIDs table"]
+
+  - id:         NV-17
+    scope:      "Implementation note caveat: tables written by external tools with a different entry-list position would be read incorrectly"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      This caveat narrows the promise of reading an existing table to tables this system wrote or that
+      happen to use the standard placement, and warns that a table written elsewhere with a different
+      placement would be misread. Since the specification does not define correct behavior for such
+      foreign tables at all, there is no obligation to check; the behavior that is checkable, namely
+      that the entry list is read from the fixed third sector, is captured as a property.
+    traces:     ["Implementation note: read path assumes Certus-written layout", "US-2"]
+
+  - id:         NV-18
+    scope:      "open decision: whether to validate the sector size explicitly or widen the requirement to accept any sector size"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      The document notes that the requirement names two supported sector sizes while the behavior it
+      describes accepts any sector size without checking, and then leaves the choice between adding a
+      check and relaxing the requirement to a future decision. An unresolved choice is not an
+      obligation; the stated two-value requirement is captured as a property, and this open decision is
+      recorded here because the two halves of the document disagree.
+    traces:     [FR-011, "Implementation note: sector size"]

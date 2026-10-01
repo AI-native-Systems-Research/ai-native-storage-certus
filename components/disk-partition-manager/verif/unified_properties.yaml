@@ -1,0 +1,4847 @@
+component: disk-partition-manager
+source: reconciled(spec,code)
+pin: d14dfb9a
+method: two-blind-extractions + deterministic assembly
+generated: '2026-09-29'
+note: 'Role 1 inventory was produced by component-sweep (extraction only). It has SINCE been
+  verified: the Creusot lane is complete and every status below was written by scorer_creusot,
+  which re-proved each property from source (see run:). The Kani lane is INCOMPLETE and is
+  withheld - see tool_notes. The earlier wording of this note ("NOT verified. No prover was
+  run") was true when the sweep wrote it and is false for this bundle.'
+counts:
+  methods: 4
+  spec_total: 82
+  code_total: 114
+  unified: 102
+  attachments: 260
+  not_verifiable: 25
+reconciliation:
+  paired: 46
+  spec_only: 5
+  code_only: 34
+  divergent: 17
+properties:
+- id: DPM-INIT-PRE-DEVICE-BOUND
+  subject: initialize
+  methods:
+  - initialize
+  - initialize_or_format
+  object_fn: GptPartitionManager::initialize -> lib.rs:69
+  kind: precondition
+  verifiable: true
+  statement: Reading the existing partition table may only be attempted once the component has been given
+    a working storage device through its block-device receptacle, because every step of the read issues
+    sector reads to that device.
+  origin: spec+code
+  global: true
+  attachments: 2
+  paired_from:
+    spec:
+    - DPM-INIT-PRE-DEVICE-BOUND
+    code:
+    - DPM-INIT-PRE-BOUND
+  traces:
+  - IR-002
+  - 'Dependencies: IBlockDevice interface'
+  - initialize lib.rs:69
+  source:
+  - 'spec: DPM-INIT-PRE-DEVICE-BOUND'
+  - 'code: DPM-INIT-PRE-BOUND'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_init_pre_device_bound
+      result: Proved
+      wall_clock_s: 4.33
+      peak_rss_mb: 247
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-INIT-ERR-UNBOUND
+  subject: initialize
+  methods:
+  - initialize
+  - initialize_or_format
+  object_fn: GptPartitionManager::initialize -> lib.rs:69-70
+  kind: error-case
+  verifiable: true
+  statement: If the block-device receptacle has not been connected, reading the partition table fails
+    with a not-initialized error whose message says the block device is not connected, and nothing is
+    read from any disk.
+  origin: code-only
+  global: true
+  attachments: 2
+  paired_from:
+    spec: []
+    code:
+    - DPM-INIT-ERR-UNBOUND
+  traces:
+  - initialize lib.rs:69
+  - initialize lib.rs:70
+  source:
+  - 'code: DPM-INIT-ERR-UNBOUND'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_init_err_unbound
+      result: Proved
+      wall_clock_s: 0.49
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-INIT-POST-CACHE
+  subject: initialize
+  methods:
+  - initialize
+  - format
+  - partition_info
+  - num_partitions
+  - initialize_or_format
+  object_fn: GptPartitionManager::initialize -> lib.rs:82-83
+  kind: postcondition
+  verifiable: true
+  statement: When reading the partition table succeeds, the component remembers that table and hands the
+    caller an identical copy, so an immediately following request for one partition’s details or for the
+    partition count is answered from the table just read rather than reporting that nothing has been loaded.
+  origin: spec+code
+  global: true
+  attachments: 5
+  paired_from:
+    spec:
+    - DPM-INIT-POST-CACHE-STATE
+    code:
+    - DPM-INIT-POST-CACHE
+  traces:
+  - IR-001
+  - 'Implementation note: internal partition-table state'
+  - initialize lib.rs:82
+  - initialize lib.rs:83
+  source:
+  - 'spec: DPM-INIT-POST-CACHE-STATE'
+  - 'code: DPM-INIT-POST-CACHE'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_init_post_cache
+      result: Proved
+      wall_clock_s: 0.49
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-INIT-POST-ENTRIES
+  subject: initialize
+  methods:
+  - initialize
+  - format
+  - partition_info
+  - num_partitions
+  - initialize_or_format
+  object_fn: try_read_gpt_at -> gpt.rs:132-146
+  kind: postcondition
+  verifiable: true
+  statement: When reading the existing table succeeds, the caller receives exactly one description for
+    every occupied slot of the on-disk entry list — those whose partition type identifier is not all zero
+    bytes — each carrying the sector where the partition starts, how many sectors it spans, its partition
+    type, its own unique identifier and its name, while the blank padding slots that exist because the
+    list is always 128 slots long are skipped and never appear as phantom partitions.
+  origin: spec+code
+  global: true
+  attachments: 5
+  paired_from:
+    spec:
+    - DPM-INIT-POST-TABLE
+    - DPM-INIT-POST-NONEMPTY-ENTRIES
+    code:
+    - DPM-READ-POST-FILTER
+  traces:
+  - AS-US2-1
+  - 'Key entity: PartitionInfo'
+  - 'Plan data flow: initialize path'
+  - 'Implementation note: entry padding'
+  - try_read_gpt_at gpt.rs:132
+  - try_read_gpt_at gpt.rs:139
+  - decode_utf16le_name gpt.rs:589
+  source:
+  - 'spec: DPM-INIT-POST-TABLE,DPM-INIT-POST-NONEMPTY-ENTRIES'
+  - 'code: DPM-READ-POST-FILTER'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_init_post_entries
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-INIT-POST-SECTOR-SIZE
+  subject: initialize
+  methods:
+  - initialize
+  - initialize_or_format
+  object_fn: GptPartitionManager::initialize -> lib.rs:73 ; try_read_gpt_at -> gpt.rs:148
+  kind: postcondition
+  verifiable: true
+  statement: The partition table handed back after a successful read reports the sector size that the
+    connected device itself reported for the namespace being read, so callers can convert the returned
+    sector positions into byte offsets.
+  origin: spec+code
+  global: true
+  attachments: 2
+  paired_from:
+    spec:
+    - DPM-INIT-POST-SECTOR-SIZE
+    code:
+    - DPM-INIT-POST-SECTORSIZE
+  traces:
+  - 'Key entity: PartitionTable'
+  - FR-011
+  - initialize lib.rs:73
+  - try_read_gpt_at gpt.rs:148
+  source:
+  - 'spec: DPM-INIT-POST-SECTOR-SIZE'
+  - 'code: DPM-INIT-POST-SECTORSIZE'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_init_post_sector_size
+      result: Proved
+      wall_clock_s: 0.49
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-INIT-POST-CRC-VALIDATION
+  subject: initialize
+  methods:
+  - initialize
+  - initialize_or_format
+  object_fn: try_read_gpt_at -> gpt.rs:107-124
+  kind: postcondition
+  verifiable: true
+  statement: A copy of the partition table is accepted as good only after both of its integrity checksums
+    have been recomputed and found to match — one over the header and one over the whole list of partition
+    entries — and a mismatch of either one makes that copy fail with a corrupt-table error that reports
+    the stored and the recomputed value.
+  origin: spec+code
+  global: true
+  attachments: 2
+  paired_from:
+    spec:
+    - DPM-INIT-POST-CRC-VALIDATION
+    code:
+    - DPM-READ-ERR-HEADERCRC
+    - DPM-READ-ERR-ENTRYCRC
+  traces:
+  - FR-002
+  - 'Plan data flow: initialize path'
+  - try_read_gpt_at gpt.rs:107
+  - try_read_gpt_at gpt.rs:110
+  - try_read_gpt_at gpt.rs:123
+  - try_read_gpt_at gpt.rs:124
+  source:
+  - 'spec: DPM-INIT-POST-CRC-VALIDATION'
+  - 'code: DPM-READ-ERR-HEADERCRC,DPM-READ-ERR-ENTRYCRC'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_init_post_crc_validation
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 52
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-INIT-POST-BACKUP-FALLBACK
+  subject: initialize
+  methods:
+  - initialize
+  - initialize_or_format
+  object_fn: read_gpt -> gpt.rs:79-90
+  kind: postcondition
+  verifiable: true
+  statement: If the main copy of the partition table fails its integrity checksum, or is damaged in the
+    specific way that the identifying marker at the start of its header is wrong or has been wiped to
+    zeros, the backup copy stored at the end of the drive is tried instead, and if that copy is intact
+    the read succeeds and returns the partitions it describes; these are the only two conditions that
+    trigger the fallback.
+  origin: spec+code
+  global: true
+  attachments: 2
+  paired_from:
+    spec:
+    - DPM-INIT-POST-BACKUP-ON-CRC
+    - DPM-INIT-POST-BACKUP-ON-SIGNATURE
+    code:
+    - DPM-READ-FALLBACK-TRIGGER
+  traces:
+  - FR-003
+  - AS-US2-2
+  - SC-002
+  - FR-003
+  - AS-US2-4
+  - read_gpt gpt.rs:79
+  - read_gpt gpt.rs:83
+  source:
+  - 'spec: DPM-INIT-POST-BACKUP-ON-CRC,DPM-INIT-POST-BACKUP-ON-SIGNATURE'
+  - 'code: DPM-READ-FALLBACK-TRIGGER'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_init_post_backup_fallback
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-INIT-ERR-NO-TABLE
+  subject: initialize
+  methods:
+  - initialize
+  - initialize_or_format
+  object_fn: read_gpt -> gpt.rs:90-92
+  kind: error-case
+  verifiable: true
+  statement: If neither the main copy nor the backup copy of the partition table can be accepted as intact,
+    the read fails with an error saying no partition table was found, which is also the answer given for
+    a completely blank drive.
+  origin: divergent
+  global: true
+  attachments: 2
+  paired_from:
+    spec:
+    - DPM-INIT-PRE-GPT-PRESENT
+    - DPM-INIT-ERR-NO-TABLE
+    code:
+    - DPM-INIT-ERR-NOGPT
+    - DPM-READ-ZEROCOUNT-ACCEPTED
+  traces:
+  - FR-003
+  - AS-US2-1
+  - AS-US2-3
+  - AS-US2-3
+  - FR-003
+  - read_gpt gpt.rs:90
+  - read_gpt gpt.rs:92
+  - try_read_gpt_at gpt.rs:118
+  - try_read_gpt_at gpt.rs:123
+  - read_bytes gpt.rs:452
+  source:
+  - 'spec: DPM-INIT-PRE-GPT-PRESENT,DPM-INIT-ERR-NO-TABLE'
+  - 'code: DPM-INIT-ERR-NOGPT,DPM-READ-ZEROCOUNT-ACCEPTED'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_init_err_no_table
+      result: Proved
+      wall_clock_s: 0.49
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+  divergence_note: Spec promises a drive with no usable table (a blank drive included) yields the no-partition-table
+    error; code accepts a header that declares zero entry slots as a valid table — reading zero entry
+    bytes whose checksum is the checksum of nothing (gpt.rs:118-123) — and reports success with a table
+    of zero partitions instead of no-partition-table.
+- id: DPM-INIT-ERR-IO
+  subject: initialize
+  methods:
+  - initialize
+  - initialize_or_format
+  object_fn: read_bytes -> gpt.rs:464-487 ; read_gpt -> gpt.rs:91
+  kind: error-case
+  verifiable: true
+  statement: If the storage device fails one of the sector reads needed to load the partition table —
+    the command cannot be queued, the device reports a failure, it answers with an unexpected kind of
+    completion, or the completion channel breaks — the read reports an input/output failure carrying the
+    device’s own explanation, rather than pretending the table is missing or corrupt.
+  origin: divergent
+  global: true
+  attachments: 2
+  paired_from:
+    spec:
+    - DPM-INIT-ERR-IO
+    code:
+    - DPM-INIT-ERR-MASKED-IO
+    - DPM-IO-READ-ERR-SEND
+    - DPM-IO-READ-ERR-DEVICE
+    - DPM-IO-READ-ERR-UNEXPECTED
+    - DPM-IO-READ-ERR-CHANNEL
+  traces:
+  - 'Error variant: IoError'
+  - 'Dependencies: IBlockDevice interface'
+  - read_gpt gpt.rs:91
+  - initialize_or_format lib.rs:57
+  - read_bytes gpt.rs:468
+  - read_bytes gpt.rs:472
+  - read_bytes gpt.rs:478
+  - read_bytes gpt.rs:481
+  - read_bytes gpt.rs:482
+  - read_bytes gpt.rs:486
+  - read_bytes gpt.rs:487
+  source:
+  - 'spec: DPM-INIT-ERR-IO'
+  - 'code: DPM-INIT-ERR-MASKED-IO,DPM-IO-READ-ERR-SEND,DPM-IO-READ-ERR-DEVICE,DPM-IO-READ-ERR-UNEXPECTED,DPM-IO-READ-ERR-CHANNEL'
+  creusot:
+    evidence:
+      refutation: refute_dpm_init_err_io
+      result: Proved (negation)
+      wall_clock_s: 0.49
+      peak_rss_mb: 51
+    fidelity: null
+    note: 'REFUTED — the negation ''refute_dpm_init_err_io'' is machine-proved, so the code violates this
+      obligation. This is a finding, not a gap: see the spec and code locations on the property record.'
+    status: refuted
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+  divergence_note: Spec promises an input/output failure is always reported as such and never as a missing
+    or corrupt table; code honours this for the main copy but collapses every possible cause of failure
+    while reading the backup copy — a genuine hardware or transport error included — into the single answer
+    no-partition-table at gpt.rs:91, which initialize_or_format then treats as licence to reformat.
+- id: DPM-INIT-ERR-GEOMETRY
+  subject: initialize
+  methods:
+  - initialize
+  - initialize_or_format
+  object_fn: GptPartitionManager::initialize -> lib.rs:73-76
+  kind: error-case
+  verifiable: true
+  statement: If the connected device cannot report its sector size or its total number of sectors, reading
+    the partition table fails with an input/output error carrying the device’s own explanation, and no
+    partition data is read.
+  origin: code-only
+  global: true
+  attachments: 2
+  paired_from:
+    spec: []
+    code:
+    - DPM-INIT-ERR-GEOMETRY
+  traces:
+  - initialize lib.rs:73
+  - initialize lib.rs:76
+  source:
+  - 'code: DPM-INIT-ERR-GEOMETRY'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_init_err_geometry
+      result: Proved
+      wall_clock_s: 0.49
+      peak_rss_mb: 50
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-INIT-ERR-CHANNEL
+  subject: initialize
+  methods:
+  - initialize
+  - initialize_or_format
+  object_fn: GptPartitionManager::initialize -> lib.rs:80 ; GptManager::new -> gpt.rs:55
+  kind: error-case
+  verifiable: true
+  statement: If the component cannot open a command and completion channel pair to the block device, reading
+    the partition table fails with an input/output error carrying the device’s explanation.
+  origin: code-only
+  global: true
+  attachments: 2
+  paired_from:
+    spec: []
+    code:
+    - DPM-INIT-ERR-CONNECT
+  traces:
+  - initialize lib.rs:80
+  - GptManager::new gpt.rs:55
+  source:
+  - 'code: DPM-INIT-ERR-CONNECT'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_init_err_channel
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-INIT-FRAME-READ-ONLY
+  subject: initialize
+  methods:
+  - initialize
+  - initialize_or_format
+  object_fn: read_gpt -> gpt.rs:66 ; read_bytes -> gpt.rs:464
+  kind: frame
+  verifiable: true
+  statement: Reading the existing partition table never writes anything to the drive — it issues only
+    read commands, whether it succeeds from the main copy, falls back to the backup copy, or fails outright
+    — so a drive whose main copy is damaged but whose backup copy is intact is recovered rather than wiped,
+    and simply inspecting a drive can never change it.
+  origin: spec+code
+  global: true
+  attachments: 2
+  paired_from:
+    spec:
+    - DPM-INIT-FRAME-READ-ONLY
+    - DPM-INIT-FRAME-NO-REFORMAT
+    code:
+    - DPM-INIT-FRAME-READONLY
+  traces:
+  - 'Plan data flow: initialize path'
+  - AS-US2-4
+  - AS-US2-4
+  - FR-003
+  - read_gpt gpt.rs:66
+  - try_read_gpt_at gpt.rs:103
+  - read_bytes gpt.rs:464
+  source:
+  - 'spec: DPM-INIT-FRAME-READ-ONLY,DPM-INIT-FRAME-NO-REFORMAT'
+  - 'code: DPM-INIT-FRAME-READONLY'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_init_frame_read_only
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 53
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-INIT-FRAME-NSID
+  subject: initialize
+  methods:
+  - initialize
+  - initialize_or_format
+  object_fn: GptPartitionManager::initialize -> lib.rs:72 ; get_ns_id -> lib.rs:34
+  kind: frame
+  verifiable: true
+  statement: Reading the partition table never changes which storage namespace the component is configured
+    to use; it only consults that setting.
+  origin: code-only
+  global: true
+  attachments: 2
+  paired_from:
+    spec: []
+    code:
+    - DPM-INIT-FRAME-NSID
+  traces:
+  - initialize lib.rs:72
+  - get_ns_id lib.rs:34
+  source:
+  - 'code: DPM-INIT-FRAME-NSID'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_init_frame_nsid
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-INIT-IO-COUNT-BOUNDED
+  subject: initialize
+  methods:
+  - initialize
+  - initialize_or_format
+  object_fn: try_read_gpt_at -> gpt.rs:118-120 ; read_bytes -> gpt.rs:453
+  kind: postcondition
+  verifiable: true
+  statement: Reading the partition table touches a fixed set of sectors — the one sector holding the header
+    plus the sectors holding the list of partition entries — and that number does not grow as the drive
+    gets larger.
+  origin: divergent
+  global: true
+  attachments: 2
+  paired_from:
+    spec:
+    - DPM-INIT-POST-IO-COUNT
+    code:
+    - DPM-READ-COUNT-UNVALIDATED
+  traces:
+  - PR-002
+  - PR-001
+  - try_read_gpt_at gpt.rs:118
+  - try_read_gpt_at gpt.rs:120
+  - read_bytes gpt.rs:453
+  source:
+  - 'spec: DPM-INIT-POST-IO-COUNT'
+  - 'code: DPM-READ-COUNT-UNVALIDATED'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_init_io_count_bounded
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 53
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+  divergence_note: Spec promises the read touches a fixed, drive-size-independent set of sectors; code
+    takes the number of entry slots and the size of each slot straight from the untrusted on-disk header
+    and multiplies them to decide how many bytes to read (gpt.rs:118-120) with no cap, so a hostile or
+    damaged header makes the read arbitrarily large rather than fixed.
+- id: DPM-INIT-POST-ENTRY-LBA2
+  subject: initialize
+  methods:
+  - initialize
+  - initialize_or_format
+  object_fn: read_gpt -> gpt.rs:68 ; parse_header -> gpt.rs:380
+  kind: postcondition
+  verifiable: true
+  statement: When reading the main copy of the table, the list of partition entries is always taken from
+    the third sector of the drive, which is where this component writes it, and the location the header
+    itself names for its entry list is parsed but never used.
+  origin: spec+code
+  global: true
+  attachments: 2
+  paired_from:
+    spec:
+    - DPM-INIT-POST-ENTRY-LBA2
+    code:
+    - DPM-READ-ENTRYLBA-IGNORED
+  traces:
+  - 'Implementation note: read path assumes Certus-written layout'
+  - Plan disk layout
+  - parse_header gpt.rs:380
+  - read_gpt gpt.rs:68
+  - read_gpt gpt.rs:89
+  source:
+  - 'spec: DPM-INIT-POST-ENTRY-LBA2'
+  - 'code: DPM-READ-ENTRYLBA-IGNORED'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_init_post_entry_lba2
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 53
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-INIT-READ-PRIMARY-FIRST
+  subject: initialize
+  methods:
+  - initialize
+  - initialize_or_format
+  object_fn: read_gpt -> gpt.rs:68-90
+  kind: postcondition
+  verifiable: true
+  statement: Reading a partition table always tries the copy at the start of the drive first, and consults
+    the backup copy at the end of the drive only if that first attempt was rejected.
+  origin: code-only
+  global: true
+  attachments: 2
+  paired_from:
+    spec: []
+    code:
+    - DPM-READ-PRIMARY-FIRST
+  traces:
+  - read_gpt gpt.rs:68
+  - read_gpt gpt.rs:90
+  source:
+  - 'code: DPM-READ-PRIMARY-FIRST'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_init_read_primary_first
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-INIT-INV-ROUNDTRIP
+  subject: initialize
+  methods:
+  - initialize
+  - initialize_or_format
+  object_fn: read_gpt -> gpt.rs:87-89 ; write_gpt -> gpt.rs:194
+  kind: invariant
+  verifiable: true
+  statement: A drive that this component formatted and then read back reports exactly the same partition
+    starting positions and lengths that the format produced, because the read path looks for the header
+    and the entry list at precisely the sectors the format path wrote them to, including the backup header
+    in the very last sector and the backup entry list in the sectors immediately before it.
+  origin: spec+code
+  global: true
+  attachments: 2
+  paired_from:
+    spec:
+    - DPM-INIT-INV-ROUNDTRIP
+    code:
+    - DPM-READ-BACKUP-LOCATION
+  traces:
+  - SC-001
+  - read_gpt gpt.rs:87
+  - read_gpt gpt.rs:89
+  - write_gpt gpt.rs:194
+  source:
+  - 'spec: DPM-INIT-INV-ROUNDTRIP'
+  - 'code: DPM-READ-BACKUP-LOCATION'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_init_inv_roundtrip
+      result: Proved
+      wall_clock_s: 0.54
+      peak_rss_mb: 55
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-LOCK-POISON-PANIC
+  subject: initialize
+  methods:
+  - initialize
+  - format
+  - partition_info
+  - num_partitions
+  - initialize_or_format
+  object_fn: GptPartitionManager::initialize -> lib.rs:82 ; partition_info -> lib.rs:98 ; num_partitions
+    -> lib.rs:114
+  kind: error-case
+  verifiable: true
+  statement: The component stores its remembered partition table behind a lock whose acquisition result
+    is unwrapped without handling failure, so if any thread panicked while holding that lock every later
+    operation aborts the calling thread instead of returning one of the declared errors.
+  origin: code-only
+  global: true
+  attachments: 5
+  paired_from:
+    spec: []
+    code:
+    - DPM-INIT-ERR-POISON-PANIC
+  traces:
+  - initialize lib.rs:82
+  - partition_info lib.rs:98
+  - num_partitions lib.rs:114
+  source:
+  - 'code: DPM-INIT-ERR-POISON-PANIC'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_lock_poison_panic
+      result: Proved
+      wall_clock_s: 0.52
+      peak_rss_mb: 53
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-FORMAT-PRE-DEVICE-BOUND
+  subject: format
+  methods:
+  - format
+  - initialize_or_format
+  object_fn: GptPartitionManager::format -> lib.rs:87
+  kind: precondition
+  verifiable: true
+  statement: Formatting can only be attempted once the component has been given a working storage device
+    through its block-device receptacle, because every step of formatting writes sectors to that device;
+    the receptacle is consulted before any layout work is done.
+  origin: spec+code
+  global: true
+  attachments: 2
+  paired_from:
+    spec:
+    - DPM-FORMAT-PRE-DEVICE-BOUND
+    code:
+    - DPM-FORMAT-PRE-BOUND
+  traces:
+  - IR-002
+  - 'Dependencies: IBlockDevice interface'
+  - format lib.rs:87
+  source:
+  - 'spec: DPM-FORMAT-PRE-DEVICE-BOUND'
+  - 'code: DPM-FORMAT-PRE-BOUND'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_format_pre_device_bound
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-FORMAT-ERR-UNBOUND
+  subject: format
+  methods:
+  - format
+  - initialize_or_format
+  object_fn: GptPartitionManager::format -> lib.rs:87-88
+  kind: error-case
+  verifiable: true
+  statement: If the block-device receptacle has not been connected, writing a new partition table fails
+    with a not-initialized error and nothing at all is written to any disk.
+  origin: code-only
+  global: true
+  attachments: 2
+  paired_from:
+    spec: []
+    code:
+    - DPM-FORMAT-ERR-UNBOUND
+  traces:
+  - format lib.rs:87
+  - format lib.rs:88
+  source:
+  - 'code: DPM-FORMAT-ERR-UNBOUND'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_format_err_unbound
+      result: Proved
+      wall_clock_s: 0.49
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-FORMAT-PRE-SECTOR-SIZE
+  subject: format
+  methods:
+  - format
+  - initialize_or_format
+  object_fn: entry_sectors -> gpt.rs:326 ; write_protective_mbr -> gpt.rs:330
+  kind: precondition
+  verifiable: true
+  statement: The sector size supplied in the format request must be one of the two sizes the component
+    promises to support, namely 512 bytes or 4096 bytes.
+  origin: divergent
+  global: true
+  attachments: 2
+  paired_from:
+    spec:
+    - DPM-FORMAT-PRE-SECTOR-SIZE
+    code:
+    - DPM-FORMAT-PRE-SECTORSIZE
+  traces:
+  - FR-011
+  - 'Key entity: PartitionConfig'
+  - 'Implementation note: sector size'
+  - entry_sectors gpt.rs:326
+  - write_protective_mbr gpt.rs:330
+  - write_protective_mbr gpt.rs:351
+  - ipartition_table.rs:39
+  source:
+  - 'spec: DPM-FORMAT-PRE-SECTOR-SIZE'
+  - 'code: DPM-FORMAT-PRE-SECTORSIZE'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_format_pre_sector_size
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 53
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+  divergence_note: Spec requires the supplied sector size to be 512 or 4096 and the component to promise
+    only those; code never checks the value anywhere — it divides by the sector size and writes to fixed
+    byte positions 446 through 511 of a buffer whose length is the sector size (gpt.rs:326, gpt.rs:330),
+    so a sector size of zero divides by zero and any size below 512 writes past the end of the buffer,
+    crashing the caller instead of returning the declared layout error.
+- id: DPM-FORMAT-ERR-LAYOUT-MULTI-GROW
+  subject: format
+  methods:
+  - format
+  - initialize_or_format
+  object_fn: compute_partition_layout -> gpt.rs:256-257
+  kind: error-case
+  verifiable: true
+  statement: A format request may contain at most one partition whose size is given as zero, because a
+    size of zero means take whatever space is left over; if two or more partitions ask for that, the request
+    fails with a layout error saying at most one partition may do so, nothing is written, and no partition
+    is arbitrarily chosen.
+  origin: spec+code
+  global: true
+  attachments: 2
+  paired_from:
+    spec:
+    - DPM-FORMAT-PRE-SINGLE-GROW
+    - DPM-FORMAT-ERR-LAYOUT-MULTI-GROW
+    code:
+    - DPM-FORMAT-ERR-LAYOUT-MULTIREST
+  traces:
+  - FR-005
+  - AS-US1-3
+  - FR-005
+  - AS-US1-3
+  - compute_partition_layout gpt.rs:256
+  - compute_partition_layout gpt.rs:257
+  source:
+  - 'spec: DPM-FORMAT-PRE-SINGLE-GROW,DPM-FORMAT-ERR-LAYOUT-MULTI-GROW'
+  - 'code: DPM-FORMAT-ERR-LAYOUT-MULTIREST'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_format_err_layout_multi_grow
+      result: Proved
+      wall_clock_s: 0.52
+      peak_rss_mb: 53
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-FORMAT-ERR-LAYOUT-CAPACITY
+  subject: format
+  methods:
+  - format
+  - initialize_or_format
+  object_fn: compute_partition_layout -> gpt.rs:270-271
+  kind: error-case
+  verifiable: true
+  statement: The combined size of all partitions that were given an explicit size must fit inside the
+    space the drive actually has available for partitions once the sectors reserved for the partition
+    table itself are set aside; if they together need more sectors than are available the request fails
+    with a layout error reporting both the number of sectors needed and the number available, instead
+    of silently truncating or overlapping partitions.
+  origin: spec+code
+  global: true
+  attachments: 2
+  paired_from:
+    spec:
+    - DPM-FORMAT-PRE-CAPACITY
+    - DPM-FORMAT-ERR-LAYOUT-CAPACITY
+    code:
+    - DPM-FORMAT-ERR-LAYOUT-OVERSUB
+  traces:
+  - FR-006
+  - AS-US1-2
+  - FR-006
+  - AS-US1-2
+  - compute_partition_layout gpt.rs:270
+  - compute_partition_layout gpt.rs:271
+  source:
+  - 'spec: DPM-FORMAT-PRE-CAPACITY,DPM-FORMAT-ERR-LAYOUT-CAPACITY'
+  - 'code: DPM-FORMAT-ERR-LAYOUT-OVERSUB'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_format_err_layout_capacity
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-FORMAT-FRAME-NO-WRITE-ON-REJECT
+  subject: format
+  methods:
+  - format
+  - initialize_or_format
+  object_fn: write_gpt -> gpt.rs:160-161, gpt.rs:204-216
+  kind: frame
+  verifiable: true
+  statement: When a format request is rejected because the requested layout is impossible, nothing at
+    all is written to the drive, so a bad request cannot leave the drive in a half-formatted state.
+  origin: divergent
+  global: true
+  attachments: 2
+  paired_from:
+    spec:
+    - DPM-FORMAT-FRAME-NO-WRITE-ON-LAYOUT-ERROR
+    code:
+    - DPM-FORMAT-ERR-LAYOUT-TOOSMALL
+    - DPM-FORMAT-NO-ROLLBACK
+  traces:
+  - AS-US1-2
+  - AS-US1-3
+  - FR-005
+  - FR-006
+  - write_gpt gpt.rs:160
+  - write_gpt gpt.rs:161
+  - write_gpt gpt.rs:204
+  - write_gpt gpt.rs:207
+  - write_gpt gpt.rs:216
+  source:
+  - 'spec: DPM-FORMAT-FRAME-NO-WRITE-ON-LAYOUT-ERROR'
+  - 'code: DPM-FORMAT-ERR-LAYOUT-TOOSMALL,DPM-FORMAT-NO-ROLLBACK'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_format_frame_no_write_on_reject
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 50
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+  divergence_note: Spec promises a rejected format leaves the drive untouched so it can never be left
+    half-formatted; code satisfies this for layout rejections — every layout check, including the device-too-small
+    check at gpt.rs:160, runs before the first write — but the write phase then performs five separate
+    disk writes one after another and gives up at the first failure with no attempt to undo the writes
+    that already succeeded (gpt.rs:204-216), so an input/output failure part-way through does leave the
+    drive half-formatted.
+- id: DPM-FORMAT-PRE-GEOMETRY-MIN
+  subject: format
+  methods:
+  - format
+  - initialize_or_format
+  object_fn: write_gpt -> gpt.rs:158-160
+  kind: precondition
+  verifiable: true
+  statement: The total sector count supplied in the format request must be large enough to hold two copies
+    of the partition entry list plus the two headers, because the last usable sector is computed by subtracting
+    those amounts from the total before the device-too-small check runs; for a smaller total the subtraction
+    goes below zero, which either crashes or wraps round to a huge number that then slips past the very
+    check intended to reject it.
+  origin: code-only
+  global: true
+  attachments: 2
+  paired_from:
+    spec: []
+    code:
+    - DPM-FORMAT-PRE-GEOMETRY
+  traces:
+  - write_gpt gpt.rs:158
+  - write_gpt gpt.rs:160
+  source:
+  - 'code: DPM-FORMAT-PRE-GEOMETRY'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_format_pre_geometry_min
+      result: Proved
+      wall_clock_s: 0.49
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-FORMAT-PRE-MAX-128
+  subject: format
+  methods:
+  - format
+  - initialize_or_format
+  - num_partitions
+  object_fn: compute_partition_layout -> gpt.rs:310 ; serialize_entries -> gpt.rs:433
+  kind: precondition
+  verifiable: true
+  statement: No more than 128 partitions can ever be created or reported, because the partitioning standard
+    this component implements provides exactly 128 slots for partition entries.
+  origin: divergent
+  global: true
+  attachments: 3
+  paired_from:
+    spec:
+    - DPM-NUMPART-INV-MAX-128
+    code:
+    - DPM-FORMAT-PRE-MAXPARTS
+  traces:
+  - FR-001
+  - compute_partition_layout gpt.rs:310
+  - serialize_entries gpt.rs:433
+  - serialize_entries gpt.rs:437
+  source:
+  - 'spec: DPM-NUMPART-INV-MAX-128'
+  - 'code: DPM-FORMAT-PRE-MAXPARTS'
+  creusot:
+    evidence:
+      refutation: refute_dpm_format_pre_max_128
+      result: Proved (negation)
+      wall_clock_s: 0.52
+      peak_rss_mb: 54
+    fidelity: null
+    note: 'REFUTED — the negation ''refute_dpm_format_pre_max_128'' is machine-proved, so the code violates
+      this obligation. This is a finding, not a gap: see the spec and code locations on the property record.'
+    status: refuted
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+  divergence_note: Spec states the number of partitions can never exceed 128 because the standard provides
+    exactly 128 entry slots; code neither caps nor rejects a larger request — the entry list is built
+    with one element per requested partition and only padded, while the buffer it is written into is sized
+    for exactly 128 (gpt.rs:310, gpt.rs:433) — so asking for a 129th partition writes past the end of
+    that buffer and crashes rather than returning the declared layout error.
+- id: DPM-FORMAT-ERR-LAYOUT-UNREACHABLE
+  subject: format
+  methods:
+  - format
+  - initialize_or_format
+  object_fn: compute_partition_layout -> gpt.rs:286
+  kind: error-case
+  verifiable: true
+  statement: The per-partition layout check that would report that one partition needs more sectors than
+    remain can never fire, because the total demand of all explicitly sized partitions is compared against
+    the available space earlier, so that declared error is unreachable.
+  origin: code-only
+  global: true
+  attachments: 2
+  paired_from:
+    spec: []
+    code:
+    - DPM-FORMAT-ERR-LAYOUT-UNREACHABLE
+  traces:
+  - compute_partition_layout gpt.rs:286
+  - compute_partition_layout gpt.rs:270
+  - compute_partition_layout gpt.rs:277
+  source:
+  - 'code: DPM-FORMAT-ERR-LAYOUT-UNREACHABLE'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_format_err_layout_unreachable
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 53
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-FORMAT-SUM-OVERFLOW
+  subject: format
+  methods:
+  - format
+  - initialize_or_format
+  object_fn: compute_partition_layout -> gpt.rs:263-268
+  kind: error-case
+  verifiable: true
+  statement: The total sector demand of the explicitly sized partitions is accumulated by plain addition
+    with no overflow check, so a request combining very large byte sizes with a very small sector size
+    can make the running total wrap round and pass the capacity check it should have failed.
+  origin: code-only
+  global: true
+  attachments: 2
+  paired_from:
+    spec: []
+    code:
+    - DPM-FORMAT-SUM-OVERFLOW
+  traces:
+  - compute_partition_layout gpt.rs:263
+  - compute_partition_layout gpt.rs:268
+  source:
+  - 'code: DPM-FORMAT-SUM-OVERFLOW'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_format_sum_overflow
+      result: Proved
+      wall_clock_s: 0.52
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-FORMAT-POST-TABLE
+  subject: format
+  methods:
+  - format
+  - initialize_or_format
+  - num_partitions
+  - partition_info
+  object_fn: write_gpt -> gpt.rs:222 ; GptPartitionManager::format -> lib.rs:93
+  kind: postcondition
+  verifiable: true
+  statement: When formatting succeeds, the caller receives a description of the finished partition table
+    that contains exactly one entry for each partition that was requested, in the same order it was requested,
+    each carrying that partition’s starting position and length on the drive, and the partition count
+    reported immediately afterwards equals the number of partitions the request asked for.
+  origin: divergent
+  global: true
+  attachments: 4
+  paired_from:
+    spec:
+    - DPM-FORMAT-POST-TABLE
+    - DPM-NUMPART-POST-MATCHES-CONFIG
+    code:
+    - DPM-FORMAT-ZEROGUID-DROPPED
+  traces:
+  - AS-US1-1
+  - 'Key entity: PartitionTable'
+  - AS-US1-1
+  - IR-001
+  - write_gpt gpt.rs:222
+  - try_read_gpt_at gpt.rs:135
+  source:
+  - 'spec: DPM-FORMAT-POST-TABLE,DPM-NUMPART-POST-MATCHES-CONFIG'
+  - 'code: DPM-FORMAT-ZEROGUID-DROPPED'
+  creusot:
+    evidence:
+      refutation: refute_dpm_format_post_table
+      result: Proved (negation)
+      wall_clock_s: 0.55
+      peak_rss_mb: 55
+    fidelity: null
+    note: 'REFUTED — the negation ''refute_dpm_format_post_table'' is machine-proved, so the code violates
+      this obligation. This is a finding, not a gap: see the spec and code locations on the property record.'
+    status: refuted
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+  divergence_note: Spec promises one returned entry per requested partition, in request order, and a count
+    equal to the number requested; code filters the returned table to entries whose partition type identifier
+    is not all zero bytes (gpt.rs:222), so a partition requested with an all-zero type identifier has
+    disk space reserved for it but is missing from the result, the count is short, and every later partition
+    is reported under a different position than the caller asked for.
+- id: DPM-FORMAT-POST-FIXED-SIZE
+  subject: format
+  methods:
+  - format
+  - initialize_or_format
+  object_fn: compute_partition_layout -> gpt.rs:267-283
+  kind: postcondition
+  verifiable: true
+  statement: Each partition that was given an explicit size in bytes ends up with at least as many sectors
+    as are needed to hold that many bytes at the drive’s sector size — the size is rounded up to a whole
+    number of sectors, never down, and never by more than one sector of slack — so the caller never receives
+    less room than it asked for.
+  origin: spec+code
+  global: true
+  attachments: 2
+  paired_from:
+    spec:
+    - DPM-FORMAT-POST-FIXED-SIZE
+    code:
+    - DPM-FORMAT-POST-SIZE
+  traces:
+  - AS-US1-1
+  - 'Key entity: PartitionSpec'
+  - compute_partition_layout gpt.rs:283
+  - compute_partition_layout gpt.rs:267
+  source:
+  - 'spec: DPM-FORMAT-POST-FIXED-SIZE'
+  - 'code: DPM-FORMAT-POST-SIZE'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_format_post_fixed_size
+      result: Proved
+      wall_clock_s: 0.52
+      peak_rss_mb: 54
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-FORMAT-POST-REST-OF-DISK
+  subject: format
+  methods:
+  - format
+  - initialize_or_format
+  object_fn: compute_partition_layout -> gpt.rs:277-281
+  kind: postcondition
+  verifiable: true
+  statement: If one of the requested partitions was given a size of zero, that partition ends up covering
+    exactly the drive space that is still free after every explicitly sized partition has been placed,
+    so no usable space is left stranded.
+  origin: spec+code
+  global: true
+  attachments: 2
+  paired_from:
+    spec:
+    - DPM-FORMAT-POST-RESTOFDISK
+    code:
+    - DPM-FORMAT-POST-REST
+  traces:
+  - FR-004
+  - AS-US1-1
+  - 'Plan design decision: rest-of-disk semantics'
+  - compute_partition_layout gpt.rs:277
+  - compute_partition_layout gpt.rs:281
+  source:
+  - 'spec: DPM-FORMAT-POST-RESTOFDISK'
+  - 'code: DPM-FORMAT-POST-REST'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_format_post_rest_of_disk
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 53
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-FORMAT-POST-MBR
+  subject: format
+  methods:
+  - format
+  - initialize_or_format
+  object_fn: write_protective_mbr -> gpt.rs:334-339
+  kind: postcondition
+  verifiable: true
+  statement: When formatting succeeds, the very first sector of the drive holds a decoy legacy partition
+    record, marked as non-bootable, describing a single region of type 0xEE that starts at sector 1 and
+    spans the rest of the drive capped at the largest value that fits in its four-byte length field, which
+    tells older tools that the drive is managed by the modern partitioning scheme and must not be touched.
+  origin: spec+code
+  global: true
+  attachments: 2
+  paired_from:
+    spec:
+    - DPM-FORMAT-POST-MBR
+    code:
+    - DPM-FORMAT-POST-MBR
+  traces:
+  - FR-007
+  - AS-US1-1
+  - write_protective_mbr gpt.rs:334
+  - write_protective_mbr gpt.rs:339
+  - write_protective_mbr gpt.rs:345
+  - write_protective_mbr gpt.rs:347
+  - write_protective_mbr gpt.rs:351
+  source:
+  - 'spec: DPM-FORMAT-POST-MBR'
+  - 'code: DPM-FORMAT-POST-MBR'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_format_post_mbr
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-FORMAT-POST-HEADER-PAIR
+  subject: format
+  methods:
+  - format
+  - initialize_or_format
+  object_fn: write_gpt -> gpt.rs:180-196
+  kind: postcondition
+  verifiable: true
+  statement: When formatting succeeds, the main partition-table header is written to the second sector
+    of the drive and a second copy of it is written to the very last sector, and each header records the
+    sector it lives in and points at the other one, so the table can still be recovered if the copy at
+    the front of the drive is damaged.
+  origin: spec+code
+  global: true
+  attachments: 2
+  paired_from:
+    spec:
+    - DPM-FORMAT-POST-PRIMARY-HEADER
+    - DPM-FORMAT-POST-BACKUP-HEADER
+    code:
+    - DPM-FORMAT-POST-HEADERPAIR
+  traces:
+  - FR-001
+  - FR-002
+  - AS-US1-1
+  - FR-001
+  - FR-003
+  - AS-US1-1
+  - write_gpt gpt.rs:180
+  - write_gpt gpt.rs:181
+  - write_gpt gpt.rs:196
+  - write_gpt gpt.rs:199
+  source:
+  - 'spec: DPM-FORMAT-POST-PRIMARY-HEADER,DPM-FORMAT-POST-BACKUP-HEADER'
+  - 'code: DPM-FORMAT-POST-HEADERPAIR'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_format_post_header_pair
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-FORMAT-POST-ENTRY-ARRAY
+  subject: format
+  methods:
+  - format
+  - initialize_or_format
+  object_fn: serialize_entries -> gpt.rs:433 ; compute_partition_layout -> gpt.rs:310-311
+  kind: postcondition
+  verifiable: true
+  statement: When formatting succeeds, the drive holds two copies of the partition-entry list, one near
+    the front and one near the back, and each copy always contains exactly 128 fixed-size slots of 128
+    bytes with every slot beyond the partitions the caller asked for filled entirely with zero bytes,
+    regardless of how many partitions were requested.
+  origin: spec+code
+  global: true
+  attachments: 2
+  paired_from:
+    spec:
+    - DPM-FORMAT-POST-ENTRY-ARRAY
+    code:
+    - DPM-FORMAT-POST-PADDING
+  traces:
+  - FR-001
+  - 'Implementation note: entry padding'
+  - Plan disk layout
+  - compute_partition_layout gpt.rs:310
+  - compute_partition_layout gpt.rs:311
+  - serialize_entries gpt.rs:433
+  source:
+  - 'spec: DPM-FORMAT-POST-ENTRY-ARRAY'
+  - 'code: DPM-FORMAT-POST-PADDING'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_format_post_entry_array
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-FORMAT-FRAME-DATA-REGIONS
+  subject: format
+  methods:
+  - format
+  - initialize_or_format
+  object_fn: write_gpt -> gpt.rs:204-216
+  kind: frame
+  verifiable: true
+  statement: A format writes only the five structures that make up the partition table — the decoy record
+    in the first sector, the main header in the second, the main entry list from the third, the backup
+    entry list near the end and the backup header in the last sector, in that order — and never writes
+    into the areas of the drive that the partitions occupy, so existing file contents inside a partition
+    survive the writing of a new table and the number of read and write operations a format performs does
+    not grow as the drive gets larger.
+  origin: spec+code
+  global: true
+  attachments: 2
+  paired_from:
+    spec:
+    - DPM-FORMAT-FRAME-DATA-REGIONS
+    - DPM-FORMAT-POST-IO-COUNT-O1
+    code:
+    - DPM-FORMAT-POST-WRITEORDER
+  traces:
+  - PR-001
+  - 'Plan data flow: format path'
+  - PR-001
+  - write_gpt gpt.rs:204
+  - write_gpt gpt.rs:207
+  - write_gpt gpt.rs:210
+  - write_gpt gpt.rs:213
+  - write_gpt gpt.rs:216
+  source:
+  - 'spec: DPM-FORMAT-FRAME-DATA-REGIONS,DPM-FORMAT-POST-IO-COUNT-O1'
+  - 'code: DPM-FORMAT-POST-WRITEORDER'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_format_frame_data_regions
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-FORMAT-POST-CACHE
+  subject: format
+  methods:
+  - initialize
+  - format
+  - partition_info
+  - num_partitions
+  - initialize_or_format
+  object_fn: GptPartitionManager::format -> lib.rs:93-94
+  kind: postcondition
+  verifiable: true
+  statement: After a format succeeds, the component remembers the table it just created and returns an
+    identical copy, so an immediately following request for a partition’s details or for the partition
+    count answers from the new table rather than reporting that nothing has been loaded.
+  origin: spec+code
+  global: true
+  attachments: 5
+  paired_from:
+    spec:
+    - DPM-FORMAT-POST-CACHE-STATE
+    code:
+    - DPM-FORMAT-POST-CACHE
+  traces:
+  - IR-001
+  - 'Implementation note: internal partition-table state'
+  - format lib.rs:93
+  - format lib.rs:94
+  source:
+  - 'spec: DPM-FORMAT-POST-CACHE-STATE'
+  - 'code: DPM-FORMAT-POST-CACHE'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_format_post_cache
+      result: Proved
+      wall_clock_s: 0.49
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-FORMAT-POST-GUID-FRESH
+  subject: format
+  methods:
+  - format
+  - initialize_or_format
+  object_fn: generate_guid -> gpt.rs:564-568
+  kind: postcondition
+  verifiable: true
+  statement: When formatting succeeds, the drive is stamped with a freshly generated random identifier,
+    and so is each individual partition.
+  origin: divergent
+  global: true
+  attachments: 2
+  paired_from:
+    spec:
+    - DPM-FORMAT-POST-GUID-V4
+    code:
+    - DPM-FORMAT-GUID-DEGRADED
+  traces:
+  - FR-008
+  - generate_guid gpt.rs:566
+  - generate_guid gpt.rs:568
+  source:
+  - 'spec: DPM-FORMAT-POST-GUID-V4'
+  - 'code: DPM-FORMAT-GUID-DEGRADED'
+  creusot:
+    evidence:
+      refutation: refute_dpm_format_post_guid_fresh
+      result: Proved (negation)
+      wall_clock_s: 0.51
+      peak_rss_mb: 53
+    fidelity: null
+    note: 'REFUTED — the negation ''refute_dpm_format_post_guid_fresh'' is machine-proved, so the code
+      violates this obligation. This is a finding, not a gap: see the spec and code locations on the property
+      record.'
+    status: refuted
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+  divergence_note: Spec promises a freshly generated random identifier for the drive and for each partition;
+    code opens the system randomness source and throws away the result of reading from it (gpt.rs:566-568),
+    so when that source cannot be opened or returns fewer bytes than asked for the identifier is whatever
+    the uninitialised buffer held — in practice all zeros — with no error reported and no uniqueness at
+    all.
+- id: DPM-FORMAT-POST-SECTOR-SIZE-ECHO
+  subject: format
+  methods:
+  - initialize
+  - format
+  - partition_info
+  - num_partitions
+  - initialize_or_format
+  object_fn: write_gpt -> gpt.rs:235 ; GptManager::new -> gpt.rs:58
+  kind: postcondition
+  verifiable: true
+  statement: Every partition table the component hands back reports the same sector size that was used
+    for all of its own sector arithmetic and all of its transfers — for a format, the sector size the
+    caller supplied in the request — so callers can convert the reported start sectors and sector counts
+    into byte offsets without guessing.
+  origin: spec+code
+  global: true
+  attachments: 5
+  paired_from:
+    spec:
+    - DPM-FORMAT-POST-SECTOR-SIZE-ECHO
+    code:
+    - DPM-INV-SECTORSIZE-CONSISTENT
+  traces:
+  - 'Key entity: PartitionTable'
+  - FR-011
+  - GptManager::new gpt.rs:58
+  - try_read_gpt_at gpt.rs:148
+  - write_gpt gpt.rs:235
+  source:
+  - 'spec: DPM-FORMAT-POST-SECTOR-SIZE-ECHO'
+  - 'code: DPM-INV-SECTORSIZE-CONSISTENT'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_format_post_sector_size_echo
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-FORMAT-POST-TYPE-GUID-ECHO
+  subject: format
+  methods:
+  - format
+  - initialize_or_format
+  object_fn: compute_partition_layout -> gpt.rs:298 ; serialize_entries -> gpt.rs:433
+  kind: postcondition
+  verifiable: true
+  statement: The partition type identifier recorded for each finished partition is exactly the type identifier
+    the caller asked for, unchanged and not reordered.
+  origin: spec-only
+  global: true
+  attachments: 2
+  paired_from:
+    spec:
+    - DPM-FORMAT-POST-TYPE-GUID-ECHO
+    code: []
+  traces:
+  - AS-US1-1
+  - 'Key entity: PartitionSpec'
+  - Well-known type GUIDs table
+  source:
+  - 'spec: DPM-FORMAT-POST-TYPE-GUID-ECHO'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_format_post_type_guid_echo
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-FORMAT-FIELDS-DROPPED
+  subject: format
+  methods:
+  - format
+  - initialize
+  - initialize_or_format
+  - partition_info
+  object_fn: parse_header -> gpt.rs:379 ; parse_entries -> gpt.rs:400
+  kind: frame
+  verifiable: true
+  statement: The whole-drive identifier and each partition’s attribute flags are parsed out of the drive
+    and then never surfaced in the table handed to callers, and the formatting path always writes attribute
+    flags of zero, so a table written by another tool loses its attribute flags whenever this component
+    rewrites it.
+  origin: code-only
+  global: true
+  attachments: 4
+  paired_from:
+    spec: []
+    code:
+    - DPM-READ-FIELDS-DROPPED
+  traces:
+  - parse_header gpt.rs:379
+  - parse_entries gpt.rs:400
+  - compute_partition_layout gpt.rs:301
+  - try_read_gpt_at gpt.rs:146
+  source:
+  - 'code: DPM-READ-FIELDS-DROPPED'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_format_fields_dropped
+      result: Proved
+      wall_clock_s: 0.52
+      peak_rss_mb: 53
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-FORMAT-IGNORES-DEVICE-GEOMETRY
+  subject: format
+  methods:
+  - format
+  - initialize_or_format
+  object_fn: GptPartitionManager::format -> lib.rs:91
+  kind: precondition
+  verifiable: true
+  statement: Writing a new partition table takes the sector size, the total sector count and the namespace
+    number from the caller’s request and never compares them with what the connected device actually reports,
+    even though the read path does ask the device for exactly those two numbers, so a caller who overstates
+    the drive size has a table written that describes sectors the device does not have.
+  origin: code-only
+  global: true
+  attachments: 2
+  paired_from:
+    spec: []
+    code:
+    - DPM-FORMAT-IGNORES-DEVICE
+  traces:
+  - format lib.rs:91
+  - initialize lib.rs:73
+  - initialize lib.rs:76
+  source:
+  - 'code: DPM-FORMAT-IGNORES-DEVICE'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_format_ignores_device_geometry
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-FORMAT-FRAME-CACHE-ON-ERROR
+  subject: format
+  methods:
+  - initialize
+  - format
+  - partition_info
+  - num_partitions
+  - initialize_or_format
+  object_fn: GptPartitionManager::format -> lib.rs:93 ; GptPartitionManager::initialize -> lib.rs:82
+  kind: frame
+  verifiable: true
+  statement: When a format request or a read request fails, whatever partition table the component was
+    already remembering stays exactly as it was, because the remembered table is replaced only on the
+    success path, so a failed operation does not make previously answerable queries start failing and
+    never leaves a half-updated table behind.
+  origin: spec+code
+  global: true
+  attachments: 5
+  paired_from:
+    spec:
+    - DPM-FORMAT-FRAME-CACHE-ON-ERROR
+    code:
+    - DPM-FORMAT-FRAME-STATE
+    - DPM-INIT-FRAME-STATE
+  traces:
+  - AS-US1-2
+  - 'Implementation note: internal partition-table state'
+  - format lib.rs:87
+  - format lib.rs:93
+  - initialize lib.rs:69
+  - initialize lib.rs:82
+  source:
+  - 'spec: DPM-FORMAT-FRAME-CACHE-ON-ERROR'
+  - 'code: DPM-FORMAT-FRAME-STATE,DPM-INIT-FRAME-STATE'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_format_frame_cache_on_error
+      result: Proved
+      wall_clock_s: 0.49
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-FORMAT-STALE-CACHE
+  subject: format
+  methods:
+  - initialize
+  - format
+  - partition_info
+  - num_partitions
+  - initialize_or_format
+  object_fn: GptPartitionManager::format -> lib.rs:93 ; partition_info -> lib.rs:99
+  kind: frame
+  verifiable: true
+  statement: Because the remembered table is only replaced on full success, a formatting attempt that
+    fails after it has already overwritten part of the drive leaves the component answering later questions
+    from a remembered table that no longer matches what is on the drive.
+  origin: code-only
+  global: true
+  attachments: 5
+  paired_from:
+    spec: []
+    code:
+    - DPM-FORMAT-STALE-CACHE
+  traces:
+  - format lib.rs:93
+  - partition_info lib.rs:99
+  - num_partitions lib.rs:115
+  source:
+  - 'code: DPM-FORMAT-STALE-CACHE'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_format_stale_cache
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-FORMAT-ERR-IO
+  subject: format
+  methods:
+  - format
+  - initialize_or_format
+  object_fn: write_bytes -> gpt.rs:530-545
+  kind: error-case
+  verifiable: true
+  statement: If the underlying storage device refuses or fails any of the sector writes a format needs
+    — the command cannot be queued, the device reports a failure, it answers with an unexpected kind of
+    completion, or the completion channel breaks — the format request reports an input/output failure
+    carrying the device’s own description rather than claiming success.
+  origin: spec+code
+  global: true
+  attachments: 2
+  paired_from:
+    spec:
+    - DPM-FORMAT-ERR-IO
+    code:
+    - DPM-IO-WRITE-ERR-SEND
+    - DPM-IO-WRITE-ERR-DEVICE
+    - DPM-IO-WRITE-ERR-UNEXPECTED
+    - DPM-IO-WRITE-ERR-CHANNEL
+  traces:
+  - 'Error variant: IoError'
+  - 'Dependencies: IBlockDevice interface'
+  - write_bytes gpt.rs:530
+  - write_bytes gpt.rs:534
+  - write_bytes gpt.rs:536
+  - write_bytes gpt.rs:539
+  - write_bytes gpt.rs:540
+  - write_bytes gpt.rs:544
+  - write_bytes gpt.rs:545
+  source:
+  - 'spec: DPM-FORMAT-ERR-IO'
+  - 'code: DPM-IO-WRITE-ERR-SEND,DPM-IO-WRITE-ERR-DEVICE,DPM-IO-WRITE-ERR-UNEXPECTED,DPM-IO-WRITE-ERR-CHANNEL'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_format_err_io
+      result: Proved
+      wall_clock_s: 0.49
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-PINFO-PRE-INITIALIZED
+  subject: partition_info
+  methods:
+  - partition_info
+  object_fn: GptPartitionManager::partition_info -> lib.rs:99
+  kind: precondition
+  verifiable: true
+  statement: Asking for the details of one partition can only succeed after the component has already
+    loaded a partition table, either by reading the one on the drive or by writing a new one.
+  origin: spec+code
+  global: false
+  attachments: 1
+  paired_from:
+    spec:
+    - DPM-PINFO-PRE-INITIALIZED
+    code:
+    - DPM-PINFO-PRE-INIT
+  traces:
+  - IR-001
+  - 'Error variant: NotInitialized'
+  - partition_info lib.rs:99
+  source:
+  - 'spec: DPM-PINFO-PRE-INITIALIZED'
+  - 'code: DPM-PINFO-PRE-INIT'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_pinfo_pre_initialized
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 53
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-PINFO-ERR-NOT-INITIALIZED
+  subject: partition_info
+  methods:
+  - partition_info
+  object_fn: GptPartitionManager::partition_info -> lib.rs:99-101
+  kind: error-case
+  verifiable: true
+  statement: Asking for the details of a partition before any partition table has been loaded fails with
+    a not-initialized error telling the caller to read the table first.
+  origin: spec+code
+  global: false
+  attachments: 1
+  paired_from:
+    spec:
+    - DPM-PINFO-ERR-NOT-INITIALIZED
+    code:
+    - DPM-PINFO-ERR-NOTINIT
+  traces:
+  - 'Error variant: NotInitialized'
+  - IR-001
+  - partition_info lib.rs:99
+  - partition_info lib.rs:101
+  source:
+  - 'spec: DPM-PINFO-ERR-NOT-INITIALIZED'
+  - 'code: DPM-PINFO-ERR-NOTINIT'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_pinfo_err_not_initialized
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-PINFO-ERR-INVALID-INDEX
+  subject: partition_info
+  methods:
+  - partition_info
+  object_fn: GptPartitionManager::partition_info -> lib.rs:104-107
+  kind: error-case
+  verifiable: true
+  statement: Asking for the details of one partition succeeds only when the position asked for is below
+    the number of partitions the component knows about, counting from zero for the first one; a position
+    at or beyond that number fails with an invalid-partition error whose message repeats the offending
+    position, instead of returning made-up or leftover data.
+  origin: spec+code
+  global: false
+  attachments: 1
+  paired_from:
+    spec:
+    - DPM-PINFO-PRE-INDEX-RANGE
+    - DPM-PINFO-ERR-INVALID-INDEX
+    code:
+    - DPM-PINFO-ERR-RANGE
+  traces:
+  - 'Error variant: InvalidPartition'
+  - 'Key entity: PartitionInfo'
+  - 'Error variant: InvalidPartition'
+  - partition_info lib.rs:104
+  - partition_info lib.rs:107
+  source:
+  - 'spec: DPM-PINFO-PRE-INDEX-RANGE,DPM-PINFO-ERR-INVALID-INDEX'
+  - 'code: DPM-PINFO-ERR-RANGE'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_pinfo_err_invalid_index
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-PINFO-POST-MATCH
+  subject: partition_info
+  methods:
+  - partition_info
+  object_fn: GptPartitionManager::partition_info -> lib.rs:102-105
+  kind: postcondition
+  verifiable: true
+  statement: When the details of one partition are requested successfully, every field returned — its
+    starting sector, its length in sectors, its partition type, its unique identifier and its name — is
+    a faithful copy of that same entry of the partition table the component currently holds.
+  origin: spec+code
+  global: false
+  attachments: 1
+  paired_from:
+    spec:
+    - DPM-PINFO-POST-MATCH
+    code:
+    - DPM-PINFO-POST
+  traces:
+  - IR-001
+  - 'Key entity: PartitionInfo'
+  - partition_info lib.rs:102
+  - partition_info lib.rs:105
+  source:
+  - 'spec: DPM-PINFO-POST-MATCH'
+  - 'code: DPM-PINFO-POST'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_pinfo_post_match
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-PINFO-POST-INDEX-ECHO
+  subject: partition_info
+  methods:
+  - partition_info
+  object_fn: GptPartitionManager::partition_info -> lib.rs:104 ; try_read_gpt_at -> gpt.rs:137
+  kind: postcondition
+  verifiable: true
+  statement: The partition description returned reports the same position number that the caller asked
+    for, so a caller can never be handed a different partition than the one it requested and can feed
+    a returned position straight back in.
+  origin: divergent
+  global: false
+  attachments: 1
+  paired_from:
+    spec:
+    - DPM-PINFO-POST-INDEX-ECHO
+    code:
+    - DPM-PINFO-INDEX-MISMATCH
+  traces:
+  - 'Key entity: PartitionInfo'
+  - IR-001
+  - try_read_gpt_at gpt.rs:137
+  - partition_info lib.rs:104
+  source:
+  - 'spec: DPM-PINFO-POST-INDEX-ECHO'
+  - 'code: DPM-PINFO-INDEX-MISMATCH'
+  creusot:
+    evidence:
+      refutation: refute_dpm_pinfo_post_index_echo
+      result: Proved (negation)
+      wall_clock_s: 0.51
+      peak_rss_mb: 53
+    fidelity: null
+    note: 'REFUTED — the negation ''refute_dpm_pinfo_post_index_echo'' is machine-proved, so the code
+      violates this obligation. This is a finding, not a gap: see the spec and code locations on the property
+      record.'
+    status: refuted
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+  divergence_note: Spec promises the returned description reports the position the caller asked for; code
+    uses two different meanings of position — the number recorded inside each returned description is
+    the slot it occupied in the on-disk entry list (gpt.rs:137) while the number this operation accepts
+    is a place in the shorter list of non-empty partitions (lib.rs:104) — so when a leading slot is empty
+    the two disagree and feeding a partition’s own reported position back in can select a different partition
+    or fail as out of range.
+- id: DPM-PINFO-FRAME-NO-MUTATION
+  subject: partition_info
+  methods:
+  - partition_info
+  object_fn: GptPartitionManager::partition_info -> lib.rs:97-105
+  kind: frame
+  verifiable: true
+  statement: Looking up a partition’s details changes nothing — it does not alter the remembered partition
+    table, it does not alter the configured namespace, and it issues no command to the drive — so it can
+    be called any number of times with the same effect as calling it once.
+  origin: spec+code
+  global: false
+  attachments: 1
+  paired_from:
+    spec:
+    - DPM-PINFO-FRAME-NO-MUTATION
+    code:
+    - DPM-PINFO-FRAME
+  traces:
+  - IR-001
+  - 'Implementation note: internal partition-table state'
+  - partition_info lib.rs:97
+  - partition_info lib.rs:105
+  source:
+  - 'spec: DPM-PINFO-FRAME-NO-MUTATION'
+  - 'code: DPM-PINFO-FRAME'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_pinfo_frame_no_mutation
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-PINFO-INV-CONSISTENT
+  subject: partition_info
+  methods:
+  - partition_info
+  - num_partitions
+  object_fn: GptPartitionManager::partition_info -> lib.rs:104 ; num_partitions -> lib.rs:118
+  kind: invariant
+  verifiable: true
+  statement: As long as no new table has been read or written in between, repeated lookups of the same
+    partition position always return exactly the same answer, and the reported count and the per-partition
+    lookup always agree — every position below the reported count returns a partition and every position
+    at or above it is rejected as out of range — because both answer from the same remembered table.
+  origin: spec+code
+  global: true
+  attachments: 2
+  paired_from:
+    spec:
+    - DPM-PINFO-INV-CONSISTENT
+    code:
+    - DPM-NUMPARTS-AGREES-WITH-PINFO
+  traces:
+  - IR-001
+  - SC-001
+  - num_partitions lib.rs:118
+  - partition_info lib.rs:104
+  source:
+  - 'spec: DPM-PINFO-INV-CONSISTENT'
+  - 'code: DPM-NUMPARTS-AGREES-WITH-PINFO'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_pinfo_inv_consistent
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 53
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-PINFO-SLOT-REUSE
+  subject: partition_info
+  methods:
+  - partition_info
+  - format
+  - initialize_or_format
+  object_fn: GptPartitionManager::partition_info -> lib.rs:104 ; compute_partition_layout -> gpt.rs:298
+  kind: invariant
+  verifiable: true
+  statement: A partition can be referred to only by its position in the table, and formatting the drive
+    again writes a brand-new set of partitions into the same positions, so the very same request can return
+    a completely different partition before and after a reformat with nothing in the answer marking the
+    change; each partition does carry a freshly generated unique identifier that could tell the two apart,
+    but no operation ever accepts or checks that identifier.
+  origin: code-only
+  global: true
+  attachments: 3
+  paired_from:
+    spec: []
+    code:
+    - DPM-PINFO-SLOT-REUSE
+  traces:
+  - partition_info lib.rs:104
+  - compute_partition_layout gpt.rs:298
+  - ipartition_table.rs:11
+  source:
+  - 'code: DPM-PINFO-SLOT-REUSE'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_pinfo_slot_reuse
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-NUMPART-PRE-INITIALIZED
+  subject: num_partitions
+  methods:
+  - num_partitions
+  object_fn: GptPartitionManager::num_partitions -> lib.rs:115
+  kind: precondition
+  verifiable: true
+  statement: Asking how many partitions there are can only succeed after the component has already loaded
+    a partition table, either by reading the one on the drive or by writing a new one.
+  origin: spec+code
+  global: false
+  attachments: 1
+  paired_from:
+    spec:
+    - DPM-NUMPART-PRE-INITIALIZED
+    code:
+    - DPM-NUMPARTS-PRE-INIT
+  traces:
+  - IR-001
+  - 'Error variant: NotInitialized'
+  - num_partitions lib.rs:115
+  source:
+  - 'spec: DPM-NUMPART-PRE-INITIALIZED'
+  - 'code: DPM-NUMPARTS-PRE-INIT'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_numpart_pre_initialized
+      result: Proved
+      wall_clock_s: 0.59
+      peak_rss_mb: 53
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-NUMPART-ERR-NOT-INITIALIZED
+  subject: num_partitions
+  methods:
+  - num_partitions
+  object_fn: GptPartitionManager::num_partitions -> lib.rs:115-117
+  kind: error-case
+  verifiable: true
+  statement: Asking how many partitions there are before any partition table has been loaded fails with
+    a not-initialized error telling the caller to read the table first, rather than answering zero.
+  origin: spec+code
+  global: false
+  attachments: 1
+  paired_from:
+    spec:
+    - DPM-NUMPART-ERR-NOT-INITIALIZED
+    code:
+    - DPM-NUMPARTS-ERR-NOTINIT
+  traces:
+  - 'Error variant: NotInitialized'
+  - IR-001
+  - num_partitions lib.rs:115
+  - num_partitions lib.rs:117
+  source:
+  - 'spec: DPM-NUMPART-ERR-NOT-INITIALIZED'
+  - 'code: DPM-NUMPARTS-ERR-NOTINIT'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_numpart_err_not_initialized
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-NUMPART-POST-COUNT
+  subject: num_partitions
+  methods:
+  - num_partitions
+  object_fn: GptPartitionManager::num_partitions -> lib.rs:118
+  kind: postcondition
+  verifiable: true
+  statement: The count returned is exactly the number of partitions in the partition table the component
+    currently holds — the same table that supplies answers about individual partitions.
+  origin: spec+code
+  global: false
+  attachments: 1
+  paired_from:
+    spec:
+    - DPM-NUMPART-POST-COUNT
+    code:
+    - DPM-NUMPARTS-POST
+  traces:
+  - IR-001
+  - 'Key entity: PartitionTable'
+  - num_partitions lib.rs:118
+  source:
+  - 'spec: DPM-NUMPART-POST-COUNT'
+  - 'code: DPM-NUMPARTS-POST'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_numpart_post_count
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 53
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-NUMPART-FRAME-NO-MUTATION
+  subject: num_partitions
+  methods:
+  - num_partitions
+  object_fn: GptPartitionManager::num_partitions -> lib.rs:113-118
+  kind: frame
+  verifiable: true
+  statement: Asking how many partitions there are changes nothing — neither the remembered partition table,
+    nor the configured namespace, nor anything on the drive — so it is safe to call repeatedly.
+  origin: spec+code
+  global: false
+  attachments: 1
+  paired_from:
+    spec:
+    - DPM-NUMPART-FRAME-NO-MUTATION
+    code:
+    - DPM-NUMPARTS-FRAME
+  traces:
+  - IR-001
+  - 'Implementation note: internal partition-table state'
+  - num_partitions lib.rs:113
+  - num_partitions lib.rs:118
+  source:
+  - 'spec: DPM-NUMPART-FRAME-NO-MUTATION'
+  - 'code: DPM-NUMPARTS-FRAME'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_numpart_frame_no_mutation
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 53
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-NUMPART-COUNT-NARROWING
+  subject: num_partitions
+  methods:
+  - num_partitions
+  object_fn: GptPartitionManager::num_partitions -> lib.rs:118
+  kind: error-case
+  verifiable: true
+  statement: The number of remembered partitions is held as a machine-sized count and handed back as a
+    four-byte number with no check, so a table holding more partitions than fits in four bytes would be
+    reported with a wrong, wrapped-round count.
+  origin: code-only
+  global: false
+  attachments: 1
+  paired_from:
+    spec: []
+    code:
+    - DPM-NUMPARTS-CAST
+  traces:
+  - num_partitions lib.rs:118
+  - try_read_gpt_at gpt.rs:131
+  source:
+  - 'code: DPM-NUMPARTS-CAST'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_numpart_count_narrowing
+      result: Proved
+      wall_clock_s: 0.49
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-IOF-PRE-CONFIG-VALID
+  subject: initialize_or_format
+  methods:
+  - initialize_or_format
+  object_fn: GptPartitionManager::initialize_or_format -> lib.rs:38-59
+  kind: precondition
+  verifiable: true
+  statement: The combined read-or-create operation must be given a partition layout that would itself
+    be acceptable to a plain format request, because it may have to fall back to formatting the drive.
+  origin: spec-only
+  global: false
+  attachments: 1
+  paired_from:
+    spec:
+    - DPM-IOF-PRE-CONFIG-VALID
+    code: []
+  traces:
+  - IR-003
+  - FR-005
+  - FR-006
+  source:
+  - 'spec: DPM-IOF-PRE-CONFIG-VALID'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_iof_pre_config_valid
+      result: Proved
+      wall_clock_s: 0.49
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-IOF-POST-FORCE-FORMATTED
+  subject: initialize_or_format
+  methods:
+  - initialize_or_format
+  object_fn: GptPartitionManager::initialize_or_format -> lib.rs:50-52
+  kind: postcondition
+  verifiable: true
+  statement: When the caller demands a fresh start, a brand-new partition table is written without first
+    reading the existing one and the accompanying flag reports that formatting took place, no matter what
+    the drive contained beforehand.
+  origin: spec+code
+  global: false
+  attachments: 1
+  paired_from:
+    spec:
+    - DPM-IOF-POST-FORCE-FORMATTED
+    code:
+    - DPM-IOF-POST-FORCE
+  traces:
+  - AS-US3-3
+  - IR-003
+  - initialize_or_format lib.rs:50
+  - initialize_or_format lib.rs:52
+  source:
+  - 'spec: DPM-IOF-POST-FORCE-FORMATTED'
+  - 'code: DPM-IOF-POST-FORCE'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_iof_post_force_formatted
+      result: Proved
+      wall_clock_s: 0.49
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-IOF-POST-EXISTING-PRESERVED
+  subject: initialize_or_format
+  methods:
+  - initialize_or_format
+  object_fn: GptPartitionManager::initialize_or_format -> lib.rs:55-56
+  kind: postcondition
+  verifiable: true
+  statement: When the caller has not demanded a fresh start and the drive already carries a usable partition
+    table, that existing table is returned, the accompanying flag reports that no formatting took place,
+    and nothing at all is written to the drive, which is what allows the data on a drive to survive a
+    restart of the system.
+  origin: spec+code
+  global: false
+  attachments: 1
+  paired_from:
+    spec:
+    - DPM-IOF-POST-EXISTING-NOT-FORMATTED
+    - DPM-IOF-FRAME-PRESERVE-DATA
+    code:
+    - DPM-IOF-POST-EXISTING
+  traces:
+  - AS-US3-1
+  - IR-003
+  - SC-004
+  - AS-US3-1
+  - SC-004
+  - US-3
+  - initialize_or_format lib.rs:55
+  - initialize_or_format lib.rs:56
+  source:
+  - 'spec: DPM-IOF-POST-EXISTING-NOT-FORMATTED,DPM-IOF-FRAME-PRESERVE-DATA'
+  - 'code: DPM-IOF-POST-EXISTING'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_iof_post_existing_preserved
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-IOF-POST-MISSING-FORMATTED
+  subject: initialize_or_format
+  methods:
+  - initialize_or_format
+  object_fn: GptPartitionManager::initialize_or_format -> lib.rs:57-59
+  kind: postcondition
+  verifiable: true
+  statement: When the caller has not demanded a fresh start but the drive carries no usable partition
+    table, a new table is written using the supplied layout and the accompanying flag reports that formatting
+    did take place.
+  origin: divergent
+  global: false
+  attachments: 1
+  paired_from:
+    spec:
+    - DPM-IOF-POST-MISSING-FORMATTED
+    code:
+    - DPM-IOF-POST-FALLBACK
+    - DPM-IOF-DOC-CLAIM
+  traces:
+  - AS-US3-2
+  - IR-003
+  - initialize_or_format lib.rs:57
+  - initialize_or_format lib.rs:59
+  - initialize_or_format lib.rs:38
+  - initialize_or_format lib.rs:57
+  source:
+  - 'spec: DPM-IOF-POST-MISSING-FORMATTED'
+  - 'code: DPM-IOF-POST-FALLBACK,DPM-IOF-DOC-CLAIM'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_iof_post_missing_formatted
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+  divergence_note: Spec — and the code’s own documentation comment at lib.rs:38 — say a new table is created
+    only when a fresh start is demanded or when no valid table exists; the code also writes a new table
+    when the read reports the table as corrupt (lib.rs:57), a destructive action neither the specification
+    nor the comment mentions.
+- id: DPM-IOF-POST-FLAG
+  subject: initialize_or_format
+  methods:
+  - initialize_or_format
+  object_fn: GptPartitionManager::initialize_or_format -> lib.rs:52, lib.rs:56
+  kind: postcondition
+  verifiable: true
+  statement: Every successful call of the combined read-or-create operation returns both the resulting
+    partition table and a separate yes-or-no indication that is true exactly when a new table was written
+    and false exactly when a table already on the drive was returned, so the caller can tell first-time
+    setup apart from recovery.
+  origin: spec+code
+  global: false
+  attachments: 1
+  paired_from:
+    spec:
+    - DPM-IOF-POST-FLAG-PRESENT
+    code:
+    - DPM-IOF-FLAG-MEANING
+  traces:
+  - IR-003
+  - initialize_or_format lib.rs:52
+  - initialize_or_format lib.rs:56
+  - initialize_or_format lib.rs:60
+  source:
+  - 'spec: DPM-IOF-POST-FLAG-PRESENT'
+  - 'code: DPM-IOF-FLAG-MEANING'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_iof_post_flag
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-IOF-ERR-PROPAGATE
+  subject: initialize_or_format
+  methods:
+  - initialize_or_format
+  object_fn: GptPartitionManager::initialize_or_format -> lib.rs:62
+  kind: error-case
+  verifiable: true
+  statement: 'Failures are reported to the caller rather than swallowed: any failure from reading the
+    existing table other than a missing or corrupt table — an unconnected device or an input/output failure,
+    for instance — is passed straight back unchanged with no attempt to write anything, and if the operation
+    does have to format the drive and the requested layout is impossible, the layout error is reported
+    as a layout error rather than as a missing partition table.'
+  origin: spec+code
+  global: false
+  attachments: 1
+  paired_from:
+    spec:
+    - DPM-IOF-ERR-LAYOUT-PROPAGATE
+    code:
+    - DPM-IOF-ERR-PROPAGATE
+  traces:
+  - IR-003
+  - FR-005
+  - FR-006
+  - initialize_or_format lib.rs:62
+  source:
+  - 'spec: DPM-IOF-ERR-LAYOUT-PROPAGATE'
+  - 'code: DPM-IOF-ERR-PROPAGATE'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_iof_err_propagate
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-IOF-NO-REFORMAT-ON-DAMAGED-PRIMARY
+  subject: initialize_or_format
+  methods:
+  - initialize_or_format
+  object_fn: GptPartitionManager::initialize_or_format -> lib.rs:57-59 ; read_gpt -> gpt.rs:91
+  kind: frame
+  verifiable: true
+  statement: A drive whose main table copy is damaged but whose backup copy is intact is recovered from
+    the backup and is not reformatted by the combined read-or-create operation, so a partially failed
+    write can never escalate into destroying the data on the drive.
+  origin: divergent
+  global: false
+  attachments: 1
+  paired_from:
+    spec:
+    - DPM-IOF-FRAME-NO-REFORMAT-ON-DAMAGED-PRIMARY
+    code:
+    - DPM-IOF-DESTRUCTIVE-FALLBACK
+  traces:
+  - AS-US2-4
+  - FR-003
+  - IR-003
+  - initialize_or_format lib.rs:57
+  - initialize_or_format lib.rs:59
+  - read_gpt gpt.rs:91
+  source:
+  - 'spec: DPM-IOF-FRAME-NO-REFORMAT-ON-DAMAGED-PRIMARY'
+  - 'code: DPM-IOF-DESTRUCTIVE-FALLBACK'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_iof_no_reformat_on_damaged_primary
+      result: Proved
+      wall_clock_s: 0.49
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+  divergence_note: Spec promises a damaged main copy with an intact backup is recovered and never reformatted;
+    code reformats the drive without asking whenever the read returns either missing-table or corrupt-table
+    (lib.rs:57), and because a failure reading the backup copy is itself reported as missing-table (gpt.rs:91),
+    a drive that merely could not be read at its backup location, or whose main header is rejected for
+    a reason that does not trigger the backup fallback, is silently overwritten with possibly live data
+    on it.
+- id: DPM-NSID-DEFAULT
+  subject: set_ns_id
+  methods:
+  - set_ns_id
+  - initialize
+  - initialize_or_format
+  object_fn: get_ns_id -> lib.rs:35 ; initialize -> lib.rs:72
+  kind: postcondition
+  verifiable: true
+  statement: If the storage namespace number is never configured, every read of the partition table uses
+    namespace 1.
+  origin: code-only
+  global: true
+  attachments: 3
+  paired_from:
+    spec: []
+    code:
+    - DPM-NSID-DEFAULT
+  traces:
+  - get_ns_id lib.rs:35
+  - initialize lib.rs:72
+  source:
+  - 'code: DPM-NSID-DEFAULT'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_nsid_default
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-NSID-SET
+  subject: set_ns_id
+  methods:
+  - set_ns_id
+  - initialize
+  - initialize_or_format
+  object_fn: set_ns_id -> lib.rs:30-31 ; get_ns_id -> lib.rs:35
+  kind: postcondition
+  verifiable: true
+  statement: After the storage namespace number is configured to a particular value, every later read
+    of the partition table queries the device and reads sectors using that value, and the most recent
+    configuration wins over earlier ones.
+  origin: code-only
+  global: true
+  attachments: 3
+  paired_from:
+    spec: []
+    code:
+    - DPM-NSID-SET
+  traces:
+  - set_ns_id lib.rs:31
+  - get_ns_id lib.rs:35
+  - initialize lib.rs:72
+  source:
+  - 'code: DPM-NSID-SET'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_nsid_set
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-NSID-FRAME
+  subject: set_ns_id
+  methods:
+  - set_ns_id
+  object_fn: set_ns_id -> lib.rs:30-31
+  kind: frame
+  verifiable: true
+  statement: Configuring the storage namespace number changes only that setting — it does not alter the
+    remembered partition table and it issues no command to the drive.
+  origin: code-only
+  global: false
+  attachments: 1
+  paired_from:
+    spec: []
+    code:
+    - DPM-NSID-FRAME
+  traces:
+  - set_ns_id lib.rs:30
+  - set_ns_id lib.rs:31
+  source:
+  - 'code: DPM-NSID-FRAME'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_nsid_frame
+      result: Proved
+      wall_clock_s: 0.49
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-NSID-UNVALIDATED
+  subject: set_ns_id
+  methods:
+  - set_ns_id
+  - initialize
+  - initialize_or_format
+  object_fn: set_ns_id -> lib.rs:30-31
+  kind: precondition
+  verifiable: true
+  statement: The storage namespace number is accepted and stored without any check, including the value
+    zero which is not a legal namespace identifier, so a bad value is not rejected where it is supplied
+    but only surfaces much later as a device failure during a read.
+  origin: code-only
+  global: true
+  attachments: 3
+  paired_from:
+    spec: []
+    code:
+    - DPM-NSID-UNVALIDATED
+  traces:
+  - set_ns_id lib.rs:30
+  - set_ns_id lib.rs:31
+  source:
+  - 'code: DPM-NSID-UNVALIDATED'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_nsid_unvalidated
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-NSID-FIELD-DOMAIN
+  subject: set_ns_id
+  methods:
+  - set_ns_id
+  - initialize
+  - initialize_or_format
+  object_fn: lib.rs:22 ; set_ns_id -> lib.rs:31 ; get_ns_id -> lib.rs:35
+  kind: invariant
+  verifiable: true
+  statement: The stored namespace setting is either absent, in which case 1 is used, or exactly a value
+    a caller supplied; the component never derives or changes it by itself, so the value used for a read
+    is always either 1 or the last value configured.
+  origin: code-only
+  global: true
+  attachments: 3
+  paired_from:
+    spec: []
+    code:
+    - DPM-INV-NSID-FIELD
+  traces:
+  - lib.rs:22
+  - set_ns_id lib.rs:31
+  - get_ns_id lib.rs:35
+  source:
+  - 'code: DPM-INV-NSID-FIELD'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_nsid_field_domain
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-READ-BACKUP-LOCATION-UNDERFLOW
+  subject: read_gpt
+  methods:
+  - initialize
+  - initialize_or_format
+  object_fn: read_gpt -> gpt.rs:87-89
+  kind: error-case
+  verifiable: true
+  statement: The location of the backup copy is computed by subtracting one, and then the size of the
+    entry list, from the device’s sector count with nothing checking that the device is large enough,
+    so on a very small device that subtraction goes below zero and crashes or wraps round to a nonsensical
+    sector instead of reporting an error.
+  origin: code-only
+  global: true
+  attachments: 2
+  paired_from:
+    spec: []
+    code:
+    - DPM-READ-BACKUP-UNDERFLOW
+  traces:
+  - read_gpt gpt.rs:87
+  - read_gpt gpt.rs:89
+  source:
+  - 'code: DPM-READ-BACKUP-UNDERFLOW'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_read_backup_location_underflow
+      result: Proved
+      wall_clock_s: 0.49
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-READ-ERR-SHORT-HEADER
+  subject: parse_header
+  methods:
+  - initialize
+  - initialize_or_format
+  object_fn: parse_header -> gpt.rs:358-362
+  kind: error-case
+  verifiable: true
+  statement: If fewer than 92 bytes of header were obtained, parsing fails with a corrupt-table error
+    saying the header is too short and no byte beyond what was read is touched, which is the check that
+    makes every later fixed-offset read of the header safe.
+  origin: code-only
+  global: true
+  attachments: 2
+  paired_from:
+    spec: []
+    code:
+    - DPM-READ-ERR-SHORT
+  traces:
+  - parse_header gpt.rs:358
+  - parse_header gpt.rs:362
+  source:
+  - 'code: DPM-READ-ERR-SHORT'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_read_err_short_header
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-READ-MYLBA-UNCHECKED
+  subject: parse_header
+  methods:
+  - initialize
+  - initialize_or_format
+  object_fn: parse_header -> gpt.rs:375-376 ; try_read_gpt_at -> gpt.rs:103
+  kind: precondition
+  verifiable: true
+  statement: Each header records which sector it lives in and where its partner copy lives, and the read
+    path never checks either value against the sector it actually read the header from, so a header relocated
+    or misattributed on the drive is accepted as if it belonged where it was found.
+  origin: code-only
+  global: true
+  attachments: 2
+  paired_from:
+    spec: []
+    code:
+    - DPM-READ-MYLBA-UNCHECKED
+  traces:
+  - parse_header gpt.rs:375
+  - parse_header gpt.rs:376
+  - try_read_gpt_at gpt.rs:103
+  source:
+  - 'code: DPM-READ-MYLBA-UNCHECKED'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_read_mylba_unchecked
+      result: Proved
+      wall_clock_s: 0.49
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-READ-STRIDE-MISMATCH
+  subject: parse_entries
+  methods:
+  - initialize
+  - initialize_or_format
+  object_fn: parse_entries -> gpt.rs:390-391 ; try_read_gpt_at -> gpt.rs:119
+  kind: postcondition
+  verifiable: true
+  statement: The number of bytes to read for the entry list is computed from the entry size declared in
+    the header, but the code that splits those bytes into entries always steps forward by a fixed 128
+    bytes and stops early when it runs out of data, so a header declaring any other entry size has its
+    entries cut at the wrong boundaries and the partitions reported are nonsense rather than an error.
+  origin: code-only
+  global: true
+  attachments: 2
+  paired_from:
+    spec: []
+    code:
+    - DPM-READ-STRIDE-MISMATCH
+  traces:
+  - parse_entries gpt.rs:390
+  - parse_entries gpt.rs:391
+  - try_read_gpt_at gpt.rs:119
+  source:
+  - 'code: DPM-READ-STRIDE-MISMATCH'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_read_stride_mismatch
+      result: Proved
+      wall_clock_s: 0.49
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-IO-READ-LENGTH
+  subject: read_bytes
+  methods:
+  - initialize
+  - initialize_or_format
+  object_fn: read_bytes -> gpt.rs:452-474
+  kind: postcondition
+  verifiable: true
+  statement: A successful multi-sector read returns exactly the number of bytes requested, assembled in
+    order from single-sector reads of consecutive sectors starting at the requested sector, with the final
+    sector contributing only as many bytes as are still needed.
+  origin: code-only
+  global: true
+  attachments: 2
+  paired_from:
+    spec: []
+    code:
+    - DPM-IO-READ-LENGTH
+  traces:
+  - read_bytes gpt.rs:452
+  - read_bytes gpt.rs:456
+  - read_bytes gpt.rs:474
+  source:
+  - 'code: DPM-IO-READ-LENGTH'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_io_read_length
+      result: Proved
+      wall_clock_s: 0.49
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-IO-ERR-DMA
+  subject: read_bytes
+  methods:
+  - initialize
+  - format
+  - initialize_or_format
+  object_fn: alloc_dma_buffer -> gpt.rs:556 ; read_bytes -> gpt.rs:457 ; write_bytes -> gpt.rs:509
+  kind: error-case
+  verifiable: true
+  statement: If a sector-sized transfer buffer cannot be allocated, the read or write fails with an input/output
+    error carrying the allocation failure’s own description, and no command is sent to the device for
+    that sector.
+  origin: code-only
+  global: true
+  attachments: 3
+  paired_from:
+    spec: []
+    code:
+    - DPM-IO-ERR-DMA
+  traces:
+  - read_bytes gpt.rs:457
+  - write_bytes gpt.rs:509
+  - alloc_dma_buffer gpt.rs:556
+  source:
+  - 'code: DPM-IO-ERR-DMA'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_io_err_dma
+      result: Proved
+      wall_clock_s: 0.49
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-IO-WRITE-PAD
+  subject: write_bytes
+  methods:
+  - format
+  - initialize_or_format
+  object_fn: write_bytes -> gpt.rs:507-515
+  kind: postcondition
+  verifiable: true
+  statement: A write of data that does not fill a whole number of sectors pads the final sector with zero
+    bytes, so no leftover contents of the transfer buffer are ever written to the drive.
+  origin: code-only
+  global: true
+  attachments: 2
+  paired_from:
+    spec: []
+    code:
+    - DPM-IO-WRITE-PAD
+  traces:
+  - write_bytes gpt.rs:507
+  - write_bytes gpt.rs:514
+  - write_bytes gpt.rs:515
+  source:
+  - 'code: DPM-IO-WRITE-PAD'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_io_write_pad
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-IO-WRITE-LENGTH
+  subject: write_bytes
+  methods:
+  - format
+  - initialize_or_format
+  object_fn: write_bytes -> gpt.rs:502-506
+  kind: postcondition
+  verifiable: true
+  statement: A successful write places the supplied bytes onto consecutive sectors starting at the requested
+    sector, using as many sectors as are needed to hold them, in order and with no sector skipped.
+  origin: code-only
+  global: true
+  attachments: 2
+  paired_from:
+    spec: []
+    code:
+    - DPM-IO-WRITE-LENGTH
+  traces:
+  - write_bytes gpt.rs:502
+  - write_bytes gpt.rs:505
+  - write_bytes gpt.rs:506
+  source:
+  - 'code: DPM-IO-WRITE-LENGTH'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_io_write_length
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-IO-WRITE-PARTIAL
+  subject: write_bytes
+  methods:
+  - format
+  - initialize_or_format
+  object_fn: write_bytes -> gpt.rs:504-552
+  kind: frame
+  verifiable: true
+  statement: A multi-sector write issues one command per sector and stops at the first failure, so when
+    it reports an error some of the earlier sectors have already been changed on the drive and no attempt
+    is made to restore them.
+  origin: code-only
+  global: true
+  attachments: 2
+  paired_from:
+    spec: []
+    code:
+    - DPM-IO-WRITE-PARTIAL
+  traces:
+  - write_bytes gpt.rs:504
+  - write_bytes gpt.rs:534
+  - write_bytes gpt.rs:552
+  source:
+  - 'code: DPM-IO-WRITE-PARTIAL'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_io_write_partial
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-IO-COMPLETION-PAIRING
+  subject: read_bytes
+  methods:
+  - initialize
+  - format
+  - initialize_or_format
+  object_fn: read_bytes -> gpt.rs:470-471 ; write_bytes -> gpt.rs:532
+  kind: invariant
+  verifiable: true
+  statement: After sending a command the code takes the very next completion off the channel and assumes
+    it belongs to that command, discarding the identifying information that would let it check, so any
+    completion that arrives out of order or belongs to another request is silently accepted as the answer.
+  origin: code-only
+  global: true
+  attachments: 3
+  paired_from:
+    spec: []
+    code:
+    - DPM-IO-COMPLETION-PAIRING
+  traces:
+  - read_bytes gpt.rs:470
+  - read_bytes gpt.rs:471
+  - write_bytes gpt.rs:532
+  source:
+  - 'code: DPM-IO-COMPLETION-PAIRING'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_io_completion_pairing
+      result: Proved
+      wall_clock_s: 0.49
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-IO-WRITE-SECTOR-TRUST
+  subject: write_sector
+  methods:
+  - format
+  - initialize_or_format
+  object_fn: write_sector -> gpt.rs:497-498
+  kind: precondition
+  verifiable: true
+  statement: The helper named for writing one sector simply forwards to the multi-sector write and never
+    checks that the data it was given is exactly one sector long, so passing more than a sector’s worth
+    silently overwrites the sectors that follow.
+  origin: code-only
+  global: true
+  attachments: 2
+  paired_from:
+    spec: []
+    code:
+    - DPM-IO-WRITE-SECTOR-TRUST
+  traces:
+  - write_sector gpt.rs:497
+  - write_sector gpt.rs:498
+  - write_gpt gpt.rs:207
+  source:
+  - 'code: DPM-IO-WRITE-SECTOR-TRUST'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_io_write_sector_trust
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-NAME-LENGTH-LIMIT
+  subject: format
+  methods:
+  - format
+  - initialize_or_format
+  object_fn: encode_utf16le_name -> gpt.rs:578 ; ipartition_table.rs:32
+  kind: precondition
+  verifiable: true
+  statement: Every partition name supplied in the format request must be short enough to fit in the space
+    the partition table reserves for a name, which is 36 characters.
+  origin: divergent
+  global: true
+  attachments: 2
+  paired_from:
+    spec:
+    - DPM-FORMAT-PRE-NAME-LENGTH
+    code:
+    - DPM-FORMAT-NAME-TRUNCATED
+  traces:
+  - FR-009
+  - 'Key entity: PartitionSpec'
+  - encode_utf16le_name gpt.rs:578
+  - ipartition_table.rs:32
+  - decode_utf16le_name gpt.rs:594
+  source:
+  - 'spec: DPM-FORMAT-PRE-NAME-LENGTH'
+  - 'code: DPM-FORMAT-NAME-TRUNCATED'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_name_length_limit
+      result: Proved
+      wall_clock_s: 0.52
+      peak_rss_mb: 54
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+  divergence_note: Spec makes a name of at most 36 characters a requirement on the caller; code neither
+    rejects nor reports a longer name — it keeps the first 36 two-byte units and discards the rest (gpt.rs:578),
+    and cutting at that point can split a character that needs two units, leaving a damaged character
+    that reads back as a replacement symbol.
+- id: DPM-NAME-ENCODE
+  subject: format
+  methods:
+  - format
+  - initialize_or_format
+  object_fn: encode_utf16le_name -> gpt.rs:578-581
+  kind: postcondition
+  verifiable: true
+  statement: Each partition name supplied by the caller is stored on the drive in the two-bytes-per-character
+    little-endian text encoding the partitioning standard requires, within the 72-byte field the entry
+    reserves for it and never beyond it, so no stored name exceeds the 36 characters the standard allows
+    and a name can never spill over into the neighbouring fields of a partition entry.
+  origin: spec+code
+  global: true
+  attachments: 2
+  paired_from:
+    spec:
+    - DPM-FORMAT-POST-NAME-ENCODE
+    - DPM-INV-NAME-MAX-36
+    code:
+    - DPM-INV-ENCODE-DEADBRANCH
+  traces:
+  - FR-009
+  - FR-009
+  - 'Key entity: PartitionSpec'
+  - encode_utf16le_name gpt.rs:578
+  - encode_utf16le_name gpt.rs:581
+  source:
+  - 'spec: DPM-FORMAT-POST-NAME-ENCODE,DPM-INV-NAME-MAX-36'
+  - 'code: DPM-INV-ENCODE-DEADBRANCH'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_name_encode
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 53
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-NAME-DECODE
+  subject: initialize
+  methods:
+  - initialize
+  - initialize_or_format
+  - partition_info
+  object_fn: decode_utf16le_name -> gpt.rs:590-594
+  kind: postcondition
+  verifiable: true
+  statement: Partition names read from the drive are converted from the two-bytes-per-character little-endian
+    encoding used on disk back into ordinary text before they are handed to the caller, reading exactly
+    the 72 bytes of the name field and never outside it, with invalid character sequences replaced rather
+    than causing a failure.
+  origin: spec+code
+  global: true
+  attachments: 3
+  paired_from:
+    spec:
+    - DPM-INIT-POST-NAME-DECODE
+    code:
+    - DPM-INV-DECODE-INBOUNDS
+  traces:
+  - FR-009
+  - decode_utf16le_name gpt.rs:590
+  - decode_utf16le_name gpt.rs:594
+  source:
+  - 'spec: DPM-INIT-POST-NAME-DECODE'
+  - 'code: DPM-INV-DECODE-INBOUNDS'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_name_decode
+      result: Proved
+      wall_clock_s: 0.52
+      peak_rss_mb: 53
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-NAME-ROUNDTRIP
+  subject: 'Global invariant: partition names survive a write-then-read cycle'
+  methods:
+  - format
+  - initialize
+  - initialize_or_format
+  - partition_info
+  object_fn: encode_utf16le_name -> gpt.rs:578 ; decode_utf16le_name -> gpt.rs:591
+  kind: invariant
+  verifiable: true
+  statement: A partition name made of ordinary letters, digits and punctuation comes back exactly as it
+    went in after being written to the drive in the two-byte-per-character on-disk encoding and read back
+    again, with no characters lost or altered.
+  origin: spec+code
+  global: true
+  attachments: 4
+  paired_from:
+    spec:
+    - DPM-INV-NAME-ROUNDTRIP-ASCII
+    code:
+    - DPM-INV-NAME-ROUNDTRIP
+  traces:
+  - SC-003
+  - FR-009
+  - encode_utf16le_name gpt.rs:578
+  - decode_utf16le_name gpt.rs:591
+  - decode_utf16le_name gpt.rs:592
+  source:
+  - 'spec: DPM-INV-NAME-ROUNDTRIP-ASCII'
+  - 'code: DPM-INV-NAME-ROUNDTRIP'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_name_roundtrip
+      result: Proved
+      wall_clock_s: 0.53
+      peak_rss_mb: 55
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-INV-NO-OVERLAP
+  subject: 'Global invariant: partitions never overlap'
+  methods:
+  - initialize
+  - format
+  - partition_info
+  - num_partitions
+  - initialize_or_format
+  object_fn: compute_partition_layout -> gpt.rs:293-305 ; try_read_gpt_at -> gpt.rs:132-146
+  kind: invariant
+  verifiable: true
+  statement: No two partitions in a partition table ever cover the same sector of the drive, whether the
+    table was just created or was read back from the drive.
+  origin: divergent
+  global: true
+  attachments: 5
+  paired_from:
+    spec:
+    - DPM-INV-NO-OVERLAP
+    code:
+    - DPM-INV-PARTITIONS-DISJOINT
+    - DPM-READ-NO-OVERLAP-CHECK
+  traces:
+  - AS-US1-1
+  - FR-004
+  - Plan disk layout
+  - compute_partition_layout gpt.rs:293
+  - compute_partition_layout gpt.rs:305
+  - write_gpt gpt.rs:157
+  - try_read_gpt_at gpt.rs:132
+  - try_read_gpt_at gpt.rs:146
+  - parse_header gpt.rs:377
+  source:
+  - 'spec: DPM-INV-NO-OVERLAP'
+  - 'code: DPM-INV-PARTITIONS-DISJOINT,DPM-READ-NO-OVERLAP-CHECK'
+  creusot:
+    evidence:
+      refutation: refute_dpm_inv_no_overlap
+      result: Proved (negation)
+      wall_clock_s: 0.5
+      peak_rss_mb: 52
+    fidelity: null
+    note: 'REFUTED — the negation ''refute_dpm_inv_no_overlap'' is machine-proved, so the code violates
+      this obligation. This is a finding, not a gap: see the spec and code locations on the property record.'
+    status: refuted
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+  divergence_note: Spec claims no two partitions ever share a sector for both freshly created and read-back
+    tables; code guarantees it only for tables it creates (each partition begins exactly one sector after
+    the previous one ends, gpt.rs:293) and performs no validation whatsoever on a table read from the
+    drive (gpt.rs:132-146) — no overlap check, no usable-range check, no ordering check — so a foreign
+    table that passes its checksums but describes overlapping partitions is accepted and handed to callers
+    as valid.
+- id: DPM-INV-ORDER-MONOTONIC
+  subject: 'Global invariant: partitions are laid out in request order'
+  methods:
+  - format
+  - initialize_or_format
+  object_fn: compute_partition_layout -> gpt.rs:247-293
+  kind: invariant
+  verifiable: true
+  statement: Partitions are placed on the drive in the order they were listed in the request, back to
+    back with no gaps, with the first one starting at the first usable sector and each later one beginning
+    on the sector immediately after the previous one ends, so the starting positions increase steadily
+    down the list.
+  origin: spec+code
+  global: true
+  attachments: 2
+  paired_from:
+    spec:
+    - DPM-INV-ORDER-MONOTONIC
+    code:
+    - DPM-FORMAT-POST-CONTIGUOUS
+  traces:
+  - 'Key entity: PartitionConfig'
+  - AS-US1-1
+  - compute_partition_layout gpt.rs:247
+  - compute_partition_layout gpt.rs:293
+  - compute_partition_layout gpt.rs:305
+  source:
+  - 'spec: DPM-INV-ORDER-MONOTONIC'
+  - 'code: DPM-FORMAT-POST-CONTIGUOUS'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_inv_order_monotonic
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 53
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-INV-WITHIN-USABLE
+  subject: 'Global invariant: partitions stay inside the usable region'
+  methods:
+  - format
+  - initialize_or_format
+  object_fn: write_gpt -> gpt.rs:157-158 ; compute_partition_layout -> gpt.rs:245
+  kind: invariant
+  verifiable: true
+  statement: Every partition a format creates lies entirely within the part of the drive set aside for
+    data, never beginning before the space reserved for the decoy legacy record, the main header and the
+    main entry list at the front, and never extending into the backup entry list or the backup header
+    at the very end.
+  origin: spec+code
+  global: true
+  attachments: 2
+  paired_from:
+    spec:
+    - DPM-FORMAT-INV-USABLE-RANGE
+    - DPM-INV-WITHIN-USABLE
+    code:
+    - DPM-FORMAT-POST-WITHIN
+  traces:
+  - FR-001
+  - Plan disk layout
+  - FR-001
+  - Plan disk layout
+  - write_gpt gpt.rs:157
+  - write_gpt gpt.rs:158
+  - compute_partition_layout gpt.rs:245
+  source:
+  - 'spec: DPM-FORMAT-INV-USABLE-RANGE,DPM-INV-WITHIN-USABLE'
+  - 'code: DPM-FORMAT-POST-WITHIN'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_inv_within_usable
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 53
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-INV-ENTRY-ARRAY-SHAPE
+  subject: 'Global invariant: the partition-entry list has a fixed shape'
+  methods:
+  - initialize
+  - format
+  - partition_info
+  - num_partitions
+  - initialize_or_format
+  object_fn: gpt.rs:11-12 ; serialize_entries -> gpt.rs:433
+  kind: invariant
+  verifiable: true
+  statement: The on-disk list of partition entries always consists of exactly 128 entries, each occupying
+    exactly 128 bytes, giving a fixed 16 kilobytes of entry data for both the main and the backup copy
+    whatever the drive or layout.
+  origin: spec+code
+  global: true
+  attachments: 5
+  paired_from:
+    spec:
+    - DPM-INV-ENTRY-ARRAY-SHAPE
+    code:
+    - DPM-INV-SLOTS-128
+  traces:
+  - FR-001
+  - 'Implementation note: entry padding'
+  - gpt.rs:11
+  - gpt.rs:12
+  - write_gpt gpt.rs:186
+  - serialize_entries gpt.rs:433
+  source:
+  - 'spec: DPM-INV-ENTRY-ARRAY-SHAPE'
+  - 'code: DPM-INV-SLOTS-128'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_inv_entry_array_shape
+      result: Proved
+      wall_clock_s: 0.49
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-INV-ENTRY-SECTORS-CONSISTENT
+  subject: 'Global invariant: entry-list size in sectors is derived identically everywhere'
+  methods:
+  - initialize
+  - format
+  - partition_info
+  - num_partitions
+  - initialize_or_format
+  object_fn: entry_sectors -> gpt.rs:324-326 ; write_gpt -> gpt.rs:157 ; read_gpt -> gpt.rs:89
+  kind: invariant
+  verifiable: true
+  statement: The number of sectors reserved for the list of partition entries is always the space needed
+    for 128 slots of 128 bytes each rounded up to whole sectors, and the same value is used when writing
+    the list, when locating the backup copy, and when deciding where usable space begins and ends, so
+    the reading and writing paths can never disagree about the layout.
+  origin: code-only
+  global: true
+  attachments: 5
+  paired_from:
+    spec: []
+    code:
+    - DPM-INV-ENTRY-SECTORS
+  traces:
+  - entry_sectors gpt.rs:324
+  - entry_sectors gpt.rs:326
+  - write_gpt gpt.rs:157
+  - read_gpt gpt.rs:88
+  source:
+  - 'code: DPM-INV-ENTRY-SECTORS'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_inv_entry_sectors_consistent
+      result: Proved
+      wall_clock_s: 0.49
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-INV-CRC-SELF-CONSISTENT
+  subject: 'Global invariant: written tables pass their own integrity checks'
+  methods:
+  - initialize
+  - format
+  - partition_info
+  - num_partitions
+  - initialize_or_format
+  object_fn: serialize_header_with_crc -> gpt.rs:426 ; write_gpt -> gpt.rs:171-188 ; try_read_gpt_at ->
+    gpt.rs:107
+  kind: invariant
+  verifiable: true
+  statement: Any partition table this component writes carries integrity checksums over both the header
+    and the list of partition entries that a subsequent reader recomputes and finds to match, because
+    writing and reading use the same recipe — a checksum of the header’s first 92 bytes with the checksum
+    field itself treated as zero, plus a checksum of the entry bytes — so a freshly formatted drive is
+    never immediately judged corrupt.
+  origin: spec+code
+  global: true
+  attachments: 5
+  paired_from:
+    spec:
+    - DPM-INV-CRC-SELF-CONSISTENT
+    code:
+    - DPM-FORMAT-POST-CRC
+    - DPM-READ-CRC-SPAN
+  traces:
+  - FR-002
+  - SC-001
+  - write_gpt gpt.rs:171
+  - write_gpt gpt.rs:188
+  - serialize_header_with_crc gpt.rs:426
+  - try_read_gpt_at gpt.rs:109
+  - try_read_gpt_at gpt.rs:107
+  - serialize_header_with_crc gpt.rs:426
+  - parse_header gpt.rs:373
+  source:
+  - 'spec: DPM-INV-CRC-SELF-CONSISTENT'
+  - 'code: DPM-FORMAT-POST-CRC,DPM-READ-CRC-SPAN'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_inv_crc_self_consistent
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 52
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-INV-SIGNATURE-REVISION
+  subject: 'Global invariant: header identifying marker and version'
+  methods:
+  - initialize
+  - format
+  - partition_info
+  - num_partitions
+  - initialize_or_format
+  object_fn: parse_header -> gpt.rs:363-373 ; write_gpt -> gpt.rs:171
+  kind: invariant
+  verifiable: true
+  statement: Every partition-table header this component writes begins with the standard eight-character
+    identifying marker required by the partitioning standard and declares version 1.0, and a header read
+    back that lacks the correct marker is treated as damaged rather than as valid, the failure reporting
+    the value actually found.
+  origin: divergent
+  global: true
+  attachments: 5
+  paired_from:
+    spec:
+    - DPM-INV-SIGNATURE-REVISION
+    code:
+    - DPM-READ-ERR-SIGNATURE
+    - DPM-READ-REVISION-UNCHECKED
+  traces:
+  - FR-001
+  - FR-003
+  - parse_header gpt.rs:363
+  - parse_header gpt.rs:364
+  - parse_header gpt.rs:372
+  - parse_header gpt.rs:373
+  - gpt.rs:9
+  - gpt.rs:10
+  source:
+  - 'spec: DPM-INV-SIGNATURE-REVISION'
+  - 'code: DPM-READ-ERR-SIGNATURE,DPM-READ-REVISION-UNCHECKED'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_inv_signature_revision
+      result: Proved
+      wall_clock_s: 0.49
+      peak_rss_mb: 51
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+  divergence_note: Spec treats both the marker and the declared version 1.0 as part of what makes a header
+    valid; code checks only the marker (gpt.rs:363) and never checks the revision or the header length
+    it stamps into every header it writes (the expected constants at gpt.rs:9-10 are declared but never
+    used as checks on the read path), so a header declaring any other revision or header size is accepted
+    as valid.
+- id: DPM-INV-BACKUP-MIRRORS-PRIMARY
+  subject: 'Global invariant: the backup copy mirrors the main copy'
+  methods:
+  - initialize
+  - format
+  - partition_info
+  - num_partitions
+  - initialize_or_format
+  object_fn: write_gpt -> gpt.rs:210-213
+  kind: invariant
+  verifiable: true
+  statement: The backup partition-entry list holds the same partition entries as the main one, byte for
+    byte, and the backup header describes the same layout as the main header with only the positions of
+    the two copies exchanged, so recovering from the backup yields the same partitions as reading the
+    main copy.
+  origin: spec+code
+  global: true
+  attachments: 5
+  paired_from:
+    spec:
+    - DPM-INV-BACKUP-MIRRORS-PRIMARY
+    code:
+    - DPM-FORMAT-POST-MIRROR
+  traces:
+  - FR-003
+  - SC-002
+  - Plan disk layout
+  - write_gpt gpt.rs:210
+  - write_gpt gpt.rs:213
+  source:
+  - 'spec: DPM-INV-BACKUP-MIRRORS-PRIMARY'
+  - 'code: DPM-FORMAT-POST-MIRROR'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_inv_backup_mirrors_primary
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-INV-GUID-V4-BITS
+  subject: 'Global invariant: generated identifiers are well-formed random identifiers'
+  methods:
+  - format
+  - initialize_or_format
+  object_fn: generate_guid -> gpt.rs:571-572
+  kind: invariant
+  verifiable: true
+  statement: Every identifier this component generates, for the drive as a whole and for each partition,
+    carries the marker bits that declare it a randomly generated identifier of the standard kind — version
+    4 and variant 1 — so other tools recognise its format.
+  origin: spec+code
+  global: true
+  attachments: 2
+  paired_from:
+    spec:
+    - DPM-INV-GUID-V4-BITS
+    code:
+    - DPM-FORMAT-POST-GUIDBITS
+  traces:
+  - FR-008
+  - generate_guid gpt.rs:571
+  - generate_guid gpt.rs:572
+  source:
+  - 'spec: DPM-INV-GUID-V4-BITS'
+  - 'code: DPM-FORMAT-POST-GUIDBITS'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_inv_guid_v4_bits
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 53
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-INV-GUID-DISTINCT
+  subject: 'Global invariant: partition identifiers are distinct'
+  methods:
+  - format
+  - initialize_or_format
+  object_fn: generate_guid -> gpt.rs:564
+  kind: invariant
+  verifiable: true
+  statement: Within a single formatted drive, no two partitions are given the same unique identifier,
+    and no partition shares the drive’s own identifier.
+  origin: spec-only
+  global: true
+  attachments: 2
+  paired_from:
+    spec:
+    - DPM-INV-GUID-DISTINCT
+    code: []
+  traces:
+  - FR-008
+  - 'Key entity: PartitionInfo'
+  source:
+  - 'spec: DPM-INV-GUID-DISTINCT'
+  creusot:
+    evidence:
+      refutation: refute_dpm_inv_guid_distinct
+      result: Proved (negation)
+      wall_clock_s: 0.5
+      peak_rss_mb: 54
+    fidelity: null
+    note: 'REFUTED — the negation ''refute_dpm_inv_guid_distinct'' is machine-proved, so the code violates
+      this obligation. This is a finding, not a gap: see the spec and code locations on the property record.'
+    status: refuted
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-INV-SECTOR-SIZE-DOMAIN
+  subject: 'Global invariant: the sector size is one of the two supported sizes'
+  methods:
+  - initialize
+  - format
+  - partition_info
+  - num_partitions
+  - initialize_or_format
+  object_fn: GptManager::new -> gpt.rs:58
+  kind: invariant
+  verifiable: true
+  statement: The sector size the component works with, and the sector size it reports back in a partition
+    table, is always either 512 bytes or 4096 bytes, the two sizes the component promises to support.
+  origin: spec-only
+  global: true
+  attachments: 5
+  paired_from:
+    spec:
+    - DPM-INV-SECTOR-SIZE-DOMAIN
+    code: []
+  traces:
+  - FR-011
+  - 'Key entity: PartitionConfig'
+  - 'Implementation note: sector size'
+  source:
+  - 'spec: DPM-INV-SECTOR-SIZE-DOMAIN'
+  creusot:
+    evidence:
+      refutation: refute_dpm_inv_sector_size_domain
+      result: Proved (negation)
+      wall_clock_s: 0.49
+      peak_rss_mb: 51
+    fidelity: null
+    note: 'REFUTED — the negation ''refute_dpm_inv_sector_size_domain'' is machine-proved, so the code
+      violates this obligation. This is a finding, not a gap: see the spec and code locations on the property
+      record.'
+    status: refuted
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-INV-TYPE-GUID-CONSTANTS
+  subject: 'Global invariant: the well-known partition type identifiers are fixed'
+  methods:
+  - format
+  - initialize_or_format
+  object_fn: ipartition_table.rs (well-known type GUID constants)
+  kind: invariant
+  verifiable: true
+  statement: The three partition kinds this system defines — the metadata region, the data region and
+    the extended-metadata region — each have one fixed published identifier value that never changes,
+    so a drive formatted by one version of the software is recognised by another.
+  origin: spec-only
+  global: true
+  attachments: 2
+  paired_from:
+    spec:
+    - DPM-INV-TYPE-GUID-CONSTANTS
+    code: []
+  traces:
+  - Well-known type GUIDs table
+  source:
+  - 'spec: DPM-INV-TYPE-GUID-CONSTANTS'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_inv_type_guid_constants
+      result: Proved
+      wall_clock_s: 0.52
+      peak_rss_mb: 54
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-INV-CACHED-STATE-MONOTONIC
+  subject: 'Global invariant: the remembered table is only ever set by a success'
+  methods:
+  - initialize
+  - format
+  - partition_info
+  - num_partitions
+  - initialize_or_format
+  object_fn: lib.rs:21 ; initialize -> lib.rs:82 ; format -> lib.rs:93
+  kind: invariant
+  verifiable: true
+  statement: The component has exactly two states — holding no partition table and holding one table —
+    it starts out holding none, begins holding one only when a read or a format succeeds completely, and
+    never goes back to holding none, so queries that once worked do not start reporting that the component
+    is uninitialized and no partly built table is ever held.
+  origin: spec+code
+  global: true
+  attachments: 5
+  paired_from:
+    spec:
+    - DPM-INV-CACHED-STATE-MONOTONIC
+    code:
+    - DPM-INV-STATE-MONOTONIC
+    - DPM-INV-STATE-TRANSITIONS
+  traces:
+  - 'Implementation note: internal partition-table state'
+  - IR-001
+  - initialize lib.rs:82
+  - format lib.rs:93
+  - partition_info lib.rs:99
+  - lib.rs:21
+  - initialize lib.rs:82
+  - format lib.rs:93
+  source:
+  - 'spec: DPM-INV-CACHED-STATE-MONOTONIC'
+  - 'code: DPM-INV-STATE-MONOTONIC,DPM-INV-STATE-TRANSITIONS'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_inv_cached_state_monotonic
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 53
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-INV-PARTITION-INDEX-SEQUENTIAL
+  subject: 'Global invariant: partition position numbers are sequential'
+  methods:
+  - initialize
+  - format
+  - partition_info
+  - num_partitions
+  - initialize_or_format
+  object_fn: try_read_gpt_at -> gpt.rs:137 ; compute_partition_layout -> gpt.rs:298
+  kind: invariant
+  verifiable: true
+  statement: The partitions in a returned partition table are numbered starting at zero and increasing
+    by one with no gaps and no repeats, so the numbering can be used directly to walk through them.
+  origin: divergent
+  global: true
+  attachments: 5
+  paired_from:
+    spec:
+    - DPM-INV-PARTITION-INDEX-SEQUENTIAL
+    code:
+    - DPM-READ-INDEX-CAST
+  traces:
+  - 'Key entity: PartitionInfo'
+  - IR-001
+  - try_read_gpt_at gpt.rs:137
+  - try_read_gpt_at gpt.rs:118
+  source:
+  - 'spec: DPM-INV-PARTITION-INDEX-SEQUENTIAL'
+  - 'code: DPM-READ-INDEX-CAST'
+  creusot:
+    evidence:
+      refutation: refute_dpm_inv_partition_index_sequential
+      result: Proved (negation)
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+    fidelity: null
+    note: 'REFUTED — the negation ''refute_dpm_inv_partition_index_sequential'' is machine-proved, so
+      the code violates this obligation. This is a finding, not a gap: see the spec and code locations
+      on the property record.'
+    status: refuted
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+  divergence_note: Spec claims the numbering of a returned table is a gapless zero-based sequence; on
+    the read path the code fills each entry’s number with the slot it occupied in the on-disk list (gpt.rs:137),
+    which has gaps whenever an occupied slot follows an empty one, and it narrows that counter from a
+    machine-sized value to a four-byte number with no check even though the slot count itself was taken
+    unvalidated from the disk.
+- id: DPM-INV-NUM-SECTORS-POSITIVE
+  subject: 'Global invariant: every partition has a non-zero length'
+  methods:
+  - initialize
+  - format
+  - partition_info
+  - num_partitions
+  - initialize_or_format
+  object_fn: compute_partition_layout -> gpt.rs:293 ; try_read_gpt_at -> gpt.rs:139
+  kind: invariant
+  verifiable: true
+  statement: Every partition that appears in a partition table spans at least one sector; a zero-length
+    partition is never produced, including for the partition that was asked to take all the remaining
+    space when little space remains.
+  origin: divergent
+  global: true
+  attachments: 5
+  paired_from:
+    spec:
+    - DPM-INV-NUM-SECTORS-POSITIVE
+    code:
+    - DPM-FORMAT-ZEROREST-UNDERFLOW
+    - DPM-READ-ENDING-UNDERFLOW
+  traces:
+  - 'Key entity: PartitionInfo'
+  - FR-004
+  - compute_partition_layout gpt.rs:293
+  - write_gpt gpt.rs:226
+  - try_read_gpt_at gpt.rs:139
+  - write_gpt gpt.rs:226
+  source:
+  - 'spec: DPM-INV-NUM-SECTORS-POSITIVE'
+  - 'code: DPM-FORMAT-ZEROREST-UNDERFLOW,DPM-READ-ENDING-UNDERFLOW'
+  creusot:
+    evidence:
+      refutation: refute_dpm_inv_num_sectors_positive
+      result: Proved (negation)
+      wall_clock_s: 0.52
+      peak_rss_mb: 55
+    fidelity: null
+    note: 'REFUTED — the negation ''refute_dpm_inv_num_sectors_positive'' is machine-proved, so the code
+      violates this obligation. This is a finding, not a gap: see the spec and code locations on the property
+      record.'
+    status: refuted
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+  divergence_note: Spec promises no zero-length partition is ever produced, naming the rest-of-disk case
+    explicitly; code produces exactly that — when the explicitly sized partitions already consume the
+    whole drive, the rest-of-disk partition is given zero sectors and an end sector one before its start
+    (gpt.rs:293), and the later conversion of start and end into a sector count then subtracts a larger
+    number from a smaller one and crashes the caller instead of returning a layout error. The same unguarded
+    subtraction sits on the read path (gpt.rs:139), where a checksum-valid table whose entry has its last
+    sector before its first crashes the read.
+- id: DPM-INV-NSID-CONSISTENT
+  subject: 'Global invariant: all device access uses the configured namespace'
+  methods:
+  - initialize
+  - format
+  - partition_info
+  - num_partitions
+  - initialize_or_format
+  object_fn: initialize -> lib.rs:72 ; format -> lib.rs:91 ; set_ns_id -> lib.rs:30
+  kind: invariant
+  verifiable: true
+  statement: Every read and write the component issues is addressed to the one storage namespace that
+    was configured for it, including all of the sector writes performed during a format, so on a drive
+    that presents several namespaces the component never reads or writes the wrong one and only the chosen
+    namespace is modified.
+  origin: divergent
+  global: true
+  attachments: 5
+  paired_from:
+    spec:
+    - DPM-FORMAT-POST-NSID
+    - DPM-INV-NSID-CONSISTENT
+    code:
+    - DPM-FORMAT-NSID-DIVERGENCE
+  traces:
+  - FR-010
+  - 'Key entity: PartitionConfig'
+  - FR-010
+  - 'Key entity: PartitionConfig'
+  - initialize lib.rs:72
+  - format lib.rs:91
+  - set_ns_id lib.rs:30
+  source:
+  - 'spec: DPM-FORMAT-POST-NSID,DPM-INV-NSID-CONSISTENT'
+  - 'code: DPM-FORMAT-NSID-DIVERGENCE'
+  creusot:
+    evidence:
+      refutation: refute_dpm_inv_nsid_consistent
+      result: Proved (negation)
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+    fidelity: null
+    note: 'REFUTED — the negation ''refute_dpm_inv_nsid_consistent'' is machine-proved, so the code violates
+      this obligation. This is a finding, not a gap: see the spec and code locations on the property record.'
+    status: refuted
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+  divergence_note: Spec treats the namespace as one configured value used by every read and write; code
+    uses two different sources — reading the partition table uses the namespace configured on the component,
+    defaulting to 1 (lib.rs:72), while writing a new table uses the namespace number carried inside the
+    caller’s format request and ignores the configured one entirely (lib.rs:91) — so a table can be written
+    to one namespace and then read back from another with no warning that they differ.
+- id: DPM-INV-PROVIDES-INTERFACE
+  subject: 'Global invariant: the component exposes exactly the partition-table interface'
+  methods:
+  - initialize
+  - format
+  - partition_info
+  - num_partitions
+  - initialize_or_format
+  object_fn: lib.rs:16-18 ; ipartition_table.rs:116
+  kind: invariant
+  verifiable: true
+  statement: The component declares that it provides the partition-table interface and requires exactly
+    one connection, to a block device, and it implements all four operations of that interface — reading
+    a table, writing a new table, describing one partition and counting the partitions — with no other
+    interface offered.
+  origin: code-only
+  global: true
+  attachments: 5
+  paired_from:
+    spec: []
+    code:
+    - DPM-INV-PROVIDES-INTERFACE
+  traces:
+  - lib.rs:16
+  - lib.rs:18
+  - lib.rs:67
+  - ipartition_table.rs:116
+  source:
+  - 'code: DPM-INV-PROVIDES-INTERFACE'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_inv_provides_interface
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 53
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: DPM-INV-ERRORS-ALL-USED
+  subject: 'Global invariant: every declared error kind is actually produced'
+  methods:
+  - initialize
+  - format
+  - partition_info
+  - num_partitions
+  - initialize_or_format
+  object_fn: ipartition_table.rs:60 ; parse_header -> gpt.rs:364 ; try_read_gpt_at -> gpt.rs:111
+  kind: invariant
+  verifiable: true
+  statement: All six kinds of partition-table failure that the interface declares are actually produced
+    somewhere by this component — no table found, corrupt table, invalid partition, input/output error,
+    layout error and not initialized — so no declared failure kind is unreachable at the level of the
+    whole component, even though one individual layout check inside the formatting path is unreachable.
+  origin: code-only
+  global: true
+  attachments: 5
+  paired_from:
+    spec: []
+    code:
+    - DPM-INV-ERRORS-ALL-USED
+  traces:
+  - ipartition_table.rs:60
+  - parse_header gpt.rs:364
+  - try_read_gpt_at gpt.rs:111
+  - partition_info lib.rs:107
+  - read_bytes gpt.rs:458
+  - write_gpt gpt.rs:161
+  - initialize lib.rs:70
+  source:
+  - 'code: DPM-INV-ERRORS-ALL-USED'
+  creusot:
+    evidence:
+      modules:
+      - verify_dpm_inv_errors_all_used
+      result: Proved
+      wall_clock_s: 0.53
+      peak_rss_mb: 55
+      lever: null
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    evidence: null
+    fidelity: null
+    note: null
+- id: NV-1
+  scope: 'tasks.md checklist: review the backfilled spec'
+  kind: not-verifiable
+  verifiable: false
+  reason: These are human review chores — checking that the generated user stories are accurate, confirming
+    the requirements describe intended rather than merely current behaviour, pruning implementation notes,
+    adding missing requirements and setting the document status. They ask a person to make editorial judgements
+    about a document and place no obligation on the running software.
+  traces: []
+- id: NV-2
+  scope: 'tasks.md checklist: add unit tests'
+  kind: not-verifiable
+  verifiable: false
+  reason: These entries call for tests to be written — a round-trip test, a backup-fallback test, two
+    layout-rejection tests, name-encoding tests and a decoy-record test. They describe work to be done
+    on the project rather than behaviour the software must exhibit, and the behaviours they would cover
+    are already captured as properties in their own right.
+  traces: []
+- id: NV-3
+  scope: 'tasks.md checklist: documentation'
+  kind: not-verifiable
+  verifiable: false
+  reason: Writing a component readme with usage examples and documenting the meaning of the well-known
+    partition kinds are documentation chores. Nothing about the software observable behaviour can be shown
+    true or false by them.
+  traces: []
+- id: NV-4
+  scope: Quality of the system randomness source behind generated identifiers
+  kind: not-verifiable
+  verifiable: false
+  reason: Whether the operating system randomness source can be opened, and whether two identifiers drawn
+    from it really differ, is a property of the environment rather than of the component, so the triggering
+    condition can neither be produced nor checked by a verifier. The shape of the identifier and the fact
+    that a failed draw is ignored are captured as properties of their own; the randomness itself is not
+    checkable here, and the specification note that identifiers fall back to all zeros directly contradicts
+    its own requirement that they are always randomly generated — a documentation defect to resolve rather
+    than an obligation to check.
+  traces: []
+- id: NV-5
+  scope: 'Mechanism of device access: synchronous request messages over the block-device channel'
+  kind: not-verifiable
+  verifiable: false
+  reason: This describes the mechanism by which the component talks to the storage device rather than
+    an outcome a caller can observe. Which message type carries a read or a write, and whether it blocks
+    the calling thread, is an internal transport choice with no falsifiable statement about partition
+    tables attached to it.
+  traces: []
+- id: NV-6
+  scope: 'Source-level shape: framework macro declaration, one receptacle, lock-protected optional table'
+  kind: not-verifiable
+  verifiable: false
+  reason: This is a statement about how the component is wired together in source form — which macro declares
+    it and which container holds its state. It is a structural fact about the code shape rather than a
+    behaviour with a possible counterexample; the behaviour that depends on it, namely that a table is
+    remembered after a success, is captured separately.
+  traces: []
+- id: NV-7
+  scope: 'PR-002 detail: the exact number of device round-trips and the deferred batching optimization'
+  kind: not-verifiable
+  verifiable: false
+  reason: The claim that reading the table costs thirty-three round-trips at the smaller sector size and
+    five at the larger one, and the decision to defer batching them into one multi-sector request, is
+    a performance characteristic plus a planning decision. It depends on how the transport splits requests
+    rather than on any observable result; the checkable part — that the cost does not grow with device
+    size — is captured as a property.
+  traces: []
+- id: NV-8
+  scope: 'plan.md testing section: no dedicated test files exist and validation happens at integration
+    level'
+  kind: not-verifiable
+  verifiable: false
+  reason: This records the current state of the project test suite and how the component is presently
+    exercised against real hardware. It is a fact about the repository and the development process, not
+    a promise about what the software does.
+  traces: []
+- id: NV-9
+  scope: 'plan.md future considerations: online growth, attribute flags, table repair, non-blocking input
+    and output'
+  kind: not-verifiable
+  verifiable: false
+  reason: These are ideas for features that do not exist yet — growing a partition in place, supporting
+    read-only or hidden markings, rebuilding one copy of the table from the other, and switching to a
+    non-blocking access path. There is no present behaviour to confirm or refute.
+  traces: []
+- id: NV-10
+  scope: 'Timing: how long a partition-table read or write takes and how long the calling thread waits'
+  kind: not-verifiable
+  verifiable: false
+  reason: The component sets no deadlines and measures no elapsed time, and how long a device takes to
+    answer is a wall-clock quantity that cannot be pinned down by inspecting the code. The specification
+    rationale that simplicity was traded for blocking the calling thread during setup is likewise a statement
+    about engineering effort and waiting time rather than about a state or result.
+  traces: []
+- id: NV-11
+  scope: 'Dependencies section: the storage interface crate, the component framework and the checksum
+    library'
+  kind: not-verifiable
+  verifiable: false
+  reason: Listing which other packages the component builds against is a build-configuration fact. The
+    behaviour that matters — that the table carries checksums that validate, and that a storage device
+    is required before any access — is captured as properties in its own right.
+  traces: []
+- id: NV-12
+  scope: 'Spec document metadata: the backfill notice, the status and last-synced stamps, and the drift-report
+    bookkeeping'
+  kind: not-verifiable
+  verifiable: false
+  reason: The warning that the document was generated from existing code, the dates of the synchronization
+    passes, and the record of which drift report was stamped clean for the build gate are all bookkeeping
+    about the document itself. They say nothing about the component behaviour.
+  traces: []
+- id: NV-13
+  scope: Overview and user-story motivation prose
+  kind: not-verifiable
+  verifiable: false
+  reason: The explanations of why partitioning is wanted — so that checkpoint structures live apart from
+    user data, so that offsets can be recovered without reformatting, so that existing data survives restarts
+    — are motivations for the requirements. Each concrete promise inside them is captured as a property;
+    the motivation itself has no counterexample.
+  traces: []
+- id: NV-14
+  scope: 'Ambiguity: when a caller sees the corrupt-table error rather than the no-partition-table error'
+  kind: not-verifiable
+  verifiable: false
+  reason: The specification describes a corrupt-table error as a possible outcome and says it is produced
+    internally when a checksum does not match, but it also says that when both copies fail the caller
+    is told no partition table was found. It never states any situation in which a caller of the read
+    operation actually receives the corrupt-table error, so there is no obligation here precise enough
+    to confirm or refute; this gap should be resolved in the specification.
+  traces: []
+- id: NV-15
+  scope: 'plan.md design decision: partition management lives in its own component rather than inside
+    the extent manager'
+  kind: not-verifiable
+  verifiable: false
+  reason: This is an architectural placement decision, justified by wanting several components to be able
+    to ask about partition offsets independently. Where code lives is not an observable behaviour of the
+    running component.
+  traces: []
+- id: NV-16
+  scope: 'Well-known type identifier table: the usage column, including one kind reserved for future use'
+  kind: not-verifiable
+  verifiable: false
+  reason: The descriptions of what each partition kind is meant to be used for, and the note that one
+    of them is reserved for later, express intent about how other components should interpret a partition.
+    The identifier values themselves are captured as a property; their intended meaning cannot be confirmed
+    or refuted by inspecting this component.
+  traces: []
+- id: NV-17
+  scope: Interoperability with firmware, third-party partitioning tools and foreign tables
+  kind: not-verifiable
+  verifiable: false
+  reason: Whether a table this component writes is accepted by system firmware or by other partitioning
+    tools can only be settled by trying those external consumers, and the specification does not define
+    correct behaviour for reading a table written elsewhere with a different entry-list placement at all,
+    so there is no obligation to check for foreign tables either. The checkable parts — that the entry
+    list is read from the fixed third sector, and the several places where the component departs from
+    general practice — are captured as properties.
+  traces: []
+- id: NV-18
+  scope: 'Open decision: whether to validate the sector size explicitly or widen the requirement to accept
+    any sector size'
+  kind: not-verifiable
+  verifiable: false
+  reason: The specification notes that the requirement names two supported sector sizes while the behaviour
+    it describes accepts any sector size without checking, then leaves the choice between adding a check
+    and relaxing the requirement to a future decision. An unresolved choice is not an obligation; the
+    stated two-value requirement is captured as a property, and this open decision is recorded because
+    the two halves of the document disagree.
+  traces: []
+- id: NV-19
+  scope: Blocking wait for a device completion (read_bytes gpt.rs:470, write_bytes gpt.rs:532)
+  kind: not-verifiable
+  verifiable: false
+  reason: Each command is followed by a blocking wait for an answer from the block-device actor. Whether
+    that answer always eventually arrives is an unbounded liveness question about another component and
+    the operating system scheduler, so it cannot be settled by checking this component alone.
+  traces: []
+- id: NV-20
+  scope: Durability of a completed write across power loss (write_gpt gpt.rs:204-216)
+  kind: not-verifiable
+  verifiable: false
+  reason: Whether the bytes reported as written are still on the medium after a sudden power loss depends
+    on the drive own caching and flush behaviour, which this component neither controls nor inspects —
+    it never issues a flush of any kind.
+  traces: []
+- id: NV-21
+  scope: Validity and alignment of the transfer buffers (alloc_dma_buffer gpt.rs:556)
+  kind: not-verifiable
+  verifiable: false
+  reason: The transfer buffers are allocated by an external facility and handed to hardware. That the
+    memory is valid, correctly aligned and reachable by the device is an assumption about the environment
+    rather than a property of this code.
+  traces: []
+- id: NV-22
+  scope: Truthfulness of the device-reported sector size and sector count
+  kind: not-verifiable
+  verifiable: false
+  reason: Every layout calculation rests on the two numbers the block device reports about itself. Whether
+    those numbers describe the real hardware is an assumption about the device, not something this component
+    can establish.
+  traces: []
+- id: NV-23
+  scope: Behaviour of the two internal locks when another thread panics
+  kind: not-verifiable
+  verifiable: false
+  reason: The remembered table and the namespace setting are each guarded by a lock the code assumes is
+    healthy. What happens when a thread dies while holding one depends on non-deterministic interleaving;
+    the resulting crash on a later call is recorded as its own property, but the interleaving itself is
+    not checkable here.
+  traces: []
+- id: NV-24
+  scope: Soundness of sharing a transfer buffer across threads (read_bytes gpt.rs:459, write_bytes gpt.rs:521)
+  kind: not-verifiable
+  verifiable: false
+  reason: The transfer buffer is wrapped for shared ownership, in one case with an explicit suppression
+    of the compiler warning that it is not safe to share between threads. Whether that sharing is actually
+    safe depends on the buffer type own internals and on the block-device actor behaviour, both outside
+    this component.
+  traces: []
+- id: NV-25
+  scope: Correctness of the external checksum routine
+  kind: not-verifiable
+  verifiable: false
+  reason: All integrity checking delegates to an external checksum library. That the library computes
+    the checksum the partition-table standard prescribes is a property of that library, not of this component;
+    what is checkable here is only that the same span of bytes is used when writing and when reading.
+  traces: []
+inventory_provenance:
+  extracted_at_pin: c788d07c
+  verified_against_pin: d14dfb9a
+  component_unchanged: true
+  checked: git diff c788d07c..d14dfb9a over components/disk-partition-manager and components/interfaces/src/ipartition_table.rs
+    returned 0 changed files, across 36 intervening commits. So the two blind extractions describe exactly
+    the source being verified, and the pin is restated as the verification pin rather than the extraction
+    pin.
+  extracted_by: component-sweep on node7, 2026-09-29
+run:
+  gate_commit: d14dfb9a
+  gate_branch: HEAD
+  creusot:
+    scored_by: scorer_creusot
+    command: scorer_creusot.py components/disk-partition-manager/verif --crate-dir components/disk-partition-manager/verif-creusot
+      --cap-seconds 60 --cap-max 300
+    started: '2026-10-01T11:03:44-07:00'
+    finished: '2026-10-01T11:05:56-07:00'
+    creusot: v0.11.0-169-g9cf662ce6
+    why3: Why3 platform, version 1.8.2+git
+    provers:
+    - Alt-Ergo 2.6.2
+    - CVC4 1.8
+    - CVC5 1.3.1
+    - Coq 8.20.1
+    - Z3 4.16.0
+    cap_seconds: 60
+    cap_max: 300
+    mem_max_mb: 16384
+tool_notes:
+- tool: kani
+  headline: incomplete, and nothing in it is published.
+  detail: >-
+    The Kani lane produced 66 harnesses but left 76 of the 102 obligations with no artifact at all,
+    so it was reported as unfinished work rather than as tool boundaries. Its agent-reported figures
+    (9 proved, 2 refuted) were NOT reproduced by scorer_kani.py, so no Kani status exists in this
+    bundle and the column reads 0 proved / 102 pending. Read that as "this lane did not finish",
+    NOT as "Kani cannot prove these". Separately, one of the two agent-reported refutations
+    (DPM-INV-SECTOR-SIZE-DOMAIN) was audited and found VACUOUS as evidence: its harness
+    re-implements the protective-MBR indexing inline and never calls write_protective_mbr, so it
+    would still pass after a correct fix. That obligation is nonetheless a genuine defect, because
+    Creusot refuted it independently on its real mirror at gpt.rs:334.
+  measured: >-
+    66 harnesses (26 base, 24 mutant twins, 4 refutations, 3 discriminators, 2 splits, 7 cost
+    probes); 26 returned a verdict, 0 with undetermined checks; three walls gave no verdict at 330s
+    (compute_partition_layout's 128-slot padding loop, String::from_utf16_lossy, new_default)
