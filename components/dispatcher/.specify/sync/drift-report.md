@@ -2,10 +2,23 @@
 spec_sync_component: dispatcher
 spec_sync_drift_status: clean
 spec_sync_synced_at: 2026-10-01T00:00:00Z
-spec_sync_git_commit: d7222e68
+spec_sync_git_commit: 72c7182b
 spec_sync_inputs_sha256: f3e895dfb7a1641be202aadbf175934db7ea2bc5f65a4226d0d681ecb4f677e1
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest
+> folds `components/interfaces/{src,specs}` into **every** component's hash, so an interface
+> change invalidates all of them at once -- which is the design, not a defect. The interface
+> change is the `served_by` attribution work: new `ServedBy` and `LookupOutcome` types, and
+> `IDispatcher::batch_lookup` widened to return `Vec<LookupOutcome>`.
+>
+> **No re-analysis was performed for this component, and the digest bump asserts only what was
+> actually checked**: the interface change is additive except for `batch_lookup`'s return type,
+> which the compiler enforces across all implementors, and this component's own `src/**` and
+> `specs/**` are unchanged. Components that implement `IDispatcher` (`dispatcher`,
+> `dispatcher-p2p`) had their specs updated substantively; this one did not need it. If a later
+> sweep finds drift here, this stamp is not evidence against it.
+
 > **Re-stamp 2026-09-29 (served_by Phases 2-3).** `ServedBy` + `LookupOutcome` in
 > `interfaces`, `batch_lookup` widened, the `LOOKUP` byte carrying the tier, and
 > `TierEventStats` from eight fields to ten (the route partition). Digest 127cc2e8f652….

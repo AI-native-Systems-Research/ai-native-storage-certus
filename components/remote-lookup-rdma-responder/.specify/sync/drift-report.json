@@ -1,1 +1,46 @@
-{"generated":"pending","project":"remote-lookup-rdma-responder","summary":{"specs_analyzed":1,"requirements_checked":24,"aligned":23,"drifted":1,"not_implemented":0,"unspecced_features":2},"specs":[{"id":"001-rdma-lookup-responder","title":"RDMA Lookup Responder","aligned":23,"drifted":[{"requirement":"FR-014","spec_text":"Diagnostics MUST route through an optional ILogger receptacle; a missing logger MUST NOT turn any operation into an error.","actual":"Primary diagnostics route through ILogger via log_debug and tolerate a missing logger (aligned), but async-event instrumentation prints via eprintln!, bypassing ILogger. Documented in spec Known Limitations with a tracked align-task.","location":"src/rdma.rs:459-464","severity":"Low"}],"not_implemented":[]}],"unspecced":[{"feature":"Device async-event instrumentation (TAG_ASYNC epoll fd, drain_async_events, async_event_name, FFI responder_async_fd/responder_drain_async_event)","location":"src/rdma.rs, src/ffi.rs, src/wrapper.c","lines":"44-70,351-356,440-466","suggested_spec":"Already documented in spec Known Limitations (backfilled 2026-08-07); best-effort operator diagnostics, no FR needed unless it becomes load-bearing."},{"feature":"Command-bridge thread (rdma-responder-cmd-bridge) draining the SPSC command inbox onto the command eventfd","location":"src/rdma.rs","lines":"358-373","suggested_spec":"Note the FR-004 SPSC->eventfd bridge mechanism in plan.md/data-model."}],"conflicts":[]}
+{
+  "generated": "pending",
+  "project": "remote-lookup-rdma-responder",
+  "summary": {
+    "specs_analyzed": 1,
+    "requirements_checked": 24,
+    "aligned": 23,
+    "drifted": 1,
+    "not_implemented": 0,
+    "unspecced_features": 2
+  },
+  "specs": [
+    {
+      "id": "001-rdma-lookup-responder",
+      "title": "RDMA Lookup Responder",
+      "aligned": 23,
+      "drifted": [
+        {
+          "requirement": "FR-014",
+          "spec_text": "Diagnostics MUST route through an optional ILogger receptacle; a missing logger MUST NOT turn any operation into an error.",
+          "actual": "Primary diagnostics route through ILogger via log_debug and tolerate a missing logger (aligned), but async-event instrumentation prints via eprintln!, bypassing ILogger. Documented in spec Known Limitations with a tracked align-task.",
+          "location": "src/rdma.rs:459-464",
+          "severity": "Low"
+        }
+      ],
+      "not_implemented": []
+    }
+  ],
+  "unspecced": [
+    {
+      "feature": "Device async-event instrumentation (TAG_ASYNC epoll fd, drain_async_events, async_event_name, FFI responder_async_fd/responder_drain_async_event)",
+      "location": "src/rdma.rs, src/ffi.rs, src/wrapper.c",
+      "lines": "44-70,351-356,440-466",
+      "suggested_spec": "Already documented in spec Known Limitations (backfilled 2026-08-07); best-effort operator diagnostics, no FR needed unless it becomes load-bearing."
+    },
+    {
+      "feature": "Command-bridge thread (rdma-responder-cmd-bridge) draining the SPSC command inbox onto the command eventfd",
+      "location": "src/rdma.rs",
+      "lines": "358-373",
+      "suggested_spec": "Note the FR-004 SPSC->eventfd bridge mechanism in plan.md/data-model."
+    }
+  ],
+  "conflicts": [],
+  "inputs_sha256": "d906205c6fb6d3a13004eb6f2b508ae3bb226dca03175162dea99dc66637499f",
+  "git_commit": "72c7182b"
+}

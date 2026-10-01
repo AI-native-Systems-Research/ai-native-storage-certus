@@ -14,10 +14,31 @@
       "id": "001-extended-metadata-store",
       "title": "Extended Metadata Store",
       "aligned": [
-        "FR-01", "FR-02", "FR-03", "FR-04", "FR-06", "FR-07", "FR-08", "FR-09",
-        "FR-10", "FR-11", "FR-12", "FR-13", "FR-14", "FR-15", "FR-16", "FR-17",
-        "NFR-01", "NFR-02", "NFR-03", "NFR-04", "NFR-05", "NFR-06", "NFR-08",
-        "NFR-09", "NFR-10"
+        "FR-01",
+        "FR-02",
+        "FR-03",
+        "FR-04",
+        "FR-06",
+        "FR-07",
+        "FR-08",
+        "FR-09",
+        "FR-10",
+        "FR-11",
+        "FR-12",
+        "FR-13",
+        "FR-14",
+        "FR-15",
+        "FR-16",
+        "FR-17",
+        "NFR-01",
+        "NFR-02",
+        "NFR-03",
+        "NFR-04",
+        "NFR-05",
+        "NFR-06",
+        "NFR-08",
+        "NFR-09",
+        "NFR-10"
       ],
       "drifted": [
         {
@@ -48,9 +69,22 @@
       "id": "002-ssd-integration-test",
       "title": "SSD Integration Test",
       "aligned": [
-        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-008",
-        "FR-009", "FR-010", "FR-012", "SC-001", "SC-002", "SC-003", "SC-004",
-        "SC-005", "SC-006"
+        "FR-001",
+        "FR-002",
+        "FR-003",
+        "FR-004",
+        "FR-005",
+        "FR-006",
+        "FR-008",
+        "FR-009",
+        "FR-010",
+        "FR-012",
+        "SC-001",
+        "SC-002",
+        "SC-003",
+        "SC-004",
+        "SC-005",
+        "SC-006"
       ],
       "drifted": [
         {
@@ -91,5 +125,7 @@
       "suggested_spec": "Surface via an interface method or drop the variant."
     }
   ],
-  "conflicts": []
+  "conflicts": [],
+  "inputs_sha256": "2d53b0d610f209eb49f38c670cfedb515eff49406677cc1e9215f3aced51490f",
+  "git_commit": "72c7182b"
 }

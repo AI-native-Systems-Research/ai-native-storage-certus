@@ -5,9 +5,9 @@
   "project": "dispatch-map",
   "spec": "specs/001-dispatch-map/spec.md",
   "branch": "fix-dispatcher-store-backpressure",
-  "git_commit": "5bb71702",
+  "git_commit": "72c7182b",
   "drift_status": "clean",
-  "inputs_sha256": "7f74b8e980be9afe665117e3ba9100092073f8f7960e78ad9620f0656cb810a7",
+  "inputs_sha256": "7328cb3b02f11cf14b2c4a7ae0c507edc55810b4814baacfa41f67f607540024",
   "summary": {
     "specs_analyzed": 1,
     "requirements_checked": 33,
