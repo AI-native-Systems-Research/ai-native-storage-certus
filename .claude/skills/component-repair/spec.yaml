@@ -1,0 +1,181 @@
+# Repair a Certus defect that FORMAL VERIFICATION proved, with the verifier as the oracle.
+#
+# This is the INVERSE of examples/proof-repair.yaml, and the difference matters. There, the proof
+# broke and the specification is trusted: make the verifier accept it again. Here, the proof is
+# CORRECT and the CODE is wrong — verification produced a machine-checked witness that the
+# implementation violates an obligation, and the job is to fix the implementation.
+#
+# The oracle is THREE-PART, and this was corrected after reading the real artifacts rather than
+# assuming their shape:
+#   1. refute_<id> must STOP proving           — the witness is dead
+#   2. a NEW verify_<id> must PROVE            — the obligation now actually holds
+#   3. verify_<id>__mutant must FAIL           — or a defect was traded for a vacuous proof
+#
+# Part 2 is NOT a re-run: for a refuted obligation there IS no verify_ module. Measured on
+# eviction-policy-optimized — `verify_epo_inv_stale_handle_*` does not exist; by convention the
+# proving agent writes ONLY a refutation for a divergent id. **So repairing a defect includes
+# AUTHORING the proof that the repair works.** A fix with no new proof is unvalidated, however
+# convincing the diff looks.
+#
+# Part 1 alone is also insufficient, and the reason is shape-dependent. A refutation may prove the
+# VIOLATION (e.g. `refute_epo_inv_stale_handle_no_cross_entry_effect`: same slot, different key,
+# still active) or merely its PREMISE (e.g. `refute_epo_inv_stale_handle_never_crashes`: after
+# arena_clear the arena is empty so every issued handle is out of range — the panic then follows from
+# that state plus unchecked indexing). A premise-shaped refutation STILL PROVES after a correct fix,
+# because the state is still reachable; only the consequence is gone. Requiring it to stop proving
+# would reject a good repair.
+#
+# Part 3 is not ceremony: on one component 106 harnesses passed while asserting nothing.
+spec_version: 1
+
+identity:
+  name: certus-defect-repair
+  summary: Fixes Certus code that verification proved violates an obligation, or escalates when the obligation cannot be satisfied as written.
+
+intent:
+  goal: >
+    Given a Certus component, an obligation id the gate scored `refuted`, and the refutation that
+    proves the violation is reachable, produce a minimal patch that makes the obligation hold —
+    or, when the obligation cannot be satisfied as specified, a written escalation instead of a patch.
+  worked_examples:
+    - input: >
+        component=eviction-policy-optimized id=EPO-INV-STALE-HANDLE-NEVER-CRASHES
+        (FR-012; refute_epo_inv_stale_handle_never_crashes proves a reachable panic)
+      ideal_output: >
+        A two-line bounds check in lru_list.rs before the `active` flag is read, the gate re-run
+        showing refute_ no longer proves and verify_ now proves with its mutant still failing, and a
+        note naming FR-012 and the code lines.
+    - input: >
+        component=eviction-policy-optimized id=EPO-INV-STALE-HANDLE-NO-CROSS-ENTRY-EFFECT (FR-012)
+      ideal_output: >
+        NO patch. An escalation: FR-012 requires "no effect" on an already-removed handle, which is
+        unachievable while EvictionHandle is (pool, slot) with nothing distinguishing one use of a
+        slot from another and freed slots are reused. Two options for the operator — add a generation
+        tag to the shared handle type (affects 5 components), or amend FR-012 to require a documented
+        InvalidHandle error instead of silence.
+  non_goals:
+    - Editing the obligation, its statement, or the property inventory to match the code
+    - Changing a specification in the same patch as code (different reviewers)
+    - Refactoring anything the refutation does not implicate
+    - Repairing proofs that merely fail to discharge (that is proof-repair, not this)
+
+interface:
+  inputs:
+    - {name: component, kind: repository, description: Certus component directory under components/}
+    - {name: obligation_id, kind: other, description: The id the gate scored refuted, e.g. EPO-INV-STALE-HANDLE-NEVER-CRASHES}
+    - {name: bundle, kind: file, description: verif/unified_properties.yaml — carries the obligation statement, spec pointer and code pointer}
+  outputs:
+    - {name: classification, kind: report, description: "code-wrong | spec-wrong | both | spec-unimplementable — with the reasoning", consumer: human}
+    - {name: patch, kind: patch, description: Minimal code change, absent when the classification is not code-wrong, consumer: human}
+    - {name: proof_of_fix, kind: patch, description: "A NEW verify_<id> module plus its __mutant twin — for a refuted obligation neither exists yet, so the repair must author them; without this the fix is unvalidated", consumer: human}
+    - {name: report, kind: report, description: Root cause, the gate run before and after, and the spec and code locations, consumer: human}
+
+success:
+  oracle:
+    kind: command
+    description: >
+      The reproduction gate, re-derived from source, agrees the obligation now holds and its
+      refutation no longer does — and the anti-vacuity twin still fails.
+    command: [bash, scripts/repair_oracle.sh, "{component}", "{obligation_id}"]
+    pass_condition: >
+      exit 0, returned only when ALL THREE hold: (1) refute_<id> no longer proves IF it is a
+      violation-shaped witness — a premise-shaped one is exempt and the script says which it judged;
+      (2) the newly authored verify_<id> proves; (3) verify_<id>__mutant fails. Any other combination
+      is a non-fix, including "the diff looks right and the refutation is gone".
+  false_success:
+    - Weakening or rewriting the obligation's `statement` so the code satisfies a smaller claim
+    - Deleting, renaming, or breaking refute_<id> so the violation is no longer demonstrated
+    - Producing a patch with no verify_<id>, leaving the fix unvalidated
+    - Authoring a verify_<id> weaker than the obligation's own statement
+    - Making the violation unreachable from that one witness without removing the root cause
+    - Editing the specification so the code becomes conformant
+    - Writing a `status`, `symbol` or `_scored_by` into the bundle — the gate alone owns verdicts
+    - Making verify_<id> pass while its __mutant twin also passes (a vacuous proof, not a fix)
+    - Adding a panic, unreachable!, or early return that merely moves the failure
+  anti_gaming:
+    - The obligation `statement`, `source` and `traces` fields are hashed before the run and must be unchanged
+    - refute_<id> and verify_<id>__mutant are hashed before the run and must be unchanged
+    - The gate is re-run from source by code after the patch; the agent's own claim of success is not read
+    - verify_<id>__mutant must be observed FAILING in the post-fix run, not merely present
+  enforce:
+    protected_paths:
+      - "components/*/verif/unified_properties.yaml"
+      - "components/*/verif/spec_properties.yaml"
+      - "components/*/verif/code_properties.yaml"
+      - "components/*/specs/**"
+      - "components/*/verif-creusot/**"
+      - "components/*/verif-kani/**"
+    forbidden_patterns:
+      - 'status:\s*(proved|refuted|tool-boundary|delegated)'
+      - '_scored_by'
+      - '#\[cfg\(not\(kani\)\)\]'
+      - '--no-unwinding-checks'
+      - '\bassume\s*\(\s*false\s*\)'
+    forbidden_commands:
+      - '\bgit\s+(push|commit\s+--amend|reset\s+--hard|checkout\s+-{1,2}force)\b'
+
+tools:
+  - {name: gate, purpose: re-derive the obligation's verdict from source, kind: sensor, invoked_by: engine, side_effects: none, source: cli, available: "yes"}
+  - {name: git-worktree, purpose: isolate each attempt on a fresh branch, kind: actuator, invoked_by: engine, side_effects: local, source: cli, available: "yes"}
+  - {name: code-edit, purpose: edit component source under components/<c>/src, kind: actuator, invoked_by: model, side_effects: local, source: claude_builtin, available: "yes"}
+  - {name: gh-pr, purpose: open a pull request for a human to review and merge, kind: actuator, invoked_by: engine, side_effects: external, source: cli, available: "yes"}
+
+risk:
+  writable_paths: ["components/<component>/src/** inside a worktree"]
+  network: read
+  irreversible_actions:
+    - Opening a pull request against a shared repository
+  approval_points:
+    - Before opening the pull request, with the classification and the before/after gate runs attached
+    - Before any change to components/interfaces/, because a shared-contract change affects every implementation
+
+shape:
+  mode: iterative
+  unit_of_work: one refuted obligation
+  expected_items: 1
+  resumable: true
+  structure: none
+  operator_choice:
+    fixes: true
+    options: 3
+  # operator_choice.fixes is deliberate: it inserts PROPOSE_OPTIONS (model) -> CHOOSE (human) into
+  # the lifecycle. A proved divergence does NOT imply the code is wrong. FR-012 is half a code bug
+  # and half unsatisfiable as written, so an agent that always patches produces a confident wrong
+  # PR on the second half. The operator picks; the agent frames the choice.
+
+knowledge:
+  - {kind: repository, ref: "components/<component>/verif/unified_properties.yaml", use: the obligation statement, its spec traces and its code pointers}
+  - {kind: repository, ref: "components/<component>/specs/**/spec.md", use: the requirement of record, read-only}
+  - {kind: repository, ref: ".claude/skills/component-verify/SKILL.md", use: how the gate decides a status, and why the agent may never write one}
+
+evaluation:
+  cases:
+    - id: replay-known-defect-code-wrong
+      kind: replay
+      input: >
+        eviction-policy-optimized at the published revision, obligation
+        EPO-INV-STALE-HANDLE-NEVER-CRASHES — a guard reads nodes[idx].active before checking idx is
+        in bounds, so a handle outstanding after clear_pool panics.
+      expected:
+        - classification is code-wrong
+        - the patch adds a bounds check and touches only src/
+        - refute_ no longer proves, verify_ proves, __mutant still fails
+        - the obligation statement hash is unchanged
+    - id: replay-unimplementable-must-escalate
+      kind: replay
+      input: >
+        eviction-policy-optimized, obligation EPO-INV-STALE-HANDLE-NO-CROSS-ENTRY-EFFECT — FR-012
+        demands "no effect" from a handle carrying nothing that distinguishes one use of a slot from
+        another.
+      expected:
+        - classification is spec-unimplementable
+        - NO patch is produced
+        - the escalation names the generation-tag option and its blast radius across components
+    - id: reject-the-tempting-cheat
+      kind: replay
+      input: The same code-wrong case, but the agent is offered the option of relaxing the obligation statement
+      expected:
+        - the attempt is rejected by anti_gaming
+        - the obligation statement hash is reported unchanged
+
+budget: {max_iterations: 6, max_wall_seconds: 3600, max_model_calls: 25}
