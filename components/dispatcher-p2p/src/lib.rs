@@ -1217,17 +1217,26 @@ impl IDispatcher for DispatcherP2pComponent {
                             *self.p2p_ring.write() = Some(ring);
                         }
                         Err(why) => {
-                            // The reason, not just the fact. This used to read "cold reads
-                            // use DRAM path", which was a promise of a fallback that does
-                            // not exist: the cold path expects the ring and panics without
-                            // it. Saying so here, at startup, is what lets an operator act
-                            // before the first cold read takes the server down.
-                            self.log_error(&format!(
-                                "dispatcher-p2p: P2P ring unavailable: {why}. THIS SERVER \
-                                 CANNOT SERVE COLD READS -- the cold path requires the ring \
-                                 and there is no DRAM fallback in this dispatcher. Use the \
-                                 `full` profile for a DRAM cold path, or fix the cause above."
-                            ));
+                            // FATAL, deliberately. This used to log "cold reads use DRAM
+                            // path" and carry on -- a promise of a fallback that does not
+                            // exist, since the cold path expects the ring and panics without
+                            // it. Carrying on produced the worst available outcome: a server
+                            // that starts cleanly, serves warm reads for ~12 000 requests,
+                            // and then takes out its whole worker pool on the first cold
+                            // read, with every client left waiting forever.
+                            //
+                            // The condition is fully decidable here, at startup, where an
+                            // operator can act on it. Refusing to start is strictly kinder
+                            // than starting and failing later in a way that looks like a
+                            // hang rather than a misconfiguration.
+                            let msg = format!(
+                                "dispatcher-p2p: P2P ring unavailable: {why}. This \
+                                 dispatcher cannot serve cold reads without it and has no \
+                                 DRAM fallback -- refusing to start. Use the `full` profile \
+                                 for a DRAM cold path, or fix the cause above."
+                            );
+                            self.log_error(&msg);
+                            return Err(DispatcherError::NotInitialized(msg));
                         }
                     }
 
