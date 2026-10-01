@@ -78,7 +78,43 @@ impl LocalLauncher {
         }
     }
 
-    /// Start a stand-in agent on `port` and return once it is listening.
+    /// Start a stand-in agent on an OS-chosen port, returning the port it actually got.
+    ///
+    /// **Binds port 0 rather than a port chosen in advance, which is what closes the race.**
+    /// `free_port` below probes a port, *closes* it, and returns the number for someone else
+    /// to re-bind later; anything that takes the port in that window makes the later bind fail
+    /// with `AddrInUse`. Under `cargo test --workspace` many test binaries run at once, and CI
+    /// also reaps leaked processes between runs, so that window is reachable in practice -- it
+    /// produced exactly this failure at `AddrInUse (os error 98)`.
+    ///
+    /// Asking the OS for 0 and reading back `local_addr()` never releases the socket, so there
+    /// is no window at all. `Server::local_addr`'s own documentation points at this: "how a
+    /// test learns the port when it asked for zero."
+    fn spawn_any(&self, stale: bool) -> (u16, Arc<AtomicBool>) {
+        let server = Server::bind(("127.0.0.1", 0), FnFactory(move || Ok(Stub { stale })))
+            .expect("bind the stand-in agent on an OS-chosen port");
+        let port = server.local_addr().expect("the bound port").port();
+        let stop = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&stop);
+        std::thread::spawn(move || {
+            let _ = server.serve(flag);
+        });
+        for _ in 0..200 {
+            if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        self.running.lock().unwrap().push((port, Arc::clone(&stop)));
+        (port, stop)
+    }
+
+    /// Start a stand-in agent on a port fixed in advance.
+    ///
+    /// Still needed for the launcher path, which must bind the port already recorded in an
+    /// `AgentSpec` -- a client is about to connect to that exact number, so retrying elsewhere
+    /// is not an option. Prefer [`Self::spawn_any`] wherever the caller can learn the port
+    /// afterwards.
     fn spawn(&self, port: u16, stale: bool) -> Arc<AtomicBool> {
         let server = Server::bind(("127.0.0.1", port), FnFactory(move || Ok(Stub { stale })))
             .expect("bind the stand-in agent");
@@ -121,6 +157,13 @@ impl Launcher for LocalLauncher {
 }
 
 /// A free loopback port.
+/// Probe a free port by binding and releasing one.
+///
+/// **Inherently racy, and kept only where the port must be known before anything binds it**
+/// -- an `AgentSpec` built before the launcher starts its agent. The socket is closed here and
+/// re-bound later, so a port taken in between fails that later bind. Where the caller can
+/// learn the port *after* the bind, use [`StubLauncher::spawn_any`], which asks the OS for 0
+/// and never releases the socket.
 fn free_port() -> u16 {
     let l = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
     let p = l.local_addr().unwrap().port();
@@ -166,10 +209,10 @@ fn a_leftover_of_the_current_build_is_replaced_rather_than_reused() {
     // FR-052's harder half. The provenance check already makes reusing a *stale* agent
     // impossible; a *current* one is equally unusable, because it holds the previous run's
     // mailbox channels and device memory and its counters would be reported as this run's.
-    let port = free_port();
+    // The OS picks the port at bind time, so nothing can take it in between.
     let launcher = LocalLauncher::new();
     // A leftover, listening before the run starts.
-    launcher.spawn(port, false);
+    let (port, _stub) = launcher.spawn_any(false);
     assert!(
         std::net::TcpStream::connect(("127.0.0.1", port)).is_ok(),
         "the fixture leftover is not listening"
@@ -223,9 +266,9 @@ fn a_leftover_that_will_not_answer_is_killed() {
 fn a_stale_leftover_is_replaced_and_the_refusal_would_name_the_node() {
     // A leftover from an older deployment. It is replaced like any other; the provenance check
     // is what stops it being *driven*, and this is what stops it being left in place.
-    let port = free_port();
+    // The OS picks the port at bind time, so nothing can take it in between.
     let mut launcher = LocalLauncher::new();
-    launcher.spawn(port, true); // the leftover is stale
+    let (port, _stub) = launcher.spawn_any(true); // the leftover is stale
     launcher.stale = false; // the replacement is this build
 
     let specs = vec![spec(port)];
@@ -538,11 +581,12 @@ fn a_refusal_leaves_an_operators_own_agent_alone() {
     // The complement, and the reason the cleanup is scoped. `NoLaunch` means the caller manages
     // the daemons; stopping one of theirs on a refusal would leave them with nothing to talk to
     // and nothing able to start it again, which is the whole reason that mode exists.
-    let port = free_port();
     // The fixture stands in for the operator's own daemon; `NoLaunch` is what the generator uses
     // for `--no-launch`, and it starts and stops nothing.
     let launcher = LocalLauncher::new();
-    launcher.spawn(port, true);
+    // Bind first and learn the port after, so no probe-and-release window exists. This test is
+    // the one that failed in CI with `AddrInUse`.
+    let (port, _stub) = launcher.spawn_any(true);
     let specs = vec![spec(port)];
 
     Agents::start_with(&workload_gen::agents::NoLaunch, &specs, 8, false)
