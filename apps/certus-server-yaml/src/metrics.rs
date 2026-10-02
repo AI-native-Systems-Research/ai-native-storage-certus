@@ -223,7 +223,13 @@ fn render_metrics(
          certus_peer_pin_hold_us_total {}\n\
          # HELP certus_peer_pin_hold_us_max Longest single responder pin-batch lifetime, microseconds\n\
          # TYPE certus_peer_pin_hold_us_max gauge\n\
-         certus_peer_pin_hold_us_max {}\n",
+         certus_peer_pin_hold_us_max {}\n\
+         # HELP certus_oldest_sampled Oldest memory-tier keys sampled -- the window eviction scans\n\
+         # TYPE certus_oldest_sampled gauge\n\
+         certus_oldest_sampled {}\n\
+         # HELP certus_oldest_persisted Of those, how many are demotable (have an ssd_offset)\n\
+         # TYPE certus_oldest_persisted gauge\n\
+         certus_oldest_persisted {}\n",
         snap.write_lock_contentions,
         snap.read_lock_contentions,
         used,
@@ -251,5 +257,7 @@ fn render_metrics(
         serve.peer_pins_taken,
         serve.peer_pin_hold_us_total,
         serve.peer_pin_hold_us_max,
+        tier.oldest_sampled,
+        tier.oldest_persisted,
     )
 }

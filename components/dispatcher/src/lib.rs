@@ -253,6 +253,10 @@ impl TierEventCounters {
             evictions_blocked_unpersisted: self
                 .evictions_blocked_unpersisted
                 .load(Ordering::Relaxed),
+            // Gauges, filled in by `tier_event_stats` which has the receptacles to
+            // sample them. The counters struct holds no dispatch-map handle.
+            oldest_sampled: 0,
+            oldest_persisted: 0,
         }
     }
 }
@@ -3819,7 +3823,27 @@ impl IDispatcher for DispatcherComponent {
     }
 
     fn tier_event_stats(&self) -> interfaces::TierEventStats {
-        self.tier_counters.snapshot()
+        let mut stats = self.tier_counters.snapshot();
+
+        // Sample the eviction window rather than the whole tier. `evict_one_clean`
+        // scans the oldest keys, and an entry that cannot be evicted ages to the oldest
+        // end and stays there -- so stuck entries CONCENTRATE here and a tier-wide
+        // average would dilute the very effect this measures.
+        //
+        // Walked at snapshot time rather than tracked incrementally because the
+        // transitions happen in several components, including one that publishes
+        // straight into the dispatch map without going through this dispatcher at all.
+        // Counting transitions here would miss exactly those and report a persisted
+        // fraction that is too high. The walk costs one `is_evictable` per sampled key
+        // and runs only when a scraper or the periodic log line asks.
+        const SAMPLE: usize = 64;
+        if let (Ok(dm), Ok(mt)) = (self.dispatch_map.get(), self.memory_tier.get()) {
+            let keys = mt.oldest_keys(SAMPLE);
+            stats.oldest_sampled = keys.len() as u64;
+            stats.oldest_persisted = keys.iter().filter(|k| dm.is_evictable(**k)).count() as u64;
+        }
+
+        stats
     }
 }
 

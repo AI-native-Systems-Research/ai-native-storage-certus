@@ -414,6 +414,21 @@ pub struct TierEventStats {
     /// evictions_blocked_unpersisted` against the scanned total is itself a check that
     /// the two explanations are exhaustive.
     pub evictions_blocked_unpersisted: u64,
+    /// How many of the oldest memory-tier keys were sampled when this snapshot was
+    /// taken, and how many of those were demotable. **Gauges, not counters.**
+    ///
+    /// Sampled over `oldest_keys`, deliberately, because that is the window
+    /// `evict_one_clean` actually scans. A tier-wide persisted fraction would be the
+    /// wrong number: an entry that cannot be evicted ages to the oldest end of the LRU
+    /// and stays there, so the oldest keys are *where stuck entries concentrate*, and a
+    /// whole-tier average would dilute exactly the effect being measured.
+    ///
+    /// `oldest_persisted == 0` with `oldest_sampled > 0` means every candidate eviction
+    /// would be refused for want of an `ssd_offset` — the store path is about to
+    /// backpressure and decline no matter how much tier capacity exists.
+    pub oldest_sampled: u64,
+    /// Of `oldest_sampled`, how many had an `ssd_offset` and so could be demoted.
+    pub oldest_persisted: u64,
 }
 
 #[cfg(feature = "spdk")]
