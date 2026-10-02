@@ -1088,6 +1088,20 @@ Note that the deployment layer already *generates* an equivalent table:
   is not required, but a hardware file whose fields cannot be filled from it
   should be treated as suspect.
 
+- **FR-084** *(New 2026-09-30.)* A read deadline expiring MUST be reported as a
+  **timeout**, distinctly from a connection failure, and the message MUST name both the
+  deadline that expired and the flag that changes it. The deadline MUST be settable
+  (`--read-timeout-ms`).
+
+  **Why this is a requirement and not a wording preference.** A read timeout surfaces from
+  the OS as `EAGAIN`, which the previous rendering reported as "agent connection failed:
+  Resource temporarily unavailable (os error 11)". The agent is typically alive and
+  healthy; what happened is that the work behind one turn outlasted the deadline. That
+  sentence sent a four-attempt hardware investigation after a connection fault that did
+  not exist, and it survived a refuted hypothesis because the evidence it offered was
+  wrong rather than merely thin. An error message that names the wrong subsystem is a
+  defect in the instrument, not a cosmetic issue.
+
 ### Key Entities
 
 - **Workload description**: the user's input; a set of shared object classes

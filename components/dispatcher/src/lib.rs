@@ -2440,21 +2440,21 @@ impl IDispatcher for DispatcherComponent {
                         None => {
                             // Fallback: create temporary streams.
                             let a = gpu.create_stream();
-                            let b = a.as_ref().ok().and_then(|&sa| {
-                                gpu.create_stream().map(|sb| [sa, sb]).ok()
-                            });
+                            let b = a
+                                .as_ref()
+                                .ok()
+                                .and_then(|&sa| gpu.create_stream().map(|sb| [sa, sb]).ok());
                             match b {
                                 Some(st) => st,
                                 None => {
                                     // Cannot get streams — fail all jobs.
                                     for djs in &drive_job_sets {
                                         for &ci in &djs.job_ci {
-                                            results[cold_entries[ci].idx] = Some(Err(
-                                                DispatcherError::IoError(
+                                            results[cold_entries[ci].idx] =
+                                                Some(Err(DispatcherError::IoError(
                                                     "create_stream failed for scatter-gather"
                                                         .into(),
-                                                ),
-                                            ));
+                                                )));
                                         }
                                     }
                                     drive_job_sets.clear();
@@ -2506,9 +2506,7 @@ impl IDispatcher for DispatcherComponent {
 
                             // Process results: promote and scatter.
                             for (di, djs) in drive_job_sets.iter().enumerate() {
-                                for (job_idx, result) in
-                                    scatter_results[di].iter().enumerate()
-                                {
+                                for (job_idx, result) in scatter_results[di].iter().enumerate() {
                                     let ci = djs.job_ci[job_idx];
                                     let entry = &cold_entries[ci];
                                     let res = match result {
@@ -2524,8 +2522,7 @@ impl IDispatcher for DispatcherComponent {
                                                 ))
                                             })
                                             .and_then(|()| {
-                                                self.tier_counters
-                                                    .record_promotion_to_memory();
+                                                self.tier_counters.record_promotion_to_memory();
                                                 if entry.regions.len() > 1 {
                                                     self.serve_memory_tier_to_gpu(
                                                         &gpu,
@@ -2624,8 +2621,22 @@ impl IDispatcher for DispatcherComponent {
                     let (key, regions) = &entries[pos];
                     let key = *key;
                     if let Err(e) = remote_res {
-                        results[pos] =
-                            Some(Err(DispatcherError::IoError(format!("remote lookup: {e}"))));
+                        // A key no peer holds is a MISS, not an I/O failure. Collapsing
+                        // both into `IoError` lost the distinction `IRemoteLookup` had
+                        // already made, and the transport host counts only `KeyNotFound`
+                        // as a miss -- so every remotely-unfound key vanished from the
+                        // server's accounting. That is why `certus_lookup_misses_total`
+                        // read 0 against millions of reserves (spec 002 research R2).
+                        //
+                        // Not merely an accounting bug: it reported a cold cache as a
+                        // broken fabric, so anything watching error rates saw transport
+                        // failures that never happened.
+                        results[pos] = Some(Err(match e {
+                            interfaces::RemoteLookupError::NotFound => {
+                                DispatcherError::KeyNotFound(key)
+                            }
+                            other => DispatcherError::IoError(format!("remote lookup: {other}")),
+                        }));
                         continue;
                     }
                     let t_lookup = probing.then(std::time::Instant::now);
@@ -5446,6 +5457,79 @@ mod tests {
             "nothing to synchronize without a warm stream"
         );
         assert_eq!(fx.dm.total_read_refs(), 0);
+
+        d.shutdown().unwrap();
+    }
+
+    /// A key no node holds is a MISS, and must not be relabelled an I/O error.
+    ///
+    /// This is the defect behind `certus_lookup_misses_total` reading 0 on the cluster
+    /// (spec 002 `research.md` R2). A local miss becomes `KeyNotFound`, is forwarded to
+    /// remote lookup, comes back `RemoteLookupError::NotFound` because no peer holds it —
+    /// and the dispatcher then overwrote that with `DispatcherError::IoError`. The
+    /// transport host counts only `KeyNotFound` as a miss and drops every other error, so
+    /// the miss vanished from the server's accounting entirely.
+    ///
+    /// Two things were wrong with that, and the second is worse than the first: the count
+    /// was lost, and a key that simply is not cached anywhere was reported as an I/O
+    /// failure — so any consumer reasoning about error rates saw transport failures that
+    /// never happened.
+    ///
+    /// `IRemoteLookup` already distinguishes the two cases
+    /// (`RemoteLookupError::{NotFound, TransportError}`), so nothing new has to be
+    /// measured; the dispatcher only has to stop collapsing them.
+    ///
+    /// The peer here holds nothing, which is what a peer-less or peer-missing cluster
+    /// looks like from this side — and note it is *not* discriminated by whether peers
+    /// exist: the `full-remote` profile wires remote lookup either way, so a solo RDMA
+    /// group takes this same path. That is why the cluster measurement read zero in both
+    /// arms and could not isolate this, and why the check lives here instead.
+    #[test]
+    fn a_key_no_peer_holds_is_a_miss_not_an_io_error() {
+        let fx = setup_initialized_with_remote(&[], PinProbe::new);
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        let (_bufs, entries) = remote_batch(&[7]);
+        let results = d.batch_lookup(&entries);
+
+        assert!(
+            matches!(results[0], Err(DispatcherError::KeyNotFound(7))),
+            "a key absent locally AND absent from every peer is a miss; got {:?}. \
+             Reporting it as IoError is what makes it uncountable by the transport host, \
+             which counts only KeyNotFound as a miss",
+            results[0]
+        );
+
+        d.shutdown().unwrap();
+    }
+
+    /// A genuine transport failure must still be an error, so the fix above cannot be
+    /// "call everything a miss".
+    ///
+    /// Without this, mapping the remote result to `KeyNotFound` unconditionally would pass
+    /// the test above while making a broken fabric indistinguishable from a cold cache —
+    /// which would corrupt the hit rate in the opposite direction and hide a real fault.
+    #[test]
+    fn a_remote_transport_failure_is_still_an_error() {
+        // The peer "holds" the key, so the mock proceeds past its NotFound branch and
+        // fails inside delivery instead — a TransportError rather than a miss.
+        let fx = setup_initialized_with_remote(&[8], PinProbe::failing_sync);
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        let (_bufs, entries) = remote_batch(&[8]);
+        let results = d.batch_lookup(&entries);
+
+        assert!(
+            results[0].is_err(),
+            "a failing transfer must not report success; got {:?}",
+            results[0]
+        );
+        assert!(
+            !matches!(results[0], Err(DispatcherError::KeyNotFound(_))),
+            "a transport/delivery failure is NOT a miss — counting it as one would hide a \
+             broken fabric inside the hit rate; got {:?}",
+            results[0]
+        );
 
         d.shutdown().unwrap();
     }

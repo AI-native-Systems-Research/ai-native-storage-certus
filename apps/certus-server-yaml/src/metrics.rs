@@ -14,6 +14,14 @@ pub struct ServiceCounters {
     pub populates: Arc<AtomicU64>,
     pub lookup_hits: Arc<AtomicU64>,
     pub lookup_misses: Arc<AtomicU64>,
+    /// Lookups that could be neither served nor shown absent: a GPU handle that
+    /// would not open, or a dispatcher error other than `KeyNotFound`.
+    ///
+    /// Exists so that hits + misses + errors accounts for every entry a client asked
+    /// for (FR-024). Before it, both classes were dropped and the accounting was
+    /// silently short -- which is how `lookup_misses` came to read 0 for so long
+    /// without anyone noticing the totals did not add up.
+    pub lookup_errors: Arc<AtomicU64>,
     pub evictions: Arc<AtomicU64>,
     pub gpu_bytes_transferred: Arc<AtomicU64>,
 }
@@ -24,6 +32,7 @@ impl ServiceCounters {
             populates: Arc::new(AtomicU64::new(0)),
             lookup_hits: Arc::new(AtomicU64::new(0)),
             lookup_misses: Arc::new(AtomicU64::new(0)),
+            lookup_errors: Arc::new(AtomicU64::new(0)),
             evictions: Arc::new(AtomicU64::new(0)),
             gpu_bytes_transferred: Arc::new(AtomicU64::new(0)),
         }
@@ -51,11 +60,14 @@ impl TranslatorObserver for CountersObserver {
             .fetch_add(succeeded, Ordering::Relaxed);
     }
 
-    fn on_lookup(&self, hits: u64, misses: u64, gpu_bytes: u64) {
+    fn on_lookup(&self, hits: u64, misses: u64, errors: u64, gpu_bytes: u64) {
         self.counters.lookup_hits.fetch_add(hits, Ordering::Relaxed);
         self.counters
             .lookup_misses
             .fetch_add(misses, Ordering::Relaxed);
+        self.counters
+            .lookup_errors
+            .fetch_add(errors, Ordering::Relaxed);
         self.counters
             .gpu_bytes_transferred
             .fetch_add(gpu_bytes, Ordering::Relaxed);
@@ -145,6 +157,9 @@ fn render_metrics(
          # HELP certus_lookup_misses_total Total lookup misses (key not found)\n\
          # TYPE certus_lookup_misses_total counter\n\
          certus_lookup_misses_total {}\n\
+         # HELP certus_lookup_errors_total Lookups neither served nor shown absent\n\
+         # TYPE certus_lookup_errors_total counter\n\
+         certus_lookup_errors_total {}\n\
          # HELP certus_gpu_bytes_transferred_total Total bytes transferred to GPU\n\
          # TYPE certus_gpu_bytes_transferred_total counter\n\
          certus_gpu_bytes_transferred_total {}\n\
@@ -168,6 +183,7 @@ fn render_metrics(
         counters.evictions.load(Ordering::Relaxed),
         counters.lookup_hits.load(Ordering::Relaxed),
         counters.lookup_misses.load(Ordering::Relaxed),
+        counters.lookup_errors.load(Ordering::Relaxed),
         counters.gpu_bytes_transferred.load(Ordering::Relaxed),
         rw.read_bytes,
         rw.write_bytes,

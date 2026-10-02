@@ -135,6 +135,15 @@ impl OtelMetrics {
             })
             .build();
 
+        let c = counters.lookup_errors.clone();
+        meter
+            .u64_observable_counter("certus.lookup_errors_total")
+            .with_description("Lookups neither served nor shown absent (FR-024)")
+            .with_callback(move |counter| {
+                counter.observe(c.load(std::sync::atomic::Ordering::Relaxed), &[]);
+            })
+            .build();
+
         // NVMe I/O counters
         let d = Arc::clone(&dispatcher);
         meter

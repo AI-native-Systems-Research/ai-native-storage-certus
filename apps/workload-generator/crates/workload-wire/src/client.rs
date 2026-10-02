@@ -297,6 +297,19 @@ pub enum ClientError {
         /// The id the peer echoed.
         corr: u32,
     },
+    /// The read timeout expired before a reply arrived.
+    ///
+    /// **Distinguished from `Io` because conflating them is actively misleading.** A read
+    /// timeout surfaces from the OS as `EAGAIN`/`EWOULDBLOCK`, which `Io` renders as
+    /// "agent connection failed: Resource temporarily unavailable (os error 11)" — a
+    /// sentence that names the wrong thing. The agent is typically alive and healthy; what
+    /// happened is that the work behind one turn outlasted the deadline. That wording sent
+    /// a four-attempt hardware investigation after a nonexistent connection fault before
+    /// the variant existed.
+    TimedOut {
+        /// The deadline that expired, so the message can say what to raise.
+        after: Duration,
+    },
     /// A reply carried an opcode the request did not ask for.
     Mismatched {
         /// What was expected.
@@ -316,6 +329,14 @@ impl fmt::Display for ClientError {
                 f,
                 "the agent echoed correlation id {corr}, which was never sent or was \
                  already answered"
+            ),
+            Self::TimedOut { after } => write!(
+                f,
+                "no reply within the {:.1?} read timeout. The agent is probably alive and \
+                 still working: a turn can legitimately take longer than this when the \
+                 server's own operation latency is high. Raise --read-timeout if that is \
+                 expected, or investigate the server's per-operation latency if it is not",
+                after
             ),
             Self::Mismatched { want, got } => {
                 write!(f, "expected a reply to opcode {want}, got opcode {got}")
@@ -347,6 +368,9 @@ pub struct Client<S> {
     stream: S,
     depth: usize,
     max_body: u32,
+    /// The configured read deadline, kept so a timeout can say what expired rather than
+    /// surfacing a bare `EAGAIN`.
+    read_timeout: Duration,
     next_corr: u32,
     /// Correlation ids sent and not yet answered, oldest first.
     inflight: VecDeque<u32>,
@@ -394,8 +418,12 @@ impl Client<TcpStream> {
     /// # Errors
     ///
     /// If the socket refuses it.
-    pub fn with_read_timeout(self, timeout: Duration) -> Result<Self, ClientError> {
+    pub fn with_read_timeout(mut self, timeout: Duration) -> Result<Self, ClientError> {
         self.stream.set_read_timeout(Some(timeout))?;
+        // Recorded as well as set, so `ClientError::TimedOut` can name the deadline that
+        // expired. Setting it on the socket alone leaves the error unable to say what to
+        // raise, which is most of what makes a timeout actionable.
+        self.read_timeout = timeout;
         Ok(self)
     }
 
@@ -440,7 +468,7 @@ impl Client<TcpStream> {
             return Ok(None);
         }
         if got < HEADER_BYTES {
-            Self::fill(&mut self.stream, &mut head[got..])?;
+            Self::fill(&mut self.stream, &mut head[got..], self.read_timeout)?;
         }
         let header = Header::decode(&head, self.max_body)?;
         // Taken out of `self` so the read borrows the stream and the buffer separately, then put
@@ -448,7 +476,7 @@ impl Client<TcpStream> {
         let mut body = std::mem::take(&mut self.body);
         body.clear();
         body.resize(header.len as usize, 0);
-        let read = Self::fill(&mut self.stream, &mut body);
+        let read = Self::fill(&mut self.stream, &mut body, self.read_timeout);
         let out = body.clone();
         self.body = body;
         read?;
@@ -504,6 +532,7 @@ impl<S: Read + Write> Client<S> {
             stream,
             depth,
             max_body: DEFAULT_MAX_BODY,
+            read_timeout: DEFAULT_READ_TIMEOUT,
             next_corr: 1,
             inflight: VecDeque::with_capacity(depth),
             body: Vec::new(),
@@ -769,7 +798,7 @@ impl<S: Read + Write> Client<S> {
         let mut body = std::mem::take(&mut self.body);
         body.clear();
         body.resize(header.len as usize, 0);
-        let read = Self::fill(&mut self.stream, &mut body);
+        let read = Self::fill(&mut self.stream, &mut body, self.read_timeout);
         let out = body.clone();
         self.body = body;
         read?;
@@ -778,20 +807,33 @@ impl<S: Read + Write> Client<S> {
 
     /// Fill `buf`, reporting a clean close as [`ClientError::Closed`].
     fn read_exact(&mut self, buf: &mut [u8]) -> Result<(), ClientError> {
-        Self::fill(&mut self.stream, buf)
+        Self::fill(&mut self.stream, buf, self.read_timeout)
     }
 
     /// Fill `buf` from `stream`, reporting a clean close as [`ClientError::Closed`].
     ///
     /// A zero-length read is the peer closing, not an error to retry: a run must name the
     /// lost node and abort rather than continue on the survivors (FR-064).
-    fn fill(stream: &mut S, buf: &mut [u8]) -> Result<(), ClientError> {
+    fn fill(stream: &mut S, buf: &mut [u8], deadline: Duration) -> Result<(), ClientError> {
         let mut at = 0usize;
         while at < buf.len() {
             match stream.read(&mut buf[at..]) {
                 Ok(0) => return Err(ClientError::Closed),
                 Ok(n) => at += n,
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                // A read timeout arrives as one of these two, and which one depends on the
+                // platform and on whether the socket is non-blocking: Linux reports
+                // `EAGAIN` (`WouldBlock`) for an expired `SO_RCVTIMEO`, while other
+                // platforms and some wrappers report `TimedOut`. Both mean the deadline
+                // expired, and neither means the connection failed.
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                    ) =>
+                {
+                    return Err(ClientError::TimedOut { after: deadline })
+                }
                 Err(e) => return Err(ClientError::Io(e)),
             }
         }
