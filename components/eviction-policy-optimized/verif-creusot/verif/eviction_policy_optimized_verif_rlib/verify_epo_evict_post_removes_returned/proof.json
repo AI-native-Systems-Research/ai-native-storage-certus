@@ -2,30 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_arena_pop_front": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_arena_pop_front": { "prover": "alt-ergo", "time": 0.015 },
       "vc_verify_epo_evict_post_removes_returned": {
-        "tactic": "compute_specified",
-        "children": [
-          {
-            "tactic": "split_vc",
-            "children": [
-              { "prover": "alt-ergo", "time": 0.032 },
-              {
-                "tactic": "split_vc",
-                "children": [
-                  { "prover": "alt-ergo", "time": 0.133 },
-                  {
-                    "tactic": "split_vc",
-                    "children": [
-                      { "prover": "alt-ergo", "time": 0.024 },
-                      { "prover": "alt-ergo", "time": 0.026 }
-                    ]
-                  }
-                ]
-              }
-            ]
-          }
-        ]
+        "prover": "alt-ergo",
+        "time": 0.069
       }
     }
   }

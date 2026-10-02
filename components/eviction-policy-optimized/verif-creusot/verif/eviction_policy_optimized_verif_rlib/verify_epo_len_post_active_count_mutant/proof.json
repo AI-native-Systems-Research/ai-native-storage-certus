@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_state_len": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_state_len": { "prover": "alt-ergo", "time": 0.019 },
       "vc_verify_epo_len_post_active_count__mutant": null
     }
   }

@@ -2,13 +2,13 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_sketch_halve": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_sketch_halve": { "prover": "alt-ergo", "time": 0.026 },
       "vc_verify_epo_inv_sketch_halve_non_increasing__mutant": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
-            "children": [ { "prover": "alt-ergo", "time": 0.033 }, null ]
+            "children": [ { "prover": "alt-ergo", "time": 0.036 }, null ]
           }
         ]
       }

@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_state_remove": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_state_remove": { "prover": "alt-ergo", "time": 0.031 },
       "vc_verify_epo_remove_pre_pool_exists": {
         "prover": "alt-ergo",
-        "time": 0.034
+        "time": 0.074
       }
     }
   }

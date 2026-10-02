@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_cms_cols4": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_cms_cols4": { "prover": "alt-ergo", "time": 0.028 },
       "vc_verify_epo_inv_sketch_bucket_in_range": {
         "prover": "alt-ergo",
-        "time": 0.017
+        "time": 0.03
       }
     }
   }

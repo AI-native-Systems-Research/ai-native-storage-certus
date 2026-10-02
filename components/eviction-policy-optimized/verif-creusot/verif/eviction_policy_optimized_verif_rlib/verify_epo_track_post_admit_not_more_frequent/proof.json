@@ -2,11 +2,11 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_arena_push_back": { "prover": "alt-ergo", "time": 0.016 },
-      "vc_arena_push_front": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_arena_push_back": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_arena_push_front": { "prover": "alt-ergo", "time": 0.033 },
       "vc_verify_epo_track_post_admit_not_more_frequent": {
         "prover": "alt-ergo",
-        "time": 0.029
+        "time": 0.052
       }
     }
   }

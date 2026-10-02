@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_arena_remove": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_arena_remove": { "prover": "alt-ergo", "time": 0.031 },
       "vc_verify_epo_remove_frame_sketch_unchanged": {
         "prover": "z3",
-        "time": 0.017
+        "time": 0.024
       }
     }
   }

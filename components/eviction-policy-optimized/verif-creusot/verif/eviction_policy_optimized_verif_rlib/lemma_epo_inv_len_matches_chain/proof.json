@@ -4,7 +4,7 @@
     "Coma": {
       "vc_lemma_epo_inv_len_matches_chain": {
         "prover": "alt-ergo",
-        "time": 0.03
+        "time": 0.031
       }
     }
   }

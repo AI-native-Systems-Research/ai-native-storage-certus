@@ -5,7 +5,7 @@
       "vc_arena_peek_front_n": { "prover": "alt-ergo", "time": 0.018 },
       "vc_verify_epo_candidates_post_zero_empty__mutant": {
         "tactic": "split_vc",
-        "children": [ { "prover": "alt-ergo", "time": 0.032 }, null ]
+        "children": [ { "prover": "alt-ergo", "time": 0.027 }, null ]
       }
     }
   }

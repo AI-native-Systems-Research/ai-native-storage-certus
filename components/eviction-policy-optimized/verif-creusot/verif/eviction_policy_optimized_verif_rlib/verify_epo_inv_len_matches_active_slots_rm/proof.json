@@ -4,9 +4,9 @@
     "Coma": {
       "vc_verify_epo_inv_len_matches_active_slots_rm": {
         "prover": "alt-ergo",
-        "time": 0.021
+        "time": 0.038
       },
-      "vc_wf_remove_ad": { "prover": "alt-ergo", "time": 0.013 }
+      "vc_wf_remove_ad": { "prover": "alt-ergo", "time": 0.023 }
     }
   }
 }

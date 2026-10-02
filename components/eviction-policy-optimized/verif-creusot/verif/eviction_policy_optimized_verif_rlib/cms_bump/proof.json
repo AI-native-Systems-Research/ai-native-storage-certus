@@ -3,7 +3,7 @@
   "proofs": {
     "Coma": {
       "vc_cms_bump": { "prover": "alt-ergo", "time": 0.018 },
-      "vc_saturating_add": { "prover": "alt-ergo", "time": 0.011 }
+      "vc_saturating_add": { "prover": "alt-ergo", "time": 0.015 }
     }
   }
 }

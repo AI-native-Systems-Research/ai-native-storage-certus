@@ -1,14 +1,14 @@
-(* #"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 3228 0 3228 95 *)
+(* #"/home/cornel/epo-proof-branch-20261002/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 3375 0 3375 95 *)
 
-let%span slib = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 3223 10 3223 14
-let%span slib'0 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 3224 11 3224 20
-let%span slib'1 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 3225 11 3225 29
-let%span slib'2 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 3226 11 3226 78
-let%span slib'3 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 3227 10 3227 60
-let%span slib'4 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2875 10 2875 14
-let%span slib'5 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2876 11 2876 20
-let%span slib'6 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2879 8 2885 9
-let%span swell_founded = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+let%span slib = "/home/cornel/epo-proof-branch-20261002/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 3370 10 3370 14
+let%span slib'0 = "/home/cornel/epo-proof-branch-20261002/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 3371 11 3371 20
+let%span slib'1 = "/home/cornel/epo-proof-branch-20261002/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 3372 11 3372 29
+let%span slib'2 = "/home/cornel/epo-proof-branch-20261002/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 3373 11 3373 78
+let%span slib'3 = "/home/cornel/epo-proof-branch-20261002/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 3374 10 3374 60
+let%span slib'4 = "/home/cornel/epo-proof-branch-20261002/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 3022 10 3022 14
+let%span slib'5 = "/home/cornel/epo-proof-branch-20261002/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 3023 11 3023 20
+let%span slib'6 = "/home/cornel/epo-proof-branch-20261002/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 3026 8 3032 9
+let%span swell_founded = "/home/cornel/epo-proof-branch-20261002/components/eviction-policy-optimized/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
 
 use creusot.int.UInt64
 use creusot.int.UInt32
@@ -19,7 +19,7 @@ type t_Option_u32 = None | Some UInt32.t
 
 type t_Node = { key: UInt64.t; prev: t_Option_u32; next: t_Option_u32; active: bool }
 
-function chain_len [#"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2877 0 2877 70] (nodes: Seq.seq t_Node) (cur: t_Option_u32) (fuel: int) : int
+function chain_len [#"/home/cornel/epo-proof-branch-20261002/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 3024 0 3024 70] (nodes: Seq.seq t_Node) (cur: t_Option_u32) (fuel: int) : int
 
 axiom chain_len_def:
   forall nodes: Seq.seq t_Node, cur: t_Option_u32, fuel: int [chain_len nodes cur fuel]. ([%#slib'5] fuel >= 0)
@@ -54,7 +54,7 @@ constant cur : t_Option_u32
 
 constant fuel : int
 
-function lemma_epo_inv_len_matches_chain [#"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 3228 0 3228 95] (a: Seq.seq t_Node) (b: Seq.seq t_Node) (cur: t_Option_u32) (fuel: int) : ()
+function lemma_epo_inv_len_matches_chain [#"/home/cornel/epo-proof-branch-20261002/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 3375 0 3375 95] (a: Seq.seq t_Node) (b: Seq.seq t_Node) (cur: t_Option_u32) (fuel: int) : ()
 
 goal vc_lemma_epo_inv_len_matches_chain: ([%#slib'0] fuel >= 0)
   -> ([%#slib'1] Seq.length a = Seq.length b)

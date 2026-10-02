@@ -2,11 +2,11 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_arena_clear": { "prover": "alt-ergo", "time": 0.015 },
-      "vc_pool_age_step": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_arena_clear": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_pool_age_step": { "prover": "alt-ergo", "time": 0.018 },
       "vc_verify_epo_inv_aging_period_non_decreasing": {
         "prover": "alt-ergo",
-        "time": 0.027
+        "time": 0.031
       }
     }
   }

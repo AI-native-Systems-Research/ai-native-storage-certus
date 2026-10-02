@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_pool_track": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_pool_track": { "prover": "alt-ergo", "time": 0.029 },
       "vc_verify_epo_track_post_maxlen_highwater": {
         "prover": "alt-ergo",
-        "time": 0.027
+        "time": 0.033
       }
     }
   }

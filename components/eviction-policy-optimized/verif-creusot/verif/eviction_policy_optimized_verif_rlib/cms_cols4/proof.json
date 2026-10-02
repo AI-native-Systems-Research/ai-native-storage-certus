@@ -2,8 +2,8 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_cms_col": { "prover": "alt-ergo", "time": 0.011 },
-      "vc_cms_cols4": { "prover": "alt-ergo", "time": 0.026 }
+      "vc_cms_col": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_cms_cols4": { "prover": "alt-ergo", "time": 0.024 }
     }
   }
 }

@@ -6,7 +6,7 @@
       "vc_arena_remove": { "prover": "alt-ergo", "time": 0.014 },
       "vc_refute_epo_inv_stale_handle_no_cross_entry_effect": {
         "prover": "alt-ergo",
-        "time": 0.036
+        "time": 0.038
       }
     }
   }

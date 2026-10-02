@@ -1,25 +1,25 @@
-(* #"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2199 0 2200 35 *)
+(* #"/home/cornel/epo-proof-branch-20261002/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2245 0 2246 35 *)
 
-let%span slib = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2201 4 2201 29
-let%span slib'0 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2193 11 2193 36
-let%span slib'1 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2194 10 2194 75
-let%span slib'2 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2195 10 2195 85
-let%span slib'3 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2196 10 2196 85
-let%span slib'4 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2197 10 2197 85
-let%span slib'5 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2198 10 2198 85
-let%span slib'6 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 682 11 682 40
-let%span slib'7 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 683 10 683 42
-let%span slib'8 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 684 10 684 26
-let%span slib'9 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 685 10 685 47
-let%span slib'10 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 686 10 686 47
-let%span slib'11 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 687 10 687 47
-let%span slib'12 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 688 10 689 109
-let%span slib'13 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 690 10 691 109
-let%span slib'14 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 692 10 693 109
-let%span slib'15 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 694 10 695 109
-let%span slib'16 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 696 10 697 88
-let%span slib'17 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 698 10 700 62
-let%span svec = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span slib = "/home/cornel/epo-proof-branch-20261002/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2247 4 2247 29
+let%span slib'0 = "/home/cornel/epo-proof-branch-20261002/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2239 11 2239 36
+let%span slib'1 = "/home/cornel/epo-proof-branch-20261002/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2240 10 2240 75
+let%span slib'2 = "/home/cornel/epo-proof-branch-20261002/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2241 10 2241 85
+let%span slib'3 = "/home/cornel/epo-proof-branch-20261002/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2242 10 2242 85
+let%span slib'4 = "/home/cornel/epo-proof-branch-20261002/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2243 10 2243 85
+let%span slib'5 = "/home/cornel/epo-proof-branch-20261002/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2244 10 2244 85
+let%span slib'6 = "/home/cornel/epo-proof-branch-20261002/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 710 11 710 40
+let%span slib'7 = "/home/cornel/epo-proof-branch-20261002/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 711 10 711 42
+let%span slib'8 = "/home/cornel/epo-proof-branch-20261002/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 712 10 712 26
+let%span slib'9 = "/home/cornel/epo-proof-branch-20261002/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 713 10 713 47
+let%span slib'10 = "/home/cornel/epo-proof-branch-20261002/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 714 10 714 47
+let%span slib'11 = "/home/cornel/epo-proof-branch-20261002/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 715 10 715 47
+let%span slib'12 = "/home/cornel/epo-proof-branch-20261002/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 716 10 717 109
+let%span slib'13 = "/home/cornel/epo-proof-branch-20261002/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 718 10 719 109
+let%span slib'14 = "/home/cornel/epo-proof-branch-20261002/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 720 10 721 109
+let%span slib'15 = "/home/cornel/epo-proof-branch-20261002/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 722 10 723 109
+let%span slib'16 = "/home/cornel/epo-proof-branch-20261002/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 724 10 725 88
+let%span slib'17 = "/home/cornel/epo-proof-branch-20261002/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 726 10 728 62
+let%span svec = "/home/cornel/epo-proof-branch-20261002/components/eviction-policy-optimized/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
 
 use creusot.prelude.MutBorrow
 use creusot.int.UInt64
@@ -100,7 +100,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let verify_epo_inv_sketch_counters_saturate [#"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2199 0 2200 35]
+let verify_epo_inv_sketch_counters_saturate [#"/home/cornel/epo-proof-branch-20261002/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2245 0 2246 35]
   (s: MutBorrow.t t_Sketch) (key: UInt64.t) (return (x: tup4_usize_usize_usize_usize)) =
 {[@stop_split] [@expl:verify_epo_inv_sketch_counters_saturate requires] [%#slib'0] Seq.length (view_Vec_u8_Global s.current.counters)
   = 4096}

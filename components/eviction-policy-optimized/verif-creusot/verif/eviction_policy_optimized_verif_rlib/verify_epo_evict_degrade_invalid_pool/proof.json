@@ -5,7 +5,7 @@
       "vc_state_evict": { "prover": "alt-ergo", "time": 0.018 },
       "vc_verify_epo_evict_degrade_invalid_pool": {
         "prover": "alt-ergo",
-        "time": 0.02
+        "time": 0.025
       }
     }
   }

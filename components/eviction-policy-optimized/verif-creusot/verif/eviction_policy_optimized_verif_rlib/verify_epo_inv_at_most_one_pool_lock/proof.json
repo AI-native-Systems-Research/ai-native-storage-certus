@@ -2,28 +2,11 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_lock_acquire": { "prover": "alt-ergo", "time": 0.016 },
-      "vc_lock_release": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_lock_acquire": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_lock_release": { "prover": "alt-ergo", "time": 0.015 },
       "vc_verify_epo_inv_at_most_one_pool_lock": {
-        "tactic": "compute_specified",
-        "children": [
-          {
-            "tactic": "split_vc",
-            "children": [
-              { "prover": "alt-ergo", "time": 0.013 },
-              { "prover": "alt-ergo", "time": 0.012 },
-              { "prover": "alt-ergo", "time": 0.018 },
-              { "prover": "alt-ergo", "time": 0.022 },
-              {
-                "tactic": "split_vc",
-                "children": [
-                  { "prover": "alt-ergo", "time": 0.021 },
-                  { "prover": "alt-ergo", "time": 0.025 }
-                ]
-              }
-            ]
-          }
-        ]
+        "prover": "alt-ergo",
+        "time": 0.048
       }
     }
   }

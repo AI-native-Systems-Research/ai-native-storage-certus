@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_sketch_increment4": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_sketch_increment4": { "prover": "alt-ergo", "time": 0.026 },
       "vc_verify_epo_track_post_sketch_increment": {
         "prover": "alt-ergo",
-        "time": 0.069
+        "time": 0.109
       }
     }
   }

@@ -2,12 +2,12 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_arena_move_to_back": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_arena_move_to_back": { "prover": "alt-ergo", "time": 0.014 },
       "vc_arena_push_back": { "prover": "alt-ergo", "time": 0.014 },
-      "vc_arena_remove": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_arena_remove": { "prover": "alt-ergo", "time": 0.014 },
       "vc_verify_epo_inv_internal_index_in_range": {
         "prover": "z3",
-        "time": 0.016
+        "time": 0.029
       }
     }
   }

@@ -1,0 +1,14 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_state_clear": { "prover": "alt-ergo", "time": 0.033 },
+      "vc_state_remove": { "prover": "alt-ergo", "time": 0.032 },
+      "vc_state_touch": { "prover": "alt-ergo", "time": 0.032 },
+      "vc_verify_epo_inv_stale_handle_never_crashes_api": {
+        "prover": "z3",
+        "time": 0.032
+      }
+    }
+  }
+}

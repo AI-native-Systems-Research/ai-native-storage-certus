@@ -2,11 +2,11 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_state_clear": { "prover": "alt-ergo", "time": 0.016 },
-      "vc_state_evict": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_state_clear": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_state_evict": { "prover": "alt-ergo", "time": 0.029 },
       "vc_verify_epo_inv_pools_append_only": {
         "prover": "alt-ergo",
-        "time": 0.061
+        "time": 0.122
       }
     }
   }

@@ -8,15 +8,15 @@
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.028 },
-              { "prover": "alt-ergo", "time": 0.026 },
-              { "prover": "alt-ergo", "time": 0.03 },
+              { "prover": "alt-ergo", "time": 0.027 },
+              { "prover": "alt-ergo", "time": 0.027 },
+              { "prover": "alt-ergo", "time": 0.025 },
               null
             ]
           }
         ]
       },
-      "vc_work_add": { "prover": "alt-ergo", "time": 0.013 }
+      "vc_work_add": { "prover": "alt-ergo", "time": 0.025 }
     }
   }
 }

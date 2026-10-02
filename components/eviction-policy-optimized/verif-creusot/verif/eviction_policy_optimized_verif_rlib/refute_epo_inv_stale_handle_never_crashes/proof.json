@@ -5,7 +5,7 @@
       "vc_arena_clear": { "prover": "alt-ergo", "time": 0.014 },
       "vc_refute_epo_inv_stale_handle_never_crashes": {
         "prover": "alt-ergo",
-        "time": 0.019
+        "time": 0.02
       }
     }
   }

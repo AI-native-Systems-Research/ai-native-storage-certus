@@ -4,7 +4,7 @@
     "Coma": {
       "vc_verify_epo_inv_sketch_row_hashes_distinct": {
         "prover": "alt-ergo",
-        "time": 0.041
+        "time": 0.079
       }
     }
   }

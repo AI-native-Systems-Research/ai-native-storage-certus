@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_new_Pool": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_new_Pool": { "prover": "alt-ergo", "time": 0.033 },
       "vc_verify_epo_inv_no_startup_banner__mutant": null
     }
   }

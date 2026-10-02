@@ -5,7 +5,7 @@
       "vc_state_clear": { "prover": "alt-ergo", "time": 0.015 },
       "vc_verify_epo_clear_frame_other_pools": {
         "prover": "alt-ergo",
-        "time": 0.021
+        "time": 0.022
       }
     }
   }

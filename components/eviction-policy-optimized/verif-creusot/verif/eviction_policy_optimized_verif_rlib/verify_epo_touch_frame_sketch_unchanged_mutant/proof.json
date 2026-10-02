@@ -2,13 +2,13 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_arena_move_to_back": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_arena_move_to_back": { "prover": "alt-ergo", "time": 0.031 },
       "vc_verify_epo_touch_frame_sketch_unchanged__mutant": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
-            "children": [ { "prover": "alt-ergo", "time": 0.035 }, null ]
+            "children": [ { "prover": "alt-ergo", "time": 0.03 }, null ]
           }
         ]
       }

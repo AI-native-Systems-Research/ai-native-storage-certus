@@ -4,9 +4,9 @@
     "Coma": {
       "vc_verify_epo_inv_list_tail_is_only_node_without_next_cl": {
         "prover": "alt-ergo",
-        "time": 0.021
+        "time": 0.043
       },
-      "vc_wf_clear": { "prover": "alt-ergo", "time": 0.015 }
+      "vc_wf_clear": { "prover": "alt-ergo", "time": 0.023 }
     }
   }
 }

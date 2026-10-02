@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_arena_pop_front": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_arena_pop_front": { "prover": "alt-ergo", "time": 0.015 },
       "vc_verify_epo_evict_post_empty_pool_none": {
         "prover": "alt-ergo",
         "time": 0.025

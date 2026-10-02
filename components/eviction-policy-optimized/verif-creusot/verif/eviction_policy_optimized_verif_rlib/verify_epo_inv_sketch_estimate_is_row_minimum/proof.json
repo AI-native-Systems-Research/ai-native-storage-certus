@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_cms_min4": { "prover": "alt-ergo", "time": 0.01 },
+      "vc_cms_min4": { "prover": "alt-ergo", "time": 0.023 },
       "vc_verify_epo_inv_sketch_estimate_is_row_minimum": {
         "prover": "alt-ergo",
-        "time": 0.015
+        "time": 0.02
       }
     }
   }

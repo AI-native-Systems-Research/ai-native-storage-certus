@@ -7,11 +7,11 @@
         "children": [
           {
             "tactic": "split_vc",
-            "children": [ { "prover": "alt-ergo", "time": 0.018 }, null ]
+            "children": [ { "prover": "alt-ergo", "time": 0.035 }, null ]
           }
         ]
       },
-      "vc_wf_push_back": { "prover": "alt-ergo", "time": 0.015 }
+      "vc_wf_push_back": { "prover": "alt-ergo", "time": 0.023 }
     }
   }
 }

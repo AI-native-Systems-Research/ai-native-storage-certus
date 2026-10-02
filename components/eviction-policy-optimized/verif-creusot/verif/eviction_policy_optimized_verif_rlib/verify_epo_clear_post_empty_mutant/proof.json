@@ -2,8 +2,8 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_state_candidates": { "prover": "alt-ergo", "time": 0.017 },
-      "vc_state_clear": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_state_candidates": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_state_clear": { "prover": "alt-ergo", "time": 0.015 },
       "vc_state_evict": { "prover": "alt-ergo", "time": 0.017 },
       "vc_verify_epo_clear_post_empty__mutant": {
         "tactic": "compute_specified",
@@ -11,8 +11,8 @@
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.042 },
-              { "prover": "alt-ergo", "time": 0.043 },
+              { "prover": "alt-ergo", "time": 0.037 },
+              { "prover": "alt-ergo", "time": 0.048 },
               null
             ]
           }

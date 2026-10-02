@@ -4,7 +4,7 @@
     "Coma": {
       "vc_cms_min4": { "prover": "alt-ergo", "time": 0.015 },
       "vc_index_Vec_u8_Global": { "prover": "alt-ergo", "time": 0.015 },
-      "vc_sketch_estimate_at": { "prover": "alt-ergo", "time": 0.021 }
+      "vc_sketch_estimate_at": { "prover": "alt-ergo", "time": 0.023 }
     }
   }
 }

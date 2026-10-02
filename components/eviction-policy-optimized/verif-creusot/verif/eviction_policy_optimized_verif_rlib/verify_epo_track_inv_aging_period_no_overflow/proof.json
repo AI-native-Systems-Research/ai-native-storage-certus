@@ -4,7 +4,7 @@
     "Coma": {
       "vc_verify_epo_track_inv_aging_period_no_overflow": {
         "prover": "alt-ergo",
-        "time": 0.016
+        "time": 0.03
       }
     }
   }

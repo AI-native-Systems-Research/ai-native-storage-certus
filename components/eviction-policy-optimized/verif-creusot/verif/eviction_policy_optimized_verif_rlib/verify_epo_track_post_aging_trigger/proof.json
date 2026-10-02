@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_pool_age_step": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_pool_age_step": { "prover": "alt-ergo", "time": 0.029 },
       "vc_verify_epo_track_post_aging_trigger": {
         "prover": "alt-ergo",
-        "time": 0.067
+        "time": 0.093
       }
     }
   }

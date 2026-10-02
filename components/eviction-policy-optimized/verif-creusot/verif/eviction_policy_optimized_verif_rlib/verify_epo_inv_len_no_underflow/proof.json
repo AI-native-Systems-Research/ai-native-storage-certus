@@ -5,7 +5,7 @@
       "vc_arena_remove": { "prover": "alt-ergo", "time": 0.014 },
       "vc_verify_epo_inv_len_no_underflow": {
         "prover": "alt-ergo",
-        "time": 0.034
+        "time": 0.059
       }
     }
   }

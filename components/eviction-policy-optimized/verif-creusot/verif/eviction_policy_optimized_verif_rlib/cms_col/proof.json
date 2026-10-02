@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_cms_col": { "prover": "z3", "time": 0.047 },
+      "vc_cms_col": { "prover": "z3", "time": 0.041 },
       "vc_wrapping_mul": { "prover": "alt-ergo", "time": 0.019 }
     }
   }
