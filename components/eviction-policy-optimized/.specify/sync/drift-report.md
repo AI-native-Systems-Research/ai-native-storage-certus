@@ -1,9 +1,9 @@
 ---
 spec_sync_component: eviction-policy-optimized
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-09-23T19:38:44Z
-spec_sync_git_commit: 919310b8
-spec_sync_inputs_sha256: 50c57c1f8f178ce63e76a9afb4b9024fdbbd3ac7a7fd92bec057a10e8e10a917
+spec_sync_synced_at: 2026-10-02T23:36:32Z
+spec_sync_git_commit: 7c1efed9
+spec_sync_inputs_sha256: fc9946decc6e517da832467270351d1c4e840ec0ef1203b15b18185f4bec254e
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 # Spec Drift Report

@@ -1,9 +1,9 @@
 ---
 spec_sync_component: dispatcher
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-09-29T00:00:00Z
-spec_sync_git_commit: 3b1cca02
-spec_sync_inputs_sha256: 58c590e9c8292d98872b5c90099144e370572f8f5b1ef79d5870b8b8389f4c4f
+spec_sync_synced_at: 2026-10-02T23:36:32Z
+spec_sync_git_commit: 7c1efed9
+spec_sync_inputs_sha256: 5a007cae3106f224fb424e0046441d7529a4e7eb7f7d1da4d62f3392612e9588
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Re-stamp 2026-09-29 (lookup-accounting fixes; spec backfilled with the behaviour
