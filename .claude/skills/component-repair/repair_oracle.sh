@@ -76,11 +76,15 @@ CRATE="$COMPONENT_DIR/verif-creusot"
 
 # Forced replay. why3find caches by goal, so without -f a source change can be judged against the
 # PREVIOUS run's result — which has produced wrong numbers on this project more than once.
-run_module() {   # <module> -> prints "PROVED" | "FAILED" | "ABSENT"
+run_module() {   # <module> -> prints "PROVED" | "FAILED" | "ABSENT" | "CRASH" | "ERROR"
   local m="$1"
   grep -qE "fn[[:space:]]+${m}\b" "$CRATE/src/"*.rs 2>/dev/null || { echo ABSENT; return; }
+  # `cargo creusot` collapses a double underscore in the emitted module name (`__mutant` ->
+  # `_mutant.coma`), and the module filter matches the EMITTED name. Asking for `x__mutant` gets
+  # "Error: No files to prove" -- the prover never runs. Measured 2026-10-02.
+  local filt; filt="$(printf '%s' "$m" | sed -E 's/_{2,}/_/g')"
   local out
-  out="$(cd "$CRATE" && timeout 1800 cargo creusot "$m" --why3find-arg=-f 2>&1)"
+  out="$(cd "$CRATE" && timeout 1800 cargo creusot "$filt" --why3find-arg=-f 2>&1)"
   # Gate on the PRINTED verdict line, never on proof.json: it is written incrementally and a mid-run
   # read once reported 0 unproved where the finished run reported 2.
   # BOTH print forms must match, and getting this wrong reported a PROVING refutation as FAILED:
@@ -88,7 +92,15 @@ run_module() {   # <module> -> prints "PROVED" | "FAILED" | "ABSENT"
   #   ONE named module              -> `Proved (verif/<crate>_rlib/<module>.coma) ✔`
   if grep -qE '^Proved \(.+\)' <<<"$out"; then echo PROVED
   elif grep -qE 'CBMC failed|Invariant check failed|panicked at' <<<"$out"; then echo CRASH
-  else echo FAILED
+  # FAILED needs EVIDENCE THE PROVER RAN: a goal line `✘ (k/n)` or "N unproved file".
+  # Anything else is ERROR. This distinction is the anti-vacuity check's correctness: the mutant is
+  # REQUIRED to fail, so when a build error or "No files to prove" was read as FAILED, a twin that
+  # never ran was credited as proof the base has content. Measured 2026-10-02: both a missing
+  # creusot-std (0.37s) and the `__mutant` name collapse produced exactly that.
+  elif grep -qE '✘ \([0-9]+/[0-9]+\)|[0-9]+ unproved file' <<<"$out"; then echo FAILED
+  else
+    echo ERROR
+    printf '%s\n' "$out" | grep -E 'Error|error' | head -3 | sed 's/^/       │ /' >&2
   fi
 }
 
@@ -114,9 +126,12 @@ R="$(run_module "$REFUTE")";  echo "  3. $REFUTE : $R   (reported; gated only wi
 
 fail=$extra_fail
 (( extra_fail )) && echo "  ✗ a module the obligation rests on does NOT prove — the defect is still present."
+[[ "$V" == ERROR ]] && echo "  ✗ verify_ did not run (build/setup error, shown above) — this is the environment, not the proof."
 [[ "$V" == PROVED ]] || { echo "  ✗ the obligation is NOT proved. A repair without a proof is unvalidated."; fail=1; }
 case "$M" in
   FAILED) : ;;
+  ERROR)  echo "  ✗ INCONCLUSIVE: the anti-vacuity twin did not run (build/setup error, shown above)."
+          echo "    A twin that never ran is not a failure. Fix the environment and re-run."; fail=1 ;;
   ABSENT) echo "  ✗ no anti-vacuity twin. Author $MUTANT — an unfalsifiable proof is not evidence."; fail=1 ;;
   PROVED) echo "  ✗ VACUOUS: the mutant also proves, so $VERIFY has no content."; fail=1 ;;
   CRASH)  echo "  ✗ INCONCLUSIVE: the mutant CRASHED rather than failing on its assertion. A crash is"
