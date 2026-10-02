@@ -1104,6 +1104,16 @@ def bench_contention(
 
 # ── mode: scheduler-step ─────────────────────────────────────────────────────
 
+def _drain_store_background(worker, stored_keys, manager):
+    """Drain and complete a deferred store in a background thread."""
+    while True:
+        finished = worker.get_finished()
+        if finished:
+            break
+        time.sleep(0.0001)
+    manager.complete_store(stored_keys, success=True)
+
+
 def bench_scheduler_step(
     manager: ShmqCertusOffloadingManager,
     worker,
@@ -1115,15 +1125,18 @@ def bench_scheduler_step(
     *,
     requests_per_step: int = 8,
     pipeline_depth: int = 4,
-    num_sessions: int = 4,
+    num_sessions: int = 32,
     num_blocks: int = 128,
 ) -> BenchResult:
-    """Simulate continuous-batching scheduler steps with prefix sharing.
+    """Simulate continuous-batching scheduler steps matching production vLLM.
 
-    Each step admits ``requests_per_step`` requests drawn from
-    ``num_sessions`` conversations.  Earlier-stored keys are shared
-    prefix (should hit on lookup); new keys are suffix (miss → store).
-    Dispatches are pipelined through the worker.
+    Models the real vLLM offloading connector call pattern:
+      - Per-request maximal prefix scan (per-key lookup, break on miss)
+      - Store submitted after drain, completed in background (fire-and-forget)
+      - drain_workers measures only load completion
+      - Prefix cache fills naturally (no per-step key removal)
+      - Geometric session prefix distribution (varied hit ratios)
+      - Backpressure: deferred steps when store backlog exceeds threshold
     """
     keys_per_request = max(4, num_blocks // requests_per_step)
     prefix_len = keys_per_request // 2
@@ -1137,12 +1150,16 @@ def bench_scheduler_step(
         "drain_workers": PhaseTiming("drain_workers"),
         "complete": PhaseTiming("complete"),
         "take_events": PhaseTiming("take_events"),
+        "backpressure_wait": PhaseTiming("backpressure_wait"),
     }
 
-    # Seed each session's prefix into the server.
+    # Build session pool with geometric prefix-length distribution.
+    # Short prefixes miss more; long prefixes hit more — like production.
     session_prefixes: list[list[bytes]] = []
+    rng = random.Random(42)
     for s in range(num_sessions):
-        prefix_keys = make_content_keys(prefix_len, seed=s * 10_000)
+        geo_len = max(2, min(prefix_len, int(rng.expovariate(1.0 / prefix_len))))
+        prefix_keys = make_content_keys(geo_len, seed=s * 10_000)
         _populate_keys(manager, worker, prefix_keys, batch_size)
         session_prefixes.append(prefix_keys)
 
@@ -1150,11 +1167,29 @@ def bench_scheduler_step(
     total_steps = 0
     total_prefix_hits = 0
     total_suffix_stores = 0
+    total_deferred_steps = 0
+    total_store_bg_completions = 0
     wall_start = time.perf_counter()
     job_id = 1_000_000
 
+    store_drain_executor = ThreadPoolExecutor(
+        max_workers=1, thread_name_prefix="store-drain",
+    )
+    pending_store_futures: list = []
+    max_store_backlog = 4
+
     while (time.perf_counter() - wall_start) < min_duration or total_steps < 3:
-        step_start = time.perf_counter()
+        # Backpressure: if too many stores in flight, wait for oldest.
+        if len(pending_store_futures) >= max_store_backlog:
+            t_bp = time.perf_counter()
+            pending_store_futures[0].result()
+            pending_store_futures.pop(0)
+            total_store_bg_completions += 1
+            phases["backpressure_wait"].record(time.perf_counter() - t_bp)
+            total_deferred_steps += 1
+
+        # Reap completed store futures without blocking.
+        pending_store_futures = [f for f in pending_store_futures if not f.done()]
 
         # Build requests for this step.
         all_load_keys: list[bytes] = []
@@ -1172,7 +1207,7 @@ def bench_scheduler_step(
 
             manager.touch(req_keys)
 
-            # Maximal prefix scan.
+            # Maximal prefix scan (matches vLLM's _maximal_prefix_lookup).
             prefix_hits = []
             for k in req_keys:
                 if manager.lookup(k):
@@ -1189,7 +1224,6 @@ def bench_scheduler_step(
         phases["touch_lookup"].record(time.perf_counter() - t_tl)
 
         # Deduplicate: multiple requests in a step can share prefix keys.
-        # The server rejects duplicate keys in a single Pin/Reserve batch.
         seen_load: set[bytes] = set()
         deduped_load = []
         for k in all_load_keys:
@@ -1222,25 +1256,17 @@ def bench_scheduler_step(
             load_spec = manager.prepare_load(all_load_keys)
             phases["prepare_load"].record(time.perf_counter() - t0)
 
-        # Dispatch (pipelined).
+        # Submit load only; store is deferred (fire-and-forget).
         t0 = time.perf_counter()
-        stored_keys = None
-        if store_result and store_result.keys_to_store:
-            stored_keys = store_result.keys_to_store
-            gpu_ids = list(range(len(stored_keys)))
-            job_id += 1
-            worker.submit_store(
-                job_id, _FakeGPUSpec(gpu_ids), store_result.store_spec,
-            )
         if load_spec and all_load_keys:
             gpu_ids = list(range(len(all_load_keys)))
             job_id += 1
             worker.submit_load(job_id, load_spec, _FakeGPUSpec(gpu_ids))
         phases["submit"].record(time.perf_counter() - t0)
 
-        # Drain workers.
+        # Drain workers: only the load future (production behavior).
         t0 = time.perf_counter()
-        pending = (1 if stored_keys else 0) + (1 if (load_spec and all_load_keys) else 0)
+        pending = 1 if (load_spec and all_load_keys) else 0
         drained = 0
         while drained < pending:
             finished = worker.get_finished()
@@ -1250,11 +1276,8 @@ def bench_scheduler_step(
                 time.sleep(0.0001)
         phases["drain_workers"].record(time.perf_counter() - t0)
 
-        # Complete.
+        # Complete load.
         t0 = time.perf_counter()
-        if stored_keys:
-            manager.complete_store(stored_keys, success=True)
-            total_blocks += len(stored_keys)
         if all_load_keys:
             manager.complete_load(all_load_keys)
             total_blocks += len(all_load_keys)
@@ -1268,11 +1291,29 @@ def bench_scheduler_step(
 
         total_steps += 1
 
-        # Remove suffix keys so next step's stores don't dedup.
-        if all_store_keys:
-            _remove_keys(ring, all_store_keys, manager._world_size)
+        # Submit store after drain, complete in background thread.
+        # This matches production: stores are fire-and-forget.
+        if store_result and store_result.keys_to_store:
+            stored_keys = store_result.keys_to_store
+            gpu_ids = list(range(len(stored_keys)))
+            job_id += 1
+            worker.submit_store(
+                job_id, _FakeGPUSpec(gpu_ids), store_result.store_spec,
+            )
+            total_blocks += len(stored_keys)
+            fut = store_drain_executor.submit(
+                _drain_store_background, worker, stored_keys, manager,
+            )
+            pending_store_futures.append(fut)
+
+    # Drain all remaining background stores.
+    for fut in pending_store_futures:
+        fut.result()
+        total_store_bg_completions += 1
 
     wall = time.perf_counter() - wall_start
+    store_drain_executor.shutdown(wait=False)
+
     result = BenchResult(
         label=(
             f"Scheduler Step (reqs={requests_per_step}, "
@@ -1286,6 +1327,8 @@ def bench_scheduler_step(
     result.print_report()
     print(f"  Steps={total_steps}  steps/s={total_steps/wall:.1f}  "
           f"prefix_hits={total_prefix_hits}  suffix_stores={total_suffix_stores}")
+    print(f"  Deferred steps (backpressure): {total_deferred_steps}  "
+          f"Store bg completions: {total_store_bg_completions}")
 
     # Clean up session prefixes.
     for prefix in session_prefixes:
@@ -1686,7 +1729,7 @@ def main():
                         help="(prefix-miss) Fraction of keys pre-stored (0.0-1.0)")
     parser.add_argument("--requests-per-step", type=int, default=8,
                         help="(scheduler-step) Requests per scheduler step")
-    parser.add_argument("--num-sessions", type=int, default=4,
+    parser.add_argument("--num-sessions", type=int, default=32,
                         help="(scheduler-step) Distinct conversations in the pool")
     args = parser.parse_args()
 
