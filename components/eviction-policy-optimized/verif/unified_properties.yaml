@@ -8230,3 +8230,18 @@ known_corrections:
   reproduce: python3 scorer_kani.py <verif> --component-dir <component>/verif-kani --only EPO-INV-SKETCH-HALVE-NON-INCREASING
     --cap-seconds 240 --cap-max 420 --wall-budget 500
   correct_counts: 'kani: 104 proved / 1 unresolved / 2 refuted / 1 tool-boundary / 2 delegated'
+- property: EPO-INV-LIST-EMPTY-IFF-NO-ENDS
+  recorded: '2026-10-02'
+  this_bundle_says: proved
+  should_read: not proved (UNRESOLVED under the corrected gate)
+  why: The gate credited verify_epo_inv_list_empty_iff_no_ends__inv, a lever variant that adds free_len_counts_inactive(l)
+    to its precondition. That is exactly the base proof's one unproved subgoal, and no module ever proves
+    it, so the variant assumed the hard part. The property's own module, verify_epo_inv_list_empty_iff_no_ends,
+    does not prove (22 of 23 goals), before and after the stale-handle fix. Found 2026-10-02; the gate
+    now always requires a property's own module and rejects a variant that assumes more or promises less
+    than its base.
+  not_a_defect: This is NOT a defect in the code. The property is probably true; it has simply not been
+    proved.
+  correct_counts: 'creusot: 105 proved / 1 unresolved / 2 refuted / 2 delegated'
+  reproduce: scorer_creusot.py components/eviction-policy-optimized/verif --crate-dir components/eviction-policy-optimized/verif-creusot
+    --cap-seconds 60 --cap-max 300 --only EPO-INV-LIST-EMPTY-IFF-NO-ENDS
