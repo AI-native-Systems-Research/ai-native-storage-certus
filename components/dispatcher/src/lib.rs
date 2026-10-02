@@ -3810,6 +3810,30 @@ impl IDispatcher for DispatcherComponent {
         Ok(flushed)
     }
 
+    fn schedule_write_through(
+        &self,
+        key: CacheKey,
+        size: u32,
+    ) -> Result<(), interfaces::DispatcherError> {
+        self.ensure_initialized()?;
+
+        let num_drives = {
+            let dd = self.data_drives.read();
+            dd.len().max(1)
+        };
+        // Same drive mapping the store path uses, so a key's data and its write job
+        // always land on the same device.
+        let guard = self.bg_writer.lock().unwrap();
+        if let Some(ref writer) = *guard {
+            let _ = writer.enqueue(WriteJob {
+                key,
+                size,
+                device_index: Self::drive_index(key, num_drives),
+            });
+        }
+        Ok(())
+    }
+
     fn read_write_stats(&self) -> interfaces::ReadWriteStats {
         // Aggregate per-direction counters across every data drive. Each drive's
         // block device tracks its own SSD read/write bytes+ops (zeroed unless

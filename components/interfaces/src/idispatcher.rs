@@ -810,6 +810,36 @@ component_macros::define_interface! {
         /// Returns the number of entries that now have a valid SSD offset.
         fn flush_to_ssd(&self) -> Result<usize, DispatcherError>;
 
+        /// Enqueue a background write-through for a key already resident in the memory
+        /// tier, **without waiting for it to land**.
+        ///
+        /// This exists for values that enter the memory tier by a path other than a
+        /// client store. A client store is persisted as a side effect of
+        /// `copy_gpu_to_memory_completed`, but a value fetched from a peer is published
+        /// straight into the dispatch map by `remote-lookup`, which has no route to the
+        /// background writer. Without this call such an entry keeps
+        /// `ssd_offset == None` forever.
+        ///
+        /// **Why "forever" is the problem, and not merely a lost optimisation.**
+        /// `IDispatchMap::try_evict_to_block` refuses an entry with no `ssd_offset`,
+        /// and the dispatcher's clean-eviction scan deliberately will not `remove` one
+        /// either (removing a resident-but-unpersisted key turns it into `NotExist`
+        /// under the Check→Pin race, which is fatal to the vLLM connector). So the entry
+        /// has no exit from the tier at all, it ages to the oldest end of the LRU, and
+        /// the eviction scan — which looks at exactly the oldest keys — comes to see
+        /// nothing but such entries. The tier poisons its own eviction candidates, and
+        /// stores are then declined regardless of how much capacity exists.
+        ///
+        /// Non-blocking by contract: callers are latency-sensitive paths such as a
+        /// remote fetch's completion. Use `flush_to_ssd` when the caller genuinely needs
+        /// the data durable before proceeding.
+        ///
+        /// Best-effort. Returns `Ok(())` when the job was queued, and callers are
+        /// expected to ignore failures: a key whose write-through cannot be scheduled is
+        /// still correctly cached and readable, it is merely undemotable, which is the
+        /// pre-existing behaviour rather than a new fault.
+        fn schedule_write_through(&self, key: CacheKey, size: u32) -> Result<(), DispatcherError>;
+
         /// Return cumulative per-direction SSD read/write byte, op, and latency
         /// counters aggregated across all data drives. Returns zeroed counters
         /// unless the dispatcher (and its block devices) were built with the

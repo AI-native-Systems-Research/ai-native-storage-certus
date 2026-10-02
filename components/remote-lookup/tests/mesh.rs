@@ -62,6 +62,10 @@ struct TestMesh {
     nodes: Vec<Arc<RemoteLookupComponent>>,
     /// Per-node scriptable local state, index-aligned with `nodes`.
     worlds: Vec<NodeWorld>,
+    /// The mock dispatchers, index-aligned with `nodes`. Retained so a test can
+    /// assert on side effects that have no other observable trace — notably whether
+    /// a published fetch had its write-through scheduled.
+    dispatchers: Vec<Arc<MockDispatcher>>,
     /// Kept alive for the mesh's lifetime (nodes also hold `IZyre` clones).
     _zyre: Arc<ZyreComponent>,
     /// Serialises mesh lifetimes across concurrently-run tests.
@@ -93,6 +97,7 @@ impl TestMesh {
 
         let mut nodes = Vec::with_capacity(n);
         let mut worlds = Vec::with_capacity(n);
+        let mut dispatchers = Vec::with_capacity(n);
 
         for i in 0..n {
             let comp = RemoteLookupComponent::new_default();
@@ -114,9 +119,10 @@ impl TestMesh {
                 .connect(Arc::new(MockDispatchMap::new(world.clone()))
                     as Arc<dyn IDispatchMap + Send + Sync>)
                 .expect("connect dispatch_map");
+            let dispatcher = Arc::new(MockDispatcher::new(world.clone()));
+            dispatchers.push(Arc::clone(&dispatcher));
             comp.dispatcher
-                .connect(Arc::new(MockDispatcher::new(world.clone()))
-                    as Arc<dyn IDispatcher + Send + Sync>)
+                .connect(dispatcher as Arc<dyn IDispatcher + Send + Sync>)
                 .expect("connect dispatcher");
             comp.initiator
                 .connect(Arc::new(MockInitiator::new(world.clone()))
@@ -155,6 +161,7 @@ impl TestMesh {
         Self {
             nodes,
             worlds,
+            dispatchers,
             _zyre: zyre_comp,
             _guard: guard,
             group,
@@ -695,5 +702,64 @@ fn stuck_orphan_is_force_reclaimed_after_teardown_timeout() {
     assert!(
         reclaimed,
         "orphan should be force-reclaimed after connection_teardown_timeout"
+    );
+}
+
+/// A fetched value must have its write-through SCHEDULED, not merely published.
+///
+/// `publish_success` creates the dispatch-map entry with `create_memory_tier_entry`,
+/// which leaves `ssd_offset == None`. Nothing else will ever persist it: the dispatcher
+/// enqueues write-through as a side effect of `copy_gpu_to_memory_completed`, which is
+/// the client store path, and a remote fetch never goes through it.
+///
+/// Why that is a correctness-adjacent bug and not a missed optimisation:
+/// `try_evict_to_block` refuses an entry with no `ssd_offset`, and the clean-eviction
+/// scan will not `remove` one either (that would turn a resident key into `NotExist`
+/// under the Check→Pin race). The entry therefore has NO exit from the memory tier, it
+/// ages to the oldest end of the LRU, and the eviction scan — which samples exactly the
+/// oldest keys — eventually sees nothing else. Measured on four instances before this
+/// fix: 0 of 64 sampled oldest keys demotable, 865 864 eviction candidates refused for a
+/// missing `ssd_offset` and none for a held pin, and 72.5% of client stores declined.
+/// The same workload with peers unreachable, and so no fetches to publish, declined
+/// 0.17%.
+///
+/// The assertion is on the call rather than on any returned value because the call has
+/// no observable result: an unscheduled entry is still readable and still reports a
+/// successful fetch. That is exactly why the defect survived.
+#[test]
+fn a_fetched_value_has_its_write_through_scheduled() {
+    let mesh = TestMesh::new(4);
+    assert!(
+        mesh.await_discovery(Duration::from_secs(15)),
+        "mesh did not form"
+    );
+
+    mesh.worlds[1].with_memory(4242, 4096);
+
+    let rl: Arc<dyn IRemoteLookup + Send + Sync> =
+        query_interface!(Arc::clone(&mesh.nodes[0]), IRemoteLookup).unwrap();
+    assert_eq!(
+        rl.batch_lookup(&[(4242, 4096)]),
+        vec![Ok(())],
+        "key 4242 should be satisfied"
+    );
+    assert!(
+        mesh.worlds[0].is_memory_resident(4242),
+        "node 0 should have published the key"
+    );
+
+    let scheduled = mesh.dispatchers[0].scheduled_write_throughs();
+    assert!(
+        scheduled.contains(&(4242, 4096)),
+        "the fetching node must schedule the write-through for a published key, else the \
+         entry is permanently undemotable and poisons its own eviction window; \
+         scheduled = {scheduled:?}",
+    );
+
+    // The serving node published nothing, so it must schedule nothing: scheduling there
+    // would write a key it already holds, doubling disk traffic for no benefit.
+    assert!(
+        mesh.dispatchers[1].scheduled_write_throughs().is_empty(),
+        "the SERVING node must not schedule a write-through; it published no new entry",
     );
 }

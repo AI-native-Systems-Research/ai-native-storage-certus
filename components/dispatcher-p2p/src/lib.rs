@@ -2756,6 +2756,29 @@ impl IDispatcher for DispatcherP2pComponent {
         Ok(count)
     }
 
+    fn schedule_write_through(&self, key: CacheKey, size: u32) -> Result<(), DispatcherError> {
+        self.ensure_initialized()?;
+
+        // A real implementation rather than a no-op: this component has its own
+        // background writer, and the `full-p2p` profile wires remote-lookup, so an
+        // unpersisted remotely-fetched entry would be exactly as undemotable here as
+        // in the other dispatcher. Same drive mapping as this file's own store path,
+        // so a key's data and its write job land on the same device.
+        let num_drives = {
+            let dd = self.data_drives.read();
+            dd.len().max(1)
+        };
+        let guard = self.bg_writer.lock().unwrap();
+        if let Some(ref writer) = *guard {
+            let _ = writer.enqueue(WriteJob {
+                key,
+                size,
+                device_index: Self::drive_index(key, num_drives),
+            });
+        }
+        Ok(())
+    }
+
     fn flush_to_ssd(&self) -> Result<usize, DispatcherError> {
         self.ensure_initialized()?;
 

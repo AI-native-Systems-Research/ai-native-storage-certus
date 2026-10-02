@@ -567,6 +567,21 @@ one-sided write into a reclaimed slot).
     variable changed), and a held pin was the leading mechanism. But the rate of serves — about 32
     keys per second — only blocks eviction if hold times are long, which nothing established. These
     counters decide it either way, and a near-zero `peer_pin_hold_us_max` refutes the hypothesis.
+- **FR-039** *(New 2026-10-02)*: On publishing a successfully-fetched value, the requester
+  MUST schedule its write-through via `IDispatcher::schedule_write_through`. Publishing
+  alone leaves `ssd_offset == None`, and nothing else in the system will ever persist a
+  remotely-fetched entry.
+  - **Consequence if omitted**, measured rather than argued: the entry can never be
+    demoted and never be removed, so it accumulates at the oldest end of the LRU where
+    the eviction scan looks. Four instances showed 0 of 64 sampled oldest keys demotable,
+    865 864 eviction candidates refused for a missing `ssd_offset` and **none** for a held
+    pin, and 72.5% of client stores declined. The identical workload with peers
+    unreachable declined 0.17%.
+  - The call MUST be best-effort and MUST NOT fail the fetch: an unscheduled entry is
+    still correctly cached and readable. Failing the fetch would convert a performance
+    defect into a correctness one.
+  - The requester MUST schedule it; the **serving** node MUST NOT, since it published no
+    new entry and would be rewriting a key it already holds.
 
 ### Key Entities
 

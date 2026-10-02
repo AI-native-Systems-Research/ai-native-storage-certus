@@ -372,6 +372,12 @@ The crate has two Cargo features:
 - `LookupConfig`: 10-field configuration for `IRemoteLookup::initialize` — `group`, `quorum_pct`, `phase1_timeout`, `op_deadline`, `max_retry_rounds`, `max_keys_per_query`, `bind_ip`, `actor_cpu`, `discovery` (optional `GossipConfig`, see FR-032), `node_endpoint`. Implements `Default`.
 - ~~`LookupRef`~~ / ~~`RemoteRequestHandlerError`~~ — **SUPERSEDED**, removed together with `IRemoteRequestHandler` (see FR-013). No replacement type exists: the RDMA split's writes are one-sided (no zero-copy handle is returned to a caller) and its errors are `RemoteLookupRdmaInitiatorError`/`RemoteLookupRdmaResponderError` (FR-033/FR-034).
 
+#### FR-031a: IDispatcher - Scheduling Persistence *(New 2026-10-02)*
+- `schedule_write_through(key, size)`: enqueue a background write-through for an entry already resident in the memory tier, **without blocking**. Distinct from `flush_to_ssd`, which blocks until every queued job lands and is therefore unusable from a latency-sensitive caller.
+- **Why the interface needs this at all.** A client store is persisted as a side effect of `copy_gpu_to_memory_completed`. A value fetched from a peer is published straight into the dispatch map by `remote-lookup`, which holds no route to the background writer, so without this method such an entry keeps `ssd_offset == None` permanently. `IDispatchMap::try_evict_to_block` refuses an unpersisted entry and the dispatcher's clean-eviction scan will not `remove` one either (removing a resident key turns it into `NotExist` under the Check→Pin race), so the entry has **no exit from the memory tier**: it ages to the oldest end of the LRU and the eviction scan, which samples exactly the oldest keys, comes to see nothing else.
+- Implementations MUST NOT block. The caller is a poll loop whose stalling stops all peer messaging.
+- Best-effort: a failure MUST NOT fail the caller's operation. The key is correctly cached and readable either way; only its demotability is lost, which is the pre-existing behaviour.
+
 #### FR-024: Supporting Types - Partition Table
 - `PartitionInfo`: Partition metadata (index, start LBA, sectors, GUIDs, name).
 - `PartitionSpec`: Partition creation spec (type GUID, size, name).
