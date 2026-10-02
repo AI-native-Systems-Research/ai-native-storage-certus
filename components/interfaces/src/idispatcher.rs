@@ -423,11 +423,21 @@ pub struct TierEventStats {
     /// and stays there, so the oldest keys are *where stuck entries concentrate*, and a
     /// whole-tier average would dilute exactly the effect being measured.
     ///
-    /// `oldest_persisted == 0` with `oldest_sampled > 0` means every candidate eviction
-    /// would be refused for want of an `ssd_offset` — the store path is about to
-    /// backpressure and decline no matter how much tier capacity exists.
+    /// `oldest_persisted == 0` with `oldest_sampled > 0` means no candidate in the
+    /// eviction window could be demoted — the store path is about to backpressure and
+    /// decline no matter how much tier capacity exists.
     pub oldest_sampled: u64,
-    /// Of `oldest_sampled`, how many had an `ssd_offset` and so could be demoted.
+    /// Of `oldest_sampled`, how many were **demotable**.
+    ///
+    /// Measured with `IDispatchMap::is_evictable`, which is a conjunction: no read
+    /// reference, no write reference, *and* resident in the memory tier with an
+    /// `ssd_offset`. So a low value does not by itself say which conjunct failed, and
+    /// the name is about demotability rather than persistence alone.
+    ///
+    /// Pair it with `evictions_blocked_by_pin` to attribute: that counter is zero
+    /// exactly when no eviction was refused for a held reference, which leaves the
+    /// missing `ssd_offset` as the cause. Reading this field alone and calling it a
+    /// persisted fraction would be assuming the attribution the other counter supplies.
     pub oldest_persisted: u64,
 }
 
