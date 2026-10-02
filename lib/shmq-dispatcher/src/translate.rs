@@ -40,9 +40,15 @@ const REASON_REMOVED: u32 = 1;
 pub trait TranslatorObserver: Send + Sync {
     /// A Populate op finalized `succeeded` new cache entries.
     fn on_populate(&self, _succeeded: u64) {}
-    /// A Lookup op resolved `hits` entries (moving `gpu_bytes` total to the GPU)
-    /// and `misses` entries that were not present.
-    fn on_lookup(&self, _hits: u64, _misses: u64, _gpu_bytes: u64) {}
+    /// A Lookup op resolved `hits` entries (moving `gpu_bytes` total to the GPU),
+    /// `misses` entries that were not present, and `errors` entries that could be
+    /// neither served nor shown absent.
+    ///
+    /// `hits + misses + errors` MUST equal the number of entries the client asked
+    /// for (FR-024). The three arrive in one call precisely so that identity is
+    /// checkable by the host: split across two calls, a host could implement one and
+    /// not the other and silently break it.
+    fn on_lookup(&self, _hits: u64, _misses: u64, _errors: u64, _gpu_bytes: u64) {}
     /// A TakeEvents op drained `count` eviction events.
     fn on_evictions(&self, _count: u64) {}
 }
@@ -245,6 +251,18 @@ fn decode_handle_batch(r: &mut Reader) -> Result<HandleBatch, OpError> {
         entries.push((key, regions));
     }
     Ok(HandleBatch { handles, entries })
+}
+
+/// Which FR-024 bucket one looked-up entry falls in. Exhaustive by construction, so a
+/// new dispatcher error cannot silently become uncounted the way `Err(_) => {}` allowed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Outcome {
+    /// Served to the GPU.
+    Hit,
+    /// Absent from every tier and every peer.
+    Miss,
+    /// Neither served nor shown absent.
+    Error,
 }
 
 /// Shared, server-global translation state. Cloneable (all fields are `Arc`),
@@ -597,6 +615,56 @@ impl Translator {
         Ok(w.into_bytes())
     }
 
+    /// Classify one dispatched entry's result into the FR-024 buckets.
+    ///
+    /// `KeyNotFound` is the only miss: it means the key is absent from every tier and
+    /// from every peer (the dispatcher maps a peer's `NotFound` back to it). Anything
+    /// else is an error -- the request neither served the key nor established that it
+    /// was absent, so counting it as a miss would put a fault into the hit rate.
+    fn classify(res: &Result<(), interfaces::DispatcherError>) -> Outcome {
+        match res {
+            Ok(()) => Outcome::Hit,
+            Err(interfaces::DispatcherError::KeyNotFound(_)) => Outcome::Miss,
+            Err(_) => Outcome::Error,
+        }
+    }
+
+    /// Tally a lookup batch so that hits + misses + errors == entries requested.
+    ///
+    /// `requested` is what the client asked for; `results` covers only the entries
+    /// that were actually dispatched. The difference is the entries held back because
+    /// their GPU handles would not open, and those are **errors, not misses**: the key
+    /// may well be resident, and the fault is in the caller's handle table, so calling
+    /// it a miss would corrupt the hit rate with a client-side failure. Recorded as a
+    /// decision (spec 002 T013), not an accident.
+    ///
+    /// Pure, and separate from `op_lookup`, because the identity above cannot otherwise
+    /// be tested without a GPU: every handle fails to open in a test process, so the
+    /// dispatched set is always empty there.
+    fn tally_lookup(
+        requested: usize,
+        results: &[Result<(), interfaces::DispatcherError>],
+    ) -> (u64, u64, u64) {
+        let mut hits = 0u64;
+        let mut misses = 0u64;
+        // Held back before dispatch: never reached the dispatcher at all.
+        //
+        // Saturating, not plain subtraction: a caller passing more results than it
+        // requested is a bug, but the release-mode consequence of wrapping here is an
+        // astronomically large error count -- a metric that lies loudly is worse than
+        // one that under-reports, and the `debug_assert` catches the bug in tests.
+        debug_assert!(results.len() <= requested);
+        let mut errors = requested.saturating_sub(results.len()) as u64;
+        for res in results {
+            match Self::classify(res) {
+                Outcome::Hit => hits += 1,
+                Outcome::Miss => misses += 1,
+                Outcome::Error => errors += 1,
+            }
+        }
+        (hits, misses, errors)
+    }
+
     fn op_lookup(&self, r: &mut Reader) -> Result<Vec<u8>, OpError> {
         let batch = decode_handle_batch(r)?;
         let keys: Vec<u64> = batch.entries.iter().map(|(k, _)| *k).collect();
@@ -604,8 +672,9 @@ impl Translator {
 
         let (resolved, opened_keys) = self.open_handle_table(&batch.handles);
 
-        // Resolve regions per entry; entries whose handles failed to open are
-        // held back from the batch and reported as misses (ok=0).
+        // Resolve regions per entry; entries whose handles failed to open are held
+        // back from the batch and reported not-served (ok=0). They are counted as
+        // ERRORS, not misses -- see `tally_lookup`.
         let mut ok_flags = vec![0u8; batch.entries.len()];
         let mut valid_indices = Vec::with_capacity(batch.entries.len());
         let mut valid_batch: Vec<(u64, Vec<IpcHandle>)> = Vec::with_capacity(batch.entries.len());
@@ -617,25 +686,17 @@ impl Translator {
         }
 
         let results = self.dispatcher.batch_lookup(&valid_batch);
-        let mut hits = 0u64;
-        let mut misses = 0u64;
+        let (hits, misses, errors) = Self::tally_lookup(batch.entries.len(), &results);
         let mut gpu_bytes = 0u64;
         for ((slot, res), (_, regions)) in valid_indices
             .iter()
-            .zip(results.into_iter())
+            .zip(results.iter())
             .zip(valid_batch.iter())
         {
-            match res {
-                Ok(()) => {
-                    ok_flags[*slot] = 1;
-                    hits += 1;
-                    // Sum across all per-layer regions (N==1 for coalesced blocks).
-                    gpu_bytes += regions.iter().map(|h| h.size as u64).sum::<u64>();
-                }
-                // Only KeyNotFound counts as a miss; other errors (e.g. transient
-                // I/O) mirror the gRPC service, which excludes them from misses.
-                Err(interfaces::DispatcherError::KeyNotFound(_)) => misses += 1,
-                Err(_) => {}
+            if matches!(Self::classify(res), Outcome::Hit) {
+                ok_flags[*slot] = 1;
+                // Sum across all per-layer regions (N==1 for coalesced blocks).
+                gpu_bytes += regions.iter().map(|h| h.size as u64).sum::<u64>();
             }
         }
 
@@ -644,7 +705,7 @@ impl Translator {
         }
 
         if let Some(obs) = &self.observer {
-            obs.on_lookup(hits, misses, gpu_bytes);
+            obs.on_lookup(hits, misses, errors, gpu_bytes);
         }
 
         let mut w = Writer::with_capacity(ok_flags.len());
@@ -704,8 +765,12 @@ impl Translator {
                 continue;
             }
             match Self::regions_of(entry_regions, &resolved) {
-                None => { rejected.push(i); }
-                Some(regions) => { batch_entries.push((*key, regions[0])); }
+                None => {
+                    rejected.push(i);
+                }
+                Some(regions) => {
+                    batch_entries.push((*key, regions[0]));
+                }
             }
         }
 
@@ -720,7 +785,10 @@ impl Translator {
             let ok = if rejected.contains(&i) {
                 false
             } else {
-                let result = batch_results.get(batch_idx).map(|r| r.is_ok()).unwrap_or(false);
+                let result = batch_results
+                    .get(batch_idx)
+                    .map(|r| r.is_ok())
+                    .unwrap_or(false);
                 batch_idx += 1;
                 result
             };
@@ -846,8 +914,14 @@ mod tests {
             self.resident.lock().unwrap().insert(key);
             Ok(())
         }
-        fn batch_populate(&self, entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), DispatcherError>> {
-            entries.iter().map(|(k, h)| self.populate(*k, h.clone())).collect()
+        fn batch_populate(
+            &self,
+            entries: &[(CacheKey, IpcHandle)],
+        ) -> Vec<Result<(), DispatcherError>> {
+            entries
+                .iter()
+                .map(|(k, h)| self.populate(*k, h.clone()))
+                .collect()
         }
         fn reserve_memory(
             &self,
@@ -921,6 +995,69 @@ mod tests {
         let (_tx, rx) = crossbeam_channel::unbounded::<dispatcher::EvictionEvent>();
         std::mem::forget(_tx);
         Translator::new(disp, rx, Arc::new(AtomicU64::new(0)), Duration::ZERO)
+    }
+
+    /// FR-024: hits + misses + errors accounts for EVERY entry the client asked for.
+    ///
+    /// Four outcomes in one batch, including the two that used to vanish: an entry held
+    /// back before dispatch (its GPU handle would not open) and a dispatcher error that
+    /// is not `KeyNotFound`. Both were dropped -- the first never reached the counting
+    /// loop, the second hit `Err(_) => {}` -- so the totals were silently short.
+    ///
+    /// Asserted as the identity rather than as four separate numbers, because the
+    /// identity is the property a reader of `/metrics` actually relies on: it is what
+    /// makes a hit *rate* meaningful. Four numbers that each look plausible can still
+    /// fail to add up.
+    #[test]
+    fn lookup_accounting_covers_every_requested_entry() {
+        use interfaces::DispatcherError;
+
+        // 5 requested, 3 dispatched: 2 were held back before reaching the dispatcher.
+        let dispatched: Vec<Result<(), DispatcherError>> = vec![
+            Ok(()),                                         // hit
+            Err(DispatcherError::KeyNotFound(7)),           // miss
+            Err(DispatcherError::IoError("fabric".into())), // error, NOT a miss
+        ];
+        let (hits, misses, errors) = Translator::tally_lookup(5, &dispatched);
+
+        assert_eq!(
+            (hits, misses, errors),
+            (1, 1, 3),
+            "got {hits}/{misses}/{errors}"
+        );
+        assert_eq!(
+            hits + misses + errors,
+            5,
+            "FR-024: every requested entry must land in exactly one bucket; \
+             {hits} + {misses} + {errors} != 5"
+        );
+    }
+
+    /// An I/O error is not a miss, and a handle that will not open is not a miss.
+    ///
+    /// Stated separately because the tempting simplification -- "anything not served is
+    /// a miss" -- would satisfy the identity above while corrupting the hit rate with
+    /// faults. A fabric failure counted as a miss makes a broken cluster look like a
+    /// cold cache; a caller's bad handle counted as a miss blames the cache for the
+    /// client's bug.
+    #[test]
+    fn faults_are_not_misses() {
+        use interfaces::DispatcherError;
+
+        let only_io: Vec<Result<(), DispatcherError>> =
+            vec![Err(DispatcherError::IoError("fabric".into()))];
+        assert_eq!(
+            Translator::tally_lookup(1, &only_io),
+            (0, 0, 1),
+            "an I/O error is an error, never a miss"
+        );
+
+        // Nothing dispatched at all: every entry held back on its handle.
+        assert_eq!(
+            Translator::tally_lookup(4, &[]),
+            (0, 0, 4),
+            "entries held back on an unopenable handle are errors, never misses"
+        );
     }
 
     fn enc_keys(keys: &[u64]) -> Vec<u8> {
