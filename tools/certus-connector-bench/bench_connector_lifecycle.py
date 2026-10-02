@@ -1104,16 +1104,6 @@ def bench_contention(
 
 # ── mode: scheduler-step ─────────────────────────────────────────────────────
 
-def _drain_store_background(worker, stored_keys, manager):
-    """Drain and complete a deferred store in a background thread."""
-    while True:
-        finished = worker.get_finished()
-        if finished:
-            break
-        time.sleep(0.0001)
-    manager.complete_store(stored_keys, success=True)
-
-
 def bench_scheduler_step(
     manager: ShmqCertusOffloadingManager,
     worker,
@@ -1132,11 +1122,11 @@ def bench_scheduler_step(
 
     Models the real vLLM offloading connector call pattern:
       - Per-request maximal prefix scan (per-key lookup, break on miss)
-      - Store submitted after drain, completed in background (fire-and-forget)
+      - Store deferred: submitted after drain, drained at next step start
       - drain_workers measures only load completion
       - Prefix cache fills naturally (no per-step key removal)
       - Geometric session prefix distribution (varied hit ratios)
-      - Backpressure: deferred steps when store backlog exceeds threshold
+      - Backpressure: store drain at step start models has_pending_work()
     """
     keys_per_request = max(4, num_blocks // requests_per_step)
     prefix_len = keys_per_request // 2
@@ -1150,46 +1140,45 @@ def bench_scheduler_step(
         "drain_workers": PhaseTiming("drain_workers"),
         "complete": PhaseTiming("complete"),
         "take_events": PhaseTiming("take_events"),
-        "backpressure_wait": PhaseTiming("backpressure_wait"),
     }
 
-    # Build session pool with geometric prefix-length distribution.
-    # Short prefixes miss more; long prefixes hit more — like production.
+    # Build a shared prefix pool, then assign each session a prefix slice.
+    # Sessions share earlier blocks (like production prefix caching) and
+    # diverge at session-specific points. Geometric distribution controls
+    # where each session diverges — short prefixes miss more.
+    max_prefix_pool = min(prefix_len * 4, num_blocks * 2)
+    shared_prefix_pool = make_content_keys(max_prefix_pool, seed=77777)
+    _populate_keys(manager, worker, shared_prefix_pool, batch_size)
+
     session_prefixes: list[list[bytes]] = []
     rng = random.Random(42)
     for s in range(num_sessions):
-        geo_len = max(2, min(prefix_len, int(rng.expovariate(1.0 / prefix_len))))
-        prefix_keys = make_content_keys(geo_len, seed=s * 10_000)
-        _populate_keys(manager, worker, prefix_keys, batch_size)
-        session_prefixes.append(prefix_keys)
+        geo_len = max(2, min(len(shared_prefix_pool), int(rng.expovariate(1.0 / prefix_len))))
+        session_prefixes.append(shared_prefix_pool[:geo_len])
 
     total_blocks = 0
     total_steps = 0
     total_prefix_hits = 0
     total_suffix_stores = 0
-    total_deferred_steps = 0
-    total_store_bg_completions = 0
     wall_start = time.perf_counter()
     job_id = 1_000_000
 
-    store_drain_executor = ThreadPoolExecutor(
-        max_workers=1, thread_name_prefix="store-drain",
-    )
-    pending_store_futures: list = []
-    max_store_backlog = 4
+    prev_store_pending = False
+    prev_stored_keys: list[bytes] | None = None
 
     while (time.perf_counter() - wall_start) < min_duration or total_steps < 3:
-        # Backpressure: if too many stores in flight, wait for oldest.
-        if len(pending_store_futures) >= max_store_backlog:
-            t_bp = time.perf_counter()
-            pending_store_futures[0].result()
-            pending_store_futures.pop(0)
-            total_store_bg_completions += 1
-            phases["backpressure_wait"].record(time.perf_counter() - t_bp)
-            total_deferred_steps += 1
-
-        # Reap completed store futures without blocking.
-        pending_store_futures = [f for f in pending_store_futures if not f.done()]
+        # Drain the PREVIOUS step's deferred store (not timed — production
+        # processes store completions asynchronously between steps).
+        if prev_store_pending:
+            while True:
+                finished = worker.get_finished()
+                if finished:
+                    break
+                time.sleep(0.0001)
+            manager.complete_store(prev_stored_keys, success=True)
+            total_blocks += len(prev_stored_keys)
+            prev_store_pending = False
+            prev_stored_keys = None
 
         # Build requests for this step.
         all_load_keys: list[bytes] = []
@@ -1256,7 +1245,7 @@ def bench_scheduler_step(
             load_spec = manager.prepare_load(all_load_keys)
             phases["prepare_load"].record(time.perf_counter() - t0)
 
-        # Submit load only; store is deferred (fire-and-forget).
+        # Submit load only; store is deferred to after drain.
         t0 = time.perf_counter()
         if load_spec and all_load_keys:
             gpu_ids = list(range(len(all_load_keys)))
@@ -1291,8 +1280,7 @@ def bench_scheduler_step(
 
         total_steps += 1
 
-        # Submit store after drain, complete in background thread.
-        # This matches production: stores are fire-and-forget.
+        # Submit store after drain — deferred to next step's start.
         if store_result and store_result.keys_to_store:
             stored_keys = store_result.keys_to_store
             gpu_ids = list(range(len(stored_keys)))
@@ -1300,20 +1288,20 @@ def bench_scheduler_step(
             worker.submit_store(
                 job_id, _FakeGPUSpec(gpu_ids), store_result.store_spec,
             )
-            total_blocks += len(stored_keys)
-            fut = store_drain_executor.submit(
-                _drain_store_background, worker, stored_keys, manager,
-            )
-            pending_store_futures.append(fut)
+            prev_store_pending = True
+            prev_stored_keys = stored_keys
 
-    # Drain all remaining background stores.
-    for fut in pending_store_futures:
-        fut.result()
-        total_store_bg_completions += 1
+    # Drain the last step's deferred store.
+    if prev_store_pending:
+        while True:
+            finished = worker.get_finished()
+            if finished:
+                break
+            time.sleep(0.0001)
+        manager.complete_store(prev_stored_keys, success=True)
+        total_blocks += len(prev_stored_keys)
 
     wall = time.perf_counter() - wall_start
-    store_drain_executor.shutdown(wait=False)
-
     result = BenchResult(
         label=(
             f"Scheduler Step (reqs={requests_per_step}, "
@@ -1327,12 +1315,9 @@ def bench_scheduler_step(
     result.print_report()
     print(f"  Steps={total_steps}  steps/s={total_steps/wall:.1f}  "
           f"prefix_hits={total_prefix_hits}  suffix_stores={total_suffix_stores}")
-    print(f"  Deferred steps (backpressure): {total_deferred_steps}  "
-          f"Store bg completions: {total_store_bg_completions}")
 
-    # Clean up session prefixes.
-    for prefix in session_prefixes:
-        _remove_keys(ring, prefix, manager._world_size)
+    # Clean up shared prefix pool.
+    _remove_keys(ring, shared_prefix_pool, manager._world_size)
 
     return result
 
