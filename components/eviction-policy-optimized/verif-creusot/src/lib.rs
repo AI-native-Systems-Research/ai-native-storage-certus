@@ -150,13 +150,13 @@ pub fn arena_fresh() -> LruList {
     LruList { nodes: Vec::new(), head: None, tail: None, free: Vec::new(), len: 0 }
 }
 
-/// `len` (lru_list.rs:195-197).
+/// `len` (lru_list.rs:205-207).
 #[ensures(result@ == self_.len@)]
 pub fn arena_len(self_: &LruList) -> usize {
     self_.len
 }
 
-/// `clear` (lru_list.rs:186-192).
+/// `clear` (lru_list.rs:197-203).
 #[ensures((^self_).len@ == 0)]
 #[ensures((^self_).head == None && (^self_).tail == None)]
 #[ensures((^self_).nodes@.len() == 0)]
@@ -273,36 +273,49 @@ pub fn arena_peek_front_key(self_: &LruList) -> Option<u64> {
     }
 }
 
-/// `remove` (lru_list.rs:159-183). Idempotent for an already-removed slot.
+/// `remove` (lru_list.rs:167-194). Idempotent for an already-removed slot.
+///
+/// TOTAL in `idx`, for the same reason as `arena_move_to_back` above: the range check at
+/// lru_list.rs:168-170 runs BEFORE the slot is read, so there is no `idx@ < nodes@.len()`
+/// precondition and no panic. Postconditions about the slot `idx` names are guarded by `idx`
+/// being in range.
 #[requires(inv(self_))]
-#[requires(idx@ < (*self_).nodes@.len())]
-#[requires((*self_).nodes@[idx@].active ==> (*self_).len@ >= 1)]
+#[requires(idx@ < (*self_).nodes@.len() && (*self_).nodes@[idx@].active ==> (*self_).len@ >= 1)]
 #[requires((*self_).free@.len() < 4294967295)]
+#[ensures(idx@ >= (*self_).nodes@.len() ==> ^self_ == *self_)]
 #[ensures(!(*self_).nodes@[idx@].active ==> ^self_ == *self_)]
-#[ensures((*self_).nodes@[idx@].active ==> (^self_).len@ == (*self_).len@ - 1)]
-#[ensures((*self_).nodes@[idx@].active ==>
+#[ensures(idx@ < (*self_).nodes@.len() && (*self_).nodes@[idx@].active
+          ==> (^self_).len@ == (*self_).len@ - 1)]
+#[ensures(idx@ < (*self_).nodes@.len() && (*self_).nodes@[idx@].active ==>
              (^self_).free@.len() == (*self_).free@.len() + 1
           && (^self_).free@[(*self_).free@.len()] == idx)]
-#[ensures(!(^self_).nodes@[idx@].active)]
+#[ensures(idx@ < (*self_).nodes@.len() ==> !(^self_).nodes@[idx@].active)]
 #[ensures((^self_).nodes@.len() == (*self_).nodes@.len())]
 #[ensures(forall<i: Int> 0 <= i && i < (*self_).nodes@.len() && i != idx@ ==>
              ((^self_).nodes@[i]).active == ((*self_).nodes@[i]).active
           && ((^self_).nodes@[i]).key == ((*self_).nodes@[i]).key)]
-#[ensures((*self_).nodes@[idx@].active && (*self_).nodes@[idx@].prev == None ==>
+#[ensures(idx@ < (*self_).nodes@.len() && (*self_).nodes@[idx@].active
+          && (*self_).nodes@[idx@].prev == None ==>
              (^self_).head == (*self_).nodes@[idx@].next)]
-#[ensures((*self_).nodes@[idx@].prev != None ==> (^self_).head == (*self_).head)]
-#[ensures((*self_).nodes@[idx@].active ==>
+#[ensures(idx@ < (*self_).nodes@.len() && (*self_).nodes@[idx@].prev != None
+          ==> (^self_).head == (*self_).head)]
+#[ensures(idx@ < (*self_).nodes@.len() && (*self_).nodes@[idx@].active ==>
              (^self_).nodes@[idx@].prev == None && (^self_).nodes@[idx@].next == None)]
-#[ensures((*self_).nodes@[idx@].active && (*self_).nodes@[idx@].prev == None ==>
+#[ensures(idx@ < (*self_).nodes@.len() && (*self_).nodes@[idx@].active
+          && (*self_).nodes@[idx@].prev == None ==>
              match (*self_).nodes@[idx@].next { Some(nx) => nx@ != idx@ ==>
                  (^self_).nodes@[nx@].prev == None, None => true })]
-#[ensures((*self_).nodes@[idx@].active && (*self_).nodes@[idx@].prev == None ==>
+#[ensures(idx@ < (*self_).nodes@.len() && (*self_).nodes@[idx@].active
+          && (*self_).nodes@[idx@].prev == None ==>
              match (*self_).nodes@[idx@].next { Some(nx) => nx@ != idx@ ==>
                  (^self_).nodes@[nx@].next == (*self_).nodes@[nx@].next
                  && (^self_).nodes@[nx@].key == (*self_).nodes@[nx@].key
                  && (^self_).nodes@[nx@].active == (*self_).nodes@[nx@].active, None => true })]
 #[ensures(inv(&^self_))]
 pub fn arena_remove(self_: &mut LruList, idx: u32) {
+    if idx as usize >= self_.nodes.len() {
+        return;
+    }
     if !self_.nodes[idx as usize].active {
         return;
     }
@@ -325,23 +338,38 @@ pub fn arena_remove(self_: &mut LruList, idx: u32) {
     self_.len -= 1;
 }
 
-/// `move_to_back` (lru_list.rs:108-134).
+/// `move_to_back` (lru_list.rs:112-141).
+///
+/// TOTAL in `idx`: there is deliberately NO `idx@ < nodes@.len()` precondition. The shipped
+/// guard now range-checks the slot number BEFORE reading the slot (lru_list.rs:113-115), so an
+/// out-of-range slot number — every handle a pool ever issued becomes one the moment `clear`
+/// discards the arena — is a silent, effect-free no-op instead of an index panic. That absence
+/// of a panic is the indexing VC Creusot discharges here WITHOUT an in-range assumption; it is
+/// EPO-INV-STALE-HANDLE-NEVER-CRASHES (FR-012), and it did not hold before the repair.
+/// The postconditions that speak about the slot `idx` names are guarded by `idx` being in range,
+/// because out of range there is no such slot to speak about.
 #[requires(inv(self_))]
-#[requires(idx@ < (*self_).nodes@.len())]
+#[ensures(idx@ >= (*self_).nodes@.len() ==> ^self_ == *self_)]
 #[ensures(!(*self_).nodes@[idx@].active ==> ^self_ == *self_)]
 #[ensures((*self_).tail == Some(idx) ==> ^self_ == *self_)]
 #[ensures((^self_).len@ == (*self_).len@)]
 #[ensures((^self_).nodes@.len() == (*self_).nodes@.len())]
 #[ensures((^self_).free@ == (*self_).free@)]
-#[ensures((*self_).nodes@[idx@].active && (*self_).tail != Some(idx) ==> (^self_).tail == Some(idx))]
+#[ensures(idx@ < (*self_).nodes@.len() && (*self_).nodes@[idx@].active
+          && (*self_).tail != Some(idx) ==> (^self_).tail == Some(idx))]
 #[ensures(forall<i: Int> 0 <= i && i < (*self_).nodes@.len() ==>
              ((^self_).nodes@[i]).active == ((*self_).nodes@[i]).active
           && ((^self_).nodes@[i]).key == ((*self_).nodes@[i]).key)]
-#[ensures((*self_).nodes@[idx@].active && (*self_).tail != Some(idx)
+#[ensures(idx@ < (*self_).nodes@.len() && (*self_).nodes@[idx@].active
+          && (*self_).tail != Some(idx)
           && (*self_).nodes@[idx@].prev == None ==> (^self_).head == (*self_).nodes@[idx@].next)]
-#[ensures((*self_).nodes@[idx@].prev != None ==> (^self_).head == (*self_).head)]
+#[ensures(idx@ < (*self_).nodes@.len() && (*self_).nodes@[idx@].prev != None
+          ==> (^self_).head == (*self_).head)]
 #[ensures(inv(&^self_))]
 pub fn arena_move_to_back(self_: &mut LruList, idx: u32) {
+    if idx as usize >= self_.nodes.len() {
+        return;
+    }
     if !self_.nodes[idx as usize].active {
         return;
     }
@@ -366,7 +394,7 @@ pub fn arena_move_to_back(self_: &mut LruList, idx: u32) {
     self_.tail = Some(idx);
 }
 
-/// `pop_front` (lru_list.rs:137-142): read the head key (LRU end) and unlink it.
+/// `pop_front` (lru_list.rs:144-149): read the head key (LRU end) and unlink it.
 #[requires(inv(self_))]
 #[requires(match (*self_).head { Some(h) => (*self_).nodes@[h@].active && (*self_).len@ >= 1, None => true })]
 #[requires((*self_).free@.len() < 4294967295)]
@@ -401,7 +429,7 @@ pub fn arena_pop_front(self_: &mut LruList) -> Option<u64> {
     }
 }
 
-/// `peek_front_n` (lru_list.rs:145-156): a read-only walk from the head collecting up to `n` keys.
+/// `peek_front_n` (lru_list.rs:152-163): a read-only walk from the head collecting up to `n` keys.
 /// The walk is bounded by `n` — `result.len() >= n` breaks — which is also the termination measure.
 #[requires(inv(self_))]
 #[ensures(result@.len() <= n@)]
@@ -866,11 +894,11 @@ pub fn state_track(self_: &mut Pools, pool: u32, key: u64) -> Result<Handle, Pol
     }
 }
 
-/// `touch` (lib.rs:142-156). The pool id inside the handle is checked; the slot number is NOT —
-/// the `#[requires]` on `h.index` is the shipped code's unchecked index, made explicit.
+/// `touch` (lib.rs:142-156). The pool id inside the handle is checked, and since the repair the
+/// slot number is range-checked too (lru_list.rs:113-115), so there is no longer an
+/// `h.index@ < nodes@.len()` precondition here: the call is total in the slot number.
 #[requires(h.pool@ < (*self_).pools@.len() ==>
-             inv(&((*self_).pools@[h.pool@]).lru)
-             && h.index@ < (((*self_).pools@[h.pool@]).lru.nodes@.len()))]
+             inv(&((*self_).pools@[h.pool@]).lru))]
 #[ensures((^self_).pools@.len() == (*self_).pools@.len())]
 #[ensures(h.pool@ >= (*self_).pools@.len() ==> ^self_ == *self_ && result == Err(PolicyError::InvalidPool(h.pool)))]
 #[ensures(h.pool@ < (*self_).pools@.len() ==> pools_frame_except(&^self_, &*self_, h.pool@))]
@@ -878,7 +906,13 @@ pub fn state_track(self_: &mut Pools, pool: u32, key: u64) -> Result<Handle, Pol
              match result { Ok(_) =>
                  ((^self_).pools@[h.pool@]).lru.len@ == ((*self_).pools@[h.pool@]).lru.len@
                  && pool_meta_eq(&(^self_).pools@[h.pool@], &(*self_).pools@[h.pool@])
-                 && (((*self_).pools@[h.pool@]).lru.nodes@[h.index@].active
+                 && inv(&((^self_).pools@[h.pool@]).lru)
+                 && ((^self_).pools@[h.pool@]).lru.nodes@.len()
+                    == ((*self_).pools@[h.pool@]).lru.nodes@.len()
+                 && (h.index@ >= ((*self_).pools@[h.pool@]).lru.nodes@.len()
+                     ==> (^self_).pools@[h.pool@] == (*self_).pools@[h.pool@])
+                 && (h.index@ < ((*self_).pools@[h.pool@]).lru.nodes@.len()
+                     && ((*self_).pools@[h.pool@]).lru.nodes@[h.index@].active
                      && ((*self_).pools@[h.pool@]).lru.tail != Some(h.index)
                      ==> ((^self_).pools@[h.pool@]).lru.tail == Some(h.index)),
                  Err(_) => false })]
@@ -891,11 +925,11 @@ pub fn state_touch(self_: &mut Pools, h: Handle) -> Result<(), PolicyError> {
     }
 }
 
-/// `remove` (lib.rs:186-200). Same unchecked slot number as `touch`.
+/// `remove` (lib.rs:186-200). Total in the slot number since the repair, exactly like `touch`.
 #[requires(h.pool@ < (*self_).pools@.len() ==>
              inv(&((*self_).pools@[h.pool@]).lru)
-             && h.index@ < (((*self_).pools@[h.pool@]).lru.nodes@.len())
-             && (((*self_).pools@[h.pool@]).lru.nodes@[h.index@].active
+             && (h.index@ < (((*self_).pools@[h.pool@]).lru.nodes@.len())
+                 && ((*self_).pools@[h.pool@]).lru.nodes@[h.index@].active
                  ==> ((*self_).pools@[h.pool@]).lru.len@ >= 1)
              && ((*self_).pools@[h.pool@]).lru.free@.len() < 4294967295)]
 #[ensures((^self_).pools@.len() == (*self_).pools@.len())]
@@ -904,8 +938,15 @@ pub fn state_touch(self_: &mut Pools, h: Handle) -> Result<(), PolicyError> {
 #[ensures(h.pool@ < (*self_).pools@.len() ==>
              match result { Ok(_) =>
                  pool_meta_eq(&(^self_).pools@[h.pool@], &(*self_).pools@[h.pool@])
-                 && !((^self_).pools@[h.pool@]).lru.nodes@[h.index@].active
-                 && (((*self_).pools@[h.pool@]).lru.nodes@[h.index@].active
+                 && inv(&((^self_).pools@[h.pool@]).lru)
+                 && ((^self_).pools@[h.pool@]).lru.nodes@.len()
+                    == ((*self_).pools@[h.pool@]).lru.nodes@.len()
+                 && (h.index@ >= ((*self_).pools@[h.pool@]).lru.nodes@.len()
+                     ==> (^self_).pools@[h.pool@] == (*self_).pools@[h.pool@])
+                 && (h.index@ < ((*self_).pools@[h.pool@]).lru.nodes@.len()
+                     ==> !((^self_).pools@[h.pool@]).lru.nodes@[h.index@].active)
+                 && (h.index@ < ((*self_).pools@[h.pool@]).lru.nodes@.len()
+                     && ((*self_).pools@[h.pool@]).lru.nodes@[h.index@].active
                      ==> ((^self_).pools@[h.pool@]).lru.len@ == ((*self_).pools@[h.pool@]).lru.len@ - 1)
                  && (!((*self_).pools@[h.pool@]).lru.nodes@[h.index@].active
                      ==> (^self_).pools@[h.pool@] == (*self_).pools@[h.pool@]),
@@ -1302,7 +1343,8 @@ pub fn verify_epo_track_error_frame_no_mutation(self_: &mut Pools, pool: u32, ke
 // ======================= touch =============================================
 
 // ---- EPO-TOUCH-PRE-POOL-EXISTS ---------------------------------------—
-// The pool id inside the handle is checked; the slot number is NOT (lib.rs:144, lru_list.rs:109).
+// The pool id inside the handle is checked (lib.rs:144); since the repair the slot number is
+// range-checked too (lru_list.rs:113-115), so no in-range precondition on `h.index` is needed.
 #[requires(h.pool@ < (*self_).pools@.len() ==>
              inv(&((*self_).pools@[h.pool@]).lru)
              && h.index@ < (((*self_).pools@[h.pool@]).lru.nodes@.len()))]
@@ -1346,8 +1388,11 @@ pub fn verify_epo_touch_post_already_at_back_noop(l: &mut Pool, idx: u32) {
 }
 
 // ---- EPO-TOUCH-POST-REMOVED-HANDLE-IS-SILENT-NOOP --------------------—
-// Holds while the slot still EXISTS: the guard is the per-entry live flag. After clear_pool has
-// discarded the slots the same call panics — that divergence is EPO-INV-STALE-HANDLE-NEVER-CRASHES.
+// The per-entry live flag is the guard for a slot that still exists. The case where the slot does
+// NOT exist any more (after clear_pool) used to panic here; that divergence was
+// EPO-INV-STALE-HANDLE-NEVER-CRASHES and is now repaired and proved — see
+// verify_epo_inv_stale_handle_never_crashes. This driver keeps its in-range precondition because
+// it is about the live-flag arm specifically.
 #[requires(inv(&(*l).lru))]
 #[requires(idx@ < (*l).lru.nodes@.len())]
 #[requires(!(*l).lru.nodes@[idx@].active)]
@@ -1834,7 +1879,7 @@ pub fn verify_epo_candidates_post_zero_empty(l: &Pool, n: usize) -> Vec<u64> {
 }
 
 // ---- EPO-CANDIDATES-FRAME-NON-DESTRUCTIVE -----------—
-// A read-only walk over `&self` (lru_list.rs:145): the pool is passed immutably, so nothing it
+// A read-only walk over `&self` (lru_list.rs:152): the pool is passed immutably, so nothing it
 // holds can change and repeated calls see the same state.
 #[requires(inv(&(*l).lru))]
 #[ensures(^l == *l)]
@@ -2065,7 +2110,8 @@ pub fn verify_epo_inv_slots_accounted(l: &mut LruList, key: u64, idx: u32) -> u3
 // ---- EPO-INV-INTERNAL-INDEX-IN-RANGE (7) -----------------------—
 // Every slot number the component keeps internally — both ends of the order, every link, and
 // every entry on the reuse list — refers to a slot that exists. (Slot numbers arriving from
-// OUTSIDE in a caller's handle are not covered: see EPO-INV-STALE-HANDLE-NEVER-CRASHES.)
+// OUTSIDE in a caller's handle are not covered here; they are handled by the range check the
+// repair added — see EPO-INV-STALE-HANDLE-NEVER-CRASHES.)
 #[requires(inv(l))]
 #[requires((*l).nodes@.len() < 4294967295)]
 #[requires((*l).free@.len() < 4294967295)]
@@ -2394,7 +2440,7 @@ pub fn ends_active(l: &LruList) -> bool {
     }
 }
 
-/// A not-live slot is fully unlinked (`remove` sets both links to `None`, lru_list.rs:179-180).
+/// A not-live slot is fully unlinked (`remove` sets both links to `None`, lru_list.rs:189-190).
 #[logic]
 pub fn inactive_unlinked(l: &LruList) -> bool {
     pearlite! {
@@ -2493,7 +2539,7 @@ pub fn wf_push_front(self_: &mut LruList, key: u64) -> u32 {
     idx
 }
 
-/// `move_to_back` (lru_list.rs:108-134) re-proved with `wf` in the contract.
+/// `move_to_back` (lru_list.rs:112-141) re-proved with `wf` in the contract.
 #[requires(inv(self_) && wf(self_))]
 #[requires(idx@ < (*self_).nodes@.len())]
 // A live entry means a non-empty order (same disclosed `ends_iff` fragment as `wf_remove`).
@@ -2501,6 +2547,9 @@ pub fn wf_push_front(self_: &mut LruList, key: u64) -> u32 {
 #[ensures(inv(&^self_) && wf(&^self_))]
 #[ensures((^self_).len@ == (*self_).len@)]
 pub fn wf_move_to_back(self_: &mut LruList, idx: u32) {
+    if idx as usize >= self_.nodes.len() {
+        return;
+    }
     if !self_.nodes[idx as usize].active {
         return;
     }
@@ -2525,7 +2574,7 @@ pub fn wf_move_to_back(self_: &mut LruList, idx: u32) {
     self_.tail = Some(idx);
 }
 
-/// `clear` (lru_list.rs:186-192) re-proved with `wf` in the contract.
+/// `clear` (lru_list.rs:197-203) re-proved with `wf` in the contract.
 #[ensures(inv(&^self_) && wf(&^self_))]
 pub fn wf_clear(self_: &mut LruList) {
     self_.nodes.clear();
@@ -2542,6 +2591,9 @@ pub fn wf_clear(self_: &mut LruList) {
 #[requires((*self_).free@.len() < 4294967295)]
 #[ensures(links_sym(&^self_) && links_active(&^self_) && inactive_unlinked(&^self_))]
 pub fn wf_remove_a(self_: &mut LruList, idx: u32) {
+    if idx as usize >= self_.nodes.len() {
+        return;
+    }
     if !self_.nodes[idx as usize].active {
         return;
     }
@@ -2575,6 +2627,9 @@ pub fn wf_remove_a(self_: &mut LruList, idx: u32) {
 #[requires((*self_).free@.len() < 4294967295)]
 #[ensures(tail_unique(&^self_) && head_unique(&^self_))]
 pub fn wf_remove_b(self_: &mut LruList, idx: u32) {
+    if idx as usize >= self_.nodes.len() {
+        return;
+    }
     if !self_.nodes[idx as usize].active {
         return;
     }
@@ -2608,6 +2663,9 @@ pub fn wf_remove_b(self_: &mut LruList, idx: u32) {
 #[requires((*self_).free@.len() < 4294967295)]
 #[ensures(ends_active(&^self_) && ends_both(&^self_))]
 pub fn wf_remove_c(self_: &mut LruList, idx: u32) {
+    if idx as usize >= self_.nodes.len() {
+        return;
+    }
     if !self_.nodes[idx as usize].active {
         return;
     }
@@ -2641,6 +2699,9 @@ pub fn wf_remove_c(self_: &mut LruList, idx: u32) {
 #[requires((*self_).free@.len() < 4294967295)]
 #[ensures(free_covers_inactive(&^self_))]
 pub fn wf_remove_d(self_: &mut LruList, idx: u32) {
+    if idx as usize >= self_.nodes.len() {
+        return;
+    }
     if !self_.nodes[idx as usize].active {
         return;
     }
@@ -2680,6 +2741,9 @@ pub fn wf_remove_d(self_: &mut LruList, idx: u32) {
 #[requires((*self_).free@.len() < 4294967295)]
 #[ensures(free_covers_inactive(&^self_) && slots_accounted(&^self_) && slots_disjoint(&^self_))]
 pub fn wf_remove_ad(self_: &mut LruList, idx: u32) {
+    if idx as usize >= self_.nodes.len() {
+        return;
+    }
     if !self_.nodes[idx as usize].active {
         return;
     }
@@ -2828,6 +2892,82 @@ pub fn verify_epo_inv_len_matches_active_slots_rm(l: &mut LruList, idx: u32) {
     wf_remove_ad(l, idx);
 }
 
+// ---- EPO-INV-STALE-HANDLE-NEVER-CRASHES (FR-012) ---------------------—
+// FR-012: `touch` and `remove` on an already-removed handle MUST be idempotent (no panic, no
+// effect), returning `Ok(())` silently. Before the repair the guard read the slot in order to
+// decide the slot was valid (`self.nodes[idx as usize].active`), so the check itself panicked on
+// any slot number past the end of the arena — and `clear` empties the arena, which turns EVERY
+// outstanding handle into exactly that. The repair range-checks first (lru_list.rs:113-115,
+// :168-170).
+//
+// What makes these drivers proofs rather than restatements: they take an ARBITRARY `u32` slot
+// number and state NO in-range precondition. Totality (no index panic) is therefore a VC Creusot
+// must discharge with no in-range assumption available — the VC that FAILED before the repair —
+// and the `^l == *l` postconditions are the "no effect" half of FR-012.
+
+/// The FR-012 scenario end to end, on the arena: `clear` discards the slot storage, then the
+/// slot number the pool issued earlier is used for `touch`, `remove`, and both again. No call
+/// panics, every call is a no-op, and the arena is left exactly as `clear` left it.
+#[ensures((^l).nodes@.len() == 0 && (^l).len@ == 0)]
+#[ensures((^l).head == None && (^l).tail == None && (^l).free@.len() == 0)]
+#[ensures(inv(&^l))]
+pub fn verify_epo_inv_stale_handle_never_crashes(l: &mut LruList, issued_index: u32) {
+    arena_clear(l);                        // clear (lru_list.rs:197-203)
+    arena_move_to_back(l, issued_index);   // touch  — panicked here before the repair
+    arena_remove(l, issued_index);         // remove — panicked here before the repair
+    arena_move_to_back(l, issued_index);   // idempotent: a second touch is still a no-op
+    arena_remove(l, issued_index);         // idempotent: a second remove is still a no-op
+}
+
+/// `touch` alone, on an arbitrary arena and an arbitrary slot number: total, and out of range it
+/// changes nothing at all.
+#[requires(inv(l))]
+#[ensures(idx@ >= (*l).nodes@.len() ==> ^l == *l)]
+#[ensures((^l).len@ == (*l).len@ && (^l).nodes@.len() == (*l).nodes@.len())]
+#[ensures((^l).free@ == (*l).free@)]
+#[ensures(inv(&^l))]
+pub fn verify_epo_inv_stale_handle_never_crashes_mv(l: &mut LruList, idx: u32) {
+    arena_move_to_back(l, idx);
+}
+
+/// `remove` alone, on an arbitrary arena and an arbitrary slot number: total, and out of range it
+/// changes nothing at all.
+#[requires(inv(l))]
+#[requires(idx@ < (*l).nodes@.len() && (*l).nodes@[idx@].active ==> (*l).len@ >= 1)]
+#[requires((*l).free@.len() < 4294967295)]
+#[ensures(idx@ >= (*l).nodes@.len() ==> ^l == *l)]
+#[ensures((^l).nodes@.len() == (*l).nodes@.len())]
+#[ensures(inv(&^l))]
+pub fn verify_epo_inv_stale_handle_never_crashes_rm(l: &mut LruList, idx: u32) {
+    arena_remove(l, idx);
+}
+
+/// The same scenario at the shipped API surface (`clear_pool` then `touch`/`remove` with the
+/// stale handle): both calls return `Ok(())` silently, and the pool is untouched.
+#[requires(h.pool@ < (*self_).pools@.len() ==> inv(&((*self_).pools@[h.pool@]).lru))]
+#[ensures(h.pool@ < (*self_).pools@.len() ==> result.0 == Ok(()) && result.1 == Ok(()))]
+// An out-of-range POOL id is the one case the shipped code does report: `pools.get(..)` returns
+// None and the call degrades to `Err(InvalidPool)` (lib.rs:144, :188). FR-012's silent no-op is
+// about the SLOT number inside the handle, which is what the repair range-checks.
+#[ensures(h.pool@ >= (*self_).pools@.len() ==>
+             result.0 == Err(PolicyError::InvalidPool(h.pool))
+          && result.1 == Err(PolicyError::InvalidPool(h.pool))
+          && ^self_ == *self_)]
+#[ensures(h.pool@ < (*self_).pools@.len() ==>
+             ((^self_).pools@[h.pool@]).lru.nodes@.len() == 0
+          && ((^self_).pools@[h.pool@]).lru.len@ == 0
+          && ((^self_).pools@[h.pool@]).lru.head == None
+          && ((^self_).pools@[h.pool@]).lru.tail == None
+          && ((^self_).pools@[h.pool@]).lru.free@.len() == 0)]
+pub fn verify_epo_inv_stale_handle_never_crashes_api(self_: &mut Pools, h: Handle)
+    -> (Result<(), PolicyError>, Result<(), PolicyError>)
+{
+    state_clear(self_, h.pool);
+    let r_touch = state_touch(self_, Handle { pool: h.pool, index: h.index });
+    let r_remove = state_remove(self_, Handle { pool: h.pool, index: h.index });
+    (r_touch, r_remove)
+}
+
 // ===========================================================================
 // REFUTATION WITNESSES — the two obligations the inventory expects to be REFUTED.
 // These modules do NOT prove their properties (which are FALSE of this component); they prove
@@ -2836,6 +2976,13 @@ pub fn verify_epo_inv_len_matches_active_slots_rm(l: &mut LruList, idx: u32) {
 // ===========================================================================
 
 /// Refutation premise for EPO-INV-STALE-HANDLE-NEVER-CRASHES.
+///
+/// LEFT INTACT ON PURPOSE, and it STILL PROVES after the repair: it is premise-shaped. The arena
+/// can still be emptied and a handle can still name a slot past the end — that is exactly what its
+/// two `ensures` say, and the repair does not change it. What the repair removed is the PANIC that
+/// used to follow, proved separately by verify_epo_inv_stale_handle_never_crashes. The paragraph
+/// below describes the PRE-REPAIR code and is kept as the record of the defect; its line numbers
+/// (lru_list.rs:109, :160, :187-191) are pre-repair line numbers.
 /// `clear_pool` empties the slot storage (lru_list.rs:187-191), so afterwards EVERY slot number
 /// the pool ever issued is out of range — and `touch`/`remove` index `self.nodes[idx as usize]`
 /// with no bounds check at all (lru_list.rs:109, :160), so using any such handle PANICS. One such
@@ -2847,7 +2994,7 @@ pub fn refute_epo_inv_stale_handle_never_crashes(l: &mut LruList, issued_index: 
 }
 
 /// Refutation premise for EPO-INV-STALE-HANDLE-NO-CROSS-ENTRY-EFFECT.
-/// `remove` pushes the freed slot onto the reuse list (lru_list.rs:181) and the next
+/// `remove` pushes the freed slot onto the reuse list (lru_list.rs:191) and the next
 /// `push_back`/`push_front` pops it straight back (lru_list.rs:38, :76), so the very same slot
 /// number comes to name a DIFFERENT key — while still looking perfectly live. A handle kept from
 /// the vanished entry therefore acts on that different key's entry, and nothing detects it.
@@ -3406,7 +3553,7 @@ pub fn lemma_epo_inv_list_acyclic_and_length(a: Seq<Node>, b: Seq<Node>, cur: Op
     }
 }
 
-/// `remove` (lru_list.rs:159-183) re-proved once more, with the FRONT/BACK RELOCATION in the
+/// `remove` (lru_list.rs:167-194) re-proved once more, with the FRONT/BACK RELOCATION in the
 /// contract. Same body, character for character, as `arena_remove` / `wf_remove_a`..`wf_remove_e`;
 /// only the contract differs. This is the single-call shape the `ends_iff` obligation needs — the
 /// previous two-call `wf_remove_a(l, idx); wf_remove_c(l, idx)` body could not discharge the second
@@ -3428,6 +3575,9 @@ pub fn lemma_epo_inv_list_acyclic_and_length(a: Seq<Node>, b: Seq<Node>, cur: Op
              (^self_).head == (*self_).nodes@[idx@].next)]
 #[ensures((*self_).nodes@[idx@].prev != None ==> (^self_).head == (*self_).head)]
 pub fn chain_remove(self_: &mut LruList, idx: u32) {
+    if idx as usize >= self_.nodes.len() {
+        return;
+    }
     if !self_.nodes[idx as usize].active {
         return;
     }
@@ -3662,6 +3812,21 @@ pub fn lemma_epo_inv_list_empty_iff_no_ends(a: Seq<Node>, b: Seq<Node>, cur: Opt
 // scorer's mutant check is silently skipped. These twins were therefore confirmed RED by hand in
 // the whole-crate run; see ../verif/creusot_advisory.yaml.
 // ###########################################################################
+
+#[ensures((^l).nodes@.len() == 1)] // FALSE: after `clear` the arena is empty and a stale
+                                   // handle adds nothing back; a no-op allocates no slot
+pub fn verify_epo_inv_stale_handle_never_crashes__mutant(l: &mut LruList, issued_index: u32) {
+    arena_clear(l);
+    arena_move_to_back(l, issued_index);
+    arena_remove(l, issued_index);
+}
+
+#[requires(inv(l))]
+#[ensures(idx@ >= (*l).nodes@.len() ==> (^l).tail == Some(idx))] // FALSE: an out-of-range slot
+                                   // number is a silent no-op, so it never becomes the back
+pub fn verify_epo_inv_stale_handle_never_crashes_mv__mutant(l: &mut LruList, idx: u32) {
+    arena_move_to_back(l, idx);
+}
 
 #[requires((*self_).pools@.len() < 4294967295)]
 #[ensures(result@ == (*self_).pools@.len() + 1)] // FALSE: the id is the OLD count
