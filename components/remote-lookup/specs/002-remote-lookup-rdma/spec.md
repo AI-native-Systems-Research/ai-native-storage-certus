@@ -549,6 +549,25 @@ one-sided write into a reclaimed slot).
   meant to be plumbed through.
 
 
+- **FR-038** *(New 2026-10-02)*: The responder MUST report the lifetime of the read pins it holds
+  on peers' behalf, through `RemoteServeStats`: `peer_pins_held` (gauge), `peer_pins_taken`,
+  `peer_pin_hold_us_total` and `peer_pin_hold_us_max`. The accounting MUST live in the
+  `PinnedBatch` guard rather than at its call sites, because the guard is the only place that
+  knows both when a pin was taken and when it was released.
+  - **Rationale.** A pin held for a peer keeps `read_ref > 0`, which
+    `IDispatchMap::try_evict_to_block` refuses, so responder pins are unevictable DRAM on this
+    node. The type's own documentation states that a leaked pin is indistinguishable from a live
+    reader and that **no leak detector exists**; `peer_pins_held` returning to zero between serves
+    is that detector.
+  - Hold time MUST be attributed per batch, and a batch that pinned nothing MUST record nothing:
+    a serve finding nothing servable still constructs a batch, and counting those would pull the
+    mean hold time toward zero and hide the long holds that matter.
+  - **This requirement exists to be able to FALSIFY a hypothesis, not to confirm one.** Peer
+    serving was measured to cause store declines (72.1% with peers against 0.17% without, one
+    variable changed), and a held pin was the leading mechanism. But the rate of serves — about 32
+    keys per second — only blocks eviction if hold times are long, which nothing established. These
+    counters decide it either way, and a near-zero `peer_pin_hold_us_max` refutes the hypothesis.
+
 ### Key Entities
 
 - **Operation**: One `batch_lookup` invocation, keyed by `op_id`. Holds the unsatisfied set,

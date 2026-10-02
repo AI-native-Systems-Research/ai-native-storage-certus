@@ -378,6 +378,42 @@ pub struct TierEventStats {
     /// means the tier could not absorb the store inflow even after
     /// backpressuring — consider a larger tier or more SSD write bandwidth.
     pub store_drops_on_full: u64,
+    /// Eviction candidates skipped because a read pin was held on them —
+    /// `IDispatchMap::try_evict_to_block` returned `ActiveReferences`.
+    ///
+    /// Counted per candidate examined, so one call that scans past several pinned
+    /// entries bumps this several times.
+    ///
+    /// This exists to separate the two reasons a clean eviction can fail, which look
+    /// identical from the call site and mean opposite things. A candidate may be
+    /// undemotable because write-through has not landed yet — expected under write
+    /// load, and self-correcting — or because something is holding a read pin, which
+    /// is the only one that implicates a reader. Counting "eviction failed" without
+    /// that distinction produces a number that cannot support either conclusion, so
+    /// the error variant is matched rather than `is_ok()` tested.
+    pub evictions_blocked_by_pin: u64,
+    /// Times a clean-eviction scan examined every candidate it was given and could
+    /// free none, so the caller had to surface pool-full.
+    ///
+    /// This is the event that becomes a declined store: `reserve_memory` retries
+    /// against its `--store-backpressure-ms` budget, each retry scanning again, and
+    /// when the budget elapses the store is dropped (`store_drops_on_full`).
+    pub eviction_scans_exhausted: u64,
+    /// Eviction candidates skipped because write-through had not landed, so there was
+    /// no `ssd_offset` to demote to. Counted per candidate examined.
+    ///
+    /// This is the *other* reason a clean eviction fails, and it involves no reader and
+    /// no peer — `reserve_memory`'s own comment names both: the oldest entries are
+    /// transiently un-evictable because they are "pinned by an in-flight load, or not
+    /// yet written through by the bg_writer".
+    ///
+    /// It is counted rather than inferred by subtraction from
+    /// `evictions_blocked_by_pin`, because subtraction would silently absorb every
+    /// third cause and any future variant, and would attribute them to whichever of
+    /// the two was not measured. With both counted, `evictions_blocked_by_pin +
+    /// evictions_blocked_unpersisted` against the scanned total is itself a check that
+    /// the two explanations are exhaustive.
+    pub evictions_blocked_unpersisted: u64,
 }
 
 #[cfg(feature = "spdk")]

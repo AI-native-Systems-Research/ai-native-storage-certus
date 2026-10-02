@@ -17,6 +17,7 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 
 use interfaces::{
     CacheKey, Endpoint, IDispatchMap, IDispatcher, IRemoteLookupRdmaInitiator, LookupResult,
@@ -48,14 +49,27 @@ pub(crate) type ServeCompletion = Box<dyn FnOnce(Vec<(CacheKey, RdmaStatusCode)>
 pub(crate) struct PinnedBatch {
     dispatch_map: Arc<dyn IDispatchMap + Send + Sync>,
     keys: Vec<CacheKey>,
+    /// Shared with `serve_stats()`, so a stalled serve is visible from outside this
+    /// crate. The guard is the only place that knows both when a pin was taken and
+    /// when it was released, which is why the accounting lives here rather than at
+    /// the call sites.
+    counters: Arc<ServeCounters>,
+    /// When this batch came into existence. The interval from here to `drop` is
+    /// exactly the window in which these keys cannot be evicted.
+    created: Instant,
 }
 
 impl PinnedBatch {
     /// An empty batch pinning nothing.
-    fn new(dispatch_map: Arc<dyn IDispatchMap + Send + Sync>) -> Self {
+    fn new(
+        dispatch_map: Arc<dyn IDispatchMap + Send + Sync>,
+        counters: Arc<ServeCounters>,
+    ) -> Self {
         Self {
             dispatch_map,
             keys: Vec::new(),
+            counters,
+            created: Instant::now(),
         }
     }
 
@@ -65,16 +79,33 @@ impl PinnedBatch {
     /// not release it itself.
     fn adopt(&mut self, key: CacheKey) {
         self.keys.push(key);
+        self.counters.pins_held.fetch_add(1, Ordering::Relaxed);
+        self.counters.pins_taken.fetch_add(1, Ordering::Relaxed);
     }
 }
 
 impl Drop for PinnedBatch {
     fn drop(&mut self) {
+        let held = self.keys.len() as u64;
         for key in self.keys.drain(..) {
             // Errors are not actionable here: a failed release means the entry is
             // already gone, which is the outcome we wanted.
             let _ = self.dispatch_map.release_read(key);
         }
+        if held == 0 {
+            // A serve that found nothing servable still builds a batch. Such a batch
+            // blocks no eviction, so recording its lifetime would pull the mean hold
+            // time toward zero and hide the holds that matter.
+            return;
+        }
+        self.counters.pins_held.fetch_sub(held, Ordering::Relaxed);
+        let us = self.created.elapsed().as_micros() as u64;
+        self.counters
+            .pin_hold_us_total
+            .fetch_add(us, Ordering::Relaxed);
+        self.counters
+            .pin_hold_us_max
+            .fetch_max(us, Ordering::Relaxed);
     }
 }
 
@@ -206,6 +237,16 @@ enum Resolved {
 pub(crate) struct ServeCounters {
     pub served: AtomicU64,
     pub cold_promotions: AtomicU64,
+    /// Read pins held on behalf of peers right now — a gauge, raised on `adopt` and
+    /// lowered when the owning [`PinnedBatch`] drops. The only non-monotonic counter
+    /// here, because what matters is the level, not the rate.
+    pub pins_held: AtomicU64,
+    /// Keys ever pinned on behalf of peers.
+    pub pins_taken: AtomicU64,
+    /// Summed lifetime of released pin batches, in microseconds, per batch.
+    pub pin_hold_us_total: AtomicU64,
+    /// Longest single batch lifetime, in microseconds.
+    pub pin_hold_us_max: AtomicU64,
 }
 
 impl ServeCounters {
@@ -213,6 +254,10 @@ impl ServeCounters {
         interfaces::RemoteServeStats {
             peer_served_keys: self.served.load(Ordering::Relaxed),
             peer_triggered_promotions: self.cold_promotions.load(Ordering::Relaxed),
+            peer_pins_held: self.pins_held.load(Ordering::Relaxed),
+            peer_pins_taken: self.pins_taken.load(Ordering::Relaxed),
+            peer_pin_hold_us_total: self.pin_hold_us_total.load(Ordering::Relaxed),
+            peer_pin_hold_us_max: self.pin_hold_us_max.load(Ordering::Relaxed),
         }
     }
 }
@@ -224,11 +269,11 @@ pub(crate) fn serve_rdma_request(
     requester_endpoint: &Endpoint,
     rkey: u32,
     slots: &[SlotDesc],
-    counters: &ServeCounters,
+    counters: &Arc<ServeCounters>,
     on_done: ServeCompletion,
 ) {
     let mut statuses: Vec<(CacheKey, RdmaStatusCode)> = Vec::with_capacity(slots.len());
-    let mut pinned = PinnedBatch::new(Arc::clone(dispatch_map));
+    let mut pinned = PinnedBatch::new(Arc::clone(dispatch_map), Arc::clone(counters));
     let mut to_push: Vec<(CacheKey, RemoteRegion)> = Vec::new();
 
     // Pass 1: classify every slot with no SSD I/O. A memory hit at the requested
@@ -408,6 +453,86 @@ mod tests {
         }
     }
 
+    /// `peer_pins_held` must return to zero once a batch is released, and that is the
+    /// point of the counter: this type's own documentation says a leaked pin makes its
+    /// entry permanently unevictable, is indistinguishable from a live reader, and that
+    /// **there is no leak detector to catch it**. A gauge that returns to zero between
+    /// serves is that detector, so this asserts the property rather than merely that
+    /// the number moves.
+    ///
+    /// The hold time is attributed per batch, not per key. One batch pinning three keys
+    /// for one interval blocks eviction for that interval, not three times it, so
+    /// multiplying by the key count would overstate the window.
+    #[test]
+    fn a_released_pin_batch_returns_the_gauge_to_zero_and_records_its_lifetime() {
+        let world = NodeWorld::new(1 << 20);
+        let (dm, _disp, _init) = node(&world);
+        let counters = Arc::new(ServeCounters::default());
+
+        {
+            let mut batch = PinnedBatch::new(Arc::clone(&dm), Arc::clone(&counters));
+            for key in 0..3u64 {
+                batch.adopt(key);
+            }
+            assert_eq!(
+                counters.snapshot().peer_pins_held,
+                3,
+                "the gauge must show pins while the batch is alive",
+            );
+            // Long enough that elapsed microseconds are unambiguously non-zero rather
+            // than rounding to 0 on a fast machine.
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+
+        let s = counters.snapshot();
+        assert_eq!(
+            s.peer_pins_held, 0,
+            "a released batch must return the gauge to zero -- a non-zero resting level \
+             is exactly the leak this counter exists to surface: {s:?}",
+        );
+        assert_eq!(
+            s.peer_pins_taken, 3,
+            "every key pinned on a peer's behalf must be counted once: {s:?}",
+        );
+        assert!(
+            s.peer_pin_hold_us_total >= 1_000,
+            "a batch held ~2 ms must record a lifetime in that order, got {} us",
+            s.peer_pin_hold_us_total,
+        );
+        assert_eq!(
+            s.peer_pin_hold_us_max, s.peer_pin_hold_us_total,
+            "with exactly one released batch the max and the total are the same number; \
+             if they differ the attribution is not per batch: {s:?}",
+        );
+    }
+
+    /// A serve that finds nothing servable still constructs a batch, and such a batch
+    /// blocks no eviction. Recording its lifetime would drag the mean hold time toward
+    /// zero and hide the long holds that matter, so an empty batch records nothing.
+    #[test]
+    fn an_empty_pin_batch_records_no_hold_time() {
+        let world = NodeWorld::new(1 << 20);
+        let (dm, _disp, _init) = node(&world);
+        let counters = Arc::new(ServeCounters::default());
+
+        {
+            let _batch = PinnedBatch::new(Arc::clone(&dm), Arc::clone(&counters));
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+
+        let s = counters.snapshot();
+        assert_eq!(
+            (
+                s.peer_pins_held,
+                s.peer_pins_taken,
+                s.peer_pin_hold_us_total
+            ),
+            (0, 0, 0),
+            "an empty batch pinned nothing and blocked nothing, so it must not appear \
+             in the hold-time statistics: {s:?}",
+        );
+    }
+
     /// Run a serve and return the statuses it reported.
     ///
     /// The mock initiator completes synchronously unless a test stages a serve
@@ -440,7 +565,7 @@ mod tests {
     ) {
         let reported = Arc::new(std::sync::Mutex::new(None));
         let sink = Arc::clone(&reported);
-        let counters = ServeCounters::default();
+        let counters = Arc::new(ServeCounters::default());
         serve_rdma_request(
             dm,
             disp,

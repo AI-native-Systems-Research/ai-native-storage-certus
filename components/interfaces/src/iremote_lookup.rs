@@ -149,6 +149,37 @@ pub struct RemoteServeStats {
     /// That makes it meaningful as a rate and misleading as a running total
     /// compared against `peer_served_keys` over a long window.
     pub peer_triggered_promotions: u64,
+    /// Read pins the responder is holding **right now** on behalf of peers.
+    ///
+    /// A gauge, not a counter: it rises as a serve pins its keys and falls when the
+    /// batch is dropped after the RDMA completion. Unlike every other field here it
+    /// is not monotonic, so differencing two snapshots is meaningless — read it as a
+    /// level.
+    ///
+    /// This is the quantity that makes a stalled responder visible. A held pin keeps
+    /// `read_ref > 0`, which `IDispatchMap::try_evict_to_block` refuses, so pins held
+    /// on behalf of peers are unevictable DRAM. A level that does not return to zero
+    /// between serves is a leak; a persistently high level is back-pressure on this
+    /// node's own eviction.
+    pub peer_pins_held: u64,
+    /// Read pins taken on behalf of peers since process start, counting keys rather
+    /// than batches. With `peer_pin_hold_us_total` this gives a mean hold time.
+    pub peer_pins_taken: u64,
+    /// Summed lifetime, in microseconds, of every responder pin batch that has been
+    /// released — measured from the batch being created to it being dropped, which is
+    /// the window in which its keys cannot be evicted.
+    ///
+    /// Attributed per **batch**, not per key: one batch pins many keys for one
+    /// interval, and multiplying by the key count would overstate the time anything
+    /// was actually blocked.
+    pub peer_pin_hold_us_total: u64,
+    /// Longest single batch lifetime in microseconds, since process start.
+    ///
+    /// The mean hides the case that matters. A batch held for seconds — a lost RDMA
+    /// completion, a peer that vanished mid-serve — blocks eviction for that whole
+    /// window, and one such batch among thousands of fast ones leaves the mean
+    /// untouched while stalling the tier.
+    pub peer_pin_hold_us_max: u64,
 }
 
 component_macros::define_interface! {

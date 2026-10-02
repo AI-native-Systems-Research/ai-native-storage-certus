@@ -2794,6 +2794,20 @@ impl IDispatcher for DispatcherP2pComponent {
         // p2p server. Adding fields to `TierEventStats` is NOT compiler-enforced -- this
         // `..default()` kept compiling -- which the dispatcher's spec 002 records as a
         // caveat and which this was a live instance of.
+        // DELIBERATELY NOT REPORTED HERE: `evictions_blocked_by_pin` and
+        // `eviction_scans_exhausted`. This component does have eviction paths that can
+        // be refused by a held pin (`background.rs` and the allocation retry loop in
+        // this file), so zero is NOT a statement that it is never blocked -- it means
+        // unmeasured. They are left out because those paths are free functions holding
+        // no handle to these counters, so reporting them is a threading change to a
+        // component this instrumentation cannot exercise: p2p needs its own profile and
+        // a loaded `gdrdrv`.
+        //
+        // The distinction against the route-counter bug above is deliberate. Reporting
+        // hits with dram 0 / ssd 0 was self-CONTRADICTORY and therefore a defect. An
+        // unmeasured counter is a gap, which is only acceptable while it is declared --
+        // hence this comment and the matching note in the dispatcher's spec. Anyone
+        // reading a p2p endpoint must not conclude "no pin blocks occurred".
         interfaces::TierEventStats {
             lookup_hits_dram: self.route_dram.load(Ordering::Relaxed),
             lookup_hits_ssd: self.route_ssd.load(Ordering::Relaxed),

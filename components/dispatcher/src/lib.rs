@@ -129,6 +129,14 @@ pub struct TierEventCounters {
     /// store reports success so the vLLM offloading connector does not treat a
     /// full cache as a fatal transfer failure.
     store_drops_on_full: AtomicU64,
+    /// Eviction candidates skipped because a read pin was held
+    /// (`DispatchMapError::ActiveReferences`). Counted per candidate examined.
+    evictions_blocked_by_pin: AtomicU64,
+    /// Clean-eviction scans that examined every candidate and freed none.
+    eviction_scans_exhausted: AtomicU64,
+    /// Eviction candidates skipped because write-through had not landed (no
+    /// `ssd_offset`), so there was nowhere to demote them to.
+    evictions_blocked_unpersisted: AtomicU64,
 }
 
 impl TierEventCounters {
@@ -206,6 +214,27 @@ impl TierEventCounters {
         self.store_drops_on_full.fetch_add(1, Ordering::Relaxed)
     }
 
+    /// One eviction candidate skipped because a read pin was held on it.
+    #[inline]
+    pub fn record_eviction_blocked_by_pin(&self) {
+        self.evictions_blocked_by_pin
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// One clean-eviction scan that could free nothing.
+    #[inline]
+    pub fn record_eviction_scan_exhausted(&self) {
+        self.eviction_scans_exhausted
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// One eviction candidate skipped because write-through had not landed.
+    #[inline]
+    pub fn record_eviction_blocked_unpersisted(&self) {
+        self.evictions_blocked_unpersisted
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
     /// Read the cumulative counters without resetting them.
     pub fn snapshot(&self) -> TierEventStats {
         TierEventStats {
@@ -219,6 +248,11 @@ impl TierEventCounters {
             remote_lookup_misses: self.remote_lookup_misses.load(Ordering::Relaxed),
             store_backpressure_events: self.store_backpressure_events.load(Ordering::Relaxed),
             store_drops_on_full: self.store_drops_on_full.load(Ordering::Relaxed),
+            evictions_blocked_by_pin: self.evictions_blocked_by_pin.load(Ordering::Relaxed),
+            eviction_scans_exhausted: self.eviction_scans_exhausted.load(Ordering::Relaxed),
+            evictions_blocked_unpersisted: self
+                .evictions_blocked_unpersisted
+                .load(Ordering::Relaxed),
         }
     }
 }
@@ -1006,11 +1040,32 @@ impl DispatcherComponent {
     ) -> bool {
         for cand in mt.oldest_keys(scan) {
             // Preferred: demote to block (data preserved, entry stays resolvable).
-            if dm.try_evict_to_block(cand).is_ok() {
-                let _ = mt.remove(cand);
-                self.emit_eviction(cand, EvictionReason::Demoted);
-                self.tier_counters.record_eviction_from_memory();
-                return true;
+            //
+            // The error VARIANT is matched rather than `is_ok()` tested, because the
+            // two ways this fails mean opposite things and are indistinguishable
+            // otherwise: `ActiveReferences` means a reader holds a pin, which is the
+            // only failure that implicates a reader, while anything else means the
+            // entry is not persisted enough to demote — expected under write load and
+            // self-correcting. A single "eviction failed" count conflates them and can
+            // support neither conclusion.
+            match dm.try_evict_to_block(cand) {
+                Ok(()) => {
+                    let _ = mt.remove(cand);
+                    self.emit_eviction(cand, EvictionReason::Demoted);
+                    self.tier_counters.record_eviction_from_memory();
+                    return true;
+                }
+                Err(interfaces::DispatchMapError::ActiveReferences(_)) => {
+                    self.tier_counters.record_eviction_blocked_by_pin();
+                }
+                Err(_) => {
+                    // The only other refusal for a resident entry is a missing
+                    // ssd_offset, i.e. write-through has not landed. Counted rather
+                    // than inferred by subtraction, so a third cause appearing later
+                    // shows up as the two counters failing to sum to the scanned
+                    // total instead of being silently attributed to this one.
+                    self.tier_counters.record_eviction_blocked_unpersisted();
+                }
             }
             // Write-through incomplete (no ssd_offset) so it can't be demoted.
             // Do NOT full-remove it: `dm.remove` returns NotExist for the key,
@@ -1030,6 +1085,10 @@ impl DispatcherComponent {
             //
             // Pinned by an in-flight load — also skip and try the next candidate.
         }
+        // Every candidate was pinned or undemotable, so the caller must surface
+        // pool-full. This is the event that becomes a declined store once
+        // `reserve_memory` exhausts its backpressure budget retrying.
+        self.tier_counters.record_eviction_scan_exhausted();
         false
     }
 
@@ -6230,6 +6289,104 @@ mod tests {
                 "key {key} resolved to NotExist after eviction — Check→Pin race regression",
             );
         }
+    }
+
+    /// A failed clean eviction must say WHICH of its two causes applied, because they
+    /// mean opposite things: a held read pin implicates a reader (an in-flight load, or
+    /// a peer being served over RDMA), while a missing `ssd_offset` means write-through
+    /// has not landed and will self-correct.
+    ///
+    /// This is the test the counters exist for. The store-decline investigation turned
+    /// on exactly this distinction, and before these counters the call site tested
+    /// `try_evict_to_block(..).is_ok()` and discarded the variant — so a run could show
+    /// 72% of stores declined with no way to say whether readers or the writeback lag
+    /// caused it.
+    ///
+    /// Both directions are asserted, which is what makes the test resistant to the
+    /// obvious regression: collapsing the `match` back to `is_err()` and bumping a
+    /// single counter passes one assertion and fails the other, whichever counter is
+    /// chosen. A test asserting only "the pin counter rose" would survive that.
+    #[test]
+    fn a_blocked_eviction_distinguishes_a_held_pin_from_unlanded_writeback() {
+        /// Builds a 4-entry full tier and returns the counters after one failed
+        /// `evict_for_space`. `pin` chooses the cause: pinned entries if true,
+        /// unpersisted ones if false.
+        fn scenario(pin: bool) -> interfaces::TierEventStats {
+            let dm_concrete = Arc::new(MockDispatchMap::new());
+            let dm: Arc<dyn IDispatchMap + Send + Sync> = dm_concrete.clone();
+            let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(16384));
+
+            const N: u64 = 4;
+            for key in 0..N {
+                mt.insert(key, 4096).unwrap();
+                dm.create_memory_tier_entry(key, std::ptr::null_mut(), 4096)
+                    .unwrap();
+                dm.release_write(key).unwrap();
+                if pin {
+                    // Persisted, so the ONLY thing preventing demotion is the pin.
+                    dm.convert_to_storage(key, 0).unwrap();
+                    dm.create_memory_tier_entry(key, std::ptr::null_mut(), 4096)
+                        .ok();
+                    // Take a read pin and keep it: this is the responder-holding-a-
+                    // PinnedBatch shape, reduced to its essentials.
+                    let _ = dm.lookup(key);
+                }
+                // When !pin, ssd_offset stays None: unpersisted, unpinned.
+            }
+
+            let counters = Arc::new(TierEventCounters::default());
+            let c = DispatcherComponent::new(
+                AtomicBool::new(false),
+                Mutex::new(None),
+                Mutex::new(None),
+                Mutex::new(None),
+                RwLock::new(Vec::new()),
+                RwLock::new(None),
+                AtomicU64::new(0),
+                Mutex::new(None),
+                Mutex::new(None),
+                AtomicUsize::new(2048),
+                AtomicU64::new(0),
+                RwLock::new(None),
+                Arc::new(Mutex::new(None)),
+                AtomicU64::new(0),
+                Arc::clone(&counters),
+            );
+            let res = c.evict_for_space(&dm, &mt, 4096, 100, 512);
+            assert!(
+                matches!(res, Err(DispatcherError::AllocationFailed(_))),
+                "the tier is full and nothing is evictable, so this must fail: {res:?}",
+            );
+            counters.snapshot()
+        }
+
+        let pinned = scenario(true);
+        let unpersisted = scenario(false);
+
+        assert!(
+            pinned.evictions_blocked_by_pin > 0,
+            "a pinned candidate must be counted as pin-blocked, got {pinned:?}",
+        );
+        assert_eq!(
+            pinned.evictions_blocked_unpersisted, 0,
+            "a persisted-but-pinned candidate must NOT be attributed to writeback lag: {pinned:?}",
+        );
+
+        assert!(
+            unpersisted.evictions_blocked_unpersisted > 0,
+            "an unpersisted candidate must be counted as writeback-blocked, got {unpersisted:?}",
+        );
+        assert_eq!(
+            unpersisted.evictions_blocked_by_pin, 0,
+            "an unpinned candidate must NOT be attributed to a reader: {unpersisted:?}",
+        );
+
+        // Both are the event that becomes a declined store, so both must record it.
+        assert!(
+            pinned.eviction_scans_exhausted > 0 && unpersisted.eviction_scans_exhausted > 0,
+            "a scan that freed nothing is what `reserve_memory` retries against, and must \
+             be counted whichever cause blocked it: pinned={pinned:?} unpersisted={unpersisted:?}",
+        );
     }
 
     /// Companion to [`evict_never_drops_unpersisted_unpinned_victim`]: the fix
