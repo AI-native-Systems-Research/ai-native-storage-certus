@@ -6,7 +6,7 @@
 # a CPU (host-RAM) primary tier + an "fs" disk secondary tier.
 #
 # Self-contained: this script has NO dependency on run-docker-common.sh and does
-# NOT bind-mount the host driver. It builds the unified certus-offload-bench image
+# NOT bind-mount the host driver. It builds the unified certus-offload image
 # (from Dockerfile.offload) if it is missing, then runs it with DISK_DIR set so
 # the driver takes the tiering (CPU primary + fs secondary) path. The only host
 # mounts are the HF cache and the disk-tier data dir.
@@ -20,7 +20,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 # ── Image / build ─────────────────────────────────────────────────────────
-IMAGE="${IMAGE:-certus-offload-bench}"
+IMAGE="${IMAGE:-certus-offload}"
 VLLM_VERSION="${VLLM_VERSION:-0.26.0}"        # tiering.fs requires vLLM 0.26+
 DOCKERFILE="${DOCKERFILE:-${SCRIPT_DIR}/Dockerfile.offload}"
 

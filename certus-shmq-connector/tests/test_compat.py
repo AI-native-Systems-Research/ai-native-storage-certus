@@ -53,6 +53,8 @@ def test_caps_for_every_supported_version(version):
         ((0, 23), True),
         ((0, 24), True),
         ((0, 26), False),  # 0.26 rewrite: submit_store/submit_load carry direction
+        ((0, 29), False),
+        ((0, 30), False),
     ],
 )
 def test_transfer_result_has_type_dropped_at_0_26(version, expected):
@@ -70,6 +72,8 @@ def test_transfer_result_has_type_dropped_at_0_26(version, expected):
         ((0, 23), False),
         ((0, 24), False),
         ((0, 26), True),
+        ((0, 29), True),
+        ((0, 30), True),
     ],
 )
 def test_new_0_26_capabilities_gate_from_0_26(version, expected):
@@ -90,6 +94,8 @@ def test_new_0_26_capabilities_gate_from_0_26(version, expected):
         ((0, 23), True),
         ((0, 24), True),
         ((0, 26), True),
+        ((0, 29), True),
+        ((0, 30), True),
     ],
 )
 def test_req_context_arg_from_0_22(version, expected):
@@ -107,6 +113,8 @@ def test_req_context_arg_from_0_22(version, expected):
         ((0, 23), False),
         ((0, 24), False),
         ((0, 26), True),
+        ((0, 29), True),
+        ((0, 30), True),
     ],
 )
 def test_disable_hybrid_kv_cache_manager_only_from_0_26(version, expected):
@@ -123,6 +131,8 @@ def test_disable_hybrid_kv_cache_manager_only_from_0_26(version, expected):
         ((0, 23), True),
         ((0, 24), True),
         ((0, 26), True),
+        ((0, 29), True),
+        ((0, 30), True),
     ],
 )
 def test_disable_async_scheduling_from_0_22(version, expected):
@@ -140,6 +150,8 @@ def test_disable_async_scheduling_from_0_22(version, expected):
         ((0, 23), True),   # 0.23 added the on_new_request abstract method
         ((0, 24), True),
         ((0, 26), True),
+        ((0, 29), True),
+        ((0, 30), True),
     ],
 )
 def test_on_new_request_from_0_23(version, expected):
@@ -147,6 +159,44 @@ def test_on_new_request_from_0_23(version, expected):
     # implement it or vLLM can't instantiate it. (Measured: abstract at 0.23, not
     # 0.24.) Pin the threshold so a matrix edit that moves it is caught.
     assert compat.caps_for(version).has_on_new_request is expected
+
+
+@pytest.mark.parametrize(
+    "version,expected",
+    [
+        ((0, 20), False),
+        ((0, 22), False),
+        ((0, 23), False),
+        ((0, 24), False),
+        ((0, 26), False),
+        ((0, 29), False),  # 0.29 shares the 0.26 base surface; layout field is 0.30
+        ((0, 30), True),   # 0.30 added OffloadingConfig.kv_cache_layout
+    ],
+)
+def test_kvcache_layout_field_from_0_30(version, expected):
+    # 0.30 added OffloadingConfig.kv_cache_layout (resolved KVCacheLayout name).
+    # The threshold is a conservative (0, 30) floor (only 0.30 source was verified);
+    # pin it so a matrix edit that moves it is caught.
+    assert compat.caps_for(version).kvcache_layout_field is expected
+
+
+def test_kv_cache_layout_name_reads_field_on_0_30(monkeypatch):
+    # On a 0.30 caps set the adapter returns the config's kv_cache_layout name;
+    # on ≤0.29 it returns None without touching the field (gated by CAPS).
+    from dataclasses import make_dataclass
+
+    Config = make_dataclass(
+        "OffloadingConfig",
+        [("worker_kv_bytes_per_block", int), ("extra_config", dict), ("kv_cache_layout", object)],
+    )
+    cfg = Config(worker_kv_bytes_per_block=4096, extra_config={}, kv_cache_layout="LBHNC")
+
+    monkeypatch.setattr(compat, "CAPS", compat.caps_for((0, 30)))
+    assert compat.kv_cache_layout_name(cfg) == "LBHNC"
+
+    # ≤0.29: flag off → None even if a field happens to be present.
+    monkeypatch.setattr(compat, "CAPS", compat.caps_for((0, 29)))
+    assert compat.kv_cache_layout_name(cfg) is None
 
 
 def test_features_and_caps_have_identical_keys():

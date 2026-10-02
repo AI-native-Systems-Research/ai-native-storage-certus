@@ -1,6 +1,6 @@
 #!/bin/bash
 # CPUOffload + Prometheus — vLLM OffloadingConnector -> host RAM (unified image
-# certus-offload-bench, default OFFLOAD_MODE) with the bench's vLLM engine
+# certus-offload, default OFFLOAD_MODE) with the bench's vLLM engine
 # exposing Prometheus metrics on port 8000.
 #
 # The bench drives vLLM through the offline LLM(...) engine (no OpenAI server),
@@ -14,7 +14,7 @@
 #   PROM_PORT=9100 CPU_BYTES=$((32*(1<<30))) ./run-docker-cpu-prom.sh
 source "$(dirname "${BASH_SOURCE[0]}")/run-docker-common.sh"
 
-IMAGE="${IMAGE:-certus-offload-bench}"
+IMAGE="${IMAGE:-certus-offload}"
 CPU_BYTES="${CPU_BYTES:-$((16 * (1 << 30)))}"   # host-RAM KV pool (bytes)
 LOG="${LOG:-${SCRIPT_DIR}/cpu_offload_prom_$(stamp).log}"
 DRIVER="${DRIVER:-${SCRIPT_DIR}/run_multiturn_offloading.py}"

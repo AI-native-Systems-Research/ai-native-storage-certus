@@ -16,7 +16,7 @@
 #   podman run --rm --device nvidia.com/gpu=all \
 #       -v /mnt/fs-backend-bench:/mnt/fs-backend-bench \
 #       -v $HOME/.cache/huggingface:/root/.cache/huggingface \
-#       certus-sharedstorage-bench
+#       certus-sharedstorage
 
 # vLLM version is a build-time choice (default 0.23.0); override with
 #   podman build --build-arg VLLM_VERSION=0.26.0 ...

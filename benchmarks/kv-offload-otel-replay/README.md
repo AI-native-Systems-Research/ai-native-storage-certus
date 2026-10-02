@@ -64,8 +64,8 @@ a run at it with `OTEL_HOST=<out_dir>` (see below).
 
 | Image | Backend(s) | Driver | Notes |
 |---|---|---|---|
-| `certus-otel-offload-bench` | NoOffload / CPUOffload / Tiered-CPU-FS (by env) | `run_otel_replay.py` | Self-contained: one vLLM process, no server, no `--ipc=host`. Bakes the 0.26 tiering fix by default. |
-| `certus-otel-shmq-bench` | Certus shmq | `run_otel_shmq_certus.py` | Client only — needs a host `certus-server` on `SHM_PATH` + `--ipc=host`. Lives in the `/mnt/certus1` podman store. |
+| `certus-otel-offload` | NoOffload / CPUOffload / Tiered-CPU-FS (by env) | `run_otel_replay.py` | Self-contained: one vLLM process, no server, no `--ipc=host`. Bakes the 0.26 tiering fix by default. |
+| `certus-otel-shmq-connector` | Certus shmq | `run_otel_shmq_certus.py` | Client only — needs a host `certus-server` on `SHM_PATH` + `--ipc=host`. Lives in the `/mnt/certus1` podman store. |
 
 ## Build
 
@@ -74,7 +74,7 @@ a run at it with `OTEL_HOST=<out_dir>` (see below).
 bash benchmarks/kv-offload-otel-replay/build-otel.sh
 # or just one:  ONLY=offload ./build-otel.sh   |   ONLY=shmq ./build-otel.sh
 # or by hand (context = repo root):
-podman build -f benchmarks/kv-offload-otel-replay/Dockerfile.otel-offload -t certus-otel-offload-bench .
+podman build -f benchmarks/kv-offload-otel-replay/Dockerfile.otel-offload -t certus-otel-offload .
 ```
 
 ## Run — offload family (`run-docker-otel-offload.sh`)

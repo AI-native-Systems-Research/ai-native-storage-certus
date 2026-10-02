@@ -9,22 +9,14 @@ Manager targets (--target):
 
   simple-lru    pure-Python LRU cache, no external deps. Default.
   cpu-manager   vLLM's CPUOffloadingManager (lazy-imported).
-  certus-connector  Real Certus SPDK+NVMe engine via certus_native.
   fs-backend    Real llmd_fs_backend: SharedStorageOffloadingManager.
 
 Handler targets (--handler-target):
 
-  certus-connector  Real Certus GPU→NVMe transfers via SPDK.
   fs-backend        Real llmd_fs_backend StorageOffloadingHandlers.
 
 Usage:
-  # Default: LRU manager + certus handler
-  python replay_offloading_traces.py \
-      --manager-trace offloading_mgr_*.jsonl \
-      --handler-trace offloading_handler_*.jsonl \
-      --handler-target certus-connector
-
-  # LRU manager + fs-backend handler
+  # Default: LRU manager + fs-backend handler
   python replay_offloading_traces.py \
       --manager-trace offloading_mgr_*.jsonl \
       --handler-trace offloading_handler_*.jsonl \
@@ -35,7 +27,8 @@ Usage:
   python replay_offloading_traces.py \
       --bulk-io \
       --handler-trace offloading_handler_*.jsonl \
-      --handler-target certus-connector
+      --handler-target fs-backend \
+      --handler-target-args '{"root_dir": "/mnt/fs-backend-bench/replay"}'
 """
 
 from __future__ import annotations
@@ -316,143 +309,6 @@ def _make_fs_backend_target(
     return _Wrapper()
 
 
-def _make_certus_connector_target(extra_config: dict | None = None,
-                                   gpu_block_size: int = 16,
-                                   **_ignored):
-    """Real Certus connector package — via the production CertusOffloadingSpec.
-
-    Builds minimal VllmConfig / KVCacheConfig stand-ins, instantiates
-    CertusOffloadingSpec, and calls spec.get_manager() to get the manager
-    that vLLM's OffloadingConnector would pick up when wired with
-    kv_connector_extra_config.spec_name="CertusOffloadingSpec". This
-    exercises the spec's extra_config plumbing (slab_size_bytes,
-    dram_cache_bytes, use_native, tiering config) — not just the bare
-    NativeCertusOffloadingManager.
-
-    extra_config kwargs are merged into the spec's extra_config dict and
-    shape how the spec builds the engine / manager.
-    """
-    import sys as _sys
-    from types import SimpleNamespace
-    import certus_native  # noqa: F401
-    import vllm.v1.kv_offload.abstract as _base
-
-    # Shim: certus-connector may import the old name "base" (renamed to "abstract" in 0.20).
-    _sys.modules.setdefault("vllm.v1.kv_offload.base", _base)
-
-    _pkg = "/home/bdh/kvconn-trace/ai-native-storage-certus/certus-connector"
-    _shadow = "/home/bdh/kvconn-trace"
-    if _pkg not in _sys.path:
-        _sys.path.insert(0, _pkg)
-    _saved_path = list(_sys.path)
-    _sys.path[:] = [p for p in _sys.path if p != _shadow]
-    _sys.modules.pop("certus_connector", None)
-    try:
-        from certus_connector.spec import CertusOffloadingSpec  # noqa
-    finally:
-        _sys.path[:] = _saved_path
-
-    cfg = {
-        "data_pci_addrs": ["0000:61:00.0"],
-        "metadata_pci_addr": "0000:62:00.0",
-        "slab_size_bytes": 131072,
-        "dram_cache_bytes": 1 << 30,
-        "io_queue_depth": 1024,
-        "use_native": True,
-    }
-    if extra_config:
-        cfg.update(extra_config)
-
-    # Minimal vLLM-config stand-ins — just the attributes the spec reads.
-    vllm_config = SimpleNamespace(
-        kv_transfer_config=SimpleNamespace(kv_connector_extra_config=cfg),
-        parallel_config=SimpleNamespace(
-            decode_context_parallel_size=1,
-            prefill_context_parallel_size=1,
-            tensor_parallel_size=1,
-            pipeline_parallel_size=1,
-            rank=0,
-            world_size=1,
-        ),
-        cache_config=SimpleNamespace(
-            block_size=gpu_block_size,
-            cache_dtype="float16",
-        ),
-        model_config=SimpleNamespace(model="replay"),
-        kv_events_config=SimpleNamespace(enable_kv_cache_events=False),
-    )
-    kv_cache_config = SimpleNamespace(
-        kv_cache_groups=[SimpleNamespace(
-            kv_cache_spec=SimpleNamespace(block_size=gpu_block_size),
-        )],
-    )
-
-    spec_obj = CertusOffloadingSpec(vllm_config, kv_cache_config)
-    mgr = spec_obj.get_manager()
-
-    def _k(hex_str):
-        """Hex trace key → OffloadKey (bytes). certus-connector uses the
-        first 8 bytes as a u64 CacheKey."""
-        return bytes.fromhex(hex_str)
-
-    hex_by_bytes: dict[bytes, str] = {}
-
-    class _W:
-        def lookup(self, keys):
-            bs = [_k(k) for k in keys]
-            for k, b in zip(keys, bs):
-                hex_by_bytes[b] = k
-            return mgr.lookup(bs) or 0
-
-        def touch(self, keys):
-            bs = [_k(k) for k in keys]
-            for k, b in zip(keys, bs):
-                hex_by_bytes[b] = k
-            mgr.touch(bs)
-
-        def prepare_load(self, keys):
-            try:
-                mgr.prepare_load([_k(k) for k in keys])
-            except Exception:
-                pass
-
-        def complete_load(self, keys):
-            try:
-                mgr.complete_load([_k(k) for k in keys])
-            except Exception:
-                pass
-
-        def prepare_store(self, keys):
-            bs = [_k(k) for k in keys]
-            for k, b in zip(keys, bs):
-                hex_by_bytes[b] = k
-            out = mgr.prepare_store(bs)
-            if out is None:
-                return None
-            to_store = list(out.keys_to_store)
-            evicted = list(out.evicted_keys)
-            return PrepareStoreOutput(
-                block_hashes_to_store=[hex_by_bytes[b] for b in to_store],
-                block_hashes_evicted=[hex_by_bytes.get(b, b.hex())
-                                       for b in evicted],
-            )
-
-        def complete_store(self, keys, success=True):
-            bs = [_k(k) for k in keys]
-            try:
-                mgr.complete_store(bs, success)
-            except TypeError:
-                mgr.complete_store(bs, success=success)
-
-        def shutdown(self):
-            try:
-                mgr.shutdown()
-            except Exception:
-                pass
-
-    return _W()
-
-
 # ── Handler-side targets (real workers) ────────────────────────────────────
 #
 # A handler target exposes:
@@ -577,162 +433,14 @@ def _make_fs_handler_target(
     return _HT()
 
 
-def _make_certus_connector_handler_target(extra_config: dict | None = None,
-                                          gpu_block_size: int = 16,
-                                          **_ignored):
-    """Real certus-connector handler path: drives NativeCertusOffloadingManager's
-    underlying certus_native.CertusEngine for actual GPU→NVMe transfers.
-
-    Uses CertusOffloadingSpec.get_manager() to obtain the manager, then
-    extracts its `_engine` for store_async / load_async / wait_job calls.
-    This exercises real SPDK IO without needing the separate (not-built)
-    CertusTransferEngine class.
-    """
-    import sys as _sys
-    from types import SimpleNamespace
-    import certus_native  # noqa: F401
-    import vllm.v1.kv_offload.abstract as _base
-
-    _sys.modules.setdefault("vllm.v1.kv_offload.base", _base)
-
-    _pkg = "/home/bdh/kvconn-trace/ai-native-storage-certus/certus-connector"
-    _shadow = "/home/bdh/kvconn-trace"
-    if _pkg not in _sys.path:
-        _sys.path.insert(0, _pkg)
-    _saved_path = list(_sys.path)
-    _sys.path[:] = [p for p in _sys.path if p != _shadow]
-    _sys.modules.pop("certus_connector", None)
-    try:
-        from certus_connector.spec import CertusOffloadingSpec  # noqa
-    finally:
-        _sys.path[:] = _saved_path
-
-    from certus_offload_manager import PinnedBlockPool, NATIVE_BLOCK_BYTES
-
-    cfg = {
-        "data_pci_addrs": ["0000:61:00.0"],
-        "metadata_pci_addr": "0000:62:00.0",
-        "slab_size_bytes": NATIVE_BLOCK_BYTES,
-        "dram_cache_bytes": 1 << 30,
-        "io_queue_depth": 1024,
-        "use_native": True,
-    }
-    if extra_config:
-        cfg.update(extra_config)
-
-    vllm_config = SimpleNamespace(
-        kv_transfer_config=SimpleNamespace(kv_connector_extra_config=cfg),
-        parallel_config=SimpleNamespace(
-            decode_context_parallel_size=1,
-            prefill_context_parallel_size=1,
-            tensor_parallel_size=1,
-            pipeline_parallel_size=1,
-            rank=0, world_size=1,
-        ),
-        cache_config=SimpleNamespace(
-            block_size=gpu_block_size, cache_dtype="float16",
-        ),
-        model_config=SimpleNamespace(model="replay"),
-        kv_events_config=SimpleNamespace(enable_kv_cache_events=False),
-    )
-    kv_cache_config = SimpleNamespace(
-        kv_cache_groups=[SimpleNamespace(
-            kv_cache_spec=SimpleNamespace(block_size=gpu_block_size),
-        )],
-    )
-
-    spec_obj = CertusOffloadingSpec(vllm_config, kv_cache_config)
-    mgr = spec_obj.get_manager()   # NativeCertusOffloadingManager
-    # Post-b32ec5f the spec routes handlers through the same CertusEngine the
-    # manager uses, so get_handlers() yields real workers (not a mock).
-    handlers_iter = list(spec_obj.get_handlers(kv_caches=None))
-    gpu_to_certus = None
-    certus_to_gpu = None
-    for src_t, dst_t, handler in handlers_iter:
-        if src_t.__name__ == "GPULoadStoreSpec":
-            gpu_to_certus = handler
-        else:
-            certus_to_gpu = handler
-    if gpu_to_certus is None or certus_to_gpu is None:
-        raise RuntimeError(
-            f"spec.get_handlers returned unexpected shape: {handlers_iter!r}")
-
-    pool = PinnedBlockPool(512)
-
-    # Import the mediums type we need to build CertusLoadStoreSpec. Same
-    # shim + sys.path juggling as above.
-    _sys.path.insert(0, _pkg)
-    _saved = list(_sys.path)
-    _sys.path[:] = [p for p in _sys.path if p != _shadow]
-    try:
-        from certus_connector.mediums import BlockLocation, CertusLoadStoreSpec  # noqa
-    finally:
-        _sys.path[:] = _saved
-
-    from vllm.v1.kv_offload.mediums import GPULoadStoreSpec
-
-    next_key = [1]
-    stored_keys: list[int] = []
-
-    class _HT:
-        per_block_bytes = NATIVE_BLOCK_BYTES
-
-        def transfer_async(self, job_id, n_blocks, direction):
-            gpu_ids = pool.take(n_blocks)
-            if direction == "out":
-                keys = list(range(next_key[0], next_key[0] + n_blocks))
-                next_key[0] += n_blocks
-                stored_keys.extend(keys)
-                src = GPULoadStoreSpec(block_ids=gpu_ids,
-                                        group_sizes=[n_blocks],
-                                        block_indices=[0])
-                dst = CertusLoadStoreSpec(
-                    [BlockLocation(nvme_slab=k, dram_slot=None) for k in keys])
-                try:
-                    return bool(gpu_to_certus.transfer_async(job_id, (src, dst)))
-                except Exception:
-                    return False
-            else:
-                if len(stored_keys) < n_blocks:
-                    return False
-                keys = stored_keys[-n_blocks:]
-                src = CertusLoadStoreSpec(
-                    [BlockLocation(nvme_slab=k, dram_slot=None) for k in keys])
-                dst = GPULoadStoreSpec(block_ids=gpu_ids,
-                                        group_sizes=[n_blocks],
-                                        block_indices=[0])
-                try:
-                    return bool(certus_to_gpu.transfer_async(job_id, (src, dst)))
-                except Exception:
-                    return False
-
-        def wait(self, job_ids):
-            gpu_to_certus.wait(set(job_ids))
-
-        def get_finished(self):
-            return (gpu_to_certus.get_finished()
-                    + certus_to_gpu.get_finished())
-
-        def shutdown(self):
-            try:
-                mgr.shutdown()
-            except Exception:
-                pass
-
-    return _HT()
-
-
 def load_handler_target(spec: str, target_args: dict):
-    """Build a handler-side target: 'fs-backend', 'certus-connector',
-    or 'module:Class'."""
+    """Build a handler-side target: 'fs-backend' or 'module:Class'."""
     if spec == "fs-backend":
         return _make_fs_handler_target(**target_args)
-    if spec == "certus-connector":
-        return _make_certus_connector_handler_target(**target_args)
     if ":" not in spec:
         raise ValueError(
-            f"--handler-target {spec!r} must be 'fs-backend', "
-            f"'certus-connector', or 'module.path:ClassName'"
+            f"--handler-target {spec!r} must be 'fs-backend' "
+            f"or 'module.path:ClassName'"
         )
     mod_path, cls_name = spec.split(":", 1)
     mod = importlib.import_module(mod_path)
@@ -747,14 +455,12 @@ def load_target(spec: str, target_args: dict):
         return SimpleLRUTarget(**target_args)
     if spec == "cpu-manager":
         return _make_cpu_manager_target(**target_args)
-    if spec == "certus-connector":
-        return _make_certus_connector_target(**target_args)
     if spec == "fs-backend":
         return _make_fs_backend_target(**target_args)
     if ":" not in spec:
         raise ValueError(
             f"--target {spec!r} must be one of 'simple-lru', 'cpu-manager', "
-            f"'certus-connector', 'fs-backend', or 'module.path:ClassName'"
+            f"'fs-backend', or 'module.path:ClassName'"
         )
     mod_path, cls_name = spec.split(":", 1)
     mod = importlib.import_module(mod_path)
@@ -940,213 +646,6 @@ def _make_cpu_shared_targets(cpu_bytes: int = 64 * (1 << 30),
             if cpu_to_gpu:
                 results.extend(cpu_to_gpu.get_finished())
             return results
-
-        def shutdown(self):
-            pass
-
-    return _MgrW(), _HandlerW()
-
-
-def _make_certus_shared_targets(extra_config: dict | None = None,
-                                gpu_block_size: int = 16,
-                                **_ignored):
-    """Build a certus manager + handler target that share one engine.
-
-    Returns (mgr_target, handler_target). Both use the same
-    CertusOffloadingSpec so dispatcher.populate() from the handler makes
-    keys visible to dispatcher.check() from the manager.
-    """
-    import sys as _sys
-    from types import SimpleNamespace
-    import certus_native  # noqa: F401
-    import vllm.v1.kv_offload.abstract as _base
-
-    _sys.modules.setdefault("vllm.v1.kv_offload.base", _base)
-
-    _pkg = "/home/bdh/kvconn-trace/ai-native-storage-certus/certus-connector"
-    _shadow = "/home/bdh/kvconn-trace"
-    if _pkg not in _sys.path:
-        _sys.path.insert(0, _pkg)
-    _saved_path = list(_sys.path)
-    _sys.path[:] = [p for p in _sys.path if p != _shadow]
-    _sys.modules.pop("certus_connector", None)
-    try:
-        from certus_connector.spec import CertusOffloadingSpec
-        from certus_connector.mediums import BlockLocation, CertusLoadStoreSpec
-    finally:
-        _sys.path[:] = _saved_path
-
-    from vllm.v1.kv_offload.mediums import GPULoadStoreSpec
-
-    cfg = {
-        "data_pci_addrs": ["0000:61:00.0"],
-        "metadata_pci_addr": "0000:62:00.0",
-        "slab_size_bytes": 131072,
-        "dram_cache_bytes": 1 << 30,
-        "io_queue_depth": 1024,
-        "use_native": True,
-    }
-    if extra_config:
-        cfg.update(extra_config)
-
-    vllm_config = SimpleNamespace(
-        kv_transfer_config=SimpleNamespace(kv_connector_extra_config=cfg),
-        parallel_config=SimpleNamespace(
-            decode_context_parallel_size=1, prefill_context_parallel_size=1,
-            tensor_parallel_size=1, pipeline_parallel_size=1,
-            rank=0, world_size=1,
-        ),
-        cache_config=SimpleNamespace(block_size=gpu_block_size, cache_dtype="float16"),
-        model_config=SimpleNamespace(model="replay"),
-        kv_events_config=SimpleNamespace(enable_kv_cache_events=False),
-    )
-    kv_cache_config = SimpleNamespace(
-        kv_cache_groups=[SimpleNamespace(
-            kv_cache_spec=SimpleNamespace(block_size=gpu_block_size),
-        )],
-    )
-
-    spec_obj = CertusOffloadingSpec(vllm_config, kv_cache_config)
-    mgr = spec_obj.get_manager()
-
-    # Get handlers from the same spec
-    handlers_iter = list(spec_obj.get_handlers(kv_caches=None))
-    gpu_to_certus = None
-    certus_to_gpu = None
-    for src_t, dst_t, handler in handlers_iter:
-        if src_t.__name__ == "GPULoadStoreSpec":
-            gpu_to_certus = handler
-        else:
-            certus_to_gpu = handler
-    if gpu_to_certus is None or certus_to_gpu is None:
-        raise RuntimeError(
-            f"spec.get_handlers returned unexpected shape: {handlers_iter!r}")
-
-    hex_by_bytes: dict[bytes, str] = {}
-    # Queue of u64 keys from prepare_store for the handler to use in store_async.
-    # Each entry is a list of u64s corresponding to one prepare_store batch.
-    store_key_queue: list[list[int]] = []
-    # Keys that have been stored (for load direction)
-    stored_u64_keys: list[int] = []
-
-    def _k(hex_str):
-        return bytes.fromhex(hex_str)
-
-    def _key_to_u64(key_bytes):
-        # Fold the full OffloadKey (block_hash + 4-byte group index, 36 bytes
-        # for default SHA-256) into a u64 via BLAKE2b, matching the connectors.
-        digest = hashlib.blake2b(bytes(key_bytes), digest_size=8).digest()
-        return int.from_bytes(digest, "big")
-
-    # Manager target wrapper
-    class _MgrW:
-        def lookup(self, keys):
-            bs = [_k(k) for k in keys]
-            for k, b in zip(keys, bs):
-                hex_by_bytes[b] = k
-            return mgr.lookup(bs) or 0
-
-        def touch(self, keys):
-            bs = [_k(k) for k in keys]
-            for k, b in zip(keys, bs):
-                hex_by_bytes[b] = k
-            mgr.touch(bs)
-
-        def prepare_load(self, keys):
-            try:
-                mgr.prepare_load([_k(k) for k in keys])
-            except Exception:
-                pass
-
-        def complete_load(self, keys):
-            try:
-                mgr.complete_load([_k(k) for k in keys])
-            except Exception:
-                pass
-
-        def prepare_store(self, keys):
-            bs = [_k(k) for k in keys]
-            for k, b in zip(keys, bs):
-                hex_by_bytes[b] = k
-            out = mgr.prepare_store(bs)
-            if out is None:
-                return None
-            to_store = list(out.keys_to_store)
-            evicted = list(out.evicted_keys)
-            # Enqueue the u64 keys for the handler to use in store_async
-            u64_keys = [_key_to_u64(k) for k in to_store]
-            if u64_keys:
-                store_key_queue.append(u64_keys)
-            return PrepareStoreOutput(
-                block_hashes_to_store=[hex_by_bytes[b] for b in to_store],
-                block_hashes_evicted=[hex_by_bytes.get(b, b.hex())
-                                       for b in evicted],
-            )
-
-        def complete_store(self, keys, success=True):
-            bs = [_k(k) for k in keys]
-            try:
-                mgr.complete_store(bs, success)
-            except TypeError:
-                mgr.complete_store(bs, success=success)
-
-        def shutdown(self):
-            try:
-                mgr.shutdown()
-            except Exception:
-                pass
-
-    # Handler target wrapper
-    from certus_offload_manager import PinnedBlockPool, NATIVE_BLOCK_BYTES
-
-    pool = PinnedBlockPool(512)
-
-    class _HandlerW:
-        per_block_bytes = NATIVE_BLOCK_BYTES
-
-        def transfer_async(self, job_id, n_blocks, direction):
-            gpu_ids = pool.take(n_blocks)
-            if direction == "out":
-                # Pop keys from the queue that prepare_store enqueued
-                if store_key_queue:
-                    u64_keys = store_key_queue.pop(0)
-                    # The queue entry should match n_blocks
-                    if len(u64_keys) != n_blocks:
-                        # Size mismatch — use what we have
-                        u64_keys = u64_keys[:n_blocks] if len(u64_keys) > n_blocks else u64_keys + [u64_keys[-1]] * (n_blocks - len(u64_keys))
-                else:
-                    # Fallback: shouldn't happen in well-formed traces
-                    u64_keys = list(range(n_blocks))
-                stored_u64_keys.extend(u64_keys)
-                src = GPULoadStoreSpec(block_ids=gpu_ids,
-                                        group_sizes=[n_blocks],
-                                        block_indices=[0])
-                dst = CertusLoadStoreSpec(
-                    [BlockLocation(nvme_slab=k, dram_slot=None) for k in u64_keys])
-                try:
-                    return bool(gpu_to_certus.transfer_async(job_id, (src, dst)))
-                except Exception:
-                    return False
-            else:
-                if len(stored_u64_keys) < n_blocks:
-                    return False
-                u64_keys = stored_u64_keys[-n_blocks:]
-                src = CertusLoadStoreSpec(
-                    [BlockLocation(nvme_slab=k, dram_slot=None) for k in u64_keys])
-                dst = GPULoadStoreSpec(block_ids=gpu_ids,
-                                        group_sizes=[n_blocks],
-                                        block_indices=[0])
-                try:
-                    return bool(certus_to_gpu.transfer_async(job_id, (src, dst)))
-                except Exception:
-                    return False
-
-        def wait(self, job_ids):
-            gpu_to_certus.wait(set(job_ids))
-
-        def get_finished(self):
-            return (gpu_to_certus.get_finished()
-                    + certus_to_gpu.get_finished())
 
         def shutdown(self):
             pass
@@ -1589,7 +1088,7 @@ def main():
     ap.add_argument("--block-size", type=int, default=16)
     ap.add_argument("--handler-target", default=None,
                     help="drive a real worker for the handler trace. One of "
-                         "'fs-backend', 'certus-connector', or 'module:Class'.")
+                         "'fs-backend' or 'module:Class'.")
     ap.add_argument("--handler-target-args", type=str, default="{}",
                     help="JSON dict of kwargs for the handler target "
                          "(e.g. root_dir, per_block_bytes, engine_config)")
@@ -1616,29 +1115,7 @@ def main():
         print(f"[replay] bulk-io mode", file=sys.stderr)
         print(f"[replay] handler trace: {h_paths[0]}", file=sys.stderr)
 
-        if args.handler_target == "certus-connector":
-            extra = json.loads(args.handler_target_args)
-            if not extra.get("dram_cache_bytes"):
-                extra["dram_cache_bytes"] = 4 * (1 << 30)
-            mgr_target, handler_target = _make_certus_shared_targets(
-                extra_config=extra,
-                gpu_block_size=args.block_size)
-            # Pre-register all write keys via prepare_store so the engine
-            # allocates space before open-loop writes
-            print(f"[replay] pre-registering keys with certus manager...",
-                  file=sys.stderr)
-            key_counter = 0
-            for line in open(h_paths[0]):
-                if not line.strip():
-                    continue
-                r = json.loads(line)
-                if r["method"] == "transfer_async" and r.get("transfer_type", "").startswith("GPU"):
-                    n = len(r["src"].get("block_ids", []))
-                    fake_keys = [f"{key_counter + i:016x}" for i in range(n)]
-                    key_counter += n
-                    mgr_target.prepare_store(fake_keys)
-            print(f"[replay] pre-registered {key_counter} keys", file=sys.stderr)
-        elif args.handler_target == "cpu-manager":
+        if args.handler_target == "cpu-manager":
             mgr_target, handler_target = _make_cpu_shared_targets(
                 gpu_block_size=args.block_size,
                 num_gpu_blocks=args.num_blocks)
@@ -1687,15 +1164,7 @@ def main():
     print(f"[replay] handler trace: {h_paths[0]}", file=sys.stderr)
     print(f"[replay] target: {args.target} {target_args}", file=sys.stderr)
 
-    if args.target == "certus-connector" and args.handler_target == "certus-connector":
-        extra = json.loads(args.target_args)
-        extra.update(json.loads(args.handler_target_args))
-        print(f"[replay] using shared certus engine for mgr+handler",
-              file=sys.stderr)
-        mgr_target, handler_target = _make_certus_shared_targets(
-            extra_config=extra or None,
-            gpu_block_size=args.block_size)
-    elif args.target == "cpu-manager" and args.handler_target == "cpu-manager":
+    if args.target == "cpu-manager" and args.handler_target == "cpu-manager":
         print(f"[replay] using shared CPU spec for mgr+handler",
               file=sys.stderr)
         mgr_target, handler_target = _make_cpu_shared_targets(

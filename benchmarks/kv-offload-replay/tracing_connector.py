@@ -30,7 +30,7 @@ inner connector unchanged (it reads them off ``vllm_config``):
             # which connector to wrap (default: OffloadingConnector):
             "traced_kv_connector": "OffloadingConnector",
             # optional — import the inner from a module instead of vLLM's registry:
-            # "traced_kv_connector_module_path": "certus_connector",
+            # "traced_kv_connector_module_path": "my_connector_pkg",
             # ...the inner connector's own knobs ride here too, untouched:
             "spec_name": "CertusShmqOffloadingSpec",
             "spec_module_path": "certus_shmq_connector.spec",

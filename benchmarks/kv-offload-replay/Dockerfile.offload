@@ -18,22 +18,22 @@
 # two Tracing* connector modules are baked in too, so TRACE_OFFLOAD=1 works.
 #
 # Build (context = repo root — needs benchmarks/kv-offload-replay/ + the dataset):
-#   podman build -f benchmarks/kv-offload-replay/Dockerfile.offload -t certus-offload-bench .
+#   podman build -f benchmarks/kv-offload-replay/Dockerfile.offload -t certus-offload .
 #
 # Run examples (GPU required for all three):
 #   # NoOffload baseline
 #   podman run --rm --device nvidia.com/gpu=all -e OFFLOAD_MODE=none \
-#       -v $HOME/.cache/huggingface:/root/.cache/huggingface certus-offload-bench
+#       -v $HOME/.cache/huggingface:/root/.cache/huggingface certus-offload
 #   # CPUOffload (pinned host RAM; CPU_BYTES < free RAM)
 #   podman run --rm --device nvidia.com/gpu=all -e CPU_BYTES=17179869184 \
-#       -v $HOME/.cache/huggingface:/root/.cache/huggingface certus-offload-bench
+#       -v $HOME/.cache/huggingface:/root/.cache/huggingface certus-offload
 #   # Tiered CPU+FS (CPU tier is a /dev/shm mmap -> --shm-size >= CPU_BYTES; bind
 #   # a host dir for the fs tier so it hits real disk)
 #   podman run --rm --device nvidia.com/gpu=all --shm-size 36g \
 #       -e SECONDARY_TIER=fs -e CPU_BYTES=34359738368 \
 #       -e FS_ROOT_DIR=/mnt/fs-tier/kv-tier \
 #       -v /mnt/certus1/hf-cache:/root/.cache/huggingface:z \
-#       -v /mnt/certus1/kv-fs-tier:/mnt/fs-tier:z certus-offload-bench
+#       -v /mnt/certus1/kv-fs-tier:/mnt/fs-tier:z certus-offload
 #   # docker equivalent of --device nvidia.com/gpu=all: --gpus all
 
 # Tiering (SECONDARY_TIER=fs) requires vLLM 0.26+ (the tiering.fs framework does

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Client-side entrypoint for the kv-offload-otel-replay shmq image
-# (certus-otel-shmq-bench). The OTel-corpus counterpart of
+# (certus-otel-shmq-connector). The OTel-corpus counterpart of
 # certus-shmq-connector/docker-entrypoint.sh.
 #
 # Two run-time preconditions, checked in order:

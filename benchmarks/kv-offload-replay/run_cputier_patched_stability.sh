@@ -23,10 +23,11 @@ mkdir -p "$OUTDIR"
 RUNS="${RUNS:-10}"
 
 # --- fixed canonical tiered-cpu-fs config (exported to run-docker-cputier-patched.sh) ---
-# Patched arm: certus-offload-bench-fix026 (build_026.sh builds it with
-# --build-arg VLLM_FIX_TIERING=1) has the fork tiering fix baked in, so no
-# runtime bind-mount is needed. Config is otherwise identical to the stock arm.
-export IMAGE="${IMAGE:-certus-offload-bench-fix026}"
+# Patched arm: certus-offload-fix026 (build: IMAGE=certus-offload-fix026
+# FIX_TIERING=1 bash build_cputier_container.sh 0.26.0) has the fork tiering fix
+# baked in, so no runtime bind-mount is needed. Config is otherwise identical to
+# the stock arm.
+export IMAGE="${IMAGE:-certus-offload-fix026}"
 export CPU_BYTES="${CPU_BYTES:-$((13 * (1 << 30)))}"   # 13G CPU primary == certus DRAM tier
 export DISK_DIR_HOST="${DISK_DIR_HOST:-/mnt/certus1/kv-fs-tier}"
 export DISK_READ_THREADS="${DISK_READ_THREADS:-16}"
