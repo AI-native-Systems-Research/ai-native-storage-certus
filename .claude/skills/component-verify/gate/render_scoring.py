@@ -314,6 +314,23 @@ def main():
             f"Corrected counts: <b>{esc(str(kc.get('correct_counts','')))}</b>. "
             f"Reproduce: <code>{esc(str(kc.get('reproduce','')))}</code></p>")
 
+    # TOOL NOTES BANNER - why a whole COLUMN is empty or must not be read.
+    # known_corrections above is per-PROPERTY; it cannot say "this entire lane is withheld", and we
+    # have now needed exactly that twice: eviction-policy-session-lists (Kani scored 8/95 with 106
+    # vacuity findings -> unsound, withheld) and disk-partition-manager (Kani left 76 of 102 with no
+    # artifact -> incomplete, withheld). Both times the reason lived only in a commit message or a
+    # chat log, while the page showed a bare "0 proved" that a reader would mistake for "the tool
+    # could not do it". A withheld column is a DECISION and it belongs on the page, next to the
+    # number it explains.
+    for tn in (d.get("tool_notes") or []):
+        P.append(
+            "<p class='foot' style='border:2px solid #b00;padding:8px'>"
+            f"\u26a0 <b>{esc(str(tn.get('tool','')).upper())} COLUMN \u2014 "
+            f"{esc(str(tn.get('headline','')))}</b> "
+            f"{esc(str(tn.get('detail','')))}"
+            + (f" <b>Measured:</b> {esc(str(tn.get('measured','')))}." if tn.get('measured') else "")
+            + "</p>")
+
     if incomplete:
         P.append("<div class='banner'>⚠ INCOMPLETE — some properties are not yet scored (shown as · pending). "
                  "Fractions and ratings reflect only what has been reproduced so far.</div>")
@@ -573,9 +590,25 @@ def main():
         P.append("<div class='scroll'><table><tr><th>property</th><th>by</th><th>spec</th>"
                  "<th>code location</th><th>what is violated</th><th>witness</th></tr>")
         for p in refs:
-            src = p.get("source") or {}
-            spec_loc = ", ".join(str(x) for x in (src.get("spec") or p.get("traces") or [])) or "—"
-            code_loc = ", ".join(str(x) for x in (src.get("code") or [])) or "—"
+            # `source` comes in TWO shapes and the dict-only reading CRASHED the whole page.
+            # Measured on disk-partition-manager: build-property-inventory emitted
+            # `source: ['spec: <id>', 'code: <id>']` (a flat list of reconciliation provenance)
+            # for all 102 properties, so `src.get` raised AttributeError and the renderer exited 1
+            # having written nothing. This table carries the REFUTED rows -- the findings, the
+            # return on the whole run -- so it must degrade, never crash.
+            # The dict form lives in `paired_from`; the real code location lives in `object_fn`
+            # (e.g. "GptManager::new -> gpt.rs:58"), which is more useful than either id list.
+            src = p.get("source")
+            if isinstance(src, dict):
+                sp, cd = src.get("spec"), src.get("code")
+            else:
+                pf = p.get("paired_from") or {}
+                sp, cd = pf.get("spec"), pf.get("code")
+            spec_loc = ", ".join(str(x) for x in (sp or p.get("traces") or [])) or "—"
+            code_loc = ", ".join(str(x) for x in (cd or [])) or ""
+            if p.get("object_fn"):
+                code_loc = str(p["object_fn"]) + (" (%s)" % code_loc if code_loc else "")
+            code_loc = code_loc or "—"
             for t in tools:
                 b = p.get(t) or {}
                 if b.get("status") != "refuted":
