@@ -145,6 +145,72 @@ def module_id(pid):
     return "verify_" + pid.lower().replace("-", "_")
 
 
+def _conjuncts(expr):
+    """Split a contract expression on TOP-LEVEL `&&` only."""
+    out, depth, cur, i = [], 0, "", 0
+    while i < len(expr):
+        c = expr[i]
+        if c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+        if depth == 0 and expr.startswith("&&", i):
+            out.append(cur.strip()); cur = ""; i += 2; continue
+        cur += c; i += 1
+    out.append(cur.strip())
+    return {re.sub(r"\s+", " ", x) for x in out if x}
+
+
+def contract_of(crate_dir, module):
+    """(requires, ensures) conjunct sets of the source fn emitted as `module`, or None.
+
+    Matched on the COLLAPSED name, because `cargo creusot` emits `verify_x__inv` as `verify_x_inv`.
+    """
+    want = re.sub(r"_{2,}", "_", module)
+    for path in sorted(glob.glob(os.path.join(crate_dir, "src", "**", "*.rs"), recursive=True)):
+        req, ens = set(), set()
+        for line in open(path, encoding="utf-8", errors="replace"):
+            t = line.strip()
+            m = re.match(r"#\[(requires|ensures)\((.*)\)\]\s*$", t)
+            if m:
+                (req if m.group(1) == "requires" else ens).update(_conjuncts(m.group(2)))
+                continue
+            m = re.match(r"(?:pub(?:\([a-z]+\))?\s+)?fn\s+([A-Za-z0-9_]+)\s*[(<]", t)
+            if m:
+                if re.sub(r"_{2,}", "_", m.group(1)) == want:
+                    return req, ens
+                req, ens = set(), set()
+                continue
+            if t.startswith("#[") or t.startswith("//") or not t:
+                continue
+            req, ens = set(), set()
+    return None
+
+
+def weakens(crate_dir, variant, base):
+    """Why `variant` proves LESS than `base`, or None if its contract is at least as strong.
+
+    A variant may change the BODY (assertions, invariants, a different model) — that is what a lever
+    is. It may not ASSUME more or PROMISE less. Measured 2026-10-02 on eviction-policy-optimized:
+    `verify_epo_inv_list_empty_iff_no_ends__inv` added `free_len_counts_inactive(l)` to its
+    precondition — exactly the base's one unproved subgoal, and a predicate no module ever ensures —
+    and the gate published the property `proved`. The variant had assumed the hard part.
+    """
+    vc, bc = contract_of(crate_dir, variant), contract_of(crate_dir, base)
+    if vc is None or bc is None:
+        return f"cannot compare the contract of '{variant}' with its base '{base}' (source fn not found)"
+    extra_req, lost_ens = sorted(vc[0] - bc[0]), sorted(bc[1] - vc[1])
+    if not extra_req and not lost_ens:
+        return None
+    parts = []
+    if extra_req:
+        parts.append("ASSUMES MORE: + " + " ; + ".join(extra_req))
+    if lost_ens:
+        parts.append("PROMISES LESS: - " + " ; - ".join(lost_ens))
+    return (f"'{variant}' proves a WEAKER claim than '{base}': " + " | ".join(parts) +
+            ". A lever may change how the obligation is proved, never what is proved.")
+
+
 def load(p):
     with open(p) as f:
         return yaml.safe_load(f)
@@ -590,6 +656,14 @@ def score_property(p, ctx):
     # module pointer: explicit evidence.module(s), else the naming convention
     mods = ev_in.get("modules") or ([ev_in["module"]] if ev_in.get("module") else [module_id(pid)])
     present = ctx["modules"]
+    # `evidence.modules` is AGENT-SUPPLIED, so it may ADD modules that must also prove (per-operation
+    # splits, callees) but may never REPLACE the property's own `verify_<id>`. When it did, the gate
+    # ran only the agent's pick: EPO-INV-LIST-EMPTY-IFF-NO-ENDS listed just its `__inv` variant, which
+    # assumes the unproved subgoal, and was published `proved` while its own module failed ✘ (22/23).
+    own = module_id(pid)
+    own_emitted = own if own in present else re.sub(r"_{2,}", "_", own)
+    if own_emitted in present and not any(re.sub(r"_{2,}", "_", m) == own_emitted for m in mods):
+        mods = [own_emitted] + list(mods)
 
     # ---- delegation: triggered by an agent-written delegate_to (the skills forbid the
     #      agent to write `status`), or a legacy status:delegated; needs a resolvable referent ----
@@ -749,6 +823,9 @@ def score_property(p, ctx):
             if variant.startswith("lemma_"):
                 lemma_only.append(variant)
                 continue
+            weak = weakens(ctx["crate_dir"], variant, module_id(pid))
+            if weak:
+                return "UNRESOLVED", {"modules": [variant]}, weak
             ev = {"modules": [variant], "result": "Proved", "wall_clock_s": vwall, "peak_rss_mb": vrss, "lever": lever}
             # Anti-vacuity applies on EVERY path that returns proved, not just the base one.
             # Three paths here (this one, the scorer-applied lever, and the rejected

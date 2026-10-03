@@ -121,3 +121,30 @@ non-deterministic / relaxed-ordering quantities.
 ## Harness note
 A property = *what an assertion / `#[ensures]` actually checks*. A harness property with no counterpart in
 spec or code = the harness verifies something unintended (a refinement gap) — flag it.
+
+### 🔴 The code agent MUST also read the declarations of every interface the component CONSUMES
+Not the implementations — the **declarations**, as contracts. Without them the blind code extraction
+**manufactures phantom divergences**, in proportion to how much the component delegates.
+
+Measured on `memory-tier`, 2026-09-30, and caught by the agent that had itself produced the sweep:
+it reported the component's "sharpest divergence" as *the spec requires eviction to untrack the victim;
+the code never does*. That is **false**. `identify_next_to_evict` is contracted at
+`interfaces/src/ieviction_policy.rs:101-104` to "remove it from tracking", and
+`eviction-policy-lru/src/lib.rs:133-138` implements it via `pop_front()` →
+`lru_list.rs:99-104` → `remove()`. The untracking happens INSIDE the callee. The code agent read only
+`memory-tier/src/**` plus `memory-tier`'s own interface, saw no `ep.remove()` beside the handle drop,
+and inferred the victim stayed tracked. Reconciliation then promoted that gap to `origin: divergent`.
+
+**So the allow-list is:** `src/**`, `tests/**`, the component's own `i<component>.rs`, **and the
+`define_interface!` declarations of every interface it imports** (find them from the component's own
+`use interfaces::{…}`). Still forbidden: those interfaces' *implementations* in other components, and
+anything under `specs/**`.
+
+This does not weaken blindness. A consumed interface's declaration is part of the contract the code is
+written against — the same artefact the spec agent is allowed to read for the method surface. What
+blindness protects is the separation of **specification prose** from **implementation**, not ignorance
+of the types a function is called through.
+
+**When reporting, say so:** a divergence on a delegating call is suspect until the callee's contract has
+been read. On that one component the correction turned a claimed "coherent three-part defect" into one
+withdrawn, one that stands on its face, and one whose reachability turns on a separate invariant.
