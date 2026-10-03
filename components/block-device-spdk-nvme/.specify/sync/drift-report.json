@@ -169,5 +169,7 @@
       "suggested_spec": "Note under spec 002 FR-026."
     }
   ],
-  "conflicts": []
+  "conflicts": [],
+  "inputs_sha256": "c1109bd77867a242ea6cb1a7038aa2b914919715b73a17fee7f9b6dd1ad12c40",
+  "git_commit": "72c7182b"
 }

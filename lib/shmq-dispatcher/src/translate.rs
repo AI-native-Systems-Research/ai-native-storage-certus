@@ -254,16 +254,6 @@ fn decode_handle_batch(r: &mut Reader) -> Result<HandleBatch, OpError> {
 }
 
 /// Which FR-024 bucket one looked-up entry falls in. Exhaustive by construction, so a
-/// new dispatcher error cannot silently become uncounted the way `Err(_) => {}` allowed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Outcome {
-    /// Served to the GPU.
-    Hit,
-    /// Absent from every tier and every peer.
-    Miss,
-    /// Neither served nor shown absent.
-    Error,
-}
 
 /// Shared, server-global translation state. Cloneable (all fields are `Arc`),
 /// so each worker thread holds its own handle; `ipc_cache`/`pending_stores` are
@@ -621,30 +611,29 @@ impl Translator {
     /// from every peer (the dispatcher maps a peer's `NotFound` back to it). Anything
     /// else is an error -- the request neither served the key nor established that it
     /// was absent, so counting it as a miss would put a fault into the hit rate.
-    fn classify(res: &Result<(), interfaces::DispatcherError>) -> Outcome {
-        match res {
-            Ok(()) => Outcome::Hit,
-            Err(interfaces::DispatcherError::KeyNotFound(_)) => Outcome::Miss,
-            Err(_) => Outcome::Error,
+    /// Map a `ServedBy` to the `LOOKUP` reply's per-key byte.
+    ///
+    /// `0` keeps its exact prior meaning, "not served", so every reader testing
+    /// `byte != 0` classifies each key as it did before -- which is what makes this
+    /// widening invisible to the Python connector (`decode_ok_flags`).
+    ///
+    /// **`PENDING` is deliberately absent.** The non-zero range means *delivered*, and a
+    /// pending key was not; a value here would tell a `!= 0` reader that data arrived
+    /// which never did. Pending lives on `CHECK`, where `decode_states` reads raw ints.
+    /// See the dispatcher's spec 002 `contracts/served-by.md`.
+    fn wire_tier(served_by: interfaces::ServedBy) -> u8 {
+        use interfaces::ServedBy as S;
+        match served_by {
+            S::Dram => 1,
+            S::Ssd => 2,
+            S::Remote => 3,
+            // The three not-served values collapse to `0`: the counters need the
+            // distinction between them, the client only needs "was it served".
+            S::Miss | S::SizeMismatch | S::Error => 0,
         }
     }
 
-    /// Tally a lookup batch so that hits + misses + errors == entries requested.
-    ///
-    /// `requested` is what the client asked for; `results` covers only the entries
-    /// that were actually dispatched. The difference is the entries held back because
-    /// their GPU handles would not open, and those are **errors, not misses**: the key
-    /// may well be resident, and the fault is in the caller's handle table, so calling
-    /// it a miss would corrupt the hit rate with a client-side failure. Recorded as a
-    /// decision (spec 002 T013), not an accident.
-    ///
-    /// Pure, and separate from `op_lookup`, because the identity above cannot otherwise
-    /// be tested without a GPU: every handle fails to open in a test process, so the
-    /// dispatched set is always empty there.
-    fn tally_lookup(
-        requested: usize,
-        results: &[Result<(), interfaces::DispatcherError>],
-    ) -> (u64, u64, u64) {
+    fn tally_lookup(requested: usize, results: &[interfaces::LookupOutcome]) -> (u64, u64, u64) {
         let mut hits = 0u64;
         let mut misses = 0u64;
         // Held back before dispatch: never reached the dispatcher at all.
@@ -655,11 +644,14 @@ impl Translator {
         // one that under-reports, and the `debug_assert` catches the bug in tests.
         debug_assert!(results.len() <= requested);
         let mut errors = requested.saturating_sub(results.len()) as u64;
-        for res in results {
-            match Self::classify(res) {
-                Outcome::Hit => hits += 1,
-                Outcome::Miss => misses += 1,
-                Outcome::Error => errors += 1,
+        for outcome in results {
+            // Read straight off the attribution the dispatcher assigned. Before it
+            // existed this had to re-derive the class from the error variant, which
+            // meant two places could disagree about what a given error meant.
+            match outcome.served_by {
+                s if s.is_hit() => hits += 1,
+                interfaces::ServedBy::Miss => misses += 1,
+                _ => errors += 1,
             }
         }
         (hits, misses, errors)
@@ -693,8 +685,9 @@ impl Translator {
             .zip(results.iter())
             .zip(valid_batch.iter())
         {
-            if matches!(Self::classify(res), Outcome::Hit) {
-                ok_flags[*slot] = 1;
+            let tier = Self::wire_tier(res.served_by);
+            if tier != 0 {
+                ok_flags[*slot] = tier;
                 // Sum across all per-layer regions (N==1 for coalesced blocks).
                 gpu_bytes += regions.iter().map(|h| h.size as u64).sum::<u64>();
             }
@@ -900,8 +893,18 @@ mod tests {
         fn batch_lookup(
             &self,
             entries: &[(CacheKey, Vec<IpcHandle>)],
-        ) -> Vec<Result<(), DispatcherError>> {
-            entries.iter().map(|_| Ok(())).collect()
+        ) -> Vec<interfaces::LookupOutcome> {
+            entries
+                .iter()
+                .map(|_| interfaces::LookupOutcome {
+                    // This mock simulates a cache that always serves locally from DRAM,
+                    // so `Dram` is what it models rather than a convenient constant. A
+                    // mock reporting one tier regardless of what it simulates would make
+                    // every attribution assertion vacuous (FR-028).
+                    served_by: interfaces::ServedBy::Dram,
+                    result: Ok(()),
+                })
+                .collect()
         }
         fn check(&self, key: CacheKey) -> Result<bool, DispatcherError> {
             Ok(self.resident.lock().unwrap().contains(&key))
@@ -997,6 +1000,46 @@ mod tests {
         Translator::new(disp, rx, Arc::new(AtomicU64::new(0)), Duration::ZERO)
     }
 
+    /// T110: a conforming server emits only `0..=3`, and every served value is non-zero.
+    ///
+    /// Exhaustive over the taxonomy rather than sampled, so a seventh value added later
+    /// cannot slip through unmapped -- the `match` in `wire_tier` would fail to compile,
+    /// and this test states the range that compile-time guarantee is protecting.
+    #[test]
+    fn the_wire_byte_stays_in_range_and_zero_still_means_not_served() {
+        use interfaces::ServedBy as S;
+
+        for served in [S::Dram, S::Ssd, S::Remote] {
+            let b = Translator::wire_tier(served);
+            assert!(
+                (1..=3).contains(&b),
+                "{served:?} must be a non-zero value in 1..=3, got {b}"
+            );
+        }
+        for not_served in [S::Miss, S::SizeMismatch, S::Error] {
+            assert_eq!(
+                Translator::wire_tier(not_served),
+                0,
+                "{not_served:?} was not served, so it must read 0 -- a non-zero value \
+                 here would tell a `!= 0` reader that data arrived which never did"
+            );
+        }
+
+        // The three served values are distinct, or the byte carries no tier at all.
+        let tiers: Vec<u8> = [S::Dram, S::Ssd, S::Remote]
+            .iter()
+            .map(|s| Translator::wire_tier(*s))
+            .collect();
+        let mut sorted = tiers.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(
+            sorted.len(),
+            3,
+            "served tiers must be distinguishable: {tiers:?}"
+        );
+    }
+
     /// FR-024: hits + misses + errors accounts for EVERY entry the client asked for.
     ///
     /// Four outcomes in one batch, including the two that used to vanish: an entry held
@@ -1013,10 +1056,22 @@ mod tests {
         use interfaces::DispatcherError;
 
         // 5 requested, 3 dispatched: 2 were held back before reaching the dispatcher.
-        let dispatched: Vec<Result<(), DispatcherError>> = vec![
-            Ok(()),                                         // hit
-            Err(DispatcherError::KeyNotFound(7)),           // miss
-            Err(DispatcherError::IoError("fabric".into())), // error, NOT a miss
+        use interfaces::{LookupOutcome, ServedBy as S};
+        let dispatched = vec![
+            // The attribution now carries the class, so the fixture states it rather
+            // than leaving the tally to re-derive it from the error variant.
+            LookupOutcome {
+                served_by: S::Dram,
+                result: Ok(()),
+            },
+            LookupOutcome {
+                served_by: S::Miss,
+                result: Err(DispatcherError::KeyNotFound(7)),
+            },
+            LookupOutcome {
+                served_by: S::Error,
+                result: Err(DispatcherError::IoError("fabric".into())),
+            },
         ];
         let (hits, misses, errors) = Translator::tally_lookup(5, &dispatched);
 
@@ -1044,8 +1099,11 @@ mod tests {
     fn faults_are_not_misses() {
         use interfaces::DispatcherError;
 
-        let only_io: Vec<Result<(), DispatcherError>> =
-            vec![Err(DispatcherError::IoError("fabric".into()))];
+        use interfaces::{LookupOutcome, ServedBy as S};
+        let only_io = vec![LookupOutcome {
+            served_by: S::Error,
+            result: Err(DispatcherError::IoError("fabric".into())),
+        }];
         assert_eq!(
             Translator::tally_lookup(1, &only_io),
             (0, 0, 1),

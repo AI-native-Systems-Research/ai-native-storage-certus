@@ -533,11 +533,16 @@ pub fn count_results(opcode: u32, body: &[u8], counters: &mut Counters) {
                 }
             }
         }
-        // Binary, and a handle that failed to open is reported as 0 too, so a miss count is
-        // an upper bound on true cache misses — the wire does not distinguish them.
+        // `0` is not-served; every non-zero value is a hit and names the serving tier
+        // (1 DRAM, 2 SSD, 3 REMOTE). **This read must be `!= 0`, not `== 1`.** It was
+        // `== 1` when the byte was binary, and left that way it silently counts every
+        // SSD and remote hit as a miss: a hardware run reported 224 848 hits where the
+        // four servers had served 299 130, short by exactly their ssd + remote totals.
+        // A handle that failed to open is also reported `0`, so a miss count remains an
+        // upper bound on true cache misses — the wire does not distinguish those.
         op::LOOKUP => {
             for b in body {
-                if *b == 1 {
+                if *b != 0 {
                     counters.lookup_hits += 1;
                 } else {
                     counters.lookup_misses += 1;
@@ -620,7 +625,7 @@ mod tests {
     }
 
     #[test]
-    fn check_is_three_valued_and_lookup_is_binary() {
+    fn check_is_three_valued_and_lookup_is_tiered() {
         // The approach this replaced: counting both as "1 means hit", which is the obvious
         // reading and records every PENDING key as a miss.
         let mut c = Counters::default();
@@ -634,6 +639,18 @@ mod tests {
             &mut c,
         );
         assert_eq!((c.check_resident, c.check_miss, c.check_pending), (1, 1, 1));
+
+        // Every non-zero byte is a hit, because the byte names the serving tier.
+        // `[1, 0, 1]` alone cannot catch a `== 1` reading — that is why the earlier
+        // version of this assertion passed while the counter under-reported on hardware
+        // by exactly the SSD and remote hits. The tiered case is the one that matters.
+        let mut c = Counters::default();
+        count_results(op::LOOKUP, &[1, 2, 3, 0], &mut c);
+        assert_eq!(
+            (c.lookup_hits, c.lookup_misses),
+            (3, 1),
+            "DRAM, SSD and remote are all hits; only 0 is a miss"
+        );
 
         let mut c = Counters::default();
         count_results(op::LOOKUP, &[1, 0, 1], &mut c);

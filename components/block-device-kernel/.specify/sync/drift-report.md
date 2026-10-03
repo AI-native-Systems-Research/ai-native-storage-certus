@@ -1,11 +1,24 @@
 ---
 spec_sync_component: block-device-kernel
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-02T23:36:32Z
-spec_sync_git_commit: 7c1efed9
-spec_sync_inputs_sha256: 3e8b7ac160aa3ea62ec552187959d840070decc953d8bc13b677d458aa597c30
+spec_sync_synced_at: 2026-10-03T13:20:17Z
+spec_sync_git_commit: 2c86a131
+spec_sync_inputs_sha256: f7e88d3c5b6badb810b97a6b6619a87b7ffdb92a3519af8df016143f64d81329
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest
+> folds `components/interfaces/{src,specs}` into **every** component's hash, so an interface
+> change invalidates all of them at once -- which is the design, not a defect. The interface
+> change is the `served_by` attribution work: new `ServedBy` and `LookupOutcome` types, and
+> `IDispatcher::batch_lookup` widened to return `Vec<LookupOutcome>`.
+>
+> **No re-analysis was performed for this component, and the digest bump asserts only what was
+> actually checked**: the interface change is additive except for `batch_lookup`'s return type,
+> which the compiler enforces across all implementors, and this component's own `src/**` and
+> `specs/**` are unchanged. Components that implement `IDispatcher` (`dispatcher`,
+> `dispatcher-p2p`) had their specs updated substantively; this one did not need it. If a later
+> sweep finds drift here, this stamp is not evidence against it.
+
 > **Re-stamp 2026-09-15 (workspace `cargo fmt` sweep; no drift).** Commit `f9bcd965` ("Add shmq RESERVE batch shared-deadline regression test") ran `cargo fmt` across the whole workspace, reflowing this component's `src/*.rs` (multi-line ↔ single-line argument lists and struct literals, import reordering). `git diff -w` confirms no token-level logic, signature, or contract change — the only substantive addition in that commit is a regression test in `lib/shmq-dispatcher/src/translate.rs`, which is outside this component and outside the spec-sync gate's `components/` scope. The formatting moved this component's `spec_sync_inputs_sha256`, but its spec↔implementation alignment is unchanged. Report body below stands unchanged; drift status remains `clean`. Digest recomputed over a clean tree matching CI.
 
 > **Re-stamp 2026-09-15 (interfaces-fold; no drift).** Branch `fix-reserve-batch-deadline` (`bec6c6ec`) added a `deadline: Option<std::time::Instant>` parameter to `IDispatcher::reserve_memory` in `components/interfaces/src/idispatcher.rs` (shared batch backpressure deadline for the shm-queue OP_RESERVE handler). `scripts/spec-sync-hash.sh` folds the whole `components/interfaces` tree into every component's hash, so this component's digest moved even though its own spec/implementation did not change. This component does not describe or call `reserve_memory`; the interface delta cannot affect its spec↔implementation alignment. Report body below stands unchanged; drift status remains `clean`. Digest recomputed over a clean tree matching CI.

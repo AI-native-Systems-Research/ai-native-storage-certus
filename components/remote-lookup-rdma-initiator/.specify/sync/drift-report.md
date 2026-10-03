@@ -1,11 +1,24 @@
 ---
 spec_sync_component: remote-lookup-rdma-initiator
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-02T23:36:33Z
-spec_sync_git_commit: 7c1efed9
-spec_sync_inputs_sha256: 4dec7d285372bb385032d087836767d6f25246de626aafeba5a62822ff793d82
+spec_sync_synced_at: 2026-10-03T13:20:18Z
+spec_sync_git_commit: 2c86a131
+spec_sync_inputs_sha256: 64c7c16379177bdf0a8c23df7a4a8e871177ac5129f792b01c61650c21ee18c3
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest
+> folds `components/interfaces/{src,specs}` into **every** component's hash, so an interface
+> change invalidates all of them at once -- which is the design, not a defect. The interface
+> change is the `served_by` attribution work: new `ServedBy` and `LookupOutcome` types, and
+> `IDispatcher::batch_lookup` widened to return `Vec<LookupOutcome>`.
+>
+> **No re-analysis was performed for this component, and the digest bump asserts only what was
+> actually checked**: the interface change is additive except for `batch_lookup`'s return type,
+> which the compiler enforces across all implementors, and this component's own `src/**` and
+> `specs/**` are unchanged. Components that implement `IDispatcher` (`dispatcher`,
+> `dispatcher-p2p`) had their specs updated substantively; this one did not need it. If a later
+> sweep finds drift here, this stamp is not evidence against it.
+
 > **Re-stamp 2026-09-15 (interfaces-fold; no drift).** Branch `fix-reserve-batch-deadline` (`bec6c6ec`) added a `deadline: Option<std::time::Instant>` parameter to `IDispatcher::reserve_memory` in `components/interfaces/src/idispatcher.rs` (shared batch backpressure deadline for the shm-queue OP_RESERVE handler). `scripts/spec-sync-hash.sh` folds the whole `components/interfaces` tree into every component's hash, so this component's digest moved even though its own spec/implementation did not change. This component does not describe or call `reserve_memory`; the interface delta cannot affect its spec↔implementation alignment. Report body below stands unchanged; drift status remains `clean`. Digest recomputed over a clean tree matching CI.
 
 > **Re-stamp 2026-09-09 (merged-branch interfaces-fold; no drift).** Branch

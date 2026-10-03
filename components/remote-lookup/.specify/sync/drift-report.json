@@ -89,5 +89,7 @@
       "suggested_spec": "Document in FR-006 that a racing AlreadyExists counts as success only at matching size; a differing size is reclaimed (never evicted). Already in knowledge/size-mismatch-handling.md."
     }
   ],
-  "conflicts": []
+  "conflicts": [],
+  "inputs_sha256": "908446231270661def4224d93b51351552388cfe156f70f7acd2c5c22b2ca9eb",
+  "git_commit": "72c7182b"
 }

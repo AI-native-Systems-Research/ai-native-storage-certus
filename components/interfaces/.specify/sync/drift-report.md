@@ -1,11 +1,24 @@
 ---
 spec_sync_component: interfaces
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-02T23:36:32Z
-spec_sync_git_commit: 7c1efed9
-spec_sync_inputs_sha256: 9d7e2a0702ae8da5fa09a25a425dffc6721f67a17cd00916633825fdd68edd6d
+spec_sync_synced_at: 2026-10-03T13:20:18Z
+spec_sync_git_commit: 2c86a131
+spec_sync_inputs_sha256: 1cd9329d436cbcded582c2e600e41879ed6e6817cdbf3711675538cc1f06ba03
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest
+> folds `components/interfaces/{src,specs}` into **every** component's hash, so an interface
+> change invalidates all of them at once -- which is the design, not a defect. The interface
+> change is the `served_by` attribution work: new `ServedBy` and `LookupOutcome` types, and
+> `IDispatcher::batch_lookup` widened to return `Vec<LookupOutcome>`.
+>
+> **No re-analysis was performed for this component, and the digest bump asserts only what was
+> actually checked**: the interface change is additive except for `batch_lookup`'s return type,
+> which the compiler enforces across all implementors, and this component's own `src/**` and
+> `specs/**` are unchanged. Components that implement `IDispatcher` (`dispatcher`,
+> `dispatcher-p2p`) had their specs updated substantively; this one did not need it. If a later
+> sweep finds drift here, this stamp is not evidence against it.
+
 > **Sync 2026-09-15 (IDispatcher::reserve_memory signature — code authoritative).** Branch `fix-reserve-batch-deadline` (`bec6c6ec`) added a `deadline: Option<std::time::Instant>` parameter to `reserve_memory` in `src/idispatcher.rs`. The method inventory in `specs/001-interfaces/spec.md` was updated to the new signature and documents the two modes (`None` = dispatcher's own `store_backpressure_ms` budget; `Some(instant)` = a deadline shared across a reserve batch, bounding the batch's total backpressure). First adoption of the spec-sync freshness stamp for this component. Digest recomputed over a clean tree matching CI.
 
 # Drift Report: interfaces

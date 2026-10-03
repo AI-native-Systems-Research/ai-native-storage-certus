@@ -77,5 +77,7 @@
       "suggested_spec": "Confirm whether these apply to dispatcher-p2p or remove from its config surface."
     }
   ],
-  "conflicts": []
+  "conflicts": [],
+  "inputs_sha256": "03724fb8868c0c380f9b4373cc347d5f40cfedf89b6d24a72eb7591d81017842",
+  "git_commit": "72c7182b"
 }

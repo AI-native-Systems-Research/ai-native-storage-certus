@@ -120,5 +120,7 @@
       "detail": "Cargo.toml (0.1.0) vs define_component! (0.3.0) vs spec (0.2.0) disagree on component version.",
       "location": "components/memory-tier/Cargo.toml; components/memory-tier/src/lib.rs:140; spec.md:190"
     }
-  ]
+  ],
+  "inputs_sha256": "d94c4e48255a26284700eda4468ecfe67d1ceb4c187cfc90d779fb92fbe25512",
+  "git_commit": "72c7182b"
 }

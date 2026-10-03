@@ -1,11 +1,24 @@
 ---
 spec_sync_component: eviction-policy-optimized
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-02T23:36:32Z
-spec_sync_git_commit: 7c1efed9
-spec_sync_inputs_sha256: fc9946decc6e517da832467270351d1c4e840ec0ef1203b15b18185f4bec254e
+spec_sync_synced_at: 2026-10-03T13:20:17Z
+spec_sync_git_commit: 2c86a131
+spec_sync_inputs_sha256: fa0dca05d6b3d9f9f0d30879aa362a6c6c8d88d50cd8be39d3cbdc077d2c545d
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest
+> folds `components/interfaces/{src,specs}` into **every** component's hash, so an interface
+> change invalidates all of them at once -- which is the design, not a defect. The interface
+> change is the `served_by` attribution work: new `ServedBy` and `LookupOutcome` types, and
+> `IDispatcher::batch_lookup` widened to return `Vec<LookupOutcome>`.
+>
+> **No re-analysis was performed for this component, and the digest bump asserts only what was
+> actually checked**: the interface change is additive except for `batch_lookup`'s return type,
+> which the compiler enforces across all implementors, and this component's own `src/**` and
+> `specs/**` are unchanged. Components that implement `IDispatcher` (`dispatcher`,
+> `dispatcher-p2p`) had their specs updated substantively; this one did not need it. If a later
+> sweep finds drift here, this stamp is not evidence against it.
+
 # Spec Drift Report
 
 Generated: 2026-09-23

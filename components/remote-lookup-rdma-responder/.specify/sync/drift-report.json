@@ -40,5 +40,7 @@
       "suggested_spec": "Note the FR-004 SPSC->eventfd bridge mechanism in plan.md/data-model."
     }
   ],
-  "conflicts": []
+  "conflicts": [],
+  "inputs_sha256": "d0edf1db6994d0c45d2885900afb0a7e797de84750dfacda8d34f9d0cbc31f68",
+  "git_commit": "72c7182b"
 }

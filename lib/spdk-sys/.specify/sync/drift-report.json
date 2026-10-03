@@ -41,5 +41,7 @@
       "suggested_spec": "Plausibly covered by FR-4 controller/admin ops but not named; consider an explicit FR for abort-in-flight and MDTS-derived max-transfer-size bindings used by the block-device actor."
     }
   ],
-  "conflicts": []
+  "conflicts": [],
+  "inputs_sha256": "0f3490585fe6569427bd2367ba637009395a6511b65cbeddc60e217b3ff62301",
+  "git_commit": "72c7182b"
 }

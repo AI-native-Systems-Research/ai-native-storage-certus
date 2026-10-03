@@ -32,6 +32,8 @@ pub use idispatcher::EvictionReason;
 #[cfg(feature = "spdk")]
 pub use idispatcher::IDispatcher;
 pub use idispatcher::IpcHandle;
+pub use idispatcher::LookupOutcome;
+pub use idispatcher::ServedBy;
 pub use idispatcher::TierEventStats;
 pub use ieviction_policy::BlockSemantics;
 pub use ieviction_policy::EvictionHandle;
@@ -52,6 +54,7 @@ pub use imemory_tier::MemoryTierTelemetrySnapshot;
 pub use iremote_lookup::IRemoteLookup;
 pub use iremote_lookup::LookupConfig;
 pub use iremote_lookup::RemoteLookupError;
+pub use iremote_lookup::RemoteServeStats;
 pub use iremote_lookup_rdma_initiator::IRemoteLookupRdmaInitiator;
 pub use iremote_lookup_rdma_initiator::PushCompletion;
 pub use iremote_lookup_rdma_initiator::PushStatus;

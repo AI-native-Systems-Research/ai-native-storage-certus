@@ -512,6 +512,43 @@ one-sided write into a reclaimed slot).
   checksum accessors on cache values. This is build configuration with no runtime-behavior
   requirement of its own.
 
+- **FR-035** *(New 2026-09-29 — responder-side serve observability.)* The component MUST count,
+  cumulatively and monotonically since process start, (a) the keys it successfully served to
+  peers' RDMA requests and (b) of those, the keys it had to read from its **own** block tier to
+  do so — promoted into the local memory tier before the RDMA read, because there is no
+  RDMA-from-SSD path (US4). It MUST expose both via `IRemoteLookup::serve_stats() ->
+  RemoteServeStats`, which MUST be readable before `initialize` (returning zeroes), MUST NOT be
+  reset by reading, and MUST be zero on a node no peer has asked anything of.
+
+  **Why (b) is the point, and why it lives here rather than on the requester.** The question is
+  how much cold work *peers cause on this node* — pressure this node's storage tier absorbs on
+  others' behalf, and the leading hypothesis for local store declines while peers are reachable.
+  That is a property of the responder, in the aggregate. The dispatcher's spec 002 originally
+  planned to answer it from the requester instead, as a per-key `REMOTE_SSD` attribution derived
+  from the peer's advertised tier; **that was withdrawn** because it named something it could not
+  deliver (no byte crosses the fabric from disk), was an advertisement rather than an
+  observation, and decayed on repeat access. Counted here it is none of those things.
+
+- **FR-036** *(New 2026-09-29.)* The two counts MUST be taken at the same stage of serving —
+  when the work is undertaken, not when the RDMA write completes — so that (b)/(a) is a
+  meaningful fraction of one request's keys. A promotion that is requested and then fails its
+  re-lookup MUST still count, because the read was performed either way. Duplicate keys within
+  one request MUST count once.
+
+- **FR-037** *(New 2026-09-29 — what this component contributes to serving-tier attribution,
+  which is less than originally planned.)* This component MUST NOT carry a serving tier out of
+  `IRemoteLookup::batch_lookup`. An earlier design required the responding peer's advertised
+  tier so a requester could report `REMOTE_DRAM` versus `REMOTE_SSD`; that split is **withdrawn**
+  (see `dispatcher/specs/002-served-by-tier-attribution/contracts/served-by.md`). A requester
+  attributes `Remote` from the per-key success of the remote pass, which it already has, so
+  `batch_lookup` keeps its signature and this component's contribution to attribution is the
+  responder-side counters of FR-035/FR-036 instead.
+
+  Recorded as an explicit non-requirement because the opposite was specified for eight weeks,
+  and a future reader finding `Avail` on the wire would otherwise reasonably conclude it was
+  meant to be plumbed through.
+
+
 ### Key Entities
 
 - **Operation**: One `batch_lookup` invocation, keyed by `op_id`. Holds the unsatisfied set,
@@ -557,6 +594,15 @@ one-sided write into a reclaimed slot).
 - **SC-008**: Concurrent `batch_lookup`s for the same missing key issue exactly one remote fetch
   (single-flight, via the actor's in-flight index); the follower observes the published value or
   the not-found result.
+- **SC-009** *(New 2026-09-29, covers FR-035/FR-036)*: For one RDMA request mixing warm and
+  disk-only keys, `serve_stats()` reports every served key in `peer_served_keys` and **only** the
+  disk-only ones in `peer_triggered_promotions`. A wholly warm request moves the first and leaves
+  the second at zero.
+
+  **The mixed batch is the load-bearing case and is required, not illustrative.** With an
+  all-cold request the cold count and the served count are the same number, so a counter wired to
+  the wrong one passes. That is not hypothetical: mutation testing during implementation found
+  exactly this hole in an all-cold test pair, and the mixed case is what closed it.
 
 ## Assumptions
 

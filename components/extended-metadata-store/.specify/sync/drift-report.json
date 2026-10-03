@@ -125,5 +125,7 @@
       "suggested_spec": "Surface via an interface method or drop the variant."
     }
   ],
-  "conflicts": []
+  "conflicts": [],
+  "inputs_sha256": "c453134f9f6ebfc49c0a8c17c023b649570917acd7851cc7f9698703824fa03f",
+  "git_commit": "72c7182b"
 }
