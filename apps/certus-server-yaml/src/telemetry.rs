@@ -142,6 +142,9 @@ impl OtelMetrics {
             .with_description("Lookups neither served nor shown absent (FR-024)")
             .with_callback(move |counter| {
                 counter.observe(c.load(std::sync::atomic::Ordering::Relaxed), &[]);
+            })
+            .build();
+
         // Remote-lookup attribution (spec 002 Phase 1). Requester-side: what this
         // node obtained FROM peers, not what peers asked OF it.
         //
