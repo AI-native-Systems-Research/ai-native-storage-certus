@@ -1,9 +1,9 @@
 ---
 spec_sync_component: dispatcher-p2p
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-02T23:36:32Z
-spec_sync_git_commit: 7c1efed9
-spec_sync_inputs_sha256: 8c821cd0d13aa44d71874e09cf420bd172cd08ecbe84540fdb4a9f4ec1c4a7cb
+spec_sync_synced_at: 2026-10-02T23:43:24Z
+spec_sync_git_commit: a6449e0b
+spec_sync_inputs_sha256: 969a68fc94e0565475dad4bc975f24620bd6bc80976ccd58bb0174ad7cf3e1d7
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Re-stamp 2026-09-25 (SSD-evictor drive-selection bug fix; drift resolved by backfill).** Branch `fix/ssd-evictor-drive-index-hash`. The `BackgroundEvictor` (`src/background.rs`) freed the backing extent on the extent manager chosen by a raw `key % num_drives`, while write-through placement enqueues each `WriteJob` with `device_index = drive_index(key, num_drives)` (splitmix64, FR-018). For `num_drives > 1` the two disagree for almost all keys, so the evictor freed the wrong extent manager — leaking the intended extent and potentially freeing a live extent for another key on the wrong drive. CODE (authoritative): the evictor now routes through `drive_index` (made `pub(crate)`). SPEC BACKFILL: FR-019 was silent on the evictor's drive selection; a clause now states it uses the same `drive_index(key, num_drives)` placement hash as FR-018 and records the prior `key % num_drives` drift. `src/lib.rs` + `src/background.rs` changed (moved the digest); `spec.md` FR-019 changed (moved it again). Digest recomputed over a clean tree matching CI; drift status `clean`.
