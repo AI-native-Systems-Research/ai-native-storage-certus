@@ -19,7 +19,7 @@ Layout (per the SEPT_2026 established design + the user's drill-down order):
 N-tool-ready: one column/section per tool in `tools` (defaults to creusot,kani).
 Usage: render_scoring.py <verif_dir> [--yaml unified_properties.yaml] [--out PATH]
 """
-import argparse, os, sys, html, collections, datetime
+import argparse, os, re, sys, html, collections, datetime
 try:
     import yaml
 except ImportError:
@@ -36,6 +36,47 @@ def esc(x):
 def load(p):
     with open(p) as f:
         return yaml.safe_load(f)
+
+
+def apply_polarity(d):
+    """Read HAZARD-shaped records the right way round. Display only: the bundle is not changed.
+
+    An obligation normally states what the code SHOULD do, so `proved` = the requirement holds and
+    `refuted` = a defect. Measured on memory-tier (2026-10-03): 22 of its 161 records instead state a
+    DEFECT ("a new entry's bytes can still hold a previous occupant's data") — the sweep's code reader
+    wrote its surprises as records. For those, `proved` CONFIRMS the defect and `refuted` shows the
+    code is correct, so rendered as-is the page shows every one of them with the wrong sign.
+
+    The classification lives in an optional top-level `polarity:` map ({id: {polarity, why}}). Only
+    the rendering flips; the scorer-written statuses are untouched, and every flipped cell says so.
+    Returns {id: polarity} for the records that are not plain requirements, for the legend.
+    """
+    pol = d.get("polarity") or {}
+    seen = {}
+    for p in d.get("properties", []):
+        e = pol.get(p.get("id"))
+        if not isinstance(e, dict):
+            continue
+        kind = str(e.get("polarity", "")).upper()
+        if kind in ("", "REQUIREMENT"):
+            continue
+        seen[p["id"]] = kind
+        if kind != "HAZARD":
+            continue
+        for t in TOOLS_DEFAULT:
+            b = p.get(t)
+            if not isinstance(b, dict):
+                continue
+            st = b.get("status")
+            if st == "proved":
+                b["status"], b["symbol"] = "refuted", "\u203c"
+                b["note"] = ("DEFECT CONFIRMED. This record is stated as a hazard, and the hazard was "
+                             "PROVED to occur. " + str(b.get("note") or ""))
+            elif st == "refuted":
+                b["status"], b["symbol"] = "proved", "\u2713"
+                b["note"] = ("CODE IS CORRECT. This record is stated as a hazard, and the hazard was "
+                             "proved NOT to occur. " + str(b.get("note") or ""))
+    return seen
 
 
 def psym(block):
@@ -89,6 +130,13 @@ def main():
 
     verif = os.path.abspath(a.verif_dir)
     d = load(os.path.join(verif, a.yaml))
+    polarity_seen = apply_polarity(d)
+    # `triage:` {id: {verdict: not-a-defect, why}} — orchestrator-written. A refutation is a mechanical
+    # fact (the obligation AS WORDED is false); whether that is a CODE defect is a judgement. memory-tier
+    # has 4 that are not: three refuted only on wording (e.g. "always smaller" where the code keeps <=)
+    # and one on a u64 counter wrap that cannot be reached. Shown, labelled, and kept out of the count.
+    triage = {k: v for k, v in (d.get("triage") or {}).items()
+              if isinstance(v, dict) and str(v.get("verdict", "")).lower() == "not-a-defect"}
     comp = d.get("component", "component")
     interface = d.get("interface", "")
     pin = d.get("pin", "")
@@ -209,7 +257,11 @@ def main():
                       rss=rss, artifacts=len(artifacts), fully=fully, partial=partial,
                       deleg_methods=deleg_methods, covered=covered, true_partial=true_partial)
 
-    incomplete = any(agg[t]["true_partial"] and agg[t]["pend"] for t in tools)
+    # A tool whose column is explained by a `tool_notes` entry (withheld, sample-only, unfinished) is
+    # pending by DECISION, and the note already says so in the one-line notice at the top. Raising the
+    # generic INCOMPLETE box for it as well put a second, vaguer warning above every count.
+    noted = {str(n.get("tool", "")).lower() for n in (d.get("tool_notes") or [])}
+    incomplete = any(agg[t]["true_partial"] and agg[t]["pend"] for t in tools if t not in noted)
     today = os.environ.get("RENDER_DATE", datetime.date.today().isoformat())
 
     # ---------------- HTML ----------------
@@ -297,39 +349,69 @@ def main():
              f"<b>{len(props)}</b> verifiable properties (+{len(nv)} non-verifiable) · "
              f"run pin <code>{esc(pin)}</code> · {esc(today)}</p>")
 
-    # KNOWN CORRECTIONS BANNER - top of page, before any count is read.
-    # A status can only be written by a scorer, so when a later gate shows a published verdict wrong
-    # the bundle cannot simply be edited: hand-typing the corrected status is exactly the self-grading
-    # the gate exists to prevent. The honest alternative is a top-level `known_corrections:` list,
-    # surfaced HERE so nobody reads the headline without seeing it. Without this the page shows the
-    # superseded number in silence - the failure mode this pipeline keeps finding in itself.
-    for kc in (d.get("known_corrections") or []):
-        P.append(
-            "<p class='foot' style='border:2px solid #b00;padding:8px'>"
-            "\u26a0 <b>KNOWN CORRECTION - the counts below are superseded for one property.</b> "
-            f"<code>{esc(str(kc.get('property','')))}</code> is shown as "
+    # CORRECTIONS AND NOTES - one short line at the top, full text at the END of the page.
+    # Two kinds exist: `known_corrections` (one PROPERTY's published verdict is superseded; a status
+    # may only be written by a scorer, so the bundle cannot simply be edited) and `tool_notes` (a whole
+    # tool COLUMN is withheld or must not be read). Both must be impossible to miss, because the page
+    # would otherwise show a superseded or meaningless number in silence. They used to render as full
+    # red-boxed paragraphs ABOVE every count; Cornel (2026-10-03): this page is meant to be simple to
+    # digest for colleagues who know nothing about it, so the top carries ONE line saying how many
+    # there are and what they touch, linking to a section at the end that holds the full text.
+    kcs = d.get("known_corrections") or []
+    tns = d.get("tool_notes") or []
+    notes_html = []
+    for kc in kcs:
+        notes_html.append(
+            "<p class='foot' style='border-left:4px solid #b00;padding:4px 10px'>"
+            f"<b>Correction — <code>{esc(str(kc.get('property','')))}</code></b> is shown as "
             f"<b>{esc(str(kc.get('this_bundle_says','')))}</b> but should read "
             f"<b>{esc(str(kc.get('should_read','')))}</b>. {esc(str(kc.get('why','')))} "
             f"<b>{esc(str(kc.get('not_a_defect','')))}</b> "
             f"Corrected counts: <b>{esc(str(kc.get('correct_counts','')))}</b>. "
             f"Reproduce: <code>{esc(str(kc.get('reproduce','')))}</code></p>")
-
-    # TOOL NOTES BANNER - why a whole COLUMN is empty or must not be read.
-    # known_corrections above is per-PROPERTY; it cannot say "this entire lane is withheld", and we
-    # have now needed exactly that twice: eviction-policy-session-lists (Kani scored 8/95 with 106
-    # vacuity findings -> unsound, withheld) and disk-partition-manager (Kani left 76 of 102 with no
-    # artifact -> incomplete, withheld). Both times the reason lived only in a commit message or a
-    # chat log, while the page showed a bare "0 proved" that a reader would mistake for "the tool
-    # could not do it". A withheld column is a DECISION and it belongs on the page, next to the
-    # number it explains.
-    for tn in (d.get("tool_notes") or []):
-        P.append(
-            "<p class='foot' style='border:2px solid #b00;padding:8px'>"
-            f"\u26a0 <b>{esc(str(tn.get('tool','')).upper())} COLUMN \u2014 "
+    for tn in tns:
+        notes_html.append(
+            "<p class='foot' style='border-left:4px solid #b00;padding:4px 10px'>"
+            f"<b>{esc(str(tn.get('tool','')).capitalize())} column — "
             f"{esc(str(tn.get('headline','')))}</b> "
             f"{esc(str(tn.get('detail','')))}"
             + (f" <b>Measured:</b> {esc(str(tn.get('measured','')))}." if tn.get('measured') else "")
             + "</p>")
+    nhaz = sum(1 for v in polarity_seen.values() if v == "HAZARD")
+    nunc = sum(1 for v in polarity_seen.values() if v != "HAZARD")
+    if nhaz or nunc:
+        notes_html.append(
+            "<p class='foot' style='border-left:4px solid #b00;padding:4px 10px'>"
+            f"<b>{nhaz} records are worded as hazards, not requirements.</b> Most records say what the "
+            "code SHOULD do, so a proof means the requirement holds. These instead describe something "
+            "that might go WRONG, so a proof means the problem is real. This page shows them the right "
+            "way round: a proved hazard is listed as a defect (\u203c), and a hazard proved not to occur "
+            "is shown as correct (\u2713). Each such cell says so in its note. The verification results "
+            "themselves are unchanged."
+            + (f" {nunc} further record(s) could not be classified either way and are shown as written."
+               if nunc else "") + "</p>")
+    if triage:
+        notes_html.append(
+            "<p class='foot' style='border-left:4px solid #b00;padding:4px 10px'>"
+            f"<b>{len(triage)} refuted records are not code defects.</b> Each is false exactly as worded, "
+            "but the code does what was meant: " + "; ".join(
+                f"<code>{esc(k)}</code>: {esc(str(v.get('why','')))}" for k, v in sorted(triage.items()))
+            + ". They stay in the defects table, labelled, and are not counted as defects.</p>")
+    if notes_html:
+        parts = []
+        if nhaz:
+            parts.append(f"{nhaz} records are worded as hazards and shown the right way round")
+        if triage:
+            parts.append(f"{len(triage)} refuted records are not code defects")
+        if kcs:
+            parts.append(f"{len(kcs)} correction{'s' if len(kcs) != 1 else ''} (" +
+                         ", ".join(esc(str(k.get('property',''))) for k in kcs) + ")")
+        if tns:
+            parts.append(" and ".join(f"the {esc(str(t.get('tool','')).capitalize())} column is "
+                                      f"{esc(re.split(r'[,.;:]', str(t.get('headline','')))[0].strip())}"
+                                      for t in tns))
+        P.append("<p class='foot' style='border-left:4px solid #b00;padding:2px 10px'>⚠ "
+                 + "; ".join(parts) + ". <a href='#notes'>Details at the end of the page.</a></p>")
 
     if incomplete:
         P.append("<div class='banner'>⚠ INCOMPLETE — some properties are not yet scored (shown as · pending). "
@@ -386,6 +468,8 @@ def main():
              f"checkable claims (properties). Across all {N} methods there are <b>{M}</b> such "
              f"verifiable properties; here is the same result counted at that finer level, "
              f"including how much each tool proves on its own.</p>")
+    n_triaged = sum(1 for p in props if p.get("id") in triage
+                    and any((p.get(t) or {}).get("status") == "refuted" for t in tools))
     P.append("<div class='cards'>")
     head_cls = "ok" if c_open == 0 else "warn"   # refuted is settled, so it does not warn here
     combfoot = []
@@ -396,7 +480,9 @@ def main():
         # reported as a bare "open", which reads as unfinished verification when in fact the
         # verification finished and proved the implementation wrong.
         note = (f" &mdash; <b>‼ {c_refuted} of these are REFUTED: verification proved the "
-                f"implementation VIOLATES them (see the Defects section)</b>") if c_refuted else ""
+                f"implementation VIOLATES them (see the Defects section)</b>"
+                + (f"; <b>{n_triaged}</b> of those are false only as worded, not code defects"
+                   if n_triaged else "")) if c_refuted else ""
         combfoot.append(f"<b>{c_open}</b> open{note}")
     else:
         combfoot.append("<b>0</b> open (nothing left unproved)")
@@ -434,6 +520,7 @@ def main():
              f"tool, and <b>{c_open}</b> are left open"
              + (f" &mdash; of which <b>{c_refuted}</b> are <b>REFUTED</b>: verification proved the "
                 f"implementation VIOLATES them, so they are defects to fix rather than unfinished work"
+                + (f" ({n_triaged} of them are false only as worded, not code defects)" if n_triaged else "")
                 if c_refuted else "") + f".</p>"
              f"<p style='margin:0 0 10px'><b>“Proved” means a tool proved the property itself.</b> Each tool's "
              f"scorer re-runs that tool's own artifact from source and checks it passes — Creusot: "
@@ -618,7 +705,9 @@ def main():
                 P.append(
                     f"<tr><td class='mono'>{esc(p['id'])}</td><td>{TOOL_LABEL.get(t,t)}</td>"
                     f"<td class='mono'>{esc(spec_loc)}</td><td class='mono'>{esc(code_loc)}</td>"
-                    f"<td>{esc(str(p.get('statement','')).strip())}</td>"
+                    f"<td>{esc(str(p.get('statement','')).strip())}"
+                    + (f"<br><b>Not a code defect:</b> {esc(str(triage[p['id']].get('why','')))}"
+                       if p.get('id') in triage else "") + "</td>"
                     f"<td class='mono'>{esc(str(wit))}</td></tr>")
         P.append("</table></div>")
 
@@ -738,6 +827,10 @@ def main():
                 bits.append(f"<b>{tool}</b>: " + " · ".join(seg))
         if bits:
             P.append("<p class='foot'>Run provenance — " + "<br>".join(bits) + "</p>")
+
+    if notes_html:
+        P.append("<h2 id='notes'>Corrections and notes</h2>")
+        P.extend(notes_html)
 
     P.append("</div>")
 
