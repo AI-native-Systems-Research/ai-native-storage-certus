@@ -91,17 +91,10 @@ use crate::background::{
 };
 pub use crate::metrics::PipelineMetrics;
 
-#[derive(Clone, Debug)]
-pub enum EvictionReason {
-    Demoted,
-    Removed,
-}
-
-#[derive(Clone, Debug)]
-pub struct EvictionEvent {
-    pub key: CacheKey,
-    pub reason: EvictionReason,
-}
+// Re-exported, not redefined: this type crosses a component boundary (both dispatchers
+// produce it, the shm-queue host consumes it), so it lives in `interfaces`. Keeping the
+// re-export means `dispatcher::EvictionEvent` still resolves for existing callers.
+pub use interfaces::{EvictionEvent, EvictionReason};
 
 /// Lifetime counters for KV-cache tier movement events. All fields are
 /// monotonic (cumulative since process start); `snapshot()` reads them without

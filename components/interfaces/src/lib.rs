@@ -27,6 +27,8 @@ pub use idispatch_map::IDispatchMap;
 pub use idispatch_map::LookupResult;
 pub use idispatcher::DispatcherConfig;
 pub use idispatcher::DispatcherError;
+pub use idispatcher::EvictionEvent;
+pub use idispatcher::EvictionReason;
 #[cfg(feature = "spdk")]
 pub use idispatcher::IDispatcher;
 pub use idispatcher::IpcHandle;

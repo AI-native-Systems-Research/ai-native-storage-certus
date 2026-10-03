@@ -192,6 +192,31 @@ impl fmt::Display for DispatcherError {
 
 impl std::error::Error for DispatcherError {}
 
+/// Why an entry left the memory tier.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EvictionReason {
+    /// Demoted to the block tier; the value is still cached, on SSD.
+    Demoted,
+    /// Removed outright; the value is no longer cached anywhere locally.
+    Removed,
+}
+
+/// One memory-tier eviction, delivered best-effort on the eviction channel.
+///
+/// **Defined here rather than in a dispatcher crate**, because it crosses a component
+/// boundary: both `dispatcher` and `dispatcher-p2p` produce it and the shm-queue
+/// transport host consumes it. It previously existed as two structurally identical
+/// types, one per dispatcher, with the transport host hardcoding `dispatcher`'s --
+/// which made the shm-queue server impossible to build against `dispatcher-p2p` at all,
+/// since the generated stack correctly handed it the other crate's type. Both
+/// dispatchers now re-export this one, so their public paths are unchanged.
+#[derive(Clone, Debug)]
+pub struct EvictionEvent {
+    /// The evicted key.
+    pub key: CacheKey,
+    /// Whether the value survives on the block tier or is gone.
+    pub reason: EvictionReason,
+
 /// How a looked-up key was served — the **route**, not the entry's residency after
 /// serving.
 ///

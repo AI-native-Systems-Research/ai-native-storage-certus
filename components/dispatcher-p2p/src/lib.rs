@@ -48,17 +48,10 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
 
-#[derive(Clone, Debug)]
-pub enum EvictionReason {
-    Demoted,
-    Removed,
-}
-
-#[derive(Clone, Debug)]
-pub struct EvictionEvent {
-    pub key: CacheKey,
-    pub reason: EvictionReason,
-}
+// Re-exported, not redefined: this type crosses a component boundary (both dispatchers
+// produce it, the shm-queue host consumes it), so it lives in `interfaces`. Keeping the
+// re-export means `dispatcher::EvictionEvent` still resolves for existing callers.
+pub use interfaces::{EvictionEvent, EvictionReason};
 
 /// Publish a best-effort eviction event to the registered subscriber, counting
 /// undeliverable events.
@@ -1220,7 +1213,7 @@ impl IDispatcher for DispatcherP2pComponent {
 
                     // Attempt P2P ring allocation (GPU BAR1 staging buffers).
                     match p2p_ring::P2pRing::new(&*gpu, chunk_size) {
-                        Some(ring) => {
+                        Ok(ring) => {
                             self.log_info(&format!(
                                 "dispatcher-p2p: P2P ring initialized ({} slots, {} KiB each, {} streams)",
                                 p2p_ring::P2P_RING_SLOTS,
@@ -1229,10 +1222,27 @@ impl IDispatcher for DispatcherP2pComponent {
                             ));
                             *self.p2p_ring.write() = Some(ring);
                         }
-                        None => {
-                            self.log_info(
-                                "dispatcher-p2p: P2P ring unavailable, cold reads use DRAM path",
+                        Err(why) => {
+                            // FATAL, deliberately. This used to log "cold reads use DRAM
+                            // path" and carry on -- a promise of a fallback that does not
+                            // exist, since the cold path expects the ring and panics without
+                            // it. Carrying on produced the worst available outcome: a server
+                            // that starts cleanly, serves warm reads for ~12 000 requests,
+                            // and then takes out its whole worker pool on the first cold
+                            // read, with every client left waiting forever.
+                            //
+                            // The condition is fully decidable here, at startup, where an
+                            // operator can act on it. Refusing to start is strictly kinder
+                            // than starting and failing later in a way that looks like a
+                            // hang rather than a misconfiguration.
+                            let msg = format!(
+                                "dispatcher-p2p: P2P ring unavailable: {why}. This \
+                                 dispatcher cannot serve cold reads without it and has no \
+                                 DRAM fallback -- refusing to start. Use the `full` profile \
+                                 for a DRAM cold path, or fix the cause above."
                             );
+                            self.log_error(&msg);
+                            return Err(DispatcherError::NotInitialized(msg));
                         }
                     }
 

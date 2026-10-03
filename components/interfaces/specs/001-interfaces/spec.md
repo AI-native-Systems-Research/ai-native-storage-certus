@@ -320,6 +320,8 @@ The crate has two Cargo features:
 - `DispatcherError`: 7-variant error enum.
 - `CacheKey`: Type alias for `u64`.
 - `LookupResult`: 4-variant enum (NotExist, MismatchSize, BlockDevice, MemoryTier).
+- `EvictionEvent` / `EvictionReason` *(moved here 2026-10-02)*: `EvictionEvent { key, reason }` with `EvictionReason` being `Demoted` (to the block device) or `Removed`. Emitted best-effort on every memory-tier eviction over a bounded single-subscriber channel, with drop-and-count backpressure; the behavioural contract lives with the dispatchers (dispatcher spec 001 FR-042/FR-050, dispatcher-p2p spec 001 FR-017).
+  - **Defined here, and only here, because two components emit it.** Both `dispatcher` and `dispatcher-p2p` publish these events, and a type defined in one of them cannot be named by the other without one dispatcher depending on the other — which is what prevented the `full-p2p` profile from building at all. A shared vocabulary type belongs in `interfaces` for the same reason `CacheKey` and `LookupResult` do.
 
 #### FR-019: Supporting Types - Memory Tier
 - `MemoryTierError`: 7-variant error enum.
