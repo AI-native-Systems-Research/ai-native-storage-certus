@@ -216,6 +216,7 @@ pub struct EvictionEvent {
     pub key: CacheKey,
     /// Whether the value survives on the block tier or is gone.
     pub reason: EvictionReason,
+}
 
 /// How a looked-up key was served — the **route**, not the entry's residency after
 /// serving.
