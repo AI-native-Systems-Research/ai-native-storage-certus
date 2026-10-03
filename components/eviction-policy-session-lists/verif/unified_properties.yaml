@@ -4170,13 +4170,11 @@ run:
     cap_seconds: 120
     cap_max: 600
     mem_max_mb: 16384
-known_corrections:
-- property: ALL — the Kani column is WITHDRAWN, not absent
-  recorded: '2026-09-30'
-  this_bundle_says: Creusot only (86 proved / 9 refuted of 95)
-  should_read: the same, and a reader should NOT infer Kani was skipped
-  why: 'Kani WAS run: 213 harnesses, and its gate scored 8 proved of 95 with 106 vacuity findings. The
-    harnesses used --unwind 4 --no-unwinding-checks over loops inside std HashMap/BTreeSet. Measured:
+tool_notes:
+- tool: kani
+  headline: withheld as unsound. It was run, but its proofs had no content.
+  detail: 'Kani WAS run: 213 harnesses, and its gate scored 8 proved of 95 with 106 vacuity findings.
+    The harnesses used --unwind 4 --no-unwinding-checks over loops inside std HashMap/BTreeSet. Measured:
     with unwinding checks ON at that bound, 1 of 4306 checks fails (the unwinding assertion) and 4305
     are UNDETERMINED; suppressing the check reports those 4305 as PASSING. That is why the column is withheld
     rather than published. Two routes out were then measured: loop contracts make the proofs sound and
@@ -4184,8 +4182,7 @@ known_corrections:
     Pool because the loops belong to std, so fidelity drops to arithmetic-core; and stubbing the std containers
     to keep real types was tried and FAILED - BTreeSet''s only read path is an iterator, which Kani cannot
     stub, and a stubbed container silently blinds the code (a harness asserting leaves.len()==2 AND evict_oldest().is_none()
-    PASSES).'
-  not_a_defect: Withholding the column is a statement about our harnesses, NOT about the component. Nothing
-    here implies a Kani-provable property is false.
-  reproduce: gate-kani-session-lists-20260929/drive.log holds the 8/95 run with all 106 vacuity notes
-  correct_counts: 'creusot: 86 proved / 9 refuted / 0 unresolved of 95 — kani: withheld as unsound'
+    PASSES). Withholding the column is a statement about our harnesses, NOT about the component. Nothing
+    here implies a Kani-provable property is false.'
+  measured: 'creusot: 86 proved / 9 refuted / 0 unresolved of 95 — kani: withheld as unsound; gate-kani-session-lists-20260929/drive.log
+    holds the 8/95 run with all 106 vacuity notes'
