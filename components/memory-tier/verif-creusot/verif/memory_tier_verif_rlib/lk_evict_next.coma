@@ -1,0 +1,105 @@
+(* #"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4138 0 4138 59 *)
+
+let%span slib = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4139 16 4139 26
+let%span slib'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4140 4 4140 27
+let%span slib'1 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4142 4 4142 29
+let%span slib'2 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4144 8 4144 31
+let%span slib'3 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4145 8 4145 33
+let%span slib'4 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4136 10 4136 65
+let%span slib'5 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4137 10 4137 104
+let%span slib'6 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4016 16 4016 79
+let%span slib'7 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4023 8 4025 74
+let%span svec = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/std/vec.rs" 102 18 102 36
+let%span svec'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/std/vec.rs" 116 18 116 48
+let%span svec'1 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+
+use seq.Seq
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_LkEv_Global
+
+type t_LkEv = StateRead | PoolRead | PoolWrite | PoolRelease | PolicyRefresh | PolicyOther
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_LkEv_Global (self: t_Vec_LkEv_Global) : Seq.seq t_LkEv
+
+axiom view_Vec_LkEv_Global_spec:
+  forall self: t_Vec_LkEv_Global [view_Vec_LkEv_Global self]. [%#svec'1] Seq.length (view_Vec_LkEv_Global self)
+    <= UInt64.t'int const_MAX
+
+let new_LkEv (return (x: t_Vec_LkEv_Global)) = any
+  [ return (result: t_Vec_LkEv_Global) ->
+  {[@stop_split] [@expl:new ensures] [%#svec] Seq.length (view_Vec_LkEv_Global result) = 0}
+    (! return {result}) ]
+
+let push_LkEv (self_: MutBorrow.t t_Vec_LkEv_Global) (v: t_LkEv) (return (x: ())) = any
+  [ return (result: ()) -> {[@stop_split] [@expl:push ensures] [%#svec'0] view_Vec_LkEv_Global self_.final
+    = Seq.snoc (view_Vec_LkEv_Global self_.current) v}
+    (! return {result}) ]
+
+predicate no_pool_read [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4015 0 4015 41] (t: Seq.seq t_LkEv) =
+  [%#slib'6] forall i: int. 0 <= i /\ i < Seq.length t -> Seq.get t i <> PoolRead
+
+predicate refresh_after_release [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4021 0 4021 50] (t: Seq.seq t_LkEv) =
+  [%#slib'7] forall i: int, j: int. 0 <= j
+      /\ j < i /\ i < Seq.length t /\ Seq.get t i = PolicyRefresh /\ (Seq.get t j = PoolRead \/ Seq.get t j = PoolWrite)
+    -> (exists m: int. j < m /\ m < i /\ Seq.get t m = PoolRelease)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let lk_evict_next [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4138 0 4138 59]
+  (init: bool) (victim: bool) (return (x: t_Vec_LkEv_Global)) = (! bb0
+  [ bb0 = s0
+    [ s0 = new_LkEv [%#slib] (fun (_x: t_Vec_LkEv_Global) -> [ &t <- _x ] s1)
+    | s1 = [ &_10 <- StateRead ] s2
+    | s2 = MutBorrow.borrow_mut <t_Vec_LkEv_Global> {t}
+        (fun (_bor: MutBorrow.t t_Vec_LkEv_Global) -> [ &_9 <- _bor ] [ &t <- _bor.final ] s3)
+    | s3 = push_LkEv [%#slib'0] {_9} {_10} (fun (_x: ()) -> [ &_8 <- _x ] s4)
+    | s4 = any [ br0 -> {init = false} (! bb3) | br1 -> {init} (! bb4) ] ]
+  | bb4 = s0
+    [ s0 = [ &_16 <- PolicyOther ] s1
+    | s1 = MutBorrow.borrow_mut <t_Vec_LkEv_Global> {t}
+        (fun (_bor: MutBorrow.t t_Vec_LkEv_Global) -> [ &_15 <- _bor ] [ &t <- _bor.final ] s2)
+    | s2 = push_LkEv [%#slib'1] {_15} {_16} (fun (_x: ()) -> [ &_14 <- _x ] s3)
+    | s3 = any [ br0 -> {victim = false} (! bb10) | br1 -> {victim} (! bb6) ] ]
+  | bb6 = s0
+    [ s0 = [ &_21 <- PoolWrite ] s1
+    | s1 = MutBorrow.borrow_mut <t_Vec_LkEv_Global> {t}
+        (fun (_bor: MutBorrow.t t_Vec_LkEv_Global) -> [ &_20 <- _bor ] [ &t <- _bor.final ] s2)
+    | s2 = push_LkEv [%#slib'2] {_20} {_21} (fun (_x: ()) -> [ &_19 <- _x ] s3)
+    | s3 = [ &_24 <- PoolRelease ] s4
+    | s4 = MutBorrow.borrow_mut <t_Vec_LkEv_Global> {t}
+        (fun (_bor: MutBorrow.t t_Vec_LkEv_Global) -> [ &_23 <- _bor ] [ &t <- _bor.final ] s5)
+    | s5 = push_LkEv [%#slib'3] {_23} {_24} (fun (_x: ()) -> [ &_22 <- _x ] s6)
+    | s6 = bb10 ]
+  | bb10 = s0 [ s0 = [ &_ret <- t ] s1 | s1 = return {_ret} ]
+  | bb3 = s0 [ s0 = [ &_ret <- t ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Vec_LkEv_Global = Any.any_l ()
+  | & init: bool = init
+  | & victim: bool = victim
+  | & t: t_Vec_LkEv_Global = Any.any_l ()
+  | & _8: () = Any.any_l ()
+  | & _9: MutBorrow.t t_Vec_LkEv_Global = Any.any_l ()
+  | & _10: t_LkEv = Any.any_l ()
+  | & _14: () = Any.any_l ()
+  | & _15: MutBorrow.t t_Vec_LkEv_Global = Any.any_l ()
+  | & _16: t_LkEv = Any.any_l ()
+  | & _19: () = Any.any_l ()
+  | & _20: MutBorrow.t t_Vec_LkEv_Global = Any.any_l ()
+  | & _21: t_LkEv = Any.any_l ()
+  | & _22: () = Any.any_l ()
+  | & _23: MutBorrow.t t_Vec_LkEv_Global = Any.any_l ()
+  | & _24: t_LkEv = Any.any_l () ])
+  [ return (result: t_Vec_LkEv_Global) ->
+  {[@stop_split] [@expl:lk_evict_next ensures] ([@stop_split] [@expl:lk_evict_next ensures #0] [%#slib'4] no_pool_read (view_Vec_LkEv_Global result)
+      /\ refresh_after_release (view_Vec_LkEv_Global result))
+    /\ ([@stop_split] [@expl:lk_evict_next ensures #1] [%#slib'5] init /\ victim
+    -> (exists i: int. 0 <= i
+      /\ i < Seq.length (view_Vec_LkEv_Global result) /\ Seq.get (view_Vec_LkEv_Global result) i = PoolWrite))}
+    (! return {result}) ]

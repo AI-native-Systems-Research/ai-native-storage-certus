@@ -1,0 +1,14 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_len_u64": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_lk_batch_touch": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_mt_batch_touch": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_refute_mt_batch_touch_empty_noop": {
+        "prover": "alt-ergo",
+        "time": 0.046
+      }
+    }
+  }
+}

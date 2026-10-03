@@ -1,0 +1,17 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.034 },
+      "vc_ev_identify": { "prover": "alt-ergo", "time": 0.034 },
+      "vc_mt_evict_next": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_mt_oldest_keys": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_mt_remove": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_refute_mt_remove_ignores_policy_error": {
+        "prover": "cvc4",
+        "time": 0.797
+      },
+      "vc_rm_concurrent": { "prover": "alt-ergo", "time": 0.034 }
+    }
+  }
+}

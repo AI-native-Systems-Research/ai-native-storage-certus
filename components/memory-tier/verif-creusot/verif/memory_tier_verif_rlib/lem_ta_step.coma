@@ -1,0 +1,77 @@
+(* #"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1401 0 1401 60 *)
+
+let%span slib = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1399 11 1399 33
+let%span slib'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1400 10 1400 106
+let%span slib'1 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1379 10 1379 18
+let%span slib'2 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1382 8 1383 91
+let%span slib'3 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1373 8 1373 108
+let%span slib'4 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1334 10 1334 17
+let%span slib'5 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1337 8 1339 60
+let%span sseq = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/logic/seq.rs" 355 20 355 57
+let%span sseq'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/logic/seq.rs" 509 8 509 38
+let%span sseq'1 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/logic/seq.rs" 500 8 500 49
+
+use creusot.int.UInt64
+use seq.Seq
+use int.Int
+
+type tup2_u64_u64 = { f0: UInt64.t; f1: UInt64.t }
+
+function first_idx [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1335 0 1335 51] (t: Seq.seq tup2_u64_u64) (k: UInt64.t) : int
+
+axiom first_idx_def: forall t: Seq.seq tup2_u64_u64, k: UInt64.t [first_idx t k]. first_idx t k
+    = ([%#slib'5] if Seq.length t <= 0 then
+      0
+    else
+      if (Seq.get t 0).f0 = k then 0 else 1 + first_idx (Seq.([..]) t 1 (Seq.length t)) k
+    )
+
+type t_RangeTo_Int = { end': int }
+
+function index_Seq_tup2_u64_u64 [@inline:trivial] (self: Seq.seq tup2_u64_u64) (range: t_RangeTo_Int) : Seq.seq tup2_u64_u64
+ = [%#sseq'0] Seq.([..]) self 0 range.end'
+
+meta "rewrite_def" function index_Seq_tup2_u64_u64
+
+type t_RangeFrom_Int = { start: int }
+
+function index_Seq_tup2_u64_u64'0 [@inline:trivial] (self: Seq.seq tup2_u64_u64) (range: t_RangeFrom_Int) : Seq.seq tup2_u64_u64
+ = [%#sseq'1] Seq.([..]) self range.start (Seq.length self)
+
+meta "rewrite_def" function index_Seq_tup2_u64_u64'0
+
+function removed_tup2_u64_u64 (self: Seq.seq tup2_u64_u64) (index: int) : Seq.seq tup2_u64_u64 =
+  [%#sseq] Seq.(++) (index_Seq_tup2_u64_u64 self { end' = index }) (index_Seq_tup2_u64_u64'0 self { start = index + 1 })
+
+function touch_l [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1371 0 1371 61] (t: Seq.seq tup2_u64_u64) (k: UInt64.t) : Seq.seq tup2_u64_u64
+ = [%#slib'3] if first_idx t k < Seq.length t then
+    Seq.snoc (removed_tup2_u64_u64 t (first_idx t k)) (Seq.get t (first_idx t k))
+  else
+    t
+
+
+function touch_all_l [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1380 0 1380 71] (t: Seq.seq tup2_u64_u64) (ks: Seq.seq UInt64.t) : Seq.seq tup2_u64_u64
+
+axiom touch_all_l_def: forall t: Seq.seq tup2_u64_u64, ks: Seq.seq UInt64.t [touch_all_l t ks]. touch_all_l t ks
+    = ([%#slib'2] if Seq.length ks <= 0 then
+      t
+    else
+      touch_l (touch_all_l t (Seq.([..]) ks 0 (Seq.length ks - 1))) (Seq.get ks (Seq.length ks - 1))
+    )
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant t : Seq.seq tup2_u64_u64
+
+constant ks : Seq.seq UInt64.t
+
+constant i : int
+
+function lem_ta_step [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1401 0 1401 60] (t: Seq.seq tup2_u64_u64) (ks: Seq.seq UInt64.t) (i: int) : ()
+
+goal vc_lem_ta_step: ([%#slib] 0 <= i /\ i < Seq.length ks)
+  -> Seq.([..]) (Seq.([..]) ks 0 (i + 1)) 0 i = Seq.([..]) ks 0 i
+  && ([@stop_split] [@expl:lem_ta_step ensures] [%#slib'0] touch_all_l t (Seq.([..]) ks 0 (i + 1))
+  = touch_l (touch_all_l t (Seq.([..]) ks 0 i)) (Seq.get ks i))

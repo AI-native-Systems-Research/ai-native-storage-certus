@@ -1,0 +1,49 @@
+(* #"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9502 0 9502 48 *)
+
+let%span slib = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9507 8 9507 13
+let%span slib'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9504 21 9504 22
+let%span slib'1 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9504 8 9504 22
+let%span slib'2 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9505 8 9505 12
+let%span slib'3 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9498 11 9498 33
+let%span slib'4 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9499 10 9499 46
+let%span slib'5 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9500 10 9500 110
+let%span slib'6 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9501 10 9501 30
+
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_PoolLockModel = { readers: UInt64.t; writer: bool; poisoned: bool }
+
+predicate resolve_refmut_PoolLockModel [@inline:trivial] (_1: MutBorrow.t t_PoolLockModel) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_PoolLockModel
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let try_read_m [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9502 0 9502 48]
+  (l: MutBorrow.t t_PoolLockModel) (return (x: bool)) =
+{[@stop_split] [@expl:try_read_m requires] [%#slib'3] UInt64.t'int l.current.readers < UInt64.t'int const_MAX}
+  (! bb0
+  [ bb0 = any [ br0 -> {l.current.writer = false} (! bb1) | br1 -> {l.current.writer} (! bb3) ]
+  | bb1 = any [ br0 -> {l.current.poisoned = false} (! bb2) | br1 -> {l.current.poisoned} (! bb3) ]
+  | bb3 = s0 [ s0 = -{resolve_refmut_PoolLockModel l}- s1 | s1 = [ &_ret <- [%#slib] false ] s2 | s2 = return {_ret} ]
+  | bb2 = s0
+    [ s0 = UInt64.add [%#slib'1] {l.current.readers} {[%#slib'0] (1: UInt64.t)}
+        (fun (_x: UInt64.t) -> [ &l <- { l with current = { l.current with readers = _x } } ] s1)
+    | s1 = -{resolve_refmut_PoolLockModel l}- s2
+    | s2 = [ &_ret <- [%#slib'2] true ] s3
+    | s3 = return {_ret} ] ] [ & _ret: bool = Any.any_l () | & l: MutBorrow.t t_PoolLockModel = l ])
+  [ return (result: bool) ->
+  {[@stop_split] [@expl:try_read_m ensures] ([@stop_split] [@expl:try_read_m ensures #0] [%#slib'4] result
+      = (not l.current.writer /\ not l.current.poisoned))
+    /\ ([@stop_split] [@expl:try_read_m ensures #1] [%#slib'5] result
+      -> UInt64.t'int l.final.readers = UInt64.t'int l.current.readers + 1
+      /\ l.final.writer = l.current.writer /\ l.final.poisoned = l.current.poisoned)
+    /\ ([@stop_split] [@expl:try_read_m ensures #2] [%#slib'6] not result -> l.final = l.current)}
+    (! return {result}) ]

@@ -1,0 +1,16 @@
+(* #"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 2313 9 2313 29 *)
+
+(* <Call as std::clone::Clone> *)
+
+use creusot.prelude.Any
+
+type t_Call = Panicked | Completed
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_Call [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 2313 9 2313 29]
+  (self: t_Call) (return (x: t_Call)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Call = Any.any_l () | & self: t_Call = self ]) [ return (result: t_Call) -> (! return {result}) ]

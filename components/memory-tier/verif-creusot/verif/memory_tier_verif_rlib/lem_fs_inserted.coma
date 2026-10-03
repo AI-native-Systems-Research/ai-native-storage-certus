@@ -1,0 +1,78 @@
+(* #"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 183 0 183 73 *)
+
+let%span slib = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 177 11 177 33
+let%span slib'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 178 11 178 33
+let%span slib'1 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 179 11 179 58
+let%span slib'2 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 180 11 180 20
+let%span slib'3 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 181 11 181 67
+let%span slib'4 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 182 10 182 46
+let%span slib'5 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 137 11 137 32
+let%span slib'6 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 138 10 138 109
+let%span slib'7 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 122 10 122 60
+let%span slib'8 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 111 10 111 17
+let%span slib'9 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 114 8 115 79
+let%span slib'10 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 141 8 141 114
+let%span slib'11 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 121 10 121 17
+let%span slib'12 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 125 8 131 9
+
+use creusot.int.UInt64
+use seq.Seq
+use int.Int
+
+type t_Region = { offset: UInt64.t; size: UInt64.t }
+
+function free_sum [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 112 0 112 38] (r: Seq.seq t_Region) : int
+
+axiom free_sum_def: forall r: Seq.seq t_Region [free_sum r]. free_sum r
+    = ([%#slib'9] if Seq.length r <= 0 then
+      0
+    else
+      free_sum (Seq.([..]) r 0 (Seq.length r - 1)) + UInt64.t'int (Seq.get r (Seq.length r - 1)).size
+    )
+
+function lem_fs_concat [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 123 0 123 52] (a: Seq.seq t_Region) (b: Seq.seq t_Region) : ()
+
+axiom lem_fs_concat_def: forall a: Seq.seq t_Region, b: Seq.seq t_Region [lem_fs_concat a b]. lem_fs_concat a b
+    = ([%#slib'12] if Seq.length b <= 0 then () else lem_fs_concat a (Seq.([..]) b 0 (Seq.length b - 1)))
+
+axiom lem_fs_concat_spec: forall a: Seq.seq t_Region, b: Seq.seq t_Region. [%#slib'7] free_sum (Seq.(++) a b)
+    = free_sum a + free_sum b
+
+function lem_fs_split [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 139 0 139 43] (r: Seq.seq t_Region) (i: int) : ()
+ = [%#slib'10] let _ = lem_fs_concat (Seq.singleton (Seq.get r i)) (Seq.([..]) r (i
+  + 1) (Seq.length r)) in let _ = lem_fs_concat (Seq.([..]) r 0 i) (Seq.(++) (Seq.singleton (Seq.get r i)) (Seq.([..]) r (i
+  + 1) (Seq.length r))) in ()
+
+axiom lem_fs_split_spec: forall r: Seq.seq t_Region, i: int. ([%#slib'5] 0 <= i /\ i < Seq.length r)
+    -> ([%#slib'6] free_sum r
+    = free_sum (Seq.([..]) r 0 i) + UInt64.t'int (Seq.get r i).size + free_sum (Seq.([..]) r (i + 1) (Seq.length r)))
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant r : Seq.seq t_Region
+
+constant s : Seq.seq t_Region
+
+constant q : int
+
+constant x : t_Region
+
+function lem_fs_inserted [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 183 0 183 73] (r: Seq.seq t_Region) (s: Seq.seq t_Region) (q: int) (x: t_Region) : ()
+
+goal vc_lem_fs_inserted: ([%#slib] 0 <= q /\ q <= Seq.length r)
+  -> ([%#slib'0] Seq.length s = Seq.length r + 1)
+  -> ([%#slib'1] forall j: int. 0 <= j /\ j < q -> Seq.get s j = Seq.get r j)
+  -> ([%#slib'2] Seq.get s q = x)
+  -> ([%#slib'3] forall j: int. q < j /\ j < Seq.length s -> Seq.get s j = Seq.get r (j - 1))
+  -> ([@stop_split] [@expl:lem_fs_split requires] [%#slib'5] 0 <= q /\ q < Seq.length s)
+  /\ (([@stop_split] [@expl:lem_fs_split ensures] [%#slib'6] free_sum s
+    = free_sum (Seq.([..]) s 0 q) + UInt64.t'int (Seq.get s q).size + free_sum (Seq.([..]) s (q + 1) (Seq.length s)))
+  -> (let _ = lem_fs_split s q in Seq.([..]) s 0 q = Seq.([..]) r 0 q
+  && Seq.([..]) s (q + 1) (Seq.length s) = Seq.([..]) r q (Seq.length r)
+  && r = Seq.(++) (Seq.([..]) r 0 q) (Seq.([..]) r q (Seq.length r))
+  && (([@stop_split] [@expl:lem_fs_concat ensures] [%#slib'7] free_sum (Seq.(++) (Seq.([..]) r 0 q) (Seq.([..]) r q (Seq.length r)))
+    = free_sum (Seq.([..]) r 0 q) + free_sum (Seq.([..]) r q (Seq.length r)))
+  -> (let _ = lem_fs_concat (Seq.([..]) r 0 q) (Seq.([..]) r q (Seq.length r)) in [@stop_split] [@expl:lem_fs_inserted ensures] [%#slib'4] free_sum s
+  = free_sum r + UInt64.t'int x.size))))

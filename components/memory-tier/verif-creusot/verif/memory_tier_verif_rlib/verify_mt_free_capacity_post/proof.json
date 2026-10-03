@@ -1,0 +1,14 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_mt_capacity": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_mt_free_capacity": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_mt_used": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_verify_mt_free_capacity_post": {
+        "prover": "alt-ergo",
+        "time": 0.046
+      }
+    }
+  }
+}

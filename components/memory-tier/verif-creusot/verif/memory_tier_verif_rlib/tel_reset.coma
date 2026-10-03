@@ -1,0 +1,32 @@
+(* #"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5398 0 5398 40 *)
+
+let%span slib = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5399 18 5399 19
+let%span slib'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5400 31 5400 32
+let%span slib'1 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5401 30 5401 31
+let%span slib'2 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5397 10 5397 103
+
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+
+type t_TelemetryModel = { evictions: UInt64.t; write_lock_contentions: UInt64.t; read_lock_contentions: UInt64.t }
+
+predicate resolve_refmut_TelemetryModel [@inline:trivial] (_1: MutBorrow.t t_TelemetryModel) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_TelemetryModel
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let tel_reset [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5398 0 5398 40]
+  (t: MutBorrow.t t_TelemetryModel) (return (x: ())) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &t <- { t with current = { t.current with evictions = ([%#slib] (0: UInt64.t)) } } ] s1
+    | s1 = [ &t <- { t with current = { t.current with write_lock_contentions = ([%#slib'0] (0: UInt64.t)) } } ] s2
+    | s2 = [ &t <- { t with current = { t.current with read_lock_contentions = ([%#slib'1] (0: UInt64.t)) } } ] s3
+    | s3 = -{resolve_refmut_TelemetryModel t}- s4
+    | s4 = return {_ret} ] ] [ & _ret: () = Any.any_l () | & t: MutBorrow.t t_TelemetryModel = t ])
+  [ return (result: ()) -> {[@stop_split] [@expl:tel_reset ensures] [%#slib'2] UInt64.t'int t.final.evictions = 0
+    /\ UInt64.t'int t.final.write_lock_contentions = 0 /\ UInt64.t'int t.final.read_lock_contentions = 0}
+    (! return {result}) ]

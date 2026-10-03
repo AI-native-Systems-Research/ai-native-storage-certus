@@ -1,0 +1,19 @@
+[package]
+name = "memory-tier-verif"
+version = "0.1.0"
+edition = "2021"
+
+# Own workspace root: this crate must NOT join the Certus root workspace, and the
+# [patch] below must NOT leak into any other cargo invocation (notably `cargo kani`
+# and the Kani scorer's `cargo metadata`, which run with a cwd inside this component).
+[workspace]
+
+[dependencies]
+creusot-std = "0.12.0-dev"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(creusot)'] }
+
+# Manifest-level patch, scoped to THIS crate only (never components/*/.cargo/config.toml).
+[patch.crates-io]
+creusot-std = { path = "../creusot/creusot-std" }

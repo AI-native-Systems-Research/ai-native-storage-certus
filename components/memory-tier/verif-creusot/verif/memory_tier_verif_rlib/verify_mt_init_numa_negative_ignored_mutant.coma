@@ -1,0 +1,150 @@
+(* #"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9061 0 9063 27 *)
+
+let%span slib = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9064 60 9064 64
+let%span slib'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9064 4 9064 65
+let%span slib'1 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9055 11 9055 17
+let%span slib'2 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9056 11 9056 68
+let%span slib'3 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9057 11 9057 31
+let%span slib'4 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9058 11 9058 32
+let%span slib'5 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9059 10 9059 30
+let%span slib'6 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9060 10 9060 39
+let%span slib'7 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7020 11 7020 68
+let%span slib'8 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7021 10 7021 49
+let%span slib'9 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7022 10 7022 90
+let%span slib'10 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7023 10 7023 55
+let%span slib'11 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7024 10 7024 81
+let%span slib'12 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7025 10 7025 100
+let%span slib'13 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7026 10 7026 93
+let%span slib'14 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7027 10 7029 48
+let%span slib'15 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7031 10 7033 65
+let%span slib'16 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7034 10 7036 93
+let%span slib'17 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7037 10 7037 35
+let%span slib'18 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7039 10 7039 37
+let%span slib'19 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7040 10 7040 65
+let%span slib'20 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 6986 0 6986 27
+let%span slib'21 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 6988 0 6988 29
+
+use creusot.int.Int32
+use creusot.prelude.MutBorrow
+use creusot.int.UInt64
+use creusot.int.Int64
+use creusot.prelude.Any
+use int.Int
+
+type t_Option_i32 = None | Some Int32.t
+
+type t_MmapLog = {
+  huge_calls: UInt64.t;
+  plain_calls: UInt64.t;
+  mbind_issued: bool;
+  mbind_mask: UInt64.t;
+  mbind_maxnode: UInt64.t;
+  mbind_node: UInt64.t }
+
+type t_LogSink = { lines: UInt64.t }
+
+type t_MtError = InvalidSize | NotInitialized | AlreadyExists | PoolFull | KeyNotFound | AllocationFailed | NotEvictable
+
+type t_Result_usize_MtError = Ok UInt64.t | Err t_MtError
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+constant const_MAP_FAILED: UInt64.t = [%#slib'20] (18446744073709551615: UInt64.t)
+
+constant const_C_ULONG_BITS: UInt64.t = [%#slib'21] (64: UInt64.t)
+
+let alloc_mmap_m (pool_size: UInt64.t) (numa: t_Option_i32) (r_huge: UInt64.t) (r_plain: UInt64.t) (rc: Int64.t)
+  (ml: MutBorrow.t t_MmapLog) (lg: MutBorrow.t t_LogSink) (connected: bool) (return (x: t_Result_usize_MtError)) =
+{[@stop_split] [@expl:alloc_mmap_m requires] [%#slib'7] UInt64.t'int ml.current.huge_calls < UInt64.t'int const_MAX
+  /\ UInt64.t'int ml.current.plain_calls < UInt64.t'int const_MAX}
+  any
+  [ return (result: t_Result_usize_MtError) ->
+  {[@stop_split] [@expl:alloc_mmap_m ensures] ([@stop_split] [@expl:alloc_mmap_m ensures #0] [%#slib'8] UInt64.t'int ml.final.huge_calls
+      = UInt64.t'int ml.current.huge_calls + 1)
+    /\ ([@stop_split] [@expl:alloc_mmap_m ensures #1] [%#slib'9] UInt64.t'int ml.final.plain_calls
+      = UInt64.t'int ml.current.plain_calls + (if r_huge = const_MAP_FAILED then 1 else 0))
+    /\ ([@stop_split] [@expl:alloc_mmap_m ensures #2] [%#slib'10] r_huge <> const_MAP_FAILED -> result = Ok r_huge)
+    /\ ([@stop_split] [@expl:alloc_mmap_m ensures #3] [%#slib'11] r_huge = const_MAP_FAILED
+        /\ r_plain <> const_MAP_FAILED -> result = Ok r_plain)
+    /\ ([@stop_split] [@expl:alloc_mmap_m ensures #4] [%#slib'12] r_huge = const_MAP_FAILED
+        /\ r_plain = const_MAP_FAILED -> result = Err (AllocationFailed))
+    /\ ([@stop_split] [@expl:alloc_mmap_m ensures #5] [%#slib'13] match result with
+        | Ok p -> p <> const_MAP_FAILED
+        | Err e -> e = AllocationFailed
+        end)
+    /\ ([@stop_split] [@expl:alloc_mmap_m ensures #6] [%#slib'14] match result with
+        | Ok _ -> true
+        | Err _ -> ml.final.mbind_issued = ml.current.mbind_issued
+        /\ ml.final.mbind_mask = ml.current.mbind_mask
+        /\ ml.final.mbind_maxnode = ml.current.mbind_maxnode /\ ml.final.mbind_node = ml.current.mbind_node
+        end)
+    /\ ([@stop_split] [@expl:alloc_mmap_m ensures #7] [%#slib'15] forall n: Int32.t. numa = Some n
+          /\ Int32.to_int n >= 0 /\ result <> Err (AllocationFailed)
+        -> ml.final.mbind_issued
+        /\ UInt64.t'int ml.final.mbind_node = Int32.to_int n
+        /\ UInt64.t'int ml.final.mbind_maxnode = Int32.to_int n + 2
+        /\ (Int32.to_int n >= UInt64.t'int const_C_ULONG_BITS -> UInt64.t'int ml.final.mbind_mask = 0))
+    /\ ([@stop_split] [@expl:alloc_mmap_m ensures #8] [%#slib'16] forall n: Int32.t. numa = None
+          \/ numa = Some n /\ Int32.to_int n < 0
+        -> ml.final.mbind_issued = ml.current.mbind_issued
+        /\ ml.final.mbind_mask = ml.current.mbind_mask
+        /\ ml.final.mbind_maxnode = ml.current.mbind_maxnode /\ ml.final.mbind_node = ml.current.mbind_node)
+    /\ ([@stop_split] [@expl:alloc_mmap_m ensures #9] [%#slib'17] not connected -> lg.final = lg.current)
+    /\ ([@stop_split] [@expl:alloc_mmap_m ensures #10] [%#slib'18] numa = None -> lg.final = lg.current)
+    /\ ([@stop_split] [@expl:alloc_mmap_m ensures #11] [%#slib'19] forall n: Int32.t. numa = Some n
+        /\ Int32.to_int n < 0 -> lg.final = lg.current)}
+    (! return {result}) ]
+
+predicate resolve_refmut_LogSink [@inline:trivial] (_1: MutBorrow.t t_LogSink) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_LogSink
+
+predicate resolve_refmut_MmapLog [@inline:trivial] (_1: MutBorrow.t t_MmapLog) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_MmapLog
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_mt_init_numa_negative_ignored__mutant [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9061 0 9063 27]
+  (psz: UInt64.t) (n: Int32.t) (r_huge: UInt64.t) (r_plain: UInt64.t) (rc: Int64.t) (ma: MutBorrow.t t_MmapLog)
+  (la: MutBorrow.t t_LogSink) (return (x: t_Result_usize_MtError)) =
+{[@stop_split] [@expl:verify_mt_init_numa_negative_ignored__mutant requires] ([@stop_split] [@expl:verify_mt_init_numa_negative_ignored__mutant requires #0] [%#slib'1] Int32.to_int n
+    < 0)
+  /\ ([@stop_split] [@expl:verify_mt_init_numa_negative_ignored__mutant requires #1] [%#slib'2] UInt64.t'int ma.current.huge_calls
+      < UInt64.t'int const_MAX
+    /\ UInt64.t'int ma.current.plain_calls < UInt64.t'int const_MAX)
+  /\ ([@stop_split] [@expl:verify_mt_init_numa_negative_ignored__mutant requires #2] [%#slib'3] r_huge
+    <> const_MAP_FAILED)
+  /\ ([@stop_split] [@expl:verify_mt_init_numa_negative_ignored__mutant requires #3] [%#slib'4] UInt64.t'int la.current.lines
+  < UInt64.t'int const_MAX)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_22 <- Some n ] s1
+    | s1 = MutBorrow.borrow_final <t_MmapLog> {ma.current} {MutBorrow.get_id ma}
+        (fun (_bor: MutBorrow.t t_MmapLog) -> [ &_27 <- _bor ] [ &ma <- { ma with current = _bor.final } ] s2)
+    | s2 = MutBorrow.borrow_final <t_LogSink> {la.current} {MutBorrow.get_id la}
+        (fun (_bor: MutBorrow.t t_LogSink) -> [ &_28 <- _bor ] [ &la <- { la with current = _bor.final } ] s3)
+    | s3 = alloc_mmap_m [%#slib'0] {psz} {_22} {r_huge} {r_plain} {rc} {_27} {_28} {[%#slib] true}
+        (fun (_x: t_Result_usize_MtError) -> [ &_ret <- _x ] s4)
+    | s4 = -{resolve_refmut_LogSink la}- s5
+    | s5 = -{resolve_refmut_MmapLog ma}- s6
+    | s6 = return {_ret} ] ]
+  [ & _ret: t_Result_usize_MtError = Any.any_l ()
+  | & psz: UInt64.t = psz
+  | & n: Int32.t = n
+  | & r_huge: UInt64.t = r_huge
+  | & r_plain: UInt64.t = r_plain
+  | & rc: Int64.t = rc
+  | & ma: MutBorrow.t t_MmapLog = ma
+  | & la: MutBorrow.t t_LogSink = la
+  | & _22: t_Option_i32 = Any.any_l ()
+  | & _27: MutBorrow.t t_MmapLog = Any.any_l ()
+  | & _28: MutBorrow.t t_LogSink = Any.any_l () ])
+  [ return (result: t_Result_usize_MtError) ->
+  {[@stop_split] [@expl:verify_mt_init_numa_negative_ignored__mutant ensures] ([@stop_split] [@expl:verify_mt_init_numa_negative_ignored__mutant ensures #0] [%#slib'5] result
+      = Ok r_huge)
+    /\ ([@stop_split] [@expl:verify_mt_init_numa_negative_ignored__mutant ensures #1] [%#slib'6] UInt64.t'int la.final.lines
+    = UInt64.t'int la.current.lines + 1)}
+    (! return {result}) ]

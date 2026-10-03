@@ -1,0 +1,14 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_ev_commit": { "prover": "alt-ergo", "time": 0.035 },
+      "vc_ev_identify": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_verify_mt_evict_next_post_policy_victim": {
+        "prover": "z3",
+        "time": 0.049
+      }
+    }
+  }
+}

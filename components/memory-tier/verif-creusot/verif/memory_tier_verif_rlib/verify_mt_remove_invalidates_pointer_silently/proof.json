@@ -1,0 +1,15 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_init_logged": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_mt_insert": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_mt_peek": { "prover": "alt-ergo", "time": 0.012 },
+      "vc_mt_remove": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_verify_mt_remove_invalidates_pointer_silently": {
+        "tactic": "compute_specified",
+        "children": [ { "prover": "z3", "time": 0.328 } ]
+      }
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_fl_new": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_mt_default": { "prover": "alt-ergo", "time": 0.059 },
+      "vc_new_SlotModel": { "prover": "alt-ergo", "time": 0.027 }
+    }
+  }
+}

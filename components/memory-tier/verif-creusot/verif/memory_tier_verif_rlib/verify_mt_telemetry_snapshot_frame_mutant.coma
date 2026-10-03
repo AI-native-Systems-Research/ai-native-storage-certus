@@ -1,0 +1,68 @@
+(* #"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 10229 0 10229 111 *)
+
+let%span slib = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 10230 18 10230 34
+let%span slib'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 10231 39 10231 43
+let%span slib'1 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 10231 12 10231 44
+let%span slib'2 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 10232 39 10232 43
+let%span slib'3 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 10232 12 10232 44
+let%span slib'4 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 10226 11 10226 27
+let%span slib'5 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 10227 10 10227 30
+let%span slib'6 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 10228 10 10228 40
+let%span slib'7 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9549 10 9549 40
+let%span slib'8 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9550 10 9550 51
+let%span slib'9 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 6968 16 6968 80
+
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_TelemetryModel = { evictions: UInt64.t; write_lock_contentions: UInt64.t; read_lock_contentions: UInt64.t }
+
+type tup3_u64_u64_u64 = { f0: UInt64.t; f1: UInt64.t; f2: UInt64.t }
+
+function trip [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 6967 0 6967 49] (t: t_TelemetryModel) : tup3_u64_u64_u64
+ = [%#slib'9] { f0 = t.evictions; f1 = t.write_lock_contentions; f2 = t.read_lock_contentions }
+
+let mt_telemetry_snapshot_m (t: t_TelemetryModel) (feature: bool) (return (x: tup3_u64_u64_u64)) = any
+  [ return (result: tup3_u64_u64_u64) ->
+  {[@stop_split] [@expl:mt_telemetry_snapshot_m ensures] ([@stop_split] [@expl:mt_telemetry_snapshot_m ensures #0] [%#slib'7] feature
+      -> result = trip t)
+    /\ ([@stop_split] [@expl:mt_telemetry_snapshot_m ensures #1] [%#slib'8] not feature
+    -> result = { f0 = (0: UInt64.t); f1 = (0: UInt64.t); f2 = (0: UInt64.t) })}
+    (! return {result}) ]
+
+predicate resolve_refmut_TelemetryModel [@inline:trivial] (_1: MutBorrow.t t_TelemetryModel) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_TelemetryModel
+
+type tup2_tup3_u64_u64_u64_tup3_u64_u64_u64 = { f0'0: tup3_u64_u64_u64; f1'0: tup3_u64_u64_u64 }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_mt_telemetry_snapshot_frame__mutant [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 10229 0 10229 111]
+  (t: MutBorrow.t t_TelemetryModel) (return (x: tup2_tup3_u64_u64_u64_tup3_u64_u64_u64)) =
+{[@stop_split] [@expl:verify_mt_telemetry_snapshot_frame__mutant requires] [%#slib'4] UInt64.t'int t.current.evictions
+  > 0}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = {[@expl:assertion] [%#slib] UInt64.t'int t.current.evictions > 0} s1
+    | s1 = mt_telemetry_snapshot_m [%#slib'1] {t.current} {[%#slib'0] true}
+        (fun (_x: tup3_u64_u64_u64) -> [ &a <- _x ] s2)
+    | s2 = -{resolve_refmut_TelemetryModel t}- s3
+    | s3 = mt_telemetry_snapshot_m [%#slib'3] {t.current} {[%#slib'2] true}
+        (fun (_x: tup3_u64_u64_u64) -> [ &b <- _x ] s4)
+    | s4 = [ &_ret <- { f0'0 = a; f1'0 = b } ] s5
+    | s5 = return {_ret} ] ]
+  [ & _ret: tup2_tup3_u64_u64_u64_tup3_u64_u64_u64 = Any.any_l ()
+  | & t: MutBorrow.t t_TelemetryModel = t
+  | & a: tup3_u64_u64_u64 = Any.any_l ()
+  | & b: tup3_u64_u64_u64 = Any.any_l () ])
+  [ return (result: tup2_tup3_u64_u64_u64_tup3_u64_u64_u64) ->
+  {[@stop_split] [@expl:verify_mt_telemetry_snapshot_frame__mutant ensures] ([@stop_split] [@expl:verify_mt_telemetry_snapshot_frame__mutant ensures #0] [%#slib'5] result.f0'0
+      = trip t.current)
+    /\ ([@stop_split] [@expl:verify_mt_telemetry_snapshot_frame__mutant ensures #1] [%#slib'6] result.f1'0
+    = { f0 = (0: UInt64.t); f1 = (0: UInt64.t); f2 = (0: UInt64.t) })}
+    (! return {result}) ]

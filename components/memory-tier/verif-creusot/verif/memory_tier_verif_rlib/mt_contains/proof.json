@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_mt_contains": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_slots_contains": { "prover": "alt-ergo", "time": 0.021 }
+    }
+  }
+}

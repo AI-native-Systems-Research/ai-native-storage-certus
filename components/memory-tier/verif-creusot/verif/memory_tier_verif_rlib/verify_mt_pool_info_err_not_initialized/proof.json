@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_mt_pool_info": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_verify_mt_pool_info_err_not_initialized": {
+        "prover": "alt-ergo",
+        "time": 0.043
+      }
+    }
+  }
+}

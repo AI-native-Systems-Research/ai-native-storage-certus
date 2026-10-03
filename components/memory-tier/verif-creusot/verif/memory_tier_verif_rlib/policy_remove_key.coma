@@ -1,0 +1,169 @@
+(* #"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1159 0 1159 66 *)
+
+let%span slib = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1161 12 1161 27
+let%span slib'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1162 35 1162 45
+let%span slib'1 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1163 23 1163 24
+let%span slib'2 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1172 16 1172 32
+let%span slib'3 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1170 16 1171 51
+let%span slib'4 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1168 16 1169 77
+let%span slib'5 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1167 16 1167 40
+let%span slib'6 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1166 16 1166 34
+let%span slib'7 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1165 16 1165 38
+let%span slib'8 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1164 16 1164 24
+let%span slib'9 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1174 25 1174 28
+let%span slib'10 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1176 12 1176 23
+let%span slib'11 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1178 13 1178 14
+let%span slib'12 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1178 8 1178 14
+let%span slib'13 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1151 11 1151 41
+let%span slib'14 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1152 10 1152 43
+let%span slib'15 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1153 10 1153 37
+let%span slib'16 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1154 10 1154 87
+let%span slib'17 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1155 10 1155 43
+let%span slib'18 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1156 10 1156 31
+let%span slib'19 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1157 10 1157 32
+let%span slib'20 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1158 10 1158 49
+let%span slib'21 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 842 16 842 69
+let%span slib'22 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 848 8 848 86
+let%span svec = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/std/vec.rs" 112 18 112 40
+let%span svec'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/std/vec.rs" 102 18 102 36
+let%span svec'1 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span svec'2 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/std/vec.rs" 193 19 193 38
+let%span svec'3 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/std/vec.rs" 194 18 194 46
+let%span svec'4 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/std/vec.rs" 116 18 116 48
+let%span sslice = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/std/slice.rs" 148 20 148 37
+let%span sslice'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/std/slice.rs" 153 20 153 37
+
+use creusot.int.UInt64
+use seq.Seq
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_tup2_u64_u64_Global
+
+type t_PolicyModel = { tracked: t_Vec_tup2_u64_u64_Global; next_handle: UInt64.t; pools: UInt64.t; last_pool: UInt64.t }
+
+type tup2_u64_u64 = { f0: UInt64.t; f1: UInt64.t }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_tup2_u64_u64_Global (self: t_Vec_tup2_u64_u64_Global) : Seq.seq tup2_u64_u64
+
+axiom view_Vec_tup2_u64_u64_Global_spec:
+  forall self: t_Vec_tup2_u64_u64_Global [view_Vec_tup2_u64_u64_Global self]. [%#svec'1] Seq.length (view_Vec_tup2_u64_u64_Global self)
+    <= UInt64.t'int const_MAX
+
+let len_tup2_u64_u64 (self_: t_Vec_tup2_u64_u64_Global) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:len ensures] [%#svec] UInt64.t'int result
+    = Seq.length (view_Vec_tup2_u64_u64_Global self_)}
+    (! return {result}) ]
+
+let new_tup2_u64_u64 (return (x: t_Vec_tup2_u64_u64_Global)) = any
+  [ return (result: t_Vec_tup2_u64_u64_Global) ->
+  {[@stop_split] [@expl:new ensures] [%#svec'0] Seq.length (view_Vec_tup2_u64_u64_Global result) = 0}
+    (! return {result}) ]
+
+predicate tracks [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 841 0 841 49] (t: Seq.seq tup2_u64_u64) (k: UInt64.t) =
+  [%#slib'21] exists i: int. 0 <= i /\ i < Seq.length t /\ (Seq.get t i).f0 = k
+
+predicate policy_keys_unique [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 846 0 846 53] (t: Seq.seq tup2_u64_u64) =
+  [%#slib'22] forall i: int, j: int. 0 <= i /\ i < j /\ j < Seq.length t -> (Seq.get t i).f0 <> (Seq.get t j).f0
+
+predicate in_bounds_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq tup2_u64_u64) =
+  [%#sslice] UInt64.t'int self < Seq.length seq
+
+meta "rewrite_def" predicate in_bounds_usize
+
+predicate has_value_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq tup2_u64_u64) (out: tup2_u64_u64) =
+  [%#sslice'0] Seq.get seq (UInt64.t'int self) = out
+
+meta "rewrite_def" predicate has_value_usize
+
+let index_Vec_tup2_u64_u64_Global (self_: t_Vec_tup2_u64_u64_Global) (ix: UInt64.t) (return (x: tup2_u64_u64)) =
+{[@stop_split] [@expl:index requires] [%#svec'2] in_bounds_usize ix (view_Vec_tup2_u64_u64_Global self_)}
+  any
+  [ return (result: tup2_u64_u64) ->
+  {[@stop_split] [@expl:index ensures] [%#svec'3] has_value_usize ix (view_Vec_tup2_u64_u64_Global self_) result}
+    (! return {result}) ]
+
+let push_tup2_u64_u64 (self_: MutBorrow.t t_Vec_tup2_u64_u64_Global) (v: tup2_u64_u64) (return (x: ())) = any
+  [ return (result: ()) -> {[@stop_split] [@expl:push ensures] [%#svec'4] view_Vec_tup2_u64_u64_Global self_.final
+    = Seq.snoc (view_Vec_tup2_u64_u64_Global self_.current) v}
+    (! return {result}) ]
+
+predicate resolve_refmut_PolicyModel [@inline:trivial] (_1: MutBorrow.t t_PolicyModel) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_PolicyModel
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let policy_remove_key [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1159 0 1159 66]
+  (p: MutBorrow.t t_PolicyModel) (pool: UInt64.t) (key: UInt64.t) (return (x: ())) =
+{[@stop_split] [@expl:policy_remove_key requires] [%#slib'13] policy_keys_unique (view_Vec_tup2_u64_u64_Global p.current.tracked)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &p <- { p with current = { p.current with last_pool = pool } } ] s1
+    | s1 = len_tup2_u64_u64 [%#slib] {p.current.tracked} (fun (_x: UInt64.t) -> [ &n <- _x ] s2)
+    | s2 = new_tup2_u64_u64 [%#slib'0] (fun (_x: t_Vec_tup2_u64_u64_Global) -> [ &out <- _x ] s3)
+    | s3 = [ &i <- [%#slib'1] (0: UInt64.t) ] s4
+    | s4 = bb3 ]
+  | bb3 = bb3
+    [ bb3 = {[@expl:loop invariant #0] [%#slib'8] UInt64.t'int i <= UInt64.t'int n}
+      {[@expl:loop invariant #1] [%#slib'7] UInt64.t'int n
+      = Seq.length (view_Vec_tup2_u64_u64_Global p.current.tracked)}
+      {[@expl:loop invariant #2] [%#slib'6] not tracks (view_Vec_tup2_u64_u64_Global out) key}
+      {[@expl:loop invariant #3] [%#slib'5] policy_keys_unique (view_Vec_tup2_u64_u64_Global out)}
+      {[@expl:loop invariant #4] [%#slib'4] forall k: UInt64.t. tracks (view_Vec_tup2_u64_u64_Global out) k
+        -> (exists j: int. 0 <= j
+          /\ j < UInt64.t'int i /\ (Seq.get (view_Vec_tup2_u64_u64_Global p.current.tracked) j).f0 = k)}
+      {[@expl:loop invariant #5] [%#slib'3] forall j: int. 0 <= j
+          /\ j < UInt64.t'int i /\ (Seq.get (view_Vec_tup2_u64_u64_Global p.current.tracked) j).f0 <> key
+        -> tracks (view_Vec_tup2_u64_u64_Global out) (Seq.get (view_Vec_tup2_u64_u64_Global p.current.tracked) j).f0}
+      {[@expl:loop invariant #6] [%#slib'2] Seq.length (view_Vec_tup2_u64_u64_Global out) <= UInt64.t'int i}
+      (! s0)
+      [ s0 = [ &_54 <- UInt64.lt i n ] s1 | s1 = any [ br0 -> {_54 = false} (! bb12) | br1 -> {_54} (! bb5) ] ]
+      [ bb5 = s0
+        [ s0 = index_Vec_tup2_u64_u64_Global [%#slib'9] {p.current.tracked} {i}
+            (fun (_x: tup2_u64_u64) -> [ &_58 <- _x ] s1)
+        | s1 = [ &e <- _58 ] s2
+        | s2 = [ &_62 <- e.f0 <> key ] s3
+        | s3 = any [ br0 -> {_62 = false} (! bb10) | br1 -> {_62} (! bb7) ] ]
+      | bb7 = s0
+        [ s0 = MutBorrow.borrow_mut <t_Vec_tup2_u64_u64_Global> {out}
+            (fun (_bor: MutBorrow.t t_Vec_tup2_u64_u64_Global) -> [ &_66 <- _bor ] [ &out <- _bor.final ] s1)
+        | s1 = push_tup2_u64_u64 [%#slib'10] {_66} {e} (fun (_x: ()) -> [ &_65 <- _x ] s2)
+        | s2 = bb10 ]
+      | bb10 = s0
+        [ s0 = UInt64.add [%#slib'12] {i} {[%#slib'11] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &i <- _x ] s1)
+        | s1 = bb3 ] ] ]
+  | bb12 = s0
+    [ s0 = [ &p <- { p with current = { p.current with tracked = out } } ] s1
+    | s1 = -{resolve_refmut_PolicyModel p}- s2
+    | s2 = return {_ret} ] ]
+  [ & _ret: () = Any.any_l ()
+  | & p: MutBorrow.t t_PolicyModel = p
+  | & pool: UInt64.t = pool
+  | & key: UInt64.t = key
+  | & n: UInt64.t = Any.any_l ()
+  | & out: t_Vec_tup2_u64_u64_Global = Any.any_l ()
+  | & i: UInt64.t = Any.any_l ()
+  | & _54: bool = Any.any_l ()
+  | & e: tup2_u64_u64 = Any.any_l ()
+  | & _58: tup2_u64_u64 = Any.any_l ()
+  | & _62: bool = Any.any_l ()
+  | & _65: () = Any.any_l ()
+  | & _66: MutBorrow.t t_Vec_tup2_u64_u64_Global = Any.any_l () ])
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:policy_remove_key ensures] ([@stop_split] [@expl:policy_remove_key ensures #0] [%#slib'14] policy_keys_unique (view_Vec_tup2_u64_u64_Global p.final.tracked))
+    /\ ([@stop_split] [@expl:policy_remove_key ensures #1] [%#slib'15] not tracks (view_Vec_tup2_u64_u64_Global p.final.tracked) key)
+    /\ ([@stop_split] [@expl:policy_remove_key ensures #2] [%#slib'16] forall k: UInt64.t. k <> key
+        -> tracks (view_Vec_tup2_u64_u64_Global p.final.tracked) k
+        = tracks (view_Vec_tup2_u64_u64_Global p.current.tracked) k)
+    /\ ([@stop_split] [@expl:policy_remove_key ensures #3] [%#slib'17] p.final.next_handle = p.current.next_handle)
+    /\ ([@stop_split] [@expl:policy_remove_key ensures #4] [%#slib'18] p.final.pools = p.current.pools)
+    /\ ([@stop_split] [@expl:policy_remove_key ensures #5] [%#slib'19] p.final.last_pool = pool)
+    /\ ([@stop_split] [@expl:policy_remove_key ensures #6] [%#slib'20] Seq.length (view_Vec_tup2_u64_u64_Global p.final.tracked)
+    <= Seq.length (view_Vec_tup2_u64_u64_Global p.current.tracked))}
+    (! return {result}) ]

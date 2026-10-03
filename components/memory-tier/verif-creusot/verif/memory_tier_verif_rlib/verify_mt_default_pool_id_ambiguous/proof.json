@@ -1,0 +1,23 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_mt_batch_touch": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_mt_clear": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_mt_default": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_mt_evict_next": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_mt_evict_next_for_key": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_mt_get": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_mt_insert": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_mt_oldest_keys": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_mt_remove": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_mt_touch": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_new_tup2_u64_u64": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_policy_create_pool": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_verify_mt_default_pool_id_ambiguous": {
+        "prover": "z3",
+        "time": 0.091
+      }
+    }
+  }
+}

@@ -1,0 +1,31 @@
+(* #"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 8544 0 8544 53 *)
+
+let%span slib = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 8545 26 8545 50
+let%span slib'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 8543 10 8543 49
+
+use map.Map
+use creusot.prelude.MutBorrow
+use creusot.int.UInt8
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_PoolMem = { bytes: Map.map int UInt8.t }
+
+predicate resolve_refmut_PoolMem [@inline:trivial] (_1: MutBorrow.t t_PoolMem) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_PoolMem
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let mem_write [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 8544 0 8544 53]
+  (m: MutBorrow.t t_PoolMem) (addr: UInt64.t) (v: UInt8.t) (return (x: ())) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &m <- { m with current = { bytes = ([%#slib] Map.set m.current.bytes (UInt64.t'int addr) v) } } ] s1
+    | s1 = -{resolve_refmut_PoolMem m}- s2
+    | s2 = return {_ret} ] ]
+  [ & _ret: () = Any.any_l () | & m: MutBorrow.t t_PoolMem = m | & addr: UInt64.t = addr | & v: UInt8.t = v ])
+  [ return (result: ()) -> {[@stop_split] [@expl:mem_write ensures] [%#slib'0] m.final.bytes
+    = Map.set m.current.bytes (UInt64.t'int addr) v}
+    (! return {result}) ]

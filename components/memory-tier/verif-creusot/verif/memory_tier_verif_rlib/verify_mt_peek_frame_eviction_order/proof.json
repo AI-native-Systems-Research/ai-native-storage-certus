@@ -1,0 +1,14 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lk_peek_or_contains": { "prover": "alt-ergo", "time": 0.032 },
+      "vc_mt_evict_next": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_mt_peek": { "prover": "alt-ergo", "time": 0.032 },
+      "vc_verify_mt_peek_frame_eviction_order": {
+        "prover": "cvc5",
+        "time": 0.171
+      }
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_mt_batch_touch": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_mt_capacity": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_mt_peek": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_mt_used": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_verify_mt_batch_touch_frame": {
+        "prover": "alt-ergo",
+        "time": 0.676
+      }
+    }
+  }
+}

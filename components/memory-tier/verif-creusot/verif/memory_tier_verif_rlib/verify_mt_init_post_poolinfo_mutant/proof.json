@@ -1,0 +1,25 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_mt_initialize_mmap": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_mt_pool_info": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_verify_mt_init_post_poolinfo__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.024 },
+              { "prover": "alt-ergo", "time": 0.017 },
+              {
+                "tactic": "split_vc",
+                "children": [ { "prover": "alt-ergo", "time": 0.062 }, null ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_fl_new": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_new_SlotModel": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_verify_mt_init_post_flag_published_last__mutant": {
+        "tactic": "split_vc",
+        "children": [ { "prover": "alt-ergo", "time": 0.018 }, null ]
+      }
+    }
+  }
+}

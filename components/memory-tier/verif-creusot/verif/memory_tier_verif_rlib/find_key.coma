@@ -1,0 +1,100 @@
+(* #"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 529 0 529 61 *)
+
+let%span slib = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 530 12 530 19
+let%span slib'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 531 23 531 24
+let%span slib'1 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 534 16 534 71
+let%span slib'2 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 533 16 533 30
+let%span slib'3 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 532 16 532 24
+let%span slib'4 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 536 12 536 15
+let%span slib'5 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 539 13 539 14
+let%span slib'6 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 539 8 539 14
+let%span slib'7 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 525 10 528 1
+let%span svec = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/std/vec.rs" 112 18 112 40
+let%span svec'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span svec'1 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/std/vec.rs" 193 19 193 38
+let%span svec'2 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/std/vec.rs" 194 18 194 46
+let%span sslice = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/std/slice.rs" 148 20 148 37
+let%span sslice'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/std/slice.rs" 153 20 153 37
+
+use creusot.int.UInt64
+use seq.Seq
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_Region_Global
+
+type t_Region = { offset: UInt64.t; size: UInt64.t }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_Region_Global (self: t_Vec_Region_Global) : Seq.seq t_Region
+
+axiom view_Vec_Region_Global_spec:
+  forall self: t_Vec_Region_Global [view_Vec_Region_Global self]. [%#svec'0] Seq.length (view_Vec_Region_Global self)
+    <= UInt64.t'int const_MAX
+
+let len_Region (self_: t_Vec_Region_Global) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:len ensures] [%#svec] UInt64.t'int result
+    = Seq.length (view_Vec_Region_Global self_)}
+    (! return {result}) ]
+
+predicate in_bounds_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq t_Region) =
+  [%#sslice] UInt64.t'int self < Seq.length seq
+
+meta "rewrite_def" predicate in_bounds_usize
+
+predicate has_value_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq t_Region) (out: t_Region) =
+  [%#sslice'0] Seq.get seq (UInt64.t'int self) = out
+
+meta "rewrite_def" predicate has_value_usize
+
+let index_Vec_Region_Global (self_: t_Vec_Region_Global) (ix: UInt64.t) (return (x: t_Region)) =
+{[@stop_split] [@expl:index requires] [%#svec'1] in_bounds_usize ix (view_Vec_Region_Global self_)}
+  any
+  [ return (result: t_Region) ->
+  {[@stop_split] [@expl:index ensures] [%#svec'2] has_value_usize ix (view_Vec_Region_Global self_) result}
+    (! return {result}) ]
+
+type t_Option_usize = None | Some UInt64.t
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let find_key [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 529 0 529 61]
+  (r: t_Vec_Region_Global) (key: UInt64.t) (return (x: t_Option_usize)) = (! bb0
+  [ bb0 = s0
+    [ s0 = len_Region [%#slib] {r} (fun (_x: UInt64.t) -> [ &n <- _x ] s1)
+    | s1 = [ &i <- [%#slib'0] (0: UInt64.t) ] s2
+    | s2 = bb2 ]
+  | bb2 = bb2
+    [ bb2 = {[@expl:loop invariant #0] [%#slib'3] UInt64.t'int i <= UInt64.t'int n}
+      {[@expl:loop invariant #1] [%#slib'2] UInt64.t'int n = Seq.length (view_Vec_Region_Global r)}
+      {[@expl:loop invariant #2] [%#slib'1] forall j: int. 0 <= j /\ j < UInt64.t'int i
+        -> (Seq.get (view_Vec_Region_Global r) j).offset <> key}
+      (! s0)
+      [ s0 = [ &_22 <- UInt64.lt i n ] s1 | s1 = any [ br0 -> {_22 = false} (! bb8) | br1 -> {_22} (! bb4) ] ]
+      [ bb4 = s0
+        [ s0 = index_Vec_Region_Global [%#slib'4] {r} {i} (fun (_x: t_Region) -> [ &_28 <- _x ] s1)
+        | s1 = [ &_26 <- _28.offset = key ] s2
+        | s2 = any [ br0 -> {_26 = false} (! bb7) | br1 -> {_26} (! bb6) ] ]
+      | bb7 = s0
+        [ s0 = UInt64.add [%#slib'6] {i} {[%#slib'5] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &i <- _x ] s1)
+        | s1 = bb2 ] ] ]
+  | bb6 = s0 [ s0 = [ &_ret <- Some i ] s1 | s1 = return {_ret} ]
+  | bb8 = s0 [ s0 = [ &_ret <- None ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Option_usize = Any.any_l ()
+  | & r: t_Vec_Region_Global = r
+  | & key: UInt64.t = key
+  | & n: UInt64.t = Any.any_l ()
+  | & i: UInt64.t = Any.any_l ()
+  | & _22: bool = Any.any_l ()
+  | & _26: bool = Any.any_l ()
+  | & _28: t_Region = Any.any_l () ])
+  [ return (result: t_Option_usize) -> {[@stop_split] [@expl:find_key ensures] [%#slib'7] match result with
+      | Some j -> UInt64.t'int j < Seq.length (view_Vec_Region_Global r)
+      /\ (Seq.get (view_Vec_Region_Global r) (UInt64.t'int j)).offset = key
+      | None -> forall j: int. 0 <= j /\ j < Seq.length (view_Vec_Region_Global r)
+        -> (Seq.get (view_Vec_Region_Global r) j).offset <> key
+      end}
+    (! return {result}) ]

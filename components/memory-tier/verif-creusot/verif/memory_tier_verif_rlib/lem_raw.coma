@@ -1,0 +1,139 @@
+(* #"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4416 0 4416 33 *)
+
+let%span slib = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4411 10 4411 17
+let%span slib'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4412 11 4412 66
+let%span slib'1 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4413 10 4413 35
+let%span slib'2 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4414 10 4414 105
+let%span slib'3 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4415 10 4415 103
+let%span slib'4 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 952 11 952 16
+let%span slib'5 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 953 10 953 35
+let%span slib'6 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 954 10 954 28
+let%span slib'7 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 955 10 955 31
+let%span slib'8 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 956 10 956 34
+let%span slib'9 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 957 10 957 46
+let%span slib'10 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 958 10 958 45
+let%span slib'11 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4387 10 4387 17
+let%span slib'12 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4390 8 4391 78
+let%span slib'13 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 929 10 929 17
+let%span slib'14 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 932 8 933 91
+let%span slib'15 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 959 22 959 24
+let%span slib'16 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 34 16 34 46
+let%span swell_founded = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use int.ComputerDivision
+use int.Int
+
+type t_SlotModel = { key: UInt64.t; offset: UInt64.t; size: UInt32.t; handle: UInt64.t }
+
+function raw_sum [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4388 0 4388 40] (s: Seq.seq t_SlotModel) : int
+
+axiom raw_sum_def: forall s: Seq.seq t_SlotModel [raw_sum s]. raw_sum s
+    = ([%#slib'12] if Seq.length s <= 0 then
+      0
+    else
+      raw_sum (Seq.([..]) s 0 (Seq.length s - 1)) + UInt32.t'int (Seq.get s (Seq.length s - 1)).size
+    )
+
+function align_up_l [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 33 0 33 35] (size'0: int) : int
+ = [%#slib'16] (ComputerDivision.div (size'0 - 1) 4096 + 1) * 4096
+
+function slot_sum [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 930 0 930 41] (s: Seq.seq t_SlotModel) : int
+
+axiom slot_sum_def: forall s: Seq.seq t_SlotModel [slot_sum s]. slot_sum s
+    = ([%#slib'14] if Seq.length s <= 0 then
+      0
+    else
+      slot_sum (Seq.([..]) s 0 (Seq.length s - 1)) + align_up_l (UInt32.t'int (Seq.get s (Seq.length s - 1)).size)
+    )
+
+function lem_al [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 959 0 959 21] (x: int) : ()
+ = [%#slib'15] ()
+
+axiom lem_al_spec: forall x: int. ([%#slib'4] x > 0) -> ([%#slib'5] ComputerDivision.mod (align_up_l x) 4096 = 0)
+
+axiom lem_al_spec'0: forall x: int. ([%#slib'4] x > 0) -> ([%#slib'6] align_up_l x >= x)
+
+axiom lem_al_spec'1: forall x: int. ([%#slib'4] x > 0) -> ([%#slib'7] align_up_l x >= 4096)
+
+axiom lem_al_spec'2: forall x: int. ([%#slib'4] x > 0) -> ([%#slib'8] align_up_l x < x + 4096)
+
+axiom lem_al_spec'3: forall x: int. ([%#slib'4] x > 0)
+    -> ([%#slib'9] ComputerDivision.mod x 4096 = 0 -> align_up_l x = x)
+
+axiom lem_al_spec'4: forall x: int. ([%#slib'4] x > 0)
+    -> ([%#slib'10] ComputerDivision.mod x 4096 <> 0 -> align_up_l x > x)
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant s : Seq.seq t_SlotModel
+
+function lem_raw [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4416 0 4416 33] (s: Seq.seq t_SlotModel) : ()
+
+goal vc_lem_raw: ([%#slib'0] forall j: int. 0 <= j /\ j < Seq.length s -> UInt32.t'int (Seq.get s j).size > 0)
+  -> (if Seq.length s <= 0 then
+    [@stop_split] [@expl:lem_raw ensures] ([@stop_split] [@expl:lem_raw ensures #0] [%#slib'1] raw_sum s <= slot_sum s)
+    /\ ([@stop_split] [@expl:lem_raw ensures #1] [%#slib'2] (forall j: int. 0 <= j /\ j < Seq.length s
+          -> ComputerDivision.mod (UInt32.t'int (Seq.get s j).size) 4096 = 0) -> raw_sum s = slot_sum s)
+    /\ ([@stop_split] [@expl:lem_raw ensures #2] [%#slib'3] (exists j: int. 0 <= j
+        /\ j < Seq.length s /\ ComputerDivision.mod (UInt32.t'int (Seq.get s j).size) 4096 <> 0)
+    -> raw_sum s < slot_sum s)
+  else
+    ([@stop_split] [@expl:lem_al requires] [%#slib'4] UInt32.t'int (Seq.get s (Seq.length s - 1)).size > 0)
+    /\ (([@stop_split] [@expl:lem_al ensures] ([@stop_split] [@expl:lem_al ensures #0] [%#slib'5] ComputerDivision.mod (align_up_l (UInt32.t'int (Seq.get s (Seq.length s
+          - 1)).size)) 4096
+        = 0)
+      /\ ([@stop_split] [@expl:lem_al ensures #1] [%#slib'6] align_up_l (UInt32.t'int (Seq.get s (Seq.length s
+          - 1)).size)
+        >= UInt32.t'int (Seq.get s (Seq.length s - 1)).size)
+      /\ ([@stop_split] [@expl:lem_al ensures #2] [%#slib'7] align_up_l (UInt32.t'int (Seq.get s (Seq.length s
+          - 1)).size)
+        >= 4096)
+      /\ ([@stop_split] [@expl:lem_al ensures #3] [%#slib'8] align_up_l (UInt32.t'int (Seq.get s (Seq.length s
+          - 1)).size)
+        < UInt32.t'int (Seq.get s (Seq.length s - 1)).size + 4096)
+      /\ ([@stop_split] [@expl:lem_al ensures #4] [%#slib'9] ComputerDivision.mod (UInt32.t'int (Seq.get s (Seq.length s
+            - 1)).size) 4096
+          = 0
+        -> align_up_l (UInt32.t'int (Seq.get s (Seq.length s - 1)).size)
+        = UInt32.t'int (Seq.get s (Seq.length s - 1)).size)
+      /\ ([@stop_split] [@expl:lem_al ensures #5] [%#slib'10] ComputerDivision.mod (UInt32.t'int (Seq.get s (Seq.length s
+          - 1)).size) 4096
+        <> 0
+      -> align_up_l (UInt32.t'int (Seq.get s (Seq.length s - 1)).size)
+      > UInt32.t'int (Seq.get s (Seq.length s - 1)).size))
+    -> (let _ = lem_al (UInt32.t'int (Seq.get s (Seq.length s - 1)).size) in (forall j: int. 0 <= j
+          /\ j < Seq.length s - 1 -> Seq.get (Seq.([..]) s 0 (Seq.length s - 1)) j = Seq.get s j)
+    && (([@stop_split] [@expl:lem_raw requires] [%#slib'0] forall j: int. 0 <= j
+            /\ j < Seq.length (Seq.([..]) s 0 (Seq.length s - 1))
+          -> UInt32.t'int (Seq.get (Seq.([..]) s 0 (Seq.length s - 1)) j).size > 0)
+      /\ ([@expl:variant decreases] well_founded_relation_Int ([%#slib] Seq.length s) ([%#slib] Seq.length (Seq.([..]) s 0 (Seq.length s
+      - 1)))))
+    /\ (([@stop_split] [@expl:lem_raw ensures] ([@stop_split] [@expl:lem_raw ensures #0] [%#slib'1] raw_sum (Seq.([..]) s 0 (Seq.length s
+          - 1))
+        <= slot_sum (Seq.([..]) s 0 (Seq.length s - 1)))
+      /\ ([@stop_split] [@expl:lem_raw ensures #1] [%#slib'2] (forall j: int. 0 <= j
+              /\ j < Seq.length (Seq.([..]) s 0 (Seq.length s - 1))
+            -> ComputerDivision.mod (UInt32.t'int (Seq.get (Seq.([..]) s 0 (Seq.length s - 1)) j).size) 4096 = 0)
+        -> raw_sum (Seq.([..]) s 0 (Seq.length s - 1)) = slot_sum (Seq.([..]) s 0 (Seq.length s - 1)))
+      /\ ([@stop_split] [@expl:lem_raw ensures #2] [%#slib'3] (exists j: int. 0 <= j
+          /\ j < Seq.length (Seq.([..]) s 0 (Seq.length s - 1))
+          /\ ComputerDivision.mod (UInt32.t'int (Seq.get (Seq.([..]) s 0 (Seq.length s - 1)) j).size) 4096 <> 0)
+      -> raw_sum (Seq.([..]) s 0 (Seq.length s - 1)) < slot_sum (Seq.([..]) s 0 (Seq.length s - 1))))
+    -> ([@stop_split] [@expl:lem_raw ensures] ([@stop_split] [@expl:lem_raw ensures #0] [%#slib'1] raw_sum s
+      <= slot_sum s)
+    /\ ([@stop_split] [@expl:lem_raw ensures #1] [%#slib'2] (forall j: int. 0 <= j /\ j < Seq.length s
+          -> ComputerDivision.mod (UInt32.t'int (Seq.get s j).size) 4096 = 0) -> raw_sum s = slot_sum s)
+    /\ ([@stop_split] [@expl:lem_raw ensures #2] [%#slib'3] (exists j: int. 0 <= j
+        /\ j < Seq.length s /\ ComputerDivision.mod (UInt32.t'int (Seq.get s j).size) 4096 <> 0)
+    -> raw_sum s < slot_sum s)))))
+  )

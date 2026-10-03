@@ -1,0 +1,10 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_mt_evict_next": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_rx_call": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_verify_mt_evict_next_pre": { "prover": "cvc5", "time": 0.148 }
+    }
+  }
+}

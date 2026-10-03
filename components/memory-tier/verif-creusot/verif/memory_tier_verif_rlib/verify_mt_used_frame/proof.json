@@ -1,0 +1,10 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lk_peek_or_contains": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_mt_used": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_verify_mt_used_frame": { "prover": "alt-ergo", "time": 0.045 }
+    }
+  }
+}

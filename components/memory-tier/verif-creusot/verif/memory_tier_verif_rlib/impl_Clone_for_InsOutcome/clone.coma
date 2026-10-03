@@ -1,0 +1,22 @@
+(* #"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9392 9 9392 29 *)
+
+(* <InsOutcome as std::clone::Clone> *)
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_MtError = InvalidSize | NotInitialized | AlreadyExists | PoolFull | KeyNotFound | AllocationFailed | NotEvictable
+
+type t_Result_usize_MtError = Ok UInt64.t | Err t_MtError
+
+type t_InsOutcome = Done t_Result_usize_MtError | Panicked
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_InsOutcome [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9392 9 9392 29]
+  (self: t_InsOutcome) (return (x: t_InsOutcome)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_InsOutcome = Any.any_l () | & self: t_InsOutcome = self ])
+  [ return (result: t_InsOutcome) -> (! return {result}) ]

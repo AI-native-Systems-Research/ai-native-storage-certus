@@ -1,0 +1,21 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_mt_capacity": { "prover": "alt-ergo", "time": 0.034 },
+      "vc_mt_clear": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_mt_contains": { "prover": "alt-ergo", "time": 0.034 },
+      "vc_mt_default": { "prover": "alt-ergo", "time": 0.034 },
+      "vc_mt_evict_next": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_mt_get": { "prover": "alt-ergo", "time": 0.036 },
+      "vc_mt_insert": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_mt_is_dma_capable": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_mt_oldest_keys": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_mt_peek": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_mt_pool_info": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_mt_remove": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_mt_used": { "prover": "alt-ergo", "time": 0.034 },
+      "vc_verify_mt_default_state_post": { "prover": "z3", "time": 0.076 }
+    }
+  }
+}

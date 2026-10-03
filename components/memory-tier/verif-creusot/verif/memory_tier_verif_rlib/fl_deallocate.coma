@@ -1,0 +1,836 @@
+(* #"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 668 0 668 70 *)
+
+let%span slib = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 669 26 669 70
+let%span slib'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 670 25 670 36
+let%span slib'1 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 672 23 672 46
+let%span slib'2 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 673 14 673 45
+let%span slib'3 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 679 12 679 44
+let%span slib'4 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 681 11 681 12
+let%span slib'5 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 682 34 682 35
+let%span slib'6 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 682 30 682 35
+let%span slib'7 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 682 29 682 36
+let%span slib'8 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 683 22 683 63
+let%span slib'9 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 684 11 684 34
+let%span slib'10 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 686 12 686 33
+let%span slib'11 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 687 47 687 48
+let%span slib'12 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 687 43 687 48
+let%span slib'13 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 687 20 687 49
+let%span slib'14 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 688 22 688 23
+let%span slib'15 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 688 12 688 23
+let%span slib'16 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 689 26 689 104
+let%span slib'17 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 690 26 690 79
+let%span slib'18 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 691 26 691 120
+let%span slib'19 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 693 26 693 57
+let%span slib'20 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 694 26 694 71
+let%span slib'21 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 695 26 695 120
+let%span slib'22 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 698 25 698 36
+let%span slib'23 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 699 18 699 77
+let%span slib'24 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 700 18 700 94
+let%span slib'25 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 701 18 701 107
+let%span slib'26 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 702 18 702 112
+let%span slib'27 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 703 18 703 57
+let%span slib'28 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 706 22 706 43
+let%span slib'29 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 707 10 707 44
+let%span slib'30 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 709 26 709 43
+let%span slib'31 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 710 38 710 41
+let%span slib'32 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 711 26 711 89
+let%span slib'33 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 712 12 712 33
+let%span slib'34 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 713 20 713 45
+let%span slib'35 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 717 25 717 36
+let%span slib'36 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 718 18 719 43
+let%span slib'37 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 720 18 722 72
+let%span slib'38 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 723 18 723 67
+let%span slib'39 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 724 18 724 94
+let%span slib'40 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 725 18 725 88
+let%span slib'41 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 726 18 726 107
+let%span slib'42 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 727 18 727 112
+let%span slib'43 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 728 18 728 95
+let%span slib'44 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 729 18 729 50
+let%span slib'45 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 730 18 730 103
+let%span slib'46 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 731 18 731 85
+let%span slib'47 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 734 18 735 80
+let%span slib'48 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 736 18 736 86
+let%span slib'49 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 737 12 737 61
+let%span slib'50 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 738 18 739 83
+let%span slib'51 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 740 18 740 51
+let%span slib'52 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 741 18 741 43
+let%span slib'53 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 742 18 742 35
+let%span slib'54 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 743 18 743 60
+let%span slib'55 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 744 18 744 86
+let%span slib'56 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 745 18 745 105
+let%span slib'57 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 746 18 746 99
+let%span slib'58 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 747 26 747 37
+let%span slib'59 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 748 18 749 69
+let%span slib'60 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 750 18 751 69
+let%span slib'61 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 752 18 753 69
+let%span slib'62 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 754 18 755 70
+let%span slib'63 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 756 18 757 71
+let%span slib'64 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 758 18 758 48
+let%span slib'65 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 759 18 759 55
+let%span slib'66 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 760 18 760 102
+let%span slib'67 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 761 18 761 55
+let%span slib'68 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 762 18 762 60
+let%span slib'69 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 763 18 763 38
+let%span slib'70 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 764 18 764 92
+let%span slib'71 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 765 18 765 92
+let%span slib'72 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 766 16 766 73
+let%span slib'73 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 767 18 767 39
+let%span slib'74 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 768 16 768 73
+let%span slib'75 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 769 18 770 94
+let%span slib'76 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 771 18 771 85
+let%span slib'77 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 630 11 630 40
+let%span slib'78 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 631 11 631 44
+let%span slib'79 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 632 11 632 20
+let%span slib'80 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 633 11 633 54
+let%span slib'81 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 635 10 635 39
+let%span slib'82 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 636 10 636 87
+let%span slib'83 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 637 10 638 75
+let%span slib'84 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 639 10 639 42
+let%span slib'85 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 640 10 640 49
+let%span slib'86 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 643 10 648 56
+let%span slib'87 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 650 10 650 98
+let%span slib'88 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 651 10 652 83
+let%span slib'89 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 653 10 655 46
+let%span slib'90 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 656 10 659 99
+let%span slib'91 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 661 10 663 90
+let%span slib'92 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 664 10 666 93
+let%span slib'93 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 667 10 667 81
+let%span slib'94 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 494 8 500 30
+let%span slib'95 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 34 16 34 46
+let%span slib'96 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 41 11 41 20
+let%span slib'97 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 42 11 42 38
+let%span slib'98 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 43 10 43 38
+let%span slib'99 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 44 10 44 29
+let%span slib'100 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 45 10 45 26
+let%span slib'101 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 46 10 46 32
+let%span slib'102 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 615 10 615 47
+let%span slib'103 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 616 10 616 64
+let%span slib'104 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 505 11 505 31
+let%span slib'105 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 506 10 506 29
+let%span slib'106 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 507 10 507 71
+let%span slib'107 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 508 10 508 79
+let%span slib'108 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 546 11 546 24
+let%span slib'109 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 547 10 547 26
+let%span slib'110 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 548 10 548 33
+let%span slib'111 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 549 10 549 37
+let%span slib'112 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 550 10 550 63
+let%span slib'113 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 551 10 551 77
+let%span slib'114 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 552 10 552 56
+let%span slib'115 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 553 10 553 58
+let%span slib'116 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 554 10 554 42
+let%span slib'117 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 555 10 555 56
+let%span slib'118 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 556 10 556 59
+let%span slib'119 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 557 10 558 77
+let%span slib'120 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 559 10 559 83
+let%span slib'121 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 560 10 560 72
+let%span slib'122 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 561 10 562 76
+let%span slib'123 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 563 10 563 38
+let%span slib'124 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 525 10 528 1
+let%span slib'125 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 216 8 217 69
+let%span slib'126 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 209 16 209 36
+let%span slib'127 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 111 10 111 17
+let%span slib'128 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 114 8 115 79
+let%span slib'129 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 225 8 226 57
+let%span slib'130 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 73 16 73 81
+let%span slib'131 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 233 16 233 94
+let%span slib'132 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 577 11 577 31
+let%span slib'133 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 578 10 578 31
+let%span slib'134 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 579 10 579 61
+let%span slib'135 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 580 10 580 33
+let%span slib'136 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 581 10 582 75
+let%span slib'137 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 583 10 584 95
+let%span slib'138 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 585 10 588 90
+let%span slib'139 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 589 10 590 67
+let%span slib'140 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 591 10 591 29
+let%span slib'141 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 592 10 592 71
+let%span slib'142 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 593 10 593 77
+let%span slib'143 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 594 10 594 60
+let%span slib'144 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 90 8 92 62
+let%span slib'145 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 248 8 248 97
+let%span slib'146 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 268 11 268 61
+let%span slib'147 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 269 11 269 60
+let%span slib'148 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 270 11 270 71
+let%span slib'149 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 271 11 271 20
+let%span slib'150 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 272 11 272 71
+let%span slib'151 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 273 11 273 71
+let%span slib'152 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 274 10 274 21
+let%span slib'153 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 277 8 277 102
+let%span slib'154 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 285 11 285 61
+let%span slib'155 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 286 11 286 60
+let%span slib'156 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 287 11 287 71
+let%span slib'157 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 288 10 289 98
+let%span slib'158 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 290 68 290 70
+let%span slib'159 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 296 8 296 101
+let%span slib'160 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 80 8 80 93
+let%span slib'161 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 874 8 879 20
+let%span sseq = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/logic/seq.rs" 355 20 355 57
+let%span sseq'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/logic/seq.rs" 509 8 509 38
+let%span sseq'1 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/logic/seq.rs" 500 8 500 49
+let%span svec = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span svec'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/std/vec.rs" 193 19 193 38
+let%span svec'1 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/std/vec.rs" 194 18 194 46
+let%span sslice = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/std/slice.rs" 148 20 148 37
+let%span sslice'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/std/slice.rs" 153 20 153 37
+
+use creusot.int.UInt64
+use seq.Seq
+use int.ComputerDivision
+use creusot.prelude.MutBorrow
+use creusot.int.UInt32
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_Region_Global
+
+type t_FreeListModel = { regions: t_Vec_Region_Global; capacity: UInt64.t; used: UInt64.t }
+
+type t_Region = { offset: UInt64.t; size: UInt64.t }
+
+predicate offsets_aligned [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 72 0 72 46] (r: Seq.seq t_Region) =
+  [%#slib'130] forall i: int. 0 <= i /\ i < Seq.length r
+    -> ComputerDivision.mod (UInt64.t'int (Seq.get r i).offset) 4096 = 0
+
+predicate disjoint_sorted [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 88 0 88 46] (r: Seq.seq t_Region) =
+  [%#slib'144] (forall i: int. 0 <= i /\ i < Seq.length r -> UInt64.t'int (Seq.get r i).size > 0)
+  /\ (forall i: int. 0 <= i /\ i + 1 < Seq.length r
+    -> UInt64.t'int (Seq.get r i).offset + UInt64.t'int (Seq.get r i).size <= UInt64.t'int (Seq.get r (i + 1)).offset)
+
+predicate disj_all [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 223 0 223 39] (r: Seq.seq t_Region) =
+  [%#slib'129] forall i: int, j: int. 0 <= i /\ i < j /\ j < Seq.length r
+    -> UInt64.t'int (Seq.get r i).offset + UInt64.t'int (Seq.get r i).size <= UInt64.t'int (Seq.get r j).offset
+
+predicate sorted_by_offset [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 78 0 78 47] (r: Seq.seq t_Region) =
+  [%#slib'160] forall i: int, j: int. 0 <= i /\ i < j /\ j < Seq.length r
+    -> UInt64.t'int (Seq.get r i).offset < UInt64.t'int (Seq.get r j).offset
+
+predicate no_adj [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 246 0 246 37] (r: Seq.seq t_Region) =
+  [%#slib'145] forall i: int. 0 <= i /\ i + 1 < Seq.length r
+    -> UInt64.t'int (Seq.get r i).offset + UInt64.t'int (Seq.get r i).size < UInt64.t'int (Seq.get r (i + 1)).offset
+
+predicate fl_inv [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 872 0 872 52] (r: Seq.seq t_Region) (capacity'0: int) =
+  [%#slib'161] offsets_aligned r
+  /\ disjoint_sorted r
+  /\ (forall i: int. 0 <= i /\ i < Seq.length r
+      -> UInt64.t'int (Seq.get r i).offset + UInt64.t'int (Seq.get r i).size <= capacity'0)
+  /\ disj_all r /\ sorted_by_offset r /\ no_adj r
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_Region_Global (self: t_Vec_Region_Global) : Seq.seq t_Region
+
+axiom view_Vec_Region_Global_spec:
+  forall self: t_Vec_Region_Global [view_Vec_Region_Global self]. [%#svec] Seq.length (view_Vec_Region_Global self)
+    <= UInt64.t'int const_MAX
+
+predicate disj [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 208 0 208 55] (a0: int) (a1: int) (b0: int) (b1: int) =
+  [%#slib'126] a1 <= b0 \/ b1 <= a0
+
+predicate clear_of [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 214 0 214 57] (r: Seq.seq t_Region) (x0: int) (x1: int) =
+  [%#slib'125] forall j: int. 0 <= j /\ j < Seq.length r
+    -> disj x0 x1 (UInt64.t'int (Seq.get r j).offset) (UInt64.t'int (Seq.get r j).offset
+    + UInt64.t'int (Seq.get r j).size)
+
+predicate dealloc_pre [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 492 0 492 72] (fl: t_FreeListModel) (offset'0: int) (aligned: int) =
+  [%#slib'94] fl_inv (view_Vec_Region_Global fl.regions) (UInt64.t'int fl.capacity)
+  /\ aligned > 0
+  /\ ComputerDivision.mod offset'0 4096 = 0
+  /\ ComputerDivision.mod aligned 4096 = 0
+  /\ offset'0 + aligned <= UInt64.t'int fl.capacity
+  /\ clear_of (view_Vec_Region_Global fl.regions) offset'0 (offset'0 + aligned) /\ aligned <= UInt64.t'int fl.used
+
+function align_up_l [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 33 0 33 35] (size'0: int) : int
+ = [%#slib'95] (ComputerDivision.div (size'0 - 1) 4096 + 1) * 4096
+
+let align_up (size'0: UInt64.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:align_up requires] ([@stop_split] [@expl:align_up requires #0] [%#slib'96] UInt64.t'int size'0
+    > 0)
+  /\ ([@stop_split] [@expl:align_up requires #1] [%#slib'97] UInt64.t'int size'0 + 4095 <= UInt64.t'int const_MAX)}
+  any
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:align_up ensures] ([@stop_split] [@expl:align_up ensures #0] [%#slib'98] UInt64.t'int result
+      = align_up_l (UInt64.t'int size'0))
+    /\ ([@stop_split] [@expl:align_up ensures #1] [%#slib'99] ComputerDivision.mod (UInt64.t'int result) 4096 = 0)
+    /\ ([@stop_split] [@expl:align_up ensures #2] [%#slib'100] UInt64.t'int result >= UInt64.t'int size'0)
+    /\ ([@stop_split] [@expl:align_up ensures #3] [%#slib'101] UInt64.t'int result < UInt64.t'int size'0 + 4096)}
+    (! return {result}) ]
+
+let used_sub (used'0: UInt64.t) (a: UInt64.t) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:used_sub ensures] ([@stop_split] [@expl:used_sub ensures #0] [%#slib'102] UInt64.t'int a
+        <= UInt64.t'int used'0 -> UInt64.t'int result = UInt64.t'int used'0 - UInt64.t'int a)
+    /\ ([@stop_split] [@expl:used_sub ensures #1] [%#slib'103] UInt64.t'int a > UInt64.t'int used'0
+    -> UInt64.t'int result = UInt64.t'int used'0 - UInt64.t'int a + UInt64.t'int const_MAX + 1)}
+    (! return {result}) ]
+
+let lower_bound (r: t_Vec_Region_Global) (key: UInt64.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:lower_bound requires] [%#slib'104] sorted_by_offset (view_Vec_Region_Global r)}
+  any
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:lower_bound ensures] ([@stop_split] [@expl:lower_bound ensures #0] [%#slib'105] UInt64.t'int result
+      <= Seq.length (view_Vec_Region_Global r))
+    /\ ([@stop_split] [@expl:lower_bound ensures #1] [%#slib'106] forall j: int. 0 <= j /\ j < UInt64.t'int result
+        -> UInt64.t'int (Seq.get (view_Vec_Region_Global r) j).offset < UInt64.t'int key)
+    /\ ([@stop_split] [@expl:lower_bound ensures #2] [%#slib'107] forall j: int. UInt64.t'int result <= j
+        /\ j < Seq.length (view_Vec_Region_Global r)
+      -> UInt64.t'int (Seq.get (view_Vec_Region_Global r) j).offset >= UInt64.t'int key)}
+    (! return {result}) ]
+
+predicate in_bounds_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq t_Region) =
+  [%#sslice] UInt64.t'int self < Seq.length seq
+
+meta "rewrite_def" predicate in_bounds_usize
+
+predicate has_value_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq t_Region) (out: t_Region) =
+  [%#sslice'0] Seq.get seq (UInt64.t'int self) = out
+
+meta "rewrite_def" predicate has_value_usize
+
+let index_Vec_Region_Global (self_: t_Vec_Region_Global) (ix: UInt64.t) (return (x: t_Region)) =
+{[@stop_split] [@expl:index requires] [%#svec'0] in_bounds_usize ix (view_Vec_Region_Global self_)}
+  any
+  [ return (result: t_Region) ->
+  {[@stop_split] [@expl:index ensures] [%#svec'1] has_value_usize ix (view_Vec_Region_Global self_) result}
+    (! return {result}) ]
+
+type t_RangeTo_Int = { end': int }
+
+function index_Seq_Region [@inline:trivial] (self: Seq.seq t_Region) (range: t_RangeTo_Int) : Seq.seq t_Region =
+  [%#sseq'0] Seq.([..]) self 0 range.end'
+
+meta "rewrite_def" function index_Seq_Region
+
+type t_RangeFrom_Int = { start: int }
+
+function index_Seq_Region'0 [@inline:trivial] (self: Seq.seq t_Region) (range: t_RangeFrom_Int) : Seq.seq t_Region =
+  [%#sseq'1] Seq.([..]) self range.start (Seq.length self)
+
+meta "rewrite_def" function index_Seq_Region'0
+
+function removed_Region (self: Seq.seq t_Region) (index: int) : Seq.seq t_Region =
+  [%#sseq] Seq.(++) (index_Seq_Region self { end' = index }) (index_Seq_Region'0 self { start = index + 1 })
+
+function free_sum [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 112 0 112 38] (r: Seq.seq t_Region) : int
+
+axiom free_sum_def: forall r: Seq.seq t_Region [free_sum r]. free_sum r
+    = ([%#slib'128] if Seq.length r <= 0 then
+      0
+    else
+      free_sum (Seq.([..]) r 0 (Seq.length r - 1)) + UInt64.t'int (Seq.get r (Seq.length r - 1)).size
+    )
+
+predicate in_cap [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 232 0 232 52] (r: Seq.seq t_Region) (capacity'0: int) =
+  [%#slib'131] forall i: int. 0 <= i /\ i < Seq.length r
+    -> UInt64.t'int (Seq.get r i).offset + UInt64.t'int (Seq.get r i).size <= capacity'0
+
+let rm_at (r: MutBorrow.t t_Vec_Region_Global) (i: UInt64.t) (return (x: t_Region)) =
+{[@stop_split] [@expl:rm_at requires] [%#slib'108] UInt64.t'int i < Seq.length (view_Vec_Region_Global r.current)}
+  any
+  [ return (result: t_Region) ->
+  {[@stop_split] [@expl:rm_at ensures] ([@stop_split] [@expl:rm_at ensures #0] [%#slib'109] result
+      = Seq.get (view_Vec_Region_Global r.current) (UInt64.t'int i))
+    /\ ([@stop_split] [@expl:rm_at ensures #1] [%#slib'110] view_Vec_Region_Global r.final
+      = removed_Region (view_Vec_Region_Global r.current) (UInt64.t'int i))
+    /\ ([@stop_split] [@expl:rm_at ensures #2] [%#slib'111] Seq.length (view_Vec_Region_Global r.final)
+      = Seq.length (view_Vec_Region_Global r.current) - 1)
+    /\ ([@stop_split] [@expl:rm_at ensures #3] [%#slib'112] forall j: int. 0 <= j /\ j < UInt64.t'int i
+        -> Seq.get (view_Vec_Region_Global r.final) j = Seq.get (view_Vec_Region_Global r.current) j)
+    /\ ([@stop_split] [@expl:rm_at ensures #4] [%#slib'113] forall j: int. UInt64.t'int i <= j
+          /\ j < Seq.length (view_Vec_Region_Global r.final)
+        -> Seq.get (view_Vec_Region_Global r.final) j = Seq.get (view_Vec_Region_Global r.current) (j + 1))
+    /\ ([@stop_split] [@expl:rm_at ensures #5] [%#slib'114] free_sum (view_Vec_Region_Global r.final)
+      = free_sum (view_Vec_Region_Global r.current)
+      - UInt64.t'int (Seq.get (view_Vec_Region_Global r.current) (UInt64.t'int i)).size)
+    /\ ([@stop_split] [@expl:rm_at ensures #6] [%#slib'115] sorted_by_offset (view_Vec_Region_Global r.current)
+      -> sorted_by_offset (view_Vec_Region_Global r.final))
+    /\ ([@stop_split] [@expl:rm_at ensures #7] [%#slib'116] disj_all (view_Vec_Region_Global r.current)
+      -> disj_all (view_Vec_Region_Global r.final))
+    /\ ([@stop_split] [@expl:rm_at ensures #8] [%#slib'117] offsets_aligned (view_Vec_Region_Global r.current)
+      -> offsets_aligned (view_Vec_Region_Global r.final))
+    /\ ([@stop_split] [@expl:rm_at ensures #9] [%#slib'118] forall c: int. in_cap (view_Vec_Region_Global r.current) c
+        -> in_cap (view_Vec_Region_Global r.final) c)
+    /\ ([@stop_split] [@expl:rm_at ensures #10] [%#slib'119] (forall j: int. 0 <= j
+            /\ j < Seq.length (view_Vec_Region_Global r.current)
+          -> UInt64.t'int (Seq.get (view_Vec_Region_Global r.current) j).size > 0)
+      -> (forall j: int. 0 <= j /\ j < Seq.length (view_Vec_Region_Global r.final)
+        -> UInt64.t'int (Seq.get (view_Vec_Region_Global r.final) j).size > 0))
+    /\ ([@stop_split] [@expl:rm_at ensures #11] [%#slib'120] forall x0: int, x1: int. clear_of (view_Vec_Region_Global r.current) x0 x1
+        -> clear_of (view_Vec_Region_Global r.final) x0 x1)
+    /\ ([@stop_split] [@expl:rm_at ensures #12] [%#slib'121] disj_all (view_Vec_Region_Global r.current)
+        /\ disjoint_sorted (view_Vec_Region_Global r.current) -> disjoint_sorted (view_Vec_Region_Global r.final))
+    /\ ([@stop_split] [@expl:rm_at ensures #13] [%#slib'122] forall x0: int, x1: int. disj_all (view_Vec_Region_Global r.current)
+          /\ UInt64.t'int (Seq.get (view_Vec_Region_Global r.current) (UInt64.t'int i)).offset <= x0
+          /\ x1
+          <= UInt64.t'int (Seq.get (view_Vec_Region_Global r.current) (UInt64.t'int i)).offset
+          + UInt64.t'int (Seq.get (view_Vec_Region_Global r.current) (UInt64.t'int i)).size
+        -> clear_of (view_Vec_Region_Global r.final) x0 x1)
+    /\ ([@stop_split] [@expl:rm_at ensures #14] [%#slib'123] no_adj (view_Vec_Region_Global r.current)
+    -> no_adj (view_Vec_Region_Global r.final))}
+    (! return {result}) ]
+
+predicate resolve_refmut_Vec_Region_Global [@inline:trivial] (_1: MutBorrow.t t_Vec_Region_Global) =
+  _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_Vec_Region_Global
+
+type t_Option_usize = None | Some UInt64.t
+
+let find_key (r: t_Vec_Region_Global) (key: UInt64.t) (return (x: t_Option_usize)) = any
+  [ return (result: t_Option_usize) -> {[@stop_split] [@expl:find_key ensures] [%#slib'124] match result with
+      | Some j -> UInt64.t'int j < Seq.length (view_Vec_Region_Global r)
+      /\ (Seq.get (view_Vec_Region_Global r) (UInt64.t'int j)).offset = key
+      | None -> forall j: int. 0 <= j /\ j < Seq.length (view_Vec_Region_Global r)
+        -> (Seq.get (view_Vec_Region_Global r) j).offset <> key
+      end}
+    (! return {result}) ]
+
+let elim_Some (_x: t_Option_usize) (return (f0: UInt64.t)) = any
+  [ _k (f0: UInt64.t) -> {Some f0 = _x} (! return {f0})
+  | _chk -> (! {[@expl:elim Some] match _x with
+      | Some _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+let map_insert (r: MutBorrow.t t_Vec_Region_Global) (key: UInt64.t) (val': UInt64.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:map_insert requires] [%#slib'132] sorted_by_offset (view_Vec_Region_Global r.current)}
+  any
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:map_insert ensures] ([@stop_split] [@expl:map_insert ensures #0] [%#slib'133] UInt64.t'int result
+      < Seq.length (view_Vec_Region_Global r.final))
+    /\ ([@stop_split] [@expl:map_insert ensures #1] [%#slib'134] Seq.get (view_Vec_Region_Global r.final) (UInt64.t'int result)
+      = { offset = key; size = val' })
+    /\ ([@stop_split] [@expl:map_insert ensures #2] [%#slib'135] sorted_by_offset (view_Vec_Region_Global r.final))
+    /\ ([@stop_split] [@expl:map_insert ensures #3] [%#slib'136] forall j: int. 0 <= j
+          /\ j < Seq.length (view_Vec_Region_Global r.current)
+          /\ (Seq.get (view_Vec_Region_Global r.current) j).offset <> key
+        -> (exists k: int. 0 <= k
+          /\ k < Seq.length (view_Vec_Region_Global r.final)
+          /\ Seq.get (view_Vec_Region_Global r.final) k = Seq.get (view_Vec_Region_Global r.current) j))
+    /\ ([@stop_split] [@expl:map_insert ensures #4] [%#slib'137] forall k: int. 0 <= k
+          /\ k < Seq.length (view_Vec_Region_Global r.final) /\ k <> UInt64.t'int result
+        -> (exists j: int. 0 <= j
+          /\ j < Seq.length (view_Vec_Region_Global r.current)
+          /\ Seq.get (view_Vec_Region_Global r.current) j = Seq.get (view_Vec_Region_Global r.final) k
+          /\ (Seq.get (view_Vec_Region_Global r.current) j).offset <> key))
+    /\ ([@stop_split] [@expl:map_insert ensures #5] [%#slib'138] (forall j: int. 0 <= j
+            /\ j < Seq.length (view_Vec_Region_Global r.current)
+          -> (Seq.get (view_Vec_Region_Global r.current) j).offset <> key)
+      -> free_sum (view_Vec_Region_Global r.final) = free_sum (view_Vec_Region_Global r.current) + UInt64.t'int val'
+      /\ Seq.length (view_Vec_Region_Global r.final) = Seq.length (view_Vec_Region_Global r.current) + 1
+      /\ (forall j: int. 0 <= j /\ j < UInt64.t'int result
+          -> Seq.get (view_Vec_Region_Global r.final) j = Seq.get (view_Vec_Region_Global r.current) j)
+      /\ (forall j: int. UInt64.t'int result < j /\ j < Seq.length (view_Vec_Region_Global r.final)
+        -> Seq.get (view_Vec_Region_Global r.final) j = Seq.get (view_Vec_Region_Global r.current) (j - 1)))
+    /\ ([@stop_split] [@expl:map_insert ensures #6] [%#slib'139] forall j: int. 0 <= j
+          /\ j < Seq.length (view_Vec_Region_Global r.current)
+          /\ (Seq.get (view_Vec_Region_Global r.current) j).offset = key
+        -> view_Vec_Region_Global r.final = Seq.set (view_Vec_Region_Global r.current) j { offset = key; size = val' })
+    /\ ([@stop_split] [@expl:map_insert ensures #7] [%#slib'140] UInt64.t'int result
+      <= Seq.length (view_Vec_Region_Global r.current))
+    /\ ([@stop_split] [@expl:map_insert ensures #8] [%#slib'141] forall j: int. 0 <= j /\ j < UInt64.t'int result
+        -> UInt64.t'int (Seq.get (view_Vec_Region_Global r.current) j).offset < UInt64.t'int key)
+    /\ ([@stop_split] [@expl:map_insert ensures #9] [%#slib'142] forall j: int. UInt64.t'int result < j
+          /\ j < Seq.length (view_Vec_Region_Global r.current)
+        -> UInt64.t'int (Seq.get (view_Vec_Region_Global r.current) j).offset > UInt64.t'int key)
+    /\ ([@stop_split] [@expl:map_insert ensures #10] [%#slib'143] UInt64.t'int result
+      < Seq.length (view_Vec_Region_Global r.current)
+    -> UInt64.t'int (Seq.get (view_Vec_Region_Global r.current) (UInt64.t'int result)).offset >= UInt64.t'int key)}
+    (! return {result}) ]
+
+predicate resolve_refmut_FreeListModel [@inline:trivial] (_1: MutBorrow.t t_FreeListModel) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_FreeListModel
+
+function lem_noadj_inserted [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 275 0 275 67] (r: Seq.seq t_Region) (fin: Seq.seq t_Region) (q: int) : ()
+ = [%#slib'153] ()
+
+axiom lem_noadj_inserted_spec: forall r: Seq.seq t_Region, fin: Seq.seq t_Region, q: int. ([%#slib'146] 0 <= q
+      /\ q <= Seq.length r /\ Seq.length fin = Seq.length r + 1)
+    -> ([%#slib'147] forall j: int. 0 <= j /\ j < q -> Seq.get fin j = Seq.get r j)
+    -> ([%#slib'148] forall j: int. q < j /\ j < Seq.length fin -> Seq.get fin j = Seq.get r (j - 1))
+    -> ([%#slib'149] no_adj r)
+    -> ([%#slib'150] q > 0
+      -> UInt64.t'int (Seq.get r (q - 1)).offset + UInt64.t'int (Seq.get r (q - 1)).size
+      < UInt64.t'int (Seq.get fin q).offset)
+    -> ([%#slib'151] q < Seq.length r
+      -> UInt64.t'int (Seq.get fin q).offset + UInt64.t'int (Seq.get fin q).size < UInt64.t'int (Seq.get r q).offset)
+    -> ([%#slib'152] no_adj fin)
+
+function lem_clear_inserted [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 290 0 290 67] (r: Seq.seq t_Region) (fin: Seq.seq t_Region) (q: int) : ()
+ = [%#slib'158] ()
+
+axiom lem_clear_inserted_spec: forall r: Seq.seq t_Region, fin: Seq.seq t_Region, q: int. ([%#slib'154] 0 <= q
+      /\ q <= Seq.length r /\ Seq.length fin = Seq.length r + 1)
+    -> ([%#slib'155] forall j: int. 0 <= j /\ j < q -> Seq.get fin j = Seq.get r j)
+    -> ([%#slib'156] forall j: int. q < j /\ j < Seq.length fin -> Seq.get fin j = Seq.get r (j - 1))
+    -> ([%#slib'157] forall x0: int, x1: int. clear_of r x0 x1
+        /\ disj x0 x1 (UInt64.t'int (Seq.get fin q).offset) (UInt64.t'int (Seq.get fin q).offset
+        + UInt64.t'int (Seq.get fin q).size) -> clear_of fin x0 x1)
+
+predicate covered [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 294 0 294 56] (r: Seq.seq t_Region) (x0: int) (x1: int) =
+  [%#slib'159] exists k: int. 0 <= k
+    /\ k < Seq.length r
+    /\ UInt64.t'int (Seq.get r k).offset <= x0
+    /\ x1 <= UInt64.t'int (Seq.get r k).offset + UInt64.t'int (Seq.get r k).size
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let fl_deallocate [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 668 0 668 70]
+  (fl: MutBorrow.t t_FreeListModel) (offset'0: UInt64.t) (size'0: UInt32.t) (return (x: ())) =
+{[@stop_split] [@expl:fl_deallocate requires] ([@stop_split] [@expl:fl_deallocate requires #0] [%#slib'77] sorted_by_offset (view_Vec_Region_Global fl.current.regions))
+  /\ ([@stop_split] [@expl:fl_deallocate requires #1] [%#slib'78] in_cap (view_Vec_Region_Global fl.current.regions) (UInt64.t'int fl.current.capacity))
+  /\ ([@stop_split] [@expl:fl_deallocate requires #2] [%#slib'79] UInt32.t'int size'0 > 0)
+  /\ ([@stop_split] [@expl:fl_deallocate requires #3] [%#slib'80] UInt64.t'int offset'0
+    + align_up_l (UInt32.t'int size'0)
+  <= UInt64.t'int fl.current.capacity)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &pre <- [%#slib] dealloc_pre fl.current (UInt64.t'int offset'0) (align_up_l (UInt32.t'int size'0)) ] s1
+    | s1 = [ &r0 <- [%#slib'0] view_Vec_Region_Global fl.current.regions ] s2
+    | s2 = [ &_68 <- UInt64.of_int (UInt32.t'int size'0) ] s3
+    | s3 = align_up [%#slib'1] {_68} (fun (_x: UInt64.t) -> [ &aligned_size <- _x ] s4)
+    | s4 = used_sub [%#slib'2] {fl.current.used} {aligned_size} (fun (_x: UInt64.t) -> [ &_70 <- _x ] s5)
+    | s5 = [ &fl <- { fl with current = { fl.current with used = _70 } } ] s6
+    | s6 = [ &new_offset <- offset'0 ] s7
+    | s7 = [ &new_size <- aligned_size ] s8
+    | s8 = [ &_77 <- fl.current.regions ] s9
+    | s9 = lower_bound [%#slib'3] {_77} {offset'0} (fun (_x: UInt64.t) -> [ &p <- _x ] s10)
+    | s10 = [ &pos <- p ] s11
+    | s11 = [ &_81 <- UInt64.gt p ([%#slib'4] (0: UInt64.t)) ] s12
+    | s12 = any [ br0 -> {_81 = false} (! bb13) | br1 -> {_81} (! bb6) ] ]
+  | bb6 = s0
+    [ s0 = UInt64.sub [%#slib'6] {p} {[%#slib'5] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &_86 <- _x ] s1)
+    | s1 = index_Vec_Region_Global [%#slib'7] {fl.current.regions} {_86} (fun (_x: t_Region) -> [ &_84 <- _x ] s2)
+    | s2 = [ &prev <- _84 ] s3
+    | s3 = {[@expl:assertion] [%#slib'8] UInt64.t'int prev.offset + UInt64.t'int prev.size
+      <= UInt64.t'int fl.current.capacity}
+      s4
+    | s4 = UInt64.add [%#slib'9] {prev.offset} {prev.size} (fun (_x: UInt64.t) -> [ &_94 <- _x ] s5)
+    | s5 = [ &_93 <- _94 = offset'0 ] s6
+    | s6 = any [ br0 -> {_93 = false} (! bb10) | br1 -> {_93} (! bb8) ] ]
+  | bb8 = s0
+    [ s0 = [ &new_offset <- prev.offset ] s1
+    | s1 = UInt64.add [%#slib'10] {new_size} {prev.size} (fun (_x: UInt64.t) -> [ &new_size <- _x ] s2)
+    | s2 = MutBorrow.borrow_mut <t_Vec_Region_Global> {fl.current.regions}
+        (fun (_bor: MutBorrow.t t_Vec_Region_Global) ->
+          [ &_102 <- _bor ] [ &fl <- { fl with current = { fl.current with regions = _bor.final } } ] s3)
+    | s3 = UInt64.sub [%#slib'12] {p} {[%#slib'11] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &_103 <- _x ] s4)
+    | s4 = MutBorrow.borrow_final <t_Vec_Region_Global> {_102.current} {MutBorrow.get_id _102}
+        (fun (_bor: MutBorrow.t t_Vec_Region_Global) ->
+          [ &_101 <- _bor ] [ &_102 <- { _102 with current = _bor.final } ] s5)
+    | s5 = rm_at [%#slib'13] {_101} {_103} (fun (_x: t_Region) -> [ &_100 <- _x ] s6)
+    | s6 = -{resolve_refmut_Vec_Region_Global _102}- s7
+    | s7 = UInt64.sub [%#slib'15] {p} {[%#slib'14] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &pos <- _x ] s8)
+    | s8 = {[@expl:assertion] [%#slib'16] pre /\ UInt64.t'int p >= 2
+      -> UInt64.t'int (Seq.get r0 (UInt64.t'int p - 2)).offset + UInt64.t'int (Seq.get r0 (UInt64.t'int p - 2)).size
+      < UInt64.t'int (Seq.get r0 (UInt64.t'int p - 1)).offset}
+      s9
+    | s9 = {[@expl:assertion] [%#slib'17] pre /\ UInt64.t'int p >= 2
+      -> Seq.get (view_Vec_Region_Global fl.current.regions) (UInt64.t'int p - 2) = Seq.get r0 (UInt64.t'int p - 2)}
+      s10
+    | s10 = {[@expl:assertion] [%#slib'18] pre /\ UInt64.t'int pos > 0
+      -> UInt64.t'int (Seq.get (view_Vec_Region_Global fl.current.regions) (UInt64.t'int pos - 1)).offset
+        + UInt64.t'int (Seq.get (view_Vec_Region_Global fl.current.regions) (UInt64.t'int pos - 1)).size
+      < UInt64.t'int new_offset}
+      s11
+    | s11 = bb13 ]
+  | bb10 = s0
+    [ s0 = {[@expl:assertion] [%#slib'19] pre -> UInt64.t'int prev.offset < UInt64.t'int offset'0} s1
+    | s1 = {[@expl:assertion] [%#slib'20] pre
+      -> UInt64.t'int prev.offset + UInt64.t'int prev.size <= UInt64.t'int offset'0}
+      s2
+    | s2 = {[@expl:assertion] [%#slib'21] pre /\ UInt64.t'int pos > 0
+      -> UInt64.t'int (Seq.get (view_Vec_Region_Global fl.current.regions) (UInt64.t'int pos - 1)).offset
+        + UInt64.t'int (Seq.get (view_Vec_Region_Global fl.current.regions) (UInt64.t'int pos - 1)).size
+      < UInt64.t'int new_offset}
+      s3
+    | s3 = bb13 ]
+  | bb13 = s0
+    [ s0 = [ &r1 <- [%#slib'22] view_Vec_Region_Global fl.current.regions ] s1
+    | s1 = {[@expl:assertion] [%#slib'23] pre
+      -> UInt64.t'int new_offset + UInt64.t'int new_size = UInt64.t'int offset'0 + UInt64.t'int aligned_size}
+      s2
+    | s2 = {[@expl:assertion] [%#slib'24] pre /\ UInt64.t'int pos > 0
+      -> UInt64.t'int (Seq.get r1 (UInt64.t'int pos - 1)).offset + UInt64.t'int (Seq.get r1 (UInt64.t'int pos - 1)).size
+      < UInt64.t'int new_offset}
+      s3
+    | s3 = {[@expl:assertion] [%#slib'25] pre
+      -> (forall j'0: int. 0 <= j'0 /\ j'0 < UInt64.t'int pos
+        -> UInt64.t'int (Seq.get r1 j'0).offset + UInt64.t'int (Seq.get r1 j'0).size <= UInt64.t'int new_offset)}
+      s4
+    | s4 = {[@expl:assertion] [%#slib'26] pre
+      -> (forall j'0: int. UInt64.t'int pos <= j'0 /\ j'0 < Seq.length r1
+        -> UInt64.t'int (Seq.get r1 j'0).offset >= UInt64.t'int new_offset + UInt64.t'int new_size)}
+      s5
+    | s5 = {[@expl:assertion] [%#slib'27] UInt64.t'int new_offset + UInt64.t'int new_size
+      <= UInt64.t'int fl.current.capacity}
+      s6
+    | s6 = UInt64.add [%#slib'28] {new_offset} {new_size} (fun (_x: UInt64.t) -> [ &next_offset <- _x ] s7)
+    | s7 = [ &_180 <- fl.current.regions ] s8
+    | s8 = find_key [%#slib'29] {_180} {next_offset} (fun (_x: t_Option_usize) -> [ &_178 <- _x ] s9)
+    | s9 = any [ br0 -> {_178 = None} (! bb22) | br1 (x0: UInt64.t) -> {_178 = Some x0} (! bb19) ] ]
+  | bb19 = s0
+    [ s0 = elim_Some {_178} (fun (r0'0: UInt64.t) -> [ &j <- r0'0 ] s1)
+    | s1 = {[@expl:assertion] [%#slib'30] pre -> j = pos} s2
+    | s2 = index_Vec_Region_Global [%#slib'31] {fl.current.regions} {j} (fun (_x: t_Region) -> [ &_190 <- _x ] s3)
+    | s3 = [ &next_size <- _190.size ] s4
+    | s4 =
+      {[@expl:assertion] [%#slib'32] UInt64.t'int (Seq.get (view_Vec_Region_Global fl.current.regions) (UInt64.t'int j)).offset
+        + UInt64.t'int (Seq.get (view_Vec_Region_Global fl.current.regions) (UInt64.t'int j)).size
+      <= UInt64.t'int fl.current.capacity}
+      s5
+    | s5 = UInt64.add [%#slib'33] {new_size} {next_size} (fun (_x: UInt64.t) -> [ &new_size <- _x ] s6)
+    | s6 = MutBorrow.borrow_mut <t_Vec_Region_Global> {fl.current.regions}
+        (fun (_bor: MutBorrow.t t_Vec_Region_Global) ->
+          [ &_201 <- _bor ] [ &fl <- { fl with current = { fl.current with regions = _bor.final } } ] s7)
+    | s7 = MutBorrow.borrow_final <t_Vec_Region_Global> {_201.current} {MutBorrow.get_id _201}
+        (fun (_bor: MutBorrow.t t_Vec_Region_Global) ->
+          [ &_200 <- _bor ] [ &_201 <- { _201 with current = _bor.final } ] s8)
+    | s8 = rm_at [%#slib'34] {_200} {j} (fun (_x: t_Region) -> [ &_199 <- _x ] s9)
+    | s9 = -{resolve_refmut_Vec_Region_Global _201}- s10
+    | s10 = bb22 ]
+  | bb22 = s0
+    [ s0 = [ &r2 <- [%#slib'35] view_Vec_Region_Global fl.current.regions ] s1
+    | s1 = {[@expl:assertion] [%#slib'36] forall x0: int, x1: int. pre /\ x0 < x1 /\ clear_of r0 x0 x1
+        -> clear_of r2 x0 x1}
+      s2
+    | s2 = {[@expl:assertion] [%#slib'37] forall x0: int, x1: int. pre
+          /\ x0 < x1
+          /\ clear_of r0 x0 x1 /\ disj x0 x1 (UInt64.t'int offset'0) (UInt64.t'int offset'0 + UInt64.t'int aligned_size)
+        -> disj x0 x1 (UInt64.t'int new_offset) (UInt64.t'int new_offset + UInt64.t'int new_size)}
+      s3
+    | s3 = {[@expl:assertion] [%#slib'38] pre /\ UInt64.t'int pos > 0
+      -> Seq.get r2 (UInt64.t'int pos - 1) = Seq.get r1 (UInt64.t'int pos - 1)}
+      s4
+    | s4 = {[@expl:assertion] [%#slib'39] pre /\ UInt64.t'int pos > 0
+      -> UInt64.t'int (Seq.get r2 (UInt64.t'int pos - 1)).offset + UInt64.t'int (Seq.get r2 (UInt64.t'int pos - 1)).size
+      < UInt64.t'int new_offset}
+      s5
+    | s5 = {[@expl:assertion] [%#slib'40] pre /\ UInt64.t'int pos < Seq.length r2
+      -> UInt64.t'int new_offset + UInt64.t'int new_size < UInt64.t'int (Seq.get r2 (UInt64.t'int pos)).offset}
+      s6
+    | s6 = {[@expl:assertion] [%#slib'41] pre
+      -> (forall j'0: int. 0 <= j'0 /\ j'0 < UInt64.t'int pos
+        -> UInt64.t'int (Seq.get r2 j'0).offset + UInt64.t'int (Seq.get r2 j'0).size <= UInt64.t'int new_offset)}
+      s7
+    | s7 = {[@expl:assertion] [%#slib'42] pre
+      -> (forall j'0: int. UInt64.t'int pos <= j'0 /\ j'0 < Seq.length r2
+        -> UInt64.t'int (Seq.get r2 j'0).offset >= UInt64.t'int new_offset + UInt64.t'int new_size)}
+      s8
+    | s8 = {[@expl:assertion] [%#slib'43] pre
+      -> (forall j'0: int. 0 <= j'0 /\ j'0 < Seq.length r2 -> (Seq.get r2 j'0).offset <> new_offset)}
+      s9
+    | s9 = {[@expl:assertion] [%#slib'44] pre -> ComputerDivision.mod (UInt64.t'int new_offset) 4096 = 0} s10
+    | s10 = {[@expl:assertion] [%#slib'45] pre
+      -> UInt64.t'int new_offset <= UInt64.t'int offset'0
+      /\ UInt64.t'int offset'0 + UInt64.t'int aligned_size <= UInt64.t'int new_offset + UInt64.t'int new_size}
+      s11
+    | s11 = {[@expl:assertion] [%#slib'46] pre
+      -> free_sum r2 + UInt64.t'int new_size = free_sum r0 + UInt64.t'int aligned_size}
+      s12
+    | s12 = {[@expl:assertion] [%#slib'47] pre
+      -> disj_all r2
+      /\ offsets_aligned r2
+      /\ in_cap r2 (UInt64.t'int fl.current.capacity)
+      /\ (forall j'0: int. 0 <= j'0 /\ j'0 < Seq.length r2 -> UInt64.t'int (Seq.get r2 j'0).size > 0)}
+      s13
+    | s13 = {[@expl:assertion] [%#slib'48] UInt64.t'int new_offset + UInt64.t'int new_size
+        <= UInt64.t'int fl.current.capacity
+      /\ in_cap r2 (UInt64.t'int fl.current.capacity)}
+      s14
+    | s14 = MutBorrow.borrow_final <t_Vec_Region_Global> {fl.current.regions}
+        {MutBorrow.inherit_id (MutBorrow.get_id fl) 0}
+        (fun (_bor: MutBorrow.t t_Vec_Region_Global) ->
+          [ &_287 <- _bor ] [ &fl <- { fl with current = { fl.current with regions = _bor.final } } ] s15)
+    | s15 = MutBorrow.borrow_final <t_Vec_Region_Global> {_287.current} {MutBorrow.get_id _287}
+        (fun (_bor: MutBorrow.t t_Vec_Region_Global) ->
+          [ &_286 <- _bor ] [ &_287 <- { _287 with current = _bor.final } ] s16)
+    | s16 = map_insert [%#slib'49] {_286} {new_offset} {new_size} (fun (_x: UInt64.t) -> [ &q <- _x ] s17)
+    | s17 = -{resolve_refmut_Vec_Region_Global _287}- s18
+    | s18 = -{resolve_refmut_FreeListModel fl}- s19
+    | s19 = {[@expl:assertion] [%#slib'50] forall k: int. 0 <= k
+          /\ k < Seq.length (view_Vec_Region_Global fl.current.regions) /\ k <> UInt64.t'int q
+        -> UInt64.t'int (Seq.get (view_Vec_Region_Global fl.current.regions) k).offset
+          + UInt64.t'int (Seq.get (view_Vec_Region_Global fl.current.regions) k).size
+        <= UInt64.t'int fl.current.capacity}
+      s20
+    | s20 =
+      {[@expl:assertion] [%#slib'51] in_cap (view_Vec_Region_Global fl.current.regions) (UInt64.t'int fl.current.capacity)}
+      s21
+    | s21 = {[@expl:assertion] [%#slib'52] pre -> UInt64.t'int pos <= Seq.length r2} s22
+    | s22 = {[@expl:assertion] [%#slib'53] pre -> q = pos} s23
+    | s23 = {[@expl:assertion] [%#slib'54] pre
+      -> Seq.length (view_Vec_Region_Global fl.current.regions) = Seq.length r2 + 1}
+      s24
+    | s24 = {[@expl:assertion] [%#slib'55] pre
+      -> (forall j'0: int. 0 <= j'0 /\ j'0 < UInt64.t'int q
+        -> Seq.get (view_Vec_Region_Global fl.current.regions) j'0 = Seq.get r2 j'0)}
+      s25
+    | s25 = {[@expl:assertion] [%#slib'56] pre
+      -> (forall j'0: int. UInt64.t'int q < j'0 /\ j'0 < Seq.length (view_Vec_Region_Global fl.current.regions)
+        -> Seq.get (view_Vec_Region_Global fl.current.regions) j'0 = Seq.get r2 (j'0 - 1))}
+      s26
+    | s26 = {[@expl:assertion] [%#slib'57] pre
+      -> (Seq.get (view_Vec_Region_Global fl.current.regions) (UInt64.t'int q)).offset = new_offset
+      /\ (Seq.get (view_Vec_Region_Global fl.current.regions) (UInt64.t'int q)).size = new_size}
+      s27
+    | s27 = [ &fin <- [%#slib'58] view_Vec_Region_Global fl.current.regions ] s28
+    | s28 = {[@expl:assertion] [%#slib'59] pre
+      -> (forall i: int, j'0: int. 0 <= i /\ i < j'0 /\ j'0 < UInt64.t'int q
+        -> UInt64.t'int (Seq.get fin i).offset + UInt64.t'int (Seq.get fin i).size
+        <= UInt64.t'int (Seq.get fin j'0).offset)}
+      s29
+    | s29 = {[@expl:assertion] [%#slib'60] pre
+      -> (forall i: int, j'0: int. UInt64.t'int q < i /\ i < j'0 /\ j'0 < Seq.length fin
+        -> UInt64.t'int (Seq.get fin i).offset + UInt64.t'int (Seq.get fin i).size
+        <= UInt64.t'int (Seq.get fin j'0).offset)}
+      s30
+    | s30 = {[@expl:assertion] [%#slib'61] pre
+      -> (forall i: int, j'0: int. 0 <= i /\ i < UInt64.t'int q /\ UInt64.t'int q < j'0 /\ j'0 < Seq.length fin
+        -> UInt64.t'int (Seq.get fin i).offset + UInt64.t'int (Seq.get fin i).size
+        <= UInt64.t'int (Seq.get fin j'0).offset)}
+      s31
+    | s31 = {[@expl:assertion] [%#slib'62] pre
+      -> (forall i: int. 0 <= i /\ i < UInt64.t'int q
+        -> UInt64.t'int (Seq.get fin i).offset + UInt64.t'int (Seq.get fin i).size
+        <= UInt64.t'int (Seq.get fin (UInt64.t'int q)).offset)}
+      s32
+    | s32 = {[@expl:assertion] [%#slib'63] pre
+      -> (forall j'0: int. UInt64.t'int q < j'0 /\ j'0 < Seq.length fin
+        -> UInt64.t'int (Seq.get fin (UInt64.t'int q)).offset + UInt64.t'int (Seq.get fin (UInt64.t'int q)).size
+        <= UInt64.t'int (Seq.get fin j'0).offset)}
+      s33
+    | s33 = {[@expl:assertion] [%#slib'64] pre -> disj_all (view_Vec_Region_Global fl.current.regions)} s34
+    | s34 = {[@expl:assertion] [%#slib'65] pre -> offsets_aligned (view_Vec_Region_Global fl.current.regions)} s35
+    | s35 = {[@expl:assertion] [%#slib'66] pre
+      -> (forall j'0: int. 0 <= j'0 /\ j'0 < Seq.length (view_Vec_Region_Global fl.current.regions)
+        -> UInt64.t'int (Seq.get (view_Vec_Region_Global fl.current.regions) j'0).size > 0)}
+      s36
+    | s36 = {[@expl:assertion] [%#slib'67] pre -> disjoint_sorted (view_Vec_Region_Global fl.current.regions)} s37
+    | s37 = {[@expl:assertion] [%#slib'68] pre
+      -> in_cap (view_Vec_Region_Global fl.current.regions) (UInt64.t'int fl.current.capacity)}
+      s38
+    | s38 = {[@expl:assertion] [%#slib'69] pre -> no_adj r2} s39
+    | s39 = {[@expl:assertion] [%#slib'70] pre /\ UInt64.t'int q > 0
+      -> UInt64.t'int (Seq.get r2 (UInt64.t'int q - 1)).offset + UInt64.t'int (Seq.get r2 (UInt64.t'int q - 1)).size
+      < UInt64.t'int (Seq.get fin (UInt64.t'int q)).offset}
+      s40
+    | s40 = {[@expl:assertion] [%#slib'71] pre /\ UInt64.t'int q < Seq.length r2
+      -> UInt64.t'int (Seq.get fin (UInt64.t'int q)).offset + UInt64.t'int (Seq.get fin (UInt64.t'int q)).size
+      < UInt64.t'int (Seq.get r2 (UInt64.t'int q)).offset}
+      s41
+    | s41 = [ &_398 <- [%#slib'72] if pre then lem_noadj_inserted r2 fin (UInt64.t'int q) else () ] s42
+    | s42 = {[@expl:assertion] [%#slib'73] pre -> no_adj fin} s43
+    | s43 = [ &_408 <- [%#slib'74] if pre then lem_clear_inserted r2 fin (UInt64.t'int q) else () ] s44
+    | s44 = {[@expl:assertion] [%#slib'75] forall x0: int, x1: int. pre
+          /\ x0 < x1
+          /\ clear_of r0 x0 x1 /\ disj x0 x1 (UInt64.t'int offset'0) (UInt64.t'int offset'0 + UInt64.t'int aligned_size)
+        -> clear_of fin x0 x1}
+      s45
+    | s45 = {[@expl:assertion] [%#slib'76] pre
+      -> covered (view_Vec_Region_Global fl.current.regions) (UInt64.t'int new_offset) (UInt64.t'int new_offset
+      + UInt64.t'int new_size)}
+      s46
+    | s46 = return {_ret} ] ]
+  [ & _ret: () = Any.any_l ()
+  | & fl: MutBorrow.t t_FreeListModel = fl
+  | & offset'0: UInt64.t = offset'0
+  | & size'0: UInt32.t = size'0
+  | & pre: bool = Any.any_l ()
+  | & r0: Seq.seq t_Region = Any.any_l ()
+  | & aligned_size: UInt64.t = Any.any_l ()
+  | & _68: UInt64.t = Any.any_l ()
+  | & _70: UInt64.t = Any.any_l ()
+  | & new_offset: UInt64.t = Any.any_l ()
+  | & new_size: UInt64.t = Any.any_l ()
+  | & p: UInt64.t = Any.any_l ()
+  | & _77: t_Vec_Region_Global = Any.any_l ()
+  | & pos: UInt64.t = Any.any_l ()
+  | & _81: bool = Any.any_l ()
+  | & prev: t_Region = Any.any_l ()
+  | & _84: t_Region = Any.any_l ()
+  | & _86: UInt64.t = Any.any_l ()
+  | & _93: bool = Any.any_l ()
+  | & _94: UInt64.t = Any.any_l ()
+  | & _100: t_Region = Any.any_l ()
+  | & _101: MutBorrow.t t_Vec_Region_Global = Any.any_l ()
+  | & _102: MutBorrow.t t_Vec_Region_Global = Any.any_l ()
+  | & _103: UInt64.t = Any.any_l ()
+  | & r1: Seq.seq t_Region = Any.any_l ()
+  | & next_offset: UInt64.t = Any.any_l ()
+  | & _178: t_Option_usize = Any.any_l ()
+  | & _180: t_Vec_Region_Global = Any.any_l ()
+  | & j: UInt64.t = Any.any_l ()
+  | & next_size: UInt64.t = Any.any_l ()
+  | & _190: t_Region = Any.any_l ()
+  | & _199: t_Region = Any.any_l ()
+  | & _200: MutBorrow.t t_Vec_Region_Global = Any.any_l ()
+  | & _201: MutBorrow.t t_Vec_Region_Global = Any.any_l ()
+  | & r2: Seq.seq t_Region = Any.any_l ()
+  | & q: UInt64.t = Any.any_l ()
+  | & _286: MutBorrow.t t_Vec_Region_Global = Any.any_l ()
+  | & _287: MutBorrow.t t_Vec_Region_Global = Any.any_l ()
+  | & fin: Seq.seq t_Region = Any.any_l ()
+  | & _398: () = Any.any_l ()
+  | & _408: () = Any.any_l () ])
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:fl_deallocate ensures] ([@stop_split] [@expl:fl_deallocate ensures #0] [%#slib'81] fl.final.capacity
+      = fl.current.capacity)
+    /\ ([@stop_split] [@expl:fl_deallocate ensures #1] [%#slib'82] align_up_l (UInt32.t'int size'0)
+        <= UInt64.t'int fl.current.used
+      -> UInt64.t'int fl.final.used = UInt64.t'int fl.current.used - align_up_l (UInt32.t'int size'0))
+    /\ ([@stop_split] [@expl:fl_deallocate ensures #2] [%#slib'83] align_up_l (UInt32.t'int size'0)
+        > UInt64.t'int fl.current.used
+      -> UInt64.t'int fl.final.used
+      = UInt64.t'int fl.current.used - align_up_l (UInt32.t'int size'0) + UInt64.t'int const_MAX + 1)
+    /\ ([@stop_split] [@expl:fl_deallocate ensures #3] [%#slib'84] sorted_by_offset (view_Vec_Region_Global fl.final.regions))
+    /\ ([@stop_split] [@expl:fl_deallocate ensures #4] [%#slib'85] in_cap (view_Vec_Region_Global fl.final.regions) (UInt64.t'int fl.final.capacity))
+    /\ ([@stop_split] [@expl:fl_deallocate ensures #5] [%#slib'86] forall j: int. 0 <= j
+          /\ j < Seq.length (view_Vec_Region_Global fl.current.regions)
+          /\ (Seq.get (view_Vec_Region_Global fl.current.regions) j).offset = offset'0
+          /\ (forall i: int. 0 <= i /\ i < Seq.length (view_Vec_Region_Global fl.current.regions)
+            -> UInt64.t'int (Seq.get (view_Vec_Region_Global fl.current.regions) i).offset
+                + UInt64.t'int (Seq.get (view_Vec_Region_Global fl.current.regions) i).size
+              <> UInt64.t'int offset'0
+            /\ UInt64.t'int (Seq.get (view_Vec_Region_Global fl.current.regions) i).offset
+            <> UInt64.t'int offset'0 + align_up_l (UInt32.t'int size'0))
+        -> (exists x: t_Region. x.offset = offset'0
+          /\ UInt64.t'int x.size = align_up_l (UInt32.t'int size'0)
+          /\ view_Vec_Region_Global fl.final.regions = Seq.set (view_Vec_Region_Global fl.current.regions) j x))
+    /\ ([@stop_split] [@expl:fl_deallocate ensures #6] [%#slib'87] dealloc_pre fl.current (UInt64.t'int offset'0) (align_up_l (UInt32.t'int size'0))
+      -> fl_inv (view_Vec_Region_Global fl.final.regions) (UInt64.t'int fl.final.capacity))
+    /\ ([@stop_split] [@expl:fl_deallocate ensures #7] [%#slib'88] dealloc_pre fl.current (UInt64.t'int offset'0) (align_up_l (UInt32.t'int size'0))
+      -> free_sum (view_Vec_Region_Global fl.final.regions)
+      = free_sum (view_Vec_Region_Global fl.current.regions) + align_up_l (UInt32.t'int size'0))
+    /\ ([@stop_split] [@expl:fl_deallocate ensures #8] [%#slib'89] forall x0: int, x1: int. dealloc_pre fl.current (UInt64.t'int offset'0) (align_up_l (UInt32.t'int size'0))
+          /\ x0 < x1
+          /\ clear_of (view_Vec_Region_Global fl.current.regions) x0 x1
+          /\ disj x0 x1 (UInt64.t'int offset'0) (UInt64.t'int offset'0 + align_up_l (UInt32.t'int size'0))
+        -> clear_of (view_Vec_Region_Global fl.final.regions) x0 x1)
+    /\ ([@stop_split] [@expl:fl_deallocate ensures #9] [%#slib'90] dealloc_pre fl.current (UInt64.t'int offset'0) (align_up_l (UInt32.t'int size'0))
+      -> (exists j: int. 0 <= j
+        /\ j < Seq.length (view_Vec_Region_Global fl.final.regions)
+        /\ UInt64.t'int (Seq.get (view_Vec_Region_Global fl.final.regions) j).offset <= UInt64.t'int offset'0
+        /\ UInt64.t'int offset'0 + align_up_l (UInt32.t'int size'0)
+        <= UInt64.t'int (Seq.get (view_Vec_Region_Global fl.final.regions) j).offset
+        + UInt64.t'int (Seq.get (view_Vec_Region_Global fl.final.regions) j).size))
+    /\ ([@stop_split] [@expl:fl_deallocate ensures #10] [%#slib'91] forall j: int. dealloc_pre fl.current (UInt64.t'int offset'0) (align_up_l (UInt32.t'int size'0))
+          /\ 0 <= j
+          /\ j < Seq.length (view_Vec_Region_Global fl.current.regions)
+          /\ UInt64.t'int (Seq.get (view_Vec_Region_Global fl.current.regions) j).offset
+            + UInt64.t'int (Seq.get (view_Vec_Region_Global fl.current.regions) j).size
+          = UInt64.t'int offset'0
+        -> covered (view_Vec_Region_Global fl.final.regions) (UInt64.t'int (Seq.get (view_Vec_Region_Global fl.current.regions) j).offset) (UInt64.t'int offset'0
+        + align_up_l (UInt32.t'int size'0)))
+    /\ ([@stop_split] [@expl:fl_deallocate ensures #11] [%#slib'92] forall j: int. dealloc_pre fl.current (UInt64.t'int offset'0) (align_up_l (UInt32.t'int size'0))
+          /\ 0 <= j
+          /\ j < Seq.length (view_Vec_Region_Global fl.current.regions)
+          /\ UInt64.t'int (Seq.get (view_Vec_Region_Global fl.current.regions) j).offset
+          = UInt64.t'int offset'0 + align_up_l (UInt32.t'int size'0)
+        -> covered (view_Vec_Region_Global fl.final.regions) (UInt64.t'int offset'0) (UInt64.t'int (Seq.get (view_Vec_Region_Global fl.current.regions) j).offset
+        + UInt64.t'int (Seq.get (view_Vec_Region_Global fl.current.regions) j).size))
+    /\ ([@stop_split] [@expl:fl_deallocate ensures #12] [%#slib'93] dealloc_pre fl.current (UInt64.t'int offset'0) (align_up_l (UInt32.t'int size'0))
+    -> no_adj (view_Vec_Region_Global fl.final.regions))}
+    (! return {result}) ]

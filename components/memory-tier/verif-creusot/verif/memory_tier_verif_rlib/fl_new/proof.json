@@ -1,0 +1,10 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_fl_new": { "prover": "alt-ergo", "time": 0.076 },
+      "vc_new_Region": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_push_Region": { "prover": "alt-ergo", "time": 0.021 }
+    }
+  }
+}

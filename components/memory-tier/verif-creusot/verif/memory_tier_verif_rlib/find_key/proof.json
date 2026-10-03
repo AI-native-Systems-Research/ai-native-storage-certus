@@ -1,0 +1,10 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_find_key": { "prover": "alt-ergo", "time": 0.036 },
+      "vc_index_Vec_Region_Global": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_len_Region": { "prover": "alt-ergo", "time": 0.021 }
+    }
+  }
+}

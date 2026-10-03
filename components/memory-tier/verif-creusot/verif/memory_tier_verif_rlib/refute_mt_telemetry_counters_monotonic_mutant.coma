@@ -1,0 +1,93 @@
+(* #"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5430 0 5430 101 *)
+
+let%span slib = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5431 24 5431 39
+let%span slib'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5432 17 5432 18
+let%span slib'1 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5432 4 5432 19
+let%span slib'2 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5433 24 5433 39
+let%span slib'3 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5427 11 5427 36
+let%span slib'4 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5428 10 5428 30
+let%span slib'5 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5429 10 5429 32
+let%span slib'6 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5405 10 5405 84
+let%span slib'7 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5373 10 5375 66
+let%span slib'8 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5376 10 5377 99
+let%span slib'9 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5378 10 5379 101
+let%span slib'10 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5393 16 5393 64
+
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use creusot.int.UInt8
+use creusot.prelude.Any
+use int.Int
+
+type t_TelemetryModel = { evictions: UInt64.t; write_lock_contentions: UInt64.t; read_lock_contentions: UInt64.t }
+
+type tup3_u64_u64_u64 = { f0: UInt64.t; f1: UInt64.t; f2: UInt64.t }
+
+let tel_snapshot (t: t_TelemetryModel) (return (x: tup3_u64_u64_u64)) = any
+  [ return (result: tup3_u64_u64_u64) -> {[@stop_split] [@expl:tel_snapshot ensures] [%#slib'6] result
+    = { f0 = t.evictions; f1 = t.write_lock_contentions; f2 = t.read_lock_contentions }}
+    (! return {result}) ]
+
+function fetch_l [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5392 0 5392 29] (c: int) : int
+ = [%#slib'10] if c < 18446744073709551615 then c + 1 else 0
+
+let tel_event (t: MutBorrow.t t_TelemetryModel) (which: UInt8.t) (return (x: ())) = any
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:tel_event ensures] ([@stop_split] [@expl:tel_event ensures #0] [%#slib'7] UInt8.t'int which = 0
+      -> UInt64.t'int t.final.evictions = fetch_l (UInt64.t'int t.current.evictions)
+      /\ t.final.write_lock_contentions = t.current.write_lock_contentions
+      /\ t.final.read_lock_contentions = t.current.read_lock_contentions)
+    /\ ([@stop_split] [@expl:tel_event ensures #1] [%#slib'8] UInt8.t'int which = 1
+      -> UInt64.t'int t.final.write_lock_contentions = fetch_l (UInt64.t'int t.current.write_lock_contentions)
+      /\ t.final.evictions = t.current.evictions /\ t.final.read_lock_contentions = t.current.read_lock_contentions)
+    /\ ([@stop_split] [@expl:tel_event ensures #2] [%#slib'9] UInt8.t'int which >= 2
+    -> UInt64.t'int t.final.read_lock_contentions = fetch_l (UInt64.t'int t.current.read_lock_contentions)
+    /\ t.final.evictions = t.current.evictions /\ t.final.write_lock_contentions = t.current.write_lock_contentions)}
+    (! return {result}) ]
+
+predicate resolve_refmut_TelemetryModel [@inline:trivial] (_1: MutBorrow.t t_TelemetryModel) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_TelemetryModel
+
+type tup4_u64_u64_u64_u64 = { f0'0: UInt64.t; f1'0: UInt64.t; f2'0: UInt64.t; f3'0: UInt64.t }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let refute_mt_telemetry_counters_monotonic__mutant [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5430 0 5430 101]
+  (t: MutBorrow.t t_TelemetryModel) (return (x: tup4_u64_u64_u64_u64)) =
+{[@stop_split] [@expl:refute_mt_telemetry_counters_monotonic__mutant requires] [%#slib'3] UInt64.t'int t.current.evictions
+  = UInt64.t'int const_MAX}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = tel_snapshot [%#slib] {t.current} (fun (_x: tup3_u64_u64_u64) -> [ &_9 <- _x ] s1)
+    | s1 = [ &e0 <- _9.f0 ] s2
+    | s2 = [ &w0 <- _9.f1 ] s3
+    | s3 = MutBorrow.borrow_final <t_TelemetryModel> {t.current} {MutBorrow.get_id t}
+        (fun (_bor: MutBorrow.t t_TelemetryModel) -> [ &_12 <- _bor ] [ &t <- { t with current = _bor.final } ] s4)
+    | s4 = tel_event [%#slib'1] {_12} {[%#slib'0] (0: UInt8.t)} (fun (_x: ()) -> [ &_11 <- _x ] s5)
+    | s5 = -{resolve_refmut_TelemetryModel t}- s6
+    | s6 = tel_snapshot [%#slib'2] {t.current} (fun (_x: tup3_u64_u64_u64) -> [ &_16 <- _x ] s7)
+    | s7 = [ &e1 <- _16.f0 ] s8
+    | s8 = [ &w1 <- _16.f1 ] s9
+    | s9 = [ &_ret <- { f0'0 = e0; f1'0 = e1; f2'0 = w0; f3'0 = w1 } ] s10
+    | s10 = return {_ret} ] ]
+  [ & _ret: tup4_u64_u64_u64_u64 = Any.any_l ()
+  | & t: MutBorrow.t t_TelemetryModel = t
+  | & e0: UInt64.t = Any.any_l ()
+  | & w0: UInt64.t = Any.any_l ()
+  | & _9: tup3_u64_u64_u64 = Any.any_l ()
+  | & _11: () = Any.any_l ()
+  | & _12: MutBorrow.t t_TelemetryModel = Any.any_l ()
+  | & e1: UInt64.t = Any.any_l ()
+  | & w1: UInt64.t = Any.any_l ()
+  | & _16: tup3_u64_u64_u64 = Any.any_l () ])
+  [ return (result: tup4_u64_u64_u64_u64) ->
+  {[@stop_split] [@expl:refute_mt_telemetry_counters_monotonic__mutant ensures] ([@stop_split] [@expl:refute_mt_telemetry_counters_monotonic__mutant ensures #0] [%#slib'4] result.f3'0
+      = result.f2'0)
+    /\ ([@stop_split] [@expl:refute_mt_telemetry_counters_monotonic__mutant ensures #1] [%#slib'5] UInt64.t'int result.f1'0
+    >= UInt64.t'int result.f0'0)}
+    (! return {result}) ]

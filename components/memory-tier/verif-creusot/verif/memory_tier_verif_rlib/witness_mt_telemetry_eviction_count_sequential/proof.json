@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_mt_evict_next_tel": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_witness_mt_telemetry_eviction_count_sequential": {
+        "prover": "alt-ergo",
+        "time": 0.054
+      }
+    }
+  }
+}

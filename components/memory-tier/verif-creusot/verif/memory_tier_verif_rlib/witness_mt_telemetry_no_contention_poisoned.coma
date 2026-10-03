@@ -1,0 +1,89 @@
+(* #"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 10203 0 10203 97 *)
+
+let%span slib = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 10204 24 10204 25
+let%span slib'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 10204 4 10204 26
+let%span slib'1 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 10200 11 10200 53
+let%span slib'2 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 10201 11 10201 41
+let%span slib'3 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 10202 10 10202 43
+let%span slib'4 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9518 11 9518 33
+let%span slib'5 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9519 10 9521 66
+let%span slib'6 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9522 10 9523 80
+let%span slib'7 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9524 10 9524 92
+let%span slib'8 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9525 10 9526 78
+let%span slib'9 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9480 16 9480 59
+let%span slib'10 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5393 16 5393 64
+
+use creusot.prelude.MutBorrow
+use creusot.int.UInt64
+use creusot.int.UInt8
+use creusot.prelude.Any
+use int.Int
+
+type t_PoolLockModel = { readers: UInt64.t; writer: bool; poisoned: bool }
+
+type t_TelemetryModel = { evictions: UInt64.t; write_lock_contentions: UInt64.t; read_lock_contentions: UInt64.t }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+predicate lk_free [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9479 0 9479 40] (l: t_PoolLockModel) =
+  [%#slib'9] UInt64.t'int l.readers = 0 /\ not l.writer /\ not l.poisoned
+
+function fetch_l [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5392 0 5392 29] (c: int) : int
+ = [%#slib'10] if c < 18446744073709551615 then c + 1 else 0
+
+let tel_pool_site (l: MutBorrow.t t_PoolLockModel) (t: MutBorrow.t t_TelemetryModel) (kind: UInt8.t) (return (x: ())) =
+{[@stop_split] [@expl:tel_pool_site requires] [%#slib'4] UInt64.t'int l.current.readers < UInt64.t'int const_MAX}
+  any
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:tel_pool_site ensures] ([@stop_split] [@expl:tel_pool_site ensures #0] [%#slib'5] lk_free l.current
+      -> lk_free l.final
+      /\ t.final.write_lock_contentions = t.current.write_lock_contentions
+      /\ t.final.read_lock_contentions = t.current.read_lock_contentions)
+    /\ ([@stop_split] [@expl:tel_pool_site ensures #1] [%#slib'6] (UInt8.t'int kind = 0 \/ UInt8.t'int kind = 4)
+        /\ not lk_free l.current
+      -> UInt64.t'int t.final.write_lock_contentions = fetch_l (UInt64.t'int t.current.write_lock_contentions))
+    /\ ([@stop_split] [@expl:tel_pool_site ensures #2] [%#slib'7] UInt8.t'int kind = 0 \/ UInt8.t'int kind = 4
+      -> t.final.read_lock_contentions = t.current.read_lock_contentions)
+    /\ ([@stop_split] [@expl:tel_pool_site ensures #3] [%#slib'8] UInt8.t'int kind = 1
+      /\ (l.current.writer \/ l.current.poisoned)
+    -> UInt64.t'int t.final.read_lock_contentions = fetch_l (UInt64.t'int t.current.read_lock_contentions))}
+    (! return {result}) ]
+
+predicate resolve_refmut_TelemetryModel [@inline:trivial] (_1: MutBorrow.t t_TelemetryModel) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_TelemetryModel
+
+predicate resolve_refmut_PoolLockModel [@inline:trivial] (_1: MutBorrow.t t_PoolLockModel) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_PoolLockModel
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let witness_mt_telemetry_no_contention_poisoned [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 10203 0 10203 97]
+  (l: MutBorrow.t t_PoolLockModel) (t: MutBorrow.t t_TelemetryModel) (return (x: ())) =
+{[@stop_split] [@expl:witness_mt_telemetry_no_contention_poisoned requires] ([@stop_split] [@expl:witness_mt_telemetry_no_contention_poisoned requires #0] [%#slib'1] not l.current.writer
+    /\ UInt64.t'int l.current.readers = 0 /\ l.current.poisoned)
+  /\ ([@stop_split] [@expl:witness_mt_telemetry_no_contention_poisoned requires #1] [%#slib'2] UInt64.t'int t.current.write_lock_contentions
+  = 0)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = MutBorrow.borrow_final <t_PoolLockModel> {l.current} {MutBorrow.get_id l}
+        (fun (_bor: MutBorrow.t t_PoolLockModel) -> [ &_12 <- _bor ] [ &l <- { l with current = _bor.final } ] s1)
+    | s1 = MutBorrow.borrow_final <t_TelemetryModel> {t.current} {MutBorrow.get_id t}
+        (fun (_bor: MutBorrow.t t_TelemetryModel) -> [ &_13 <- _bor ] [ &t <- { t with current = _bor.final } ] s2)
+    | s2 = tel_pool_site [%#slib'0] {_12} {_13} {[%#slib] (0: UInt8.t)} (fun (_x: ()) -> [ &_11 <- _x ] s3)
+    | s3 = -{resolve_refmut_TelemetryModel t}- s4
+    | s4 = -{resolve_refmut_PoolLockModel l}- s5
+    | s5 = return {_ret} ] ]
+  [ & _ret: () = Any.any_l ()
+  | & l: MutBorrow.t t_PoolLockModel = l
+  | & t: MutBorrow.t t_TelemetryModel = t
+  | & _11: () = Any.any_l ()
+  | & _12: MutBorrow.t t_PoolLockModel = Any.any_l ()
+  | & _13: MutBorrow.t t_TelemetryModel = Any.any_l () ])
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:witness_mt_telemetry_no_contention_poisoned ensures] [%#slib'3] UInt64.t'int t.final.write_lock_contentions
+    = 1}
+    (! return {result}) ]

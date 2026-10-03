@@ -1,0 +1,54 @@
+(* #"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4399 0 4399 40 *)
+
+let%span slib = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4397 10 4397 17
+let%span slib'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4398 10 4398 33
+let%span slib'1 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 929 10 929 17
+let%span slib'2 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 932 8 933 91
+let%span slib'3 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 34 16 34 46
+let%span swell_founded = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use int.ComputerDivision
+use int.Int
+
+type t_SlotModel = { key: UInt64.t; offset: UInt64.t; size: UInt32.t; handle: UInt64.t }
+
+function align_up_l [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 33 0 33 35] (size'0: int) : int
+ = [%#slib'3] (ComputerDivision.div (size'0 - 1) 4096 + 1) * 4096
+
+function slot_sum [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 930 0 930 41] (s: Seq.seq t_SlotModel) : int
+
+axiom slot_sum_def: forall s: Seq.seq t_SlotModel [slot_sum s]. slot_sum s
+    = ([%#slib'2] if Seq.length s <= 0 then
+      0
+    else
+      slot_sum (Seq.([..]) s 0 (Seq.length s - 1)) + align_up_l (UInt32.t'int (Seq.get s (Seq.length s - 1)).size)
+    )
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant s : Seq.seq t_SlotModel
+
+function lem_ss_aligned [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4399 0 4399 40] (s: Seq.seq t_SlotModel) : ()
+
+goal vc_lem_ss_aligned: if Seq.length s <= 0 then
+    [@stop_split] [@expl:lem_ss_aligned ensures] [%#slib'0] ComputerDivision.mod (slot_sum s) 4096 = 0
+  else
+    ([@expl:variant decreases] well_founded_relation_Int ([%#slib] Seq.length s) ([%#slib] Seq.length (Seq.([..]) s 0 (Seq.length s
+      - 1))))
+    /\ (([@stop_split] [@expl:lem_ss_aligned ensures] [%#slib'0] ComputerDivision.mod (slot_sum (Seq.([..]) s 0 (Seq.length s
+        - 1))) 4096
+      = 0)
+    -> (let _ = lem_ss_aligned (Seq.([..]) s 0 (Seq.length s
+    - 1)) in ComputerDivision.mod (align_up_l (UInt32.t'int (Seq.get s (Seq.length s - 1)).size)) 4096 = 0
+    && ([@stop_split] [@expl:lem_ss_aligned ensures] [%#slib'0] ComputerDivision.mod (slot_sum s) 4096 = 0)))
+  

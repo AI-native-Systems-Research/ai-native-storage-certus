@@ -1,0 +1,50 @@
+(* #"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 123 0 123 52 *)
+
+let%span slib = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 121 10 121 17
+let%span slib'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 122 10 122 60
+let%span slib'1 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 111 10 111 17
+let%span slib'2 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 114 8 115 79
+let%span swell_founded = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+
+use creusot.int.UInt64
+use seq.Seq
+use int.Int
+
+type t_Region = { offset: UInt64.t; size: UInt64.t }
+
+function free_sum [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 112 0 112 38] (r: Seq.seq t_Region) : int
+
+axiom free_sum_def: forall r: Seq.seq t_Region [free_sum r]. free_sum r
+    = ([%#slib'2] if Seq.length r <= 0 then
+      0
+    else
+      free_sum (Seq.([..]) r 0 (Seq.length r - 1)) + UInt64.t'int (Seq.get r (Seq.length r - 1)).size
+    )
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant a : Seq.seq t_Region
+
+constant b : Seq.seq t_Region
+
+function lem_fs_concat [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 123 0 123 52] (a: Seq.seq t_Region) (b: Seq.seq t_Region) : ()
+
+goal vc_lem_fs_concat: if Seq.length b <= 0 then
+    Seq.(++) a b = a
+    && ([@stop_split] [@expl:lem_fs_concat ensures] [%#slib'0] free_sum (Seq.(++) a b) = free_sum a + free_sum b)
+  else
+    Seq.([..]) (Seq.(++) a b) 0 (Seq.length a + Seq.length b - 1) = Seq.(++) a (Seq.([..]) b 0 (Seq.length b - 1))
+    && ([@expl:variant decreases] well_founded_relation_Int ([%#slib] Seq.length b) ([%#slib] Seq.length (Seq.([..]) b 0 (Seq.length b
+      - 1))))
+    /\ (([@stop_split] [@expl:lem_fs_concat ensures] [%#slib'0] free_sum (Seq.(++) a (Seq.([..]) b 0 (Seq.length b
+        - 1)))
+      = free_sum a + free_sum (Seq.([..]) b 0 (Seq.length b - 1)))
+    -> ([@stop_split] [@expl:lem_fs_concat ensures] [%#slib'0] free_sum (Seq.(++) a b) = free_sum a + free_sum b))
+  

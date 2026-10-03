@@ -1,0 +1,14 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_mt_initialize_mmap": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_mt_initialize_spdk": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_mt_is_dma_capable": { "prover": "alt-ergo", "time": 0.032 },
+      "vc_verify_mt_is_dma_capable_post_iff_spdk": {
+        "prover": "cvc5",
+        "time": 0.098
+      }
+    }
+  }
+}

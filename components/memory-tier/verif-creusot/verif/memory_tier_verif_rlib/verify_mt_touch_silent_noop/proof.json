@@ -1,0 +1,11 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lk_touch": { "prover": "alt-ergo", "time": 0.032 },
+      "vc_mt_touch": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_slots_contains": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_verify_mt_touch_silent_noop": { "prover": "cvc5", "time": 0.191 }
+    }
+  }
+}

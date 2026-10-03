@@ -1,0 +1,45 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_cs_insert": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.027 },
+              { "prover": "alt-ergo", "time": 0.079 },
+              { "prover": "alt-ergo", "time": 0.043 },
+              { "prover": "alt-ergo", "time": 0.048 },
+              { "prover": "alt-ergo", "time": 0.047 },
+              { "prover": "z3", "time": 0.052 },
+              {
+                "tactic": "split_vc",
+                "children": [
+                  { "prover": "cvc5", "time": 0.381 },
+                  { "prover": "z3", "time": 0.064 }
+                ]
+              },
+              { "prover": "cvc5", "time": 0.418 },
+              { "prover": "z3", "time": 0.039 },
+              { "prover": "alt-ergo", "time": 0.123 },
+              { "prover": "alt-ergo", "time": 0.119 },
+              { "prover": "cvc5", "time": 0.301 },
+              { "prover": "cvc5", "time": 0.518 },
+              { "prover": "cvc4", "time": 0.717 },
+              { "prover": "alt-ergo", "time": 0.156 },
+              { "prover": "alt-ergo", "time": 0.042 },
+              { "prover": "alt-ergo", "time": 0.041 },
+              { "prover": "alt-ergo", "time": 0.036 }
+            ]
+          }
+        ]
+      },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_fl_allocate": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_push_SlotModel": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_slots_contains": { "prover": "alt-ergo", "time": 0.025 }
+    }
+  }
+}

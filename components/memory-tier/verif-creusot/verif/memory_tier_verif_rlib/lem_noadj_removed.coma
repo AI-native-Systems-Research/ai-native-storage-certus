@@ -1,0 +1,64 @@
+(* #"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 256 0 256 48 *)
+
+let%span slib = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 254 11 254 32
+let%span slib'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 255 10 255 44
+let%span slib'1 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 248 8 248 97
+let%span sseq = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/logic/seq.rs" 355 20 355 57
+let%span sseq'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/logic/seq.rs" 509 8 509 38
+let%span sseq'1 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/logic/seq.rs" 500 8 500 49
+
+use creusot.int.UInt64
+use seq.Seq
+use int.Int
+
+type t_Region = { offset: UInt64.t; size: UInt64.t }
+
+predicate no_adj [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 246 0 246 37] (r: Seq.seq t_Region) =
+  [%#slib'1] forall i: int. 0 <= i /\ i + 1 < Seq.length r
+    -> UInt64.t'int (Seq.get r i).offset + UInt64.t'int (Seq.get r i).size < UInt64.t'int (Seq.get r (i + 1)).offset
+
+type t_RangeTo_Int = { end': int }
+
+function index_Seq_Region [@inline:trivial] (self: Seq.seq t_Region) (range: t_RangeTo_Int) : Seq.seq t_Region =
+  [%#sseq'0] Seq.([..]) self 0 range.end'
+
+meta "rewrite_def" function index_Seq_Region
+
+type t_RangeFrom_Int = { start: int }
+
+function index_Seq_Region'0 [@inline:trivial] (self: Seq.seq t_Region) (range: t_RangeFrom_Int) : Seq.seq t_Region =
+  [%#sseq'1] Seq.([..]) self range.start (Seq.length self)
+
+meta "rewrite_def" function index_Seq_Region'0
+
+function removed_Region (self: Seq.seq t_Region) (index: int) : Seq.seq t_Region =
+  [%#sseq] Seq.(++) (index_Seq_Region self { end' = index }) (index_Seq_Region'0 self { start = index + 1 })
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant r : Seq.seq t_Region
+
+constant i : int
+
+function lem_noadj_removed [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 256 0 256 48] (r: Seq.seq t_Region) (i: int) : ()
+
+goal vc_lem_noadj_removed: ([%#slib] 0 <= i /\ i < Seq.length r)
+  -> (forall j: int. 0 <= j /\ j < i -> Seq.get (removed_Region r i) j = Seq.get r j)
+  && (forall j: int. i <= j /\ j < Seq.length r - 1 -> Seq.get (removed_Region r i) j = Seq.get r (j + 1))
+  && (if no_adj r then
+    if i > 0 then
+      if i + 1 < Seq.length r then
+        UInt64.t'int (Seq.get r (i - 1)).offset + UInt64.t'int (Seq.get r (i - 1)).size
+          < UInt64.t'int (Seq.get r (i + 1)).offset
+        && ([@stop_split] [@expl:lem_noadj_removed ensures] [%#slib'0] no_adj r -> no_adj (removed_Region r i))
+      else
+        [@stop_split] [@expl:lem_noadj_removed ensures] [%#slib'0] no_adj r -> no_adj (removed_Region r i)
+    
+    else
+      [@stop_split] [@expl:lem_noadj_removed ensures] [%#slib'0] no_adj r -> no_adj (removed_Region r i)
+  
+  else
+    [@stop_split] [@expl:lem_noadj_removed ensures] [%#slib'0] no_adj r -> no_adj (removed_Region r i)
+  )

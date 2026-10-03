@@ -1,0 +1,18 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_mt_is_dma_capable": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_mt_run": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_verify_mt_is_dma_capable_frame_stable__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [ { "prover": "alt-ergo", "time": 0.036 }, null ]
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lk_insert": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.02 },
+          { "prover": "alt-ergo", "time": 0.022 },
+          { "prover": "alt-ergo", "time": 0.07 },
+          { "prover": "alt-ergo", "time": 0.069 },
+          { "prover": "alt-ergo", "time": 0.156 }
+        ]
+      },
+      "vc_new_LkEv": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_push_LkEv": { "prover": "alt-ergo", "time": 0.023 }
+    }
+  }
+}

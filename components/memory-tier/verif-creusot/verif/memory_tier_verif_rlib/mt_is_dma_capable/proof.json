@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_mt_is_dma_capable": { "prover": "alt-ergo", "time": 0.031 }
+    }
+  }
+}

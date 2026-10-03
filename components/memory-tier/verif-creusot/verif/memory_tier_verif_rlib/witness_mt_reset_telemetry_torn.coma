@@ -1,0 +1,55 @@
+(* #"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7918 0 7918 81 *)
+
+let%span slib = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7919 18 7919 19
+let%span slib'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7921 31 7921 32
+let%span slib'1 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7922 30 7922 31
+let%span slib'2 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7915 11 7915 40
+let%span slib'3 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7916 10 7916 41
+let%span slib'4 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7917 10 7917 40
+let%span slib'5 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 6968 16 6968 80
+
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_TelemetryModel = { evictions: UInt64.t; write_lock_contentions: UInt64.t; read_lock_contentions: UInt64.t }
+
+type tup3_u64_u64_u64 = { f0: UInt64.t; f1: UInt64.t; f2: UInt64.t }
+
+predicate resolve_refmut_TelemetryModel [@inline:trivial] (_1: MutBorrow.t t_TelemetryModel) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_TelemetryModel
+
+function trip [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 6967 0 6967 49] (t: t_TelemetryModel) : tup3_u64_u64_u64
+ = [%#slib'5] { f0 = t.evictions; f1 = t.write_lock_contentions; f2 = t.read_lock_contentions }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let witness_mt_reset_telemetry_torn [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7918 0 7918 81]
+  (t: MutBorrow.t t_TelemetryModel) (return (x: tup3_u64_u64_u64)) =
+{[@stop_split] [@expl:witness_mt_reset_telemetry_torn requires] [%#slib'2] UInt64.t'int t.current.write_lock_contentions
+  > 0}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &t <- { t with current = { t.current with evictions = ([%#slib] (0: UInt64.t)) } } ] s1
+    | s1 = [ &s <- { f0 = t.current.evictions;
+                     f1 = t.current.write_lock_contentions;
+                     f2 = t.current.read_lock_contentions } ] s2
+    | s2 = [ &t <- { t with current = { t.current with write_lock_contentions = ([%#slib'0] (0: UInt64.t)) } } ] s3
+    | s3 = [ &t <- { t with current = { t.current with read_lock_contentions = ([%#slib'1] (0: UInt64.t)) } } ] s4
+    | s4 = -{resolve_refmut_TelemetryModel t}- s5
+    | s5 = [ &_ret <- s ] s6
+    | s6 = return {_ret} ] ]
+  [ & _ret: tup3_u64_u64_u64 = Any.any_l ()
+  | & t: MutBorrow.t t_TelemetryModel = t
+  | & s: tup3_u64_u64_u64 = Any.any_l () ])
+  [ return (result: tup3_u64_u64_u64) ->
+  {[@stop_split] [@expl:witness_mt_reset_telemetry_torn ensures] ([@stop_split] [@expl:witness_mt_reset_telemetry_torn ensures #0] [%#slib'3] UInt64.t'int result.f0
+        = 0
+      /\ UInt64.t'int result.f1 > 0)
+    /\ ([@stop_split] [@expl:witness_mt_reset_telemetry_torn ensures #1] [%#slib'4] trip t.final
+    = { f0 = (0: UInt64.t); f1 = (0: UInt64.t); f2 = (0: UInt64.t) })}
+    (! return {result}) ]

@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_tel_pool_site": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_witness_mt_telemetry_no_contention_poisoned": {
+        "prover": "alt-ergo",
+        "time": 0.031
+      }
+    }
+  }
+}

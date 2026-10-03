@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_mt_initialize_mmap": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_verify_mt_init_post_numa_fallback": {
+        "prover": "cvc5",
+        "time": 0.16
+      }
+    }
+  }
+}

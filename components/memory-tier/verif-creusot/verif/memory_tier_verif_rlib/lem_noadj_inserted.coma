@@ -1,0 +1,46 @@
+(* #"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 275 0 275 67 *)
+
+let%span slib = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 268 11 268 61
+let%span slib'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 269 11 269 60
+let%span slib'1 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 270 11 270 71
+let%span slib'2 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 271 11 271 20
+let%span slib'3 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 272 11 272 71
+let%span slib'4 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 273 11 273 71
+let%span slib'5 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 274 10 274 21
+let%span slib'6 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 248 8 248 97
+
+use creusot.int.UInt64
+use seq.Seq
+use int.Int
+
+type t_Region = { offset: UInt64.t; size: UInt64.t }
+
+predicate no_adj [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 246 0 246 37] (r: Seq.seq t_Region) =
+  [%#slib'6] forall i: int. 0 <= i /\ i + 1 < Seq.length r
+    -> UInt64.t'int (Seq.get r i).offset + UInt64.t'int (Seq.get r i).size < UInt64.t'int (Seq.get r (i + 1)).offset
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant r : Seq.seq t_Region
+
+constant fin : Seq.seq t_Region
+
+constant q : int
+
+function lem_noadj_inserted [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 275 0 275 67] (r: Seq.seq t_Region) (fin: Seq.seq t_Region) (q: int) : ()
+
+goal vc_lem_noadj_inserted: ([%#slib] 0 <= q /\ q <= Seq.length r /\ Seq.length fin = Seq.length r + 1)
+  -> ([%#slib'0] forall j: int. 0 <= j /\ j < q -> Seq.get fin j = Seq.get r j)
+  -> ([%#slib'1] forall j: int. q < j /\ j < Seq.length fin -> Seq.get fin j = Seq.get r (j - 1))
+  -> ([%#slib'2] no_adj r)
+  -> ([%#slib'3] q > 0
+    -> UInt64.t'int (Seq.get r (q - 1)).offset + UInt64.t'int (Seq.get r (q - 1)).size
+    < UInt64.t'int (Seq.get fin q).offset)
+  -> ([%#slib'4] q < Seq.length r
+    -> UInt64.t'int (Seq.get fin q).offset + UInt64.t'int (Seq.get fin q).size < UInt64.t'int (Seq.get r q).offset)
+  -> (forall i: int. 0 <= i /\ i + 1 < q -> Seq.get fin i = Seq.get r i /\ Seq.get fin (i + 1) = Seq.get r (i + 1))
+  && (forall i: int. q < i /\ i + 1 < Seq.length fin
+      -> Seq.get fin i = Seq.get r (i - 1) /\ Seq.get fin (i + 1) = Seq.get r i)
+  && ([@stop_split] [@expl:lem_noadj_inserted ensures] [%#slib'5] no_adj fin)

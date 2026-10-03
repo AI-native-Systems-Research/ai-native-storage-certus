@@ -1,0 +1,14 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_fl_allocate": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_fl_new": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_len_Region": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_refute_mt_freelist_new_post": {
+        "prover": "alt-ergo",
+        "time": 0.08
+      }
+    }
+  }
+}

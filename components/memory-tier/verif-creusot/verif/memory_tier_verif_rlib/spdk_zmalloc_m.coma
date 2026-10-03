@@ -1,0 +1,59 @@
+(* #"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7256 0 7256 83 *)
+
+let%span slib = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7257 18 7257 26
+let%span slib'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7258 20 7258 21
+let%span slib'1 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7258 8 7258 21
+let%span slib'2 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7253 10 7253 87
+let%span slib'3 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7254 10 7254 56
+let%span slib'4 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7255 10 7255 21
+
+use creusot.int.UInt64
+use creusot.int.Int32
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+type t_ZmLog = { calls: UInt64.t; numa_id: Int32.t; size: UInt64.t }
+
+predicate resolve_refmut_ZmLog [@inline:trivial] (_1: MutBorrow.t t_ZmLog) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_ZmLog
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let spdk_zmalloc_m [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7256 0 7256 83]
+  (size'0: UInt64.t) (numa_id'0: Int32.t) (r: UInt64.t) (zl: MutBorrow.t t_ZmLog) (return (x: UInt64.t)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_14 <- UInt64.lt zl.current.calls ([%#slib] const_MAX) ] s1
+    | s1 = any [ br0 -> {_14 = false} (! bb3) | br1 -> {_14} (! bb1) ] ]
+  | bb1 = s0
+    [ s0 = UInt64.add [%#slib'1] {zl.current.calls} {[%#slib'0] (1: UInt64.t)}
+        (fun (_x: UInt64.t) -> [ &zl <- { zl with current = { zl.current with calls = _x } } ] s1)
+    | s1 = bb3 ]
+  | bb3 = s0
+    [ s0 = [ &zl <- { zl with current = { zl.current with numa_id = numa_id'0 } } ] s1
+    | s1 = [ &zl <- { zl with current = { zl.current with size = size'0 } } ] s2
+    | s2 = -{resolve_refmut_ZmLog zl}- s3
+    | s3 = [ &_ret <- r ] s4
+    | s4 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l ()
+  | & size'0: UInt64.t = size'0
+  | & numa_id'0: Int32.t = numa_id'0
+  | & r: UInt64.t = r
+  | & zl: MutBorrow.t t_ZmLog = zl
+  | & _14: bool = Any.any_l () ])
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:spdk_zmalloc_m ensures] ([@stop_split] [@expl:spdk_zmalloc_m ensures #0] [%#slib'2] UInt64.t'int zl.final.calls
+      = (if UInt64.t'int zl.current.calls < UInt64.t'int const_MAX then
+        UInt64.t'int zl.current.calls + 1
+      else
+        UInt64.t'int zl.current.calls
+      ))
+    /\ ([@stop_split] [@expl:spdk_zmalloc_m ensures #1] [%#slib'3] zl.final.numa_id = numa_id'0
+      /\ zl.final.size = size'0)
+    /\ ([@stop_split] [@expl:spdk_zmalloc_m ensures #2] [%#slib'4] result = r)}
+    (! return {result}) ]

@@ -1,0 +1,20 @@
+(* #"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4430 0 4430 32 *)
+
+let%span slib = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4428 11 4428 44
+let%span slib'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4429 10 4429 27
+
+use int.ComputerDivision
+use int.Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant x : int
+
+constant c : int
+
+function lem_floor [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4430 0 4430 32] (x: int) (c: int) : ()
+
+goal vc_lem_floor: ([%#slib] ComputerDivision.mod x 4096 = 0 /\ 0 <= x /\ x <= c)
+  -> ([@stop_split] [@expl:lem_floor ensures] [%#slib'0] x <= c - ComputerDivision.mod c 4096)

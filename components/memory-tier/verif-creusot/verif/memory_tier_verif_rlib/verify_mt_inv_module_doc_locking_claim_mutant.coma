@@ -1,0 +1,65 @@
+(* #"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4180 0 4180 93 *)
+
+let%span slib = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4181 4 4181 25
+let%span slib'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4177 10 4177 32
+let%span slib'1 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4178 10 4179 44
+let%span slib'2 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4030 10 4030 66
+let%span slib'3 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4032 10 4033 81
+let%span slib'4 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4011 16 4011 80
+let%span slib'5 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4023 8 4025 74
+let%span svec = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+
+use seq.Seq
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_LkEv_Global
+
+type t_LkEv = StateRead | PoolRead | PoolWrite | PoolRelease | PolicyRefresh | PolicyOther
+
+predicate no_pool_write [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4010 0 4010 42] (t: Seq.seq t_LkEv) =
+  [%#slib'4] forall i: int. 0 <= i /\ i < Seq.length t -> Seq.get t i <> PoolWrite
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_LkEv_Global (self: t_Vec_LkEv_Global) : Seq.seq t_LkEv
+
+axiom view_Vec_LkEv_Global_spec:
+  forall self: t_Vec_LkEv_Global [view_Vec_LkEv_Global self]. [%#svec] Seq.length (view_Vec_LkEv_Global self)
+    <= UInt64.t'int const_MAX
+
+predicate refresh_after_release [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4021 0 4021 50] (t: Seq.seq t_LkEv) =
+  [%#slib'5] forall i: int, j: int. 0 <= j
+      /\ j < i /\ i < Seq.length t /\ Seq.get t i = PolicyRefresh /\ (Seq.get t j = PoolRead \/ Seq.get t j = PoolWrite)
+    -> (exists m: int. j < m /\ m < i /\ Seq.get t m = PoolRelease)
+
+let lk_get (init: bool) (present: bool) (return (x: t_Vec_LkEv_Global)) = any
+  [ return (result: t_Vec_LkEv_Global) ->
+  {[@stop_split] [@expl:lk_get ensures] ([@stop_split] [@expl:lk_get ensures #0] [%#slib'2] no_pool_write (view_Vec_LkEv_Global result)
+      /\ refresh_after_release (view_Vec_LkEv_Global result))
+    /\ ([@stop_split] [@expl:lk_get ensures #1] [%#slib'3] init /\ present
+    -> Seq.length (view_Vec_LkEv_Global result) = 4
+    /\ Seq.get (view_Vec_LkEv_Global result) 0 = StateRead
+    /\ Seq.get (view_Vec_LkEv_Global result) 1 = PoolRead
+    /\ Seq.get (view_Vec_LkEv_Global result) 2 = PoolRelease
+    /\ Seq.get (view_Vec_LkEv_Global result) 3 = PolicyRefresh)}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_mt_inv_module_doc_locking_claim__mutant [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 4180 0 4180 93]
+  (init: bool) (present: bool) (return (x: t_Vec_LkEv_Global)) = (! bb0
+  [ bb0 = s0
+    [ s0 = lk_get [%#slib] {init} {present} (fun (_x: t_Vec_LkEv_Global) -> [ &_ret <- _x ] s1) | s1 = return {_ret} ] ]
+  [ & _ret: t_Vec_LkEv_Global = Any.any_l () | & init: bool = init | & present: bool = present ])
+  [ return (result: t_Vec_LkEv_Global) ->
+  {[@stop_split] [@expl:verify_mt_inv_module_doc_locking_claim__mutant ensures] ([@stop_split] [@expl:verify_mt_inv_module_doc_locking_claim__mutant ensures #0] [%#slib'0] no_pool_write (view_Vec_LkEv_Global result))
+    /\ ([@stop_split] [@expl:verify_mt_inv_module_doc_locking_claim__mutant ensures #1] [%#slib'1] init /\ present
+    -> (exists i: int. 0 <= i
+      /\ i < Seq.length (view_Vec_LkEv_Global result)
+      /\ Seq.get (view_Vec_LkEv_Global result) i = PolicyRefresh
+      /\ not refresh_after_release (view_Vec_LkEv_Global result)))}
+    (! return {result}) ]

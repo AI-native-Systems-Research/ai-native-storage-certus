@@ -1,0 +1,15 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_mt_capacity": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_mt_peek": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_mt_touch": { "prover": "alt-ergo", "time": 0.012 },
+      "vc_mt_used": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_verify_mt_touch_frame": {
+        "tactic": "compute_specified",
+        "children": [ { "prover": "alt-ergo", "time": 0.826 } ]
+      }
+    }
+  }
+}

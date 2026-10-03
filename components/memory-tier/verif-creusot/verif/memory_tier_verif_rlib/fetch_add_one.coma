@@ -1,0 +1,33 @@
+(* #"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5367 0 5367 35 *)
+
+let%span slib = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5368 12 5368 20
+let%span slib'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5368 23 5368 24
+let%span slib'1 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5368 38 5368 39
+let%span slib'2 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5368 34 5368 39
+let%span slib'3 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5365 10 5365 46
+let%span slib'4 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5366 10 5366 42
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let fetch_add_one [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5367 0 5367 35]
+  (c: UInt64.t) (return (x: UInt64.t)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_6 <- c = ([%#slib] const_MAX) ] s1 | s1 = any [ br0 -> {_6 = false} (! bb2) | br1 -> {_6} (! bb1) ] ]
+  | bb1 = s0 [ s0 = [ &_ret <- [%#slib'0] (0: UInt64.t) ] s1 | s1 = return {_ret} ]
+  | bb2 = s0
+    [ s0 = UInt64.add [%#slib'2] {c} {[%#slib'1] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s1)
+    | s1 = return {_ret} ] ] [ & _ret: UInt64.t = Any.any_l () | & c: UInt64.t = c | & _6: bool = Any.any_l () ])
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:fetch_add_one ensures] ([@stop_split] [@expl:fetch_add_one ensures #0] [%#slib'3] UInt64.t'int c
+        < UInt64.t'int const_MAX -> UInt64.t'int result = UInt64.t'int c + 1)
+    /\ ([@stop_split] [@expl:fetch_add_one ensures #1] [%#slib'4] UInt64.t'int c = UInt64.t'int const_MAX
+    -> UInt64.t'int result = 0)}
+    (! return {result}) ]

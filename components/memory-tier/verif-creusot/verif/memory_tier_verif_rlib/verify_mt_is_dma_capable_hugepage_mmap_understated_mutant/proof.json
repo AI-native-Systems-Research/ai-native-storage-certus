@@ -1,0 +1,24 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_mt_initialize_mmap": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_mt_is_dma_capable": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_verify_mt_is_dma_capable_hugepage_mmap_understated__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.038 },
+              {
+                "tactic": "split_vc",
+                "children": [ { "prover": "alt-ergo", "time": 0.044 }, null ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

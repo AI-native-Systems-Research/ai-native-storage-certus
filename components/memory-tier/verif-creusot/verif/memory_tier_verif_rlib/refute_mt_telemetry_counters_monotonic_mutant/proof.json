@@ -1,0 +1,23 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_refute_mt_telemetry_counters_monotonic__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              {
+                "tactic": "split_vc",
+                "children": [ { "prover": "alt-ergo", "time": 0.03 }, null ]
+              }
+            ]
+          }
+        ]
+      },
+      "vc_tel_event": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_tel_snapshot": { "prover": "alt-ergo", "time": 0.023 }
+    }
+  }
+}

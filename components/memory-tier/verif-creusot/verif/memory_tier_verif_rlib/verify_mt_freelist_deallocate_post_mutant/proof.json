@@ -1,0 +1,17 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_fl_deallocate": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_verify_mt_freelist_deallocate_post__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [ { "prover": "alt-ergo", "time": 0.039 }, null ]
+          }
+        ]
+      }
+    }
+  }
+}

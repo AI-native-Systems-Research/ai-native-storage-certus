@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_fl_allocate": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_fl_new": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_witness_mt_freelist_new_post_aligned": {
+        "prover": "cvc5",
+        "time": 0.236
+      }
+    }
+  }
+}

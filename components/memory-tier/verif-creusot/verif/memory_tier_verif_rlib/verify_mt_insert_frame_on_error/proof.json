@@ -1,0 +1,15 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_mt_contains": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_mt_insert": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_mt_peek": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_mt_used": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_verify_mt_insert_frame_on_error": {
+        "prover": "cvc5",
+        "time": 0.592
+      }
+    }
+  }
+}

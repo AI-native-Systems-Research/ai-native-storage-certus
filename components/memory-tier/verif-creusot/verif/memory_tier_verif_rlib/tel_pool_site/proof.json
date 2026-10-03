@@ -1,0 +1,11 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_tel_event": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_tel_pool_site": { "prover": "alt-ergo", "time": 0.061 },
+      "vc_try_read_m": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_try_write_m": { "prover": "alt-ergo", "time": 0.022 }
+    }
+  }
+}

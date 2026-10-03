@@ -1,0 +1,26 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lock_ok": { "prover": "alt-ergo", "time": 0.012 },
+      "vc_mt_batch_touch": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_mt_call": { "prover": "cvc5", "time": 0.949 },
+      "vc_mt_capacity": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_mt_clear": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_mt_contains": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_mt_evict_next": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_mt_evict_next_for_key": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_mt_get": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_mt_initialize": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_mt_insert": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_mt_is_dma_capable": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_mt_oldest_keys": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_mt_peek": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_mt_pool_info": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_mt_remove": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_mt_telemetry_snapshot": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_mt_touch": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_mt_used": { "prover": "alt-ergo", "time": 0.017 }
+    }
+  }
+}

@@ -1,0 +1,223 @@
+(* #"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7041 0 7050 27 *)
+
+let%span slib = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7052 21 7052 22
+let%span slib'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7052 4 7052 22
+let%span slib'1 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7054 24 7054 34
+let%span slib'2 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7055 26 7055 27
+let%span slib'3 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7055 8 7055 27
+let%span slib'4 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7057 16 7057 26
+let%span slib'5 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7066 23 7066 24
+let%span slib'6 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7068 40 7068 41
+let%span slib'7 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7069 29 7069 41
+let%span slib'8 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7070 31 7070 35
+let%span slib'9 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7070 20 7070 46
+let%span slib'10 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7073 40 7073 41
+let%span slib'11 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7073 30 7073 41
+let%span slib'12 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7074 34 7074 38
+let%span slib'13 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7078 25 7078 26
+let%span slib'14 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7079 20 7079 42
+let%span slib'15 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7081 20 7081 42
+let%span slib'16 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7020 11 7020 68
+let%span slib'17 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7021 10 7021 49
+let%span slib'18 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7022 10 7022 90
+let%span slib'19 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7023 10 7023 55
+let%span slib'20 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7024 10 7024 81
+let%span slib'21 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7025 10 7025 100
+let%span slib'22 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7026 10 7026 93
+let%span slib'23 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7027 10 7029 48
+let%span slib'24 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7031 10 7033 65
+let%span slib'25 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7034 10 7036 93
+let%span slib'26 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7037 10 7037 35
+let%span slib'27 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7039 10 7039 37
+let%span slib'28 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7040 10 7040 65
+let%span slib'29 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 6986 0 6986 27
+let%span slib'30 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 6988 0 6988 29
+let%span slib'31 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1563 10 1563 101
+let%span slib'32 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1564 10 1564 35
+
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use creusot.int.Int32
+use creusot.int.Int64
+use creusot.prelude.Any
+use int.Int
+
+type t_MmapLog = {
+  huge_calls: UInt64.t;
+  plain_calls: UInt64.t;
+  mbind_issued: bool;
+  mbind_mask: UInt64.t;
+  mbind_maxnode: UInt64.t;
+  mbind_node: UInt64.t }
+
+constant const_MAP_FAILED: UInt64.t = [%#slib'29] (18446744073709551615: UInt64.t)
+
+type t_LogSink = { lines: UInt64.t }
+
+predicate resolve_refmut_LogSink [@inline:trivial] (_1: MutBorrow.t t_LogSink) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_LogSink
+
+predicate resolve_refmut_MmapLog [@inline:trivial] (_1: MutBorrow.t t_MmapLog) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_MmapLog
+
+type t_MtError = InvalidSize | NotInitialized | AlreadyExists | PoolFull | KeyNotFound | AllocationFailed | NotEvictable
+
+type t_Result_usize_MtError = Ok UInt64.t | Err t_MtError
+
+type t_Option_i32 = None | Some Int32.t
+
+let elim_Some (_x: t_Option_i32) (return (f0: Int32.t)) = any
+  [ _k (f0: Int32.t) -> {Some f0 = _x} (! return {f0})
+  | _chk -> (! {[@expl:elim Some] match _x with
+      | Some _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+constant const_C_ULONG_BITS: UInt64.t = [%#slib'30] (64: UInt64.t)
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+let log_msg (lg: MutBorrow.t t_LogSink) (connected: bool) (return (x: ())) = any
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:log_msg ensures] ([@stop_split] [@expl:log_msg ensures #0] [%#slib'31] connected
+      -> UInt64.t'int lg.final.lines
+      = (if UInt64.t'int lg.current.lines < UInt64.t'int const_MAX then
+        UInt64.t'int lg.current.lines + 1
+      else
+        UInt64.t'int lg.current.lines
+      ))
+    /\ ([@stop_split] [@expl:log_msg ensures #1] [%#slib'32] not connected -> lg.final = lg.current)}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let alloc_mmap_m [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 7041 0 7050 27]
+  (pool_size: UInt64.t) (numa: t_Option_i32) (r_huge: UInt64.t) (r_plain: UInt64.t) (rc: Int64.t)
+  (ml: MutBorrow.t t_MmapLog) (lg: MutBorrow.t t_LogSink) (connected: bool) (return (x: t_Result_usize_MtError)) =
+{[@stop_split] [@expl:alloc_mmap_m requires] [%#slib'16] UInt64.t'int ml.current.huge_calls < UInt64.t'int const_MAX
+  /\ UInt64.t'int ml.current.plain_calls < UInt64.t'int const_MAX}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = UInt64.add [%#slib'0] {ml.current.huge_calls} {[%#slib] (1: UInt64.t)}
+        (fun (_x: UInt64.t) -> [ &ml <- { ml with current = { ml.current with huge_calls = _x } } ] s1)
+    | s1 = [ &ptr <- r_huge ] s2
+    | s2 = [ &_45 <- ptr = ([%#slib'1] const_MAP_FAILED) ] s3
+    | s3 = any [ br0 -> {_45 = false} (! bb4) | br1 -> {_45} (! bb1) ] ]
+  | bb1 = s0
+    [ s0 = UInt64.add [%#slib'3] {ml.current.plain_calls} {[%#slib'2] (1: UInt64.t)}
+        (fun (_x: UInt64.t) -> [ &ml <- { ml with current = { ml.current with plain_calls = _x } } ] s1)
+    | s1 = [ &p <- r_plain ] s2
+    | s2 = [ &_49 <- p = ([%#slib'4] const_MAP_FAILED) ] s3
+    | s3 = any [ br0 -> {_49 = false} (! bb3) | br1 -> {_49} (! bb2) ] ]
+  | bb2 = s0
+    [ s0 = -{resolve_refmut_LogSink lg}- s1
+    | s1 = -{resolve_refmut_MmapLog ml}- s2
+    | s2 = [ &_52 <- AllocationFailed ] s3
+    | s3 = [ &_ret <- Err _52 ] s4
+    | s4 = return {_ret} ]
+  | bb3 = s0 [ s0 = [ &ptr'0 <- p ] s1 | s1 = bb5 ]
+  | bb4 = s0 [ s0 = [ &ptr'0 <- ptr ] s1 | s1 = bb5 ]
+  | bb5 = any [ br0 -> {numa = None} (! bb8) | br1 (x0: Int32.t) -> {numa = Some x0} (! bb9) ]
+  | bb9 = s0
+    [ s0 = elim_Some {numa} (fun (r0: Int32.t) -> [ &node <- r0 ] s1)
+    | s1 = [ &_56 <- Int32.ge node ([%#slib'5] (0: Int32.t)) ] s2
+    | s2 = any [ br0 -> {_56 = false} (! bb19) | br1 -> {_56} (! bb10) ] ]
+  | bb10 = s0
+    [ s0 = [ &node_id <- UInt64.of_int (Int32.to_int node) ] s1
+    | s1 = [ &nodemask <- [%#slib'6] (0: UInt64.t) ] s2
+    | s2 = [ &_62 <- UInt64.lt node_id ([%#slib'7] const_C_ULONG_BITS) ] s3
+    | s3 = any [ br0 -> {_62 = false} (! bb13) | br1 -> {_62} (! bb11) ] ]
+  | bb11 = s0
+    [ s0 = UInt64.shl [%#slib'9] {[%#slib'8] (1: UInt64.t)} {UInt64.t'int node_id}
+        (fun (_x: UInt64.t) -> [ &nodemask <- _x ] s1)
+    | s1 = bb13 ]
+  | bb13 = s0
+    [ s0 = UInt64.add [%#slib'11] {node_id} {[%#slib'10] (2: UInt64.t)} (fun (_x: UInt64.t) -> [ &maxnode <- _x ] s1)
+    | s1 = [ &ml <- { ml with current = { ml.current with mbind_issued = ([%#slib'12] true) } } ] s2
+    | s2 = [ &ml <- { ml with current = { ml.current with mbind_mask = nodemask } } ] s3
+    | s3 = [ &ml <- { ml with current = { ml.current with mbind_maxnode = maxnode } } ] s4
+    | s4 = [ &ml <- { ml with current = { ml.current with mbind_node = node_id } } ] s5
+    | s5 = -{resolve_refmut_MmapLog ml}- s6
+    | s6 = [ &_70 <- rc = ([%#slib'13] (0: Int64.t)) ] s7
+    | s7 = any [ br0 -> {_70 = false} (! bb16) | br1 -> {_70} (! bb14) ] ]
+  | bb14 = s0
+    [ s0 = MutBorrow.borrow_final <t_LogSink> {lg.current} {MutBorrow.get_id lg}
+        (fun (_bor: MutBorrow.t t_LogSink) -> [ &_73 <- _bor ] [ &lg <- { lg with current = _bor.final } ] s1)
+    | s1 = log_msg [%#slib'14] {_73} {connected} (fun (_x: ()) -> [ &_72 <- _x ] s2)
+    | s2 = -{resolve_refmut_LogSink lg}- s3
+    | s3 = bb21 ]
+  | bb16 = s0
+    [ s0 = MutBorrow.borrow_final <t_LogSink> {lg.current} {MutBorrow.get_id lg}
+        (fun (_bor: MutBorrow.t t_LogSink) -> [ &_76 <- _bor ] [ &lg <- { lg with current = _bor.final } ] s1)
+    | s1 = log_msg [%#slib'15] {_76} {connected} (fun (_x: ()) -> [ &_75 <- _x ] s2)
+    | s2 = -{resolve_refmut_LogSink lg}- s3
+    | s3 = bb21 ]
+  | bb19 = s0 [ s0 = -{resolve_refmut_LogSink lg}- s1 | s1 = -{resolve_refmut_MmapLog ml}- s2 | s2 = bb21 ]
+  | bb8 = s0 [ s0 = -{resolve_refmut_LogSink lg}- s1 | s1 = -{resolve_refmut_MmapLog ml}- s2 | s2 = bb21 ]
+  | bb21 = s0 [ s0 = [ &_ret <- Ok ptr'0 ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Result_usize_MtError = Any.any_l ()
+  | & numa: t_Option_i32 = numa
+  | & r_huge: UInt64.t = r_huge
+  | & r_plain: UInt64.t = r_plain
+  | & rc: Int64.t = rc
+  | & ml: MutBorrow.t t_MmapLog = ml
+  | & lg: MutBorrow.t t_LogSink = lg
+  | & connected: bool = connected
+  | & ptr: UInt64.t = Any.any_l ()
+  | & ptr'0: UInt64.t = Any.any_l ()
+  | & _45: bool = Any.any_l ()
+  | & p: UInt64.t = Any.any_l ()
+  | & _49: bool = Any.any_l ()
+  | & _52: t_MtError = Any.any_l ()
+  | & node: Int32.t = Any.any_l ()
+  | & _56: bool = Any.any_l ()
+  | & node_id: UInt64.t = Any.any_l ()
+  | & nodemask: UInt64.t = Any.any_l ()
+  | & _62: bool = Any.any_l ()
+  | & maxnode: UInt64.t = Any.any_l ()
+  | & _70: bool = Any.any_l ()
+  | & _72: () = Any.any_l ()
+  | & _73: MutBorrow.t t_LogSink = Any.any_l ()
+  | & _75: () = Any.any_l ()
+  | & _76: MutBorrow.t t_LogSink = Any.any_l () ])
+  [ return (result: t_Result_usize_MtError) ->
+  {[@stop_split] [@expl:alloc_mmap_m ensures] ([@stop_split] [@expl:alloc_mmap_m ensures #0] [%#slib'17] UInt64.t'int ml.final.huge_calls
+      = UInt64.t'int ml.current.huge_calls + 1)
+    /\ ([@stop_split] [@expl:alloc_mmap_m ensures #1] [%#slib'18] UInt64.t'int ml.final.plain_calls
+      = UInt64.t'int ml.current.plain_calls + (if r_huge = const_MAP_FAILED then 1 else 0))
+    /\ ([@stop_split] [@expl:alloc_mmap_m ensures #2] [%#slib'19] r_huge <> const_MAP_FAILED -> result = Ok r_huge)
+    /\ ([@stop_split] [@expl:alloc_mmap_m ensures #3] [%#slib'20] r_huge = const_MAP_FAILED
+        /\ r_plain <> const_MAP_FAILED -> result = Ok r_plain)
+    /\ ([@stop_split] [@expl:alloc_mmap_m ensures #4] [%#slib'21] r_huge = const_MAP_FAILED
+        /\ r_plain = const_MAP_FAILED -> result = Err (AllocationFailed))
+    /\ ([@stop_split] [@expl:alloc_mmap_m ensures #5] [%#slib'22] match result with
+        | Ok p -> p <> const_MAP_FAILED
+        | Err e -> e = AllocationFailed
+        end)
+    /\ ([@stop_split] [@expl:alloc_mmap_m ensures #6] [%#slib'23] match result with
+        | Ok _ -> true
+        | Err _ -> ml.final.mbind_issued = ml.current.mbind_issued
+        /\ ml.final.mbind_mask = ml.current.mbind_mask
+        /\ ml.final.mbind_maxnode = ml.current.mbind_maxnode /\ ml.final.mbind_node = ml.current.mbind_node
+        end)
+    /\ ([@stop_split] [@expl:alloc_mmap_m ensures #7] [%#slib'24] forall n: Int32.t. numa = Some n
+          /\ Int32.to_int n >= 0 /\ result <> Err (AllocationFailed)
+        -> ml.final.mbind_issued
+        /\ UInt64.t'int ml.final.mbind_node = Int32.to_int n
+        /\ UInt64.t'int ml.final.mbind_maxnode = Int32.to_int n + 2
+        /\ (Int32.to_int n >= UInt64.t'int const_C_ULONG_BITS -> UInt64.t'int ml.final.mbind_mask = 0))
+    /\ ([@stop_split] [@expl:alloc_mmap_m ensures #8] [%#slib'25] forall n: Int32.t. numa = None
+          \/ numa = Some n /\ Int32.to_int n < 0
+        -> ml.final.mbind_issued = ml.current.mbind_issued
+        /\ ml.final.mbind_mask = ml.current.mbind_mask
+        /\ ml.final.mbind_maxnode = ml.current.mbind_maxnode /\ ml.final.mbind_node = ml.current.mbind_node)
+    /\ ([@stop_split] [@expl:alloc_mmap_m ensures #9] [%#slib'26] not connected -> lg.final = lg.current)
+    /\ ([@stop_split] [@expl:alloc_mmap_m ensures #10] [%#slib'27] numa = None -> lg.final = lg.current)
+    /\ ([@stop_split] [@expl:alloc_mmap_m ensures #11] [%#slib'28] forall n: Int32.t. numa = Some n
+        /\ Int32.to_int n < 0 -> lg.final = lg.current)}
+    (! return {result}) ]

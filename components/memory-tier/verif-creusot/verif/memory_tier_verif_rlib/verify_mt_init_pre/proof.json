@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_rx_initialize_spdk": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_verify_mt_init_pre": { "prover": "alt-ergo", "time": 0.065 }
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_init_logged": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_verify_mt_inv_logger_optional": { "prover": "cvc5", "time": 0.607 }
+    }
+  }
+}

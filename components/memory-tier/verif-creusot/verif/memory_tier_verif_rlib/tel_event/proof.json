@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_fetch_add_one": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_tel_event": { "prover": "z3", "time": 0.014 }
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_index_Vec_tup2_u64_u64_Global": {
+        "prover": "alt-ergo",
+        "time": 0.016
+      },
+      "vc_mt_contains": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_mt_evict_next": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_verify_mt_contains_frame__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.042 },
+              { "prover": "alt-ergo", "time": 0.047 },
+              { "prover": "alt-ergo", "time": 0.026 },
+              { "prover": "alt-ergo", "time": 0.059 },
+              { "prover": "alt-ergo", "time": 0.032 },
+              {
+                "tactic": "split_vc",
+                "children": [ { "prover": "alt-ergo", "time": 0.09 }, null ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

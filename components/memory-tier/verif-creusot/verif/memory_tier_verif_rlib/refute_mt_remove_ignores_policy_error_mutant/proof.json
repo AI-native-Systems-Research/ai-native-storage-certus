@@ -1,0 +1,23 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_mt_remove": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_refute_mt_remove_ignores_policy_error__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.034 },
+              {
+                "tactic": "split_vc",
+                "children": [ { "prover": "alt-ergo", "time": 0.05 }, null ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

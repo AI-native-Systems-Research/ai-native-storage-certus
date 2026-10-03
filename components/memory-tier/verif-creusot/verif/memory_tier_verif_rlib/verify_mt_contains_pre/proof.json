@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_mt_contains": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_mt_default": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_mt_initialize": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_mt_run": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_slots_contains": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_verify_mt_contains_pre": { "prover": "z3", "time": 0.062 }
+    }
+  }
+}

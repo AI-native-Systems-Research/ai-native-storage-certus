@@ -1,0 +1,61 @@
+(* #"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 8259 0 8259 55 *)
+
+let%span slib = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 8257 10 8257 18
+let%span slib'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 8258 10 8258 57
+let%span slib'1 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1389 10 1389 18
+let%span slib'2 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1392 8 1394 61
+let%span slib'3 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 837 16 837 69
+let%span swell_founded = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+
+use creusot.int.UInt64
+use seq.Seq
+use creusot.int.UInt32
+use int.Int
+
+type t_SlotModel = { key: UInt64.t; offset: UInt64.t; size: UInt32.t; handle: UInt64.t }
+
+predicate slot_at [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 836 0 836 49] (s: Seq.seq t_SlotModel) (k: UInt64.t) =
+  [%#slib'3] exists i: int. 0 <= i /\ i < Seq.length s /\ (Seq.get s i).key = k
+
+function filter_l [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 1390 0 1390 60] (ks: Seq.seq UInt64.t) (s: Seq.seq t_SlotModel) : Seq.seq UInt64.t
+
+axiom filter_l_def: forall ks: Seq.seq UInt64.t, s: Seq.seq t_SlotModel [filter_l ks s]. filter_l ks s
+    = ([%#slib'2] if Seq.length ks <= 0 then
+      Seq.empty: Seq.seq UInt64.t
+    else
+      if slot_at s (Seq.get ks (Seq.length ks - 1)) then
+        Seq.snoc (filter_l (Seq.([..]) ks 0 (Seq.length ks - 1)) s) (Seq.get ks (Seq.length ks - 1))
+      else
+        filter_l (Seq.([..]) ks 0 (Seq.length ks - 1)) s
+    
+    )
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant ks : Seq.seq UInt64.t
+
+constant s : Seq.seq t_SlotModel
+
+function lem_filter_idem [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 8259 0 8259 55] (ks: Seq.seq UInt64.t) (s: Seq.seq t_SlotModel) : ()
+
+goal vc_lem_filter_idem: if Seq.length ks <= 0 then
+    [@stop_split] [@expl:lem_filter_idem ensures] [%#slib'0] filter_l (filter_l ks s) s = filter_l ks s
+  else
+    let p = Seq.([..]) ks 0 (Seq.length ks - 1) in let x = Seq.get ks (Seq.length ks
+    - 1) in ([@expl:variant decreases] well_founded_relation_Int ([%#slib] Seq.length ks) ([%#slib] Seq.length p))
+    /\ (([@stop_split] [@expl:lem_filter_idem ensures] [%#slib'0] filter_l (filter_l p s) s = filter_l p s)
+    -> (let _ = lem_filter_idem p s in if slot_at s x then
+      filter_l ks s = Seq.snoc (filter_l p s) x
+      && Seq.([..]) (Seq.snoc (filter_l p s) x) 0 (Seq.length (filter_l p s)) = filter_l p s
+      && ([@stop_split] [@expl:lem_filter_idem ensures] [%#slib'0] filter_l (filter_l ks s) s = filter_l ks s)
+    else
+      [@stop_split] [@expl:lem_filter_idem ensures] [%#slib'0] filter_l (filter_l ks s) s = filter_l ks s
+    ))
+  

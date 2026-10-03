@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_lem_ta_push": { "prover": "cvc5", "time": 0.089 } }
+  }
+}

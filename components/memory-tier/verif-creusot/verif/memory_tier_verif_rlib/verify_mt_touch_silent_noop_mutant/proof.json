@@ -1,0 +1,23 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_mt_touch": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_verify_mt_touch_silent_noop__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.031 },
+              {
+                "tactic": "split_vc",
+                "children": [ { "prover": "alt-ergo", "time": 0.045 }, null ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

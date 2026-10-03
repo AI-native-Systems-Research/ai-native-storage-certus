@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lk_peek_or_contains": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_mt_capacity": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_mt_contains": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_mt_evict_next": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_mt_used": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_verify_mt_contains_frame": { "prover": "cvc5", "time": 0.128 }
+    }
+  }
+}

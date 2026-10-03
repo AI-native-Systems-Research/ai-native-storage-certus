@@ -1,0 +1,11 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_index_Vec_u64_Global": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_len_u64": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_policy_batch_touch": { "prover": "z3", "time": 0.099 },
+      "vc_policy_touch_key": { "prover": "alt-ergo", "time": 0.024 }
+    }
+  }
+}

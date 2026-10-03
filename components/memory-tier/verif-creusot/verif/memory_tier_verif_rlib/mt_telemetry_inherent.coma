@@ -1,0 +1,34 @@
+(* #"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 6974 0 6974 67 *)
+
+let%span slib = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 6973 10 6973 28
+let%span slib'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 6968 16 6968 80
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_TelemetryModel = { evictions: UInt64.t; write_lock_contentions: UInt64.t; read_lock_contentions: UInt64.t }
+
+type tup3_u64_u64_u64 = { f0: UInt64.t; f1: UInt64.t; f2: UInt64.t }
+
+function trip [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 6967 0 6967 49] (t: t_TelemetryModel) : tup3_u64_u64_u64
+ = [%#slib'0] { f0 = t.evictions; f1 = t.write_lock_contentions; f2 = t.read_lock_contentions }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let mt_telemetry_inherent [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 6974 0 6974 67]
+  (t: t_TelemetryModel) (return (x: tup3_u64_u64_u64)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &e <- t.evictions ] s1
+    | s1 = [ &w <- t.write_lock_contentions ] s2
+    | s2 = [ &r <- t.read_lock_contentions ] s3
+    | s3 = [ &_ret <- { f0 = e; f1 = w; f2 = r } ] s4
+    | s4 = return {_ret} ] ]
+  [ & _ret: tup3_u64_u64_u64 = Any.any_l ()
+  | & t: t_TelemetryModel = t
+  | & e: UInt64.t = Any.any_l ()
+  | & w: UInt64.t = Any.any_l ()
+  | & r: UInt64.t = Any.any_l () ])
+  [ return (result: tup3_u64_u64_u64) -> {[@stop_split] [@expl:mt_telemetry_inherent ensures] [%#slib] result = trip t}
+    (! return {result}) ]

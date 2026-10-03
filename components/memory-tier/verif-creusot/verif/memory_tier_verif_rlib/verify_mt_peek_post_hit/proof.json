@@ -1,0 +1,10 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_mt_get": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_mt_peek": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_verify_mt_peek_post_hit": { "prover": "alt-ergo", "time": 0.125 }
+    }
+  }
+}

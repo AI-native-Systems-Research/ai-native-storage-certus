@@ -1,0 +1,14 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lk_insert": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_mt_insert": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_slots_contains": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_verify_mt_insert_err_not_initialized": {
+        "prover": "alt-ergo",
+        "time": 0.15
+      }
+    }
+  }
+}

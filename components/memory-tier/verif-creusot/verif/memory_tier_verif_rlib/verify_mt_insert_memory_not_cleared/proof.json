@@ -1,0 +1,17 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_elim_Err": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_elim_Err'0": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_elim_Ok": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_mem_write": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_mt_insert": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_mt_remove": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_verify_mt_insert_memory_not_cleared": {
+        "prover": "z3",
+        "time": 0.227
+      }
+    }
+  }
+}

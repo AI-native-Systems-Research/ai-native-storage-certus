@@ -1,0 +1,10 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_cs_remove": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_policy_remove_key": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_rm_concurrent": { "prover": "cvc5", "time": 0.131 }
+    }
+  }
+}

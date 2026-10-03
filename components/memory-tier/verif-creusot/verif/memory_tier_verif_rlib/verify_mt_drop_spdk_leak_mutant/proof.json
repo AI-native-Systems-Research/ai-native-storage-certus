@@ -1,0 +1,25 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_mt_drop": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_mt_initialize_spdk": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_verify_mt_drop_spdk_leak__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.018 },
+              { "prover": "alt-ergo", "time": 0.03 },
+              {
+                "tactic": "split_vc",
+                "children": [ { "prover": "alt-ergo", "time": 0.022 }, null ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

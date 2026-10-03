@@ -1,0 +1,151 @@
+(* #"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5451 0 5451 90 *)
+
+let%span slib = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5452 25 5452 27
+let%span slib'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5453 12 5453 21
+let%span slib'1 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5454 23 5454 24
+let%span slib'2 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5461 16 5462 94
+let%span slib'3 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5459 16 5460 77
+let%span slib'4 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5457 16 5458 79
+let%span slib'5 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5456 16 5456 83
+let%span slib'6 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5455 16 5455 24
+let%span slib'7 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5464 21 5464 27
+let%span slib'8 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5464 8 5464 28
+let%span slib'9 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5465 13 5465 14
+let%span slib'10 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5465 8 5465 14
+let%span slib'11 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5441 11 5441 48
+let%span slib'12 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5442 11 5442 61
+let%span slib'13 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5443 11 5443 60
+let%span slib'14 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5444 10 5444 89
+let%span slib'15 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5445 10 5446 83
+let%span slib'16 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5447 10 5448 81
+let%span slib'17 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5449 10 5450 93
+let%span slib'18 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5373 10 5375 66
+let%span slib'19 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5376 10 5377 99
+let%span slib'20 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5378 10 5379 101
+let%span slib'21 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5393 16 5393 64
+let%span sslice = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/creusot/creusot-std/src/std/slice.rs" 328 18 328 40
+
+use creusot.prelude.MutBorrow
+use creusot.slice.Slice64
+use creusot.int.UInt8
+use creusot.int.UInt64
+use seq.Seq
+use creusot.slice.Slice64Ops
+use creusot.prelude.Any
+use int.Int
+
+let len_u8 (self_: Slice64.slice UInt8.t) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:len ensures] [%#sslice] Seq.length (Slice64.view self_)
+    = UInt64.t'int result}
+    (! return {result}) ]
+
+type t_TelemetryModel = { evictions: UInt64.t; write_lock_contentions: UInt64.t; read_lock_contentions: UInt64.t }
+
+function fetch_l [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5392 0 5392 29] (c: int) : int
+ = [%#slib'21] if c < 18446744073709551615 then c + 1 else 0
+
+let tel_event (t: MutBorrow.t t_TelemetryModel) (which: UInt8.t) (return (x: ())) = any
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:tel_event ensures] ([@stop_split] [@expl:tel_event ensures #0] [%#slib'18] UInt8.t'int which = 0
+      -> UInt64.t'int t.final.evictions = fetch_l (UInt64.t'int t.current.evictions)
+      /\ t.final.write_lock_contentions = t.current.write_lock_contentions
+      /\ t.final.read_lock_contentions = t.current.read_lock_contentions)
+    /\ ([@stop_split] [@expl:tel_event ensures #1] [%#slib'19] UInt8.t'int which = 1
+      -> UInt64.t'int t.final.write_lock_contentions = fetch_l (UInt64.t'int t.current.write_lock_contentions)
+      /\ t.final.evictions = t.current.evictions /\ t.final.read_lock_contentions = t.current.read_lock_contentions)
+    /\ ([@stop_split] [@expl:tel_event ensures #2] [%#slib'20] UInt8.t'int which >= 2
+    -> UInt64.t'int t.final.read_lock_contentions = fetch_l (UInt64.t'int t.current.read_lock_contentions)
+    /\ t.final.evictions = t.current.evictions /\ t.final.write_lock_contentions = t.current.write_lock_contentions)}
+    (! return {result}) ]
+
+predicate resolve_refmut_TelemetryModel [@inline:trivial] (_1: MutBorrow.t t_TelemetryModel) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_TelemetryModel
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let witness_mt_telemetry_counters_monotonic_bounded [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 5451 0 5451 90]
+  (t: MutBorrow.t t_TelemetryModel) (evs: Slice64.slice UInt8.t) (return (x: ())) =
+{[@stop_split] [@expl:witness_mt_telemetry_counters_monotonic_bounded requires] ([@stop_split] [@expl:witness_mt_telemetry_counters_monotonic_bounded requires #0] [%#slib'11] UInt64.t'int t.current.evictions
+      + Seq.length (Slice64.view evs)
+    < UInt64.t'int const_MAX)
+  /\ ([@stop_split] [@expl:witness_mt_telemetry_counters_monotonic_bounded requires #1] [%#slib'12] UInt64.t'int t.current.write_lock_contentions
+      + Seq.length (Slice64.view evs)
+    < UInt64.t'int const_MAX)
+  /\ ([@stop_split] [@expl:witness_mt_telemetry_counters_monotonic_bounded requires #2] [%#slib'13] UInt64.t'int t.current.read_lock_contentions
+    + Seq.length (Slice64.view evs)
+  < UInt64.t'int const_MAX)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &t0 <- [%#slib] t.current ] s1
+    | s1 = len_u8 [%#slib'0] {evs} (fun (_x: UInt64.t) -> [ &n <- _x ] s2)
+    | s2 = [ &i <- [%#slib'1] (0: UInt64.t) ] s3
+    | s3 = [ &_old <- t.final ] s4
+    | s4 = bb3 ]
+  | bb3 = bb3
+    [ bb3 = {[@expl:inferred invariant: unchanged value] _old = t.final}
+      {[@expl:loop invariant #0] [%#slib'6] UInt64.t'int i <= UInt64.t'int n}
+      {[@expl:loop invariant #1] [%#slib'5] UInt64.t'int t0.evictions <= UInt64.t'int t.current.evictions
+      /\ UInt64.t'int t.current.evictions <= UInt64.t'int t0.evictions + UInt64.t'int i}
+      {[@expl:loop invariant #2] [%#slib'4] UInt64.t'int t0.write_lock_contentions
+        <= UInt64.t'int t.current.write_lock_contentions
+      /\ UInt64.t'int t.current.write_lock_contentions <= UInt64.t'int t0.write_lock_contentions + UInt64.t'int i}
+      {[@expl:loop invariant #3] [%#slib'3] UInt64.t'int t0.read_lock_contentions
+        <= UInt64.t'int t.current.read_lock_contentions
+      /\ UInt64.t'int t.current.read_lock_contentions <= UInt64.t'int t0.read_lock_contentions + UInt64.t'int i}
+      {[@expl:loop invariant #4] [%#slib'2] UInt64.t'int t.current.evictions
+          + UInt64.t'int t.current.write_lock_contentions
+        + UInt64.t'int t.current.read_lock_contentions
+      = UInt64.t'int t0.evictions + UInt64.t'int t0.write_lock_contentions + UInt64.t'int t0.read_lock_contentions
+      + UInt64.t'int i}
+      (! s0)
+      [ s0 = [ &_53 <- UInt64.lt i n ] s1 | s1 = any [ br0 -> {_53 = false} (! bb8) | br1 -> {_53} (! bb5) ] ]
+      [ bb5 = s0
+        [ s0 = [ &_59 <- i ] s1
+        | s1 = [ &_60 <- Slice64Ops.length evs ] s2
+        | s2 = [ &_61 <- UInt64.lt _59 _60 ] s3
+        | s3 = {[@expl:index in bounds] [%#slib'7] _61} s4
+        | s4 = Slice64Ops.get [%#slib'7] <UInt8.t> {evs} {_59} (fun (r: UInt8.t) -> [ &_58 <- r ] s5)
+        | s5 = MutBorrow.borrow_mut <t_TelemetryModel> {t.current}
+            (fun (_bor: MutBorrow.t t_TelemetryModel) -> [ &_57 <- _bor ] [ &t <- { t with current = _bor.final } ] s6)
+        | s6 = tel_event [%#slib'8] {_57} {_58} (fun (_x: ()) -> [ &_56 <- _x ] s7)
+        | s7 = UInt64.add [%#slib'10] {i} {[%#slib'9] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &i <- _x ] s8)
+        | s8 = bb3 ] ] ]
+  | bb8 = s0 [ s0 = -{resolve_refmut_TelemetryModel t}- s1 | s1 = return {_ret} ] ]
+  [ & _ret: () = Any.any_l ()
+  | & t: MutBorrow.t t_TelemetryModel = t
+  | & evs: Slice64.slice UInt8.t = evs
+  | & t0: t_TelemetryModel = Any.any_l ()
+  | & n: UInt64.t = Any.any_l ()
+  | & i: UInt64.t = Any.any_l ()
+  | & _53: bool = Any.any_l ()
+  | & _56: () = Any.any_l ()
+  | & _57: MutBorrow.t t_TelemetryModel = Any.any_l ()
+  | & _58: UInt8.t = Any.any_l ()
+  | & _59: UInt64.t = Any.any_l ()
+  | & _60: UInt64.t = Any.any_l ()
+  | & _61: bool = Any.any_l ()
+  | & _old: t_TelemetryModel = Any.any_l () ])
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:witness_mt_telemetry_counters_monotonic_bounded ensures] ([@stop_split] [@expl:witness_mt_telemetry_counters_monotonic_bounded ensures #0] [%#slib'14] UInt64.t'int t.current.evictions
+        <= UInt64.t'int t.final.evictions
+      /\ UInt64.t'int t.final.evictions <= UInt64.t'int t.current.evictions + Seq.length (Slice64.view evs))
+    /\ ([@stop_split] [@expl:witness_mt_telemetry_counters_monotonic_bounded ensures #1] [%#slib'15] UInt64.t'int t.current.write_lock_contentions
+        <= UInt64.t'int t.final.write_lock_contentions
+      /\ UInt64.t'int t.final.write_lock_contentions
+      <= UInt64.t'int t.current.write_lock_contentions + Seq.length (Slice64.view evs))
+    /\ ([@stop_split] [@expl:witness_mt_telemetry_counters_monotonic_bounded ensures #2] [%#slib'16] UInt64.t'int t.current.read_lock_contentions
+        <= UInt64.t'int t.final.read_lock_contentions
+      /\ UInt64.t'int t.final.read_lock_contentions
+      <= UInt64.t'int t.current.read_lock_contentions + Seq.length (Slice64.view evs))
+    /\ ([@stop_split] [@expl:witness_mt_telemetry_counters_monotonic_bounded ensures #3] [%#slib'17] UInt64.t'int t.final.evictions
+        + UInt64.t'int t.final.write_lock_contentions
+      + UInt64.t'int t.final.read_lock_contentions
+    = UInt64.t'int t.current.evictions + UInt64.t'int t.current.write_lock_contentions
+      + UInt64.t'int t.current.read_lock_contentions
+    + Seq.length (Slice64.view evs))}
+    (! return {result}) ]

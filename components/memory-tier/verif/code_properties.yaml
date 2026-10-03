@@ -1,0 +1,1673 @@
+# Blind code-only property extraction for the Certus memory-tier component.
+# Read: components/memory-tier/src/lib.rs, components/memory-tier/src/allocator.rs,
+#       components/interfaces/src/imemory_tier.rs (interface declaration only).
+# No specification, README, or info/ material was consulted. Doc-comments in the
+# sources are treated as claims made BY the code, not as a specification; where a
+# doc-comment promises behaviour the code does not implement, that divergence is
+# recorded as a finding inside the relevant record.
+# Trace pins are real line numbers in those three files at the pin below.
+component:  memory-tier
+source:     code
+artifact:   >
+  components/memory-tier/src/lib.rs; components/memory-tier/src/allocator.rs;
+  components/interfaces/src/imemory_tier.rs
+pin:        c788d07c
+method:     blind-extraction
+generated:  2026-09-29
+counts: {total: 158, methods: 17, verifiable: 145, not_verifiable: 13}
+properties:
+
+  # ---------------------------------------------------------------- initialize
+  - id:         MT-INITIALIZE-PRE
+    subject:    initialize
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      To call initialize successfully the caller must pass a pool size greater than zero,
+      must already have connected the eviction-policy receptacle of the component, and must
+      not have initialized this component before; the NUMA node argument is optional and any
+      value is accepted.
+    traces:     ["lib.rs:261", "lib.rs:262", "lib.rs:266", "lib.rs:271"]
+
+  - id:         MT-INITIALIZE-POST-POOL-READY
+    subject:    initialize
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      When initialize returns success, the component reports a total capacity exactly equal to
+      the requested pool size, reports zero bytes used, and holds no cached entries at all.
+    traces:     ["lib.rs:313", "lib.rs:314", "lib.rs:315", "lib.rs:318"]
+
+  - id:         MT-INITIALIZE-POST-POOL-INFO
+    subject:    initialize
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      After initialize succeeds, asking the component for its pool information returns a
+      non-null base address for the memory region together with the exact pool size that was
+      requested.
+    traces:     ["lib.rs:310", "lib.rs:311", "lib.rs:587", "lib.rs:588"]
+
+  - id:         MT-INITIALIZE-POST-POLICY-POOL
+    subject:    initialize
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Initialize asks the bound eviction policy to create a fresh pool and stores the
+      identifier it hands back, and every later eviction-related call uses that stored
+      identifier rather than creating another pool.
+    traces:     ["lib.rs:308", "lib.rs:312", "lib.rs:366", "lib.rs:431", "lib.rs:441"]
+
+  - id:         MT-INITIALIZE-POST-INITIALIZED-FLAG
+    subject:    initialize
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Initialize marks the component as initialized only as its final step, after the memory
+      region, the pool size, the policy pool identifier and the fresh allocator have all been
+      stored, so no other operation can ever observe the component as initialized while those
+      fields are still half-written.
+    traces:     ["lib.rs:310", "lib.rs:317", "lib.rs:318"]
+
+  - id:         MT-INITIALIZE-ERR-ZERO-SIZE
+    subject:    initialize
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Calling initialize with a pool size of zero fails immediately with the invalid-size
+      error, before any memory is requested from the operating system and before any component
+      state is touched.
+    traces:     ["lib.rs:262", "lib.rs:263"]
+
+  - id:         MT-INITIALIZE-ERR-POLICY-MISSING
+    subject:    initialize
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If the eviction-policy receptacle has not been connected, initialize fails with a
+      not-initialized error whose message says the eviction policy receptacle is not connected,
+      and it does so before allocating any memory.
+    traces:     ["lib.rs:266", "lib.rs:267", "lib.rs:268"]
+
+  - id:         MT-INITIALIZE-ERR-ALREADY-INITIALIZED
+    subject:    initialize
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      A second call to initialize on an already-initialized component fails and leaves the
+      existing pool untouched; note that the error it reports is the generic allocation-failed
+      error carrying the text "already initialized", even though nothing was allocated and the
+      error list has no dedicated already-initialized variant, so callers cannot distinguish
+      this condition from a genuine out-of-memory failure except by matching on the message text.
+    traces:     ["lib.rs:271", "lib.rs:272", "lib.rs:273", "imemory_tier.rs:28"]
+
+  - id:         MT-INITIALIZE-ERR-ALLOCATION-FAILED
+    subject:    initialize
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If the underlying memory allocation cannot be satisfied, initialize fails with the
+      allocation-failed error and the component stays uninitialized; the message is
+      "spdk_zmalloc failed (insufficient hugepages?)" when the SPDK environment is active and
+      "mmap failed" when the ordinary mapping path is used.
+    traces:     ["lib.rs:291", "lib.rs:292", "lib.rs:293", "lib.rs:217", "lib.rs:218"]
+
+  - id:         MT-INITIALIZE-FRAME-ON-ERROR
+    subject:    initialize
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Every failing path of initialize leaves the component exactly as it was: the initialized
+      flag, the stored base pointer, the stored pool size, the policy pool identifier and the
+      set of cached entries are all unchanged, because all of these are written only after the
+      last operation that can fail.
+    traces:     ["lib.rs:262", "lib.rs:271", "lib.rs:291", "lib.rs:302", "lib.rs:310"]
+
+  - id:         MT-INITIALIZE-NUMA-FALLBACK
+    subject:    initialize
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      When a NUMA node is requested and the kernel refuses to bind the pool's pages to it,
+      initialize still succeeds and the pool remains fully usable under the default memory
+      placement policy; the failure is only reported as a warning to the logger.
+    traces:     ["lib.rs:244", "lib.rs:247", "lib.rs:252", "lib.rs:256", "imemory_tier.rs:58"]
+
+  - id:         MT-INITIALIZE-NUMA-SPDK-GAP
+    subject:    initialize
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The interface documentation promises that a requested NUMA node is honoured by binding
+      the pool with the kernel's memory-binding call, but that binding is attempted only on the
+      ordinary mapping path; when the SPDK environment is active the node number is merely
+      passed to the SPDK allocator as a socket hint and no binding call is made, so the
+      documented binding-and-fallback behaviour does not apply in that configuration.
+    traces:     ["imemory_tier.rs:57", "imemory_tier.rs:58", "lib.rs:280", "lib.rs:284", "lib.rs:225"]
+
+  - id:         MT-INITIALIZE-NUMA-NEGATIVE-IGNORED
+    subject:    initialize
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      A requested NUMA node that is negative is silently ignored on the ordinary mapping path
+      and the pool is created with default placement, with no error and no warning to tell the
+      caller that the request was dropped.
+    traces:     ["lib.rs:225", "lib.rs:226", "lib.rs:253"]
+
+  - id:         MT-INITIALIZE-ORDERING-MIX
+    subject:    initialize
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Initialize reads the initialized flag with the weakest possible memory ordering while
+      every other operation of the component reads the same flag with an acquire ordering and
+      initialize itself publishes it with a release ordering; this mismatch means the guard
+      that is supposed to reject a second initialization is the one place that does not
+      participate in the release-acquire handshake used everywhere else.
+    traces:     ["lib.rs:271", "lib.rs:318", "lib.rs:334", "lib.rs:383", "lib.rs:426"]
+
+  - id:         MT-INITIALIZE-HUGEPAGE-FALLBACK
+    subject:    alloc_mmap
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The fallback allocator first tries to map the pool from huge pages and, if that mapping
+      is refused, transparently retries with an ordinary anonymous mapping, so a machine
+      without huge pages configured still gets a working pool.
+    traces:     ["lib.rs:195", "lib.rs:200", "lib.rs:206", "lib.rs:212"]
+
+  - id:         MT-ALLOC-MMAP-ERR-BOTH-FAIL
+    subject:    alloc_mmap
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Only when both the huge-page mapping and the ordinary mapping fail does the fallback
+      allocator report an allocation failure with the message "mmap failed"; it never returns a
+      null or failed mapping address to its caller.
+    traces:     ["lib.rs:217", "lib.rs:218", "lib.rs:256"]
+
+  - id:         MT-ALLOC-MMAP-NODEMASK-GUARD
+    subject:    alloc_mmap
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      The bitmask naming the requested NUMA node is only filled in when the node number is
+      small enough to fit in one machine word, but when the node number is too large the code
+      does not stop: it goes on to ask the kernel to bind the pool using an all-zero, empty
+      node mask, which is a meaningless request that can only be rejected, and the rejection is
+      merely logged as a warning.
+    traces:     ["lib.rs:228", "lib.rs:229", "lib.rs:230", "lib.rs:233", "lib.rs:247"]
+
+  - id:         MT-ALLOC-MMAP-MAXNODE-ARITHMETIC
+    subject:    alloc_mmap
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The node-count argument handed to the kernel binding call is computed as the requested
+      node number plus two, using unchecked arithmetic on a value that was converted from a
+      signed integer; the conversion is guarded by a non-negative check but the addition itself
+      is not bounded, so a very large node number produces a nonsensical node count rather than
+      a rejected request.
+    traces:     ["lib.rs:226", "lib.rs:227", "lib.rs:240"]
+
+  # -------------------------------------------------------------------- insert
+  - id:         MT-INSERT-PRE
+    subject:    insert
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      To call insert successfully the component must already be initialized, the requested size
+      must be greater than zero, the key must not already have an entry, and a free run of
+      memory at least as large as the size rounded up to the next 4 KiB boundary must exist.
+    traces:     ["lib.rs:329", "lib.rs:334", "lib.rs:356", "lib.rs:360", "allocator.rs:42"]
+
+  - id:         MT-INSERT-POST-POINTER
+    subject:    insert
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      When insert succeeds it returns a non-null address that lies inside the pool, computed as
+      the pool's base address plus the byte offset the allocator reserved for this entry.
+    traces:     ["lib.rs:360", "lib.rs:377", "lib.rs:378"]
+
+  - id:         MT-INSERT-POST-LOOKUP
+    subject:    insert
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      After insert succeeds for a key, asking whether the pool contains that key answers yes,
+      and both the refreshing and the non-refreshing lookups return exactly the address that
+      insert returned together with exactly the size that was requested.
+    traces:     ["lib.rs:368", "lib.rs:371", "lib.rs:372", "lib.rs:403", "lib.rs:419"]
+
+  - id:         MT-INSERT-POST-USED-ROUNDED
+    subject:    insert
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      A successful insert increases the reported number of bytes used by the requested size
+      rounded up to the next 4 KiB boundary, not by the requested size itself, so inserting a
+      single byte consumes 4096 bytes of the pool's budget.
+    traces:     ["lib.rs:362", "allocator.rs:42", "allocator.rs:53", "lib.rs:582"]
+
+  - id:         MT-INSERT-POST-TRACKED
+    subject:    insert
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      A successful insert registers the new key with the bound eviction policy, so the entry
+      immediately becomes a candidate that a later eviction can select and that a later refresh
+      can promote.
+    traces:     ["lib.rs:365", "lib.rs:366", "lib.rs:373"]
+
+  - id:         MT-INSERT-ERR-ZERO-SIZE
+    subject:    insert
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Inserting with a size of zero fails with the invalid-size error before any lock is taken
+      and before any space is reserved.
+    traces:     ["lib.rs:329", "lib.rs:330"]
+
+  - id:         MT-INSERT-ERR-NOT-INITIALIZED
+    subject:    insert
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Inserting into a component whose pool has never been initialized fails with the
+      not-initialized error carrying the message "pool not initialized".
+    traces:     ["lib.rs:334", "lib.rs:335", "lib.rs:336"]
+
+  - id:         MT-INSERT-ERR-ALREADY-EXISTS
+    subject:    insert
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Inserting a key that already has an entry fails with the already-exists error naming that
+      key, and because this check runs before any space is reserved the failure wastes no pool
+      space and does not disturb the existing entry.
+    traces:     ["lib.rs:356", "lib.rs:357", "lib.rs:360"]
+
+  - id:         MT-INSERT-ERR-POOL-FULL
+    subject:    insert
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Insert fails with the pool-full error whenever no single free run of memory is large
+      enough for the rounded request; because the allocator only ever hands out one contiguous
+      run, this failure can happen even when the total free space in the pool is much larger
+      than the request, that is, when the free space is fragmented.
+    traces:     ["lib.rs:360", "lib.rs:363", "allocator.rs:44"]
+
+  - id:         MT-INSERT-FRAME-ON-ERROR
+    subject:    insert
+    kind:       frame
+    verifiable: true
+    statement:  >
+      A failing insert must leave the pool contents unchanged: no entry is added or removed, no
+      existing entry's address or size changes, and the number of bytes used stays the same.
+    traces:     ["lib.rs:330", "lib.rs:335", "lib.rs:357", "lib.rs:363"]
+
+  - id:         MT-INSERT-PARTIAL-MUTATION-ON-TRACK-FAILURE
+    subject:    insert
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Insert reserves the pool space first and only afterwards asks the eviction policy to
+      track the new key, and it unwraps that result instead of handling it, so if the policy
+      ever refuses to track the key the operation panics with the space already reserved and no
+      entry recorded for it; those bytes are then permanently lost from the pool and, because
+      the panic happens while the pool's exclusive lock is held, the lock is poisoned and every
+      subsequent operation on the component panics as well.
+    traces:     ["lib.rs:360", "lib.rs:365", "lib.rs:366", "lib.rs:367", "lib.rs:368"]
+
+  - id:         MT-INSERT-MEMORY-NOT-CLEARED
+    subject:    insert
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Insert hands back a region of the pool without clearing it, and because the allocator
+      reuses the byte offsets of evicted or removed entries, the bytes a caller receives for a
+      brand-new key can still hold the data written by a previous, unrelated key.
+    traces:     ["lib.rs:377", "allocator.rs:44", "allocator.rs:82"]
+
+  # ----------------------------------------------------------------------- get
+  - id:         MT-GET-PRE
+    subject:    get
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      Get imposes no precondition on the caller: it is safe to call on a component that was
+      never initialized and with a key that was never inserted, and in both of those cases it
+      simply reports that nothing was found.
+    traces:     ["lib.rs:383", "lib.rs:384", "lib.rs:403"]
+
+  - id:         MT-GET-POST-HIT
+    subject:    get
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      When the key has an entry, get returns that entry's address, computed as the pool base
+      plus the entry's stored offset, together with the size that was originally requested for
+      it.
+    traces:     ["lib.rs:403", "lib.rs:404", "lib.rs:405", "lib.rs:409"]
+
+  - id:         MT-GET-POST-REFRESHES-ORDER
+    subject:    get
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      A successful get refreshes the entry's position in the eviction order, making it the most
+      recently used entry, and it does so only after releasing the pool lock so that the
+      refresh never blocks other readers of the pool.
+    traces:     ["lib.rs:406", "lib.rs:407", "lib.rs:408"]
+
+  - id:         MT-GET-ERR-MISS
+    subject:    get
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Get reports nothing found both when the pool has no entry for the key and when the
+      component has not been initialized, so a caller cannot tell a genuine cache miss apart
+      from an unusable component; in the uninitialized case no eviction-order refresh happens
+      either.
+    traces:     ["lib.rs:383", "lib.rs:384", "lib.rs:403"]
+
+  - id:         MT-GET-FRAME
+    subject:    get
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Get never changes what the pool holds: it adds and removes no entries, moves no entry's
+      address, and leaves the number of bytes used and the total capacity exactly as they were;
+      its only side effect is on the eviction order.
+    traces:     ["lib.rs:401", "lib.rs:403", "lib.rs:408"]
+
+  - id:         MT-GET-STALE-HANDLE-RACE
+    subject:    get
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Get copies the entry's eviction handle out of the pool, releases the pool lock, and only
+      then uses the handle to refresh the eviction order; in the window between those two steps
+      another thread may remove or evict that entry, so the refresh can be applied to a handle
+      that no longer belongs to the key that was looked up, and if the eviction policy recycles
+      handle values it can promote a completely different entry.
+    traces:     ["lib.rs:406", "lib.rs:407", "lib.rs:408", "lib.rs:500"]
+
+  # ---------------------------------------------------------------------- peek
+  - id:         MT-PEEK-POST-HIT
+    subject:    peek
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      When the key has an entry, peek returns the same address and size that the refreshing
+      lookup would return for it.
+    traces:     ["lib.rs:419", "lib.rs:420", "lib.rs:421"]
+
+  - id:         MT-PEEK-FRAME-NO-TOUCH
+    subject:    peek
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Peek must leave the eviction order completely untouched, so an entry that is only ever
+      peeked at stays exactly as evictable as it was; peek never calls the eviction policy at
+      all, which also means it keeps working when the eviction-policy receptacle is
+      disconnected.
+    traces:     ["lib.rs:412", "lib.rs:418", "lib.rs:421", "imemory_tier.rs:77"]
+
+  - id:         MT-PEEK-ERR-MISS
+    subject:    peek
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Peek reports nothing found when the component is uninitialized or when the pool holds no
+      entry for the key, and these two situations are indistinguishable to the caller.
+    traces:     ["lib.rs:413", "lib.rs:414", "lib.rs:419"]
+
+  # ---------------------------------------------------------------- evict_next
+  - id:         MT-EVICT-NEXT-PRE
+    subject:    evict_next
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      Evicting the next victim requires only that the component has been initialized; it is
+      safe to call on an empty pool and the caller needs no knowledge of which entry will be
+      chosen.
+    traces:     ["lib.rs:436", "lib.rs:437", "lib.rs:441"]
+
+  - id:         MT-EVICT-NEXT-POST-FREES-SLOT
+    subject:    evict_next
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      When the eviction policy names a victim that the pool actually holds, that entry is
+      removed from the pool and its bytes are returned to the free space, so the pool no longer
+      contains the key and the number of bytes used drops by that entry's rounded size.
+    traces:     ["lib.rs:456", "lib.rs:457", "allocator.rs:59", "allocator.rs:61"]
+
+  - id:         MT-EVICT-NEXT-POST-RETURNS-VICTIM
+    subject:    evict_next
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Evict-next returns exactly the key that the bound eviction policy selected as the next
+      victim, so the caller learns which entry lost its space.
+    traces:     ["lib.rs:441", "lib.rs:462"]
+
+  - id:         MT-EVICT-NEXT-ERR-NO-VICTIM
+    subject:    evict_next
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Evict-next reports that nothing was evicted when the component is uninitialized or when
+      the eviction policy names no victim; the documentation claims this means the pool is
+      empty, but the code never consults the pool's own entry list to decide, so a pool that
+      still holds entries can report nothing evictable whenever the policy has lost track of
+      them.
+    traces:     ["lib.rs:436", "lib.rs:441", "lib.rs:463", "lib.rs:464", "imemory_tier.rs:84"]
+
+  - id:         MT-EVICT-NEXT-REPORTS-SUCCESS-WITHOUT-FREEING
+    subject:    evict_next
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If the eviction policy names a key for which the pool holds no entry, evict-next silently
+      does nothing to the pool yet still reports that key as evicted and still counts one more
+      eviction in its telemetry, so a caller that frees space by repeatedly evicting can be told
+      space was reclaimed when in fact none was.
+    traces:     ["lib.rs:456", "lib.rs:457", "lib.rs:458", "lib.rs:460", "lib.rs:462"]
+
+  - id:         MT-EVICT-NEXT-DOES-NOT-UNTRACK
+    subject:    evict_next
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Unlike the explicit removal operation, evict-next never tells the eviction policy to stop
+      tracking the entry it just destroyed: it drops the entry's eviction handle on the floor,
+      so unless the policy untracks the victim by itself the policy keeps listing a key whose
+      storage has already been freed, and every later eviction attempt can keep returning that
+      dead key.
+    traces:     ["lib.rs:456", "lib.rs:457", "lib.rs:500", "lib.rs:462"]
+
+  - id:         MT-EVICT-NEXT-NO-EVICTABILITY-CHECK
+    subject:    evict_next
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      The error list declares a not-evictable error for entries that must not be evicted yet,
+      for example while a write-through to durable storage is still in flight, but evict-next
+      contains no such check and no code path anywhere in the component ever produces that
+      error, so an entry that is still being written out can have its memory freed and reused
+      underneath the operation using it.
+    traces:     ["imemory_tier.rs:31", "imemory_tier.rs:32", "lib.rs:441", "lib.rs:456"]
+
+  - id:         MT-EVICT-NEXT-TELEMETRY
+    subject:    evict_next
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Each evict-next call in which the policy names a victim adds exactly one to the cumulative
+      eviction counter reported by the telemetry snapshot, and calls in which no victim is named
+      add nothing.
+    traces:     ["lib.rs:459", "lib.rs:460", "lib.rs:463"]
+
+  - id:         MT-EVICT-NEXT-FRAME
+    subject:    evict_next
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Evicting one entry must leave every other entry intact: no other key is removed and no
+      other entry's address or size changes, and the pool's total capacity is unchanged.
+    traces:     ["lib.rs:456", "lib.rs:457", "lib.rs:573"]
+
+  # -------------------------------------------------------- evict_next_for_key
+  - id:         MT-EVICT-NEXT-FOR-KEY-POST-ALIAS
+    subject:    evict_next_for_key
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Evicting "for" a particular key behaves exactly like plain evict-next: the key argument is
+      discarded and the victim is whichever entry the eviction policy names, which the interface
+      documentation states openly because the pool is one unsharded region whose freed space is
+      usable by any later insert.
+    traces:     ["lib.rs:468", "lib.rs:469", "imemory_tier.rs:88", "imemory_tier.rs:90"]
+
+  - id:         MT-EVICT-NEXT-FOR-KEY-MAY-EVICT-ARGUMENT
+    subject:    evict_next_for_key
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Because the key argument is ignored entirely, a caller asking to free space for a key can
+      have that very key evicted and returned as the victim, which is the opposite of what the
+      call appears to ask for.
+    traces:     ["lib.rs:468", "lib.rs:469", "lib.rs:441"]
+
+  # --------------------------------------------------------------- oldest_keys
+  - id:         MT-OLDEST-KEYS-POST
+    subject:    oldest_keys
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Asking for the oldest keys returns the eviction policy's list of up to the requested
+      number of eviction candidates for this pool, oldest first, without removing or evicting
+      anything.
+    traces:     ["lib.rs:430", "lib.rs:431", "imemory_tier.rs:97"]
+
+  - id:         MT-OLDEST-KEYS-ERR-EMPTY
+    subject:    oldest_keys
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Asking for zero keys, or asking at all before the component is initialized, returns an
+      empty list rather than an error.
+    traces:     ["lib.rs:426", "lib.rs:427"]
+
+  - id:         MT-OLDEST-KEYS-UNFILTERED
+    subject:    oldest_keys
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      The returned keys are passed straight through from the eviction policy and are never
+      checked against the pool's own list of entries, so any key the policy still tracks after
+      its storage was freed appears in the answer as though the pool still held it, and the
+      component also does not itself guarantee that no more than the requested number of keys
+      comes back.
+    traces:     ["lib.rs:431", "lib.rs:564", "lib.rs:456"]
+
+  - id:         MT-OLDEST-KEYS-FRAME
+    subject:    oldest_keys
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Asking for the oldest keys changes nothing: no entry is removed, no byte of the pool is
+      freed or reserved, and the eviction order itself is not refreshed by the inspection.
+    traces:     ["lib.rs:424", "lib.rs:431", "lib.rs:432"]
+
+  # -------------------------------------------------------------------- remove
+  - id:         MT-REMOVE-PRE
+    subject:    remove
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      To remove an entry successfully the component must be initialized and the pool must
+      currently hold an entry for the given key.
+    traces:     ["lib.rs:474", "lib.rs:496", "lib.rs:497", "lib.rs:499"]
+
+  - id:         MT-REMOVE-POST
+    subject:    remove
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      After remove succeeds the pool no longer contains the key, lookups for it report nothing
+      found, and the entry's rounded size is subtracted from the bytes used and becomes
+      available to later inserts.
+    traces:     ["lib.rs:496", "lib.rs:498", "lib.rs:501", "allocator.rs:61", "allocator.rs:82"]
+
+  - id:         MT-REMOVE-POST-UNTRACK
+    subject:    remove
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Remove tells the eviction policy to stop tracking the entry, so the removed key is no
+      longer offered as an eviction candidate.
+    traces:     ["lib.rs:500"]
+
+  - id:         MT-REMOVE-ERR-NOT-INITIALIZED
+    subject:    remove
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Removing from a component that was never initialized fails with the not-initialized error
+      carrying the message "pool not initialized".
+    traces:     ["lib.rs:474", "lib.rs:475", "lib.rs:476"]
+
+  - id:         MT-REMOVE-ERR-KEY-NOT-FOUND
+    subject:    remove
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Removing a key the pool does not hold fails with the key-not-found error naming that key,
+      and nothing is freed or changed.
+    traces:     ["lib.rs:496", "lib.rs:498", "lib.rs:499"]
+
+  - id:         MT-REMOVE-FRAME
+    subject:    remove
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Removing one entry must leave every other entry's address, size and presence untouched,
+      and must not change the pool's total capacity.
+    traces:     ["lib.rs:498", "lib.rs:501", "lib.rs:573"]
+
+  - id:         MT-REMOVE-IGNORES-POLICY-ERROR
+    subject:    remove
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Remove deletes the entry from the pool first and only then asks the eviction policy to
+      untrack it, discarding whatever the policy answers; if that untracking fails the caller is
+      still told the removal succeeded while the policy goes on listing a key whose storage has
+      already been handed back to the free space.
+    traces:     ["lib.rs:496", "lib.rs:498", "lib.rs:500"]
+
+  - id:         MT-REMOVE-INVALIDATES-POINTER-SILENTLY
+    subject:    remove
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Any address previously handed out for the removed key becomes stale the instant remove
+      returns, and nothing in the component marks it as stale: the freed byte range goes
+      straight back into the free space and the very next insert of a different key can be given
+      the same address, so a caller still holding the old pointer reads and writes another key's
+      data.
+    traces:     ["lib.rs:501", "allocator.rs:82", "allocator.rs:44", "imemory_tier.rs:65"]
+
+  # --------------------------------------------------------------------- touch
+  - id:         MT-TOUCH-POST
+    subject:    touch
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Touching a key that the pool holds makes that entry the most recently used one in the
+      eviction order, and the refresh is performed only after the pool lock has been released.
+    traces:     ["lib.rs:513", "lib.rs:514", "lib.rs:515", "lib.rs:516"]
+
+  - id:         MT-TOUCH-SILENT-NOOP
+    subject:    touch
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Touching a key the pool does not hold, or touching before the component is initialized,
+      does nothing at all and reports nothing, so a caller has no way to discover that its
+      refresh was dropped.
+    traces:     ["lib.rs:505", "lib.rs:507", "lib.rs:508", "lib.rs:513"]
+
+  - id:         MT-TOUCH-FRAME
+    subject:    touch
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Touch must not change which entries the pool holds, their addresses, their sizes, or the
+      number of bytes used; it may only change the eviction order.
+    traces:     ["lib.rs:512", "lib.rs:513", "lib.rs:516"]
+
+  # ---------------------------------------------------------------- batch_touch
+  - id:         MT-BATCH-TOUCH-POST
+    subject:    batch_touch
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Batch-touch refreshes the eviction order for every one of the given keys that the pool
+      actually holds, gathering all their eviction handles under a single acquisition of the
+      pool's shared lock and then applying the whole batch to the eviction policy in one call.
+    traces:     ["lib.rs:545", "lib.rs:547", "lib.rs:548", "lib.rs:553", "lib.rs:554"]
+
+  - id:         MT-BATCH-TOUCH-SKIPS-ABSENT
+    subject:    batch_touch
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Keys in the batch that the pool does not hold are silently skipped rather than causing the
+      whole batch to be rejected, and the caller is never told how many of its keys were skipped.
+    traces:     ["lib.rs:548", "lib.rs:549", "lib.rs:550"]
+
+  - id:         MT-BATCH-TOUCH-EMPTY-EARLY-RETURN
+    subject:    batch_touch
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Batch-touch with an empty list of keys returns immediately without taking any lock and
+      without calling the eviction policy, and the same silent return happens when the component
+      is not initialized.
+    traces:     ["lib.rs:521", "lib.rs:522", "lib.rs:525", "lib.rs:526"]
+
+  - id:         MT-BATCH-TOUCH-FRAME
+    subject:    batch_touch
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Batch-touch must not add or remove entries, must not move any entry's address, and must
+      not change the bytes used or the capacity; it may only change the eviction order.
+    traces:     ["lib.rs:545", "lib.rs:549", "lib.rs:554"]
+
+  - id:         MT-BATCH-TOUCH-INCONSISTENT-RECEPTACLE-HANDLING
+    subject:    batch_touch
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Batch-touch is the only operation in the component that handles a disconnected
+      eviction-policy receptacle gracefully, quietly returning instead of failing; every other
+      operation that needs the policy unwraps the same lookup and therefore panics in exactly
+      that situation, so the component's behaviour when its dependency is missing is
+      inconsistent from one operation to the next.
+    traces:     ["lib.rs:528", "lib.rs:529", "lib.rs:530", "lib.rs:531", "lib.rs:340"]
+
+  # ------------------------------------------------------------------- contains
+  - id:         MT-CONTAINS-POST
+    subject:    contains
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Contains answers yes exactly when the pool currently holds an entry for the key, which is
+      true after a successful insert of that key and false after it has been removed, evicted or
+      cleared.
+    traces:     ["lib.rs:563", "lib.rs:564"]
+
+  - id:         MT-CONTAINS-UNINITIALIZED
+    subject:    contains
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Contains answers no for every key when the component has not been initialized, which a
+      caller cannot distinguish from the key genuinely being absent from a working pool.
+    traces:     ["lib.rs:558", "lib.rs:559", "lib.rs:560"]
+
+  - id:         MT-CONTAINS-FRAME
+    subject:    contains
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Checking for a key changes nothing at all, and in particular it does not count as a use of
+      the entry, so it never affects which entry is evicted next.
+    traces:     ["lib.rs:557", "lib.rs:563", "lib.rs:564"]
+
+  # ------------------------------------------------------------------- capacity
+  - id:         MT-CAPACITY-POST
+    subject:    capacity
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      After initialization the reported capacity equals the pool size that was requested, and it
+      stays the same for the whole life of the component no matter how many entries are inserted,
+      removed, evicted or cleared.
+    traces:     ["lib.rs:572", "lib.rs:573", "allocator.rs:29", "lib.rs:314"]
+
+  - id:         MT-CAPACITY-UNINITIALIZED
+    subject:    capacity
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Before initialization the reported capacity is zero, which is also what a component
+      initialized with a zero-sized pool would report if that were allowed, so zero always means
+      "no usable pool".
+    traces:     ["lib.rs:568", "lib.rs:569", "lib.rs:570", "allocator.rs:18"]
+
+  - id:         MT-CAPACITY-FRAME
+    subject:    capacity
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Reading the capacity changes nothing in the component and does not affect the eviction
+      order.
+    traces:     ["lib.rs:567", "lib.rs:572", "lib.rs:573"]
+
+  # ----------------------------------------------------------------------- used
+  - id:         MT-USED-POST
+    subject:    used
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The reported number of bytes used equals the sum, over all entries the pool currently
+      holds, of each entry's size rounded up to the next 4 KiB boundary.
+    traces:     ["lib.rs:581", "lib.rs:582", "allocator.rs:53", "allocator.rs:61"]
+
+  - id:         MT-USED-UNINITIALIZED
+    subject:    used
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Before initialization the reported number of bytes used is zero.
+    traces:     ["lib.rs:577", "lib.rs:578", "lib.rs:579"]
+
+  - id:         MT-USED-ROUNDING-DRIFT
+    subject:    used
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The bytes-used figure counts whole 4 KiB units while lookups report the unrounded sizes
+      the caller asked for, so the two can never be reconciled by the caller: adding up the sizes
+      of all entries always gives a smaller number than the reported usage, and in the worst case
+      a pool reported as completely full holds only one useful byte per 4096.
+    traces:     ["lib.rs:371", "lib.rs:405", "allocator.rs:42", "allocator.rs:53"]
+
+  - id:         MT-USED-FRAME
+    subject:    used
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Reading the bytes used changes nothing in the component and does not affect the eviction
+      order.
+    traces:     ["lib.rs:576", "lib.rs:581", "lib.rs:582"]
+
+  # ------------------------------------------------------------------ pool_info
+  - id:         MT-POOL-INFO-POST
+    subject:    pool_info
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      When the component is initialized and holds a real memory region, asking for the pool
+      information returns that region's base address together with its total size in bytes, which
+      is what a caller needs in order to register the whole region once with an external
+      subsystem such as a GPU driver.
+    traces:     ["lib.rs:587", "lib.rs:588", "imemory_tier.rs:119"]
+
+  - id:         MT-POOL-INFO-NONE
+    subject:    pool_info
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Asking for the pool information returns nothing when the component is not initialized or
+      when its stored base address is null, so a caller never receives a null pointer dressed up
+      as a valid region.
+    traces:     ["lib.rs:587", "lib.rs:589", "lib.rs:590"]
+
+  - id:         MT-POOL-INFO-FRAME
+    subject:    pool_info
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Asking for the pool information changes nothing in the component, and the base address and
+      size it reports never change after initialization.
+    traces:     ["lib.rs:585", "lib.rs:587", "lib.rs:588"]
+
+  # ------------------------------------------------------------- is_dma_capable
+  - id:         MT-IS-DMA-CAPABLE-POST
+    subject:    is_dma_capable
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The component reports that it is capable of direct device transfers exactly when its pool
+      was obtained from the SPDK huge-page allocator, and reports that it is not whenever the
+      ordinary memory-mapping fallback was used.
+    traces:     ["lib.rs:611", "lib.rs:612", "lib.rs:300", "lib.rs:306"]
+
+  - id:         MT-IS-DMA-CAPABLE-NO-INIT-GUARD
+    subject:    is_dma_capable
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      This is the only one of the component's seventeen operations that does not check whether
+      the component has been initialized: it reads the stored flag directly, so an entirely
+      uninitialized component answers "not capable of direct device transfers", which is exactly
+      the same answer a fully working memory-mapped pool gives, and callers therefore cannot use
+      this answer to detect an unusable component.
+    traces:     ["lib.rs:610", "lib.rs:611", "lib.rs:612", "lib.rs:569"]
+
+  - id:         MT-IS-DMA-CAPABLE-HUGEPAGE-MMAP
+    subject:    is_dma_capable
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      A pool that the fallback path successfully mapped from huge pages still reports that it is
+      not capable of direct device transfers, because the flag records only whether the SPDK
+      allocator was used and not whether the memory happens to be huge-page backed.
+    traces:     ["lib.rs:200", "lib.rs:306", "lib.rs:612", "imemory_tier.rs:122"]
+
+  # ---------------------------------------------------------------------- clear
+  - id:         MT-CLEAR-PRE
+    subject:    clear
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      Clearing requires only that the component has been initialized; it is safe to clear a pool
+      that is already empty, in which case it reports that zero entries were cleared.
+    traces:     ["lib.rs:596", "lib.rs:603", "lib.rs:607"]
+
+  - id:         MT-CLEAR-POST-COUNT
+    subject:    clear
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Clear returns exactly the number of entries the pool held at the moment it was cleared.
+    traces:     ["lib.rs:603", "lib.rs:604", "lib.rs:607"]
+
+  - id:         MT-CLEAR-POST-EMPTY
+    subject:    clear
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      After clear returns, the pool holds no entries, reports zero bytes used, reports the same
+      total capacity as before, and its free space is one single unbroken run covering the whole
+      pool so that any request up to the full capacity can be satisfied again.
+    traces:     ["lib.rs:604", "lib.rs:605", "allocator.rs:16", "allocator.rs:19"]
+
+  - id:         MT-CLEAR-POST-POLICY
+    subject:    clear
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Clear also tells the eviction policy to drop everything it was tracking for this pool, so
+      after clearing there are no eviction candidates left.
+    traces:     ["lib.rs:606"]
+
+  - id:         MT-CLEAR-ERR-NOT-INITIALIZED
+    subject:    clear
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Clearing a component that was never initialized fails with the not-initialized error
+      carrying the message "pool not initialized".
+    traces:     ["lib.rs:596", "lib.rs:597", "lib.rs:598"]
+
+  - id:         MT-CLEAR-DISCARDS-HANDLES
+    subject:    clear
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Clear throws away every entry's eviction handle in one go without individually untracking
+      any of them, relying entirely on the policy's bulk pool-clearing call to do the equivalent
+      work; if that bulk call does not fully untrack the entries, the policy is left holding
+      candidates whose storage has been reclaimed and there is no longer any handle left with
+      which to untrack them.
+    traces:     ["lib.rs:604", "lib.rs:606", "lib.rs:500"]
+
+  - id:         MT-CLEAR-INVALIDATES-ALL-POINTERS
+    subject:    clear
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Clear makes every address previously handed out by the component reusable, even though the
+      interface documentation promises only that an address stays valid until its own entry is
+      evicted or removed and never mentions clearing as a third way of invalidating it.
+    traces:     ["lib.rs:604", "lib.rs:605", "imemory_tier.rs:65"]
+
+  - id:         MT-CLEAR-CAPACITY-SOURCE
+    subject:    clear
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Clear rebuilds the free-space bookkeeping from the pool size stored in the component
+      rather than from the capacity the old bookkeeping reported, so the two values must always
+      agree; if they ever diverged, clearing would silently change the pool's reported capacity
+      and could hand out addresses outside the real memory region.
+    traces:     ["lib.rs:605", "lib.rs:311", "lib.rs:314", "allocator.rs:16"]
+
+  # --------------------------------------------------------- telemetry_snapshot
+  - id:         MT-TELEMETRY-SNAPSHOT-POST
+    subject:    telemetry_snapshot
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The telemetry snapshot reports the current cumulative counts of evictions and of write-
+      and read-lock contentions when the telemetry build option is enabled, and reports all
+      zeros when it is not, exactly as the interface documentation promises.
+    traces:     ["lib.rs:619", "lib.rs:620", "lib.rs:633", "imemory_tier.rs:133"]
+
+  - id:         MT-TELEMETRY-COUNTERS-MONOTONIC
+    subject:    telemetry_snapshot
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Every telemetry counter only ever increases by one at a time and never decreases except
+      when the counters are explicitly reset, and each increase is an unchecked addition on a
+      64-bit counter that would silently wrap round to zero rather than saturate if it ever
+      reached its maximum.
+    traces:     ["lib.rs:348", "lib.rs:396", "lib.rs:460", "lib.rs:56", "lib.rs:57"]
+
+  - id:         MT-TELEMETRY-SNAPSHOT-FRAME
+    subject:    telemetry_snapshot
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Taking a telemetry snapshot changes nothing: it does not reset the counters, does not touch
+      the pool's contents, and does not affect the eviction order.
+    traces:     ["lib.rs:615", "lib.rs:618", "lib.rs:619"]
+
+  # ----------------------------------------------- inherent (non-interface) fns
+  - id:         MT-FREE-CAPACITY-POST
+    subject:    free_capacity
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The free-capacity helper reports the total capacity minus the bytes currently used, and
+      reports zero for a component that has not been initialized.
+    traces:     ["lib.rs:180", "lib.rs:182", "lib.rs:183", "lib.rs:186"]
+
+  - id:         MT-FREE-CAPACITY-SUBTRACTION
+    subject:    free_capacity
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The free-capacity helper subtracts the bytes used from the capacity with unchecked
+      arithmetic on unsigned numbers, so it depends entirely on the bytes used never exceeding the
+      capacity; if that ever failed to hold, the helper would not report a negative number but
+      would either crash or report an astronomically large amount of free space.
+    traces:     ["lib.rs:186", "allocator.rs:53", "allocator.rs:61"]
+
+  - id:         MT-LOGGER-OPTIONAL
+    subject:    log_info
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Logging is best-effort: when the logger receptacle is not connected the component silently
+      skips the message and carries on, so no operation can fail merely because no logger is
+      attached.
+    traces:     ["lib.rs:153", "lib.rs:154", "lib.rs:159", "lib.rs:160"]
+
+  - id:         MT-RESET-TELEMETRY-POST
+    subject:    reset_telemetry
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Resetting telemetry sets all three counters, evictions and write- and read-lock
+      contentions, back to zero, and it is the only way any counter ever decreases; note that it
+      takes only a shared lock on the component state while mutating those counters, which is
+      sound only because the counters are atomic.
+    traces:     ["lib.rs:174", "lib.rs:175", "lib.rs:56", "lib.rs:57", "lib.rs:58"]
+
+  - id:         MT-TELEMETRY-INHERENT-POST
+    subject:    telemetry
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The inherent telemetry accessor returns the same three counter values as the interface-level
+      snapshot, read one at a time rather than as one atomic group, so the three numbers it
+      returns need not correspond to any single instant.
+    traces:     ["lib.rs:167", "lib.rs:169", "lib.rs:48", "lib.rs:49", "lib.rs:51"]
+
+  # ------------------------------------------------------- allocator (FreeList)
+  - id:         MT-FREELIST-NEW-POST
+    subject:    FreeList::new
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      A newly created free list records the requested capacity, reports zero bytes used, and
+      holds exactly one free run starting at offset zero and spanning the whole capacity.
+    traces:     ["allocator.rs:16", "allocator.rs:18", "allocator.rs:19", "allocator.rs:24"]
+
+  - id:         MT-FREELIST-NEW-ZERO-CAPACITY
+    subject:    FreeList::new
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      A free list created with zero capacity records no free run at all, so every later
+      allocation request from it fails; this is the state the component sits in before it is
+      initialized.
+    traces:     ["allocator.rs:18", "allocator.rs:19", "allocator.rs:44", "lib.rs:105"]
+
+  - id:         MT-FREELIST-ALLOCATE-POST
+    subject:    FreeList::allocate
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      A successful allocation returns the starting offset of a run of free bytes at least as long
+      as the requested size rounded up to the next 4 KiB boundary, marks that rounded amount as
+      used, and leaves whatever is left over of the chosen run available as a smaller free run
+      immediately after it.
+    traces:     ["allocator.rs:42", "allocator.rs:44", "allocator.rs:48", "allocator.rs:50", "allocator.rs:53"]
+
+  - id:         MT-FREELIST-ALLOCATE-FIRST-FIT
+    subject:    FreeList::allocate
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The allocator scans its free runs in increasing order of position and takes the first one
+      that is large enough, which is the first-fit strategy the module documentation claims; it
+      therefore always returns the lowest possible starting offset among the runs that fit, and
+      never the best-fitting or largest run.
+    traces:     ["allocator.rs:1", "allocator.rs:7", "allocator.rs:10", "allocator.rs:44"]
+
+  - id:         MT-FREELIST-ALLOCATE-ERR-ZERO
+    subject:    FreeList::allocate
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      A request for zero bytes fails without reserving anything and without changing the free
+      runs or the bytes-used total.
+    traces:     ["allocator.rs:39", "allocator.rs:40"]
+
+  - id:         MT-FREELIST-ALLOCATE-ERR-NO-FIT
+    subject:    FreeList::allocate
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      When no single free run is long enough for the rounded request, the allocation fails and,
+      because the search happens before any modification, the free runs and the bytes-used total
+      are left exactly as they were.
+    traces:     ["allocator.rs:44", "allocator.rs:46", "allocator.rs:53"]
+
+  - id:         MT-FREELIST-ALLOCATE-ROUNDING-OVERFLOW
+    subject:    FreeList::allocate
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      The allocator rounds the requested size up to the next 4 KiB boundary before any bounds
+      check at all, and that rounding is unchecked arithmetic: a request within 4095 bytes of the
+      largest representable size crashes the process in a debug build and, in a release build,
+      silently wraps round to a tiny or zero rounded size that is then compared against the free
+      runs, so an absurdly large request could be answered with a tiny allocation.
+    traces:     ["allocator.rs:39", "allocator.rs:42", "allocator.rs:44"]
+
+  - id:         MT-FREELIST-ALLOCATE-FRAME
+    subject:    FreeList::allocate
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Allocation never changes the total capacity and never moves or shrinks any free run other
+      than the single run it takes space from.
+    traces:     ["allocator.rs:44", "allocator.rs:46", "allocator.rs:50", "allocator.rs:29"]
+
+  - id:         MT-FREELIST-DEALLOCATE-PRE
+    subject:    FreeList::deallocate
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      The caller of deallocate must pass the exact starting offset of a run that is currently
+      allocated together with the exact size that was originally requested for it; the documented
+      rule is stated in a comment and is never checked by the code, and violating it silently
+      corrupts the free-space bookkeeping instead of reporting an error.
+    traces:     ["allocator.rs:57", "allocator.rs:58", "allocator.rs:59", "allocator.rs:60"]
+
+  - id:         MT-FREELIST-DEALLOCATE-POST
+    subject:    FreeList::deallocate
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Deallocating returns the run's rounded number of bytes to the free space and reduces the
+      bytes-used total by that same amount, making those bytes available to later allocations.
+    traces:     ["allocator.rs:60", "allocator.rs:61", "allocator.rs:82"]
+
+  - id:         MT-FREELIST-DEALLOCATE-COALESCE
+    subject:    FreeList::deallocate
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      When the freed run directly abuts a free run before it, a free run after it, or both, the
+      neighbours are merged with it into a single larger free run, so that space freed in pieces
+      can later satisfy one large request.
+    traces:     ["allocator.rs:67", "allocator.rs:68", "allocator.rs:76", "allocator.rs:77", "allocator.rs:82"]
+
+  - id:         MT-FREELIST-DEALLOCATE-UNDERFLOW
+    subject:    FreeList::deallocate
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Deallocate subtracts from the bytes-used total as its very first action, before it looks at
+      the free runs at all and without ever checking that the run being freed was actually
+      allocated or that the total is large enough; an unmatched or oversized release therefore
+      crashes the process in a debug build and, in a release build, wraps the bytes-used total
+      round to an enormous value from which the pool never recovers.
+    traces:     ["allocator.rs:59", "allocator.rs:60", "allocator.rs:61"]
+
+  - id:         MT-FREELIST-DEALLOCATE-NO-DOUBLE-FREE-CHECK
+    subject:    FreeList::deallocate
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Nothing detects the same run being released twice: the second release decrements the
+      bytes-used total again and merges an already-free region into the free runs, after which the
+      same bytes can be handed out to two different callers at once.
+    traces:     ["allocator.rs:59", "allocator.rs:61", "allocator.rs:82"]
+
+  - id:         MT-FREELIST-CAPACITY-CONSTANT
+    subject:    FreeList::capacity
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The capacity a free list reports is fixed when it is created and is never changed by any
+      allocation or release, so the only way the component's capacity can change is by building a
+      whole new free list.
+    traces:     ["allocator.rs:12", "allocator.rs:28", "allocator.rs:29", "lib.rs:605"]
+
+  - id:         MT-FREELIST-USED-POST
+    subject:    FreeList::used
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The bytes-used figure a free list reports is the running total of the rounded sizes of all
+      runs currently allocated from it.
+    traces:     ["allocator.rs:32", "allocator.rs:33", "allocator.rs:53", "allocator.rs:61"]
+
+  # ------------------------------------------------------ drop / default state
+  - id:         MT-DROP-POST-UNMAP
+    subject:    Drop for MemoryTierState
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      When the component is destroyed, a pool that came from the ordinary memory-mapping path is
+      handed back to the operating system and the stored base address is set to null, so the
+      region is released exactly once even if the destructor logic runs on a state that was never
+      initialized, which it detects by the null address and returns immediately.
+    traces:     ["lib.rs:117", "lib.rs:118", "lib.rs:131", "lib.rs:132", "lib.rs:134"]
+
+  - id:         MT-DROP-SPDK-LEAK
+    subject:    Drop for MemoryTierState
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      For a pool obtained from the SPDK allocator the destructor frees it only while the SPDK
+      environment is still active; if that environment has already been shut down, the destructor
+      nulls the stored address and returns without freeing anything and without falling back to
+      unmapping, so the entire pool, typically hundreds of megabytes, is leaked silently and no
+      warning is logged.
+    traces:     ["lib.rs:121", "lib.rs:122", "lib.rs:123", "lib.rs:128", "lib.rs:129"]
+
+  - id:         MT-DROP-DOES-NOT-UNTRACK
+    subject:    Drop for MemoryTierState
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Destroying the component releases its memory but never tells the eviction policy that the
+      pool is gone: the policy keeps the pool identifier and every entry it was tracking, so a
+      policy shared with other components accumulates candidates that point into memory which no
+      longer exists.
+    traces:     ["lib.rs:117", "lib.rs:134", "lib.rs:606", "lib.rs:308"]
+
+  - id:         MT-DEFAULT-STATE-POST
+    subject:    Default for MemoryTierState
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      A freshly created component starts with a null base address, a pool size of zero, a
+      zero-capacity allocator holding no entries, the initialized flag clear, and the
+      direct-transfer capability flag clear, so every operation either reports emptiness or
+      reports that the component is not initialized.
+    traces:     ["lib.rs:100", "lib.rs:101", "lib.rs:102", "lib.rs:105", "lib.rs:108", "lib.rs:109"]
+
+  - id:         MT-DEFAULT-POOL-ID-AMBIGUOUS
+    subject:    Default for MemoryTierState
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      An uninitialized component stores the pool identifier zero, which is not a reserved
+      sentinel but a perfectly valid identifier that the eviction policy may hand to some other
+      pool, so the stored identifier only means anything once the initialized flag is set; every
+      operation that uses the identifier must therefore check that flag first, and each of them
+      does.
+    traces:     ["lib.rs:102", "lib.rs:312", "lib.rs:426", "lib.rs:436", "lib.rs:596"]
+
+  # -------------------------------------------------------- global invariants
+  - id:         MT-INV-SLOT-RANGES-DISJOINT
+    subject:    "Global invariant: entries never share bytes"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      At every moment, the byte ranges belonging to two different keys in the pool never overlap,
+      so writing through the address obtained for one key can never corrupt the data of another.
+    traces:     ["lib.rs:78", "lib.rs:368", "allocator.rs:44", "allocator.rs:46", "allocator.rs:50"]
+
+  - id:         MT-INV-SLOT-WITHIN-POOL
+    subject:    "Global invariant: every entry lies inside the pool"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      For every entry the pool holds, its starting offset plus its rounded size never exceeds the
+      pool's total size, which is what makes the address handed to the caller a real address
+      inside the mapped region; the three places that compute such an address by advancing the
+      base pointer rely on this invariant and, contrary to the project's own convention for
+      unsafe code, none of them carries a justification comment.
+    traces:     ["lib.rs:377", "lib.rs:404", "lib.rs:420", "allocator.rs:44", "allocator.rs:48"]
+
+  - id:         MT-INV-USED-EQUALS-SUM-OF-ENTRIES
+    subject:    "Global invariant: bytes used matches the entries held"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The bytes-used total is always exactly the sum of the rounded sizes of the entries the pool
+      currently holds, which is what makes the reported usage trustworthy; every operation that
+      adds an entry reserves its space in the same step and every operation that drops an entry
+      releases its space in the same step, with the single exception of an insert whose tracking
+      step panics, which leaves reserved space with no entry behind it.
+    traces:     ["lib.rs:360", "lib.rs:368", "lib.rs:456", "lib.rs:457", "lib.rs:367"]
+
+  - id:         MT-INV-USED-NEVER-EXCEEDS-CAPACITY
+    subject:    "Global invariant: usage never exceeds capacity"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The bytes-used total never exceeds the pool's capacity, because space is only ever marked
+      used when it has been carved out of a free run that lies inside the pool.
+    traces:     ["allocator.rs:44", "allocator.rs:48", "allocator.rs:53", "lib.rs:186"]
+
+  - id:         MT-INV-CAPACITY-EQUALS-POOL-SIZE
+    subject:    "Global invariant: capacity equals the mapped pool size"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The capacity the component reports is always the same as the size of the memory region it
+      actually mapped, both immediately after initialization and after any clear.
+    traces:     ["lib.rs:311", "lib.rs:314", "lib.rs:605", "lib.rs:573"]
+
+  - id:         MT-INV-INITIALIZED-IMPLIES-USABLE-POOL
+    subject:    "Global invariant: initialized implies a real pool"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Whenever the component reports itself as initialized, its stored base address is non-null
+      and its stored pool size is greater than zero, because a zero size is rejected up front and
+      neither allocation path can return a null address without the whole call failing.
+    traces:     ["lib.rs:262", "lib.rs:291", "lib.rs:218", "lib.rs:310", "lib.rs:318"]
+
+  - id:         MT-INV-INITIALIZED-MONOTONIC
+    subject:    "Global invariant: initialization happens at most once"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The component has exactly two states, uninitialized and initialized, and the only legal
+      transition is from the first to the second, exactly once: nothing ever clears the flag, so
+      there is no way to shut the pool down, resize it, or re-initialize it on a different NUMA
+      node without destroying the whole component.
+    traces:     ["lib.rs:108", "lib.rs:271", "lib.rs:318", "lib.rs:594"]
+
+  - id:         MT-INV-ENTRY-SIZE-POSITIVE
+    subject:    "Global invariant: no zero-sized entry exists"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Every entry the pool holds has a size of at least one byte, because insert rejects a size of
+      zero and no other operation creates entries.
+    traces:     ["lib.rs:329", "lib.rs:330", "lib.rs:368", "lib.rs:371"]
+
+  - id:         MT-INV-KEY-UNIQUE
+    subject:    "Global invariant: at most one entry per key"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      A key never has more than one entry in the pool at a time, which is enforced both by the
+      duplicate check in insert and by the keyed map the entries are stored in.
+    traces:     ["lib.rs:78", "lib.rs:356", "lib.rs:357", "lib.rs:368"]
+
+  - id:         MT-INV-OFFSET-IS-THE-ONLY-IDENTITY
+    subject:    "Global invariant: a slot is identified only by its position"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The only thing that identifies an entry's storage is its byte position in the pool, and
+      positions are freely recycled: when an entry is removed, evicted or cleared away, its
+      position goes straight back into the free space and the very next allocation of a similar
+      size is given the same position again, with no generation number, epoch, or any other tag
+      distinguishing one use of a position from the next; consequently an address the component
+      handed out earlier cannot be told apart from a currently valid address for a different key,
+      and the interface's promise that an address is "valid until the slot is evicted or removed"
+      is unenforceable because nothing in the component can detect that a caller is still holding
+      the old one.
+    traces:     ["lib.rs:71", "lib.rs:377", "lib.rs:501", "allocator.rs:44", "allocator.rs:82", "imemory_tier.rs:65"]
+
+  - id:         MT-INV-POLICY-AND-POOL-AGREE
+    subject:    "Global invariant: the eviction policy and the pool track the same keys"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Every key the eviction policy tracks for this pool should correspond to an entry the pool
+      actually holds and vice versa, since otherwise eviction can free nothing, report phantom
+      victims, or never reach a real entry; the component upholds one direction by tracking each
+      key as it is inserted, but breaks the other direction in two places, because eviction never
+      untracks the victim it destroys and an untracking failure during removal is discarded.
+    traces:     ["lib.rs:365", "lib.rs:456", "lib.rs:462", "lib.rs:500", "lib.rs:606"]
+
+  - id:         MT-INV-HANDLE-CAN-OUTLIVE-ENTRY
+    subject:    "Global invariant: eviction handles are copies that can outlive their entry"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      An entry's eviction handle is a freely copyable value, and three operations copy it out,
+      release the pool lock, and use it afterwards, so a handle in flight can refer to an entry
+      that no longer exists by the time it is used; nothing in the component invalidates a copied
+      handle or checks that it still belongs to the key it came from.
+    traces:     ["lib.rs:73", "lib.rs:406", "lib.rs:514", "lib.rs:550", "lib.rs:554"]
+
+  - id:         MT-INV-NOT-EVICTABLE-NEVER-PRODUCED
+    subject:    "Global invariant: one declared error is unreachable"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The component declares seven kinds of error but only ever produces six of them: the
+      not-evictable error, documented as meaning an entry cannot be evicted yet because for
+      example its write-through to durable storage has not finished, is never constructed anywhere
+      in the implementation, which means there is no pinning or in-flight check at all and a
+      caller can never be told that an eviction was refused for that reason.
+    traces:     ["imemory_tier.rs:31", "imemory_tier.rs:32", "lib.rs:434", "lib.rs:472"]
+
+  - id:         MT-INV-RECEPTACLE-LOOKUP-PANICS
+    subject:    "Global invariant: a missing eviction policy crashes most operations"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Initialization refuses cleanly when the eviction-policy receptacle is not connected, and
+      batch-touch returns quietly in that case, but seven other places fetch the same receptacle
+      and unwrap the result, so if the policy is ever disconnected after initialization those
+      operations crash the calling thread instead of returning an error, even though the error
+      list contains a perfectly suitable not-initialized error that initialization itself uses for
+      exactly this condition.
+    traces:     ["lib.rs:266", "lib.rs:340", "lib.rs:387", "lib.rs:430", "lib.rs:440", "lib.rs:480", "lib.rs:511", "lib.rs:601"]
+
+  - id:         MT-INV-LOCK-POISONING-CASCADE
+    subject:    "Global invariant: one panic disables the whole component"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Every single lock acquisition in the component unwraps its result, so once any thread panics
+      while holding either the component-state lock or the pool lock, every later call on the
+      component panics too and there is no way to recover; the panic sites that can start this
+      cascade are the unwrapped eviction-policy lookups and the unwrapped tracking call inside
+      insert.
+    traces:     ["lib.rs:270", "lib.rs:333", "lib.rs:354", "lib.rs:367", "lib.rs:494", "lib.rs:602"]
+
+  - id:         MT-INV-LOCK-ORDER
+    subject:    "Global invariant: locks are always taken in the same order"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Every operation takes the component-state lock first and the inner pool lock second, never
+      the other way round, and every call out to the eviction policy for a refresh is made after
+      the pool lock has been released; this consistent ordering is what keeps two concurrent
+      operations from waiting on each other forever.
+    traces:     ["lib.rs:333", "lib.rs:354", "lib.rs:407", "lib.rs:515", "lib.rs:553"]
+
+  - id:         MT-INV-FREE-SPACE-CONSERVATION
+    subject:    "Global invariant: free space plus used space equals capacity"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The sizes of all free runs added together plus the bytes-used total always equal the pool's
+      capacity, so no byte of the pool is ever lost or counted twice by the bookkeeping.
+    traces:     ["allocator.rs:19", "allocator.rs:48", "allocator.rs:53", "allocator.rs:61", "allocator.rs:82"]
+
+  - id:         MT-INV-FREE-RUNS-DISJOINT-AND-MERGED
+    subject:    "Global invariant: free runs are separate and fully merged"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      No two free runs overlap, none has a size of zero, and no two of them are immediately
+      adjacent, because whenever a run is released it is merged with any free neighbour on either
+      side; without this the allocator would report a large amount of free space that it could
+      never hand out in one piece.
+    traces:     ["allocator.rs:49", "allocator.rs:50", "allocator.rs:67", "allocator.rs:77", "allocator.rs:82"]
+
+  - id:         MT-INV-USED-IS-ALIGNED
+    subject:    "Global invariant: bytes used is always a whole number of 4 KiB units"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The bytes-used total is always a multiple of 4096, because every amount added to it and
+      every amount taken from it is first rounded up to the next 4 KiB boundary.
+    traces:     ["allocator.rs:5", "allocator.rs:42", "allocator.rs:53", "allocator.rs:60", "allocator.rs:61"]
+
+  - id:         MT-INV-UNALIGNED-CAPACITY-TAIL
+    subject:    "Global invariant: a pool size that is not a multiple of 4 KiB wastes its tail"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Nothing requires the requested pool size to be a whole number of 4 KiB units, and when it is
+      not, the leftover bytes at the end of the pool can never be allocated to anyone, so the
+      component reports a capacity it can never fully use and no warning is given; the allocator
+      does stay safe in this case, because a request is only satisfied by a run at least as long as
+      the rounded size.
+    traces:     ["lib.rs:262", "lib.rs:314", "allocator.rs:19", "allocator.rs:42", "allocator.rs:44"]
+
+  - id:         MT-INV-ENTRY-SIZE-NARROW-FIELD
+    subject:    "Global invariant: entry sizes are limited to a 32-bit range"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      An entry's size is stored in a 32-bit field while the pool's capacity and usage are counted
+      in machine-word-sized numbers, so no single entry can ever be larger than four gigabytes
+      even in a much larger pool; the conversions the code performs all widen the 32-bit size to
+      the larger type and therefore lose nothing, but a caller wanting one very large entry has no
+      way to ask for it and must discover the limit from the type alone.
+    traces:     ["lib.rs:72", "lib.rs:362", "lib.rs:457", "lib.rs:501", "imemory_tier.rs:67"]
+
+  - id:         MT-INV-DMA-FLAG-SET-ONLY-AT-INIT
+    subject:    "Global invariant: the direct-transfer flag is fixed at initialization"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Whether the pool supports direct device transfers is decided once, while the pool is being
+      created, and never changes afterwards, so the answer the component gives is stable for its
+      whole lifetime.
+    traces:     ["lib.rs:87", "lib.rs:300", "lib.rs:306", "lib.rs:317", "lib.rs:612"]
+
+  - id:         MT-INV-MODULE-DOC-LOCKING-CLAIM
+    subject:    "Global invariant: the documented locking discipline holds"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The module documentation claims that lookups, peeks, batch refreshes and presence checks take
+      only a shared lock while inserts, removals and evictions take an exclusive one, and that
+      eviction-order refreshes happen after the pool lock is released; the implementation does match
+      this claim at every one of those call sites, so the documented discipline is a real property
+      rather than an aspiration.
+    traces:     ["lib.rs:8", "lib.rs:9", "lib.rs:10", "lib.rs:401", "lib.rs:454", "lib.rs:553"]
+
+  # ------------------------------------------------- not-verifiable ledger
+  - id:         NV-1
+    scope:      "Success of the underlying memory calls: mmap, spdk_zmalloc, munmap, spdk_free"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Whether the operating system or the SPDK allocator can satisfy a request for hundreds of
+      megabytes, and whether the release call succeeds, depends on the machine's configuration and
+      on how much memory other processes are using; this is an assumption about the environment,
+      not behaviour of the component that a checker could falsify.
+    traces:     ["lib.rs:195", "lib.rs:207", "lib.rs:284", "lib.rs:125", "lib.rs:132"]
+
+  - id:         NV-2
+    scope:      "Actual NUMA placement of the pool's pages"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Whether the kernel really places the pool's pages on the requested memory node, and what
+      error it reports if it cannot, is decided by the kernel's memory policy machinery and the
+      machine's topology; only the component's reaction to success or failure can be checked, not
+      the placement itself.
+    traces:     ["lib.rs:233", "lib.rs:244", "lib.rs:247"]
+
+  - id:         NV-3
+    scope:      "Content and delivery of log messages"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      The wording of the informational and warning messages is not observable behaviour that a
+      checker can meaningfully falsify. Worth noting as a defect all the same: the initialization
+      message divides the pool size by a megabyte using integer division, so any pool smaller than
+      one megabyte is announced as a "0 MiB pool".
+    traces:     ["lib.rs:320", "lib.rs:321", "lib.rs:322", "lib.rs:245", "lib.rs:296"]
+
+  - id:         NV-4
+    scope:      "Lock-contention counter values"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      How many times a lock is found to be busy depends entirely on thread scheduling, so the
+      counters can legitimately hold any value from zero upwards for the same workload; only the
+      fact that they never decrease is checkable, and that is recorded as a separate obligation.
+    traces:     ["lib.rs:343", "lib.rs:348", "lib.rs:390", "lib.rs:534"]
+
+  - id:         NV-5
+    scope:      "Freedom from deadlock and progress under contention"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Whether concurrent callers eventually make progress is an unbounded liveness question about
+      the reader-writer locks and the scheduler; the checkable part, that locks are always taken in
+      the same order, is recorded as a separate obligation.
+    traces:     ["lib.rs:333", "lib.rs:354", "lib.rs:602"]
+
+  - id:         NV-6
+    scope:      "The hand-written promise that the component may be shared across threads"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      The claim that the raw pool address stays valid and usable from any thread is an assumption
+      about the memory the operating system gave us rather than a property of this code; note also
+      that the justification calls the stored address immutable while the destructor does in fact
+      overwrite it.
+    traces:     ["lib.rs:92", "lib.rs:93", "lib.rs:95", "lib.rs:96", "lib.rs:134"]
+
+  - id:         NV-7
+    scope:      "Missing safety justifications on the three pointer-arithmetic sites"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      The project requires every unsafe block to carry a written justification, and the three places
+      that build an entry's address by advancing the pool's base pointer carry none; this is a
+      documentation-convention gap rather than a behaviour a checker can falsify, and the underlying
+      in-bounds requirement is recorded as its own obligation.
+    traces:     ["lib.rs:377", "lib.rs:404", "lib.rs:420"]
+
+  - id:         NV-8
+    scope:      "The published default pool size constant"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      The exported constant naming a 256 mebibyte default is a plain numeric fact that gates no
+      behaviour in this component, and nothing inside the component reads it; only a caller that
+      chooses to pass it to initialization gives it any effect.
+    traces:     ["lib.rs:33", "lib.rs:34"]
+
+  - id:         NV-9
+    scope:      "Which code exists under the telemetry and SPDK build options"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Whether the telemetry counters and the SPDK allocation path are compiled in at all is decided
+      when the crate is built, so it is a build-configuration fact rather than a runtime behaviour;
+      each configuration's behaviour is covered by the obligations above.
+    traces:     ["lib.rs:20", "lib.rs:37", "lib.rs:277", "lib.rs:305", "lib.rs:616"]
+
+  - id:         NV-10
+    scope:      "The unit tests in the two test modules"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      The tests are themselves checks of the behaviour described above rather than obligations the
+      component must meet; they are listed here only so that no part of the source is left
+      unaccounted for. They exercise double initialization, insert-and-look-up, duplicate and
+      zero-size rejection, removal and reuse, eviction, the pool-full error, capacity and usage,
+      presence, clearing, refreshing order, and the allocator's own behaviour.
+    traces:     ["lib.rs:638", "lib.rs:639", "allocator.rs:86", "allocator.rs:87", "imemory_tier.rs:139"]
+
+  - id:         NV-11
+    scope:      "The caller's obligation not to use an address after its entry is gone"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Once the component has handed out a raw address, nothing it does can prevent the caller from
+      reading or writing that address after the entry has been removed, evicted or cleared; this is
+      a caller-side memory-safety assumption. The component-side consequence, that positions are
+      recycled with nothing distinguishing one use from the next, is recorded as its own obligation.
+    traces:     ["imemory_tier.rs:63", "imemory_tier.rs:65", "lib.rs:378", "lib.rs:501"]
+
+  - id:         NV-12
+    scope:      "The behaviour of the bound eviction policy"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      What the eviction policy does when asked to create a pool, track a key, name the next victim,
+      refresh an entry, or clear a pool is implemented in a different component and cannot be
+      established from this source; every obligation above is stated in terms of what this component
+      asks for and how it reacts to the answer.
+    traces:     ["lib.rs:308", "lib.rs:366", "lib.rs:431", "lib.rs:441", "lib.rs:606"]
+
+  - id:         NV-13
+    scope:      "Exact telemetry values observed under relaxed memory ordering"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      The counters are read and written with the weakest memory ordering, so a snapshot taken while
+      other threads are working may return values from slightly different instants and the three
+      numbers need not be mutually consistent; the precise values are therefore not a falsifiable
+      property, though their never decreasing is.
+    traces:     ["lib.rs:49", "lib.rs:348", "lib.rs:620", "lib.rs:624"]

@@ -1,0 +1,42 @@
+(* #"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 617 0 617 47 *)
+
+let%span slib = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 619 8 619 16
+let%span slib'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 621 22 621 32
+let%span slib'1 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 621 9 621 19
+let%span slib'2 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 621 8 621 33
+let%span slib'3 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 621 36 621 37
+let%span slib'4 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 621 8 621 37
+let%span slib'5 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 615 10 615 47
+let%span slib'6 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 616 10 616 64
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let used_sub [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 617 0 617 47]
+  (used: UInt64.t) (a: UInt64.t) (return (x: UInt64.t)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_9 <- UInt64.le a used ] s1 | s1 = any [ br0 -> {_9 = false} (! bb2) | br1 -> {_9} (! bb1) ] ]
+  | bb1 = s0 [ s0 = UInt64.sub [%#slib] {used} {a} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s1) | s1 = return {_ret} ]
+  | bb2 = s0
+    [ s0 = UInt64.sub [%#slib'0] {a} {used} (fun (_x: UInt64.t) -> [ &_15 <- _x ] s1)
+    | s1 = UInt64.sub [%#slib'2] {[%#slib'1] const_MAX} {_15} (fun (_x: UInt64.t) -> [ &_14 <- _x ] s2)
+    | s2 = UInt64.add [%#slib'4] {_14} {[%#slib'3] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s3)
+    | s3 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l ()
+  | & used: UInt64.t = used
+  | & a: UInt64.t = a
+  | & _9: bool = Any.any_l ()
+  | & _14: UInt64.t = Any.any_l ()
+  | & _15: UInt64.t = Any.any_l () ])
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:used_sub ensures] ([@stop_split] [@expl:used_sub ensures #0] [%#slib'5] UInt64.t'int a
+        <= UInt64.t'int used -> UInt64.t'int result = UInt64.t'int used - UInt64.t'int a)
+    /\ ([@stop_split] [@expl:used_sub ensures #1] [%#slib'6] UInt64.t'int a > UInt64.t'int used
+    -> UInt64.t'int result = UInt64.t'int used - UInt64.t'int a + UInt64.t'int const_MAX + 1)}
+    (! return {result}) ]

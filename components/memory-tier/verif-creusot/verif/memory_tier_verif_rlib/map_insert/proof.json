@@ -1,0 +1,16 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_index_Vec_Region_Global": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_index_mut_Vec_Region_Global": {
+        "prover": "alt-ergo",
+        "time": 0.019
+      },
+      "vc_insert_Region": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_len_Region": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_lower_bound": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_map_insert": { "prover": "alt-ergo", "time": 0.755 }
+    }
+  }
+}
