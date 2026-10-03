@@ -1,9 +1,9 @@
 ---
 spec_sync_component: block-device-kernel
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-09-15T22:04:08Z
-spec_sync_git_commit: f9bcd965
-spec_sync_inputs_sha256: fe0c7558a238fe3e7b36da4cddc79696459bf37460b468343e7744c90ae48e93
+spec_sync_synced_at: 2026-10-02T23:36:32Z
+spec_sync_git_commit: 7c1efed9
+spec_sync_inputs_sha256: 3e8b7ac160aa3ea62ec552187959d840070decc953d8bc13b677d458aa597c30
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Re-stamp 2026-09-15 (workspace `cargo fmt` sweep; no drift).** Commit `f9bcd965` ("Add shmq RESERVE batch shared-deadline regression test") ran `cargo fmt` across the whole workspace, reflowing this component's `src/*.rs` (multi-line ↔ single-line argument lists and struct literals, import reordering). `git diff -w` confirms no token-level logic, signature, or contract change — the only substantive addition in that commit is a regression test in `lib/shmq-dispatcher/src/translate.rs`, which is outside this component and outside the spec-sync gate's `components/` scope. The formatting moved this component's `spec_sync_inputs_sha256`, but its spec↔implementation alignment is unchanged. Report body below stands unchanged; drift status remains `clean`. Digest recomputed over a clean tree matching CI.

@@ -1,9 +1,9 @@
 ---
 spec_sync_component: disk-partition-manager
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-09-15T21:09:38Z
-spec_sync_git_commit: bec6c6ec
-spec_sync_inputs_sha256: 1aaafe4a5203516bc2916977b1ff3a6f46d681f413c10b95ab54da97fe94e134
+spec_sync_synced_at: 2026-10-02T23:36:32Z
+spec_sync_git_commit: 7c1efed9
+spec_sync_inputs_sha256: 66e28f349ace48892113b51af069243dc02231de271765b8492e715223706bb6
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Re-stamp 2026-09-15 (interfaces-fold; no drift).** Branch `fix-reserve-batch-deadline` (`bec6c6ec`) added a `deadline: Option<std::time::Instant>` parameter to `IDispatcher::reserve_memory` in `components/interfaces/src/idispatcher.rs` (shared batch backpressure deadline for the shm-queue OP_RESERVE handler). `scripts/spec-sync-hash.sh` folds the whole `components/interfaces` tree into every component's hash, so this component's digest moved even though its own spec/implementation did not change. This component does not describe or call `reserve_memory`; the interface delta cannot affect its spec↔implementation alignment. Report body below stands unchanged; drift status remains `clean`. Digest recomputed over a clean tree matching CI.

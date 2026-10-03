@@ -5,7 +5,7 @@
   "branch": "evolve-throughput",
   "git_commit": "3b1cca02",
   "drift_status": "clean",
-  "inputs_sha256": "58c590e9c8292d98872b5c90099144e370572f8f5b1ef79d5870b8b8389f4c4f",
+  "inputs_sha256": "5a007cae3106f224fb424e0046441d7529a4e7eb7f7d1da4d62f3392612e9588",
   "summary": {
     "specs_analyzed": 1,
     "drift_findings": 2,
@@ -47,5 +47,5 @@
   ],
   "unspecced": [],
   "conflicts": [],
-  "synced_at": "2026-09-29T00:00:00Z"
+  "synced_at": "2026-10-02T23:36:32Z"
 }

@@ -4,7 +4,7 @@
 //! implementation. See the crate-level docs for the concurrency model.
 
 use std::io;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -68,6 +68,56 @@ fn log_poller_stats(prefix: &str, serviced: &[u64], qdepth: usize, max_qdepth: u
 ///
 /// `shutdown` is a `'static` atomic so the SIGINT/SIGTERM handler installed by
 /// the binary can flip it; `serve` only reads it.
+/// Where a request got to, counted at each hand-off in the serve path.
+///
+/// **Diagnostic, added to separate two indistinguishable failure shapes.** Under
+/// `dispatcher-p2p` the server reaches a state where every worker is idle on an empty
+/// queue while the client still believes it has requests outstanding — so a request or a
+/// reply is being lost, and the backtraces cannot say which. These four counters can:
+///
+/// - `taken > enqueued`  — the poller read a request off the mailbox and failed to hand it
+///   to a worker (the only path is a closed channel, which returns early).
+/// - `enqueued > dequeued` — requests are sitting in the queue with no worker taking them,
+///   which contradicts an idle worker pool and would mean a lost wakeup.
+/// - `dequeued > replied` — a worker took a request and never wrote a reply: the dispatch
+///   call did not return.
+/// - all four equal, client still waiting — the reply was written to shared memory but the
+///   client never saw it, moving the fault to the mailbox or the agent.
+///
+/// Relaxed ordering throughout: these are monotonic observability counters read by a
+/// reporter thread, and no reader depends on seeing them mutually consistent.
+#[derive(Debug, Default)]
+pub struct ServeCounters {
+    /// Requests the poller took off a mailbox channel.
+    pub taken: AtomicU64,
+    /// Requests handed to the worker queue.
+    pub enqueued: AtomicU64,
+    /// Requests a worker took off the queue.
+    pub dequeued: AtomicU64,
+    /// Replies written back to shared memory.
+    pub replied: AtomicU64,
+}
+
+impl ServeCounters {
+    fn line(&self) -> String {
+        let (t, e, d, r) = (
+            self.taken.load(Ordering::Relaxed),
+            self.enqueued.load(Ordering::Relaxed),
+            self.dequeued.load(Ordering::Relaxed),
+            self.replied.load(Ordering::Relaxed),
+        );
+        // The gaps are the point, so they are computed here rather than left to a reader
+        // subtracting four numbers under time pressure during a stall.
+        format!(
+            "shmq-flow taken {t} enqueued {e} dequeued {d} replied {r} \
+             gaps[take->enq {}, enq->deq {}, deq->reply {}]",
+            t - e,
+            e - d,
+            d - r
+        )
+    }
+}
+
 pub fn serve(
     server: Arc<shm_queue::Server>,
     translator: Translator,
@@ -75,6 +125,24 @@ pub fn serve(
     shutdown: &'static AtomicBool,
     logger: Arc<dyn ILogger + Send + Sync>,
 ) -> io::Result<()> {
+    let flow = Arc::new(ServeCounters::default());
+    // A reporter for the flow counters, at the same 2 s cadence as the server's
+    // tier-events line so the two can be read against each other during a stall. Cheap
+    // enough to leave on: four relaxed loads and one log line.
+    {
+        let flow_r = Arc::clone(&flow);
+        let log_r = Arc::clone(&logger);
+        thread::Builder::new()
+            .name("shmq-flow".into())
+            .spawn(move || {
+                while !shutdown.load(Ordering::Relaxed) {
+                    thread::sleep(std::time::Duration::from_secs(2));
+                    log_r.info(&flow_r.line());
+                }
+            })
+            .expect("spawn flow reporter");
+    }
+
     // Worker pool: one worker per channel, blocking on the request queue.
     let (tx, rx) = crossbeam_channel::unbounded::<shm_queue::PolledRequest>();
     let mut workers = Vec::with_capacity(config.channels);
@@ -82,11 +150,13 @@ pub fn serve(
         let rx = rx.clone();
         let server = Arc::clone(&server);
         let tr = translator.clone();
+        let flow_w = Arc::clone(&flow);
         workers.push(
             thread::Builder::new()
                 .name(format!("shmq-worker-{w}"))
                 .spawn(move || {
                     while let Ok(req) = rx.recv() {
+                        flow_w.dequeued.fetch_add(1, Ordering::Relaxed);
                         match tr.dispatch(req.opcode, &req.payload) {
                             Ok(blob) => server.reply(req.channel, req.seq, wire::STATUS_OK, &blob),
                             Err(e) => {
@@ -99,6 +169,9 @@ pub fn serve(
                                 );
                             }
                         }
+                        // After the reply, so `dequeued > replied` means dispatch did not
+                        // return -- which is the distinction the gap exists to draw.
+                        flow_w.replied.fetch_add(1, Ordering::Relaxed);
                     }
                 })
                 .expect("spawn worker"),
@@ -143,6 +216,7 @@ pub fn serve(
         let poller_cpu = config.poller_cpu;
         let poller_stats = config.poller_stats;
         let stats_tx = tx.clone(); // for backlog sampling (tx.len()); does not extend worker life
+        let flow_p = Arc::clone(&flow);
         thread::Builder::new()
             .name("shmq-poller".into())
             .spawn(move || {
@@ -186,9 +260,11 @@ pub fn serve(
                             if poller_stats {
                                 serviced[ch] += 1;
                             }
+                            flow_p.taken.fetch_add(1, Ordering::Relaxed);
                             if tx.send(req).is_err() {
                                 return; // workers gone
                             }
+                            flow_p.enqueued.fetch_add(1, Ordering::Relaxed);
                         }
                     }
                     start += 1;

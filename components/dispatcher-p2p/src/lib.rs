@@ -48,17 +48,10 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
 
-#[derive(Clone, Debug)]
-pub enum EvictionReason {
-    Demoted,
-    Removed,
-}
-
-#[derive(Clone, Debug)]
-pub struct EvictionEvent {
-    pub key: CacheKey,
-    pub reason: EvictionReason,
-}
+// Re-exported, not redefined: this type crosses a component boundary (both dispatchers
+// produce it, the shm-queue host consumes it), so it lives in `interfaces`. Keeping the
+// re-export means `dispatcher::EvictionEvent` still resolves for existing callers.
+pub use interfaces::{EvictionEvent, EvictionReason};
 
 /// Publish a best-effort eviction event to the registered subscriber, counting
 /// undeliverable events.

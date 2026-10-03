@@ -274,7 +274,7 @@ pub struct Translator {
     dispatcher: Arc<dyn IDispatcher + Send + Sync>,
     ipc_cache: IpcCache,
     pending_stores: PendingStores,
-    eviction_rx: crossbeam_channel::Receiver<dispatcher::EvictionEvent>,
+    eviction_rx: crossbeam_channel::Receiver<interfaces::EvictionEvent>,
     eviction_dropped: Arc<AtomicU64>,
     observer: Option<Arc<dyn TranslatorObserver>>,
     /// Total store-backpressure budget shared across ALL keys in one OP_RESERVE
@@ -291,7 +291,7 @@ impl Drop for Translator {
 impl Translator {
     pub fn new(
         dispatcher: Arc<dyn IDispatcher + Send + Sync>,
-        eviction_rx: crossbeam_channel::Receiver<dispatcher::EvictionEvent>,
+        eviction_rx: crossbeam_channel::Receiver<interfaces::EvictionEvent>,
         eviction_dropped: Arc<AtomicU64>,
         store_backpressure: Duration,
     ) -> Self {
@@ -992,7 +992,7 @@ mod tests {
     fn translator(disp: Arc<MockDispatcher>) -> Translator {
         // Eviction channel is unused by op_check; keep the sender alive so the
         // receiver does not report "disconnected".
-        let (_tx, rx) = crossbeam_channel::unbounded::<dispatcher::EvictionEvent>();
+        let (_tx, rx) = crossbeam_channel::unbounded::<interfaces::EvictionEvent>();
         std::mem::forget(_tx);
         Translator::new(disp, rx, Arc::new(AtomicU64::new(0)), Duration::ZERO)
     }
@@ -1170,7 +1170,7 @@ mod tests {
     fn op_reserve_shares_one_deadline_across_batch() {
         let disp = Arc::new(MockDispatcher::default());
         *disp.block_until_deadline.lock().unwrap() = true;
-        let (_tx, rx) = crossbeam_channel::unbounded::<dispatcher::EvictionEvent>();
+        let (_tx, rx) = crossbeam_channel::unbounded::<interfaces::EvictionEvent>();
         std::mem::forget(_tx);
         let budget = Duration::from_millis(300);
         let tr = Translator::new(disp.clone(), rx, Arc::new(AtomicU64::new(0)), budget);
