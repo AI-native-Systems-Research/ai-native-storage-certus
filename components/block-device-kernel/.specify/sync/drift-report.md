@@ -1,9 +1,9 @@
 ---
 spec_sync_component: block-device-kernel
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-01T00:00:00Z
-spec_sync_git_commit: 72c7182b
-spec_sync_inputs_sha256: 18adef4260ac5752b37f70e40e0849d8d7c1ac19938c938b8ed86aeafb6798cf
+spec_sync_synced_at: 2026-10-03T13:20:17Z
+spec_sync_git_commit: 2c86a131
+spec_sync_inputs_sha256: f7e88d3c5b6badb810b97a6b6619a87b7ffdb92a3519af8df016143f64d81329
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest

@@ -1,9 +1,9 @@
 ---
 spec_sync_component: gpu-services
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-01T00:00:00Z
-spec_sync_git_commit: 72c7182b
-spec_sync_inputs_sha256: e3089cf554a1ed5a9658586db581f07f4a13453be95ba29e03f09344fcd8a4df
+spec_sync_synced_at: 2026-10-03T13:20:17Z
+spec_sync_git_commit: 2c86a131
+spec_sync_inputs_sha256: f05061be71d1c32e40aa7d76a4be5258d5798ebacf14fe3719e61125065bab20
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest

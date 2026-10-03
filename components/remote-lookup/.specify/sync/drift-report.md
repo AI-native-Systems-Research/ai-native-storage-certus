@@ -1,9 +1,9 @@
 ---
 spec_sync_component: remote-lookup
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-01T00:00:00Z
-spec_sync_git_commit: 72c7182b
-spec_sync_inputs_sha256: ef4781b3f85824a56d18bb18620b8949b2fd9e75a0c55e6f1e20224e56214070
+spec_sync_synced_at: 2026-10-03T13:20:18Z
+spec_sync_git_commit: 2c86a131
+spec_sync_inputs_sha256: 908446231270661def4224d93b51351552388cfe156f70f7acd2c5c22b2ca9eb
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest

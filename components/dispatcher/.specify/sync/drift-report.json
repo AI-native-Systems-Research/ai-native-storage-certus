@@ -5,7 +5,7 @@
   "branch": "certus-lookup-observability",
   "git_commit": "72c7182b",
   "drift_status": "resolved",
-  "inputs_sha256": "f3e895dfb7a1641be202aadbf175934db7ea2bc5f65a4226d0d681ecb4f677e1",
+  "inputs_sha256": "75a21d9bfc9fc0db520a621f50aa507edc831f778c773c15e59d1550cb82accd",
   "summary": {
     "specs_analyzed": 2,
     "requirements_checked": 11,
@@ -95,7 +95,7 @@
     }
   ],
   "conflicts": [],
-  "synced_at": "2026-09-29T00:00:00Z",
+  "synced_at": "2026-10-03T13:20:17Z",
   "trigger": "feature 002 Phase 1 - lookup classification fix, remote-lookup counters, FR-024 accounting",
   "method": {
     "note": "Citation-counting (the method used on apps/workload-generator) is INVALID here and was not used as a signal.",

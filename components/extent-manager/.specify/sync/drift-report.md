@@ -1,9 +1,9 @@
 ---
 spec_sync_component: extent-manager
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-01T00:00:00Z
-spec_sync_git_commit: 72c7182b
-spec_sync_inputs_sha256: 6245143339f849e123e3f58cd35fb034f2c81a345a78fafa6141c50de32187e0
+spec_sync_synced_at: 2026-10-03T13:20:17Z
+spec_sync_git_commit: 2c86a131
+spec_sync_inputs_sha256: 8df0d529f091857da7660a734e5ae7f93774710a43e9ae5d16837fd9cf45e3ca
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest

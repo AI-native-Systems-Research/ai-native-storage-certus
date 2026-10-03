@@ -1,9 +1,9 @@
 ---
 spec_sync_component: dispatch-map
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-01T00:00:00Z
-spec_sync_git_commit: 72c7182b
-spec_sync_inputs_sha256: 7328cb3b02f11cf14b2c4a7ae0c507edc55810b4814baacfa41f67f607540024
+spec_sync_synced_at: 2026-10-03T13:20:17Z
+spec_sync_git_commit: 2c86a131
+spec_sync_inputs_sha256: 3e4988f5503dce9978881864d35a3404b1b4db93e9cf803f49b375be76999801
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest

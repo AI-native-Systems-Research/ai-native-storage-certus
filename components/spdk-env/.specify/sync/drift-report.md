@@ -1,9 +1,9 @@
 ---
 spec_sync_component: spdk-env
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-01T00:00:00Z
-spec_sync_git_commit: 72c7182b
-spec_sync_inputs_sha256: 0e550e65bcacfcea633f944bdb7d7811d62c38478012e3e19f9b394a07bb3bd3
+spec_sync_synced_at: 2026-10-03T13:20:18Z
+spec_sync_git_commit: 2c86a131
+spec_sync_inputs_sha256: afde9a404287094307ff6c803e8a5bb6b69d3fbc981865e68fe77580fc9e8a15
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest

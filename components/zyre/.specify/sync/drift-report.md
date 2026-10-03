@@ -1,9 +1,9 @@
 ---
 spec_sync_component: zyre
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-01T00:00:00Z
-spec_sync_git_commit: 72c7182b
-spec_sync_inputs_sha256: e8e27443444ace83b7121f55cb7daa0fa81de460112a606157099eb67f00fa44
+spec_sync_synced_at: 2026-10-03T13:20:18Z
+spec_sync_git_commit: 2c86a131
+spec_sync_inputs_sha256: 4480921504b119f664370cd8d885eb0ad1f7180d031c9e41f90ca23cc8e4dfd0
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest

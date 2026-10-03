@@ -1,9 +1,9 @@
 ---
 spec_sync_component: eviction-policy-session-lists
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-01T00:00:00Z
-spec_sync_git_commit: 72c7182b
-spec_sync_inputs_sha256: 96514dcb7933f3552127bef1c3ecba268e5b410be98629bc3c10c02c4757aea6
+spec_sync_synced_at: 2026-10-03T13:20:17Z
+spec_sync_git_commit: 2c86a131
+spec_sync_inputs_sha256: 866a69612e625e60cfd0924745ef22fce318cfa800c4397abc4c7b4b5cf30260
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest

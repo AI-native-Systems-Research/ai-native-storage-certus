@@ -1,9 +1,9 @@
 ---
 spec_sync_component: remote-lookup-rdma-responder
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-01T00:00:00Z
-spec_sync_git_commit: 72c7182b
-spec_sync_inputs_sha256: d906205c6fb6d3a13004eb6f2b508ae3bb226dca03175162dea99dc66637499f
+spec_sync_synced_at: 2026-10-03T13:20:18Z
+spec_sync_git_commit: 2c86a131
+spec_sync_inputs_sha256: d0edf1db6994d0c45d2885900afb0a7e797de84750dfacda8d34f9d0cbc31f68
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest

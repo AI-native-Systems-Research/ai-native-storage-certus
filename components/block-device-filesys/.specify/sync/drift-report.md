@@ -1,9 +1,9 @@
 ---
 spec_sync_component: block-device-filesys
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-01T00:00:00Z
-spec_sync_git_commit: 72c7182b
-spec_sync_inputs_sha256: 62f4aa029201a4ae9fa92f8cad3ab1730a445a55a6544c5abc598f66eed44e57
+spec_sync_synced_at: 2026-10-03T13:20:17Z
+spec_sync_git_commit: 2c86a131
+spec_sync_inputs_sha256: 57278921c8a7ffa187fc4ea7fcc433d1533ed2c6a0c4fe3c45fccbe787cf5f0a
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest

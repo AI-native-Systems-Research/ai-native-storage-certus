@@ -1,9 +1,9 @@
 ---
 spec_sync_component: logger
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-01T00:00:00Z
-spec_sync_git_commit: 72c7182b
-spec_sync_inputs_sha256: d04fda665f9704fa47f190d4231727479a0f855aceccb824f348569e1d6983bd
+spec_sync_synced_at: 2026-10-03T13:20:18Z
+spec_sync_git_commit: 2c86a131
+spec_sync_inputs_sha256: c74398bc3f329c0dcf6f9f03ef2285c4bf0c2e1d0ff55273758a1cb89e1d286b
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest
