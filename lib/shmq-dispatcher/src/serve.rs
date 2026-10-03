@@ -42,6 +42,28 @@ fn pin_current_thread(cpu: usize) -> io::Result<()> {
     Ok(())
 }
 
+/// Describe the calling thread's effective CPU affinity: the CPU count, plus
+/// the CPU list when it is small. Startup diagnostic only.
+fn describe_current_affinity(prefix: &str) -> String {
+    // SAFETY: cpu_set_t is a plain bitset; sched_getaffinity(0, ...) reads the
+    // calling thread's mask into `set`. All arguments are sized correctly.
+    unsafe {
+        let mut set: libc::cpu_set_t = std::mem::zeroed();
+        if libc::sched_getaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &mut set) != 0 {
+            return format!("{prefix} = unknown ({})", io::Error::last_os_error());
+        }
+        let k = libc::CPU_COUNT(&set) as usize;
+        if k <= 8 {
+            let cpus: Vec<usize> = (0..libc::CPU_SETSIZE as usize)
+                .filter(|&c| libc::CPU_ISSET(c, &set))
+                .collect();
+            format!("{prefix} = {k} CPU(s) {cpus:?}")
+        } else {
+            format!("{prefix} = {k} CPU(s)")
+        }
+    }
+}
+
 /// Format a compact poller fairness/backlog summary line. Reports total
 /// requests forwarded, the lower-half vs upper-half channel split (the
 /// data-parallel fairness signal — replica 0 owns the low channels, replica 1
@@ -154,6 +176,7 @@ pub fn serve(
                         }
                     }
                 }
+                logger.info(&describe_current_affinity("shmq: poller affinity"));
                 let mut last_seen = server.seq_baseline();
                 let n = last_seen.len();
                 // Rotating first-pick offset: the channel serviced first advances
