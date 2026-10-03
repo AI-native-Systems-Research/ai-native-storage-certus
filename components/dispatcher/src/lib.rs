@@ -129,6 +129,10 @@ pub struct TierEventCounters {
     /// store reports success so the vLLM offloading connector does not treat a
     /// full cache as a fatal transfer failure.
     store_drops_on_full: AtomicU64,
+    /// Reserves refused because the key was already resident (`mt.insert` returned
+    /// `AlreadyExists`). Not a capacity refusal, and it bypasses the backpressure
+    /// retry entirely, so it appears in neither store counter above.
+    store_already_resident: AtomicU64,
     /// Eviction candidates skipped because a read pin was held
     /// (`DispatchMapError::ActiveReferences`). Counted per candidate examined.
     evictions_blocked_by_pin: AtomicU64,
@@ -214,6 +218,12 @@ impl TierEventCounters {
         self.store_drops_on_full.fetch_add(1, Ordering::Relaxed)
     }
 
+    /// One reserve refused because the key was already resident in the memory tier.
+    #[inline]
+    pub fn record_store_already_resident(&self) {
+        self.store_already_resident.fetch_add(1, Ordering::Relaxed);
+    }
+
     /// One eviction candidate skipped because a read pin was held on it.
     #[inline]
     pub fn record_eviction_blocked_by_pin(&self) {
@@ -248,6 +258,7 @@ impl TierEventCounters {
             remote_lookup_misses: self.remote_lookup_misses.load(Ordering::Relaxed),
             store_backpressure_events: self.store_backpressure_events.load(Ordering::Relaxed),
             store_drops_on_full: self.store_drops_on_full.load(Ordering::Relaxed),
+            store_already_resident: self.store_already_resident.load(Ordering::Relaxed),
             evictions_blocked_by_pin: self.evictions_blocked_by_pin.load(Ordering::Relaxed),
             eviction_scans_exhausted: self.eviction_scans_exhausted.load(Ordering::Relaxed),
             evictions_blocked_unpersisted: self
@@ -1195,6 +1206,14 @@ impl DispatcherComponent {
                     }
                 }
                 Err(interfaces::MemoryTierError::AlreadyExists(k)) => {
+                    // Not a capacity refusal: someone else — a concurrent writer, or a
+                    // remote fetch's `publish_success` — already put this key in the
+                    // tier. Counted here because this return bypasses the backpressure
+                    // retry in `reserve_memory`, so it leaves no trace in either store
+                    // counter, and the shm-queue wire collapses it into the same flat
+                    // zero as a genuine pool-full. Without this counter a run can show
+                    // stores declined while eviction never failed once.
+                    self.tier_counters.record_store_already_resident();
                     return Err(DispatcherError::AlreadyExists(k));
                 }
                 Err(e) => {
@@ -6337,6 +6356,80 @@ mod tests {
                 "key {key} resolved to NotExist after eviction — Check→Pin race regression",
             );
         }
+    }
+
+    /// A reserve refused because the key is ALREADY CACHED must be counted apart from
+    /// one refused for want of space, because they mean opposite things and the wire
+    /// cannot tell them apart.
+    ///
+    /// `op_reserve` reports every reserve error as the same flat zero, and the
+    /// already-resident path returns from `evict_and_insert` immediately — bypassing
+    /// the backpressure retry, so it bumps neither `store_backpressure_events` nor
+    /// `store_drops_on_full`. The observable consequence, measured on four instances:
+    /// 7.28% of stores "declined" while `eviction_scans_exhausted` was 0, i.e. eviction
+    /// never once failed to free space. Without this counter that number has no
+    /// explanation available to an operator.
+    ///
+    /// Both directions are asserted. A test that only checked the already-resident
+    /// counter would still pass if someone also bumped it on a genuine pool-full, which
+    /// would re-merge exactly the two cases this separates.
+    #[test]
+    fn a_reserve_refused_as_already_cached_is_counted_apart_from_one_refused_for_space() {
+        let dm: Arc<dyn IDispatchMap + Send + Sync> = Arc::new(MockDispatchMap::new());
+        // Room for 4 x 4 KiB, so the first insert cannot fail for space.
+        let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(16384));
+        let counters = Arc::new(TierEventCounters::default());
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
+            RwLock::new(None),
+            Arc::new(Mutex::new(None)),
+            AtomicU64::new(0),
+            Arc::clone(&counters),
+        );
+
+        // First reserve succeeds and leaves the key resident.
+        c.evict_and_insert(&dm, &mt, 7, 4096, 100)
+            .expect("the first insert has room and must succeed");
+        assert_eq!(
+            counters.snapshot().store_already_resident,
+            0,
+            "a successful reserve must not be counted as already-resident",
+        );
+
+        // Second reserve of the SAME key: the tier still has room, so this can only
+        // fail because the key is already there.
+        let res = c.evict_and_insert(&dm, &mt, 7, 4096, 100);
+        assert!(
+            matches!(res, Err(DispatcherError::AlreadyExists(7))),
+            "a repeat reserve of a resident key must report AlreadyExists, got {res:?}",
+        );
+
+        let s = counters.snapshot();
+        assert_eq!(
+            s.store_already_resident, 1,
+            "the already-resident refusal must be counted: {s:?}",
+        );
+        assert_eq!(
+            (s.store_backpressure_events, s.store_drops_on_full),
+            (0, 0),
+            "an already-resident refusal is NOT capacity pressure and must leave both \
+             store counters untouched — conflating them is what made a benign 7.28% \
+             look like a defect: {s:?}",
+        );
+        assert_eq!(
+            s.eviction_scans_exhausted, 0,
+            "eviction was never asked to free anything here: {s:?}",
+        );
     }
 
     /// A failed clean eviction must say WHICH of its two causes applied, because they

@@ -229,7 +229,16 @@ fn render_metrics(
          certus_oldest_sampled {}\n\
          # HELP certus_oldest_persisted Of those, how many are demotable (have an ssd_offset)\n\
          # TYPE certus_oldest_persisted gauge\n\
-         certus_oldest_persisted {}\n",
+         certus_oldest_persisted {}\n\
+         # HELP certus_store_backpressure_events_total Reserve retries while the memory tier was momentarily full\n\
+         # TYPE certus_store_backpressure_events_total counter\n\
+         certus_store_backpressure_events_total {}\n\
+         # HELP certus_store_drops_on_full_total Stores dropped after the backpressure budget elapsed\n\
+         # TYPE certus_store_drops_on_full_total counter\n\
+         certus_store_drops_on_full_total {}\n\
+         # HELP certus_store_already_resident_total Reserves refused because the key was already cached, not for want of space\n\
+         # TYPE certus_store_already_resident_total counter\n\
+         certus_store_already_resident_total {}\n",
         snap.write_lock_contentions,
         snap.read_lock_contentions,
         used,
@@ -259,5 +268,8 @@ fn render_metrics(
         serve.peer_pin_hold_us_max,
         tier.oldest_sampled,
         tier.oldest_persisted,
+        tier.store_backpressure_events,
+        tier.store_drops_on_full,
+        tier.store_already_resident,
     )
 }

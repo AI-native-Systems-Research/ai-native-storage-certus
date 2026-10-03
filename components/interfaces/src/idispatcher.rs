@@ -378,6 +378,25 @@ pub struct TierEventStats {
     /// means the tier could not absorb the store inflow even after
     /// backpressuring — consider a larger tier or more SSD write bandwidth.
     pub store_drops_on_full: u64,
+    /// Reserves refused because the key was **already resident** in the memory tier —
+    /// `mt.insert` returned `AlreadyExists`, so another writer, or a remote fetch's
+    /// `publish_success`, got there first.
+    ///
+    /// Counted because this is the one refusal that is **not** a capacity problem, and
+    /// it is otherwise indistinguishable from one: it returns from `evict_and_insert`
+    /// immediately, bypassing the backpressure retry entirely, so it bumps neither
+    /// `store_backpressure_events` nor `store_drops_on_full`, and the shm-queue wire
+    /// reports every reserve error as the same flat zero. A run can therefore show
+    /// stores being "declined" while eviction never failed once, which is exactly the
+    /// observation that prompted this counter.
+    ///
+    /// Note the asymmetry it measures. On the **load** path the identical
+    /// `AlreadyExists` from `mt.insert` is treated as a hit — see
+    /// `serve_concurrently_promoted`, whose contract is that observing `MemoryTier`
+    /// means the data is resident. On the **store** path it is surfaced as a failure.
+    /// Whether the wire should keep conflating the two is a protocol question this
+    /// counter deliberately only measures rather than answers.
+    pub store_already_resident: u64,
     /// Eviction candidates skipped because a read pin was held on them —
     /// `IDispatchMap::try_evict_to_block` returned `ActiveReferences`.
     ///

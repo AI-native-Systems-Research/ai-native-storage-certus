@@ -323,6 +323,15 @@ The crate has two Cargo features:
 - `EvictionEvent` / `EvictionReason` *(moved here 2026-10-02)*: `EvictionEvent { key, reason }` with `EvictionReason` being `Demoted` (to the block device) or `Removed`. Emitted best-effort on every memory-tier eviction over a bounded single-subscriber channel, with drop-and-count backpressure; the behavioural contract lives with the dispatchers (dispatcher spec 001 FR-042/FR-050, dispatcher-p2p spec 001 FR-017).
   - **Defined here, and only here, because two components emit it.** Both `dispatcher` and `dispatcher-p2p` publish these events, and a type defined in one of them cannot be named by the other without one dispatcher depending on the other — which is what prevented the `full-p2p` profile from building at all. A shared vocabulary type belongs in `interfaces` for the same reason `CacheKey` and `LookupResult` do.
 
+#### FR-018a: Store-Refusal Accounting *(New 2026-10-03)*
+- `TierEventStats` MUST distinguish the reasons a reserve was refused, because the shm-queue wire reports every reserve error as the same flat zero (`op_reserve` writes `0` on any `Err`) and the reasons mean opposite things:
+  - `store_backpressure_events` — retries taken while the tier was momentarily full.
+  - `store_drops_on_full` — the backpressure budget elapsed and the store was dropped.
+  - `store_already_resident` — `mt.insert` returned `AlreadyExists`: another writer, or a remote fetch's `publish_success`, got there first. **Not a capacity refusal.**
+- `store_already_resident` MUST be counted rather than inferred, because that path returns from `evict_and_insert` immediately and so bumps neither of the other two. A measured run showed 7.28% of stores refused while `eviction_scans_exhausted` was 0 — eviction never failed once — which no combination of the pre-existing counters could explain.
+- All three MUST be exposed by the server's metrics endpoint. They existed in this struct and were computed by the dispatcher, but were published nowhere, so the question above could not be answered from a scrape.
+- **Known asymmetry, recorded not resolved**: on the load path the identical `AlreadyExists` from `mt.insert` is treated as a *hit* (`serve_concurrently_promoted`), while on the store path it is surfaced as a failure. Whether the wire should keep conflating "already cached" with "cache full" is a protocol question; these counters measure it without settling it.
+
 #### FR-019: Supporting Types - Memory Tier
 - `MemoryTierError`: 7-variant error enum.
 - `MemoryTierTelemetrySnapshot`: `Copy + Default` 3-field cumulative counter snapshot (`evictions`, `write_lock_contentions`, `read_lock_contentions`), returned by `IMemoryTier::telemetry_snapshot` (see FR-009); zeroed unless the `telemetry` feature is enabled.
