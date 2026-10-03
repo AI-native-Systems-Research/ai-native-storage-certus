@@ -19,3 +19,8 @@ spdk-sys = { workspace = true, optional = true }
 
 [dev-dependencies]
 eviction-policy-lru.workspace = true
+
+[lints.rust]
+# `cfg(kani)` is set only by cargo-kani; declare it so `clippy -D warnings` stays clean
+# with the additive `#[cfg(kani)] mod verification` harnesses present.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }

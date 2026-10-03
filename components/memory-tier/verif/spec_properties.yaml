@@ -1,0 +1,1665 @@
+# Blind, spec-only verifiable-property extraction for the Certus memory-tier component.
+# This pass read ONLY the component specification set (spec.md, plan.md, tasks.md) and the
+# IMemoryTier interface declaration. The implementation sources were deliberately not opened,
+# so that a downstream spec-versus-code divergence analysis stays meaningful.
+# Ambiguities and contradictions found in the specification are recorded as records in their
+# own right rather than silently resolved.
+component:  memory-tier
+source:     spec
+artifact:   components/memory-tier/specs/001-memory-tier/spec.md + plan.md + tasks.md + components/interfaces/src/imemory_tier.rs (interface declaration only)
+pin:        c788d07c
+method:     blind-extraction
+generated:  2026-09-29
+counts: {total: 169, methods: 17, verifiable: 131, not_verifiable: 38}
+properties:
+
+  # ---------------------------------------------------------------- initialize
+  - id:         MT-INITIALIZE-PRE
+    subject:    initialize
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      Before calling the operation that sets up the memory pool, the caller must not have set the
+      pool up already, must ask for a pool size larger than zero bytes, and must have connected the
+      external eviction-policy component that the memory tier depends on for choosing victims.
+    traces:     [US-3, FR-023, FR-024, "plan.md: Required Receptacles"]
+
+  - id:         MT-INITIALIZE-POST-CAPACITY
+    subject:    initialize
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      After the pool is successfully set up with a requested size, the reported total capacity of
+      the pool equals exactly the number of bytes the caller requested.
+    traces:     [US-3, FR-001, US-5]
+
+  - id:         MT-INITIALIZE-POST-EMPTY
+    subject:    initialize
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Immediately after the pool is successfully set up, the pool holds no cached entries at all,
+      so the reported number of bytes in use is zero and no key is reported as present.
+    traces:     [US-3, US-5, FR-023]
+
+  - id:         MT-INITIALIZE-POST-POOLINFO
+    subject:    initialize
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      After the pool is successfully set up, the query that reports the pool's base address and
+      total size returns a real address together with the same size the caller requested, so that
+      an outside party such as a GPU driver can register that whole memory range.
+    traces:     [FR-022, US-5]
+
+  - id:         MT-INITIALIZE-POST-NUMA-FALLBACK
+    subject:    initialize
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      If the caller asks for the pool memory to be pinned to a particular processor memory node
+      and that pinning cannot be carried out, setting up the pool still succeeds and the pool is
+      fully usable with whatever memory placement the operating system chose by default.
+    traces:     [FR-019, US-3, "imemory_tier.rs: initialize doc comment"]
+
+  - id:         MT-INITIALIZE-POST-HUGEPAGE-FALLBACK
+    subject:    initialize
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Setting up the pool prefers large memory pages but must still succeed, with the full
+      requested capacity available, when large pages cannot be obtained and ordinary pages are
+      used instead.
+    traces:     [FR-002, US-3]
+
+  - id:         MT-INITIALIZE-ERR-DOUBLE-INIT
+    subject:    initialize
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      A second attempt to set up the memory pool on a component that is already set up fails with
+      an error instead of replacing the existing pool; the specification requires the failure but
+      does not say which of the component's error values is returned.
+    traces:     [US-3, FR-023, "plan.md: initialize_twice_fails"]
+
+  - id:         MT-INITIALIZE-ERR-ZERO-SIZE
+    subject:    initialize
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Asking to set up a pool of zero bytes fails with the invalid-size error and leaves the
+      component not set up, so no memory is reserved.
+    traces:     [US-3, FR-008]
+
+  - id:         MT-INITIALIZE-ERR-ALLOC-FAILED
+    subject:    initialize
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If the underlying request for memory from the operating system or from the storage runtime
+      cannot be satisfied, setting up the pool fails with the allocation-failed error carrying a
+      description of what went wrong, rather than returning success with an unusable pool.
+    traces:     ["plan.md: Error Handling Strategy", FR-001, FR-003]
+
+  - id:         MT-INITIALIZE-ERR-NO-EVICTION-POLICY
+    subject:    initialize
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If the external eviction-policy component has not been connected when the pool is set up,
+      the set-up call fails rather than producing a pool that can never choose a victim; the
+      specification states the check happens at set-up time but does not name the error returned.
+    traces:     [FR-024, "plan.md: Required Receptacles"]
+
+  - id:         MT-INITIALIZE-FRAME-ON-FAILURE
+    subject:    initialize
+    kind:       frame
+    verifiable: true
+    statement:  >
+      When setting up the pool fails for any reason, the component is left exactly as it was
+      before the call: it still reports itself as not set up, reports no capacity and no bytes in
+      use, and holds no partially built pool that a later successful set-up would have to clean up.
+    traces:     [US-3, FR-023, "plan.md: Error Handling Strategy"]
+
+  # -------------------------------------------------------------------- insert
+  - id:         MT-INSERT-PRE
+    subject:    insert
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      To add a new cache entry the caller must have set the pool up first, must ask for a size of
+      at least one byte, must use a key that is not already in the cache, and there must be a
+      single free stretch of pool memory large enough to hold the request.
+    traces:     [US-1, FR-008, FR-009, FR-010, FR-023]
+
+  - id:         MT-INSERT-POST-POINTER
+    subject:    insert
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      When adding a cache entry succeeds, the caller receives a usable, non-null memory address
+      that lies inside the pool's own memory range and refers to a block at least as large as the
+      number of bytes requested, so the caller may immediately write that many bytes there.
+    traces:     [US-1, FR-011, "imemory_tier.rs: insert doc comment"]
+
+  - id:         MT-INSERT-POST-LOOKUP
+    subject:    insert
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      After adding a cache entry succeeds, the key is reported as present, and both the
+      recency-updating lookup and the non-recency-updating lookup return the very same address and
+      size that the insertion returned.
+    traces:     [US-1, FR-011, FR-012]
+
+  - id:         MT-INSERT-POST-USED
+    subject:    insert
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      After adding a cache entry succeeds, the reported number of bytes in use grows by the
+      requested size rounded up to the next multiple of four kibibytes, and by nothing more.
+    traces:     [US-5, FR-004, "spec.md Implementation Notes: allocator rounds all sizes up to 4 KiB"]
+
+  - id:         MT-INSERT-POST-ALIGNMENT
+    subject:    insert
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Every address handed back when adding a cache entry starts on a four-kibibyte boundary, so
+      that the memory can be used directly as the source or destination of a disk transfer without
+      any extra copying or realignment.
+    traces:     [FR-004, SC-4, NFR-010, US-3]
+
+  - id:         MT-INSERT-POST-EVICTION-TRACKED
+    subject:    insert
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      After adding a cache entry succeeds, that entry is registered with the external
+      eviction-policy component, so it can subsequently be chosen as a victim and can appear in
+      the list of oldest keys.
+    traces:     [FR-013, FR-021, FR-024, "spec.md Key Entities: Slot holds an eviction handle"]
+
+  - id:         MT-INSERT-ERR-INVALID-SIZE
+    subject:    insert
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Asking to add a cache entry of zero bytes fails with the invalid-size error, and no key is
+      created and no memory is reserved.
+    traces:     [FR-008, US-3, "plan.md: insert_zero_size_fails"]
+
+  - id:         MT-INSERT-ERR-ALREADY-EXISTS
+    subject:    insert
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Asking to add a cache entry under a key that is already in the cache fails with the
+      already-exists error naming that key, and the entry that was already there keeps its
+      original address, size, and contents.
+    traces:     [FR-009, US-1, "plan.md: insert_duplicate_fails"]
+
+  - id:         MT-INSERT-ERR-POOL-FULL
+    subject:    insert
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      When no single free stretch of pool memory is large enough for the request, adding a cache
+      entry fails with the pool-full error rather than returning a short or overlapping block.
+    traces:     [FR-010, US-2, "plan.md: pool_full_returns_error"]
+
+  - id:         MT-INSERT-ERR-NOT-INITIALIZED
+    subject:    insert
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Attempting to add a cache entry before the pool has been set up fails with the
+      not-initialized error rather than reading or writing any memory.
+    traces:     [FR-023]
+
+  - id:         MT-INSERT-FRAME-OTHER-ENTRIES
+    subject:    insert
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Adding a cache entry leaves every other entry untouched: their addresses, their sizes, and
+      the bytes they hold are unchanged, none of them is removed, and the pool's total capacity
+      stays the same.
+    traces:     [US-1, FR-007, SC-5]
+
+  - id:         MT-INSERT-FRAME-ON-ERROR
+    subject:    insert
+    kind:       frame
+    verifiable: true
+    statement:  >
+      When adding a cache entry fails for any reason, nothing about the cache changes: the set of
+      keys present and the reported number of bytes in use are exactly what they were before the
+      call, so no partial reservation is left behind.
+    traces:     [FR-008, FR-009, FR-010, FR-023]
+
+  # ----------------------------------------------------------------------- get
+  - id:         MT-GET-PRE
+    subject:    get
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      The recency-updating lookup may be called with any key at any time and never fails outright:
+      a key that is missing, or a pool that has not been set up, is reported through the return
+      value rather than by raising an error or crashing.
+    traces:     [FR-011, FR-023, "imemory_tier.rs: get doc comment"]
+
+  - id:         MT-GET-POST-HIT
+    subject:    get
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Looking up a key that is present returns the same memory address and the same size that were
+      established when that entry was added, so the caller reads the identical block of cached data.
+    traces:     [FR-011, US-1]
+
+  - id:         MT-GET-POST-TOUCH
+    subject:    get
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      A successful recency-updating lookup marks the key as the most recently used entry, so it
+      will be chosen for eviction only after entries that have not been used since.
+    traces:     [FR-011, US-1, US-2]
+
+  - id:         MT-GET-ERR-MISS
+    subject:    get
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Looking up a key that is not in the cache reports absence rather than returning a stale or
+      invalid memory address.
+    traces:     [FR-011, "imemory_tier.rs: get doc comment"]
+
+  - id:         MT-GET-ERR-NOT-INITIALIZED
+    subject:    get
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Looking up any key before the pool has been set up reports absence, because the operation
+      checks that the component is set up before doing anything else.
+    traces:     [FR-023]
+
+  - id:         MT-GET-FRAME-POOL-STATE
+    subject:    get
+    kind:       frame
+    verifiable: true
+    statement:  >
+      A lookup never changes the stored data: no entry is added or removed, no block is moved or
+      freed, the reported bytes in use and total capacity are unchanged, and the contents of the
+      returned block are not modified by the lookup itself.
+    traces:     [FR-006, FR-011, US-1]
+
+  # ---------------------------------------------------------------------- peek
+  - id:         MT-PEEK-PRE
+    subject:    peek
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      The non-recency-updating lookup may be called with any key at any time and never fails
+      outright; a missing key or a pool that has not been set up is reported through the return
+      value.
+    traces:     [FR-012, FR-023]
+
+  - id:         MT-PEEK-POST-HIT
+    subject:    peek
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The non-recency-updating lookup of a key that is present returns exactly the same memory
+      address and size that the ordinary lookup would return for that key.
+    traces:     [FR-012, US-1]
+
+  - id:         MT-PEEK-FRAME-EVICTION-ORDER
+    subject:    peek
+    kind:       frame
+    verifiable: true
+    statement:  >
+      The non-recency-updating lookup must leave the eviction order completely unchanged, so an
+      entry that was next in line to be evicted is still next in line after being read this way,
+      which is what lets background work read an entry without protecting it from eviction.
+    traces:     [FR-012, US-1, "imemory_tier.rs: peek doc comment"]
+
+  - id:         MT-PEEK-ERR-MISS
+    subject:    peek
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      The non-recency-updating lookup of a key that is not in the cache reports absence rather
+      than returning an address.
+    traces:     [FR-012]
+
+  - id:         MT-PEEK-ERR-NOT-INITIALIZED
+    subject:    peek
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      The non-recency-updating lookup reports absence for every key when the pool has not been set
+      up yet.
+    traces:     [FR-023]
+
+  - id:         MT-PEEK-FRAME-POOL-STATE
+    subject:    peek
+    kind:       frame
+    verifiable: true
+    statement:  >
+      The non-recency-updating lookup changes no stored data: the set of keys present, every
+      entry's address and size, the bytes in use, and the total capacity are all the same
+      afterwards.
+    traces:     [FR-006, FR-012]
+
+  # ---------------------------------------------------------------- evict_next
+  - id:         MT-EVICT-NEXT-PRE
+    subject:    evict_next
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      To evict an entry the pool must have been set up, the external eviction-policy component must
+      be connected, and at least one entry must be in the cache; an empty pool is reported through
+      the return value rather than treated as a failure.
+    traces:     [US-2, FR-013, FR-023, FR-024]
+
+  - id:         MT-EVICT-NEXT-POST-POLICY-VICTIM
+    subject:    evict_next
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The key that eviction removes and returns is exactly the key that the external
+      eviction-policy component nominates as the next one to evict for this pool; the memory tier
+      makes no choice of its own.
+    traces:     [FR-013, US-2, "spec.md Implementation Notes: victim choice delegated entirely to the bound policy"]
+
+  - id:         MT-EVICT-NEXT-POST-ENTRY-GONE
+    subject:    evict_next
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      After an entry is evicted, that key is no longer reported as present and looking it up
+      reports absence, so the evicted entry is fully gone from the cache index.
+    traces:     [US-2, FR-013]
+
+  - id:         MT-EVICT-NEXT-POST-SPACE-FREED
+    subject:    evict_next
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Evicting an entry gives its memory back to the pool: the reported bytes in use drop by the
+      space that entry occupied, and a later insertion that needs that much room succeeds where it
+      would previously have been rejected for lack of space.
+    traces:     [US-2, SC-5, FR-013, FR-026]
+
+  - id:         MT-EVICT-NEXT-POST-UNTRACKED
+    subject:    evict_next
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      An evicted key is also removed from the external eviction-policy component's bookkeeping, so
+      it can no longer appear in the list of oldest keys and cannot be nominated as a victim a
+      second time.
+    traces:     [FR-013, FR-021, US-2]
+
+  - id:         MT-EVICT-NEXT-POST-LRU-ORDER
+    subject:    evict_next
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      With the least-recently-used policy that the system currently binds, an entry that has been
+      read or explicitly refreshed more recently is never evicted before an entry that has not been
+      used since, so refreshing an entry genuinely protects it while older entries remain.
+    traces:     [US-2, FR-016, "plan.md: touch_updates_eviction_order"]
+
+  - id:         MT-EVICT-NEXT-ERR-EMPTY-POOL
+    subject:    evict_next
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Asking to evict when the cache holds no entries reports that there was nothing to evict and
+      changes nothing at all.
+    traces:     ["imemory_tier.rs: evict_next doc comment", US-2]
+
+  - id:         MT-EVICT-NEXT-ERR-NOT-INITIALIZED
+    subject:    evict_next
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Asking to evict before the pool has been set up reports that nothing was evicted, because the
+      operation checks that the component is set up first.
+    traces:     [FR-023]
+
+  - id:         MT-EVICT-NEXT-FRAME-OTHER-ENTRIES
+    subject:    evict_next
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Eviction removes exactly one entry: every other key stays present with the same memory
+      address, the same size, and the same contents, and the pool's total capacity is unchanged.
+    traces:     [US-2, FR-013, SC-5]
+
+  - id:         MT-EVICT-NEXT-FRAME-NO-ROTATION-STATE
+    subject:    evict_next
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Eviction keeps no hidden position or rotation counter of its own, so two runs that start from
+      the same cache contents and the same policy state evict the same key; the victim never
+      depends on how many evictions happened earlier.
+    traces:     [FR-013, "spec.md Spec-Sync Notes: no round-robin shard counter"]
+
+  # -------------------------------------------------------- evict_next_for_key
+  - id:         MT-EVICT-FOR-KEY-PRE
+    subject:    evict_next_for_key
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      To free space on behalf of a particular key the pool must have been set up and the eviction
+      policy connected, but the named key itself need not be present in the cache and no other
+      condition applies to it.
+    traces:     [FR-014, US-2, FR-023]
+
+  - id:         MT-EVICT-FOR-KEY-POST-ALIAS
+    subject:    evict_next_for_key
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Freeing space on behalf of a named key behaves exactly like a plain eviction for every
+      possible key argument: it removes the same victim and leaves the cache in the same state as a
+      plain eviction would.
+    traces:     [FR-014, US-2, "imemory_tier.rs: evict_next_for_key doc comment"]
+
+  - id:         MT-EVICT-FOR-KEY-POST-SPACE-GLOBAL
+    subject:    evict_next_for_key
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The space released by this operation is usable by any subsequent insertion, not only by an
+      insertion of the key that was named, because the pool is one undivided region of memory.
+    traces:     [FR-014, US-2, FR-005]
+
+  - id:         MT-EVICT-FOR-KEY-FRAME-KEY-IGNORED
+    subject:    evict_next_for_key
+    kind:       frame
+    verifiable: true
+    statement:  >
+      The key passed to this operation has no effect on what happens: it does not narrow the choice
+      of victim, it is not given any protection, and it may itself be the entry that gets evicted.
+    traces:     [FR-014, "spec.md Spec-Sync Notes: the key argument is ignored"]
+
+  - id:         MT-EVICT-FOR-KEY-ERR-EMPTY-POOL
+    subject:    evict_next_for_key
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Asking to free space on behalf of a key when the cache is empty reports that nothing was
+      evicted and changes nothing.
+    traces:     ["imemory_tier.rs: evict_next_for_key doc comment", FR-014]
+
+  - id:         MT-EVICT-FOR-KEY-ERR-NOT-INITIALIZED
+    subject:    evict_next_for_key
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Asking to free space on behalf of a key before the pool has been set up reports that nothing
+      was evicted.
+    traces:     [FR-023]
+
+  # --------------------------------------------------------------- oldest_keys
+  - id:         MT-OLDEST-KEYS-PRE
+    subject:    oldest_keys
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      The query for the oldest keys may be called with any requested count, including zero or a
+      count larger than the number of entries held, and it never fails outright.
+    traces:     [FR-021, US-2]
+
+  - id:         MT-OLDEST-KEYS-POST-BOUNDED
+    subject:    oldest_keys
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The query for the oldest keys returns no more keys than the caller asked for, and no more
+      than the number of entries the eviction policy is currently tracking, so a short answer is
+      normal rather than an error.
+    traces:     [FR-021, US-2, "spec.md Implementation Notes: may return fewer than N keys"]
+
+  - id:         MT-OLDEST-KEYS-POST-ORDER
+    subject:    oldest_keys
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The keys returned by the oldest-keys query are ordered with the entry that would be evicted
+      first at the front and progressively newer entries after it.
+    traces:     [US-2, FR-021]
+
+  - id:         MT-OLDEST-KEYS-POST-LIVE-MEMBERSHIP
+    subject:    oldest_keys
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Every key returned by the oldest-keys query is a key that is actually still present in the
+      cache at the time of the call, so a caller can look each one up without getting a miss.
+    traces:     [FR-021, US-2]
+
+  - id:         MT-OLDEST-KEYS-POST-SINGLE-POLICY-QUERY
+    subject:    oldest_keys
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The oldest-keys query obtains its whole answer by asking the external eviction-policy
+      component once for the requested number of candidates, rather than by repeatedly sampling
+      several separate regions of the pool.
+    traces:     [FR-021, "spec.md Spec-Sync Notes: a single get_eviction_candidates call, not per-shard sampling"]
+
+  - id:         MT-OLDEST-KEYS-ERR-ZERO-N
+    subject:    oldest_keys
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Asking for zero oldest keys returns an empty list and changes nothing, rather than being
+      treated as a request for all keys or as an error.
+    traces:     [FR-021, US-2]
+
+  - id:         MT-OLDEST-KEYS-ERR-NOT-INITIALIZED
+    subject:    oldest_keys
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Asking for the oldest keys before the pool has been set up returns an empty list.
+    traces:     [FR-023]
+
+  - id:         MT-OLDEST-KEYS-FRAME
+    subject:    oldest_keys
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Looking at the oldest keys is purely observational: it removes no entry, frees no memory,
+      leaves the bytes in use and total capacity unchanged, and does not alter how soon any of the
+      reported keys will be evicted.
+    traces:     [US-2, FR-021]
+
+  # -------------------------------------------------------------------- remove
+  - id:         MT-REMOVE-PRE
+    subject:    remove
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      To delete a named entry the pool must have been set up and the key must currently be present
+      in the cache.
+    traces:     [US-4, FR-015, FR-023]
+
+  - id:         MT-REMOVE-POST-OK-AND-GONE
+    subject:    remove
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Deleting an entry that is present reports success, and afterwards the key is no longer
+      reported as present and looking it up reports absence.
+    traces:     [US-4, FR-015]
+
+  - id:         MT-REMOVE-POST-SPACE-REUSABLE
+    subject:    remove
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Deleting an entry returns its memory to the pool: the reported bytes in use drop by the space
+      that entry occupied, and a later insertion needing that much room succeeds.
+    traces:     [US-4, FR-015, FR-026, "plan.md: remove_and_reuse"]
+
+  - id:         MT-REMOVE-POST-UNTRACKED
+    subject:    remove
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      A deleted key is also dropped from the external eviction-policy component's bookkeeping, so
+      it can no longer be reported among the oldest keys nor nominated as a victim.
+    traces:     [FR-015, FR-021, FR-024]
+
+  - id:         MT-REMOVE-ERR-KEY-NOT-FOUND
+    subject:    remove
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Attempting to delete a key that is not in the cache fails with the key-not-found error naming
+      that key, and nothing about the cache changes.
+    traces:     [FR-015, US-4]
+
+  - id:         MT-REMOVE-ERR-NOT-INITIALIZED
+    subject:    remove
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Attempting to delete an entry before the pool has been set up fails with the not-initialized
+      error.
+    traces:     [FR-023]
+
+  - id:         MT-REMOVE-FRAME-OTHER-ENTRIES
+    subject:    remove
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Deleting one entry leaves all other entries with the same addresses, sizes, and contents,
+      keeps them all present, and does not change the pool's total capacity.
+    traces:     [US-4, FR-015]
+
+  # --------------------------------------------------------------------- touch
+  - id:         MT-TOUCH-PRE
+    subject:    touch
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      Refreshing an entry's recency may be requested for any key at any time; it returns nothing
+      and reports no error, so the caller needs no prior check that the key exists.
+    traces:     [FR-016, US-2]
+
+  - id:         MT-TOUCH-POST-ORDER-REFRESH
+    subject:    touch
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Refreshing a key that is present makes it the most recently used entry, so it will be evicted
+      only after entries that have not been used since, and no data is returned to the caller.
+    traces:     [FR-016, US-2, "plan.md: touch_updates_eviction_order"]
+
+  - id:         MT-TOUCH-ERR-ABSENT-KEY-NOOP
+    subject:    touch
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Refreshing a key that is not in the cache does nothing at all and does not crash or report a
+      problem; the specification never states this case explicitly for the single-key refresh and
+      only states it for the batched form.
+    traces:     [FR-016, US-6]
+
+  - id:         MT-TOUCH-ERR-NOT-INITIALIZED
+    subject:    touch
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Refreshing an entry before the pool has been set up does nothing, because the operation
+      checks that the component is set up first and has no way to report an error.
+    traces:     [FR-023]
+
+  - id:         MT-TOUCH-FRAME-NO-DATA-CHANGE
+    subject:    touch
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Refreshing an entry changes only its position in the eviction order: the set of keys present,
+      each entry's address and size, the bytes in use, and the total capacity all stay the same.
+    traces:     [FR-016, FR-006]
+
+  # --------------------------------------------------------------- batch_touch
+  - id:         MT-BATCH-TOUCH-PRE
+    subject:    batch_touch
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      Refreshing many entries at once may be requested with any list of keys, including an empty
+      list or keys that are not in the cache, and it never fails outright.
+    traces:     [US-6, FR-017]
+
+  - id:         MT-BATCH-TOUCH-POST-ALL-PRESENT
+    subject:    batch_touch
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Refreshing many entries at once updates the recency of every key in the list that is present
+      in the cache, giving the same result as refreshing each of those keys individually.
+    traces:     [US-6, FR-017]
+
+  - id:         MT-BATCH-TOUCH-ERR-ABSENT-SKIPPED
+    subject:    batch_touch
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Keys in the batch that are not in the cache are quietly skipped, no error is reported, and
+      the keys in the same batch that are present are still refreshed.
+    traces:     [US-6, FR-017]
+
+  - id:         MT-BATCH-TOUCH-ERR-EMPTY-NOOP
+    subject:    batch_touch
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Refreshing an empty list of keys has no observable effect of any kind on the cache or on the
+      eviction order.
+    traces:     [US-6]
+
+  - id:         MT-BATCH-TOUCH-ERR-NOT-INITIALIZED
+    subject:    batch_touch
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Refreshing many entries at once before the pool has been set up does nothing.
+    traces:     [FR-023]
+
+  - id:         MT-BATCH-TOUCH-FRAME-NO-DATA-CHANGE
+    subject:    batch_touch
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Refreshing many entries at once changes only their positions in the eviction order: no entry
+      is added or removed, no address or size changes, and the bytes in use and total capacity stay
+      the same.
+    traces:     [US-6, FR-006, FR-017]
+
+  # ------------------------------------------------------------------ contains
+  - id:         MT-CONTAINS-PRE
+    subject:    contains
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      The presence check may be called with any key at any time and always answers yes or no rather
+      than failing.
+    traces:     [US-1, FR-006, FR-023]
+
+  - id:         MT-CONTAINS-POST-EXACT
+    subject:    contains
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The presence check answers yes exactly when a live cache entry exists for that key, so it
+      answers yes after the entry is added and no after the entry is deleted, evicted, or wiped by a
+      full clear.
+    traces:     [US-1, US-4, "plan.md: contains"]
+
+  - id:         MT-CONTAINS-ERR-NOT-INITIALIZED
+    subject:    contains
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      The presence check answers no for every key when the pool has not been set up yet.
+    traces:     [FR-023]
+
+  - id:         MT-CONTAINS-FRAME
+    subject:    contains
+    kind:       frame
+    verifiable: true
+    statement:  >
+      The presence check changes nothing whatsoever, and in particular it does not make the key look
+      more recently used, so checking for an entry does not protect it from eviction.
+    traces:     [FR-006, US-1]
+
+  # ------------------------------------------------------------------ capacity
+  - id:         MT-CAPACITY-PRE
+    subject:    capacity
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      The total-capacity query may be called at any time, before or after the pool is set up, and
+      always returns a number rather than failing.
+    traces:     [US-5, FR-023]
+
+  - id:         MT-CAPACITY-POST
+    subject:    capacity
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The total-capacity query reports the full size of the pool in bytes as it was requested when
+      the pool was set up, and that number does not change as entries are added, deleted, evicted,
+      or wiped.
+    traces:     [US-5, FR-001, FR-018]
+
+  - id:         MT-CAPACITY-ERR-NOT-INITIALIZED
+    subject:    capacity
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Before the pool has been set up the total-capacity query reports zero, reflecting that no
+      memory has been reserved; the specification requires the set-up check but does not state the
+      reported number.
+    traces:     [FR-023, US-5]
+
+  - id:         MT-CAPACITY-FRAME
+    subject:    capacity
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Asking for the total capacity changes nothing about the cache or the eviction order.
+    traces:     [FR-006, US-5]
+
+  # ---------------------------------------------------------------------- used
+  - id:         MT-USED-PRE
+    subject:    used
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      The bytes-in-use query may be called at any time and always returns a number rather than
+      failing.
+    traces:     [US-5, FR-023]
+
+  - id:         MT-USED-POST-SUM
+    subject:    used
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The bytes-in-use query reports the total space occupied by all entries currently in the cache,
+      where each entry counts as its requested size rounded up to the next multiple of four
+      kibibytes.
+    traces:     [US-5, FR-004, "plan.md: capacity_and_used"]
+
+  - id:         MT-USED-ERR-NOT-INITIALIZED
+    subject:    used
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Before the pool has been set up the bytes-in-use query reports zero.
+    traces:     [FR-023, US-5]
+
+  - id:         MT-USED-FRAME
+    subject:    used
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Asking how many bytes are in use changes nothing about the cache or the eviction order.
+    traces:     [FR-006, US-5]
+
+  # ----------------------------------------------------------------- pool_info
+  - id:         MT-POOL-INFO-PRE
+    subject:    pool_info
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      The query for the pool's base address and size may be called at any time and reports the
+      absence of a pool through its return value instead of failing.
+    traces:     [FR-022, US-5, FR-023]
+
+  - id:         MT-POOL-INFO-POST
+    subject:    pool_info
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Once the pool is set up, the query reports the starting address of the single block of memory
+      that backs the whole cache together with its total size, and that size equals the pool's
+      reported capacity.
+    traces:     [FR-022, US-5, FR-001]
+
+  - id:         MT-POOL-INFO-ERR-NOT-INITIALIZED
+    subject:    pool_info
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Before the pool is set up the query reports that there is no pool address to give out, rather
+      than returning a null or meaningless address.
+    traces:     [FR-023, FR-022]
+
+  - id:         MT-POOL-INFO-FRAME
+    subject:    pool_info
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Asking for the pool's base address and size changes nothing about the cache, the eviction
+      order, or the memory itself.
+    traces:     [FR-022, FR-006]
+
+  # ------------------------------------------------------------ is_dma_capable
+  - id:         MT-IS-DMA-CAPABLE-PRE
+    subject:    is_dma_capable
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      The question of whether the pool's memory can be used directly by storage hardware may be
+      asked at any time and always answers yes or no rather than failing.
+    traces:     [FR-020, US-3]
+
+  - id:         MT-IS-DMA-CAPABLE-POST-ONLY-IF-SPDK
+    subject:    is_dma_capable
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The component answers yes to being directly usable by storage hardware only when the pool's
+      memory was obtained from the storage runtime's own allocator, so a yes answer is a reliable
+      licence for callers to hand cache pointers straight to the disk without an intermediate copy.
+    traces:     [FR-020, US-3, "imemory_tier.rs: is_dma_capable doc comment"]
+
+  - id:         MT-IS-DMA-CAPABLE-POST-IF-SPDK
+    subject:    is_dma_capable
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Conversely, when the pool's memory really was obtained from the storage runtime's allocator
+      the component answers yes rather than understating its capability; the specification states
+      only the one-way condition, so this converse direction is an inferred obligation.
+    traces:     [FR-020, FR-003, SC-7]
+
+  - id:         MT-IS-DMA-CAPABLE-ERR-NOT-INITIALIZED
+    subject:    is_dma_capable
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Before the pool is set up the component answers no to being directly usable by storage
+      hardware, because there is no pool memory yet.
+    traces:     [FR-023, FR-020]
+
+  - id:         MT-IS-DMA-CAPABLE-FRAME
+    subject:    is_dma_capable
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Asking whether the memory is directly usable by storage hardware changes nothing, and the
+      answer stays the same for the whole life of a pool no matter how many entries are added,
+      deleted, evicted, or wiped.
+    traces:     [FR-020, FR-006]
+
+  # --------------------------------------------------------------------- clear
+  - id:         MT-CLEAR-PRE
+    subject:    clear
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      To wipe the whole cache the pool must have been set up; no condition is placed on how many
+      entries it currently holds.
+    traces:     [US-4, FR-018, FR-023]
+
+  - id:         MT-CLEAR-POST-COUNT
+    subject:    clear
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Wiping the cache reports how many entries were removed, which is exactly the number of entries
+      that were present at the moment of the call.
+    traces:     [FR-018, US-4]
+
+  - id:         MT-CLEAR-POST-EMPTY
+    subject:    clear
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      After the cache is wiped no key is reported as present, every previously cached key now looks
+      up as absent, and the reported number of bytes in use is zero.
+    traces:     [US-4, FR-018, "plan.md: clear_resets_all"]
+
+  - id:         MT-CLEAR-POST-FULL-CAPACITY-REUSABLE
+    subject:    clear
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Wiping the cache returns all the memory to the free pool, so immediately afterwards a single
+      insertion as large as the entire pool capacity can succeed.
+    traces:     [FR-018, US-4, FR-026]
+
+  - id:         MT-CLEAR-POST-UNTRACKED
+    subject:    clear
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      After the cache is wiped the external eviction-policy component no longer tracks any of the
+      removed keys, so the oldest-keys query returns an empty list and an eviction attempt reports
+      that there is nothing to evict.
+    traces:     [FR-018, FR-021, FR-013]
+
+  - id:         MT-CLEAR-POST-EMPTY-POOL-ZERO
+    subject:    clear
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Wiping a cache that already holds nothing succeeds and reports that zero entries were removed.
+    traces:     [FR-018, US-4]
+
+  - id:         MT-CLEAR-ERR-NOT-INITIALIZED
+    subject:    clear
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Attempting to wipe the cache before the pool has been set up fails with the not-initialized
+      error.
+    traces:     [FR-023, FR-018]
+
+  - id:         MT-CLEAR-FRAME-POOL-MEMORY
+    subject:    clear
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Wiping the cache removes the entries but keeps the pool itself: the total capacity, the pool's
+      base address, and whether the memory is directly usable by storage hardware are all unchanged,
+      and the component remains set up and ready for new insertions.
+    traces:     [FR-018, FR-022, FR-020, US-4]
+
+  # --------------------------------------------------------- telemetry_snapshot
+  - id:         MT-TELEMETRY-SNAPSHOT-PRE
+    subject:    telemetry_snapshot
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      The telemetry snapshot may be requested at any time, including before the pool has been set up
+      and regardless of whether the optional counter-tracking build option was enabled, and it
+      always returns a set of numbers rather than failing.
+    traces:     [US-7, FR-028]
+
+  - id:         MT-TELEMETRY-SNAPSHOT-POST-ZERO-WHEN-DISABLED
+    subject:    telemetry_snapshot
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      When the component was built without the optional counter-tracking option, the telemetry
+      snapshot reports zero for every counter, so callers see a well-defined empty reading rather
+      than stale or invented numbers.
+    traces:     [FR-028, US-7, NFR-011]
+
+  - id:         MT-TELEMETRY-SNAPSHOT-POST-EVICTION-COUNT
+    subject:    telemetry_snapshot
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      When the component was built with the optional counter-tracking option, the eviction counter
+      in the snapshot equals the total number of entries that have actually been evicted since the
+      counters were last reset, counting each successful eviction exactly once and counting nothing
+      when an eviction attempt found the cache empty.
+    traces:     [FR-027, US-7]
+
+  - id:         MT-TELEMETRY-SNAPSHOT-POST-NO-CONTENTION-WHEN-UNCONTENDED
+    subject:    telemetry_snapshot
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      When only one thread has ever used the component, both lock-contention counters in the
+      snapshot remain zero, because a contention is recorded only when an operation fails to take
+      the lock on its first attempt.
+    traces:     [FR-027, US-7, "spec.md Implementation Notes: a failed first try_read/try_write attempt bumps the counter"]
+
+  - id:         MT-TELEMETRY-SNAPSHOT-FRAME-NO-RESET
+    subject:    telemetry_snapshot
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Reading the telemetry snapshot neither resets nor otherwise alters the counters and changes
+      nothing about the cache, so two readings taken with no activity in between are identical.
+    traces:     [FR-028, US-7]
+
+  - id:         MT-TELEMETRY-SNAPSHOT-INV-MONOTONIC
+    subject:    telemetry_snapshot
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Every telemetry counter only ever grows as the component is used and never decreases, except
+      when the dedicated reset operation is deliberately called.
+    traces:     [FR-027, FR-028, US-7]
+
+  # ----------------------------------- additional public operations named by the spec
+  - id:         MT-FREE-CAPACITY-POST
+    subject:    free_capacity
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The free-space query reports the total pool capacity minus the bytes currently in use, so a
+      caller watching for memory pressure can see exactly how much room is left; this operation is
+      described in the requirements but is not one of the operations offered on the component's
+      public interface.
+    traces:     [FR-029]
+
+  - id:         MT-RESET-TELEMETRY-POST
+    subject:    reset_telemetry
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      After the telemetry counters are explicitly reset, a fresh snapshot reports zero for every
+      counter, while the cache contents, capacity, and bytes in use are all left untouched.
+    traces:     [FR-028, US-7]
+
+  # ------------------------------------------------- global state invariants
+  - id:         MT-INV-USED-WITHIN-CAPACITY
+    subject:    "global invariant: allocated bytes never exceed pool capacity"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      At every point in the component's life the number of bytes reported as in use is between zero
+      and the pool's total capacity inclusive, so the cache can never claim to hold more data than
+      the pool can physically contain.
+    traces:     [US-5, FR-010, SC-4]
+
+  - id:         MT-INV-SLOT-REGIONS-DISJOINT
+    subject:    "global invariant: live entries never share memory"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      No two entries that are in the cache at the same time occupy overlapping memory, so writing
+      through the address of one entry can never corrupt the data of another.
+    traces:     [FR-007, FR-026, SC-3, "spec.md Key Entities: Slot maps a key to an offset and size"]
+
+  - id:         MT-INV-POINTERS-INSIDE-POOL
+    subject:    "global invariant: every handed-out address lies inside the pool"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Every memory address the component gives out for an entry, together with the whole block of
+      bytes that entry is said to occupy, lies inside the single region of memory reserved when the
+      pool was set up, so a caller writing within the stated size can never write outside the pool.
+    traces:     [FR-001, FR-022, "plan.md: Pointer Arithmetic"]
+
+  - id:         MT-INV-FOUR-KIB-ALIGNMENT
+    subject:    "global invariant: four-kibibyte alignment of all allocations"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Every entry's position within the pool and every entry's reserved length are whole multiples
+      of four kibibytes, which is what makes the addresses usable for direct disk transfers.
+    traces:     [FR-004, SC-4, NFR-010]
+
+  - id:         MT-INV-SIZE-ACCOUNTING
+    subject:    "global invariant: reported entry size versus space charged"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      For each entry the size reported back to callers on lookup is the size they originally asked
+      for, while the space charged against the pool is that size rounded up to the next multiple of
+      four kibibytes; the difference, which can be up to 4095 bytes per entry, is accounted as used
+      space and is never handed to another entry.
+    traces:     [FR-004, US-5, "spec.md Implementation Notes: small objects waste up to 4095 bytes"]
+
+  - id:         MT-INV-UNIQUE-KEY
+    subject:    "global invariant: at most one entry per key"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The cache holds at most one entry for any given key at any time, so a lookup can never be
+      ambiguous and a deletion can never leave a second copy behind.
+    traces:     [FR-009, FR-007, US-1]
+
+  - id:         MT-INV-OBSERVER-CONSISTENCY
+    subject:    "global invariant: all observers agree about which keys are present"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The presence check, the two lookup operations, the count returned when the cache is wiped, and
+      the bytes-in-use figure all agree about which entries exist: a key reported as present is
+      exactly a key whose lookups succeed and whose space is included in the bytes in use.
+    traces:     [US-1, US-4, US-5, FR-018]
+
+  - id:         MT-INV-INITIALIZE-ONCE-ONLY
+    subject:    "global invariant: set-up happens at most once and is never undone"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Setting up the pool is a one-way step: once it has succeeded the component stays set up for the
+      rest of its life, its capacity and base address never change, and no operation on the public
+      interface returns it to the not-set-up state.
+    traces:     [US-3, FR-023, "spec.md Implementation Notes: after initialization the immutable state fields do not change"]
+
+  - id:         MT-INV-POOL-BASE-STABLE
+    subject:    "global invariant: the pool's memory is never moved or resized"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Once the pool exists, its starting address and total size stay the same no matter what
+      sequence of insertions, lookups, deletions, evictions, or wipes is performed, which is what
+      makes it safe for an outside party such as a GPU driver to register that range once and keep
+      using it.
+    traces:     [FR-022, US-5, FR-001]
+
+  - id:         MT-INV-POINTER-STABLE-UNTIL-FREED
+    subject:    "global invariant: an entry's address stays valid until that entry goes away"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The address given out for an entry remains valid and keeps pointing at that entry's own data
+      until the entry is explicitly deleted or evicted; until then the component never moves the
+      entry and never re-uses its memory for a different entry.
+    traces:     ["imemory_tier.rs: insert doc comment", FR-011, US-1]
+
+  - id:         MT-INV-ALLOCATOR-SLOT-MAP-AGREEMENT
+    subject:    "global invariant: no leaked or double-booked space"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Every byte of the pool is either free or belongs to exactly one entry that is currently in the
+      cache, so repeatedly adding and removing entries can never lose space permanently and can
+      never hand the same space out twice.
+    traces:     [FR-007, FR-026, SC-5, US-4]
+
+  - id:         MT-INV-FREE-LIST-COALESCING
+    subject:    "global invariant: adjacent freed space merges back into one usable run"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      When two entries that sat next to each other in the pool are both removed, their space merges
+      into one larger free run, so an insertion as large as the two of them together succeeds
+      afterwards.
+    traces:     [FR-026, US-4, "plan.md: coalesce_adjacent"]
+
+  - id:         MT-INV-NEVER-NOT-EVICTABLE
+    subject:    "global invariant: the not-evictable error is never produced"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      No operation of the component ever returns the not-evictable error, because that error value
+      exists only as a placeholder for a future feature that protects entries during write-through
+      and no such protection is implemented.
+    traces:     ["spec.md Implementation Notes: NotEvictable reserved for future use", "plan.md: Error Handling Strategy", "plan.md Future Considerations 3"]
+
+  - id:         MT-INV-DEFAULT-POOL-SIZE-NEVER-APPLIED
+    subject:    "global invariant: the published default pool size is never substituted"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The component never silently uses its published default pool size of 256 mebibytes; the size of
+      a pool is always exactly the size the caller passed when setting it up, since every set-up call
+      requires an explicit size.
+    traces:     [NFR-007, "spec.md Implementation Notes: DEFAULT_POOL_SIZE is currently unused by any call site"]
+
+  - id:         MT-INV-NO-INTERNAL-VICTIM-SELECTION-STATE
+    subject:    "global invariant: the component keeps no victim-selection state of its own"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      All decisions about which entry to evict come from the external eviction-policy component; the
+      memory tier itself stores no ordering, rotation, or region-selection information, so its
+      eviction behaviour is fully determined by that policy plus the current cache contents.
+    traces:     [FR-013, FR-014, FR-024, "spec.md Spec-Sync Notes: no internal round-robin counter or shard-selection state"]
+
+  - id:         MT-INV-LOGGER-OPTIONAL
+    subject:    "global invariant: results do not depend on whether a logger is attached"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Every operation returns the same result and leaves the cache in the same state whether or not
+      the optional logging component is attached, so logging is never required for correct operation.
+    traces:     [FR-025, "plan.md: logger receptacle is optional, best-effort"]
+
+  - id:         MT-INV-CONCURRENT-STRUCTURAL-INTEGRITY
+    subject:    "global invariant: concurrent use cannot corrupt the cache"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      When many threads use the component at the same time, the cache always ends up in a state that
+      satisfies all of its structural rules: entries never overlap, no key appears twice, no space is
+      lost or double-booked, and the bytes-in-use figure still matches the entries that are present.
+    traces:     [SC-3, NFR-002, NFR-004, FR-006]
+
+  # ---------------------------------------- not-verifiable coverage ledger
+  - id:         MT-NV-01-MMAP-CONTIGUOUS-REGION
+    scope:      "FR-001 — pool is allocated as a single contiguous memory mapping"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      This names the operating-system mechanism used to obtain the memory rather than a behaviour a
+      caller can observe through the component's operations; which system call produced the memory
+      cannot be checked from the outside. The observable consequences that matter are captured
+      separately as the rules that every entry address lies inside one reported region.
+    traces:     [FR-001]
+
+  - id:         MT-NV-02-HUGEPAGE-BACKING
+    scope:      "FR-002 — large-page backing is preferred with automatic fallback"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Whether the memory ended up on large pages depends on how the machine is configured at the
+      moment of the call, so it is an environment fact rather than a property of the component. The
+      part that is a real obligation, namely that set-up still succeeds when large pages are
+      unavailable, is recorded as its own property.
+    traces:     [FR-002, US-3]
+
+  - id:         MT-NV-03-SPDK-ZMALLOC-MECHANISM
+    scope:      "FR-003 — the storage runtime's allocator is used when its environment is active"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Which allocator supplied the memory is an internal and environment-dependent choice; a caller
+      can only observe the resulting yes-or-no answer about direct hardware usability, which is
+      covered by its own properties.
+    traces:     [FR-003, US-3]
+
+  - id:         MT-NV-04-MBIND-MECHANISM
+    scope:      "FR-019 — memory-node binding is performed through the kernel policy call"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      The specific kernel call used to pin memory to a processor node, and whether the machine has
+      more than one such node, are properties of the environment rather than checkable behaviour. The
+      graceful-fallback obligation is recorded as a property.
+    traces:     [FR-019, US-3]
+
+  - id:         MT-NV-05-INTERNAL-POOL-STRUCTURE
+    scope:      "FR-005, FR-007 and the Key Entities table — one unsharded structure containing one free-list allocator and one key-to-slot map"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      These describe how the component is built internally, naming private data structures that no
+      caller can inspect. Their externally visible consequences, such as one pool of globally usable
+      space and at most one entry per key, are captured as properties in their own right.
+    traces:     [FR-005, FR-007, "spec.md Key Entities table"]
+
+  - id:         MT-NV-06-LOCK-DISCIPLINE
+    scope:      "FR-006, NFR-002 and the Overview — which operations take a shared lock and which take an exclusive lock"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      The choice of locking mode is an internal design decision about concurrency and throughput; a
+      caller cannot observe which kind of lock was taken, only that results stay consistent. The
+      consistency obligation is recorded as a concurrency invariant, and the promise that read-only
+      operations change nothing is recorded per operation.
+    traces:     [FR-006, NFR-002, "spec.md Overview"]
+
+  - id:         MT-NV-07-BATCH-LOCK-AMORTIZATION
+    scope:      "FR-017 and User Story 6 — batching many recency updates amortizes the cost of taking the lock"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      This is a performance claim about how often an internal lock is taken. It has no observable
+      pass-or-fail outcome, and the number of lock acquisitions is not exposed. The functional part of
+      the batched operation is covered by its own properties.
+    traces:     [FR-017, US-6]
+
+  - id:         MT-NV-08-O1-LRU-COMPLEXITY
+    scope:      "NFR-001 — recency updates and evictions are constant-time"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Algorithmic cost is a performance characteristic measured by benchmarking, not a correctness
+      statement with a possible counterexample in a single run.
+    traces:     [NFR-001]
+
+  - id:         MT-NV-09-NO-SYSCALLS-DATA-PATH
+    scope:      "NFR-003 — no operating-system calls happen on the data path after set-up"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Establishing that no system call occurs requires tracing the process at the operating-system
+      level; it is not an input-output obligation of any operation.
+    traces:     [NFR-003]
+
+  - id:         MT-NV-10-SEND-SYNC-AND-UNSAFE-JUSTIFICATION
+    scope:      "NFR-004 and the implementation note justifying the manual thread-safety declaration"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Being shareable between threads is a compile-time type property that the compiler already
+      settles, and the prose justification for declaring it by hand is an argument rather than a
+      checkable assertion. The behavioural content, that concurrent use cannot corrupt the cache, is
+      recorded as an invariant.
+    traces:     [NFR-004, "spec.md Implementation Notes: unsafe Send/Sync justification"]
+
+  - id:         MT-NV-11-BTREEMAP-CHOICE
+    scope:      "NFR-005 — the allocator uses an ordered map giving logarithmic first-fit search"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      This fixes an internal data-structure choice and its cost; neither the structure nor the search
+      cost is observable through the component's operations.
+    traces:     [NFR-005]
+
+  - id:         MT-NV-12-DROP-RELEASE
+    scope:      "NFR-006 — pool memory is properly released when the component is dropped"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Release of operating-system resources at destruction time is not observable through the
+      component's own operations and needs external leak tooling. This requirement is also directly
+      undercut by an implementation note stating that the pool is deliberately leaked when the
+      storage runtime has already shut down, so as written the requirement does not hold
+      unconditionally.
+    traces:     [NFR-006, SC-2, "spec.md Implementation Notes: the pool is intentionally leaked when SPDK has already shut down"]
+
+  - id:         MT-NV-13-DEFAULT-POOL-SIZE-CONSTANT
+    scope:      "NFR-007 — the default pool size is 256 mebibytes"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      As written this requirement describes a published constant that the spec itself says nothing
+      ever reads, so it constrains no behaviour and is self-undercutting. The behavioural consequence,
+      that the size is never silently substituted, is recorded as an invariant instead.
+    traces:     [NFR-007, "spec.md Implementation Notes: DEFAULT_POOL_SIZE is currently unused by any call site"]
+
+  - id:         MT-NV-14-COMPONENT-VERSION
+    scope:      "NFR-008 — the component version is 0.3.0"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      A version string is packaging metadata; it says nothing about how the component behaves.
+    traces:     [NFR-008, "spec.md Spec-Sync Notes 2026-09-03"]
+
+  - id:         MT-NV-15-SPDK-FEATURE-GATE
+    scope:      "NFR-009 — support for the storage runtime is an optional compile-time feature"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      This is a build-configuration fact about which code is compiled, not a runtime behaviour with a
+      possible counterexample.
+    traces:     [NFR-009]
+
+  - id:         MT-NV-16-DMA-HARDWARE-SUITABILITY
+    scope:      "NFR-010 and Success Criterion 7 — returned addresses are genuinely suitable for direct disk transfers on real hardware"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Whether a transfer actually succeeds depends on the physical device, the driver, and the running
+      storage runtime, so it can only be established by running on hardware. The checkable part of the
+      claim, that addresses are aligned to four kibibytes and lie within one pool region, is recorded
+      as invariants.
+    traces:     [NFR-010, SC-7]
+
+  - id:         MT-NV-17-TELEMETRY-ZERO-COST
+    scope:      "NFR-011 — the optional counter-tracking feature costs nothing when it is switched off"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      This is a claim about generated code and memory layout when a build option is off; it has no
+      observable runtime outcome beyond the counters reading zero, which is covered by its own
+      property.
+    traces:     [NFR-011, US-7]
+
+  - id:         MT-NV-18-TELEMETRY-CONTENTION-COUNTS
+    scope:      "FR-027 and User Story 7 — the exact values of the read-lock and write-lock contention counters"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      A contention is recorded only when a lock happens not to be free on the first attempt, which
+      depends entirely on thread scheduling, so no particular count can be required of a run. The
+      weaker deterministic obligation, that the counters stay at zero when there is no concurrent use,
+      is recorded as a property.
+    traces:     [FR-027, US-7]
+
+  - id:         MT-NV-19-LOGGING-BEHAVIOR
+    scope:      "FR-025 — operational messages are emitted through the optional logging component"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      What gets logged is best-effort diagnostic output and is explicitly not required for the
+      operations to succeed. The obligation that matters, that results are identical with and without
+      a logger attached, is recorded as an invariant.
+    traces:     [FR-025]
+
+  - id:         MT-NV-20-TESTS-PASS
+    scope:      "Success Criterion 1 — the component's unit tests all pass"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      This is a statement about the project's test run rather than a property of the component's
+      behaviour; the behaviours those tests cover are recorded as properties in their own right.
+    traces:     [SC-1]
+
+  - id:         MT-NV-21-NO-MEMORY-LEAKS
+    scope:      "Success Criterion 2 — the pool allocates and releases without leaking memory"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Freedom from operating-system-level leaks is a resource-accounting property outside the
+      component's observable interface; only the internal no-lost-space rule is checkable, and that is
+      recorded as an invariant.
+    traces:     [SC-2, NFR-006]
+
+  - id:         MT-NV-22-DEADLOCK-FREEDOM
+    scope:      "Success Criterion 3 — concurrent access from sixteen or more threads does not deadlock"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Never getting stuck is a liveness claim over unbounded time, which cannot be settled by
+      examining any single finite run. The other half of the criterion, that concurrent use does not
+      corrupt state, is recorded as an invariant.
+    traces:     [SC-3]
+
+  - id:         MT-NV-23-NUMA-HARDWARE
+    scope:      "Success Criterion 6 — memory-node binding succeeds on machines with more than one processor socket"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      This depends on the hardware the component happens to run on. Only the fallback behaviour is a
+      component obligation, and that is recorded as a property.
+    traces:     [SC-6, FR-019]
+
+  - id:         MT-NV-24-TEST-COVERAGE-LISTS
+    scope:      "The Test Coverage subsections of all seven user stories and the test tables in the plan"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      These list the names of existing tests rather than stating obligations; each behaviour a named
+      test checks is already recorded as a property, and the notes that two user stories have no
+      dedicated test are observations about the test suite.
+    traces:     [US-1, US-2, US-3, US-4, US-5, US-6, US-7, "plan.md Testing tables"]
+
+  - id:         MT-NV-25-PLAN-SHARDING-CONTRADICTION
+    scope:      "plan.md Summary, Memory Layout, Pointer Arithmetic, Concurrency Model and Key Design Decisions 1 and 6 — a sixteen-way partitioned pool with per-partition locks, key-modulo assignment and round-robin eviction"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      The plan still describes a pool split into sixteen independently locked partitions with victims
+      chosen by rotating between partitions, while the requirements document explicitly replaces that
+      with one single undivided pool whose victim is chosen solely by the external policy. The two
+      documents contradict each other and the plan's own synchronisation note admits the design was
+      never built, so no obligation can be taken from this text. The requirement side of the
+      contradiction is captured as properties stating that the pool is one global region, that the key
+      argument to the space-freeing operation is ignored, and that no rotation state exists.
+    traces:     ["plan.md Memory Layout", "plan.md Pointer Arithmetic", "plan.md Concurrency Model", "plan.md Key Design Decisions 1 and 6", FR-005, FR-013, FR-014]
+
+  - id:         MT-NV-26-PLAN-FORMAL-VERIFICATION-CLAIM
+    scope:      "plan.md Formal Verification — ten named properties discharged by twenty-one verification conditions, including partition-bounded, partition-deterministic and round-robin eviction"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      This is a claim about proof artifacts, not about component behaviour, and the requirements
+      document states those claims were withdrawn because no such artifacts exist. Three of the named
+      properties also describe the partitioned design that the requirements say was never built, so
+      they cannot be obligations at all.
+    traces:     ["plan.md Formal Verification", "spec.md Spec-Sync Notes 2026-08-20"]
+
+  - id:         MT-NV-27-TASKS-CHECKLIST
+    scope:      "tasks.md — all review, validation, test-gap, benchmark, documentation and backlog checklists"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      These are project-management to-do items about reviewing the specification, adding tests,
+      writing benchmarks and updating documentation. They assign work to people and impose no
+      behavioural obligation on the component.
+    traces:     ["tasks.md Review Backfilled Spec", "tasks.md Validate Test Coverage", "tasks.md Address Test Gaps", "tasks.md Add Benchmarks", "tasks.md Documentation", "tasks.md Future Enhancements"]
+
+  - id:         MT-NV-28-TASKS-PARTITION-TEST-CONTRADICTION
+    scope:      "tasks.md — the outstanding item to add a test that the space-freeing operation targets the correct partition"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      This task asks for a test of behaviour that the requirements explicitly deny, since the
+      space-freeing operation is defined to ignore the key it is given and the pool has no partitions.
+      A test written to this task would fail against the specified behaviour, so the task cannot be
+      turned into an obligation.
+    traces:     ["tasks.md Address Test Gaps", FR-014]
+
+  - id:         MT-NV-29-PLAN-GAPS-AND-FUTURE-WORK
+    scope:      "plan.md Test Gaps Identified and Future Considerations"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      These record what is missing from the test suite and what might be built later, such as
+      configurable partition counts, pinning entries during write-through, richer metrics, a different
+      allocator, and GPU registration. None of them states behaviour the component must have today.
+    traces:     ["plan.md Test Gaps Identified", "plan.md Future Considerations"]
+
+  - id:         MT-NV-30-DOUBLE-INIT-ERROR-VARIANT-UNSPECIFIED
+    scope:      "User Story 3 — double set-up returns an error, but which error is left unsaid"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      The specification requires a failure but never names which of the component's error values a
+      second set-up returns, and none of the listed error values obviously fits an already-set-up pool.
+      The requirement that the call fails is recorded as a property; the identity of the error cannot
+      be pinned down from the specification alone.
+    traces:     [US-3, "plan.md Error Handling Strategy"]
+
+  - id:         MT-NV-31-INITIALIZATION-CHECK-WITHOUT-ERROR-CHANNEL
+    scope:      "FR-023 — every operation checks the set-up flag before proceeding"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Eight of the seventeen public operations cannot report an error at all, because they hand back a
+      plain number, a yes-or-no answer, a list, or nothing. The specification does not say what those
+      operations should do when the component is not set up, so the intended outcome of the check is
+      ambiguous. Each such operation has been given a property recording the most plausible reading,
+      namely reporting emptiness, zero, or no, and this entry records that the specification itself
+      leaves it open.
+    traces:     [FR-023]
+
+  - id:         MT-NV-32-BATCH-TOUCH-DUPLICATES-UNSPECIFIED
+    scope:      "User Story 6 — behaviour when the same key appears more than once in a batch"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      The specification covers present keys and absent keys in a batch but says nothing about repeated
+      keys, so there is no stated obligation to check.
+    traces:     [US-6, FR-017]
+
+  - id:         MT-NV-33-CLEAR-FAILURE-MODES-UNSPECIFIED
+    scope:      "User Story 4 — the wipe operation can report a failure, but no failure other than not being set up is described"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      The operation is declared as able to fail, yet the specification lists only success outcomes plus
+      the general set-up check, so any further failure condition is unspecified and cannot be turned
+      into an obligation.
+    traces:     [US-4, FR-018]
+
+  - id:         MT-NV-34-FREE-CAPACITY-NOT-ON-INTERFACE
+    scope:      "FR-029 — the free-space query used to trigger proactive eviction"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      This requirement describes an operation that is not among the seventeen operations the
+      component's public interface declares, so callers reaching the component through that interface
+      cannot use it and the requirement's surface is ambiguous. Its arithmetic obligation is still
+      recorded as a property against the operation as named in the requirement.
+    traces:     [FR-029]
+
+  - id:         MT-NV-35-SPEC-PROCESS-METADATA
+    scope:      "The backfill notice, the status line, and the synchronisation notes at the end of the specification"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      These passages describe how the document itself was produced and reconciled, including the
+      warning that it records current behaviour rather than original intent. They are editorial history
+      and place no obligation on the component.
+    traces:     ["spec.md Backfill Notice", "spec.md Status line", "spec.md Spec-Sync Notes 2026-08-20", "spec.md Spec-Sync Notes 2026-09-03", "plan.md Spec-Sync Notes 2026-07-22"]
+
+  - id:         MT-NV-36-DEPENDENCY-TABLES
+    scope:      "The dependency tables in the specification and the plan, and the crate-level component model notes"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      These list the libraries and framework pieces the component is built from and when each
+      dependency is connected. Build-time dependency lists are not observable behaviour; the one
+      behavioural consequence, that the eviction policy must be connected before set-up while the
+      logger stays optional, is recorded as properties.
+    traces:     ["spec.md Dependencies table", "plan.md Crate Dependencies", "plan.md Component Model Integration"]
+
+  - id:         MT-NV-37-TOUCH-APPLIED-OUTSIDE-POOL-LOCK
+    scope:      "The Overview and NFR-002 — recency updates are applied after the pool lock is released, using the eviction policy's own synchronisation"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      This describes the internal order in which two locks are taken. It is not observable through the
+      component's operations, and the specification draws no user-visible consequence from it, such as
+      a window in which a recency update is not yet visible.
+    traces:     ["spec.md Overview", NFR-002, "spec.md Implementation Notes"]
+
+  - id:         MT-NV-38-GPU-REGISTRATION-NOT-PERFORMED
+    scope:      "FR-022 together with the plan's note that no GPU registration call is made inside this component"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      The requirement only asks that the pool's address and size be exposed so that some other layer
+      can register the memory with a GPU, and the plan confirms the component makes no such call
+      itself. The absence of an outbound call to an external library is not checkable through the
+      component's own observable behaviour; the exposure part of the requirement is recorded as
+      properties.
+    traces:     [FR-022, "plan.md Future Considerations 7"]

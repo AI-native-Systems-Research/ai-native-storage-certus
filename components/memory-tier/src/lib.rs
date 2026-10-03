@@ -1,3 +1,4 @@
+#![cfg_attr(kani, feature(stmt_expr_attributes, proc_macro_hygiene))]
 //! Memory-tier component for the Certus storage system.
 //!
 //! Provides a DRAM-resident cache pool with pluggable eviction (delegated to a
@@ -15,6 +16,9 @@
 //! and [`IEvictionPolicy`].
 
 mod allocator;
+
+#[cfg(kani)]
+mod verification;
 
 use std::collections::HashMap;
 #[cfg(feature = "telemetry")]
