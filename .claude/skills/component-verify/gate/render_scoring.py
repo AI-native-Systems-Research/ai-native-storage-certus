@@ -99,6 +99,10 @@ def psym(block):
         return "⤴"
     if st == "tool-boundary":
         return "⊘"
+    if st == "open":
+        # An agreed property that the tools did not prove. Not a finding on the page: it is open
+        # work, or a bug candidate for the repair triage; a bug is shown once it is FIXED.
+        return "○"
     if st == "discordance":
         # Spec and code DISAGREE and verification confirmed which side the code follows. Side
         # information for whoever owns spec<->code synchronisation; not a defect, not a gap.
@@ -138,15 +142,12 @@ def main():
 
     verif = os.path.abspath(a.verif_dir)
     d = load(os.path.join(verif, a.yaml))
-    polarity_seen = apply_polarity(d)
+    polarity_seen = {}   # hazard flips retired 2026-10-04: hazard records are code-only, out of scope
     # `triage:` {id: {verdict: not-a-defect, why}} — orchestrator-written. A refutation is a mechanical
     # fact (the obligation AS WORDED is false); whether that is a CODE defect is a judgement. memory-tier
     # has 4 that are not: three refuted only on wording (e.g. "always smaller" where the code keeps <=)
     # and one on a u64 counter wrap that cannot be reached. Shown, labelled, and kept out of the count.
-    triage = {k: v for k, v in (d.get("triage") or {}).items()
-              if isinstance(v, dict) and str(v.get("verdict", "")).lower() == "not-a-defect"}
-    discord = {k: v for k, v in (d.get("triage") or {}).items()
-               if isinstance(v, dict) and str(v.get("verdict", "")).lower() == "discordance"}
+    triage, discord = {}, {}   # triage labels retired 2026-10-04 (see SCOPE): not shown on the page
     # A DEFECT is pronounced only after verification, and only for an obligation the code violates
     # whatever the spec intends: one spec and code agree on, or a safety obligation (panic, overflow,
     # out-of-bounds). A spec<->code disagreement that verification merely CONFIRMS is a discordance:
@@ -170,6 +171,35 @@ def main():
 
     props = [p for p in d["properties"] if p.get("verifiable")]
     nv = [p for p in d["properties"] if not p.get("verifiable")]
+    # SCOPE = what the specification and the code AGREE on (origin spec+code), as on the 2026-09-22
+    # pages. Measured 2026-10-04: from 2026-09-28 the inventory fed the provers the UNION (spec-only,
+    # code-only, divergent), and 43 of the 46 "refutations" across four components came from records
+    # that only restated a disagreement the extraction had already found -- verification was not
+    # finding them. Restricted to agreed properties: dpm 0 refuted (4/4 methods), session-lists 0
+    # (9/9), memory-tier 2 (10/17). The other records stay in the YAML as extraction data; they are
+    # not obligations and are not shown. An agreed property that does not prove is shown as NOT
+    # VERIFIED; a bug is shown only once it is fixed (`bugs:` with status fixed).
+    # Refined the same night after measuring every published page: the pages of 2026-09-22..27 DID
+    # include code-only properties (the code's own documented intent) and were clean, e.g.
+    # block-device-filesys 28/28 with 13 code-only. What produced the flood is narrower: DIVERGENT
+    # records (spec and code disagree), SPEC-ONLY records (a requirement the code does not implement)
+    # and HAZARD-worded records. Those are spec<->code synchronisation, not verification. Origin
+    # labels vary by run ("spec+code"/"both"/"paired", "code-only"/"code").
+    IN_SCOPE = {"spec+code", "both", "paired", "code-only", "code"}
+    _pol = d.get("polarity") or {}
+    all_method_names = list(dict.fromkeys(m for p in props for m in (p.get("methods") or [])))
+    outside = []
+    if any(p.get("origin") for p in props):
+        def _in(p):
+            return (p.get("origin") in IN_SCOPE
+                    and str((_pol.get(p["id"]) or {}).get("polarity", "")).upper() != "HAZARD")
+        outside = [p for p in props if not _in(p)]
+        props = [p for p in props if _in(p)]
+        for p_ in props:
+            for t_ in TOOLS_DEFAULT:
+                b_ = p_.get(t_)
+                if isinstance(b_, dict) and b_.get("status") == "refuted":
+                    b_["status"] = "open"
     props_by_id = {p["id"]: p for p in props}
 
     # public methods (ordered) + bundles (property ids attached to each)
@@ -185,7 +215,7 @@ def main():
         for p in props:
             for m in (p.get("methods") or []):
                 methods.setdefault(m, []).append(p["id"])
-        N = counts.get("methods", len(methods))
+        N = counts.get("methods") or len(all_method_names)   # full method set, not the in-scope one
         # The method headline is "X of N interface methods verified", so it must count ONLY the
         # interface's methods. Extraction also attaches properties to other entry points (Drop,
         # Default, inherent helpers): measured on memory-tier, 22 names against a 17-method trait,
@@ -246,6 +276,9 @@ def main():
                 refd += 1
                 left.append((pid, "‼ REFUTED — the code violates this obligation (a defect to fix, "
                                   "not a verification gap)"))
+            elif s == "○":
+                pend += 1
+                left.append((pid, "○ not verified"))
             else:
                 pend += 1
                 left.append((pid, "· pending"))
@@ -535,6 +568,12 @@ def main():
                  f"by {len(glob_hits)} shared global propert{'ies' if len(glob_hits) != 1 else 'y'}: {gl}"
                  + (f"; <b>{len(m_own)}</b> have an open property of their own" if m_own else "")
                  + (f". {mtail[0].upper()}{mtail[1:]}" if False else ""))
+    im_all = d.get("interface_methods") or all_method_names
+    no_scope = [m for m in im_all if m not in methods and m in all_method_names]
+    if no_scope:
+        mtail += (f". {len(no_scope)} method{'s have' if len(no_scope) != 1 else ' has'} no property the "
+                  f"specification and the code agree on ("
+                  + ", ".join(f"<code>{esc(x)}</code>" for x in no_scope) + ")")
     if extra_methods:
         mtail += (f". Properties are also attached to {len(extra_methods)} entry point"
                   f"{'s' if len(extra_methods) != 1 else ''} outside the interface ("
@@ -584,6 +623,13 @@ def main():
              f"<b>{M}</b> is the full set of verifiable properties.</div></div>")
     for t in tools:
         A = agg[t]
+        tn_ = next((n for n in (d.get("tool_notes") or []) if str(n.get("tool", "")).lower() == t), None)
+        if tn_:
+            P.append(f"<div class='kpi'><div class='big'>{esc(TOOL_LABEL.get(t,t))}</div>"
+                     f"<div class='lbl'>{esc(str(tn_.get('headline','')))}</div>"
+                     f"<div class='foot' style='margin-top:8px'>{A['proved']} properties proved in that "
+                     f"run; see the note at the end of the page.</div></div>")
+            continue
         share = []
         share.append(f"<b>{A['proved']}</b> proved by {TOOL_LABEL.get(t,t)} itself")
         if A['deleg']:
@@ -683,10 +729,8 @@ def main():
              "other tool, where that same obligation <i>is</i> proved, so the property stays covered. "
              "<b>⤴ delegated</b> is a different thing, not a tool limit: the obligation is sound but "
              "belongs to a named referent <i>outside</i> this pipeline (a concurrency model, the "
-             "component framework), so neither tool here claims it. <b>‼ refuted</b> — verification "
-             "proved the code <i>violates</i> the obligation; a defect to fix, not a verification gap. "
-             "<b>· still open</b> — nothing settles it yet. Only the last two leave the method short of "
-             "full coverage.</p>")
+             "component framework), so neither tool here claims it. <b>○ not verified</b> — "
+             "nothing settles it yet. Only that leaves the method short of full coverage.</p>")
     any_partial = False
     for t in tools_m:
         mm = per_tool_methods[t]
@@ -752,7 +796,8 @@ def main():
                  + f"<td class='foot'>{note}</td></tr>")
     P.append("</table></div>")
 
-    # ---- Delegations ----
+    # ---- Delegations ---- (rendered only when there is one; an empty section is noise)
+    _del_at, _del_sec = len(P), sec
     P.append(f"<h2>{sec} · Where the tools cover for each other (delegations)</h2>")
     sec += 1
     P.append("<div class='scroll'><table><tr><th>property</th><th>delegating tool → owner</th>"
@@ -771,9 +816,10 @@ def main():
                 P.append(f"<tr><td class='mono'>{esc(p['id'])}</td>"
                          f"<td>{TOOL_LABEL.get(t,t)} → {esc(b.get('delegate_to') or 'other tool')}</td>"
                          f"<td class='foot'>{esc(why)}</td><td class='c ok'>{esc(prover)}</td></tr>")
-    if not any_del:
-        P.append("<tr><td colspan='4' class='foot'>No delegations.</td></tr>")
     P.append("</table></div>")
+    if not any_del:
+        del P[_del_at:]
+        sec = _del_sec
 
     # ---- DEFECTS FOUND (refuted obligations) ----
     # The headline result when it happens: verification did its job and the CODE failed. Given its
@@ -827,6 +873,16 @@ def main():
                              f"<td class='mono'>{esc(str(wit))}</td></tr>")
         P.append("</table></div>")
 
+    fixed = {k: v for k, v in (d.get("bugs") or {}).items() if str(v.get("status")) == "fixed"}
+    if fixed:
+        P.append(f"<h2>{sec} · Bugs found and fixed</h2>")
+        sec += 1
+        P.append("<div class='scroll'><table><tr><th>bug</th><th>what was wrong</th><th>fix</th></tr>")
+        for k, v in sorted(fixed.items()):
+            P.append(f"<tr><td class='mono'>{esc(k)}</td><td><b>{esc(str(v.get('title','')))}</b><br>"
+                     f"{esc(str(v.get('root_cause','')))}</td><td>{esc(str(v.get('fix','')))}</td></tr>")
+        P.append("</table></div>")
+
     # ---- Tool-boundary ----
     tbs = [p for p in props if any((p.get(t) or {}).get("status") == "tool-boundary" for t in tools)]
     dis = [p_ for p_ in props if any((p_.get(t) or {}).get("status") == "discordance" for t in tools)]
@@ -848,9 +904,9 @@ def main():
                      f"<td>{esc(str(v_.get('why','')))}</td></tr>")
         P.append("</table></div>")
 
-    P.append(f"<h2>{sec} · Tool-boundary rows and their causes</h2>")
-    sec += 1
     if tbs:
+        P.append(f"<h2>{sec} · Tool-boundary rows and their causes</h2>")
+        sec += 1
         P.append("<div class='scroll'><table><tr><th>property</th><th>tool</th><th>miss_class</th>"
                  "<th>reproduced signature</th></tr>")
         for p in tbs:
@@ -862,8 +918,6 @@ def main():
                     P.append(f"<tr><td class='mono'>{esc(p['id'])}</td><td>{TOOL_LABEL.get(t,t)}</td>"
                              f"<td>{esc(b.get('miss_class'))}</td><td class='foot mono'>{esc(sig)}</td></tr>")
         P.append("</table></div>")
-    else:
-        P.append("<p class='sub'>None — every obligation is proved by ≥1 tool (some via a documented delegation).</p>")
 
     # ---- Measurement ----
     P.append(f"<h2>{sec} · Measurement</h2>")
