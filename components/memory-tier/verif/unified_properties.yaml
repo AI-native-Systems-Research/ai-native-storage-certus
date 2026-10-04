@@ -8330,19 +8330,164 @@ tool_notes:
     so a poisoned lock cannot exist in its model. Read the column as a sample, NOT as ''Kani cannot prove
     these''.'
   measured: Kani gate 13 min 41 s, peak 2 GB per harness; scored 4 proved, 1 unresolved of 5
-# Orchestrator-written triage (node7 report, 2026-10-03). Not a status.
+# Orchestrator-written, NOT scorer-written (2026-10-03): what each refutation MEANS.
+# defect -> a bug in fv_bugs.yaml (root cause) and how it manifested here; discordance ->
+# spec and code disagree, side information; not-a-defect -> false only as worded.
 triage:
-  MT-INV-SIZE-ACCOUNTING:
+  MT-INIT-NUMA-NEGATIVE-IGNORED:
+    verdict: discordance
+    code_does: A negative NUMA node is silently ignored and the pool is created with default placement.
+    why: Spec and code disagree on behaviour that does not crash, overflow, read out of bounds or act on the wrong
+      object; reported for spec/code synchronisation.
+  MT-INSERT-MEMORY-NOT-CLEARED:
+    verdict: defect
+    bug: FV-BUG-007
+    manifested_as: previous entry's data visible
+  MT-REMOVE-INVALIDATES-POINTER-SILENTLY:
+    verdict: defect
+    bug: FV-BUG-007
+    manifested_as: use after free (no way to detect the pointer is dead)
+  MT-EVICT-NEXT-REPORTS-SUCCESS-WITHOUT-FREEING:
+    verdict: defect
+    bug: FV-BUG-006
+    manifested_as: use after free (frees the new entry)
+  MT-OLDEST-KEYS-POST-LIVE-MEMBERSHIP:
+    verdict: defect
+    bug: FV-BUG-006
+    manifested_as: wrong object (a reported key is no longer live)
+  MT-BATCH-TOUCH-EMPTY-NOOP:
     verdict: not-a-defect
-    why: it says the sizes add up to 'always smaller' than the bytes in use; the code keeps them equal-or-smaller, and the
-      witness proves that form.
+    why: before set-up, a non-empty batch briefly takes the state lock before checking the flag; the intended 'no
+      pool lock, no policy call, no effect' still holds.
+  MT-IS-DMA-CAPABLE-HUGEPAGE-MMAP-UNDERSTATED:
+    verdict: discordance
+    code_does: A huge-page mmap pool reports itself as not DMA capable.
+    why: Spec and code disagree on behaviour that does not crash, overflow, read out of bounds or act on the wrong
+      object; reported for spec/code synchronisation.
+  MT-CLEAR-POST-EMPTY:
+    verdict: defect
+    bug: FV-BUG-009
+    manifested_as: capacity cannot be used in full after clear
+  MT-TELEMETRY-EVICTION-COUNT:
+    verdict: defect
+    bug: FV-BUG-006
+    manifested_as: wrong count (an eviction is counted that freed the wrong entry)
+  MT-TELEMETRY-COUNTERS-MONOTONIC:
+    verdict: not-a-defect
+    why: the counters wrap only at 2^64 increments, which cannot be reached; below that they are proved to only
+      increase.
   MT-RESET-TELEMETRY-POST:
     verdict: not-a-defect
     why: only its clause about a 64-bit counter wrapping is false; that wrap cannot be reached in practice.
-  MT-BATCH-TOUCH-EMPTY-NOOP:
+  MT-TELEMETRY-INHERENT-POST:
+    verdict: discordance
+    code_does: Telemetry counters are read one at a time, so a snapshot can be torn under concurrency.
+    why: Spec and code disagree on behaviour that does not crash, overflow, read out of bounds or act on the wrong
+      object; reported for spec/code synchronisation.
+  MT-DROP-SPDK-LEAK:
+    verdict: discordance
+    code_does: The SPDK pool is not freed after the environment shuts down; whether memory is actually lost depends
+      on spdk_env_fini, which is not modelled.
+    why: Spec and code disagree on behaviour that does not crash, overflow, read out of bounds or act on the wrong
+      object; reported for spec/code synchronisation.
+  MT-DROP-DOES-NOT-UNTRACK:
+    verdict: discordance
+    code_does: Drop never releases the eviction policy's pool for this tier.
+    why: Spec and code disagree on behaviour that does not crash, overflow, read out of bounds or act on the wrong
+      object; reported for spec/code synchronisation.
+  MT-FREELIST-NEW-POST:
+    verdict: defect
+    bug: FV-BUG-009
+    manifested_as: unusable tail in a new free list
+  MT-FREELIST-DEALLOCATE-UNDERFLOW:
+    verdict: defect
+    bug: FV-BUG-008
+    manifested_as: underflow
+  MT-FREELIST-DEALLOCATE-NO-DOUBLE-FREE-CHECK:
+    verdict: defect
+    bug: FV-BUG-008
+    manifested_as: double free accepted
+  MT-ALLOC-MMAP-NODEMASK-GUARD:
+    verdict: discordance
+    code_does: 'A node number too large for the one-word mask still calls mbind, with an all-zero mask. A possible
+      out-of-bounds read by the kernel is NOT confirmed: the kernel side is not modelled.'
+    why: Spec and code disagree on behaviour that does not crash, overflow, read out of bounds or act on the wrong
+      object; reported for spec/code synchronisation.
+  MT-INV-SIZE-ACCOUNTING:
     verdict: not-a-defect
-    why: before set-up, a non-empty batch briefly takes the state lock before checking the flag; the intended 'no pool lock,
-      no policy call, no effect' still holds.
-  MT-TELEMETRY-COUNTERS-MONOTONIC:
-    verdict: not-a-defect
-    why: the counters wrap only at 2^64 increments, which cannot be reached; below that they are proved to only increase.
+    why: it says the sizes add up to 'always smaller' than the bytes in use; the code keeps them equal-or-smaller,
+      and the witness proves that form.
+  MT-INV-HANDLE-CAN-OUTLIVE-ENTRY:
+    verdict: defect
+    bug: FV-BUG-007
+    manifested_as: use after free (pointer outlives its entry)
+  MT-INV-RECEPTACLE-LOOKUP-PANICS:
+    verdict: defect
+    bug: FV-BUG-010
+    manifested_as: panic
+  MT-INV-LOCK-POISONING-CASCADE:
+    verdict: defect
+    bug: FV-BUG-010
+    manifested_as: panic cascade (poisoned lock)
+  MT-INV-UNALIGNED-CAPACITY-TAIL:
+    verdict: defect
+    bug: FV-BUG-009
+    manifested_as: unusable tail; full capacity still reported
+  MT-INV-ENTRY-SIZE-NARROW-FIELD:
+    verdict: discordance
+    code_does: Entries are capped at 4 GiB because the shared interface takes size as u32 (imemory_tier.rs:67);
+      memory-tier only widens it, so nothing is truncated. A design limit.
+    why: Spec and code disagree on behaviour that does not crash, overflow, read out of bounds or act on the wrong
+      object; reported for spec/code synchronisation.
+bugs:
+  FV-BUG-006:
+    title: evict_next chooses its victim before taking the pool lock
+    root_cause: evict_next asks the eviction policy for a victim BEFORE locking the pool. A concurrent remove(k)
+      + insert(k) can land in between, and the eviction then frees the NEW entry, whose owner keeps a pointer into
+      freed memory. The policy obeys its contract throughout.
+    location: components/memory-tier/src/lib.rs (evict_next)
+    status: open
+  FV-BUG-007:
+    title: Pool memory is reused without a generation and without clearing
+    root_cause: A freed offset is handed to the next insert with nothing marking which use it belongs to and without
+      clearing it, so an old pointer reaches the new entry and the new entry starts with the previous occupant's
+      bytes. Same design flaw as FV-BUG-002, in memory-tier's own pool.
+    location: components/memory-tier/src/lib.rs (insert/remove) and src/allocator.rs
+    status: open
+  FV-BUG-008:
+    title: The free list trusts every release it is given
+    root_cause: FreeList::deallocate does not detect a double free, and its `used` counter is decremented without
+      a check, so an unmatched release underflows it.
+    location: components/memory-tier/src/allocator.rs (FreeList::deallocate)
+    status: open
+  FV-BUG-009:
+    title: A pool size that is not a multiple of 4 KiB is accepted
+    root_cause: Nothing requires the pool size to be a whole number of 4 KiB units (e.g. 5000 is accepted), so the
+      tail can never be allocated and a full-size request is refused.
+    location: components/memory-tier/src/lib.rs (initialize) and src/allocator.rs (FreeList::new)
+    status: open
+  FV-BUG-010:
+    title: Internal failures panic instead of returning errors
+    root_cause: Seven .unwrap()s on the eviction-policy receptacle, and lock results unwrapped everywhere, so one
+      panic while a lock is held poisons it and every later call panics too.
+    location: components/memory-tier/src/lib.rs (receptacle lookups, lock acquisitions)
+    status: open
+# Orchestrator-written: the IMemoryTier trait's own methods (components/interfaces/src/imemory_tier.rs), the method-headline denominator.
+interface_methods:
+- initialize
+- insert
+- get
+- peek
+- evict_next
+- evict_next_for_key
+- oldest_keys
+- remove
+- touch
+- batch_touch
+- contains
+- capacity
+- used
+- pool_info
+- is_dma_capable
+- clear
+- telemetry_snapshot
