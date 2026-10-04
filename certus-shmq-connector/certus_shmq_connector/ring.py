@@ -78,7 +78,6 @@ OP_REMOVE = 12
 OP_CLEAR_MEMORY_TIER = 13
 OP_FLUSH_TO_SSD = 14
 OP_GET_IO_STATS = 15
-OP_TOUCH_CHECK = 16
 
 STATUS_OK = 0
 
@@ -673,17 +672,6 @@ class Ring:
             return []
         return decode_ok_flags(
             self._dispatch(OP_TOUCH, encode_promote_keys(promote, keys)), len(keys)
-        )
-
-    def touch_states(self, keys: Sequence[int], promote: bool = False) -> list[int]:
-        """Fused Touch + tri-state Check in one round trip: touches every key and
-        returns its ``CHECK_*`` state (a failed touch reads as ``CHECK_MISS``)."""
-        keys = list(keys)
-        if not keys:
-            return []
-        return decode_states(
-            self._dispatch(OP_TOUCH_CHECK, encode_promote_keys(promote, keys)),
-            len(keys),
         )
 
     def reserve(self, entries: Sequence[tuple[int, int, int]]) -> list[bool]:

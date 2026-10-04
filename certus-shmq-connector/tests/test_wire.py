@@ -30,7 +30,6 @@ from certus_shmq_connector.ring import (
     OP_GET_IO_STATS,
     OP_POPULATE,
     OP_REMOVE,
-    OP_TOUCH_CHECK,
     decode_io_stats,
     decode_ok_flags,
     decode_states,
@@ -45,9 +44,9 @@ from certus_shmq_connector.ring import (
 
 def test_new_opcodes_have_the_wire_values():
     # wire.rs: POPULATE=11, REMOVE=12, CLEAR_MEMORY_TIER=13, FLUSH_TO_SSD=14,
-    # GET_IO_STATS=15, TOUCH_CHECK=16.
+    # GET_IO_STATS=15.
     assert (OP_POPULATE, OP_REMOVE, OP_CLEAR_MEMORY_TIER, OP_FLUSH_TO_SSD,
-            OP_GET_IO_STATS, OP_TOUCH_CHECK) == (11, 12, 13, 14, 15, 16)
+            OP_GET_IO_STATS) == (11, 12, 13, 14, 15)
 
 
 # ── Check: req is a key list; resp is `[state:u8]*n` (0=miss/1=resident/2=pend)─

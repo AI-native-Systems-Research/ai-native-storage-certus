@@ -212,19 +212,15 @@ class ShmqCertusOffloadingManager(OffloadingManager):
             return
         # Touch every per-rank key so all W shards' LRU positions advance.
         expanded = [nk for k in int_keys for nk in self._ns_all(k)]
-        # Residency now comes from the touch reply itself (fused TouchCheck), so
-        # the scheduler's subsequent per-key lookup loop
+        self._ring.touch(expanded, promote=False)
+        # Batch the existence probe for the whole key list here, where we
+        # already hold it, so the scheduler's subsequent per-key lookup loop
         # (offloading/scheduler.py::_maximal_prefix_lookup) is served from this
-        # map without a separate Check round trip. resident_only semantics: only
-        # RESIDENT counts, a PENDING shard reads as a miss (see
-        # _check_all_present). AND-across-ranks per logical key (a block is a hit
-        # only if all shards are present); states return in expansion order.
-        states = self._ring.touch_states(expanded, promote=False)
-        flags = [s == CHECK_RESIDENT for s in states]
-        w = self._world_size
-        for i, k in enumerate(int_keys):
-            chunk = flags[i * w:(i + 1) * w]
-            self._lookup_cache[k] = len(chunk) == w and all(chunk)
+        # map instead of firing one Check RPC per key. AND-across-ranks per
+        # logical key (a block is a hit only if all shards are present).
+        self._lookup_cache.update(
+            self._check_all_present(int_keys, resident_only=True)
+        )
 
     # ── store ──
 

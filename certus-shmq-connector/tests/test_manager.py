@@ -67,12 +67,6 @@ class FakeRing:
         self.calls.append(("touch", (keys, promote)))
         return [True] * len(keys)
 
-    def touch_states(self, keys, promote=False):
-        # Fused TouchCheck: recorded as "touch" so touch-call assertions hold.
-        keys = list(keys)
-        self.calls.append(("touch", (keys, promote)))
-        return [self._state_of(k) for k in keys]
-
     def reserve(self, entries):
         entries = list(entries)
         self.calls.append(("reserve", entries))
@@ -205,10 +199,9 @@ def test_touch_maps_to_touch_no_promote():
 
 
 def test_touch_batches_check_for_following_per_key_lookups():
-    # touch() ships the whole key list as one fused TouchCheck, whose reply
-    # carries per-key residency — so touch() issues NO separate check, and the
-    # scheduler's subsequent per-key lookup loop is served from the memoized
-    # bitmap — no per-key check RPC either.
+    # Option 1: touch() ships the whole key list, so it fires ONE batched check
+    # and the scheduler's subsequent per-key lookup loop is served from the
+    # memoized bitmap — no per-key check RPC.
     ring = FakeRing()
     ring.exists[U(1)] = True
     ring.exists[U(2)] = True
@@ -217,15 +210,15 @@ def test_touch_batches_check_for_following_per_key_lookups():
     keys = [K(1), K(2), K(3)]
 
     mgr.touch(keys)
-    # Exactly one fused touch over the full list, and no check RPC.
-    assert _calls_of(ring, "touch") == [([U(1), U(2), U(3)], False)]
-    assert _calls_of(ring, "check_states") == []
+    # Exactly one batched (tri-state) check over the full list.
+    checks = _calls_of(ring, "check_states")
+    assert checks == [[U(1), U(2), U(3)]]
 
-    # Per-key lookups answer from the cache, issuing NO check.
+    # Per-key lookups answer from the cache, issuing NO further check.
     assert mgr.lookup(keys[0]) is True
     assert mgr.lookup(keys[1]) is True
     assert mgr.lookup(keys[2]) is False
-    assert _calls_of(ring, "check_states") == []
+    assert _calls_of(ring, "check_states") == [[U(1), U(2), U(3)]]  # still just the one
 
 
 def test_lookup_miss_falls_back_to_single_check():
@@ -236,10 +229,10 @@ def test_lookup_miss_falls_back_to_single_check():
     ring.exists[U(42)] = True
     mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
     mgr.touch([K(1)])  # bitmap covers key 1 only
-    assert _calls_of(ring, "check_states") == []  # residency came from touch
     assert mgr.lookup(K(42)) is True
-    # The fallback single-key check happened for the uncached key only.
-    assert _calls_of(ring, "check_states") == [[U(42)]]
+    # The fallback single-key check happened for the uncached key.
+    assert [U(1)] in _calls_of(ring, "check_states")
+    assert [U(42)] in _calls_of(ring, "check_states")
 
 
 def test_touch_after_lookup_starts_new_pass_and_clears_bitmap():
@@ -292,37 +285,10 @@ def test_touch_caches_pending_state_for_following_lookups():
     keys = [K(1), K(2)]
 
     mgr.touch(keys)
-    assert _calls_of(ring, "check_states") == []  # residency came from touch
+    assert _calls_of(ring, "check_states") == [[U(1), U(2)]]
     assert mgr.lookup(keys[0]) is True  # resident
     assert mgr.lookup(keys[1]) is False  # pending -> reads as MISS, from cache
-    assert _calls_of(ring, "check_states") == []  # no further RPC
-
-
-def test_touch_tp_any_non_resident_shard_makes_logical_key_miss():
-    # TP>1: touch() expands each logical key to W per-rank shards and a block is
-    # a hit only if ALL shards are RESIDENT. One PENDING or MISS shard makes the
-    # logical key miss, answered from the cache with no check RPC.
-    from certus_shmq_connector.mediums import ns_key
-    from certus_shmq_connector.ring import CHECK_PENDING
-
-    w = 2
-    ring = FakeRing()
-    for r in range(w):
-        ring.exists[ns_key(U(1), r, w)] = True  # all shards resident -> hit
-    ring.exists[ns_key(U(2), 0, w)] = True  # rank 1 shard pending -> miss
-    ring.states[ns_key(U(2), 1, w)] = CHECK_PENDING
-    ring.exists[ns_key(U(3), 1, w)] = True  # rank 0 shard absent -> miss
-    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096, world_size=w)
-    keys = [K(1), K(2), K(3)]
-
-    mgr.touch(keys)
-    ((touched, promote),) = _calls_of(ring, "touch")
-    assert touched == [ns_key(U(k), r, w) for k in (1, 2, 3) for r in range(w)]
-    assert promote is False
-    assert mgr.lookup(keys[0]) is True
-    assert mgr.lookup(keys[1]) is False
-    assert mgr.lookup(keys[2]) is False
-    assert _calls_of(ring, "check_states") == []
+    assert _calls_of(ring, "check_states") == [[U(1), U(2)]]  # no further RPC
 
 
 # ── manager: prepare_store ──
