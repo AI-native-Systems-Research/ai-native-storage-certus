@@ -2132,13 +2132,17 @@ impl IDispatcher for DispatcherComponent {
     ///    - MemoryTier hit → issue async H2D DMA (round-robin across 4 streams)
     ///    - BlockDevice hit → collect into cold_entries for phase 2
     ///    - NotExist → handle inline
-    ///      After the loop, synchronize all warm streams once.
+    ///      The warm copies are only queued here; the loop does not wait on them.
     ///
     /// 2. **Cold promotion** (if any BlockDevice hits):
     ///    - Group cold entries by drive index
     ///    - Spawn per-drive queue threads (up to 2 per drive)
     ///    - Each thread: evict → insert memory-tier slot → pipelined NVMe reads
     ///      directly into memory-tier → async H2D DMA to GPU
+    ///
+    /// Order: classify → warm copies queued async → cold prep → scatter-gather
+    /// (NVMe overlaps the warm H2D drain) → warm stream sync → warm pin release
+    /// → remote lookup → reply.
     fn batch_lookup(&self, entries: &[(CacheKey, Vec<IpcHandle>)]) -> Vec<LookupOutcome> {
         if entries.is_empty() {
             return Vec::new();
@@ -2259,9 +2263,9 @@ impl IDispatcher for DispatcherComponent {
         let mut cold_entries: Vec<ColdEntry> = Vec::new();
         let mut deferred_touch_keys: Vec<CacheKey> = Vec::new();
         // Read pins for the warm hits below. The H2D copies are submitted async and
-        // synchronized once after the loop, so each pin must survive until *after*
-        // that sync: releasing at submission would let the memory-tier evictor
-        // reclaim the DRAM slot from under an in-flight DMA.
+        // synchronized once after the cold scatter-gather, so each pin must survive
+        // until *after* that deferred sync: releasing at submission would let the
+        // memory-tier evictor reclaim the DRAM slot from under an in-flight DMA.
         let mut warm_pins = pins::PinnedKeys::new(Arc::clone(&dm));
 
         for (i, (key, regions)) in entries.iter().enumerate() {
@@ -2362,23 +2366,12 @@ impl IDispatcher for DispatcherComponent {
             }
         }
 
-        // Batched stream sync: wait for all submitted async DMA copies at once.
-        // Sync the same per-device warm stream the fast path issued them on.
+        // Refresh warm-hit recency before cold prep so its evictor sees the same
+        // LRU order as before. The slots stay pinned by `warm_pins` meanwhile; the
+        // warm stream sync is deferred past the cold block below so the queued
+        // H2D copies drain while the NVMe reads run.
         if !deferred_touch_keys.is_empty() {
-            if warm_raw != 0 {
-                let s = GpuStream(warm_raw as *mut std::ffi::c_void);
-                if let Err(e) = gpu.stream_synchronize(s) {
-                    self.log_info(&format!("batch stream_synchronize failed: {e}"));
-                }
-            }
-            // Every warm copy has completed: only now is it safe to let the entries
-            // become evictable again.
-            drop(warm_pins);
             mt.batch_touch(&deferred_touch_keys);
-        } else {
-            // Nothing was submitted, so nothing is pinned; drop explicitly so the
-            // pin lifetime is obvious on both paths rather than left to scope end.
-            drop(warm_pins);
         }
 
         // Promote cold entries in parallel via a single multiplexed
@@ -2616,6 +2609,9 @@ impl IDispatcher for DispatcherComponent {
                                             })
                                             .and_then(|()| {
                                                 self.tier_counters.record_promotion_to_memory();
+                                                // The warm-stream sync here also waits
+                                                // for the warm-hit copies still queued
+                                                // on it: correct, and intentional.
                                                 if entry.regions.len() > 1 {
                                                     self.serve_memory_tier_to_gpu(
                                                         &gpu,
@@ -2660,6 +2656,20 @@ impl IDispatcher for DispatcherComponent {
                 }
             }
         }
+
+        // Deferred batched stream sync: wait for all submitted warm copies at once,
+        // now that the cold scatter-gather has run alongside them. Sync the same
+        // per-device warm stream the fast path issued them on.
+        if !deferred_touch_keys.is_empty() && warm_raw != 0 {
+            let s = GpuStream(warm_raw as *mut std::ffi::c_void);
+            if let Err(e) = gpu.stream_synchronize(s) {
+                self.log_info(&format!("batch stream_synchronize failed: {e}"));
+            }
+        }
+        // Every warm copy has completed (or nothing was submitted): only now is it
+        // safe to let the entries become evictable again. Dropped explicitly so the
+        // pin lifetime is obvious rather than left to scope end.
+        drop(warm_pins);
 
         // --- Remote lookup for entries not found locally ---
         if let Ok(rl) = self.remote_lookup.get() {
@@ -4006,6 +4016,18 @@ mod tests {
                 .sum()
         }
 
+        /// Whether `key` currently resolves to a resident memory-tier slot — false
+        /// while it is still classified BlockDevice, true once a promote landed.
+        fn is_memory_resident(&self, key: CacheKey) -> bool {
+            matches!(
+                self.inner.lock().unwrap().entries.get(&key),
+                Some(MockEntry {
+                    location: MockEntryLocation::MemoryTier { pointer, .. },
+                    ..
+                }) if !pointer.is_null()
+            )
+        }
+
         /// Arm a one-shot flip: the next `lookup(key)` still reports the current
         /// (BlockDevice) classification, but installs a MemoryTier pointer so the
         /// *following* lookup observes MemoryTier — mimicking the racing lookup
@@ -4396,6 +4418,10 @@ mod tests {
         /// Report every pointer as belonging to no GPU, so the dispatcher resolves
         /// no per-device streams and takes the synchronous fallback copy.
         no_device: bool,
+        /// Key whose memory-tier residency is sampled at each `Sync`, to order a
+        /// cold promotion against the warm stream sync.
+        watch: Option<CacheKey>,
+        resident_at_sync: Mutex<Vec<bool>>,
     }
 
     impl PinProbe {
@@ -4407,6 +4433,15 @@ mod tests {
                 fail_submit_on: 0,
                 fail_sync: false,
                 no_device: false,
+                watch: None,
+                resident_at_sync: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn watching(dm: Arc<MockDispatchMap>, key: CacheKey) -> Self {
+            Self {
+                watch: Some(key),
+                ..Self::new(dm)
             }
         }
 
@@ -4434,6 +4469,14 @@ mod tests {
         fn record(&self, event: GpuEvent) {
             let pins = self.dm.total_read_refs();
             self.events.lock().unwrap().push((event, pins));
+            if let (GpuEvent::Sync, Some(key)) = (event, self.watch) {
+                let resident = self.dm.is_memory_resident(key);
+                self.resident_at_sync.lock().unwrap().push(resident);
+            }
+        }
+
+        fn resident_at_sync(&self) -> Vec<bool> {
+            self.resident_at_sync.lock().unwrap().clone()
         }
 
         fn events(&self) -> Vec<(GpuEvent, u32)> {
@@ -5883,6 +5926,49 @@ mod tests {
         );
         assert_eq!(bufs[0][0], 0x11);
         assert_eq!(bufs[1][0], 0x22);
+        assert_eq!(fx.dm.total_read_refs(), 0);
+
+        d.shutdown().unwrap();
+    }
+
+    /// In a mixed batch the warm stream sync is deferred past the cold block, so
+    /// the queued warm copies drain while the cold entries are processed. The
+    /// mock has no data drives, so the cold key takes the inline evict/insert/
+    /// promote branch rather than scatter-gather; the ordering is the same.
+    #[test]
+    fn mixed_batch_defers_warm_sync_past_cold_block() {
+        let fx = setup_initialized_with_remote(&[], |dm| PinProbe::watching(dm, 3));
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        fx.install_warm_key(1, 0x11, 4096);
+        fx.install_warm_key(2, 0x22, 4096);
+        // Key 3 is cold: registered, but demoted to BlockDevice with no tier slot.
+        fx.install_warm_key(3, 0x33, 4096);
+        fx.mt.remove(3).unwrap();
+        fx.dm.convert_entry_to_block(3, 0x1000);
+        assert!(!fx.dm.is_memory_resident(3));
+        assert_eq!(fx.dm.total_read_refs(), 0);
+
+        let (bufs, entries) = remote_batch(&[1, 2, 3]);
+        let results = d.batch_lookup(&entries);
+        assert!(results.iter().all(|r| r.result.is_ok()), "got: {results:?}");
+        assert_eq!(bufs[0][0], 0x11);
+        assert_eq!(bufs[1][0], 0x22);
+
+        assert_eq!(
+            fx.probe.events(),
+            vec![
+                (GpuEvent::SubmitH2d, 1),
+                (GpuEvent::SubmitH2d, 2),
+                (GpuEvent::Sync, 2),
+            ],
+            "both warm pins must still be outstanding at the single deferred sync"
+        );
+        assert_eq!(
+            fx.probe.resident_at_sync(),
+            vec![true],
+            "the cold key must already be promoted when the warm stream sync runs"
+        );
         assert_eq!(fx.dm.total_read_refs(), 0);
 
         d.shutdown().unwrap();
