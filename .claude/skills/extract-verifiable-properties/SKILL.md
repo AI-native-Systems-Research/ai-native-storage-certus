@@ -103,6 +103,18 @@ understand without the spec, the code, or any FV/tooling knowledge in front of t
   promised — the traces are provenance, not the explanation.
 - One obligation per statement (granularity rule below still holds); just say it in English.
 
+### The `statement` says what the code SHOULD do — never what might go wrong (mandatory, 2026-10-04)
+- **Requirement, not hazard.** Write "a new entry starts with cleared memory", never "a new entry's bytes
+  can still hold the previous occupant's data". A record worded as a defect inverts its own result: a
+  proof then means the BUG is real. memory-tier had 22 such records and the scoring page showed every one
+  with the wrong sign. If reading the code makes you suspect a problem, write the requirement the code
+  should meet; verification decides whether it holds. A defect is pronounced only after verification.
+- **Match the strictness the artifact means.** "Smaller than or equal to" is not "always smaller"; "at
+  most" is not "fewer than". A strict relation where the code keeps a non-strict one refutes on wording
+  alone (memory-tier MT-INV-SIZE-ACCOUNTING, MT-BATCH-TOUCH-EMPTY-NOOP).
+- **Do not over-specify mechanism.** "An empty batch has no effect" is the obligation; "returns without
+  taking any lock" is an implementation detail that turns a true property false.
+
 ## Not verifiable (list here; don't force into rows)
 Unbounded liveness / deadlock-freedom; wall-clock **timing** (a timeout's *occurrence* is verifiable, its
 *duration* is not); caller/environment **assumptions** (I/O, allocation, pointer validity); pure

@@ -934,8 +934,16 @@ def main():
 
     counts = {"proved": 0, "refuted": 0, "tool-boundary": 0, "delegated": 0, "UNRESOLVED": 0, "DRY": 0, "resumed": 0}
     unresolved = []
+    # SCOPE (2026-10-04): only what spec and code agree on, plus code-only, is a verification
+    # obligation. `divergent` / `spec-only` records and hazard-worded ones are extraction data:
+    # refuting them only re-discovered disagreements extraction had already found (43 of 46
+    # published refutations). Skipped here, so they are neither scored nor able to fail the gate.
+    _OUT = {"divergent", "spec-only", "spec"}
+    _pol = d.get("polarity") or {}
     for p in d["properties"]:
         if not p.get("verifiable"):
+            continue
+        if p.get("origin") in _OUT or str((_pol.get(p["id"]) or {}).get("polarity", "")).upper() == "HAZARD":
             continue
         if only and p["id"] not in only:
             continue
