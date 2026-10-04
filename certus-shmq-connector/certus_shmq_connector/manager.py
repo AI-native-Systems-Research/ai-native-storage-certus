@@ -29,6 +29,7 @@ from .compat import (
     OffloadKey,
     PrepareStoreOutput,
 )
+from . import compat as _compat
 
 from .mediums import BlockLocation, CertusLoadStoreSpec, denamespace_key, ns_key
 from .ring import CHECK_MISS, CHECK_RESIDENT, REASON_REMOVED
@@ -109,8 +110,12 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         # and clears the map (so a positive bit can never be reused across steps,
         # after the key may have been evicted). A cache miss falls back to the
         # authoritative single-key ``Check`` — an unseen key is never answered
-        # wrong, only un-batched.
+        # wrong, only un-batched. ``_raw_lookup_cache`` holds the same answers
+        # keyed by the caller's original OffloadKey, so a touched key's
+        # ``lookup()`` skips the fold; it shares this map's pass scope and clear
+        # rule.
         self._lookup_cache: dict[int, bool] = {}
+        self._raw_lookup_cache: dict = {}
         self._last_op_was_lookup = False
 
     def set_block_size_bytes(self, block_size_bytes: int) -> None:
@@ -183,22 +188,29 @@ class ShmqCertusOffloadingManager(OffloadingManager):
     def lookup(self, key: OffloadKey, req_context=None):
         # Returns ``bool`` on ≤0.24 and a ``LookupResult`` enum (HIT/MISS) on
         # 0.26+, which rewrote ``lookup``'s return type. The shim absorbs the
-        # difference so this body stays a single Check call.
-        from .compat import lookup_result
-
+        # difference so this body stays a single Check call. The shim is bound
+        # at module level and resolved per call (``_compat.lookup_result``), so
+        # a patched or reloaded compat still applies.
         self._last_op_was_lookup = True
-        int_key = _key_to_u64(key)
-        # Fast path: answer from the bitmap the preceding touch() batched. A
-        # miss (key not in this pass's batch, e.g. the scheduler looking up a
-        # key it never touched) falls back to the authoritative single-key
-        # Check — correctness is never traded for the batch, only latency.
-        cached = self._lookup_cache.get(int_key)
+        # Fastest path: a key the preceding touch() saw is answered from the
+        # raw-key map without folding. Unhashable keys (bytearray) fall through.
+        try:
+            cached = self._raw_lookup_cache.get(key)
+        except TypeError:
+            cached = None
         if cached is None:
-            # AND across all W shards — a load needs every rank's shard present.
-            cached = self._check_all_present(
-                [int_key], resident_only=True
-            ).get(int_key, False)
-        return lookup_result(cached)
+            int_key = _key_to_u64(key)
+            # Fast path: answer from the bitmap the preceding touch() batched. A
+            # miss (key not in this pass's batch, e.g. the scheduler looking up a
+            # key it never touched) falls back to the authoritative single-key
+            # Check — correctness is never traded for the batch, only latency.
+            cached = self._lookup_cache.get(int_key)
+            if cached is None:
+                # AND across all W shards — a load needs every rank's shard present.
+                cached = self._check_all_present(
+                    [int_key], resident_only=True
+                ).get(int_key, False)
+        return _compat.lookup_result(cached)
 
     def touch(self, keys: Iterable[OffloadKey], req_context=None) -> None:
         # A touch that follows a lookup opens a new scheduling pass — retire the
@@ -206,12 +218,12 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         # in which its Check was authoritative (the key may since be evicted).
         if self._last_op_was_lookup:
             self._lookup_cache.clear()
+            self._raw_lookup_cache.clear()
             self._last_op_was_lookup = False
+        keys = list(keys)
         int_keys = _keys_to_u64s(keys)
         if not int_keys:
             return
-        # Touch every per-rank key so all W shards' LRU positions advance.
-        expanded = [nk for k in int_keys for nk in self._ns_all(k)]
         # Residency now comes from the touch reply itself (fused TouchCheck), so
         # the scheduler's subsequent per-key lookup loop
         # (offloading/scheduler.py::_maximal_prefix_lookup) is served from this
@@ -219,12 +231,38 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         # RESIDENT counts, a PENDING shard reads as a miss (see
         # _check_all_present). AND-across-ranks per logical key (a block is a hit
         # only if all shards are present); states return in expansion order.
-        states = self._ring.touch_states(expanded, promote=False)
-        flags = [s == CHECK_RESIDENT for s in states]
-        w = self._world_size
-        for i, k in enumerate(int_keys):
-            chunk = flags[i * w:(i + 1) * w]
-            self._lookup_cache[k] = len(chunk) == w and all(chunk)
+        if self._world_size == 1:
+            # W==1: ns_key is identity, so skip the expansion and fill the map
+            # in one bulk update (same items, same order, resident_only). The
+            # raw-key map is filled after the branch, on every fill path.
+            states = self._ring.touch_states(int_keys, promote=False)
+            if len(states) == len(int_keys):
+                self._lookup_cache.update(zip(int_keys, map(CHECK_RESIDENT.__eq__, states)))
+            else:
+                # Short reply (test fakes only): a key with no state reads as a miss.
+                flags = [s == CHECK_RESIDENT for s in states]
+                for i, k in enumerate(int_keys):
+                    self._lookup_cache[k] = i < len(flags) and flags[i]
+        else:
+            # Touch every per-rank key so all W shards' LRU positions advance.
+            expanded = [nk for k in int_keys for nk in self._ns_all(k)]
+            states = self._ring.touch_states(expanded, promote=False)
+            flags = [s == CHECK_RESIDENT for s in states]
+            w = self._world_size
+            for i, k in enumerate(int_keys):
+                chunk = flags[i * w:(i + 1) * w]
+                self._lookup_cache[k] = len(chunk) == w and all(chunk)
+        # Raw-key entries copy the FINAL u64-map value for each key, so a raw hit
+        # returns exactly what the fold path would have returned.
+        try:
+            self._raw_lookup_cache.update(
+                zip(keys, map(self._lookup_cache.__getitem__, int_keys))
+            )
+        except TypeError:  # unhashable caller key (e.g. bytearray): fold path
+            # update() stops at the unhashable key, which could leave an earlier
+            # touch()'s raw entry for a later key stale; drop the whole map so
+            # every lookup this pass takes the fold path.
+            self._raw_lookup_cache.clear()
 
     # ── store ──
 
