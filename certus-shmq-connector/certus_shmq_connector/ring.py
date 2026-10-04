@@ -132,17 +132,29 @@ def _round_up_cl(x: int) -> int:
 # ── pure encode/decode helpers (server-independent; unit-testable) ───────────
 
 
+_U64_MASK = 0xFFFFFFFFFFFFFFFF
+
+
 def encode_keys(keys: Sequence[int]) -> bytes:
     """`{ n:u32, [key:u64]*n }` — Check/Commit/Abort/Unpin request."""
-    out = bytearray(struct.pack("<I", len(keys)))
-    for k in keys:
-        out += struct.pack("<Q", k & 0xFFFFFFFFFFFFFFFF)
-    return bytes(out)
+    # One bulk pack for the whole list. An out-of-range int makes struct raise,
+    # so retry with the keys masked to u64 — same bytes as a per-key mask.
+    n = len(keys)
+    try:
+        return struct.pack(f"<I{n}Q", n, *keys)
+    except struct.error:
+        return struct.pack(f"<I{n}Q", n, *[k & _U64_MASK for k in keys])
 
 
 def encode_promote_keys(promote: bool, keys: Sequence[int]) -> bytes:
     """`{ promote:u8, n:u32, [key:u64]*n }` — Touch/Pin request."""
-    return struct.pack("<B", 1 if promote else 0) + encode_keys(keys)
+    # Single bulk pack (no encode_keys + concat); same masked retry, same bytes.
+    n = len(keys)
+    p = 1 if promote else 0
+    try:
+        return struct.pack(f"<BI{n}Q", p, n, *keys)
+    except struct.error:
+        return struct.pack(f"<BI{n}Q", p, n, *[k & _U64_MASK for k in keys])
 
 
 def encode_reserve(entries: Sequence[tuple[int, int, int]]) -> bytes:
@@ -249,7 +261,12 @@ def decode_ok_flags(payload: bytes, n: int) -> list[bool]:
 def decode_states(payload: bytes, n: int) -> list[int]:
     """`[state:u8]*n` Check response → list of raw state ints (missing bytes
     default ``CHECK_MISS``). Values are 0=miss, 1=resident, 2=pending."""
-    return [payload[i] if i < len(payload) else CHECK_MISS for i in range(n)]
+    # Bulk byte->int conversion; extra bytes are ignored, a short tail pads MISS.
+    states = list(payload[:n])
+    short = n - len(states)
+    if short > 0:
+        states.extend([CHECK_MISS] * short)
+    return states
 
 
 def decode_take_events(payload: bytes) -> tuple[list[tuple[int, int]], int]:
