@@ -37,7 +37,7 @@
 spec_version: 1
 
 identity:
-  name: certus-defect-repair
+  name: repair-agent
   summary: Fixes Certus code that verification proved violates an obligation, or escalates when the obligation cannot be satisfied as written.
 
 intent:
@@ -82,7 +82,7 @@ interface:
     - {name: classification, kind: report, description: "code-wrong | spec-wrong | both | spec-unimplementable — with the reasoning", consumer: human}
     - {name: patch, kind: patch, description: Minimal code change, absent when the classification is not code-wrong, consumer: human}
     - {name: proof_of_fix, kind: patch, description: "A NEW verify_<id> module plus its __mutant twin — for a refuted obligation neither exists yet, so the repair must author them; without this the fix is unvalidated", consumer: human}
-    - {name: regression_test, kind: patch, description: "A unit test in src/ that fails on the pre-fix code and passes after", consumer: human}
+    - {name: regression_test, kind: patch, description: "A unit test in its OWN file components/<c>/src/repair_test_<name>.rs, wired into the module it tests by `#[cfg(test)] #[path = \"repair_test_<name>.rs\"] mod repair_test_<name>;`, using only the existing API. It must FAIL on the pre-fix code and pass after; the acceptance check injects it into the pre-fix code to confirm.", consumer: human}
     - {name: report, kind: report, description: Root cause, the gate run before and after, and the spec and code locations, consumer: human}
 
 success:
@@ -93,9 +93,10 @@ success:
       changed, its tests pass, and nothing that proved before has stopped proving.
     command: [bash, "{oracle_dir}/repair_accept.sh", ".", "{component}", "{obligation_id}", "{base_rev}", --also, "{callee_modules}"]
     pass_condition: >
-      exit 0, returned only when ALL FOUR legs hold: (1) the callee modules and the new verify_<id>
+      exit 0, returned only when ALL legs hold: (1) the callee modules and the new verify_<id>
       prove and verify_<id>__mutant fails with the prover having run; (2) components/<c>/src differs
-      from base_rev; (3) the crate's cargo test passes; (4) no module that proved at base_rev is
+      from base_rev; (2b) the repair's own repair_test_*.rs FAILS when injected into the base_rev
+      code (so a cosmetic edit cannot pass); (3) the crate's cargo test passes; (4) no module that proved at base_rev is
       unproved now. refute_<id> is reported, not gated: a premise-shaped refutation still proves after
       a correct fix. Any other combination is a non-fix, including "the diff looks right".
   false_success:

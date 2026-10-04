@@ -10,6 +10,14 @@
 #               The Creusot proofs check a MODEL of the code kept in verif-creusot/, not src/
 #               itself — so a change confined to the model satisfies leg 1 while the real code stays
 #               broken. This leg, and leg 3, are what tie the proof to the product.
+#   2b RED-FIRST the repair's own regression test FAILS on the unfixed code. Leg 2 alone accepts a
+#               cosmetic edit (a comment) to src/. The test must live in its own file,
+#               components/<c>/src/**/repair_test_<anything>.rs, wired into the module it tests by
+#               `#[cfg(test)] #[path = "repair_test_….rs"] mod …;`. This leg injects that file into a
+#               fresh checkout of <base-rev> at the same place and runs it there: it must fail by a
+#               panic or a failed assertion. A test that only fails to COMPILE on the base is
+#               rejected — it must exercise the existing API. (The held-out evaluation tests use the
+#               same injection mechanism, evals/check_heldout.sh.)
 #   3. TESTED   the component crate's own `cargo test` passes.
 #   4. HARMLESS whole-crate proof regression: every module that proved at <base-rev> still proves.
 #               Compared against a baseline, NOT "only mutants may fail": eviction-policy-optimized
@@ -41,6 +49,38 @@ if git -C "$REPO" diff --quiet "$BASE" -- "components/$COMP/src"; then
   echo "  2. REAL     : NO — src/ is unchanged. A fix confined to the proof model is not a fix."; fail=1
 else
   echo "  2. REAL     : yes ($(git -C "$REPO" diff --shortstat "$BASE" -- "components/$COMP/src" | sed 's/^ *//'))"
+fi
+
+# 2b. RED-FIRST
+added="$( { git -C "$REPO" diff --name-only --diff-filter=A "$BASE" -- "components/$COMP/src";
+            git -C "$REPO" ls-files --others --exclude-standard -- "components/$COMP/src"; } \
+          | grep -E '/repair_test_[^/]+\.rs$' | sort -u)"
+if [[ -z "$added" ]]; then
+  echo "  2b RED-FIRST: NO — no regression test file components/$COMP/src/**/repair_test_*.rs"; fail=1
+else
+  TMPR="$(mktemp -d)"; git -C "$REPO" worktree add -q --detach "$TMPR/base" "$BASE"
+  rf_ok=1
+  for t in $added; do
+    b="$(basename "$t")"
+    host="$(grep -rlE "#\[path *= *\"$b\"\]" "$REPO/components/$COMP/src" | head -1)"
+    if [[ -z "$host" ]]; then echo "  2b RED-FIRST: NO — $b is not wired in by a #[path = \"$b\"] mod line"; rf_ok=0; continue; fi
+    rel="${host#$REPO/}"
+    cp "$REPO/$t" "$TMPR/base/$t"
+    printf '\n#[cfg(test)]\n#[path = "%s"]\nmod %s;\n' "$b" "${b%.rs}" >> "$TMPR/base/$rel"
+  done
+  if (( rf_ok )); then
+    bout="$(cd "$TMPR/base" && timeout 1800 cargo test -q -p "$PKG" repair_test_ 2>&1)"
+    if grep -qE 'error(\[E[0-9]+\])?: ' <<<"$bout" && ! grep -q 'test result:' <<<"$bout"; then
+      echo "  2b RED-FIRST: NO — the regression test does not COMPILE against the unfixed code; it must use the existing API"
+      grep -E '^error' <<<"$bout" | head -2 | sed 's/^/       │ /'; fail=1
+    elif grep -qE 'test result: FAILED\. [0-9]+ passed; [1-9][0-9]* failed' <<<"$bout"; then
+      echo "  2b RED-FIRST: yes ($(grep -oE '[0-9]+ failed' <<<"$bout" | head -1) on the unfixed code, as it must)"
+    else
+      echo "  2b RED-FIRST: NO — the regression test PASSES on the unfixed code, so it does not show the defect"
+      grep -E 'test result' <<<"$bout" | head -1 | sed 's/^/       │ /'; fail=1
+    fi
+  else fail=1; fi
+  git -C "$REPO" worktree remove --force "$TMPR/base"; rm -rf "$TMPR"
 fi
 
 # 3. TESTED
