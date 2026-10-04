@@ -8245,3 +8245,43 @@ known_corrections:
   correct_counts: 'creusot: 105 proved / 1 unresolved / 2 refuted / 2 delegated'
   reproduce: scorer_creusot.py components/eviction-policy-optimized/verif --crate-dir components/eviction-policy-optimized/verif-creusot
     --cap-seconds 60 --cap-max 300 --only EPO-INV-LIST-EMPTY-IFF-NO-ENDS
+# Orchestrator-written, NOT scorer-written (2026-10-03): what each refutation MEANS.
+# defect -> a bug in fv_bugs.yaml (root cause) and how it manifested here; discordance ->
+# spec and code disagree, side information; not-a-defect -> false only as worded.
+triage:
+  EPO-INV-STALE-HANDLE-NO-CROSS-ENTRY-EFFECT:
+    verdict: defect
+    bug: FV-BUG-002
+    manifested_as: wrong object (moves or removes another key's entry)
+  EPO-INV-STALE-HANDLE-NEVER-CRASHES:
+    verdict: defect
+    bug: FV-BUG-001
+    manifested_as: panic (index out of bounds)
+bugs:
+  FV-BUG-001:
+    title: A stale handle is used as an array index without checking it
+    root_cause: move_to_back and remove index the node arena with the caller's handle before checking it is in range,
+      so after clear() every handle the list issued points past the end.
+    location: components/eviction-policy-optimized/src/lru_list.rs (move_to_back, remove)
+    status: fixed
+    fix: PR
+  FV-BUG-002:
+    title: A handle is only a slot number, and freed slots are reused
+    root_cause: An eviction handle is (pool or domain, slot) with nothing that says WHICH use of the slot it belongs
+      to, and a freed slot is handed straight to the next registration. An old handle therefore comes to name a
+      different, live entry, and every operation taking it acts on that entry while reporting success. Needs a generation
+      tag in the shared handle type.
+    location: components/interfaces/src/ieviction_policy.rs (EvictionHandle), shared by every eviction policy
+    status: escalated
+    fix: design change in components/interfaces/ (generation tag) — not a local patch
+# Orchestrator-written: the IEvictionPolicy trait's own methods (components/interfaces/src/ieviction_policy.rs), the method-headline denominator.
+interface_methods:
+- create_pool
+- track
+- touch
+- batch_touch
+- remove
+- identify_next_to_evict
+- get_eviction_candidates
+- len
+- clear_pool
