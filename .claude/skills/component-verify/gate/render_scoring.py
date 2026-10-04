@@ -99,6 +99,14 @@ def psym(block):
         return "⤴"
     if st == "tool-boundary":
         return "⊘"
+    if st == "discordance":
+        # Spec and code DISAGREE and verification confirmed which side the code follows. Side
+        # information for whoever owns spec<->code synchronisation; not a defect, not a gap.
+        return "≠"
+    if st == "wording":
+        # False only as worded (e.g. "always smaller" where the code keeps <=); the code does
+        # what was meant. Not a defect.
+        return "≈"
     if st == "refuted":
         # The obligation is FALSE and that was machine-checked. Distinct from every other symbol
         # because it is a statement about the CODE, not about how far verification got.
@@ -137,6 +145,22 @@ def main():
     # and one on a u64 counter wrap that cannot be reached. Shown, labelled, and kept out of the count.
     triage = {k: v for k, v in (d.get("triage") or {}).items()
               if isinstance(v, dict) and str(v.get("verdict", "")).lower() == "not-a-defect"}
+    discord = {k: v for k, v in (d.get("triage") or {}).items()
+               if isinstance(v, dict) and str(v.get("verdict", "")).lower() == "discordance"}
+    # A DEFECT is pronounced only after verification, and only for an obligation the code violates
+    # whatever the spec intends: one spec and code agree on, or a safety obligation (panic, overflow,
+    # out-of-bounds). A spec<->code disagreement that verification merely CONFIRMS is a discordance:
+    # side information for the spec-sync owners, shown separately, and it does not stop a method
+    # counting as verified (Cornel, 2026-10-03). Display only; the scorer's statuses are untouched.
+    for p_ in d.get("properties", []):
+        v = p_.get("id")
+        new = "discordance" if v in discord else ("wording" if v in triage else None)
+        if not new:
+            continue
+        for t_ in TOOLS_DEFAULT:
+            b_ = p_.get(t_)
+            if isinstance(b_, dict) and b_.get("status") == "refuted":
+                b_["status"] = new
     comp = d.get("component", "component")
     interface = d.get("interface", "")
     pin = d.get("pin", "")
@@ -150,6 +174,7 @@ def main():
 
     # public methods (ordered) + bundles (property ids attached to each)
     methods = collections.OrderedDict()
+    extra_methods = []
     if a.collapse:
         # Display lens only: group every property under one method label. The YAML
         # keeps its real `methods`; this regroups for rendering when the public
@@ -161,17 +186,40 @@ def main():
             for m in (p.get("methods") or []):
                 methods.setdefault(m, []).append(p["id"])
         N = counts.get("methods", len(methods))
+        # The method headline is "X of N interface methods verified", so it must count ONLY the
+        # interface's methods. Extraction also attaches properties to other entry points (Drop,
+        # Default, inherent helpers): measured on memory-tier, 22 names against a 17-method trait,
+        # which produced "4 / 17 verified + 17 more" = 21 of 17. `interface_methods` (orchestrator-
+        # written, read from the trait itself) fixes the denominator; the other entry points keep
+        # their properties in every property-level count and are named under the headline.
+        im = d.get("interface_methods")
+        if im:
+            extra_methods = [m for m in methods if m not in im]
+            methods = collections.OrderedDict((m, methods[m]) for m in im if m in methods)
+            N = len(im)
+        else:
+            extra_methods = []
 
     # ---- per (tool, method) native fraction + disposition of the remainder ----
     # returns dict: nat, B, rating, leftovers=[(pid, disp)]
     def method_row(tool, ids):
-        nat = deleg = tb = pend = handed = refd = 0
+        nat = deleg = tb = pend = handed = refd = acc = 0
         left = []          # non-native bundle properties (the delegation/gap detail)
+        blocking = []      # leftovers that keep the method from `verified`
         for pid in ids:
             b = props_by_id[pid].get(tool) or {}
             s = psym(b)
             if s in ("✓", "★"):
                 nat += 1
+            elif s == "≠":
+                acc += 1
+                left.append((pid, "≠ spec and code disagree; verification confirmed what the code does "
+                                  "(side information, not a defect)"))
+                continue
+            elif s == "≈":
+                acc += 1
+                left.append((pid, "≈ false only as worded; the code does what was meant (not a defect)"))
+                continue
             elif s == "⤴":
                 deleg += 1
                 tgt = b.get("delegate_to") or "other tool"
@@ -201,22 +249,34 @@ def main():
             else:
                 pend += 1
                 left.append((pid, "· pending"))
+            if s not in ("✓", "★", "⤴") and not (s == "⊘" and any(
+                    psym(props_by_id[pid].get(ot) or {}) in ("✓", "★") for ot in tools if ot != tool)):
+                blocking.append(pid)
         B = len(ids)
-        covered = nat + deleg + handed      # proved here, soundly delegated, or proved by the other tool
+        covered = nat + deleg + handed + acc  # proved here, delegated, proved by the other tool, or ≠/≈
         gap = B - covered                   # genuinely open: pending, or a wall no tool clears
         # rating is FAIR / per-tool: a method is `proved` for a tool ONLY when that tool
         # proves EVERY bundle property itself (proved == B). If it proves some and leaves
         # the rest to the other tool it is `partially proved`; if it proves none, the whole
         # bundle is `delegated` (or `needs other tool` on a structural wall).
-        if nat == B:
+        # GLOBAL INVARIANTS, as on the 2026-09-22 pages: one or two shared properties that fail can
+        # make EVERY method look unverified, which says nothing about the methods themselves. A method
+        # whose only leftovers are shared global properties is `proved except shared invariants`,
+        # and the headline names those invariants once instead of once per method.
+        glob_block = [x for x in blocking if props_by_id[x].get("global")]
+        own_block = [x for x in blocking if not props_by_id[x].get("global")]
+        if nat + acc == B:
             rating = "proved"
+        elif blocking and not own_block and nat + acc + deleg + handed + len(glob_block) == B:
+            rating = "proved except shared invariants"
         elif nat == 0:
             rating = ("delegated" if (deleg and not tb and not pend)
                       else ("needs other tool" if tb else "pending"))
         else:
             rating = "partially proved"
-        return dict(nat=nat, B=B, deleg=deleg, tb=tb, pend=pend, refuted=refd,
-                    covered=covered, gap=gap, rating=rating, left=left)
+        return dict(nat=nat, B=B, deleg=deleg, tb=tb, pend=pend, refuted=refd, acc=acc,
+                    covered=covered, gap=gap, rating=rating, left=left,
+                    glob_block=glob_block, own_block=own_block)
 
     per_tool_methods = {t: {m: method_row(t, ids) for m, ids in methods.items()} for t in tools}
 
@@ -324,7 +384,7 @@ def main():
     ul.left{margin:4px 0 0;padding-left:18px}ul.left li{margin:2px 0}
     """
 
-    RATE_CLASS = {"proved": "r-proved", "partially proved": "r-partial",
+    RATE_CLASS = {"proved": "r-proved", "proved except shared invariants": "r-partial", "partially proved": "r-partial",
                   "delegated": "r-deleg", "needs other tool": "r-tb", "pending": "r-pend"}
 
     def frac_symbol(row):
@@ -447,11 +507,39 @@ def main():
     # immediately below, a step down, so the property view is present but not the headline.
     m_covered = agg[tools[0]]["covered"]      # union across tools; identical for every tool
     m_open = N - m_covered
+    # Union view of what blocks each method: a property blocks only if NO tool settles it.
+    def settled(pid):
+        return any(psym(props_by_id[pid].get(t) or {}) in ("✓", "★", "⤴", "≠", "≈") for t in tools)
+    m_glob_only, m_own, glob_hits = [], [], collections.Counter()
+    for m, ids in methods.items():
+        blk = [x for x in ids if not settled(x)]
+        if not blk:
+            continue
+        if all(props_by_id[x].get("global") for x in blk):
+            m_glob_only.append(m)
+            glob_hits.update(blk)
+        else:
+            m_own.append(m)
+    def why_open(pid):
+        st = {psym(props_by_id[pid].get(t) or {}) for t in tools}
+        return "a defect" if "‼" in st else ("a tool boundary" if "⊘" in st else "not yet proved")
 
     P.append("<div class='cards'>")
     mhead_cls = "ok" if m_open == 0 else "warn"
     mtail = (f"<b>{m_open}</b> still open" if m_open
              else "<b>0</b> open — every method fully covered")
+    if m_glob_only:
+        gl = ", ".join(f"<code>{esc(g)}</code> ({why_open(g)}; touches {n} method{'s' if n != 1 else ''})"
+                       for g, n in glob_hits.most_common())
+        mtail = (f"<b>{len(m_glob_only)}</b> more are verified on their own properties and held back only "
+                 f"by {len(glob_hits)} shared global propert{'ies' if len(glob_hits) != 1 else 'y'}: {gl}"
+                 + (f"; <b>{len(m_own)}</b> have an open property of their own" if m_own else "")
+                 + (f". {mtail[0].upper()}{mtail[1:]}" if False else ""))
+    if extra_methods:
+        mtail += (f". Properties are also attached to {len(extra_methods)} entry point"
+                  f"{'s' if len(extra_methods) != 1 else ''} outside the interface ("
+                  + ", ".join(f"<code>{esc(x)}</code>" for x in extra_methods)
+                  + "); they count in every property figure but not in this method total")
     P.append(f"<div class='kpi {mhead_cls}' style='flex:1 1 100%'>"
              f"<div class='big'>{m_covered} / {N} methods verified</div>"
              f"<div class='lbl'>every verifiable property of the method carries a machine-checked proof "
@@ -468,6 +556,8 @@ def main():
              f"checkable claims (properties). Across all {N} methods there are <b>{M}</b> such "
              f"verifiable properties; here is the same result counted at that finer level, "
              f"including how much each tool proves on its own.</p>")
+    n_bugs = len({(d.get("triage") or {}).get(p_["id"], {}).get("bug") or ("?" + p_["id"])
+                  for p_ in props if any((p_.get(t) or {}).get("status") == "refuted" for t in tools)})
     n_triaged = sum(1 for p in props if p.get("id") in triage
                     and any((p.get(t) or {}).get("status") == "refuted" for t in tools))
     P.append("<div class='cards'>")
@@ -479,8 +569,8 @@ def main():
         # Say WHAT is open. Counting is unchanged; only the label is. A refuted property was being
         # reported as a bare "open", which reads as unfinished verification when in fact the
         # verification finished and proved the implementation wrong.
-        note = (f" &mdash; <b>‼ {c_refuted} of these are REFUTED: verification proved the "
-                f"implementation VIOLATES them (see the Defects section)</b>"
+        note = (f" &mdash; <b>‼ {c_refuted} of these show {n_bugs} bug{'s' if n_bugs != 1 else ''} "
+                f"(see Bugs found)</b>"
                 + (f"; <b>{n_triaged}</b> of those are false only as worded, not code defects"
                    if n_triaged else "")) if c_refuted else ""
         combfoot.append(f"<b>{c_open}</b> open{note}")
@@ -546,7 +636,11 @@ def main():
 
     # ---- Section: per-method scorecard, one table per tool (AS BEFORE) ----
     sec = 1
-    for t in tools:
+    # A tool whose column a tool_note explains (sample-only, withheld, unfinished) gets no per-method
+    # sections: measured on memory-tier, its 157 unscored properties filled 570 of the 674 rows in the
+    # detail section with "· pending", which read as "everything failed". The note says why instead.
+    tools_m = [t for t in tools if t not in noted]
+    for t in tools_m:
         mm = per_tool_methods[t]
         P.append(f"<h2>{sec} · {TOOL_LABEL.get(t,t)} — per-method scoring</h2>")
         sec += 1
@@ -594,10 +688,18 @@ def main():
              "<b>· still open</b> — nothing settles it yet. Only the last two leave the method short of "
              "full coverage.</p>")
     any_partial = False
-    for t in tools:
+    for t in tools_m:
         mm = per_tool_methods[t]
-        partial_methods = [(m, mm[m]) for m in methods if mm[m]["left"]]
-        if not partial_methods:
+        # Shared global properties are listed ONCE, below, not under every method they touch:
+        # on memory-tier one of them was repeated under 34 methods.
+        glob_left = collections.OrderedDict()
+        for m_ in methods:
+            for pid_, disp_ in mm[m_]["left"]:
+                if props_by_id[pid_].get("global"):
+                    glob_left.setdefault(pid_, [disp_, 0])[1] += 1
+        own_left = {m_: [(x, y) for x, y in mm[m_]["left"] if not props_by_id[x].get("global")] for m_ in methods}
+        partial_methods = [(m, dict(mm[m], left=own_left[m])) for m in methods if own_left[m]]
+        if not partial_methods and not glob_left:
             continue
         any_partial = True
         P.append(f"<h3>{TOOL_LABEL.get(t,t)}</h3>")
@@ -612,6 +714,17 @@ def main():
                 P.append(f"<tr>{mcell}<td class='mono'>{esc(pid)}</td><td>{stmt}</td>"
                          f"<td class='{dcls}'>{esc(disp)}</td></tr>")
         P.append("</table></div>")
+        if glob_left:
+            P.append(f"<p class='sub'><b>Shared global properties</b> this tool did not prove itself, each "
+                     f"listed once with the number of methods it touches.</p>")
+            P.append("<div class='scroll'><table class='lg'><tr><th>property</th><th class='c'>methods</th>"
+                     "<th>statement</th><th>disposition</th></tr>")
+            for pid_, (disp_, n_) in glob_left.items():
+                dcls = "deleg" if disp_.startswith("⤴") else ("tb" if disp_.startswith("⊘") else "pend")
+                P.append(f"<tr><td class='mono'>{esc(pid_)}</td><td class='c'>{n_}</td>"
+                         f"<td>{esc((props_by_id[pid_].get('statement') or '').strip())}</td>"
+                         f"<td class='{dcls}'>{esc(disp_)}</td></tr>")
+            P.append("</table></div>")
     if not any_partial:
         P.append("<p class='sub'>None — every method is proved outright by both tools.</p>")
 
@@ -668,51 +781,73 @@ def main():
     # lines a reader needs in order to act — the point of the exercise is a fix, not a score.
     refs = [p for p in props if any((p.get(t) or {}).get("status") == "refuted" for t in tools)]
     if refs:
-        P.append(f"<h2>{sec} · ‼ Defects found — obligations the code violates</h2>")
-        sec += 1
-        P.append("<div class='note' style='border-left:4px solid #b00;padding-left:10px'>"
-                 "Each row is a property that was <b>machine-checked to be FALSE</b>: the implementation "
-                 "breaks it. These are findings, not gaps in the verification — they are the return on "
-                 "the verification effort, and each needs a decision in the spec, the code, or both.</div>")
-        P.append("<div class='scroll'><table><tr><th>property</th><th>by</th><th>spec</th>"
-                 "<th>code location</th><th>what is violated</th><th>witness</th></tr>")
+        # BUGS, BY ROOT CAUSE (Cornel, 2026-10-03). A bug is a defect in the code; each refuted
+        # property it explains is one MANIFESTATION of it (panic, out-of-bounds, wrong object, ...).
+        # A team-mate reads "bug X, manifested as overflow here and as a wrong object there", not a
+        # flat list of failed properties. A defect with no identified root cause is grouped last.
+        bugs_meta = d.get("bugs") or {}
+        tri_all = d.get("triage") or {}
+        groups = collections.OrderedDict()
         for p in refs:
-            # `source` comes in TWO shapes and the dict-only reading CRASHED the whole page.
-            # Measured on disk-partition-manager: build-property-inventory emitted
-            # `source: ['spec: <id>', 'code: <id>']` (a flat list of reconciliation provenance)
-            # for all 102 properties, so `src.get` raised AttributeError and the renderer exited 1
-            # having written nothing. This table carries the REFUTED rows -- the findings, the
-            # return on the whole run -- so it must degrade, never crash.
-            # The dict form lives in `paired_from`; the real code location lives in `object_fn`
-            # (e.g. "GptManager::new -> gpt.rs:58"), which is more useful than either id list.
-            src = p.get("source")
-            if isinstance(src, dict):
-                sp, cd = src.get("spec"), src.get("code")
+            bid = (tri_all.get(p["id"]) or {}).get("bug") or "_unknown"
+            groups.setdefault(bid, []).append(p)
+        order = [k for k in sorted(groups) if k != "_unknown"] + (["_unknown"] if "_unknown" in groups else [])
+        P.append(f"<h2>{sec} · ‼ Bugs found — by root cause</h2>")
+        sec += 1
+        nb = sum(1 for k in order if k != "_unknown")
+        P.append("<div class='note' style='border-left:4px solid #b00;padding-left:10px'>"
+                 f"Verification found <b>{nb} bug{'s' if nb != 1 else ''}</b>, by root cause, showing up in "
+                 f"<b>{len(refs)}</b> propert{'ies' if len(refs) != 1 else 'y'}. Each property row is one "
+                 "place the bug shows, and says how: a crash, an out-of-bounds access, acting on the wrong "
+                 "entry, and so on. Each was <b>machine-checked</b>: the property is false of the code.</div>")
+        P.append("<div class='scroll'><table><tr><th>property</th><th>manifested as</th><th>by</th>"
+                 "<th>what should hold</th><th>witness</th></tr>")
+        for bid in order:
+            bm = bugs_meta.get(bid) or {}
+            if bid == "_unknown":
+                hdr = "<b>Root cause not yet identified</b>"
             else:
-                pf = p.get("paired_from") or {}
-                sp, cd = pf.get("spec"), pf.get("code")
-            spec_loc = ", ".join(str(x) for x in (sp or p.get("traces") or [])) or "—"
-            code_loc = ", ".join(str(x) for x in (cd or [])) or ""
-            if p.get("object_fn"):
-                code_loc = str(p["object_fn"]) + (" (%s)" % code_loc if code_loc else "")
-            code_loc = code_loc or "—"
-            for t in tools:
-                b = p.get(t) or {}
-                if b.get("status") != "refuted":
-                    continue
-                ev = b.get("evidence") or {}
-                wit = ev.get("refutation", "") if isinstance(ev, dict) else ""
-                P.append(
-                    f"<tr><td class='mono'>{esc(p['id'])}</td><td>{TOOL_LABEL.get(t,t)}</td>"
-                    f"<td class='mono'>{esc(spec_loc)}</td><td class='mono'>{esc(code_loc)}</td>"
-                    f"<td>{esc(str(p.get('statement','')).strip())}"
-                    + (f"<br><b>Not a code defect:</b> {esc(str(triage[p['id']].get('why','')))}"
-                       if p.get('id') in triage else "") + "</td>"
-                    f"<td class='mono'>{esc(str(wit))}</td></tr>")
+                st_ = str(bm.get("status", "open"))
+                hdr = (f"<b>{esc(bid)} — {esc(str(bm.get('title','')))}</b> "
+                       f"<span class='foot'>[{esc(st_)}{(': ' + esc(str(bm.get('fix')))) if bm.get('fix') else ''}]</span>"
+                       f"<br>{esc(str(bm.get('root_cause','')))}"
+                       + (f"<br><span class='foot'>{esc(str(bm.get('location')))}</span>" if bm.get('location') else ""))
+            P.append(f"<tr><td colspan='5' style='background:var(--partbg)'>{hdr}</td></tr>")
+            for p in groups[bid]:
+                man_ = (tri_all.get(p["id"]) or {}).get("manifested_as", "")
+                for t in tools:
+                    b_ = p.get(t) or {}
+                    if b_.get("status") != "refuted":
+                        continue
+                    ev = b_.get("evidence") or {}
+                    wit = (ev.get("refutation") or ", ".join(ev.get("modules") or [])) if isinstance(ev, dict) else ""
+                    P.append(f"<tr><td class='mono'>{esc(p['id'])}</td><td>{esc(str(man_))}</td>"
+                             f"<td>{TOOL_LABEL.get(t,t)}</td>"
+                             f"<td>{esc(str(p.get('statement','')).strip())}</td>"
+                             f"<td class='mono'>{esc(str(wit))}</td></tr>")
         P.append("</table></div>")
 
     # ---- Tool-boundary ----
     tbs = [p for p in props if any((p.get(t) or {}).get("status") == "tool-boundary" for t in tools)]
+    dis = [p_ for p_ in props if any((p_.get(t) or {}).get("status") == "discordance" for t in tools)]
+    if dis:
+        P.append(f"<h2>{sec} · ≠ Spec and code disagree — side information, not defects</h2>")
+        sec += 1
+        P.append("<div class='note'>Each row is a property on which the specification and the code "
+                 "<b>disagree</b>, and verification confirmed what the code actually does. Keeping spec and "
+                 "code in step is not this pipeline's job, so these are reported for whoever owns that, and "
+                 "they do <b>not</b> stop a method counting as verified. Anything here that could crash, "
+                 "overflow or read out of bounds is listed as a defect instead.</div>")
+        P.append("<div class='scroll'><table><tr><th>property</th><th>spec</th><th>what the code does</th>"
+                 "<th>why it is not a defect</th></tr>")
+        for p_ in dis:
+            v_ = discord.get(p_["id"], {})
+            P.append(f"<tr><td class='mono'>{esc(p_['id'])}</td>"
+                     f"<td>{esc(str(p_.get('statement','')).strip())}</td>"
+                     f"<td>{esc(str(v_.get('code_does','')))}</td>"
+                     f"<td>{esc(str(v_.get('why','')))}</td></tr>")
+        P.append("</table></div>")
+
     P.append(f"<h2>{sec} · Tool-boundary rows and their causes</h2>")
     sec += 1
     if tbs:
