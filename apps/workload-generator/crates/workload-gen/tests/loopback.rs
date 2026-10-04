@@ -205,8 +205,14 @@ fn driven_turns_at_depth(lanes: usize, depth: usize, options: &RunOptions) -> Ve
         extra_args: Vec::new(),
     }];
     // Already running, so nothing is launched and nothing is replaced.
-    let mut agents = Agents::start_with(&NoLaunch, &specs, depth, false)
-        .expect("handshake with the loopback agent");
+    let mut agents = Agents::start_with(
+        &NoLaunch,
+        &specs,
+        depth,
+        false,
+        workload_wire::client::DEFAULT_READ_TIMEOUT,
+    )
+    .expect("handshake with the loopback agent");
     let d: WorkloadDescription = DESCRIPTION.parse().unwrap();
     drive::run(&mut agents, &d, options, Arc::new(AtomicBool::new(false)))
         .expect("drive the loopback agent");
