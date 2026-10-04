@@ -4845,3 +4845,92 @@ tool_notes:
     66 harnesses (26 base, 24 mutant twins, 4 refutations, 3 discriminators, 2 splits, 7 cost
     probes); 26 returned a verdict, 0 with undetermined checks; three walls gave no verdict at 330s
     (compute_partition_layout's 128-slot padding loop, String::from_utf16_lossy, new_default)
+# Orchestrator-written, NOT scorer-written (2026-10-03): what each refutation MEANS.
+# defect -> a bug in fv_bugs.yaml (root cause) and how it manifested here; discordance ->
+# spec and code disagree, side information; not-a-defect -> false only as worded.
+triage:
+  DPM-INIT-ERR-IO:
+    verdict: discordance
+    code_does: An I/O failure on the BACKUP header read is reported as 'no partition table' (gpt.rs:91-95); the
+      primary path reports I/O correctly.
+    why: Spec and code disagree on behaviour that does not crash, overflow, read out of bounds or act on the wrong
+      object; reported for spec/code synchronisation.
+  DPM-FORMAT-PRE-MAX-128:
+    verdict: defect
+    bug: FV-BUG-004
+    manifested_as: out-of-bounds panic (gpt.rs:433)
+  DPM-FORMAT-POST-TABLE:
+    verdict: discordance
+    code_does: Entries are filtered on a non-zero type GUID (gpt.rs:222) and nothing rejects an all-zero type GUID
+      in a request, so such a partition is silently dropped.
+    why: Spec and code disagree on behaviour that does not crash, overflow, read out of bounds or act on the wrong
+      object; reported for spec/code synchronisation.
+  DPM-FORMAT-POST-GUID-FRESH:
+    verdict: discordance
+    code_does: If /dev/urandom cannot be opened the GUID silently stays at the fixed constant 00000000-0000-4000-8000-000000000000
+      (gpt.rs:564-574).
+    why: Spec and code disagree on behaviour that does not crash, overflow, read out of bounds or act on the wrong
+      object; reported for spec/code synchronisation.
+  DPM-PINFO-POST-INDEX-ECHO:
+    verdict: discordance
+    code_does: partition_info numbers entries before filtering empty slots (gpt.rs:133-137), so on a sparse table
+      the returned index is the on-disk slot, not the one asked for.
+    why: Spec and code disagree on behaviour that does not crash, overflow, read out of bounds or act on the wrong
+      object; reported for spec/code synchronisation.
+  DPM-INV-NO-OVERLAP:
+    verdict: discordance
+    code_does: Tables read back from disk are not validated (gpt.rs:132-144), so a CRC-valid table with overlapping
+      partitions is reported as-is. Tables the component creates never overlap (proved).
+    why: Spec and code disagree on behaviour that does not crash, overflow, read out of bounds or act on the wrong
+      object; reported for spec/code synchronisation.
+  DPM-INV-GUID-DISTINCT:
+    verdict: discordance
+    code_does: 'Same fallback as DPM-FORMAT-POST-GUID-FRESH: the disk GUID and every partition GUID can coincide.'
+    why: Spec and code disagree on behaviour that does not crash, overflow, read out of bounds or act on the wrong
+      object; reported for spec/code synchronisation.
+  DPM-INV-SECTOR-SIZE-DOMAIN:
+    verdict: defect
+    bug: FV-BUG-003
+    manifested_as: out-of-bounds panic (gpt.rs:334)
+  DPM-INV-PARTITION-INDEX-SEQUENTIAL:
+    verdict: discordance
+    code_does: 'Same cause as DPM-PINFO-POST-INDEX-ECHO: reported indices follow on-disk slots and can have gaps.'
+    why: Spec and code disagree on behaviour that does not crash, overflow, read out of bounds or act on the wrong
+      object; reported for spec/code synchronisation.
+  DPM-INV-NUM-SECTORS-POSITIVE:
+    verdict: defect
+    bug: FV-BUG-005
+    manifested_as: underflow (gpt.rs:226; panic in debug
+  DPM-INV-NSID-CONSISTENT:
+    verdict: discordance
+    code_does: format writes to config.ns_id (lib.rs:91) and never consults the configured namespace, so after set_ns_id(3)
+      a format with ns_id 1 writes namespace 1.
+    why: Spec and code disagree on behaviour that does not crash, overflow, read out of bounds or act on the wrong
+      object; reported for spec/code synchronisation.
+bugs:
+  FV-BUG-003:
+    title: The sector size is never validated
+    root_cause: config.sector_size is passed through unchecked (lib.rs:91 -> gpt.rs:58); 512 or 4096 appears only
+      in a doc comment. The protective MBR buffer is sized by it, then written at offset 446.
+    location: components/disk-partition-manager/src/gpt.rs:58
+    status: open
+    also_seen: Kani (unscored) — with a 1-byte sector size the u64 sector sum wraps and passes the capacity check
+      (DPM-FORMAT-SUM-OVERFLOW).
+  FV-BUG-004:
+    title: More than 128 partitions are not rejected
+    root_cause: The layout pads the entry list UP to 128 but never truncates or rejects more (gpt.rs:310), so a
+      129th entry is serialised past the fixed 16 KiB entry buffer.
+    location: components/disk-partition-manager/src/gpt.rs:310
+    status: open
+  FV-BUG-005:
+    title: A 'rest of disk' partition with no space left gets an inverted extent
+    root_cause: When no sectors remain, the rest-of-disk partition gets ending_lba = starting_lba - 1 (gpt.rs:293),
+      and its length is then computed as ending - starting + 1.
+    location: components/disk-partition-manager/src/gpt.rs:293
+    status: open
+# Orchestrator-written: the IPartitionTable trait's own methods (components/interfaces/src/ipartition_table.rs), the method-headline denominator.
+interface_methods:
+- initialize
+- format
+- partition_info
+- num_partitions
