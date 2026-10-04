@@ -1,0 +1,13 @@
+# Standalone copy of the repair agent, built with the colleague's agent_builder and VENDORED here so
+# we own it and are isolated from the workbench's frequent changes (3-4 people commit there).
+source_repo: git@github.com:AI-native-Systems-Research/ai-native-storage-certus-workbench.git
+source_commit: dd19bc04aaff0bb6dab115566649b97a1ee9a9f1
+built_from_spec: .claude/skills/component-repair/spec.yaml
+build_run: agent_builder/runs/20261003-234807-46ba353d  (in the workbench checkout, not copied)
+build_result: deterministic contract and smoke gates PASSED; promotion refused as UNTESTED (no live
+  evaluation was run — by choice, so nothing could open a PR or push unattended)
+contents:
+  agents/_kit: the workbench runtime kit, minus its tests/ (those import agent_builder; the runtime does not)
+  agents/repair-agent: the generated agent; repair_accept.sh / repair_oracle.sh are symlinks to the skill's
+runtime_needs: python3 with pyyaml and jsonschema; the claude CLI; git; gh only for the after-approval PR
+to_update: rebuild from spec.yaml with a newer workbench, then re-copy both directories and bump source_commit
