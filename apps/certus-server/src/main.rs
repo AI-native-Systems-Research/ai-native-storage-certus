@@ -289,34 +289,9 @@ fn initialize_component_stack(
     let spdk_comp = spdk_env::SPDKEnvComponent::new_default();
     let spdk_iface =
         query_interface!(spdk_comp, spdk_env::ISPDKEnv).ok_or("failed to query ISPDKEnv")?;
-    // Save the main thread's CPU affinity before SPDK/DPDK init, which
-    // restricts the calling thread to the master lcore.  Restoring it
-    // afterwards ensures spawned threads inherit an unrestricted mask.
-    let saved_affinity = component_core::numa::get_thread_affinity().ok();
     spdk_iface
         .init()
         .map_err(|e| format!("SPDK init failed: {e}"))?;
-
-    // Restore the main thread's CPU affinity after SPDK/DPDK init, before any
-    // later thread (GPU, memory-tier, dispatcher, serve loop) is spawned.
-    if let Some(ref affinity) = saved_affinity {
-        let after_init = component_core::numa::get_thread_affinity()
-            .map(|s| s.count().to_string())
-            .unwrap_or_else(|e| format!("unknown ({e})"));
-        match component_core::numa::set_thread_affinity(affinity) {
-            Ok(()) => logger.info(&format!(
-                "certus-server: main-thread affinity after SPDK init = {after_init} CPU(s); restored to {} CPU(s)",
-                affinity.count()
-            )),
-            Err(e) => logger.warn(&format!(
-                "certus-server: main-thread affinity after SPDK init = {after_init} CPU(s); failed to restore: {e}"
-            )),
-        }
-    } else {
-        logger.warn(
-            "certus-server: could not read main-thread affinity before SPDK init; not restoring",
-        );
-    }
 
     // NVMe PCI class code: 0x010802 (Mass Storage Controller, NVM Express).
     const NVME_CLASS_CODE: u32 = 0x010802;
