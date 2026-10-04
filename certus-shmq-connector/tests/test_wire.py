@@ -37,6 +37,7 @@ from certus_shmq_connector.ring import (
     decode_u64,
     encode_handle_batch,
     encode_keys,
+    encode_promote_keys,
 )
 
 
@@ -188,3 +189,133 @@ def test_populate_handle_must_be_64_bytes():
 
     with pytest.raises(RingError):
         encode_handle_batch([(1, [(b"\x00" * 32, 0, 0, 4096)])])
+
+
+# ── bulk key codec: byte-identical to the old per-key encoders/decoder ───────
+
+# Reference copies of the pre-bulk per-key implementations. The bulk helpers in
+# ring.py must reproduce these bytes/lists exactly for every input.
+
+
+def _old_encode_keys(keys):
+    out = bytearray(struct.pack("<I", len(keys)))
+    for k in keys:
+        out += struct.pack("<Q", k & 0xFFFFFFFFFFFFFFFF)
+    return bytes(out)
+
+
+def _old_encode_promote_keys(promote, keys):
+    return struct.pack("<B", 1 if promote else 0) + _old_encode_keys(keys)
+
+
+def _old_decode_states(payload, n):
+    return [payload[i] if i < len(payload) else CHECK_MISS for i in range(n)]
+
+
+_CODEC_SIZES = [0, 1, 2, 63, 64, 65, 4096]
+
+
+def _key_lists():
+    import random
+
+    rnd = random.Random(20261003)
+    for n in _CODEC_SIZES:
+        yield [rnd.getrandbits(64) for _ in range(n)]
+        if n:
+            # Edge values at both ends of u64, placed at the ends of the list.
+            keys = [rnd.getrandbits(64) for _ in range(n)]
+            keys[0] = 0
+            keys[-1] = 2**64 - 1
+            yield keys
+
+
+@pytest.mark.parametrize("promote", [False, True])
+def test_bulk_encoders_match_per_key_reference(promote):
+    for keys in _key_lists():
+        assert encode_keys(keys) == _old_encode_keys(keys)
+        assert encode_promote_keys(promote, keys) == _old_encode_promote_keys(promote, keys)
+
+
+@pytest.mark.parametrize("promote", [False, True])
+def test_bulk_encoders_mask_out_of_range_ints_like_reference(promote):
+    # Negative and >= 2**64 ints take the masked retry; bytes must match the
+    # old per-key `k & mask` exactly.
+    for n in _CODEC_SIZES[1:]:
+        keys = [7] * n
+        keys[0] = -1
+        keys[-1] = 2**64 + 5
+        keys[n // 2] = -(2**70) + 3
+        assert encode_keys(keys) == _old_encode_keys(keys)
+        assert encode_promote_keys(promote, keys) == _old_encode_promote_keys(promote, keys)
+
+
+def test_bulk_encoders_reject_float_key_with_type_error():
+    with pytest.raises(TypeError):
+        _old_encode_keys([1, 2.0])
+    with pytest.raises(TypeError):
+        encode_keys([1, 2.0])
+    with pytest.raises(TypeError):
+        encode_promote_keys(False, [1, 2.0])
+
+
+def test_bulk_decode_states_matches_per_key_reference():
+    import random
+
+    rnd = random.Random(7)
+    for n in _CODEC_SIZES:
+        for plen in sorted({0, max(0, n - 1), n // 2, n, n + 1, n + 64}):
+            payload = bytes(rnd.choice((CHECK_MISS, CHECK_RESIDENT, CHECK_PENDING)) for _ in range(plen))
+            got = decode_states(payload, n)
+            assert got == _old_decode_states(payload, n)
+            assert len(got) == n
+            assert all(type(s) is int for s in got)
+
+
+# ── presence: the bulk codec is what ring.py actually runs ───────────────────
+
+
+def test_presence_bulk_encoders_make_one_pack_call(monkeypatch):
+    import certus_shmq_connector.ring as ring
+
+    assert ring._U64_MASK == 2**64 - 1
+
+    class _CountingStruct:
+        error = struct.error
+
+        def __init__(self):
+            self.calls = 0
+
+        def pack(self, *args):
+            self.calls += 1
+            return struct.pack(*args)
+
+    counter = _CountingStruct()
+    monkeypatch.setattr(ring, "struct", counter)
+    keys = list(range(1, 65))
+    for encode in (encode_keys, lambda ks: encode_promote_keys(True, ks)):
+        counter.calls = 0
+        encode(keys)
+        assert counter.calls == 1
+        bad = list(keys)
+        bad[10] = 2**64 + 1
+        counter.calls = 0
+        encode(bad)
+        assert counter.calls == 2  # masked retry
+
+
+def test_presence_bulk_decode_states_slices_only():
+    class _SliceOnly:
+        def __init__(self, data):
+            self._data = data
+
+        def __getitem__(self, idx):
+            if isinstance(idx, slice):
+                return self._data[idx]
+            raise AssertionError("decode_states must not index per byte")
+
+        def __len__(self):
+            raise AssertionError("decode_states must not call len(payload)")
+
+    data = bytes([CHECK_RESIDENT, CHECK_PENDING, CHECK_MISS] * 22)  # 66 bytes
+    for n in (len(data) + 5, len(data), len(data) - 7):
+        assert decode_states(_SliceOnly(data), n) == decode_states(data, n)
