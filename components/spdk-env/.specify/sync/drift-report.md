@@ -1,9 +1,9 @@
 ---
 spec_sync_component: spdk-env
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-05T19:05:49Z
-spec_sync_git_commit: d102a00b
-spec_sync_inputs_sha256: 7610958b3166348734406bd87cf86a4e180a77d2ccae32c51994582514287f0d
+spec_sync_synced_at: 2026-10-05T23:33:09Z
+spec_sync_git_commit: 4e185dd2
+spec_sync_inputs_sha256: 6cdd14483de3d7f0b4fcda3d214a4581047f4aec82622f4faad0d39cf320faa0
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Sync 2026-10-05 (branch `fix/poller-cpu-placement-logging`).** Delta analysis on a certified baseline: this component's existing clean stamp was re-verified to equal the spec-sync hash of `git archive origin/unstable`, so the only new inputs are this branch's src/specs/interfaces changes. Every FR/SC touching CPU placement, NUMA pinning, threads or SPDK init was located by grep over specs/** and re-checked against the changed code.

@@ -1,9 +1,9 @@
 ---
 spec_sync_component: eviction-policy-lru
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-05T19:05:49Z
-spec_sync_git_commit: d102a00b
-spec_sync_inputs_sha256: 0cbe2bec316aa98cd8d9ac432430ad00a757bbc554d16975c35472b44ec418c0
+spec_sync_synced_at: 2026-10-05T23:33:08Z
+spec_sync_git_commit: 4e185dd2
+spec_sync_inputs_sha256: 2cadd270443a2fe173ff2526d4a5a755f629ee1d769e710a449fc3b6fc104b4e
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Re-stamp 2026-10-05 (transitive: `components/interfaces` changed, branch `fix/poller-cpu-placement-logging`).** The only change to this component's hashed inputs is a doc-comment correction on `DispatcherConfig::poller_base_cpu` in `components/interfaces/src/idispatcher.rs` (no signature, type, or behaviour change). This component's own `src/**` and `specs/**` are unchanged, and it does not reference `poller_base_cpu` (verified by grep over its src/ and specs/). Its previous stamp was re-verified to match `git archive origin/unstable` before re-stamping. **No re-analysis was performed for this component**; this stamp asserts only what was checked.

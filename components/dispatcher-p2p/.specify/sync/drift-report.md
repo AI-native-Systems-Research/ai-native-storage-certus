@@ -1,9 +1,9 @@
 ---
 spec_sync_component: dispatcher-p2p
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-05T19:05:49Z
-spec_sync_git_commit: d102a00b
-spec_sync_inputs_sha256: ae1677d341b199059f11059b89a768ad88805bb5ebc1ee4b4b80a499dd00c4eb
+spec_sync_synced_at: 2026-10-05T23:33:08Z
+spec_sync_git_commit: 4e185dd2
+spec_sync_inputs_sha256: ad62faa2b4495cabfb34c1773a0c1d716c034cc9c317e330fc1535c65b75d663
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Sync 2026-10-05 (branch `fix/poller-cpu-placement-logging`).** Delta analysis on a certified baseline: this component's existing clean stamp was re-verified to equal the spec-sync hash of `git archive origin/unstable`, so the only new inputs are this branch's src/specs/interfaces changes. Every FR/SC touching CPU placement, NUMA pinning, threads or SPDK init was located by grep over specs/** and re-checked against the changed code.

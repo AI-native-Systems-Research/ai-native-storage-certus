@@ -1,9 +1,9 @@
 ---
 spec_sync_component: interfaces
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-05T19:05:49Z
-spec_sync_git_commit: d102a00b
-spec_sync_inputs_sha256: 07985dfb7f3a52f1b62ae6697886bbd116eed45fe64bf72d9c3f7e06e4f64199
+spec_sync_synced_at: 2026-10-05T23:33:09Z
+spec_sync_git_commit: 4e185dd2
+spec_sync_inputs_sha256: fa02f777c552e1bcfe19275bffceefc461cbbedb98ed1972a105b20a74393967
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Sync 2026-10-05 (branch `fix/poller-cpu-placement-logging`).** Delta analysis on a certified baseline: this component's existing clean stamp was re-verified to equal the spec-sync hash of `git archive origin/unstable`, so the only new inputs are this branch's src/specs/interfaces changes. Every FR/SC touching CPU placement, NUMA pinning, threads or SPDK init was located by grep over specs/** and re-checked against the changed code.
