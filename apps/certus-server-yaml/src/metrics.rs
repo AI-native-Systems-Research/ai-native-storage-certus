@@ -215,12 +215,6 @@ fn render_metrics(
          # HELP certus_peer_pins_held Read pins the responder holds for peers right now (gauge, not monotonic)\n\
          # TYPE certus_peer_pins_held gauge\n\
          certus_peer_pins_held {}\n\
-         # HELP certus_peer_pins_taken_total Keys ever pinned on behalf of peers\n\
-         # TYPE certus_peer_pins_taken_total counter\n\
-         certus_peer_pins_taken_total {}\n\
-         # HELP certus_peer_pin_hold_us_total Summed lifetime of released responder pin batches, microseconds\n\
-         # TYPE certus_peer_pin_hold_us_total counter\n\
-         certus_peer_pin_hold_us_total {}\n\
          # HELP certus_peer_pin_hold_us_max Longest single responder pin-batch lifetime, microseconds\n\
          # TYPE certus_peer_pin_hold_us_max gauge\n\
          certus_peer_pin_hold_us_max {}\n\
@@ -263,8 +257,6 @@ fn render_metrics(
         tier.evictions_blocked_unpersisted,
         tier.eviction_scans_exhausted,
         serve.peer_pins_held,
-        serve.peer_pins_taken,
-        serve.peer_pin_hold_us_total,
         serve.peer_pin_hold_us_max,
         tier.oldest_sampled,
         tier.oldest_persisted,

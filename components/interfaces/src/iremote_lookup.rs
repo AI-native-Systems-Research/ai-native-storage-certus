@@ -162,17 +162,6 @@ pub struct RemoteServeStats {
     /// between serves is a leak; a persistently high level is back-pressure on this
     /// node's own eviction.
     pub peer_pins_held: u64,
-    /// Read pins taken on behalf of peers since process start, counting keys rather
-    /// than batches. With `peer_pin_hold_us_total` this gives a mean hold time.
-    pub peer_pins_taken: u64,
-    /// Summed lifetime, in microseconds, of every responder pin batch that has been
-    /// released — measured from the batch being created to it being dropped, which is
-    /// the window in which its keys cannot be evicted.
-    ///
-    /// Attributed per **batch**, not per key: one batch pins many keys for one
-    /// interval, and multiplying by the key count would overstate the time anything
-    /// was actually blocked.
-    pub peer_pin_hold_us_total: u64,
     /// Longest single batch lifetime in microseconds, since process start.
     ///
     /// The mean hides the case that matters. A batch held for seconds — a lost RDMA

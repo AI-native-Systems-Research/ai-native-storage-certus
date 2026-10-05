@@ -494,8 +494,6 @@ mod tests {
             peer_served_keys: 118,
             peer_triggered_promotions: 41,
             peer_pins_held: 0,
-            peer_pins_taken: 0,
-            peer_pin_hold_us_total: 0,
             peer_pin_hold_us_max: 0,
         };
         let line = format_cache_stats(&tier, &serve);

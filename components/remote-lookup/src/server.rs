@@ -79,8 +79,10 @@ impl PinnedBatch {
     /// not release it itself.
     fn adopt(&mut self, key: CacheKey) {
         self.keys.push(key);
+        // One atomic per key. `pins_taken` was dropped: it measured 1.000x
+        // `peer_served_keys` on every run, so it duplicated an already-published
+        // counter for the cost of a second per-key atomic on the serve path.
         self.counters.pins_held.fetch_add(1, Ordering::Relaxed);
-        self.counters.pins_taken.fetch_add(1, Ordering::Relaxed);
     }
 }
 
@@ -100,9 +102,10 @@ impl Drop for PinnedBatch {
         }
         self.counters.pins_held.fetch_sub(held, Ordering::Relaxed);
         let us = self.created.elapsed().as_micros() as u64;
-        self.counters
-            .pin_hold_us_total
-            .fetch_add(us, Ordering::Relaxed);
+        // Only the MAX is kept. A summed total cannot yield a mean hold: it accumulates
+        // per BATCH while every key count available is per KEY, so their quotient is
+        // batch-microseconds-per-key, not a duration. A real mean needs a batch counter
+        // that nothing provides, and the summed form invites exactly that bad division.
         self.counters
             .pin_hold_us_max
             .fetch_max(us, Ordering::Relaxed);
@@ -241,10 +244,6 @@ pub(crate) struct ServeCounters {
     /// lowered when the owning [`PinnedBatch`] drops. The only non-monotonic counter
     /// here, because what matters is the level, not the rate.
     pub pins_held: AtomicU64,
-    /// Keys ever pinned on behalf of peers.
-    pub pins_taken: AtomicU64,
-    /// Summed lifetime of released pin batches, in microseconds, per batch.
-    pub pin_hold_us_total: AtomicU64,
     /// Longest single batch lifetime, in microseconds.
     pub pin_hold_us_max: AtomicU64,
 }
@@ -255,8 +254,6 @@ impl ServeCounters {
             peer_served_keys: self.served.load(Ordering::Relaxed),
             peer_triggered_promotions: self.cold_promotions.load(Ordering::Relaxed),
             peer_pins_held: self.pins_held.load(Ordering::Relaxed),
-            peer_pins_taken: self.pins_taken.load(Ordering::Relaxed),
-            peer_pin_hold_us_total: self.pin_hold_us_total.load(Ordering::Relaxed),
             peer_pin_hold_us_max: self.pin_hold_us_max.load(Ordering::Relaxed),
         }
     }
@@ -490,19 +487,10 @@ mod tests {
             "a released batch must return the gauge to zero -- a non-zero resting level \
              is exactly the leak this counter exists to surface: {s:?}",
         );
-        assert_eq!(
-            s.peer_pins_taken, 3,
-            "every key pinned on a peer's behalf must be counted once: {s:?}",
-        );
         assert!(
-            s.peer_pin_hold_us_total >= 1_000,
-            "a batch held ~2 ms must record a lifetime in that order, got {} us",
-            s.peer_pin_hold_us_total,
-        );
-        assert_eq!(
-            s.peer_pin_hold_us_max, s.peer_pin_hold_us_total,
-            "with exactly one released batch the max and the total are the same number; \
-             if they differ the attribution is not per batch: {s:?}",
+            s.peer_pin_hold_us_max >= 1_000,
+            "a batch held ~2 ms must record a max lifetime in that order, got {} us",
+            s.peer_pin_hold_us_max,
         );
     }
 
@@ -522,12 +510,8 @@ mod tests {
 
         let s = counters.snapshot();
         assert_eq!(
-            (
-                s.peer_pins_held,
-                s.peer_pins_taken,
-                s.peer_pin_hold_us_total
-            ),
-            (0, 0, 0),
+            (s.peer_pins_held, s.peer_pin_hold_us_max),
+            (0, 0),
             "an empty batch pinned nothing and blocked nothing, so it must not appear \
              in the hold-time statistics: {s:?}",
         );

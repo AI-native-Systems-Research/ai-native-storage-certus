@@ -145,6 +145,14 @@ pipeline {
         '''
       }
     }
+    // DEFERRED: no stage builds `--features otel`, so
+    // `apps/certus-server-yaml/src/telemetry.rs` is never even parsed (`mod telemetry`
+    // is cfg-gated). A file with an unterminated closure therefore rode an approved,
+    // fully-green PR (#502) and was caught only by `cargo fmt`, which parses regardless
+    // of cfg. Adding
+    //     cargo check -p certus-server-yaml --features otel
+    // here would catch the next one in seconds. Not added yet: needs the otel
+    // dependencies present on the agent.
     stage('Build Server') {
       steps {
           sh 'pwd'
