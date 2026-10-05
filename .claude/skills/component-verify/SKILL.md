@@ -66,10 +66,34 @@ Run `build-property-inventory <component>` inside the fresh worktree. It perform
 
 If `unified_properties.yaml` did not materialize, stop — Role 2 has nothing to consume.
 
+## Step 1.5 — LEVEL 1: spec<->code reconciliation (cheap; no provers) — 2026-10-04
+Verification has **two levels**. Level 1 compares what the specification says with what the code says;
+level 2 (Steps 2-4) formally proves the rest. Run, in the worktree:
+```
+python3 gate/level1.py components/<component>/verif
+python3 gate/render_discordances.py components/<component>/verif
+```
+`level1.py` writes `verif/discordances.yaml`, one entry per **discordance** (spec and code differ, or a
+spec item was not found in the code) with what the spec says, what the code does, spec pointers
+(FR/US/AS…) and code pointers (file:line), the methods touched, a stable id keyed on those pointers, and
+`status: candidate`. It appends `level2_excluded:` to the bundle: **every property derived from a
+discordance, from either side, is excluded from level 2.** `render_discordances.py` writes the small
+`<component>_discordances.html`; the scoring page links to it in one line.
+
+**Why** (measured): from 2026-09-28 the divergent and spec-only records went to the provers, and 43 of 46
+published "refutations" were those records — re-discovered disagreements, not verification results —
+while the pages became unreadable and no component could be finalised. A discordance is a real finding of
+the verification and is reported and credited as such; it is simply not worth proving. Which side is
+wrong is decided by whoever owns spec/code synchronisation, or confirmed by the repair agent with a test
+that fails on today's code. Once fixed, the next extraction sees agreement and the property enters level 2.
+
+**Role 2 proves ONLY the level-2 set** (properties not in `level2_excluded`, and never a hazard-worded
+record). The scorers skip the excluded ids, so an excluded property can neither be scored nor fail the gate.
+
 ## Step 2 — Role 2: PRODUCE proof artifacts (the agent does not grade itself)
 Run the two Role-2 skills. They are independent, so **launch them in parallel** as two subagents (one per tool) **inside the ONE shared fresh worktree** — they write disjoint artifact trees (Kani → `#[cfg(kani)]` harnesses under `src/`; Creusot → the `verif/` crate + `.coma`), so their files never collide and **there is no merge step across trees**. Neither subagent writes `unified_properties.yaml` directly (concurrent writes would race); each writes its advisory fields to a per-tool side-file `verif/<tool>_advisory.yaml`, and the **orchestrator is the single writer** that folds those into `unified_properties.yaml` before the gate. The critical rule of the strong gate: **a Role-2 subagent produces artifacts; it never writes its own `status`.** Status is derived by the gate scorer in Step 2.5, which *executes* the artifacts. Each subagent:
 - consumes the inventory by `id` (never re-extracts),
-- attempts **every** property it can express (no lane pre-filtering — coverage discipline is in the sub-skills),
+- attempts **every level-2 property** it can express — every property NOT in `level2_excluded` (Step 1.5); no lane pre-filtering beyond that (coverage discipline is in the sub-skills),
 - produces, **per property `id`, a runnable proof artifact** the scorer can find by the naming convention (Kani: a `#[kani::proof] fn verify_<id>`; Creusot: a proof module `verify_<id>` → `verif/<crate>_rlib/verify_<id>.coma`) — or points the scorer at an existing artifact via `kani.evidence.harness` / `creusot.evidence.module(s)`,
 - **for any property it cannot prove on the first attempt, produces the lever-battery variant artifacts** the battery requires for the observed failure class (Kani `verify_<id>__nounwindcheck|__concrete|__split_*|__stub`; Creusot `verify_<id>__fmap|__trusted|__inv`, `lemma_<id>`) — the scorer will run each; a missing required variant scores UNRESOLVED, never tool-boundary,
 - builds a `verify_<id>__mutant` anti-vacuity twin wherever the property could be vacuously true (the scorer requires it to FAIL),
@@ -188,7 +212,7 @@ If any verifiable property lacks a scorer-owned status for a rendered tool, the 
 Both branches carry the **identical full metadata bundle**; they differ only in which tool's proof artifacts sit alongside it. For **each** tool run (`--tools`):
 1. From the fresh `origin/unstable`, check out `verif/<tool>/<component>` if it exists, else create it off `origin/unstable`. Overwrite-in-place — do **not** branch off a stale local tip.
 2. Stage, all under `components/<component>/`:
-   - **the full metadata bundle (identical on both branches):** `verif/spec_properties.yaml`, `verif/code_properties.yaml`, `verif/unified_properties.yaml`, and the combined `verif/<component>_scoring.html`;
+   - **the full metadata bundle (identical on both branches):** `verif/spec_properties.yaml`, `verif/code_properties.yaml`, `verif/unified_properties.yaml`, the combined `verif/<component>_scoring.html`, and the level-1 report `verif/discordances.yaml` + `verif/<component>_discordances.html` (Step 1.5);
    - **plus that one tool's proof artifacts:** Kani branch → the `#[cfg(kani)]` harnesses (under `src/`); Creusot branch → the `verif/` crate + its `.coma`.
    Do **not** stage the *other* tool's artifacts, and do **not** commit the scratch advisory side-files (`verif/<tool>_advisory.yaml`).
 3. **Artifact-presence gate (HARD — absence is a contamination too).** Before committing, count that

@@ -4,6 +4,13 @@ description: Create a Creusot verification for a Certus component from BOTH its 
 argument-hint: "<component-name-or-path>"
 ---
 
+
+> **Scope (2026-10-04): prove only LEVEL-2 properties.** Skip every id listed in the bundle's
+> `level2_excluded:` (written by `gate/level1.py`): those are spec<->code discordances, reported in
+> `discordances.yaml` and NOT formally verified — proving them only rediscovers a disagreement the
+> reconciliation already found. Also skip any hazard-worded record. "Attempt every property" below means
+> every level-2 property.
+
 ## Goal
 Verify a component with Creusot **and** record exactly what was proved.
 Inputs are the component's **spec** (the intended behavior) and its **Rust code** (the functions to

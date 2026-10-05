@@ -190,9 +190,13 @@ def main():
     all_method_names = list(dict.fromkeys(m for p in props for m in (p.get("methods") or [])))
     outside = []
     if any(p.get("origin") for p in props):
+        _excl = set(d["level2_excluded"]) if isinstance(d.get("level2_excluded"), list) else None
         def _in(p):
-            return (p.get("origin") in IN_SCOPE
-                    and str((_pol.get(p["id"]) or {}).get("polarity", "")).upper() != "HAZARD")
+            if str((_pol.get(p["id"]) or {}).get("polarity", "")).upper() == "HAZARD":
+                return False
+            if _excl is not None:                  # LEVEL 1 decided (level1.py / discordances.yaml)
+                return p["id"] not in _excl
+            return p.get("origin") in IN_SCOPE     # older bundle: the origin rule
         outside = [p for p in props if not _in(p)]
         props = [p for p in props if _in(p)]
         for p_ in props:
@@ -568,6 +572,13 @@ def main():
                  f"by {len(glob_hits)} shared global propert{'ies' if len(glob_hits) != 1 else 'y'}: {gl}"
                  + (f"; <b>{len(m_own)}</b> have an open property of their own" if m_own else "")
                  + (f". {mtail[0].upper()}{mtail[1:]}" if False else ""))
+    _dpath = os.path.join(verif, "discordances.yaml")
+    if os.path.exists(_dpath):
+        _dn = (yaml.safe_load(open(_dpath)) or {}).get("counts", {}).get("discordances", 0)
+        if _dn:
+            mtail += (f". <b>Level 1</b>: reconciling the specification with the code found <b>{_dn}</b> "
+                      f"spec&harr;code discordance{'s' if _dn != 1 else ''}; the properties built from them "
+                      f"are not formally verified here (<a href='{esc(comp)}_discordances.html'>see the list</a>)")
     im_all = d.get("interface_methods") or all_method_names
     no_scope = [m for m in im_all if m not in methods and m in all_method_names]
     if no_scope:

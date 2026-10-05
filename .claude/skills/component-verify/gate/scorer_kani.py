@@ -940,11 +940,15 @@ def main():
     # published refutations). Skipped here, so they are neither scored nor able to fail the gate.
     _OUT = {"divergent", "spec-only", "spec"}
     _pol = d.get("polarity") or {}
+    _excl = set(d["level2_excluded"]) if isinstance(d.get("level2_excluded"), list) else None
     for p in d["properties"]:
         if not p.get("verifiable"):
             continue
-        if p.get("origin") in _OUT or str((_pol.get(p["id"]) or {}).get("polarity", "")).upper() == "HAZARD":
-            continue
+        if _excl is not None:
+            if p["id"] in _excl or str((_pol.get(p["id"]) or {}).get("polarity", "")).upper() == "HAZARD":
+                continue      # LEVEL 1 found it (level1.py / discordances.yaml): never sent to the provers
+        elif p.get("origin") in _OUT or str((_pol.get(p["id"]) or {}).get("polarity", "")).upper() == "HAZARD":
+            continue          # older bundle with no level-1 list: fall back to the origin rule
         if only and p["id"] not in only:
             continue
         prior = p.get("kani") or {}
