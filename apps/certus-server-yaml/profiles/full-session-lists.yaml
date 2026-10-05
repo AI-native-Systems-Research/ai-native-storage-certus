@@ -113,3 +113,5 @@ exports:
     interface: ISPDKEnv
   - component: memory_tier
     interface: IMemoryTier
+  - component: remote_lookup
+    interface: IRemoteLookup

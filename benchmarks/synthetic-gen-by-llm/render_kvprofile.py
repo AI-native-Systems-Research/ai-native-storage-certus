@@ -133,6 +133,14 @@ TIER_COUNTERS = [
 TIER_KEYS = [c[0] for c in TIER_COUNTERS]
 # Matches both the periodic "tier-events …" line and the "FINAL tier-events …"
 # summary (the leading FINAL is outside the capture). Numbers are cumulative.
+#
+# This is a PREFIX match, deliberately: the server's line carries further groups
+# after evictions[...] — from-peers[...], to-peers[...], store[...] at the time of
+# writing — and more may be added. Do not anchor this pattern to end-of-line, and do
+# not assume the groups it ignores are stable; only promotions[...] and
+# evictions[...] are a contract. The server side documents the same boundary on
+# `format_cache_stats` in apps/certus-server-yaml/src/main.rs, which has a unit test
+# asserting this prefix does not drift.
 TIER_RE = re.compile(
     r"tier-events\s+promotions\[->memory\s+(\d+),\s*->gpu\s+(\d+)\]"
     r"\s+evictions\[memory\s+(\d+),\s*ssd\s+(\d+)\]"

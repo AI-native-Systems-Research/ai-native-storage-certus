@@ -72,7 +72,7 @@ The crate has two Cargo features:
 **As the** remote lookup component, **I want** interfaces for outbound lookups plus a split RDMA push/accept pair **so that** cache misses can be served from other Certus nodes in a cluster.
 
 **Acceptance Criteria:**
-- `IRemoteLookup` provides `initialize`, `batch_lookup`, `join_cluster`, and `leave_cluster`.
+- `IRemoteLookup` provides `initialize`, `batch_lookup`, `join_cluster`, `leave_cluster`, and `serve_stats` *(the last added 2026-09-29)*.
 - `IRemoteLookupRdmaInitiator` (outbound) RDMA-writes local values into a remote requester's memory; `IRemoteLookupRdmaResponder`/`IRemoteLookupRdmaResponderAdmin` (inbound) accept connections and expose the requester's landing-slot region and control channel. (Supersedes the earlier single `IRemoteRequestHandler` interface and its zero-copy `LookupRef`; see FR-013, FR-030, FR-031.)
 
 ### User Story 6 - Extent Management (Priority: P1)
@@ -172,7 +172,7 @@ The crate has two Cargo features:
 - **Method**: `shutdown(&self) -> Result<(), DispatcherError>` - Shut down, completing in-flight writes.
 - **Method**: `lookup(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError>` - Look up and DMA-copy to GPU memory.
 - **Method**: `lookup_async(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<GpuStream, DispatcherError>` - Async lookup returning CUDA stream.
-- **Method**: `batch_lookup(&self, entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), DispatcherError>>` - Concurrent batch lookup.
+- **Method**: `batch_lookup(&self, entries: &[(CacheKey, Vec<IpcHandle>)]) -> Vec<LookupOutcome>` *(Sync 2026-10-01 — CODE CHANGE, served_by Phase 2)* - Concurrent batch lookup. Returns one `LookupOutcome` per requested entry, in order, each carrying **how** the key was served as well as the result. Widened from `Vec<Result<(), DispatcherError>>`: the tier was previously lost at this boundary, so no consumer could distinguish a DRAM hit from an SSD read or a peer fetch.
 - **Method**: `check(&self, key: CacheKey) -> Result<bool, DispatcherError>` - Check entry existence.
 - **Method**: `remove(&self, key: CacheKey) -> Result<(), DispatcherError>` - Remove entry and free resources.
 - **Method**: `populate(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError>` - Populate cache from GPU memory.
@@ -261,6 +261,7 @@ The crate has two Cargo features:
 - **Method**: `batch_lookup(&self, entries: &[(CacheKey, u32)]) -> Vec<Result<(), RemoteLookupError>>` - Batch lookup from remote nodes; the `u32` is the expected value size (a size hint used to validate the RDMA-written region), not a GPU IPC handle.
 - **Method**: `join_cluster(&self, endpoint: &str) -> Result<(), RemoteLookupError>` - Join a cluster.
 - **Method**: `leave_cluster(&self) -> Result<(), RemoteLookupError>` - Leave the cluster.
+- **Method**: `serve_stats(&self) -> RemoteServeStats` *(Sync 2026-09-29 — CODE CHANGE)* - Cumulative snapshot of what this node has served **to its peers**: keys served, and of those, keys read from this node's own block tier to serve them. Responder-side, the opposite direction from `TierEventStats::remote_lookup_hits` (which is what this node obtained *from* peers). Readable before `initialize` (zeroes), never reset by reading. Specified in `components/remote-lookup/specs/002-remote-lookup-rdma` FR-035/FR-036.
 
 #### FR-013: Remote Request Handling (RDMA Initiator/Responder Split)
 
@@ -319,6 +320,8 @@ The crate has two Cargo features:
 - `DispatcherError`: 7-variant error enum.
 - `CacheKey`: Type alias for `u64`.
 - `LookupResult`: 4-variant enum (NotExist, MismatchSize, BlockDevice, MemoryTier).
+- `EvictionEvent` / `EvictionReason` *(moved here 2026-10-02)*: `EvictionEvent { key, reason }` with `EvictionReason` being `Demoted` (to the block device) or `Removed`. Emitted best-effort on every memory-tier eviction over a bounded single-subscriber channel, with drop-and-count backpressure; the behavioural contract lives with the dispatchers (dispatcher spec 001 FR-042/FR-050, dispatcher-p2p spec 001 FR-017).
+  - **Defined here, and only here, because two components emit it.** Both `dispatcher` and `dispatcher-p2p` publish these events, and a type defined in one of them cannot be named by the other without one dispatcher depending on the other — which is what prevented the `full-p2p` profile from building at all. A shared vocabulary type belongs in `interfaces` for the same reason `CacheKey` and `LookupResult` do.
 
 #### FR-019: Supporting Types - Memory Tier
 - `MemoryTierError`: 7-variant error enum.
@@ -344,8 +347,25 @@ The crate has two Cargo features:
 - `GpuDmaBuffer`: GPU memory buffer with auto-close on drop.
 - `GpuStream`: Opaque CUDA stream handle.
 
+#### FR-023a: Supporting Types - Serving-Tier Attribution *(New 2026-10-01)*
+- `ServedBy`: 6-variant enum naming **how** a looked-up key was served — `Dram`, `Ssd`,
+  `Remote`, `Miss`, `SizeMismatch`, `Error` — with `is_hit()` true for the first three. **The
+  value space is defined here and only here**; every other document and crate references this
+  type rather than restating it, because a taxonomy written down twice is a taxonomy that will
+  disagree with itself. It describes the **route**, not the entry's residency afterwards: an SSD
+  hit that is promoted into DRAM as part of being served is `Ssd`, because that is what the
+  request cost.
+- `LookupOutcome`: the per-key result of `IDispatcher::batch_lookup` — `{ served_by: ServedBy,
+  result: Result<(), DispatcherError> }`, with the invariant `served_by.is_hit()` **if and only
+  if** `result.is_ok()`. A struct rather than `Result<ServedBy, DispatcherError>` deliberately:
+  the tier-on-`Ok` encoding cannot express `Miss`, `SizeMismatch` or `Error`, since those *are*
+  the `Err` cases, and would push a third of the taxonomy into a per-server error-to-tier
+  mapping — which is how two servers reporting the same cache would drift apart.
+- Owning feature: `components/dispatcher/specs/002-served-by-tier-attribution`.
+
 #### FR-023: Supporting Types - Remote
 - `RemoteLookupError`: 2-variant error enum (`NotFound`, `TransportError`).
+- `RemoteServeStats` *(Sync 2026-09-29)*: 2-field `Copy` counter snapshot returned by `IRemoteLookup::serve_stats` — `peer_served_keys`, `peer_triggered_promotions`. Both monotonic since process start; take the delta of two snapshots for a rate. The second is a **first-touch** quantity (promoting the key leaves it warm), so it is meaningful as a rate and misleading as a lifetime ratio against the first.
 - `LookupConfig`: 10-field configuration for `IRemoteLookup::initialize` — `group`, `quorum_pct`, `phase1_timeout`, `op_deadline`, `max_retry_rounds`, `max_keys_per_query`, `bind_ip`, `actor_cpu`, `discovery` (optional `GossipConfig`, see FR-032), `node_endpoint`. Implements `Default`.
 - ~~`LookupRef`~~ / ~~`RemoteRequestHandlerError`~~ — **SUPERSEDED**, removed together with `IRemoteRequestHandler` (see FR-013). No replacement type exists: the RDMA split's writes are one-sided (no zero-copy handle is returned to a caller) and its errors are `RemoteLookupRdmaInitiatorError`/`RemoteLookupRdmaResponderError` (FR-033/FR-034).
 

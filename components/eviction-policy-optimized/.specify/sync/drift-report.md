@@ -1,11 +1,26 @@
 ---
 spec_sync_component: eviction-policy-optimized
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-09-23T19:38:44Z
-spec_sync_git_commit: 919310b8
-spec_sync_inputs_sha256: 50c57c1f8f178ce63e76a9afb4b9024fdbbd3ac7a7fd92bec057a10e8e10a917
+spec_sync_synced_at: 2026-10-05T19:05:49Z
+spec_sync_git_commit: d102a00b
+spec_sync_inputs_sha256: 6569b2ba30f8f7eb89f2157f7cde57dce33a89e434b61f2976b104fe44079f60
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-05 (transitive: `components/interfaces` changed, branch `fix/poller-cpu-placement-logging`).** The only change to this component's hashed inputs is a doc-comment correction on `DispatcherConfig::poller_base_cpu` in `components/interfaces/src/idispatcher.rs` (no signature, type, or behaviour change). This component's own `src/**` and `specs/**` are unchanged, and it does not reference `poller_base_cpu` (verified by grep over its src/ and specs/). Its previous stamp was re-verified to match `git archive origin/unstable` before re-stamping. **No re-analysis was performed for this component**; this stamp asserts only what was checked.
+
+> **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest
+> folds `components/interfaces/{src,specs}` into **every** component's hash, so an interface
+> change invalidates all of them at once -- which is the design, not a defect. The interface
+> change is the `served_by` attribution work: new `ServedBy` and `LookupOutcome` types, and
+> `IDispatcher::batch_lookup` widened to return `Vec<LookupOutcome>`.
+>
+> **No re-analysis was performed for this component, and the digest bump asserts only what was
+> actually checked**: the interface change is additive except for `batch_lookup`'s return type,
+> which the compiler enforces across all implementors, and this component's own `src/**` and
+> `specs/**` are unchanged. Components that implement `IDispatcher` (`dispatcher`,
+> `dispatcher-p2p`) had their specs updated substantively; this one did not need it. If a later
+> sweep finds drift here, this stamp is not evidence against it.
+
 # Spec Drift Report
 
 Generated: 2026-09-23

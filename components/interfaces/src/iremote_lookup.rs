@@ -117,6 +117,40 @@ impl fmt::Display for RemoteLookupError {
 
 impl std::error::Error for RemoteLookupError {}
 
+/// A cumulative snapshot of what this node has served **to its peers**.
+///
+/// Responder-side, and deliberately so: these count work other nodes caused here,
+/// which is the opposite direction from `TierEventStats::remote_lookup_hits`
+/// (what this node obtained *from* peers). Conflating the two is easy and the
+/// names are chosen to make it hard.
+///
+/// Both fields are monotonic since process start; subtract two successive
+/// snapshots for a per-interval rate.
+///
+/// # Examples
+///
+/// ```
+/// use interfaces::RemoteServeStats;
+///
+/// let s = RemoteServeStats::default();
+/// assert_eq!((s.peer_served_keys, s.peer_triggered_promotions), (0, 0));
+/// ```
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RemoteServeStats {
+    /// Keys this node successfully served to a peer's RDMA request.
+    pub peer_served_keys: u64,
+    /// Keys this node had to read from its **own disk** in order to serve a peer —
+    /// promoted into the local memory tier before the RDMA read, because there is
+    /// no RDMA-from-SSD path.
+    ///
+    /// This is the cold-serve signal: the pressure peers place on this node's
+    /// storage tier. It is a **first-touch** quantity, since the promotion leaves
+    /// the entry in DRAM and a second request for the same key is served warm.
+    /// That makes it meaningful as a rate and misleading as a running total
+    /// compared against `peer_served_keys` over a long window.
+    pub peer_triggered_promotions: u64,
+}
+
 component_macros::define_interface! {
     pub IRemoteLookup {
         /// Configure and bring up the component.
@@ -192,6 +226,28 @@ component_macros::define_interface! {
         /// # }
         /// ```
         fn leave_cluster(&self) -> Result<(), RemoteLookupError>;
+
+        /// A cumulative snapshot of what this node has served to its peers.
+        ///
+        /// Mirrors `IDispatcher::tier_event_stats()`: always populated, never reset
+        /// by reading, and zero on an implementation that serves no peers. Polled by
+        /// the server for `/metrics` rather than pushed, so nothing is lost if no one
+        /// asks.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// use interfaces::IRemoteLookup;
+        ///
+        /// # fn example(rl: &dyn IRemoteLookup) {
+        /// let before = rl.serve_stats();
+        /// // ... peers issue requests ...
+        /// let after = rl.serve_stats();
+        /// let cold = after.peer_triggered_promotions - before.peer_triggered_promotions;
+        /// let _ = cold;
+        /// # }
+        /// ```
+        fn serve_stats(&self) -> RemoteServeStats;
     }
 }
 

@@ -1,51 +1,35 @@
 {
-  "generated": "2026-09-21T23:54:58Z",
+  "generated": "2026-10-05",
   "project": "dispatcher",
-  "spec": "specs/001-dispatcher-cache-interface/spec.md",
-  "branch": "evolve-throughput",
-  "git_commit": "3b1cca02",
-  "drift_status": "clean",
-  "inputs_sha256": "58c590e9c8292d98872b5c90099144e370572f8f5b1ef79d5870b8b8389f4c4f",
+  "spec": "001-dispatcher-cache-interface",
+  "branch": "fix/poller-cpu-placement-logging",
+  "baseline": "origin/unstable (stamped 2c86a131; stamp re-verified against `git archive origin/unstable`)",
+  "method": "Delta analysis on a certified baseline: this component's existing clean stamp was re-verified to equal the spec-sync hash of `git archive origin/unstable`, so the only new inputs are this branch's src/specs/interfaces changes. Every FR/SC touching CPU placement, NUMA pinning, threads or SPDK init was located by grep over specs/** and re-checked against the changed code.",
   "summary": {
     "specs_analyzed": 1,
-    "drift_findings": 2,
-    "drifted_resolved_by_backfill": 1,
-    "dead_code_resolved_by_deletion": 1,
-    "not_implemented": 0,
-    "unspecced_features": 0
+    "findings": 1,
+    "resolved": 1,
+    "open": 0
   },
-  "specs": [
+  "aligned": [
+    "FR-011 (poller_base_cpu=Some(base): drive i -> base+i, src/lib.rs:1530-1536)"
+  ],
+  "drifted": [
     {
-      "id": "001-dispatcher-cache-interface",
-      "title": "Dispatcher Cache Interface",
-      "drifted": [
-        {
-          "requirement": "FR-061,FR-039,FR-019,FR-052",
-          "spec_text": "batch_lookup cold path spawns up to MAX_QUEUES_PER_DRIVE threads per drive, each running pipelined_multi_object_zero_copy with max_queue_depth=128 per thread; drives grouped by key % num_drives; cold_pool::ColdReadRequest carries gpu_device",
-          "actual": "batch_lookup cold path checks out one channel per active drive and runs a single multiplexed scatter_gather_multi_drive_zero_copy on the caller thread (no spawned threads, no MAX_QUEUES_PER_DRIVE); total max_queue_depth=128 distributed proportionally per drive by segment count; per-device pipe stream pair; drive_index is a splitmix64 hash of the key mod num_drives",
-          "location": "components/dispatcher/src/pipeline.rs:746 (DriveWork), :766 (scatter_gather_multi_drive_zero_copy); components/dispatcher/src/lib.rs:2337-2567 (batch_lookup cold path), :494-503 (drive_index)",
-          "severity": "major",
-          "commit": "6f35b13a",
-          "resolution": "backfill",
-          "outcome": "fixed",
-          "notes": "Code authoritative (shipped throughput optimization on evolve-throughput). New FR-061 specifies scatter_gather_multi_drive_zero_copy + DriveWork; FR-039(4)/(5), FR-019, FR-052, User Story 11 (narrative + scenarios 1 & 3), Key Entities, Session Q&A updated. promote_and_serve (single-entry cold) still uses pipelined_multi_object_zero_copy."
-        },
-        {
-          "requirement": "FR-044",
-          "spec_text": "The dispatcher MUST provide a ColdReadPool (persistent per-drive/per-queue worker pool); batch_lookup dispatches cold entries to the pool",
-          "actual": "ColdReadPool was constructed at initialize() and torn down at shutdown() but never submitted to after 6f35b13a routed the cold path through scatter-gather; dead code",
-          "location": "components/dispatcher/src/cold_pool.rs (deleted); components/dispatcher/src/lib.rs (mod decl, field, init/shutdown wiring removed)",
-          "severity": "moderate",
-          "commit": "6f35b13a",
-          "resolution": "code_deletion",
-          "outcome": "fixed",
-          "notes": "User-directed ('Remove ColdRealPool redundant code.'). Deleted src/cold_pool.rs and all wiring; FR-044 marked REMOVED, pointing to FR-034 (ChannelPool) + FR-061 (scatter-gather). Positional constructor arity fixed across 23 test call sites. dispatcher-p2p's separate P2pColdReadPool is still used and was NOT touched. cargo check -p dispatcher --tests clean."
-        }
-      ],
-      "not_implemented": []
+      "requirement": "FR-011",
+      "direction": "BACKFILL",
+      "severity": "moderate",
+      "spec_text": "`poller_base_cpu` ... Defaults to `None` (OS scheduler decides).",
+      "actual": "`None` selects NUMA-local automatic placement: round-robin over each drive's NUMA-node cores excluding the node's first two (this branch; previously global CPUs 0/1 were excluded); unresolvable node or node with <=2 cores -> no CPU passed, block device chooses; topology discovery failure -> warning, unpinned.",
+      "location": "components/dispatcher/src/lib.rs:550-600, 1530-1539",
+      "note": "Pre-existing drift (the None path was already automatic on unstable), surfaced because this branch modifies that path.",
+      "resolution": "FR-011 rewritten for the None case; Last Synced header added."
     }
   ],
   "unspecced": [],
   "conflicts": [],
-  "synced_at": "2026-09-29T00:00:00Z"
+  "drift_status": "clean",
+  "inputs_sha256": "acb693621e8650c9b7d66c51f46b99f7c6864245d9f6aa86840a2a3824b2f9ee",
+  "git_commit": "d102a00b",
+  "synced_at": "2026-10-05T19:05:49Z"
 }

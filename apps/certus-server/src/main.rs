@@ -24,7 +24,7 @@ use interfaces::{
     IMemoryTier, IRemoteLookup, PciAddress,
 };
 
-use shmq_dispatcher::{serve, ServeConfig, Translator};
+use shmq_dispatcher::{log_cpu_bindings, serve, ServeConfig, Translator};
 
 /// Set once by the SIGINT/SIGTERM handler; polled by the poller and reaper.
 static SHUTDOWN: AtomicBool = AtomicBool::new(false);
@@ -109,17 +109,40 @@ fn format_io_stats(s: &interfaces::ReadWriteStats) -> String {
     )
 }
 
-/// Format the cumulative KV-cache tier-movement counters for the server log,
-/// including the store-path backpressure/drop counters that report whether the
-/// memory tier saturated under load. Always available (not gated by a feature).
-fn format_tier_stats(s: &interfaces::TierEventStats) -> String {
+/// Format the cumulative KV-cache counters for the server log, including the
+/// store-path backpressure/drop counters that report whether the memory tier
+/// saturated under load. Always available (not gated by a feature).
+///
+/// **Kept identical in shape to `certus-server-yaml`'s `format_cache_stats`**, which
+/// is the point of it: the two servers are compared against each other, and until
+/// 2026-09-29 this copy silently omitted the remote groups entirely, so a reader
+/// switching servers lost the numbers without being told. Any change to the groups
+/// here belongs in that copy too.
+///
+/// `from-peers` is what this node *obtained* from peers — its own hit rate.
+/// `to-peers` is what this node *did for* peers — work they caused here. Two
+/// directions, never to be read for one another: a reader who swaps them concludes
+/// the opposite about whether remote lookup earns its cost.
+///
+/// **Parser contract.** `render_kvprofile.py`'s `TIER_RE` matches the
+/// `promotions[...] evictions[...]` prefix and stops, so groups after
+/// `evictions[...]` are free to change and those two are not.
+fn format_tier_stats(
+    s: &interfaces::TierEventStats,
+    serve: &interfaces::RemoteServeStats,
+) -> String {
     format!(
         "promotions[->memory {pm}, ->gpu {pg}]  evictions[memory {em}, ssd {es}]  \
+         from-peers[hits {rh}, misses {rm}]  to-peers[served {ps}, own-disk {pp}]  \
          store[backpressure {sb}, drops-on-full {sd}]",
         pm = s.promotions_to_memory,
         pg = s.promotions_to_gpu,
         em = s.evictions_from_memory,
         es = s.evictions_from_ssd,
+        rh = s.remote_lookup_hits,
+        rm = s.remote_lookup_misses,
+        ps = serve.peer_served_keys,
+        pp = serve.peer_triggered_promotions,
         sb = s.store_backpressure_events,
         sd = s.store_drops_on_full,
     )
@@ -280,6 +303,10 @@ fn initialize_component_stack(
         Arc<dyn ILogger + Send + Sync>,
         Vec<String>,
         Arc<dispatcher::DispatcherComponent>,
+        // Returned solely so the FINAL log line can read `serve_stats()`. The
+        // dispatcher already holds its own clone in a receptacle, so this is an extra
+        // handle rather than a transfer of ownership.
+        Arc<dyn IRemoteLookup + Send + Sync>,
     ),
     String,
 > {
@@ -451,7 +478,13 @@ fn initialize_component_stack(
         .map_err(|e| format!("Dispatcher init failed: {e}"))?;
 
     logger.info("certus-server: component stack initialized");
-    Ok((dispatcher, logger, device_pci_addrs, disp_comp))
+    Ok((
+        dispatcher,
+        logger,
+        device_pci_addrs,
+        disp_comp,
+        remote_lookup,
+    ))
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -461,7 +494,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     const DEFAULT_MEMORY_TIER_SIZE: usize = 2 * 1024 * 1024 * 1024; // 2 GiB
     let pool_size = cli.memory_tier_size.unwrap_or(DEFAULT_MEMORY_TIER_SIZE);
-    let (dispatcher, logger, device_pci, disp_comp) = initialize_component_stack(
+    let (dispatcher, logger, device_pci, disp_comp, remote_lookup) = initialize_component_stack(
         &device_pci,
         cli.drive_count,
         pool_size,
@@ -472,6 +505,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         cli.memory_tier_eviction_threshold,
     )?;
 
+    // Report the CPU cores the component threads (NVMe pollers, remote-lookup
+    // actor, ...) were bound to during stack initialization.
+    log_cpu_bindings(logger.as_ref(), "certus-server");
+    match cli.shmq_poller_cpu {
+        Some(cpu) => logger.info(&format!(
+            "certus-server: shmq poller will bind to CPU {cpu}"
+        )),
+        None => logger.info("certus-server: shmq poller not pinned (use --shmq-poller-cpu)"),
+    }
     logger.info(&format!("certus-server: devices={device_pci:?}"));
     logger.info(&format!(
         "certus-server: memory-tier-size={} MiB",
@@ -576,10 +618,74 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // logged before teardown while the dispatcher's counters are still live.
     logger.info(&format!(
         "certus-server: FINAL tier-events {}",
-        format_tier_stats(&dispatcher.tier_event_stats())
+        format_tier_stats(&dispatcher.tier_event_stats(), &remote_lookup.serve_stats(),)
     ));
 
     let _ = dispatcher.shutdown();
     logger.info("certus-server: shutdown complete");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The kvprofile parser contract: `promotions[...] evictions[...]` keeps its exact
+    /// shape; everything after it stays free to change.
+    ///
+    /// Duplicated from `certus-server-yaml` **deliberately**. The two servers cannot
+    /// share this code (separate binaries, separate composition), so the literal below
+    /// is the only thing binding their log shapes together. If you edit it here, the
+    /// other copy's identical assertion is where to look next.
+    #[test]
+    fn the_parsed_prefix_of_the_log_line_is_unchanged() {
+        let tier = interfaces::TierEventStats {
+            promotions_to_memory: 812,
+            promotions_to_gpu: 4401,
+            evictions_from_memory: 77,
+            evictions_from_ssd: 12,
+            ..Default::default()
+        };
+        let line = format_tier_stats(&tier, &interfaces::RemoteServeStats::default());
+
+        assert!(
+            line.starts_with(
+                "promotions[->memory 812, ->gpu 4401]  evictions[memory 77, ssd 12]  "
+            ),
+            "the kvprofile parser scans this prefix; it changed:\n  {line}"
+        );
+    }
+
+    /// Both directions of remote traffic must be labelled and ordered as in
+    /// `certus-server-yaml`.
+    ///
+    /// **Must be shown to fail** if the two are swapped. Until 2026-09-29 this server
+    /// logged neither group, so a reader comparing the two servers lost the numbers
+    /// silently — which is the failure this test exists to stop recurring.
+    #[test]
+    fn the_log_line_says_which_direction_each_count_is() {
+        let tier = interfaces::TierEventStats {
+            remote_lookup_hits: 312,
+            remote_lookup_misses: 166_405,
+            ..Default::default()
+        };
+        let serve = interfaces::RemoteServeStats {
+            peer_served_keys: 118,
+            peer_triggered_promotions: 41,
+        };
+        let line = format_tier_stats(&tier, &serve);
+
+        assert!(
+            line.contains("from-peers[hits 312, misses 166405]"),
+            "requester-side counts must be labelled from-peers:\n  {line}"
+        );
+        assert!(
+            line.contains("to-peers[served 118, own-disk 41]"),
+            "responder-side counts must be labelled to-peers:\n  {line}"
+        );
+        assert!(
+            line.find("from-peers").unwrap() < line.find("to-peers").unwrap(),
+            "obtained-then-provided ordering is what makes the pair readable:\n  {line}"
+        );
+    }
 }

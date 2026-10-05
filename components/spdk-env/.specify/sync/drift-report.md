@@ -1,11 +1,30 @@
 ---
 spec_sync_component: spdk-env
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-09-15T21:09:38Z
-spec_sync_git_commit: bec6c6ec
-spec_sync_inputs_sha256: 5c1cabf41c93c06a1a38df811fdb5ba6659e55baf6fb778749d883e6724cac30
+spec_sync_synced_at: 2026-10-05T19:05:49Z
+spec_sync_git_commit: d102a00b
+spec_sync_inputs_sha256: 7610958b3166348734406bd87cf86a4e180a77d2ccae32c51994582514287f0d
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-10-05 (branch `fix/poller-cpu-placement-logging`).** Delta analysis on a certified baseline: this component's existing clean stamp was re-verified to equal the spec-sync hash of `git archive origin/unstable`, so the only new inputs are this branch's src/specs/interfaces changes. Every FR/SC touching CPU placement, NUMA pinning, threads or SPDK init was located by grep over specs/** and re-checked against the changed code.
+>
+> - **FR-022 (new) — BACKFILL (moderate).** init_spdk_env saves the caller's affinity (sched_getaffinity) before spdk_env_init and restores it (sched_setaffinity) after, undoing DPDK EAL's main-lcore pin so later-spawned threads do not inherit CPU 0. Best-effort. `components/spdk-env/src/env.rs:91-102, 115-139`. *New behaviour on this branch.* Resolution: FR-022 added; Last Synced header added.
+>
+> No actionable drift remains for this component after apply.
+
+> **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest
+> folds `components/interfaces/{src,specs}` into **every** component's hash, so an interface
+> change invalidates all of them at once -- which is the design, not a defect. The interface
+> change is the `served_by` attribution work: new `ServedBy` and `LookupOutcome` types, and
+> `IDispatcher::batch_lookup` widened to return `Vec<LookupOutcome>`.
+>
+> **No re-analysis was performed for this component, and the digest bump asserts only what was
+> actually checked**: the interface change is additive except for `batch_lookup`'s return type,
+> which the compiler enforces across all implementors, and this component's own `src/**` and
+> `specs/**` are unchanged. Components that implement `IDispatcher` (`dispatcher`,
+> `dispatcher-p2p`) had their specs updated substantively; this one did not need it. If a later
+> sweep finds drift here, this stamp is not evidence against it.
+
 > **Re-stamp 2026-09-15 (interfaces-fold; no drift).** Branch `fix-reserve-batch-deadline` (`bec6c6ec`) added a `deadline: Option<std::time::Instant>` parameter to `IDispatcher::reserve_memory` in `components/interfaces/src/idispatcher.rs` (shared batch backpressure deadline for the shm-queue OP_RESERVE handler). `scripts/spec-sync-hash.sh` folds the whole `components/interfaces` tree into every component's hash, so this component's digest moved even though its own spec/implementation did not change. This component does not describe or call `reserve_memory`; the interface delta cannot affect its spec↔implementation alignment. Report body below stands unchanged; drift status remains `clean`. Digest recomputed over a clean tree matching CI.
 
 > **Re-stamp 2026-09-09 (merged-branch interfaces-fold; no drift).** Branch

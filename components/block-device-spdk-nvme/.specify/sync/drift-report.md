@@ -1,11 +1,30 @@
 ---
 spec_sync_component: block-device-spdk-nvme
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-09-15T21:09:38Z
-spec_sync_git_commit: bec6c6ec
-spec_sync_inputs_sha256: 93db2773a0a89caf9b4ab4ba7242a2a06ccc45faaf40b29ee757a7310f83755e
+spec_sync_synced_at: 2026-10-05T19:05:49Z
+spec_sync_git_commit: d102a00b
+spec_sync_inputs_sha256: 9115a4a49b86c817d0d74c577c3228945ef91ba4845bf932558f42feb8693f04
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-10-05 (branch `fix/poller-cpu-placement-logging`).** Delta analysis on a certified baseline: this component's existing clean stamp was re-verified to equal the spec-sync hash of `git archive origin/unstable`, so the only new inputs are this branch's src/specs/interfaces changes. Every FR/SC touching CPU placement, NUMA pinning, threads or SPDK init was located by grep over specs/** and re-checked against the changed code.
+>
+> - **FR-013 — ALIGN+BACKFILL (major).** Branch revision used `cpus().iter().nth(2)` for the fallback core, which returns None on a NUMA node with <=2 cores and left the actor UNPINNED (violates the MUST). Fixed: `.nth(2).or_else(|| first core)`. `components/block-device-spdk-nvme/src/lib.rs:229-250`. *Regression introduced by this branch, caught by this sync before stamping.* Resolution: Code fixed; FR-013 now documents set_actor_cpu precedence and the third-core / first-core fallback.
+>
+> No actionable drift remains for this component after apply.
+
+> **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest
+> folds `components/interfaces/{src,specs}` into **every** component's hash, so an interface
+> change invalidates all of them at once -- which is the design, not a defect. The interface
+> change is the `served_by` attribution work: new `ServedBy` and `LookupOutcome` types, and
+> `IDispatcher::batch_lookup` widened to return `Vec<LookupOutcome>`.
+>
+> **No re-analysis was performed for this component, and the digest bump asserts only what was
+> actually checked**: the interface change is additive except for `batch_lookup`'s return type,
+> which the compiler enforces across all implementors, and this component's own `src/**` and
+> `specs/**` are unchanged. Components that implement `IDispatcher` (`dispatcher`,
+> `dispatcher-p2p`) had their specs updated substantively; this one did not need it. If a later
+> sweep finds drift here, this stamp is not evidence against it.
+
 > **Re-stamp 2026-09-15 (interfaces-fold; no drift).** Branch `fix-reserve-batch-deadline` (`bec6c6ec`) added a `deadline: Option<std::time::Instant>` parameter to `IDispatcher::reserve_memory` in `components/interfaces/src/idispatcher.rs` (shared batch backpressure deadline for the shm-queue OP_RESERVE handler). `scripts/spec-sync-hash.sh` folds the whole `components/interfaces` tree into every component's hash, so this component's digest moved even though its own spec/implementation did not change. This component does not describe or call `reserve_memory`; the interface delta cannot affect its spec↔implementation alignment. Report body below stands unchanged; drift status remains `clean`. Digest recomputed over a clean tree matching CI.
 
 > **Re-stamp 2026-09-09 (merged-branch interfaces-fold; no drift).** Branch

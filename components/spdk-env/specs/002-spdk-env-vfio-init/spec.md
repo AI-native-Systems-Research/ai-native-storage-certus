@@ -3,6 +3,7 @@
 **Feature Branch**: `002-spdk-env-vfio-init`  
 **Created**: 2026-04-07  
 **Status**: Draft  
+**Last Synced**: 2026-10-05 — spec-sync on branch `fix/poller-cpu-placement-logging`. FR-022 BACKFILL: `init()` restores the caller's CPU affinity after `spdk_env_init()`.  
 **Input**: User description: "Build a component, as a lib-based crate, that initializes the SPDK and DPDK environments and iterates over available VFIO attached devices. The component should use the framework provided in ../component-framework [spec-sync backfill 2026-08-20: the component-framework crate has since moved to ../../lib/component-framework; the crate name is unchanged and still resolves as a workspace dependency]. The component interface, ISPDKEnv, should provide methods for iterating over available devices. The component must verify the availability of VFIO and raise an error if the system is not configured correctly. The component should use the logging APIs provided by the framework. Add a test example main.rs that instantiates the component. The component should run without root permissions providing that /dev/vfio directories are user accessible. The component should check for permission and report an error as needed. This component is not an actor, but a plain procedural component."
 
 ## Clarifications
@@ -159,6 +160,14 @@ A developer integrates the SPDKEnv component with other Certus components via th
   `deps/install_deps.sh`). These scripts are not part of the component's
   runtime code path; they are developer/operator convenience tooling for the
   external configuration steps FR-008/Assumptions already require.
+- **FR-022** *(New 2026-10-05 — BACKFILL.)*: `init()` MUST leave the calling thread's CPU
+  affinity as it was before initialization. DPDK's EAL pins the thread that calls
+  `spdk_env_init()` to its main lcore (CPU 0 with the default core mask); because that is
+  typically the process's main thread, every thread it spawns afterwards would inherit the
+  single-core pin. The component saves the caller's affinity with `sched_getaffinity` before
+  `spdk_env_init()` and restores it with `sched_setaffinity` afterwards (`src/env.rs:91-102`,
+  `115-139`). The restore is best-effort: if the save or restore syscall fails, `init()` still
+  succeeds and the thread keeps DPDK's pin. This does not spawn threads (FR-011, SC-004).
 
 ### Key Entities
 

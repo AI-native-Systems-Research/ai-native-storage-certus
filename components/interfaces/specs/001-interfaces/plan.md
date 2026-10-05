@@ -26,7 +26,7 @@ components/interfaces/
     imemory_tier.rs    # IMemoryTier trait (16 methods, spdk-gated)
     iextent_manager.rs # IExtentManager trait (14 methods, spdk-gated), + types
     igpu_services.rs   # IGpuServices trait (22 methods), + types
-    iremote_lookup.rs  # IRemoteLookup trait (3 methods)
+    iremote_lookup.rs  # IRemoteLookup trait (5 methods)
     iremote_request_handler.rs # IRemoteRequestHandler trait (4 methods), + types
     iextended_metadata_store.rs # IExtendedMetadataStore trait (5 methods)
     ipartition_table.rs # IPartitionTable trait (4 methods), + types
@@ -48,7 +48,7 @@ components/interfaces/
 | IMemoryTier | 16 | spdk |
 | IExtentManager | 14 | spdk |
 | IGpuServices | 22 | none (some methods spdk-gated) |
-| IRemoteLookup | 3 | none |
+| IRemoteLookup | 5 | none |
 | IRemoteRequestHandler | 4 | none |
 | IExtendedMetadataStore | 5 | none |
 | IPartitionTable | 4 | spdk |

@@ -1,0 +1,135 @@
+[New LWP 3326685]
+[New LWP 3326684]
+[New LWP 3326683]
+[New LWP 3326682]
+[New LWP 3326681]
+[New LWP 3326680]
+[New LWP 3326679]
+[New LWP 3326669]
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/lib64/libthread_db.so.1".
+0x00007fc76d2883aa in __futex_abstimed_wait_common () from /lib64/libc.so.6
+
+Thread 9 (Thread 0x7fc76d1ff640 (LWP 3326669) "workload-gen"):
+#0  0x00007fc76d2d5995 in clock_nanosleep@GLIBC_2.2.5 () from /lib64/libc.so.6
+#1  0x0000562ed634e357 in std::thread::functions::sleep ()
+#2  0x0000562ed62612d1 in std::sys::backtrace::__rust_begin_short_backtrace ()
+#3  0x0000562ed6246260 in core::ops::function::FnOnce::call_once{{vtable.shim}} ()
+#4  0x0000562ed63523af in <std::sys::thread::unix::Thread>::new::thread_start ()
+#5  0x00007fc76d28b3c9 in start_thread () from /lib64/libc.so.6
+#6  0x00007fc76d3105d0 in clone3 () from /lib64/libc.so.6
+
+Thread 8 (Thread 0x7fc76cdfd640 (LWP 3326679) "workload-gen"):
+#0  0x00007fc76d310ffe in recv () from /lib64/libc.so.6
+#1  0x0000562ed6335e42 in <std::net::tcp::TcpStream as std::io::Read>::read ()
+#2  0x0000562ed624a11b in workload_wire::client::Client<S>::read_frame ()
+#3  0x0000562ed624a608 in workload_wire::client::Client<S>::recv_outcome ()
+#4  0x0000562ed624b06a in workload_wire::client::Client<S>::submit ()
+#5  0x0000562ed623273f in workload_gen::agents::AgentLane::submit ()
+#6  0x0000562ed625050c in workload_gen::drive::consume ()
+#7  0x0000562ed6261287 in std::sys::backtrace::__rust_begin_short_backtrace ()
+#8  0x0000562ed6245fe5 in core::ops::function::FnOnce::call_once{{vtable.shim}} ()
+#9  0x0000562ed63523af in <std::sys::thread::unix::Thread>::new::thread_start ()
+#10 0x00007fc76d28b3c9 in start_thread () from /lib64/libc.so.6
+#11 0x00007fc76d3105d0 in clone3 () from /lib64/libc.so.6
+
+Thread 7 (Thread 0x7fc76cbfc640 (LWP 3326680) "workload-gen"):
+#0  0x00007fc76d310ffe in recv () from /lib64/libc.so.6
+#1  0x0000562ed6335e42 in <std::net::tcp::TcpStream as std::io::Read>::read ()
+#2  0x0000562ed624a11b in workload_wire::client::Client<S>::read_frame ()
+#3  0x0000562ed624a608 in workload_wire::client::Client<S>::recv_outcome ()
+#4  0x0000562ed624b06a in workload_wire::client::Client<S>::submit ()
+#5  0x0000562ed623273f in workload_gen::agents::AgentLane::submit ()
+#6  0x0000562ed625050c in workload_gen::drive::consume ()
+#7  0x0000562ed6261287 in std::sys::backtrace::__rust_begin_short_backtrace ()
+#8  0x0000562ed6245fe5 in core::ops::function::FnOnce::call_once{{vtable.shim}} ()
+#9  0x0000562ed63523af in <std::sys::thread::unix::Thread>::new::thread_start ()
+#10 0x00007fc76d28b3c9 in start_thread () from /lib64/libc.so.6
+#11 0x00007fc76d3105d0 in clone3 () from /lib64/libc.so.6
+
+Thread 6 (Thread 0x7fc76c9fb640 (LWP 3326681) "workload-gen"):
+#0  0x00007fc76d310ffe in recv () from /lib64/libc.so.6
+#1  0x0000562ed6335e42 in <std::net::tcp::TcpStream as std::io::Read>::read ()
+#2  0x0000562ed624a11b in workload_wire::client::Client<S>::read_frame ()
+#3  0x0000562ed624a608 in workload_wire::client::Client<S>::recv_outcome ()
+#4  0x0000562ed624b06a in workload_wire::client::Client<S>::submit ()
+#5  0x0000562ed623273f in workload_gen::agents::AgentLane::submit ()
+#6  0x0000562ed625050c in workload_gen::drive::consume ()
+#7  0x0000562ed6261287 in std::sys::backtrace::__rust_begin_short_backtrace ()
+#8  0x0000562ed6245fe5 in core::ops::function::FnOnce::call_once{{vtable.shim}} ()
+#9  0x0000562ed63523af in <std::sys::thread::unix::Thread>::new::thread_start ()
+#10 0x00007fc76d28b3c9 in start_thread () from /lib64/libc.so.6
+#11 0x00007fc76d3105d0 in clone3 () from /lib64/libc.so.6
+
+Thread 5 (Thread 0x7fc76c7fa640 (LWP 3326682) "workload-gen"):
+#0  0x00007fc76d310ffe in recv () from /lib64/libc.so.6
+#1  0x0000562ed6335e42 in <std::net::tcp::TcpStream as std::io::Read>::read ()
+#2  0x0000562ed624a11b in workload_wire::client::Client<S>::read_frame ()
+#3  0x0000562ed624a608 in workload_wire::client::Client<S>::recv_outcome ()
+#4  0x0000562ed624b06a in workload_wire::client::Client<S>::submit ()
+#5  0x0000562ed623273f in workload_gen::agents::AgentLane::submit ()
+#6  0x0000562ed625050c in workload_gen::drive::consume ()
+#7  0x0000562ed6261287 in std::sys::backtrace::__rust_begin_short_backtrace ()
+#8  0x0000562ed6245fe5 in core::ops::function::FnOnce::call_once{{vtable.shim}} ()
+#9  0x0000562ed63523af in <std::sys::thread::unix::Thread>::new::thread_start ()
+#10 0x00007fc76d28b3c9 in start_thread () from /lib64/libc.so.6
+#11 0x00007fc76d3105d0 in clone3 () from /lib64/libc.so.6
+
+Thread 4 (Thread 0x7fc76c5f9640 (LWP 3326683) "workload-gen"):
+#0  0x00007fc76d310ffe in recv () from /lib64/libc.so.6
+#1  0x0000562ed6335e42 in <std::net::tcp::TcpStream as std::io::Read>::read ()
+#2  0x0000562ed624a11b in workload_wire::client::Client<S>::read_frame ()
+#3  0x0000562ed624a608 in workload_wire::client::Client<S>::recv_outcome ()
+#4  0x0000562ed624b06a in workload_wire::client::Client<S>::submit ()
+#5  0x0000562ed623273f in workload_gen::agents::AgentLane::submit ()
+#6  0x0000562ed625050c in workload_gen::drive::consume ()
+#7  0x0000562ed6261287 in std::sys::backtrace::__rust_begin_short_backtrace ()
+#8  0x0000562ed6245fe5 in core::ops::function::FnOnce::call_once{{vtable.shim}} ()
+#9  0x0000562ed63523af in <std::sys::thread::unix::Thread>::new::thread_start ()
+#10 0x00007fc76d28b3c9 in start_thread () from /lib64/libc.so.6
+#11 0x00007fc76d3105d0 in clone3 () from /lib64/libc.so.6
+
+Thread 3 (Thread 0x7fc76c3d5640 (LWP 3326684) "workload-gen"):
+#0  0x00007fc76d310ffe in recv () from /lib64/libc.so.6
+#1  0x0000562ed6335e42 in <std::net::tcp::TcpStream as std::io::Read>::read ()
+#2  0x0000562ed624a11b in workload_wire::client::Client<S>::read_frame ()
+#3  0x0000562ed624a608 in workload_wire::client::Client<S>::recv_outcome ()
+#4  0x0000562ed624b06a in workload_wire::client::Client<S>::submit ()
+#5  0x0000562ed623273f in workload_gen::agents::AgentLane::submit ()
+#6  0x0000562ed625050c in workload_gen::drive::consume ()
+#7  0x0000562ed6261287 in std::sys::backtrace::__rust_begin_short_backtrace ()
+#8  0x0000562ed6245fe5 in core::ops::function::FnOnce::call_once{{vtable.shim}} ()
+#9  0x0000562ed63523af in <std::sys::thread::unix::Thread>::new::thread_start ()
+#10 0x00007fc76d28b3c9 in start_thread () from /lib64/libc.so.6
+#11 0x00007fc76d3105d0 in clone3 () from /lib64/libc.so.6
+
+Thread 2 (Thread 0x7fc767fff640 (LWP 3326685) "workload-gen"):
+#0  0x00007fc76d310ffe in recv () from /lib64/libc.so.6
+#1  0x0000562ed6335e42 in <std::net::tcp::TcpStream as std::io::Read>::read ()
+#2  0x0000562ed624a11b in workload_wire::client::Client<S>::read_frame ()
+#3  0x0000562ed624a608 in workload_wire::client::Client<S>::recv_outcome ()
+#4  0x0000562ed624b06a in workload_wire::client::Client<S>::submit ()
+#5  0x0000562ed623273f in workload_gen::agents::AgentLane::submit ()
+#6  0x0000562ed625050c in workload_gen::drive::consume ()
+#7  0x0000562ed6261287 in std::sys::backtrace::__rust_begin_short_backtrace ()
+#8  0x0000562ed6245fe5 in core::ops::function::FnOnce::call_once{{vtable.shim}} ()
+#9  0x0000562ed63523af in <std::sys::thread::unix::Thread>::new::thread_start ()
+#10 0x00007fc76d28b3c9 in start_thread () from /lib64/libc.so.6
+#11 0x00007fc76d3105d0 in clone3 () from /lib64/libc.so.6
+
+Thread 1 (Thread 0x7fc76d47a280 (LWP 3326667) "workload-gen"):
+#0  0x00007fc76d2883aa in __futex_abstimed_wait_common () from /lib64/libc.so.6
+#1  0x00007fc76d28cfb4 in __pthread_clockjoin_ex () from /lib64/libc.so.6
+#2  0x0000562ed6339901 in <std::sys::thread::unix::Thread>::join ()
+#3  0x0000562ed6245cb9 in std::thread::lifecycle::JoinInner<T>::join ()
+#4  0x0000562ed6268319 in std::thread::scoped::scope ()
+#5  0x0000562ed624da03 in workload_gen::drive::run ()
+#6  0x0000562ed621691a in workload_gen::cli::run ()
+#7  0x0000562ed621afb7 in workload_gen::cli::run_argv ()
+#8  0x0000562ed62122cd in workload_gen::cli::run_argv_os ()
+#9  0x0000562ed620e687 in workload_gen::main ()
+#10 0x0000562ed620e6a3 in std::sys::backtrace::__rust_begin_short_backtrace ()
+#11 0x0000562ed620e699 in std::rt::lang_start::{{closure}} ()
+#12 0x0000562ed634c404 in std::rt::lang_start_internal ()
+#13 0x0000562ed620e6e5 in main ()
+[Inferior 1 (process 3326667) detached]

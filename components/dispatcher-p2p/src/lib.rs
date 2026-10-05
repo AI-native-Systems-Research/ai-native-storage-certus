@@ -48,17 +48,10 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
 
-#[derive(Clone, Debug)]
-pub enum EvictionReason {
-    Demoted,
-    Removed,
-}
-
-#[derive(Clone, Debug)]
-pub struct EvictionEvent {
-    pub key: CacheKey,
-    pub reason: EvictionReason,
-}
+// Re-exported, not redefined: this type crosses a component boundary (both dispatchers
+// produce it, the shm-queue host consumes it), so it lives in `interfaces`. Keeping the
+// re-export means `dispatcher::EvictionEvent` still resolves for existing callers.
+pub use interfaces::{EvictionEvent, EvictionReason};
 
 /// Publish a best-effort eviction event to the registered subscriber, counting
 /// undeliverable events.
@@ -91,8 +84,8 @@ use component_framework::define_component;
 use interfaces::{
     CacheKey, ClientChannels, Command, Completion, DispatcherConfig, DispatcherError, DmaAllocFn,
     DmaBuffer, FormatParams, GpuStream, IBlockDevice, IBlockDeviceAdmin, IDispatchMap, IDispatcher,
-    IExtentManager, IGpuServices, ILogger, IMemoryTier, IRemoteLookup, IpcHandle, LookupResult,
-    PciAddress,
+    IExtentManager, IGpuServices, ILogger, IMemoryTier, IRemoteLookup, IpcHandle, LookupOutcome,
+    LookupResult, PciAddress, ServedBy,
 };
 
 use component_core::binding::bind;
@@ -199,6 +192,12 @@ define_component! {
             extent_manager_factory: Mutex<Option<ExtentManagerFactory>>,
             eviction_tx: Arc<Mutex<Option<crossbeam_channel::Sender<EvictionEvent>>>>,
             eviction_dropped: Arc<AtomicU64>,
+            // The route partition: served keys by how they were served. Recorded where
+            // `batch_lookup` derives its per-key `ServedBy`, so the aggregate and the
+            // per-key attribution for one batch cannot disagree.
+            route_dram: AtomicU64,
+            route_ssd: AtomicU64,
+            route_remote: AtomicU64,
         },
     }
 }
@@ -267,7 +266,8 @@ impl DispatcherP2pComponent {
     ///
     /// For each PCI address, looks up the device's NUMA node from SPDK's
     /// device list, then assigns CPUs round-robin from that node's available
-    /// cores. Returns `None` for any drive whose NUMA node can't be resolved
+    /// cores, skipping the node's first two cores (left for the OS and other
+    /// housekeeping threads). Returns `None` for any drive whose NUMA node can't be resolved
     /// (the block device component will fall back to its own NUMA heuristic).
     fn compute_numa_cpu_assignments(
         spdk_env: &Arc<dyn ISPDKEnv + Send + Sync>,
@@ -307,7 +307,7 @@ impl DispatcherP2pComponent {
                     Some(n) => n,
                     None => return None,
                 };
-                let cpus: Vec<usize> = node.cpus().iter().filter(|&c| c >= 2).collect();
+                let cpus: Vec<usize> = node.cpus().iter().skip(2).collect();
                 if cpus.is_empty() {
                     return None;
                 }
@@ -1214,7 +1214,7 @@ impl IDispatcher for DispatcherP2pComponent {
 
                     // Attempt P2P ring allocation (GPU BAR1 staging buffers).
                     match p2p_ring::P2pRing::new(&*gpu, chunk_size) {
-                        Some(ring) => {
+                        Ok(ring) => {
                             self.log_info(&format!(
                                 "dispatcher-p2p: P2P ring initialized ({} slots, {} KiB each, {} streams)",
                                 p2p_ring::P2P_RING_SLOTS,
@@ -1223,10 +1223,27 @@ impl IDispatcher for DispatcherP2pComponent {
                             ));
                             *self.p2p_ring.write() = Some(ring);
                         }
-                        None => {
-                            self.log_info(
-                                "dispatcher-p2p: P2P ring unavailable, cold reads use DRAM path",
+                        Err(why) => {
+                            // FATAL, deliberately. This used to log "cold reads use DRAM
+                            // path" and carry on -- a promise of a fallback that does not
+                            // exist, since the cold path expects the ring and panics without
+                            // it. Carrying on produced the worst available outcome: a server
+                            // that starts cleanly, serves warm reads for ~12 000 requests,
+                            // and then takes out its whole worker pool on the first cold
+                            // read, with every client left waiting forever.
+                            //
+                            // The condition is fully decidable here, at startup, where an
+                            // operator can act on it. Refusing to start is strictly kinder
+                            // than starting and failing later in a way that looks like a
+                            // hang rather than a misconfiguration.
+                            let msg = format!(
+                                "dispatcher-p2p: P2P ring unavailable: {why}. This \
+                                 dispatcher cannot serve cold reads without it and has no \
+                                 DRAM fallback -- refusing to start. Use the `full` profile \
+                                 for a DRAM cold path, or fix the cause above."
                             );
+                            self.log_error(&msg);
+                            return Err(DispatcherError::NotInitialized(msg));
                         }
                     }
 
@@ -1581,42 +1598,67 @@ impl IDispatcher for DispatcherP2pComponent {
         Ok(())
     }
 
-    fn batch_lookup(
-        &self,
-        entries: &[(CacheKey, Vec<IpcHandle>)],
-    ) -> Vec<Result<(), DispatcherError>> {
+    fn batch_lookup(&self, entries: &[(CacheKey, Vec<IpcHandle>)]) -> Vec<LookupOutcome> {
         if entries.is_empty() {
             return Vec::new();
         }
 
         let init_check = self.ensure_initialized();
         if let Err(e) = init_check {
-            return entries.iter().map(|_| Err(e.clone())).collect();
+            return entries
+                .iter()
+                .map(|_| LookupOutcome {
+                    served_by: ServedBy::Error,
+                    result: Err(e.clone()),
+                })
+                .collect();
         }
 
         let dm = match self.dispatch_map.get() {
             Ok(dm) => dm,
             Err(_) => {
                 let e = DispatcherError::NotInitialized("dispatch_map not bound".into());
-                return entries.iter().map(|_| Err(e.clone())).collect();
+                return entries
+                    .iter()
+                    .map(|_| LookupOutcome {
+                        served_by: ServedBy::Error,
+                        result: Err(e.clone()),
+                    })
+                    .collect();
             }
         };
         let mt = match self.memory_tier.get() {
             Ok(mt) => mt,
             Err(_) => {
                 let e = DispatcherError::NotInitialized("memory_tier not bound".into());
-                return entries.iter().map(|_| Err(e.clone())).collect();
+                return entries
+                    .iter()
+                    .map(|_| LookupOutcome {
+                        served_by: ServedBy::Error,
+                        result: Err(e.clone()),
+                    })
+                    .collect();
             }
         };
         let gpu = match self.gpu_services.get() {
             Ok(gpu) => gpu,
             Err(_) => {
                 let e = DispatcherError::NotInitialized("gpu_services not bound".into());
-                return entries.iter().map(|_| Err(e.clone())).collect();
+                return entries
+                    .iter()
+                    .map(|_| LookupOutcome {
+                        served_by: ServedBy::Error,
+                        result: Err(e.clone()),
+                    })
+                    .collect();
             }
         };
 
         let mut results: Vec<Option<Result<(), DispatcherError>>> = vec![None; entries.len()];
+        // Per-key serving tier. Same discipline as `dispatcher`: `None` by default,
+        // never defaulted to a tier at the end, so an unmarked served key breaks the
+        // `is_hit() <=> is_ok()` invariant loudly instead of reporting a plausible lie.
+        let mut tier: Vec<Option<ServedBy>> = vec![None; entries.len()];
 
         // Classify entries and handle fast paths inline.
         struct ColdEntry {
@@ -1715,9 +1757,15 @@ impl IDispatcher for DispatcherP2pComponent {
                         };
                         let _ = dm.release_read(key);
                         mt.touch(key);
+                        tier[i] = Some(ServedBy::Dram);
                         results[i] = Some(res);
                     }
                     LookupResult::BlockDevice { offset } => {
+                        // FR-014: this dispatcher's cold path is SSD -> GPU BAR1 ring ->
+                        // D2D with NO synchronous DRAM promotion, so a repeat read may
+                        // legitimately be `Ssd` again where `dispatcher` would say `Dram`.
+                        // The value is the same; what differs is how long it persists.
+                        tier[i] = Some(ServedBy::Ssd);
                         let _ = dm.release_read(key);
                         cold_entries.push(ColdEntry {
                             idx: i,
@@ -1951,6 +1999,7 @@ impl IDispatcher for DispatcherP2pComponent {
                 let mut submitted: Vec<usize> = Vec::with_capacity(not_found.len());
 
                 for (&pos, remote_res) in not_found.iter().zip(remote_results.into_iter()) {
+                    tier[pos] = Some(ServedBy::Remote);
                     let (key, regions) = &entries[pos];
                     let key = *key;
                     // Only single-region entries reach KeyNotFound (N>1 short-circuits
@@ -2057,7 +2106,35 @@ impl IDispatcher for DispatcherP2pComponent {
             }
         }
 
-        results.into_iter().map(|r| r.unwrap()).collect()
+        // Derived once, exactly as in `dispatcher`, so the error-to-taxonomy mapping
+        // lives in one shape in both and the two cannot drift (FR-032's concern applied
+        // to behaviour rather than to documents).
+        results
+            .into_iter()
+            .zip(tier)
+            .map(|(r, t)| {
+                let result = r.unwrap();
+                let served_by = match (&result, t) {
+                    (Ok(()), Some(t)) => t,
+                    (Ok(()), None) => {
+                        debug_assert!(false, "served a key with no recorded tier");
+                        ServedBy::Error
+                    }
+                    (Err(DispatcherError::KeyNotFound(_)), _) => ServedBy::Miss,
+                    (Err(DispatcherError::InvalidParameter(_)), _) => ServedBy::SizeMismatch,
+                    (Err(_), _) => ServedBy::Error,
+                };
+                match served_by {
+                    ServedBy::Dram => self.route_dram.fetch_add(1, Ordering::Relaxed),
+                    ServedBy::Ssd => self.route_ssd.fetch_add(1, Ordering::Relaxed),
+                    ServedBy::Remote => self.route_remote.fetch_add(1, Ordering::Relaxed),
+                    // Not served: the transport host owns miss and error totals. Counting
+                    // them here as well would double-count them.
+                    _ => 0,
+                };
+                LookupOutcome { served_by, result }
+            })
+            .collect()
     }
 
     fn lookup_async(
@@ -2706,8 +2783,23 @@ impl IDispatcher for DispatcherP2pComponent {
     }
 
     fn tier_event_stats(&self) -> interfaces::TierEventStats {
-        // dispatcher-p2p does not track tier-movement counters; report zeroed.
-        interfaces::TierEventStats::default()
+        // This component still tracks no tier-MOVEMENT counters (promotions, evictions,
+        // store backpressure) -- those belong to paths it does not have. It does report
+        // the route partition, because it derives exactly the same per-key `ServedBy` the
+        // other dispatcher does, and an endpoint showing hits with no routes would imply
+        // every hit was unattributed.
+        //
+        // Reported here rather than left defaulted because leaving it defaulted is what
+        // happened, and a hardware run caught it: 5 526 hits against dram 0 / ssd 0 on a
+        // p2p server. Adding fields to `TierEventStats` is NOT compiler-enforced -- this
+        // `..default()` kept compiling -- which the dispatcher's spec 002 records as a
+        // caveat and which this was a live instance of.
+        interfaces::TierEventStats {
+            lookup_hits_dram: self.route_dram.load(Ordering::Relaxed),
+            lookup_hits_ssd: self.route_ssd.load(Ordering::Relaxed),
+            remote_lookup_hits: self.route_remote.load(Ordering::Relaxed),
+            ..Default::default()
+        }
     }
 }
 
@@ -3511,6 +3603,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         c.dispatch_map
             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
@@ -3599,6 +3694,11 @@ mod tests {
         fn leave_cluster(&self) -> Result<(), RemoteLookupError> {
             Ok(())
         }
+
+        fn serve_stats(&self) -> interfaces::RemoteServeStats {
+            // This mock is a lookup stub, never a responder, so it serves no peer.
+            interfaces::RemoteServeStats::default()
+        }
     }
 
     struct RemoteFixture {
@@ -3643,6 +3743,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         c.dispatch_map
             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
@@ -3702,6 +3805,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
     }
 
@@ -3722,6 +3828,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher);
         assert!(d.is_some());
@@ -3744,6 +3853,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let config = DispatcherConfig {
@@ -3771,6 +3883,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let config = DispatcherConfig {
@@ -3799,6 +3914,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let mut buf = vec![0u8; 4096];
@@ -3827,6 +3945,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let err = d.check(42);
@@ -3850,6 +3971,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let err = d.remove(42);
@@ -3873,6 +3997,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let mut buf = vec![0u8; 4096];
@@ -3901,6 +4028,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         // Even though not initialized, zero-size check comes after init check.
@@ -3932,6 +4062,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         assert!(d.shutdown().is_ok());
@@ -3954,6 +4087,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         assert!(d.shutdown().is_ok());
@@ -3977,6 +4113,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         ));
 
         let handles: Vec<_> = (0..4)
@@ -4031,6 +4170,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         c.dispatch_map.connect(dm).unwrap();
         c.memory_tier.connect(mt).unwrap();
@@ -4064,6 +4206,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         c.dispatch_map.connect(dm).unwrap();
         c.logger.connect(logger).unwrap();
@@ -4141,6 +4286,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         c.dispatch_map.connect(dm).unwrap();
         c.logger.connect(logger).unwrap();
@@ -4285,6 +4433,86 @@ mod tests {
         (bufs, entries)
     }
 
+    /// The route partition on THIS dispatcher — the test whose absence let a real defect
+    /// reach hardware.
+    ///
+    /// `tier_event_stats()` returned `TierEventStats::default()` here, so a p2p server
+    /// reported 5 526 hits against dram 0 / ssd 0: every hit unattributed, and nothing
+    /// caught it. The invariant test above passed, because per-key attribution was
+    /// correct all along — only the aggregate face of it was missing. Adding fields to
+    /// `TierEventStats` is not compiler-enforced, which spec 002 records as a caveat and
+    /// this was an instance of.
+    #[test]
+    fn the_route_counters_partition_the_served_keys() {
+        let fx = setup_initialized_with_remote(&[1, 3], PinProbe::new);
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        let (_bufs, entries) = remote_batch(&[1, 2, 3]);
+        let results = d.batch_lookup(&entries);
+        let served = results.iter().filter(|o| o.result.is_ok()).count() as u64;
+        assert!(
+            served > 0,
+            "fixture served nothing, so the partition is vacuous"
+        );
+
+        let t = d.tier_event_stats();
+        assert_eq!(
+            t.lookup_hits_dram + t.lookup_hits_ssd + t.remote_lookup_hits,
+            served,
+            "route counters must partition the served keys: dram {} + ssd {} + remote {} \
+             != served {served}",
+            t.lookup_hits_dram,
+            t.lookup_hits_ssd,
+            t.remote_lookup_hits
+        );
+    }
+
+    /// T114 / FR-027 for this dispatcher: the same three invariants `dispatcher` asserts.
+    ///
+    /// Stated separately rather than shared, because the two dispatchers are separate
+    /// components with separate specs and a shared test would hide a divergence in either.
+    /// SC-005 requires identical attribution for identical residency *except where FR-014
+    /// permits*, and this is the test that would fail if this component drifted.
+    #[test]
+    fn every_outcome_obeys_the_interface_invariants() {
+        let fx = setup_initialized_with_remote(&[1, 3], PinProbe::new);
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        let (_bufs, entries) = remote_batch(&[1, 2, 3]);
+        let results = d.batch_lookup(&entries);
+
+        assert_eq!(
+            results.len(),
+            entries.len(),
+            "one outcome per entry, in order"
+        );
+
+        for (i, o) in results.iter().enumerate() {
+            assert_eq!(
+                o.served_by.is_hit(),
+                o.result.is_ok(),
+                "entry {i}: served_by {:?} disagrees with result {:?}",
+                o.served_by,
+                o.result
+            );
+            assert_eq!(
+                o.served_by == ServedBy::Miss,
+                matches!(o.result, Err(DispatcherError::KeyNotFound(_))),
+                "entry {i}: Miss must mean KeyNotFound and nothing else"
+            );
+        }
+
+        // Not vacuous: a peer holds 1 and 3, nobody holds 2.
+        let distinct: std::collections::BTreeSet<_> = results
+            .iter()
+            .map(|o| format!("{:?}", o.served_by))
+            .collect();
+        assert!(
+            distinct.len() > 1,
+            "one outcome for every key leaves the invariants untested: {distinct:?}"
+        );
+    }
+
     /// The load-bearing invariant: a read pin must still be held when the copy is
     /// *submitted* and when the batched sync runs, because that pin is the only
     /// thing keeping the memory-tier evictor off the DRAM slot the DMA is reading.
@@ -4300,7 +4528,7 @@ mod tests {
         let (bufs, entries) = remote_batch(&[1, 2]);
         let results = d.batch_lookup(&entries);
         assert!(
-            results.iter().all(|r| r.is_ok()),
+            results.iter().all(|r| r.result.is_ok()),
             "both remote keys should be delivered, got: {results:?}"
         );
 
@@ -4332,7 +4560,7 @@ mod tests {
 
         let (_bufs, entries) = remote_batch(&keys);
         let results = d.batch_lookup(&entries);
-        assert!(results.iter().all(|r| r.is_ok()), "got: {results:?}");
+        assert!(results.iter().all(|r| r.result.is_ok()), "got: {results:?}");
 
         assert_eq!(fx.probe.count(GpuEvent::SubmitH2d), 8);
         assert_eq!(
@@ -4355,9 +4583,9 @@ mod tests {
         let (bufs, entries) = remote_batch(&[1, 2, 3]);
         let results = d.batch_lookup(&entries);
 
-        assert!(results[0].is_ok(), "key 1: {:?}", results[0]);
-        assert!(results[1].is_err(), "key 2 is not held remotely");
-        assert!(results[2].is_ok(), "key 3: {:?}", results[2]);
+        assert!(results[0].result.is_ok(), "key 1: {:?}", results[0]);
+        assert!(results[1].result.is_err(), "key 2 is not held remotely");
+        assert!(results[2].result.is_ok(), "key 3: {:?}", results[2]);
 
         assert_eq!(bufs[0][0], MockRemoteLookup::fill_byte(1));
         assert_eq!(bufs[2][0], MockRemoteLookup::fill_byte(3));
@@ -4377,9 +4605,12 @@ mod tests {
         let (_bufs, entries) = remote_batch(&[1, 2, 3]);
         let results = d.batch_lookup(&entries);
 
-        assert!(results[0].is_ok(), "key 1: {:?}", results[0]);
-        assert!(results[1].is_err(), "key 2's submission was made to fail");
-        assert!(results[2].is_ok(), "key 3: {:?}", results[2]);
+        assert!(results[0].result.is_ok(), "key 1: {:?}", results[0]);
+        assert!(
+            results[1].result.is_err(),
+            "key 2's submission was made to fail"
+        );
+        assert!(results[2].result.is_ok(), "key 3: {:?}", results[2]);
 
         assert_eq!(fx.probe.count(GpuEvent::SubmitH2d), 3);
         assert_eq!(fx.probe.count(GpuEvent::Sync), 1);
@@ -4403,7 +4634,7 @@ mod tests {
         let results = d.batch_lookup(&entries);
 
         assert!(
-            results.iter().all(|r| r.is_err()),
+            results.iter().all(|r| r.result.is_err()),
             "a failed sync must not be reported as a hit, got: {results:?}"
         );
         assert_eq!(fx.dm.total_read_refs(), 0);
@@ -4424,7 +4655,7 @@ mod tests {
         let (bufs, entries) = remote_batch(&[1, 2]);
         let results = d.batch_lookup(&entries);
 
-        assert!(results.iter().all(|r| r.is_ok()), "got: {results:?}");
+        assert!(results.iter().all(|r| r.result.is_ok()), "got: {results:?}");
         assert_eq!(bufs[0][0], MockRemoteLookup::fill_byte(1));
         assert_eq!(bufs[1][0], MockRemoteLookup::fill_byte(2));
         assert_eq!(
@@ -4677,6 +4908,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
 
         // Capacity-1 subscriber, never drained: the first eviction event fills the
@@ -4729,6 +4963,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         c.dispatch_map
             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)

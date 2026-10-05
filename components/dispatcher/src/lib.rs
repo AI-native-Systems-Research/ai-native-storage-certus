@@ -78,8 +78,8 @@ use component_framework::define_component;
 use interfaces::{
     CacheKey, ClientChannels, Command, Completion, DispatcherConfig, DispatcherError, DmaAllocFn,
     DmaBuffer, FormatParams, GpuStream, IBlockDevice, IBlockDeviceAdmin, IDispatchMap, IDispatcher,
-    IExtentManager, IGpuServices, ILogger, IMemoryTier, IRemoteLookup, IpcHandle, LookupResult,
-    PciAddress, TierEventStats,
+    IExtentManager, IGpuServices, ILogger, IMemoryTier, IRemoteLookup, IpcHandle, LookupOutcome,
+    LookupResult, PciAddress, ServedBy, TierEventStats,
 };
 
 use component_core::binding::bind;
@@ -91,17 +91,10 @@ use crate::background::{
 };
 pub use crate::metrics::PipelineMetrics;
 
-#[derive(Clone, Debug)]
-pub enum EvictionReason {
-    Demoted,
-    Removed,
-}
-
-#[derive(Clone, Debug)]
-pub struct EvictionEvent {
-    pub key: CacheKey,
-    pub reason: EvictionReason,
-}
+// Re-exported, not redefined: this type crosses a component boundary (both dispatchers
+// produce it, the shm-queue host consumes it), so it lives in `interfaces`. Keeping the
+// re-export means `dispatcher::EvictionEvent` still resolves for existing callers.
+pub use interfaces::{EvictionEvent, EvictionReason};
 
 /// Lifetime counters for KV-cache tier movement events. All fields are
 /// monotonic (cumulative since process start); `snapshot()` reads them without
@@ -121,6 +114,12 @@ pub struct TierEventCounters {
     evictions_from_memory: AtomicU64,
     /// Extents freed on SSD by the background extent evictor.
     evictions_from_ssd: AtomicU64,
+    /// Keys a peer served, via `IRemoteLookup`. Requester-side.
+    lookup_hits_dram: AtomicU64,
+    lookup_hits_ssd: AtomicU64,
+    remote_lookup_hits: AtomicU64,
+    /// Keys forwarded to a peer that no peer held.
+    remote_lookup_misses: AtomicU64,
     /// Store-allocation retries taken while backpressuring on a momentarily
     /// full memory tier (see `reserve_memory`). Bumped once per retry sleep.
     store_backpressure_events: AtomicU64,
@@ -158,6 +157,38 @@ impl TierEventCounters {
         self.evictions_from_ssd.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Record the outcome of one forwarded batch: `hits` keys a peer served and
+    /// `misses` keys no peer held.
+    ///
+    /// Taken per batch rather than per key because the remote path resolves a
+    /// batch at a time, and because a per-key call on this path would add an
+    /// atomic per key to a loop that already has one.
+    #[inline]
+    /// Record the local half of the route partition for one batch.
+    ///
+    /// Counted beside `record_remote_lookup` so that dram + ssd + remote equals the
+    /// served count for the same batch -- a partition, not three loosely related
+    /// numbers. Taken from the attribution the dispatcher just derived, so the
+    /// counters cannot disagree with the per-key `served_by` returned to the caller.
+    pub fn record_local_hits(&self, dram: u64, ssd: u64) {
+        if dram > 0 {
+            self.lookup_hits_dram.fetch_add(dram, Ordering::Relaxed);
+        }
+        if ssd > 0 {
+            self.lookup_hits_ssd.fetch_add(ssd, Ordering::Relaxed);
+        }
+    }
+
+    pub fn record_remote_lookup(&self, hits: u64, misses: u64) {
+        if hits > 0 {
+            self.remote_lookup_hits.fetch_add(hits, Ordering::Relaxed);
+        }
+        if misses > 0 {
+            self.remote_lookup_misses
+                .fetch_add(misses, Ordering::Relaxed);
+        }
+    }
+
     /// Record one store-backpressure retry. Returns the count *before* this
     /// call, so a caller can log a one-shot line on the first engagement
     /// (return value `0`).
@@ -182,6 +213,10 @@ impl TierEventCounters {
             promotions_to_gpu: self.promotions_to_gpu.load(Ordering::Relaxed),
             evictions_from_memory: self.evictions_from_memory.load(Ordering::Relaxed),
             evictions_from_ssd: self.evictions_from_ssd.load(Ordering::Relaxed),
+            lookup_hits_dram: self.lookup_hits_dram.load(Ordering::Relaxed),
+            lookup_hits_ssd: self.lookup_hits_ssd.load(Ordering::Relaxed),
+            remote_lookup_hits: self.remote_lookup_hits.load(Ordering::Relaxed),
+            remote_lookup_misses: self.remote_lookup_misses.load(Ordering::Relaxed),
             store_backpressure_events: self.store_backpressure_events.load(Ordering::Relaxed),
             store_drops_on_full: self.store_drops_on_full.load(Ordering::Relaxed),
         }
@@ -509,7 +544,8 @@ impl DispatcherComponent {
     ///
     /// For each PCI address, looks up the device's NUMA node from SPDK's
     /// device list, then assigns CPUs round-robin from that node's available
-    /// cores. Returns `None` for any drive whose NUMA node can't be resolved
+    /// cores, skipping the node's first two cores (left for the OS and other
+    /// housekeeping threads). Returns `None` for any drive whose NUMA node can't be resolved
     /// (the block device component will fall back to its own NUMA heuristic).
     fn compute_numa_cpu_assignments(
         spdk_env: &Arc<dyn ISPDKEnv + Send + Sync>,
@@ -548,7 +584,7 @@ impl DispatcherComponent {
                     Some(n) => n,
                     None => return None,
                 };
-                let cpus: Vec<usize> = node.cpus().iter().filter(|&c| c >= 2).collect();
+                let cpus: Vec<usize> = node.cpus().iter().skip(2).collect();
                 if cpus.is_empty() {
                     return None;
                 }
@@ -2103,43 +2139,93 @@ impl IDispatcher for DispatcherComponent {
     ///    - Spawn per-drive queue threads (up to 2 per drive)
     ///    - Each thread: evict → insert memory-tier slot → pipelined NVMe reads
     ///      directly into memory-tier → async H2D DMA to GPU
-    fn batch_lookup(
-        &self,
-        entries: &[(CacheKey, Vec<IpcHandle>)],
-    ) -> Vec<Result<(), DispatcherError>> {
+    fn batch_lookup(&self, entries: &[(CacheKey, Vec<IpcHandle>)]) -> Vec<LookupOutcome> {
         if entries.is_empty() {
             return Vec::new();
         }
 
         let init_check = self.ensure_initialized();
         if let Err(e) = init_check {
-            return entries.iter().map(|_| Err(e.clone())).collect();
+            return entries
+                .iter()
+                .map(|_| LookupOutcome {
+                    // Nothing was attempted, so no tier was involved. `Error` rather
+                    // than `Miss`: an unbound receptacle is a fault, and reporting it
+                    // as absence would fold a broken server into the hit rate as a
+                    // cold cache.
+                    served_by: ServedBy::Error,
+                    result: Err(e.clone()),
+                })
+                .collect();
         }
 
         let dm = match self.dispatch_map.get() {
             Ok(dm) => dm,
             Err(_) => {
                 let e = DispatcherError::NotInitialized("dispatch_map not bound".into());
-                return entries.iter().map(|_| Err(e.clone())).collect();
+                return entries
+                    .iter()
+                    .map(|_| LookupOutcome {
+                        // Nothing was attempted, so no tier was involved. `Error` rather
+                        // than `Miss`: an unbound receptacle is a fault, and reporting it
+                        // as absence would fold a broken server into the hit rate as a
+                        // cold cache.
+                        served_by: ServedBy::Error,
+                        result: Err(e.clone()),
+                    })
+                    .collect();
             }
         };
         let mt = match self.memory_tier.get() {
             Ok(mt) => mt,
             Err(_) => {
                 let e = DispatcherError::NotInitialized("memory_tier not bound".into());
-                return entries.iter().map(|_| Err(e.clone())).collect();
+                return entries
+                    .iter()
+                    .map(|_| LookupOutcome {
+                        // Nothing was attempted, so no tier was involved. `Error` rather
+                        // than `Miss`: an unbound receptacle is a fault, and reporting it
+                        // as absence would fold a broken server into the hit rate as a
+                        // cold cache.
+                        served_by: ServedBy::Error,
+                        result: Err(e.clone()),
+                    })
+                    .collect();
             }
         };
         let gpu = match self.gpu_services.get() {
             Ok(gpu) => gpu,
             Err(_) => {
                 let e = DispatcherError::NotInitialized("gpu_services not bound".into());
-                return entries.iter().map(|_| Err(e.clone())).collect();
+                return entries
+                    .iter()
+                    .map(|_| LookupOutcome {
+                        // Nothing was attempted, so no tier was involved. `Error` rather
+                        // than `Miss`: an unbound receptacle is a fault, and reporting it
+                        // as absence would fold a broken server into the hit rate as a
+                        // cold cache.
+                        served_by: ServedBy::Error,
+                        result: Err(e.clone()),
+                    })
+                    .collect();
             }
         };
 
         let mut results: Vec<Option<Result<(), DispatcherError>>> = vec![None; entries.len()];
 
+        // Per-key serving tier, set by whichever pass actually serves the key.
+
+        // Deliberately `None` by default and deliberately NOT defaulted to a tier at
+
+        // the end: a key that was served without a pass recording how is a bug, and a
+
+        // plausible default (`Dram`) would hide it behind a number that looks right.
+
+        // Left `None`, it becomes `ServedBy::Error` on an `Ok` result, which breaks the
+
+        // `is_hit() <=> is_ok()` invariant loudly and fails its test.
+
+        let mut tier: Vec<Option<ServedBy>> = vec![None; entries.len()];
         // Resolve the GPU device this batch's blocks live on (all entries come
         // from a single rank → a single device) and make it current on this
         // thread. Pick the warm/pipeline streams bound to that device: a stream
@@ -2250,10 +2336,17 @@ impl IDispatcher for DispatcherComponent {
                         // `warm_pins`, which releases it after the batched sync.
                         warm_pins.adopt(key);
                         deferred_touch_keys.push(key);
+                        tier[i] = Some(ServedBy::Dram);
                         results[i] = Some(res);
                     }
                     LookupResult::BlockDevice { offset } => {
                         let _ = dm.release_read(key);
+                        // Marked here rather than at each cold sub-path (pooled read,
+                        // inline fallback, staging post-pass, no-drives) so all four
+                        // inherit one attribution and cannot drift apart. `Ssd` is the
+                        // honest answer even though serving promotes into DRAM: the
+                        // taxonomy is the route, not the residency afterwards.
+                        tier[i] = Some(ServedBy::Ssd);
                         cold_entries.push(ColdEntry {
                             idx: i,
                             key,
@@ -2617,10 +2710,23 @@ impl IDispatcher for DispatcherComponent {
                 let mut remote_pins = pins::PinnedKeys::new(Arc::clone(&dm));
                 let mut submitted: Vec<usize> = Vec::with_capacity(not_found.len());
 
+                // Requester-side tally for this batch (FR-011, spec 002 Phase 1).
+                // Counted here because this is the only place that knows, per key,
+                // whether a peer served it -- `batch_lookup`'s return type collapses
+                // that away, and widening it is a later phase.
+                let mut remote_hits: u64 = 0;
+                let mut remote_misses: u64 = 0;
+
                 for (&pos, remote_res) in not_found.iter().zip(remote_results.into_iter()) {
                     let (key, regions) = &entries[pos];
                     let key = *key;
                     if let Err(e) = remote_res {
+                        // A NotFound is a remote miss; a TransportError is neither a
+                        // hit nor a miss -- the question "did a peer have it" was not
+                        // answered, and counting it either way would invent data.
+                        if matches!(e, interfaces::RemoteLookupError::NotFound) {
+                            remote_misses += 1;
+                        }
                         // A key no peer holds is a MISS, not an I/O failure. Collapsing
                         // both into `IoError` lost the distinction `IRemoteLookup` had
                         // already made, and the transport host counts only `KeyNotFound`
@@ -2639,6 +2745,10 @@ impl IDispatcher for DispatcherComponent {
                         }));
                         continue;
                     }
+                    // The peer answered with data: a remote hit, whatever happens
+                    // next locally. A failure below is a local delivery fault, not
+                    // evidence about whether the peer held the key.
+                    remote_hits += 1;
                     let t_lookup = probing.then(std::time::Instant::now);
                     let looked_up = dm.lookup(key);
                     if let Some(t) = t_lookup {
@@ -2670,6 +2780,7 @@ impl IDispatcher for DispatcherComponent {
                             if res.is_ok() {
                                 submitted.push(pos);
                             }
+                            tier[pos] = Some(ServedBy::Remote);
                             results[pos] = Some(res);
                         }
                         // A block-tier answer still holds a pin — `lookup` increments
@@ -2711,6 +2822,11 @@ impl IDispatcher for DispatcherComponent {
                 // Every remote copy has completed: release the pins.
                 drop(remote_pins);
 
+                // One atomic pair per forwarded batch, after the walk, so the tally
+                // is whole even if a delivery failed partway.
+                self.tier_counters
+                    .record_remote_lookup(remote_hits, remote_misses);
+
                 if probing {
                     let sync_us = t_sync.map_or(0, |t| t.elapsed().as_micros() as u64);
                     if let Some(line) = remote_probe::record(
@@ -2737,14 +2853,49 @@ impl IDispatcher for DispatcherComponent {
             }
         }
 
-        let out: Vec<Result<(), DispatcherError>> =
-            results.into_iter().map(|r| r.unwrap()).collect();
+        // Attribution is derived here, once, from the result plus the tier the serving
+        // pass recorded -- rather than constructed at each of the dozen assignment
+        // sites, so the mapping from error to taxonomy value exists in exactly one
+        // place and the two dispatchers cannot disagree about it.
+        let out: Vec<LookupOutcome> = results
+            .into_iter()
+            .zip(tier)
+            .map(|(r, t)| {
+                let result = r.unwrap();
+                let served_by = match (&result, t) {
+                    (Ok(()), Some(t)) => t,
+                    // Served, but no pass said how. A bug, and reported as one: `Error`
+                    // on an `Ok` result violates `is_hit() <=> is_ok()` and fails that
+                    // invariant's test. Defaulting to `Dram` here would be the same
+                    // class of mistake as a counter wired to the wrong quantity --
+                    // plausible, and silently wrong.
+                    (Ok(()), None) => {
+                        debug_assert!(false, "served a key with no recorded tier");
+                        ServedBy::Error
+                    }
+                    (Err(DispatcherError::KeyNotFound(_)), _) => ServedBy::Miss,
+                    // A size mismatch is its own bucket: the key IS present, so
+                    // "populate from scratch" and "your size model disagrees with what
+                    // is stored" are different problems for a caller.
+                    (Err(DispatcherError::InvalidParameter(_)), _) => ServedBy::SizeMismatch,
+                    (Err(_), _) => ServedBy::Error,
+                };
+                LookupOutcome { served_by, result }
+            })
+            .collect();
         // One "promotion to GPU" per key successfully served up to the caller's
         // GPU buffer this batch (warm hit, cold promote, or remote fetch alike).
-        let served = out.iter().filter(|r| r.is_ok()).count() as u64;
+        let served = out.iter().filter(|r| r.result.is_ok()).count() as u64;
         if served > 0 {
             self.tier_counters.record_promotions_to_gpu(served);
         }
+        // The local half of the route partition, taken from the attribution derived
+        // immediately above rather than recomputed, so the counters and the per-key
+        // `served_by` this call returns cannot disagree. Remote is recorded by the
+        // remote pass itself, which is the only place that knows a peer answered.
+        let dram = out.iter().filter(|o| o.served_by == ServedBy::Dram).count() as u64;
+        let ssd = out.iter().filter(|o| o.served_by == ServedBy::Ssd).count() as u64;
+        self.tier_counters.record_local_hits(dram, ssd);
         out
     }
 
@@ -4579,6 +4730,11 @@ mod tests {
         fn leave_cluster(&self) -> Result<(), RemoteLookupError> {
             Ok(())
         }
+
+        fn serve_stats(&self) -> interfaces::RemoteServeStats {
+            // This mock is a lookup stub, never a responder, so it serves no peer.
+            interfaces::RemoteServeStats::default()
+        }
     }
 
     struct RemoteFixture {
@@ -5277,7 +5433,7 @@ mod tests {
         let results = d.batch_lookup(&[(1, vec![make_handle(&mut out)])]);
         assert_eq!(results.len(), 1);
         assert!(
-            results[0].is_ok(),
+            results[0].result.is_ok(),
             "concurrent-promotion loser should be served warm, got: {:?}",
             results[0]
         );
@@ -5318,7 +5474,7 @@ mod tests {
         let (bufs, entries) = remote_batch(&[1, 2]);
         let results = d.batch_lookup(&entries);
         assert!(
-            results.iter().all(|r| r.is_ok()),
+            results.iter().all(|r| r.result.is_ok()),
             "both remote keys should be delivered, got: {results:?}"
         );
 
@@ -5351,7 +5507,7 @@ mod tests {
 
         let (_bufs, entries) = remote_batch(&keys);
         let results = d.batch_lookup(&entries);
-        assert!(results.iter().all(|r| r.is_ok()), "got: {results:?}");
+        assert!(results.iter().all(|r| r.result.is_ok()), "got: {results:?}");
 
         assert_eq!(fx.probe.count(GpuEvent::SubmitH2d), 8);
         assert_eq!(
@@ -5374,9 +5530,9 @@ mod tests {
         let (bufs, entries) = remote_batch(&[1, 2, 3]);
         let results = d.batch_lookup(&entries);
 
-        assert!(results[0].is_ok(), "key 1: {:?}", results[0]);
-        assert!(results[1].is_err(), "key 2 is not held remotely");
-        assert!(results[2].is_ok(), "key 3: {:?}", results[2]);
+        assert!(results[0].result.is_ok(), "key 1: {:?}", results[0]);
+        assert!(results[1].result.is_err(), "key 2 is not held remotely");
+        assert!(results[2].result.is_ok(), "key 3: {:?}", results[2]);
 
         assert_eq!(bufs[0][0], MockRemoteLookup::fill_byte(1));
         assert_eq!(bufs[2][0], MockRemoteLookup::fill_byte(3));
@@ -5396,9 +5552,12 @@ mod tests {
         let (_bufs, entries) = remote_batch(&[1, 2, 3]);
         let results = d.batch_lookup(&entries);
 
-        assert!(results[0].is_ok(), "key 1: {:?}", results[0]);
-        assert!(results[1].is_err(), "key 2's submission was made to fail");
-        assert!(results[2].is_ok(), "key 3: {:?}", results[2]);
+        assert!(results[0].result.is_ok(), "key 1: {:?}", results[0]);
+        assert!(
+            results[1].result.is_err(),
+            "key 2's submission was made to fail"
+        );
+        assert!(results[2].result.is_ok(), "key 3: {:?}", results[2]);
 
         assert_eq!(fx.probe.count(GpuEvent::SubmitH2d), 3);
         assert_eq!(fx.probe.count(GpuEvent::Sync), 1);
@@ -5423,7 +5582,7 @@ mod tests {
         let results = d.batch_lookup(&entries);
 
         assert!(
-            results.iter().all(|r| r.is_err()),
+            results.iter().all(|r| r.result.is_err()),
             "a failed sync must not be reported as a hit, got: {results:?}"
         );
         assert_eq!(fx.dm.total_read_refs(), 0);
@@ -5443,7 +5602,7 @@ mod tests {
         let (bufs, entries) = remote_batch(&[1, 2]);
         let results = d.batch_lookup(&entries);
 
-        assert!(results.iter().all(|r| r.is_ok()), "got: {results:?}");
+        assert!(results.iter().all(|r| r.result.is_ok()), "got: {results:?}");
         assert_eq!(bufs[0][0], MockRemoteLookup::fill_byte(1));
         assert_eq!(bufs[1][0], MockRemoteLookup::fill_byte(2));
         assert_eq!(
@@ -5483,6 +5642,95 @@ mod tests {
     /// looks like from this side — and note it is *not* discriminated by whether peers
     /// exist: the `full-remote` profile wires remote lookup either way, so a solo RDMA
     /// group takes this same path. That is why the cluster measurement read zero in both
+    /// T107 / FR-027: the three invariants `contracts/idispatcher.md` states.
+    ///
+    /// **`served_by.is_hit()` if and only if `result.is_ok()`** is the load-bearing one,
+    /// and it is what makes the "unmarked tier" design safe: a serving path that forgets
+    /// to record its tier yields `Error` on an `Ok` result, which fails here rather than
+    /// reporting a plausible `Dram` that nobody would question. Without this test that
+    /// design is worse than a default, not better.
+    ///
+    /// Also checks length-and-order and `Miss` ⇔ `KeyNotFound`, over a batch that mixes a
+    /// remote hit, a remote miss and a not-found key, so the assertions run against more
+    /// than one taxonomy value.
+    #[test]
+    fn every_outcome_obeys_the_interface_invariants() {
+        let fx = setup_initialized_with_remote(&[1, 3], PinProbe::new);
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        let (_bufs, entries) = remote_batch(&[1, 2, 3]);
+        let results = d.batch_lookup(&entries);
+
+        // 1. Length and order.
+        assert_eq!(
+            results.len(),
+            entries.len(),
+            "one outcome per requested entry, in order"
+        );
+
+        // 2. Hit agreement, per key. Stated as an iff, because either direction failing
+        //    is a different defect: a hit with an error means we reported data we did not
+        //    deliver, and an error with a hit means we hid a delivery.
+        for (i, o) in results.iter().enumerate() {
+            assert_eq!(
+                o.served_by.is_hit(),
+                o.result.is_ok(),
+                "entry {i}: served_by {:?} disagrees with result {:?}",
+                o.served_by,
+                o.result
+            );
+        }
+
+        // 3. Miss ⇔ KeyNotFound, after the remote attempt has been made.
+        for (i, o) in results.iter().enumerate() {
+            assert_eq!(
+                o.served_by == ServedBy::Miss,
+                matches!(o.result, Err(DispatcherError::KeyNotFound(_))),
+                "entry {i}: Miss must mean KeyNotFound and nothing else, got {:?} / {:?}",
+                o.served_by,
+                o.result
+            );
+        }
+
+        // And the batch was not vacuous: a peer held 1 and 3, nobody held 2, so the
+        // outcomes must not be uniform. A test where every entry has the same outcome
+        // would satisfy all three invariants while exercising one path (FR-028).
+        let distinct: std::collections::BTreeSet<_> = results
+            .iter()
+            .map(|o| format!("{:?}", o.served_by))
+            .collect();
+        assert!(
+            distinct.len() > 1,
+            "fixture produced one outcome for every key, so the invariants above are \
+             untested against variation: {distinct:?}"
+        );
+    }
+
+    /// The route partition: dram + ssd + remote equals the served count.
+    ///
+    /// Checkable without knowing anything about the workload, which is why SC-017 states
+    /// it — a hit *rate* needs a reference to argue about, a partition does not.
+    #[test]
+    fn the_route_counters_partition_the_served_keys() {
+        let fx = setup_initialized_with_remote(&[1, 3], PinProbe::new);
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        let (_bufs, entries) = remote_batch(&[1, 2, 3]);
+        let results = d.batch_lookup(&entries);
+        let served = results.iter().filter(|o| o.result.is_ok()).count() as u64;
+
+        let t = d.tier_event_stats();
+        assert_eq!(
+            t.lookup_hits_dram + t.lookup_hits_ssd + t.remote_lookup_hits,
+            served,
+            "route counters must partition the served keys, not merely correlate with \
+             them: dram {} + ssd {} + remote {} != served {served}",
+            t.lookup_hits_dram,
+            t.lookup_hits_ssd,
+            t.remote_lookup_hits
+        );
+    }
+
     /// arms and could not isolate this, and why the check lives here instead.
     #[test]
     fn a_key_no_peer_holds_is_a_miss_not_an_io_error() {
@@ -5493,11 +5741,84 @@ mod tests {
         let results = d.batch_lookup(&entries);
 
         assert!(
-            matches!(results[0], Err(DispatcherError::KeyNotFound(7))),
+            matches!(results[0].result, Err(DispatcherError::KeyNotFound(7))),
             "a key absent locally AND absent from every peer is a miss; got {:?}. \
              Reporting it as IoError is what makes it uncountable by the transport host, \
              which counts only KeyNotFound as a miss",
             results[0]
+        );
+
+        d.shutdown().unwrap();
+    }
+
+    /// The remote counters must count REMOTE service only.
+    ///
+    /// The failure this guards is the one that would look most plausible: wiring the
+    /// tally to the general served-key path. `remote_lookup_hits` would then track
+    /// `promotions_to_gpu` closely, move whenever traffic moved, and read as a
+    /// healthy instrument while saying nothing about peers at all — which is exactly
+    /// the confusion this feature exists to end. So the assertion is not "the counter
+    /// increments" but "it stays at zero when no peer was involved".
+    #[test]
+    fn remote_counters_ignore_a_purely_local_hit() {
+        let fx = setup_initialized_with_remote(&[], PinProbe::new);
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        // Resident locally, so these never reach remote lookup.
+        fx.install_warm_key(1, 0x11, 4096);
+        fx.install_warm_key(2, 0x22, 4096);
+
+        let (_bufs, entries) = remote_batch(&[1, 2]);
+        let results = d.batch_lookup(&entries);
+        assert!(results.iter().all(|r| r.result.is_ok()), "got: {results:?}");
+
+        let st = d.tier_event_stats();
+        assert_eq!(
+            (st.remote_lookup_hits, st.remote_lookup_misses),
+            (0, 0),
+            "two local hits must leave the remote counters untouched; got hits={} \
+             misses={}. A counter that moves on local traffic would track the overall \
+             hit rate and look plausible while measuring nothing about peers",
+            st.remote_lookup_hits,
+            st.remote_lookup_misses
+        );
+        // And the served keys were counted somewhere, so this is not a dead path.
+        assert_eq!(
+            st.promotions_to_gpu, 2,
+            "both local hits should still be counted"
+        );
+
+        d.shutdown().unwrap();
+    }
+
+    /// A peer that serves is a remote hit; a peer that does not is a remote miss.
+    ///
+    /// Asserted in one batch so the two cannot be satisfied by a counter that simply
+    /// tallies batch size — a bug that would pass either assertion alone.
+    #[test]
+    fn remote_counters_split_peer_hits_from_peer_misses() {
+        // The peer holds 1 and 3, not 2.
+        let fx = setup_initialized_with_remote(&[1, 3], PinProbe::new);
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        let (_bufs, entries) = remote_batch(&[1, 2, 3]);
+        let results = d.batch_lookup(&entries);
+
+        assert!(results[0].result.is_ok(), "peer holds 1: {:?}", results[0]);
+        assert!(
+            matches!(results[1].result, Err(DispatcherError::KeyNotFound(2))),
+            "no peer holds 2, so it is a miss: {:?}",
+            results[1]
+        );
+        assert!(results[2].result.is_ok(), "peer holds 3: {:?}", results[2]);
+
+        let st = d.tier_event_stats();
+        assert_eq!(
+            (st.remote_lookup_hits, st.remote_lookup_misses),
+            (2, 1),
+            "two keys served by the peer and one held by nobody; got hits={} misses={}",
+            st.remote_lookup_hits,
+            st.remote_lookup_misses
         );
 
         d.shutdown().unwrap();
@@ -5520,12 +5841,12 @@ mod tests {
         let results = d.batch_lookup(&entries);
 
         assert!(
-            results[0].is_err(),
+            results[0].result.is_err(),
             "a failing transfer must not report success; got {:?}",
             results[0]
         );
         assert!(
-            !matches!(results[0], Err(DispatcherError::KeyNotFound(_))),
+            !matches!(results[0].result, Err(DispatcherError::KeyNotFound(_))),
             "a transport/delivery failure is NOT a miss — counting it as one would hide a \
              broken fabric inside the hit rate; got {:?}",
             results[0]
@@ -5548,7 +5869,7 @@ mod tests {
 
         let (bufs, entries) = remote_batch(&[1, 2]);
         let results = d.batch_lookup(&entries);
-        assert!(results.iter().all(|r| r.is_ok()), "got: {results:?}");
+        assert!(results.iter().all(|r| r.result.is_ok()), "got: {results:?}");
 
         assert_eq!(
             fx.probe.events(),

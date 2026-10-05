@@ -1,11 +1,24 @@
 ---
 spec_sync_component: spdk-sys
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-09-09T22:30:36Z
-spec_sync_git_commit: 3411518a
-spec_sync_inputs_sha256: 4608e457759821021fc3f33df5d8b1cb4837ffe0a3af61b5d31f598b478bd7cd
+spec_sync_synced_at: 2026-10-01T00:00:00Z
+spec_sync_git_commit: 72c7182b
+spec_sync_inputs_sha256: 0f3490585fe6569427bd2367ba637009395a6511b65cbeddc60e217b3ff62301
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest
+> folds `components/interfaces/{src,specs}` into **every** component's hash, so an interface
+> change invalidates all of them at once -- which is the design, not a defect. The interface
+> change is the `served_by` attribution work: new `ServedBy` and `LookupOutcome` types, and
+> `IDispatcher::batch_lookup` widened to return `Vec<LookupOutcome>`.
+>
+> **No re-analysis was performed for this component, and the digest bump asserts only what was
+> actually checked**: the interface change is additive except for `batch_lookup`'s return type,
+> which the compiler enforces across all implementors, and this component's own `src/**` and
+> `specs/**` are unchanged. Components that implement `IDispatcher` (`dispatcher`,
+> `dispatcher-p2p`) had their specs updated substantively; this one did not need it. If a later
+> sweep finds drift here, this stamp is not evidence against it.
+
 > **Re-stamp 2026-09-09 (latent-stale on unstable; re-verified clean).** This
 > stamp was already stale on `origin/unstable`: commit `2c7864a2` backfilled
 > FR-4's binding-cluster names into `specs/001-spdk-sys/spec.md` after the stamp

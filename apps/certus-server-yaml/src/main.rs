@@ -25,7 +25,7 @@ use std::time::Duration;
 
 use clap::Parser;
 
-use shmq_dispatcher::{serve, ServeConfig, Translator};
+use shmq_dispatcher::{log_cpu_bindings, serve, ServeConfig, Translator};
 
 use config::StackConfig;
 use metrics::{CountersObserver, ServiceCounters};
@@ -38,17 +38,46 @@ extern "C" fn handle_signal(_sig: libc::c_int) {
     SHUTDOWN.store(true, Ordering::SeqCst);
 }
 
-/// Format the cumulative KV-cache tier-movement counters for the server log.
-/// The `tier-events` shape here is what the kvprofile renderer's parser scans
-/// for; keep it in sync with `tools/render_kvprofile.py`'s `TIER_RE`.
-fn format_tier_stats(s: &interfaces::TierEventStats) -> String {
+/// Format the cumulative KV-cache counters for the server log.
+///
+/// Two sources, because the line reports both directions of remote traffic and
+/// they come from different components: tier movement and requester-side remote
+/// results from the dispatcher, responder-side serve counts from remote-lookup.
+///
+/// **`from-peers` versus `to-peers` is the distinction this line exists to keep
+/// straight.** `from-peers` is what this node *obtained* — its own hit rate.
+/// `to-peers` is what this node *did for others* — work peers caused here. The
+/// groups were named after the previous `remote[hits, misses]` proved ambiguous
+/// about direction the moment a second remote-ish group joined it; a dashboard
+/// reading the two backwards would draw the opposite conclusion about whether
+/// remote lookup pays for itself.
+///
+/// **Parser contract, and its exact boundary.** `render_kvprofile.py`'s `TIER_RE`
+/// scans `tier-events promotions[...] evictions[...]` and stops there — it matches
+/// a prefix, not the whole line, so groups after `evictions[...]` may be added,
+/// renamed or reordered freely. Verified 2026-09-29: nothing anywhere parses
+/// `from-peers`, `to-peers` or `store`. Changing `promotions[...]` or
+/// `evictions[...]` is the breaking edit; keep those in sync with `TIER_RE`.
+///
+/// `to-peers` reads `0, 0` on a node no peer has asked anything of, which is
+/// honest rather than absent: the line has a fixed shape so a parser can rely on
+/// it, and an omitted group would be a different contract.
+fn format_cache_stats(
+    s: &interfaces::TierEventStats,
+    serve: &interfaces::RemoteServeStats,
+) -> String {
     format!(
         "promotions[->memory {pm}, ->gpu {pg}]  evictions[memory {em}, ssd {es}]  \
+         from-peers[hits {rh}, misses {rm}]  to-peers[served {ps}, own-disk {pp}]  \
          store[backpressure {sb}, drops-on-full {sd}]",
         pm = s.promotions_to_memory,
         pg = s.promotions_to_gpu,
         em = s.evictions_from_memory,
         es = s.evictions_from_ssd,
+        rh = s.remote_lookup_hits,
+        rm = s.remote_lookup_misses,
+        ps = serve.peer_served_keys,
+        pp = serve.peer_triggered_promotions,
         sb = s.store_backpressure_events,
         sd = s.store_drops_on_full,
     )
@@ -242,14 +271,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         logger.info("certus-server-yaml: --format specified, extent managers will be reformatted");
     }
 
+    // Report the CPU cores the component threads (NVMe pollers, remote-lookup
+    // actor, ...) were bound to during stack initialization.
+    log_cpu_bindings(logger.as_ref(), "certus-server-yaml");
+    match cli.shmq_poller_cpu {
+        Some(cpu) => logger.info(&format!(
+            "certus-server-yaml: shmq poller will bind to CPU {cpu}"
+        )),
+        None => logger.info("certus-server-yaml: shmq poller not pinned (use --shmq-poller-cpu)"),
+    }
+
     let counters = ServiceCounters::new();
 
     // Start Prometheus metrics HTTP endpoint
     if cli.metrics_port > 0 {
         let mt = Arc::clone(&stack.memory_tier);
         let disp = Arc::clone(&stack.dispatcher);
+        let rl = Arc::clone(&stack.remote_lookup);
         let port = cli.metrics_port;
-        tokio::spawn(metrics::serve_metrics(port, mt, disp, counters.clone()));
+        tokio::spawn(metrics::serve_metrics(port, mt, disp, rl, counters.clone()));
         logger.info(&format!(
             "certus-server-yaml: metrics endpoint on port {port}"
         ));
@@ -264,6 +304,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &cli.otel_service_name,
                 Arc::clone(&stack.memory_tier),
                 Arc::clone(&stack.dispatcher),
+                Arc::clone(&stack.remote_lookup),
                 counters.clone(),
             )
             .map_err(|e| format!("otel init failed: {e}"))?;
@@ -324,14 +365,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         libc::signal(libc::SIGTERM, handle_signal as libc::sighandler_t);
     }
 
-    // Always-on KV-cache tier-event telemetry: a periodic "tier-events" line
-    // (cumulative counts, every ~2s) that the kvprofile renderer parses into the
+    // Always-on KV-cache telemetry: a periodic "tier-events" line (cumulative
+    // counts, every ~2s) that the kvprofile renderer parses into the
     // promotions/evictions series. The dispatcher's tier counters are always
     // present. (SSD read/write bytes are not logged here — the client queries
     // them over the shmq ring via GetIoStats, mirroring the old gRPC path.)
+    //
+    // The line also carries `to-peers`, from remote-lookup rather than the
+    // dispatcher, so the pressure peers place on this node's disk can be read
+    // against `store[drops-on-full]` **in the same tick**. That correlation over
+    // time is the reason it is logged periodically at all and not only in the FINAL
+    // summary: the open question is whether serving peers is what makes local
+    // stores fail, and a per-run total cannot answer it.
     // Exits when SHUTDOWN flips; the process exits before any join is needed.
     {
         let tier_disp = Arc::clone(&stack.dispatcher);
+        let tier_rl = Arc::clone(&stack.remote_lookup);
         let tier_logger = Arc::clone(&logger);
         std::thread::Builder::new()
             .name("tier-events".into())
@@ -346,7 +395,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     tier_logger.info(&format!(
                         "certus-server-yaml: tier-events {}",
-                        format_tier_stats(&tier_disp.tier_event_stats())
+                        format_cache_stats(&tier_disp.tier_event_stats(), &tier_rl.serve_stats(),)
                     ));
                 }
             })
@@ -381,7 +430,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // logged before teardown while the dispatcher's counters are still live.
     logger.info(&format!(
         "certus-server-yaml: FINAL tier-events {}",
-        format_tier_stats(&stack.dispatcher.tier_event_stats())
+        format_cache_stats(
+            &stack.dispatcher.tier_event_stats(),
+            &stack.remote_lookup.serve_stats(),
+        )
     ));
 
     let _ = stack.dispatcher.shutdown();
@@ -390,4 +442,71 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Exit immediately rather than waiting on the tokio runtime / SPDK teardown.
     std::process::exit(0);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The kvprofile parser contract: `promotions[...] evictions[...]` must keep its
+    /// exact shape, and everything after it must stay free to change.
+    ///
+    /// `render_kvprofile.py`'s `TIER_RE` matches that prefix and stops, so this test
+    /// guards the half that is a contract without freezing the half that is not.
+    /// Written as a literal prefix rather than a regex because the literal is what a
+    /// reader must compare against `TIER_RE` by eye when editing either side.
+    ///
+    /// Verified 2026-09-29 against the real regex read out of `render_kvprofile.py`:
+    /// the pre- and post-rename lines produce identical captures.
+    #[test]
+    fn the_parsed_prefix_of_the_log_line_is_unchanged() {
+        let tier = interfaces::TierEventStats {
+            promotions_to_memory: 812,
+            promotions_to_gpu: 4401,
+            evictions_from_memory: 77,
+            evictions_from_ssd: 12,
+            ..Default::default()
+        };
+        let line = format_cache_stats(&tier, &interfaces::RemoteServeStats::default());
+
+        assert!(
+            line.starts_with(
+                "promotions[->memory 812, ->gpu 4401]  evictions[memory 77, ssd 12]  "
+            ),
+            "the kvprofile parser scans this prefix; it changed:\n  {line}"
+        );
+    }
+
+    /// The two directions of remote traffic must stay distinguishable in the log.
+    ///
+    /// **Must be shown to fail** if the two groups are swapped, which is the whole
+    /// reason they stopped being called `remote[...]`: a reader who takes
+    /// "what peers served us" for "what we served peers" draws the opposite
+    /// conclusion about whether remote lookup earns its cost.
+    #[test]
+    fn the_log_line_says_which_direction_each_count_is() {
+        let tier = interfaces::TierEventStats {
+            remote_lookup_hits: 312,
+            remote_lookup_misses: 166_405,
+            ..Default::default()
+        };
+        let serve = interfaces::RemoteServeStats {
+            peer_served_keys: 118,
+            peer_triggered_promotions: 41,
+        };
+        let line = format_cache_stats(&tier, &serve);
+
+        assert!(
+            line.contains("from-peers[hits 312, misses 166405]"),
+            "requester-side counts must be labelled from-peers:\n  {line}"
+        );
+        assert!(
+            line.contains("to-peers[served 118, own-disk 41]"),
+            "responder-side counts must be labelled to-peers:\n  {line}"
+        );
+        assert!(
+            line.find("from-peers").unwrap() < line.find("to-peers").unwrap(),
+            "obtained-then-provided ordering is what makes the pair readable:\n  {line}"
+        );
+    }
 }

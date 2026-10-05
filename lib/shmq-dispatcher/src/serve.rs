@@ -4,7 +4,7 @@
 //! implementation. See the crate-level docs for the concurrency model.
 
 use std::io;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -68,6 +68,74 @@ fn log_poller_stats(prefix: &str, serviced: &[u64], qdepth: usize, max_qdepth: u
 ///
 /// `shutdown` is a `'static` atomic so the SIGINT/SIGTERM handler installed by
 /// the binary can flip it; `serve` only reads it.
+/// Where a request got to, counted at each hand-off in the serve path.
+///
+/// **Diagnostic, added to separate two indistinguishable failure shapes.** Under
+/// `dispatcher-p2p` the server reaches a state where every worker is idle on an empty
+/// queue while the client still believes it has requests outstanding — so a request or a
+/// reply is being lost, and the backtraces cannot say which. These four counters can:
+///
+/// - `taken > enqueued`  — the poller read a request off the mailbox and failed to hand it
+///   to a worker (the only path is a closed channel, which returns early).
+/// - `enqueued > dequeued` — requests are sitting in the queue with no worker taking them,
+///   which contradicts an idle worker pool and would mean a lost wakeup.
+/// - `dequeued > replied` — a worker took a request and never wrote a reply: the dispatch
+///   call did not return.
+/// - all four equal, client still waiting — the reply was written to shared memory but the
+///   client never saw it, moving the fault to the mailbox or the agent.
+///
+/// Relaxed ordering throughout: these are monotonic observability counters read by a
+/// reporter thread, and no reader depends on seeing them mutually consistent.
+#[derive(Debug, Default)]
+pub struct ServeCounters {
+    /// Requests the poller took off a mailbox channel.
+    pub taken: AtomicU64,
+    /// Requests handed to the worker queue.
+    pub enqueued: AtomicU64,
+    /// Requests a worker took off the queue.
+    pub dequeued: AtomicU64,
+    /// Replies written back to shared memory.
+    pub replied: AtomicU64,
+    /// Worker panics caught. **Nonzero means the process is aborting**: a panic is an
+    /// invariant break, and this server is in the data path.
+    pub worker_panics: AtomicU64,
+}
+
+/// Best-effort text from a caught panic payload.
+///
+/// `panic!` with a literal yields `&str` and with formatting yields `String`; anything
+/// else is possible but vanishingly rare, so it is named rather than guessed at.
+fn panic_text(payload: &Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "non-string panic payload".to_string()
+    }
+}
+
+impl ServeCounters {
+    fn line(&self) -> String {
+        let (t, e, d, r) = (
+            self.taken.load(Ordering::Relaxed),
+            self.enqueued.load(Ordering::Relaxed),
+            self.dequeued.load(Ordering::Relaxed),
+            self.replied.load(Ordering::Relaxed),
+        );
+        // The gaps are the point, so they are computed here rather than left to a reader
+        // subtracting four numbers under time pressure during a stall.
+        format!(
+            "shmq-flow taken {t} enqueued {e} dequeued {d} replied {r} \
+             gaps[take->enq {}, enq->deq {}, deq->reply {}] panics {}",
+            t - e,
+            e - d,
+            d - r,
+            self.worker_panics.load(Ordering::Relaxed)
+        )
+    }
+}
+
 pub fn serve(
     server: Arc<shm_queue::Server>,
     translator: Translator,
@@ -75,6 +143,24 @@ pub fn serve(
     shutdown: &'static AtomicBool,
     logger: Arc<dyn ILogger + Send + Sync>,
 ) -> io::Result<()> {
+    let flow = Arc::new(ServeCounters::default());
+    // A reporter for the flow counters, at the same 2 s cadence as the server's
+    // tier-events line so the two can be read against each other during a stall. Cheap
+    // enough to leave on: four relaxed loads and one log line.
+    {
+        let flow_r = Arc::clone(&flow);
+        let log_r = Arc::clone(&logger);
+        thread::Builder::new()
+            .name("shmq-flow".into())
+            .spawn(move || {
+                while !shutdown.load(Ordering::Relaxed) {
+                    thread::sleep(std::time::Duration::from_secs(2));
+                    log_r.info(&flow_r.line());
+                }
+            })
+            .expect("spawn flow reporter");
+    }
+
     // Worker pool: one worker per channel, blocking on the request queue.
     let (tx, rx) = crossbeam_channel::unbounded::<shm_queue::PolledRequest>();
     let mut workers = Vec::with_capacity(config.channels);
@@ -82,14 +168,30 @@ pub fn serve(
         let rx = rx.clone();
         let server = Arc::clone(&server);
         let tr = translator.clone();
+        let flow_w = Arc::clone(&flow);
+        let log_w = Arc::clone(&logger);
         workers.push(
             thread::Builder::new()
                 .name(format!("shmq-worker-{w}"))
                 .spawn(move || {
                     while let Ok(req) = rx.recv() {
-                        match tr.dispatch(req.opcode, &req.payload) {
-                            Ok(blob) => server.reply(req.channel, req.seq, wire::STATUS_OK, &blob),
-                            Err(e) => {
+                        flow_w.dequeued.fetch_add(1, Ordering::Relaxed);
+                        // `AssertUnwindSafe` because `tr` and `server` are captured by
+                        // reference and neither is `UnwindSafe`. The assertion is doing
+                        // less work here than it usually does: this handler does not
+                        // resume on the caught panic -- it replies and aborts -- so no
+                        // later code observes whatever state the panic left behind. The
+                        // component framework makes the same assertion at its own message
+                        // boundary (`component-core/src/actor.rs`) and does continue.
+                        let outcome =
+                            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                tr.dispatch(req.opcode, &req.payload)
+                            }));
+                        match outcome {
+                            Ok(Ok(blob)) => {
+                                server.reply(req.channel, req.seq, wire::STATUS_OK, &blob)
+                            }
+                            Ok(Err(e)) => {
                                 let msg = e.to_string();
                                 server.reply(
                                     req.channel,
@@ -98,7 +200,46 @@ pub fn serve(
                                     msg.as_bytes(),
                                 );
                             }
+                            Err(payload) => {
+                                // A panic used to unwind past both replies and end this
+                                // loop, retiring the thread in silence. With one worker per
+                                // channel the pool then eroded to nothing while the server
+                                // kept answering /metrics and kept checkpointing: a black
+                                // hole that still looked healthy. One observed instance cost
+                                // 16 workers and left every client blocked forever.
+                                let what = panic_text(&payload);
+
+                                // Reply FIRST. Whatever happens to this process, the client
+                                // that sent this request must not be left waiting on a reply
+                                // that can never come -- that is the half of the defect that
+                                // is unambiguously ours to fix.
+                                server.reply(
+                                    req.channel,
+                                    req.seq,
+                                    wire::STATUS_ERROR,
+                                    format!("server panic: {what}").as_bytes(),
+                                );
+                                flow_w.worker_panics.fetch_add(1, Ordering::Relaxed);
+                                log_w.error(&format!(
+                                    "shmq-worker panic, aborting: {what} (opcode {}, channel \
+                                     {})",
+                                    req.opcode, req.channel
+                                ));
+
+                                // Then abort, deliberately, rather than carry on like the
+                                // framework's actor does. This server sits in the data path:
+                                // a panic mid-dispatch can leave a dispatch-map entry
+                                // pointing at a half-written extent, and serving from that
+                                // state risks returning wrong data. An outage is recoverable;
+                                // silently wrong reads are not. Abort rather than `panic!`
+                                // so no further unwinding runs destructors over the same
+                                // broken state.
+                                std::process::abort();
+                            }
                         }
+                        // After the reply, so `dequeued > replied` means dispatch did not
+                        // return -- which is the distinction the gap exists to draw.
+                        flow_w.replied.fetch_add(1, Ordering::Relaxed);
                     }
                 })
                 .expect("spawn worker"),
@@ -143,6 +284,7 @@ pub fn serve(
         let poller_cpu = config.poller_cpu;
         let poller_stats = config.poller_stats;
         let stats_tx = tx.clone(); // for backlog sampling (tx.len()); does not extend worker life
+        let flow_p = Arc::clone(&flow);
         thread::Builder::new()
             .name("shmq-poller".into())
             .spawn(move || {
@@ -186,9 +328,11 @@ pub fn serve(
                             if poller_stats {
                                 serviced[ch] += 1;
                             }
+                            flow_p.taken.fetch_add(1, Ordering::Relaxed);
                             if tx.send(req).is_err() {
                                 return; // workers gone
                             }
+                            flow_p.enqueued.fetch_add(1, Ordering::Relaxed);
                         }
                     }
                     start += 1;
@@ -241,4 +385,58 @@ pub fn serve(
     let _ = reaper.join();
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The panic payload must become readable text, because it is what the client is told
+    /// and what the operator sees in the log.
+    ///
+    /// Both forms are covered because `panic!("literal")` yields `&str` while
+    /// `panic!("{x}")` yields `String`, and the `expect` that prompted this work
+    /// (`dispatcher-p2p` requiring its P2P ring) is the `&str` form — so getting only the
+    /// `String` case right would have produced "non-string panic payload" for the exact
+    /// panic this exists to report.
+    #[test]
+    fn a_panic_payload_becomes_readable_text() {
+        let from_str = std::panic::catch_unwind(|| panic!("ring unavailable"))
+            .expect_err("the closure panics");
+        assert_eq!(panic_text(&from_str), "ring unavailable");
+
+        let n = 16;
+        let from_string = std::panic::catch_unwind(|| panic!("{n} workers died"))
+            .expect_err("the closure panics");
+        assert_eq!(panic_text(&from_string), "16 workers died");
+
+        let odd = std::panic::catch_unwind(|| std::panic::panic_any(7u8))
+            .expect_err("the closure panics");
+        assert_eq!(
+            panic_text(&odd),
+            "non-string panic payload",
+            "an unexpected payload must still yield something a reader can act on"
+        );
+    }
+
+    /// The flow line must surface the panic count, or the condition stays invisible in the
+    /// one place an operator is already looking.
+    #[test]
+    fn the_flow_line_reports_panics() {
+        let c = ServeCounters::default();
+        c.taken.store(10, Ordering::Relaxed);
+        c.enqueued.store(10, Ordering::Relaxed);
+        c.dequeued.store(10, Ordering::Relaxed);
+        c.replied.store(9, Ordering::Relaxed);
+        c.worker_panics.store(1, Ordering::Relaxed);
+        let line = c.line();
+        assert!(
+            line.contains("panics 1"),
+            "panic count must be on the line: {line}"
+        );
+        assert!(
+            line.contains("deq->reply 1"),
+            "and the gap it explains must be there too: {line}"
+        );
+    }
 }

@@ -49,7 +49,16 @@ impl P2pRing {
     ///
     /// Returns `None` if GDRCopy/BAR1 is unavailable or GPU memory is
     /// insufficient. Cleans up any partial allocations on failure.
-    pub fn new(gpu: &dyn IGpuServices, slot_size: usize) -> Option<Self> {
+    /// Build the ring, or say why it could not be built.
+    ///
+    /// **Returns the reason**, where this previously returned a bare `None`. Both failure
+    /// paths discarded their cause -- the `Err(_)` on the BAR mapping threw the error away
+    /// entirely -- so the caller could only log "P2P ring unavailable" and an operator had
+    /// no way to tell a CUDA allocation failure from a GPU-BAR mapping failure. Those have
+    /// completely different remedies: the first is capacity, the second is usually missing
+    /// peer-memory kernel support. Diagnosing one real instance of this cost several
+    /// hardware runs and an incorrect hypothesis, purely because the reason was dropped.
+    pub fn new(gpu: &dyn IGpuServices, slot_size: usize) -> Result<Self, String> {
         let mut dev_ptrs: Vec<*mut std::ffi::c_void> = Vec::with_capacity(P2P_RING_SLOTS);
         let mut ring_bufs: Vec<Arc<Mutex<DmaBuffer>>> = Vec::with_capacity(P2P_RING_SLOTS);
 
@@ -61,7 +70,11 @@ impl P2pRing {
                 for p in &dev_ptrs {
                     unsafe { cuda_ffi::cudaFree(*p) };
                 }
-                return None;
+                return Err(format!(
+                    "cudaMalloc failed (err {err}) for slot {_i} of {P2P_RING_SLOTS} at \
+                     {slot_size} bytes; {} MiB already allocated for this ring",
+                    (_i * slot_size) / (1024 * 1024)
+                ));
             }
 
             match create_spdk_dma_buffer_from_gpu_bar(dev_ptr, slot_size) {
@@ -69,13 +82,22 @@ impl P2pRing {
                     dev_ptrs.push(dev_ptr);
                     ring_bufs.push(Arc::new(Mutex::new(buf)));
                 }
-                Err(_) => {
+                Err(e) => {
                     unsafe { cuda_ffi::cudaFree(dev_ptr) };
                     drop(ring_bufs);
                     for p in &dev_ptrs {
                         unsafe { cuda_ffi::cudaFree(*p) };
                     }
-                    return None;
+                    // The error is reported rather than discarded. This is the path that
+                    // usually fails for an environmental reason -- mapping GPU BAR memory
+                    // for SPDK DMA needs peer-memory kernel support -- and it is
+                    // indistinguishable from a capacity failure unless it says so.
+                    return Err(format!(
+                        "GPU BAR mapping for SPDK DMA failed at slot {_i} of \
+                         {P2P_RING_SLOTS} ({slot_size} bytes): {e}. This usually means \
+                         peer-memory kernel support is absent (nvidia_peermem) rather \
+                         than a GPU capacity problem"
+                    ));
                 }
             }
         }
@@ -100,13 +122,20 @@ impl P2pRing {
                     for p in &dev_ptrs {
                         unsafe { cuda_ffi::cudaFree(*p) };
                     }
-                    return None;
+                    // A third distinct cause, also previously indistinguishable: fewer than
+                    // two GPU streams could be created, which the loop above tolerates down
+                    // to 2 and gives up on below that.
+                    return Err(format!(
+                        "could not create 2 GPU streams for D2D (got {i}); the ring needs at \
+                         least two to overlap transfers"
+                    ));
                 }
             }
         }
 
         // Ensure we have at least 2 streams.
         if streams.len() < 2 {
+            let got = streams.len();
             for s in &streams {
                 let _ = gpu.destroy_stream(*s);
             }
@@ -114,10 +143,13 @@ impl P2pRing {
             for p in &dev_ptrs {
                 unsafe { cuda_ffi::cudaFree(*p) };
             }
-            return None;
+            return Err(format!(
+                "only {got} GPU stream(s) available; the ring needs at least 2 to overlap \
+                 D2D transfers"
+            ));
         }
 
-        Some(Self {
+        Ok(Self {
             ring_bufs,
             dev_ptrs,
             streams,

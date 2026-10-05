@@ -76,5 +76,7 @@
       "suggested_spec": "Covered in spirit by SC-005 (001) and the performance-accountability constitution rule; no dedicated FR names each bench. No action required."
     }
   ],
-  "conflicts": []
+  "conflicts": [],
+  "inputs_sha256": "36a8eaae6363b026c7e8e57d629b806208d6e06bf4db71a97ab22487ea646334",
+  "git_commit": "72c7182b"
 }

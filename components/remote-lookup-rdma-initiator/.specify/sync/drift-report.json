@@ -1,1 +1,32 @@
-{"generated":"pending","project":"remote-lookup-rdma-initiator","summary":{"specs_analyzed":2,"requirements_checked":23,"aligned":23,"drifted":0,"not_implemented":0,"unspecced_features":0},"specs":[{"id":"001-rdma-remote-request-handler","title":"RDMA Remote Lookup Initiator (SUPERSEDED by 002)","aligned":0,"drifted":[],"not_implemented":[]},{"id":"002-rdma-push-initiator","title":"RDMA Push Initiator","aligned":23,"drifted":[],"not_implemented":[]}],"unspecced":[],"conflicts":[]}
+{
+  "generated": "pending",
+  "project": "remote-lookup-rdma-initiator",
+  "summary": {
+    "specs_analyzed": 2,
+    "requirements_checked": 23,
+    "aligned": 23,
+    "drifted": 0,
+    "not_implemented": 0,
+    "unspecced_features": 0
+  },
+  "specs": [
+    {
+      "id": "001-rdma-remote-request-handler",
+      "title": "RDMA Remote Lookup Initiator (SUPERSEDED by 002)",
+      "aligned": 0,
+      "drifted": [],
+      "not_implemented": []
+    },
+    {
+      "id": "002-rdma-push-initiator",
+      "title": "RDMA Push Initiator",
+      "aligned": 23,
+      "drifted": [],
+      "not_implemented": []
+    }
+  ],
+  "unspecced": [],
+  "conflicts": [],
+  "inputs_sha256": "64c7c16379177bdf0a8c23df7a4a8e871177ac5129f792b01c61650c21ee18c3",
+  "git_commit": "72c7182b"
+}
