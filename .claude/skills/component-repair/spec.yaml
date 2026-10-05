@@ -104,6 +104,11 @@ success:
       Re-derived from source by code: the obligation now holds in the proof model AND the real code
       changed, its tests pass, and nothing that proved before has stopped proving.
     command: [bash, "{oracle_dir}/repair_accept_repo.sh", ".", "{base_rev}", --targets, "{targets}"]
+    # Measured 2026-10-05: one honest run of repair_accept_repo.sh on one component takes 25-40 min (two
+    # full Creusot gate runs, before and after). Without this the kit's default 900 s applied, and a
+    # check that can never finish in time is no check: inside the agent's run the re-verification leg
+    # came back "0 proved, 0 lost" without the gate having run.
+    timeout_seconds: 7200
     pass_condition: >
       exit 0 from repair_accept_repo.sh, which requires: every touched crate and every crate depending
       on one of them compiles; every touched crate's tests pass; every target passes repair_accept.sh;

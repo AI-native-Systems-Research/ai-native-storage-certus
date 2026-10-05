@@ -125,7 +125,20 @@ yaml.safe_dump(d, open(sys.argv[1], "w"), sort_keys=False, allow_unicode=True, w
 PY2
     timeout 7200 python3 "$GATE/scorer_creusot.py" "$W/components/$c/verif" --crate-dir "$W/components/$c/verif-creusot" \
         --cap-seconds 60 --cap-max 300 > "$SCR/gate_$side.log" 2>&1
+    # keep the log: a re-verification nobody can inspect is not evidence
+    LOGS="${REPAIR_GATE_LOG_DIR:-/tmp}"; cp "$SCR/gate_$side.log" "$LOGS/repair_gate_${c}_${side}.log" 2>/dev/null
   done
+  # THE GATE MUST HAVE RUN (2026-10-05). Inside the agent's own run this leg reported "0 proved after;
+  # 0 newly proved; 0 lost" and PASSED — the gate had not run on either side, and 0 = 0 read as
+  # "nothing lost". A vacuous re-verification is the same class of defect as a mutant that never ran.
+  ran=1
+  for side in before after; do
+    if ! grep -q '^SUMMARY:' "$SCR/gate_$side.log"; then
+      echo "  E. REVERIFY: $c NO — the gate did not run on the $side side (no SUMMARY line); log kept: ${LOGS:-/tmp}/repair_gate_${c}_${side}.log"
+      tail -4 "$SCR/gate_$side.log" | sed 's/^/       │ /'; ran=0
+    fi
+  done
+  (( ran )) || { fail=1; EVID+=("$c|re-verification (Creusot gate, before vs after)|DID NOT RUN"); git -C "$REPO" worktree remove --force "$SCR/before" 2>/dev/null; rm -rf "$SCR"; continue; }
   read -r lost gained prov <<<"$(python3 - "$SCR/before/components/$c/verif/unified_properties.yaml" "$SCR/after/components/$c/verif/unified_properties.yaml" <<'PY2'
 import sys, yaml
 st = lambda f: {p["id"]: (p.get("creusot") or {}).get("status") for p in yaml.safe_load(open(f))["properties"]}
@@ -135,7 +148,9 @@ gained = [k for k, v in b.items() if v == "proved" and a.get(k) != "proved"]
 print(len(lost), len(gained), sum(1 for v in b.values() if v == "proved"))
 PY2
 )"
-  if [[ "$lost" == 0 ]]; then echo "  E. REVERIFY: $c yes ($prov proved after the repair; $gained newly proved; 0 lost — same gate, same scope, before vs after)"
+  if [[ "$prov" == 0 ]]; then
+    echo "  E. REVERIFY: $c NO — the gate ran but proved NOTHING on the repaired code; that is not a re-verification"; fail=1
+  elif [[ "$lost" == 0 ]]; then echo "  E. REVERIFY: $c yes ($prov proved after the repair; $gained newly proved; 0 lost — same gate, same scope, before vs after)"
   else echo "  E. REVERIFY: $c NO — $lost properties proved before the repair no longer prove"; fail=1; fi
   EVID+=("$c|re-verification (Creusot gate, before vs after)|$prov proved, $gained newly proved, $lost lost")
   git -C "$REPO" worktree remove --force "$SCR/before" 2>/dev/null; rm -rf "$SCR"
