@@ -41,6 +41,9 @@ ACCEPT = {"proved", "tool-boundary", "delegated", "refuted"}
 _UNIT_SEQ = 0
 
 
+
+CARGO_FEATURES = ""   # set from --features in main(); appended to every cargo kani call
+
 def _capture(cmd, cwd=None, timeout=60):
     """First line of a command's output, or None. Never raises: provenance is best-effort
     metadata and must never fail a scoring run."""
@@ -187,12 +190,45 @@ def find_harness_names(component_dir):
             # so the harness became INVISIBLE to the gate and scored "no runnable harness" while
             # sitting in the file. A silently invisible harness looks exactly like a missing one,
             # which is the worst kind of false negative, so tolerate comments and blank lines too.
-            for m in re.finditer(
-                    r"#\[kani::proof\][^\n]*\n"
-                    r"(?:\s*(?:#\[[^\n]*\]|//[^\n]*|/\*.*?\*/)?\s*\n)*"
-                    r"\s*(?:pub\s+)?fn\s+([A-Za-z0-9_]+)", txt, re.S):
-                names.add(m.group(1))
+            # MULTI-LINE ATTRIBUTES (node7, 2026-10-04): rustfmt wraps a long
+            # `#[kani::stub(path::a, path::b)]` over several lines, and the old one-line-attribute
+            # regex then lost the harness. Walk the text instead: after each #[kani::proof], skip
+            # whitespace, comments and whole attributes by BRACKET MATCHING, then read `fn NAME`.
+            for m in re.finditer(r"#\[kani::proof\]", txt):
+                name = _proof_fn_after(txt, m.end())
+                if name:
+                    names.add(name)
     return names
+
+
+def _proof_fn_after(txt, i):
+    n = len(txt)
+    while i < n:
+        if txt[i].isspace():
+            i += 1
+        elif txt.startswith("//", i):
+            j = txt.find("\n", i); i = n if j < 0 else j + 1
+        elif txt.startswith("/*", i):
+            j = txt.find("*/", i + 2); i = n if j < 0 else j + 2
+        elif txt.startswith("#[", i) or txt.startswith("#![", i):
+            depth, i = 0, txt.index("[", i)
+            while i < n:
+                if txt[i] == "[":
+                    depth += 1
+                elif txt[i] == "]":
+                    depth -= 1
+                    if depth == 0:
+                        i += 1
+                        break
+                elif txt[i] == '"':                       # a string literal may contain brackets
+                    i += 1
+                    while i < n and txt[i] != '"':
+                        i += 2 if txt[i] == "\\" else 1
+                i += 1
+        else:
+            mm = re.match(r"(?:pub(?:\([a-z]+\))?\s+)?(?:unsafe\s+)?fn\s+([A-Za-z0-9_]+)", txt[i:])
+            return mm.group(1) if mm else None
+    return None
 
 
 def classify(stderr, battery):
@@ -346,7 +382,8 @@ def run_kani(harness, component_dir, cap, mem_mb=None, cap_max=None, escalate=Tr
     def once(c):
         unit = _new_unit("kani") if mem_mb else None
         kani_cmd = [time_bin, "-v", "cargo", "kani", "--harness", harness,
-                    "-Z", "stubbing", "--output-format", "terse"] + list(extra or [])
+                    "-Z", "stubbing", "--output-format", "terse"] + list(extra or []) \
+                   + (["--features", CARGO_FEATURES] if CARGO_FEATURES else [])
         if mem_mb:
             cmd = ["systemd-run", "--user", "--scope", "--quiet", f"--unit={unit}",
                    "-p", f"MemoryMax={mem_mb}M", "-p", "MemorySwapMax=0"] + kani_cmd
@@ -862,6 +899,10 @@ def main():
                          "same wall. Measured: 43%% of a 2.1h stage went to attempts that never "
                          "resolved, nearly all one construction wall. Raise it to revisit a shape; "
                          "0 disables escalation entirely.")
+    ap.add_argument("--features", default="",
+                    help="cargo features to build the crate with (comma-separated). Without it a property "
+                         "behind a feature flag cannot be scored at all (node7, 2026-10-04: extent-manager's "
+                         "EM-BIO-FLUSH is behind volatile_write_cache). Recorded in the run block.")
     ap.add_argument("--cap-max", type=int, default=300,
                     help="escalated per-harness time cap in seconds for the one timeout retry "
                          "(default 300). Set <= --cap-seconds to disable escalation.")
@@ -877,6 +918,8 @@ def main():
                     help="disable the cgroup memory cap (UNSAFE: a runaway harness can OOM the "
                          "host). Only for environments without a usable systemd --user manager.")
     a = ap.parse_args()
+    global CARGO_FEATURES
+    CARGO_FEATURES = a.features
 
     verif = os.path.abspath(a.verif_dir)
     yaml_path = os.path.join(verif, a.yaml)
