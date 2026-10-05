@@ -1,0 +1,29 @@
+protected_paths:
+- components/*/verif/unified_properties.yaml
+- components/*/verif/spec_properties.yaml
+- components/*/verif/code_properties.yaml
+- components/*/specs/**
+- components/*/verif-creusot/Cargo.toml
+- components/*/verif-creusot/why3find.json
+- components/*/verif-kani/**
+forbidden_patterns:
+- status:\s*(proved|refuted|tool-boundary|delegated)
+- _scored_by
+- '#\[cfg\(not\(kani\)\)\]'
+- --no-unwinding-checks
+- \bassume\s*\(\s*false\s*\)
+forbidden_commands:
+- \bgit\s+(push|commit\s+--amend|reset\s+--hard|checkout\s+-{1,2}force)\b
+- cargo\s+creusot\s+clean\b
+confine_writes: true
+max_stop_blocks: 6
+oracle:
+  command:
+  - bash
+  - '{oracle_dir}/repair_accept_repo.sh'
+  - .
+  - '{base_rev}'
+  - --targets
+  - '{targets}'
+  timeout: 7200
+  must_contain: []
