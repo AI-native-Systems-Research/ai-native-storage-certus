@@ -25,7 +25,7 @@ use std::time::Duration;
 
 use clap::Parser;
 
-use shmq_dispatcher::{serve, ServeConfig, Translator};
+use shmq_dispatcher::{log_cpu_bindings, serve, ServeConfig, Translator};
 
 use config::StackConfig;
 use metrics::{CountersObserver, ServiceCounters};
@@ -269,6 +269,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
     if cli.format {
         logger.info("certus-server-yaml: --format specified, extent managers will be reformatted");
+    }
+
+    // Report the CPU cores the component threads (NVMe pollers, remote-lookup
+    // actor, ...) were bound to during stack initialization.
+    log_cpu_bindings(logger.as_ref(), "certus-server-yaml");
+    match cli.shmq_poller_cpu {
+        Some(cpu) => logger.info(&format!(
+            "certus-server-yaml: shmq poller will bind to CPU {cpu}"
+        )),
+        None => logger.info("certus-server-yaml: shmq poller not pinned (use --shmq-poller-cpu)"),
     }
 
     let counters = ServiceCounters::new();

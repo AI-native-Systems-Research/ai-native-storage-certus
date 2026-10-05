@@ -266,7 +266,8 @@ impl DispatcherP2pComponent {
     ///
     /// For each PCI address, looks up the device's NUMA node from SPDK's
     /// device list, then assigns CPUs round-robin from that node's available
-    /// cores. Returns `None` for any drive whose NUMA node can't be resolved
+    /// cores, skipping the node's first two cores (left for the OS and other
+    /// housekeeping threads). Returns `None` for any drive whose NUMA node can't be resolved
     /// (the block device component will fall back to its own NUMA heuristic).
     fn compute_numa_cpu_assignments(
         spdk_env: &Arc<dyn ISPDKEnv + Send + Sync>,
@@ -306,7 +307,7 @@ impl DispatcherP2pComponent {
                     Some(n) => n,
                     None => return None,
                 };
-                let cpus: Vec<usize> = node.cpus().iter().filter(|&c| c >= 2).collect();
+                let cpus: Vec<usize> = node.cpus().iter().skip(2).collect();
                 if cpus.is_empty() {
                     return None;
                 }
