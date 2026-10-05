@@ -4186,54 +4186,6 @@ tool_notes:
     here implies a Kani-provable property is false.'
   measured: 'creusot: 86 proved / 9 refuted / 0 unresolved of 95 — kani: withheld as unsound; gate-kani-session-lists-20260929/drive.log
     holds the 8/95 run with all 106 vacuity notes'
-# Orchestrator-written, NOT scorer-written (2026-10-03): what each refutation MEANS.
-# defect -> a bug in fv_bugs.yaml (root cause) and how it manifested here; discordance ->
-# spec and code disagree, side information; not-a-defect -> false only as worded.
-triage:
-  EPSL-TRACK-SESSION-COMES-FROM-CALLER:
-    verdict: discordance
-    code_does: Re-registering a tracked key takes the idempotent path (session_list.rs:91-94) and returns before
-      the session argument is read, so the block silently stays in its original session.
-    why: Spec and code disagree on behaviour that does not crash, overflow, read out of bounds or act on the wrong
-      object; reported for spec/code synchronisation.
-  EPSL-TOUCH-INVALID-HANDLE-IS-AN-ERROR:
-    verdict: defect
-    bug: FV-BUG-002
-    manifested_as: wrong object (refreshes an unrelated block
-  EPSL-BATCH-TOUCH-INVALID-HANDLE-IS-AN-ERROR:
-    verdict: defect
-    bug: FV-BUG-002
-    manifested_as: wrong object (src/lib.rs:179)
-  EPSL-INV-FAILED-OPERATIONS-CHANGE-NOTHING:
-    verdict: discordance
-    code_does: A group refresh stops at the first bad handle with no undo (src/lib.rs:169-182); handles before it
-      keep their new recency although the call reported failure.
-    why: Spec and code disagree on behaviour that does not crash, overflow, read out of bounds or act on the wrong
-      object; reported for spec/code synchronisation.
-  EPSL-REMOVE-INVALID-HANDLE-IS-AN-ERROR:
-    verdict: defect
-    bug: FV-BUG-002
-    manifested_as: wrong object (stops tracking an unrelated block
-  EPSL-CANDIDATES-LISTED-IN-EVICTION-ORDER:
-    verdict: discordance
-    code_does: candidates lists the currently eligible blocks by recency (session_list.rs:196-202), which fixes
-      only the first entry; evicting it can promote an older parent that was not in the list.
-    why: Spec and code disagree on behaviour that does not crash, overflow, read out of bounds or act on the wrong
-      object; reported for spec/code synchronisation.
-  EPSL-CLEAR-INVALIDATES-EXISTING-HANDLES:
-    verdict: defect
-    bug: FV-BUG-002
-    manifested_as: wrong object (slot numbering restarts after clear
-  EPSL-INV-RECENCY-STRICTLY-ADVANCES:
-    verdict: discordance
-    code_does: clear resets the recency counter to zero (session_list.rs:226), so a stamp handed out after a clear
-      repeats one from before it.
-    why: Spec and code disagree on behaviour that does not crash, overflow, read out of bounds or act on the wrong
-      object; reported for spec/code synchronisation.
-  EPSL-INV-HANDLES-KEEP-NAMING-THEIR-BLOCK:
-    verdict: defect
-    bug: FV-BUG-002
-    manifested_as: wrong object (src/lib.rs:140)
 bugs:
   FV-BUG-002:
     title: A handle is only a slot number, and freed slots are reused
