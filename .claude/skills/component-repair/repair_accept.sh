@@ -33,7 +33,7 @@ while (( $# )); do case "$1" in --also) ALSO="${2:?}"; shift ;; *) echo "ACCEPT:
 [[ -n "$ALSO" ]] || { echo "ACCEPT: FAIL — --also is required: without the callee modules, a driver proves against callees' CONTRACTS and certifies unfixed code"; exit 2; }
 
 export PATH="$HOME/.local/share/creusot/bin:$HOME/.cargo/bin:$PATH"
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HERE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"   # through symlinks
 CDIR="$REPO/components/$COMP"
 CRATE="$CDIR/verif-creusot"
 PKG="$(sed -nE 's/^name[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' "$CDIR/Cargo.toml" | head -1)"

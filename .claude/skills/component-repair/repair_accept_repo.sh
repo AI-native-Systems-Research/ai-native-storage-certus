@@ -31,8 +31,15 @@ while (( $# )); do case "$1" in
   *) echo "ACCEPT-REPO: FAIL — unknown arg $1"; exit 2 ;;
 esac; shift; done
 export PATH="$HOME/.local/share/creusot/bin:$HOME/.cargo/bin:$PATH"
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-GATE="$(cd "$HERE/../component-verify/gate" 2>/dev/null && pwd)"
+# Resolve through symlinks: the agent calls this through a link in its own directory.
+HERE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+# WHERE THE GATE IS (2026-10-05): resolved from this script's location, the gate was "" inside the
+# agent's run, the scorer could not even start ("can't open file '/scorer_creusot.py'"), and the old
+# leg E read the empty result as "0 lost". Explicit REPAIR_GATE_DIR first; fail at once if absent.
+GATE="${REPAIR_GATE_DIR:-$(cd "$HERE/../component-verify/gate" 2>/dev/null && pwd)}"
+[[ -n "$GATE" && -f "$GATE/scorer_creusot.py" ]] || {
+  echo "ACCEPT-REPO: FAIL — cannot find the verification gate (scorer_creusot.py). Set REPAIR_GATE_DIR to"
+  echo "  .claude/skills/component-verify/gate. Refusing to run: a re-verification without a gate is not one."; exit 2; }
 fail=0; declare -a EVID
 TOUCHED="$( { git -C "$REPO" diff --name-only "$BASE" -- components; git -C "$REPO" ls-files --others --exclude-standard -- components; } \
             | awk -F/ '$1=="components"{print $2}' | sort -u)"

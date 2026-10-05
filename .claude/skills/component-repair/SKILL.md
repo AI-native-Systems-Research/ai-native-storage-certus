@@ -40,6 +40,7 @@ proof that already exists.
 ```
 export AGENT_RESOURCE_AI_NATIVE_STORAGE_CERTUS=<your certus checkout>
 export AGENT_RESOURCE_CREUSOT=<creusot tree>      # for creusot-std
+export REPAIR_GATE_DIR=<repo>/.claude/skills/component-verify/gate   # the gate re-verification runs
 .claude/skills/component-repair/agent/agents/repair-agent/run.sh run \
   --input repository=<checkout> --input component=<c> --input obligation_id=<ID> \
   --input bundle=components/<c>/verif/unified_properties.yaml \
