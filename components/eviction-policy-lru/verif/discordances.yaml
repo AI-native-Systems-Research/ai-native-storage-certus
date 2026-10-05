@@ -1,0 +1,11 @@
+component: eviction-policy-lru
+pin: f3de84aa
+level: 1
+what: 'spec<->code discordances found while reconciling the specification with the code. Each is EXCLUDED from formal
+  verification (level 2). status: candidate until a test confirms it (confirmed) or shows it was a misreading (withdrawn).'
+counts:
+  discordances: 0
+  spec_and_code_differ: 0
+  spec_not_found_in_code: 0
+  properties_excluded_from_level2: 0
+discordances: []
