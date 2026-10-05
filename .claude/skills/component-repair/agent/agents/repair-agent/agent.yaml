@@ -2,10 +2,17 @@ schema_version: 1
 identity:
   name: repair-agent
   display_name: Repair Agent
-  goal: Given a Certus component, an obligation id the gate scored `refuted`, and
-    the refutation that proves the violation is reachable, produce a minimal patch
-    that makes the obligation hold — or, when the obligation cannot be satisfied as
-    specified, a written escalation instead of a patch.
+  goal: 'Fix the CODE behind a verification finding, completely, and hand a non-expert
+    reviewer a pull request they can approve from the evidence alone. The finding
+    is either a LEVEL-2 BUG (a property spec and code agree on that formal verification
+    refuted) or, on request, a LEVEL-1 DISCORDANCE from the component''s discordances.yaml
+    (spec and code disagree). For a discordance, FIRST confirm it: write a test that
+    fails on today''s code; if no such test can be written, report it withdrawn (a
+    misreading) and change nothing. Then choose the fix yourself — the reviewer may
+    not read Rust — and implement it everywhere it is needed, across components and
+    shared interfaces if the root cause lives there; add regression tests; make the
+    proofs of the target properties prove; and keep every touched, already-verified
+    component verified.'
 interface:
   inputs:
   - 'repository: A checkout of ai-native-storage-certus; the agent works in a worktree
@@ -13,6 +20,11 @@ interface:
   - 'component: The component''s directory name under components/, e.g. eviction-policy-optimized'
   - 'obligation_id: The id the gate scored refuted'
   - 'bundle: verif/unified_properties.yaml — carries the obligation statement'
+  - 'mode: bug (a level-2 refutation) or discordance (a level-1 entry, confirmed first
+    by a failing test)'
+  - 'discordance_id: For mode=discordance: the id in components/<component>/verif/discordances.yaml'
+  - 'targets: All obligations the repair must make prove, as component:OBLIGATION-ID:callee,modules
+    separated by '';''. Named by the operator, never chosen by the agent.'
   - 'callee_modules: Comma-separated Creusot modules where the obligation''s goals
     live, e.g. arena_move_to_back,arena_remove. Named by the operator, never chosen
     by the agent, because the agent choosing its own evidence is how a weaker proof
@@ -33,7 +45,12 @@ interface:
     mod repair_test_<name>;`, using only the existing API. It must FAIL on the pre-fix
     code and pass after; the acceptance check injects it into the pre-fix code to
     confirm.'
-  - 'report: Root cause'
+  - 'report: The PR description, written for a reviewer who does not read Rust. Four
+    short parts: WHAT WAS WRONG (one plain sentence); WHAT CHANGED (components and
+    files, a few words each); EVIDENCE (the before/after table repair_accept_repo.sh
+    prints: tests passed, properties proved, components re-verified); RISKS (anything
+    a caller must know, e.g. a shared type changed). Plus one line on the alternatives
+    rejected and why.'
 capabilities:
   provider: claude
   tools:
@@ -55,7 +72,6 @@ capabilities:
   - untrusted_content
   - anti_gaming
   - context_packs
-  - operator_chooses_fix
   - fresh_context_per_phase
   plugins: []
 permissions:
@@ -64,8 +80,8 @@ permissions:
   write:
   - agents/repair-agent/runs
   external_write:
-  - components/<component>/src/** inside a worktree
-  - components/<component>/verif-creusot/src/** inside a worktree
+  - components/**/src/** inside a worktree
+  - components/**/verif-creusot/src/** inside a worktree
   deny:
   - .git
   - .env
@@ -101,8 +117,6 @@ architecture:
 workflow:
   stages:
   - LOAD_INPUT
-  - PROPOSE_OPTIONS
-  - CHOOSE
   - PREPARE
   - SESSION
   - VERIFY
@@ -127,5 +141,5 @@ evaluation:
     - --self-check
 budgets:
   max_iterations: 6
-  max_wall_seconds: 3600
+  max_wall_seconds: 14400
   max_model_calls: 25

@@ -6,7 +6,6 @@ protected_paths:
 - components/*/verif-creusot/Cargo.toml
 - components/*/verif-creusot/why3find.json
 - components/*/verif-kani/**
-- components/interfaces/**
 forbidden_patterns:
 - status:\s*(proved|refuted|tool-boundary|delegated)
 - _scored_by
@@ -21,12 +20,10 @@ max_stop_blocks: 6
 oracle:
   command:
   - bash
-  - '{oracle_dir}/repair_accept.sh'
+  - '{oracle_dir}/repair_accept_repo.sh'
   - .
-  - '{component}'
-  - '{obligation_id}'
   - '{base_rev}'
-  - --also
-  - '{callee_modules}'
-  timeout: 900
+  - --targets
+  - '{targets}'
+  timeout: 7200
   must_contain: []
