@@ -1,11 +1,17 @@
 ---
 spec_sync_component: dispatcher
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-03T13:20:17Z
-spec_sync_git_commit: 2c86a131
-spec_sync_inputs_sha256: 75a21d9bfc9fc0db520a621f50aa507edc831f778c773c15e59d1550cb82accd
+spec_sync_synced_at: 2026-10-05T19:05:49Z
+spec_sync_git_commit: d102a00b
+spec_sync_inputs_sha256: acb693621e8650c9b7d66c51f46b99f7c6864245d9f6aa86840a2a3824b2f9ee
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-10-05 (branch `fix/poller-cpu-placement-logging`).** Delta analysis on a certified baseline: this component's existing clean stamp was re-verified to equal the spec-sync hash of `git archive origin/unstable`, so the only new inputs are this branch's src/specs/interfaces changes. Every FR/SC touching CPU placement, NUMA pinning, threads or SPDK init was located by grep over specs/** and re-checked against the changed code.
+>
+> - **FR-011 — BACKFILL (moderate).** `None` selects NUMA-local automatic placement: round-robin over each drive's NUMA-node cores excluding the node's first two (this branch; previously global CPUs 0/1 were excluded); unresolvable node or node with <=2 cores -> no CPU passed, block device chooses; topology discovery failure -> warning, unpinned. `components/dispatcher/src/lib.rs:550-600, 1530-1539`. *Pre-existing drift (the None path was already automatic on unstable), surfaced because this branch modifies that path.* Resolution: FR-011 rewritten for the None case; Last Synced header added.
+>
+> No actionable drift remains for this component after apply.
+
 > **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest
 > folds `components/interfaces/{src,specs}` into **every** component's hash, so an interface
 > change invalidates all of them at once -- which is the design, not a defect. The interface

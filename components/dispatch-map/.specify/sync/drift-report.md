@@ -1,11 +1,13 @@
 ---
 spec_sync_component: dispatch-map
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-03T13:20:17Z
-spec_sync_git_commit: 2c86a131
-spec_sync_inputs_sha256: 3e4988f5503dce9978881864d35a3404b1b4db93e9cf803f49b375be76999801
+spec_sync_synced_at: 2026-10-05T19:05:49Z
+spec_sync_git_commit: d102a00b
+spec_sync_inputs_sha256: 48439f556fc54cc6146b4bf528256a797474271d4888cfb17f8c7188205aea51
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-05 (transitive: `components/interfaces` changed, branch `fix/poller-cpu-placement-logging`).** The only change to this component's hashed inputs is a doc-comment correction on `DispatcherConfig::poller_base_cpu` in `components/interfaces/src/idispatcher.rs` (no signature, type, or behaviour change). This component's own `src/**` and `specs/**` are unchanged, and it does not reference `poller_base_cpu` (verified by grep over its src/ and specs/). Its previous stamp was re-verified to match `git archive origin/unstable` before re-stamping. **No re-analysis was performed for this component**; this stamp asserts only what was checked.
+
 > **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest
 > folds `components/interfaces/{src,specs}` into **every** component's hash, so an interface
 > change invalidates all of them at once -- which is the design, not a defect. The interface

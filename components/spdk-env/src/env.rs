@@ -88,9 +88,18 @@ fn init_spdk_env() -> Result<(), SpdkEnvError> {
     // Don't require specific cores — let DPDK use the default.
     opts.shm_id = -1;
 
+    // DPDK's EAL pins the calling thread to its main lcore (CPU 0 with the
+    // default core mask). Every thread later spawned from this one would
+    // inherit that single-core affinity, so save it here and restore it after.
+    let saved_affinity = current_thread_affinity();
+
     // SAFETY: spdk_env_init is called exactly once (enforced by singleton flag).
     // The opts struct is valid for the duration of the call.
     let rc = unsafe { spdk_sys::spdk_env_init(&opts) };
+
+    if let Some(set) = saved_affinity {
+        restore_thread_affinity(&set);
+    }
     if rc != 0 {
         return Err(SpdkEnvError::InitFailed(format!(
             "spdk_env_init() returned {rc}. Check DPDK EAL log output for details."
@@ -102,6 +111,31 @@ fn init_spdk_env() -> Result<(), SpdkEnvError> {
     interfaces::set_spdk_env_active(true);
 
     Ok(())
+}
+
+/// Read the calling thread's CPU affinity mask, or `None` if the syscall fails.
+fn current_thread_affinity() -> Option<libc::cpu_set_t> {
+    // SAFETY: cpu_set_t is a plain bitset, so all-zero is a valid value, and
+    // sched_getaffinity(0, ...) writes at most size_of::<cpu_set_t>() bytes
+    // into it for the calling thread.
+    unsafe {
+        let mut set: libc::cpu_set_t = std::mem::zeroed();
+        if libc::sched_getaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &mut set) == 0 {
+            Some(set)
+        } else {
+            None
+        }
+    }
+}
+
+/// Restore the calling thread's CPU affinity mask. Best-effort: a failure only
+/// leaves the thread with DPDK's main-lcore pin, which is not fatal.
+fn restore_thread_affinity(set: &libc::cpu_set_t) {
+    // SAFETY: `set` is a valid cpu_set_t of the size passed, and
+    // sched_setaffinity(0, ...) only reads it and targets the calling thread.
+    unsafe {
+        libc::sched_setaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), set);
+    }
 }
 
 /// Enumerate all PCI devices visible to SPDK after environment initialization.

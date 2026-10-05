@@ -1,11 +1,17 @@
 ---
 spec_sync_component: block-device-spdk-nvme
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-03T13:20:17Z
-spec_sync_git_commit: 2c86a131
-spec_sync_inputs_sha256: c1109bd77867a242ea6cb1a7038aa2b914919715b73a17fee7f9b6dd1ad12c40
+spec_sync_synced_at: 2026-10-05T19:05:49Z
+spec_sync_git_commit: d102a00b
+spec_sync_inputs_sha256: 9115a4a49b86c817d0d74c577c3228945ef91ba4845bf932558f42feb8693f04
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-10-05 (branch `fix/poller-cpu-placement-logging`).** Delta analysis on a certified baseline: this component's existing clean stamp was re-verified to equal the spec-sync hash of `git archive origin/unstable`, so the only new inputs are this branch's src/specs/interfaces changes. Every FR/SC touching CPU placement, NUMA pinning, threads or SPDK init was located by grep over specs/** and re-checked against the changed code.
+>
+> - **FR-013 — ALIGN+BACKFILL (major).** Branch revision used `cpus().iter().nth(2)` for the fallback core, which returns None on a NUMA node with <=2 cores and left the actor UNPINNED (violates the MUST). Fixed: `.nth(2).or_else(|| first core)`. `components/block-device-spdk-nvme/src/lib.rs:229-250`. *Regression introduced by this branch, caught by this sync before stamping.* Resolution: Code fixed; FR-013 now documents set_actor_cpu precedence and the third-core / first-core fallback.
+>
+> No actionable drift remains for this component after apply.
+
 > **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest
 > folds `components/interfaces/{src,specs}` into **every** component's hash, so an interface
 > change invalidates all of them at once -- which is the design, not a defect. The interface
