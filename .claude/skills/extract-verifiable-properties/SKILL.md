@@ -103,6 +103,18 @@ understand without the spec, the code, or any FV/tooling knowledge in front of t
   promised — the traces are provenance, not the explanation.
 - One obligation per statement (granularity rule below still holds); just say it in English.
 
+### The `statement` says what the code SHOULD do — never what might go wrong (mandatory, 2026-10-04)
+- **Requirement, not hazard.** Write "a new entry starts with cleared memory", never "a new entry's bytes
+  can still hold the previous occupant's data". A record worded as a defect inverts its own result: a
+  proof then means the BUG is real. memory-tier had 22 such records and the scoring page showed every one
+  with the wrong sign. If reading the code makes you suspect a problem, write the requirement the code
+  should meet; verification decides whether it holds. A defect is pronounced only after verification.
+- **Match the strictness the artifact means.** "Smaller than or equal to" is not "always smaller"; "at
+  most" is not "fewer than". A strict relation where the code keeps a non-strict one refutes on wording
+  alone (memory-tier MT-INV-SIZE-ACCOUNTING, MT-BATCH-TOUCH-EMPTY-NOOP).
+- **Do not over-specify mechanism.** "An empty batch has no effect" is the obligation; "returns without
+  taking any lock" is an implementation detail that turns a true property false.
+
 ## Not verifiable (list here; don't force into rows)
 Unbounded liveness / deadlock-freedom; wall-clock **timing** (a timeout's *occurrence* is verifiable, its
 *duration* is not); caller/environment **assumptions** (I/O, allocation, pointer validity); pure
@@ -121,3 +133,30 @@ non-deterministic / relaxed-ordering quantities.
 ## Harness note
 A property = *what an assertion / `#[ensures]` actually checks*. A harness property with no counterpart in
 spec or code = the harness verifies something unintended (a refinement gap) — flag it.
+
+### 🔴 The code agent MUST also read the declarations of every interface the component CONSUMES
+Not the implementations — the **declarations**, as contracts. Without them the blind code extraction
+**manufactures phantom divergences**, in proportion to how much the component delegates.
+
+Measured on `memory-tier`, 2026-09-30, and caught by the agent that had itself produced the sweep:
+it reported the component's "sharpest divergence" as *the spec requires eviction to untrack the victim;
+the code never does*. That is **false**. `identify_next_to_evict` is contracted at
+`interfaces/src/ieviction_policy.rs:101-104` to "remove it from tracking", and
+`eviction-policy-lru/src/lib.rs:133-138` implements it via `pop_front()` →
+`lru_list.rs:99-104` → `remove()`. The untracking happens INSIDE the callee. The code agent read only
+`memory-tier/src/**` plus `memory-tier`'s own interface, saw no `ep.remove()` beside the handle drop,
+and inferred the victim stayed tracked. Reconciliation then promoted that gap to `origin: divergent`.
+
+**So the allow-list is:** `src/**`, `tests/**`, the component's own `i<component>.rs`, **and the
+`define_interface!` declarations of every interface it imports** (find them from the component's own
+`use interfaces::{…}`). Still forbidden: those interfaces' *implementations* in other components, and
+anything under `specs/**`.
+
+This does not weaken blindness. A consumed interface's declaration is part of the contract the code is
+written against — the same artefact the spec agent is allowed to read for the method surface. What
+blindness protects is the separation of **specification prose** from **implementation**, not ignorance
+of the types a function is called through.
+
+**When reporting, say so:** a divergence on a delegating call is suspect until the callee's contract has
+been read. On that one component the correction turned a claimed "coherent three-part defect" into one
+withdrawn, one that stands on its face, and one whose reachability turns on a separate invariant.
