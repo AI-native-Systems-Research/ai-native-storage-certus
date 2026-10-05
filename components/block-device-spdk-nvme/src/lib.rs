@@ -231,7 +231,9 @@ impl BlockDeviceSpdkNvmeComponent {
             if numa >= 0 {
                 component_core::numa::NumaTopology::discover()
                     .ok()
-                    .and_then(|topo| topo.node(numa as usize).map(|n| n.cpus().iter().next()))
+                    // Skip the node's first two cores, matching the dispatcher's
+                    // automatic poller placement.
+                    .and_then(|topo| topo.node(numa as usize).map(|n| n.cpus().iter().nth(2)))
                     .flatten()
             } else {
                 None

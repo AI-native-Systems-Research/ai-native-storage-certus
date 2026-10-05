@@ -24,10 +24,12 @@
 //! the [`Translator`] via [`Translator::with_observer`]; the plain server passes
 //! none, for zero overhead.
 
+pub mod cpu_bindings;
 pub mod translate;
 pub mod wire;
 
 mod serve;
 
+pub use cpu_bindings::{log_cpu_bindings, thread_cpu_bindings, ThreadCpuBinding};
 pub use serve::{serve, ServeConfig};
 pub use translate::{OpError, Translator, TranslatorObserver};

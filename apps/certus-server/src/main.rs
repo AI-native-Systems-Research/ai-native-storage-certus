@@ -24,7 +24,7 @@ use interfaces::{
     IMemoryTier, IRemoteLookup, PciAddress,
 };
 
-use shmq_dispatcher::{serve, ServeConfig, Translator};
+use shmq_dispatcher::{log_cpu_bindings, serve, ServeConfig, Translator};
 
 /// Set once by the SIGINT/SIGTERM handler; polled by the poller and reaper.
 static SHUTDOWN: AtomicBool = AtomicBool::new(false);
@@ -505,6 +505,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         cli.memory_tier_eviction_threshold,
     )?;
 
+    // Report the CPU cores the component threads (NVMe pollers, remote-lookup
+    // actor, ...) were bound to during stack initialization.
+    log_cpu_bindings(logger.as_ref(), "certus-server");
+    match cli.shmq_poller_cpu {
+        Some(cpu) => logger.info(&format!(
+            "certus-server: shmq poller will bind to CPU {cpu}"
+        )),
+        None => logger.info("certus-server: shmq poller not pinned (use --shmq-poller-cpu)"),
+    }
     logger.info(&format!("certus-server: devices={device_pci:?}"));
     logger.info(&format!(
         "certus-server: memory-tier-size={} MiB",
