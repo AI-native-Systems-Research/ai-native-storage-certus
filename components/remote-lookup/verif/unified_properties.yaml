@@ -1551,3 +1551,13 @@ run:
     cap_seconds: 120
     cap_max: 300
     mem_max_mb: 16384
+# LEVEL 1 (level1.py): properties derived from a spec<->code discordance; see discordances.yaml. Never sent to the provers.
+level2_excluded:
+- RL-CONCURRENCY-INTERLEAVE
+- RL-SINGLE-FLIGHT
+- RL-PUBLISH-ON-SUCCESS
+- RL-TEARDOWN-BEFORE-RECLAIM
+- RL-ONE-SIDED-RDMA
+- RL-ZYRE-DISCOVERY-WARM
+- RL-PEER-EXIT
+- RL-COMPLETION-CRITERIA
