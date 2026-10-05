@@ -1,0 +1,54 @@
+component: logger
+pin: f3de84aa (2026-09-21)
+level: 1
+what: 'spec<->code discordances found while reconciling the specification with the code. Each is EXCLUDED from formal
+  verification (level 2). status: candidate until a test confirms it (confirmed) or shows it was a misreading (withdrawn).'
+counts:
+  discordances: 2
+  spec_and_code_differ: 0
+  spec_not_found_in_code: 2
+  properties_excluded_from_level2: 2
+discordances:
+- id: D-FR-003-define_componentexpansionofLoggerComponentIUnknownquery_interfacemachinery-f49c86
+  kind: spec-not-found-in-code
+  methods:
+  - error
+  - warn
+  - info
+  - debug
+  spec_says: Querying the component for the ILogger interface at runtime returns a valid ILogger reference.
+  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
+    decides.
+  spec_pointers:
+  - FR-003
+  - US3-AS1
+  - SC-006
+  code_pointers: []
+  status: candidate
+  excluded_properties:
+  - LOG-INTERFACE-DISCOVERY
+  extraction_sides:
+    spec: []
+    code: []
+- id: D-US3-AS2-component_frameworkreceptaclebindingconnect_receptacle_raw-1db8e7
+  kind: spec-not-found-in-code
+  methods:
+  - error
+  - warn
+  - info
+  - debug
+  spec_says: When the logger is bound into another component's ILogger receptacle, that receptacle then hands back
+    the logger implementation when it is asked for it.
+  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
+    decides.
+  spec_pointers:
+  - US3-AS2
+  - US3-AS3
+  - SC-006
+  code_pointers: []
+  status: candidate
+  excluded_properties:
+  - LOG-RECEPTACLE-BIND
+  extraction_sides:
+    spec: []
+    code: []
