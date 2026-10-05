@@ -1,0 +1,32 @@
+component: block-device-filesys
+pin: e87bafd8 (2026-09-15)
+level: 1
+what: 'spec<->code discordances found while reconciling the specification with the code. Each is EXCLUDED from formal
+  verification (level 2). status: candidate until a test confirms it (confirmed) or shows it was a misreading (withdrawn).'
+counts:
+  discordances: 1
+  spec_and_code_differ: 1
+  spec_not_found_in_code: 0
+  properties_excluded_from_level2: 1
+discordances:
+- id: D-FR-021-lib.rs-7d0205
+  kind: spec-and-code-differ
+  methods:
+  - max_transfer_size
+  spec_says: The reported maximum transfer size in bytes equals the configured block size multiplied by 256.
+  code_does: spec (FR-021/contract) says block_size*256; code uses saturating_mul(256), which caps at u32::MAX on
+    overflow instead of wrapping.
+  spec_pointers:
+  - FR-021
+  - US2
+  - AS1
+  - contract:max_transfer_size
+  code_pointers:
+  - lib.rs
+  - lib.rs:292-294
+  status: candidate
+  excluded_properties:
+  - BDF-MAXTRANSFER
+  extraction_sides:
+    spec: []
+    code: []

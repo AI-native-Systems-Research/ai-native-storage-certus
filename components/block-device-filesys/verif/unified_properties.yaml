@@ -3053,3 +3053,6 @@ run:
     cap_seconds: 120
     cap_max: 300
     mem_max_mb: 16384
+# LEVEL 1 (level1.py): properties derived from a spec<->code discordance; see discordances.yaml. Never sent to the provers.
+level2_excluded:
+- BDF-MAXTRANSFER
