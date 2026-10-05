@@ -112,6 +112,12 @@ for c in $TOUCHED; do
   SCR="$(mktemp -d)"
   git -C "$REPO" worktree add -q --detach "$SCR/before" "$BASE"
   cp -a "$REPO" "$SCR/after"
+  # The BEFORE side is identical on every oracle call for the same base: cache it (measured
+  # 2026-10-05: one cold gate run is ~55 min, and the agent's 1 h budget expired inside the oracle).
+  # The key covers everything that can change the result; any change is a miss.
+  CACHE="${REPAIR_GATE_CACHE:-$HOME/.cache/repair-gate}"; mkdir -p "$CACHE"
+  GHASH="$(cat "$GATE"/scorer_creusot.py "$GATE"/*.yaml 2>/dev/null | sha1sum | cut -c1-12)"
+  BSHA="$(git -C "$REPO" rev-parse "$BASE")"
   for side in before after; do
     W="$SCR/$side"
     if [[ ! -d "$W/components/$c/verif-creusot/src" ]]; then
@@ -121,6 +127,14 @@ for c in $TOUCHED; do
     [[ -e "$REPO/components/$c/creusot" ]] && ln -sfn "$(readlink -f "$REPO/components/$c/creusot")" "$W/components/$c/creusot"
     B="$W/components/$c/verif/unified_properties.yaml"
     [[ -f "$B" ]] || { echo "  E. REVERIFY: $c NO — no bundle on the $side side"; fail=1; continue 2; }
+    if [[ "$side" == before ]]; then
+      CTREE="$(cd "$W" && git ls-files -s "components/$c/verif-creusot/src" "components/$c/verif" 2>/dev/null | sha1sum | cut -c1-12)"
+      KEY="$CACHE/${c}_${BSHA:0:12}_${CTREE}_${GHASH}"
+      if [[ -f "$KEY.yaml" && -f "$KEY.log" ]] && grep -q '^SUMMARY:' "$KEY.log"; then
+        cp "$KEY.yaml" "$B"; cp "$KEY.log" "$SCR/gate_before.log"
+        echo "  E. (before side for $c reused from cache: same base, proof crate and gate)"; continue
+      fi
+    fi
     python3 - "$B" <<'PY2'
 import sys, yaml
 d = yaml.safe_load(open(sys.argv[1]))
@@ -134,6 +148,7 @@ PY2
         --cap-seconds 60 --cap-max 300 > "$SCR/gate_$side.log" 2>&1
     # keep the log: a re-verification nobody can inspect is not evidence
     LOGS="${REPAIR_GATE_LOG_DIR:-/tmp}"; cp "$SCR/gate_$side.log" "$LOGS/repair_gate_${c}_${side}.log" 2>/dev/null
+    if [[ "$side" == before ]] && grep -q '^SUMMARY:' "$SCR/gate_before.log"; then cp "$B" "$KEY.yaml"; cp "$SCR/gate_before.log" "$KEY.log"; fi
   done
   # THE GATE MUST HAVE RUN (2026-10-05). Inside the agent's own run this leg reported "0 proved after;
   # 0 newly proved; 0 lost" and PASSED — the gate had not run on either side, and 0 = 0 read as

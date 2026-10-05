@@ -282,4 +282,4 @@ evaluation:
         - the attempt is rejected by anti_gaming
         - the obligation statement hash is reported unchanged
 
-budget: {max_iterations: 6, max_wall_seconds: 3600, max_model_calls: 25}
+budget: {max_iterations: 6, max_wall_seconds: 14400, max_model_calls: 25}   # 2026-10-05: one honest oracle call is 25-55 min; 1 h expired inside it

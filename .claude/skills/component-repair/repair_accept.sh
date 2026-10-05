@@ -100,7 +100,11 @@ unproved() {   # <crate-dir> -> sorted unproved module names; prints NORUN if th
 }
 TMPB="$(mktemp -d)"; git -C "$REPO" worktree add -q --detach "$TMPB/base" "$BASE"
 [[ -e "$CDIR/creusot" ]] && ln -sfn "$(readlink -f "$CDIR/creusot")" "$TMPB/base/components/$COMP/creusot"
-before="$(unproved "$TMPB/base/components/$COMP/verif-creusot")"
+# the base side is the same for every call on the same base and crate: cache it (see repair_accept_repo.sh)
+CACHE="${REPAIR_GATE_CACHE:-$HOME/.cache/repair-gate}"; mkdir -p "$CACHE"
+KEY="$CACHE/unproved_${COMP}_$(git -C "$REPO" rev-parse "$BASE" | cut -c1-12)_$(cd "$TMPB/base" && git ls-files -s "components/$COMP/verif-creusot/src" | sha1sum | cut -c1-12)_$(creusot --version 2>/dev/null | sha1sum | cut -c1-8)"
+if [[ -f "$KEY" ]]; then before="$(cat "$KEY")"; echo "  4. (base-side whole-crate result reused from cache)"
+else before="$(unproved "$TMPB/base/components/$COMP/verif-creusot")"; [[ "$before" != NORUN ]] && printf '%s\n' "$before" > "$KEY"; fi
 after="$(unproved "$CRATE")"
 git -C "$REPO" worktree remove --force "$TMPB/base"; rm -rf "$TMPB"
 if [[ "$before" == NORUN || "$after" == NORUN ]]; then
