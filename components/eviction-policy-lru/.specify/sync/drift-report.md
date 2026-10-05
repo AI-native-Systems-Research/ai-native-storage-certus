@@ -1,11 +1,13 @@
 ---
 spec_sync_component: eviction-policy-lru
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-03T13:20:17Z
-spec_sync_git_commit: 2c86a131
-spec_sync_inputs_sha256: 11ffc7a3dfa8db69ddf9b98e4bd66c0dc298000c09e5c588b43cfa5ac1b77873
+spec_sync_synced_at: 2026-10-05T19:05:49Z
+spec_sync_git_commit: d102a00b
+spec_sync_inputs_sha256: 0cbe2bec316aa98cd8d9ac432430ad00a757bbc554d16975c35472b44ec418c0
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-05 (transitive: `components/interfaces` changed, branch `fix/poller-cpu-placement-logging`).** The only change to this component's hashed inputs is a doc-comment correction on `DispatcherConfig::poller_base_cpu` in `components/interfaces/src/idispatcher.rs` (no signature, type, or behaviour change). This component's own `src/**` and `specs/**` are unchanged, and it does not reference `poller_base_cpu` (verified by grep over its src/ and specs/). Its previous stamp was re-verified to match `git archive origin/unstable` before re-stamping. **No re-analysis was performed for this component**; this stamp asserts only what was checked.
+
 > **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest
 > folds `components/interfaces/{src,specs}` into **every** component's hash, so an interface
 > change invalidates all of them at once -- which is the design, not a defect. The interface

@@ -46,8 +46,11 @@ pub struct DispatcherConfig {
     /// Base CPU index for NVMe poller threads.
     ///
     /// Drive `i`'s actor thread is pinned to CPU `poller_base_cpu + i`.
-    /// When `None`, each drive's actor falls back to the first available CPU
-    /// in its NUMA node (all drives on the same node would share that core).
+    /// When `None`, the dispatcher pins each drive's actor to a core on the
+    /// drive's NUMA node, round-robin over that node's cores excluding its
+    /// first two. A drive whose NUMA node cannot be resolved, or whose node has
+    /// two or fewer cores, is left to the block device's own NUMA-local choice;
+    /// if the NUMA topology cannot be discovered at all, pollers are unpinned.
     /// Set this to a dedicated core range to give each drive exclusive use of
     /// a core, which is required for SPDK busy-polling to achieve full bandwidth.
     pub poller_base_cpu: Option<usize>,
