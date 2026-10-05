@@ -184,6 +184,46 @@ depending on an agent being careful:
 Measured outcome doing it this way: 0 orphans, 0 double-use, 0 ghosts across 147 input ids, and the
 assembly step cannot misplace a property because it never makes a judgement.
 
+## LEVEL 1 — the spec<->code sync check (mandatory, after reconciliation; 2026-10-04)
+
+Reconciliation produces the unified records. **Level 1 then CHECKS them**, read-only, before anything
+reaches a prover. It is not enough to trust the origin labels: on extent-manager the reconciler produced
+**0 divergent** records — the disagreements had been merged into "agreed" ones — and the provers then
+rediscovered them as 75 refutations, 28 of them one input-range mismatch. Three checks, in order:
+
+**1. Merge check.** For every `origin: spec+code` record, read its two sides (`paired_from`). If the
+merge had to NARROW, BROADEN or REWORD either side's claim to make them agree — a scope narrowed to some
+callers, "at most" vs "fewer than", one side naming an error the other does not — the record is
+`origin: divergent`, with both readings in `divergence_note`. A `delta_note` is only for a difference of
+wording with identical meaning. *If you would need to explain the difference to a reviewer, it is divergent.*
+
+**2. Input-range check, both directions.** List every constraint the SPECIFICATION places on inputs,
+configuration and state (validation lists such as "format() MUST validate …", allowed values, ranges,
+maxima, alignment, power-of-two) with its pointer. Independently list every assumption the CODE makes
+about them — a mask `x & !(n-1)` assumes a power of two, a fixed buffer assumes a maximum, a division
+assumes non-zero, an `as u32` assumes a range — with file:line. Compare:
+- the spec constrains a value and the code never enforces it (dpm: sector size 512 or 4096, unchecked), or
+- the code assumes something the spec neither requires nor validates (extent-manager: `buddy.rs:136`
+  assumes a power-of-two sector size; FR-002 only requires `sector_size > 0`).
+Each mismatch is ONE `domain_discordances:` entry (top level of the bundle):
+```yaml
+domain_discordances:
+  - spec_says: format() must validate only that the sector size is greater than zero (FR-002)
+    code_does: the buddy allocator assumes the sector size is a power of two (buddy.rs:136)
+    spec_pointers: [FR-002]
+    code_pointers: [buddy.rs:136, lib.rs:<where format takes the value>]
+    methods: [format, recover, ...]
+    assume: the sector size is a power of two       # plain English: the narrower range both sides meet
+    assume_rust: "sector_size.is_power_of_two()"    # how a proof states it, on the entry input
+```
+
+**3. Filtering.** `gate/level1.py` then writes `discordances.yaml` and excludes from level 2 every record
+that IS a discordance (divergent, spec-only, from either side). Records that merely DEPEND on a
+domain discordance are kept, and level 2 proves them **under its `assume`** — stated on the page as
+"verified for <assume>" — so one mismatch is reported once, at level 1, instead of being rediscovered as
+dozens of refutations. A level-2 refutation that disappears under a level-1 assumption was never a level-2
+finding.
+
 ## Verification scope — what goes to the provers (corrected 2026-10-04)
 
 **Only `origin: spec+code` and `origin: code-only` records are verification obligations.** They are

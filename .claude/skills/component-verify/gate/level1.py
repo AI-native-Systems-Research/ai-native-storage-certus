@@ -104,6 +104,21 @@ def main():
         }
         disc.append(entry)
         excluded.append(p["id"])
+    # INPUT-RANGE MISMATCHES (the level-1 sync check, build-property-inventory step 2): one entry each,
+    # however many properties depend on them. Those properties stay in level 2 and are proved UNDER the
+    # narrower range (`assume`), so the mismatch is reported once here instead of rediscovered as
+    # dozens of refutations (extent-manager: 28 of 75 refutations were one such mismatch).
+    assumptions = []
+    for k, dd in enumerate(d.get("domain_discordances") or [], 1):
+        sp = list(dd.get("spec_pointers") or []); cp = list(dd.get("code_pointers") or [])
+        h = hashlib.sha1(f"{comp}|{'|'.join(sp)}|{'|'.join(cp)}|domain".encode()).hexdigest()[:6]
+        did = f"D-RANGE-{(sp[0] if sp else 'nospec').upper().replace(' ', '')}-{h}"
+        disc.append({"id": did, "kind": "input-range-mismatch", "methods": list(dd.get("methods") or []),
+                     "spec_says": dd.get("spec_says", ""), "code_does": dd.get("code_does", ""),
+                     "spec_pointers": sp, "code_pointers": cp, "status": "candidate",
+                     "assume_in_level2": dd.get("assume", ""), "excluded_properties": []})
+        assumptions.append({"id": did, "assume": dd.get("assume", ""), "assume_rust": dd.get("assume_rust", ""),
+                            "methods": list(dd.get("methods") or [])})
     out = {
         "component": comp,
         "pin": d.get("pin"),
@@ -114,6 +129,7 @@ def main():
         "counts": {"discordances": len(disc),
                    "spec_and_code_differ": sum(1 for e in disc if e["kind"] == "spec-and-code-differ"),
                    "spec_not_found_in_code": sum(1 for e in disc if e["kind"] == "spec-not-found-in-code"),
+                   "input_range_mismatch": len(assumptions),
                    "properties_excluded_from_level2": len(excluded)},
         "discordances": disc,
     }
@@ -128,13 +144,20 @@ def main():
                 e["id"] = f"{e['id']}-{seen[e['id']]}"
     print(f"level1: {comp}: {len(disc)} discordances "
           f"({out['counts']['spec_and_code_differ']} differ, {out['counts']['spec_not_found_in_code']} spec-not-found-in-code); "
-          f"{len(excluded)} properties excluded from level 2")
+          f"{len(assumptions)} input-range mismatch(es); {len(excluded)} properties excluded from level 2")
     if a.dry_run:
         return 0
     yaml.safe_dump(out, open(os.path.join(a.verif_dir, "discordances.yaml"), "w"),
                    sort_keys=False, allow_unicode=True, width=110)
     txt = io.open(bpath, encoding="utf-8").read()
     lines = txt.split("\n")
+    for key in ("level2_assumptions:",):
+        if any(l.startswith(key) for l in lines):
+            st = next(i for i, l in enumerate(lines) if l.startswith(key))
+            en = next((i for i in range(st + 1, len(lines)) if re.match(r"^[A-Za-z_#]", lines[i])), len(lines))
+            if st > 0 and lines[st - 1].startswith("# LEVEL 1: input-range"):
+                st -= 1
+            del lines[st:en]
     if any(l.startswith("level2_excluded:") for l in lines):     # idempotent: replace the old block
         st = next(i for i, l in enumerate(lines) if l.startswith("level2_excluded:"))
         en = next((i for i in range(st + 1, len(lines)) if re.match(r"^[A-Za-z_#]", lines[i])), len(lines))
@@ -145,6 +168,9 @@ def main():
     txt = txt.rstrip("\n") + ("\n# LEVEL 1 (level1.py): properties derived from a spec<->code discordance; see "
                               "discordances.yaml. Never sent to the provers.\n")
     txt += yaml.safe_dump({"level2_excluded": excluded}, sort_keys=False, width=200)
+    if assumptions:
+        txt += ("# LEVEL 1: input-range mismatches. Level 2 proves the dependent properties UNDER these.\n"
+                + yaml.safe_dump({"level2_assumptions": assumptions}, sort_keys=False, allow_unicode=True, width=200))
     io.open(bpath, "w", encoding="utf-8").write(txt)
     return 0
 

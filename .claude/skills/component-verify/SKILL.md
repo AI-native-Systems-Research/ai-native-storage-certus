@@ -68,7 +68,16 @@ If `unified_properties.yaml` did not materialize, stop — Role 2 has nothing to
 
 ## Step 1.5 — LEVEL 1: spec<->code reconciliation (cheap; no provers) — 2026-10-04
 Verification has **two levels**. Level 1 compares what the specification says with what the code says;
-level 2 (Steps 2-4) formally proves the rest. Run, in the worktree:
+level 2 (Steps 2-4) formally proves the rest.
+
+**First, the sync check (part of Step 1, `build-property-inventory` → "LEVEL 1 — the spec<->code sync
+check").** It is mandatory and it is what finds the discordances; `level1.py` only reports and filters
+what it found. Without it, disagreements stay merged inside "agreed" records and the provers rediscover
+them: measured on extent-manager (2026-10-04), the reconciler marked 0 records divergent, and Creusot
+then refuted 75 of 184 in-scope properties — 28 of them one input-range mismatch (the code assumes a
+power-of-two sector size; the spec's FR-002 requires only > 0). Confirm the bundle shows the sync check
+ran: divergent records where a merge narrowed a claim, and a `domain_discordances:` list (possibly empty,
+but present). **Do not start Step 2 if it is missing.** Then run, in the worktree:
 ```
 python3 gate/level1.py components/<component>/verif
 python3 gate/render_discordances.py components/<component>/verif

@@ -12,7 +12,8 @@ import yaml
 
 esc = lambda s: html.escape(str(s if s is not None else ""))
 KIND = {"spec-and-code-differ": "spec and code differ",
-        "spec-not-found-in-code": "spec item not found in code"}
+        "spec-not-found-in-code": "spec item not found in code",
+        "input-range-mismatch": "input range mismatch"}
 
 
 def main():
@@ -49,13 +50,18 @@ th{font-weight:600;color:var(--muted);font-size:13px} code{font-size:12.5px}
          "confirms it.</p>",
          f"<p><b>{c.get('discordances', len(rows))}</b> discordances: "
          f"{c.get('spec_and_code_differ', 0)} where spec and code differ, "
-         f"{c.get('spec_not_found_in_code', 0)} where a spec item was not found in the code.</p>"]
+         f"{c.get('spec_not_found_in_code', 0)} where a spec item was not found in the code"
+         + (f", {c.get('input_range_mismatch', 0)} where the spec and the code accept different ranges of input"
+            if c.get('input_range_mismatch') else "") + ".</p>"
+         + ("<p>For an <b>input range mismatch</b>, the properties that depend on that input are still formally "
+            "verified, but only for the narrower range both sides accept, shown in the last column.</p>"
+            if c.get('input_range_mismatch') else "")]
     if not rows:
         P.append("<p>None — the specification and the code agree everywhere they were compared.</p>")
     else:
         P.append("<div class='scroll'><table><tr><th>#</th><th>kind</th><th>method</th>"
                  "<th>what the specification says</th><th>what the code does</th><th>where</th>"
-                 "<th>status</th></tr>")
+                 "<th>status</th><th>formal verification assumes</th></tr>")
         for i, e in enumerate(rows, 1):
             where = ("<b>spec</b> " + esc(", ".join(e.get("spec_pointers") or []) or "—") +
                      "<br><b>code</b> " + esc(", ".join(e.get("code_pointers") or []) or "—"))
@@ -63,7 +69,7 @@ th{font-weight:600;color:var(--muted);font-size:13px} code{font-size:12.5px}
                      f"<td><code>{esc(', '.join(e.get('methods') or []))}</code></td>"
                      f"<td>{esc(e.get('spec_says'))}</td><td>{esc(e.get('code_does'))}</td>"
                      f"<td class='ptr'>{where}<br><code>{esc(e.get('id'))}</code></td>"
-                     f"<td>{esc(e.get('status'))}</td></tr>")
+                     f"<td>{esc(e.get('status'))}</td><td>{esc(e.get('assume_in_level2') or '—')}</td></tr>")
         P.append("</table></div>")
     P.append("</div>")
     open(out, "w", encoding="utf-8").write("\n".join(P))

@@ -10,6 +10,13 @@ argument-hint: "[component-path] [interface-path]"
 > `discordances.yaml` and NOT formally verified — proving them only rediscovers a disagreement the
 > reconciliation already found. Also skip any hazard-worded record. "Attempt every property" below means
 > every level-2 property.
+>
+> **Prove under the level-1 assumptions.** If the bundle has `level2_assumptions:`, each entry is an
+> input range the specification and the code disagree on (`discordances.yaml`, kind input range
+> mismatch). State its `assume_rust` as a precondition on the entry operation's input (Creusot:
+> `#[requires(...)]` on the driver; Kani: `kani::assume(...)` before the call), and record which ones a
+> proof uses in its advisory note (`assumes: [D-RANGE-…]`). Add NO other precondition that the
+> obligation does not state: the gate rejects a proof that assumes more than its base.
 
 ## Goal
 Verify a component with Kani **and** record exactly what was verified.

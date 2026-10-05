@@ -579,6 +579,10 @@ def main():
             mtail += (f". <b>Level 1</b>: reconciling the specification with the code found <b>{_dn}</b> "
                       f"spec&harr;code discordance{'s' if _dn != 1 else ''}; the properties built from them "
                       f"are not formally verified here (<a href='{esc(comp)}_discordances.html'>see the list</a>)")
+    _as = d.get("level2_assumptions") or []
+    if _as:
+        mtail += (". Verified for: " + "; ".join(esc(str(x.get("assume", ""))) for x in _as)
+                  + " (where the specification and the code accept different inputs; see the list)")
     im_all = d.get("interface_methods") or all_method_names
     no_scope = [m for m in im_all if m not in methods and m in all_method_names]
     if no_scope:
