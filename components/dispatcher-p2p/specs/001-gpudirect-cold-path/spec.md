@@ -139,9 +139,173 @@ The system keeps both DRAM and SSD tiers within configured utilization bounds wi
 - **MemoryTierEvictor**: Periodic DRAM→SSD demotion thread driven by memory-tier utilization watermarks (`memory_tier_eviction_*` config), with pressure-scaled batch sizing and dry-run backoff, emitting `Demoted` events.
 - **PinnedKeys**: A crate-local guard owning a batch of dispatch-map read pins, releasing them together on drop so a pin outlives the completion (not merely submission) of an asynchronous GPU copy, preventing an entry from being demoted while a copy is still reading it.
 
+- **FR-024** *(New 2026-09-29 — serving-tier attribution.)* `batch_lookup` MUST return one
+  `LookupOutcome` per requested entry, in order, each carrying a `ServedBy` from the taxonomy
+  defined in `components/interfaces`. This component MUST NOT define its own value space or
+  restate it; the dispatcher's spec 002 owns the feature and `components/interfaces` owns the
+  type.
+
+- **FR-025** *(New 2026-09-29.)* This component MUST attribute its SSD-to-GPU cold path as
+  `Ssd`, **and the value legitimately persists across repeat reads of the same key**, unlike in
+  `components/dispatcher`. The cold path here is SSD → GPU BAR1 ring → D2D with **no
+  synchronous DRAM promotion** (see the GPUDirect requirements above), so a second read of a
+  key may be `Ssd` again where `dispatcher` would report `Dram`.
+
+  This is the one place SC-005 of spec 002 permits the two dispatchers to disagree for
+  identical residency, and it is a difference in *persistence*, not in the value chosen. A test
+  asserting that a repeat read changes tier would be mis-specified against this component.
+
+- **FR-025a** *(New 2026-10-01 — drift found by sweep, previously unspecced.)* This component
+  MUST report the **route partition** through `IDispatcher::tier_event_stats()`:
+  `lookup_hits_dram`, `lookup_hits_ssd` and `remote_lookup_hits`, which MUST sum to the served
+  keys over any interval. It MUST NOT return `TierEventStats::default()` for these, which is
+  what it did until 2026-09-30.
+
+  It still reports **no tier-movement counters** (promotions, evictions, store backpressure) —
+  those belong to paths this component does not have — so those fields remain zero, and that is
+  intentional rather than an omission.
+
+  **Why this needed stating.** Returning zeros compiled and passed every test: adding fields to
+  `TierEventStats` is not compiler-enforced, because the other implementors build it with
+  `..Default::default()`. A p2p server therefore reported 5 526 hits with every route at zero,
+  and the per-key attribution was correct the whole time — only its aggregate face was missing,
+  which is exactly why the invariant tests passed and nothing caught it. The partition
+  assertion of FR-026 is what closes that, and it is required *in this component* for the same
+  reason.
+
+- **FR-026** *(New 2026-09-29.)* The three invariants of
+  `dispatcher/specs/002-served-by-tier-attribution/contracts/idispatcher.md` MUST hold here
+  and MUST be tested **in this component**, not by borrowing `dispatcher`'s tests: length and
+  order, `served_by.is_hit()` if and only if `result.is_ok()`, and `Miss` if and only if
+  `KeyNotFound` after any remote attempt. A shared test would hide a divergence in either
+  component, which is the failure two separate specs exist to prevent.
+
+## ROOT CAUSE FOUND 2026-09-30: the cold path panics when the P2P ring is absent
+
+Found while attempting the dispatcher's spec 002 T116. **Three defects, and the cold path
+appears never to have been exercised.**
+
+### Defect 1 — a promised fallback that does not exist
+
+`initialize` attempts `p2p_ring::P2pRing::new()`, and on `None` logs:
+
+> `dispatcher-p2p: P2P ring unavailable, cold reads use DRAM path`
+
+**No such DRAM path exists.** The only cold-path use of the ring (`src/lib.rs:1802`) is
+`p2p_ring_guard.as_ref().expect("dispatcher-p2p requires P2P ring; use full.yaml profile
+for DRAM path")`. So the component logs a fallback at startup and panics ~12 000 requests
+later when the first cold read arrives. Two contradictory statements about one condition.
+
+`P2pRing::new` returns `None` when **`cudaMalloc` fails** (`p2p_ring.rs:58`) — a CUDA
+allocation failure, unrelated to GDRCopy.
+
+### Defect 2 — a worker panic silently retires the thread
+
+Observed: **16 panics, one per shm-queue worker**, and the pool erodes to zero. The worker
+loop in `lib/shmq-dispatcher/src/serve.rs` replies in both the `Ok` and `Err` arms, but a
+**panic unwinds past both**, so no reply is written and `while let Ok(req) = rx.recv()`
+exits. The server then:
+
+- still answers `/metrics` and still checkpoints (poller and NVMe threads unaffected),
+- has an **empty** work queue, because no worker remains to take from it,
+- and leaves every client blocked forever on a reply that cannot come.
+
+Measured by the flow counters added for this: `taken 1520, enqueued 1519, dequeued 1519,
+replied 1503` — `deq->reply 16`, exactly the worker count. **`serve` must catch a worker
+panic, reply `STATUS_ERROR`, and restart or fail loudly.** A server that has lost its
+entire worker pool while reporting healthy is the worst available failure mode.
+
+**A deadline in `dispatch` would NOT fix this and was rejected as a band-aid**: the threads
+are dead, not slow. Considering one was a symptom of mistaking the panic for a hang.
+
+### Defect 3 — a composition error surfaces at first cold read, not at startup
+
+`expect` on a data-path resource defers a knowable startup condition by ~12 000 requests.
+The ring's availability is decidable in `initialize`; a profile that cannot supply it should
+fail there, where the operator can act on it.
+
+### Evidence the cold path has never been exercised
+
+1. The promised DRAM fallback is **unimplemented** — specified in a log message, never written.
+2. **No test reaches it.** This crate's mock `MockEntryLocation::BlockDevice` variant is
+   reported by the compiler as **never constructed**; its 72 unit tests cover warm hits and
+   remote delivery only.
+3. **`CERTUS_PROFILE=full-p2p` could not build the yaml server at all** before 2026-09-30
+   (duplicated `EvictionEvent`), so this stack had never run.
+4. On this hardware the ring **cannot allocate**, so the path is unreachable even composed.
+
+Not claimed: that it never worked on hardware where `cudaMalloc` succeeds. That cannot be
+determined from here. What is established is that nothing in the repository exercises it and
+this configuration cannot.
+
+**Consequence for FR-014 and SC-008**: the `Ssd`-share comparison against
+`components/dispatcher` remains unverifiable until Defect 1 is fixed, because the first cold
+read is what kills the server.
+
 ## Success Criteria *(mandatory)*
 
 ### Measurable Outcomes
+
+- **SC-007** *(New 2026-09-29, covers FR-024..FR-026)*: For a batch mixing a locally-resident
+  key, a cold key and a key no peer holds, every outcome satisfies the three invariants and the
+  batch produces more than one distinct `ServedBy` — a fixture where every key resolves
+  identically satisfies all three while exercising one path.
+
+- **SC-008** *(New 2026-09-29, refined 2026-09-30, **MY PREDICTION REFUTED AND CORRECTED
+  2026-10-01**)*: On an identical workload this component reports a **LOWER** `Ssd` share of
+  served keys than `components/dispatcher`.
+
+  **Measured, both arms valid, 2 instances on node2, `--until 10 --rate inf --seed 1`:**
+
+  | arm | hits | dram | ssd | ssd share |
+  |---|---|---|---|---|
+  | `dispatcher-p2p` | 330 280 | 269 540 | 60 740 | **18.39%** |
+  | `dispatcher` | 329 254 | 221 451 | 107 803 | **32.74%** |
+
+  Total work within 0.3%; the route partition exact in both.
+
+  **I predicted the opposite sign and was wrong.** The reasoning was that no synchronous DRAM
+  promotion means a repeat read stays SSD-attributed, so p2p should report *more* `Ssd`. It
+  reports far less, and the mechanism is one the prediction ignored: **this component does not
+  stage cold reads through the memory tier at all.** `dispatcher` promotes every cold read
+  into DRAM as part of serving it, consuming memory-tier slots and forcing evictions; p2p
+  stages in GPU BAR1 and backfills DRAM asynchronously, so it puts far less pressure on the
+  tier. A less-pressured tier retains more, so fewer later reads are cold at all — 48 089 more
+  DRAM hits on an identical workload. The `Ssd` share fell because there were fewer cold
+  reads, not because cold reads were attributed differently.
+
+  **FR-014 itself is VERIFIED**: this component does attribute its SSD-to-GPU cold path as
+  `Ssd` (60 740 of them), the three interface invariants hold, and the route partition closes
+  exactly. What was wrong was my *observable*, not the requirement.
+
+  **A share comparison is therefore the wrong test of FR-014 and this criterion should not be
+  read as one.** The share conflates two independent things — how a cold read is attributed,
+  and how many cold reads occur. Those move in opposite directions here, so the aggregate can
+  shift either way for reasons unrelated to attribution. A direct test needs a *fixed* set of
+  known-cold keys read once each, with the per-key `ServedBy` inspected, which the widened
+  `LOOKUP` byte now makes possible and which no existing harness does.
+
+  **Incidental finding worth more than the criterion**: p2p's cold path costs the DRAM tier
+  far less than the DRAM path does, which is a performance argument for it that this feature
+  was not looking for and did not set out to measure.
+
+  **Stated as an aggregate share rather than as "a repeat read reports `Ssd` twice", and the
+  correction matters.** The obvious per-key formulation is wrong, because this component *does*
+  backfill DRAM — asynchronously. A key read cold is therefore `Ssd` on that read and may
+  legitimately be `Dram` on a later one, once the backfill has landed. "Twice `Ssd`" holds only
+  within a window shorter than the backfill, which no black-box client can observe or control,
+  so a test asserting it would be measuring the scheduler's timing rather than this
+  requirement. What FR-014 actually claims is that the promotion is not on the serving path,
+  and a share comparison on one workload tests exactly that.
+
+  **Not yet verified, and the reason is structural rather than an omission.** Dispatcher
+  selection is a build-time `CERTUS_PROFILE` choice, so the two cannot be compared by flipping
+  a runtime flag, and this component's unit tests reach `batch_lookup` only through mocks whose
+  `MockEntryLocation::BlockDevice` variant is currently never constructed. Verifying it needs
+  either a mock that models a real cold path or a `--features p2p-native` hardware run.
+  Recorded as unverified rather than quietly dropped.
+
+
 
 - **SC-001**: Cold lookups complete successfully with correct data under single-client and multi-client (4+) workloads.
 - **SC-002**: Hot-path throughput shows no measurable regression compared to the standard dispatcher.

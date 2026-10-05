@@ -14,10 +14,33 @@
       "id": "001-block-device-filesys",
       "title": "Block Device Filesys Component",
       "aligned": [
-        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007",
-        "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-014",
-        "FR-016", "FR-017", "FR-018", "FR-019", "FR-020", "FR-021", "FR-022",
-        "SC-001", "SC-002", "SC-003", "SC-004", "SC-005", "SC-006"
+        "FR-001",
+        "FR-002",
+        "FR-003",
+        "FR-004",
+        "FR-005",
+        "FR-006",
+        "FR-007",
+        "FR-008",
+        "FR-009",
+        "FR-010",
+        "FR-011",
+        "FR-012",
+        "FR-013",
+        "FR-014",
+        "FR-016",
+        "FR-017",
+        "FR-018",
+        "FR-019",
+        "FR-020",
+        "FR-021",
+        "FR-022",
+        "SC-001",
+        "SC-002",
+        "SC-003",
+        "SC-004",
+        "SC-005",
+        "SC-006"
       ],
       "drifted": [
         {
@@ -39,5 +62,7 @@
       "suggested_spec": "Not public API; either remove as dead code or note as reserved config mutators. Out of scope for functional requirements."
     }
   ],
-  "conflicts": []
+  "conflicts": [],
+  "inputs_sha256": "57278921c8a7ffa187fc4ea7fcc433d1533ed2c6a0c4fe3c45fccbe787cf5f0a",
+  "git_commit": "72c7182b"
 }

@@ -35,37 +35,37 @@
   ],
   "unspecced": [
     {
-      "feature": "MemoryTierEvictor — proactive background DRAM->SSD demotion sweep (config memory_tier_eviction_*)",
+      "feature": "MemoryTierEvictor \u2014 proactive background DRAM->SSD demotion sweep (config memory_tier_eviction_*)",
       "location": "components/dispatcher-p2p/src/background.rs",
       "lines": "490-654",
       "suggested_spec": "Add FR for proactive memory-tier demotion; FR-017 only covers the event, not the sweep."
     },
     {
-      "feature": "BackgroundEvictor — SSD extent eviction at utilization threshold (config ssd_eviction_*)",
+      "feature": "BackgroundEvictor \u2014 SSD extent eviction at utilization threshold (config ssd_eviction_*)",
       "location": "components/dispatcher-p2p/src/background.rs",
       "lines": "303-488",
       "suggested_spec": "Add FR for SSD capacity reclamation / watermarks."
     },
     {
-      "feature": "ParallelBackgroundWriter — write-through persistence memory-tier->SSD, one thread/drive",
+      "feature": "ParallelBackgroundWriter \u2014 write-through persistence memory-tier->SSD, one thread/drive",
       "location": "components/dispatcher-p2p/src/background.rs",
       "lines": "154-219",
       "suggested_spec": "Spec the write/persistence path (spec is cold-read-only)."
     },
     {
-      "feature": "clear_memory_tier() — flush entire memory tier",
+      "feature": "clear_memory_tier() \u2014 flush entire memory tier",
       "location": "components/dispatcher-p2p/src/lib.rs",
       "lines": "2606+",
       "suggested_spec": "Add FR or note as admin/maintenance op."
     },
     {
-      "feature": "lookup_async() — returns GpuStream for caller-side pipelined hot-path sync",
+      "feature": "lookup_async() \u2014 returns GpuStream for caller-side pipelined hot-path sync",
       "location": "components/dispatcher-p2p/src/lib.rs",
       "lines": "2044-2110",
       "suggested_spec": "Document async single-key contract in interface spec."
     },
     {
-      "feature": "pins::PinnedKeys — read-pin lifetime guard across async H2D copy (remote-lookup path)",
+      "feature": "pins::PinnedKeys \u2014 read-pin lifetime guard across async H2D copy (remote-lookup path)",
       "location": "components/dispatcher-p2p/src/pins.rs",
       "lines": "26-57",
       "suggested_spec": "Note pin-lifetime correctness invariant in data-model."
@@ -77,5 +77,7 @@
       "suggested_spec": "Confirm whether these apply to dispatcher-p2p or remove from its config surface."
     }
   ],
-  "conflicts": []
+  "conflicts": [],
+  "inputs_sha256": "03724fb8868c0c380f9b4373cc347d5f40cfedf89b6d24a72eb7591d81017842",
+  "git_commit": "72c7182b"
 }

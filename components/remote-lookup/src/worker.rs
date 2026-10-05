@@ -65,6 +65,8 @@ pub(crate) struct ServerDeps {
     pub dispatcher: Option<Arc<dyn IDispatcher + Send + Sync>>,
     pub initiator: Arc<dyn IRemoteLookupRdmaInitiator + Send + Sync>,
     pub logger: Option<Arc<dyn ILogger + Send + Sync>>,
+    /// Shared with the component's `serve_stats()` accessor.
+    pub serve_counters: Arc<crate::server::ServeCounters>,
 }
 
 /// The worker loop: drain [`InitiatorCmd`]s until the channel closes.
@@ -93,6 +95,7 @@ pub(crate) fn run(deps: ServerDeps, rx: Receiver<InitiatorCmd>, back: MpscSender
                     &requester_endpoint,
                     rkey,
                     &slots,
+                    &deps.serve_counters,
                     // Runs on the initiator's connection thread once the writes have
                     // landed. The poll loop owns the zyre node, so it whispers the
                     // status; a closed channel means the actor is shutting down and

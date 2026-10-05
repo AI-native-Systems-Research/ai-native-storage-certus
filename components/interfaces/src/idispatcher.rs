@@ -192,6 +192,120 @@ impl fmt::Display for DispatcherError {
 
 impl std::error::Error for DispatcherError {}
 
+/// Why an entry left the memory tier.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EvictionReason {
+    /// Demoted to the block tier; the value is still cached, on SSD.
+    Demoted,
+    /// Removed outright; the value is no longer cached anywhere locally.
+    Removed,
+}
+
+/// One memory-tier eviction, delivered best-effort on the eviction channel.
+///
+/// **Defined here rather than in a dispatcher crate**, because it crosses a component
+/// boundary: both `dispatcher` and `dispatcher-p2p` produce it and the shm-queue
+/// transport host consumes it. It previously existed as two structurally identical
+/// types, one per dispatcher, with the transport host hardcoding `dispatcher`'s --
+/// which made the shm-queue server impossible to build against `dispatcher-p2p` at all,
+/// since the generated stack correctly handed it the other crate's type. Both
+/// dispatchers now re-export this one, so their public paths are unchanged.
+#[derive(Clone, Debug)]
+pub struct EvictionEvent {
+    /// The evicted key.
+    pub key: CacheKey,
+    /// Whether the value survives on the block tier or is gone.
+    pub reason: EvictionReason,
+}
+
+/// How a looked-up key was served — the **route**, not the entry's residency after
+/// serving.
+///
+/// Exactly six values, and the value space is defined **here and only here**: any
+/// other document or crate references this type rather than restating it, because a
+/// taxonomy written down twice is a taxonomy that will disagree with itself.
+///
+/// Route, not residency, is the load-bearing distinction. In `dispatcher` an SSD hit
+/// is promoted into DRAM as part of being served, so "served from SSD" and "now in
+/// DRAM" are both true of one request; `Ssd` is the honest answer because it is what
+/// the request cost.
+///
+/// # Examples
+///
+/// ```
+/// use interfaces::ServedBy;
+///
+/// assert!(ServedBy::Dram.is_hit());
+/// assert!(ServedBy::Remote.is_hit());
+/// assert!(!ServedBy::Miss.is_hit());
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServedBy {
+    /// Local memory tier (DRAM) hit. The block was already resident.
+    Dram,
+    /// A local data drive was read to serve this request — whether it was then
+    /// promoted into DRAM (`dispatcher`) or delivered straight to the GPU with an
+    /// asynchronous DRAM backfill (`dispatcher-p2p`).
+    Ssd,
+    /// A peer served it.
+    ///
+    /// Deliberately **not** subdivided by the peer's tier. A responder promotes
+    /// disk-resident keys into its own memory tier before the RDMA read, so every
+    /// remotely served byte leaves a peer's DRAM and a `RemoteSsd` value could only
+    /// have meant "a peer's disk read was on this request's critical path" — an
+    /// advertisement rather than an observation, decaying on repeat access, at 0.81%
+    /// of hits. The peer's own disk work is counted on the peer instead, by
+    /// `IRemoteLookup::serve_stats`.
+    Remote,
+    /// Not found in any tier, local or remote.
+    Miss,
+    /// Present, but at a different size than requested. Distinct from `Miss`: the key
+    /// exists, so the caller's size model disagrees with what is stored rather than
+    /// needing to populate from scratch.
+    SizeMismatch,
+    /// Attempted and failed for some other reason. Deliberately flat — it does not
+    /// record which tier was attempted, because a failure's tier is not something a
+    /// caller can act on.
+    Error,
+}
+
+impl ServedBy {
+    /// True for the three values in which data reached the caller's destination.
+    ///
+    /// A hit is reported if and only if the lookup succeeded, so a consumer can
+    /// compute a hit rate as `hits / total` without knowing the error taxonomy.
+    pub fn is_hit(&self) -> bool {
+        matches!(self, Self::Dram | Self::Ssd | Self::Remote)
+    }
+}
+
+/// The per-key outcome of a batched lookup: what happened, and where it came from.
+///
+/// `served_by` is meaningful on every path, including the failures — which is what
+/// makes per-key attribution total.
+///
+/// **A struct, not `Result<ServedBy, DispatcherError>`.** The tier-on-`Ok` encoding
+/// cannot express `Miss`, `SizeMismatch` or `Error`, because those *are* the `Err`
+/// cases; it would push a third of the taxonomy into a per-server error-to-tier
+/// mapping, which is precisely how two servers reporting the same cache would drift
+/// apart.
+///
+/// # Examples
+///
+/// ```
+/// use interfaces::{LookupOutcome, ServedBy};
+///
+/// let served = LookupOutcome { served_by: ServedBy::Dram, result: Ok(()) };
+/// assert_eq!(served.served_by.is_hit(), served.result.is_ok());
+/// ```
+#[derive(Debug, Clone)]
+pub struct LookupOutcome {
+    /// How the key was served, or why it was not.
+    pub served_by: ServedBy,
+    /// The result the caller acts on. `is_ok()` if and only if `served_by.is_hit()`.
+    pub result: Result<(), DispatcherError>,
+}
+
 /// A cumulative snapshot of the dispatcher's KV-cache tier-movement counters.
 ///
 /// All fields are monotonic since process start; subtract two successive
@@ -201,6 +315,20 @@ impl std::error::Error for DispatcherError {}
 pub struct TierEventStats {
     /// Blocks promoted SSD -> DRAM (memory tier), across all promote paths.
     pub promotions_to_memory: u64,
+    /// Lookups served from the local memory tier (`ServedBy::Dram`).
+    ///
+    /// With `lookup_hits_ssd` and `remote_lookup_hits` this partitions every served
+    /// key by route, so the three sum to the served count. They are counted where the
+    /// dispatcher derives its attribution, so they cannot disagree with the per-key
+    /// `served_by` it returns for the same batch.
+    pub lookup_hits_dram: u64,
+    /// Lookups served by reading a local data drive (`ServedBy::Ssd`).
+    ///
+    /// Route, not residency: in `dispatcher` the block is promoted into DRAM as part
+    /// of being served, and this still counts as an SSD hit because that is what the
+    /// request cost. In `dispatcher-p2p` there is no synchronous promotion (FR-014),
+    /// so a repeat read of the same key may count here again.
+    pub lookup_hits_ssd: u64,
     /// Lookups served up to the GPU (one per successfully-served lookup key),
     /// whether the source was the memory tier or SSD.
     pub promotions_to_gpu: u64,
@@ -209,6 +337,32 @@ pub struct TierEventStats {
     pub evictions_from_memory: u64,
     /// Extents freed on SSD by the background extent evictor.
     pub evictions_from_ssd: u64,
+    /// Lookups a **peer** served, one per key the dispatcher obtained through
+    /// `IRemoteLookup` rather than from its own tiers.
+    ///
+    /// A `RemoteLookupError::TransportError` counts as **neither** a hit nor a miss:
+    /// the question "did a peer hold this key" was never answered, so counting it
+    /// either way would invent data. Consequently
+    /// `remote_lookup_hits + remote_lookup_misses` is the number of keys that got an
+    /// *answer*, not the number forwarded.
+    ///
+    /// A hit is recorded when the peer returns data, not after local delivery
+    /// succeeds — a delivery fault on this node is not evidence about what the peer
+    /// held.
+    ///
+    /// Requester-side: what this node got *from* peers, not what peers asked *of*
+    /// it. Those are different quantities and must not share a name.
+    ///
+    /// This exists because `promotions_to_gpu` counts every served key without
+    /// distinguishing the source, so remote lookup's *benefit* was unmeasurable
+    /// while its cost was not — two cluster measurements established the cost and
+    /// neither could establish the benefit.
+    pub remote_lookup_hits: u64,
+    /// Keys forwarded to a peer that no peer held. Absent everywhere, so a miss.
+    ///
+    /// With `remote_lookup_hits` this gives the remote path's own hit rate, which
+    /// is the number that says whether forwarding earns what it costs.
+    pub remote_lookup_misses: u64,
     /// Store-allocation retries taken while backpressuring on a momentarily
     /// full memory tier (see `DispatcherConfig::store_backpressure_ms`). A
     /// nonzero value means the tier saturated and the store path waited for the
@@ -360,7 +514,7 @@ component_macros::define_interface! {
         fn batch_lookup(
             &self,
             entries: &[(CacheKey, Vec<IpcHandle>)],
-        ) -> Vec<Result<(), DispatcherError>>;
+        ) -> Vec<LookupOutcome>;
 
         /// Check whether a cache entry exists without transferring data.
         ///

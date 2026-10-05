@@ -72,6 +72,10 @@ define_component! {
             // thread; read by tests via [`RemoteLookupComponent::peers_seen`] to
             // implement a discovery barrier.
             peers_seen: Arc<AtomicUsize>,
+            // Responder-side serve counters: what peers caused this node to do.
+            // Shared with the initiator worker thread, which owns the serve path;
+            // read by `serve_stats()`. Same pattern as `peers_seen` above.
+            serve_counters: Arc<crate::server::ServeCounters>,
         },
     }
 }
@@ -209,6 +213,7 @@ impl IRemoteLookup for RemoteLookupComponent {
             dispatcher: self.dispatcher.get().ok(),
             initiator,
             logger: logger.clone(),
+            serve_counters: Arc::clone(&self.serve_counters),
         };
         let back = tx.clone();
         let worker_handle = std::thread::Builder::new()
@@ -330,6 +335,14 @@ impl IRemoteLookup for RemoteLookupComponent {
         })?;
         tx.send(ActorMsg::Leave)
             .map_err(|e| RemoteLookupError::TransportError(format!("remote-lookup: {e:?}")))
+    }
+
+    /// Cumulative snapshot of what this node has served to its peers.
+    ///
+    /// Readable before `initialize`, returning zeroes: the counters exist from
+    /// construction, so a scraper never has to know whether the component came up.
+    fn serve_stats(&self) -> interfaces::RemoteServeStats {
+        self.serve_counters.snapshot()
     }
 }
 

@@ -40,9 +40,15 @@ const REASON_REMOVED: u32 = 1;
 pub trait TranslatorObserver: Send + Sync {
     /// A Populate op finalized `succeeded` new cache entries.
     fn on_populate(&self, _succeeded: u64) {}
-    /// A Lookup op resolved `hits` entries (moving `gpu_bytes` total to the GPU)
-    /// and `misses` entries that were not present.
-    fn on_lookup(&self, _hits: u64, _misses: u64, _gpu_bytes: u64) {}
+    /// A Lookup op resolved `hits` entries (moving `gpu_bytes` total to the GPU),
+    /// `misses` entries that were not present, and `errors` entries that could be
+    /// neither served nor shown absent.
+    ///
+    /// `hits + misses + errors` MUST equal the number of entries the client asked
+    /// for (FR-024). The three arrive in one call precisely so that identity is
+    /// checkable by the host: split across two calls, a host could implement one and
+    /// not the other and silently break it.
+    fn on_lookup(&self, _hits: u64, _misses: u64, _errors: u64, _gpu_bytes: u64) {}
     /// A TakeEvents op drained `count` eviction events.
     fn on_evictions(&self, _count: u64) {}
 }
@@ -247,6 +253,8 @@ fn decode_handle_batch(r: &mut Reader) -> Result<HandleBatch, OpError> {
     Ok(HandleBatch { handles, entries })
 }
 
+/// Which FR-024 bucket one looked-up entry falls in. Exhaustive by construction, so a
+
 /// Shared, server-global translation state. Cloneable (all fields are `Arc`),
 /// so each worker thread holds its own handle; `ipc_cache`/`pending_stores` are
 /// shared under mutexes exactly as in the gRPC server — a Reserve on one channel
@@ -256,7 +264,7 @@ pub struct Translator {
     dispatcher: Arc<dyn IDispatcher + Send + Sync>,
     ipc_cache: IpcCache,
     pending_stores: PendingStores,
-    eviction_rx: crossbeam_channel::Receiver<dispatcher::EvictionEvent>,
+    eviction_rx: crossbeam_channel::Receiver<interfaces::EvictionEvent>,
     eviction_dropped: Arc<AtomicU64>,
     observer: Option<Arc<dyn TranslatorObserver>>,
     /// Total store-backpressure budget shared across ALL keys in one OP_RESERVE
@@ -273,7 +281,7 @@ impl Drop for Translator {
 impl Translator {
     pub fn new(
         dispatcher: Arc<dyn IDispatcher + Send + Sync>,
-        eviction_rx: crossbeam_channel::Receiver<dispatcher::EvictionEvent>,
+        eviction_rx: crossbeam_channel::Receiver<interfaces::EvictionEvent>,
         eviction_dropped: Arc<AtomicU64>,
         store_backpressure: Duration,
     ) -> Self {
@@ -597,6 +605,58 @@ impl Translator {
         Ok(w.into_bytes())
     }
 
+    /// Classify one dispatched entry's result into the FR-024 buckets.
+    ///
+    /// `KeyNotFound` is the only miss: it means the key is absent from every tier and
+    /// from every peer (the dispatcher maps a peer's `NotFound` back to it). Anything
+    /// else is an error -- the request neither served the key nor established that it
+    /// was absent, so counting it as a miss would put a fault into the hit rate.
+    /// Map a `ServedBy` to the `LOOKUP` reply's per-key byte.
+    ///
+    /// `0` keeps its exact prior meaning, "not served", so every reader testing
+    /// `byte != 0` classifies each key as it did before -- which is what makes this
+    /// widening invisible to the Python connector (`decode_ok_flags`).
+    ///
+    /// **`PENDING` is deliberately absent.** The non-zero range means *delivered*, and a
+    /// pending key was not; a value here would tell a `!= 0` reader that data arrived
+    /// which never did. Pending lives on `CHECK`, where `decode_states` reads raw ints.
+    /// See the dispatcher's spec 002 `contracts/served-by.md`.
+    fn wire_tier(served_by: interfaces::ServedBy) -> u8 {
+        use interfaces::ServedBy as S;
+        match served_by {
+            S::Dram => 1,
+            S::Ssd => 2,
+            S::Remote => 3,
+            // The three not-served values collapse to `0`: the counters need the
+            // distinction between them, the client only needs "was it served".
+            S::Miss | S::SizeMismatch | S::Error => 0,
+        }
+    }
+
+    fn tally_lookup(requested: usize, results: &[interfaces::LookupOutcome]) -> (u64, u64, u64) {
+        let mut hits = 0u64;
+        let mut misses = 0u64;
+        // Held back before dispatch: never reached the dispatcher at all.
+        //
+        // Saturating, not plain subtraction: a caller passing more results than it
+        // requested is a bug, but the release-mode consequence of wrapping here is an
+        // astronomically large error count -- a metric that lies loudly is worse than
+        // one that under-reports, and the `debug_assert` catches the bug in tests.
+        debug_assert!(results.len() <= requested);
+        let mut errors = requested.saturating_sub(results.len()) as u64;
+        for outcome in results {
+            // Read straight off the attribution the dispatcher assigned. Before it
+            // existed this had to re-derive the class from the error variant, which
+            // meant two places could disagree about what a given error meant.
+            match outcome.served_by {
+                s if s.is_hit() => hits += 1,
+                interfaces::ServedBy::Miss => misses += 1,
+                _ => errors += 1,
+            }
+        }
+        (hits, misses, errors)
+    }
+
     fn op_lookup(&self, r: &mut Reader) -> Result<Vec<u8>, OpError> {
         let batch = decode_handle_batch(r)?;
         let keys: Vec<u64> = batch.entries.iter().map(|(k, _)| *k).collect();
@@ -604,8 +664,9 @@ impl Translator {
 
         let (resolved, opened_keys) = self.open_handle_table(&batch.handles);
 
-        // Resolve regions per entry; entries whose handles failed to open are
-        // held back from the batch and reported as misses (ok=0).
+        // Resolve regions per entry; entries whose handles failed to open are held
+        // back from the batch and reported not-served (ok=0). They are counted as
+        // ERRORS, not misses -- see `tally_lookup`.
         let mut ok_flags = vec![0u8; batch.entries.len()];
         let mut valid_indices = Vec::with_capacity(batch.entries.len());
         let mut valid_batch: Vec<(u64, Vec<IpcHandle>)> = Vec::with_capacity(batch.entries.len());
@@ -617,25 +678,18 @@ impl Translator {
         }
 
         let results = self.dispatcher.batch_lookup(&valid_batch);
-        let mut hits = 0u64;
-        let mut misses = 0u64;
+        let (hits, misses, errors) = Self::tally_lookup(batch.entries.len(), &results);
         let mut gpu_bytes = 0u64;
         for ((slot, res), (_, regions)) in valid_indices
             .iter()
-            .zip(results.into_iter())
+            .zip(results.iter())
             .zip(valid_batch.iter())
         {
-            match res {
-                Ok(()) => {
-                    ok_flags[*slot] = 1;
-                    hits += 1;
-                    // Sum across all per-layer regions (N==1 for coalesced blocks).
-                    gpu_bytes += regions.iter().map(|h| h.size as u64).sum::<u64>();
-                }
-                // Only KeyNotFound counts as a miss; other errors (e.g. transient
-                // I/O) mirror the gRPC service, which excludes them from misses.
-                Err(interfaces::DispatcherError::KeyNotFound(_)) => misses += 1,
-                Err(_) => {}
+            let tier = Self::wire_tier(res.served_by);
+            if tier != 0 {
+                ok_flags[*slot] = tier;
+                // Sum across all per-layer regions (N==1 for coalesced blocks).
+                gpu_bytes += regions.iter().map(|h| h.size as u64).sum::<u64>();
             }
         }
 
@@ -644,7 +698,7 @@ impl Translator {
         }
 
         if let Some(obs) = &self.observer {
-            obs.on_lookup(hits, misses, gpu_bytes);
+            obs.on_lookup(hits, misses, errors, gpu_bytes);
         }
 
         let mut w = Writer::with_capacity(ok_flags.len());
@@ -704,8 +758,12 @@ impl Translator {
                 continue;
             }
             match Self::regions_of(entry_regions, &resolved) {
-                None => { rejected.push(i); }
-                Some(regions) => { batch_entries.push((*key, regions[0])); }
+                None => {
+                    rejected.push(i);
+                }
+                Some(regions) => {
+                    batch_entries.push((*key, regions[0]));
+                }
             }
         }
 
@@ -720,7 +778,10 @@ impl Translator {
             let ok = if rejected.contains(&i) {
                 false
             } else {
-                let result = batch_results.get(batch_idx).map(|r| r.is_ok()).unwrap_or(false);
+                let result = batch_results
+                    .get(batch_idx)
+                    .map(|r| r.is_ok())
+                    .unwrap_or(false);
                 batch_idx += 1;
                 result
             };
@@ -832,8 +893,18 @@ mod tests {
         fn batch_lookup(
             &self,
             entries: &[(CacheKey, Vec<IpcHandle>)],
-        ) -> Vec<Result<(), DispatcherError>> {
-            entries.iter().map(|_| Ok(())).collect()
+        ) -> Vec<interfaces::LookupOutcome> {
+            entries
+                .iter()
+                .map(|_| interfaces::LookupOutcome {
+                    // This mock simulates a cache that always serves locally from DRAM,
+                    // so `Dram` is what it models rather than a convenient constant. A
+                    // mock reporting one tier regardless of what it simulates would make
+                    // every attribution assertion vacuous (FR-028).
+                    served_by: interfaces::ServedBy::Dram,
+                    result: Ok(()),
+                })
+                .collect()
         }
         fn check(&self, key: CacheKey) -> Result<bool, DispatcherError> {
             Ok(self.resident.lock().unwrap().contains(&key))
@@ -846,8 +917,14 @@ mod tests {
             self.resident.lock().unwrap().insert(key);
             Ok(())
         }
-        fn batch_populate(&self, entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), DispatcherError>> {
-            entries.iter().map(|(k, h)| self.populate(*k, h.clone())).collect()
+        fn batch_populate(
+            &self,
+            entries: &[(CacheKey, IpcHandle)],
+        ) -> Vec<Result<(), DispatcherError>> {
+            entries
+                .iter()
+                .map(|(k, h)| self.populate(*k, h.clone()))
+                .collect()
         }
         fn reserve_memory(
             &self,
@@ -918,9 +995,127 @@ mod tests {
     fn translator(disp: Arc<MockDispatcher>) -> Translator {
         // Eviction channel is unused by op_check; keep the sender alive so the
         // receiver does not report "disconnected".
-        let (_tx, rx) = crossbeam_channel::unbounded::<dispatcher::EvictionEvent>();
+        let (_tx, rx) = crossbeam_channel::unbounded::<interfaces::EvictionEvent>();
         std::mem::forget(_tx);
         Translator::new(disp, rx, Arc::new(AtomicU64::new(0)), Duration::ZERO)
+    }
+
+    /// T110: a conforming server emits only `0..=3`, and every served value is non-zero.
+    ///
+    /// Exhaustive over the taxonomy rather than sampled, so a seventh value added later
+    /// cannot slip through unmapped -- the `match` in `wire_tier` would fail to compile,
+    /// and this test states the range that compile-time guarantee is protecting.
+    #[test]
+    fn the_wire_byte_stays_in_range_and_zero_still_means_not_served() {
+        use interfaces::ServedBy as S;
+
+        for served in [S::Dram, S::Ssd, S::Remote] {
+            let b = Translator::wire_tier(served);
+            assert!(
+                (1..=3).contains(&b),
+                "{served:?} must be a non-zero value in 1..=3, got {b}"
+            );
+        }
+        for not_served in [S::Miss, S::SizeMismatch, S::Error] {
+            assert_eq!(
+                Translator::wire_tier(not_served),
+                0,
+                "{not_served:?} was not served, so it must read 0 -- a non-zero value \
+                 here would tell a `!= 0` reader that data arrived which never did"
+            );
+        }
+
+        // The three served values are distinct, or the byte carries no tier at all.
+        let tiers: Vec<u8> = [S::Dram, S::Ssd, S::Remote]
+            .iter()
+            .map(|s| Translator::wire_tier(*s))
+            .collect();
+        let mut sorted = tiers.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(
+            sorted.len(),
+            3,
+            "served tiers must be distinguishable: {tiers:?}"
+        );
+    }
+
+    /// FR-024: hits + misses + errors accounts for EVERY entry the client asked for.
+    ///
+    /// Four outcomes in one batch, including the two that used to vanish: an entry held
+    /// back before dispatch (its GPU handle would not open) and a dispatcher error that
+    /// is not `KeyNotFound`. Both were dropped -- the first never reached the counting
+    /// loop, the second hit `Err(_) => {}` -- so the totals were silently short.
+    ///
+    /// Asserted as the identity rather than as four separate numbers, because the
+    /// identity is the property a reader of `/metrics` actually relies on: it is what
+    /// makes a hit *rate* meaningful. Four numbers that each look plausible can still
+    /// fail to add up.
+    #[test]
+    fn lookup_accounting_covers_every_requested_entry() {
+        use interfaces::DispatcherError;
+
+        // 5 requested, 3 dispatched: 2 were held back before reaching the dispatcher.
+        use interfaces::{LookupOutcome, ServedBy as S};
+        let dispatched = vec![
+            // The attribution now carries the class, so the fixture states it rather
+            // than leaving the tally to re-derive it from the error variant.
+            LookupOutcome {
+                served_by: S::Dram,
+                result: Ok(()),
+            },
+            LookupOutcome {
+                served_by: S::Miss,
+                result: Err(DispatcherError::KeyNotFound(7)),
+            },
+            LookupOutcome {
+                served_by: S::Error,
+                result: Err(DispatcherError::IoError("fabric".into())),
+            },
+        ];
+        let (hits, misses, errors) = Translator::tally_lookup(5, &dispatched);
+
+        assert_eq!(
+            (hits, misses, errors),
+            (1, 1, 3),
+            "got {hits}/{misses}/{errors}"
+        );
+        assert_eq!(
+            hits + misses + errors,
+            5,
+            "FR-024: every requested entry must land in exactly one bucket; \
+             {hits} + {misses} + {errors} != 5"
+        );
+    }
+
+    /// An I/O error is not a miss, and a handle that will not open is not a miss.
+    ///
+    /// Stated separately because the tempting simplification -- "anything not served is
+    /// a miss" -- would satisfy the identity above while corrupting the hit rate with
+    /// faults. A fabric failure counted as a miss makes a broken cluster look like a
+    /// cold cache; a caller's bad handle counted as a miss blames the cache for the
+    /// client's bug.
+    #[test]
+    fn faults_are_not_misses() {
+        use interfaces::DispatcherError;
+
+        use interfaces::{LookupOutcome, ServedBy as S};
+        let only_io = vec![LookupOutcome {
+            served_by: S::Error,
+            result: Err(DispatcherError::IoError("fabric".into())),
+        }];
+        assert_eq!(
+            Translator::tally_lookup(1, &only_io),
+            (0, 0, 1),
+            "an I/O error is an error, never a miss"
+        );
+
+        // Nothing dispatched at all: every entry held back on its handle.
+        assert_eq!(
+            Translator::tally_lookup(4, &[]),
+            (0, 0, 4),
+            "entries held back on an unopenable handle are errors, never misses"
+        );
     }
 
     fn enc_keys(keys: &[u64]) -> Vec<u8> {
@@ -1033,7 +1228,7 @@ mod tests {
     fn op_reserve_shares_one_deadline_across_batch() {
         let disp = Arc::new(MockDispatcher::default());
         *disp.block_until_deadline.lock().unwrap() = true;
-        let (_tx, rx) = crossbeam_channel::unbounded::<dispatcher::EvictionEvent>();
+        let (_tx, rx) = crossbeam_channel::unbounded::<interfaces::EvictionEvent>();
         std::mem::forget(_tx);
         let budget = Duration::from_millis(300);
         let tr = Translator::new(disp.clone(), rx, Arc::new(AtomicU64::new(0)), budget);

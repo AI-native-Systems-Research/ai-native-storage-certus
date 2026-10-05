@@ -15,6 +15,7 @@
 //! `batch_lookup`s as a client (the dual-role concurrency the mesh tests
 //! exercise).
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use interfaces::{
@@ -195,6 +196,27 @@ enum Resolved {
 ///
 /// `requester_endpoint`/`rkey` come from the RDMA_REQUEST: the serving peer's
 /// initiator connects to the requester's responder and writes into its pool.
+/// Responder-side serve counters, shared between the worker thread and the
+/// component's `serve_stats()` accessor.
+///
+/// Relaxed ordering throughout: these are monotonic observability counters read by a
+/// polling scraper, so no reader depends on seeing them in step with each other or
+/// with any other memory operation.
+#[derive(Debug, Default)]
+pub(crate) struct ServeCounters {
+    pub served: AtomicU64,
+    pub cold_promotions: AtomicU64,
+}
+
+impl ServeCounters {
+    pub(crate) fn snapshot(&self) -> interfaces::RemoteServeStats {
+        interfaces::RemoteServeStats {
+            peer_served_keys: self.served.load(Ordering::Relaxed),
+            peer_triggered_promotions: self.cold_promotions.load(Ordering::Relaxed),
+        }
+    }
+}
+
 pub(crate) fn serve_rdma_request(
     dispatch_map: &Arc<dyn IDispatchMap + Send + Sync>,
     dispatcher: Option<&Arc<dyn IDispatcher + Send + Sync>>,
@@ -202,6 +224,7 @@ pub(crate) fn serve_rdma_request(
     requester_endpoint: &Endpoint,
     rkey: u32,
     slots: &[SlotDesc],
+    counters: &ServeCounters,
     on_done: ServeCompletion,
 ) {
     let mut statuses: Vec<(CacheKey, RdmaStatusCode)> = Vec::with_capacity(slots.len());
@@ -245,6 +268,17 @@ pub(crate) fn serve_rdma_request(
             cold.sort_unstable();
             cold.dedup();
             disp.promote_to_memory_tier(&cold);
+            // The cold-serve signal: keys this node had to go to its OWN disk for in
+            // order to answer a peer. Counted here, where the promotion is requested,
+            // so it measures I/O undertaken rather than bytes confirmed delivered --
+            // a promotion that then fails the re-lookup below still cost the read.
+            //
+            // Deduplicated already, so one request asking twice for the same key
+            // counts once. First-touch by nature: the promotion leaves the entry in
+            // DRAM, so the next request for it is served warm and adds nothing.
+            counters
+                .cold_promotions
+                .fetch_add(cold.len() as u64, Ordering::Relaxed);
 
             for (slot, outcome) in slots.iter().zip(resolved.iter_mut()) {
                 if !matches!(outcome, Resolved::Cold) {
@@ -285,6 +319,14 @@ pub(crate) fn serve_rdma_request(
             }
         }
     }
+
+    // Counted at the same stage as `cold_promotions`, deliberately: both are work
+    // this node undertook for a peer, so their ratio is the fraction of peer-served
+    // keys that needed a disk read. Counting one at completion and the other at
+    // submission would make that ratio quietly wrong whenever a push failed.
+    counters
+        .served
+        .fetch_add(to_push.len() as u64, Ordering::Relaxed);
 
     if to_push.is_empty() {
         // Nothing to write, so nothing to wait for — and `pinned` is empty.
@@ -378,8 +420,27 @@ mod tests {
         rkey: u32,
         slots: &[SlotDesc],
     ) -> Vec<(CacheKey, RdmaStatusCode)> {
+        serve_counted(dm, disp, init, rkey, slots).0
+    }
+
+    /// As `serve`, but also returns the serve counters this request moved.
+    ///
+    /// Separate rather than folded into `serve` so the existing call sites stay
+    /// readable; the counters matter to two tests, not to the twenty that only care
+    /// about statuses.
+    fn serve_counted(
+        dm: &Arc<dyn IDispatchMap + Send + Sync>,
+        disp: Option<&Arc<dyn IDispatcher + Send + Sync>>,
+        init: &Arc<dyn IRemoteLookupRdmaInitiator + Send + Sync>,
+        rkey: u32,
+        slots: &[SlotDesc],
+    ) -> (
+        Vec<(CacheKey, RdmaStatusCode)>,
+        interfaces::RemoteServeStats,
+    ) {
         let reported = Arc::new(std::sync::Mutex::new(None));
         let sink = Arc::clone(&reported);
+        let counters = ServeCounters::default();
         serve_rdma_request(
             dm,
             disp,
@@ -387,13 +448,17 @@ mod tests {
             &endpoint(),
             rkey,
             slots,
+            &counters,
             Box::new(move |statuses| {
                 *sink.lock().expect("sink poisoned") = Some(statuses);
             }),
         );
         // Bound to a local so the guard drops before `reported` does.
         let statuses = reported.lock().expect("sink poisoned").take();
-        statuses.expect("serve did not report any statuses")
+        (
+            statuses.expect("serve did not report any statuses"),
+            counters.snapshot(),
+        )
     }
 
     /// Every disk-resident key in one RDMA_REQUEST must be promoted by a *single*
@@ -423,6 +488,107 @@ mod tests {
         for (key, code) in &statuses {
             assert_eq!(*code, RdmaStatusCode::Success, "key {key} not served");
         }
+    }
+
+    /// The cold-serve counter counts the node's OWN disk reads done for a peer.
+    ///
+    /// This is the instrument that replaced a per-key `REMOTE_SSD` attribution
+    /// (withdrawn — see the dispatcher's spec 002): the useful question was never
+    /// "which tier did my hit come from" but "how much cold work are peers causing
+    /// here", and that is a responder-side aggregate.
+    ///
+    /// Asserted against `peer_served_keys` in the same request, because the number
+    /// that matters is the *fraction*: 8 of 8 served keys needed a disk read here.
+    #[test]
+    fn cold_serve_counts_this_nodes_own_disk_reads_for_a_peer() {
+        let world = NodeWorld::new(1 << 20);
+        let keys: Vec<CacheKey> = (1..=8).collect();
+        for (i, &key) in keys.iter().enumerate() {
+            world.with_disk(key, SIZE, i as u64 * SIZE as u64);
+        }
+        let (dm, disp, init) = node(&world);
+
+        let (statuses, stats) = serve_counted(&dm, Some(&disp), &init, 0x42, &slots(&keys));
+
+        for (key, code) in &statuses {
+            assert_eq!(*code, RdmaStatusCode::Success, "key {key} not served");
+        }
+        assert_eq!(
+            stats.peer_triggered_promotions, 8,
+            "every disk-only key served to a peer is one disk read this node did for it"
+        );
+        assert_eq!(
+            stats.peer_served_keys, 8,
+            "all eight were served, so the cold fraction is 8/8"
+        );
+    }
+
+    /// A MIXED batch is what pins the counter to the cold keys specifically.
+    ///
+    /// Added after mutation testing found the hole: with an all-cold batch,
+    /// `cold.len()` and `slots.len()` are the same number, so replacing one with the
+    /// other passed both of the neighbouring tests. Only a batch where some keys are
+    /// warm and some are cold can tell "keys I read from disk" from "keys I served".
+    ///
+    /// Nine keys, three of them disk-only: the counter must read 3, not 9.
+    #[test]
+    fn cold_serve_counts_only_the_cold_keys_in_a_mixed_batch() {
+        let world = NodeWorld::new(1 << 20);
+        let warm: Vec<CacheKey> = (1..=6).collect();
+        let cold: Vec<CacheKey> = (7..=9).collect();
+        for &key in &warm {
+            world.with_memory(key, SIZE);
+        }
+        for (i, &key) in cold.iter().enumerate() {
+            world.with_disk(key, SIZE, i as u64 * SIZE as u64);
+        }
+        let all: Vec<CacheKey> = warm.iter().chain(cold.iter()).copied().collect();
+        let (dm, disp, init) = node(&world);
+
+        let (statuses, stats) = serve_counted(&dm, Some(&disp), &init, 0x42, &slots(&all));
+
+        for (key, code) in &statuses {
+            assert_eq!(*code, RdmaStatusCode::Success, "key {key} not served");
+        }
+        assert_eq!(
+            stats.peer_served_keys, 9,
+            "all nine were served to the peer"
+        );
+        assert_eq!(
+            stats.peer_triggered_promotions, 3,
+            "only the three disk-only keys cost this node a read; counting all nine \
+             would report three times the true cold-serve pressure"
+        );
+    }
+
+    /// Serving from memory costs this node no disk read, and must count none.
+    ///
+    /// **This is the test that makes the counter mean anything.** Counting every
+    /// served key as cold would satisfy the test above perfectly while measuring
+    /// nothing but traffic — the same failure mode that made `certus_lookup_hits`
+    /// useless for the remote question.
+    #[test]
+    fn serving_from_memory_costs_no_disk_read() {
+        let world = NodeWorld::new(1 << 20);
+        let keys: Vec<CacheKey> = (1..=4).collect();
+        for &key in &keys {
+            world.with_memory(key, SIZE);
+        }
+        let (dm, disp, init) = node(&world);
+
+        let (statuses, stats) = serve_counted(&dm, Some(&disp), &init, 0x42, &slots(&keys));
+
+        for (key, code) in &statuses {
+            assert_eq!(*code, RdmaStatusCode::Success, "key {key} not served");
+        }
+        assert_eq!(
+            stats.peer_served_keys, 4,
+            "the peer was served, so the denominator moves"
+        );
+        assert_eq!(
+            stats.peer_triggered_promotions, 0,
+            "a warm serve reads no disk; counting it would make the signal meaningless"
+        );
     }
 
     /// Memory-resident keys need no promotion at all — the batched call must not

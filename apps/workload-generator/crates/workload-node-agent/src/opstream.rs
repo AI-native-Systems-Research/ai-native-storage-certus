@@ -200,7 +200,17 @@ impl TurnSplit {
         self.missing.clear();
         self.pending = 0;
         for (key, served) in path.iter().zip(ok.iter()) {
-            if *served == 1 {
+            // `!= 0`, not `== 1`: the byte was widened to carry the serving tier
+            // (1 DRAM, 2 SSD, 3 REMOTE) and `0` still means not served. Testing `== 1`
+            // counted every SSD and remote hit as a miss and re-stored those blocks --
+            // silently wrong in exactly the accounting this instrument exists to report.
+            //
+            // The original reasoning for `== 1` was sound under a two-valued byte: an
+            // unexpected value could only mean a key that was never delivered, and
+            // treating it as a hit would leave a block unstored. That argument now applies
+            // to the UNASSIGNED range only, and a future value there will be a served
+            // tier, so `!= 0` is the forward-compatible reading.
+            if *served != 0 {
                 self.resident.push(*key);
             } else {
                 self.missing.push(*key);
@@ -458,11 +468,18 @@ mod tests {
         assert_eq!(split.missing(), &[11, 13]);
         assert_eq!(split.pending(), 0);
 
-        // Only 1 means served: a byte that is neither 0 nor 1 must not be read as a hit, or a
-        // key that was never delivered would go unstored and unloaded.
-        split.split_by_lookup(&[20, 21], &[2, 1]);
-        assert_eq!(split.resident(), &[21]);
-        assert_eq!(split.missing(), &[20]);
+        // Any non-zero byte is served, because the byte now carries the serving tier:
+        // 1 DRAM, 2 SSD, 3 REMOTE. This assertion used to require that `2` be a miss,
+        // which was right under the old two-valued byte and became wrong the moment the
+        // server started distinguishing tiers.
+        split.split_by_lookup(&[20, 21, 22], &[1, 2, 3]);
+        assert_eq!(split.resident(), &[20, 21, 22]);
+        assert!(split.missing().is_empty());
+
+        // Only `0` means not served, and it still does.
+        split.split_by_lookup(&[30, 31], &[0, 2]);
+        assert_eq!(split.resident(), &[31]);
+        assert_eq!(split.missing(), &[30]);
 
         // A short answer leaves the rest alone, exactly as `split` does: guessing would
         // either invent a hit or invent a store.
