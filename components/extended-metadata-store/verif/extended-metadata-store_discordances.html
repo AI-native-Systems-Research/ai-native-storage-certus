@@ -1,0 +1,20 @@
+<title>extended-metadata-store discordances</title>
+<style>
+:root{--bg:#fbfaf7;--fg:#1d1d1b;--muted:#6b6a64;--line:#e4e1d8;--chip:#efece4}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1b1b19;--fg:#ecebe6;--muted:#a3a29b;--line:#3a3934;--chip:#2a2a27}}
+:root[data-theme="dark"]{--bg:#1b1b19;--fg:#ecebe6;--muted:#a3a29b;--line:#3a3934;--chip:#2a2a27}
+body{background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;margin:0}
+.wrap{max-width:1100px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:22px;margin:0 0 6px} .sub{color:var(--muted);margin:0 0 18px}
+.scroll{overflow-x:auto} table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{border-top:1px solid var(--line);padding:8px 10px;vertical-align:top;text-align:left}
+th{font-weight:600;color:var(--muted);font-size:13px} code{font-size:12.5px}
+.chip{background:var(--chip);border-radius:4px;padding:1px 6px;font-size:12px;white-space:nowrap}
+.ptr{color:var(--muted);font-size:12.5px}
+</style><div class='wrap'>
+<h1>extended-metadata-store — spec↔code discordances</h1>
+<p class='sub'>Pin <code>f3de84aa</code> · Level 1 of verification</p>
+<p>Before any formal proof, the component's specification and its code are each read independently and the two readings are compared. Where they <b>disagree</b>, or the specification asks for something not found in the code, it is listed here. These are findings of the verification, but they are <b>not formally verified</b>: proving them would only rediscover what is already plain from the text. Whoever keeps the specification and the code in step decides which side to change. Each entry is a <i>candidate</i> until a test confirms it.</p>
+<p><b>0</b> discordances: 0 where spec and code differ, 0 where a spec item was not found in the code.</p>
+<p>None — the specification and the code agree everywhere they were compared.</p>
+</div>
