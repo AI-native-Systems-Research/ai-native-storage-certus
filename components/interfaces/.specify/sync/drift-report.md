@@ -1,11 +1,17 @@
 ---
 spec_sync_component: interfaces
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-03T13:20:18Z
-spec_sync_git_commit: 2c86a131
-spec_sync_inputs_sha256: 1cd9329d436cbcded582c2e600e41879ed6e6817cdbf3711675538cc1f06ba03
+spec_sync_synced_at: 2026-10-05T19:05:49Z
+spec_sync_git_commit: d102a00b
+spec_sync_inputs_sha256: 07985dfb7f3a52f1b62ae6697886bbd116eed45fe64bf72d9c3f7e06e4f64199
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-10-05 (branch `fix/poller-cpu-placement-logging`).** Delta analysis on a certified baseline: this component's existing clean stamp was re-verified to equal the spec-sync hash of `git archive origin/unstable`, so the only new inputs are this branch's src/specs/interfaces changes. Every FR/SC touching CPU placement, NUMA pinning, threads or SPDK init was located by grep over specs/** and re-checked against the changed code.
+>
+> - **DispatcherConfig::poller_base_cpu doc comment — ALIGN (doc) (minor).** The dispatchers assign NUMA-local cores round-robin, excluding each node's first two; block-device fallback / unpinned cases as in dispatcher FR-011. `components/interfaces/src/idispatcher.rs:46-56`. *Pre-existing doc drift; user chose to fix in this PR and re-stamp all components.* Resolution: Doc comment corrected. FR-018 lists `poller_base_cpu` by name only, so no spec text change was needed.
+>
+> No actionable drift remains for this component after apply.
+
 > **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest
 > folds `components/interfaces/{src,specs}` into **every** component's hash, so an interface
 > change invalidates all of them at once -- which is the design, not a defect. The interface

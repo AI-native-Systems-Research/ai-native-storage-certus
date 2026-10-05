@@ -1,32 +1,25 @@
 {
-  "generated": "2026-09-09T21:33:18Z",
+  "generated": "2026-10-05",
   "project": "dispatcher",
   "spec": "001-dispatcher-cache-interface",
-  "branch": "fix-dispatcher-store-backpressure",
-  "source": ".specify/sync/drift-report.json",
-  "editing_scope": ["specs/**"],
+  "branch": "fix/poller-cpu-placement-logging",
+  "mode": "interactive",
   "summary": {
-    "align": 0,
-    "backfill": 1,
-    "backfill_unspecced": 0,
-    "resolved": 0,
-    "human_decision": 0,
+    "proposals": 1,
     "approved": 1
   },
   "proposals": [
     {
-      "requirement": "FR-060 (new); FR-003, FR-033, FR-056, FR-058, FR-059; edge-case; US1 scenario 5",
+      "id": 1,
+      "requirement": "FR-011",
       "direction": "BACKFILL",
-      "commit": "39ffee9b,c400ced8",
-      "status": "APPROVED",
-      "rationale": "reserve_memory applies bounded store backpressure (retry evict_and_insert on a 20ms poll until store_backpressure_ms budget, default 5000ms, then fail fast; budget=0 restores single-shot fail-fast) at src/lib.rs:3115. populate (src/lib.rs:2950) and batch_populate (src/lib.rs:3017) unconditionally best-effort drop on full: log, bump store_drops_on_full, return Ok(()) without caching, instead of propagating AllocationFailed (which the vLLM connector turns into a fatal assert transfer_result.success -> EngineDeadError). DispatcherConfig gained store_backpressure_ms; TierEventStats gained store_backpressure_events + store_drops_on_full (idispatcher.rs). Spec previously specified only FR-053 read-path staging and a four-field TierEventStats, and specified populate/batch_populate to surface AllocationFailed on a full tier.",
-      "accuracy_note": "Drop-on-full is unconditional; store_backpressure_ms=0 disables ONLY the reserve_memory retry, not the caller-side drop. Verified against src/lib.rs:3150-3202. Spec text does not claim store_backpressure_ms=0 makes populate return AllocationFailed.",
-      "before": "(store path) reserve_memory fails fast on AllocationFailed; populate/batch_populate surface AllocationFailed on a full tier; TierEventStats has four u64 fields (promotions_to_memory, promotions_to_gpu, evictions_from_memory, evictions_from_ssd).",
-      "after": "New FR-060 (two-layer store backpressure: bounded backpressure in reserve_memory + unconditional best-effort drop-on-full in populate/batch_populate). FR-003/FR-033/FR-056/FR-058/FR-059 + one edge case + US1 acceptance scenario 5 updated; store_backpressure_ms config (default 5000) and store_backpressure_events/store_drops_on_full counters (six u64 fields) documented.",
-      "confidence": "HIGH"
+      "current_spec": "`poller_base_cpu` ... Defaults to `None` (OS scheduler decides).",
+      "current_code": "`None` selects NUMA-local automatic placement: round-robin over each drive's NUMA-node cores excluding the node's first two (this branch; previously global CPUs 0/1 were excluded); unresolvable node or node with <=2 cores -> no CPU passed, block device chooses; topology discovery failure -> warning, unpinned.",
+      "location": "components/dispatcher/src/lib.rs:550-600, 1530-1539",
+      "proposed": "FR-011 rewritten for the None case; Last Synced header added.",
+      "confidence": "HIGH",
+      "approved": true,
+      "approved_by": "user (interactive, 2026-10-05)"
     }
-  ],
-  "not_proposed": [
-    "Two src/lib.rs 'gRPC handler' source comments: source out of editing scope; follow-up cleanup (carried over)."
   ]
 }

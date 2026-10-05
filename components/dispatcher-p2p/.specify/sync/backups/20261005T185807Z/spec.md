@@ -8,8 +8,6 @@
 
 **Last-Synced**: 2026-09-03 (Spec-Sync — FR-017 ALIGN: eviction drop-count now actually incremented on every live emit path; `eviction_dropped_count()` reflects reality. Prior 2026-08-20 Phase B: SC-006 reworded to match implemented graceful-init/deferred-panic behavior; FR-018..FR-023 backfilled for previously unspecced background/admin/async features.)
 
-**Last-Synced**: 2026-10-05 (Spec-Sync on branch `fix/poller-cpu-placement-logging` — FR-027 BACKFILL: NVMe poller placement, shared with `dispatcher` FR-011.)
-
 **Input**: User description: "GPUDirect Storage cold-read path for dispatcher-p2p. NVMe DMA reads directly into GPU BAR1 staging buffers, then D2D copies to client GPU destination, eliminating host DRAM bounce."
 
 ## User Scenarios & Testing *(mandatory)*
@@ -181,15 +179,6 @@ The system keeps both DRAM and SSD tiers within configured utilization bounds wi
   order, `served_by.is_hit()` if and only if `result.is_ok()`, and `Miss` if and only if
   `KeyNotFound` after any remote attempt. A shared test would hide a divergence in either
   component, which is the failure two separate specs exist to prevent.
-- **FR-027** *(New 2026-10-05 — BACKFILL, previously unspecced.)* NVMe poller placement MUST
-  follow `dispatcher` FR-011. When `DispatcherConfig::poller_base_cpu` is `Some(base)`, data
-  drive `i`'s poller actor is pinned to CPU `base + i`. When it is `None`, each drive is
-  assigned the next core of its NUMA node (resolved from `ISPDKEnv::devices()`), round-robin
-  over the node's cores **excluding its first two**. A drive with an unresolvable node, or on a
-  node with two or fewer cores, is passed no CPU and the block device chooses a NUMA-local core
-  itself. If NUMA topology discovery fails, a warning is logged and pollers are left unpinned.
-  (`src/lib.rs:272-323`, `894-903`.) The two dispatchers share this policy so that switching
-  the build profile does not move pollers.
 
 ## ROOT CAUSE FOUND 2026-09-30: the cold path panics when the P2P ring is absent
 

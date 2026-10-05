@@ -1,115 +1,35 @@
 {
-  "generated": "2026-09-28T00:00:00Z",
+  "generated": "2026-10-05",
   "project": "dispatcher",
-  "spec": "specs/001-dispatcher-cache-interface/spec.md",
-  "branch": "certus-lookup-observability",
-  "git_commit": "72c7182b",
-  "drift_status": "resolved",
-  "inputs_sha256": "75a21d9bfc9fc0db520a621f50aa507edc831f778c773c15e59d1550cb82accd",
+  "spec": "001-dispatcher-cache-interface",
+  "branch": "fix/poller-cpu-placement-logging",
+  "baseline": "origin/unstable (stamped 2c86a131; stamp re-verified against `git archive origin/unstable`)",
+  "method": "Delta analysis on a certified baseline: this component's existing clean stamp was re-verified to equal the spec-sync hash of `git archive origin/unstable`, so the only new inputs are this branch's src/specs/interfaces changes. Every FR/SC touching CPU placement, NUMA pinning, threads or SPDK init was located by grep over specs/** and re-checked against the changed code.",
   "summary": {
-    "specs_analyzed": 2,
-    "requirements_checked": 11,
-    "aligned": 8,
-    "drifted": 3,
-    "not_implemented": 0,
-    "unspecced_features": 1
+    "specs_analyzed": 1,
+    "findings": 1,
+    "resolved": 1,
+    "open": 0
   },
-  "specs": [
+  "aligned": [
+    "FR-011 (poller_base_cpu=Some(base): drive i -> base+i, src/lib.rs:1530-1536)"
+  ],
+  "drifted": [
     {
-      "id": "001-dispatcher-cache-interface",
-      "title": "Dispatcher Cache Interface",
-      "aligned": [
-        "FR-011"
-      ],
-      "drifted": [
-        {
-          "requirement": "FR-058",
-          "spec_text": "TierEventStats is a Copy struct of six u64 fields",
-          "actual": "eight fields; remote_lookup_hits and remote_lookup_misses added by 9416c997",
-          "location": "components/interfaces/src/idispatcher.rs",
-          "severity": "major",
-          "self_inflicted": true,
-          "note": "Phase 1 updated FR-011 and contracts/errors.md but missed the requirement that enumerates these counters. Precedent existed in the same requirement: the 2026-09-09 sync took it from four to six.",
-          "status": "fixed"
-        },
-        {
-          "requirement": "SC-017",
-          "spec_text": "covers FR-058 via a populate/lookup/evict cycle",
-          "actual": "that cycle does not exercise the remote counters at all, so they were unverified",
-          "location": "components/dispatcher/specs/001-dispatcher-cache-interface/spec.md:397",
-          "severity": "moderate",
-          "status": "fixed"
-        }
-      ],
-      "not_implemented": []
-    },
-    {
-      "id": "002-served-by-tier-attribution",
-      "title": "Serving-Tier Attribution",
-      "aligned": [
-        "FR-024",
-        "FR-026",
-        "FR-030",
-        "FR-031"
-      ],
-      "drifted": [
-        {
-          "requirement": "contracts/idispatcher.md (FR-024 rationale)",
-          "spec_text": "served_by being meaningful on failure paths is what makes 'every request lands in exactly one bucket' enforceable",
-          "actual": "FR-024 is enforced server-side by a pure tally in shmq-dispatcher with no interface change; the claim tied a requirement to a design that proved unnecessary for it",
-          "location": "components/dispatcher/specs/002-served-by-tier-attribution/contracts/idispatcher.md:51",
-          "severity": "moderate",
-          "status": "fixed"
-        },
-        {
-          "requirement": "contracts/idispatcher.md (Migration)",
-          "spec_text": "Compiler-enforced; nothing silently keeps working.",
-          "actual": "true for the return-type widening, false as a blanket property: adding two TierEventStats fields compiled with zero errors because other implementors use ..Default::default()",
-          "location": "components/dispatcher/specs/002-served-by-tier-attribution/contracts/idispatcher.md:148",
-          "severity": "moderate",
-          "status": "fixed"
-        }
-      ],
-      "not_implemented": [
-        "FR-025",
-        "FR-027",
-        "FR-028",
-        "FR-029"
-      ],
-      "not_implemented_note": "Correctly out of Phase 1 scope and recorded as such in the new coverage table, not left to inference."
+      "requirement": "FR-011",
+      "direction": "BACKFILL",
+      "severity": "moderate",
+      "spec_text": "`poller_base_cpu` ... Defaults to `None` (OS scheduler decides).",
+      "actual": "`None` selects NUMA-local automatic placement: round-robin over each drive's NUMA-node cores excluding the node's first two (this branch; previously global CPUs 0/1 were excluded); unresolvable node or node with <=2 cores -> no CPU passed, block device chooses; topology discovery failure -> warning, unpinned.",
+      "location": "components/dispatcher/src/lib.rs:550-600, 1530-1539",
+      "note": "Pre-existing drift (the None path was already automatic on unstable), surfaced because this branch modifies that path.",
+      "resolution": "FR-011 rewritten for the None case; Last Synced header added."
     }
   ],
-  "unspecced": [
-    {
-      "feature": "Prometheus /metrics name surface",
-      "location": "apps/certus-server-yaml/src/metrics.rs::serve_metrics",
-      "metrics": 16,
-      "added_by_phase_1": [
-        "certus_lookup_errors_total",
-        "certus_remote_lookup_hits_total",
-        "certus_remote_lookup_misses_total"
-      ],
-      "suggested_spec": null,
-      "pre_existing": true,
-      "note": "apps/certus-server-yaml has no specs/ or .specify/, so it cannot own a feature. The gap already covered certus_populates_total, memory-tier and NVMe metrics. Phase 1 widened an existing structural gap by two; it did not create it. Metric names are an external contract, so who owns them is a decision for the user, not a silent backfill."
-    }
-  ],
+  "unspecced": [],
   "conflicts": [],
-  "synced_at": "2026-10-03T13:20:17Z",
-  "trigger": "feature 002 Phase 1 - lookup classification fix, remote-lookup counters, FR-024 accounting",
-  "method": {
-    "note": "Citation-counting (the method used on apps/workload-generator) is INVALID here and was not used as a signal.",
-    "requirements_defined": 120,
-    "distinct_ids_cited_in_code": 4,
-    "scope": "meaning-based, limited to requirements Phase 1 could have falsified"
-  },
-  "open_decisions": [
-    "components/dispatcher has no constitution, yet feature 001's plan gates against seven principles matching none of the 18 that exist elsewhere",
-    "the five-value wire projection in contracts/served-by.md is unsigned-off and blocks Phase 3"
-  ],
-  "supersedes": {
-    "note": "This sweep appends to the 2026-09-21 report rather than replacing it. An earlier revision of this branch overwrote the file wholesale and destroyed the stamp; the markdown report records that explicitly.",
-    "previous_git_commit": "e4b97a0b",
-    "previous_inputs_sha256": "439b2a8dd89946423e1fb3d38d34bed1e0c34c84701afa5da189e7700900e937"
-  }
+  "drift_status": "clean",
+  "inputs_sha256": "acb693621e8650c9b7d66c51f46b99f7c6864245d9f6aa86840a2a3824b2f9ee",
+  "git_commit": "d102a00b",
+  "synced_at": "2026-10-05T19:05:49Z"
 }

@@ -1,43 +1,19 @@
 {
-  "generated": "2026-08-20",
-  "component": "block-device-spdk-nvme",
-  "phase": "Spec-Sync Phase B",
-  "based_on": "drift-report.json (generated 2026-08-20)",
-  "policy": ".specify/sync/PHASE_B_POLICY.md",
-  "counts": {
-    "backfill_applied": 3,
-    "backfill_unspecced": 8,
-    "align_tasks": 1,
-    "resolved": 0,
-    "human_decision": 0
-  },
-  "specs_updated": [
-    { "spec": "001-spdk-nvme-block-device", "requirement": "FR-005", "change_type": "BACKFILL", "note": "abort contract re-synced from 'drafted/needs-hw-validation' to implemented" },
-    { "spec": "001-spdk-nvme-block-device", "requirement": "FR-010", "change_type": "BACKFILL", "note": "max_transfer_size is MDTS-derived, moved out of the fixed-fields list" },
-    { "spec": "001-spdk-nvme-block-device", "requirement": "SC-005", "change_type": "BACKFILL", "note": "only nvme_version and numa_id remain fixed constants" },
-    { "spec": "001-spdk-nvme-block-device", "requirement": "FR-031", "change_type": "BACKFILL-UNSPECCED (new FR)", "note": "FlushSync/FlushDone durability barrier + acceptance scenario" },
-    { "spec": "001-spdk-nvme-block-device", "requirement": "Assumptions", "change_type": "BACKFILL-UNSPECCED (note)", "note": "dead namespace::probe() helper documented as superseded/removal candidate" },
-    { "spec": "002-iops-benchmark", "requirement": "FR-015", "change_type": "BACKFILL-UNSPECCED", "note": "GB/s throughput + per-thread IOPS breakdown" },
-    { "spec": "002-iops-benchmark", "requirement": "FR-024", "change_type": "BACKFILL-UNSPECCED", "note": "batch send-failure rollback of in-flight entries" },
-    { "spec": "002-iops-benchmark", "requirement": "FR-026", "change_type": "BACKFILL-UNSPECCED", "note": "parallel thread::scope init + [timing] output + per-device summary block" },
-    { "spec": "002-iops-benchmark", "requirement": "SC-001", "change_type": "BACKFILL-UNSPECCED", "note": "barrier-based start sync excludes init time from wall-clock" }
+  "applied": "2026-10-05",
+  "project": "block-device-spdk-nvme",
+  "spec": "001-spdk-nvme-block-device",
+  "branch": "fix/poller-cpu-placement-logging",
+  "backup": ".specify/sync/backups/20261005T185807Z/spec.md",
+  "edits": [
+    {
+      "requirement": "FR-013",
+      "direction": "ALIGN+BACKFILL",
+      "result": "Code fixed; FR-013 now documents set_actor_cpu precedence and the third-core / first-core fallback."
+    }
   ],
-  "align_tasks_generated": [
-    { "id": "BD-4", "spec": "002-iops-benchmark", "requirement": "FR-026", "severity": "Low", "summary": "per-device summary format string has unbalanced '(' at main.rs:423", "files": ["apps/iops-benchmark/src/main.rs:423"] }
+  "source_files_modified": [
+    "components/block-device-spdk-nvme/src/lib.rs"
   ],
-  "unspecced_backfilled": [
-    { "feature": "Command::FlushSync/FlushDone + do_sync_flush", "target": "001/FR-031 (new)" },
-    { "feature": "Dead probe() free function superseded by discover_namespaces", "target": "001/Assumptions note" },
-    { "feature": "Multi-device per-device summary block", "target": "002/FR-026 (+ ALIGN BD-4 for format bug)" },
-    { "feature": "Barrier-based start sync excluding init time", "target": "002/SC-001" },
-    { "feature": "throughput_gbps computed and reported", "target": "002/FR-015" },
-    { "feature": "Per-thread IOPS breakdown in final report", "target": "002/FR-015" },
-    { "feature": "Batch send-failure rollback of in-flight entries", "target": "002/FR-024" },
-    { "feature": "Parallel device init via thread::scope + [timing] eprintlns", "target": "002/FR-026" }
-  ],
-  "resolved": [],
-  "backups": [
-    ".specify/sync/backups/specs/001-spdk-nvme-block-device/spec.md.bak",
-    ".specify/sync/backups/specs/002-iops-benchmark/spec.md.bak"
-  ]
+  "align_tasks_generated": 0,
+  "drift_status": "clean"
 }

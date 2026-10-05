@@ -1,11 +1,17 @@
 ---
 spec_sync_component: dispatcher-p2p
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-03T13:20:17Z
-spec_sync_git_commit: 2c86a131
-spec_sync_inputs_sha256: 03724fb8868c0c380f9b4373cc347d5f40cfedf89b6d24a72eb7591d81017842
+spec_sync_synced_at: 2026-10-05T19:05:49Z
+spec_sync_git_commit: d102a00b
+spec_sync_inputs_sha256: ae1677d341b199059f11059b89a768ad88805bb5ebc1ee4b4b80a499dd00c4eb
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-10-05 (branch `fix/poller-cpu-placement-logging`).** Delta analysis on a certified baseline: this component's existing clean stamp was re-verified to equal the spec-sync hash of `git archive origin/unstable`, so the only new inputs are this branch's src/specs/interfaces changes. Every FR/SC touching CPU placement, NUMA pinning, threads or SPDK init was located by grep over specs/** and re-checked against the changed code.
+>
+> - **FR-027 (new) — BACKFILL (minor).** Same poller placement policy as dispatcher FR-011, including this branch's skip-first-two-cores-per-node change. `components/dispatcher-p2p/src/lib.rs:272-323, 894-903`. *Unspecced behaviour, modified by this branch.* Resolution: FR-027 added, cross-referencing dispatcher FR-011.
+>
+> No actionable drift remains for this component after apply.
+
 > **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest
 > folds `components/interfaces/{src,specs}` into **every** component's hash, so an interface
 > change invalidates all of them at once -- which is the design, not a defect. The interface

@@ -1,11 +1,17 @@
 ---
 spec_sync_component: spdk-env
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-03T13:20:18Z
-spec_sync_git_commit: 2c86a131
-spec_sync_inputs_sha256: afde9a404287094307ff6c803e8a5bb6b69d3fbc981865e68fe77580fc9e8a15
+spec_sync_synced_at: 2026-10-05T19:05:49Z
+spec_sync_git_commit: d102a00b
+spec_sync_inputs_sha256: 7610958b3166348734406bd87cf86a4e180a77d2ccae32c51994582514287f0d
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-10-05 (branch `fix/poller-cpu-placement-logging`).** Delta analysis on a certified baseline: this component's existing clean stamp was re-verified to equal the spec-sync hash of `git archive origin/unstable`, so the only new inputs are this branch's src/specs/interfaces changes. Every FR/SC touching CPU placement, NUMA pinning, threads or SPDK init was located by grep over specs/** and re-checked against the changed code.
+>
+> - **FR-022 (new) — BACKFILL (moderate).** init_spdk_env saves the caller's affinity (sched_getaffinity) before spdk_env_init and restores it (sched_setaffinity) after, undoing DPDK EAL's main-lcore pin so later-spawned threads do not inherit CPU 0. Best-effort. `components/spdk-env/src/env.rs:91-102, 115-139`. *New behaviour on this branch.* Resolution: FR-022 added; Last Synced header added.
+>
+> No actionable drift remains for this component after apply.
+
 > **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest
 > folds `components/interfaces/{src,specs}` into **every** component's hash, so an interface
 > change invalidates all of them at once -- which is the design, not a defect. The interface
