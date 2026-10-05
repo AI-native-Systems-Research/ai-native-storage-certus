@@ -8245,18 +8245,6 @@ known_corrections:
   correct_counts: 'creusot: 105 proved / 1 unresolved / 2 refuted / 2 delegated'
   reproduce: scorer_creusot.py components/eviction-policy-optimized/verif --crate-dir components/eviction-policy-optimized/verif-creusot
     --cap-seconds 60 --cap-max 300 --only EPO-INV-LIST-EMPTY-IFF-NO-ENDS
-# Orchestrator-written, NOT scorer-written (2026-10-03): what each refutation MEANS.
-# defect -> a bug in fv_bugs.yaml (root cause) and how it manifested here; discordance ->
-# spec and code disagree, side information; not-a-defect -> false only as worded.
-triage:
-  EPO-INV-STALE-HANDLE-NO-CROSS-ENTRY-EFFECT:
-    verdict: defect
-    bug: FV-BUG-002
-    manifested_as: wrong object (moves or removes another key's entry)
-  EPO-INV-STALE-HANDLE-NEVER-CRASHES:
-    verdict: defect
-    bug: FV-BUG-001
-    manifested_as: panic (index out of bounds)
 bugs:
   FV-BUG-001:
     title: A stale handle is used as an array index without checking it
