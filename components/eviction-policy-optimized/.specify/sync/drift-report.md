@@ -1,11 +1,20 @@
 ---
 spec_sync_component: eviction-policy-optimized
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-03T13:20:17Z
-spec_sync_git_commit: 2c86a131
-spec_sync_inputs_sha256: fa0dca05d6b3d9f9f0d30879aa362a6c6c8d88d50cd8be39d3cbdc077d2c545d
+spec_sync_synced_at: 2026-10-05T18:06:24Z
+spec_sync_git_commit: 6474e388
+spec_sync_inputs_sha256: 9f470a1e26c91b8bb17074c4ab19b13d992f1498e587232590b04e9f58721480
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-10-05 (PR #505, FR-012 stale-handle fix).** Scope: the only `src/` change since the
+> last `clean` stamp (2026-10-03, `2c86a131`) is the fix in `src/lru_list.rs`: `move_to_back` and
+> `remove` now range-check the slot index before reading it, so a handle whose slot no longer exists
+> (e.g. issued before `clear_pool`) is a silent no-op instead of a panic. **Re-checked** every
+> requirement that code touches: FR-012 (now satisfied as written: no panic, no effect, `Ok(())`) and
+> FR-009 (`clear`, unchanged behaviour). Spec edits: FR-012's guard description and citations, and
+> FR-009's citation; every cited `lru_list.rs` line was re-mapped from the diff and re-read. No other
+> requirement cites the changed code; this stamp asserts nothing beyond what was checked.
+>
 > **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest
 > folds `components/interfaces/{src,specs}` into **every** component's hash, so an interface
 > change invalidates all of them at once -- which is the design, not a defect. The interface
@@ -78,15 +87,16 @@ Post-fix: `cargo test -p eviction-policy-optimized` (27 passed),
 - **FR-007** get_eviction_candidates → `peek_front_n`, empty for bad pool → `src/lib.rs:209-218`.
 - **FR-008** len → `0` for bad pool → `src/lib.rs:220-229`.
 - **FR-009** clear_pool clears list, preserves sketch/counters → `src/lib.rs:231-237`
-  (list `clear` only, `src/lru_list.rs:186-192`).
+  (list `clear` only, `src/lru_list.rs:197-203`).
 - **FR-010** InvalidPool on Result methods
   (`src/lib.rs:111-118,144-152,164-167,175-178,188-196`); graceful degradation
   elsewhere (`:204,211,222,233`).
 - **FR-011** admission gate: non-empty pool → `push_front` when
   `estimate(key) <= estimate(head_key)` else `push_back`; empty pool →
   `push_back`; no absolute threshold → `src/lib.rs:129-137`.
-- **FR-012** idempotent touch/remove on stale handle → guarded by `active`
-  flag in `src/lru_list.rs:109-111` (move_to_back) and `:160-162` (remove).
+- **FR-012** idempotent touch/remove on stale handle → guarded by a range check
+  on the slot index, then the `active` flag, in `src/lru_list.rs:113-118`
+  (move_to_back) and `:168-173` (remove).
 - **FR-013** aging: halve every `max_len * 10` accesses → `src/lib.rs:121-127`
   (`halve` at `src/lib.rs:54-60`).
 - **NFR-001** O(1) single-entry ops; sketch bounded by `CMS_ROWS`/`CMS_COLS`
