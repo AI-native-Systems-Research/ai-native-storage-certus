@@ -1,0 +1,612 @@
+component: disk-partition-manager
+pin: d14dfb9a
+level: 1
+what: 'spec<->code discordances found while reconciling the specification with the code. Each is EXCLUDED from formal
+  verification (level 2). status: candidate until a test confirms it (confirmed) or shows it was a misreading (withdrawn).'
+counts:
+  discordances: 22
+  spec_and_code_differ: 17
+  spec_not_found_in_code: 5
+  properties_excluded_from_level2: 22
+discordances:
+- id: D-FR-003-gpt.rs:9092-ca0c39
+  kind: spec-and-code-differ
+  methods:
+  - initialize
+  - initialize_or_format
+  spec_says: If neither the main copy nor the backup copy of the partition table can be accepted as intact, the
+    read fails with an error saying no partition table was found, which is also the answer given for a completely
+    blank drive.
+  code_does: Spec promises a drive with no usable table (a blank drive included) yields the no-partition-table error;
+    code accepts a header that declares zero entry slots as a valid table — reading zero entry bytes whose checksum
+    is the checksum of nothing (gpt.rs:118-123) — and reports success with a table of zero partitions instead of
+    no-partition-table.
+  spec_pointers:
+  - FR-003
+  - AS-US2-1
+  - AS-US2-3
+  code_pointers:
+  - gpt.rs:90-92
+  - gpt.rs:90
+  - gpt.rs:92
+  - gpt.rs:118
+  - gpt.rs:123
+  - gpt.rs:452
+  status: candidate
+  excluded_properties:
+  - DPM-INIT-ERR-NO-TABLE
+  extraction_sides:
+    spec:
+    - DPM-INIT-PRE-GPT-PRESENT
+    - DPM-INIT-ERR-NO-TABLE
+    code:
+    - DPM-INIT-ERR-NOGPT
+    - DPM-READ-ZEROCOUNT-ACCEPTED
+- id: D-NOSPEC-gpt.rs:464487-be2449
+  kind: spec-and-code-differ
+  methods:
+  - initialize
+  - initialize_or_format
+  spec_says: If the storage device fails one of the sector reads needed to load the partition table — the command
+    cannot be queued, the device reports a failure, it answers with an unexpected kind of completion, or the completion
+    channel breaks — the read reports an input/output failure carrying the device’s own explanation, rather than
+    pretending the table is missing or corrupt.
+  code_does: Spec promises an input/output failure is always reported as such and never as a missing or corrupt
+    table; code honours this for the main copy but collapses every possible cause of failure while reading the backup
+    copy — a genuine hardware or transport error included — into the single answer no-partition-table at gpt.rs:91,
+    which initialize_or_format then treats as licence to reformat.
+  spec_pointers: []
+  code_pointers:
+  - gpt.rs:464-487
+  - gpt.rs:91
+  - lib.rs:57
+  - gpt.rs:468
+  - gpt.rs:472
+  - gpt.rs:478
+  - gpt.rs:481
+  - gpt.rs:482
+  - gpt.rs:486
+  - gpt.rs:487
+  status: candidate
+  excluded_properties:
+  - DPM-INIT-ERR-IO
+  extraction_sides:
+    spec:
+    - DPM-INIT-ERR-IO
+    code:
+    - DPM-INIT-ERR-MASKED-IO
+    - DPM-IO-READ-ERR-SEND
+    - DPM-IO-READ-ERR-DEVICE
+    - DPM-IO-READ-ERR-UNEXPECTED
+    - DPM-IO-READ-ERR-CHANNEL
+- id: D-NOSPEC-gpt.rs:118120-4d9cf0
+  kind: spec-and-code-differ
+  methods:
+  - initialize
+  - initialize_or_format
+  spec_says: Reading the partition table touches a fixed set of sectors — the one sector holding the header plus
+    the sectors holding the list of partition entries — and that number does not grow as the drive gets larger.
+  code_does: Spec promises the read touches a fixed, drive-size-independent set of sectors; code takes the number
+    of entry slots and the size of each slot straight from the untrusted on-disk header and multiplies them to decide
+    how many bytes to read (gpt.rs:118-120) with no cap, so a hostile or damaged header makes the read arbitrarily
+    large rather than fixed.
+  spec_pointers: []
+  code_pointers:
+  - gpt.rs:118-120
+  - gpt.rs:118
+  - gpt.rs:120
+  - gpt.rs:453
+  status: candidate
+  excluded_properties:
+  - DPM-INIT-IO-COUNT-BOUNDED
+  extraction_sides:
+    spec:
+    - DPM-INIT-POST-IO-COUNT
+    code:
+    - DPM-READ-COUNT-UNVALIDATED
+- id: D-FR-011-gpt.rs:326-582fc3
+  kind: spec-and-code-differ
+  methods:
+  - format
+  - initialize_or_format
+  spec_says: The sector size supplied in the format request must be one of the two sizes the component promises
+    to support, namely 512 bytes or 4096 bytes.
+  code_does: Spec requires the supplied sector size to be 512 or 4096 and the component to promise only those; code
+    never checks the value anywhere — it divides by the sector size and writes to fixed byte positions 446 through
+    511 of a buffer whose length is the sector size (gpt.rs:326, gpt.rs:330), so a sector size of zero divides by
+    zero and any size below 512 writes past the end of the buffer, crashing the caller instead of returning the
+    declared layout error.
+  spec_pointers:
+  - FR-011
+  code_pointers:
+  - gpt.rs:326
+  - gpt.rs:330
+  - gpt.rs:351
+  - ipartition_table.rs:39
+  status: candidate
+  excluded_properties:
+  - DPM-FORMAT-PRE-SECTOR-SIZE
+  extraction_sides:
+    spec:
+    - DPM-FORMAT-PRE-SECTOR-SIZE
+    code:
+    - DPM-FORMAT-PRE-SECTORSIZE
+- id: D-AS-US1-2-gpt.rs:160161-267b4d
+  kind: spec-and-code-differ
+  methods:
+  - format
+  - initialize_or_format
+  spec_says: When a format request is rejected because the requested layout is impossible, nothing at all is written
+    to the drive, so a bad request cannot leave the drive in a half-formatted state.
+  code_does: Spec promises a rejected format leaves the drive untouched so it can never be left half-formatted;
+    code satisfies this for layout rejections — every layout check, including the device-too-small check at gpt.rs:160,
+    runs before the first write — but the write phase then performs five separate disk writes one after another
+    and gives up at the first failure with no attempt to undo the writes that already succeeded (gpt.rs:204-216),
+    so an input/output failure part-way through does leave the drive half-formatted.
+  spec_pointers:
+  - AS-US1-2
+  - AS-US1-3
+  - FR-005
+  - FR-006
+  code_pointers:
+  - gpt.rs:160-161
+  - gpt.rs:160
+  - gpt.rs:161
+  - gpt.rs:204
+  - gpt.rs:207
+  - gpt.rs:216
+  status: candidate
+  excluded_properties:
+  - DPM-FORMAT-FRAME-NO-WRITE-ON-REJECT
+  extraction_sides:
+    spec:
+    - DPM-FORMAT-FRAME-NO-WRITE-ON-LAYOUT-ERROR
+    code:
+    - DPM-FORMAT-ERR-LAYOUT-TOOSMALL
+    - DPM-FORMAT-NO-ROLLBACK
+- id: D-FR-001-gpt.rs:310-90710b
+  kind: spec-and-code-differ
+  methods:
+  - format
+  - initialize_or_format
+  - num_partitions
+  spec_says: No more than 128 partitions can ever be created or reported, because the partitioning standard this
+    component implements provides exactly 128 slots for partition entries.
+  code_does: Spec states the number of partitions can never exceed 128 because the standard provides exactly 128
+    entry slots; code neither caps nor rejects a larger request — the entry list is built with one element per requested
+    partition and only padded, while the buffer it is written into is sized for exactly 128 (gpt.rs:310, gpt.rs:433)
+    — so asking for a 129th partition writes past the end of that buffer and crashes rather than returning the declared
+    layout error.
+  spec_pointers:
+  - FR-001
+  code_pointers:
+  - gpt.rs:310
+  - gpt.rs:433
+  - gpt.rs:437
+  status: candidate
+  excluded_properties:
+  - DPM-FORMAT-PRE-MAX-128
+  extraction_sides:
+    spec:
+    - DPM-NUMPART-INV-MAX-128
+    code:
+    - DPM-FORMAT-PRE-MAXPARTS
+- id: D-AS-US1-1-gpt.rs:222-405648
+  kind: spec-and-code-differ
+  methods:
+  - format
+  - initialize_or_format
+  - num_partitions
+  - partition_info
+  spec_says: When formatting succeeds, the caller receives a description of the finished partition table that contains
+    exactly one entry for each partition that was requested, in the same order it was requested, each carrying that
+    partition’s starting position and length on the drive, and the partition count reported immediately afterwards
+    equals the number of partitions the request asked for.
+  code_does: Spec promises one returned entry per requested partition, in request order, and a count equal to the
+    number requested; code filters the returned table to entries whose partition type identifier is not all zero
+    bytes (gpt.rs:222), so a partition requested with an all-zero type identifier has disk space reserved for it
+    but is missing from the result, the count is short, and every later partition is reported under a different
+    position than the caller asked for.
+  spec_pointers:
+  - AS-US1-1
+  code_pointers:
+  - gpt.rs:222
+  - gpt.rs:135
+  status: candidate
+  excluded_properties:
+  - DPM-FORMAT-POST-TABLE
+  extraction_sides:
+    spec:
+    - DPM-FORMAT-POST-TABLE
+    - DPM-NUMPART-POST-MATCHES-CONFIG
+    code:
+    - DPM-FORMAT-ZEROGUID-DROPPED
+- id: D-FR-008-gpt.rs:564568-1fda36
+  kind: spec-and-code-differ
+  methods:
+  - format
+  - initialize_or_format
+  spec_says: When formatting succeeds, the drive is stamped with a freshly generated random identifier, and so is
+    each individual partition.
+  code_does: Spec promises a freshly generated random identifier for the drive and for each partition; code opens
+    the system randomness source and throws away the result of reading from it (gpt.rs:566-568), so when that source
+    cannot be opened or returns fewer bytes than asked for the identifier is whatever the uninitialised buffer held
+    — in practice all zeros — with no error reported and no uniqueness at all.
+  spec_pointers:
+  - FR-008
+  code_pointers:
+  - gpt.rs:564-568
+  - gpt.rs:566
+  - gpt.rs:568
+  status: candidate
+  excluded_properties:
+  - DPM-FORMAT-POST-GUID-FRESH
+  extraction_sides:
+    spec:
+    - DPM-FORMAT-POST-GUID-V4
+    code:
+    - DPM-FORMAT-GUID-DEGRADED
+- id: D-AS-US1-1-gpt.rs:298-24db0d
+  kind: spec-not-found-in-code
+  methods:
+  - format
+  - initialize_or_format
+  spec_says: The partition type identifier recorded for each finished partition is exactly the type identifier the
+    caller asked for, unchanged and not reordered.
+  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
+    decides.
+  spec_pointers:
+  - AS-US1-1
+  code_pointers:
+  - gpt.rs:298
+  status: candidate
+  excluded_properties:
+  - DPM-FORMAT-POST-TYPE-GUID-ECHO
+  extraction_sides:
+    spec:
+    - DPM-FORMAT-POST-TYPE-GUID-ECHO
+    code: []
+- id: D-NOSPEC-lib.rs:104-b23f41
+  kind: spec-and-code-differ
+  methods:
+  - partition_info
+  spec_says: The partition description returned reports the same position number that the caller asked for, so a
+    caller can never be handed a different partition than the one it requested and can feed a returned position
+    straight back in.
+  code_does: Spec promises the returned description reports the position the caller asked for; code uses two different
+    meanings of position — the number recorded inside each returned description is the slot it occupied in the on-disk
+    entry list (gpt.rs:137) while the number this operation accepts is a place in the shorter list of non-empty
+    partitions (lib.rs:104) — so when a leading slot is empty the two disagree and feeding a partition’s own reported
+    position back in can select a different partition or fail as out of range.
+  spec_pointers: []
+  code_pointers:
+  - lib.rs:104
+  - gpt.rs:137
+  status: candidate
+  excluded_properties:
+  - DPM-PINFO-POST-INDEX-ECHO
+  extraction_sides:
+    spec:
+    - DPM-PINFO-POST-INDEX-ECHO
+    code:
+    - DPM-PINFO-INDEX-MISMATCH
+- id: D-FR-005-lib.rs:3859-b8dfcd
+  kind: spec-not-found-in-code
+  methods:
+  - initialize_or_format
+  spec_says: The combined read-or-create operation must be given a partition layout that would itself be acceptable
+    to a plain format request, because it may have to fall back to formatting the drive.
+  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
+    decides.
+  spec_pointers:
+  - FR-005
+  - FR-006
+  code_pointers:
+  - lib.rs:38-59
+  status: candidate
+  excluded_properties:
+  - DPM-IOF-PRE-CONFIG-VALID
+  extraction_sides:
+    spec:
+    - DPM-IOF-PRE-CONFIG-VALID
+    code: []
+- id: D-AS-US3-2-lib.rs:5759-81652d
+  kind: spec-and-code-differ
+  methods:
+  - initialize_or_format
+  spec_says: When the caller has not demanded a fresh start but the drive carries no usable partition table, a new
+    table is written using the supplied layout and the accompanying flag reports that formatting did take place.
+  code_does: Spec — and the code’s own documentation comment at lib.rs:38 — say a new table is created only when
+    a fresh start is demanded or when no valid table exists; the code also writes a new table when the read reports
+    the table as corrupt (lib.rs:57), a destructive action neither the specification nor the comment mentions.
+  spec_pointers:
+  - AS-US3-2
+  code_pointers:
+  - lib.rs:57-59
+  - lib.rs:57
+  - lib.rs:59
+  - lib.rs:38
+  status: candidate
+  excluded_properties:
+  - DPM-IOF-POST-MISSING-FORMATTED
+  extraction_sides:
+    spec:
+    - DPM-IOF-POST-MISSING-FORMATTED
+    code:
+    - DPM-IOF-POST-FALLBACK
+    - DPM-IOF-DOC-CLAIM
+- id: D-AS-US2-4-lib.rs:5759-323f41
+  kind: spec-and-code-differ
+  methods:
+  - initialize_or_format
+  spec_says: A drive whose main table copy is damaged but whose backup copy is intact is recovered from the backup
+    and is not reformatted by the combined read-or-create operation, so a partially failed write can never escalate
+    into destroying the data on the drive.
+  code_does: Spec promises a damaged main copy with an intact backup is recovered and never reformatted; code reformats
+    the drive without asking whenever the read returns either missing-table or corrupt-table (lib.rs:57), and because
+    a failure reading the backup copy is itself reported as missing-table (gpt.rs:91), a drive that merely could
+    not be read at its backup location, or whose main header is rejected for a reason that does not trigger the
+    backup fallback, is silently overwritten with possibly live data on it.
+  spec_pointers:
+  - AS-US2-4
+  - FR-003
+  code_pointers:
+  - lib.rs:57-59
+  - lib.rs:57
+  - lib.rs:59
+  - gpt.rs:91
+  status: candidate
+  excluded_properties:
+  - DPM-IOF-NO-REFORMAT-ON-DAMAGED-PRIMARY
+  extraction_sides:
+    spec:
+    - DPM-IOF-FRAME-NO-REFORMAT-ON-DAMAGED-PRIMARY
+    code:
+    - DPM-IOF-DESTRUCTIVE-FALLBACK
+- id: D-FR-009-gpt.rs:578-a38286
+  kind: spec-and-code-differ
+  methods:
+  - format
+  - initialize_or_format
+  spec_says: Every partition name supplied in the format request must be short enough to fit in the space the partition
+    table reserves for a name, which is 36 characters.
+  code_does: Spec makes a name of at most 36 characters a requirement on the caller; code neither rejects nor reports
+    a longer name — it keeps the first 36 two-byte units and discards the rest (gpt.rs:578), and cutting at that
+    point can split a character that needs two units, leaving a damaged character that reads back as a replacement
+    symbol.
+  spec_pointers:
+  - FR-009
+  code_pointers:
+  - gpt.rs:578
+  - ipartition_table.rs:32
+  - gpt.rs:594
+  status: candidate
+  excluded_properties:
+  - DPM-NAME-LENGTH-LIMIT
+  extraction_sides:
+    spec:
+    - DPM-FORMAT-PRE-NAME-LENGTH
+    code:
+    - DPM-FORMAT-NAME-TRUNCATED
+- id: D-AS-US1-1-gpt.rs:293305-2d22cf
+  kind: spec-and-code-differ
+  methods:
+  - initialize
+  - format
+  - partition_info
+  - num_partitions
+  - initialize_or_format
+  spec_says: No two partitions in a partition table ever cover the same sector of the drive, whether the table was
+    just created or was read back from the drive.
+  code_does: Spec claims no two partitions ever share a sector for both freshly created and read-back tables; code
+    guarantees it only for tables it creates (each partition begins exactly one sector after the previous one ends,
+    gpt.rs:293) and performs no validation whatsoever on a table read from the drive (gpt.rs:132-146) — no overlap
+    check, no usable-range check, no ordering check — so a foreign table that passes its checksums but describes
+    overlapping partitions is accepted and handed to callers as valid.
+  spec_pointers:
+  - AS-US1-1
+  - FR-004
+  code_pointers:
+  - gpt.rs:293-305
+  - gpt.rs:293
+  - gpt.rs:305
+  - gpt.rs:157
+  - gpt.rs:132
+  - gpt.rs:146
+  - gpt.rs:377
+  status: candidate
+  excluded_properties:
+  - DPM-INV-NO-OVERLAP
+  extraction_sides:
+    spec:
+    - DPM-INV-NO-OVERLAP
+    code:
+    - DPM-INV-PARTITIONS-DISJOINT
+    - DPM-READ-NO-OVERLAP-CHECK
+- id: D-FR-001-gpt.rs:363373-d0dc35
+  kind: spec-and-code-differ
+  methods:
+  - initialize
+  - format
+  - partition_info
+  - num_partitions
+  - initialize_or_format
+  spec_says: Every partition-table header this component writes begins with the standard eight-character identifying
+    marker required by the partitioning standard and declares version 1.0, and a header read back that lacks the
+    correct marker is treated as damaged rather than as valid, the failure reporting the value actually found.
+  code_does: Spec treats both the marker and the declared version 1.0 as part of what makes a header valid; code
+    checks only the marker (gpt.rs:363) and never checks the revision or the header length it stamps into every
+    header it writes (the expected constants at gpt.rs:9-10 are declared but never used as checks on the read path),
+    so a header declaring any other revision or header size is accepted as valid.
+  spec_pointers:
+  - FR-001
+  - FR-003
+  code_pointers:
+  - gpt.rs:363-373
+  - gpt.rs:363
+  - gpt.rs:364
+  - gpt.rs:372
+  - gpt.rs:373
+  - gpt.rs:9
+  - gpt.rs:10
+  status: candidate
+  excluded_properties:
+  - DPM-INV-SIGNATURE-REVISION
+  extraction_sides:
+    spec:
+    - DPM-INV-SIGNATURE-REVISION
+    code:
+    - DPM-READ-ERR-SIGNATURE
+    - DPM-READ-REVISION-UNCHECKED
+- id: D-FR-008-gpt.rs:564-56fdef
+  kind: spec-not-found-in-code
+  methods:
+  - format
+  - initialize_or_format
+  spec_says: Within a single formatted drive, no two partitions are given the same unique identifier, and no partition
+    shares the drive’s own identifier.
+  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
+    decides.
+  spec_pointers:
+  - FR-008
+  code_pointers:
+  - gpt.rs:564
+  status: candidate
+  excluded_properties:
+  - DPM-INV-GUID-DISTINCT
+  extraction_sides:
+    spec:
+    - DPM-INV-GUID-DISTINCT
+    code: []
+- id: D-FR-011-gpt.rs:58-e127fc
+  kind: spec-not-found-in-code
+  methods:
+  - initialize
+  - format
+  - partition_info
+  - num_partitions
+  - initialize_or_format
+  spec_says: The sector size the component works with, and the sector size it reports back in a partition table,
+    is always either 512 bytes or 4096 bytes, the two sizes the component promises to support.
+  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
+    decides.
+  spec_pointers:
+  - FR-011
+  code_pointers:
+  - gpt.rs:58
+  status: candidate
+  excluded_properties:
+  - DPM-INV-SECTOR-SIZE-DOMAIN
+  extraction_sides:
+    spec:
+    - DPM-INV-SECTOR-SIZE-DOMAIN
+    code: []
+- id: D-NOSPEC-ipartition_table.rs-b35063
+  kind: spec-not-found-in-code
+  methods:
+  - format
+  - initialize_or_format
+  spec_says: The three partition kinds this system defines — the metadata region, the data region and the extended-metadata
+    region — each have one fixed published identifier value that never changes, so a drive formatted by one version
+    of the software is recognised by another.
+  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
+    decides.
+  spec_pointers: []
+  code_pointers:
+  - ipartition_table.rs
+  status: candidate
+  excluded_properties:
+  - DPM-INV-TYPE-GUID-CONSTANTS
+  extraction_sides:
+    spec:
+    - DPM-INV-TYPE-GUID-CONSTANTS
+    code: []
+- id: D-NOSPEC-gpt.rs:137-2c196c
+  kind: spec-and-code-differ
+  methods:
+  - initialize
+  - format
+  - partition_info
+  - num_partitions
+  - initialize_or_format
+  spec_says: The partitions in a returned partition table are numbered starting at zero and increasing by one with
+    no gaps and no repeats, so the numbering can be used directly to walk through them.
+  code_does: Spec claims the numbering of a returned table is a gapless zero-based sequence; on the read path the
+    code fills each entry’s number with the slot it occupied in the on-disk list (gpt.rs:137), which has gaps whenever
+    an occupied slot follows an empty one, and it narrows that counter from a machine-sized value to a four-byte
+    number with no check even though the slot count itself was taken unvalidated from the disk.
+  spec_pointers: []
+  code_pointers:
+  - gpt.rs:137
+  - gpt.rs:118
+  status: candidate
+  excluded_properties:
+  - DPM-INV-PARTITION-INDEX-SEQUENTIAL
+  extraction_sides:
+    spec:
+    - DPM-INV-PARTITION-INDEX-SEQUENTIAL
+    code:
+    - DPM-READ-INDEX-CAST
+- id: D-FR-004-gpt.rs:293-9d5bb1
+  kind: spec-and-code-differ
+  methods:
+  - initialize
+  - format
+  - partition_info
+  - num_partitions
+  - initialize_or_format
+  spec_says: Every partition that appears in a partition table spans at least one sector; a zero-length partition
+    is never produced, including for the partition that was asked to take all the remaining space when little space
+    remains.
+  code_does: Spec promises no zero-length partition is ever produced, naming the rest-of-disk case explicitly; code
+    produces exactly that — when the explicitly sized partitions already consume the whole drive, the rest-of-disk
+    partition is given zero sectors and an end sector one before its start (gpt.rs:293), and the later conversion
+    of start and end into a sector count then subtracts a larger number from a smaller one and crashes the caller
+    instead of returning a layout error. The same unguarded subtraction sits on the read path (gpt.rs:139), where
+    a checksum-valid table whose entry has its last sector before its first crashes the read.
+  spec_pointers:
+  - FR-004
+  code_pointers:
+  - gpt.rs:293
+  - gpt.rs:226
+  - gpt.rs:139
+  status: candidate
+  excluded_properties:
+  - DPM-INV-NUM-SECTORS-POSITIVE
+  extraction_sides:
+    spec:
+    - DPM-INV-NUM-SECTORS-POSITIVE
+    code:
+    - DPM-FORMAT-ZEROREST-UNDERFLOW
+    - DPM-READ-ENDING-UNDERFLOW
+- id: D-FR-010-lib.rs:72-0b7634
+  kind: spec-and-code-differ
+  methods:
+  - initialize
+  - format
+  - partition_info
+  - num_partitions
+  - initialize_or_format
+  spec_says: Every read and write the component issues is addressed to the one storage namespace that was configured
+    for it, including all of the sector writes performed during a format, so on a drive that presents several namespaces
+    the component never reads or writes the wrong one and only the chosen namespace is modified.
+  code_does: Spec treats the namespace as one configured value used by every read and write; code uses two different
+    sources — reading the partition table uses the namespace configured on the component, defaulting to 1 (lib.rs:72),
+    while writing a new table uses the namespace number carried inside the caller’s format request and ignores the
+    configured one entirely (lib.rs:91) — so a table can be written to one namespace and then read back from another
+    with no warning that they differ.
+  spec_pointers:
+  - FR-010
+  code_pointers:
+  - lib.rs:72
+  - lib.rs:91
+  - lib.rs:30
+  status: candidate
+  excluded_properties:
+  - DPM-INV-NSID-CONSISTENT
+  extraction_sides:
+    spec:
+    - DPM-FORMAT-POST-NSID
+    - DPM-INV-NSID-CONSISTENT
+    code:
+    - DPM-FORMAT-NSID-DIVERGENCE
