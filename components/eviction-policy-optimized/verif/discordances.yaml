@@ -7,17 +7,20 @@ counts:
   discordances: 14
   spec_and_code_differ: 4
   spec_not_found_in_code: 10
+  input_range_mismatch: 0
   properties_excluded_from_level2: 14
 discordances:
 - id: D-FR-013-lib.rs:122-91416b
   kind: spec-and-code-differ
   methods:
   - track
-  spec_says: 'On each track the pool updates its record of the largest size it has ever reached to be the larger
-    of the previous record and the pool''s size measured at that moment. The measurement is taken BEFORE the new
-    entry is inserted, so the record is the high-water mark of the pool''s size just before an insertion, not of
-    the pool''s size itself: whenever the pool reaches a new peak, the record is one short of that peak.'
-  code_does: ''
+  spec_says: On each track the pool updates its record of the largest size it has ever reached to be the larger
+    of the previous record and the pool's size at that moment, so the record is always at least as big as the pool's
+    current size.
+  code_does: Every successful registration updates the pool's record of the largest length it has ever held, setting
+    it to the larger of its old value and the pool's length as measured before the new entry is inserted. Because
+    the measurement happens before the insertion, the record always lags the true maximum by one whenever the pool
+    is at a new peak, and it never decreases, not even when the pool is emptied.
   spec_pointers:
   - FR-013
   code_pointers:
@@ -26,16 +29,17 @@ discordances:
   excluded_properties:
   - EPO-TRACK-POST-MAXLEN-HIGHWATER
   extraction_sides:
-    spec: []
-    code: []
+    spec:
+    - EPO-TRACK-POST-MAXLEN-HIGHWATER
+    code:
+    - EPO-TRACK-POST-MAXLEN
 - id: D-FR-013-lib.rs:124-972fc2
   kind: spec-not-found-in-code
   methods:
   - track
   spec_says: Working out the ageing period by multiplying the pool's largest-ever size by ten must never overflow
     into a wrong or crashing result, no matter how large the pool has grown.
-  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
-    decides.
+  code_does: Nothing found.
   spec_pointers:
   - FR-013
   code_pointers:
@@ -44,7 +48,8 @@ discordances:
   excluded_properties:
   - EPO-TRACK-INV-AGING-PERIOD-NO-OVERFLOW
   extraction_sides:
-    spec: []
+    spec:
+    - EPO-TRACK-POST-AGING-PERIOD-NO-OVERFLOW
     code: []
 - id: D-FR-002-lib.rs:129139-a799ec
   kind: spec-and-code-differ
@@ -52,9 +57,12 @@ discordances:
   - track
   spec_says: 'Tracking a key that is already being tracked in the same pool does not refresh the existing entry:
     it deliberately creates a second, separate entry for that key and returns a new handle that differs from the
-    one returned the first time, so the pool then holds two entries for the same key and its reported size grows
-    by one.'
-  code_does: ''
+    one returned the first time, so the pool then holds two entries for the same key.'
+  code_does: Every successful registration increases the number of tracked entries in that pool by exactly one,
+    without exception. In particular, registering a key that the pool is already tracking creates a second, independent
+    entry for the same key rather than reusing the existing one. This contradicts the interface documentation, which
+    promises that re-registering an already-tracked key is idempotent and returns the existing handle; the implementation
+    has no lookup from key to entry at all, so it cannot detect a repeat.
   spec_pointers:
   - FR-002
   code_pointers:
@@ -64,16 +72,17 @@ discordances:
   excluded_properties:
   - EPO-TRACK-POST-NON-IDEMPOTENT-REREGISTRATION
   extraction_sides:
-    spec: []
-    code: []
+    spec:
+    - EPO-TRACK-POST-NON-IDEMPOTENT-REREGISTRATION
+    code:
+    - EPO-TRACK-POST-LEN
 - id: D-FR-002-lru_list.rs:3767-f2eebe
   kind: spec-not-found-in-code
   methods:
   - track
   spec_says: A successful track only inserts; it never drops an entry the pool already held, and the entries that
     were already there keep their order relative to one another, whichever end the new key was inserted at.
-  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
-    decides.
+  code_does: Nothing found.
   spec_pointers:
   - FR-002
   - FR-011
@@ -84,7 +93,8 @@ discordances:
   excluded_properties:
   - EPO-TRACK-FRAME-EXISTING-ENTRIES
   extraction_sides:
-    spec: []
+    spec:
+    - EPO-TRACK-FRAME-EXISTING-ENTRIES
     code: []
 - id: D-US1-AS2-lru_list.rs:108134-4d42d0
   kind: spec-not-found-in-code
@@ -92,8 +102,7 @@ discordances:
   - touch
   spec_says: After an entry is touched, asking the pool for the next entry to evict does not return that touched
     entry, as long as the pool holds at least one other entry.
-  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
-    decides.
+  code_does: Nothing found.
   spec_pointers:
   - US1-AS2
   - FR-003
@@ -105,7 +114,8 @@ discordances:
   excluded_properties:
   - EPO-TOUCH-POST-NOT-NEXT-VICTIM
   extraction_sides:
-    spec: []
+    spec:
+    - EPO-TOUCH-POST-NOT-NEXT-VICTIM
     code: []
 - id: D-FR-012-lib.rs:169182-b45332
   kind: spec-not-found-in-code
@@ -113,8 +123,7 @@ discordances:
   - batch_touch
   spec_says: 'A batch that contains handles for entries already removed or evicted still succeeds: the stale handles
     are skipped without crashing, and the remaining live handles are still moved to the protected end.'
-  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
-    decides.
+  code_does: Nothing found.
   spec_pointers:
   - FR-012
   - FR-004
@@ -125,7 +134,8 @@ discordances:
   excluded_properties:
   - EPO-BATCH-TOUCH-POST-REMOVED-HANDLES-SKIPPED
   extraction_sides:
-    spec: []
+    spec:
+    - EPO-BATCH-TOUCH-POST-IDEMPOTENT-REMOVED-HANDLES
     code: []
 - id: D-US1-lib.rs:129137-55e21f
   kind: spec-not-found-in-code
@@ -134,10 +144,8 @@ discordances:
   - track
   spec_says: If several keys the policy has never seen before are tracked one after another into a fresh pool, then
     repeatedly asking for the next victim gives them back in reverse order of tracking, most recently tracked first,
-    because every one of them looks exactly as cold as the entry already at the front and therefore piles up at
-    the eviction end.
-  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
-    decides.
+    because every one of them looks exactly as cold as the entry already at the front.
+  code_does: Nothing found.
   spec_pointers:
   - US1
   - US1-AS1
@@ -149,7 +157,8 @@ discordances:
   excluded_properties:
   - EPO-EVICT-POST-ORDER-FIRST-TIME-KEYS
   extraction_sides:
-    spec: []
+    spec:
+    - EPO-EVICT-POST-ORDER-FIRST-TIME-KEYS
     code: []
 - id: D-FR-012-lru_list.rs:109-ca1808
   kind: spec-and-code-differ
@@ -158,11 +167,22 @@ discordances:
   - batch_touch
   - remove
   - clear_pool
-  spec_says: 'Recording an access through a handle, or stopping the tracking of an entry, must never crash the process,
-    whatever handle it is given: the interface defines an invalid-handle error for exactly the case of a handle
-    that is bad or already removed, so a handle naming a slot the pool no longer has should be reported or ignored,
-    not fatal.'
-  code_does: ''
+  spec_says: 'Touching a handle whose entry has already been removed, or already evicted, quietly succeeds and changes
+    nothing: it does not crash, does not resurrect the entry, and does not disturb any other entry''s position.'
+  code_does: 'Recording an access must never crash the process, whatever handle it is given. This obligation is
+    expected to be refuted: the implementation reads the entry slot named by the handle without first checking that
+    such a slot exists, so a handle whose slot number is at or beyond the number of slots the pool has ever allocated
+    causes an out-of-bounds crash rather than the error the interface provides for exactly this case. Any handle
+    issued before its pool was emptied has this shape. Stopping the tracking of an entry must never crash the process,
+    whatever handle it is given. This obligation is expected to be refuted for the same reason as for recording
+    an access: the slot named by the handle is read without any check that the slot exists, so a handle whose slot
+    number is beyond the slots the pool has allocated causes an out-of-bounds crash instead of an error return.
+    Emptying a pool must not leave the component in a state where a previously issued handle can crash it or corrupt
+    it. This obligation is expected to be refuted: emptying a pool discards all its internal slots, so every handle
+    the pool ever handed out now names a slot that no longer exists, and using any such handle to record an access
+    or to stop tracking crashes the process with an out-of-bounds access. Worse, once new keys have been registered
+    into the emptied pool, an old handle can instead name a live slot belonging to an unrelated key and quietly
+    corrupt that key''s position or remove it. No mechanism in the code marks old handles as expired.'
   spec_pointers:
   - FR-012
   code_pointers:
@@ -175,17 +195,25 @@ discordances:
   excluded_properties:
   - EPO-INV-STALE-HANDLE-NEVER-CRASHES
   extraction_sides:
-    spec: []
-    code: []
+    spec:
+    - EPO-TOUCH-POST-IDEMPOTENT-REMOVED-HANDLE
+    code:
+    - EPO-TOUCH-ERR-OOB-PANIC
+    - EPO-REMOVE-ERR-OOB-PANIC
+    - EPO-CLEAR-POOL-ERR-STALE-HANDLES
 - id: D-FR-013-lib.rs:122-d210f9
   kind: spec-and-code-differ
   methods:
   - track
   - len
-  spec_says: A pool's current size is never more than one greater than its recorded largest-ever size, and the record
-    is never greater than the size the pool has truly reached. The record is measured just before each insertion
-    rather than after it, so whenever the pool stands at a new peak the record is exactly one too low.
-  code_does: ''
+  spec_says: A pool's record of the largest size it has ever reached never goes down, not even when entries are
+    removed, evicted, or the whole pool is cleared, and it is always at least as large as the pool's current size.
+  code_does: 'A pool''s current count of tracked entries is never more than one greater than its recorded high-water
+    mark, and the recorded mark is never greater than the true peak. The mark is measured just before each new entry
+    is inserted rather than after, so whenever the pool reaches a new peak the recorded mark is one too low. This
+    looks like an accidental off-by-one: it means the frequency-ageing interval is computed from a slightly stale
+    peak, and a pool that has only ever held one entry records a mark of zero and so never ages its frequency records
+    at all.'
   spec_pointers:
   - FR-013
   code_pointers:
@@ -195,8 +223,10 @@ discordances:
   excluded_properties:
   - EPO-INV-MAXLEN-UPPER-BOUNDS-LEN
   extraction_sides:
-    spec: []
-    code: []
+    spec:
+    - EPO-INV-MAXLEN-MONOTONE-UPPER-BOUND
+    code:
+    - EPO-INV-LEN-LE-MAXLEN-PLUS-1
 - id: D-NOSPEC-lib.rs:2025-041526
   kind: spec-not-found-in-code
   methods:
@@ -204,8 +234,7 @@ discordances:
   spec_says: The four rows of the frequency estimator each use a different odd multiplier to pick their counter
     position, so the rows are genuinely independent views of a key rather than four identical copies of the same
     counter.
-  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
-    decides.
+  code_does: Nothing found.
   spec_pointers: []
   code_pointers:
   - lib.rs:20-25
@@ -215,17 +244,17 @@ discordances:
   excluded_properties:
   - EPO-INV-SKETCH-ROW-HASHES-DISTINCT
   extraction_sides:
-    spec: []
+    spec:
+    - EPO-INV-SKETCH-ROW-HASHES-DISTINCT
     code: []
 - id: D-NFR-001-lib.rs:3860-0e8e40
   kind: spec-not-found-in-code
   methods:
   - track
   spec_says: Raising a key's count and reading its estimate each touch exactly four counters, and ageing touches
-    the whole fixed table once, so the amount of work the frequency estimator does never depends on how many keys
-    are tracked or how large the pool has grown.
-  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
-    decides.
+    the whole fixed table once, so the amount of work never depends on how many keys are tracked or how large the
+    pool has grown.
+  code_does: Nothing found.
   spec_pointers:
   - NFR-001
   - NFR-004
@@ -235,7 +264,8 @@ discordances:
   excluded_properties:
   - EPO-INV-SKETCH-OPS-BOUNDED-BY-FIXED-SIZE
   extraction_sides:
-    spec: []
+    spec:
+    - EPO-INV-SKETCH-OPS-BOUNDED-BY-FIXED-SIZE
     code: []
 - id: D-NFR-002-lib.rs:7173-c9c615
   kind: spec-not-found-in-code
@@ -250,10 +280,9 @@ discordances:
   - len
   - clear_pool
   spec_says: 'When several threads track, touch, remove, and evict at the same time, every one of the policy''s
-    structural guarantees still holds afterwards: the eviction order stays an unbroken chain, the reported size
-    matches the real contents, slots are never double-used, and no operation reads a half-updated state.'
-  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
-    decides.
+    structural guarantees still holds afterwards: the eviction chain stays unbroken, the reported size matches the
+    real contents, slots are never double-used, and no operation reads a half-updated state.'
+  code_does: Nothing found.
   spec_pointers:
   - NFR-002
   - US4
@@ -268,7 +297,8 @@ discordances:
   excluded_properties:
   - EPO-INV-NO-DATA-CORRUPTION-UNDER-CONCURRENCY
   extraction_sides:
-    spec: []
+    spec:
+    - EPO-INV-NO-DATA-CORRUPTION-UNDER-CONCURRENCY
     code: []
 - id: D-US4-AS1-lib.rs:119137-a8757a
   kind: spec-not-found-in-code
@@ -277,8 +307,7 @@ discordances:
   - len
   spec_says: 'If several threads together perform a known total number of successful tracks into the same pool,
     the pool afterwards holds exactly that many entries: no track is lost and none is counted twice.'
-  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
-    decides.
+  code_does: Nothing found.
   spec_pointers:
   - US4-AS1
   - SC-002
@@ -289,15 +318,15 @@ discordances:
   excluded_properties:
   - EPO-INV-CONCURRENT-TRACK-TOTAL-COUNT
   extraction_sides:
-    spec: []
+    spec:
+    - EPO-INV-CONCURRENT-TRACK-TOTAL-COUNT
     code: []
 - id: D-NOSPEC-lib.rs:7586-c97857
   kind: spec-not-found-in-code
   methods: []
   spec_says: Starting this component up produces no banner or announcement log message, unlike components that print
     a line about themselves when they initialise.
-  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
-    decides.
+  code_does: Nothing found.
   spec_pointers: []
   code_pointers:
   - lib.rs:75-86
@@ -305,5 +334,6 @@ discordances:
   excluded_properties:
   - EPO-INV-NO-STARTUP-BANNER
   extraction_sides:
-    spec: []
+    spec:
+    - EPO-INV-NO-STARTUP-BANNER
     code: []
