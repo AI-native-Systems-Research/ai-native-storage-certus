@@ -58,11 +58,21 @@ CERTUS_RL_GROUP="${CERTUS_RL_GROUP:-}"
 # key is handled by the pod spec's `optional: true`, so "off" holds regardless of
 # the server version; a blank key is rejected by certus-server at startup, since
 # it can only come from a mistake.
+# Re-initialise certus's on-disk layout (superblock + extent bitmap) on every pod
+# start, discarding previously cached extents. This is certus metadata only -- not
+# an NVMe format or secure erase. Default true: this deployment is for testing,
+# where a clean slate per restart beats a cache that outlived a rollout.
+CERTUS_FORMAT_ON_START="${CERTUS_FORMAT_ON_START:-true}"
+
+# Build the ConfigMap's data map. rl-group is omitted entirely when unset, so
+# "off" rests on the keyRef's optional:true rather than on the server's handling
+# of a blank value. format-on-start is always written out, because a destructive
+# default belongs in the manifest where it can be seen.
+_cm_entries=""
 if [ -n "${CERTUS_RL_GROUP}" ]; then
-    CERTUS_RL_GROUP_DATA="{\"rl-group\": \"${CERTUS_RL_GROUP}\"}"
-else
-    CERTUS_RL_GROUP_DATA="{}"
+    _cm_entries="\"rl-group\": \"${CERTUS_RL_GROUP}\", "
 fi
+CERTUS_CONFIGMAP_DATA="{${_cm_entries}\"format-on-start\": \"${CERTUS_FORMAT_ON_START}\"}"
 
 echo "[render] namespace=${CERTUS_NAMESPACE} nodes=${CERTUS_NODE_SELECTOR_KEY}=${CERTUS_NODE_SELECTOR_VALUE}"
 echo "[render] image=${CERTUS_REGISTRY}/${CERTUS_REPO}/${CERTUS_IMAGE}:${CERTUS_TAG}"
@@ -71,6 +81,7 @@ if [ -n "${CERTUS_RL_GROUP}" ]; then
 else
     echo "[render] rl-group default empty (remote-lookup OFF; each instance isolated)"
 fi
+echo "[render] format-on-start=${CERTUS_FORMAT_ON_START}$([ "${CERTUS_FORMAT_ON_START}" = false ] || echo ' (fresh certus superblock on every pod start; cached extents discarded)')"
 
 for tpl in deploy/k8s/*.yaml.tpl; do
     out="${tpl%.tpl}"
@@ -81,7 +92,7 @@ for tpl in deploy/k8s/*.yaml.tpl; do
         -e "s|%%CERTUS_NAMESPACE%%|${CERTUS_NAMESPACE}|g" \
         -e "s|%%CERTUS_NODE_SELECTOR_KEY%%|${CERTUS_NODE_SELECTOR_KEY}|g" \
         -e "s|%%CERTUS_NODE_SELECTOR_VALUE%%|${CERTUS_NODE_SELECTOR_VALUE}|g" \
-        -e "s|%%CERTUS_RL_GROUP_DATA%%|${CERTUS_RL_GROUP_DATA}|g" \
+        -e "s|%%CERTUS_CONFIGMAP_DATA%%|${CERTUS_CONFIGMAP_DATA}|g" \
         -e "s|%%CERTUS_RL_GROUP%%|${CERTUS_RL_GROUP}|g" \
         "$tpl" > "$out"
     echo "  Generated: ${out}"

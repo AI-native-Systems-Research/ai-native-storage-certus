@@ -29,14 +29,19 @@ metadata:
   namespace: %%CERTUS_NAMESPACE%%
   labels:
     app: certus-server
-# A flow mapping so the renderer emits either an empty map or the single key in
-# one substitution. The key must be ABSENT to mean "off", not blank: absence is
-# handled by the keyRef's `optional: true` -- pure Kubernetes semantics, with no
-# dependence on how the server treats a blank value -- whereas a blank value is
-# a startup error, because it can only come from a broken substitution or config
-# pipeline and silently isolating would turn a remote-lookup-ON run into an OFF
-# one that looks like "remote-lookup did not help".
-data: %%CERTUS_RL_GROUP_DATA%%
+# A flow mapping so the renderer can emit a varying set of keys in one
+# substitution.
+#
+# rl-group must be ABSENT to mean "off", not blank: absence is handled by the
+# keyRef's `optional: true` -- pure Kubernetes semantics, with no dependence on
+# how the server treats a blank value -- whereas a blank value is a startup
+# error, because it can only come from a broken substitution or config pipeline
+# and silently isolating would turn a remote-lookup-ON run into an OFF one that
+# looks like "remote-lookup did not help".
+#
+# format-on-start is always emitted. Its default discards cached data, and that
+# should be visible in the manifest rather than implied by a missing key.
+data: %%CERTUS_CONFIGMAP_DATA%%
 ---
 # NUMA 0 DaemonSet (cluster-wide)
 apiVersion: apps/v1
@@ -137,6 +142,17 @@ spec:
           # DRAM tier rather than the template's old 32/4G. --metrics-port is new;
           # without it the DaemonSets expose nothing to scrape and there is no way
           # to see tier occupancy or remote-lookup hits.
+          # Default is on. Absent or unrecognised counts as "yes": the intent is a
+          # clean slate per restart, and a typo should not silently leave a run
+          # reading the previous run's cache. Writes certus's superblock and
+          # extent bitmap only -- not a device-level format.
+          case "${CERTUS_FORMAT_ON_START:-true}" in
+            false|False|FALSE|0|no|No|NO)
+              echo "certus: format-on-start disabled; recovering the existing on-disk layout" ;;
+            *)
+              ARGS="$ARGS --format"
+              echo "certus: writing a fresh certus superblock (discards cached extents; set format-on-start=false to keep them)" ;;
+          esac
           # Pin to the CPUs of this instance's own NUMA domain.
           #
           # The hand-started host-mode instances this replaces ran pinned
@@ -186,6 +202,19 @@ spec:
             configMapKeyRef:
               name: certus-config
               key: rl-group
+              optional: true
+        # Re-initialise certus's on-disk layout at startup -- the superblock and
+        # extent bitmap that ExtentManager::format writes. This is certus
+        # metadata only: it is not an NVMe format or a secure erase, and it
+        # discards previously cached extents rather than touching the device.
+        # Default is on, because this deployment is for testing and a clean slate
+        # per restart beats a cache that outlived a rollout. Set
+        # format-on-start to "false" to keep cached data across restarts.
+        - name: CERTUS_FORMAT_ON_START
+          valueFrom:
+            configMapKeyRef:
+              name: certus-config
+              key: format-on-start
               optional: true
         resources:
           limits:
@@ -341,6 +370,17 @@ spec:
           # DRAM tier rather than the template's old 32/4G. --metrics-port is new;
           # without it the DaemonSets expose nothing to scrape and there is no way
           # to see tier occupancy or remote-lookup hits.
+          # Default is on. Absent or unrecognised counts as "yes": the intent is a
+          # clean slate per restart, and a typo should not silently leave a run
+          # reading the previous run's cache. Writes certus's superblock and
+          # extent bitmap only -- not a device-level format.
+          case "${CERTUS_FORMAT_ON_START:-true}" in
+            false|False|FALSE|0|no|No|NO)
+              echo "certus: format-on-start disabled; recovering the existing on-disk layout" ;;
+            *)
+              ARGS="$ARGS --format"
+              echo "certus: writing a fresh certus superblock (discards cached extents; set format-on-start=false to keep them)" ;;
+          esac
           # Pin to the CPUs of this instance's own NUMA domain.
           #
           # The hand-started host-mode instances this replaces ran pinned
@@ -390,6 +430,19 @@ spec:
             configMapKeyRef:
               name: certus-config
               key: rl-group
+              optional: true
+        # Re-initialise certus's on-disk layout at startup -- the superblock and
+        # extent bitmap that ExtentManager::format writes. This is certus
+        # metadata only: it is not an NVMe format or a secure erase, and it
+        # discards previously cached extents rather than touching the device.
+        # Default is on, because this deployment is for testing and a clean slate
+        # per restart beats a cache that outlived a rollout. Set
+        # format-on-start to "false" to keep cached data across restarts.
+        - name: CERTUS_FORMAT_ON_START
+          valueFrom:
+            configMapKeyRef:
+              name: certus-config
+              key: format-on-start
               optional: true
         resources:
           limits:
