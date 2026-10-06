@@ -162,7 +162,13 @@ spec:
         resources:
           limits:
             rdma/rdma_shared_device_a: 1
-            hugepages-1Gi: 30Gi
+            # Tier size plus DPDK EAL/DMA overhead, not the tier size alone:
+            # setup-host.sh documents the usable tier as ~(hugepages - 3)GiB, so a
+            # 30G tier needs >=33. Requesting exactly 30Gi made every instance die
+            # on "spdk_zmalloc failed (insufficient hugepages?)" even with 64Gi free
+            # per NUMA node, because the cgroup limit -- not host availability -- was
+            # the binding constraint.
+            hugepages-1Gi: 34Gi
           requests:
             memory: 1Gi
         securityContext:
@@ -332,7 +338,13 @@ spec:
         resources:
           limits:
             rdma/rdma_shared_device_a: 1
-            hugepages-1Gi: 30Gi
+            # Tier size plus DPDK EAL/DMA overhead, not the tier size alone:
+            # setup-host.sh documents the usable tier as ~(hugepages - 3)GiB, so a
+            # 30G tier needs >=33. Requesting exactly 30Gi made every instance die
+            # on "spdk_zmalloc failed (insufficient hugepages?)" even with 64Gi free
+            # per NUMA node, because the cgroup limit -- not host availability -- was
+            # the binding constraint.
+            hugepages-1Gi: 34Gi
           requests:
             memory: 1Gi
         securityContext:
