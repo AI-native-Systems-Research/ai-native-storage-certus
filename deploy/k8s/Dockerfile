@@ -50,8 +50,32 @@ COPY . .
 # Build SPDK
 RUN cd deps && bash build_spdk.sh
 
-# Build certus-server-yaml (spdk feature is the default)
-RUN cargo build --release -p certus-server-yaml
+# Build libzmq -> czmq -> zyre into deps/zyre-build. The remote-lookup transport
+# uses zyre for peer discovery (group SHOUT / directed WHISPER), so the
+# full-remote build below links against it. deps/install_zyre_deps.sh calls sudo,
+# which does not exist in a build stage, so its package list is inlined.
+RUN dnf install -y cmake gcc gcc-c++ make pkg-config libtool autoconf automake \
+        clang-devel libuuid-devel && dnf clean all
+RUN cd deps && bash build_zyre.sh
+
+# Build certus-server-yaml with the FULL-REMOTE profile.
+#
+# The previous `cargo build --release -p certus-server-yaml` took the default
+# feature set, which is just ["spdk"]. That omits zyre and the RDMA
+# initiator/responder, so the resulting server still ACCEPTS --rl-group but has
+# no remote-lookup transport behind it -- instances silently never exchange
+# entries. The initiator/responder also need their OWN `rdma` features, or they
+# compile in stub mode rather than driving real hardware RDMA.
+#
+# Mirrors scripts/build-certus-full-remote-spdk.sh -- keep the two in step.
+# Exposed as build args so build-image-and-push.sh can override them.
+ARG CERTUS_PROFILE=full-remote
+ARG CERTUS_FEATURES="spdk,rdma,remote-lookup-rdma-initiator/rdma,remote-lookup-rdma-responder/rdma"
+ENV PKG_CONFIG_PATH=/build/deps/zyre-build/lib/pkgconfig:/build/deps/zyre-build/lib64/pkgconfig
+ENV LD_LIBRARY_PATH=/build/deps/zyre-build/lib:/build/deps/zyre-build/lib64
+RUN CERTUS_PROFILE="${CERTUS_PROFILE}" cargo build --release \
+        -p certus-server-yaml \
+        --features "${CERTUS_FEATURES}"
 
 # --- Runtime stage ---
 FROM rockylinux:9
@@ -75,6 +99,16 @@ RUN ldconfig
 # Tell nvidia-container-toolkit to inject CUDA libraries from the host
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+# libzmq / czmq / zyre for the remote-lookup transport. Copied wholesale from the
+# builder because RHEL9 has no packages at these pinned versions (libzmq v4.3.5,
+# czmq v4.2.1, zyre v2.0.1). Registered via ld.so.conf rather than
+# LD_LIBRARY_PATH so the binary resolves them however it is invoked -- `ldd` on a
+# host-built server shows libzyre.so.2/libczmq.so.4 as "not found" precisely
+# because that build relies on the caller exporting LD_LIBRARY_PATH.
+COPY --from=builder /build/deps/zyre-build/ /opt/zyre-build/
+RUN printf '/opt/zyre-build/lib\n/opt/zyre-build/lib64\n' > /etc/ld.so.conf.d/zyre.conf && \
+    ldconfig
 
 # Copy the built binary
 COPY --from=builder /build/target/release/certus-server-yaml /usr/local/bin/certus-server-yaml

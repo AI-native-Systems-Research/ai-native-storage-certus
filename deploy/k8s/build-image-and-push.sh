@@ -43,6 +43,12 @@ fi
 # --- Optional environment variables with defaults ---
 CERTUS_IMAGE="${CERTUS_IMAGE:-certus}"
 CERTUS_TAG="${CERTUS_TAG:-latest}"
+# Cargo build selection, passed through to the Dockerfile. The defaults build the
+# full-remote profile (remote-lookup over zyre + hardware RDMA), matching
+# scripts/build-certus-full-remote-spdk.sh. Overriding CERTUS_FEATURES with just
+# "spdk" reverts to a server that accepts --rl-group but cannot remote-look-up.
+CERTUS_PROFILE="${CERTUS_PROFILE:-full-remote}"
+CERTUS_FEATURES="${CERTUS_FEATURES:-spdk,rdma,remote-lookup-rdma-initiator/rdma,remote-lookup-rdma-responder/rdma}"
 
 # --- Parse command-line arguments ---
 NO_PUSH=false
@@ -59,7 +65,12 @@ FULL_IMAGE="${CERTUS_REGISTRY}/${CERTUS_REPO}/${CERTUS_IMAGE}:${CERTUS_TAG}"
 
 # --- Build the container image ---
 echo "Building image: ${FULL_IMAGE}"
-docker build -f deploy/k8s/Dockerfile -t "${FULL_IMAGE}" .
+echo "  profile:  ${CERTUS_PROFILE}"
+echo "  features: ${CERTUS_FEATURES}"
+docker build -f deploy/k8s/Dockerfile \
+    --build-arg "CERTUS_PROFILE=${CERTUS_PROFILE}" \
+    --build-arg "CERTUS_FEATURES=${CERTUS_FEATURES}" \
+    -t "${FULL_IMAGE}" .
 
 # --- Generate k8s manifests from templates ---
 echo "Generating k8s manifests..."
