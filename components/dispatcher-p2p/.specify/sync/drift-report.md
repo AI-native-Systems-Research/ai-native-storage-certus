@@ -6,6 +6,12 @@ spec_sync_git_commit: 4e185dd2
 spec_sync_inputs_sha256: ad62faa2b4495cabfb34c1773a0c1d716c034cc9c317e330fc1535c65b75d663
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-10-05 (branch `fix/store-declines-root-cause`).** Delta analysis on a certified baseline (see the interfaces report).
+>
+> - **Spec not updated while code moved — DRIFTED (moderate), two requirements' worth.** This component's `src/lib.rs` gained 37 lines and its own spec was untouched, which `dispatcher` spec 002 **FR-030** names as a MUST for exactly this component and spec. Two distinct gaps: a full `IDispatcher::schedule_write_through` implementation (a real `WriteJob` enqueue, not a no-op), and a declaration that the FR-033/FR-034 eviction counters are unreported here. FR-035 requires that second one be declared "in both the component's code and this spec" — the code comment existed, and the dispatcher's spec carried the note, but **this** component's spec said nothing. **Resolution**: new **FR-028** (the real enqueue, same `drive_index` placement hash as the FR-018 store path, non-blocking, best-effort, with why a no-op would be wrong under the `full-p2p` profile specifically) and new **FR-029** (the unmeasured-counter declaration, and why it is a declared gap rather than a defect — contrasted against FR-025a's self-contradictory zeroed route counters).
+> - Both follow the precedent FR-025a and FR-027 set in this file for drift found by a sweep.
+>
+> No actionable drift remains for this component.
 > **Sync 2026-10-05 (branch `fix/poller-cpu-placement-logging`).** Delta analysis on a certified baseline: this component's existing clean stamp was re-verified to equal the spec-sync hash of `git archive origin/unstable`, so the only new inputs are this branch's src/specs/interfaces changes. Every FR/SC touching CPU placement, NUMA pinning, threads or SPDK init was located by grep over specs/** and re-checked against the changed code.
 >
 > - **FR-027 (new) — BACKFILL (minor).** Same poller placement policy as dispatcher FR-011, including this branch's skip-first-two-cores-per-node change. `components/dispatcher-p2p/src/lib.rs:272-323, 894-903`. *Unspecced behaviour, modified by this branch.* Resolution: FR-027 added, cross-referencing dispatcher FR-011.

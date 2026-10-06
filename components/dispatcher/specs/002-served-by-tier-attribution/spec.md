@@ -596,6 +596,28 @@ assert identical attribution for identical residency, except where FR-014 specif
     hits with `lookup_hits_dram == 0` was **self-contradictory** and therefore a defect, whereas an
     unmeasured counter is a gap — acceptable only while declared. Adding fields to `TierEventStats`
     is not compiler-enforced, so neither case is caught by a build.
+- **FR-036** *(New 2026-10-05)*: `TierEventStats` MUST carry `oldest_sampled` and
+  `oldest_persisted`, describing the window the clean-eviction scan actually looks at:
+  `oldest_sampled` is how many of the oldest memory-tier keys were sampled, and
+  `oldest_persisted` how many of those were **demotable** (held an `ssd_offset`).
+  - **Both are GAUGES, not counters**, and are the only non-monotonic fields in the struct.
+    Each is overwritten with the latest sample rather than accumulated, so differencing two
+    snapshots is meaningless and the server MUST publish them as Prometheus gauges rather than
+    `_total` counters.
+  - **Rationale: this pair measures the eviction window's health directly, which no counter
+    does.** FR-033's two refusal counters say how often the scan was refused; they cannot say
+    whether the window had *any* demotable candidate to begin with. `oldest_persisted == 0`
+    with `oldest_sampled > 0` means the scan is examining a window in which nothing can be
+    evicted, which is a standing condition rather than a transient refusal.
+  - **This is the instrument that located the write-through defect**, which is why it is
+    specified rather than left as a convenience: four instances each reported 0 of 64 sampled
+    oldest keys demotable, simultaneously with 865 864 candidates refused for want of an
+    `ssd_offset` and none for a held pin. That combination is what distinguished "write-through
+    is behind" from "these entries can never be persisted at all" — the latter being
+    remote-lookup `002-remote-lookup-rdma` FR-039.
+  - `oldest_persisted` MUST be read as **demotability, not persistence alone**: an entry is
+    counted only if its `ssd_offset` is set, which is precisely the condition
+    `IDispatchMap::try_evict_to_block` tests, so the gauge measures what the scan can act on.
 
 - **FR-030**: Every component whose code this feature changes MUST have its **own** spec
   updated in the same change: `components/interfaces` (`001-interfaces`),

@@ -6,6 +6,12 @@ spec_sync_git_commit: 4e185dd2
 spec_sync_inputs_sha256: 8f7abcec4957932822928a3ef2f3de4108a3739b3fea072afa61152cd34b8f6a
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-10-05 (branch `fix/store-declines-root-cause`).** Delta analysis on a certified baseline (see the interfaces report).
+>
+> - **FR-038 required two counters that no longer exist — DRIFTED (major), an unsatisfiable MUST.** The requirement named `peer_pins_held`, `peer_pins_taken`, `peer_pin_hold_us_total` and `peer_pin_hold_us_max`; `4e185dd2` removed the middle two from `RemoteServeStats` after measurement, leaving this requirement impossible to satisfy as written. Same root cause as the interfaces finding: the text was added by earlier commits on this branch and not revised in place when the counters went. **Resolution**: code authoritative. FR-038 narrowed to the two surviving fields, with the removal and its measured justification recorded and cross-referenced to interfaces FR-023 rather than restated.
+> - **FR-039 — ALIGNED, verified not assumed, including its negative clause.** The requester schedules the write-through at `src/actor.rs:629` on the publish path, best-effort via `let _ =` so a failure cannot fail the fetch; and `src/server.rs` contains **no** call, which is what FR-039's "the serving node MUST NOT" requires. The negative half of a requirement is the half a grep for the method name would have passed over.
+>
+> No actionable drift remains for this component.
 > **Re-stamp 2026-10-05 (transitive: `components/interfaces` changed, branch `fix/poller-cpu-placement-logging`).** The only change to this component's hashed inputs is a doc-comment correction on `DispatcherConfig::poller_base_cpu` in `components/interfaces/src/idispatcher.rs` (no signature, type, or behaviour change). This component's own `src/**` and `specs/**` are unchanged, and it does not reference `poller_base_cpu` (verified by grep over its src/ and specs/). Its previous stamp was re-verified to match `git archive origin/unstable` before re-stamping. **No re-analysis was performed for this component**; this stamp asserts only what was checked.
 
 > **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest

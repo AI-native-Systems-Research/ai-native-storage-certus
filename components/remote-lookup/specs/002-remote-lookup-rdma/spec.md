@@ -549,11 +549,17 @@ one-sided write into a reclaimed slot).
   meant to be plumbed through.
 
 
-- **FR-038** *(New 2026-10-02)*: The responder MUST report the lifetime of the read pins it holds
-  on peers' behalf, through `RemoteServeStats`: `peer_pins_held` (gauge), `peer_pins_taken`,
-  `peer_pin_hold_us_total` and `peer_pin_hold_us_max`. The accounting MUST live in the
+- **FR-038** *(New 2026-10-02; narrowed 2026-10-05 — CODE CHANGE)*: The responder MUST report the
+  lifetime of the read pins it holds on peers' behalf, through `RemoteServeStats`:
+  `peer_pins_held` (gauge) and `peer_pin_hold_us_max`. The accounting MUST live in the
   `PinnedBatch` guard rather than at its call sites, because the guard is the only place that
   knows both when a pin was taken and when it was released.
+  - **Narrowed from four fields to two.** `peer_pins_taken` and `peer_pin_hold_us_total` were
+    required by the original wording and have been **removed** from the type; requiring them here
+    made this an unsatisfiable MUST. `peer_pins_taken` measured 1.000× the already-published
+    `peer_served_keys` on every run, and `peer_pin_hold_us_total` accumulated per batch while all
+    key counts are per key, so it could not yield the mean it existed for. See interfaces
+    `001-interfaces` FR-023 for the full supersession note.
   - **Rationale.** A pin held for a peer keeps `read_ref > 0`, which
     `IDispatchMap::try_evict_to_block` refuses, so responder pins are unevictable DRAM on this
     node. The type's own documentation states that a leaked pin is indistinguishable from a live
