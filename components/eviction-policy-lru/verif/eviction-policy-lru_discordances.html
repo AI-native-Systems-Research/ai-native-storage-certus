@@ -14,7 +14,7 @@ th{font-weight:600;color:var(--muted);font-size:13px} code{font-size:12.5px}
 </style><div class='wrap'>
 <h1>eviction-policy-lru — spec↔code discordances</h1>
 <p class='sub'>Pin <code>f3de84aa</code> · Level 1 of verification</p>
-<p>Before any formal proof, the component's specification and its code are each read independently and the two readings are compared. Where they <b>disagree</b>, or the specification asks for something not found in the code, it is listed here. These are findings of the verification, but they are <b>not formally verified</b>: proving them would only rediscover what is already plain from the text. Whoever keeps the specification and the code in step decides which side to change. Each entry is a <i>candidate</i> until a test confirms it.</p>
+<p>Before any formal proof, the component's specification and its code are each read independently and the two readings are compared. Where they <b>disagree</b>, or the specification asks for something not found in the code, it is listed here. These are findings of the verification, but they are <b>not formally verified</b>: proving them would only rediscover what is already plain from the text. Whoever keeps the specification and the code in step decides which side to change. Each entry is a <i>candidate</i> until a test of the specification's requirement is run on the code: if the test <b>fails</b> the entry is <i>confirmed</i>; if it <b>passes</b>, the code does it after all and the entry is <i>withdrawn</i>.</p>
 <p><b>0</b> discordances: 0 where spec and code differ, 0 where a spec item was not found in the code.</p>
 <p>None — the specification and the code agree everywhere they were compared.</p>
 </div>
