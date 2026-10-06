@@ -9,8 +9,11 @@ counts:
   spec_not_found_in_code: 10
   input_range_mismatch: 0
   properties_excluded_from_level2: 14
+  confirmed: 1
+  withdrawn: 0
 discordances:
 - id: D-FR-013-lib.rs:122-91416b
+  name: Track maxlen highwater
   kind: spec-and-code-differ
   methods:
   - track
@@ -34,6 +37,7 @@ discordances:
     code:
     - EPO-TRACK-POST-MAXLEN
 - id: D-FR-013-lib.rs:124-972fc2
+  name: Track aging period no overflow
   kind: spec-not-found-in-code
   methods:
   - track
@@ -52,6 +56,7 @@ discordances:
     - EPO-TRACK-POST-AGING-PERIOD-NO-OVERFLOW
     code: []
 - id: D-FR-002-lib.rs:129139-a799ec
+  name: Track non idempotent reregistration
   kind: spec-and-code-differ
   methods:
   - track
@@ -77,6 +82,7 @@ discordances:
     code:
     - EPO-TRACK-POST-LEN
 - id: D-FR-002-lru_list.rs:3767-f2eebe
+  name: Track existing entries
   kind: spec-not-found-in-code
   methods:
   - track
@@ -97,6 +103,7 @@ discordances:
     - EPO-TRACK-FRAME-EXISTING-ENTRIES
     code: []
 - id: D-US1-AS2-lru_list.rs:108134-4d42d0
+  name: Touch not next victim
   kind: spec-not-found-in-code
   methods:
   - touch
@@ -118,6 +125,7 @@ discordances:
     - EPO-TOUCH-POST-NOT-NEXT-VICTIM
     code: []
 - id: D-FR-012-lib.rs:169182-b45332
+  name: Batch touch removed handles skipped
   kind: spec-not-found-in-code
   methods:
   - batch_touch
@@ -138,6 +146,7 @@ discordances:
     - EPO-BATCH-TOUCH-POST-IDEMPOTENT-REMOVED-HANDLES
     code: []
 - id: D-US1-lib.rs:129137-55e21f
+  name: Evict order first time keys
   kind: spec-not-found-in-code
   methods:
   - identify_next_to_evict
@@ -161,6 +170,7 @@ discordances:
     - EPO-EVICT-POST-ORDER-FIRST-TIME-KEYS
     code: []
 - id: D-FR-012-lru_list.rs:109-ca1808
+  name: Stale handle never crashes
   kind: spec-and-code-differ
   methods:
   - touch
@@ -191,7 +201,7 @@ discordances:
   - lib.rs:154
   - lib.rs:198
   - ieviction_policy.rs:56-58
-  status: candidate
+  status: confirmed
   excluded_properties:
   - EPO-INV-STALE-HANDLE-NEVER-CRASHES
   extraction_sides:
@@ -201,7 +211,12 @@ discordances:
     - EPO-TOUCH-ERR-OOB-PANIC
     - EPO-REMOVE-ERR-OOB-PANIC
     - EPO-CLEAR-POOL-ERR-STALE-HANDLES
+  status_evidence: The repair agent's test repair_test_stale_handle.rs failed on the code before the fix and passes
+    after it (evaluation run 2026-10-05).
+  status_fix: 'PR #505 (bounds check in lru_list.rs)'
+  status_date: '2026-10-05'
 - id: D-FR-013-lib.rs:122-d210f9
+  name: Maxlen upper bounds len
   kind: spec-and-code-differ
   methods:
   - track
@@ -228,6 +243,7 @@ discordances:
     code:
     - EPO-INV-LEN-LE-MAXLEN-PLUS-1
 - id: D-NOSPEC-lib.rs:2025-041526
+  name: Sketch row hashes distinct
   kind: spec-not-found-in-code
   methods:
   - track
@@ -248,6 +264,7 @@ discordances:
     - EPO-INV-SKETCH-ROW-HASHES-DISTINCT
     code: []
 - id: D-NFR-001-lib.rs:3860-0e8e40
+  name: Sketch ops bounded by fixed size
   kind: spec-not-found-in-code
   methods:
   - track
@@ -268,6 +285,7 @@ discordances:
     - EPO-INV-SKETCH-OPS-BOUNDED-BY-FIXED-SIZE
     code: []
 - id: D-NFR-002-lib.rs:7173-c9c615
+  name: No data corruption under concurrency
   kind: spec-not-found-in-code
   methods:
   - create_pool
@@ -301,6 +319,7 @@ discordances:
     - EPO-INV-NO-DATA-CORRUPTION-UNDER-CONCURRENCY
     code: []
 - id: D-US4-AS1-lib.rs:119137-a8757a
+  name: Concurrent track total count
   kind: spec-not-found-in-code
   methods:
   - track
@@ -322,6 +341,7 @@ discordances:
     - EPO-INV-CONCURRENT-TRACK-TOTAL-COUNT
     code: []
 - id: D-NOSPEC-lib.rs:7586-c97857
+  name: No startup banner
   kind: spec-not-found-in-code
   methods: []
   spec_says: Starting this component up produces no banner or announcement log message, unlike components that print
