@@ -71,8 +71,31 @@ need = float(sys.argv[2]) * 2**30
 while not os.path.exists(path) and path != "/":
     path = os.path.dirname(path)
 t, _, free = shutil.disk_usage(path)
-floor = 0.10 * t          # nodefs floor; imagefs would be 15%
-print(f"{path}|{free/2**30:.1f}|{floor/2**30:.1f}|{(free-need)/2**30:.1f}|"
+import re, subprocess
+def _mount_of(q):
+    try:
+        return subprocess.run(["findmnt","-no","TARGET","--target",q],
+                              capture_output=True, text=True).stdout.strip()
+    except Exception:
+        return None
+# Which floor applies depends on WHICH filesystem the store is on. kubelet
+# evicts on nodefs.available<10% (its own root) and imagefs.available<15%
+# (the runtime root). containerd was moved to /home on these hosts, so a
+# store under /home is governed by the STRICTER 15%; using 10% there
+# under-reports the floor by 5% of the device and can greenlight a build
+# that evicts the node.
+_cr = "/var/lib/containerd"
+try:
+    _m = re.search(r'^\s*root\s*=\s*"([^"]+)"', open("/etc/containerd/config.toml").read(), re.M)
+    if _m: _cr = _m.group(1)
+except Exception:
+    pass
+_sm = _mount_of(path)
+_pct, _which = 0.10, "nodefs 10%"
+if _sm and _sm == _mount_of(_cr):
+    _pct, _which = 0.15, "imagefs 15%"
+floor = _pct * t
+print(f"{path} ({_which})|{free/2**30:.1f}|{floor/2**30:.1f}|{(free-need)/2**30:.1f}|"
       f"{'OK' if free - need > floor else 'TIGHT'}")
 PY
 )"
