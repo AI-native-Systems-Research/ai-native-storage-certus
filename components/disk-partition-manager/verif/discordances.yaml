@@ -9,8 +9,11 @@ counts:
   spec_not_found_in_code: 5
   input_range_mismatch: 0
   properties_excluded_from_level2: 22
+  confirmed: 0
+  withdrawn: 0
 discordances:
 - id: D-FR-003-gpt.rs:9092-ca0c39
+  name: Init error no table
   kind: spec-and-code-differ
   methods:
   - initialize
@@ -47,6 +50,7 @@ discordances:
     - DPM-INIT-ERR-NOGPT
     - DPM-READ-ZEROCOUNT-ACCEPTED
 - id: D-NOSPEC-gpt.rs:464487-be2449
+  name: Init error io
   kind: spec-and-code-differ
   methods:
   - initialize
@@ -89,6 +93,7 @@ discordances:
     - DPM-IO-READ-ERR-UNEXPECTED
     - DPM-IO-READ-ERR-CHANNEL
 - id: D-NOSPEC-gpt.rs:118120-4d9cf0
+  name: Init io count bounded
   kind: spec-and-code-differ
   methods:
   - initialize
@@ -115,6 +120,7 @@ discordances:
     code:
     - DPM-READ-COUNT-UNVALIDATED
 - id: D-FR-011-gpt.rs:326-582fc3
+  name: Format precondition sector size
   kind: spec-and-code-differ
   methods:
   - format
@@ -143,6 +149,7 @@ discordances:
     code:
     - DPM-FORMAT-PRE-SECTORSIZE
 - id: D-AS-US1-2-gpt.rs:160161-267b4d
+  name: Format no write on reject
   kind: spec-and-code-differ
   methods:
   - format
@@ -178,6 +185,7 @@ discordances:
     - DPM-FORMAT-ERR-LAYOUT-TOOSMALL
     - DPM-FORMAT-NO-ROLLBACK
 - id: D-FR-001-gpt.rs:310-90710b
+  name: Format precondition max 128
   kind: spec-and-code-differ
   methods:
   - format
@@ -204,6 +212,7 @@ discordances:
     code:
     - DPM-FORMAT-PRE-MAXPARTS
 - id: D-AS-US1-1-gpt.rs:222-405648
+  name: Format table
   kind: spec-and-code-differ
   methods:
   - format
@@ -234,6 +243,7 @@ discordances:
     code:
     - DPM-FORMAT-ZEROGUID-DROPPED
 - id: D-FR-008-gpt.rs:564568-1fda36
+  name: Format guid fresh
   kind: spec-and-code-differ
   methods:
   - format
@@ -260,6 +270,7 @@ discordances:
     code:
     - DPM-FORMAT-GUID-DEGRADED
 - id: D-AS-US1-1-gpt.rs:298-24db0d
+  name: Format type guid echo
   kind: spec-not-found-in-code
   methods:
   - format
@@ -279,6 +290,7 @@ discordances:
     - DPM-FORMAT-POST-TYPE-GUID-ECHO
     code: []
 - id: D-NOSPEC-lib.rs:104-b23f41
+  name: Pinfo index echo
   kind: spec-and-code-differ
   methods:
   - partition_info
@@ -302,6 +314,7 @@ discordances:
     code:
     - DPM-PINFO-INDEX-MISMATCH
 - id: D-FR-005-lib.rs:3859-b8dfcd
+  name: Iof precondition config valid
   kind: spec-not-found-in-code
   methods:
   - initialize_or_format
@@ -321,6 +334,7 @@ discordances:
     - DPM-IOF-PRE-CONFIG-VALID
     code: []
 - id: D-AS-US3-2-lib.rs:5759-81652d
+  name: Iof missing formatted
   kind: spec-and-code-differ
   methods:
   - initialize_or_format
@@ -349,6 +363,7 @@ discordances:
     - DPM-IOF-POST-FALLBACK
     - DPM-IOF-DOC-CLAIM
 - id: D-AS-US2-4-lib.rs:5759-323f41
+  name: Iof no reformat on damaged primary
   kind: spec-and-code-differ
   methods:
   - initialize_or_format
@@ -376,6 +391,7 @@ discordances:
     code:
     - DPM-IOF-DESTRUCTIVE-FALLBACK
 - id: D-FR-009-gpt.rs:578-a38286
+  name: Name length limit
   kind: spec-and-code-differ
   methods:
   - format
@@ -402,6 +418,7 @@ discordances:
     code:
     - DPM-FORMAT-NAME-TRUNCATED
 - id: D-AS-US1-1-gpt.rs:293305-2d22cf
+  name: No overlap
   kind: spec-and-code-differ
   methods:
   - initialize
@@ -438,6 +455,7 @@ discordances:
     - DPM-INV-PARTITIONS-DISJOINT
     - DPM-READ-NO-OVERLAP-CHECK
 - id: D-FR-001-gpt.rs:363373-d0dc35
+  name: Signature revision
   kind: spec-and-code-differ
   methods:
   - initialize
@@ -475,6 +493,7 @@ discordances:
     - DPM-READ-ERR-SIGNATURE
     - DPM-READ-REVISION-UNCHECKED
 - id: D-FR-008-gpt.rs:564-56fdef
+  name: Guid distinct
   kind: spec-not-found-in-code
   methods:
   - format
@@ -494,6 +513,7 @@ discordances:
     - DPM-INV-GUID-DISTINCT
     code: []
 - id: D-FR-011-gpt.rs:58-e127fc
+  name: Sector size domain
   kind: spec-not-found-in-code
   methods:
   - initialize
@@ -516,6 +536,7 @@ discordances:
     - DPM-INV-SECTOR-SIZE-DOMAIN
     code: []
 - id: D-NOSPEC-ipartition_table.rs-b35063
+  name: Type guid constants
   kind: spec-not-found-in-code
   methods:
   - format
@@ -535,6 +556,7 @@ discordances:
     - DPM-INV-TYPE-GUID-CONSTANTS
     code: []
 - id: D-NOSPEC-gpt.rs:137-2c196c
+  name: Partition index sequential
   kind: spec-and-code-differ
   methods:
   - initialize
@@ -561,6 +583,7 @@ discordances:
     code:
     - DPM-READ-INDEX-CAST
 - id: D-FR-004-gpt.rs:293-9d5bb1
+  name: Num sectors positive
   kind: spec-and-code-differ
   methods:
   - initialize
@@ -595,6 +618,7 @@ discordances:
     - DPM-FORMAT-ZEROREST-UNDERFLOW
     - DPM-READ-ENDING-UNDERFLOW
 - id: D-FR-010-lib.rs:72-0b7634
+  name: Nsid consistent
   kind: spec-and-code-differ
   methods:
   - initialize
