@@ -100,6 +100,38 @@ spec:
           for dev in $(cat /config/drives.txt | tr ',' ' '); do
             ARGS="$ARGS --device-pci $dev"
           done
+          # Pin this instance to the GPU in its own NUMA domain.
+          #
+          # Otherwise the server serves a client on a non-zero host GPU through
+          # device 0 by peer access across the socket interconnect. It trusts the
+          # client's reported gpu_device_id, which is always 0 because the device
+          # plugin exposes only the assigned GPU inside a pod, so it selects the
+          # wrong device and CUDA_IPC_MEM_LAZY_ENABLE_PEER_ACCESS makes that
+          # succeed rather than fail. Measured on an A30 pair: 0.05 GiB/s that way
+          # versus 2.10 GiB/s same-device, a 43x penalty. Making the NUMA-local
+          # GPU the only visible one makes the client's "0" true.
+          #
+          # Derived, not hardcoded: NUMA id and CUDA ordinal are not the same
+          # mapping on every node. A two-GPU node may have GPU0 on NUMA 0 and GPU1
+          # on NUMA 1, so ordinal == NUMA id; a one-GPU node whose GPU sits on
+          # NUMA 1 has it as ordinal 0, where that equality breaks. A UUID
+          # sidesteps ordinals entirely. An instance with no NUMA-local GPU
+          # (peer-only) leaves this unset and is unaffected.
+          if [ -z "${CUDA_VISIBLE_DEVICES:-}" ]; then
+            for pair in $(nvidia-smi --query-gpu=uuid,pci.bus_id --format=csv,noheader | tr -d '[:blank:]'); do
+              uuid=${pair%%,*}
+              bdf=${pair#*,}
+              sysfs=$(printf '%s' "$bdf" | sed 's/^0000//' | tr 'A-Z' 'a-z')
+              if [ "$(cat /sys/bus/pci/devices/$sysfs/numa_node 2>/dev/null)" = "$CERTUS_NUMA_ID" ]; then
+                export CUDA_VISIBLE_DEVICES="$uuid"
+                echo "certus: pinned to NUMA-$CERTUS_NUMA_ID GPU $bdf ($uuid)"
+                break
+              fi
+            done
+            if [ -z "${CUDA_VISIBLE_DEVICES:-}" ]; then
+              echo "certus: no GPU in NUMA domain $CERTUS_NUMA_ID; CUDA_VISIBLE_DEVICES left unset"
+            fi
+          fi
           exec certus-server-yaml $ARGS --shm-path ${CERTUS_SHM_PATH} --channels 32 --memory-tier-size 4G
         # Each NUMA instance publishes a DISTINCT mailbox on the shared host
         # /dev/shm; a client selects an instance by pointing at its shm path.
@@ -138,6 +170,10 @@ spec:
           mountPath: /dev/infiniband
         - name: dev-shm
           mountPath: /dev/shm
+        # Read-only, for the NUMA->GPU derivation above.
+        - name: sysfs
+          mountPath: /sys
+          readOnly: true
       volumes:
       - name: config
         emptyDir: {}
@@ -225,6 +261,38 @@ spec:
           for dev in $(cat /config/drives.txt | tr ',' ' '); do
             ARGS="$ARGS --device-pci $dev"
           done
+          # Pin this instance to the GPU in its own NUMA domain.
+          #
+          # Otherwise the server serves a client on a non-zero host GPU through
+          # device 0 by peer access across the socket interconnect. It trusts the
+          # client's reported gpu_device_id, which is always 0 because the device
+          # plugin exposes only the assigned GPU inside a pod, so it selects the
+          # wrong device and CUDA_IPC_MEM_LAZY_ENABLE_PEER_ACCESS makes that
+          # succeed rather than fail. Measured on an A30 pair: 0.05 GiB/s that way
+          # versus 2.10 GiB/s same-device, a 43x penalty. Making the NUMA-local
+          # GPU the only visible one makes the client's "0" true.
+          #
+          # Derived, not hardcoded: NUMA id and CUDA ordinal are not the same
+          # mapping on every node. A two-GPU node may have GPU0 on NUMA 0 and GPU1
+          # on NUMA 1, so ordinal == NUMA id; a one-GPU node whose GPU sits on
+          # NUMA 1 has it as ordinal 0, where that equality breaks. A UUID
+          # sidesteps ordinals entirely. An instance with no NUMA-local GPU
+          # (peer-only) leaves this unset and is unaffected.
+          if [ -z "${CUDA_VISIBLE_DEVICES:-}" ]; then
+            for pair in $(nvidia-smi --query-gpu=uuid,pci.bus_id --format=csv,noheader | tr -d '[:blank:]'); do
+              uuid=${pair%%,*}
+              bdf=${pair#*,}
+              sysfs=$(printf '%s' "$bdf" | sed 's/^0000//' | tr 'A-Z' 'a-z')
+              if [ "$(cat /sys/bus/pci/devices/$sysfs/numa_node 2>/dev/null)" = "$CERTUS_NUMA_ID" ]; then
+                export CUDA_VISIBLE_DEVICES="$uuid"
+                echo "certus: pinned to NUMA-$CERTUS_NUMA_ID GPU $bdf ($uuid)"
+                break
+              fi
+            done
+            if [ -z "${CUDA_VISIBLE_DEVICES:-}" ]; then
+              echo "certus: no GPU in NUMA domain $CERTUS_NUMA_ID; CUDA_VISIBLE_DEVICES left unset"
+            fi
+          fi
           exec certus-server-yaml $ARGS --shm-path ${CERTUS_SHM_PATH} --channels 32 --memory-tier-size 4G
         # Each NUMA instance publishes a DISTINCT mailbox on the shared host
         # /dev/shm; a client selects an instance by pointing at its shm path.
@@ -263,6 +331,10 @@ spec:
           mountPath: /dev/infiniband
         - name: dev-shm
           mountPath: /dev/shm
+        # Read-only, for the NUMA->GPU derivation above.
+        - name: sysfs
+          mountPath: /sys
+          readOnly: true
       volumes:
       - name: config
         emptyDir: {}
