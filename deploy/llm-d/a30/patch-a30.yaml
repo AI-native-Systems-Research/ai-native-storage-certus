@@ -39,10 +39,16 @@ spec:
             - "--tensor-parallel-size=1"
             - "--gpu-memory-utilization=0.90"
             # An A30 is 24Gi: ~15.3Gi of bf16 weights plus activations and CUDA
-            # graphs leave only ~4.11Gi for KV cache, while Qwen3-8B advertises a
-            # 40960 context needing 5.62Gi -- vLLM refuses to start. 16384 needs
-            # ~2.25Gi and yields "Maximum concurrency ... 1.83x".
-            - "--max-model-len=16384"
+            # graphs leave only ~4.11Gi of GPU KV = 29,936 tokens, while Qwen3-8B
+            # advertises a 40960 context -- vLLM refuses to start because
+            # _check_enough_kv_cache_memory requires ONE full-length sequence to
+            # fit in GPU KV. Certus offload does NOT relax that: the offload tier
+            # is not counted, so ~29,920 remains the hard ceiling. What offload
+            # buys is tolerance for lower concurrency -- evicted prefixes come
+            # back from certus instead of being recomputed. 24576 gives 1.22x
+            # concurrency (29,936/24,576); 16384 gave 1.83x, 28672 would give
+            # 1.04x (one request at a time).
+            - "--max-model-len=24576"
           env:
             # Qwen3-8B is ungated, so drop base's dependency on the
             # llm-d-hf-token secret entirely. Omitting it is not enough -- env
