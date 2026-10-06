@@ -137,7 +137,35 @@ spec:
           # DRAM tier rather than the template's old 32/4G. --metrics-port is new;
           # without it the DaemonSets expose nothing to scrape and there is no way
           # to see tier occupancy or remote-lookup hits.
-          exec certus-server-yaml $ARGS --shm-path ${CERTUS_SHM_PATH} --channels 16 --memory-tier-size 30G --metrics-port ${CERTUS_METRICS_PORT}
+          # Pin to the CPUs of this instance's own NUMA domain.
+          #
+          # The hand-started host-mode instances this replaces ran pinned
+          # (0-15,32-47 for NUMA 0, 16-31,48-63 for NUMA 1) and the DaemonSets
+          # did not, so their poller and worker threads could land on either
+          # socket. That matters twice over: every transfer stages GPU->DRAM->SSD,
+          # so a thread on the wrong socket drags the staging buffer across the
+          # interconnect; and DPDK's EAL allocates hugepages on the socket its
+          # threads are running on, so an unpinned instance can take its 34Gi
+          # from the other NUMA node. Two unpinned instances drawing from the same
+          # one then want 68Gi, which will not fit a NUMA domain smaller than that
+          # -- so pinning also keeps the instances out of each other's hugepages.
+          #
+          # taskset rather than numactl: numactl reports "No NUMA available"
+          # unless it can read the topology, and the cpulist is right there in the
+          # sysfs mount. This matches the host-mode processes, which pinned CPUs
+          # but left memory unbound (Mems_allowed_list 0-1) -- hugepage locality
+          # follows from where the threads run rather than from an explicit
+          # --membind, so a shortfall on the local node degrades instead of
+          # failing outright.
+          CERTUS_PIN=""
+          CERTUS_CPUS=$(cat /sys/devices/system/node/node${CERTUS_NUMA_ID}/cpulist 2>/dev/null)
+          if [ -n "$CERTUS_CPUS" ]; then
+            CERTUS_PIN="taskset -c $CERTUS_CPUS"
+            echo "certus: pinning to NUMA-$CERTUS_NUMA_ID cpus $CERTUS_CPUS"
+          else
+            echo "certus: no cpulist for NUMA domain $CERTUS_NUMA_ID; running unpinned"
+          fi
+          exec $CERTUS_PIN certus-server-yaml $ARGS --shm-path ${CERTUS_SHM_PATH} --channels 16 --memory-tier-size 30G --metrics-port ${CERTUS_METRICS_PORT}
         # Each NUMA instance publishes a DISTINCT mailbox on the shared host
         # /dev/shm; a client selects an instance by pointing at its shm path.
         env:
@@ -313,7 +341,35 @@ spec:
           # DRAM tier rather than the template's old 32/4G. --metrics-port is new;
           # without it the DaemonSets expose nothing to scrape and there is no way
           # to see tier occupancy or remote-lookup hits.
-          exec certus-server-yaml $ARGS --shm-path ${CERTUS_SHM_PATH} --channels 16 --memory-tier-size 30G --metrics-port ${CERTUS_METRICS_PORT}
+          # Pin to the CPUs of this instance's own NUMA domain.
+          #
+          # The hand-started host-mode instances this replaces ran pinned
+          # (0-15,32-47 for NUMA 0, 16-31,48-63 for NUMA 1) and the DaemonSets
+          # did not, so their poller and worker threads could land on either
+          # socket. That matters twice over: every transfer stages GPU->DRAM->SSD,
+          # so a thread on the wrong socket drags the staging buffer across the
+          # interconnect; and DPDK's EAL allocates hugepages on the socket its
+          # threads are running on, so an unpinned instance can take its 34Gi
+          # from the other NUMA node. Two unpinned instances drawing from the same
+          # one then want 68Gi, which will not fit a NUMA domain smaller than that
+          # -- so pinning also keeps the instances out of each other's hugepages.
+          #
+          # taskset rather than numactl: numactl reports "No NUMA available"
+          # unless it can read the topology, and the cpulist is right there in the
+          # sysfs mount. This matches the host-mode processes, which pinned CPUs
+          # but left memory unbound (Mems_allowed_list 0-1) -- hugepage locality
+          # follows from where the threads run rather than from an explicit
+          # --membind, so a shortfall on the local node degrades instead of
+          # failing outright.
+          CERTUS_PIN=""
+          CERTUS_CPUS=$(cat /sys/devices/system/node/node${CERTUS_NUMA_ID}/cpulist 2>/dev/null)
+          if [ -n "$CERTUS_CPUS" ]; then
+            CERTUS_PIN="taskset -c $CERTUS_CPUS"
+            echo "certus: pinning to NUMA-$CERTUS_NUMA_ID cpus $CERTUS_CPUS"
+          else
+            echo "certus: no cpulist for NUMA domain $CERTUS_NUMA_ID; running unpinned"
+          fi
+          exec $CERTUS_PIN certus-server-yaml $ARGS --shm-path ${CERTUS_SHM_PATH} --channels 16 --memory-tier-size 30G --metrics-port ${CERTUS_METRICS_PORT}
         # Each NUMA instance publishes a DISTINCT mailbox on the shared host
         # /dev/shm; a client selects an instance by pointing at its shm path.
         env:
