@@ -7,22 +7,20 @@ counts:
   discordances: 16
   spec_and_code_differ: 9
   spec_not_found_in_code: 7
+  input_range_mismatch: 0
   properties_excluded_from_level2: 16
 discordances:
 - id: D-FR-003-session_list.rs:91-184f6d
   kind: spec-and-code-differ
   methods:
   - track
-  spec_says: The session a registered block belongs to must be exactly the session the caller named at registration
+  spec_says: The session a newly registered block is placed in is exactly the session the caller named at registration
     time; the policy never works the session out from the cache key or from anything else.
-  code_does: 'The specification promises that the session a block is placed in is exactly the session named by the
-    caller on that registration. The code honours this only for a key that is not already tracked: when the key
-    is already tracked, registration takes the early idempotent path, refreshes the existing block''s recency and
-    returns its handle, discarding the newly supplied session identifier entirely (src/session_list.rs:90-94 - the
-    `by_key` hit calls `touch` and returns before the `session` argument is ever read). Re-registering a key under
-    a different session therefore silently keeps the block in its original session and the caller is given no indication.
-    The specification is authoritative on intent; the code''s behaviour is a defect unless the specification is
-    amended to say the session is fixed at first registration.'
+  code_does: When a key is already being tracked, the session identifier supplied with the new request is discarded
+    entirely; the block stays in the session it was first tracked under, even if the caller asked for a different
+    one. The interface documentation says a lineage-aware policy reads the supplied session identifier to place
+    the block into its session's chain, which is true only for a key that is not yet tracked, so a caller that re-tracks
+    a key under a new session gets no error and no effect.
   spec_pointers:
   - FR-003
   - ASSUMPTION-caller-supplies-session
@@ -45,16 +43,11 @@ discordances:
   methods:
   - touch
   spec_says: Reporting an access with a handle that was never issued, or that names a block that has already been
-    evicted or removed, must report an error to the caller instead of quietly doing nothing or acting on some other
-    block, and must change nothing.
-  code_does: The specification requires an error for any handle naming a block that has already been evicted or
-    removed. The code only checks that the storage position named by the handle is beyond the end of the domain's
-    storage or currently unoccupied (src/session_list.rs:80-82, 123-126). Because a freed position goes onto the
-    spare list and is reused by the next registration, a handle to a removed block reports an error only until its
-    position is reused; after reuse the refresh silently succeeds and refreshes a different block. The specification
-    is authoritative; the code cannot deliver the promised error because handles carry no use-generation marker
-    (see EPSL-STALE-HANDLE-ALIASES-A-RECYCLED-SLOT for the root cause, which the specification itself records as
-    an open gap).
+    evicted or removed, reports an error to the caller instead of quietly doing nothing or acting on the wrong block,
+    and changes no tracking state.
+  code_does: Refreshing a block fails with an invalid-handle error, and changes nothing, when the handle names a
+    storage slot that is beyond the end of the pool's storage or a slot whose block has already been removed. Refreshing
+    the same handle twice after a removal fails both times.
   spec_pointers:
   - FR-015
   - EC-after-eviction
@@ -79,9 +72,9 @@ discordances:
   - batch_touch
   - identify_next_to_evict
   spec_says: When the caller reports a group of accessed blocks in one operation, every block in that group has
-    its recency refreshed, not just the first or the last one, so all of them count as recently used afterwards.
-  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
-    decides.
+    its most-recent-access time refreshed - not just the first or the last one - so all of them count as recently
+    used afterwards.
+  code_does: Nothing found.
   spec_pointers:
   - FR-005
   - US-3.2
@@ -97,13 +90,12 @@ discordances:
   kind: spec-and-code-differ
   methods:
   - batch_touch
-  spec_says: If a group of reported accesses contains a handle that was never issued, or one that names a block
-    that is no longer tracked, the operation must report an error to the caller rather than appearing to succeed.
-  code_does: The specification requires an error for any handle in the group that names a block that is no longer
-    tracked. The code stops at the first handle whose storage position is empty or beyond the end of its domain's
-    storage and reports an invalid-handle error (src/lib.rs:179-181), but a handle to a removed block whose position
-    has since been reused passes that check and silently refreshes the block that now occupies the position. Specification
-    authoritative; same root cause as EPSL-STALE-HANDLE-ALIASES-A-RECYCLED-SLOT.
+  spec_says: If a group of reported accesses contains a handle that was never issued or that names a block that
+    is no longer tracked, the operation reports an error to the caller rather than appearing to succeed. The specification
+    does not say whether the valid handles in the same group are applied before the error is reported, so only the
+    fact that an error is reported is claimed here.
+  code_does: If any handle in the list names a storage slot that is empty or beyond the end of its pool's storage,
+    the call stops at that handle and fails with an invalid-handle error.
   spec_pointers:
   - FR-015
   code_pointers:
@@ -121,11 +113,10 @@ discordances:
   kind: spec-not-found-in-code
   methods:
   - batch_touch
-  spec_says: Reporting a group of accesses changes only the recency of the blocks named in the group. A block not
-    named in the group keeps its recency, no parent or child link anywhere changes, no block is added or removed,
-    and no domain's reported size changes.
-  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
-    decides.
+  spec_says: Reporting a group of accesses changes only the most-recent-access times of the blocks named in that
+    group. A block not named in the group keeps its most-recent-access time, no parent/child link anywhere changes,
+    and the number of tracked blocks is unchanged.
+  code_does: Nothing found.
   spec_pointers:
   - FR-005
   code_pointers: []
@@ -148,15 +139,11 @@ discordances:
   - len
   - clear_pool
   spec_says: Whenever an operation reports an error, or safely does nothing because the domain named does not exist,
-    the policy's tracking state is left exactly as it was beforehand; no operation, valid or invalid, ever leaves
-    partially applied state behind.
-  code_does: 'The specification''s global invariant promises that a failed operation leaves no partial state. The
-    code''s group recency refresh violates this: it refreshes each handle in turn and returns the error as soon
-    as it reaches a bad one (src/lib.rs:169-182), so every handle before the failing one keeps its new recency and
-    the eviction order is permanently changed by an operation the caller was told had failed. Every other operation
-    does satisfy the invariant - each single-handle operation validates before mutating. The specification is authoritative
-    on intent, but its own not-verifiable ledger records that it never explicitly states whether a group refresh
-    is all-or-nothing (spec NV-11), so this is at minimum an unresolved conflict that the specification must settle.'
+    the policy's tracking state is left exactly as it was beforehand. No operation, valid or invalid, ever leaves
+    tracking state inconsistent.
+  code_does: A failing batch refresh is not undone. Every handle that appeared before the failing one has already
+    been marked as accessed, and those refreshes stay in effect, so the eviction order can be permanently changed
+    by a call that reports failure. The batch is not all-or-nothing.
   spec_pointers:
   - FR-015
   code_pointers:
@@ -176,14 +163,12 @@ discordances:
   kind: spec-and-code-differ
   methods:
   - remove
-  spec_says: Asking the policy to stop tracking a block with a handle that was never issued, or that names a block
-    already evicted or already removed, must report an error to the caller rather than quietly succeeding, and must
-    change nothing.
-  code_does: The specification requires an error for a handle naming an already removed or evicted block. The code
-    checks only that the handle's storage position is within the domain's storage and currently occupied (src/session_list.rs:206-209).
-    Once the position of a removed block has been reused by a later registration, a stale handle passes the check
-    and removes the block that now occupies that position - a silent removal of the wrong block, which is worse
-    than the false success in the refresh case. Specification authoritative; same root cause as EPSL-STALE-HANDLE-ALIASES-A-RECYCLED-SLOT.
+  spec_says: Asking the policy to stop tracking a block using a handle that was never issued, or that names a block
+    already evicted or already removed, reports an error to the caller rather than quietly succeeding, and changes
+    no tracking state.
+  code_does: Asking to stop tracking a block fails with an invalid-handle error, and changes nothing, when the handle
+    names a slot beyond the end of the pool's storage or a slot whose block has already been removed. Removing the
+    same block twice fails the second time.
   spec_pointers:
   - FR-015
   - EC-after-eviction
@@ -206,10 +191,10 @@ discordances:
   methods:
   - identify_next_to_evict
   - len
-  spec_says: Whenever an eviction domain tracks at least one block, a request for a victim always returns one. The
-    policy can never reach a state in which it tracks blocks but reports that none of them may be evicted.
-  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
-    decides.
+  spec_says: Whenever an eviction domain tracks at least one block, a request for a victim always returns one; the
+    policy can never get into a state where it tracks blocks but reports that none of them may be evicted. This
+    follows from every non-empty session having exactly one end-of-chain block, which is always eligible.
+  code_does: Nothing found.
   spec_pointers:
   - FR-007
   - FR-008
@@ -228,9 +213,9 @@ discordances:
   methods:
   - identify_next_to_evict
   spec_says: Evicting a block changes only that block's own record and its parent's end-of-chain status. No surviving
-    block's recency changes, no other block stops being tracked, and no other session's chain is altered.
-  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
-    decides.
+    block's most-recent-access time changes, no other block stops being tracked, and no other session's or other
+    domain's chains are touched.
+  code_does: Nothing found.
   spec_pointers:
   - FR-008
   - FR-009
@@ -249,15 +234,16 @@ discordances:
   - get_eviction_candidates
   - identify_next_to_evict
   spec_says: The candidates are listed in the order the policy would actually evict them, oldest access first, so
-    that the list read from front to back is the sequence of blocks successive victim requests would return.
-  code_does: 'The specification promises the candidate list is in true eviction order. The code returns the currently
-    eligible end-of-chain blocks sorted by recency, oldest first (src/session_list.rs:196-202), which guarantees
-    only the FIRST entry: evicting that block promotes its parent into the eligible set at the parent''s own, possibly
-    much older, recency, so the block actually evicted second may be a block that was not in the list at all, or
-    one further down it. The code extraction states this explicitly as a separate obligation. The specification''s
-    own first-entry claim is met; its whole-list ordering claim is not. Either the specification must be weakened
-    to ''the first candidate is the next victim'', or the implementation must simulate successive evictions - the
-    specification is authoritative and currently over-promises.'
+    the first candidate in the list is exactly the block a victim request would return at that moment, the second
+    is the one after that, and so on.
+  code_does: Beyond its first entry, the candidate list is not in general the order in which blocks will actually
+    be evicted. Evicting a block can promote its ancestor into the candidate set at that ancestor's older recency,
+    and the promoted ancestor can then be evicted ahead of blocks that the earlier list named. For example, with
+    one session holding an older block beneath a newer one and a second session holding a single newest block, the
+    list of two candidates names the newer block of the first session and then the block of the second session,
+    whereas two successive evictions take the newer block of the first session and then its promoted ancestor. The
+    interface documentation describes this list as the keys the policy would evict next in eviction order; the code
+    only guarantees that for the first entry.
   spec_pointers:
   - FR-010
   - US-1.4
@@ -281,8 +267,7 @@ discordances:
   - get_eviction_candidates
   spec_says: When an eviction domain currently tracks no blocks, a request for candidates returns an empty list
     rather than failing or inventing entries.
-  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
-    decides.
+  code_does: Nothing found.
   spec_pointers:
   - EC-empty-domain
   - US-1.4
@@ -302,15 +287,14 @@ discordances:
   - batch_touch
   - remove
   - track
-  spec_says: A handle the caller obtained before a domain was cleared no longer names a tracked block afterwards,
-    so using it to refresh recency or to stop tracking must report an error rather than appearing to succeed.
-  code_does: The specification promises that a pre-clear handle is rejected with an error. The code clears the domain's
-    whole storage area and its spare list (src/session_list.rs:220-228), so storage positions are numbered from
-    the beginning again. A pre-clear handle is rejected only while the domain is still smaller than that handle's
-    position; once enough blocks have been registered after the clear, the same handle names a live but completely
-    unrelated block and a refresh or a stop-tracking request on it silently succeeds against the wrong block. The
-    specification is authoritative; the code cannot deliver the promised error for the same reason as EPSL-STALE-HANDLE-ALIASES-A-RECYCLED-SLOT
-    - handles carry no marker of which use of a position they belong to.
+  spec_says: Handles the caller obtained before a domain was cleared no longer name tracked blocks afterwards, so
+    using one of them to refresh recency or to stop tracking reports an error rather than appearing to succeed or
+    acting on some unrelated block.
+  code_does: 'Clearing a pool throws away its whole storage area, so slot numbering restarts from the beginning.
+    Handles the caller still holds from before the clear are not marked invalid in any durable way: while the pool
+    is empty they are correctly rejected, but as soon as new blocks are tracked the old handles name those new,
+    unrelated blocks and will be accepted for refreshing or removal. The operation gives the caller no indication
+    that its handles have become meaningless.'
   spec_pointers:
   - FR-014
   - FR-015
@@ -336,10 +320,9 @@ discordances:
   - batch_touch
   - remove
   - identify_next_to_evict
-  spec_says: Every tracked block belongs to exactly one session, never to none and never to two, and the session
-    it belongs to is the one named when it was registered and never changes for as long as the block remains tracked.
-  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
-    decides.
+  spec_says: Every tracked block belongs to exactly one session - never to none and never to two - and the session
+    it belongs to is the one named when it was registered and never changes for as long as the block is tracked.
+  code_does: Nothing found.
   spec_pointers:
   - FR-003
   - ASSUMPTION-caller-supplies-session
@@ -359,16 +342,12 @@ discordances:
   - batch_touch
   - clear_pool
   spec_says: Every time a block is registered or an access to it is reported, it is stamped with a recency value
-    strictly later than every recency value handed out before it in that eviction domain, so recency only ever moves
-    forward and older accesses can never appear newer than later ones.
-  code_does: The specification promises that recency values strictly advance for the whole life of a domain. The
-    code maintains only the weaker property that the domain's recency counter is at least as large as the recency
-    of every block it currently tracks, and it resets that counter to zero when the domain is cleared (src/session_list.rs:226),
-    so values handed out after a clear repeat values handed out before it. This is unobservable while it lasts,
-    because clearing discards every block, so no two blocks ever share a recency value and the eviction order is
-    never wrong - but the specification's monotonicity claim is literally false across a clear, and it becomes observable
-    if a pre-clear handle is reused (see EPSL-CLEAR-INVALIDATES-EXISTING-HANDLES). The specification should be weakened
-    to per-epoch monotonicity, or the counter should not be reset.
+    strictly later than every recency value handed out before it in that domain. Recency therefore only ever moves
+    forward, two blocks never end up equally recent, and "the oldest eligible block" is always a single well-defined
+    block.
+  code_does: The pool's running access counter is always at least as large as the access number of every block it
+    tracks, so the next number it hands out is guaranteed to be newer than everything currently stored. The component's
+    own internal invariant check does not test it.
   spec_pointers:
   - FR-004
   - FR-012
@@ -397,17 +376,13 @@ discordances:
   - identify_next_to_evict
   - clear_pool
   spec_says: For as long as a block remains tracked, the handle issued for it keeps identifying that same block,
-    however many other blocks are registered, accessed, evicted or removed in the meantime, and a handle never starts
-    identifying a different block.
-  code_does: The specification promises a handle never comes to name a different block. The code's handle is nothing
-    but the domain identifier plus the storage position (src/lib.rs:140), with no counter recording which use of
-    that position it belongs to, and a position freed by a removal or eviction is pushed onto a spare list and handed
-    to the next registration (src/session_list.rs:182 and the allocator). A handle held across the removal of its
-    block therefore names whatever block later occupies that position, and every operation that takes a handle will
-    act on that unrelated block while reporting success. This is the root cause of the three per-method invalid-handle
-    divergences and of the clear-domain one. The specification is authoritative but its own not-verifiable ledger
-    admits it never required a generation marker (spec NV-12); closing the gap needs either a generation counter
-    in the handle or an explicit specification change permitting aliasing.
+    no matter how many other blocks are registered, accessed, evicted or removed in the meantime. A handle never
+    starts naming a different block while its own block is still tracked.
+  code_does: After a block is removed, its storage slot is put back into the pool of spare slots and is reused by
+    the next block that is tracked. A handle held from before the removal then names the slot of that new, unrelated
+    block, so refreshing or removing through the stale handle succeeds and acts on the new block instead of reporting
+    an invalid handle. Because spare slots are reused most-recently-freed first, this happens on the very next tracking
+    call after a removal.
   spec_pointers:
   - FR-001
   - FR-011
@@ -437,11 +412,11 @@ discordances:
   - get_eviction_candidates
   - len
   - clear_pool
-  spec_says: 'There is no precondition the caller must satisfy beyond supplying correctly typed arguments: any domain
-    identifier, any handle, any cache key, any session identifier and any requested candidate count is accepted,
-    and the operation either succeeds or reports an error, never aborting the process.'
-  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
-    decides.
+  spec_says: 'There is no precondition the caller must satisfy beyond supplying correctly-typed arguments: any domain
+    identifier, any handle, any cache key, any session identifier, any requested candidate count and any group of
+    handles - including ones that are unknown, stale, empty or extreme - may be passed to any operation without
+    the policy crashing, aborting, or overflowing. Bad inputs are reported as errors or handled harmlessly instead.'
+  code_does: Nothing found.
   spec_pointers:
   - FR-015
   code_pointers: []
