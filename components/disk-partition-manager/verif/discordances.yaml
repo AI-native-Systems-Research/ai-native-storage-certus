@@ -7,6 +7,7 @@ counts:
   discordances: 22
   spec_and_code_differ: 17
   spec_not_found_in_code: 5
+  input_range_mismatch: 0
   properties_excluded_from_level2: 22
 discordances:
 - id: D-FR-003-gpt.rs:9092-ca0c39
@@ -14,13 +15,16 @@ discordances:
   methods:
   - initialize
   - initialize_or_format
-  spec_says: If neither the main copy nor the backup copy of the partition table can be accepted as intact, the
-    read fails with an error saying no partition table was found, which is also the answer given for a completely
-    blank drive.
-  code_does: Spec promises a drive with no usable table (a blank drive included) yields the no-partition-table error;
-    code accepts a header that declares zero entry slots as a valid table — reading zero entry bytes whose checksum
-    is the checksum of nothing (gpt.rs:118-123) — and reports success with a table of zero partitions instead of
-    no-partition-table.
+  spec_says: Reading the existing partition table can only succeed if the drive already carries at least one intact
+    copy of the table, either the main copy at the front or the backup copy at the end. If neither the main copy
+    nor the backup copy of the partition table can be accepted as intact, the read fails with an error saying no
+    partition table was found, which is also the answer given for a completely blank drive.
+  code_does: If neither the partition table at the start of the disk nor the spare copy at the end of the disk can
+    be validated, reading fails with a "no partition table" error stating that neither the primary nor the backup
+    header is valid. SURPRISE - an empty table counts as a successful read. A header that declares zero entry slots
+    leads to reading zero bytes of entries, whose checksum is the checksum of nothing, so if the header happens
+    to record that same value the read succeeds and reports a partition table with no partitions at all rather than
+    reporting that no usable table was found.
   spec_pointers:
   - FR-003
   - AS-US2-1
@@ -47,14 +51,19 @@ discordances:
   methods:
   - initialize
   - initialize_or_format
-  spec_says: If the storage device fails one of the sector reads needed to load the partition table — the command
-    cannot be queued, the device reports a failure, it answers with an unexpected kind of completion, or the completion
-    channel breaks — the read reports an input/output failure carrying the device’s own explanation, rather than
-    pretending the table is missing or corrupt.
-  code_does: Spec promises an input/output failure is always reported as such and never as a missing or corrupt
-    table; code honours this for the main copy but collapses every possible cause of failure while reading the backup
-    copy — a genuine hardware or transport error included — into the single answer no-partition-table at gpt.rs:91,
-    which initialize_or_format then treats as licence to reformat.
+  spec_says: If the underlying storage device fails one of the sector reads needed to load the partition table,
+    the read reports an input/output failure rather than pretending the table is missing or corrupt.
+  code_does: SURPRISE - error masking. When the attempt to read the spare copy of the partition table at the end
+    of the disk fails, every possible cause is collapsed into the single answer "no partition table", including
+    a genuine hardware or channel failure; a caller therefore cannot distinguish an unformatted disk from a disk
+    the manager simply failed to read, and the convenience entry point reacts to that answer by reformatting the
+    disk. If the read command cannot be handed to the device's command queue, the operation fails with an input/output
+    error saying the read command could not be sent. If the device reports that the read itself failed, or reports
+    a generic error for the command, the operation fails with an input/output error carrying the device's own description
+    of the failure. If the device answers a read command with some other kind of completion than a read result or
+    an error, the operation fails with an input/output error saying the completion type was unexpected. If the completion
+    channel from the device is closed or broken while waiting for a read result, the operation fails with an input/output
+    error saying the completion could not be received.
   spec_pointers: []
   code_pointers:
   - gpt.rs:464-487
@@ -86,10 +95,11 @@ discordances:
   - initialize_or_format
   spec_says: Reading the partition table touches a fixed set of sectors — the one sector holding the header plus
     the sectors holding the list of partition entries — and that number does not grow as the drive gets larger.
-  code_does: Spec promises the read touches a fixed, drive-size-independent set of sectors; code takes the number
-    of entry slots and the size of each slot straight from the untrusted on-disk header and multiplies them to decide
-    how many bytes to read (gpt.rs:118-120) with no cap, so a hostile or damaged header makes the read arbitrarily
-    large rather than fixed.
+  code_does: SURPRISE - untrusted on-disk numbers used directly to size a read. The number of entry slots and the
+    size of each slot are taken from the header on the disk and multiplied together to decide how many bytes to
+    read, with no check against the 128 slots of 128 bytes each that this component itself always writes, so a damaged
+    or hostile header can make the component reserve an enormous buffer and issue an enormous number of single-sector
+    reads before any checksum is ever examined.
   spec_pointers: []
   code_pointers:
   - gpt.rs:118-120
@@ -111,11 +121,12 @@ discordances:
   - initialize_or_format
   spec_says: The sector size supplied in the format request must be one of the two sizes the component promises
     to support, namely 512 bytes or 4096 bytes.
-  code_does: Spec requires the supplied sector size to be 512 or 4096 and the component to promise only those; code
-    never checks the value anywhere — it divides by the sector size and writes to fixed byte positions 446 through
-    511 of a buffer whose length is the sector size (gpt.rs:326, gpt.rs:330), so a sector size of zero divides by
-    zero and any size below 512 writes past the end of the buffer, crashing the caller instead of returning the
-    declared layout error.
+  code_does: SURPRISE - missing guard and unchecked indexing. The caller must supply a sector size that is non-zero
+    and at least 512 bytes, because the code divides by the sector size and writes to fixed byte positions 446 through
+    511 of a buffer whose length is the sector size; nothing in the component ever checks the value, even though
+    the declared configuration documents it as being 512 or 4096, so a sector size of zero divides by zero and any
+    size below 512 writes past the end of the buffer - both crash the caller instead of returning the declared layout
+    error.
   spec_pointers:
   - FR-011
   code_pointers:
@@ -138,11 +149,13 @@ discordances:
   - initialize_or_format
   spec_says: When a format request is rejected because the requested layout is impossible, nothing at all is written
     to the drive, so a bad request cannot leave the drive in a half-formatted state.
-  code_does: Spec promises a rejected format leaves the drive untouched so it can never be left half-formatted;
-    code satisfies this for layout rejections — every layout check, including the device-too-small check at gpt.rs:160,
-    runs before the first write — but the write phase then performs five separate disk writes one after another
-    and gives up at the first failure with no attempt to undo the writes that already succeeded (gpt.rs:204-216),
-    so an input/output failure part-way through does leave the drive half-formatted.
+  code_does: If the device does not leave at least one sector of usable space between the partition table structures
+    at the two ends of the disk, writing a new table fails with a layout error saying the device is too small, and
+    nothing is written. SURPRISE - partial change left behind on the failure path. Writing a new partition table
+    performs five separate disk writes one after another and gives up at the first one that fails, with no attempt
+    to undo the writes that already landed, so a failure part-way through leaves the disk in a mixed state - for
+    example the protective first sector and the primary header replaced while the backup header still describes
+    the old layout - and the caller is told only that a write failed.
   spec_pointers:
   - AS-US1-2
   - AS-US1-3
@@ -170,13 +183,12 @@ discordances:
   - format
   - initialize_or_format
   - num_partitions
-  spec_says: No more than 128 partitions can ever be created or reported, because the partitioning standard this
-    component implements provides exactly 128 slots for partition entries.
-  code_does: Spec states the number of partitions can never exceed 128 because the standard provides exactly 128
-    entry slots; code neither caps nor rejects a larger request — the entry list is built with one element per requested
-    partition and only padded, while the buffer it is written into is sized for exactly 128 (gpt.rs:310, gpt.rs:433)
-    — so asking for a 129th partition writes past the end of that buffer and crashes rather than returning the declared
-    layout error.
+  spec_says: The number of partitions reported can never exceed 128, because the partitioning standard this component
+    implements provides exactly 128 slots for partition entries.
+  code_does: SURPRISE - missing guard leading to out-of-range writing. The caller must request no more than 128
+    partitions, because the buffer the entries are written into is sized for exactly 128 of them while the entry
+    list is built with one element per requested partition and only padded, never capped; asking for a 129th partition
+    writes past the end of that buffer and crashes rather than returning the declared layout error.
   spec_pointers:
   - FR-001
   code_pointers:
@@ -199,14 +211,14 @@ discordances:
   - num_partitions
   - partition_info
   spec_says: When formatting succeeds, the caller receives a description of the finished partition table that contains
-    exactly one entry for each partition that was requested, in the same order it was requested, each carrying that
-    partition’s starting position and length on the drive, and the partition count reported immediately afterwards
-    equals the number of partitions the request asked for.
-  code_does: Spec promises one returned entry per requested partition, in request order, and a count equal to the
-    number requested; code filters the returned table to entries whose partition type identifier is not all zero
-    bytes (gpt.rs:222), so a partition requested with an all-zero type identifier has disk space reserved for it
-    but is missing from the result, the count is short, and every later partition is reported under a different
-    position than the caller asked for.
+    exactly one entry for each partition that was requested, in the same order it was requested, with each entry
+    carrying that partition's starting position and length on the drive. Immediately after a drive has been formatted,
+    the count returned equals the number of partitions that the format request asked for — for example three, when
+    metadata, extended-metadata and data partitions were requested.
+  code_does: SURPRISE - a requested partition silently disappears from the result. The table returned after formatting
+    lists only those entries whose type identifier is not all zero bytes, so a caller who asks for a partition with
+    an all-zero type identifier has disk space reserved for it on the medium but receives a result that does not
+    mention it, and every later partition is reported under a different position than the caller asked for.
   spec_pointers:
   - AS-US1-1
   code_pointers:
@@ -227,11 +239,12 @@ discordances:
   - format
   - initialize_or_format
   spec_says: When formatting succeeds, the drive is stamped with a freshly generated random identifier, and so is
-    each individual partition.
-  code_does: Spec promises a freshly generated random identifier for the drive and for each partition; code opens
-    the system randomness source and throws away the result of reading from it (gpt.rs:566-568), so when that source
-    cannot be opened or returns fewer bytes than asked for the identifier is whatever the uninitialised buffer held
-    — in practice all zeros — with no error reported and no uniqueness at all.
+    each individual partition, using the standard random-identifier format defined by the relevant internet standard.
+  code_does: SURPRISE - silently ignored failure with no uniqueness guarantee. The identifier generator opens the
+    system randomness source and throws away the result of reading from it, so if that source cannot be opened or
+    returns fewer bytes than asked for, the generated identifier is a fixed almost-all-zero value; nothing in the
+    component ever checks that two generated identifiers differ, so a whole disk can end up with every partition
+    sharing one identifier.
   spec_pointers:
   - FR-008
   code_pointers:
@@ -253,8 +266,7 @@ discordances:
   - initialize_or_format
   spec_says: The partition type identifier recorded for each finished partition is exactly the type identifier the
     caller asked for, unchanged and not reordered.
-  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
-    decides.
+  code_does: Nothing found.
   spec_pointers:
   - AS-US1-1
   code_pointers:
@@ -271,13 +283,12 @@ discordances:
   methods:
   - partition_info
   spec_says: The partition description returned reports the same position number that the caller asked for, so a
-    caller can never be handed a different partition than the one it requested and can feed a returned position
-    straight back in.
-  code_does: Spec promises the returned description reports the position the caller asked for; code uses two different
-    meanings of position — the number recorded inside each returned description is the slot it occupied in the on-disk
-    entry list (gpt.rs:137) while the number this operation accepts is a place in the shorter list of non-empty
-    partitions (lib.rs:104) — so when a leading slot is empty the two disagree and feeding a partition’s own reported
-    position back in can select a different partition or fail as out of range.
+    caller can never be handed a different partition than the one it requested.
+  code_does: SURPRISE - two different meanings of "index" that can disagree. The position recorded inside each returned
+    partition description is the slot number it occupied in the on-disk table, while the position this operation
+    accepts is a place in the shorter list of non-empty partitions; when a leading slot is empty the two numbers
+    differ, so feeding a partition's own reported position straight back in can select a different partition or
+    fail as out of range.
   spec_pointers: []
   code_pointers:
   - lib.rs:104
@@ -296,8 +307,7 @@ discordances:
   - initialize_or_format
   spec_says: The combined read-or-create operation must be given a partition layout that would itself be acceptable
     to a plain format request, because it may have to fall back to formatting the drive.
-  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
-    decides.
+  code_does: Nothing found.
   spec_pointers:
   - FR-005
   - FR-006
@@ -315,10 +325,13 @@ discordances:
   methods:
   - initialize_or_format
   spec_says: When the caller has not demanded a fresh start but the drive carries no usable partition table, a new
-    table is written using the supplied layout and the accompanying flag reports that formatting did take place.
-  code_does: Spec — and the code’s own documentation comment at lib.rs:38 — say a new table is created only when
-    a fresh start is demanded or when no valid table exists; the code also writes a new table when the read reports
-    the table as corrupt (lib.rs:57), a destructive action neither the specification nor the comment mentions.
+    table is written and the accompanying flag reports that formatting did take place.
+  code_does: When reading the existing table reports either that there is no table or that the table is corrupt,
+    the convenience entry point writes a new table using the supplied layout and reports that a new table was created.
+    SURPRISE - the documentation understates what the code does. The comment above the convenience entry point says
+    a new table is created when a fresh start is demanded or when no valid table exists, but the code also creates
+    one when the table is present and merely reports itself as corrupt, which is a destructive action the comment
+    does not mention.
   spec_pointers:
   - AS-US3-2
   code_pointers:
@@ -341,12 +354,11 @@ discordances:
   - initialize_or_format
   spec_says: A drive whose main table copy is damaged but whose backup copy is intact is recovered from the backup
     and is not reformatted by the combined read-or-create operation, so a partially failed write can never escalate
-    into destroying the data on the drive.
-  code_does: Spec promises a damaged main copy with an intact backup is recovered and never reformatted; code reformats
-    the drive without asking whenever the read returns either missing-table or corrupt-table (lib.rs:57), and because
-    a failure reading the backup copy is itself reported as missing-table (gpt.rs:91), a drive that merely could
-    not be read at its backup location, or whose main header is rejected for a reason that does not trigger the
-    backup fallback, is silently overwritten with possibly live data on it.
+    into destroying the drive's contents.
+  code_does: SURPRISE - automatic destruction of possibly live data. Because a corrupt table and a merely unreadable
+    backup copy both lead to the same answer, the convenience entry point reformats the disk in both situations
+    without asking anyone, so a disk whose partition data is still present but temporarily unreadable is overwritten
+    and its contents become unreachable.
   spec_pointers:
   - AS-US2-4
   - FR-003
@@ -370,10 +382,11 @@ discordances:
   - initialize_or_format
   spec_says: Every partition name supplied in the format request must be short enough to fit in the space the partition
     table reserves for a name, which is 36 characters.
-  code_does: Spec makes a name of at most 36 characters a requirement on the caller; code neither rejects nor reports
-    a longer name — it keeps the first 36 two-byte units and discards the rest (gpt.rs:578), and cutting at that
-    point can split a character that needs two units, leaving a damaged character that reads back as a replacement
-    symbol.
+  code_does: SURPRISE - silent truncation where the documentation implies a limit. A partition name is stored as
+    at most 36 two-byte characters; the interface documents the name as having a maximum of 36 characters but the
+    code neither rejects nor reports a longer name, it simply keeps the first 36 units and discards the rest, and
+    cutting at that point can split a character that needs two units, leaving a damaged character that reads back
+    as a replacement symbol.
   spec_pointers:
   - FR-009
   code_pointers:
@@ -398,11 +411,12 @@ discordances:
   - initialize_or_format
   spec_says: No two partitions in a partition table ever cover the same sector of the drive, whether the table was
     just created or was read back from the drive.
-  code_does: Spec claims no two partitions ever share a sector for both freshly created and read-back tables; code
-    guarantees it only for tables it creates (each partition begins exactly one sector after the previous one ends,
-    gpt.rs:293) and performs no validation whatsoever on a table read from the drive (gpt.rs:132-146) — no overlap
-    check, no usable-range check, no ordering check — so a foreign table that passes its checksums but describes
-    overlapping partitions is accepted and handed to callers as valid.
+  code_does: In any table this component creates, no two partitions share a sector - each one begins exactly one
+    sector after the previous one ends - and together they never reach outside the usable region between the two
+    copies of the partition table. SURPRISE - no sanity checking of the geometry that was read. Partitions read
+    from a disk are reported exactly as stored with no check that they stay inside the usable region the header
+    itself declares, that they do not overlap one another, or that they appear in increasing order, so a table that
+    passes its checksums but describes overlapping partitions is accepted and handed to callers as valid.
   spec_pointers:
   - AS-US1-1
   - FR-004
@@ -433,11 +447,13 @@ discordances:
   - initialize_or_format
   spec_says: Every partition-table header this component writes begins with the standard eight-character identifying
     marker required by the partitioning standard and declares version 1.0, and a header read back that lacks the
-    correct marker is treated as damaged rather than as valid, the failure reporting the value actually found.
-  code_does: Spec treats both the marker and the declared version 1.0 as part of what makes a header valid; code
-    checks only the marker (gpt.rs:363) and never checks the revision or the header length it stamps into every
-    header it writes (the expected constants at gpt.rs:9-10 are declared but never used as checks on the read path),
-    so a header declaring any other revision or header size is accepted as valid.
+    correct marker is treated as damaged rather than as valid.
+  code_does: If the first eight bytes of a header sector are not the expected partition-table signature, parsing
+    fails with a "no partition table" error that reports the value actually found. SURPRISE - declared constants
+    that are never used as checks on the read path. The component defines the expected format revision and the expected
+    header length and stamps both into every header it writes, yet when reading a header it parses those two fields
+    and never compares them with the expected values, so a header announcing a different revision or length is accepted
+    as long as its checksums happen to match.
   spec_pointers:
   - FR-001
   - FR-003
@@ -464,9 +480,8 @@ discordances:
   - format
   - initialize_or_format
   spec_says: Within a single formatted drive, no two partitions are given the same unique identifier, and no partition
-    shares the drive’s own identifier.
-  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
-    decides.
+    shares the drive's own identifier.
+  code_does: Nothing found.
   spec_pointers:
   - FR-008
   code_pointers:
@@ -488,8 +503,7 @@ discordances:
   - initialize_or_format
   spec_says: The sector size the component works with, and the sector size it reports back in a partition table,
     is always either 512 bytes or 4096 bytes, the two sizes the component promises to support.
-  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
-    decides.
+  code_does: Nothing found.
   spec_pointers:
   - FR-011
   code_pointers:
@@ -509,8 +523,7 @@ discordances:
   spec_says: The three partition kinds this system defines — the metadata region, the data region and the extended-metadata
     region — each have one fixed published identifier value that never changes, so a drive formatted by one version
     of the software is recognised by another.
-  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
-    decides.
+  code_does: Nothing found.
   spec_pointers: []
   code_pointers:
   - ipartition_table.rs
@@ -531,10 +544,10 @@ discordances:
   - initialize_or_format
   spec_says: The partitions in a returned partition table are numbered starting at zero and increasing by one with
     no gaps and no repeats, so the numbering can be used directly to walk through them.
-  code_does: Spec claims the numbering of a returned table is a gapless zero-based sequence; on the read path the
-    code fills each entry’s number with the slot it occupied in the on-disk list (gpt.rs:137), which has gaps whenever
-    an occupied slot follows an empty one, and it narrows that counter from a machine-sized value to a four-byte
-    number with no check even though the slot count itself was taken unvalidated from the disk.
+  code_does: SURPRISE - a narrowing conversion on a value derived from disk contents. Each reported partition's
+    slot number is converted from a machine-sized counter to a four-byte number with no check; because the number
+    of slots is taken unvalidated from the header, a header claiming more slots than fit in four bytes yields partitions
+    whose reported slot numbers have silently wrapped around.
   spec_pointers: []
   code_pointers:
   - gpt.rs:137
@@ -558,12 +571,14 @@ discordances:
   spec_says: Every partition that appears in a partition table spans at least one sector; a zero-length partition
     is never produced, including for the partition that was asked to take all the remaining space when little space
     remains.
-  code_does: Spec promises no zero-length partition is ever produced, naming the rest-of-disk case explicitly; code
-    produces exactly that — when the explicitly sized partitions already consume the whole drive, the rest-of-disk
-    partition is given zero sectors and an end sector one before its start (gpt.rs:293), and the later conversion
-    of start and end into a sector count then subtracts a larger number from a smaller one and crashes the caller
-    instead of returning a layout error. The same unguarded subtraction sits on the read path (gpt.rs:139), where
-    a checksum-valid table whose entry has its last sector before its first crashes the read.
+  code_does: SURPRISE - subtraction below zero on a reachable path. If the caller asks for a partition that takes
+    all remaining space but the explicitly sized partitions already consume the whole disk, that partition is given
+    zero sectors and its end sector is computed as one before its start; the later conversion of start and end into
+    a sector count then subtracts a larger number from a smaller one, which crashes the caller rather than reporting
+    a layout error. SURPRISE - subtraction below zero driven by on-disk data. A partition's sector count is computed
+    as its last sector minus its first sector plus one, with no check that the last is not smaller than the first;
+    a checksum-valid table whose entry has those two fields the wrong way round therefore crashes the read instead
+    of being reported as corrupt.
   spec_pointers:
   - FR-004
   code_pointers:
@@ -587,14 +602,14 @@ discordances:
   - partition_info
   - num_partitions
   - initialize_or_format
-  spec_says: Every read and write the component issues is addressed to the one storage namespace that was configured
-    for it, including all of the sector writes performed during a format, so on a drive that presents several namespaces
-    the component never reads or writes the wrong one and only the chosen namespace is modified.
-  code_does: Spec treats the namespace as one configured value used by every read and write; code uses two different
-    sources — reading the partition table uses the namespace configured on the component, defaulting to 1 (lib.rs:72),
-    while writing a new table uses the namespace number carried inside the caller’s format request and ignores the
-    configured one entirely (lib.rs:91) — so a table can be written to one namespace and then read back from another
-    with no warning that they differ.
+  spec_says: All of the sector writes performed during a format are directed at the storage namespace the caller
+    named in the format request, so that a drive presenting several namespaces has only the chosen one modified.
+    Every read and write the component issues is addressed to the storage namespace that was configured for it,
+    so on a drive that presents several namespaces the component never reads or writes the wrong one.
+  code_does: SURPRISE - two operations can act on two different namespaces. Reading the partition table uses the
+    namespace number configured on the manager, defaulting to 1, while writing a new table uses the namespace number
+    carried inside the caller's request and ignores the configured one entirely, so a table can be written to one
+    namespace and then read back from another with no warning that they differ.
   spec_pointers:
   - FR-010
   code_pointers:
