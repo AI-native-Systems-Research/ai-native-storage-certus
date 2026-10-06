@@ -92,11 +92,13 @@ warning only costs download rate limit.
 
 ## certus offload prerequisites
 
-1. **certus servers running on each GPU node** in shmq mode, one per NUMA
-   domain, e.g. `--shm-path /dev/shm/certus-stress-n0 --channels 16`. Currently
-   host processes, not pods; `entrypoint-certus.sh` takes `CERTUS_SHM_PREFIX`
-   (default `certus-stress-n`) to match whatever naming is live. Under the
-   `deploy/k8s` DaemonSet the prefix is `certus-shmq-numa`.
+1. **certus servers running on each GPU node**, one per NUMA domain. Deploy them
+   from `deploy/k8s` (see that README): the DaemonSets publish
+   `/dev/shm/certus-shmq-numa{0,1}`, which is what `CERTUS_SHM_PREFIX` defaults
+   to here. Override it (to `certus-stress-n`, say) if you are pointing at
+   hand-started host-mode servers instead. The mailbox naming is the one thing
+   that must agree across the client and server deployments; a mismatch fails
+   fast in the entrypoint rather than silently.
 2. **An image pull secret** named `artifactory-creds` in the target namespace:
    ```bash
    kubectl create secret docker-registry artifactory-creds \
@@ -146,11 +148,11 @@ the domain.
 
 Example topology -- a two-GPU node and a one-GPU node:
 
-| Node         | GPU            | NUMA | Mailbox            |
-|--------------|----------------|------|--------------------|
-| `gpu-node-a` | `0000:41:00.0` | 0    | `certus-stress-n0` |
-| `gpu-node-a` | `0000:a1:00.0` | 1    | `certus-stress-n1` |
-| `gpu-node-b` | `0000:a1:00.0` | 1    | `certus-stress-n1` |
+| Node         | GPU            | NUMA | Mailbox             |
+|--------------|----------------|------|---------------------|
+| `gpu-node-a` | `0000:41:00.0` | 0    | `certus-shmq-numa0` |
+| `gpu-node-a` | `0000:a1:00.0` | 1    | `certus-shmq-numa1` |
+| `gpu-node-b` | `0000:a1:00.0` | 1    | `certus-shmq-numa1` |
 
 Each pod gets its own mailbox on its own host — none is shared — so `DP_SIZE=1`
 and `DP_RANK=0` are correct throughout. Those only need changing if two engines

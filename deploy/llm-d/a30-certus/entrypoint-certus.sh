@@ -11,12 +11,17 @@
 set -euo pipefail
 
 CERTUS_SHM_DIR="${CERTUS_SHM_DIR:-/certus-shm}"
-# Matches the mailboxes the running host-mode servers actually create:
-#   --shm-path /dev/shm/certus-stress-n0   (NUMA 0, drives 0000:61-64)
-#   --shm-path /dev/shm/certus-stress-n1   (NUMA 1, drives 0000:c1-c4)
-# NOTE: "stress" suggests a benchmark harness name -- override this if the
-# long-lived instances use a different --shm-path.
-CERTUS_SHM_PREFIX="${CERTUS_SHM_PREFIX:-certus-stress-n}"
+# Matches the mailboxes the certus DaemonSets publish:
+#   /dev/shm/certus-shmq-numa0   (NUMA 0)
+#   /dev/shm/certus-shmq-numa1   (NUMA 1)
+# set by CERTUS_SHM_PATH in deploy/k8s/certus-server-numa.yaml.tpl.
+#
+# Host-mode servers started by hand may publish under a different prefix
+# (`certus-stress-n`, for one), so override this when pointing at those rather
+# than at the DaemonSets -- the two naming
+# schemes are the one thing that has to agree across the client and server
+# deployments, and a mismatch fails fast below rather than silently.
+CERTUS_SHM_PREFIX="${CERTUS_SHM_PREFIX:-certus-shmq-numa}"
 CERTUS_SLAB_SIZE_BYTES="${CERTUS_SLAB_SIZE_BYTES:-131072}"
 
 log() { printf '[certus-entrypoint] %s\n' "$*" >&2; }
