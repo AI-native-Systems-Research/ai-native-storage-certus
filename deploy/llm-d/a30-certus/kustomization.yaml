@@ -14,9 +14,13 @@ configMapGenerator:
 patches:
   - path: patch-certus.yaml
 
-# Swap the stock vLLM image for the connector-bearing build (see Dockerfile).
-# Keep the tag in step with the VLLM_VERSION the connector was built against.
+# Swap the stock vLLM image for the connector-bearing build published by
+# ../publish-image.sh. Pin the exact tag after each build rather than editing by
+# hand:
+#   (cd a30-certus && kustomize edit set image \
+#      docker.io/vllm/vllm-openai=<registry>/<repo>/llm-d-vllm-certus:<tag>)
+# The tag below is a placeholder in that scheme (vllm<version>-<certus sha>).
 images:
   - name: docker.io/vllm/vllm-openai
     newName: registry.example.com/my-team-docker-local/llm-d-vllm-certus
-    newTag: v0.30.0
+    newTag: vllm0.30.0-REPLACE_ME

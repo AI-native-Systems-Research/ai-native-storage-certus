@@ -18,12 +18,11 @@ deploy/llm-d/
   a30/
     kustomization.yaml        overlay on llm-d's ../base
     patch-a30.yaml            A30 retuning (replicas, args, resources, cache)
+  publish-image.sh            build + push the modelserver image
   a30-certus/
     kustomization.yaml        overlay layered on ../a30 (apply-time)
     patch-certus.yaml         hostIPC, entrypoint, cache env, mailbox mount
     entrypoint-certus.sh      derives the mailbox from the GPU's NUMA domain
-    Dockerfile                vLLM + certus-shmq-connector image
-    build-image-and-push.sh   build/push that image
 ```
 
 `a30/` and `a30-certus/` here are **sources**. `install.sh` copies them into
@@ -106,7 +105,37 @@ warning only costs download rate limit.
        -n llm-d-quickstart
    ```
 3. **The connector image** built and pushed:
-   `CERTUS_REGISTRY=... CERTUS_REPO=... deploy/llm-d/a30-certus/build-image-and-push.sh`
+   `CERTUS_REGISTRY=... CERTUS_REPO=... deploy/llm-d/publish-image.sh`
+
+   There is deliberately no second Dockerfile here: `publish-image.sh` builds
+   `certus-shmq-connector/Dockerfile`, which is already proven by the benchmark
+   flow and carries the offline-safe pip flags (`--no-build-isolation
+   --no-index --no-deps`; without `--no-deps`, pip re-resolves torch's pins and
+   fails on `nvidia-nccl-cu13` for CUDA-13 bases, i.e. vLLM >= 0.27). It is a
+   benchmark-driver image, but the pod's `command`/`args` override its
+   `ENTRYPOINT`, so serving is unaffected -- the only cost is ~25MB of baked
+   datasets and some inert env vars.
+
+### Where to build
+
+The vLLM base is ~30GB extracted, so the build host needs real room *and* has to
+stay above kubelet's eviction floor (`nodefs.available<10%`,
+`imagefs.available<15%`). In practice that rules out a GPU node that is already
+serving: between the model cache and the running decode pods it can sit within a
+few GB of its floor, or already below it, and pulling 30GB there evicts those
+pods mid-pull. Build somewhere that is not serving. `publish-image.sh` computes
+the margin for the host it is run on and refuses if it does not fit. Note docker
+group membership is per-host and per-login: a session predating the group change
+will not have it -- use a fresh login.
+
+Pulling on the GPU nodes is cheap even though the image is large: their
+containerd stores already hold the base layers, so only the connector layer
+transfers. That holds as long as the base tag still resolves to the index they
+have -- `v0.30.0` and both nodes agree on
+`sha256:8a69ffad015f138d7170c4ddc429e230a3bc1c1719f67e14324749df200a4b90`. If
+that tag ever moves, a pull becomes a full ~30GB transfer into `/home`, which has
+only ~7G of headroom above the imagefs floor. Check before bumping:
+`docker buildx imagetools inspect docker.io/vllm/vllm-openai:v<ver>`
 
 ## GPU / NUMA / mailbox mapping
 
