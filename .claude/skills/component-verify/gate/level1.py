@@ -78,6 +78,20 @@ def main():
     bpath = os.path.join(a.verif_dir, a.yaml) if not os.path.isabs(a.yaml) else a.yaml
     d = yaml.safe_load(open(bpath))
     comp = d.get("component", "component")
+    # EACH SIDE IN ITS OWN WORDS (Cornel, 2026-10-04): "what the specification says" comes from the blind
+    # SPEC reader's statement and "what the code does" from the blind CODE reader's, both plain English
+    # and written independently. The unified record's statement is NOT used for either: on
+    # eviction-policy-optimized it was "adjudicated in favour of the CODE", so it showed the code's
+    # version under "spec says", and the code column was empty.
+    def _stmts(fname):
+        fp = os.path.join(os.path.dirname(bpath), fname)
+        try:
+            recs = (yaml.safe_load(open(fp)) or {}).get("properties") or []
+        except OSError:
+            return {}
+        return {r["id"]: re.sub(r"\s+", " ", str(r.get("statement", ""))).strip()
+                for r in recs if r.get("id") and r.get("statement")}
+    SPEC_TXT, CODE_TXT = _stmts("spec_properties.yaml"), _stmts("code_properties.yaml")
     disc, excluded = [], []
     for p in d.get("properties", []):
         if not p.get("verifiable"):
@@ -86,16 +100,18 @@ def main():
         if not kind:
             continue
         spec, code = pointers(p)
-        pf = p.get("paired_from") or {}
+        pf = p.get("paired_from") or p.get("derived_from") or {}      # field name varies by run
         sides = {"spec": _strs(pf.get("spec")) if isinstance(pf, dict) else [],
                  "code": _strs(pf.get("code")) if isinstance(pf, dict) else []}
+        spec_txt = " ".join(dict.fromkeys(SPEC_TXT[i] for i in sides["spec"] if i in SPEC_TXT))
+        code_txt = " ".join(dict.fromkeys(CODE_TXT[i] for i in sides["code"] if i in CODE_TXT))
         entry = {
             "id": stable_id(comp, p, spec, code),
             "kind": kind,
             "methods": list(p.get("methods") or []),
-            "spec_says": re.sub(r"\s+", " ", str(p.get("statement", ""))).strip(),
-            "code_does": (re.sub(r"\s+", " ", str(p.get("divergence_note"))).strip() if p.get("divergence_note")
-                          else ("The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test decides." if kind == "spec-not-found-in-code" else "")),
+            "spec_says": spec_txt or re.sub(r"\s+", " ", str(p.get("statement", ""))).strip(),
+            "code_does": ("Nothing found." if kind == "spec-not-found-in-code" else
+                          code_txt or re.sub(r"\s+", " ", str(p.get("divergence_note") or p.get("note") or "")).strip()),
             "spec_pointers": spec,
             "code_pointers": code,
             "status": "candidate",
