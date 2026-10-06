@@ -9,8 +9,11 @@ counts:
   spec_not_found_in_code: 7
   input_range_mismatch: 0
   properties_excluded_from_level2: 16
+  confirmed: 0
+  withdrawn: 0
 discordances:
 - id: D-FR-003-session_list.rs:91-184f6d
+  name: Track session comes from caller
   kind: spec-and-code-differ
   methods:
   - track
@@ -39,6 +42,7 @@ discordances:
     code:
     - EPSL-TRACK-RETRACK-IGNORES-THE-SUPPLIED-SESSION
 - id: D-FR-015-session_list.rs:80-02886a
+  name: Touch invalid handle is an error
   kind: spec-and-code-differ
   methods:
   - touch
@@ -67,6 +71,7 @@ discordances:
     code:
     - EPSL-TOUCH-REJECTS-AN-UNOCCUPIED-SLOT
 - id: D-FR-005-nocode-0efff1
+  name: Batch touch refreshes every block
   kind: spec-not-found-in-code
   methods:
   - batch_touch
@@ -87,6 +92,7 @@ discordances:
     - EPSL-BATCH-TOUCH-REFRESHES-EVERY-BLOCK
     code: []
 - id: D-FR-015-lib.rs:179-ec74a9
+  name: Batch touch invalid handle is an error
   kind: spec-and-code-differ
   methods:
   - batch_touch
@@ -110,6 +116,7 @@ discordances:
     code:
     - EPSL-BATCH-TOUCH-REJECTS-AN-UNOCCUPIED-SLOT
 - id: D-FR-005-nocode-46dd4a
+  name: Batch touch touches nothing else
   kind: spec-not-found-in-code
   methods:
   - batch_touch
@@ -128,6 +135,7 @@ discordances:
     - EPSL-BATCH-TOUCH-TOUCHES-NOTHING-ELSE
     code: []
 - id: D-FR-015-lib.rs:169-133402
+  name: Failed operations change nothing
   kind: spec-and-code-differ
   methods:
   - track
@@ -160,6 +168,7 @@ discordances:
     code:
     - EPSL-BATCH-TOUCH-IS-NOT-ROLLED-BACK-ON-FAILURE
 - id: D-FR-015-session_list.rs:206-12b3fa
+  name: Remove invalid handle is an error
   kind: spec-and-code-differ
   methods:
   - remove
@@ -187,6 +196,7 @@ discordances:
     code:
     - EPSL-REMOVE-REJECTS-AN-UNOCCUPIED-SLOT
 - id: D-FR-007-nocode-ef6e13
+  name: Evict nonempty domain always yields a victim
   kind: spec-not-found-in-code
   methods:
   - identify_next_to_evict
@@ -209,6 +219,7 @@ discordances:
     - EPSL-EVICT-NONEMPTY-DOMAIN-ALWAYS-YIELDS-A-VICTIM
     code: []
 - id: D-FR-008-nocode-02eea7
+  name: Evict disturbs only victim and parent
   kind: spec-not-found-in-code
   methods:
   - identify_next_to_evict
@@ -229,6 +240,7 @@ discordances:
     - EPSL-EVICT-DISTURBS-ONLY-VICTIM-AND-PARENT
     code: []
 - id: D-FR-010-ieviction_policy.rs:106-bfcdca
+  name: Candidates listed in eviction order
   kind: spec-and-code-differ
   methods:
   - get_eviction_candidates
@@ -262,6 +274,7 @@ discordances:
     code:
     - EPSL-CANDIDATES-AFTER-THE-FIRST-ARE-NOT-THE-EVICTION-SEQUENCE
 - id: D-EC-EMPTY-DOMAIN-nocode-bfa9b0
+  name: Candidates empty domain returns empty list
   kind: spec-not-found-in-code
   methods:
   - get_eviction_candidates
@@ -280,6 +293,7 @@ discordances:
     - EPSL-CANDIDATES-EMPTY-DOMAIN-RETURNS-EMPTY-LIST
     code: []
 - id: D-FR-014-session_list.rs:221-dec7f1
+  name: Clear invalidates existing handles
   kind: spec-and-code-differ
   methods:
   - clear_pool
@@ -313,6 +327,7 @@ discordances:
     code:
     - EPSL-CLEAR-POOL-SILENTLY-INVALIDATES-OUTSTANDING-HANDLES
 - id: D-FR-003-nocode-ac726b
+  name: Block belongs to exactly one session
   kind: spec-not-found-in-code
   methods:
   - track
@@ -335,6 +350,7 @@ discordances:
     - EPSL-INV-BLOCK-BELONGS-TO-EXACTLY-ONE-SESSION
     code: []
 - id: D-FR-004-session_list.rs:52-8ff4db
+  name: Recency strictly advances
   kind: spec-and-code-differ
   methods:
   - track
@@ -367,6 +383,7 @@ discordances:
     code:
     - EPSL-INV-CLOCK-DOMINATES-EVERY-STAMP
 - id: D-FR-001-session_list.rs:69-d8c95a
+  name: Handles keep naming their block
   kind: spec-and-code-differ
   methods:
   - track
@@ -401,6 +418,7 @@ discordances:
     code:
     - EPSL-STALE-HANDLE-ALIASES-A-RECYCLED-SLOT
 - id: D-FR-015-nocode-408ab6
+  name: No input can make an operation panic
   kind: spec-not-found-in-code
   methods:
   - create_pool
