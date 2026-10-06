@@ -1,0 +1,22 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Layered on top of the plain A30 overlay rather than folded into it, so the
+# deployment can still be rolled out without certus by applying ../a30.
+resources:
+  - ../a30
+
+configMapGenerator:
+  - name: certus-entrypoint
+    files:
+      - entrypoint-certus.sh
+
+patches:
+  - path: patch-certus.yaml
+
+# Swap the stock vLLM image for the connector-bearing build (see Dockerfile).
+# Keep the tag in step with the VLLM_VERSION the connector was built against.
+images:
+  - name: docker.io/vllm/vllm-openai
+    newName: registry.example.com/my-team-docker-local/llm-d-vllm-certus
+    newTag: v0.30.0
