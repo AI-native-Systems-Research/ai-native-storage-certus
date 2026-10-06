@@ -1115,15 +1115,18 @@ def bench_scheduler_step(
     *,
     requests_per_step: int = 8,
     pipeline_depth: int = 4,
-    num_sessions: int = 4,
+    num_sessions: int = 32,
     num_blocks: int = 128,
 ) -> BenchResult:
-    """Simulate continuous-batching scheduler steps with prefix sharing.
+    """Simulate continuous-batching scheduler steps matching production vLLM.
 
-    Each step admits ``requests_per_step`` requests drawn from
-    ``num_sessions`` conversations.  Earlier-stored keys are shared
-    prefix (should hit on lookup); new keys are suffix (miss → store).
-    Dispatches are pipelined through the worker.
+    Models the real vLLM offloading connector call pattern:
+      - Per-request maximal prefix scan (per-key lookup, break on miss)
+      - Store deferred: submitted after drain, drained at next step start
+      - drain_workers measures only load completion
+      - Prefix cache fills naturally (no per-step key removal)
+      - Geometric session prefix distribution (varied hit ratios)
+      - Backpressure: store drain at step start models has_pending_work()
     """
     keys_per_request = max(4, num_blocks // requests_per_step)
     prefix_len = keys_per_request // 2
@@ -1139,12 +1142,19 @@ def bench_scheduler_step(
         "take_events": PhaseTiming("take_events"),
     }
 
-    # Seed each session's prefix into the server.
+    # Build a shared prefix pool, then assign each session a prefix slice.
+    # Sessions share earlier blocks (like production prefix caching) and
+    # diverge at session-specific points. Geometric distribution controls
+    # where each session diverges — short prefixes miss more.
+    max_prefix_pool = min(prefix_len * 4, num_blocks * 2)
+    shared_prefix_pool = make_content_keys(max_prefix_pool, seed=77777)
+    _populate_keys(manager, worker, shared_prefix_pool, batch_size)
+
     session_prefixes: list[list[bytes]] = []
+    rng = random.Random(42)
     for s in range(num_sessions):
-        prefix_keys = make_content_keys(prefix_len, seed=s * 10_000)
-        _populate_keys(manager, worker, prefix_keys, batch_size)
-        session_prefixes.append(prefix_keys)
+        geo_len = max(2, min(len(shared_prefix_pool), int(rng.expovariate(1.0 / prefix_len))))
+        session_prefixes.append(shared_prefix_pool[:geo_len])
 
     total_blocks = 0
     total_steps = 0
@@ -1153,8 +1163,22 @@ def bench_scheduler_step(
     wall_start = time.perf_counter()
     job_id = 1_000_000
 
+    prev_store_pending = False
+    prev_stored_keys: list[bytes] | None = None
+
     while (time.perf_counter() - wall_start) < min_duration or total_steps < 3:
-        step_start = time.perf_counter()
+        # Drain the PREVIOUS step's deferred store (not timed — production
+        # processes store completions asynchronously between steps).
+        if prev_store_pending:
+            while True:
+                finished = worker.get_finished()
+                if finished:
+                    break
+                time.sleep(0.0001)
+            manager.complete_store(prev_stored_keys, success=True)
+            total_blocks += len(prev_stored_keys)
+            prev_store_pending = False
+            prev_stored_keys = None
 
         # Build requests for this step.
         all_load_keys: list[bytes] = []
@@ -1172,7 +1196,7 @@ def bench_scheduler_step(
 
             manager.touch(req_keys)
 
-            # Maximal prefix scan.
+            # Maximal prefix scan (matches vLLM's _maximal_prefix_lookup).
             prefix_hits = []
             for k in req_keys:
                 if manager.lookup(k):
@@ -1189,7 +1213,6 @@ def bench_scheduler_step(
         phases["touch_lookup"].record(time.perf_counter() - t_tl)
 
         # Deduplicate: multiple requests in a step can share prefix keys.
-        # The server rejects duplicate keys in a single Pin/Reserve batch.
         seen_load: set[bytes] = set()
         deduped_load = []
         for k in all_load_keys:
@@ -1222,25 +1245,17 @@ def bench_scheduler_step(
             load_spec = manager.prepare_load(all_load_keys)
             phases["prepare_load"].record(time.perf_counter() - t0)
 
-        # Dispatch (pipelined).
+        # Submit load only; store is deferred to after drain.
         t0 = time.perf_counter()
-        stored_keys = None
-        if store_result and store_result.keys_to_store:
-            stored_keys = store_result.keys_to_store
-            gpu_ids = list(range(len(stored_keys)))
-            job_id += 1
-            worker.submit_store(
-                job_id, _FakeGPUSpec(gpu_ids), store_result.store_spec,
-            )
         if load_spec and all_load_keys:
             gpu_ids = list(range(len(all_load_keys)))
             job_id += 1
             worker.submit_load(job_id, load_spec, _FakeGPUSpec(gpu_ids))
         phases["submit"].record(time.perf_counter() - t0)
 
-        # Drain workers.
+        # Drain workers: only the load future (production behavior).
         t0 = time.perf_counter()
-        pending = (1 if stored_keys else 0) + (1 if (load_spec and all_load_keys) else 0)
+        pending = 1 if (load_spec and all_load_keys) else 0
         drained = 0
         while drained < pending:
             finished = worker.get_finished()
@@ -1250,11 +1265,8 @@ def bench_scheduler_step(
                 time.sleep(0.0001)
         phases["drain_workers"].record(time.perf_counter() - t0)
 
-        # Complete.
+        # Complete load.
         t0 = time.perf_counter()
-        if stored_keys:
-            manager.complete_store(stored_keys, success=True)
-            total_blocks += len(stored_keys)
         if all_load_keys:
             manager.complete_load(all_load_keys)
             total_blocks += len(all_load_keys)
@@ -1268,9 +1280,26 @@ def bench_scheduler_step(
 
         total_steps += 1
 
-        # Remove suffix keys so next step's stores don't dedup.
-        if all_store_keys:
-            _remove_keys(ring, all_store_keys, manager._world_size)
+        # Submit store after drain — deferred to next step's start.
+        if store_result and store_result.keys_to_store:
+            stored_keys = store_result.keys_to_store
+            gpu_ids = list(range(len(stored_keys)))
+            job_id += 1
+            worker.submit_store(
+                job_id, _FakeGPUSpec(gpu_ids), store_result.store_spec,
+            )
+            prev_store_pending = True
+            prev_stored_keys = stored_keys
+
+    # Drain the last step's deferred store.
+    if prev_store_pending:
+        while True:
+            finished = worker.get_finished()
+            if finished:
+                break
+            time.sleep(0.0001)
+        manager.complete_store(prev_stored_keys, success=True)
+        total_blocks += len(prev_stored_keys)
 
     wall = time.perf_counter() - wall_start
     result = BenchResult(
@@ -1287,9 +1316,8 @@ def bench_scheduler_step(
     print(f"  Steps={total_steps}  steps/s={total_steps/wall:.1f}  "
           f"prefix_hits={total_prefix_hits}  suffix_stores={total_suffix_stores}")
 
-    # Clean up session prefixes.
-    for prefix in session_prefixes:
-        _remove_keys(ring, prefix, manager._world_size)
+    # Clean up shared prefix pool.
+    _remove_keys(ring, shared_prefix_pool, manager._world_size)
 
     return result
 
@@ -1686,7 +1714,7 @@ def main():
                         help="(prefix-miss) Fraction of keys pre-stored (0.0-1.0)")
     parser.add_argument("--requests-per-step", type=int, default=8,
                         help="(scheduler-step) Requests per scheduler step")
-    parser.add_argument("--num-sessions", type=int, default=4,
+    parser.add_argument("--num-sessions", type=int, default=32,
                         help="(scheduler-step) Distinct conversations in the pool")
     args = parser.parse_args()
 

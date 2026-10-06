@@ -980,6 +980,17 @@ mod tests {
         fn clear_memory_tier(&self) -> Result<usize, DispatcherError> {
             Ok(0)
         }
+        /// No-op: this implementation has no background writer. The real
+        /// dispatcher persists the entry so it becomes demotable; nothing here
+        /// models demotability, so there is nothing to schedule.
+        fn schedule_write_through(
+            &self,
+            _key: CacheKey,
+            _size: u32,
+        ) -> Result<(), DispatcherError> {
+            Ok(())
+        }
+
         fn flush_to_ssd(&self) -> Result<usize, DispatcherError> {
             Ok(0)
         }

@@ -563,6 +563,62 @@ assert identical attribution for identical residency, except where FR-014 specif
 
 *Added 2026-09-25, replacing a section about generated proto bindings that no longer exist.*
 
+- **FR-033** *(New 2026-10-02)*: A clean eviction that fails MUST record **which** of its two
+  causes applied, as separate counters on `TierEventStats`: `evictions_blocked_by_pin` when
+  `IDispatchMap::try_evict_to_block` returns `ActiveReferences`, and
+  `evictions_blocked_unpersisted` when it refuses for want of an `ssd_offset`. The call site MUST
+  match the error variant; testing `is_ok()` and incrementing a single "eviction failed" counter
+  does NOT satisfy this.
+  - **Rationale.** The two causes mean opposite things and are indistinguishable at the call site.
+    A held read pin implicates a *reader* — an in-flight load, or a peer being served over RDMA.
+    A missing `ssd_offset` means write-through has not landed, which is expected under write load
+    and self-correcting. `reserve_memory`'s own comment names both. A combined count can support
+    neither conclusion, and a store-decline measurement of 72% was unattributable for exactly
+    this reason.
+  - Both counters MUST be recorded per *candidate examined*, so one scan past several pinned
+    entries increments several times.
+  - `evictions_blocked_unpersisted` MUST be counted, not inferred by subtracting
+    `evictions_blocked_by_pin` from the scanned total. Subtraction silently absorbs any third
+    cause into whichever counter was not measured; counting both makes their sum against the
+    scanned total a check that the two explanations are exhaustive.
+- **FR-034** *(New 2026-10-02)*: `TierEventStats` MUST carry `eviction_scans_exhausted`, counting
+  clean-eviction scans that examined every candidate and freed none. This is the event that
+  becomes a declined store — `reserve_memory` retries it against the `--store-backpressure-ms`
+  budget and drops the store when the budget elapses — so it MUST be recorded whichever cause
+  blocked the scan.
+- **FR-035** *(New 2026-10-02)*: `dispatcher-p2p` does **not** report FR-033/FR-034 and its
+  values for them are to be read as *unmeasured*, not as zero. That component has eviction paths
+  which can be refused by a held pin, but they are free functions holding no counter handle, so
+  reporting them is a threading change to a component this work cannot exercise (p2p needs its own
+  profile and a loaded `gdrdrv`). The gap MUST stay declared in both the component's code and this
+  spec for as long as it exists.
+  - This is distinguished deliberately from the route-counter defect recorded in SC-008: reporting
+    hits with `lookup_hits_dram == 0` was **self-contradictory** and therefore a defect, whereas an
+    unmeasured counter is a gap — acceptable only while declared. Adding fields to `TierEventStats`
+    is not compiler-enforced, so neither case is caught by a build.
+- **FR-036** *(New 2026-10-05)*: `TierEventStats` MUST carry `oldest_sampled` and
+  `oldest_persisted`, describing the window the clean-eviction scan actually looks at:
+  `oldest_sampled` is how many of the oldest memory-tier keys were sampled, and
+  `oldest_persisted` how many of those were **demotable** (held an `ssd_offset`).
+  - **Both are GAUGES, not counters**, and are the only non-monotonic fields in the struct.
+    Each is overwritten with the latest sample rather than accumulated, so differencing two
+    snapshots is meaningless and the server MUST publish them as Prometheus gauges rather than
+    `_total` counters.
+  - **Rationale: this pair measures the eviction window's health directly, which no counter
+    does.** FR-033's two refusal counters say how often the scan was refused; they cannot say
+    whether the window had *any* demotable candidate to begin with. `oldest_persisted == 0`
+    with `oldest_sampled > 0` means the scan is examining a window in which nothing can be
+    evicted, which is a standing condition rather than a transient refusal.
+  - **This is the instrument that located the write-through defect**, which is why it is
+    specified rather than left as a convenience: four instances each reported 0 of 64 sampled
+    oldest keys demotable, simultaneously with 865 864 candidates refused for want of an
+    `ssd_offset` and none for a held pin. That combination is what distinguished "write-through
+    is behind" from "these entries can never be persisted at all" — the latter being
+    remote-lookup `002-remote-lookup-rdma` FR-039.
+  - `oldest_persisted` MUST be read as **demotability, not persistence alone**: an entry is
+    counted only if its `ssd_offset` is set, which is precisely the condition
+    `IDispatchMap::try_evict_to_block` tests, so the gauge measures what the scan can act on.
+
 - **FR-030**: Every component whose code this feature changes MUST have its **own** spec
   updated in the same change: `components/interfaces` (`001-interfaces`),
   `components/dispatcher` (`001-dispatcher-cache-interface` and this spec),

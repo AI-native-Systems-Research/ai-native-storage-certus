@@ -1,9 +1,9 @@
 ---
 spec_sync_component: eviction-policy-optimized
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-05T20:01:35Z
-spec_sync_git_commit: 35cbd80f
-spec_sync_inputs_sha256: 7916d219def48261d4a832b8f08790d1ae409624b7f41040e6c49bf5d853bdbc
+spec_sync_synced_at: 2026-10-06T00:17:04Z
+spec_sync_git_commit: bd1598f5
+spec_sync_inputs_sha256: f76e181e0e3955e8e170ba89dcd0e6b85f9a1a737df1ce55f892fb39bdfa8044
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Sync 2026-10-05 (PR #505, FR-012 stale-handle fix).** Scope: the only `src/` change since the

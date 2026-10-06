@@ -20,8 +20,9 @@
 
 #![cfg(feature = "live")]
 
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use workload_gen::agents::{AgentSpec, Agents, NoLaunch};
@@ -121,11 +122,28 @@ impl Service for Stub {
     }
 }
 
+/// Grab an ephemeral TCP port, never handing out the same one twice in this
+/// process.
+///
+/// The listener is dropped before the port is ever used, so it is free again by
+/// the time anything binds it -- and callers here allocate in batches
+/// (`(0..3).map(|_| free_port())`) with nothing bound in between, so two
+/// iterations can legitimately be handed the SAME port and the second bind then
+/// fails. Remembering what has been issued closes that window. A port can still
+/// be taken by an unrelated process between the probe and the real bind; that
+/// would need a retry at the bind site.
 fn free_port() -> u16 {
-    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let p = l.local_addr().unwrap().port();
-    drop(l);
-    p
+    static ISSUED: OnceLock<Mutex<HashSet<u16>>> = OnceLock::new();
+    let issued = ISSUED.get_or_init(|| Mutex::new(HashSet::new()));
+    for _ in 0..128 {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let p = l.local_addr().unwrap().port();
+        drop(l);
+        if issued.lock().unwrap_or_else(|e| e.into_inner()).insert(p) {
+            return p;
+        }
+    }
+    panic!("no unissued ephemeral port after 128 attempts");
 }
 
 /// Drive one loopback stub and return what the run measured.
