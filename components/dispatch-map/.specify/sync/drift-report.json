@@ -7,7 +7,7 @@
   "branch": "fix-dispatcher-store-backpressure",
   "git_commit": "72c7182b",
   "drift_status": "clean",
-  "inputs_sha256": "73a9998b451cba715b05e45c0e8872151664534c5b64112743be0211f481516f",
+  "inputs_sha256": "ec0279d94417185764a4f70dc79435719f911127c4ea83cc193ff7850ef94209",
   "summary": {
     "specs_analyzed": 1,
     "requirements_checked": 33,

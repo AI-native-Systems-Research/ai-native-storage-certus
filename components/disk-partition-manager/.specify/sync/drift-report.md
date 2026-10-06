@@ -1,9 +1,9 @@
 ---
 spec_sync_component: disk-partition-manager
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-05T23:33:08Z
-spec_sync_git_commit: 4e185dd2
-spec_sync_inputs_sha256: 7839903ae09cdb7f500784d73be2b337be8d9cf51e9ae727603eaf1b9eb5404c
+spec_sync_synced_at: 2026-10-06T00:17:04Z
+spec_sync_git_commit: bd1598f5
+spec_sync_inputs_sha256: c3567d1f51414de3bea2b02002f24f9c155ae4417bd77e16a14622261bb5076e
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Re-stamp 2026-10-05 (transitive: `components/interfaces` changed, branch `fix/poller-cpu-placement-logging`).** The only change to this component's hashed inputs is a doc-comment correction on `DispatcherConfig::poller_base_cpu` in `components/interfaces/src/idispatcher.rs` (no signature, type, or behaviour change). This component's own `src/**` and `specs/**` are unchanged, and it does not reference `poller_base_cpu` (verified by grep over its src/ and specs/). Its previous stamp was re-verified to match `git archive origin/unstable` before re-stamping. **No re-analysis was performed for this component**; this stamp asserts only what was checked.

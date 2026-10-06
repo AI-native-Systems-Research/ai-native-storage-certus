@@ -1,9 +1,9 @@
 ---
 spec_sync_component: dispatcher
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-05T23:33:08Z
-spec_sync_git_commit: 4e185dd2
-spec_sync_inputs_sha256: b7c912f7edc3de142586298d335535d197f88cfc9c8b9a4a68d3b90da21fc5fc
+spec_sync_synced_at: 2026-10-06T00:17:04Z
+spec_sync_git_commit: bd1598f5
+spec_sync_inputs_sha256: d3209328eea6bf26b5c8e2c1c56ec8422f2a5cbe44985f1f084fc3f01ccaaaf4
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Sync 2026-10-05 (branch `fix/store-declines-root-cause`).** Delta analysis on a certified baseline (see the interfaces report for the baseline argument). Both specs in scope.

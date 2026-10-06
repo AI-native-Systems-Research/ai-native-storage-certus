@@ -1,9 +1,9 @@
 ---
 spec_sync_component: dispatcher-p2p
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-05T23:33:08Z
-spec_sync_git_commit: 4e185dd2
-spec_sync_inputs_sha256: ad62faa2b4495cabfb34c1773a0c1d716c034cc9c317e330fc1535c65b75d663
+spec_sync_synced_at: 2026-10-06T00:17:04Z
+spec_sync_git_commit: bd1598f5
+spec_sync_inputs_sha256: 637f54a21fabcd202cb6902d4f744ff1ebff3339517725f9eee4c34578fbdee0
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Sync 2026-10-05 (branch `fix/store-declines-root-cause`).** Delta analysis on a certified baseline (see the interfaces report).

@@ -1,9 +1,9 @@
 ---
 spec_sync_component: interfaces
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-05T23:33:09Z
-spec_sync_git_commit: 4e185dd2
-spec_sync_inputs_sha256: fa02f777c552e1bcfe19275bffceefc461cbbedb98ed1972a105b20a74393967
+spec_sync_synced_at: 2026-10-06T00:17:04Z
+spec_sync_git_commit: bd1598f5
+spec_sync_inputs_sha256: cee2412a4eb5de01d900823eff412190f4cfcbe9b4ec331fcd270342c625176b
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Sync 2026-10-05 (branch `fix/store-declines-root-cause`).** Delta analysis on a certified baseline: `origin/unstable` (`08a5ae88`) changed no component `src/`or `specs/` after its `fa4adab0` re-stamp, so the only new inputs are this branch's changes. Every FR naming a counter, a `TierEventStats`/`RemoteServeStats` field, or an `IDispatcher` method was located by grep over `specs/**` and re-checked against the changed code.

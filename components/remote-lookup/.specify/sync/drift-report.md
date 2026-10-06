@@ -1,9 +1,9 @@
 ---
 spec_sync_component: remote-lookup
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-05T23:33:09Z
-spec_sync_git_commit: 4e185dd2
-spec_sync_inputs_sha256: 8f7abcec4957932822928a3ef2f3de4108a3739b3fea072afa61152cd34b8f6a
+spec_sync_synced_at: 2026-10-06T00:17:04Z
+spec_sync_git_commit: bd1598f5
+spec_sync_inputs_sha256: 0cb6bb4a6fac402016e4cb6fc9d796d10818754b171b4544fca56a2e317f5ad1
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Sync 2026-10-05 (branch `fix/store-declines-root-cause`).** Delta analysis on a certified baseline (see the interfaces report).
