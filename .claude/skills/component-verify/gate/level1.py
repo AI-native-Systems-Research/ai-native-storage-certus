@@ -69,6 +69,34 @@ def stable_id(comp, p, spec, code):
     return f"D-{s}-{re.sub(r'[^A-Za-z0-9.:_]', '', c)}-{h}"
 
 
+ROLE_TAGS = {"POST", "PRE", "INV", "FRAME"}
+
+
+def readable_name(pids, methods):
+    """A short name a reader can recognise ("Inv stale handle never crashes" -> "Stale handle never crashes"),
+    made from the property id the extraction gave it: drop the component prefix and the POST/PRE/INV/FRAME
+    tag, keep the method words (stripping them left a dozen rows called just "Precondition").
+    Cornel, 2026-10-05: the page's "kind" column meant nothing to a reader; the property name is what
+    tells you which row is the stale-handle one."""
+    names = []
+    for pid in pids:
+        toks = [t for t in str(pid).split("-")[1:] if t not in ROLE_TAGS - {"PRE"}] or str(pid).split("-")[1:]
+        toks = ["error" if t == "ERR" else ("precondition" if t == "PRE" else t.lower()) for t in toks]
+        n = " ".join(toks) or str(pid)
+        names.append(n[:1].upper() + n[1:])
+    return "; ".join(dict.fromkeys(names))
+
+
+def load_confirmations(verif_dir):
+    """discordance_confirmations.yaml (record_confirmation.py) survives every regeneration of
+    discordances.yaml: a test that confirmed or withdrew a discordance stays on the record."""
+    fp = os.path.join(verif_dir, "discordance_confirmations.yaml")
+    try:
+        return (yaml.safe_load(open(fp)) or {}).get("confirmations") or []
+    except OSError:
+        return []
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("verif_dir")
@@ -107,6 +135,7 @@ def main():
         code_txt = " ".join(dict.fromkeys(CODE_TXT[i] for i in sides["code"] if i in CODE_TXT))
         entry = {
             "id": stable_id(comp, p, spec, code),
+            "name": readable_name([p["id"]], list(p.get("methods") or [])),
             "kind": kind,
             "methods": list(p.get("methods") or []),
             "spec_says": spec_txt or re.sub(r"\s+", " ", str(p.get("statement", ""))).strip(),
@@ -129,7 +158,8 @@ def main():
         sp = list(dd.get("spec_pointers") or []); cp = list(dd.get("code_pointers") or [])
         h = hashlib.sha1(f"{comp}|{'|'.join(sp)}|{'|'.join(cp)}|domain".encode()).hexdigest()[:6]
         did = f"D-RANGE-{(sp[0] if sp else 'nospec').upper().replace(' ', '')}-{h}"
-        disc.append({"id": did, "kind": "input-range-mismatch", "methods": list(dd.get("methods") or []),
+        disc.append({"id": did, "name": dd.get("name") or "Input range: " + str(dd.get("assume", "")).strip(),
+                     "kind": "input-range-mismatch", "methods": list(dd.get("methods") or []),
                      "spec_says": dd.get("spec_says", ""), "code_does": dd.get("code_does", ""),
                      "spec_pointers": sp, "code_pointers": cp, "status": "candidate",
                      "assume_in_level2": dd.get("assume", ""), "excluded_properties": []})
@@ -149,6 +179,25 @@ def main():
                    "properties_excluded_from_level2": len(excluded)},
         "discordances": disc,
     }
+    # CONFIRMATIONS: candidate -> confirmed / withdrawn, matched by discordance id, else by property id
+    # (an id can shift if a pointer changes; the property name usually does not).
+    conf = load_confirmations(a.verif_dir)
+    used = set()
+    for e in disc:
+        for k, c in enumerate(conf):
+            if c.get("id") == e["id"] or (c.get("property") and c["property"] in e.get("excluded_properties", [])):
+                e["status"] = c.get("status", "candidate")
+                for f in ("evidence", "fix", "date"):
+                    if c.get(f):
+                        e[f"status_{f}"] = c[f]
+                used.add(k)
+                break
+    for k, c in enumerate(conf):
+        if k not in used:
+            print(f"level1: note: confirmation {c.get('id') or c.get('property')} matches no current discordance "
+                  "(fixed and re-extracted as agreement?)", file=sys.stderr)
+    out["counts"]["confirmed"] = sum(1 for e in disc if e["status"] == "confirmed")
+    out["counts"]["withdrawn"] = sum(1 for e in disc if e["status"] == "withdrawn")
     ids = [e["id"] for e in disc]
     dup = {i for i in ids if ids.count(i) > 1}
     if dup:

@@ -85,7 +85,10 @@ python3 gate/render_discordances.py components/<component>/verif
 `level1.py` writes `verif/discordances.yaml`, one entry per **discordance** (spec and code differ, or a
 spec item was not found in the code) with what the spec says, what the code does, spec pointers
 (FR/US/AS…) and code pointers (file:line), the methods touched, a stable id keyed on those pointers, and
-`status: candidate`. It appends `level2_excluded:` to the bundle: **every property derived from a
+`status: candidate` (or `confirmed` / `withdrawn` when `verif/discordance_confirmations.yaml` holds a
+test's verdict for it — written by `gate/record_confirmation.py`, see component-repair; level1.py applies it
+on every regeneration, so carry that file forward on a re-run), and a readable `name` made from the
+property id ("Stale handle never crashes") that the page shows instead of the kind. It appends `level2_excluded:` to the bundle: **every property derived from a
 discordance, from either side, is excluded from level 2.** `render_discordances.py` writes the small
 `<component>_discordances.html`; the scoring page links to it in one line.
 
@@ -221,7 +224,7 @@ If any verifiable property lacks a scorer-owned status for a rendered tool, the 
 Both branches carry the **identical full metadata bundle**; they differ only in which tool's proof artifacts sit alongside it. For **each** tool run (`--tools`):
 1. From the fresh `origin/unstable`, check out `verif/<tool>/<component>` if it exists, else create it off `origin/unstable`. Overwrite-in-place — do **not** branch off a stale local tip.
 2. Stage, all under `components/<component>/`:
-   - **the full metadata bundle (identical on both branches):** `verif/spec_properties.yaml`, `verif/code_properties.yaml`, `verif/unified_properties.yaml`, the combined `verif/<component>_scoring.html`, and the level-1 report `verif/discordances.yaml` + `verif/<component>_discordances.html` (Step 1.5);
+   - **the full metadata bundle (identical on both branches):** `verif/spec_properties.yaml`, `verif/code_properties.yaml`, `verif/unified_properties.yaml`, the combined `verif/<component>_scoring.html`, and the level-1 report `verif/discordances.yaml` + `verif/<component>_discordances.html` (Step 1.5), plus `verif/discordance_confirmations.yaml` when it exists;
    - **plus that one tool's proof artifacts:** Kani branch → the `#[cfg(kani)]` harnesses (under `src/`); Creusot branch → the `verif/` crate + its `.coma`.
    Do **not** stage the *other* tool's artifacts, and do **not** commit the scratch advisory side-files (`verif/<tool>_advisory.yaml`).
 3. **Artifact-presence gate (HARD — absence is a contamination too).** Before committing, count that

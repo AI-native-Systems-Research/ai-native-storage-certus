@@ -46,30 +46,37 @@ th{font-weight:600;color:var(--muted);font-size:13px} code{font-size:12.5px}
          "specification asks for something not found in the code, it is listed here. These are "
          "findings of the verification, but they are <b>not formally verified</b>: proving them would "
          "only rediscover what is already plain from the text. Whoever keeps the specification and the "
-         "code in step decides which side to change. Each entry is a <i>candidate</i> until a test "
-         "confirms it.</p>",
+         "code in step decides which side to change. Each entry is a <i>candidate</i> until a test of the "
+         "specification's requirement is run on the code: if the test <b>fails</b> the entry is "
+         "<i>confirmed</i>; if it <b>passes</b>, the code does it after all and the entry is <i>withdrawn</i>.</p>",
          f"<p><b>{c.get('discordances', len(rows))}</b> discordances: "
          f"{c.get('spec_and_code_differ', 0)} where spec and code differ, "
          f"{c.get('spec_not_found_in_code', 0)} where a spec item was not found in the code"
          + (f", {c.get('input_range_mismatch', 0)} where the spec and the code accept different ranges of input"
-            if c.get('input_range_mismatch') else "") + ".</p>"
+            if c.get('input_range_mismatch') else "") + "."
+         + (f" {c.get('confirmed', 0)} confirmed by a test" if c.get('confirmed') else "")
+         + (f", {c.get('withdrawn', 0)} withdrawn" if c.get('withdrawn') else "") + "</p>"
          + ("<p>For an <b>input range mismatch</b>, the properties that depend on that input are still formally "
             "verified, but only for the narrower range both sides accept, shown in the last column.</p>"
             if c.get('input_range_mismatch') else "")]
     if not rows:
         P.append("<p>None — the specification and the code agree everywhere they were compared.</p>")
     else:
-        P.append("<div class='scroll'><table><tr><th>#</th><th>kind</th><th>method</th>"
+        P.append("<div class='scroll'><table><tr><th>#</th><th>name</th><th>method</th>"
                  "<th>what the specification says</th><th>what the code does</th><th>where</th>"
                  "<th>status</th><th>formal verification assumes</th></tr>")
         for i, e in enumerate(rows, 1):
             where = ("<b>spec</b> " + esc(", ".join(e.get("spec_pointers") or []) or "—") +
                      "<br><b>code</b> " + esc(", ".join(e.get("code_pointers") or []) or "—"))
-            P.append(f"<tr><td>{i}</td><td><span class='chip'>{esc(KIND.get(e.get('kind'), e.get('kind')))}</span></td>"
+            st = esc(e.get("status"))
+            if e.get("status") in ("confirmed", "withdrawn"):
+                st = (f"<b>{st}</b>" + (f"<br><span class='ptr'>{esc(e.get('status_evidence'))}</span>" if e.get("status_evidence") else "")
+                      + (f"<br><span class='ptr'>Fix: {esc(e.get('status_fix'))}</span>" if e.get("status_fix") else ""))
+            P.append(f"<tr><td>{i}</td><td><b>{esc(e.get('name') or KIND.get(e.get('kind'), e.get('kind')))}</b></td>"
                      f"<td><code>{esc(', '.join(e.get('methods') or []))}</code></td>"
                      f"<td>{esc(e.get('spec_says'))}</td><td>{esc(e.get('code_does'))}</td>"
                      f"<td class='ptr'>{where}<br><code>{esc(e.get('id'))}</code></td>"
-                     f"<td>{esc(e.get('status'))}</td><td>{esc(e.get('assume_in_level2') or '—')}</td></tr>")
+                     f"<td>{st}</td><td>{esc(e.get('assume_in_level2') or '—')}</td></tr>")
         P.append("</table></div>")
     P.append("</div>")
     open(out, "w", encoding="utf-8").write("\n".join(P))
