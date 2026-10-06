@@ -1,11 +1,13 @@
 ---
 spec_sync_component: eviction-policy-optimized
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-06T00:17:04Z
-spec_sync_git_commit: bd1598f5
-spec_sync_inputs_sha256: f76e181e0e3955e8e170ba89dcd0e6b85f9a1a737df1ce55f892fb39bdfa8044
+spec_sync_synced_at: 2026-10-06T23:46:10Z
+spec_sync_git_commit: 64184293
+spec_sync_inputs_sha256: 7635e51de06bf35575f1b1dab6b7ceb6176e7ffe7ae0158cd1b4bbe004f96b5c
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+
+> **Re-stamp 2026-10-06:** inputs changed only through other components' interfaces (`interfaces/src/idispatcher.rs`, `interfaces/src/iremote_lookup.rs`, and the interfaces drift report), none of which eviction-policy-optimized uses; its own `src/`, `specs/` and `ieviction_policy.rs` are unchanged since the previous sync, so that analysis stands.
 > **Sync 2026-10-05 (PR #505, FR-012 stale-handle fix).** Scope: the only `src/` change since the
 > last `clean` stamp (2026-10-03, `2c86a131`) is the fix in `src/lru_list.rs`: `move_to_back` and
 > `remove` now range-check the slot index before reading it, so a handle whose slot no longer exists
