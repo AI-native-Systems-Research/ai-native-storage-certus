@@ -170,6 +170,13 @@ def main():
         excluded.extend(x for x in (dd.get("excluded_properties") or []) if x not in excluded)
         assumptions.append({"id": did, "assume": dd.get("assume", ""), "assume_rust": dd.get("assume_rust", ""),
                             "methods": list(dd.get("methods") or [])})
+    # UNREACHABLE (dispatch-map 2026-10-06): a property whose premise can never hold in any state that
+    # satisfies the component's PROVED invariants. Proving it is vacuous (no mutant can fail) and
+    # refuting it needs an impossible starting state, so it is neither proved nor a defect. Listed by the
+    # orchestrator under `level2_unreachable:` with the reason; excluded from level 2, not a discordance.
+    for u in d.get("level2_unreachable") or []:
+        if u.get("id") and u["id"] not in excluded:
+            excluded.append(u["id"])
     out = {
         "component": comp,
         "pin": d.get("pin"),

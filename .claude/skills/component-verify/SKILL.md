@@ -157,6 +157,16 @@ Each scorer executes each property's artifact, captures wall-clock + peak RSS **
 
 **Hard gate:** if either scorer exits non-zero, the run is **not done**. Do **not** proceed to commit either branch. Feed the printed UNRESOLVED list back to the Role-2 subagent as its next work-list (produce the missing artifact / the demanded lever variant / fix the broken harness) and re-run the scorer (with `--resume`, so it only re-attempts the outstanding ids). The scorer's `.coma`/harness regeneration is from source (Creusot `touch`es `src/**.rs`; Kani rebuilds), so a hand-edited artifact cannot fake a pass.
 
+**Cross-tool check (after BOTH scorers pass; 1 s).** `python3 gate/cross_check.py components/<component>/verif`
+exits 1 if any property is `proved` by one tool and `refuted` by the other. Both cannot be right about one
+obligation: either the proof assumed something the obligation does not say (a `requires`, an `==>` premise or
+a `kani::assume` beyond the statement, a declared `level2_assumptions` entry, or a PROVED invariant), or the
+refutation started from a state that breaks a proved invariant and so can never occur. Resolve each at the
+artifact and re-score; never by editing a status. Measured on dispatch-map 2026-10-06: two weakened proofs (one
+per tool) and two unreachable-state refutations, invisible to either scorer alone. **Rule for every refutation:
+its starting state must satisfy the component's proved invariants**; a counterexample from an unreachable state
+is a latent code-quality note, not a defect.
+
 **Bounded iterate (7th rail — do NOT loop forever).** Cap this UNRESOLVED → re-attempt cycle at **3 iterations**. If both scorers have not reached exit 0 after the 3rd, **stop and PAUSE** — do not commit, do not push, do not start a 4th round. Print `COMPONENT-VERIFY: PAUSED(iterate-cap)` followed by the still-outstanding property `id`s and their last UNRESOLVED notes, so the operator (or a colleague) picks up a bounded, legible work-list instead of an agent spinning on the same wall. A paused run is resumable: its per-property progress is already checkpointed in `unified_properties.yaml`, so a later supervised re-run with `--resume` continues from the outstanding ids only. Pausing is a first-class outcome, not a failure to hide.
 
 ## Re-scoring an ALREADY-PUBLISHED component — change exactly ONE variable (mandatory protocol)
