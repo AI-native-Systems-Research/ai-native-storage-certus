@@ -1,0 +1,23 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_dm_create_memory_tier_entry": {
+        "prover": "alt-ergo",
+        "time": 0.034
+      },
+      "vc_dm_get_checksum": { "prover": "alt-ergo", "time": 0.034 },
+      "vc_dm_initialize": { "prover": "alt-ergo", "time": 0.033 },
+      "vc_dm_recover_extent": { "prover": "alt-ergo", "time": 0.033 },
+      "vc_elim_Create": { "prover": "alt-ergo", "time": 0.035 },
+      "vc_elim_Init": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_elim_Recover": { "prover": "alt-ergo", "time": 0.036 },
+      "vc_elim_Ret": { "prover": "alt-ergo", "time": 0.033 },
+      "vc_reported_prog": { "prover": "alt-ergo", "time": 0.034 },
+      "vc_verify_dm_get_checksum_none_unset": {
+        "prover": "z3",
+        "time": 0.071
+      }
+    }
+  }
+}

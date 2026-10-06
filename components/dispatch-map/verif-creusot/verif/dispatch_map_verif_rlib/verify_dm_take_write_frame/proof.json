@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_dm_take_write": { "prover": "alt-ergo", "time": 0.034 },
+      "vc_verify_dm_take_write_frame": {
+        "prover": "alt-ergo",
+        "time": 0.059
+      }
+    }
+  }
+}

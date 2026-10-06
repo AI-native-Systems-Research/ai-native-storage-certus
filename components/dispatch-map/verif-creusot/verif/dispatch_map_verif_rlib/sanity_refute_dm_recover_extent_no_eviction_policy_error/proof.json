@@ -1,0 +1,22 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_dm_recover_extent": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_sanity_refute_dm_recover_extent_no_eviction_policy_error": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.038 },
+              null,
+              { "prover": "alt-ergo", "time": 0.047 },
+              { "prover": "alt-ergo", "time": 0.036 }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

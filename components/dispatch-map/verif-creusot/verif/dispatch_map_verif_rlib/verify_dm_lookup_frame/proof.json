@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_dm_lookup": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_verify_dm_lookup_frame": { "prover": "alt-ergo", "time": 0.145 }
+    }
+  }
+}

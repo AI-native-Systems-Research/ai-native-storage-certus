@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_dm_remove": { "prover": "alt-ergo", "time": 0.036 },
+      "vc_verify_dm_remove_deletes": { "prover": "alt-ergo", "time": 0.059 }
+    }
+  }
+}

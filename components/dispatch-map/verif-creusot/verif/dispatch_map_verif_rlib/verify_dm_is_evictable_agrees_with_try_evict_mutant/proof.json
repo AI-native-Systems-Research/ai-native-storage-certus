@@ -1,0 +1,25 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_dm_is_evictable": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_dm_try_evict_to_block": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_verify_dm_is_evictable_agrees_with_try_evict__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.02 },
+              { "prover": "alt-ergo", "time": 0.041 },
+              null,
+              { "prover": "alt-ergo", "time": 0.043 },
+              { "prover": "alt-ergo", "time": 0.04 },
+              { "prover": "alt-ergo", "time": 0.034 }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

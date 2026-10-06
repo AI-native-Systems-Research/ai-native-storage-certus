@@ -1,0 +1,22 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_dm_initialize": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_verify_dm_initialize_restored_zero_refs__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.035 },
+              null,
+              { "prover": "alt-ergo", "time": 0.045 },
+              { "prover": "alt-ergo", "time": 0.038 }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

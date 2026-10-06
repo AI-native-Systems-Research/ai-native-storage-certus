@@ -1,0 +1,17 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_checked_add": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_dm_downgrade_reference": {
+        "tactic": "compute_specified",
+        "children": [ { "prover": "z3", "time": 0.085 } ]
+      },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_elim_Some'0": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_get_mut": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_notify_all": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_wrapping_add": { "prover": "alt-ergo", "time": 0.017 }
+    }
+  }
+}

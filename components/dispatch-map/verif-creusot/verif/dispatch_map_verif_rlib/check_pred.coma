@@ -1,0 +1,161 @@
+(* #"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 475 0 475 52 *)
+
+let%span score = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 476 10 476 29
+let%span score'0 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 480 42 480 43
+let%span score'1 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 480 62 480 63
+let%span score'2 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 480 28 480 63
+let%span score'3 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 479 45 479 46
+let%span score'4 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 477 16 477 20
+let%span score'5 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 475 18 475 19
+let%span score'6 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 474 10 474 42
+let%span score'7 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 114 16 114 20
+let%span score'8 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 113 14 113 104
+let%span score'9 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 467 16 470 86
+let%span sfmap = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/creusot/creusot-std/src/logic/fmap.rs" 88 8 88 32
+let%span sinvariant = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/creusot/creusot-std/src/invariant.rs" 85 8 85 18
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.prelude.Opaque
+use map.Map
+use creusot.prelude.Any
+
+type t_HashMap_u64_Entry_RandomState_Global
+
+type t_Entries = { f0: t_HashMap_u64_Entry_RandomState_Global }
+
+type t_Option_u32 = None | Some UInt32.t
+
+type t_FMap_Handle_tup2_u32_u64
+
+type t_Ep = { npools: int; tracked: t_FMap_Handle_tup2_u32_u64 }
+
+type t_Option_Ep = None'0 | Some'0 t_Ep
+
+type t_Vec_Extent_Global
+
+type t_Em = { extents: t_Vec_Extent_Global }
+
+type t_Option_Em = None'1 | Some'1 t_Em
+
+type t_Cv = { epoch: int }
+
+type t_Dm = { entries: t_Entries; pool_id: t_Option_u32; ep: t_Option_Ep; em: t_Option_Em; cv: t_Cv }
+
+type t_Option_u64 = None'2 | Some'2 UInt64.t
+
+type t_Location = BlockDevice UInt64.t | MemoryTier Opaque.ptr UInt32.t t_Option_u64
+
+type t_Handle = { pool_id'0: UInt32.t; index'0: UInt32.t }
+
+type t_Entry = {
+  location: t_Location;
+  size_blocks: UInt32.t;
+  read_ref: UInt32.t;
+  write_ref: UInt32.t;
+  eviction_handle: t_Handle;
+  reuse_count: UInt32.t;
+  checksum: UInt32.t }
+
+type t_Option_ref_Entry = None'3 | Some'3 t_Entry
+
+predicate inv_HashMap_u64_Entry_RandomState_Global (_1: t_HashMap_u64_Entry_RandomState_Global)
+
+predicate inv_Entries (_1: t_Entries)
+
+axiom inv_axiom [@rewrite]: forall x: t_Entries [inv_Entries x]. inv_Entries x
+    = inv_HashMap_u64_Entry_RandomState_Global x.f0
+
+predicate invariant_ref_Entries [@inline:trivial] (self: t_Entries) = [%#sinvariant] inv_Entries self
+
+meta "rewrite_def" predicate invariant_ref_Entries
+
+predicate inv_ref_Entries [@inline:trivial] (_1: t_Entries) = invariant_ref_Entries _1
+
+meta "rewrite_def" predicate inv_ref_Entries
+
+type t_FMap_u64_Entry
+
+type t_Option_Entry = None'4 | Some'4 t_Entry
+
+function to_mapping_u64 (self: t_FMap_u64_Entry) : Map.map UInt64.t t_Option_Entry
+
+function get_u64 [@inline:trivial] (self: t_FMap_u64_Entry) (k: UInt64.t) : t_Option_Entry =
+  [%#sfmap] Map.get (to_mapping_u64 self) k
+
+meta "rewrite_def" function get_u64
+
+function view_Entries [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 94 4 94 37] (self: t_Entries) : t_FMap_u64_Entry
+
+let get (self: t_Entries) (k: UInt64.t) (return (x: t_Option_ref_Entry)) =
+{[@stop_split] [@expl:get 'self' type invariant] [%#score'7] inv_ref_Entries self}
+  any
+  [ return (result: t_Option_ref_Entry) -> {[@stop_split] [@expl:get ensures] [%#score'8] match result with
+      | Some'3 e -> get_u64 (view_Entries self) k = Some'4 e
+      | None'3 -> get_u64 (view_Entries self) k = None'4
+      end}
+    (! return {result}) ]
+
+let elim_Some (_x: t_Option_ref_Entry) (return (f0'0: t_Entry)) = any
+  [ _k (f0'0: t_Entry) -> {Some'3 f0'0 = _x} (! return {f0'0})
+  | _chk -> (! {[@expl:elim Some] match _x with
+      | Some'3 _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+type t_Pred = NoWriter | NoRefs
+
+predicate inv_Dm (_1: t_Dm)
+
+axiom inv_axiom'0 [@rewrite]: forall x: t_Dm [inv_Dm x]. inv_Dm x = inv_Entries x.entries
+
+predicate invariant_ref_Dm [@inline:trivial] (self: t_Dm) = [%#sinvariant] inv_Dm self
+
+meta "rewrite_def" predicate invariant_ref_Dm
+
+predicate inv_ref_Dm [@inline:trivial] (_1: t_Dm) = invariant_ref_Dm _1
+
+meta "rewrite_def" predicate inv_ref_Dm
+
+predicate pred_holds [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 466 0 466 51] (d: t_Dm) (key: UInt64.t) (p: t_Pred) =
+  [%#score'9] match get_u64 (view_Entries d.entries) key with
+    | None'4 -> true
+    | Some'4 e -> match p with
+      | NoWriter -> UInt32.t'int e.write_ref = 0
+      | NoRefs -> UInt32.t'int e.read_ref = 0 /\ UInt32.t'int e.write_ref = 0
+      end
+    end
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let check_pred [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 475 0 475 52]
+  (d: t_Dm) (key: UInt64.t) (p: t_Pred) (return (x: bool)) =
+{[@stop_split] [@expl:check_pred 'd' type invariant] [%#score'5] inv_ref_Dm d}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_11 <- key ] s1
+    | s1 = get [%#score] {d.entries} {_11} (fun (_x: t_Option_ref_Entry) -> [ &_8 <- _x ] s2)
+    | s2 = any [ br0 -> {_8 = None'3} (! bb5) | br1 (x0: t_Entry) -> {_8 = Some'3 x0} (! bb4) ] ]
+  | bb4 = s0
+    [ s0 = elim_Some {_8} (fun (r0: t_Entry) -> [ &e <- r0 ] s1)
+    | s1 = any [ br0 -> {p = NoWriter} (! bb9) | br1 -> {p = NoRefs} (! bb8) ] ]
+  | bb8 = s0
+    [ s0 = [ &_16 <- e.read_ref = ([%#score'0] (0: UInt32.t)) ] s1
+    | s1 = any [ br0 -> {_16 = false} (! bb11) | br1 -> {_16} (! bb10) ] ]
+  | bb10 = s0 [ s0 = [ &_ret <- e.write_ref = ([%#score'1] (0: UInt32.t)) ] s1 | s1 = return {_ret} ]
+  | bb11 = s0 [ s0 = [ &_ret <- [%#score'2] false ] s1 | s1 = return {_ret} ]
+  | bb9 = s0 [ s0 = [ &_ret <- e.write_ref = ([%#score'3] (0: UInt32.t)) ] s1 | s1 = return {_ret} ]
+  | bb5 = s0 [ s0 = [ &_ret <- [%#score'4] true ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: bool = Any.any_l ()
+  | & d: t_Dm = d
+  | & key: UInt64.t = key
+  | & p: t_Pred = p
+  | & _8: t_Option_ref_Entry = Any.any_l ()
+  | & _11: UInt64.t = Any.any_l ()
+  | & e: t_Entry = Any.any_l ()
+  | & _16: bool = Any.any_l () ])
+  [ return (result: bool) -> {[@stop_split] [@expl:check_pred ensures] [%#score'6] result = pred_holds d key p}
+    (! return {result}) ]

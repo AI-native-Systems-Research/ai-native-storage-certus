@@ -1,0 +1,14 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_dm_release_read": {
+        "tactic": "compute_specified",
+        "children": [ { "prover": "z3", "time": 0.064 } ]
+      },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_get_mut": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_notify_all": { "prover": "alt-ergo", "time": 0.018 }
+    }
+  }
+}

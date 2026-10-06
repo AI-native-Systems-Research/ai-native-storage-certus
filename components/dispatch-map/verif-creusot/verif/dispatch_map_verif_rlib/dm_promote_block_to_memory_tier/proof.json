@@ -1,0 +1,16 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_div_ceil": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_dm_promote_block_to_memory_tier": {
+        "tactic": "compute_specified",
+        "children": [ { "prover": "z3", "time": 0.069 } ]
+      },
+      "vc_elim_BlockDevice": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_get_mut": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_notify_all": { "prover": "alt-ergo", "time": 0.017 }
+    }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_dm_entry_size": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_dm_promote_block_to_memory_tier": {
+        "prover": "alt-ergo",
+        "time": 0.033
+      },
+      "vc_verify_dm_promote_recomputes_size__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.037 },
+              { "prover": "alt-ergo", "time": 0.048 },
+              {
+                "tactic": "split_vc",
+                "children": [
+                  null,
+                  { "prover": "alt-ergo", "time": 0.1 },
+                  { "prover": "alt-ergo", "time": 0.142 }
+                ]
+              },
+              { "prover": "alt-ergo", "time": 0.052 },
+              { "prover": "alt-ergo", "time": 0.049 },
+              { "prover": "alt-ergo", "time": 0.031 }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

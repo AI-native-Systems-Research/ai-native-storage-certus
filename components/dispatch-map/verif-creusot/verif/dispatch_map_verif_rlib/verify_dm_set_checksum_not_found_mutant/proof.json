@@ -1,0 +1,22 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_dm_set_checksum": { "prover": "alt-ergo", "time": 0.034 },
+      "vc_verify_dm_set_checksum_not_found__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.041 },
+              null,
+              { "prover": "alt-ergo", "time": 0.047 },
+              { "prover": "alt-ergo", "time": 0.038 }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

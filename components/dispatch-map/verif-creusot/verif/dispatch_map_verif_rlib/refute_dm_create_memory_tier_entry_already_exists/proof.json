@@ -1,0 +1,15 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_dm_create_memory_tier_entry": {
+        "prover": "alt-ergo",
+        "time": 0.017
+      },
+      "vc_refute_dm_create_memory_tier_entry_already_exists": {
+        "prover": "alt-ergo",
+        "time": 0.06
+      }
+    }
+  }
+}

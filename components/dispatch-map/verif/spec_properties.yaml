@@ -1,0 +1,1270 @@
+# dispatch-map: blind SPEC-side extraction of verifiable properties.
+# Sources read: specs/001-dispatch-map/ (spec.md primary; contract, data-model, research, quickstart, plan, tasks, checklist)
+# plus the doc comments and signatures of interfaces/src/idispatch_map.rs. No code, tests or prior results were read.
+# Trace prefixes: FR, US, AS (acceptance scenario story.n), SC, EC (edge case), CLAR (clarification), contract, data-model.
+component: dispatch-map
+source: spec
+artifact: "components/dispatch-map/specs/001-dispatch-map/ (+ interfaces/src/idispatch_map.rs doc comments)"
+pin: "08a5ae88"
+method: blind-extraction
+generated: "2026-10-05"
+counts: {total: 150, methods: 20, verifiable: 126, not_verifiable: 24}
+properties:
+  - id: DM-INITIALIZE-EVICTION-POLICY-REQUIRED
+    subject: "initialize"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If initialize is called while no eviction-policy component is connected, it returns an error to
+      the caller (it does not crash) and the map is not populated.
+    traces: ["FR-012", "FR-015", "contract:initialize"]
+  - id: DM-INITIALIZE-RECOVERS-ALL-EXTENTS
+    subject: "initialize"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When an extent manager is connected, after initialize succeeds every extent the extent manager
+      reports is present in the map as a block-device entry, and looking it up returns that extent's
+      on-disk offset.
+    traces: ["FR-012", "FR-020", "SC-001", "AS-5.1", "contract:initialize"]
+  - id: DM-INITIALIZE-RECOVERED-SIZE
+    subject: "initialize"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After initialize recovers an extent from the extent manager, the entry's stored size matches the
+      size the extent manager reported for that extent.
+    traces: ["AS-5.1", "FR-012"]
+  - id: DM-INITIALIZE-EMPTY-EXTENT-MANAGER
+    subject: "initialize"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When the connected extent manager holds no extents, initialize succeeds and leaves the map
+      empty, so every lookup afterwards reports that the key does not exist.
+    traces: ["AS-5.2", "FR-012"]
+  - id: DM-INITIALIZE-NO-EXTENT-MANAGER-OK
+    subject: "initialize"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When the eviction-policy component is connected but no extent manager is connected, initialize
+      returns success and leaves the map empty, so every lookup afterwards reports that the key does
+      not exist.
+    traces: ["FR-012", "FR-020", "AS-5.3", "US-5", "contract:initialize"]
+  - id: DM-INITIALIZE-EXPLICIT-ONLY
+    subject: "initialize"
+    kind: frame
+    verifiable: true
+    statement: >
+      Constructing the component does not recover any extents by itself; the map contains no recovered
+      entries until initialize is called explicitly.
+    traces: ["FR-020", "contract:initialize"]
+  - id: DM-INITIALIZE-REUSE-COUNT-ZERO
+    subject: "initialize"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Every entry created by the recovery walk in initialize starts with its internal reuse counter at
+      zero.
+    traces: ["FR-029"]
+  - id: DM-LOOKUP-NOT-EXIST
+    subject: "lookup"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Looking up a key that is not in the map returns the 'does not exist' result (not an error), and
+      does not create an entry for that key.
+    traces: ["FR-004", "AS-2.3", "AS-5.2", "AS-6.1", "contract:lookup"]
+  - id: DM-LOOKUP-MEMORY-TIER-RESULT
+    subject: "lookup"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Looking up a key whose entry is in the memory tier returns exactly the memory pointer and byte
+      size currently recorded for that entry.
+    traces: ["FR-004", "AS-2.1", "contract:lookup"]
+  - id: DM-LOOKUP-BLOCK-DEVICE-RESULT
+    subject: "lookup"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Looking up a key whose entry is on the block device returns exactly the block-device offset
+      currently recorded for that entry.
+    traces: ["FR-004", "AS-2.2", "AS-5.1", "contract:lookup"]
+  - id: DM-LOOKUP-INCREMENTS-READ-REF
+    subject: "lookup"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When lookup finds an existing entry and returns its location, the entry's read-reference count
+      is exactly one higher than before the call.
+    traces: ["FR-004", "AS-2.1", "AS-2.2", "US-2", "contract:lookup"]
+  - id: DM-LOOKUP-WAITS-FOR-WRITER
+    subject: "lookup"
+    kind: precondition
+    verifiable: true
+    statement: >
+      Lookup only returns a location and acquires a read reference at a moment when no write reference
+      is held on the entry; while a writer holds the entry, lookup waits instead of returning.
+    traces: ["FR-004", "AS-2.5", "US-2", "contract:lookup"]
+  - id: DM-LOOKUP-TIMEOUT
+    subject: "lookup"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If a write reference on the entry remains held for the whole of lookup's fixed waiting period,
+      lookup returns a Timeout error and the entry's read-reference count is left unchanged.
+    traces: ["FR-004", "contract:lookup", "data-model:Timeout"]
+  - id: DM-LOOKUP-NO-BLOCK-WITHOUT-WRITER
+    subject: "lookup"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When no write reference is held on an existing entry, lookup returns its location without
+      waiting and never reports a Timeout.
+    traces: ["SC-005", "FR-004"]
+  - id: DM-LOOKUP-REFRESHES-EVICTION-PRIORITY
+    subject: "lookup"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A successful lookup of an existing entry makes that entry the most recently used for eviction
+      ordering, so it is listed after all other entries by oldest_keys.
+    traces: ["FR-004", "AS-8.2", "contract:lookup", "contract:invariant-6"]
+  - id: DM-LOOKUP-NEVER-MISMATCH-SIZE
+    subject: "lookup"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Lookup never returns the size-mismatch result, because it takes no expected-size argument.
+    traces: ["FR-004", "AS-2.4", "data-model:LookupResult"]
+  - id: DM-LOOKUP-REUSE-COUNT-INCREMENT
+    subject: "lookup"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Each successful lookup of an existing entry increases that entry's internal reuse counter by
+      exactly one.
+    traces: ["FR-029", "AS-2.6"]
+  - id: DM-LOOKUP-REFCOUNT-OVERFLOW
+    subject: "lookup"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the entry's read-reference count is already at the largest value it can hold, lookup returns
+      a RefCountOverflow error and leaves the count unchanged rather than wrapping around.
+    traces: ["data-model:RefCountOverflow", "CLAR-invalid-ops-error"]
+  - id: DM-LOOKUP-FRAME
+    subject: "lookup"
+    kind: frame
+    verifiable: true
+    statement: >
+      Lookup does not change the entry's location, recorded size, or write-reference count.
+    traces: ["FR-004", "contract:lookup"]
+  - id: DM-CREATE-MEMORY-TIER-ENTRY-LOCATION
+    subject: "create_memory_tier_entry"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After create_memory_tier_entry succeeds for a new key, the key is in the map as a memory-tier
+      entry recording exactly the given pointer and byte size.
+    traces: ["FR-003", "AS-1.1", "US-1", "contract:create_memory_tier_entry"]
+  - id: DM-CREATE-MEMORY-TIER-ENTRY-WRITE-REF
+    subject: "create_memory_tier_entry"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After create_memory_tier_entry succeeds, the new entry holds exactly one write reference, owned
+      by the caller.
+    traces: ["FR-003", "AS-1.1", "US-1", "contract:create_memory_tier_entry"]
+  - id: DM-CREATE-MEMORY-TIER-ENTRY-NO-SSD-OFFSET
+    subject: "create_memory_tier_entry"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A newly created memory-tier entry has no on-disk offset recorded yet, so it is not evictable
+      until convert_to_storage records one.
+    traces: ["US-9", "FR-022", "US-3"]
+  - id: DM-CREATE-MEMORY-TIER-ENTRY-REGISTERS-EVICTION
+    subject: "create_memory_tier_entry"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After create_memory_tier_entry succeeds, the new key is tracked for eviction ordering as the
+      most recently used entry, so oldest_keys lists entries in creation order.
+    traces: ["FR-003", "AS-8.1", "contract:create_memory_tier_entry"]
+  - id: DM-CREATE-MEMORY-TIER-ENTRY-ALREADY-EXISTS
+    subject: "create_memory_tier_entry"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the key is already in the map, create_memory_tier_entry returns an AlreadyExists error and
+      the existing entry is left exactly as it was.
+    traces: ["FR-003", "AS-1.2", "EC-create-existing-key", "contract:create_memory_tier_entry"]
+  - id: DM-CREATE-MEMORY-TIER-ENTRY-NULL-POINTER
+    subject: "create_memory_tier_entry"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If create_memory_tier_entry is given a null pointer, it returns an error and no entry is
+      recorded for the key.
+    traces: ["AS-1.3", "EC-create-null-pointer", "US-1"]
+  - id: DM-CREATE-MEMORY-TIER-ENTRY-ZERO-SIZE
+    subject: "create_memory_tier_entry"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If create_memory_tier_entry is given a size of zero, it returns an InvalidSize error and no
+      entry is recorded for the key.
+    traces: ["contract:create_memory_tier_entry", "CLAR-invalid-ops-error", "data-model:InvalidSize"]
+  - id: DM-CREATE-MEMORY-TIER-ENTRY-REUSE-COUNT-ZERO
+    subject: "create_memory_tier_entry"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A newly created memory-tier entry starts with its internal reuse counter at zero.
+    traces: ["FR-029"]
+  - id: DM-CONVERT-TO-STORAGE-SETS-SSD-OFFSET
+    subject: "convert_to_storage"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After convert_to_storage(key, offset) succeeds on a memory-tier entry, the entry records that
+      offset as its on-disk location.
+    traces: ["FR-005", "AS-3.1", "US-3", "contract:convert_to_storage"]
+  - id: DM-CONVERT-TO-STORAGE-STAYS-MEMORY-TIER
+    subject: "convert_to_storage"
+    kind: frame
+    verifiable: true
+    statement: >
+      convert_to_storage does not move the entry out of the memory tier: afterwards lookup still
+      returns the same memory pointer and size as before.
+    traces: ["FR-005", "US-3", "contract:convert_to_storage", "data-model:state-machine"]
+  - id: DM-CONVERT-TO-STORAGE-DECREMENTS-READ-REF
+    subject: "convert_to_storage"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When convert_to_storage succeeds on an entry whose read-reference count is above zero, the count
+      is exactly one lower afterwards.
+    traces: ["FR-005", "AS-3.1", "contract:convert_to_storage"]
+  - id: DM-CONVERT-TO-STORAGE-NO-UNDERFLOW
+    subject: "convert_to_storage"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When convert_to_storage succeeds on an entry whose read-reference count is zero, the count stays
+      at zero.
+    traces: ["FR-005", "AS-3.1", "contract:convert_to_storage"]
+  - id: DM-CONVERT-TO-STORAGE-WRITE-REF-UNCHANGED
+    subject: "convert_to_storage"
+    kind: frame
+    verifiable: true
+    statement: >
+      convert_to_storage does not change the entry's write-reference count, so a caller holding the
+      write reference still holds it afterwards.
+    traces: ["EC-convert-while-write-held", "contract:convert_to_storage"]
+  - id: DM-CONVERT-TO-STORAGE-NOT-FOUND
+    subject: "convert_to_storage"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the key is not in the map, convert_to_storage returns an error and no entry is created.
+    traces: ["FR-005", "AS-3.3", "contract:convert_to_storage"]
+  - id: DM-CONVERT-TO-STORAGE-BLOCK-DEVICE
+    subject: "convert_to_storage"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the entry is already on the block device, convert_to_storage returns an error and the entry,
+      including its offset and reference counts, is left unchanged.
+    traces: ["FR-005", "AS-3.4", "contract:convert_to_storage", "data-model:InvalidState"]
+  - id: DM-TAKE-READ-INCREMENTS
+    subject: "take_read"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When take_read succeeds, the entry's read-reference count is exactly one higher than before the
+      call.
+    traces: ["FR-006", "AS-4.1", "contract:take_read"]
+  - id: DM-TAKE-READ-IMMEDIATE-WITHOUT-WRITER
+    subject: "take_read"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When no write reference is held on the entry, take_read succeeds without waiting.
+    traces: ["AS-4.1", "US-4"]
+  - id: DM-TAKE-READ-WAITS-FOR-WRITER
+    subject: "take_read"
+    kind: precondition
+    verifiable: true
+    statement: >
+      take_read only acquires a read reference at a moment when no write reference is held on the
+      entry; while a writer holds it, take_read waits.
+    traces: ["FR-006", "AS-4.3", "US-4", "contract:take_read"]
+  - id: DM-TAKE-READ-TIMEOUT
+    subject: "take_read"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If a write reference remains held for the whole of take_read's fixed waiting period, take_read
+      returns a Timeout error and the read-reference count is unchanged.
+    traces: ["FR-006", "AS-4.7", "contract:take_read"]
+  - id: DM-TAKE-READ-NOT-FOUND
+    subject: "take_read"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the key is not in the map, take_read returns a KeyNotFound error and no entry is created.
+    traces: ["data-model:KeyNotFound", "CLAR-invalid-ops-error"]
+  - id: DM-TAKE-READ-REFCOUNT-OVERFLOW
+    subject: "take_read"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the read-reference count is already at the largest value it can hold, take_read returns a
+      RefCountOverflow error and leaves the count unchanged rather than wrapping around.
+    traces: ["data-model:RefCountOverflow"]
+  - id: DM-TAKE-READ-REUSE-COUNT-INCREMENT
+    subject: "take_read"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Each successful take_read increases the entry's internal reuse counter by exactly one.
+    traces: ["FR-029", "AS-4.9"]
+  - id: DM-TAKE-WRITE-SETS-WRITE-REF
+    subject: "take_write"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When take_write succeeds, the entry holds exactly one write reference.
+    traces: ["FR-007", "AS-4.2", "contract:take_write"]
+  - id: DM-TAKE-WRITE-REQUIRES-NO-REFS
+    subject: "take_write"
+    kind: precondition
+    verifiable: true
+    statement: >
+      take_write only acquires the write reference at a moment when the entry has no read references
+      and no write reference; otherwise it waits.
+    traces: ["FR-007", "AS-4.2", "US-4", "contract:take_write"]
+  - id: DM-TAKE-WRITE-TIMEOUT
+    subject: "take_write"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If read or write references remain held for the whole of take_write's fixed waiting period,
+      take_write returns a Timeout error and the reference counts are unchanged.
+    traces: ["FR-007", "AS-4.8", "contract:take_write"]
+  - id: DM-TAKE-WRITE-NOT-FOUND
+    subject: "take_write"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the key is not in the map, take_write returns a KeyNotFound error and no entry is created.
+    traces: ["data-model:KeyNotFound", "CLAR-invalid-ops-error"]
+  - id: DM-RELEASE-READ-DECREMENTS
+    subject: "release_read"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When release_read succeeds, the entry's read-reference count is exactly one lower than before
+      the call.
+    traces: ["FR-008", "AS-4.5", "contract:release_read"]
+  - id: DM-RELEASE-READ-UNDERFLOW
+    subject: "release_read"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the read-reference count is already zero, release_read returns a RefCountUnderflow error and
+      the count stays at zero.
+    traces: ["FR-008", "EC-release-at-zero", "CLAR-invalid-ops-error", "contract:release_read"]
+  - id: DM-RELEASE-READ-NOT-FOUND
+    subject: "release_read"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the key is not in the map, release_read returns a KeyNotFound error.
+    traces: ["data-model:KeyNotFound", "CLAR-invalid-ops-error"]
+  - id: DM-RELEASE-READ-WAKES-WRITER
+    subject: "release_read"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When release_read drops the last read reference, a take_write that is waiting on that entry (and
+      blocked only by those readers) is able to acquire the write reference instead of timing out.
+    traces: ["contract:release_read", "AS-4.2", "US-4"]
+  - id: DM-RELEASE-WRITE-CLEARS
+    subject: "release_write"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When release_write succeeds, the entry holds no write reference.
+    traces: ["FR-009", "AS-4.6", "contract:release_write"]
+  - id: DM-RELEASE-WRITE-UNDERFLOW
+    subject: "release_write"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the entry holds no write reference, release_write returns a RefCountUnderflow error and the
+      write-reference count stays at zero.
+    traces: ["FR-009", "EC-release-at-zero", "CLAR-invalid-ops-error", "contract:release_write"]
+  - id: DM-RELEASE-WRITE-NOT-FOUND
+    subject: "release_write"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the key is not in the map, release_write returns a KeyNotFound error.
+    traces: ["data-model:KeyNotFound", "CLAR-invalid-ops-error"]
+  - id: DM-RELEASE-WRITE-WAKES-WAITERS
+    subject: "release_write"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After release_write succeeds, readers and writers that were waiting on that entry are unblocked
+      and can acquire their references instead of timing out.
+    traces: ["AS-4.6", "contract:release_write"]
+  - id: DM-RELEASE-WRITE-READ-REF-UNCHANGED
+    subject: "release_write"
+    kind: frame
+    verifiable: true
+    statement: >
+      release_write does not change the entry's read-reference count.
+    traces: ["FR-009", "contract:release_write"]
+  - id: DM-DOWNGRADE-REFERENCE-SWAPS
+    subject: "downgrade_reference"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When downgrade_reference succeeds, the entry no longer holds a write reference and its read-
+      reference count is exactly one higher than before.
+    traces: ["FR-010", "AS-4.4", "contract:downgrade_reference"]
+  - id: DM-DOWNGRADE-REFERENCE-ATOMIC
+    subject: "downgrade_reference"
+    kind: invariant
+    verifiable: true
+    statement: >
+      During downgrade_reference there is no moment at which the entry holds neither the write
+      reference nor the new read reference, so no other caller can acquire a write reference in
+      between.
+    traces: ["FR-010", "SC-003", "AS-4.4", "contract:invariant-3"]
+  - id: DM-DOWNGRADE-REFERENCE-NO-WRITE-REF
+    subject: "downgrade_reference"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If no write reference is held on the entry, downgrade_reference returns a NoWriteReference error
+      and both reference counts are unchanged.
+    traces: ["FR-010", "EC-downgrade-without-write", "CLAR-invalid-ops-error", "contract:downgrade_reference"]
+  - id: DM-DOWNGRADE-REFERENCE-NOT-FOUND
+    subject: "downgrade_reference"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the key is not in the map, downgrade_reference returns an error and no entry is created.
+    traces: ["data-model:KeyNotFound", "CLAR-invalid-ops-error"]
+  - id: DM-DOWNGRADE-REFERENCE-REFCOUNT-OVERFLOW
+    subject: "downgrade_reference"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the read-reference count is already at the largest value it can hold, downgrade_reference
+      returns a RefCountOverflow error and leaves both counts unchanged.
+    traces: ["data-model:RefCountOverflow"]
+  - id: DM-DOWNGRADE-REFERENCE-WAKES-READERS
+    subject: "downgrade_reference"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After downgrade_reference succeeds, other readers waiting on that entry are able to acquire read
+      references instead of timing out.
+    traces: ["contract:downgrade_reference"]
+  - id: DM-DOWNGRADE-REFERENCE-REUSE-COUNT-INCREMENT
+    subject: "downgrade_reference"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Each successful downgrade_reference increases the entry's internal reuse counter by exactly one.
+    traces: ["FR-029", "AS-4.9"]
+  - id: DM-REMOVE-DELETES
+    subject: "remove"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After remove succeeds on an entry with no active references, the key is no longer in the map and
+      lookup reports that it does not exist.
+    traces: ["FR-011", "AS-6.1", "US-6", "contract:remove"]
+  - id: DM-REMOVE-ACTIVE-REFERENCES
+    subject: "remove"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the entry has any read or write reference held, remove returns an ActiveReferences error and
+      the entry stays in the map unchanged.
+    traces: ["FR-011", "AS-6.3", "CLAR-remove-with-refs", "contract:remove", "contract:invariant-4"]
+  - id: DM-REMOVE-NOT-FOUND
+    subject: "remove"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the key is not in the map, remove returns a KeyNotFound error and the map is unchanged.
+    traces: ["contract:remove", "AS-6.2", "data-model:KeyNotFound"]
+  - id: DM-TOUCH-REFRESHES-PRIORITY
+    subject: "touch"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After touch succeeds, the entry becomes the most recently used for eviction ordering, so
+      oldest_keys lists it after all other entries.
+    traces: ["FR-016", "AS-7.1", "US-7", "contract:touch", "contract:invariant-7"]
+  - id: DM-TOUCH-FRAME
+    subject: "touch"
+    kind: frame
+    verifiable: true
+    statement: >
+      touch does not change the entry's read-reference count, write-reference count, location or size.
+    traces: ["FR-016", "AS-7.1", "contract:touch", "contract:invariant-7"]
+  - id: DM-TOUCH-NOT-FOUND
+    subject: "touch"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the key is not in the map, touch returns a KeyNotFound error.
+    traces: ["FR-016", "AS-7.2", "contract:touch"]
+  - id: DM-TOUCH-NO-WAIT
+    subject: "touch"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      touch never waits for references to be released: it completes even while another caller holds a
+      read or write reference on the entry, and never reports a Timeout.
+    traces: ["FR-016"]
+  - id: DM-ENTRY-SIZE-BLOCK-MULTIPLE
+    subject: "entry_size"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      entry_size returns the entry's stored size in bytes as its number of 4 KiB blocks times 4096, so
+      the value is always a multiple of 4096.
+    traces: ["FR-023", "contract:entry_size", "data-model:DispatchEntry"]
+  - id: DM-ENTRY-SIZE-ROUNDS-UP-MEMORY-TIER
+    subject: "entry_size"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      For an entry created in the memory tier with a byte size, entry_size returns that size rounded
+      up to the next multiple of 4096 (unchanged if already a multiple).
+    traces: ["FR-023"]
+  - id: DM-ENTRY-SIZE-FRAME
+    subject: "entry_size"
+    kind: frame
+    verifiable: true
+    statement: >
+      entry_size does not acquire or release any reference and does not change the entry in any way.
+    traces: ["FR-023", "contract:entry_size"]
+  - id: DM-ENTRY-SIZE-NOT-FOUND
+    subject: "entry_size"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the key is not in the map, entry_size returns a KeyNotFound error.
+    traces: ["FR-023", "contract:entry_size"]
+  - id: DM-OLDEST-KEYS-AT-MOST-N
+    subject: "oldest_keys"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      oldest_keys(n) returns at most n keys.
+    traces: ["FR-017", "US-8", "contract:oldest_keys"]
+  - id: DM-OLDEST-KEYS-ORDER
+    subject: "oldest_keys"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      oldest_keys returns keys ordered least recently used first, where an entry counts as used when
+      it is created, recovered, looked up or touched.
+    traces: ["FR-017", "AS-8.1", "AS-8.2", "US-8", "contract:oldest_keys"]
+  - id: DM-OLDEST-KEYS-FILLS-TO-N
+    subject: "oldest_keys"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When at least n entries are tracked, oldest_keys(n) returns exactly n keys (for example, two of
+      three created keys when n is two).
+    traces: ["AS-8.1"]
+  - id: DM-OLDEST-KEYS-EMPTY
+    subject: "oldest_keys"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      On an empty map, oldest_keys returns an empty list for any n.
+    traces: ["AS-8.3"]
+  - id: DM-OLDEST-KEYS-FRAME
+    subject: "oldest_keys"
+    kind: frame
+    verifiable: true
+    statement: >
+      oldest_keys only reports keys; it does not remove entries, change reference counts, or change
+      any entry's location.
+    traces: ["FR-017", "US-8"]
+  - id: DM-CONVERT-MEMORY-TIER-TO-BLOCK-TRANSITION
+    subject: "convert_memory_tier_to_block"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When convert_memory_tier_to_block succeeds on a memory-tier entry that has an on-disk offset
+      recorded, the entry becomes a block-device entry at exactly that offset, and lookup then returns
+      that block-device offset.
+    traces: ["FR-018", "AS-3.2", "US-3", "contract:convert_memory_tier_to_block"]
+  - id: DM-CONVERT-MEMORY-TIER-TO-BLOCK-NO-SSD-OFFSET
+    subject: "convert_memory_tier_to_block"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the memory-tier entry has no on-disk offset recorded yet, convert_memory_tier_to_block
+      returns an InvalidState error and the entry stays in the memory tier unchanged.
+    traces: ["FR-018", "contract:convert_memory_tier_to_block"]
+  - id: DM-CONVERT-MEMORY-TIER-TO-BLOCK-NOT-MEMORY-TIER
+    subject: "convert_memory_tier_to_block"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the entry is already on the block device, convert_memory_tier_to_block returns an
+      InvalidState error and the entry is unchanged.
+    traces: ["FR-018", "contract:convert_memory_tier_to_block"]
+  - id: DM-CONVERT-MEMORY-TIER-TO-BLOCK-NOT-FOUND
+    subject: "convert_memory_tier_to_block"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the key is not in the map, convert_memory_tier_to_block returns an error and no entry is
+      created.
+    traces: ["FR-018", "data-model:KeyNotFound", "CLAR-invalid-ops-error"]
+  - id: DM-PROMOTE-TRANSITION
+    subject: "promote_block_to_memory_tier"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When promote_block_to_memory_tier(key, pointer, size) succeeds on a block-device entry, the
+      entry becomes a memory-tier entry and lookup then returns exactly the given pointer and size.
+    traces: ["FR-025", "AS-10.1", "US-10", "contract:promote_block_to_memory_tier"]
+  - id: DM-PROMOTE-SSD-OFFSET-ORIGINAL
+    subject: "promote_block_to_memory_tier"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After a successful promotion, the entry records its previous block-device offset as its on-disk
+      offset, so it can be demoted or evicted again without a fresh write-through.
+    traces: ["FR-025", "AS-10.1", "US-10", "contract:promote_block_to_memory_tier"]
+  - id: DM-PROMOTE-RECOMPUTES-SIZE
+    subject: "promote_block_to_memory_tier"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After a successful promotion, entry_size reports the new byte size rounded up to the next
+      multiple of 4096.
+    traces: ["AS-10.1", "FR-023"]
+  - id: DM-PROMOTE-ALLOWED-WHILE-PINNED
+    subject: "promote_block_to_memory_tier"
+    kind: precondition
+    verifiable: true
+    statement: >
+      promote_block_to_memory_tier does not require the entry to be free of references: it succeeds on
+      a block-device entry even while read references are held.
+    traces: ["FR-025", "AS-10.2", "US-10", "EC-promote-with-refs"]
+  - id: DM-PROMOTE-PRESERVES-REFS
+    subject: "promote_block_to_memory_tier"
+    kind: frame
+    verifiable: true
+    statement: >
+      promote_block_to_memory_tier leaves the entry's read-reference and write-reference counts
+      exactly as they were before the call.
+    traces: ["FR-025", "AS-10.2", "EC-promote-with-refs", "contract:invariant-9"]
+  - id: DM-PROMOTE-PRESERVES-EVICTION-POSITION
+    subject: "promote_block_to_memory_tier"
+    kind: frame
+    verifiable: true
+    statement: >
+      promote_block_to_memory_tier keeps the entry's existing eviction tracking rather than removing
+      and re-adding the entry, so its position in the oldest_keys ordering is unchanged by the
+      promotion.
+    traces: ["FR-025", "US-10", "EC-promote-with-refs", "contract:invariant-9"]
+  - id: DM-PROMOTE-ALREADY-MEMORY-TIER
+    subject: "promote_block_to_memory_tier"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the entry is already in the memory tier, promote_block_to_memory_tier returns an InvalidState
+      error and the entry is left unchanged.
+    traces: ["FR-025", "AS-10.3", "contract:promote_block_to_memory_tier", "contract:invariant-8"]
+  - id: DM-PROMOTE-NOT-FOUND
+    subject: "promote_block_to_memory_tier"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the key is not in the map, promote_block_to_memory_tier returns a KeyNotFound error and no
+      entry is created.
+    traces: ["FR-025", "AS-10.4", "contract:promote_block_to_memory_tier"]
+  - id: DM-PROMOTE-ZERO-SIZE
+    subject: "promote_block_to_memory_tier"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If promote_block_to_memory_tier is given a size of zero, it returns an InvalidSize error and the
+      entry is left unchanged.
+    traces: ["FR-025", "AS-10.5", "EC-promote-zero-size", "contract:invariant-8"]
+  - id: DM-IS-EVICTABLE-TRUE
+    subject: "is_evictable"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      is_evictable returns true for a memory-tier entry that has an on-disk offset recorded and no
+      read or write references held.
+    traces: ["FR-022", "AS-9.1", "US-9", "contract:is_evictable"]
+  - id: DM-IS-EVICTABLE-NO-SSD-OFFSET
+    subject: "is_evictable"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      is_evictable returns false for a memory-tier entry that has no on-disk offset recorded yet.
+    traces: ["FR-022", "AS-9.2"]
+  - id: DM-IS-EVICTABLE-ACTIVE-REFS
+    subject: "is_evictable"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      is_evictable returns false for any entry that has a read reference or a write reference held.
+    traces: ["FR-022", "AS-9.3", "US-9"]
+  - id: DM-IS-EVICTABLE-BLOCK-DEVICE
+    subject: "is_evictable"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      is_evictable returns false for an entry that is on the block device.
+    traces: ["FR-022", "AS-9.4"]
+  - id: DM-IS-EVICTABLE-NOT-FOUND
+    subject: "is_evictable"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      is_evictable returns false, not an error, for a key that is not in the map.
+    traces: ["FR-022", "AS-9.5", "contract:is_evictable"]
+  - id: DM-IS-EVICTABLE-FRAME
+    subject: "is_evictable"
+    kind: frame
+    verifiable: true
+    statement: >
+      is_evictable only answers the question; it does not change any entry, reference count or
+      eviction ordering.
+    traces: ["contract:is_evictable", "FR-022"]
+  - id: DM-IS-EVICTABLE-AGREES-WITH-TRY-EVICT
+    subject: "is_evictable"
+    kind: invariant
+    verifiable: true
+    statement: >
+      In any given state of an entry, is_evictable returns true exactly when try_evict_to_block on
+      that entry would succeed.
+    traces: ["FR-026", "contract:is_evictable", "contract:try_evict_to_block"]
+  - id: DM-TRY-EVICT-TO-BLOCK-SUCCESS
+    subject: "try_evict_to_block"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When try_evict_to_block succeeds on a memory-tier entry with an on-disk offset and no references
+      held, the entry becomes a block-device entry at exactly that offset.
+    traces: ["FR-026", "AS-11.1", "US-11", "contract:try_evict_to_block"]
+  - id: DM-TRY-EVICT-TO-BLOCK-ACTIVE-REFS
+    subject: "try_evict_to_block"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the entry has any read or write reference held, try_evict_to_block returns an InvalidState
+      error and the entry stays in the memory tier with its location and reference counts unchanged.
+    traces: ["FR-026", "AS-11.2", "contract:invariant-8"]
+  - id: DM-TRY-EVICT-TO-BLOCK-NO-SSD-OFFSET
+    subject: "try_evict_to_block"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the memory-tier entry has no on-disk offset recorded yet, try_evict_to_block returns an
+      InvalidState error and the entry stays in the memory tier unchanged.
+    traces: ["FR-026", "AS-11.3", "contract:invariant-8"]
+  - id: DM-TRY-EVICT-TO-BLOCK-NOT-MEMORY-TIER
+    subject: "try_evict_to_block"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the entry is already on the block device, try_evict_to_block returns an InvalidState error
+      and the entry is unchanged.
+    traces: ["FR-026", "AS-11.4"]
+  - id: DM-TRY-EVICT-TO-BLOCK-NOT-FOUND
+    subject: "try_evict_to_block"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the key is not in the map, try_evict_to_block returns a KeyNotFound error.
+    traces: ["FR-026", "AS-11.5", "contract:try_evict_to_block"]
+  - id: DM-TRY-EVICT-TO-BLOCK-ATOMIC
+    subject: "try_evict_to_block"
+    kind: invariant
+    verifiable: true
+    statement: >
+      try_evict_to_block checks evictability and performs the move to the block device as one
+      indivisible step, so no other caller can acquire a reference on the entry between the check and
+      the move.
+    traces: ["FR-026", "EC-try-evict-single-lock", "contract:invariant-10", "US-11"]
+  - id: DM-TRY-EVICT-TO-BLOCK-NO-POINTER-AFTER
+    subject: "try_evict_to_block"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After try_evict_to_block succeeds, no lookup returns the entry's former memory pointer (unless
+      the entry is later promoted with that pointer again), so the caller may safely free that memory.
+    traces: ["FR-026", "US-11", "contract:try_evict_to_block"]
+  - id: DM-RECOVER-EXTENT-INSERTS
+    subject: "recover_extent"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After recover_extent(key, offset, size_blocks) succeeds for a new key, the key is in the map as
+      a block-device entry and lookup returns exactly that offset.
+    traces: ["FR-024", "contract:recover_extent", "US-10"]
+  - id: DM-RECOVER-EXTENT-SIZE-BLOCKS
+    subject: "recover_extent"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After recover_extent(key, offset, size_blocks) succeeds, entry_size for that key returns
+      size_blocks times 4096.
+    traces: ["FR-024", "FR-023"]
+  - id: DM-RECOVER-EXTENT-REGISTERS-EVICTION
+    subject: "recover_extent"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After recover_extent succeeds, the new key is tracked for eviction ordering and can be returned
+      by oldest_keys.
+    traces: ["FR-024", "contract:recover_extent"]
+  - id: DM-RECOVER-EXTENT-ALREADY-EXISTS
+    subject: "recover_extent"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the key is already in the map, recover_extent returns an AlreadyExists error and the existing
+      entry is left unchanged.
+    traces: ["FR-024", "EC-recover-existing-key", "contract:recover_extent"]
+  - id: DM-RECOVER-EXTENT-REUSE-COUNT-ZERO
+    subject: "recover_extent"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      An entry created by recover_extent starts with its internal reuse counter at zero.
+    traces: ["FR-029"]
+  - id: DM-SET-CHECKSUM-RECORDS
+    subject: "set_checksum"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After set_checksum(key, c) succeeds with a non-zero checksum c, get_checksum(key) returns c.
+    traces: ["FR-027", "AS-12.1", "US-12", "contract:set_checksum"]
+  - id: DM-SET-CHECKSUM-NOT-FOUND
+    subject: "set_checksum"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the key is not in the map, set_checksum returns a KeyNotFound error and no entry is created.
+    traces: ["FR-027", "AS-12.3", "contract:set_checksum"]
+  - id: DM-SET-CHECKSUM-FRAME
+    subject: "set_checksum"
+    kind: frame
+    verifiable: true
+    statement: >
+      set_checksum does not change the entry's location, size or reference counts.
+    traces: ["FR-027", "US-12"]
+  - id: DM-GET-CHECKSUM-NONE-UNSET
+    subject: "get_checksum"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      get_checksum returns no value for an existing entry on which no checksum has been recorded.
+    traces: ["FR-027", "AS-12.2", "contract:get_checksum"]
+  - id: DM-GET-CHECKSUM-ZERO-IS-NONE
+    subject: "get_checksum"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      get_checksum returns no value for an entry whose recorded checksum is zero, because zero means
+      'not set'.
+    traces: ["FR-027", "AS-12.2", "contract:get_checksum"]
+  - id: DM-GET-CHECKSUM-ABSENT-KEY
+    subject: "get_checksum"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      get_checksum returns no value (not an error) for a key that is not in the map.
+    traces: ["FR-027", "contract:get_checksum"]
+  - id: DM-GET-CHECKSUM-FRAME
+    subject: "get_checksum"
+    kind: frame
+    verifiable: true
+    statement: >
+      get_checksum does not change any entry or reference count.
+    traces: ["FR-027", "contract:get_checksum"]
+  - id: DM-INV-WRITE-REF-AT-MOST-ONE
+    subject: "write reference count is 0 or 1"
+    kind: invariant
+    verifiable: true
+    statement: >
+      At every point, every entry holds either zero or one write reference, never more.
+    traces: ["contract:invariant-1", "FR-007", "US-4"]
+  - id: DM-INV-READ-WRITE-EXCLUSIVE
+    subject: "readers and writer exclude each other"
+    kind: invariant
+    verifiable: true
+    statement: >
+      At every point, an entry that holds a write reference holds no read references.
+    traces: ["contract:invariant-2", "US-4", "FR-006", "FR-007"]
+  - id: DM-INV-REFCOUNT-CONSERVATION
+    subject: "reference counts are exact"
+    kind: invariant
+    verifiable: true
+    statement: >
+      Under any interleaving of concurrent calls, each entry's read-reference count equals the number
+      of read references successfully acquired on it minus the number successfully released or
+      consumed, with no lost updates, leaks or underflows.
+    traces: ["SC-006", "SC-002", "FR-013"]
+  - id: DM-INV-NO-PANIC
+    subject: "errors are returned, not raised"
+    kind: invariant
+    verifiable: true
+    statement: >
+      Every invalid call (missing key, wrong state, zero size, reference underflow or overflow,
+      timeout) returns an error value to the caller; no operation crashes the process and no invalid
+      call is silently ignored.
+    traces: ["CLAR-invalid-ops-error", "contract:error-semantics", "FR-012"]
+  - id: DM-INV-NO-ERROR-LOG
+    subject: "errors are not logged as errors"
+    kind: invariant
+    verifiable: true
+    statement: >
+      When an operation returns an error, the component reports it only through the returned error
+      value and does not emit an error-level log message.
+    traces: ["FR-014"]
+  - id: DM-INV-REUSE-COUNT-ONLY-READ-ACQUISITIONS
+    subject: "reuse counter changes only on read acquisition"
+    kind: invariant
+    verifiable: true
+    statement: >
+      An entry's internal reuse counter changes only when lookup, take_read or downgrade_reference
+      succeeds on it; take_write, release_read, release_write, convert_to_storage and the tier-
+      transition operations never change it.
+    traces: ["FR-029", "AS-4.9"]
+  - id: DM-INV-OPERATIONS-ARE-KEY-LOCAL
+    subject: "operations affect only their own key"
+    kind: invariant
+    verifiable: true
+    statement: >
+      Every operation that names a key changes at most that key's entry; no other key's location, size
+      or reference counts are changed by it.
+    traces: ["FR-002", "contract:interface-methods"]
+  - id: DM-INV-MEMORY-TIER-SIZE-NONZERO
+    subject: "memory-tier entries have a non-zero size"
+    kind: invariant
+    verifiable: true
+    statement: >
+      Every entry in the memory tier records a byte size greater than zero.
+    traces: ["FR-025", "contract:create_memory_tier_entry", "CLAR-invalid-ops-error"]
+  - id: DM-INV-ENTRY-TRACKED-FOR-EVICTION
+    subject: "every entry is tracked for eviction"
+    kind: invariant
+    verifiable: true
+    statement: >
+      Every entry in the map, whether created, recovered or promoted, remains tracked for eviction
+      ordering for as long as it is in the map.
+    traces: ["FR-003", "FR-024", "FR-025", "FR-015"]
+  - id: DM-INV-CHECKSUM-SURVIVES-TRANSITIONS
+    subject: "checksum travels with the entry"
+    kind: invariant
+    verifiable: true
+    statement: >
+      A checksum recorded on an entry is still returned by get_checksum after the entry moves between
+      the memory tier and the block device in either direction.
+    traces: ["FR-027", "US-12", "contract:set_checksum"]
+  - id: NV-SPEC-CACHEKEY-TYPE
+    scope: "FR-001 key type"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      The key type being a 64-bit unsigned integer is a type-level fact enforced by the compiler, not
+      a behaviour that can be falsified.
+    traces: ["FR-001", "data-model:CacheKey"]
+  - id: NV-SPEC-ENTRY-STRUCTURE
+    scope: "FR-002 per-entry fields and single global lock"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      The list of internal fields and the choice of one global lock with one wait queue describe
+      internal mechanism, not observable behaviour; their observable consequences are captured by the
+      per-operation and atomicity properties.
+    traces: ["FR-002", "data-model:DispatchEntry", "data-model:DispatchMapState", "Key-Entities"]
+  - id: NV-SPEC-THREAD-SAFETY-MECHANISM
+    scope: "FR-013, FR-017 and contract invariant 5 thread safety"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      Thread safety and re-entrancy as a general guarantee is a whole-program mechanism claim; its
+      checkable consequences are covered by the atomicity, exclusion and reference-conservation
+      invariants.
+    traces: ["FR-013", "FR-017", "contract:invariant-5"]
+  - id: NV-SPEC-NO-DEADLOCK
+    scope: "SC-002 no deadlocks under sustained access"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      Deadlock freedom under sustained unbounded concurrent access is an unbounded liveness property.
+    traces: ["SC-002"]
+  - id: NV-SPEC-INFO-DEBUG-LOGGING
+    scope: "FR-014 positive logging requirement"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      Emitting info and debug logs throughout the component is logging content, not checkable
+      behaviour; only the negative no-error-log rule is kept as a property.
+    traces: ["FR-014"]
+  - id: NV-SPEC-COMPONENT-WIRING
+    scope: "FR-015 component definition and receptacles"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      Being declared with the component macro and the listed receptacles is a structural build fact;
+      the mandatory eviction-policy rule is covered by the initialize property.
+    traces: ["FR-015"]
+  - id: NV-SPEC-FR-019-REMOVED
+    scope: "FR-019 removed requirement"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      The requirement was removed from the spec and imposes no obligation.
+    traces: ["FR-019"]
+  - id: NV-SPEC-FR-021-MERGED
+    scope: "FR-021 merged into FR-005"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      The requirement was merged into FR-005 and is covered there.
+    traces: ["FR-021"]
+  - id: NV-SPEC-FEATURE-GATING
+    scope: "FR-028 and AS-12.4 integrity-check feature gating"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      Whether the checksum methods and field exist depends on compile-time feature selection and
+      struct layout, which is a build configuration fact rather than runtime behaviour.
+    traces: ["FR-028", "AS-12.4", "US-12"]
+  - id: NV-SPEC-ENTRY-LAYOUT-SIZE
+    scope: "SC-004 compact fixed-size entry"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      The in-memory size and layout of an entry is a pure layout fact that does not gate behaviour.
+    traces: ["SC-004", "data-model:Location"]
+  - id: NV-SPEC-TIMEOUT-DURATION
+    scope: "Fixed 2000 ms timeout and the 100 ms timeouts in AS-4.7 and AS-4.8"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      The duration of a wait is wall-clock timing; only the occurrence of a timeout is kept as a
+      property.
+    traces: ["FR-004", "FR-006", "FR-007", "CLAR-timeout", "AS-4.7", "AS-4.8"]
+  - id: NV-SPEC-HIGH-CONTENTION
+    scope: "Edge case on hundreds of threads contending"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      The edge case explicitly requires no throttling or fairness guarantee, so there is nothing to
+      falsify.
+    traces: ["EC-high-contention"]
+  - id: NV-SPEC-REUSE-COUNT-NOT-EXPOSED
+    scope: "FR-029 counter not exposed, relaxed ordering, Debug-only visibility"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      That the counter is absent from the public method list is a type-surface fact, and relaxed-
+      ordering counter values are non-deterministic across threads.
+    traces: ["FR-029", "data-model:DispatchEntry"]
+  - id: NV-SPEC-ONE-WAY-CLARIFICATION
+    scope: "Superseded 2026-04-27 one-way lifecycle clarification"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      This clarification was explicitly superseded by the 2026-07-22 clarification, which makes the
+      lifecycle bidirectional; the current behaviour is covered by the promote properties.
+    traces: ["CLAR-one-way", "CLAR-bidirectional"]
+  - id: NV-SPEC-ASSUMPTION-CALLER-IO
+    scope: "Assumptions on caller-performed I/O and external buffer allocation"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      That the caller performs all data transfer, allocates memory-tier buffers and stages data before
+      promotion is an environment assumption about the caller.
+    traces: ["Assumptions", "US-10"]
+  - id: NV-SPEC-ASSUMPTION-LOGGER-BOUND
+    scope: "Assumption that the logger is connected before logging"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      This is an environment assumption on wiring order.
+    traces: ["Assumptions"]
+  - id: NV-SPEC-ASSUMPTION-EXTENT-MANAGER-ORDER
+    scope: "Assumption that the extent manager is initialized before initialize"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      This is an environment assumption on start-up ordering.
+    traces: ["Assumptions", "US-5"]
+  - id: NV-SPEC-ASSUMPTION-SINGLE-NAMESPACE
+    scope: "Assumption of one storage namespace per instance"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      Scope statement; multi-namespace behaviour is out of scope and nothing is promised to falsify.
+    traces: ["Assumptions"]
+  - id: NV-SPEC-ASSUMPTION-NO-DEVICE-ID
+    scope: "Assumption that convert_to_storage takes no device id"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      The parameter list of convert_to_storage is a signature fact enforced by the compiler.
+    traces: ["Assumptions"]
+  - id: NV-SPEC-ASSUMPTION-CONSUMERS
+    scope: "Assumption that dispatcher components decide when to promote and evict"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      Statement about which callers use the operations and where policy lives; it is architectural
+      context, not behaviour of this component.
+    traces: ["Assumptions", "US-10", "US-11"]
+  - id: NV-SPEC-EC-CONVERT-CALLER-HOLDS-WRITE
+    scope: "Edge case that the convert_to_storage caller holds the write reference"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      This is a caller protocol assumption; the component behaviour it relies on (write exclusivity,
+      write count unchanged by convert) is covered by other properties.
+    traces: ["EC-convert-while-write-held"]
+  - id: NV-SPEC-RESERVED-ERROR-VARIANTS
+    scope: "Reserved AllocationFailed, NotInitialized and MismatchSize variants"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      The data model describes these as reserved and currently unused; that is a status note rather
+      than a requirement (the lookup case is kept as DM-LOOKUP-NEVER-MISMATCH-SIZE).
+    traces: ["data-model:DispatchMapError", "data-model:LookupResult"]
+  - id: NV-SPEC-STORY-NARRATIVE
+    scope: "User story narratives, priorities and independent-test descriptions"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      Motivation and priority text carries no obligation beyond the acceptance scenarios and
+      requirements, which are covered individually.
+    traces: ["US-1", "US-2", "US-3", "US-4", "US-5", "US-6", "US-7", "US-8", "US-9", "US-10", "US-11", "US-12"]
+  - id: NV-SPEC-STALE-PLAN-RESEARCH
+    scope: "plan.md, research.md and tasks.md design notes"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      These documents describe a superseded staging-buffer design (DMA allocator, side map, 32-byte
+      entry target, device id) that the current spec and contract no longer contain, so they are not
+      used as a source of obligations.
+    traces: ["plan", "research", "tasks"]
+input_constraints:
+  - constraint: "The memory-tier size passed in must be greater than zero."
+    pointers: ["contract:create_memory_tier_entry", "FR-025", "AS-10.5", "CLAR-invalid-ops-error"]
+    methods: ["create_memory_tier_entry", "promote_block_to_memory_tier"]
+  - constraint: "The memory-tier pointer passed to create_memory_tier_entry must not be null."
+    pointers: ["AS-1.3", "EC-create-null-pointer"]
+    methods: ["create_memory_tier_entry"]
+  - constraint: "The key must not already be present when creating or recovering an entry."
+    pointers: ["FR-003", "FR-024", "AS-1.2", "EC-create-existing-key", "EC-recover-existing-key"]
+    methods: ["create_memory_tier_entry", "recover_extent"]
+  - constraint: "The key must already be present for every operation on an existing entry."
+    pointers: ["data-model:KeyNotFound", "AS-3.3", "AS-7.2", "AS-10.4", "AS-11.5", "AS-12.3", "FR-023"]
+    methods: ["convert_to_storage", "take_read", "take_write", "release_read", "release_write", "downgrade_reference", "remove", "touch", "entry_size", "convert_memory_tier_to_block", "promote_block_to_memory_tier", "try_evict_to_block", "set_checksum"]
+  - constraint: "convert_to_storage requires the entry to be in the memory tier (not on the block device)."
+    pointers: ["FR-005", "AS-3.4"]
+    methods: ["convert_to_storage"]
+  - constraint: "convert_memory_tier_to_block requires a memory-tier entry with an on-disk offset already recorded."
+    pointers: ["FR-018", "contract:convert_memory_tier_to_block"]
+    methods: ["convert_memory_tier_to_block"]
+  - constraint: "try_evict_to_block requires a memory-tier entry with an on-disk offset recorded and zero read and zero write references."
+    pointers: ["FR-026", "FR-022"]
+    methods: ["try_evict_to_block", "is_evictable"]
+  - constraint: "promote_block_to_memory_tier requires the entry to be on the block device; references may be held."
+    pointers: ["FR-025", "AS-10.2", "AS-10.3"]
+    methods: ["promote_block_to_memory_tier"]
+  - constraint: "release_read requires the read-reference count to be above zero."
+    pointers: ["FR-008", "EC-release-at-zero"]
+    methods: ["release_read"]
+  - constraint: "release_write requires a write reference to be held."
+    pointers: ["FR-009", "EC-release-at-zero"]
+    methods: ["release_write"]
+  - constraint: "downgrade_reference requires a write reference to be held."
+    pointers: ["FR-010", "EC-downgrade-without-write"]
+    methods: ["downgrade_reference"]
+  - constraint: "remove requires zero read and zero write references."
+    pointers: ["FR-011", "CLAR-remove-with-refs", "contract:invariant-4"]
+    methods: ["remove"]
+  - constraint: "Read acquisition requires no write reference held, within the fixed waiting period."
+    pointers: ["FR-004", "FR-006"]
+    methods: ["lookup", "take_read"]
+  - constraint: "Write acquisition requires zero read and zero write references, within the fixed waiting period."
+    pointers: ["FR-007"]
+    methods: ["take_write"]
+  - constraint: "The read-reference count must be below its maximum representable value for a read acquisition to succeed."
+    pointers: ["data-model:RefCountOverflow"]
+    methods: ["lookup", "take_read", "downgrade_reference"]
+  - constraint: "The write-reference count is only ever 0 or 1."
+    pointers: ["contract:invariant-1", "data-model:DispatchEntry"]
+    methods: ["take_write", "release_write", "downgrade_reference", "create_memory_tier_entry"]
+  - constraint: "Blocking waits use a fixed 2000 ms timeout; no per-call timeout parameter is accepted."
+    pointers: ["FR-004", "FR-006", "FR-007", "CLAR-timeout"]
+    methods: ["lookup", "take_read", "take_write"]
+  - constraint: "initialize requires the eviction-policy component to be connected; the extent manager is optional."
+    pointers: ["FR-012", "FR-015", "contract:initialize"]
+    methods: ["initialize"]
+  - constraint: "initialize must be called explicitly after construction and receptacle binding."
+    pointers: ["FR-020"]
+    methods: ["initialize"]
+  - constraint: "When used, the extent manager must be initialized before the dispatch map's initialize is called."
+    pointers: ["Assumptions"]
+    methods: ["initialize"]
+  - constraint: "The logger must be connected before any logging call is made."
+    pointers: ["Assumptions"]
+    methods: []
+  - constraint: "Entry size is held in 4 KiB blocks; entry_size reports block count times 4096, with memory-tier byte sizes rounded up to a block boundary."
+    pointers: ["FR-002", "FR-023", "FR-024"]
+    methods: ["entry_size", "recover_extent", "create_memory_tier_entry", "promote_block_to_memory_tier"]
+  - constraint: "Memory-tier size is a 32-bit byte count; block-device offsets are 64-bit byte offsets; recovered size is a 32-bit block count."
+    pointers: ["FR-003", "FR-018", "FR-024", "data-model:Location"]
+    methods: ["create_memory_tier_entry", "promote_block_to_memory_tier", "convert_to_storage", "recover_extent"]
+  - constraint: "oldest_keys(n) returns at most n keys."
+    pointers: ["FR-017"]
+    methods: ["oldest_keys"]
+  - constraint: "A checksum value of zero means 'not set'."
+    pointers: ["FR-027", "AS-12.2"]
+    methods: ["set_checksum", "get_checksum"]
+  - constraint: "The checksum methods exist only when the integrity-check feature is enabled, and it is off by default."
+    pointers: ["FR-027", "FR-028"]
+    methods: ["set_checksum", "get_checksum"]
+  - constraint: "The caller of convert_to_storage is expected to hold the write reference on the entry."
+    pointers: ["EC-convert-while-write-held"]
+    methods: ["convert_to_storage"]
+  - constraint: "The caller of promote_block_to_memory_tier must have allocated the buffer and staged the data before the call."
+    pointers: ["Assumptions", "US-10"]
+    methods: ["promote_block_to_memory_tier"]
+  - constraint: "lookup takes no expected-size argument, so no size check is performed on lookup."
+    pointers: ["FR-004", "AS-2.4"]
+    methods: ["lookup"]
+  - constraint: "One dispatch-map instance serves exactly one storage namespace."
+    pointers: ["Assumptions"]
+    methods: []

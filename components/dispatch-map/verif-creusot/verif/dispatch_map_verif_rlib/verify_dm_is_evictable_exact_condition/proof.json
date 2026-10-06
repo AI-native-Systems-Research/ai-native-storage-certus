@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_dm_is_evictable": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_verify_dm_is_evictable_exact_condition": {
+        "prover": "alt-ergo",
+        "time": 0.023
+      }
+    }
+  }
+}

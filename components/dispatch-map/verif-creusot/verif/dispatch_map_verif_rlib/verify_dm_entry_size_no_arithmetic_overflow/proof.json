@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_dm_entry_size": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_verify_dm_entry_size_no_arithmetic_overflow": {
+        "prover": "alt-ergo",
+        "time": 0.054
+      }
+    }
+  }
+}

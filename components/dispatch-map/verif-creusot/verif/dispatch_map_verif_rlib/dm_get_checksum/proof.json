@@ -1,0 +1,10 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_dm_get_checksum": { "prover": "alt-ergo", "time": 0.033 },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_get": { "prover": "alt-ergo", "time": 0.018 }
+    }
+  }
+}

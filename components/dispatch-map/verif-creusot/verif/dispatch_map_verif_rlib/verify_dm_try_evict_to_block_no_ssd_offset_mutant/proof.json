@@ -1,0 +1,22 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_dm_try_evict_to_block": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_verify_dm_try_evict_to_block_no_ssd_offset__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.03 },
+              null,
+              { "prover": "alt-ergo", "time": 0.049 },
+              { "prover": "alt-ergo", "time": 0.037 }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

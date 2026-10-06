@@ -1,0 +1,20 @@
+[package]
+name = "dispatch-map-verif"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+creusot-std = "0.12.0-dev"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(creusot)'] }
+
+# creusot-std is not vendored. The patch path is CHECKOUT-RELATIVE via the gitignored
+# `components/dispatch-map/creusot` symlink (-> a tools/creusot/creusot checkout). It lives HERE,
+# in the Creusot crate, and deliberately NOT in components/dispatch-map/.cargo/config.toml: at
+# component scope it would apply to every cargo command in the component, including `cargo kani`.
+[patch.crates-io]
+creusot-std = { path = "../creusot/creusot-std" }

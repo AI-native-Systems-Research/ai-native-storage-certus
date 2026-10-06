@@ -1,0 +1,21 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_dm_create_memory_tier_entry": {
+        "prover": "alt-ergo",
+        "time": 0.032
+      },
+      "vc_dm_entry_size": { "prover": "alt-ergo", "time": 0.034 },
+      "vc_dm_promote_block_to_memory_tier": {
+        "prover": "alt-ergo",
+        "time": 0.034
+      },
+      "vc_elim_Err": { "prover": "alt-ergo", "time": 0.033 },
+      "vc_verify_dm_entry_size_rounds_up_memory_tier": {
+        "prover": "z3",
+        "time": 0.24
+      }
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_dm_get_checksum": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_verify_dm_get_checksum_absent_key": {
+        "prover": "alt-ergo",
+        "time": 0.042
+      }
+    }
+  }
+}

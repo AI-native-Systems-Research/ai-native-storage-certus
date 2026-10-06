@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_dm_entry_size": { "prover": "alt-ergo", "time": 0.034 },
+      "vc_dm_recover_extent": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_verify_dm_recover_extent_inserts": {
+        "prover": "z3",
+        "time": 0.033
+      }
+    }
+  }
+}

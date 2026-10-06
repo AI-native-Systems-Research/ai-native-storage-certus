@@ -1,0 +1,46 @@
+(* #"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/drivers.rs" 112 0 112 45 *)
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_DmError =
+  | KeyNotFound UInt64.t
+  | AlreadyExists UInt64.t
+  | ActiveReferences UInt64.t
+  | Timeout UInt64.t
+  | AllocationFailed
+  | InvalidSize
+  | NotInitialized
+  | RefCountUnderflow UInt64.t
+  | RefCountOverflow UInt64.t
+  | NoWriteReference UInt64.t
+  | InvalidState
+
+type t_Result_unit_DmError = Ok () | Err t_DmError
+
+type t_Out_Result_unit_DmError = Ret t_Result_unit_DmError | Panic
+
+type t_St = Ok'0 | Err'0 | Panic'0
+
+let elim_Ret (_x: t_Out_Result_unit_DmError) (return (f0: t_Result_unit_DmError)) = any
+  [ _k (f0: t_Result_unit_DmError) -> {Ret f0 = _x} (! return {f0})
+  | _chk -> (! {[@expl:elim Ret] match _x with
+      | Ret _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let st_out [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/drivers.rs" 112 0 112 45]
+  (r: t_Out_Result_unit_DmError) (return (x: t_St)) = (! bb0
+  [ bb0 = any [ br0 (x0: t_Result_unit_DmError) -> {r = Ret x0} (! bb2) | br1 -> {r = Panic} (! bb5) ]
+  | bb5 = s0 [ s0 = [ &_ret <- Panic'0 ] s1 | s1 = return {_ret} ]
+  | bb2 = elim_Ret {r}
+      (fun (r0: t_Result_unit_DmError) ->
+        any [ br0 (x0: ()) -> {r0 = Ok x0} (! bb7) | br1 (x0: t_DmError) -> {r0 = Err x0} (! bb6) ])
+  | bb6 = s0 [ s0 = [ &_ret <- Err'0 ] s1 | s1 = return {_ret} ]
+  | bb7 = s0 [ s0 = [ &_ret <- Ok'0 ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_St = Any.any_l () | & r: t_Out_Result_unit_DmError = r ]) [ return (result: t_St) -> (! return {result}) ]

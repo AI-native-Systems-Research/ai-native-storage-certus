@@ -1,0 +1,252 @@
+(* #"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/drivers.rs" 1755 0 1755 95 *)
+
+let%span score = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 521 57 521 59
+let%span score'0 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 518 10 518 40
+let%span score'1 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 519 10 519 70
+let%span score'2 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 520 10 520 20
+let%span score'3 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 251 16 251 38
+let%span score'4 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 384 16 384 70
+let%span score'5 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 357 16 357 64
+let%span score'6 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 363 16 363 91
+let%span score'7 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 369 16 370 107
+let%span score'8 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 376 16 379 22
+let%span score'9 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 345 8 351 9
+let%span score'10 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 256 16 256 36
+let%span score'11 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 288 16 288 62
+let%span score'12 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 283 16 283 75
+let%span score'13 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 332 16 332 36
+let%span sfmap = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/creusot/creusot-std/src/logic/fmap.rs" 102 8 102 27
+let%span sfmap'0 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/creusot/creusot-std/src/logic/fmap.rs" 88 8 88 32
+let%span sfmap'1 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/creusot/creusot-std/src/logic/fmap.rs" 96 8 96 34
+let%span sfmap'2 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/creusot/creusot-std/src/logic/fmap.rs" 45 14 45 31
+let%span sfmap'3 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/creusot/creusot-std/src/logic/fmap.rs" 46 14 46 55
+let%span sfmap'4 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/creusot/creusot-std/src/logic/fmap.rs" 54 14 54 25
+let%span soption = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/creusot/creusot-std/src/std/option.rs" 796 15 796 27
+let%span soption'0 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/creusot/creusot-std/src/std/option.rs" 798 8 801 9
+let%span slogic = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/creusot/creusot-std/src/logic.rs" 39 11 39 28
+let%span slogic'0 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/creusot/creusot-std/src/logic.rs" 40 10 40 19
+let%span smapping = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/creusot/creusot-std/src/logic/mapping.rs" 66 8 66 19
+let%span sdrivers = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/drivers.rs" 1756 4 1756 22
+let%span sdrivers'0 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/drivers.rs" 1755 93 1755 95
+let%span sdrivers'1 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/drivers.rs" 1754 10 1754 39
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use creusot.prelude.Opaque
+use map.Map
+use int.ComputerDivision
+use map.Const
+use creusot.prelude.Any
+use int.Int
+
+type t_FMap_Handle_tup2_u32_u64
+
+type t_Ep = { npools: int; tracked: t_FMap_Handle_tup2_u32_u64 }
+
+type t_Option_Ep = None | Some t_Ep
+
+type t_Vec_Extent_Global
+
+type t_Em = { extents: t_Vec_Extent_Global }
+
+type t_Option_Em = None'0 | Some'0 t_Em
+
+type t_Cv = { epoch: int }
+
+type t_HashMap_u64_Entry_RandomState_Global
+
+type t_Entries = { f0: t_HashMap_u64_Entry_RandomState_Global }
+
+type t_Option_u32 = None'1 | Some'1 UInt32.t
+
+type t_Dm = { entries: t_Entries; pool_id: t_Option_u32; ep: t_Option_Ep; em: t_Option_Em; cv: t_Cv }
+
+predicate inv_HashMap_u64_Entry_RandomState_Global (_1: t_HashMap_u64_Entry_RandomState_Global)
+
+predicate inv_Entries (_1: t_Entries)
+
+axiom inv_axiom [@rewrite]: forall x: t_Entries [inv_Entries x]. inv_Entries x
+    = inv_HashMap_u64_Entry_RandomState_Global x.f0
+
+predicate inv_Dm (_1: t_Dm)
+
+axiom inv_axiom'0 [@rewrite]: forall x: t_Dm [inv_Dm x]. inv_Dm x = inv_Entries x.entries
+
+type t_FMap_u64_Entry
+
+type t_Option_u64 = None'2 | Some'2 UInt64.t
+
+type t_Location = BlockDevice UInt64.t | MemoryTier Opaque.ptr UInt32.t t_Option_u64
+
+type t_Handle = { pool_id'0: UInt32.t; index'0: UInt32.t }
+
+type t_Entry = {
+  location: t_Location;
+  size_blocks: UInt32.t;
+  read_ref: UInt32.t;
+  write_ref: UInt32.t;
+  eviction_handle: t_Handle;
+  reuse_count: UInt32.t;
+  checksum: UInt32.t }
+
+type t_Option_Entry = None'3 | Some'3 t_Entry
+
+function to_mapping_u64 (self: t_FMap_u64_Entry) : Map.map UInt64.t t_Option_Entry
+
+function get_u64 [@inline:trivial] (self: t_FMap_u64_Entry) (k: UInt64.t) : t_Option_Entry =
+  [%#sfmap'0] Map.get (to_mapping_u64 self) k
+
+meta "rewrite_def" function get_u64
+
+predicate contains_u64 [@inline:trivial] (self: t_FMap_u64_Entry) (k: UInt64.t) = [%#sfmap] get_u64 self k <> None'3
+
+meta "rewrite_def" predicate contains_u64
+
+function view_Entries [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 94 4 94 37] (self: t_Entries) : t_FMap_u64_Entry
+
+predicate has [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 250 0 250 33] (d: t_Dm) (k: UInt64.t) =
+  [%#score'3] contains_u64 (view_Entries d.entries) k
+
+function ceil_blocks [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 331 0 331 36] (size: int) : int
+ = [%#score'13] ComputerDivision.div (size + 4095) 4096
+
+predicate entry_ok [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 343 0 343 33] (e: t_Entry) =
+  [%#score'9] UInt32.t'int e.write_ref <= 1
+  /\ (UInt32.t'int e.write_ref <> 0 -> UInt32.t'int e.read_ref = 0)
+  /\ UInt32.t'int e.size_blocks <= 1048575
+  /\ match e.location with
+    | MemoryTier _ size _ -> UInt32.t'int size > 0 /\ UInt32.t'int e.size_blocks = ceil_blocks (UInt32.t'int size)
+    | BlockDevice _ -> true
+    end
+
+predicate index_Mapping_Entry_bool [@inline:trivial] (self: Map.map t_Entry bool) (a: t_Entry) =
+  [%#smapping] Map.get self a
+
+meta "rewrite_def" predicate index_Mapping_Entry_bool
+
+function such_that_Entry (p: Map.map t_Entry bool) : t_Entry
+
+axiom such_that_Entry_spec:
+  forall p: Map.map t_Entry bool [such_that_Entry p]. ([%#slogic] exists x: t_Entry. index_Mapping_Entry_bool p x)
+    -> ([%#slogic'0] index_Mapping_Entry_bool p (such_that_Entry p))
+
+function unwrap_Option_Entry (self: t_Option_Entry) : t_Entry = [%#soption'0] match self with
+    | Some'3 x -> x
+    | None'3 -> such_that_Entry (fun (__0: t_Entry) -> true)
+    end
+
+function lookup_u64 [@inline:trivial] (self: t_FMap_u64_Entry) (k: UInt64.t) : t_Entry =
+  [%#sfmap'1] unwrap_Option_Entry (get_u64 self k)
+
+meta "rewrite_def" function lookup_u64
+
+function ent [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 255 0 255 34] (d: t_Dm) (k: UInt64.t) : t_Entry
+ = [%#score'10] lookup_u64 (view_Entries d.entries) k
+
+predicate wf_entries [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 356 0 356 32] (d: t_Dm) =
+  [%#score'5] forall k: UInt64.t. has d k -> entry_ok (ent d k)
+
+function npools'0 [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 287 0 287 27] (d: t_Dm) : int
+ = [%#score'11] match d.ep with
+    | Some e -> e.npools
+    | None -> 0
+    end
+
+predicate wf_pool [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 362 0 362 29] (d: t_Dm) =
+  [%#score'6] match d.pool_id with
+    | Some'1 p -> d.ep <> None /\ UInt32.t'int p < npools'0 d
+    | None'1 -> true
+    end
+
+type tup2_u32_u64 = { f0'0: UInt32.t; f1'0: UInt64.t }
+
+type t_Option_tup2_u32_u64 = None'4 | Some'4 tup2_u32_u64
+
+function to_mapping_Handle (self: t_FMap_Handle_tup2_u32_u64) : Map.map t_Handle t_Option_tup2_u32_u64
+
+function get_Handle [@inline:trivial] (self: t_FMap_Handle_tup2_u32_u64) (k: t_Handle) : t_Option_tup2_u32_u64 =
+  [%#sfmap'0] Map.get (to_mapping_Handle self) k
+
+meta "rewrite_def" function get_Handle
+
+function len_Handle (self: t_FMap_Handle_tup2_u32_u64) : int
+
+axiom len_Handle_spec: forall self: t_FMap_Handle_tup2_u32_u64 [len_Handle self]. [%#sfmap'4] len_Handle self >= 0
+
+constant empty_Handle : t_FMap_Handle_tup2_u32_u64
+
+axiom empty_Handle_spec: [%#sfmap'2] len_Handle empty_Handle = 0
+
+axiom empty_Handle_spec'0: [%#sfmap'3] to_mapping_Handle empty_Handle = Const.const (None'4)
+
+function trk [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 282 0 282 45] (d: t_Dm) : t_FMap_Handle_tup2_u32_u64
+ = [%#score'12] match d.ep with
+    | Some e -> e.tracked
+    | None -> empty_Handle
+    end
+
+predicate wf_fwd [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 368 0 368 28] (d: t_Dm) =
+  [%#score'7] forall k: UInt64.t. has d k
+    -> match d.pool_id with
+      | Some'1 p -> get_Handle (trk d) (ent d k).eviction_handle = Some'4 { f0'0 = p; f1'0 = k }
+      | None'1 -> false
+      end
+
+predicate contains_Handle [@inline:trivial] (self: t_FMap_Handle_tup2_u32_u64) (k: t_Handle) =
+  [%#sfmap] get_Handle self k <> None'4
+
+meta "rewrite_def" predicate contains_Handle
+
+predicate index_Mapping_tup2_u32_u64_bool [@inline:trivial] (self: Map.map tup2_u32_u64 bool) (a: tup2_u32_u64) =
+  [%#smapping] Map.get self a
+
+meta "rewrite_def" predicate index_Mapping_tup2_u32_u64_bool
+
+function such_that_tup2_u32_u64 (p: Map.map tup2_u32_u64 bool) : tup2_u32_u64
+
+axiom such_that_tup2_u32_u64_spec:
+  forall p: Map.map tup2_u32_u64 bool [such_that_tup2_u32_u64 p]. ([%#slogic] exists x: tup2_u32_u64. index_Mapping_tup2_u32_u64_bool p x)
+    -> ([%#slogic'0] index_Mapping_tup2_u32_u64_bool p (such_that_tup2_u32_u64 p))
+
+function unwrap_Option_tup2_u32_u64 (self: t_Option_tup2_u32_u64) : tup2_u32_u64 = [%#soption'0] match self with
+    | Some'4 x -> x
+    | None'4 -> such_that_tup2_u32_u64 (fun (__0: tup2_u32_u64) -> true)
+    end
+
+function lookup_Handle [@inline:trivial] (self: t_FMap_Handle_tup2_u32_u64) (k: t_Handle) : tup2_u32_u64 =
+  [%#sfmap'1] unwrap_Option_tup2_u32_u64 (get_Handle self k)
+
+meta "rewrite_def" function lookup_Handle
+
+predicate wf_back [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 375 0 375 29] (d: t_Dm) =
+  [%#score'8] match d.pool_id with
+    | Some'1 p -> forall h: t_Handle. contains_Handle (trk d) h /\ (lookup_Handle (trk d) h).f0'0 = p
+      -> has d (lookup_Handle (trk d) h).f1'0 /\ (ent d (lookup_Handle (trk d) h).f1'0).eviction_handle = h
+    | None'1 -> true
+    end
+
+predicate wf [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 383 0 383 24] (d: t_Dm) =
+  [%#score'4] wf_entries d /\ wf_pool d /\ wf_fwd d /\ wf_back d
+
+let dm_new (ep'0: t_Option_Ep) (em'0: t_Option_Em) (cv'0: t_Cv) (return (x: t_Dm)) = any
+  [ return (result: t_Dm) ->
+  {[@stop_split] [@expl:dm_new ensures] ([@stop_split] [@expl:dm_new result type invariant] [%#score] inv_Dm result)
+    /\ ([@stop_split] [@expl:dm_new ensures #0] [%#score'0] forall k: UInt64.t. not has result k)
+    /\ ([@stop_split] [@expl:dm_new ensures #1] [%#score'1] result.pool_id = None'1
+      /\ result.ep = ep'0 /\ result.em = em'0)
+    /\ ([@stop_split] [@expl:dm_new ensures #2] [%#score'2] wf result)}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_dm_initialize_explicit_only__mutant [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/drivers.rs" 1755 0 1755 95]
+  (ep'0: t_Option_Ep) (em'0: t_Option_Em) (cv'0: t_Cv) (return (x: t_Dm)) = (! bb0
+  [ bb0 = s0
+    [ s0 = dm_new [%#sdrivers] {ep'0} {em'0} {cv'0} (fun (_x: t_Dm) -> [ &_ret <- _x ] s1) | s1 = return {_ret} ] ]
+  [ & _ret: t_Dm = Any.any_l () | & ep'0: t_Option_Ep = ep'0 | & em'0: t_Option_Em = em'0 | & cv'0: t_Cv = cv'0 ])
+  [ return (result: t_Dm) ->
+  {[@stop_split] [@expl:verify_dm_initialize_explicit_only__mutant ensures] ([@stop_split] [@expl:verify_dm_initialize_explicit_only__mutant result type invariant] [%#sdrivers'0] inv_Dm result)
+    /\ ([@stop_split] [@expl:verify_dm_initialize_explicit_only__mutant ensures] [%#sdrivers'1] exists k: UInt64.t. has result k)}
+    (! return {result}) ]

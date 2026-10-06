@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_dm_try_evict_to_block": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_verify_dm_try_evict_to_block_not_found": {
+        "prover": "alt-ergo",
+        "time": 0.048
+      }
+    }
+  }
+}

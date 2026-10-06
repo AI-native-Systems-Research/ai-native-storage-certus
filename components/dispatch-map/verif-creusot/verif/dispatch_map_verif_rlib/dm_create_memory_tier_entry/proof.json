@@ -1,0 +1,16 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_contains_key": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_div_ceil": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_dm_create_memory_tier_entry": { "prover": "z3", "time": 0.12 },
+      "vc_elim_Ok": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_elim_Ret": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_get_pool_id": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_insert": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_track": { "prover": "alt-ergo", "time": 0.018 }
+    }
+  }
+}

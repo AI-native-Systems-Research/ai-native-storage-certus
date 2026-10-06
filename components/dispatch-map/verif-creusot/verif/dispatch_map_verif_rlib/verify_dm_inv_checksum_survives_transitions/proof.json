@@ -1,0 +1,61 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_dm_convert_memory_tier_to_block": {
+        "prover": "alt-ergo",
+        "time": 0.02
+      },
+      "vc_dm_convert_to_storage": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_dm_create_memory_tier_entry": {
+        "prover": "alt-ergo",
+        "time": 0.02
+      },
+      "vc_dm_downgrade_reference": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_dm_entry_size": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_dm_get_checksum": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_dm_initialize": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_dm_is_evictable": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_dm_lookup": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_dm_oldest_keys": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_dm_promote_block_to_memory_tier": {
+        "prover": "alt-ergo",
+        "time": 0.02
+      },
+      "vc_dm_recover_extent": { "prover": "alt-ergo", "time": 0.032 },
+      "vc_dm_release_read": { "prover": "alt-ergo", "time": 0.032 },
+      "vc_dm_release_write": { "prover": "alt-ergo", "time": 0.032 },
+      "vc_dm_remove": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_dm_set_checksum": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_dm_take_read": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_dm_take_write": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_dm_touch": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_dm_try_evict_to_block": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_elim_ConvertMtToBlock": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_elim_ConvertToStorage": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_elim_CreateMt": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_elim_Downgrade": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_elim_EntrySize": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_elim_GetChecksum": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_elim_IsEvictable": { "prover": "alt-ergo", "time": 0.035 },
+      "vc_elim_Lookup": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_elim_OldestKeys": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_elim_Promote": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_elim_RecoverExtent": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_elim_ReleaseRead": { "prover": "alt-ergo", "time": 0.032 },
+      "vc_elim_ReleaseWrite": { "prover": "alt-ergo", "time": 0.035 },
+      "vc_elim_Remove": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_elim_Ret": { "prover": "alt-ergo", "time": 0.034 },
+      "vc_elim_Ret'0": { "prover": "alt-ergo", "time": 0.032 },
+      "vc_elim_SetChecksum": { "prover": "alt-ergo", "time": 0.032 },
+      "vc_elim_TakeRead": { "prover": "alt-ergo", "time": 0.032 },
+      "vc_elim_TakeWrite": { "prover": "alt-ergo", "time": 0.032 },
+      "vc_elim_Touch": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_elim_TryEvict": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_verify_dm_inv_checksum_survives_transitions": {
+        "prover": "z3",
+        "time": 0.427
+      }
+    }
+  }
+}

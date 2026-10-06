@@ -1,0 +1,31 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_dm_is_evictable": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_verify_dm_is_evictable_exact_condition__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.023 },
+              {
+                "tactic": "split_vc",
+                "children": [
+                  { "prover": "alt-ergo", "time": 0.036 },
+                  { "prover": "alt-ergo", "time": 0.038 },
+                  { "prover": "alt-ergo", "time": 0.042 },
+                  { "prover": "alt-ergo", "time": 0.039 },
+                  null
+                ]
+              },
+              { "prover": "alt-ergo", "time": 0.023 },
+              { "prover": "alt-ergo", "time": 0.022 }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

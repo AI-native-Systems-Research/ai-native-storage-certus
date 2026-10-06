@@ -1,0 +1,14 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_add_Instant": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_check_pred": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_condvar_wait_timeout": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_is_zero": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_now": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_saturating_duration_since": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_wait_for": { "prover": "alt-ergo", "time": 0.105 }
+    }
+  }
+}

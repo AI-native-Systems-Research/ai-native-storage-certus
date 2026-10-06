@@ -1,0 +1,25 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_dm_promote_block_to_memory_tier": {
+        "prover": "alt-ergo",
+        "time": 0.017
+      },
+      "vc_sanity_refute_dm_promote_already_memory_tier": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.044 },
+              null,
+              { "prover": "alt-ergo", "time": 0.05 },
+              { "prover": "alt-ergo", "time": 0.04 }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

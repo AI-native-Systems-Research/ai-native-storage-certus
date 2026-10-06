@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_dm_oldest_keys": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_refute_dm_oldest_keys_no_eviction_policy_empty": {
+        "prover": "alt-ergo",
+        "time": 0.027
+      }
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_dm_entry_size": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_dm_promote_block_to_memory_tier": {
+        "prover": "alt-ergo",
+        "time": 0.033
+      },
+      "vc_verify_dm_promote_recomputes_size": {
+        "prover": "alt-ergo",
+        "time": 0.171
+      }
+    }
+  }
+}

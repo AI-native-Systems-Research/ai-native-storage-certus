@@ -1,0 +1,15 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_dm_promote_block_to_memory_tier": {
+        "prover": "alt-ergo",
+        "time": 0.017
+      },
+      "vc_verify_dm_promote_zero_size": {
+        "prover": "alt-ergo",
+        "time": 0.049
+      }
+    }
+  }
+}

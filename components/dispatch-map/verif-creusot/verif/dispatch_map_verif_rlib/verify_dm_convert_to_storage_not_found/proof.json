@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_dm_convert_to_storage": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_verify_dm_convert_to_storage_not_found": {
+        "prover": "alt-ergo",
+        "time": 0.028
+      }
+    }
+  }
+}

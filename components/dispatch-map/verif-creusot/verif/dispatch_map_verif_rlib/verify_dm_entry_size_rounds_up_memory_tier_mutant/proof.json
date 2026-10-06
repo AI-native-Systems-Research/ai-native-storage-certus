@@ -1,0 +1,54 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_dm_create_memory_tier_entry": {
+        "prover": "alt-ergo",
+        "time": 0.032
+      },
+      "vc_dm_entry_size": { "prover": "alt-ergo", "time": 0.034 },
+      "vc_dm_promote_block_to_memory_tier": {
+        "prover": "alt-ergo",
+        "time": 0.033
+      },
+      "vc_elim_Err": { "prover": "alt-ergo", "time": 0.033 },
+      "vc_verify_dm_entry_size_rounds_up_memory_tier__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.039 },
+              { "prover": "alt-ergo", "time": 0.041 },
+              { "prover": "alt-ergo", "time": 0.042 },
+              { "prover": "alt-ergo", "time": 0.053 },
+              { "prover": "alt-ergo", "time": 0.04 },
+              { "prover": "alt-ergo", "time": 0.056 },
+              {
+                "tactic": "split_vc",
+                "children": [
+                  {
+                    "tactic": "split_vc",
+                    "children": [
+                      null,
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          null, { "prover": "alt-ergo", "time": 0.065 }
+                        ]
+                      }
+                    ]
+                  },
+                  { "prover": "alt-ergo", "time": 0.138 },
+                  { "prover": "z3", "time": 0.049 }
+                ]
+              },
+              { "prover": "alt-ergo", "time": 0.069 },
+              { "prover": "alt-ergo", "time": 0.057 }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

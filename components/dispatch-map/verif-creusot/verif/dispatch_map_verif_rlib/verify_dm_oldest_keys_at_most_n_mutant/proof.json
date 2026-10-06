@@ -1,0 +1,22 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_dm_oldest_keys": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_verify_dm_oldest_keys_at_most_n__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.038 },
+              null,
+              { "prover": "alt-ergo", "time": 0.042 },
+              { "prover": "alt-ergo", "time": 0.037 }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

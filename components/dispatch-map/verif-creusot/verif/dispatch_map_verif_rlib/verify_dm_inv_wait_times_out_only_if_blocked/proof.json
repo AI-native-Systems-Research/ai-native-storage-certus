@@ -1,0 +1,16 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_dm_lookup": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_dm_take_read": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_dm_take_write": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_elim_Err": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_elim_Err'0": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_verify_dm_inv_wait_times_out_only_if_blocked": {
+        "prover": "z3",
+        "time": 0.081
+      }
+    }
+  }
+}

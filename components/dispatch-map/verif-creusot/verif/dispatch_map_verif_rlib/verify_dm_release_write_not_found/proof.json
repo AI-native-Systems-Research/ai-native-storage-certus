@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_dm_release_write": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_verify_dm_release_write_not_found": {
+        "prover": "alt-ergo",
+        "time": 0.049
+      }
+    }
+  }
+}

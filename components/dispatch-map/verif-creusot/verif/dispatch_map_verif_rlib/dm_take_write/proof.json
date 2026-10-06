@@ -1,0 +1,15 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_dm_take_write": {
+        "tactic": "compute_specified",
+        "children": [ { "prover": "z3", "time": 0.041 } ]
+      },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_from_millis": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_get_mut": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_wait_for": { "prover": "alt-ergo", "time": 0.021 }
+    }
+  }
+}
