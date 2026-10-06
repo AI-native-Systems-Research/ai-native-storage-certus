@@ -497,8 +497,8 @@ The certus DaemonSet uses a `certus.ai/worker: "true"` nodeSelector to
 determine which nodes run certus pods. Label each desired node explicitly:
 
 ```bash
-kubectl label node node2 certus.ai/worker=true
-kubectl label node node7 certus.ai/worker=true
+kubectl label node <node-name> certus.ai/worker=true
+kubectl label node <another-node-name> certus.ai/worker=true
 ```
 
 To remove a node from the certus pool:
