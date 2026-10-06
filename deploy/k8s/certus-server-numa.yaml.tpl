@@ -132,12 +132,21 @@ spec:
               echo "certus: no GPU in NUMA domain $CERTUS_NUMA_ID; CUDA_VISIBLE_DEVICES left unset"
             fi
           fi
-          exec certus-server-yaml $ARGS --shm-path ${CERTUS_SHM_PATH} --channels 32 --memory-tier-size 4G
+          # Matches the hand-started host-mode instances these replace, so offload
+          # measurements stay comparable across the move: 16 channels and a 30G
+          # DRAM tier rather than the template's old 32/4G. --metrics-port is new;
+          # without it the DaemonSets expose nothing to scrape and there is no way
+          # to see tier occupancy or remote-lookup hits.
+          exec certus-server-yaml $ARGS --shm-path ${CERTUS_SHM_PATH} --channels 16 --memory-tier-size 30G --metrics-port ${CERTUS_METRICS_PORT}
         # Each NUMA instance publishes a DISTINCT mailbox on the shared host
         # /dev/shm; a client selects an instance by pointing at its shm path.
         env:
         - name: CERTUS_SHM_PATH
           value: "/dev/shm/certus-shmq-numa0"
+        # hostNetwork is on, so this binds on the node; the two instances
+        # must differ. Same ports the host-mode servers used.
+        - name: CERTUS_METRICS_PORT
+          value: "9400"
         - name: CERTUS_NUMA_ID
           value: "0"
         # Resolved from the certus-config ConfigMap, not from this spec -- see the
@@ -153,7 +162,7 @@ spec:
         resources:
           limits:
             rdma/rdma_shared_device_a: 1
-            hugepages-1Gi: 4Gi
+            hugepages-1Gi: 30Gi
           requests:
             memory: 1Gi
         securityContext:
@@ -293,12 +302,21 @@ spec:
               echo "certus: no GPU in NUMA domain $CERTUS_NUMA_ID; CUDA_VISIBLE_DEVICES left unset"
             fi
           fi
-          exec certus-server-yaml $ARGS --shm-path ${CERTUS_SHM_PATH} --channels 32 --memory-tier-size 4G
+          # Matches the hand-started host-mode instances these replace, so offload
+          # measurements stay comparable across the move: 16 channels and a 30G
+          # DRAM tier rather than the template's old 32/4G. --metrics-port is new;
+          # without it the DaemonSets expose nothing to scrape and there is no way
+          # to see tier occupancy or remote-lookup hits.
+          exec certus-server-yaml $ARGS --shm-path ${CERTUS_SHM_PATH} --channels 16 --memory-tier-size 30G --metrics-port ${CERTUS_METRICS_PORT}
         # Each NUMA instance publishes a DISTINCT mailbox on the shared host
         # /dev/shm; a client selects an instance by pointing at its shm path.
         env:
         - name: CERTUS_SHM_PATH
           value: "/dev/shm/certus-shmq-numa1"
+        # hostNetwork is on, so this binds on the node; the two instances
+        # must differ. Same ports the host-mode servers used.
+        - name: CERTUS_METRICS_PORT
+          value: "9401"
         - name: CERTUS_NUMA_ID
           value: "1"
         # Resolved from the certus-config ConfigMap, not from this spec -- see the
@@ -314,7 +332,7 @@ spec:
         resources:
           limits:
             rdma/rdma_shared_device_a: 1
-            hugepages-1Gi: 4Gi
+            hugepages-1Gi: 30Gi
           requests:
             memory: 1Gi
         securityContext:
