@@ -162,7 +162,12 @@ def main():
                      "kind": "input-range-mismatch", "methods": list(dd.get("methods") or []),
                      "spec_says": dd.get("spec_says", ""), "code_does": dd.get("code_does", ""),
                      "spec_pointers": sp, "code_pointers": cp, "status": "candidate",
-                     "assume_in_level2": dd.get("assume", ""), "excluded_properties": []})
+                     "assume_in_level2": dd.get("assume", ""),
+                     # a property whose premise IS the excluded range would only be proved vacuously under
+                     # the assumption (dispatch-map 2026-10-06: DM-INITIALIZE-PRESERVES-REFERENCED-ENTRY
+                     # under D-RANGE-FR-020) -> it belongs to this discordance, not to level 2
+                     "excluded_properties": list(dd.get("excluded_properties") or [])})
+        excluded.extend(x for x in (dd.get("excluded_properties") or []) if x not in excluded)
         assumptions.append({"id": did, "assume": dd.get("assume", ""), "assume_rust": dd.get("assume_rust", ""),
                             "methods": list(dd.get("methods") or [])})
     out = {
