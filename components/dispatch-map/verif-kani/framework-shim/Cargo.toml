@@ -1,0 +1,20 @@
+# Stand-in for the `component-framework` crate name, used ONLY so that the production line
+# `use component_framework::define_component;` in components/dispatch-map/src/lib.rs resolves
+# when that file is compiled inside the Kani crate (see ../Cargo.toml for why the real
+# framework crates cannot be path dependencies of a standalone crate).
+#
+# It contains no copy of framework logic that an IDispatchMap method executes:
+#   * `receptacle` and `error` are the REAL component-core source files, mounted with #[path];
+#   * `define_component!` is a structural macro that emits the component struct with the same
+#     public fields the real proc-macro emits (user fields + `Receptacle<dyn I + Send + Sync>`
+#     receptacles) and a plain constructor. The real macro additionally builds an
+#     `InterfaceMap`/`IUnknown` query table, which no IDispatchMap method reads.
+[package]
+name = "component-framework-kani-shim"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "component_framework"
+path = "src/lib.rs"

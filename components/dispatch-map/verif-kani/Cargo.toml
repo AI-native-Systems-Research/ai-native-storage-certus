@@ -1,0 +1,62 @@
+#  Kani verification crate for the `dispatch-map` component.
+#
+#  Separate crate on purpose: a Creusot agent works concurrently in `verif-creusot/`, and the
+#  scorer is invoked with
+#      --component-dir components/dispatch-map/verif-kani
+#  so `cargo kani` must resolve HERE.
+#
+#  HOW THE REAL CODE IS REACHED (no copy of it lives in this crate):
+#  `build.rs` derives an includable copy of the production `../src/lib.rs`, `../src/entry.rs`
+#  and `../src/state.rs` into OUT_DIR on every build (the only transformation: a leading `//!`
+#  becomes `//`, and the build fails unless the code tokens are identical), and `src/lib.rs`
+#  `include!`s it at the crate root. So `DispatchMapComponent`, its real `IDispatchMap` impl,
+#  `DispatchMapState::wait_for`, `DispatchEntry`/`Location` and the real
+#  `Mutex<HashMap<CacheKey, DispatchEntry>>` are compiled here, with their `pub(crate)`
+#  representation visible to the harnesses. Editing the production source changes what every
+#  harness checks.
+#
+#  WHY NOT A PATH DEPENDENCY ON `dispatch-map` — its entry state is `pub(crate)`, so frame and
+#  reference-count obligations cannot be stated through `IDispatchMap` alone, and an arbitrary
+#  (symbolic) pre-state cannot be built through the public surface.
+#
+#  THE FRAMEWORK SEAM: `define_component!` (component-macros) expands to `::component_core::...`
+#  paths, and neither component-core nor component-macros can be a direct path dependency of a
+#  standalone crate (their manifests inherit from the root workspace through
+#  `lib/component-framework/Cargo.toml`, a comment-only stub, and cargo refuses to load them —
+#  measured). So `src/lib.rs` provides `define_component!` as a small structural macro that
+#  emits the same struct shape the real macro emits for the fields the methods use
+#  (`pub <field>: <type>` for user fields, `pub <receptacle>: Receptacle<dyn I + Send + Sync>`),
+#  and mounts the REAL `component-core/src/receptacle.rs` and `error.rs` with `#[path]`, so the
+#  receptacle `get()`/`connect()` semantics are production code. What is NOT reproduced is the
+#  `InterfaceMap`/`IUnknown` query plumbing, which no `IDispatchMap` method touches.
+#
+#  FEATURES: `integrity-check` is ON by default here so `set_checksum`/`get_checksum` (and the
+#  4-byte checksum field) are compiled; the scorer therefore needs no CARGO_FEATURES.
+
+[package]
+name = "dispatch-map-verif-kani"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+publish = false
+build = "build.rs"
+
+[lib]
+name = "dm_verif_kani"
+path = "src/lib.rs"
+
+[features]
+default = ["integrity-check"]
+integrity-check = ["interfaces/integrity-check"]
+
+[dependencies]
+interfaces = { path = "../../interfaces", features = ["spdk"] }
+# See framework-shim/Cargo.toml: resolves `use component_framework::define_component;`.
+component-framework = { package = "component-framework-kani-shim", path = "framework-shim" }
+
+[lints.rust]
+unexpected_cfgs = { level = "allow", check-cfg = ['cfg(kani)'] }
+
+# Standalone workspace: detaches this crate from the repository-root workspace so the root
+# Cargo.toml needs no edit.
+[workspace]

@@ -1,0 +1,1431 @@
+# dispatch-map -- CODE-side blind extraction of verifiable properties.
+# Read only components/dispatch-map/src/**, tests/**, Cargo.toml, the component's own interface
+# (interfaces/src/idispatch_map.rs) and the declarations of the consumed interfaces
+# (ILogger, IExtentManager, IEvictionPolicy) plus interfaces/src/lib.rs re-exports.
+# No spec prose, no other component implementations, no prior verification results were read.
+# Line pointers refer to components/dispatch-map/src/{lib,entry,state}.rs at pin 08a5ae88.
+# Block size 4096 is the constant hard-coded in lib.rs. set_checksum/get_checksum exist only under the
+# integrity-check cargo feature. Input/config/state assumptions are listed separately under the
+# top-level input_assumptions key at the end of the file.
+component: dispatch-map
+source: code
+artifact: components/dispatch-map/src/** (+ interfaces/src/idispatch_map.rs and consumed interface declarations)
+pin: 08a5ae88
+method: blind-extraction
+generated: 2026-10-05
+counts: {total: 139, methods: 20, verifiable: 127, not_verifiable: 12}
+properties:
+
+  # ---------------------------------------------------------------- initialize
+  - id: DM-INITIALIZE-NO-EM-EMPTY-OK
+    subject: initialize
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When the eviction policy is connected but no extent manager is bound, initialize returns
+      success and adds no entries to the dispatch map.
+    traces: ["lib.rs:73-81 initialize"]
+    object_fn: "DispatchMapComponent::initialize"
+  - id: DM-INITIALIZE-RESTORES-EACH-EXTENT
+    subject: initialize
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After initialize succeeds with an extent manager bound, every extent the extent manager reports
+      has an entry in the dispatch map under that extent's key, located on the block device at exactly
+      the extent's offset.
+    traces: ["lib.rs:90-108 initialize"]
+    object_fn: "DispatchMapComponent::initialize"
+  - id: DM-INITIALIZE-RESTORED-SIZE
+    subject: initialize
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Each entry restored by initialize records the extent's size in blocks exactly as the extent
+      manager reported it.
+    traces: ["lib.rs:94-98 initialize"]
+    object_fn: "DispatchMapComponent::initialize"
+  - id: DM-INITIALIZE-RESTORED-ZERO-REFS
+    subject: initialize
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Each entry restored by initialize starts with no read references and no write reference, so it
+      can immediately be read, written or removed.
+    traces: ["lib.rs:99-100 initialize"]
+    object_fn: "DispatchMapComponent::initialize"
+  - id: DM-INITIALIZE-TRACKS-EVICTION
+    subject: initialize
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Each entry restored by initialize is registered with the eviction policy in the dispatch map's
+      eviction pool, and the entry keeps the handle the eviction policy returned.
+    traces: ["lib.rs:91-93 initialize", "lib.rs:101 initialize"]
+    object_fn: "DispatchMapComponent::initialize"
+  - id: DM-INITIALIZE-NO-EVICTION-POLICY-ERROR
+    subject: initialize
+    kind: error-case
+    verifiable: true
+    statement: >
+      If no eviction policy is connected, initialize returns a NotInitialized error instead of
+      terminating the program, and the map is left unchanged.
+    traces: ["lib.rs:68 initialize -> get_pool_id lib.rs:55", "lib.rs:69-71 initialize"]
+    object_fn: "DispatchMapComponent::initialize, DispatchMapComponent::get_pool_id"
+  - id: DM-INITIALIZE-FRAME-UNREPORTED-KEYS
+    subject: initialize
+    kind: frame
+    verifiable: true
+    statement: >
+      initialize does not change or delete any entry whose key the extent manager does not report.
+    traces: ["lib.rs:87-108 initialize"]
+    object_fn: "DispatchMapComponent::initialize"
+  - id: DM-INITIALIZE-PRESERVES-REFERENCED-ENTRY
+    subject: initialize
+    kind: frame
+    verifiable: true
+    statement: >
+      If initialize is called while the map already holds an entry for a key the extent manager
+      reports, and that entry has active read or write references, those references are not lost.
+    traces: ["lib.rs:106 initialize (insert replaces an existing entry)"]
+    object_fn: "DispatchMapComponent::initialize"
+  - id: DM-INITIALIZE-RETURNS-OK
+    subject: initialize
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When the eviction policy is connected, initialize always reports success, whether or not an
+      extent manager is bound and however many extents it reports (including none).
+    traces: ["lib.rs:79 initialize", "lib.rs:115 initialize"]
+    object_fn: "DispatchMapComponent::initialize"
+
+  # ---------------------------------------------------------------- lookup
+  - id: DM-LOOKUP-ABSENT-NOT-EXIST
+    subject: lookup
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Looking up a key that is not in the map returns NotExist and changes nothing in the map.
+    traces: ["lib.rs:123-125 lookup", "lib.rs:132-133 lookup"]
+    object_fn: "DispatchMapComponent::lookup"
+  - id: DM-LOOKUP-BLOCK-DEVICE-RESULT
+    subject: lookup
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Looking up a key whose entry is on the block device returns BlockDevice carrying exactly the
+      stored block-device offset.
+    traces: ["lib.rs:146-147 lookup"]
+    object_fn: "DispatchMapComponent::lookup"
+  - id: DM-LOOKUP-MEMORY-TIER-RESULT
+    subject: lookup
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Looking up a key whose entry is in the memory tier returns MemoryTier carrying exactly the stored
+      pointer and byte size, whether or not an SSD copy has been recorded for it.
+    traces: ["lib.rs:148-151 lookup"]
+    object_fn: "DispatchMapComponent::lookup"
+  - id: DM-LOOKUP-RESULT-VARIANTS
+    subject: lookup
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A successful lookup returns only NotExist, BlockDevice or MemoryTier; it never returns
+      MismatchSize.
+    traces: ["lib.rs:132-152 lookup"]
+    object_fn: "DispatchMapComponent::lookup"
+  - id: DM-LOOKUP-TAKES-READ-REF
+    subject: lookup
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A lookup that finds the key increases that entry's read-reference count by exactly one, so the
+      caller must later release it with release_read.
+    traces: ["lib.rs:137-140 lookup"]
+    object_fn: "DispatchMapComponent::lookup"
+  - id: DM-LOOKUP-WAITS-FOR-WRITER
+    subject: lookup
+    kind: precondition
+    verifiable: true
+    statement: >
+      lookup grants a read reference on an existing entry only at a moment when that entry has no
+      write reference; while a writer holds the entry, lookup waits.
+    traces: ["lib.rs:121-126 lookup", "state.rs:54-78 wait_for"]
+    object_fn: "DispatchMapComponent::lookup, DispatchMapState::wait_for"
+  - id: DM-LOOKUP-TIMEOUT
+    subject: lookup
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the entry's write reference stays held for the whole waiting period, lookup returns a
+      Timeout error for that key and changes nothing in the map.
+    traces: ["lib.rs:128-130 lookup", "state.rs:68-75 wait_for"]
+    object_fn: "DispatchMapComponent::lookup"
+  - id: DM-LOOKUP-OVERFLOW
+    subject: lookup
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the entry's read-reference count is already at its maximum value, lookup returns a
+      RefCountOverflow error for that key and leaves the count unchanged.
+    traces: ["lib.rs:137-140 lookup"]
+    object_fn: "DispatchMapComponent::lookup"
+  - id: DM-LOOKUP-TOUCHES-EVICTION
+    subject: lookup
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A lookup that finds the key reports an access for that entry's eviction handle to the eviction
+      policy, so the entry's eviction ranking is refreshed.
+    traces: ["lib.rs:144 lookup", "lib.rs:154-157 lookup"]
+    object_fn: "DispatchMapComponent::lookup"
+  - id: DM-LOOKUP-FRAME
+    subject: lookup
+    kind: frame
+    verifiable: true
+    statement: >
+      lookup does not change the entry's location, size, write reference or eviction handle, and does
+      not change any other entry.
+    traces: ["lib.rs:118-164 lookup"]
+    object_fn: "DispatchMapComponent::lookup"
+
+  # ---------------------------------------------------------------- convert_to_storage
+  - id: DM-CONVERT-TO-STORAGE-NOT-FOUND
+    subject: convert_to_storage
+    kind: error-case
+    verifiable: true
+    statement: >
+      convert_to_storage on a key that is not in the map returns KeyNotFound for that key and changes
+      nothing.
+    traces: ["lib.rs:168-171 convert_to_storage"]
+    object_fn: "DispatchMapComponent::convert_to_storage"
+  - id: DM-CONVERT-TO-STORAGE-BLOCK-DEVICE-INVALID
+    subject: convert_to_storage
+    kind: error-case
+    verifiable: true
+    statement: >
+      convert_to_storage on an entry that is already on the block device returns InvalidState and
+      leaves the entry, including its reference counts, unchanged.
+    traces: ["lib.rs:177-181 convert_to_storage"]
+    object_fn: "DispatchMapComponent::convert_to_storage"
+  - id: DM-CONVERT-TO-STORAGE-RECORDS-SSD-OFFSET
+    subject: convert_to_storage
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After convert_to_storage(key, offset) succeeds on a memory-tier entry, the entry records offset
+      as the location of its SSD copy.
+    traces: ["lib.rs:173-176 convert_to_storage"]
+    object_fn: "DispatchMapComponent::convert_to_storage"
+  - id: DM-CONVERT-TO-STORAGE-STAYS-MEMORY-TIER
+    subject: convert_to_storage
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After convert_to_storage succeeds, the entry is still a memory-tier entry with the same pointer
+      and byte size, so lookup keeps returning the memory-tier location.
+    traces: ["lib.rs:173-176 convert_to_storage"]
+    object_fn: "DispatchMapComponent::convert_to_storage"
+  - id: DM-CONVERT-TO-STORAGE-RELEASES-READ-REF
+    subject: convert_to_storage
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After convert_to_storage succeeds, the entry's read-reference count is one less than before if
+      it was positive, and stays zero if it was zero.
+    traces: ["lib.rs:184-186 convert_to_storage"]
+    object_fn: "DispatchMapComponent::convert_to_storage"
+  - id: DM-CONVERT-TO-STORAGE-FRAME
+    subject: convert_to_storage
+    kind: frame
+    verifiable: true
+    statement: >
+      convert_to_storage does not change the entry's write reference, size in blocks or eviction
+      handle, and does not change any other entry.
+    traces: ["lib.rs:166-198 convert_to_storage"]
+    object_fn: "DispatchMapComponent::convert_to_storage"
+
+  # ---------------------------------------------------------------- take_read
+  - id: DM-TAKE-READ-NOT-FOUND
+    subject: take_read
+    kind: error-case
+    verifiable: true
+    statement: >
+      take_read on a key that is not in the map returns KeyNotFound for that key and changes nothing.
+    traces: ["lib.rs:211-214 take_read"]
+    object_fn: "DispatchMapComponent::take_read"
+  - id: DM-TAKE-READ-INCREMENTS
+    subject: take_read
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After take_read succeeds, the entry's read-reference count is exactly one more than before.
+    traces: ["lib.rs:216-219 take_read"]
+    object_fn: "DispatchMapComponent::take_read"
+  - id: DM-TAKE-READ-WAITS-FOR-WRITER
+    subject: take_read
+    kind: precondition
+    verifiable: true
+    statement: >
+      take_read grants a read reference only at a moment when the entry has no write reference; while
+      a writer holds the entry, take_read waits.
+    traces: ["lib.rs:203-205 take_read", "state.rs:54-78 wait_for"]
+    object_fn: "DispatchMapComponent::take_read, DispatchMapState::wait_for"
+  - id: DM-TAKE-READ-TIMEOUT
+    subject: take_read
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the entry's write reference stays held for the whole waiting period, take_read returns a
+      Timeout error for that key and changes nothing.
+    traces: ["lib.rs:207-209 take_read"]
+    object_fn: "DispatchMapComponent::take_read"
+  - id: DM-TAKE-READ-OVERFLOW
+    subject: take_read
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the entry's read-reference count is already at its maximum value, take_read returns a
+      RefCountOverflow error for that key and leaves the count unchanged.
+    traces: ["lib.rs:216-219 take_read"]
+    object_fn: "DispatchMapComponent::take_read"
+  - id: DM-TAKE-READ-FRAME
+    subject: take_read
+    kind: frame
+    verifiable: true
+    statement: >
+      take_read does not change the entry's location, size, write reference or eviction handle, does
+      not change the entry's eviction ranking, and does not change any other entry.
+    traces: ["lib.rs:200-227 take_read"]
+    object_fn: "DispatchMapComponent::take_read"
+
+  # ---------------------------------------------------------------- take_write
+  - id: DM-TAKE-WRITE-NOT-FOUND
+    subject: take_write
+    kind: error-case
+    verifiable: true
+    statement: >
+      take_write on a key that is not in the map returns KeyNotFound for that key and changes nothing.
+    traces: ["lib.rs:245-248 take_write"]
+    object_fn: "DispatchMapComponent::take_write"
+  - id: DM-TAKE-WRITE-SETS-WRITE-REF
+    subject: take_write
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After take_write succeeds, the entry holds exactly one write reference.
+    traces: ["lib.rs:250 take_write"]
+    object_fn: "DispatchMapComponent::take_write"
+  - id: DM-TAKE-WRITE-WAITS-FOR-ALL-REFS
+    subject: take_write
+    kind: precondition
+    verifiable: true
+    statement: >
+      take_write grants the write reference only at a moment when the entry has no read references
+      and no write reference; otherwise it waits.
+    traces: ["lib.rs:234-239 take_write", "state.rs:54-78 wait_for"]
+    object_fn: "DispatchMapComponent::take_write, DispatchMapState::wait_for"
+  - id: DM-TAKE-WRITE-TIMEOUT
+    subject: take_write
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the entry keeps a read or write reference for the whole waiting period, take_write returns a
+      Timeout error for that key and changes nothing.
+    traces: ["lib.rs:241-243 take_write"]
+    object_fn: "DispatchMapComponent::take_write"
+  - id: DM-TAKE-WRITE-FRAME
+    subject: take_write
+    kind: frame
+    verifiable: true
+    statement: >
+      take_write does not change the entry's location, size, read references or eviction handle, and
+      does not change any other entry.
+    traces: ["lib.rs:229-255 take_write"]
+    object_fn: "DispatchMapComponent::take_write"
+
+  # ---------------------------------------------------------------- release_read
+  - id: DM-RELEASE-READ-NOT-FOUND
+    subject: release_read
+    kind: error-case
+    verifiable: true
+    statement: >
+      release_read on a key that is not in the map returns KeyNotFound for that key and changes
+      nothing.
+    traces: ["lib.rs:259-262 release_read"]
+    object_fn: "DispatchMapComponent::release_read"
+  - id: DM-RELEASE-READ-UNDERFLOW
+    subject: release_read
+    kind: error-case
+    verifiable: true
+    statement: >
+      release_read on an entry with no read references returns RefCountUnderflow for that key and
+      leaves the count at zero.
+    traces: ["lib.rs:264-266 release_read"]
+    object_fn: "DispatchMapComponent::release_read"
+  - id: DM-RELEASE-READ-DECREMENTS
+    subject: release_read
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After release_read succeeds, the entry's read-reference count is exactly one less than before.
+    traces: ["lib.rs:268 release_read"]
+    object_fn: "DispatchMapComponent::release_read"
+  - id: DM-RELEASE-READ-FRAME
+    subject: release_read
+    kind: frame
+    verifiable: true
+    statement: >
+      release_read does not change the entry's location, size, write reference or eviction handle,
+      and does not change any other entry.
+    traces: ["lib.rs:257-275 release_read"]
+    object_fn: "DispatchMapComponent::release_read"
+
+  # ---------------------------------------------------------------- release_write
+  - id: DM-RELEASE-WRITE-NOT-FOUND
+    subject: release_write
+    kind: error-case
+    verifiable: true
+    statement: >
+      release_write on a key that is not in the map returns KeyNotFound for that key and changes
+      nothing.
+    traces: ["lib.rs:279-282 release_write"]
+    object_fn: "DispatchMapComponent::release_write"
+  - id: DM-RELEASE-WRITE-UNDERFLOW
+    subject: release_write
+    kind: error-case
+    verifiable: true
+    statement: >
+      release_write on an entry that holds no write reference returns RefCountUnderflow for that key
+      and changes nothing.
+    traces: ["lib.rs:284-286 release_write"]
+    object_fn: "DispatchMapComponent::release_write"
+  - id: DM-RELEASE-WRITE-CLEARS
+    subject: release_write
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After release_write succeeds, the entry holds no write reference.
+    traces: ["lib.rs:288 release_write"]
+    object_fn: "DispatchMapComponent::release_write"
+  - id: DM-RELEASE-WRITE-FRAME
+    subject: release_write
+    kind: frame
+    verifiable: true
+    statement: >
+      release_write does not change the entry's location, size, read references or eviction handle,
+      and does not change any other entry.
+    traces: ["lib.rs:277-295 release_write"]
+    object_fn: "DispatchMapComponent::release_write"
+
+  # ---------------------------------------------------------------- downgrade_reference
+  - id: DM-DOWNGRADE-REFERENCE-NOT-FOUND
+    subject: downgrade_reference
+    kind: error-case
+    verifiable: true
+    statement: >
+      downgrade_reference on a key that is not in the map returns KeyNotFound for that key and changes
+      nothing.
+    traces: ["lib.rs:299-302 downgrade_reference"]
+    object_fn: "DispatchMapComponent::downgrade_reference"
+  - id: DM-DOWNGRADE-REFERENCE-NO-WRITE-REF
+    subject: downgrade_reference
+    kind: error-case
+    verifiable: true
+    statement: >
+      downgrade_reference on an entry that holds no write reference returns NoWriteReference for that
+      key and changes nothing.
+    traces: ["lib.rs:304-306 downgrade_reference"]
+    object_fn: "DispatchMapComponent::downgrade_reference"
+  - id: DM-DOWNGRADE-REFERENCE-CONVERTS
+    subject: downgrade_reference
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After downgrade_reference succeeds, the entry holds no write reference and its read-reference
+      count is exactly one more than before, with no moment in between at which another caller could
+      take the write reference.
+    traces: ["lib.rs:308-312 downgrade_reference"]
+    object_fn: "DispatchMapComponent::downgrade_reference"
+  - id: DM-DOWNGRADE-REFERENCE-OVERFLOW
+    subject: downgrade_reference
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the entry's read-reference count is already at its maximum value, downgrade_reference returns
+      RefCountOverflow for that key and leaves the entry exactly as it was, still holding its write
+      reference.
+    traces: ["lib.rs:308-312 downgrade_reference"]
+    object_fn: "DispatchMapComponent::downgrade_reference"
+  - id: DM-DOWNGRADE-REFERENCE-FRAME
+    subject: downgrade_reference
+    kind: frame
+    verifiable: true
+    statement: >
+      downgrade_reference does not change the entry's location, size or eviction handle, and does not
+      change any other entry.
+    traces: ["lib.rs:297-322 downgrade_reference"]
+    object_fn: "DispatchMapComponent::downgrade_reference"
+
+  # ---------------------------------------------------------------- remove
+  - id: DM-REMOVE-NOT-FOUND
+    subject: remove
+    kind: error-case
+    verifiable: true
+    statement: >
+      remove on a key that is not in the map returns KeyNotFound for that key and changes nothing.
+    traces: ["lib.rs:326-329 remove"]
+    object_fn: "DispatchMapComponent::remove"
+  - id: DM-REMOVE-ACTIVE-REFERENCES
+    subject: remove
+    kind: error-case
+    verifiable: true
+    statement: >
+      remove on an entry that has any read reference or a write reference returns ActiveReferences for
+      that key, and the entry stays in the map unchanged and still tracked for eviction.
+    traces: ["lib.rs:331-333 remove"]
+    object_fn: "DispatchMapComponent::remove"
+  - id: DM-REMOVE-DELETES
+    subject: remove
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After remove succeeds, the key is no longer in the map, so a following lookup returns NotExist.
+    traces: ["lib.rs:336 remove"]
+    object_fn: "DispatchMapComponent::remove"
+  - id: DM-REMOVE-UNTRACKS
+    subject: remove
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After remove succeeds, the removed entry's eviction handle is no longer tracked by the eviction
+      policy, so the key is never again offered as an eviction candidate.
+    traces: ["lib.rs:335 remove", "lib.rs:338-340 remove"]
+    object_fn: "DispatchMapComponent::remove"
+  - id: DM-REMOVE-FRAME
+    subject: remove
+    kind: frame
+    verifiable: true
+    statement: >
+      remove does not change any entry other than the one for the given key.
+    traces: ["lib.rs:324-347 remove"]
+    object_fn: "DispatchMapComponent::remove"
+
+  # ---------------------------------------------------------------- touch
+  - id: DM-TOUCH-NOT-FOUND
+    subject: touch
+    kind: error-case
+    verifiable: true
+    statement: >
+      touch on a key that is not in the map returns KeyNotFound for that key and changes nothing.
+    traces: ["lib.rs:351-354 touch"]
+    object_fn: "DispatchMapComponent::touch"
+  - id: DM-TOUCH-RECORDS-ACCESS
+    subject: touch
+    kind: postcondition
+    verifiable: true
+    statement: >
+      touch on an existing key reports an access for that entry's eviction handle to the eviction
+      policy and returns success.
+    traces: ["lib.rs:355-360 touch"]
+    object_fn: "DispatchMapComponent::touch"
+  - id: DM-TOUCH-FRAME
+    subject: touch
+    kind: frame
+    verifiable: true
+    statement: >
+      touch does not take or release any reference and does not change any entry's location, size or
+      reference counts.
+    traces: ["lib.rs:349-361 touch"]
+    object_fn: "DispatchMapComponent::touch"
+
+  # ---------------------------------------------------------------- entry_size
+  - id: DM-ENTRY-SIZE-NOT-FOUND
+    subject: entry_size
+    kind: error-case
+    verifiable: true
+    statement: >
+      entry_size on a key that is not in the map returns KeyNotFound for that key.
+    traces: ["lib.rs:365-368 entry_size"]
+    object_fn: "DispatchMapComponent::entry_size"
+  - id: DM-ENTRY-SIZE-BLOCKS-TIMES-4096
+    subject: entry_size
+    kind: postcondition
+    verifiable: true
+    statement: >
+      entry_size on an existing key returns the entry's recorded size in blocks multiplied by 4096,
+      that is, its size in bytes.
+    traces: ["lib.rs:369 entry_size"]
+    object_fn: "DispatchMapComponent::entry_size"
+  - id: DM-ENTRY-SIZE-NO-ARITHMETIC-OVERFLOW
+    subject: entry_size
+    kind: invariant
+    verifiable: true
+    statement: >
+      For every entry that can be in the map, the byte size entry_size computes fits in a 32-bit
+      unsigned value, so entry_size never fails or reports a wrapped-around size.
+    traces: ["lib.rs:369 entry_size", "lib.rs:406 create_memory_tier_entry", "lib.rs:494 promote_block_to_memory_tier", "lib.rs:582 recover_extent", "lib.rs:98 initialize"]
+    object_fn: "DispatchMapComponent::entry_size"
+  - id: DM-ENTRY-SIZE-MEMORY-TIER-COVERS-SIZE
+    subject: entry_size
+    kind: postcondition
+    verifiable: true
+    statement: >
+      For a memory-tier entry created or promoted with a byte size s, entry_size returns s rounded up
+      to the next multiple of 4096, which is at least s and less than s plus 4096.
+    traces: ["lib.rs:369 entry_size", "lib.rs:406 create_memory_tier_entry", "lib.rs:494 promote_block_to_memory_tier"]
+    object_fn: "DispatchMapComponent::entry_size"
+  - id: DM-ENTRY-SIZE-FRAME
+    subject: entry_size
+    kind: frame
+    verifiable: true
+    statement: >
+      entry_size changes nothing in the map and takes no reference.
+    traces: ["lib.rs:363-370 entry_size"]
+    object_fn: "DispatchMapComponent::entry_size"
+
+  # ---------------------------------------------------------------- oldest_keys
+  - id: DM-OLDEST-KEYS-AT-MOST-N
+    subject: oldest_keys
+    kind: postcondition
+    verifiable: true
+    statement: >
+      oldest_keys(n) returns at most n keys.
+    traces: ["lib.rs:372-379 oldest_keys", "ieviction_policy.rs get_eviction_candidates declaration"]
+    object_fn: "DispatchMapComponent::oldest_keys"
+  - id: DM-OLDEST-KEYS-EVICTION-ORDER
+    subject: oldest_keys
+    kind: postcondition
+    verifiable: true
+    statement: >
+      oldest_keys(n) returns the keys the eviction policy would evict next from the dispatch map's
+      pool, in the policy's eviction order, so with a recency policy a key accessed through lookup or
+      touch is listed after keys not accessed since.
+    traces: ["lib.rs:373-375 oldest_keys"]
+    object_fn: "DispatchMapComponent::oldest_keys"
+  - id: DM-OLDEST-KEYS-ONLY-PRESENT-KEYS
+    subject: oldest_keys
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Every key returned by oldest_keys is currently an entry in the dispatch map.
+    traces: ["lib.rs:372-379 oldest_keys", "lib.rs:335-340 remove"]
+    object_fn: "DispatchMapComponent::oldest_keys"
+  - id: DM-OLDEST-KEYS-NO-EVICTION-POLICY-EMPTY
+    subject: oldest_keys
+    kind: error-case
+    verifiable: true
+    statement: >
+      When no eviction policy is connected, oldest_keys returns an empty list instead of terminating
+      the program.
+    traces: ["lib.rs:373 oldest_keys -> get_pool_id lib.rs:55", "lib.rs:376-378 oldest_keys"]
+    object_fn: "DispatchMapComponent::oldest_keys, DispatchMapComponent::get_pool_id"
+  - id: DM-OLDEST-KEYS-FRAME
+    subject: oldest_keys
+    kind: frame
+    verifiable: true
+    statement: >
+      oldest_keys does not change any entry, take any reference, or remove any key from eviction
+      tracking.
+    traces: ["lib.rs:372-379 oldest_keys"]
+    object_fn: "DispatchMapComponent::oldest_keys"
+
+  # ---------------------------------------------------------------- create_memory_tier_entry
+  - id: DM-CREATE-MEMORY-TIER-ENTRY-INVALID-SIZE
+    subject: create_memory_tier_entry
+    kind: error-case
+    verifiable: true
+    statement: >
+      create_memory_tier_entry with a size of zero returns InvalidSize and adds nothing to the map.
+    traces: ["lib.rs:387-389 create_memory_tier_entry"]
+    object_fn: "DispatchMapComponent::create_memory_tier_entry"
+  - id: DM-CREATE-MEMORY-TIER-ENTRY-ALREADY-EXISTS
+    subject: create_memory_tier_entry
+    kind: error-case
+    verifiable: true
+    statement: >
+      create_memory_tier_entry for a key that is already in the map returns AlreadyExists for that key
+      and leaves the existing entry unchanged.
+    traces: ["lib.rs:395-397 create_memory_tier_entry"]
+    object_fn: "DispatchMapComponent::create_memory_tier_entry"
+  - id: DM-CREATE-MEMORY-TIER-ENTRY-LOCATION
+    subject: create_memory_tier_entry
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After create_memory_tier_entry(key, pointer, size) succeeds, the key's entry is in the memory
+      tier with exactly that pointer and byte size and with no SSD copy recorded yet.
+    traces: ["lib.rs:400-405 create_memory_tier_entry"]
+    object_fn: "DispatchMapComponent::create_memory_tier_entry"
+  - id: DM-CREATE-MEMORY-TIER-ENTRY-HOLDS-WRITE-REF
+    subject: create_memory_tier_entry
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A newly created memory-tier entry starts holding one write reference and no read references, so
+      readers wait until the creator calls release_write or downgrade_reference.
+    traces: ["lib.rs:407-408 create_memory_tier_entry"]
+    object_fn: "DispatchMapComponent::create_memory_tier_entry"
+  - id: DM-CREATE-MEMORY-TIER-ENTRY-SIZE-BLOCKS
+    subject: create_memory_tier_entry
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A newly created memory-tier entry records its size in blocks as the byte size divided by 4096,
+      rounded up.
+    traces: ["lib.rs:406 create_memory_tier_entry"]
+    object_fn: "DispatchMapComponent::create_memory_tier_entry"
+  - id: DM-CREATE-MEMORY-TIER-ENTRY-TRACKS
+    subject: create_memory_tier_entry
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After create_memory_tier_entry succeeds, the key is tracked by the eviction policy in the
+      dispatch map's pool and the entry keeps the returned handle.
+    traces: ["lib.rs:399 create_memory_tier_entry", "lib.rs:409 create_memory_tier_entry"]
+    object_fn: "DispatchMapComponent::create_memory_tier_entry"
+  - id: DM-CREATE-MEMORY-TIER-ENTRY-NO-EVICTION-POLICY-ERROR
+    subject: create_memory_tier_entry
+    kind: error-case
+    verifiable: true
+    statement: >
+      When no eviction policy is connected, create_memory_tier_entry with a non-zero size returns an
+      error instead of terminating the program, and adds nothing to the map.
+    traces: ["lib.rs:391 create_memory_tier_entry -> get_pool_id lib.rs:55", "lib.rs:392 create_memory_tier_entry"]
+    object_fn: "DispatchMapComponent::create_memory_tier_entry, DispatchMapComponent::get_pool_id"
+  - id: DM-CREATE-MEMORY-TIER-ENTRY-FRAME
+    subject: create_memory_tier_entry
+    kind: frame
+    verifiable: true
+    statement: >
+      create_memory_tier_entry does not change any entry other than the new one it adds.
+    traces: ["lib.rs:381-424 create_memory_tier_entry"]
+    object_fn: "DispatchMapComponent::create_memory_tier_entry"
+
+  # ---------------------------------------------------------------- convert_memory_tier_to_block
+  - id: DM-CONVERT-MEMORY-TIER-TO-BLOCK-NOT-FOUND
+    subject: convert_memory_tier_to_block
+    kind: error-case
+    verifiable: true
+    statement: >
+      convert_memory_tier_to_block on a key that is not in the map returns KeyNotFound for that key and
+      changes nothing.
+    traces: ["lib.rs:428-431 convert_memory_tier_to_block"]
+    object_fn: "DispatchMapComponent::convert_memory_tier_to_block"
+  - id: DM-CONVERT-MEMORY-TIER-TO-BLOCK-NO-SSD-OFFSET
+    subject: convert_memory_tier_to_block
+    kind: error-case
+    verifiable: true
+    statement: >
+      convert_memory_tier_to_block on a memory-tier entry with no recorded SSD copy returns
+      InvalidState and leaves the entry in the memory tier unchanged.
+    traces: ["lib.rs:441-447 convert_memory_tier_to_block"]
+    object_fn: "DispatchMapComponent::convert_memory_tier_to_block"
+  - id: DM-CONVERT-MEMORY-TIER-TO-BLOCK-NOT-MEMORY-TIER
+    subject: convert_memory_tier_to_block
+    kind: error-case
+    verifiable: true
+    statement: >
+      convert_memory_tier_to_block on an entry that is already on the block device returns
+      InvalidState and leaves the entry unchanged.
+    traces: ["lib.rs:448-452 convert_memory_tier_to_block"]
+    object_fn: "DispatchMapComponent::convert_memory_tier_to_block"
+  - id: DM-CONVERT-MEMORY-TIER-TO-BLOCK-TRANSITIONS
+    subject: convert_memory_tier_to_block
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After convert_memory_tier_to_block succeeds, the entry is on the block device at exactly the SSD
+      offset that had been recorded for it.
+    traces: ["lib.rs:434-440 convert_memory_tier_to_block"]
+    object_fn: "DispatchMapComponent::convert_memory_tier_to_block"
+  - id: DM-CONVERT-MEMORY-TIER-TO-BLOCK-FRAME
+    subject: convert_memory_tier_to_block
+    kind: frame
+    verifiable: true
+    statement: >
+      convert_memory_tier_to_block does not change the entry's reference counts, size in blocks or
+      eviction handle, and does not change any other entry.
+    traces: ["lib.rs:426-465 convert_memory_tier_to_block"]
+    object_fn: "DispatchMapComponent::convert_memory_tier_to_block"
+
+  # ---------------------------------------------------------------- promote_block_to_memory_tier
+  - id: DM-PROMOTE-BLOCK-TO-MEMORY-TIER-INVALID-SIZE
+    subject: promote_block_to_memory_tier
+    kind: error-case
+    verifiable: true
+    statement: >
+      promote_block_to_memory_tier with a size of zero returns InvalidSize and changes nothing,
+      whether or not the key exists.
+    traces: ["lib.rs:473-475 promote_block_to_memory_tier"]
+    object_fn: "DispatchMapComponent::promote_block_to_memory_tier"
+  - id: DM-PROMOTE-BLOCK-TO-MEMORY-TIER-NOT-FOUND
+    subject: promote_block_to_memory_tier
+    kind: error-case
+    verifiable: true
+    statement: >
+      promote_block_to_memory_tier with a non-zero size on a key that is not in the map returns
+      KeyNotFound for that key and changes nothing.
+    traces: ["lib.rs:478-481 promote_block_to_memory_tier"]
+    object_fn: "DispatchMapComponent::promote_block_to_memory_tier"
+  - id: DM-PROMOTE-BLOCK-TO-MEMORY-TIER-ALREADY-MEMORY-TIER
+    subject: promote_block_to_memory_tier
+    kind: error-case
+    verifiable: true
+    statement: >
+      promote_block_to_memory_tier on an entry that is already in the memory tier returns InvalidState
+      and leaves the entry unchanged.
+    traces: ["lib.rs:496-500 promote_block_to_memory_tier"]
+    object_fn: "DispatchMapComponent::promote_block_to_memory_tier"
+  - id: DM-PROMOTE-BLOCK-TO-MEMORY-TIER-TRANSITIONS
+    subject: promote_block_to_memory_tier
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After promote_block_to_memory_tier(key, pointer, size) succeeds on a block-device entry at
+      offset X, the entry is in the memory tier with exactly that pointer and byte size and records X
+      as its SSD copy, so it can later be demoted back to offset X.
+    traces: ["lib.rs:484-493 promote_block_to_memory_tier"]
+    object_fn: "DispatchMapComponent::promote_block_to_memory_tier"
+  - id: DM-PROMOTE-BLOCK-TO-MEMORY-TIER-SIZE-BLOCKS
+    subject: promote_block_to_memory_tier
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After promote_block_to_memory_tier succeeds, the entry's size in blocks equals the new byte size
+      divided by 4096, rounded up.
+    traces: ["lib.rs:494 promote_block_to_memory_tier"]
+    object_fn: "DispatchMapComponent::promote_block_to_memory_tier"
+  - id: DM-PROMOTE-BLOCK-TO-MEMORY-TIER-PRESERVES-REFS
+    subject: promote_block_to_memory_tier
+    kind: frame
+    verifiable: true
+    statement: >
+      promote_block_to_memory_tier keeps the entry in the map with the same eviction handle and the
+      same read and write reference counts, so it succeeds on an entry pinned by readers, and it does
+      not change any other entry.
+    traces: ["lib.rs:485-494 promote_block_to_memory_tier"]
+    object_fn: "DispatchMapComponent::promote_block_to_memory_tier"
+
+  # ---------------------------------------------------------------- is_evictable
+  - id: DM-IS-EVICTABLE-EXACT-CONDITION
+    subject: is_evictable
+    kind: postcondition
+    verifiable: true
+    statement: >
+      is_evictable(key) returns true exactly when the key is in the map, its entry is in the memory
+      tier with an SSD copy recorded, and it has no read references and no write reference.
+    traces: ["lib.rs:517-528 is_evictable"]
+    object_fn: "DispatchMapComponent::is_evictable"
+  - id: DM-IS-EVICTABLE-ABSENT-FALSE
+    subject: is_evictable
+    kind: error-case
+    verifiable: true
+    statement: >
+      is_evictable on a key that is not in the map returns false.
+    traces: ["lib.rs:529 is_evictable"]
+    object_fn: "DispatchMapComponent::is_evictable"
+  - id: DM-IS-EVICTABLE-FRAME
+    subject: is_evictable
+    kind: frame
+    verifiable: true
+    statement: >
+      is_evictable changes nothing in the map and takes no reference.
+    traces: ["lib.rs:515-531 is_evictable"]
+    object_fn: "DispatchMapComponent::is_evictable"
+
+  # ---------------------------------------------------------------- try_evict_to_block
+  - id: DM-TRY-EVICT-TO-BLOCK-NOT-FOUND
+    subject: try_evict_to_block
+    kind: error-case
+    verifiable: true
+    statement: >
+      try_evict_to_block on a key that is not in the map returns KeyNotFound for that key and changes
+      nothing.
+    traces: ["lib.rs:535-538 try_evict_to_block"]
+    object_fn: "DispatchMapComponent::try_evict_to_block"
+  - id: DM-TRY-EVICT-TO-BLOCK-ACTIVE-REFS
+    subject: try_evict_to_block
+    kind: error-case
+    verifiable: true
+    statement: >
+      try_evict_to_block on an entry that has any read reference or a write reference returns
+      InvalidState and leaves the entry unchanged.
+    traces: ["lib.rs:540-544 try_evict_to_block"]
+    object_fn: "DispatchMapComponent::try_evict_to_block"
+  - id: DM-TRY-EVICT-TO-BLOCK-NO-SSD-OFFSET
+    subject: try_evict_to_block
+    kind: error-case
+    verifiable: true
+    statement: >
+      try_evict_to_block on an unreferenced memory-tier entry with no recorded SSD copy returns
+      InvalidState and leaves the entry unchanged.
+    traces: ["lib.rs:555-559 try_evict_to_block"]
+    object_fn: "DispatchMapComponent::try_evict_to_block"
+  - id: DM-TRY-EVICT-TO-BLOCK-NOT-MEMORY-TIER
+    subject: try_evict_to_block
+    kind: error-case
+    verifiable: true
+    statement: >
+      try_evict_to_block on an unreferenced entry that is already on the block device returns
+      InvalidState and leaves the entry unchanged.
+    traces: ["lib.rs:560-562 try_evict_to_block"]
+    object_fn: "DispatchMapComponent::try_evict_to_block"
+  - id: DM-TRY-EVICT-TO-BLOCK-TRANSITIONS
+    subject: try_evict_to_block
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After try_evict_to_block succeeds, the entry is on the block device at exactly the SSD offset
+      that had been recorded for it, so no later lookup returns the old memory-tier pointer.
+    traces: ["lib.rs:546-553 try_evict_to_block"]
+    object_fn: "DispatchMapComponent::try_evict_to_block"
+  - id: DM-TRY-EVICT-TO-BLOCK-AGREES-WITH-IS-EVICTABLE
+    subject: try_evict_to_block
+    kind: postcondition
+    verifiable: true
+    statement: >
+      In any given map state, try_evict_to_block(key) succeeds exactly when is_evictable(key) would
+      return true in that same state.
+    traces: ["lib.rs:533-564 try_evict_to_block", "lib.rs:515-531 is_evictable"]
+    object_fn: "DispatchMapComponent::try_evict_to_block, DispatchMapComponent::is_evictable"
+  - id: DM-TRY-EVICT-TO-BLOCK-FRAME
+    subject: try_evict_to_block
+    kind: frame
+    verifiable: true
+    statement: >
+      try_evict_to_block keeps the entry in the map with the same reference counts, size in blocks and
+      eviction handle, leaves it tracked by the eviction policy, and does not change any other entry.
+    traces: ["lib.rs:533-564 try_evict_to_block"]
+    object_fn: "DispatchMapComponent::try_evict_to_block"
+
+  # ---------------------------------------------------------------- recover_extent
+  - id: DM-RECOVER-EXTENT-ALREADY-EXISTS
+    subject: recover_extent
+    kind: error-case
+    verifiable: true
+    statement: >
+      recover_extent for a key that is already in the map returns AlreadyExists for that key and leaves
+      the existing entry unchanged.
+    traces: ["lib.rs:576-578 recover_extent"]
+    object_fn: "DispatchMapComponent::recover_extent"
+  - id: DM-RECOVER-EXTENT-INSERTS-BLOCK-DEVICE
+    subject: recover_extent
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After recover_extent(key, offset, size_blocks) succeeds, the key's entry is on the block device
+      at exactly that offset and records exactly that size in blocks.
+    traces: ["lib.rs:580-582 recover_extent"]
+    object_fn: "DispatchMapComponent::recover_extent"
+  - id: DM-RECOVER-EXTENT-ZERO-REFS
+    subject: recover_extent
+    kind: postcondition
+    verifiable: true
+    statement: >
+      An entry created by recover_extent starts with no read references and no write reference.
+    traces: ["lib.rs:583-584 recover_extent"]
+    object_fn: "DispatchMapComponent::recover_extent"
+  - id: DM-RECOVER-EXTENT-TRACKS
+    subject: recover_extent
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After recover_extent succeeds, the key is tracked by the eviction policy in the dispatch map's
+      pool and the entry keeps the returned handle.
+    traces: ["lib.rs:579 recover_extent", "lib.rs:585 recover_extent"]
+    object_fn: "DispatchMapComponent::recover_extent"
+  - id: DM-RECOVER-EXTENT-NO-EVICTION-POLICY-ERROR
+    subject: recover_extent
+    kind: error-case
+    verifiable: true
+    statement: >
+      When no eviction policy is connected, recover_extent returns an error instead of terminating the
+      program, and adds nothing to the map.
+    traces: ["lib.rs:572 recover_extent -> get_pool_id lib.rs:55", "lib.rs:573 recover_extent"]
+    object_fn: "DispatchMapComponent::recover_extent, DispatchMapComponent::get_pool_id"
+  - id: DM-RECOVER-EXTENT-FRAME
+    subject: recover_extent
+    kind: frame
+    verifiable: true
+    statement: >
+      recover_extent does not change any entry other than the new one it adds.
+    traces: ["lib.rs:566-592 recover_extent"]
+    object_fn: "DispatchMapComponent::recover_extent"
+
+  # ---------------------------------------------------------------- set_checksum / get_checksum
+  - id: DM-SET-CHECKSUM-NOT-FOUND
+    subject: set_checksum
+    kind: error-case
+    verifiable: true
+    statement: >
+      set_checksum on a key that is not in the map returns KeyNotFound for that key and changes
+      nothing.
+    traces: ["lib.rs:597-600 set_checksum"]
+    object_fn: "DispatchMapComponent::set_checksum"
+  - id: DM-SET-CHECKSUM-RECORDS
+    subject: set_checksum
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After set_checksum(key, c) succeeds with a non-zero c, get_checksum(key) returns c until the
+      checksum is set again or the entry is removed.
+    traces: ["lib.rs:601 set_checksum", "lib.rs:610-614 get_checksum"]
+    object_fn: "DispatchMapComponent::set_checksum, DispatchMapComponent::get_checksum"
+  - id: DM-SET-CHECKSUM-FRAME
+    subject: set_checksum
+    kind: frame
+    verifiable: true
+    statement: >
+      set_checksum changes only the recorded checksum of the given entry; its location, size,
+      references and every other entry are unchanged.
+    traces: ["lib.rs:595-603 set_checksum"]
+    object_fn: "DispatchMapComponent::set_checksum"
+  - id: DM-GET-CHECKSUM-ABSENT-NONE
+    subject: get_checksum
+    kind: error-case
+    verifiable: true
+    statement: >
+      get_checksum on a key that is not in the map returns no checksum.
+    traces: ["lib.rs:610-613 get_checksum"]
+    object_fn: "DispatchMapComponent::get_checksum"
+  - id: DM-GET-CHECKSUM-ZERO-IS-UNSET
+    subject: get_checksum
+    kind: postcondition
+    verifiable: true
+    statement: >
+      get_checksum returns no checksum for an entry whose recorded checksum is zero, and returns the
+      recorded value for an entry whose checksum is non-zero.
+    traces: ["lib.rs:608-614 get_checksum"]
+    object_fn: "DispatchMapComponent::get_checksum"
+  - id: DM-GET-CHECKSUM-FRAME
+    subject: get_checksum
+    kind: frame
+    verifiable: true
+    statement: >
+      get_checksum changes nothing in the map and takes no reference.
+    traces: ["lib.rs:605-615 get_checksum"]
+    object_fn: "DispatchMapComponent::get_checksum"
+
+  # ---------------------------------------------------------------- global invariants
+  - id: DM-INV-WRITE-REF-AT-MOST-ONE
+    subject: "global invariant (write reference count)"
+    kind: invariant
+    verifiable: true
+    statement: >
+      Every entry's write-reference count is always either zero or one.
+    traces: ["lib.rs:250 take_write", "lib.rs:288 release_write", "lib.rs:308 downgrade_reference", "lib.rs:408 create_memory_tier_entry", "lib.rs:100 initialize", "lib.rs:584 recover_extent"]
+    object_fn: "DispatchMapComponent::take_write, DispatchMapComponent::release_write, DispatchMapComponent::downgrade_reference, DispatchMapComponent::create_memory_tier_entry"
+  - id: DM-INV-SINGLE-WRITER
+    subject: "global invariant (writer exclusion)"
+    kind: invariant
+    verifiable: true
+    statement: >
+      Under any interleaving of concurrent callers, at most one caller holds the write reference of a
+      given key at a time; two concurrent take_write calls on the same key never both succeed before
+      one of them releases or downgrades.
+    traces: ["lib.rs:229-255 take_write", "state.rs:40-78 wait_for"]
+    object_fn: "DispatchMapComponent::take_write, DispatchMapState::wait_for"
+  - id: DM-INV-READ-WRITE-EXCLUSIVE
+    subject: "global invariant (reader/writer exclusion)"
+    kind: invariant
+    verifiable: true
+    statement: >
+      No entry ever has a write reference and a read reference at the same time.
+    traces: ["lib.rs:121-126 lookup", "lib.rs:203-205 take_read", "lib.rs:234-239 take_write", "lib.rs:308-312 downgrade_reference", "lib.rs:407-408 create_memory_tier_entry"]
+    object_fn: "DispatchMapComponent::lookup, DispatchMapComponent::take_read, DispatchMapComponent::take_write, DispatchMapComponent::downgrade_reference"
+  - id: DM-INV-WAIT-THEN-ACT-ATOMIC
+    subject: "global invariant (blocking acquisition)"
+    kind: invariant
+    verifiable: true
+    statement: >
+      When lookup, take_read or take_write finishes waiting, the condition it waited for (no writer,
+      or no writer and no readers) still holds at the moment it takes its reference; no other caller
+      can change the entry in between.
+    traces: ["state.rs:54-78 wait_for", "lib.rs:121-140 lookup", "lib.rs:203-219 take_read", "lib.rs:234-250 take_write"]
+    object_fn: "DispatchMapState::wait_for"
+  - id: DM-INV-WAIT-FOR-SOUND
+    subject: "global invariant (blocking acquisition)"
+    kind: invariant
+    verifiable: true
+    statement: >
+      The internal wait used by lookup, take_read and take_write reports success only when its
+      condition holds on the state it hands back, and reports failure only after its deadline has
+      passed with the condition still false.
+    traces: ["state.rs:54-78 wait_for"]
+    object_fn: "DispatchMapState::wait_for"
+  - id: DM-INV-RELEASE-WAKES-WAITERS
+    subject: "global invariant (wake-up on release)"
+    kind: invariant
+    verifiable: true
+    statement: >
+      Every operation that removes a write reference or lowers a read-reference count (release_read,
+      release_write, downgrade_reference, convert_to_storage) wakes the callers blocked waiting on the
+      map so they re-check their condition before their deadline.
+    traces: ["lib.rs:195 convert_to_storage", "lib.rs:273 release_read", "lib.rs:293 release_write", "lib.rs:320 downgrade_reference", "lib.rs:462 convert_memory_tier_to_block", "lib.rs:510 promote_block_to_memory_tier"]
+    object_fn: "DispatchMapComponent::release_read, DispatchMapComponent::release_write, DispatchMapComponent::downgrade_reference, DispatchMapComponent::convert_to_storage"
+  - id: DM-INV-ERROR-LEAVES-STATE-UNCHANGED
+    subject: "global invariant (error atomicity)"
+    kind: invariant
+    verifiable: true
+    statement: >
+      Whenever any dispatch-map operation returns an error, the map's entries (locations, sizes,
+      reference counts, eviction handles, checksums) are exactly as they were before the call.
+    traces: ["lib.rs:308-312 downgrade_reference", "lib.rs:128-140 lookup", "lib.rs:207-219 take_read"]
+    object_fn: "all IDispatchMap methods returning Result"
+  - id: DM-INV-REFCOUNT-NO-WRAP
+    subject: "global invariant (read reference count)"
+    kind: invariant
+    verifiable: true
+    statement: >
+      An entry's read-reference count never wraps around in either direction; it only moves up or down
+      by one per successful acquire or release.
+    traces: ["lib.rs:137-140 lookup", "lib.rs:184-186 convert_to_storage", "lib.rs:216-219 take_read", "lib.rs:264-268 release_read", "lib.rs:309-312 downgrade_reference"]
+    object_fn: "DispatchMapComponent::lookup, DispatchMapComponent::take_read, DispatchMapComponent::release_read, DispatchMapComponent::downgrade_reference, DispatchMapComponent::convert_to_storage"
+  - id: DM-INV-TRACKED-IFF-PRESENT
+    subject: "global invariant (eviction tracking)"
+    kind: invariant
+    verifiable: true
+    statement: >
+      A key is tracked in the dispatch map's eviction pool exactly when it has an entry in the map;
+      every operation that adds an entry registers it and every successful remove unregisters it.
+    traces: ["lib.rs:91-93 initialize", "lib.rs:335-340 remove", "lib.rs:399 create_memory_tier_entry", "lib.rs:579 recover_extent"]
+    object_fn: "DispatchMapComponent::initialize, DispatchMapComponent::remove, DispatchMapComponent::create_memory_tier_entry, DispatchMapComponent::recover_extent"
+  - id: DM-INV-HANDLE-STABLE
+    subject: "global invariant (eviction handle)"
+    kind: invariant
+    verifiable: true
+    statement: >
+      An entry's eviction handle never changes while the entry is in the map, including across
+      demotion to the block device and promotion to the memory tier.
+    traces: ["lib.rs:439 convert_memory_tier_to_block", "lib.rs:485-494 promote_block_to_memory_tier", "lib.rs:552 try_evict_to_block"]
+    object_fn: "DispatchMapComponent::convert_memory_tier_to_block, DispatchMapComponent::promote_block_to_memory_tier, DispatchMapComponent::try_evict_to_block"
+  - id: DM-INV-SINGLE-POOL
+    subject: "global invariant (eviction pool)"
+    kind: invariant
+    verifiable: true
+    statement: >
+      A dispatch-map instance creates at most one eviction pool, and every operation that talks to the
+      eviction policy about a pool uses that same pool.
+    traces: ["lib.rs:50-59 get_pool_id", "lib.rs:68 initialize", "lib.rs:373 oldest_keys", "lib.rs:391 create_memory_tier_entry", "lib.rs:572 recover_extent"]
+    object_fn: "DispatchMapComponent::get_pool_id"
+  - id: DM-INV-MEMORY-TIER-SIZE-POSITIVE
+    subject: "global invariant (memory-tier size)"
+    kind: invariant
+    verifiable: true
+    statement: >
+      Every memory-tier entry in the map has a byte size greater than zero.
+    traces: ["lib.rs:387-389 create_memory_tier_entry", "lib.rs:473-475 promote_block_to_memory_tier"]
+    object_fn: "DispatchMapComponent::create_memory_tier_entry, DispatchMapComponent::promote_block_to_memory_tier"
+  - id: DM-INV-MEMORY-TIER-SIZE-BLOCKS-CONSISTENT
+    subject: "global invariant (memory-tier size)"
+    kind: invariant
+    verifiable: true
+    statement: >
+      For every memory-tier entry, the recorded size in blocks equals its byte size divided by 4096,
+      rounded up.
+    traces: ["lib.rs:406 create_memory_tier_entry", "lib.rs:494 promote_block_to_memory_tier"]
+    object_fn: "DispatchMapComponent::create_memory_tier_entry, DispatchMapComponent::promote_block_to_memory_tier"
+  - id: DM-INV-SSD-OFFSET-STICKY
+    subject: "global invariant (SSD copy)"
+    kind: invariant
+    verifiable: true
+    statement: >
+      Once a memory-tier entry has an SSD copy recorded, it keeps a recorded SSD copy for as long as it
+      stays in the memory tier.
+    traces: ["lib.rs:173-176 convert_to_storage", "lib.rs:489-493 promote_block_to_memory_tier"]
+    object_fn: "DispatchMapComponent::convert_to_storage, DispatchMapComponent::promote_block_to_memory_tier"
+  - id: DM-INV-LEGAL-LOCATION-TRANSITIONS
+    subject: "global invariant (location state machine)"
+    kind: invariant
+    verifiable: true
+    statement: >
+      An entry moves from the memory tier to the block device only when an SSD copy is recorded, and
+      then lands at that SSD offset; it moves from the block device to the memory tier only through
+      promote_block_to_memory_tier; no other operation changes which tier an entry is in.
+    traces: ["lib.rs:433-453 convert_memory_tier_to_block", "lib.rs:483-501 promote_block_to_memory_tier", "lib.rs:546-563 try_evict_to_block"]
+    object_fn: "DispatchMapComponent::convert_memory_tier_to_block, DispatchMapComponent::promote_block_to_memory_tier, DispatchMapComponent::try_evict_to_block"
+  - id: DM-INV-NEW-ENTRY-NO-CHECKSUM
+    subject: "global invariant (checksum)"
+    kind: invariant
+    verifiable: true
+    statement: >
+      An entry added by create_memory_tier_entry, recover_extent or initialize has no checksum recorded,
+      so get_checksum returns none for it until set_checksum is called.
+    traces: ["lib.rs:104 initialize", "lib.rs:412 create_memory_tier_entry", "lib.rs:588 recover_extent"]
+    object_fn: "DispatchMapComponent::create_memory_tier_entry, DispatchMapComponent::recover_extent, DispatchMapComponent::initialize"
+  - id: DM-INV-CHECKSUM-SURVIVES-TRANSITIONS
+    subject: "global invariant (checksum)"
+    kind: invariant
+    verifiable: true
+    statement: >
+      Demoting an entry to the block device or promoting it to the memory tier does not change its
+      recorded checksum.
+    traces: ["lib.rs:439 convert_memory_tier_to_block", "lib.rs:489-494 promote_block_to_memory_tier", "lib.rs:552 try_evict_to_block"]
+    object_fn: "DispatchMapComponent::convert_memory_tier_to_block, DispatchMapComponent::promote_block_to_memory_tier, DispatchMapComponent::try_evict_to_block"
+  - id: DM-INV-FRESH-STATE-EMPTY
+    subject: "global invariant (construction)"
+    kind: invariant
+    verifiable: true
+    statement: >
+      A freshly constructed dispatch-map state (by new or default) has no entries and has not yet
+      created an eviction pool.
+    traces: ["state.rs:23-38 DispatchMapState::new/default"]
+    object_fn: "DispatchMapState::new, DispatchMapState::default"
+  - id: DM-INV-NO-ABRUPT-TERMINATION-ON-TRACK-FAILURE
+    subject: "global invariant (eviction policy failures)"
+    kind: invariant
+    verifiable: true
+    statement: >
+      If the eviction policy refuses to track a key, initialize, create_memory_tier_entry and
+      recover_extent report the failure to their caller instead of terminating the program.
+    traces: ["lib.rs:91-93 initialize", "lib.rs:399 create_memory_tier_entry", "lib.rs:579 recover_extent"]
+    object_fn: "DispatchMapComponent::initialize, DispatchMapComponent::create_memory_tier_entry, DispatchMapComponent::recover_extent"
+
+  # ---------------------------------------------------------------- not verifiable ledger
+  - id: NV-CODE-LOGGING
+    scope: "logger receptacle calls in every method"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      The info and debug log messages emitted by initialize, lookup and the other methods are logging
+      only; they do not affect map state or results, and the logger is optional.
+    traces: ["lib.rs:76-78", "lib.rs:83-85", "lib.rs:110-114", "lib.rs:159-161", "lib.rs:188-192", "lib.rs:223-225", "lib.rs:251-253", "lib.rs:269-271", "lib.rs:289-291", "lib.rs:316-318", "lib.rs:342-344", "lib.rs:417-422", "lib.rs:455-459", "lib.rs:503-507"]
+    object_fn: "multiple"
+  - id: NV-CODE-REUSE-COUNT
+    scope: "DispatchEntry.reuse_count field"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      The per-entry reuse counter is incremented by lookup, take_read and downgrade_reference with
+      relaxed ordering, but no public operation ever reads it (only the Debug printout), so it has no
+      observable behavior to check.
+    traces: ["entry.rs:36-37", "lib.rs:141-143 lookup", "lib.rs:220-222 take_read", "lib.rs:313-315 downgrade_reference"]
+    object_fn: "DispatchMapComponent::lookup, DispatchMapComponent::take_read, DispatchMapComponent::downgrade_reference"
+  - id: NV-CODE-TIMEOUT-DURATION
+    scope: "DEFAULT_TIMEOUT of 2000 ms for blocking operations"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      The length of the waiting period is wall-clock timing; that a timeout is reported is covered by
+      the per-method timeout rows, but its exact duration is not machine-checkable.
+    traces: ["lib.rs:25", "state.rs:63-70 wait_for"]
+    object_fn: "DispatchMapState::wait_for"
+  - id: NV-CODE-ENTRY-LAYOUT
+    scope: "free function entry_size() and the 56-byte DispatchEntry layout"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      The crate-level entry_size() returns the in-memory size of the entry structure, a pure layout
+      fact used for benchmarks that does not gate any behavior.
+    traces: ["lib.rs:15-18 entry_size (free fn)", "entry.rs:38-42"]
+    object_fn: "dispatch_map::entry_size"
+  - id: NV-CODE-SEND-SYNC-POINTER
+    scope: "unsafe Send/Sync for Location holding a raw pointer"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      Declaring the raw memory-tier pointer safe to share across threads is an assumption about the
+      memory-tier pool supplied by the environment, not behavior of this component.
+    traces: ["entry.rs:21-25"]
+    object_fn: "Location"
+  - id: NV-CODE-POINTER-VALIDITY
+    scope: "pointer arguments of create_memory_tier_entry and promote_block_to_memory_tier"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      The component stores and returns the caller's pointer without dereferencing it; whether it is
+      non-null and refers to at least size bytes is a caller assumption.
+    traces: ["lib.rs:384-404 create_memory_tier_entry", "lib.rs:470-493 promote_block_to_memory_tier"]
+    object_fn: "DispatchMapComponent::create_memory_tier_entry, DispatchMapComponent::promote_block_to_memory_tier"
+  - id: NV-CODE-LOCK-POISONING
+    scope: "Mutex lock and Condvar wait unwraps"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      Every method aborts if the internal lock is poisoned by a panic in another thread; poisoning is
+      an environment failure, not a reachable state of correct operation.
+    traces: ["lib.rs:51", "lib.rs:87", "lib.rs:167", "lib.rs:258", "lib.rs:278", "lib.rs:298", "lib.rs:325", "lib.rs:350", "lib.rs:364", "lib.rs:394", "lib.rs:427", "lib.rs:477", "lib.rs:516", "lib.rs:534", "lib.rs:575", "lib.rs:596", "lib.rs:607", "state.rs:62", "state.rs:72"]
+    object_fn: "multiple"
+  - id: NV-CODE-DEADLOCK-AND-STARVATION
+    scope: "blocking waits, callbacks into the extent manager and eviction policy while the map lock is held"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      Freedom from deadlock (initialize runs the extent manager's iteration callback and remove and
+      create call the eviction policy while holding the map lock) and freedom from writer starvation by
+      a stream of readers are unbounded liveness properties.
+    traces: ["lib.rs:87-108 initialize", "lib.rs:338-340 remove", "lib.rs:399 create_memory_tier_entry", "lib.rs:579 recover_extent", "state.rs:54-78 wait_for"]
+    object_fn: "multiple"
+  - id: NV-CODE-DEBUG-FMT
+    scope: "Debug implementations of DispatchEntry and Location"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      Debug formatting is diagnostic output only and is not part of the component's behavior.
+    traces: ["entry.rs:8", "entry.rs:45-61"]
+    object_fn: "DispatchEntry::fmt"
+  - id: NV-CODE-KEY-UNIQUENESS
+    scope: "one entry per key"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      That the map holds at most one entry per key is a type fact of the hash map used as storage, not
+      a falsifiable behavior.
+    traces: ["state.rs:12-14 Inner.entries"]
+    object_fn: "Inner"
+  - id: NV-CODE-UNUSED-ERROR-VARIANTS
+    scope: "DispatchMapError AllocationFailed and the NotInitialized branch of initialize"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      AllocationFailed is never produced by any method, and the only NotInitialized return (in
+      initialize) is unreachable because the pool lookup before it already requires the eviction
+      policy; there is no behavior to check beyond the error-case rows already recorded.
+    traces: ["idispatch_map.rs:48-53", "lib.rs:68-71 initialize"]
+    object_fn: "DispatchMapComponent::initialize"
+  - id: NV-CODE-EVICTION-CALL-RESULTS-IGNORED
+    scope: "results of eviction policy touch and remove are discarded"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      lookup, touch and remove discard the eviction policy's error result; whether the policy accepted
+      the call depends on the bound implementation, which is outside this component, and the tracked
+      consequences are captured by DM-INV-TRACKED-IFF-PRESENT.
+    traces: ["lib.rs:155-157 lookup", "lib.rs:338-340 remove", "lib.rs:357-359 touch"]
+    object_fn: "DispatchMapComponent::lookup, DispatchMapComponent::touch, DispatchMapComponent::remove"
+
+input_assumptions:
+  - assumption: "The eviction-policy receptacle is connected before initialize, oldest_keys, create_memory_tier_entry or recover_extent is called; otherwise the pool lookup aborts the program (the NotInitialized branch in initialize and the empty-list branch in oldest_keys are effectively unreachable on first call)."
+    enforced: false
+    pointers: [lib.rs:55, lib.rs:68-71, lib.rs:373-378, lib.rs:391-392, lib.rs:572-573]
+    methods: [initialize, oldest_keys, create_memory_tier_entry, recover_extent]
+  - assumption: "The eviction policy's track call never fails for the dispatch map's pool."
+    enforced: false
+    pointers: [lib.rs:91-93, lib.rs:399, lib.rs:579]
+    methods: [initialize, create_memory_tier_entry, recover_extent]
+  - assumption: "The eviction pool, once created, stays valid and is not cleared or reused by another user of the same eviction policy."
+    enforced: false
+    pointers: [lib.rs:50-59, lib.rs:375]
+    methods: [initialize, oldest_keys, create_memory_tier_entry, recover_extent]
+  - assumption: "Failures of eviction-policy touch and remove are harmless and can be ignored."
+    enforced: false
+    pointers: [lib.rs:156, lib.rs:339, lib.rs:358]
+    methods: [lookup, remove, touch]
+  - assumption: "The internal map lock and pool-id lock are never poisoned by a panicking thread."
+    enforced: false
+    pointers: [lib.rs:51, lib.rs:87, lib.rs:167, lib.rs:258, lib.rs:278, lib.rs:298, lib.rs:325, lib.rs:350, lib.rs:364, lib.rs:394, lib.rs:427, lib.rs:477, lib.rs:516, lib.rs:534, lib.rs:575, lib.rs:596, lib.rs:607, state.rs:62, state.rs:72]
+    methods: [all]
+  - assumption: "Keys reported by the extent manager are unique and not already present in the map when initialize runs; an existing entry for the same key (including its references) is silently replaced."
+    enforced: false
+    pointers: [lib.rs:106]
+    methods: [initialize]
+  - assumption: "initialize is called once, on an empty map, before other operations."
+    enforced: false
+    pointers: [lib.rs:87-108]
+    methods: [initialize]
+  - assumption: "The extent manager's for_each_extent callback does not call back into the dispatch map (the map lock is held during iteration)."
+    enforced: false
+    pointers: [lib.rs:87-108]
+    methods: [initialize]
+  - assumption: "Eviction-policy calls made while the map lock is held (track, remove) do not call back into the dispatch map."
+    enforced: false
+    pointers: [lib.rs:92, lib.rs:339, lib.rs:399, lib.rs:579]
+    methods: [initialize, remove, create_memory_tier_entry, recover_extent]
+  - assumption: "size_blocks multiplied by 4096 fits in a u32, i.e. size_blocks is at most 1048575 (entries under 4 GiB); a memory-tier size above u32::MAX - 4095 rounds up to 1048576 blocks and overflows."
+    enforced: false
+    pointers: [lib.rs:369, lib.rs:406, lib.rs:494, lib.rs:582, lib.rs:98]
+    methods: [entry_size, create_memory_tier_entry, promote_block_to_memory_tier, recover_extent, initialize]
+  - assumption: "The block size is 4096 bytes and extent sizes from the extent manager and recover_extent are expressed in 4096-byte blocks."
+    enforced: false
+    pointers: [lib.rs:98, lib.rs:369, lib.rs:406, lib.rs:494, lib.rs:582]
+    methods: [entry_size, initialize, recover_extent, create_memory_tier_entry, promote_block_to_memory_tier]
+  - assumption: "Memory-tier sizes are non-zero."
+    enforced: true
+    pointers: [lib.rs:387-389, lib.rs:473-475]
+    methods: [create_memory_tier_entry, promote_block_to_memory_tier]
+  - assumption: "Recovered extent sizes (size_blocks) are non-zero."
+    enforced: false
+    pointers: [lib.rs:98, lib.rs:582]
+    methods: [recover_extent, initialize]
+  - assumption: "The pointer passed for a memory-tier entry is non-null and refers to at least size bytes that stay valid while the entry is in the memory tier."
+    enforced: false
+    pointers: [lib.rs:384, lib.rs:402, lib.rs:470, lib.rs:490]
+    methods: [create_memory_tier_entry, promote_block_to_memory_tier]
+  - assumption: "Block-device offsets supplied to convert_to_storage, recover_extent and by the extent manager are valid, aligned locations on the device."
+    enforced: false
+    pointers: [lib.rs:175, lib.rs:96, lib.rs:581]
+    methods: [convert_to_storage, recover_extent, initialize]
+  - assumption: "The read-reference count never exceeds u32::MAX."
+    enforced: true
+    pointers: [lib.rs:137-140, lib.rs:216-219, lib.rs:309-312]
+    methods: [lookup, take_read, downgrade_reference]
+  - assumption: "A release is never issued when the corresponding count is already zero."
+    enforced: true
+    pointers: [lib.rs:264-266, lib.rs:284-286]
+    methods: [release_read, release_write]
+  - assumption: "Callers of release_read, release_write and downgrade_reference actually hold the reference they release (references are not tied to an owner)."
+    enforced: false
+    pointers: [lib.rs:257-322]
+    methods: [release_read, release_write, downgrade_reference]
+  - assumption: "When downgrade_reference runs, adding one read reference cannot overflow; the write reference is cleared before the overflow check, so an overflow would leave it cleared."
+    enforced: false
+    pointers: [lib.rs:308-312]
+    methods: [downgrade_reference]
+  - assumption: "A caller of convert_to_storage holds exactly one read reference that the call should consume; the call decrements read_ref if positive and silently does nothing when it is zero."
+    enforced: false
+    pointers: [lib.rs:184-186]
+    methods: [convert_to_storage]
+  - assumption: "convert_to_storage is called at most once per memory-tier residency; a second call silently overwrites the recorded SSD offset."
+    enforced: false
+    pointers: [lib.rs:174-176]
+    methods: [convert_to_storage]
+  - assumption: "Callers of convert_to_storage, convert_memory_tier_to_block and promote_block_to_memory_tier hold an appropriate reference (write or pin) on the entry; these methods do not check references, unlike try_evict_to_block."
+    enforced: false
+    pointers: [lib.rs:166-198, lib.rs:426-465, lib.rs:467-513]
+    methods: [convert_to_storage, convert_memory_tier_to_block, promote_block_to_memory_tier]
+  - assumption: "Only memory-tier entries are converted to storage, demoted or evicted, and only block-device entries are promoted."
+    enforced: true
+    pointers: [lib.rs:177-181, lib.rs:441-452, lib.rs:496-500, lib.rs:555-562]
+    methods: [convert_to_storage, convert_memory_tier_to_block, promote_block_to_memory_tier, try_evict_to_block]
+  - assumption: "Demotion and eviction happen only after the write-through to SSD has recorded an offset."
+    enforced: true
+    pointers: [lib.rs:441-447, lib.rs:555-559]
+    methods: [convert_memory_tier_to_block, try_evict_to_block]
+  - assumption: "Eviction happens only when the entry has no read or write references."
+    enforced: true
+    pointers: [lib.rs:540-544]
+    methods: [try_evict_to_block]
+  - assumption: "Remove happens only when the entry has no read or write references."
+    enforced: true
+    pointers: [lib.rs:331-333]
+    methods: [remove]
+  - assumption: "Keys passed to create_memory_tier_entry and recover_extent are not already in the map."
+    enforced: true
+    pointers: [lib.rs:395-397, lib.rs:576-578]
+    methods: [create_memory_tier_entry, recover_extent]
+  - assumption: "Keys passed to the reference, transition, touch, size and checksum operations are present in the map."
+    enforced: true
+    pointers: [lib.rs:168-171, lib.rs:211-214, lib.rs:245-248, lib.rs:259-262, lib.rs:279-282, lib.rs:299-302, lib.rs:326-329, lib.rs:351-354, lib.rs:365-368, lib.rs:428-431, lib.rs:478-481, lib.rs:535-538, lib.rs:597-600]
+    methods: [convert_to_storage, take_read, take_write, release_read, release_write, downgrade_reference, remove, touch, entry_size, convert_memory_tier_to_block, promote_block_to_memory_tier, try_evict_to_block, set_checksum]
+  - assumption: "A genuine CRC-32 checksum is never 0; a stored value of 0 means not recorded, so a real CRC of 0 disables verification."
+    enforced: false
+    pointers: [lib.rs:601, lib.rs:608-614, entry.rs:38-42]
+    methods: [set_checksum, get_checksum]
+  - assumption: "A 2000 ms wait is long enough for readers and writers to finish; longer holds surface as Timeout errors."
+    enforced: false
+    pointers: [lib.rs:25, state.rs:63-75]
+    methods: [lookup, take_read, take_write]
+  - assumption: "The per-entry reuse counter wrapping around at u32::MAX is harmless."
+    enforced: false
+    pointers: [lib.rs:141-143, lib.rs:220-222, lib.rs:313-315]
+    methods: [lookup, take_read, downgrade_reference]
+  - assumption: "The memory-tier pointer can safely be shared across threads (raw pointer marked Send and Sync)."
+    enforced: false
+    pointers: [entry.rs:21-25]
+    methods: [lookup, create_memory_tier_entry, promote_block_to_memory_tier]
+  - assumption: "The logger and extent-manager receptacles are optional."
+    enforced: true
+    pointers: [lib.rs:73-81, lib.rs:76, lib.rs:83, lib.rs:110, lib.rs:159]
+    methods: [initialize, lookup, convert_to_storage, take_read, take_write, release_read, release_write, downgrade_reference, remove, create_memory_tier_entry, convert_memory_tier_to_block, promote_block_to_memory_tier]
