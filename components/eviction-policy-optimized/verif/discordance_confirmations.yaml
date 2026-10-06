@@ -1,0 +1,11 @@
+what: Test results for level-1 discordances (record_confirmation.py). confirmed = a test of the spec's requirement
+  FAILED on the code before any fix; withdrawn = it PASSED (the code reader missed it). Applied by level1.py on
+  every regeneration.
+confirmations:
+- id: D-FR-012-lru_list.rs:109-ca1808
+  property: EPO-INV-STALE-HANDLE-NEVER-CRASHES
+  status: confirmed
+  evidence: The repair agent's test repair_test_stale_handle.rs failed on the code before the fix and passes after
+    it (evaluation run 2026-10-05).
+  date: '2026-10-05'
+  fix: 'PR #505 (bounds check in lru_list.rs)'
