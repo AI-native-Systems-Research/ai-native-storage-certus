@@ -9,8 +9,11 @@ counts:
   spec_not_found_in_code: 2
   input_range_mismatch: 0
   properties_excluded_from_level2: 2
+  confirmed: 0
+  withdrawn: 0
 discordances:
 - id: D-FR-003-define_componentexpansionofLoggerComponentIUnknownquery_interfacemachinery-f49c86
+  name: Interface discovery
   kind: spec-not-found-in-code
   methods:
   - error
@@ -31,6 +34,7 @@ discordances:
     spec: []
     code: []
 - id: D-US3-AS2-component_frameworkreceptaclebindingconnect_receptacle_raw-1db8e7
+  name: Receptacle bind
   kind: spec-not-found-in-code
   methods:
   - error
