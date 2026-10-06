@@ -190,6 +190,37 @@ The system keeps both DRAM and SSD tiers within configured utilization bounds wi
   itself. If NUMA topology discovery fails, a warning is logged and pollers are left unpinned.
   (`src/lib.rs:272-323`, `894-903`.) The two dispatchers share this policy so that switching
   the build profile does not move pollers.
+- **FR-028** *(New 2026-10-05.)* This component MUST implement
+  `IDispatcher::schedule_write_through` as a **real** enqueue onto its own
+  `ParallelBackgroundWriter`, not as a no-op, routing the job with the same
+  `drive_index(key, num_drives)` placement hash the store path of FR-018 uses so a key's data
+  and its write job land on the same device. It MUST NOT block (the caller is remote-lookup's
+  poll loop) and a failure MUST NOT be surfaced to the caller.
+  - **Why a no-op would be wrong here specifically.** The `full-p2p` profile wires
+    `remote-lookup`, so this component serves remotely-fetched entries too, and such an entry
+    is published straight into the dispatch map without passing through
+    `copy_gpu_to_memory_completed` — the only other path that persists anything. Left
+    unpersisted it keeps `ssd_offset == None`, which makes it permanently undemotable here for
+    exactly the reasons set out in interfaces `001-interfaces` FR-031a. The defect would be
+    identical in this dispatcher; only the profile differs.
+  - Contract: interfaces `001-interfaces` FR-031a. Caller: remote-lookup
+    `002-remote-lookup-rdma` FR-039. (`src/lib.rs:2759`.)
+- **FR-029** *(New 2026-10-05.)* This component does **not** report
+  `evictions_blocked_by_pin`, `evictions_blocked_unpersisted` or `eviction_scans_exhausted`
+  (`dispatcher` spec `002-served-by-tier-attribution` FR-033/FR-034), and its zeroes for them
+  MUST be read as **unmeasured, not as "never blocked"**. The gap MUST stay declared both here
+  and at the construction site in code for as long as it exists.
+  - This component *does* have eviction paths that a held pin can refuse (`background.rs` and
+    this file's allocation retry loop), so a reader of a p2p `/metrics` endpoint must not
+    conclude that no pin block occurred. Those paths are free functions holding no handle to
+    the counters, so reporting them is a threading change to a component the instrumentation
+    behind FR-033 cannot exercise — p2p needs its own profile and a loaded `gdrdrv`.
+  - **This is a gap, not a defect, and the distinction is the point.** FR-025a's zeroed route
+    counters were *self-contradictory* — hits reported with every route at zero — and so were a
+    defect. An unmeasured counter contradicts nothing and is acceptable **only while
+    declared**, which is what this requirement and the matching code comment do. Adding fields
+    to `TierEventStats` is not compiler-enforced, so neither case is caught by a build.
+    (`src/lib.rs:2817-2832`.)
 
 ## ROOT CAUSE FOUND 2026-09-30: the cold path panics when the P2P ring is absent
 

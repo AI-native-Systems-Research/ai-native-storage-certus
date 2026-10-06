@@ -378,6 +378,86 @@ pub struct TierEventStats {
     /// means the tier could not absorb the store inflow even after
     /// backpressuring — consider a larger tier or more SSD write bandwidth.
     pub store_drops_on_full: u64,
+    /// Reserves refused because the key was **already resident** in the memory tier —
+    /// `mt.insert` returned `AlreadyExists`, so another writer, or a remote fetch's
+    /// `publish_success`, got there first.
+    ///
+    /// Counted because this is the one refusal that is **not** a capacity problem, and
+    /// it is otherwise indistinguishable from one: it returns from `evict_and_insert`
+    /// immediately, bypassing the backpressure retry entirely, so it bumps neither
+    /// `store_backpressure_events` nor `store_drops_on_full`, and the shm-queue wire
+    /// reports every reserve error as the same flat zero. A run can therefore show
+    /// stores being "declined" while eviction never failed once, which is exactly the
+    /// observation that prompted this counter.
+    ///
+    /// Note the asymmetry it measures. On the **load** path the identical
+    /// `AlreadyExists` from `mt.insert` is treated as a hit — see
+    /// `serve_concurrently_promoted`, whose contract is that observing `MemoryTier`
+    /// means the data is resident. On the **store** path it is surfaced as a failure.
+    /// Whether the wire should keep conflating the two is a protocol question this
+    /// counter deliberately only measures rather than answers.
+    pub store_already_resident: u64,
+    /// Eviction candidates skipped because a read pin was held on them —
+    /// `IDispatchMap::try_evict_to_block` returned `ActiveReferences`.
+    ///
+    /// Counted per candidate examined, so one call that scans past several pinned
+    /// entries bumps this several times.
+    ///
+    /// This exists to separate the two reasons a clean eviction can fail, which look
+    /// identical from the call site and mean opposite things. A candidate may be
+    /// undemotable because write-through has not landed yet — expected under write
+    /// load, and self-correcting — or because something is holding a read pin, which
+    /// is the only one that implicates a reader. Counting "eviction failed" without
+    /// that distinction produces a number that cannot support either conclusion, so
+    /// the error variant is matched rather than `is_ok()` tested.
+    pub evictions_blocked_by_pin: u64,
+    /// Times a clean-eviction scan examined every candidate it was given and could
+    /// free none, so the caller had to surface pool-full.
+    ///
+    /// This is the event that becomes a declined store: `reserve_memory` retries
+    /// against its `--store-backpressure-ms` budget, each retry scanning again, and
+    /// when the budget elapses the store is dropped (`store_drops_on_full`).
+    pub eviction_scans_exhausted: u64,
+    /// Eviction candidates skipped because write-through had not landed, so there was
+    /// no `ssd_offset` to demote to. Counted per candidate examined.
+    ///
+    /// This is the *other* reason a clean eviction fails, and it involves no reader and
+    /// no peer — `reserve_memory`'s own comment names both: the oldest entries are
+    /// transiently un-evictable because they are "pinned by an in-flight load, or not
+    /// yet written through by the bg_writer".
+    ///
+    /// It is counted rather than inferred by subtraction from
+    /// `evictions_blocked_by_pin`, because subtraction would silently absorb every
+    /// third cause and any future variant, and would attribute them to whichever of
+    /// the two was not measured. With both counted, `evictions_blocked_by_pin +
+    /// evictions_blocked_unpersisted` against the scanned total is itself a check that
+    /// the two explanations are exhaustive.
+    pub evictions_blocked_unpersisted: u64,
+    /// How many of the oldest memory-tier keys were sampled when this snapshot was
+    /// taken, and how many of those were demotable. **Gauges, not counters.**
+    ///
+    /// Sampled over `oldest_keys`, deliberately, because that is the window
+    /// `evict_one_clean` actually scans. A tier-wide persisted fraction would be the
+    /// wrong number: an entry that cannot be evicted ages to the oldest end of the LRU
+    /// and stays there, so the oldest keys are *where stuck entries concentrate*, and a
+    /// whole-tier average would dilute exactly the effect being measured.
+    ///
+    /// `oldest_persisted == 0` with `oldest_sampled > 0` means no candidate in the
+    /// eviction window could be demoted — the store path is about to backpressure and
+    /// decline no matter how much tier capacity exists.
+    pub oldest_sampled: u64,
+    /// Of `oldest_sampled`, how many were **demotable**.
+    ///
+    /// Measured with `IDispatchMap::is_evictable`, which is a conjunction: no read
+    /// reference, no write reference, *and* resident in the memory tier with an
+    /// `ssd_offset`. So a low value does not by itself say which conjunct failed, and
+    /// the name is about demotability rather than persistence alone.
+    ///
+    /// Pair it with `evictions_blocked_by_pin` to attribute: that counter is zero
+    /// exactly when no eviction was refused for a held reference, which leaves the
+    /// missing `ssd_offset` as the cause. Reading this field alone and calling it a
+    /// persisted fraction would be assuming the attribution the other counter supplies.
+    pub oldest_persisted: u64,
 }
 
 #[cfg(feature = "spdk")]
@@ -748,6 +828,36 @@ component_macros::define_interface! {
         ///
         /// Returns the number of entries that now have a valid SSD offset.
         fn flush_to_ssd(&self) -> Result<usize, DispatcherError>;
+
+        /// Enqueue a background write-through for a key already resident in the memory
+        /// tier, **without waiting for it to land**.
+        ///
+        /// This exists for values that enter the memory tier by a path other than a
+        /// client store. A client store is persisted as a side effect of
+        /// `copy_gpu_to_memory_completed`, but a value fetched from a peer is published
+        /// straight into the dispatch map by `remote-lookup`, which has no route to the
+        /// background writer. Without this call such an entry keeps
+        /// `ssd_offset == None` forever.
+        ///
+        /// **Why "forever" is the problem, and not merely a lost optimisation.**
+        /// `IDispatchMap::try_evict_to_block` refuses an entry with no `ssd_offset`,
+        /// and the dispatcher's clean-eviction scan deliberately will not `remove` one
+        /// either (removing a resident-but-unpersisted key turns it into `NotExist`
+        /// under the Check→Pin race, which is fatal to the vLLM connector). So the entry
+        /// has no exit from the tier at all, it ages to the oldest end of the LRU, and
+        /// the eviction scan — which looks at exactly the oldest keys — comes to see
+        /// nothing but such entries. The tier poisons its own eviction candidates, and
+        /// stores are then declined regardless of how much capacity exists.
+        ///
+        /// Non-blocking by contract: callers are latency-sensitive paths such as a
+        /// remote fetch's completion. Use `flush_to_ssd` when the caller genuinely needs
+        /// the data durable before proceeding.
+        ///
+        /// Best-effort. Returns `Ok(())` when the job was queued, and callers are
+        /// expected to ignore failures: a key whose write-through cannot be scheduled is
+        /// still correctly cached and readable, it is merely undemotable, which is the
+        /// pre-existing behaviour rather than a new fault.
+        fn schedule_write_through(&self, key: CacheKey, size: u32) -> Result<(), DispatcherError>;
 
         /// Return cumulative per-direction SSD read/write byte, op, and latency
         /// counters aggregated across all data drives. Returns zeroed counters

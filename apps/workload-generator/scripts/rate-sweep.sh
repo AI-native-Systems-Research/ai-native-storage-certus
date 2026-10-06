@@ -29,7 +29,15 @@
 #     numbers from whichever one the mailbox path happens to reach.
 #   * Never quote a percentile without its n. The report carries the turn count
 #     beside the lateness percentiles; this script prints both.
-#   * Restart the server before quoting throughput.
+#   * Restart the server before quoting throughput. COLD=1 now ENFORCES this
+#     rather than leaving it to the operator: it cold-formats the server between
+#     rungs and refuses to drive one whose memory tier is not empty. Without it
+#     rung 1 warms the cache and every later rung reports a throughput the first
+#     one paid for -- which looks like a result. Note what this does NOT affect:
+#     lateness is a property of the schedule, not of the cache (see n>=8 below),
+#     so the validity verdict and the lateness columns are sound either way. It
+#     is `keys_per_s`, and any hit-dependent figure read from the per-rung
+#     reports, that a warm cache silently inflates.
 #   * Rebuild the agent after any `src/` edit — the handshake refuses a stale
 #     binary, but only if the binary is genuinely older, and a rebuilt generator
 #     against an unrebuilt agent is the case that bites.
@@ -52,6 +60,12 @@
 #   OUT       directory for the JSON reports (default a fresh mktemp -d)
 #   REPEATS   runs per rate (default 1)
 #   GEN       path to the workload-gen binary
+#   COLD      non-empty: cold-restart the server before every rung and assert its
+#             memory tier reads empty before driving. Set it to 1 to use
+#             scripts/stress-servers.sh, or to the path of an equivalent helper
+#             taking `start`/`stop`. Off by default, because a sweep that stops
+#             and starts the operator's server unasked would be a surprise.
+#   METRICS   metrics port to read the tier from when COLD is set (default 9400)
 #
 # Example:
 #   UNTIL=120 scripts/rate-sweep.sh chat.yml 1 2 5 10 20 50
@@ -113,15 +127,66 @@ if [ -n "$HARDWARE" ]; then
     target_args+=(--hardware "$HARDWARE")
 fi
 
+COLD="${COLD:-}"
+METRICS="${METRICS:-9400}"
+if [ -n "$COLD" ]; then
+    if [ "$COLD" = "1" ]; then
+        COLD="$(dirname "$0")/../../../scripts/stress-servers.sh"
+    fi
+    if [ ! -x "$COLD" ]; then
+        echo "COLD is set but no server helper is executable at $COLD" >&2
+        exit 2
+    fi
+fi
+
+# Note on scope: the single-server check above already refuses a multi-instance
+# host, which is also what makes COLD safe here -- the helper stops every server
+# it finds, so on a host with more than one it would tear down instances this
+# sweep never intended to touch. No second guard is needed.
+
+# One rung's worth of hygiene: cold-format, then prove the tier is empty rather
+# than trusting that --format did it. An instance that survived the stop keeps
+# its tier, and a warm tier is the artifact COLD exists to prevent.
+cold_restart() {
+    "$COLD" stop  >/dev/null 2>&1 || true
+    if ! "$COLD" start >"$OUT/cold-restart.log" 2>&1; then
+        echo "cold restart failed; see $OUT/cold-restart.log" >&2
+        return 1
+    fi
+    used=$(curl -s --max-time 10 "localhost:$METRICS/metrics" \
+           | awk '/^certus_memory_tier_used_bytes/{print $2; exit}')
+    if [ -z "$used" ]; then
+        echo "cold restart: no certus_memory_tier_used_bytes on localhost:$METRICS" >&2
+        return 1
+    fi
+    case "${used%%.*}" in
+        0) return 0 ;;
+        *) echo "cold restart: memory tier is not empty (used=$used); a stale server survived" >&2
+           return 1 ;;
+    esac
+}
+
 mkdir -p "$OUT"
 echo "# rate sweep: $DESCRIPTION, until=$UNTIL seed=$SEED lanes=$LANES repeats=$REPEATS"
 echo "# reports in $OUT"
+if [ -n "$COLD" ]; then
+    echo "# cold restart before every rung via $COLD, tier asserted empty on :$METRICS"
+else
+    echo "# NOT cold between rungs: lateness and validity are unaffected, but keys_per_s"
+    echo "#   and any hit-dependent figure carry the cache the earlier rungs warmed."
+    echo "#   Set COLD=1 to enforce the restart this script's hygiene notes describe."
+fi
 printf '%-8s %-6s %-8s %-10s %-10s %-10s %-10s %s\n' \
     rate run valid turns late_p50 late_p99 late_max keys_per_s
 
 for rate in "${RATES[@]}"; do
     for run in $(seq 1 "$REPEATS"); do
         report="$OUT/rate-$rate-run-$run.json"
+        if [ -n "$COLD" ] && ! cold_restart; then
+            printf '%-8s %-6s %-8s %s\n' "$rate" "$run" "ERROR" \
+                "cold restart failed; rung skipped rather than run warm"
+            continue
+        fi
         # Projected cost, printed by the generator itself before it starts: at rate
         # r a run costs UNTIL/r wallclock seconds, so a low rate on a long span is a
         # long wait rather than a hang.
