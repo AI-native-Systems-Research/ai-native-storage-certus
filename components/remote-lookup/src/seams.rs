@@ -617,12 +617,29 @@ impl IMemoryTier for MockMemoryTier {
 // ---------------------------------------------------------------------------
 
 /// Mock [`IDispatcher`] backed by a [`NodeWorld`].
-pub struct MockDispatcher(NodeWorld);
+pub struct MockDispatcher {
+    world: NodeWorld,
+    /// Keys for which `schedule_write_through` was called, in call order.
+    ///
+    /// Recorded because the call is a pure side effect with no observable result: a
+    /// remotely-fetched entry that is never scheduled is still readable, and only
+    /// becomes a problem later when eviction cannot demote it. Without this a test
+    /// cannot tell the two apart.
+    scheduled: Mutex<Vec<(CacheKey, u32)>>,
+}
 
 impl MockDispatcher {
     /// Wrap `world`.
     pub fn new(world: NodeWorld) -> Self {
-        Self(world)
+        Self {
+            world,
+            scheduled: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Keys whose write-through was scheduled, in call order.
+    pub fn scheduled_write_throughs(&self) -> Vec<(CacheKey, u32)> {
+        self.scheduled.lock().expect("scheduled poisoned").clone()
     }
 }
 
@@ -632,7 +649,7 @@ impl IDispatcher for MockDispatcher {
     }
 
     fn promote_to_memory_tier(&self, keys: &[CacheKey]) {
-        let mut inner = self.0.lock();
+        let mut inner = self.world.lock();
         inner.promote_log.push(keys.to_vec());
         for &key in keys {
             if inner.promote_failures.contains(&key) {
@@ -743,6 +760,16 @@ impl IDispatcher for MockDispatcher {
 
     fn clear_memory_tier(&self) -> Result<usize, DispatcherError> {
         unimplemented!("mock: IDispatcher::clear_memory_tier not needed by remote-lookup tests")
+    }
+
+    /// Records the call rather than performing it: there is no background writer
+    /// here, and what a test needs to assert is that the scheduling HAPPENED.
+    fn schedule_write_through(&self, key: CacheKey, size: u32) -> Result<(), DispatcherError> {
+        self.scheduled
+            .lock()
+            .expect("scheduled poisoned")
+            .push((key, size));
+        Ok(())
     }
 
     fn flush_to_ssd(&self) -> Result<usize, DispatcherError> {
