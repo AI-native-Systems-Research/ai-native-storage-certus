@@ -9,8 +9,11 @@ counts:
   spec_not_found_in_code: 8
   input_range_mismatch: 0
   properties_excluded_from_level2: 8
+  confirmed: 0
+  withdrawn: 0
 discordances:
 - id: D-FR-020-actor.rs-1676df
+  name: Concurrency interleave
   kind: spec-not-found-in-code
   methods:
   - batch_lookup
@@ -30,6 +33,7 @@ discordances:
     spec: []
     code: []
 - id: D-FR-026-actor.rs-76d6d2
+  name: Single flight
   kind: spec-not-found-in-code
   methods:
   - batch_lookup
@@ -50,6 +54,7 @@ discordances:
     spec: []
     code: []
 - id: D-FR-006-actor.rs:576591-7a72a8
+  name: Publish on success
   kind: spec-not-found-in-code
   methods:
   - batch_lookup
@@ -72,6 +77,7 @@ discordances:
     spec: []
     code: []
 - id: D-FR-014-actor.rs:10201033-aeca03
+  name: Teardown before reclaim
   kind: spec-not-found-in-code
   methods:
   - batch_lookup
@@ -94,6 +100,7 @@ discordances:
     spec: []
     code: []
 - id: D-FR-007-server.rs-e65266
+  name: One sided rdma
   kind: spec-not-found-in-code
   methods:
   - batch_lookup
@@ -117,6 +124,7 @@ discordances:
     spec: []
     code: []
 - id: D-FR-003-actor.rs-2159d7
+  name: Zyre discovery warm
   kind: spec-not-found-in-code
   methods:
   - initialize
@@ -142,6 +150,7 @@ discordances:
     spec: []
     code: []
 - id: D-FR-013-actor.rs-aa316e
+  name: Peer exit
   kind: spec-not-found-in-code
   methods:
   - batch_lookup
@@ -162,6 +171,7 @@ discordances:
     spec: []
     code: []
 - id: D-FR-012-actor.rs-a28630
+  name: Completion criteria
   kind: spec-not-found-in-code
   methods:
   - batch_lookup
