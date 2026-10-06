@@ -340,10 +340,119 @@ out of source control:
 
 ```bash
 export CERTUS_REGISTRY="registry.example.com"   # Required: registry hostname
-export CERTUS_REPO="your-docker-repo"            # Required: repository path
-export CERTUS_IMAGE="certus"                     # Optional (default: certus)
-export CERTUS_TAG="latest"                       # Optional (default: latest)
+export CERTUS_REPO="your-docker-repo"           # Required: repository path
+export CERTUS_IMAGE="certus"                    # Optional (default: certus)
+export CERTUS_TAG="$(git rev-parse --short HEAD)"  # Optional (default: repo short SHA)
 ```
+
+Deployment knobs, read by `render-manifests.sh` (see 4.1.2) rather than by the
+image build — none of them affect the image:
+
+```bash
+export CERTUS_NAMESPACE="certus"                # Optional (default: certus)
+export CERTUS_NODE_SELECTOR_KEY="certus.ai/worker"   # Optional
+export CERTUS_NODE_SELECTOR_VALUE="true"        # Optional (default: true)
+export CERTUS_RL_GROUP="foo"                    # Optional (unset = remote-lookup off; blank is an error)
+```
+
+`CERTUS_TAG` deliberately defaults to the repo's short SHA, not `latest`: see
+4.1.3 for why a shared mutable tag breaks side-by-side deployments.
+
+### 4.1.1 Turning remote-lookup on and off
+
+The switch is a **ConfigMap**, not an image property and not a literal in the
+workload spec. `CERTUS_RL_GROUP` at render time only *seeds* its default; the
+pod spec references the key:
+
+```yaml
+env:
+- name: CERTUS_RL_GROUP
+  valueFrom:
+    configMapKeyRef:
+      name: certus-config
+      key: rl-group
+      optional: true
+```
+
+| `rl-group` | effect |
+| --- | --- |
+| key absent, or ConfigMap absent | each instance forms its own isolated single-node group — remote-lookup **off**. The default, and what this deployment did before the option existed. |
+| a name, same across instances | they join that zyre group, so a local miss can be filled from a peer — **on**. |
+| present but **blank** | **startup error.** Not a synonym for absent. |
+
+The third row is deliberate. A blank value can only come from a broken template
+substitution, a config pipeline that yielded nothing, or a hand-edit that cleared
+the value but left the key — and in all of those the intent was to *join* a
+cluster. Accepting blank as "off" would turn a remote-lookup-ON run into an OFF
+run, and zero remote hits reads exactly like "remote-lookup did not help": the
+one wrong answer that is hard to notice. So it fails loudly instead, and the
+message says to omit the key to mean off on purpose.
+
+Because "off" is expressed by *absence*, it rests on the pod spec's
+`optional: true` rather than on how the server treats a blank value — so it holds
+even against an older certus image.
+
+Flip it live without re-rendering or rebuilding:
+
+```bash
+kubectl -n certus edit configmap certus-config        # set or clear rl-group
+kubectl -n certus rollout restart daemonset -l app=certus-server
+```
+
+The restart is required: a ConfigMap consumed via `env` is injected at pod
+creation, so it does not propagate to running pods. That is desirable here — you
+want a deliberate restart between two measurement runs, not a rollout landing
+mid-run.
+
+The image is built `full-remote` either way, so it always carries zyre and the
+RDMA initiator/responder. Flipping this changes cluster membership and nothing
+else, so an A/B pair differs only in remote-lookup rather than in which binary
+is running. Cross-instance fill only pays off when a parallel workload is spread
+across nodes, NUMA domains and GPUs; for a single instance there are no peers
+worth asking, which is why off is the default.
+
+### 4.1.2 Rendering manifests without building an image
+
+`deploy/k8s/render-manifests.sh` does only the template substitution:
+
+```bash
+CERTUS_REGISTRY=... CERTUS_REPO=... deploy/k8s/render-manifests.sh
+```
+
+`build-image-and-push.sh` calls it, so the two cannot drift. Use it directly to
+re-stamp a namespace, node selector, image tag or rl-group default without
+coming back through a ~30GB image build.
+
+### 4.1.3 Running more than one deployment on a cluster
+
+Each deployment gets its own namespace, its own value of the node-selector
+label, and its own image — so two people can test their own certus builds side
+by side:
+
+```bash
+# the nodes you are testing on
+kubectl label node <your-node-a> <your-node-b> certus.ai/worker=foo --overwrite
+CERTUS_NAMESPACE=certus-foo CERTUS_NODE_SELECTOR_VALUE=foo \
+CERTUS_RL_GROUP=foo CERTUS_IMAGE=certus CERTUS_TAG=$(git rev-parse --short HEAD) \
+  deploy/k8s/build-image-and-push.sh
+
+# a colleague's nodes, their own build, their own group
+kubectl label node <their-node-a> <their-node-b> certus.ai/worker=bar --overwrite
+CERTUS_NAMESPACE=certus-bar CERTUS_NODE_SELECTOR_VALUE=bar \
+CERTUS_RL_GROUP=bar CERTUS_IMAGE=certus CERTUS_TAG=their-sha \
+  deploy/k8s/build-image-and-push.sh
+```
+
+`CERTUS_TAG` defaults to the repo's short SHA rather than `latest` precisely for
+this case: two people pushing to one repo must not share a mutable tag, or one
+overwrites the other and a node can pull the wrong build.
+
+**Node sets must be disjoint**, and that is forced by hardware rather than
+convention: the NVMe drives are bound to vfio exclusively, hugepages are
+consumed per instance, and the shm mailbox paths (`/dev/shm/certus-shmq-numa*`)
+and metrics ports (9400/9401) are fixed. Two deployments on one node would
+collide on all four. Partitioning by the label *value* keeps that explicit —
+a node carries exactly one deployment's value.
 
 ### 4.2 Build the container image
 
