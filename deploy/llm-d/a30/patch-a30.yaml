@@ -8,6 +8,13 @@ spec:
   # 3 replicas == exactly the 3 A30s of the example cluster (a two-GPU node
   # plus a one-GPU node). Size this to the GPUs you actually have.
   replicas: 3
+  # vLLM's startup probe allows 60 min (120 x 30s) because a cold start downloads
+  # ~16Gi of weights and compiles CUDA graphs. progressDeadlineSeconds defaults to
+  # 600, so a single slow pod -- or any stall such as a failing image pull -- marks
+  # the Deployment ProgressDeadlineExceeded and makes `kubectl rollout status` exit
+  # non-zero even though the rollout is still advancing. Match the probe budget so
+  # the watcher agrees with reality.
+  progressDeadlineSeconds: 3900
   # No spare GPU exists for a surge pod, so a rolling update must free one before
   # claiming one. With the default maxSurge 25% the rollout deadlocks: the old
   # ReplicaSet holds every GPU, never goes Ready, and so is never scaled down.
