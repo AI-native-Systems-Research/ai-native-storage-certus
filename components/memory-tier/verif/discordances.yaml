@@ -9,8 +9,11 @@ counts:
   spec_not_found_in_code: 22
   input_range_mismatch: 0
   properties_excluded_from_level2: 44
+  confirmed: 0
+  withdrawn: 0
 discordances:
 - id: D-US-3-lib.rs:271-9b3c9c
+  name: Init error double init
   kind: spec-and-code-differ
   methods:
   - initialize
@@ -40,6 +43,7 @@ discordances:
     code:
     - MT-INITIALIZE-ERR-ALREADY-INITIALIZED
 - id: D-FR-024-lib.rs:266-8a9610
+  name: Init error no eviction policy
   kind: spec-and-code-differ
   methods:
   - initialize
@@ -64,6 +68,7 @@ discordances:
     code:
     - MT-INITIALIZE-ERR-POLICY-MISSING
 - id: D-FR-004-lib.rs:377-444f51
+  name: Insert alignment
   kind: spec-not-found-in-code
   methods:
   - insert
@@ -87,6 +92,7 @@ discordances:
     - MT-INSERT-POST-ALIGNMENT
     code: []
 - id: D-US-1-lib.rs:360-31aa9f
+  name: Insert other entries
   kind: spec-not-found-in-code
   methods:
   - insert
@@ -111,6 +117,7 @@ discordances:
     - MT-INSERT-FRAME-OTHER-ENTRIES
     code: []
 - id: D-FR-011-lib.rs:383-81dfd5
+  name: Get error miss
   kind: spec-and-code-differ
   methods:
   - get
@@ -138,6 +145,7 @@ discordances:
     code:
     - MT-GET-ERR-MISS
 - id: D-FR-012-lib.rs:413-86613f
+  name: Peek precondition
   kind: spec-not-found-in-code
   methods:
   - peek
@@ -157,6 +165,7 @@ discordances:
     - MT-PEEK-PRE
     code: []
 - id: D-FR-012-lib.rs:413419-6899ba
+  name: Peek error miss
   kind: spec-and-code-differ
   methods:
   - peek
@@ -183,6 +192,7 @@ discordances:
     code:
     - MT-PEEK-ERR-MISS
 - id: D-FR-006-lib.rs:413421-384265
+  name: Peek pool state
   kind: spec-not-found-in-code
   methods:
   - peek
@@ -205,6 +215,7 @@ discordances:
     - MT-PEEK-FRAME-POOL-STATE
     code: []
 - id: D-US-2-lib.rs:456458-c70362
+  name: Evict next entry gone and space freed
   kind: spec-and-code-differ
   methods:
   - evict_next
@@ -243,6 +254,7 @@ discordances:
     code:
     - MT-EVICT-NEXT-POST-FREES-SLOT
 - id: D-FR-013-lib.rs:456462-1a89b4
+  name: Evict next untracked
   kind: spec-and-code-differ
   methods:
   - evict_next
@@ -273,6 +285,7 @@ discordances:
     code:
     - MT-EVICT-NEXT-DOES-NOT-UNTRACK
 - id: D-US-2-lib.rs:441-546c41
+  name: Evict next lru order
   kind: spec-not-found-in-code
   methods:
   - evict_next
@@ -298,6 +311,7 @@ discordances:
     - MT-EVICT-NEXT-POST-LRU-ORDER
     code: []
 - id: D-US-2-lib.rs:436-399ab7
+  name: Evict next error no victim
   kind: spec-and-code-differ
   methods:
   - evict_next
@@ -329,6 +343,7 @@ discordances:
     code:
     - MT-EVICT-NEXT-ERR-NO-VICTIM
 - id: D-FR-013-lib.rs:436464-36a974
+  name: Evict next no rotation state
   kind: spec-not-found-in-code
   methods:
   - evict_next
@@ -349,6 +364,7 @@ discordances:
     - MT-EVICT-NEXT-FRAME-NO-ROTATION-STATE
     code: []
 - id: D-FR-014-lib.rs:468-5ec7b3
+  name: Evict for key precondition
   kind: spec-not-found-in-code
   methods:
   - evict_next_for_key
@@ -369,6 +385,7 @@ discordances:
     - MT-EVICT-FOR-KEY-PRE
     code: []
 - id: D-FR-014-lib.rs:468-0c1153
+  name: Evict for key space global
   kind: spec-not-found-in-code
   methods:
   - evict_next_for_key
@@ -390,6 +407,7 @@ discordances:
     - MT-EVICT-FOR-KEY-POST-SPACE-GLOBAL
     code: []
 - id: D-FR-014-lib.rs:468-5b3866
+  name: Evict for key key ignored
   kind: spec-and-code-differ
   methods:
   - evict_next_for_key
@@ -412,6 +430,7 @@ discordances:
     code:
     - MT-EVICT-NEXT-FOR-KEY-MAY-EVICT-ARGUMENT
 - id: D-FR-014-lib.rs:468-18ae23
+  name: Evict for key error no victim
   kind: spec-not-found-in-code
   methods:
   - evict_next_for_key
@@ -434,6 +453,7 @@ discordances:
     - MT-EVICT-FOR-KEY-ERR-NOT-INITIALIZED
     code: []
 - id: D-FR-021-lib.rs:424-91355b
+  name: Oldest keys precondition
   kind: spec-not-found-in-code
   methods:
   - oldest_keys
@@ -453,6 +473,7 @@ discordances:
     - MT-OLDEST-KEYS-PRE
     code: []
 - id: D-FR-021-lib.rs:431-56bb55
+  name: Oldest keys live membership
   kind: spec-and-code-differ
   methods:
   - oldest_keys
@@ -480,6 +501,7 @@ discordances:
     code:
     - MT-OLDEST-KEYS-UNFILTERED
 - id: D-FR-016-lib.rs:508-609b4e
+  name: Touch precondition
   kind: spec-not-found-in-code
   methods:
   - touch
@@ -499,6 +521,7 @@ discordances:
     - MT-TOUCH-PRE
     code: []
 - id: D-FR-016-lib.rs:508-0ff7d5
+  name: Touch silent noop
   kind: spec-and-code-differ
   methods:
   - touch
@@ -527,6 +550,7 @@ discordances:
     code:
     - MT-TOUCH-SILENT-NOOP
 - id: D-US-6-lib.rs:520-a32548
+  name: Batch touch precondition
   kind: spec-not-found-in-code
   methods:
   - batch_touch
@@ -546,6 +570,7 @@ discordances:
     - MT-BATCH-TOUCH-PRE
     code: []
 - id: D-US-1-lib.rs:557-54dafa
+  name: Contains precondition
   kind: spec-not-found-in-code
   methods:
   - contains
@@ -566,6 +591,7 @@ discordances:
     - MT-CONTAINS-PRE
     code: []
 - id: D-US-5-lib.rs:567-6bdc69
+  name: Capacity precondition
   kind: spec-not-found-in-code
   methods:
   - capacity
@@ -585,6 +611,7 @@ discordances:
     - MT-CAPACITY-PRE
     code: []
 - id: D-FR-023-lib.rs:568569-fcaa65
+  name: Capacity error not initialized
   kind: spec-and-code-differ
   methods:
   - capacity
@@ -610,6 +637,7 @@ discordances:
     code:
     - MT-CAPACITY-UNINITIALIZED
 - id: D-US-5-lib.rs:576-c452fd
+  name: Used precondition
   kind: spec-not-found-in-code
   methods:
   - used
@@ -628,6 +656,7 @@ discordances:
     - MT-USED-PRE
     code: []
 - id: D-FR-022-lib.rs:585-270fa4
+  name: Pool info precondition
   kind: spec-not-found-in-code
   methods:
   - pool_info
@@ -648,6 +677,7 @@ discordances:
     - MT-POOL-INFO-PRE
     code: []
 - id: D-FR-020-lib.rs:610-1cdebd
+  name: Is dma capable precondition
   kind: spec-not-found-in-code
   methods:
   - is_dma_capable
@@ -667,6 +697,7 @@ discordances:
     - MT-IS-DMA-CAPABLE-PRE
     code: []
 - id: D-FR-023-lib.rs:610612-03b2a2
+  name: Is dma capable no init guard
   kind: spec-and-code-differ
   methods:
   - is_dma_capable
@@ -694,6 +725,7 @@ discordances:
     code:
     - MT-IS-DMA-CAPABLE-NO-INIT-GUARD
 - id: D-FR-018-lib.rs:605-4ed523
+  name: Clear pool memory
   kind: spec-and-code-differ
   methods:
   - clear
@@ -725,6 +757,7 @@ discordances:
     code:
     - MT-CLEAR-CAPACITY-SOURCE
 - id: D-US-7-lib.rs:615-f7a48d
+  name: Telemetry snapshot precondition
   kind: spec-not-found-in-code
   methods:
   - telemetry_snapshot
@@ -745,6 +778,7 @@ discordances:
     - MT-TELEMETRY-SNAPSHOT-PRE
     code: []
 - id: D-FR-027-lib.rs:460-e90984
+  name: Telemetry eviction count
   kind: spec-and-code-differ
   methods:
   - telemetry_snapshot
@@ -772,6 +806,7 @@ discordances:
     code:
     - MT-EVICT-NEXT-TELEMETRY
 - id: D-FR-027-lib.rs:619620-a6f57a
+  name: Telemetry no contention when uncontended
   kind: spec-not-found-in-code
   methods:
   - telemetry_snapshot
@@ -791,6 +826,7 @@ discordances:
     - MT-TELEMETRY-SNAPSHOT-POST-NO-CONTENTION-WHEN-UNCONTENDED
     code: []
 - id: D-FR-027-lib.rs:619-9ddd97
+  name: Telemetry counters monotonic
   kind: spec-and-code-differ
   methods:
   - telemetry_snapshot
@@ -823,6 +859,7 @@ discordances:
     code:
     - MT-TELEMETRY-COUNTERS-MONOTONIC
 - id: D-FR-029-lib.rs:180186-f76665
+  name: Free capacity
   kind: spec-and-code-differ
   methods:
   - free_capacity
@@ -850,6 +887,7 @@ discordances:
     code:
     - MT-FREE-CAPACITY-POST
 - id: D-FR-028-lib.rs:174175-510a90
+  name: Reset telemetry
   kind: spec-and-code-differ
   methods:
   - reset_telemetry
@@ -878,6 +916,7 @@ discordances:
     code:
     - MT-RESET-TELEMETRY-POST
 - id: D-FR-004-allocator.rs:4253-9d82b6
+  name: Four kib alignment
   kind: spec-and-code-differ
   methods:
   - insert
@@ -909,6 +948,7 @@ discordances:
     code:
     - MT-INV-USED-IS-ALIGNED
 - id: D-FR-004-lib.rs:371-cf2666
+  name: Size accounting
   kind: spec-and-code-differ
   methods:
   - insert
@@ -940,6 +980,7 @@ discordances:
     code:
     - MT-USED-ROUNDING-DRIFT
 - id: D-US-1-lib.rs:563-6f2914
+  name: Observer consistency
   kind: spec-not-found-in-code
   methods:
   - contains
@@ -966,6 +1007,7 @@ discordances:
     - MT-INV-OBSERVER-CONSISTENCY
     code: []
 - id: D-FR-022-lib.rs:311-2db46d
+  name: Pool base stable
   kind: spec-and-code-differ
   methods:
   - initialize
@@ -1000,6 +1042,7 @@ discordances:
     code:
     - MT-INV-CAPACITY-EQUALS-POOL-SIZE
 - id: D-FR-011-lib.rs:377-4ea7a4
+  name: Pointer stable until freed
   kind: spec-and-code-differ
   methods:
   - insert
@@ -1045,6 +1088,7 @@ discordances:
     - MT-INV-OFFSET-IS-THE-ONLY-IDENTITY
     - MT-CLEAR-INVALIDATES-ALL-POINTERS
 - id: D-NFR-007-lib.rs:262-6f525d
+  name: Default pool size never applied
   kind: spec-not-found-in-code
   methods:
   - initialize
@@ -1065,6 +1109,7 @@ discordances:
     - MT-INV-DEFAULT-POOL-SIZE-NEVER-APPLIED
     code: []
 - id: D-FR-013-lib.rs:441-c90d91
+  name: No internal victim selection state
   kind: spec-not-found-in-code
   methods:
   - evict_next
@@ -1091,6 +1136,7 @@ discordances:
     - MT-INV-NO-INTERNAL-VICTIM-SELECTION-STATE
     code: []
 - id: D-SC-3-lib.rs:333-2fb813
+  name: Concurrent structural integrity
   kind: spec-and-code-differ
   methods:
   - initialize
