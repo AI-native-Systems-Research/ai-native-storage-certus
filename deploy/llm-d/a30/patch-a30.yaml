@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+# Already namePrefix'd: this overlay consumes ../base as a resource, so base has
+# applied its `namePrefix: optimized-baseline-nvidia-gpu-vllm-` by now.
+metadata:
+  name: optimized-baseline-nvidia-gpu-vllm-decode
+spec:
+  # 3 replicas == exactly the 3 A30s of the example cluster (a two-GPU node
+  # plus a one-GPU node). Size this to the GPUs you actually have.
+  replicas: 3
+  # No spare GPU exists for a surge pod, so a rolling update must free one before
+  # claiming one. With the default maxSurge 25% the rollout deadlocks: the old
+  # ReplicaSet holds every GPU, never goes Ready, and so is never scaled down.
+  strategy:
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  # Set here rather than via the label transformer because it is immutable after
+  # creation -- it must keep matching the live Deployment exactly.
+  selector:
+    matchLabels:
+      llm-d.ai/model: Qwen3-8B
+  template:
+    spec:
+      containers:
+        - name: modelserver
+          # Lists without a merge key are replaced wholesale, so this is the
+          # complete arg vector, not an addition to base's.
+          args:
+            - "Qwen/Qwen3-8B"
+            - "--disable-access-log-for-endpoints=/health,/metrics,/v1/models"
+            - "--tensor-parallel-size=1"
+            - "--gpu-memory-utilization=0.90"
+            # An A30 is 24Gi: ~15.3Gi of bf16 weights plus activations and CUDA
+            # graphs leave only ~4.11Gi for KV cache, while Qwen3-8B advertises a
+            # 40960 context needing 5.62Gi -- vLLM refuses to start. 16384 needs
+            # ~2.25Gi and yields "Maximum concurrency ... 1.83x".
+            - "--max-model-len=16384"
+          env:
+            # Qwen3-8B is ungated, so drop base's dependency on the
+            # llm-d-hf-token secret entirely. Omitting it is not enough -- env
+            # merges by name, so the entry has to be deleted explicitly.
+            - name: HF_TOKEN
+              $patch: delete
+            # This image has HOME=/root and sets no HF_HOME, so HuggingFace
+            # writes ~16Gi of weights to /root/.cache on the container's
+            # writable layer -- under containerd's root on /home, which is
+            # kubelet's imagefs. Two pods on one node crossed
+            # imagefs.available<15% and were evicted mid-download. Redirect both
+            # caches into the shared hostPath below. (base's emptyDirs at
+            # /.cache, /.triton and /.config are dead -- 0 bytes -- for the same
+            # HOME=/root reason.)
+            - name: HF_HOME
+              value: /.cache/huggingface
+            - name: VLLM_CACHE_ROOT
+              value: /.cache/vllm
+          resources:
+            limits:
+              cpu: '8'
+              memory: 96Gi
+              nvidia.com/gpu: 1
+            requests:
+              cpu: '4'
+              memory: 64Gi
+              nvidia.com/gpu: 1
+          volumeMounts:
+            # Merge key is mountPath, so this repoints /.cache at model-cache.
+            - mountPath: /.cache
+              name: model-cache
+      volumes:
+        # base mounts this as an emptyDir. `$patch: replace` on a list element
+        # does NOT work here -- it silently keeps the emptyDir and drops the
+        # hostPath, with no error. So delete base's volume and introduce a
+        # differently-named one. The new name also describes it better: it holds
+        # HF weights and the vLLM compile cache, not just a torch cache.
+        - name: torch-compile-cache
+          $patch: delete
+        # One shared ~16Gi copy per node instead of one per pod, and it survives
+        # pod restarts, so a restart no longer re-downloads the weights.
+        - name: model-cache
+          hostPath:
+            path: /home/llm-d-cache
+            type: DirectoryOrCreate

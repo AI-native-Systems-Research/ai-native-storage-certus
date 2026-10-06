@@ -5,18 +5,19 @@ points its vLLM modelservers at certus as a KV-cache offload tier.
 
 **This repo holds the sources; the llm-d checkout is a disposable build area.**
 Nothing here is pushed to the llm-d project — the tuning is site-specific (A30
-memory sizing, this cluster's NUMA layout, our registry). `install.sh`
-regenerates the overlay from llm-d's own `base` on every run, so a stale
-hand-edit inside the checkout can never survive.
+memory sizing, this cluster's NUMA layout, our registry). The checkout is pinned
+to `llm-d.ref` and re-materialized on every run, so a stale hand-edit inside it
+cannot survive.
 
 ## Layout
 
 ```
 deploy/llm-d/
   install.sh                  end-to-end deploy (was ~/llm-d-install.sh)
+  llm-d.ref                   pinned upstream llm-d revision
   a30/
-    edit-patch.ex             ex script: retunes base/patch-vllm.yaml for A30
-    edit-kustomization.ex     ex script: fixes the llm-d.ai/model label
+    kustomization.yaml        overlay on llm-d's ../base
+    patch-a30.yaml            A30 retuning (replicas, args, resources, cache)
   a30-certus/
     kustomization.yaml        overlay layered on ../a30 (apply-time)
     patch-certus.yaml         hostIPC, entrypoint, cache env, mailbox mount
@@ -25,14 +26,36 @@ deploy/llm-d/
     build-image-and-push.sh   build/push that image
 ```
 
-`a30/` and `a30-certus/` here are **sources**. `install.sh` materializes them
-into `<llm-d>/guides/optimized-baseline/modelserver/gpu/vllm/` as `a30/` and
-`a30-certus/`. The certus overlay consumes `../a30` as a kustomize resource, so
-it must sit beside the generated overlay — which is why it is copied in rather
-than applied from here.
+`a30/` and `a30-certus/` here are **sources**. `install.sh` copies them into
+`<llm-d>/guides/optimized-baseline/modelserver/gpu/vllm/`, because `a30` consumes
+llm-d's `../base` and `a30-certus` consumes `../a30` — kustomize will not resolve
+a relative resource outside its own root, so the overlays have to live next to
+what they extend. Do not hand-edit them there; change the sources here.
 
-Do not hand-edit the generated overlays. Change the `.ex` scripts (A30 tuning)
-or `a30-certus/*.yaml` (certus wiring) in this repo instead.
+Both are ordinary kustomize overlays. An earlier version instead copied `base/*`
+and replayed two `ex` scripts over it, which failed **silently** whenever
+upstream changed a line a script matched on: the substitution did not fire and
+the overlay stayed byte-identical to base, with nothing to notice. That happened
+once already. Now upstream changes flow through, and structural breakage surfaces
+at the `kubectl kustomize` step.
+
+Two kustomize details worth knowing if you edit `patch-a30.yaml`:
+
+- `env` merges by name, so dropping base's `HF_TOKEN` entry needs an explicit
+  `$patch: delete` — omitting it is not enough.
+- `$patch: replace` on a **list element** does not work for swapping a volume's
+  source. It silently keeps base's `emptyDir` and drops the new `hostPath`, with
+  no error. Hence base's `torch-compile-cache` is deleted and a
+  differently-named `model-cache` added, with the `/.cache` mount repointed by
+  its `mountPath` merge key.
+
+## Upstream pinning
+
+`llm-d.ref` records the llm-d revision the overlay is known to apply against;
+`install.sh` fetches and checks it out detached. Upstream changes to llm-d's base
+manifests therefore reach us only through an explicit bump of that file, never
+silently on the next deploy. After a bump, re-run `install.sh` — the
+`kubectl kustomize` step is where a base restructuring will show up.
 
 ## Usage
 
@@ -43,7 +66,7 @@ WITH_CERTUS=1 deploy/llm-d/install.sh   # + certus KV-cache offload
 
 ## What the A30 tuning does
 
-llm-d's `base` targets Qwen3-32B on 2 GPUs. `edit-patch.ex` retunes it for one
+llm-d's `base` targets Qwen3-32B on 2 GPUs. `patch-a30.yaml` retunes it for one
 A30: model `Qwen3-8B`, `--tensor-parallel-size=1`, `nvidia.com/gpu: 1`,
 `replicas: 3`, halved cpu/memory, and three changes worth calling out:
 
