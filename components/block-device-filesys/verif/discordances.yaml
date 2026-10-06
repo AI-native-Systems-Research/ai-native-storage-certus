@@ -9,8 +9,11 @@ counts:
   spec_not_found_in_code: 0
   input_range_mismatch: 0
   properties_excluded_from_level2: 1
+  confirmed: 0
+  withdrawn: 0
 discordances:
 - id: D-FR-021-lib.rs-7d0205
+  name: Maxtransfer
   kind: spec-and-code-differ
   methods:
   - max_transfer_size
