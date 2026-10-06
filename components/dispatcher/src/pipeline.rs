@@ -756,11 +756,6 @@ pub struct DriveWork<'a> {
 /// NVMe segment completes, the fused H2D DMA is issued immediately —
 /// preserving the NVMe/H2D overlap that is load-bearing.
 ///
-/// Completions are reaped continuously: H2Ds queue on the pipe streams
-/// without any intermediate host sync, and one final dual sync covers the
-/// whole batch before returning. This is safe because each object's H2D
-/// source is its own memory-tier slot, so there is no buffer reuse to guard.
-///
 /// Returns `Vec<Vec<Result<(), DispatcherError>>>` indexed by drive, then
 /// by job index within that drive.
 ///
@@ -934,7 +929,6 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
 
     let mut t_recv_ns: u64 = 0;
     let mut t_gpu_ns: u64 = 0;
-    // Covers only the final dual sync; the poll loop never blocks on the GPU.
     let mut t_sync_ns: u64 = 0;
 
     // Multiplexed completion loop: poll all drives' completion_rx channels.
@@ -1045,6 +1039,13 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
                     t_gpu_ns += tg.elapsed().as_nanos() as u64;
 
                     stream_idx += 1;
+
+                    if stream_idx % PIPELINE_RING_SIZE == 0 {
+                        let ts = std::time::Instant::now();
+                        let _ = gpu.stream_synchronize(streams[0]);
+                        let _ = gpu.stream_synchronize(streams[1]);
+                        t_sync_ns += ts.elapsed().as_nanos() as u64;
+                    }
                 }
             }
             Ok(Completion::Timeout { handle }) => {

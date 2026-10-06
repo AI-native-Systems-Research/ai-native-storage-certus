@@ -78,7 +78,6 @@ OP_REMOVE = 12
 OP_CLEAR_MEMORY_TIER = 13
 OP_FLUSH_TO_SSD = 14
 OP_GET_IO_STATS = 15
-OP_TOUCH_CHECK = 16
 
 STATUS_OK = 0
 
@@ -132,29 +131,17 @@ def _round_up_cl(x: int) -> int:
 # ── pure encode/decode helpers (server-independent; unit-testable) ───────────
 
 
-_U64_MASK = 0xFFFFFFFFFFFFFFFF
-
-
 def encode_keys(keys: Sequence[int]) -> bytes:
     """`{ n:u32, [key:u64]*n }` — Check/Commit/Abort/Unpin request."""
-    # One bulk pack for the whole list. An out-of-range int makes struct raise,
-    # so retry with the keys masked to u64 — same bytes as a per-key mask.
-    n = len(keys)
-    try:
-        return struct.pack(f"<I{n}Q", n, *keys)
-    except struct.error:
-        return struct.pack(f"<I{n}Q", n, *[k & _U64_MASK for k in keys])
+    out = bytearray(struct.pack("<I", len(keys)))
+    for k in keys:
+        out += struct.pack("<Q", k & 0xFFFFFFFFFFFFFFFF)
+    return bytes(out)
 
 
 def encode_promote_keys(promote: bool, keys: Sequence[int]) -> bytes:
     """`{ promote:u8, n:u32, [key:u64]*n }` — Touch/Pin request."""
-    # Single bulk pack (no encode_keys + concat); same masked retry, same bytes.
-    n = len(keys)
-    p = 1 if promote else 0
-    try:
-        return struct.pack(f"<BI{n}Q", p, n, *keys)
-    except struct.error:
-        return struct.pack(f"<BI{n}Q", p, n, *[k & _U64_MASK for k in keys])
+    return struct.pack("<B", 1 if promote else 0) + encode_keys(keys)
 
 
 def encode_reserve(entries: Sequence[tuple[int, int, int]]) -> bytes:
@@ -261,12 +248,7 @@ def decode_ok_flags(payload: bytes, n: int) -> list[bool]:
 def decode_states(payload: bytes, n: int) -> list[int]:
     """`[state:u8]*n` Check response → list of raw state ints (missing bytes
     default ``CHECK_MISS``). Values are 0=miss, 1=resident, 2=pending."""
-    # Bulk byte->int conversion; extra bytes are ignored, a short tail pads MISS.
-    states = list(payload[:n])
-    short = n - len(states)
-    if short > 0:
-        states.extend([CHECK_MISS] * short)
-    return states
+    return [payload[i] if i < len(payload) else CHECK_MISS for i in range(n)]
 
 
 def decode_take_events(payload: bytes) -> tuple[list[tuple[int, int]], int]:
@@ -690,17 +672,6 @@ class Ring:
             return []
         return decode_ok_flags(
             self._dispatch(OP_TOUCH, encode_promote_keys(promote, keys)), len(keys)
-        )
-
-    def touch_states(self, keys: Sequence[int], promote: bool = False) -> list[int]:
-        """Fused Touch + tri-state Check in one round trip: touches every key and
-        returns its ``CHECK_*`` state (a failed touch reads as ``CHECK_MISS``)."""
-        keys = list(keys)
-        if not keys:
-            return []
-        return decode_states(
-            self._dispatch(OP_TOUCH_CHECK, encode_promote_keys(promote, keys)),
-            len(keys),
         )
 
     def reserve(self, entries: Sequence[tuple[int, int, int]]) -> list[bool]:

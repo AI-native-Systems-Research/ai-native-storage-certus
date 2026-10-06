@@ -81,13 +81,14 @@ version_compatibility:
 
 known_bugs:
   key_collision:
-    severity: FIXED
-    location: "manager.py:38 (_key_to_u64)"
+    severity: CRITICAL
+    location: "manager.py:37 (_key_to_u64)"
     description: |
-      FIXED. _key_to_u64 now hashes the complete OffloadKey with BLAKE2b
-      (8-byte digest) instead of truncating to key[:8]. The old truncation
-      discarded the group_idx and 24 bytes of the hash, aliasing distinct
-      blocks onto one u64. Fixed in the evolve-latency branch.
+      _key_to_u64 uses only the first 8 bytes of OffloadKey, discarding
+      the group_idx (last 4 bytes) entirely. Keys from different groups
+      that share the first 8 hash bytes will collide deterministically.
+    impact: "Data corruption — loading block from wrong group"
+    fix: "Hash the complete OffloadKey (including group_idx) into the u64"
 
   invalid_eviction_events:
     severity: MEDIUM
