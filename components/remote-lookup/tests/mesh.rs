@@ -13,6 +13,7 @@
 //! discovery barrier ([`TestMesh::await_discovery`]) plus, in later protocol
 //! tests, app-level reply delays scripted into each node's mock server.
 
+use std::collections::HashSet;
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
@@ -44,12 +45,39 @@ fn mesh_lock() -> MutexGuard<'static, ()> {
 
 /// Grab an ephemeral TCP port by binding to `:0` and immediately releasing it.
 /// There is a small TOCTOU window before zyre rebinds it, acceptable for tests.
+/// Grab an ephemeral TCP port from the OS, never handing out the same one twice
+/// in this process.
+///
+/// The listener is closed before this returns, so the port is free again by the
+/// time a caller binds it. That matters here: the gossip hub's port is resolved
+/// (and released) at mesh setup and nothing binds it until node 0 is
+/// initialized, so a later call could legitimately be handed the SAME port --
+/// node 0 then tries to bind both the hub and its own node endpoint to it and
+/// fails with "failed to bind node endpoint 'tcp://127.0.0.1:<port>'". Tracking
+/// what has been issued closes that window deterministically.
+///
+/// A port can still be taken by an unrelated process on the build host in the
+/// gap between the probe and the real bind; that is inherently racy and would
+/// need a retry at the bind site. This fixes the self-collision, which is the
+/// one the suite can actually cause on its own.
 fn free_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0")
-        .expect("bind ephemeral port")
-        .local_addr()
-        .expect("local_addr")
-        .port()
+    static ISSUED: OnceLock<Mutex<HashSet<u16>>> = OnceLock::new();
+    let issued = ISSUED.get_or_init(|| Mutex::new(HashSet::new()));
+    for _ in 0..128 {
+        let port = TcpListener::bind("127.0.0.1:0")
+            .expect("bind ephemeral port")
+            .local_addr()
+            .expect("local_addr")
+            .port();
+        if issued
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(port)
+        {
+            return port;
+        }
+    }
+    panic!("no unissued ephemeral port after 128 attempts");
 }
 
 /// An in-process mesh of `remote-lookup` instances wired to one real zyre
