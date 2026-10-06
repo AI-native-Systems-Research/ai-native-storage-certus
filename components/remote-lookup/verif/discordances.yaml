@@ -7,6 +7,7 @@ counts:
   discordances: 8
   spec_and_code_differ: 0
   spec_not_found_in_code: 8
+  input_range_mismatch: 0
   properties_excluded_from_level2: 8
 discordances:
 - id: D-FR-020-actor.rs-1676df
@@ -16,8 +17,7 @@ discordances:
   spec_says: The actor supports multiple concurrent in-flight operations, each keyed by a unique op_id, interleaving
     event handling across them so that a slow or timing-out operation does not block the progress or completion
     of the others.
-  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
-    decides.
+  code_does: Nothing found.
   spec_pointers:
   - FR-020
   - FR-030
@@ -37,8 +37,7 @@ discordances:
     in-flight remote fetch through the actor per-key in-flight index: the later operation attaches as a follower
     and waits for the one fill rather than issuing a duplicate remote fetch, and the follower then observes the
     published value or the not-found result.'
-  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
-    decides.
+  code_does: Nothing found.
   spec_pointers:
   - FR-026
   - SC-008
@@ -59,8 +58,7 @@ discordances:
     the slot is discarded (memory_tier.remove) and no dispatch-map entry is ever created. A racing create_memory_tier_entry
     that returns AlreadyExists counts as success only when the resident entry size equals the slot length, and a
     size mismatch discards the private slot without evicting or overwriting the resident entry.
-  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
-    decides.
+  code_does: Nothing found.
   spec_pointers:
   - FR-006
   - FR-008
@@ -81,8 +79,7 @@ discordances:
     the actor issues a responder Disconnect for that peer and blocks (bounded by the fixed DISCONNECT_ACK_TIMEOUT)
     for the DisconnectAck, whose receipt guarantees the peer QP is in ERROR state so no late one-sided write can
     land in the reclaimed slot.
-  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
-    decides.
+  code_does: Nothing found.
   spec_pointers:
   - FR-014
   - SC-005
@@ -104,8 +101,7 @@ discordances:
     to IRemoteLookupRdmaInitiator::push_async carrying each landing RemoteRegion, and each PushStatus is mapped
     to the correct RDMA_STATUS code (Success->Success, UnableToConnect->UnableToConnect, KeyNotFound/SizeMismatch->KeyNoLongerAvailable)
     whispered back per key.'
-  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
-    decides.
+  code_does: Nothing found.
   spec_pointers:
   - FR-007
   - FR-016
@@ -130,8 +126,7 @@ discordances:
     SHOUT whose peer id equals its own uuid (defensive self-filter), and on discovering a peer that advertises a
     responder endpoint proactively warms an RDMA connection off the poll loop so the cold rdma_cm connect happens
     at discovery time rather than inline on the first serve.
-  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
-    decides.
+  code_does: Nothing found.
   spec_pointers:
   - FR-003
   - FR-021
@@ -153,8 +148,7 @@ discordances:
   spec_says: When a zyre Exit for a peer arrives during an operation, the actor deletes that peer's cached reply,
     returns any of its in-progress keys to the unsatisfied set, and re-evaluates the completion criteria, so a departed
     peer cannot leave the operation hanging past the point its remaining criteria are met.
-  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
-    decides.
+  code_does: Nothing found.
   spec_pointers:
   - FR-013
   - US7-AS1
@@ -175,8 +169,7 @@ discordances:
     key and no further replies are expected; the retry-round cap is reached; or the operation deadline (op_deadline)
     expires. On deadline expiry with no peer reply all keys are reported Err(NotFound) and the operation completes
     without hanging.'
-  code_does: The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test
-    decides.
+  code_does: Nothing found.
   spec_pointers:
   - FR-012
   - US6
