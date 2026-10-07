@@ -271,6 +271,17 @@ pub fn serve(
                                 reserve_timeout.as_secs()
                             ));
                         }
+                        // Mappings whose grace period elapsed. Without this the
+                        // sweep only ran as a side effect of the next op, so a
+                        // client's last mappings stayed open forever once it went
+                        // quiet or died -- holding the GPU memory its KV cache
+                        // occupied and starving the replacement pod.
+                        let m = tr.reap_expired_ipc_mappings();
+                        if m > 0 {
+                            logger.info(&format!(
+                                "shmq: closed {m} expired CUDA-IPC mapping(s)"
+                            ));
+                        }
                     }
                 }
             })
