@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_dm_recover_extent": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_dm_recover_extent": { "prover": "alt-ergo", "time": 0.036 },
       "vc_verify_dm_recover_extent_already_exists": {
         "prover": "z3",
         "time": 0.015

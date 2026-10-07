@@ -5,7 +5,7 @@
       "vc_dm_take_read": { "prover": "alt-ergo", "time": 0.022 },
       "vc_verify_dm_take_read_refcount_overflow": {
         "prover": "alt-ergo",
-        "time": 0.062
+        "time": 0.125
       }
     }
   }

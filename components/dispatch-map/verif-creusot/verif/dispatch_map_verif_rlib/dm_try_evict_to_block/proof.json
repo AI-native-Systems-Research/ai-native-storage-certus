@@ -4,9 +4,9 @@
     "Coma": {
       "vc_dm_try_evict_to_block": {
         "tactic": "compute_specified",
-        "children": [ { "prover": "z3", "time": 0.05 } ]
+        "children": [ { "prover": "z3", "time": 0.149 } ]
       },
-      "vc_elim_MemoryTier": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_elim_MemoryTier": { "prover": "alt-ergo", "time": 0.038 },
       "vc_elim_Some": { "prover": "alt-ergo", "time": 0.014 },
       "vc_elim_Some'0": { "prover": "alt-ergo", "time": 0.018 },
       "vc_get_mut": { "prover": "alt-ergo", "time": 0.014 }

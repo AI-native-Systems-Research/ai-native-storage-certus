@@ -5,12 +5,12 @@
       "vc_checked_add": { "prover": "alt-ergo", "time": 0.02 },
       "vc_dm_take_read": {
         "tactic": "compute_specified",
-        "children": [ { "prover": "z3", "time": 0.059 } ]
+        "children": [ { "prover": "z3", "time": 0.133 } ]
       },
-      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.035 },
       "vc_elim_Some'0": { "prover": "alt-ergo", "time": 0.02 },
       "vc_from_millis": { "prover": "alt-ergo", "time": 0.016 },
-      "vc_get_mut": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_get_mut": { "prover": "alt-ergo", "time": 0.034 },
       "vc_wait_for": { "prover": "alt-ergo", "time": 0.021 },
       "vc_wrapping_add": { "prover": "alt-ergo", "time": 0.02 }
     }

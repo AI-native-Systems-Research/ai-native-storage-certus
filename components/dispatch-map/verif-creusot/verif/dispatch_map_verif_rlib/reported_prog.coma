@@ -1,6 +1,6 @@
-(* #"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/drivers.rs" 94 0 94 46 *)
+(* #"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/drivers.rs" 141 0 141 46 *)
 
-let%span score = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 438 16 439 44
+let%span score = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 469 16 470 44
 let%span sinvariant = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/creusot/creusot-std/src/invariant.rs" 85 8 85 18
 let%span svec = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/creusot/creusot-std/src/std/vec.rs" 112 18 112 40
 let%span svec'0 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
@@ -8,22 +8,22 @@ let%span svec'1 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map
 let%span svec'2 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/creusot/creusot-std/src/std/vec.rs" 194 18 194 46
 let%span sslice = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/creusot/creusot-std/src/std/slice.rs" 148 20 148 37
 let%span sslice'0 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/creusot/creusot-std/src/std/slice.rs" 153 20 153 37
-let%span sdrivers = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/drivers.rs" 98 31 98 32
-let%span sdrivers'0 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/drivers.rs" 101 22 101 38
-let%span sdrivers'1 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/drivers.rs" 100 24 100 85
-let%span sdrivers'2 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/drivers.rs" 99 24 99 47
-let%span sdrivers'3 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/drivers.rs" 102 29 102 32
-let%span sdrivers'4 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/drivers.rs" 105 21 105 22
-let%span sdrivers'5 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/drivers.rs" 105 16 105 22
-let%span sdrivers'6 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/drivers.rs" 103 27 103 31
-let%span sdrivers'7 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/drivers.rs" 107 12 107 17
-let%span sdrivers'8 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/drivers.rs" 96 16 96 21
-let%span sdrivers'9 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/drivers.rs" 94 21 94 22
-let%span sdrivers'10 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/drivers.rs" 93 10 93 37
+let%span sdrivers = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/drivers.rs" 145 31 145 32
+let%span sdrivers'0 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/drivers.rs" 148 22 148 38
+let%span sdrivers'1 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/drivers.rs" 147 24 147 85
+let%span sdrivers'2 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/drivers.rs" 146 24 146 47
+let%span sdrivers'3 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/drivers.rs" 149 29 149 32
+let%span sdrivers'4 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/drivers.rs" 152 21 152 22
+let%span sdrivers'5 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/drivers.rs" 152 16 152 22
+let%span sdrivers'6 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/drivers.rs" 150 27 150 31
+let%span sdrivers'7 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/drivers.rs" 154 12 154 17
+let%span sdrivers'8 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/drivers.rs" 143 16 143 21
+let%span sdrivers'9 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/drivers.rs" 141 21 141 22
+let%span sdrivers'10 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/drivers.rs" 140 10 140 37
 
 use creusot.int.UInt32
-use creusot.int.UInt64
 use seq.Seq
+use creusot.int.UInt64
 use creusot.prelude.Any
 use int.Int
 
@@ -35,7 +35,9 @@ type t_Option_u32 = None | Some UInt32.t
 
 type t_FMap_Handle_tup2_u32_u64
 
-type t_Ep = { npools: int; tracked: t_FMap_Handle_tup2_u32_u64 }
+type t_Handle = { pool_id: UInt32.t; index: UInt32.t }
+
+type t_Ep = { npools: int; tracked: t_FMap_Handle_tup2_u32_u64; uses: Seq.seq t_Handle }
 
 type t_Option_Ep = None'0 | Some'0 t_Ep
 
@@ -47,7 +49,7 @@ type t_Option_Em = None'1 | Some'1 t_Em
 
 type t_Cv = { epoch: int }
 
-type t_Dm = { entries: t_Entries; pool_id: t_Option_u32; ep: t_Option_Ep; em: t_Option_Em; cv: t_Cv }
+type t_Dm = { entries'0: t_Entries; pool_id'0: t_Option_u32; ep'0: t_Option_Ep; em'0: t_Option_Em; cv'0: t_Cv }
 
 let elim_Some (_x: t_Option_Em) (return (f0'0: t_Em)) = any
   [ _k (f0'0: t_Em) -> {Some'1 f0'0 = _x} (! return {f0'0})
@@ -98,7 +100,7 @@ axiom inv_axiom [@rewrite]: forall x: t_Entries [inv_Entries x]. inv_Entries x
 
 predicate inv_Dm (_1: t_Dm)
 
-axiom inv_axiom'0 [@rewrite]: forall x: t_Dm [inv_Dm x]. inv_Dm x = inv_Entries x.entries
+axiom inv_axiom'0 [@rewrite]: forall x: t_Dm [inv_Dm x]. inv_Dm x = inv_Entries x.entries'0
 
 predicate invariant_ref_Dm [@inline:trivial] (self: t_Dm) = [%#sinvariant] inv_Dm self
 
@@ -108,11 +110,10 @@ predicate inv_ref_Dm [@inline:trivial] (_1: t_Dm) = invariant_ref_Dm _1
 
 meta "rewrite_def" predicate inv_ref_Dm
 
-predicate reported [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 437 0 437 38] (d: t_Dm) (k: UInt64.t) =
-  [%#score] match d.em with
-    | Some'1 em'0 -> exists i: int. 0 <= i
-      /\ i < Seq.length (view_Vec_Extent_Global em'0.extents)
-      /\ (Seq.get (view_Vec_Extent_Global em'0.extents) i).key = k
+predicate reported [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 468 0 468 38] (d: t_Dm) (k: UInt64.t) =
+  [%#score] match d.em'0 with
+    | Some'1 em -> exists i: int. 0 <= i
+      /\ i < Seq.length (view_Vec_Extent_Global em.extents) /\ (Seq.get (view_Vec_Extent_Global em.extents) i).key = k
     | None'1 -> false
     end
 
@@ -120,27 +121,27 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let reported_prog [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/drivers.rs" 94 0 94 46]
+let reported_prog [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/drivers.rs" 141 0 141 46]
   (d: t_Dm) (key'0: UInt64.t) (return (x: bool)) =
 {[@stop_split] [@expl:reported_prog 'd' type invariant] [%#sdrivers'9] inv_ref_Dm d}
   (! bb0
   [ bb0 = s0
-    [ s0 = [ &_6 <- d.em ] s1 | s1 = any [ br0 -> {_6 = None'1} (! bb4) | br1 (x0: t_Em) -> {_6 = Some'1 x0} (! bb3) ] ]
+    [ s0 = [ &_6 <- d.em'0 ] s1
+    | s1 = any [ br0 -> {_6 = None'1} (! bb4) | br1 (x0: t_Em) -> {_6 = Some'1 x0} (! bb3) ] ]
   | bb3 = s0
-    [ s0 = elim_Some {_6} (fun (r0: t_Em) -> [ &em'0 <- r0 ] s1)
+    [ s0 = elim_Some {_6} (fun (r0: t_Em) -> [ &em <- r0 ] s1)
     | s1 = [ &i <- [%#sdrivers] (0: UInt64.t) ] s2
     | s2 = bb5 ]
   | bb5 = bb5
-    [ bb5 = {[@expl:loop invariant #0] [%#sdrivers'2] UInt64.t'int i
-      <= Seq.length (view_Vec_Extent_Global em'0.extents)}
+    [ bb5 = {[@expl:loop invariant #0] [%#sdrivers'2] UInt64.t'int i <= Seq.length (view_Vec_Extent_Global em.extents)}
       {[@expl:loop invariant #1] [%#sdrivers'1] forall j: int. 0 <= j /\ j < UInt64.t'int i
-        -> (Seq.get (view_Vec_Extent_Global em'0.extents) j).key <> key'0}
+        -> (Seq.get (view_Vec_Extent_Global em.extents) j).key <> key'0}
       (! s0)
-      [ s0 = len_Extent [%#sdrivers'0] {em'0.extents} (fun (_x: UInt64.t) -> [ &_22 <- _x ] s1)
+      [ s0 = len_Extent [%#sdrivers'0] {em.extents} (fun (_x: UInt64.t) -> [ &_22 <- _x ] s1)
       | s1 = [ &_20 <- UInt64.lt i _22 ] s2
       | s2 = any [ br0 -> {_20 = false} (! bb12) | br1 -> {_20} (! bb8) ] ]
       [ bb8 = s0
-        [ s0 = index_Vec_Extent_Global [%#sdrivers'3] {em'0.extents} {i} (fun (_x: t_Extent) -> [ &_27 <- _x ] s1)
+        [ s0 = index_Vec_Extent_Global [%#sdrivers'3] {em.extents} {i} (fun (_x: t_Extent) -> [ &_27 <- _x ] s1)
         | s1 = [ &_25 <- _27.key = key'0 ] s2
         | s2 = any [ br0 -> {_25 = false} (! bb11) | br1 -> {_25} (! bb10) ] ]
       | bb11 = s0
@@ -153,7 +154,7 @@ let reported_prog [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-m
   | & d: t_Dm = d
   | & key'0: UInt64.t = key'0
   | & _6: t_Option_Em = Any.any_l ()
-  | & em'0: t_Em = Any.any_l ()
+  | & em: t_Em = Any.any_l ()
   | & i: UInt64.t = Any.any_l ()
   | & _20: bool = Any.any_l ()
   | & _22: UInt64.t = Any.any_l ()

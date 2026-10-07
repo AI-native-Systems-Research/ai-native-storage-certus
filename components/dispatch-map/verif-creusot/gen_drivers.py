@@ -43,9 +43,19 @@ def E(k):  # entry field at key in state
     return k
 
 ROWS = []
-def row(pid, sig, req, ens, mut=None, mods=None, note="", fid="ghost-mirror", custom=None, refute=None, wf=False):
+def row(pid, sig, req, ens, mut=None, mods=None, note="", fid="ghost-mirror", custom=None, refute=None, wf=False,
+        attrs=None, deleg=None):
     ROWS.append(dict(id=pid, sig=sig, req=req, ens=ens, mut=mut, mods=mods or [], note=note, fid=fid,
-                     custom=custom, refute=refute, wf=wf))
+                     custom=custom, refute=refute, wf=wf, attrs=attrs or [], deleg=deleg))
+
+# The eviction ORDER (which key is least recently used) is decided by the connected eviction-policy
+# component; dispatch-map's own part is to report each use to it and to return its answer verbatim.
+EP_ORDER = ("for one pool, track(pool, key) registers the key as the most recently used and touch(h) on a "
+            "tracked handle makes it the most recently used, so get_eviction_candidates(pool, n) returns the "
+            "pool's tracked keys least recently used (by that track/touch history) first")
+ORDER_HALF = (" ORDERING HALF DELEGATED: the order in which oldest_keys lists keys is the order "
+              "IEvictionPolicy::get_eviction_candidates returns (left abstract here as cands(policy state, pool, n)); "
+              "that it is least-recently-used order is the eviction-policy component's obligation (delegate_to).")
 
 OKR = "Out::Ret(Ok(()))"
 EXT = "em.extents@[i]"
@@ -122,6 +132,12 @@ row("DM-LOOKUP-FRAME", "lookup", [],
      "has(*result.1, key) ==> has(^d, key) && keep_meta(ent(^d, key), ent(*result.1, key)) && ent(^d, key).write_ref == ent(*result.1, key).write_ref"],
     ["has(*result.1, key) ==> ent(^d, key).write_ref@ == ent(*result.1, key).write_ref@ + 1"],
     note="keep_meta = location, size_blocks, eviction_handle, checksum unchanged. Relative to the linearization point.")
+
+row("DM-LOOKUP-REFRESHES-EVICTION-PRIORITY", "lookup", [WF],
+    ["match result.0 { Ok(_) => has(*result.1, key) ==> (^d).ep != None && uses(^d) == uses(*result.1).push_back(ent(*result.1, key).eviction_handle) && match (^d).pool_id { Some(p) => trk(^d).get(ent(*result.1, key).eviction_handle) == Some((p, key)), None => false }, Err(_) => true }"],
+    ["match result.0 { Ok(_) => has(*result.1, key) ==> uses(^d) == uses(*result.1), Err(_) => true }"], wf=True, fid="trusted-boundary",
+    deleg=dict(component="eviction-policy", obligation="touch(h) on a handle tracked in pool p makes it the most recently used entry of p, so get_eviction_candidates(p, n) lists its key after every other key tracked in p (until another track/touch)"),
+    note="Dispatch-map's half, proved: a successful lookup of an existing entry (relative to the linearization point) reports exactly one use - that entry's eviction handle, tracking (map pool, key) - to the connected policy via touch (lib.rs:144, :154-157); the policy's touch result is discarded. Needs wf only to know a policy is connected whenever an entry exists. In the real code the policy call happens after the map lock is dropped (lib.rs:153); the read reference just taken keeps the entry from being removed in between (remove refuses ActiveReferences)." + ORDER_HALF)
 
 # ---------------- convert_to_storage ----------------
 row("DM-CONVERT-TO-STORAGE-SETS-SSD-OFFSET", "cts", [],
@@ -249,6 +265,17 @@ row("DM-REMOVE-UNTRACKS", "rm", [WF],
 row("DM-REMOVE-FRAME", "rm", [], ["others_same(^d, *d, key)"], ["forall<j: u64> (^d).entries@.get(j) == None"])
 row("DM-TOUCH-FRAME", "touch", [], ["same_map(^d, *d)"], ["has(*d, key) ==> ent(^d, key).read_ref@ == ent(*d, key).read_ref@ + 1"])
 row("DM-TOUCH-NOT-FOUND", "touch", ["!has(*d, key)"], ["result == Err(DmError::KeyNotFound(key))"], ["result == Ok(())"])
+row("DM-TOUCH-NO-WAIT", "touch", [],
+    ["result != Err(DmError::Timeout(key))",
+     "has(*d, key) && (ent(*d, key).read_ref@ > 0 || ent(*d, key).write_ref@ > 0) ==> result == Ok(())"],
+    ["has(*d, key) && ent(*d, key).write_ref@ > 0 ==> result == Err(DmError::Timeout(key))"],
+    attrs=["#[check(terminates)]"], fid="trusted-boundary",
+    note="Proved: touch never returns Timeout, and returns Ok(()) for a present entry whatever read/write references are held on it; the driver, dm_touch and the two callees it reaches (Entries::get, IEvictionPolicy::touch, both trusted and declared terminating) carry #[check(terminates)], so the call is machine-checked to complete with no wait or loop on its path (lib.rs:349-361 takes only the map Mutex and never touches the Condvar). The Mutex acquisition itself is the trusted boundary: that the short internal lock is always eventually granted is not proved.")
+row("DM-TOUCH-REFRESHES-PRIORITY", "touch", [WF],
+    ["result == Ok(()) ==> (*d).ep != None && uses(^d) == uses(*d).push_back(ent(*d, key).eviction_handle) && match (*d).pool_id { Some(p) => trk(^d).get(ent(*d, key).eviction_handle) == Some((p, key)), None => false }"],
+    ["result == Ok(()) ==> uses(^d) == uses(*d)"], wf=True, fid="trusted-boundary",
+    deleg=dict(component="eviction-policy", obligation="touch(h) on a handle tracked in pool p makes it the most recently used entry of p, so get_eviction_candidates(p, n) lists its key after every other key tracked in p (until another track/touch)"),
+    note="Dispatch-map's half, proved: a successful touch reports exactly one use - the entry's own eviction handle, which tracks (map pool, key) - to the connected eviction policy (lib.rs:355-359); the policy's touch result is discarded. Needs the proved invariant wf only to know a policy is connected whenever an entry exists (wf_pool + wf_fwd); without it a touch on a map with no policy would return Ok and report nothing. The use log is a ghost field of the trusted IEvictionPolicy model (track/touch append). The real code releases the map lock BEFORE calling the policy (lib.rs:356), so a concurrent remove of the same key can interleave between the two; that interleaving is not modelled here (Loom territory)." + ORDER_HALF)
 
 # ---------------- entry_size ----------------
 row("DM-ENTRY-SIZE-BLOCK-MULTIPLE", "es", [WF],
@@ -284,7 +311,22 @@ row("DM-OLDEST-KEYS-NO-EVICTION-POLICY-EMPTY", "ok", ["(*d).ep == None"],
     refute=dict(req=["wf(*d)", "(*d).ep == None", "(*d).pool_id == None"], ens=["result == Out::Panic"]),
     note="REFUTED: oldest_keys (lib.rs:373) first calls get_pool_id, which on the first call (no pool yet) does `self.eviction_policy.get().unwrap()` (lib.rs:55) and panics when no eviction policy is connected; the empty-list fallback at lib.rs:376-378 is reachable only once a pool already exists. refute_ proves: no eviction policy and no pool yet ==> the call aborts. Reachable: a freshly constructed component with no eviction-policy receptacle connected.")
 
+row("DM-OLDEST-KEYS-ORDER", "custom", [WF, "op_assume(*d, op)"],
+    ["match op { Op::OldestKeys(n) => result.0 == St::Ok ==> match (^d).ep { Some(e) => match (^d).pool_id { Some(p) => result.2@ == cands(e, p, n), None => false }, None => false }, _ => true }",
+     "uses_ok(op, result.0, *result.1, ^d)"],
+    ["match op { Op::Touch(k) => result.0 == St::Ok ==> uses(^d) == uses(*result.1), _ => true }"],
+    custom=("d: &mut Dm, op: Op", "(St, Snapshot<Dm>, Vec<u64>)",
+            "match op {\n        Op::OldestKeys(n) => { let lin = snapshot!(*d); match dm_oldest_keys(d, n) { Out::Ret(v) => (St::Ok, lin, v), Out::Panic => (St::Panic, lin, Vec::new()) } }\n        _ => { let (s, lin) = step!(d, op); (s, lin, Vec::new()) }\n    }",
+            None), wf=True, fid="trusted-boundary",
+    deleg=dict(component="eviction-policy", obligation=EP_ORDER),
+    note="Dispatch-map's half, proved over EVERY method (inductive step, in wf states): (1) oldest_keys returns exactly the eviction policy's get_eviction_candidates(map pool, n) answer, unaltered (lib.rs:373-375); (2) the uses the policy is told about are exactly: one per successful create_memory_tier_entry / recover_extent (the new handle, via track), one per extent restored by initialize (in reporting order), one per successful lookup of an existing entry and one per successful touch (the entry's handle, via touch); every other method, and every error/NotExist path, reports none (uses_ok). The use log is a ghost field of the trusted IEvictionPolicy model. assumes: [D-RANGE-FR-020-fd9bf8, D-RANGE-FR-003-8e9f6a, D-RANGE-FR-023-388782] via op_assume." + ORDER_HALF)
+
 # ---------------- create_memory_tier_entry ----------------
+row("DM-CREATE-MEMORY-TIER-ENTRY-REGISTERS-EVICTION", "cr", [],
+    ["result == Out::Ret(Ok(())) ==> uses(^d) == uses(*d).push_back(ent(^d, key).eviction_handle) && (^d).pool_id != None && trk(^d).contains(ent(^d, key).eviction_handle) && Some(trk(^d).lookup(ent(^d, key).eviction_handle)) == (^d).pool_id.map_logic(|p| (p, key))"],
+    ["result == Out::Ret(Ok(())) ==> uses(^d) == uses(*d)"], fid="trusted-boundary",
+    deleg=dict(component="eviction-policy", obligation="track(p, key) registers key as the most recently used entry of pool p, so get_eviction_candidates(p, n) lists keys in the order they were tracked (absent later touches)"),
+    note="Dispatch-map's half, proved: a successful create registers the key with the connected eviction policy in the map's pool (track, lib.rs:399), stores the returned handle in the entry (lib.rs:409), and that registration is the only use reported by the call (uses log extended by exactly the new handle)." + ORDER_HALF)
 row("DM-CREATE-MEMORY-TIER-ENTRY-LOCATION", "cr", [],
     ["result == Out::Ret(Ok(())) ==> has(^d, key) && ent(^d, key).location == Location::MemoryTier { pointer, size, ssd_offset: None }"],
     ["result == Out::Ret(Ok(())) ==> ssd_of(ent(^d, key).location) != None"])
@@ -512,6 +554,11 @@ row("DM-INV-LEGAL-LOCATION-TRANSITIONS", "all", [WF, "op_assume(*d, op)"],
     ["forall<k: u64> has(*result.1, k) && has(^d, k) && !is_mt(ent(*result.1, k).location) && is_mt(ent(^d, k).location) ==> !promotes(op, k)"],
     note="Over every method: memory tier -> block device only by convert_memory_tier_to_block / try_evict_to_block, only with an SSD copy recorded, landing at that offset; block device -> memory tier only by promote_block_to_memory_tier. assumes: [D-RANGE-FR-020-fd9bf8].")
 
+row("DM-INV-OPERATIONS-ARE-KEY-LOCAL", "all", [],
+    ["match op_key(op) { Some(k) => forall<j: u64> j != k ==> (^d).entries@.get(j) == (*result.1).entries@.get(j), None => true }"],
+    ["forall<j: u64> (^d).entries@.get(j) == (*result.1).entries@.get(j)"],
+    note="Over every method that names a key (all but initialize and oldest_keys): every other key's entry - location, size, both reference counts, handle, checksum - is identical before (at the linearization point) and after the call, on every path (success, error, unwrap-panic). No precondition, not even wf. Concurrency: other callers' critical sections run only inside the trusted Condvar wait, i.e. before the linearization point.")
+
 # =====================================================================================
 HEADER = r'''// drivers.rs — GENERATED from the property table (one verify_<ID> per level-2 property).
 // Each driver's #[requires] holds only the obligation's own premises, declared level-2
@@ -599,6 +646,53 @@ pub fn promotes(op: Op, k: u64) -> bool {
     pearlite! { match op { Op::Promote(j, _, _) => j == k, _ => false } }
 }
 
+/// The key an operation names (None for initialize / oldest_keys).
+#[logic(open)]
+pub fn op_key(op: Op) -> Option<u64> {
+    pearlite! { match op {
+        Op::Initialize => None,
+        Op::OldestKeys(_) => None,
+        Op::Lookup(k) => Some(k),
+        Op::ConvertToStorage(k, _) => Some(k),
+        Op::TakeRead(k) => Some(k),
+        Op::TakeWrite(k) => Some(k),
+        Op::ReleaseRead(k) => Some(k),
+        Op::ReleaseWrite(k) => Some(k),
+        Op::Downgrade(k) => Some(k),
+        Op::Remove(k) => Some(k),
+        Op::Touch(k) => Some(k),
+        Op::EntrySize(k) => Some(k),
+        Op::CreateMt(k, _, _) => Some(k),
+        Op::ConvertMtToBlock(k) => Some(k),
+        Op::Promote(k, _, _) => Some(k),
+        Op::IsEvictable(k) => Some(k),
+        Op::TryEvict(k) => Some(k),
+        Op::RecoverExtent(k, _, _) => Some(k),
+        Op::SetChecksum(k, _) => Some(k),
+        Op::GetChecksum(k) => Some(k),
+    } }
+}
+
+/// The uses each method reports to the eviction policy (DM-OLDEST-KEYS-ORDER), relative to the
+/// linearization-point state `lin`: creation / recovery / initialize's restored extents (track)
+/// and a successful lookup of an existing entry / touch (touch) append that entry's handle;
+/// nothing else reports a use.
+#[logic(open)]
+pub fn uses_ok(op: Op, s: St, lin: Dm, post: Dm) -> bool {
+    pearlite! { match op {
+        Op::Touch(k) => if s == St::Ok { uses(post) == uses(lin).push_back(ent(lin, k).eviction_handle) } else { uses(post) == uses(lin) },
+        Op::Lookup(k) => if s == St::Ok && has(lin, k) { uses(post) == uses(lin).push_back(ent(lin, k).eviction_handle) } else { uses(post) == uses(lin) },
+        Op::CreateMt(k, _, _) => if s == St::Ok { uses(post) == uses(lin).push_back(ent(post, k).eviction_handle) } else { uses(post) == uses(lin) },
+        Op::RecoverExtent(k, _, _) => if s == St::Ok { uses(post) == uses(lin).push_back(ent(post, k).eviction_handle) } else { uses(post) == uses(lin) },
+        Op::Initialize => if s == St::Ok { match lin.em {
+            Some(em) => uses(post).len() == uses(lin).len() + em.extents@.len()
+                && (forall<j: Int> 0 <= j && j < uses(lin).len() ==> uses(post)[j] == uses(lin)[j])
+                && (forall<i: Int> 0 <= i && i < em.extents@.len() ==> uses(post)[uses(lin).len() + i] == ent(post, em.extents@[i].key).eviction_handle),
+            None => uses(post) == uses(lin) } } else { uses(post) == uses(lin) },
+        _ => uses(post) == uses(lin),
+    } }
+}
+
 #[logic(open)]
 pub fn pw(which: u8) -> Pred {
     pearlite! { if which@ < 2 { Pred::NoWriter } else { Pred::NoRefs } }
@@ -660,8 +754,8 @@ macro_rules! step {
 def fn_name(pid, suffix=""):
     return ("verify_" + pid.lower().replace("-", "_")) + suffix
 
-def emit_fn(name, params, ret, body, req, ens, comment):
-    lines = [f"// ---- {comment}"]
+def emit_fn(name, params, ret, body, req, ens, comment, attrs=()):
+    lines = [f"// ---- {comment}"] + list(attrs)
     for r in req:
         lines.append(f"#[requires({r})]")
     for e in ens:
@@ -694,9 +788,9 @@ def main():
         mods = list(mods) + [m for m in r["mods"] if m not in mods]
         if r["wf"] or r["sig"] == "all":
             mods = mods + [m for m in ALL_MODS if m not in mods]
-        out.append(emit_fn(fn_name(r["id"]), params, ret, body, r["req"], r["ens"], r["id"]))
+        out.append(emit_fn(fn_name(r["id"]), params, ret, body, r["req"], r["ens"], r["id"], r["attrs"]))
         if r["mut"]:
-            out.append(emit_fn(fn_name(r["id"], "__mutant"), params, ret, body, r["req"], r["mut"], r["id"] + " — anti-vacuity twin, MUST FAIL"))
+            out.append(emit_fn(fn_name(r["id"], "__mutant"), params, ret, body, r["req"], r["mut"], r["id"] + " — anti-vacuity twin, MUST FAIL", r["attrs"]))
         if r["refute"]:
             rf = r["refute"]
             out.append(emit_fn("refute_" + r["id"].lower().replace("-", "_"), params, ret, body, rf["req"], rf["ens"],
@@ -705,6 +799,8 @@ def main():
                                r["id"] + " — sanity twin of the refutation: same premises, opposite verdict; MUST FAIL (else the refutation's premises are unsatisfiable)"))
         own = fn_name(r["id"])
         a = {"fidelity": r["fid"], "evidence": {"modules": [own] + mods}}
+        if r["deleg"]:
+            a["delegate_to"] = dict(r["deleg"])
         note = r["note"]
         base = ("Proved against a line-faithful standalone mirror (verif-creusot/src/core.rs) of src/lib.rs + src/state.rs; "
                 "std HashMap = FMap ghost mirror via #[trusted] wrappers (KD-STD-CONTAINER-NO-SPECS lever); Mutex = trusted "

@@ -1,55 +1,59 @@
-(* #"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 665 0 665 87 *)
+(* #"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 714 0 714 87 *)
 
-let%span score = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 666 54 666 58
-let%span score'0 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 666 32 666 59
-let%span score'1 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 666 20 666 81
-let%span score'2 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 667 24 667 26
-let%span score'3 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 671 22 671 45
-let%span score'4 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 675 54 675 55
-let%span score'5 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 675 27 675 56
-let%span score'6 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 679 55 679 56
-let%span score'7 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 679 24 679 57
-let%span score'8 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 687 20 687 36
-let%span score'9 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 665 17 665 18
-let%span score'10 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 648 10 648 65
-let%span score'11 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 649 10 649 34
-let%span score'12 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 650 10 650 35
-let%span score'13 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 651 10 651 32
-let%span score'14 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 652 10 652 31
-let%span score'15 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 653 10 653 32
-let%span score'16 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 654 10 654 34
-let%span score'17 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 655 10 655 123
-let%span score'18 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 656 10 657 75
-let%span score'19 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 658 10 659 84
-let%span score'20 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 660 10 664 92
-let%span score'21 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 493 16 493 17
-let%span score'22 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 493 28 493 35
-let%span score'23 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 487 10 487 42
-let%span score'24 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 488 10 488 45
-let%span score'25 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 489 10 489 35
-let%span score'26 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 490 10 490 32
-let%span score'27 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 491 10 491 31
-let%span score'28 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 492 10 492 32
-let%span score'29 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 123 24 123 28
-let%span score'30 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 119 14 122 97
-let%span score'31 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 181 14 181 28
-let%span score'32 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 467 16 470 86
-let%span score'33 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 384 16 384 70
-let%span score'34 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 357 16 357 64
-let%span score'35 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 363 16 363 91
-let%span score'36 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 369 16 370 107
-let%span score'37 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 376 16 379 22
-let%span score'38 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 272 16 272 86
-let%span score'39 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 261 16 261 69
-let%span score'40 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 251 16 251 38
-let%span score'41 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 256 16 256 36
-let%span score'42 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 323 16 326 5
-let%span score'43 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 299 16 300 85
-let%span score'44 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 266 16 266 80
-let%span score'45 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 345 8 351 9
-let%span score'46 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 288 16 288 62
-let%span score'47 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 283 16 283 75
-let%span score'48 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 332 16 332 36
+let%span score = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 715 54 715 58
+let%span score'0 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 715 32 715 59
+let%span score'1 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 715 20 715 81
+let%span score'2 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 716 24 716 26
+let%span score'3 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 720 22 720 45
+let%span score'4 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 724 54 724 55
+let%span score'5 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 724 27 724 56
+let%span score'6 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 728 55 728 56
+let%span score'7 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 728 24 728 57
+let%span score'8 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 736 20 736 36
+let%span score'9 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 714 17 714 18
+let%span score'10 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 693 10 693 65
+let%span score'11 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 694 10 694 34
+let%span score'12 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 695 10 695 35
+let%span score'13 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 696 10 696 32
+let%span score'14 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 697 10 697 31
+let%span score'15 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 698 10 698 32
+let%span score'16 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 699 10 699 36
+let%span score'17 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 700 10 701 84
+let%span score'18 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 702 10 703 37
+let%span score'19 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 704 10 704 123
+let%span score'20 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 705 10 706 75
+let%span score'21 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 707 10 708 84
+let%span score'22 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 709 10 713 92
+let%span score'23 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 524 16 524 17
+let%span score'24 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 524 28 524 35
+let%span score'25 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 518 10 518 42
+let%span score'26 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 519 10 519 45
+let%span score'27 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 520 10 520 35
+let%span score'28 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 521 10 521 32
+let%span score'29 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 522 10 522 31
+let%span score'30 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 523 10 523 32
+let%span score'31 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 124 24 124 28
+let%span score'32 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 120 14 123 97
+let%span score'33 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 196 14 196 88
+let%span score'34 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 197 14 197 59
+let%span score'35 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 498 16 501 86
+let%span score'36 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 415 16 415 70
+let%span score'37 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 388 16 388 64
+let%span score'38 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 394 16 394 91
+let%span score'39 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 400 16 401 107
+let%span score'40 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 407 16 410 22
+let%span score'41 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 302 16 303 77
+let%span score'42 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 269 16 269 38
+let%span score'43 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 309 16 309 71
+let%span score'44 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 274 16 274 36
+let%span score'45 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 279 16 279 69
+let%span score'46 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 354 16 357 5
+let%span score'47 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 330 16 331 85
+let%span score'48 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 284 16 284 80
+let%span score'49 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 376 8 382 9
+let%span score'50 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 319 16 319 62
+let%span score'51 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 314 16 314 75
+let%span score'52 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 363 16 363 36
 let%span sfmap = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/creusot/creusot-std/src/logic/fmap.rs" 88 8 88 32
 let%span sfmap'0 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/creusot/creusot-std/src/logic/fmap.rs" 102 8 102 27
 let%span sfmap'1 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/creusot/creusot-std/src/logic/fmap.rs" 96 8 96 34
@@ -71,6 +75,7 @@ let%span snum'1 = "/home/cornel/cv-dispatch-map-20261005/components/dispatch-map
 
 use creusot.int.UInt64
 use creusot.int.UInt32
+use seq.Seq
 use creusot.prelude.MutBorrow
 use creusot.prelude.Opaque
 use map.Map
@@ -115,7 +120,9 @@ type t_Option_u32 = None | Some UInt32.t
 
 type t_FMap_Handle_tup2_u32_u64
 
-type t_Ep = { npools: int; tracked: t_FMap_Handle_tup2_u32_u64 }
+type t_Handle = { pool_id: UInt32.t; index: UInt32.t }
+
+type t_Ep = { npools: int; tracked: t_FMap_Handle_tup2_u32_u64; uses: Seq.seq t_Handle }
 
 type t_Option_Ep = None'0 | Some'0 t_Ep
 
@@ -127,11 +134,11 @@ type t_Option_Em = None'1 | Some'1 t_Em
 
 type t_Cv = { epoch: int }
 
-type t_Dm = { entries: t_Entries; pool_id: t_Option_u32; ep: t_Option_Ep; em: t_Option_Em; cv: t_Cv }
+type t_Dm = { entries'0: t_Entries; pool_id'0: t_Option_u32; ep'0: t_Option_Ep; em'0: t_Option_Em; cv'0: t_Cv }
 
 predicate inv_Dm (_1: t_Dm)
 
-axiom inv_axiom'0 [@rewrite]: forall x: t_Dm [inv_Dm x]. inv_Dm x = inv_Entries x.entries
+axiom inv_axiom'0 [@rewrite]: forall x: t_Dm [inv_Dm x]. inv_Dm x = inv_Entries x.entries'0
 
 predicate invariant_refmut_Dm [@inline:trivial] (self: MutBorrow.t t_Dm) =
   [%#sinvariant] inv_Dm self.current /\ inv_Dm self.final
@@ -145,8 +152,6 @@ meta "rewrite_def" predicate inv_refmut_Dm
 type t_Option_u64 = None'2 | Some'2 UInt64.t
 
 type t_Location = BlockDevice UInt64.t | MemoryTier Opaque.ptr UInt32.t t_Option_u64
-
-type t_Handle = { pool_id'0: UInt32.t; index'0: UInt32.t }
 
 type t_Entry = {
   location: t_Location;
@@ -170,8 +175,8 @@ meta "rewrite_def" function get_u64
 
 function view_Entries [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 94 4 94 37] (self: t_Entries) : t_FMap_u64_Entry
 
-predicate pred_holds [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 466 0 466 51] (d: t_Dm) (key: UInt64.t) (p: t_Pred) =
-  [%#score'32] match get_u64 (view_Entries d.entries) key with
+predicate pred_holds [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 497 0 497 51] (d: t_Dm) (key: UInt64.t) (p: t_Pred) =
+  [%#score'35] match get_u64 (view_Entries d.entries'0) key with
     | None'3 -> true
     | Some'3 e -> match p with
       | NoWriter -> UInt32.t'int e.write_ref = 0
@@ -183,14 +188,14 @@ predicate contains_u64 [@inline:trivial] (self: t_FMap_u64_Entry) (k: UInt64.t) 
 
 meta "rewrite_def" predicate contains_u64
 
-predicate has [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 250 0 250 33] (d: t_Dm) (k: UInt64.t) =
-  [%#score'40] contains_u64 (view_Entries d.entries) k
+predicate has [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 268 0 268 33] (d: t_Dm) (k: UInt64.t) =
+  [%#score'42] contains_u64 (view_Entries d.entries'0) k
 
-function ceil_blocks [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 331 0 331 36] (size: int) : int
- = [%#score'48] ComputerDivision.div (size + 4095) 4096
+function ceil_blocks [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 362 0 362 36] (size: int) : int
+ = [%#score'52] ComputerDivision.div (size + 4095) 4096
 
-predicate entry_ok [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 343 0 343 33] (e: t_Entry) =
-  [%#score'45] UInt32.t'int e.write_ref <= 1
+predicate entry_ok [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 374 0 374 33] (e: t_Entry) =
+  [%#score'49] UInt32.t'int e.write_ref <= 1
   /\ (UInt32.t'int e.write_ref <> 0 -> UInt32.t'int e.read_ref = 0)
   /\ UInt32.t'int e.size_blocks <= 1048575
   /\ match e.location with
@@ -219,21 +224,21 @@ function lookup_u64 [@inline:trivial] (self: t_FMap_u64_Entry) (k: UInt64.t) : t
 
 meta "rewrite_def" function lookup_u64
 
-function ent [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 255 0 255 34] (d: t_Dm) (k: UInt64.t) : t_Entry
- = [%#score'41] lookup_u64 (view_Entries d.entries) k
+function ent [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 273 0 273 34] (d: t_Dm) (k: UInt64.t) : t_Entry
+ = [%#score'44] lookup_u64 (view_Entries d.entries'0) k
 
-predicate wf_entries [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 356 0 356 32] (d: t_Dm) =
-  [%#score'34] forall k: UInt64.t. has d k -> entry_ok (ent d k)
+predicate wf_entries [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 387 0 387 32] (d: t_Dm) =
+  [%#score'37] forall k: UInt64.t. has d k -> entry_ok (ent d k)
 
-function npools'0 [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 287 0 287 27] (d: t_Dm) : int
- = [%#score'46] match d.ep with
+function npools'0 [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 318 0 318 27] (d: t_Dm) : int
+ = [%#score'50] match d.ep'0 with
     | Some'0 e -> e.npools
     | None'0 -> 0
     end
 
-predicate wf_pool [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 362 0 362 29] (d: t_Dm) =
-  [%#score'35] match d.pool_id with
-    | Some p -> d.ep <> None'0 /\ UInt32.t'int p < npools'0 d
+predicate wf_pool [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 393 0 393 29] (d: t_Dm) =
+  [%#score'38] match d.pool_id'0 with
+    | Some p -> d.ep'0 <> None'0 /\ UInt32.t'int p < npools'0 d
     | None -> true
     end
 
@@ -258,15 +263,15 @@ axiom empty_Handle_spec: [%#sfmap'2] len_Handle empty_Handle = 0
 
 axiom empty_Handle_spec'0: [%#sfmap'3] to_mapping_Handle empty_Handle = Const.const (None'4)
 
-function trk [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 282 0 282 45] (d: t_Dm) : t_FMap_Handle_tup2_u32_u64
- = [%#score'47] match d.ep with
+function trk [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 313 0 313 45] (d: t_Dm) : t_FMap_Handle_tup2_u32_u64
+ = [%#score'51] match d.ep'0 with
     | Some'0 e -> e.tracked
     | None'0 -> empty_Handle
     end
 
-predicate wf_fwd [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 368 0 368 28] (d: t_Dm) =
-  [%#score'36] forall k: UInt64.t. has d k
-    -> match d.pool_id with
+predicate wf_fwd [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 399 0 399 28] (d: t_Dm) =
+  [%#score'39] forall k: UInt64.t. has d k
+    -> match d.pool_id'0 with
       | Some p -> get_Handle (trk d) (ent d k).eviction_handle = Some'4 { f0'0 = p; f1'0 = k }
       | None -> false
       end
@@ -297,28 +302,28 @@ function lookup_Handle [@inline:trivial] (self: t_FMap_Handle_tup2_u32_u64) (k: 
 
 meta "rewrite_def" function lookup_Handle
 
-predicate wf_back [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 375 0 375 29] (d: t_Dm) =
-  [%#score'37] match d.pool_id with
+predicate wf_back [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 406 0 406 29] (d: t_Dm) =
+  [%#score'40] match d.pool_id'0 with
     | Some p -> forall h: t_Handle. contains_Handle (trk d) h /\ (lookup_Handle (trk d) h).f0'0 = p
       -> has d (lookup_Handle (trk d) h).f1'0 /\ (ent d (lookup_Handle (trk d) h).f1'0).eviction_handle = h
     | None -> true
     end
 
-predicate wf [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 383 0 383 24] (d: t_Dm) =
-  [%#score'33] wf_entries d /\ wf_pool d /\ wf_fwd d /\ wf_back d
+predicate wf [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 414 0 414 24] (d: t_Dm) =
+  [%#score'36] wf_entries d /\ wf_pool d /\ wf_fwd d /\ wf_back d
 
 let wait_for (d: MutBorrow.t t_Dm) (timeout: t_Duration) (key: UInt64.t) (p: t_Pred) (return (x: bool)) =
-{[@stop_split] [@expl:wait_for requires] ([@stop_split] [@expl:wait_for 'd' type invariant] [%#score'21] inv_refmut_Dm d)
-  /\ ([@stop_split] [@expl:wait_for 'timeout' type invariant] [%#score'22] inv_Duration timeout)}
+{[@stop_split] [@expl:wait_for requires] ([@stop_split] [@expl:wait_for 'd' type invariant] [%#score'23] inv_refmut_Dm d)
+  /\ ([@stop_split] [@expl:wait_for 'timeout' type invariant] [%#score'24] inv_Duration timeout)}
   any
   [ return (result: bool) ->
-  {[@stop_split] [@expl:wait_for ensures] ([@stop_split] [@expl:wait_for ensures #0] [%#score'23] result
+  {[@stop_split] [@expl:wait_for ensures] ([@stop_split] [@expl:wait_for ensures #0] [%#score'25] result
       = pred_holds d.final key p)
-    /\ ([@stop_split] [@expl:wait_for ensures #1] [%#score'24] pred_holds d.current key p -> d.final = d.current)
-    /\ ([@stop_split] [@expl:wait_for ensures #2] [%#score'25] wf d.current -> wf_entries d.final)
-    /\ ([@stop_split] [@expl:wait_for ensures #3] [%#score'26] wf d.current -> wf_pool d.final)
-    /\ ([@stop_split] [@expl:wait_for ensures #4] [%#score'27] wf d.current -> wf_fwd d.final)
-    /\ ([@stop_split] [@expl:wait_for ensures #5] [%#score'28] wf d.current -> wf_back d.final)}
+    /\ ([@stop_split] [@expl:wait_for ensures #1] [%#score'26] pred_holds d.current key p -> d.final = d.current)
+    /\ ([@stop_split] [@expl:wait_for ensures #2] [%#score'27] wf d.current -> wf_entries d.final)
+    /\ ([@stop_split] [@expl:wait_for ensures #3] [%#score'28] wf d.current -> wf_pool d.final)
+    /\ ([@stop_split] [@expl:wait_for ensures #4] [%#score'29] wf d.current -> wf_fwd d.final)
+    /\ ([@stop_split] [@expl:wait_for ensures #5] [%#score'30] wf d.current -> wf_back d.final)}
     (! return {result}) ]
 
 type t_Option_refmut_Entry = None'5 | Some'5 (MutBorrow.t t_Entry)
@@ -333,9 +338,9 @@ predicate inv_refmut_Entries [@inline:trivial] (_1: MutBorrow.t t_Entries) = inv
 meta "rewrite_def" predicate inv_refmut_Entries
 
 let get_mut (self: MutBorrow.t t_Entries) (k: UInt64.t) (return (x: t_Option_refmut_Entry)) =
-{[@stop_split] [@expl:get_mut 'self' type invariant] [%#score'29] inv_refmut_Entries self}
+{[@stop_split] [@expl:get_mut 'self' type invariant] [%#score'31] inv_refmut_Entries self}
   any
-  [ return (result: t_Option_refmut_Entry) -> {[@stop_split] [@expl:get_mut ensures] [%#score'30] match result with
+  [ return (result: t_Option_refmut_Entry) -> {[@stop_split] [@expl:get_mut ensures] [%#score'32] match result with
       | Some'5 e -> get_u64 (view_Entries self.current) k = Some'3 (e.current)
       /\ get_u64 (view_Entries self.final) k = Some'3 (e.final)
       /\ (forall j: UInt64.t. j <> k -> get_u64 (view_Entries self.final) j = get_u64 (view_Entries self.current) j)
@@ -413,8 +418,11 @@ type t_EpError = InvalidPool | InvalidHandle
 type t_Result_unit_EpError = Ok () | Err t_EpError
 
 let touch (self: MutBorrow.t t_Ep) (h: t_Handle) (return (x: t_Result_unit_EpError)) = any
-  [ return (result: t_Result_unit_EpError) -> {[@stop_split] [@expl:touch ensures] [%#score'31] self.final
-    = self.current}
+  [ return (result: t_Result_unit_EpError) ->
+  {[@stop_split] [@expl:touch ensures] ([@stop_split] [@expl:touch ensures #0] [%#score'33] self.final.npools
+        = self.current.npools
+      /\ self.final.tracked = self.current.tracked)
+    /\ ([@stop_split] [@expl:touch ensures #1] [%#score'34] self.final.uses = Seq.snoc self.current.uses h)}
     (! return {result}) ]
 
 predicate resolve_refmut_Ep [@inline:trivial] (_1: MutBorrow.t t_Ep) = _1.final = _1.current
@@ -446,160 +454,168 @@ type t_Result_LookupResult_DmError = Ok'0 t_LookupResult | Err'0 t_DmError
 
 type tup2_Result_LookupResult_DmError_Snapshot_Dm = { f0'1: t_Result_LookupResult_DmError; f1'1: t_Dm }
 
-predicate rest_same [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 271 0 271 38] (a: t_Dm) (b: t_Dm) =
-  [%#score'38] a.pool_id = b.pool_id /\ a.ep = b.ep /\ a.em = b.em /\ a.cv = b.cv
+predicate rest_same_u [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 301 0 301 40] (a: t_Dm) (b: t_Dm) =
+  [%#score'41] a.pool_id'0 = b.pool_id'0
+  /\ a.em'0 = b.em'0
+  /\ a.cv'0 = b.cv'0 /\ trk a = trk b /\ npools'0 a = npools'0 b /\ (a.ep'0 = None'0) = (b.ep'0 = None'0)
 
-predicate same_map [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 260 0 260 37] (a: t_Dm) (b: t_Dm) =
-  [%#score'39] forall j: UInt64.t. get_u64 (view_Entries a.entries) j = get_u64 (view_Entries b.entries) j
+function uses'0 [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 308 0 308 33] (d: t_Dm) : Seq.seq t_Handle
+ = [%#score'43] match d.ep'0 with
+    | Some'0 e -> e.uses
+    | None'0 -> Seq.empty: Seq.seq t_Handle
+    end
 
-function lr_of [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 322 0 322 41] (l: t_Location) : t_LookupResult
- = [%#score'42] match l with
+predicate same_map [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 278 0 278 37] (a: t_Dm) (b: t_Dm) =
+  [%#score'45] forall j: UInt64.t. get_u64 (view_Entries a.entries'0) j = get_u64 (view_Entries b.entries'0) j
+
+function lr_of [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 353 0 353 41] (l: t_Location) : t_LookupResult
+ = [%#score'46] match l with
     | BlockDevice offset -> BlockDevice'0 offset
     | MemoryTier pointer size _ -> MemoryTier'0 pointer size
     end
 
-predicate keep_meta [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 298 0 298 44] (a: t_Entry) (b: t_Entry) =
-  [%#score'43] a.location = b.location
+predicate keep_meta [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 329 0 329 44] (a: t_Entry) (b: t_Entry) =
+  [%#score'47] a.location = b.location
   /\ a.size_blocks = b.size_blocks /\ a.eviction_handle = b.eviction_handle /\ a.checksum = b.checksum
 
-predicate others_same [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 265 0 265 48] (a: t_Dm) (b: t_Dm) (k: UInt64.t) =
-  [%#score'44] forall j: UInt64.t. j <> k -> get_u64 (view_Entries a.entries) j = get_u64 (view_Entries b.entries) j
+predicate others_same [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 283 0 283 48] (a: t_Dm) (b: t_Dm) (k: UInt64.t) =
+  [%#score'48] forall j: UInt64.t. j <> k -> get_u64 (view_Entries a.entries'0) j = get_u64 (view_Entries b.entries'0) j
 
 meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let dm_lookup [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 665 0 665 87]
+let dm_lookup [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot/src/core.rs" 714 0 714 87]
   (d: MutBorrow.t t_Dm) (key: UInt64.t) (return (x: tup2_Result_LookupResult_DmError_Snapshot_Dm)) =
 {[@stop_split] [@expl:dm_lookup 'd' type invariant] [%#score'9] inv_refmut_Dm d}
   (! bb0
   [ bb0 = s0
-    [ s0 = from_millis [%#score'0] {[%#score] (2000: UInt64.t)} (fun (_x: t_Duration) -> [ &_32 <- _x ] s1)
-    | s1 = [ &_34 <- NoWriter ] s2
+    [ s0 = from_millis [%#score'0] {[%#score] (2000: UInt64.t)} (fun (_x: t_Duration) -> [ &_38 <- _x ] s1)
+    | s1 = [ &_40 <- NoWriter ] s2
     | s2 = MutBorrow.borrow_mut <t_Dm> {d.current}
         (fun (_bor: MutBorrow.t t_Dm) ->
-          [ &_31 <- _bor ] -{inv_Dm _bor.final}-
+          [ &_37 <- _bor ] -{inv_Dm _bor.final}-
           [ &d <- { d with current = _bor.final } ] s3) [ _ck -> (! {[@expl:type invariant] inv_Dm d.current} any) ]
-    | s3 = wait_for [%#score'1] {_31} {_32} {key} {_34} (fun (_x: bool) -> [ &satisfied <- _x ] s4)
+    | s3 = wait_for [%#score'1] {_37} {_38} {key} {_40} (fun (_x: bool) -> [ &satisfied <- _x ] s4)
     | s4 = [ &mid <- [%#score'2] d.current ] s5
     | s5 = any [ br0 -> {satisfied = false} (! bb4) | br1 -> {satisfied} (! bb5) ] ]
   | bb5 = s0
-    [ s0 = [ &_49 <- key ] s1
-    | s1 = MutBorrow.borrow_final <t_Entries> {d.current.entries} {MutBorrow.inherit_id (MutBorrow.get_id d) 0}
+    [ s0 = [ &_55 <- key ] s1
+    | s1 = MutBorrow.borrow_final <t_Entries> {d.current.entries'0} {MutBorrow.inherit_id (MutBorrow.get_id d) 0}
         (fun (_bor: MutBorrow.t t_Entries) ->
-          [ &_47 <- _bor ] -{inv_Entries _bor.final}-
-          [ &d <- { d with current = { d.current with entries = _bor.final } } ] s2)
-      [ _ck -> (! {[@expl:type invariant] inv_Entries d.current.entries} any) ]
-    | s2 = get_mut [%#score'3] {_47} {_49} (fun (_x: t_Option_refmut_Entry) -> [ &_46 <- _x ] s3)
-    | s3 = any [ br0 -> {_46 = None'5} (! bb10) | br1 (x0: MutBorrow.t t_Entry) -> {_46 = Some'5 x0} (! bb9) ] ]
+          [ &_53 <- _bor ] -{inv_Entries _bor.final}-
+          [ &d <- { d with current = { d.current with entries'0 = _bor.final } } ] s2)
+      [ _ck -> (! {[@expl:type invariant] inv_Entries d.current.entries'0} any) ]
+    | s2 = get_mut [%#score'3] {_53} {_55} (fun (_x: t_Option_refmut_Entry) -> [ &_52 <- _x ] s3)
+    | s3 = any [ br0 -> {_52 = None'5} (! bb10) | br1 (x0: MutBorrow.t t_Entry) -> {_52 = Some'5 x0} (! bb9) ] ]
   | bb9 = s0
-    [ s0 = elim_Some {_46} (fun (r0: MutBorrow.t t_Entry) -> [ &e <- r0 ] s1)
+    [ s0 = elim_Some {_52} (fun (r0: MutBorrow.t t_Entry) -> [ &e <- r0 ] s1)
     | s1 = [ &entry <- e ] s2
     | s2 = checked_add [%#score'5] {entry.current.read_ref} {[%#score'4] (1: UInt32.t)}
-        (fun (_x: t_Option_u32) -> [ &_57 <- _x ] s3)
-    | s3 = any [ br0 -> {_57 = None} (! bb14) | br1 (x0: UInt32.t) -> {_57 = Some x0} (! bb15) ] ]
+        (fun (_x: t_Option_u32) -> [ &_63 <- _x ] s3)
+    | s3 = any [ br0 -> {_63 = None} (! bb14) | br1 (x0: UInt32.t) -> {_63 = Some x0} (! bb15) ] ]
   | bb15 = s0
-    [ s0 = elim_Some'0 {_57} (fun (r0: UInt32.t) -> [ &v <- r0 ] s1)
+    [ s0 = elim_Some'0 {_63} (fun (r0: UInt32.t) -> [ &v <- r0 ] s1)
     | s1 = [ &entry <- { entry with current = { entry.current with read_ref = v } } ] s2
     | s2 = wrapping_add [%#score'7] {entry.current.reuse_count} {[%#score'6] (1: UInt32.t)}
-        (fun (_x: UInt32.t) -> [ &_66 <- _x ] s3)
-    | s3 = [ &entry <- { entry with current = { entry.current with reuse_count = _66 } } ] s4
+        (fun (_x: UInt32.t) -> [ &_72 <- _x ] s3)
+    | s3 = [ &entry <- { entry with current = { entry.current with reuse_count = _72 } } ] s4
     | s4 = [ &handle <- entry.current.eviction_handle ] s5
     | s5 = -{resolve_refmut_Entry entry}- s6
-    | s6 = [ &_70 <- entry.current.location ] s7
+    | s6 = [ &_76 <- entry.current.location ] s7
     | s7 = any
-      [ br0 (x0: UInt64.t) -> {_70 = BlockDevice x0} (! bb20)
-      | br1 (x0: Opaque.ptr) (x1: UInt32.t) (x2: t_Option_u64) -> {_70 = MemoryTier x0 x1 x2} (! bb19) ] ]
+      [ br0 (x0: UInt64.t) -> {_76 = BlockDevice x0} (! bb20)
+      | br1 (x0: Opaque.ptr) (x1: UInt32.t) (x2: t_Option_u64) -> {_76 = MemoryTier x0 x1 x2} (! bb19) ] ]
   | bb19 = s0
-    [ s0 = elim_MemoryTier {_70}
+    [ s0 = elim_MemoryTier {_76}
         (fun (rpointer: Opaque.ptr) (rsize: UInt32.t) (rssd_offset: t_Option_u64) -> [ &pointer <- rpointer ] s1)
-    | s1 = elim_MemoryTier {_70}
+    | s1 = elim_MemoryTier {_76}
         (fun (rpointer: Opaque.ptr) (rsize: UInt32.t) (rssd_offset: t_Option_u64) -> [ &size <- rsize ] s2)
     | s2 = [ &result <- MemoryTier'0 pointer size ] s3
     | s3 = bb21 ]
   | bb20 = s0
-    [ s0 = elim_BlockDevice {_70} (fun (roffset: UInt64.t) -> [ &offset <- roffset ] s1)
+    [ s0 = elim_BlockDevice {_76} (fun (roffset: UInt64.t) -> [ &offset <- roffset ] s1)
     | s1 = [ &result <- BlockDevice'0 offset ] s2
     | s2 = bb21 ]
   | bb21 = s0
-    [ s0 = MutBorrow.borrow_final <t_Option_Ep> {d.current.ep} {MutBorrow.inherit_id (MutBorrow.get_id d) 2}
+    [ s0 = MutBorrow.borrow_final <t_Option_Ep> {d.current.ep'0} {MutBorrow.inherit_id (MutBorrow.get_id d) 2}
         (fun (_bor: MutBorrow.t t_Option_Ep) ->
-          [ &_79 <- _bor ] [ &d <- { d with current = { d.current with ep = _bor.final } } ] s1)
-    | s1 = any [ br0 -> {_79.current = None'0} (! bb24) | br1 (x0: t_Ep) -> {_79.current = Some'0 x0} (! bb25) ] ]
+          [ &_85 <- _bor ] [ &d <- { d with current = { d.current with ep'0 = _bor.final } } ] s1)
+    | s1 = any [ br0 -> {_85.current = None'0} (! bb24) | br1 (x0: t_Ep) -> {_85.current = Some'0 x0} (! bb25) ] ]
   | bb25 = s0
-    [ s0 = elim_Some'1 {_79.current}
+    [ s0 = elim_Some'1 {_85.current}
         (fun (r0: t_Ep) ->
-          MutBorrow.borrow_final <t_Ep> {r0} {MutBorrow.inherit_id (MutBorrow.get_id _79) 0}
-            (fun (_bor: MutBorrow.t t_Ep) -> [ &ep'0 <- _bor ] [ &_79 <- { _79 with current = Some'0 _bor.final } ] s1))
-    | s1 = MutBorrow.borrow_final <t_Ep> {ep'0.current} {MutBorrow.get_id ep'0}
-        (fun (_bor: MutBorrow.t t_Ep) -> [ &_83 <- _bor ] [ &ep'0 <- { ep'0 with current = _bor.final } ] s2)
-    | s2 = touch [%#score'8] {_83} {handle} (fun (_x: t_Result_unit_EpError) -> [ &_82 <- _x ] s3)
-    | s3 = -{resolve_refmut_Ep ep'0}- s4
-    | s4 = -{resolve_refmut_Option_Ep _79}- s5
+          MutBorrow.borrow_final <t_Ep> {r0} {MutBorrow.inherit_id (MutBorrow.get_id _85) 0}
+            (fun (_bor: MutBorrow.t t_Ep) -> [ &ep <- _bor ] [ &_85 <- { _85 with current = Some'0 _bor.final } ] s1))
+    | s1 = MutBorrow.borrow_final <t_Ep> {ep.current} {MutBorrow.get_id ep}
+        (fun (_bor: MutBorrow.t t_Ep) -> [ &_89 <- _bor ] [ &ep <- { ep with current = _bor.final } ] s2)
+    | s2 = touch [%#score'8] {_89} {handle} (fun (_x: t_Result_unit_EpError) -> [ &_88 <- _x ] s3)
+    | s3 = -{resolve_refmut_Ep ep}- s4
+    | s4 = -{resolve_refmut_Option_Ep _85}- s5
     | s5 = s6 [ _ck -> (! {[@expl:type invariant] inv_refmut_Dm d} any) ]
     | s6 = -{resolve_refmut_Dm d}- s7
     | s7 = bb27 ]
   | bb24 = s0
-    [ s0 = -{resolve_refmut_Option_Ep _79}- s1
+    [ s0 = -{resolve_refmut_Option_Ep _85}- s1
     | s1 = s2 [ _ck -> (! {[@expl:type invariant] inv_refmut_Dm d} any) ]
     | s2 = -{resolve_refmut_Dm d}- s3
     | s3 = bb27 ]
-  | bb27 = s0 [ s0 = [ &_85 <- Ok'0 result ] s1 | s1 = [ &_ret <- { f0'1 = _85; f1'1 = mid } ] s2 | s2 = return {_ret} ]
+  | bb27 = s0 [ s0 = [ &_91 <- Ok'0 result ] s1 | s1 = [ &_ret <- { f0'1 = _91; f1'1 = mid } ] s2 | s2 = return {_ret} ]
   | bb14 = s0
     [ s0 = -{resolve_refmut_Entry entry}- s1
     | s1 = s2 [ _ck -> (! {[@expl:type invariant] inv_refmut_Dm d} any) ]
     | s2 = -{resolve_refmut_Dm d}- s3
-    | s3 = [ &_63 <- RefCountOverflow key ] s4
-    | s4 = [ &_62 <- Err'0 _63 ] s5
-    | s5 = [ &_ret <- { f0'1 = _62; f1'1 = mid } ] s6
+    | s3 = [ &_69 <- RefCountOverflow key ] s4
+    | s4 = [ &_68 <- Err'0 _69 ] s5
+    | s5 = [ &_ret <- { f0'1 = _68; f1'1 = mid } ] s6
     | s6 = return {_ret} ]
   | bb10 = s0
     [ s0 = s1 [ _ck -> (! {[@expl:type invariant] inv_refmut_Dm d} any) ]
     | s1 = -{resolve_refmut_Dm d}- s2
-    | s2 = [ &_53 <- NotExist'0 ] s3
-    | s3 = [ &_52 <- Ok'0 _53 ] s4
-    | s4 = [ &_ret <- { f0'1 = _52; f1'1 = mid } ] s5
+    | s2 = [ &_59 <- NotExist'0 ] s3
+    | s3 = [ &_58 <- Ok'0 _59 ] s4
+    | s4 = [ &_ret <- { f0'1 = _58; f1'1 = mid } ] s5
     | s5 = return {_ret} ]
   | bb4 = s0
     [ s0 = s1 [ _ck -> (! {[@expl:type invariant] inv_refmut_Dm d} any) ]
     | s1 = -{resolve_refmut_Dm d}- s2
-    | s2 = [ &_42 <- Timeout key ] s3
-    | s3 = [ &_41 <- Err'0 _42 ] s4
-    | s4 = [ &_ret <- { f0'1 = _41; f1'1 = mid } ] s5
+    | s2 = [ &_48 <- Timeout key ] s3
+    | s3 = [ &_47 <- Err'0 _48 ] s4
+    | s4 = [ &_ret <- { f0'1 = _47; f1'1 = mid } ] s5
     | s5 = return {_ret} ] ]
   [ & _ret: tup2_Result_LookupResult_DmError_Snapshot_Dm = Any.any_l ()
   | & d: MutBorrow.t t_Dm = d
   | & key: UInt64.t = key
   | & satisfied: bool = Any.any_l ()
-  | & _31: MutBorrow.t t_Dm = Any.any_l ()
-  | & _32: t_Duration = Any.any_l ()
-  | & _34: t_Pred = Any.any_l ()
+  | & _37: MutBorrow.t t_Dm = Any.any_l ()
+  | & _38: t_Duration = Any.any_l ()
+  | & _40: t_Pred = Any.any_l ()
   | & mid: t_Dm = Any.any_l ()
-  | & _41: t_Result_LookupResult_DmError = Any.any_l ()
-  | & _42: t_DmError = Any.any_l ()
+  | & _47: t_Result_LookupResult_DmError = Any.any_l ()
+  | & _48: t_DmError = Any.any_l ()
   | & entry: MutBorrow.t t_Entry = Any.any_l ()
-  | & _46: t_Option_refmut_Entry = Any.any_l ()
-  | & _47: MutBorrow.t t_Entries = Any.any_l ()
-  | & _49: UInt64.t = Any.any_l ()
-  | & _52: t_Result_LookupResult_DmError = Any.any_l ()
-  | & _53: t_LookupResult = Any.any_l ()
+  | & _52: t_Option_refmut_Entry = Any.any_l ()
+  | & _53: MutBorrow.t t_Entries = Any.any_l ()
+  | & _55: UInt64.t = Any.any_l ()
+  | & _58: t_Result_LookupResult_DmError = Any.any_l ()
+  | & _59: t_LookupResult = Any.any_l ()
   | & e: MutBorrow.t t_Entry = Any.any_l ()
-  | & _57: t_Option_u32 = Any.any_l ()
+  | & _63: t_Option_u32 = Any.any_l ()
   | & v: UInt32.t = Any.any_l ()
-  | & _62: t_Result_LookupResult_DmError = Any.any_l ()
-  | & _63: t_DmError = Any.any_l ()
-  | & _66: UInt32.t = Any.any_l ()
+  | & _68: t_Result_LookupResult_DmError = Any.any_l ()
+  | & _69: t_DmError = Any.any_l ()
+  | & _72: UInt32.t = Any.any_l ()
   | & handle: t_Handle = Any.any_l ()
   | & result: t_LookupResult = Any.any_l ()
-  | & _70: t_Location = Any.any_l ()
+  | & _76: t_Location = Any.any_l ()
   | & offset: UInt64.t = Any.any_l ()
   | & pointer: Opaque.ptr = Any.any_l ()
   | & size: UInt32.t = Any.any_l ()
-  | & _79: MutBorrow.t t_Option_Ep = Any.any_l ()
-  | & ep'0: MutBorrow.t t_Ep = Any.any_l ()
-  | & _82: t_Result_unit_EpError = Any.any_l ()
-  | & _83: MutBorrow.t t_Ep = Any.any_l ()
-  | & _85: t_Result_LookupResult_DmError = Any.any_l () ])
+  | & _85: MutBorrow.t t_Option_Ep = Any.any_l ()
+  | & ep: MutBorrow.t t_Ep = Any.any_l ()
+  | & _88: t_Result_unit_EpError = Any.any_l ()
+  | & _89: MutBorrow.t t_Ep = Any.any_l ()
+  | & _91: t_Result_LookupResult_DmError = Any.any_l () ])
   [ return (result: tup2_Result_LookupResult_DmError_Snapshot_Dm) ->
   {[@stop_split] [@expl:dm_lookup ensures] ([@stop_split] [@expl:dm_lookup ensures #0] [%#score'10] pred_holds d.current key (NoWriter)
       -> result.f1'1 = d.current)
@@ -608,15 +624,23 @@ let dm_lookup [#"/home/cornel/cv-dispatch-map-20261005/components/dispatch-map/v
     /\ ([@stop_split] [@expl:dm_lookup ensures #3] [%#score'13] wf d.current -> wf_pool d.final)
     /\ ([@stop_split] [@expl:dm_lookup ensures #4] [%#score'14] wf d.current -> wf_fwd d.final)
     /\ ([@stop_split] [@expl:dm_lookup ensures #5] [%#score'15] wf d.current -> wf_back d.final)
-    /\ ([@stop_split] [@expl:dm_lookup ensures #6] [%#score'16] rest_same result.f1'1 d.final)
-    /\ ([@stop_split] [@expl:dm_lookup ensures #7] [%#score'17] not pred_holds result.f1'1 key (NoWriter)
+    /\ ([@stop_split] [@expl:dm_lookup ensures #6] [%#score'16] rest_same_u result.f1'1 d.final)
+    /\ ([@stop_split] [@expl:dm_lookup ensures #7] [%#score'17] match result.f0'1 with
+          | Ok'0 _ -> has result.f1'1 key /\ result.f1'1.ep'0 <> None'0
+          | Err'0 _ -> false
+          end -> uses'0 d.final = Seq.snoc (uses'0 result.f1'1) (ent result.f1'1 key).eviction_handle)
+    /\ ([@stop_split] [@expl:dm_lookup ensures #8] [%#score'18] not match result.f0'1 with
+          | Ok'0 _ -> has result.f1'1 key /\ result.f1'1.ep'0 <> None'0
+          | Err'0 _ -> false
+          end -> uses'0 d.final = uses'0 result.f1'1)
+    /\ ([@stop_split] [@expl:dm_lookup ensures #9] [%#score'19] not pred_holds result.f1'1 key (NoWriter)
       -> result.f0'1 = Err'0 (Timeout key) /\ same_map d.final result.f1'1)
-    /\ ([@stop_split] [@expl:dm_lookup ensures #8] [%#score'18] pred_holds result.f1'1 key (NoWriter)
+    /\ ([@stop_split] [@expl:dm_lookup ensures #10] [%#score'20] pred_holds result.f1'1 key (NoWriter)
         /\ not has result.f1'1 key -> result.f0'1 = Ok'0 (NotExist'0) /\ same_map d.final result.f1'1)
-    /\ ([@stop_split] [@expl:dm_lookup ensures #9] [%#score'19] pred_holds result.f1'1 key (NoWriter)
+    /\ ([@stop_split] [@expl:dm_lookup ensures #11] [%#score'21] pred_holds result.f1'1 key (NoWriter)
         /\ has result.f1'1 key /\ (ent result.f1'1 key).read_ref = const_MAX'0
       -> result.f0'1 = Err'0 (RefCountOverflow key) /\ same_map d.final result.f1'1)
-    /\ ([@stop_split] [@expl:dm_lookup ensures #10] [%#score'20] pred_holds result.f1'1 key (NoWriter)
+    /\ ([@stop_split] [@expl:dm_lookup ensures #12] [%#score'22] pred_holds result.f1'1 key (NoWriter)
       /\ has result.f1'1 key /\ UInt32.t'int (ent result.f1'1 key).read_ref < UInt32.t'int const_MAX'0
     -> result.f0'1 = Ok'0 (lr_of (ent result.f1'1 key).location)
     /\ has d.final key

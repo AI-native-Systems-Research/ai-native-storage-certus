@@ -5,7 +5,7 @@
       "vc_div_ceil": { "prover": "alt-ergo", "time": 0.017 },
       "vc_dm_promote_block_to_memory_tier": {
         "tactic": "compute_specified",
-        "children": [ { "prover": "z3", "time": 0.069 } ]
+        "children": [ { "prover": "z3", "time": 0.2 } ]
       },
       "vc_elim_BlockDevice": { "prover": "alt-ergo", "time": 0.018 },
       "vc_elim_Some": { "prover": "alt-ergo", "time": 0.018 },

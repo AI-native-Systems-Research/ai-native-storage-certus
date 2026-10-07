@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_dm_recover_extent": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_dm_recover_extent": { "prover": "alt-ergo", "time": 0.034 },
       "vc_verify_dm_recover_extent_registers_eviction__mutant": {
         "tactic": "compute_specified",
         "children": [

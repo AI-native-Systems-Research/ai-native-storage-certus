@@ -2,9 +2,9 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_contains_key": { "prover": "alt-ergo", "time": 0.017 },
-      "vc_dm_recover_extent": { "prover": "z3", "time": 0.079 },
-      "vc_elim_Ok": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_contains_key": { "prover": "alt-ergo", "time": 0.036 },
+      "vc_dm_recover_extent": { "prover": "z3", "time": 0.197 },
+      "vc_elim_Ok": { "prover": "alt-ergo", "time": 0.036 },
       "vc_elim_Ret": { "prover": "alt-ergo", "time": 0.02 },
       "vc_elim_Some": { "prover": "alt-ergo", "time": 0.019 },
       "vc_get_pool_id": { "prover": "alt-ergo", "time": 0.019 },

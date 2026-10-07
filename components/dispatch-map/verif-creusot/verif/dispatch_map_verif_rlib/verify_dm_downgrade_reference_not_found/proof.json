@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_dm_downgrade_reference": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_dm_downgrade_reference": { "prover": "alt-ergo", "time": 0.038 },
       "vc_verify_dm_downgrade_reference_not_found": {
         "prover": "alt-ergo",
         "time": 0.033

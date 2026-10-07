@@ -5,7 +5,7 @@
       "vc_dm_convert_to_storage": { "prover": "alt-ergo", "time": 0.021 },
       "vc_verify_dm_convert_to_storage_block_device": {
         "prover": "alt-ergo",
-        "time": 0.027
+        "time": 0.054
       }
     }
   }

@@ -5,7 +5,25 @@
       "vc_dm_oldest_keys": { "prover": "alt-ergo", "time": 0.02 },
       "vc_verify_dm_oldest_keys_only_present_keys": {
         "tactic": "compute_specified",
-        "children": [ { "prover": "z3", "time": 0.147 } ]
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.038 },
+              {
+                "tactic": "split_vc",
+                "children": [
+                  {
+                    "tactic": "split_vc",
+                    "children": [ { "prover": "z3", "time": 0.141 } ]
+                  }
+                ]
+              },
+              { "prover": "alt-ergo", "time": 0.028 },
+              { "prover": "alt-ergo", "time": 0.042 }
+            ]
+          }
+        ]
       }
     }
   }

@@ -4,11 +4,11 @@
     "Coma": {
       "vc_dm_take_write": {
         "tactic": "compute_specified",
-        "children": [ { "prover": "z3", "time": 0.041 } ]
+        "children": [ { "prover": "z3", "time": 0.093 } ]
       },
-      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.035 },
       "vc_from_millis": { "prover": "alt-ergo", "time": 0.016 },
-      "vc_get_mut": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_get_mut": { "prover": "alt-ergo", "time": 0.035 },
       "vc_wait_for": { "prover": "alt-ergo", "time": 0.021 }
     }
   }

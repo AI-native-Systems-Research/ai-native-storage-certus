@@ -84,6 +84,53 @@ pub fn promotes(op: Op, k: u64) -> bool {
     pearlite! { match op { Op::Promote(j, _, _) => j == k, _ => false } }
 }
 
+/// The key an operation names (None for initialize / oldest_keys).
+#[logic(open)]
+pub fn op_key(op: Op) -> Option<u64> {
+    pearlite! { match op {
+        Op::Initialize => None,
+        Op::OldestKeys(_) => None,
+        Op::Lookup(k) => Some(k),
+        Op::ConvertToStorage(k, _) => Some(k),
+        Op::TakeRead(k) => Some(k),
+        Op::TakeWrite(k) => Some(k),
+        Op::ReleaseRead(k) => Some(k),
+        Op::ReleaseWrite(k) => Some(k),
+        Op::Downgrade(k) => Some(k),
+        Op::Remove(k) => Some(k),
+        Op::Touch(k) => Some(k),
+        Op::EntrySize(k) => Some(k),
+        Op::CreateMt(k, _, _) => Some(k),
+        Op::ConvertMtToBlock(k) => Some(k),
+        Op::Promote(k, _, _) => Some(k),
+        Op::IsEvictable(k) => Some(k),
+        Op::TryEvict(k) => Some(k),
+        Op::RecoverExtent(k, _, _) => Some(k),
+        Op::SetChecksum(k, _) => Some(k),
+        Op::GetChecksum(k) => Some(k),
+    } }
+}
+
+/// The uses each method reports to the eviction policy (DM-OLDEST-KEYS-ORDER), relative to the
+/// linearization-point state `lin`: creation / recovery / initialize's restored extents (track)
+/// and a successful lookup of an existing entry / touch (touch) append that entry's handle;
+/// nothing else reports a use.
+#[logic(open)]
+pub fn uses_ok(op: Op, s: St, lin: Dm, post: Dm) -> bool {
+    pearlite! { match op {
+        Op::Touch(k) => if s == St::Ok { uses(post) == uses(lin).push_back(ent(lin, k).eviction_handle) } else { uses(post) == uses(lin) },
+        Op::Lookup(k) => if s == St::Ok && has(lin, k) { uses(post) == uses(lin).push_back(ent(lin, k).eviction_handle) } else { uses(post) == uses(lin) },
+        Op::CreateMt(k, _, _) => if s == St::Ok { uses(post) == uses(lin).push_back(ent(post, k).eviction_handle) } else { uses(post) == uses(lin) },
+        Op::RecoverExtent(k, _, _) => if s == St::Ok { uses(post) == uses(lin).push_back(ent(post, k).eviction_handle) } else { uses(post) == uses(lin) },
+        Op::Initialize => if s == St::Ok { match lin.em {
+            Some(em) => uses(post).len() == uses(lin).len() + em.extents@.len()
+                && (forall<j: Int> 0 <= j && j < uses(lin).len() ==> uses(post)[j] == uses(lin)[j])
+                && (forall<i: Int> 0 <= i && i < em.extents@.len() ==> uses(post)[uses(lin).len() + i] == ent(post, em.extents@[i].key).eviction_handle),
+            None => uses(post) == uses(lin) } } else { uses(post) == uses(lin) },
+        _ => uses(post) == uses(lin),
+    } }
+}
+
 #[logic(open)]
 pub fn pw(which: u8) -> Pred {
     pearlite! { if which@ < 2 { Pred::NoWriter } else { Pred::NoRefs } }
@@ -353,6 +400,20 @@ pub fn verify_dm_lookup_frame(d: &mut Dm, key: u64) -> (Result<LookupResult, DmE
 // ---- DM-LOOKUP-FRAME — anti-vacuity twin, MUST FAIL
 #[ensures(has(*result.1, key) ==> ent(^d, key).write_ref@ == ent(*result.1, key).write_ref@ + 1)]
 pub fn verify_dm_lookup_frame__mutant(d: &mut Dm, key: u64) -> (Result<LookupResult, DmError>, Snapshot<Dm>) {
+    dm_lookup(d, key)
+}
+
+// ---- DM-LOOKUP-REFRESHES-EVICTION-PRIORITY
+#[requires(wf(*d))]
+#[ensures(match result.0 { Ok(_) => has(*result.1, key) ==> (^d).ep != None && uses(^d) == uses(*result.1).push_back(ent(*result.1, key).eviction_handle) && match (^d).pool_id { Some(p) => trk(^d).get(ent(*result.1, key).eviction_handle) == Some((p, key)), None => false }, Err(_) => true })]
+pub fn verify_dm_lookup_refreshes_eviction_priority(d: &mut Dm, key: u64) -> (Result<LookupResult, DmError>, Snapshot<Dm>) {
+    dm_lookup(d, key)
+}
+
+// ---- DM-LOOKUP-REFRESHES-EVICTION-PRIORITY — anti-vacuity twin, MUST FAIL
+#[requires(wf(*d))]
+#[ensures(match result.0 { Ok(_) => has(*result.1, key) ==> uses(^d) == uses(*result.1), Err(_) => true })]
+pub fn verify_dm_lookup_refreshes_eviction_priority__mutant(d: &mut Dm, key: u64) -> (Result<LookupResult, DmError>, Snapshot<Dm>) {
     dm_lookup(d, key)
 }
 
@@ -829,6 +890,35 @@ pub fn verify_dm_touch_not_found__mutant(d: &mut Dm, key: u64) -> Result<(), DmE
     dm_touch(d, key)
 }
 
+// ---- DM-TOUCH-NO-WAIT
+#[check(terminates)]
+#[ensures(result != Err(DmError::Timeout(key)))]
+#[ensures(has(*d, key) && (ent(*d, key).read_ref@ > 0 || ent(*d, key).write_ref@ > 0) ==> result == Ok(()))]
+pub fn verify_dm_touch_no_wait(d: &mut Dm, key: u64) -> Result<(), DmError> {
+    dm_touch(d, key)
+}
+
+// ---- DM-TOUCH-NO-WAIT — anti-vacuity twin, MUST FAIL
+#[check(terminates)]
+#[ensures(has(*d, key) && ent(*d, key).write_ref@ > 0 ==> result == Err(DmError::Timeout(key)))]
+pub fn verify_dm_touch_no_wait__mutant(d: &mut Dm, key: u64) -> Result<(), DmError> {
+    dm_touch(d, key)
+}
+
+// ---- DM-TOUCH-REFRESHES-PRIORITY
+#[requires(wf(*d))]
+#[ensures(result == Ok(()) ==> (*d).ep != None && uses(^d) == uses(*d).push_back(ent(*d, key).eviction_handle) && match (*d).pool_id { Some(p) => trk(^d).get(ent(*d, key).eviction_handle) == Some((p, key)), None => false })]
+pub fn verify_dm_touch_refreshes_priority(d: &mut Dm, key: u64) -> Result<(), DmError> {
+    dm_touch(d, key)
+}
+
+// ---- DM-TOUCH-REFRESHES-PRIORITY — anti-vacuity twin, MUST FAIL
+#[requires(wf(*d))]
+#[ensures(result == Ok(()) ==> uses(^d) == uses(*d))]
+pub fn verify_dm_touch_refreshes_priority__mutant(d: &mut Dm, key: u64) -> Result<(), DmError> {
+    dm_touch(d, key)
+}
+
 // ---- DM-ENTRY-SIZE-BLOCK-MULTIPLE
 #[requires(wf(*d))]
 #[ensures(result != Out::Panic)]
@@ -964,6 +1054,41 @@ pub fn refute_dm_oldest_keys_no_eviction_policy_empty(d: &mut Dm, n: usize) -> O
 #[ensures(!(result == Out::Panic))]
 pub fn sanity_refute_dm_oldest_keys_no_eviction_policy_empty(d: &mut Dm, n: usize) -> Out<Vec<u64>> {
     dm_oldest_keys(d, n)
+}
+
+// ---- DM-OLDEST-KEYS-ORDER
+#[requires(wf(*d))]
+#[requires(op_assume(*d, op))]
+#[ensures(match op { Op::OldestKeys(n) => result.0 == St::Ok ==> match (^d).ep { Some(e) => match (^d).pool_id { Some(p) => result.2@ == cands(e, p, n), None => false }, None => false }, _ => true })]
+#[ensures(uses_ok(op, result.0, *result.1, ^d))]
+pub fn verify_dm_oldest_keys_order(d: &mut Dm, op: Op) -> (St, Snapshot<Dm>, Vec<u64>) {
+    match op {
+        Op::OldestKeys(n) => { let lin = snapshot!(*d); match dm_oldest_keys(d, n) { Out::Ret(v) => (St::Ok, lin, v), Out::Panic => (St::Panic, lin, Vec::new()) } }
+        _ => { let (s, lin) = step!(d, op); (s, lin, Vec::new()) }
+    }
+}
+
+// ---- DM-OLDEST-KEYS-ORDER — anti-vacuity twin, MUST FAIL
+#[requires(wf(*d))]
+#[requires(op_assume(*d, op))]
+#[ensures(match op { Op::Touch(k) => result.0 == St::Ok ==> uses(^d) == uses(*result.1), _ => true })]
+pub fn verify_dm_oldest_keys_order__mutant(d: &mut Dm, op: Op) -> (St, Snapshot<Dm>, Vec<u64>) {
+    match op {
+        Op::OldestKeys(n) => { let lin = snapshot!(*d); match dm_oldest_keys(d, n) { Out::Ret(v) => (St::Ok, lin, v), Out::Panic => (St::Panic, lin, Vec::new()) } }
+        _ => { let (s, lin) = step!(d, op); (s, lin, Vec::new()) }
+    }
+}
+
+// ---- DM-CREATE-MEMORY-TIER-ENTRY-REGISTERS-EVICTION
+#[ensures(result == Out::Ret(Ok(())) ==> uses(^d) == uses(*d).push_back(ent(^d, key).eviction_handle) && (^d).pool_id != None && trk(^d).contains(ent(^d, key).eviction_handle) && Some(trk(^d).lookup(ent(^d, key).eviction_handle)) == (^d).pool_id.map_logic(|p| (p, key)))]
+pub fn verify_dm_create_memory_tier_entry_registers_eviction(d: &mut Dm, key: u64, pointer: *mut u8, size: u32) -> Out<Result<(), DmError>> {
+    dm_create_memory_tier_entry(d, key, pointer, size)
+}
+
+// ---- DM-CREATE-MEMORY-TIER-ENTRY-REGISTERS-EVICTION — anti-vacuity twin, MUST FAIL
+#[ensures(result == Out::Ret(Ok(())) ==> uses(^d) == uses(*d))]
+pub fn verify_dm_create_memory_tier_entry_registers_eviction__mutant(d: &mut Dm, key: u64, pointer: *mut u8, size: u32) -> Out<Result<(), DmError>> {
+    dm_create_memory_tier_entry(d, key, pointer, size)
 }
 
 // ---- DM-CREATE-MEMORY-TIER-ENTRY-LOCATION
@@ -1854,5 +1979,17 @@ pub fn verify_dm_inv_legal_location_transitions(d: &mut Dm, op: Op) -> (St, Snap
 #[requires(op_assume(*d, op))]
 #[ensures(forall<k: u64> has(*result.1, k) && has(^d, k) && !is_mt(ent(*result.1, k).location) && is_mt(ent(^d, k).location) ==> !promotes(op, k))]
 pub fn verify_dm_inv_legal_location_transitions__mutant(d: &mut Dm, op: Op) -> (St, Snapshot<Dm>) {
+    step!(d, op)
+}
+
+// ---- DM-INV-OPERATIONS-ARE-KEY-LOCAL
+#[ensures(match op_key(op) { Some(k) => forall<j: u64> j != k ==> (^d).entries@.get(j) == (*result.1).entries@.get(j), None => true })]
+pub fn verify_dm_inv_operations_are_key_local(d: &mut Dm, op: Op) -> (St, Snapshot<Dm>) {
+    step!(d, op)
+}
+
+// ---- DM-INV-OPERATIONS-ARE-KEY-LOCAL — anti-vacuity twin, MUST FAIL
+#[ensures(forall<j: u64> (^d).entries@.get(j) == (*result.1).entries@.get(j))]
+pub fn verify_dm_inv_operations_are_key_local__mutant(d: &mut Dm, op: Op) -> (St, Snapshot<Dm>) {
     step!(d, op)
 }

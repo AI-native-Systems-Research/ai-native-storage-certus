@@ -4,9 +4,9 @@
     "Coma": {
       "vc_checked_mul": { "prover": "alt-ergo", "time": 0.02 },
       "vc_dm_entry_size": { "prover": "alt-ergo", "time": 0.045 },
-      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.039 },
       "vc_elim_Some'0": { "prover": "alt-ergo", "time": 0.017 },
-      "vc_get": { "prover": "alt-ergo", "time": 0.018 }
+      "vc_get": { "prover": "alt-ergo", "time": 0.036 }
     }
   }
 }

@@ -8,7 +8,7 @@
       },
       "vc_verify_dm_create_memory_tier_entry_location": {
         "prover": "alt-ergo",
-        "time": 0.054
+        "time": 0.11
       }
     }
   }

@@ -1,7 +1,7 @@
 // core.rs — mirror types, trusted boundaries, and one mirror fn per IDispatchMap method.
 // Line references are to components/dispatch-map/src/*.rs at pin 08a5ae88.
 
-use creusot_std::{logic::FMap, prelude::*};
+use creusot_std::{logic::{FMap, Seq}, prelude::*};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -110,6 +110,7 @@ impl Entries {
     }
 
     #[trusted]
+    #[check(terminates)]
     #[ensures(match result { Some(e) => (*self)@.get(*k) == Some(*e), None => (*self)@.get(*k) == None })]
     pub fn get(&self, k: &u64) -> Option<&Entry> {
         self.0.get(k)
@@ -146,10 +147,21 @@ impl Entries {
 
 /// Logical state of the connected eviction-policy component, as far as its interface declares
 /// it: how many pools exist, and which handle tracks which (pool, key). Ranking (recency /
-/// frequency) is NOT modelled: `touch` is observably a no-op on this state.
+/// frequency) is NOT modelled. `uses` is a ghost log of the "use" reports the policy has received
+/// from this client, in call order: every successful `track` (a new entry, registered as newest)
+/// and every `touch` call appends the handle. HOW the policy ranks from that history is the
+/// policy's business and is left abstract (`cands`).
 pub struct Ep {
     pub npools: Snapshot<Int>,
     pub tracked: Snapshot<FMap<Handle, (u32, u64)>>,
+    pub uses: Snapshot<Seq<Handle>>,
+}
+
+/// The policy's answer to `get_eviction_candidates(pool, n)` in a given policy state: abstract,
+/// because its order is decided by the eviction-policy component, not by the dispatch map.
+#[logic(opaque)]
+pub fn cands(e: Ep, pool: u32, n: usize) -> Seq<u64> {
+    dead
 }
 
 impl Ep {
@@ -157,6 +169,7 @@ impl Ep {
     #[trusted]
     #[ensures(result@ < *(^self).npools && *(*self).npools <= *(^self).npools)]
     #[ensures(*(^self).tracked == *(*self).tracked)]
+    #[ensures(*(^self).uses == *(*self).uses)]
     #[ensures(forall<h: Handle> (*(*self).tracked).contains(h) ==> ((*(*self).tracked).lookup(h)).0 != result)]
     pub fn create_pool(&mut self) -> u32 {
         unimplemented!()
@@ -169,6 +182,7 @@ impl Ep {
     #[ensures(match result {
         Ok(h) => pool@ < *(*self).npools && h.pool_id == pool
                  && *(^self).tracked == (*(*self).tracked).insert(h, (pool, key))
+                 && *(^self).uses == (*(*self).uses).push_back(h)
                  && ((*(*self).tracked).contains(h) ==> (*(*self).tracked).lookup(h) == (pool, key)),
         Err(_) => pool@ >= *(*self).npools && ^self == *self })]
     #[ensures(*(^self).npools == *(*self).npools)]
@@ -176,9 +190,11 @@ impl Ep {
         unimplemented!()
     }
 
-    /// `touch` — updates ranking only.
+    /// `touch` — updates ranking only: the tracking state is unchanged, the use is logged.
     #[trusted]
-    #[ensures(^self == *self)]
+    #[check(terminates)]
+    #[ensures(*(^self).npools == *(*self).npools && *(^self).tracked == *(*self).tracked)]
+    #[ensures(*(^self).uses == (*(*self).uses).push_back(h))]
     pub fn touch(&mut self, h: Handle) -> Result<(), EpError> {
         unimplemented!()
     }
@@ -187,12 +203,14 @@ impl Ep {
     #[trusted]
     #[ensures(*(^self).tracked == (*(*self).tracked).remove(h))]
     #[ensures(*(^self).npools == *(*self).npools)]
+    #[ensures(*(^self).uses == *(*self).uses)]
     pub fn remove(&mut self, h: Handle) -> Result<(), EpError> {
         unimplemented!()
     }
 
     /// `get_eviction_candidates` — up to `n` keys tracked in `pool`.
     #[trusted]
+    #[ensures(result@ == cands(*self, pool, n))]
     #[ensures(result@.len() <= n@)]
     #[ensures(forall<i: Int> 0 <= i && i < result@.len() ==>
               exists<h: Handle> (*(*self).tracked).get(h) == Some((pool, result@[i])))]
@@ -276,6 +294,19 @@ pub fn rest_same(a: Dm, b: Dm) -> bool {
 #[logic(open)]
 pub fn rest_notified(a: Dm, b: Dm) -> bool {
     pearlite! { b.pool_id == a.pool_id && b.ep == a.ep && b.em == a.em && *b.cv.epoch == *a.cv.epoch + 1 }
+}
+
+/// As `rest_same`, but the eviction policy may have logged uses (its tracking state is unchanged).
+#[logic(open)]
+pub fn rest_same_u(a: Dm, b: Dm) -> bool {
+    pearlite! { a.pool_id == b.pool_id && a.em == b.em && a.cv == b.cv && trk(a) == trk(b)
+                && npools(a) == npools(b) && (a.ep == None) == (b.ep == None) }
+}
+
+/// The eviction policy's use log (empty when no policy is connected).
+#[logic(open)]
+pub fn uses(d: Dm) -> Seq<Handle> {
+    pearlite! { match d.ep { Some(e) => *e.uses, None => Seq::empty() } }
 }
 
 #[logic(open)]
@@ -525,6 +556,7 @@ pub fn dm_new(ep: Option<Ep>, em: Option<Em>, cv: Cv) -> Dm {
 /// `get_pool_id` (lib.rs:50-59).
 #[ensures((^d).entries == (*d).entries && (^d).em == (*d).em && (^d).cv == (*d).cv)]
 #[ensures(trk(^d) == trk(*d) && npools(*d) <= npools(^d) && ((^d).ep == None) == ((*d).ep == None))]
+#[ensures(uses(^d) == uses(*d))]
 #[ensures(match (*d).pool_id { Some(p) => result == Out::Ret(p) && ^d == *d, None => true })]
 #[ensures((*d).pool_id == None && (*d).ep == None ==> result == Out::Panic && ^d == *d)]
 #[ensures((*d).pool_id == None && (*d).ep != None ==>
@@ -579,6 +611,15 @@ pub fn get_pool_id(d: &mut Dm) -> Out<u32> {
                     && trk(^d).contains(ent(^d, em.extents@[i].key).eviction_handle)),
         None => true },
     _ => true })]
+#[ensures(match result {
+    Out::Ret(Ok(())) => match (*d).em {
+        Some(em) => uses(^d).len() == uses(*d).len() + em.extents@.len()
+            && (forall<j: Int> 0 <= j && j < uses(*d).len() ==> uses(^d)[j] == uses(*d)[j])
+            && (a_fr020(*d) ==> forall<i: Int> 0 <= i && i < em.extents@.len() ==>
+                    uses(^d)[uses(*d).len() + i] == ent(^d, em.extents@[i].key).eviction_handle),
+        None => uses(^d) == uses(*d) },
+    Out::Ret(Err(_)) => uses(^d) == uses(*d),
+    Out::Panic => true })]
 #[ensures(wf(*d) && a_fr020(*d) && a_fr023_em(*d) && result != Out::Panic ==> wf_entries(^d))]
 #[ensures(wf(*d) && a_fr020(*d) && a_fr023_em(*d) && result != Out::Panic ==> wf_pool(^d))]
 #[ensures(wf(*d) && a_fr020(*d) && a_fr023_em(*d) && result != Out::Panic ==> wf_fwd(^d))]
@@ -604,6 +645,10 @@ pub fn dm_initialize(d: &mut Dm) -> Out<Result<(), DmError>> {
     let mut i: usize = 0;
     #[invariant(i@ <= exts@.len() && count@ == i@)]
     #[invariant(*ep.npools == npools(*o1))]
+    #[invariant((*ep.uses).len() == uses(*o1).len() + i@)]
+    #[invariant(forall<j: Int> 0 <= j && j < uses(*o1).len() ==> (*ep.uses)[j] == uses(*o1)[j])]
+    #[invariant(a_fr020(*o) ==> forall<j: Int> 0 <= j && j < i@ ==>
+                (*ep.uses)[uses(*o1).len() + j] == (entries@.lookup(exts@[j].key)).eviction_handle)]
     #[invariant(forall<k: u64> (forall<j: Int> 0 <= j && j < i@ ==> exts@[j].key != k) ==>
                 entries@.get(k) == (*o1).entries@.get(k))]
     #[invariant(forall<j: Int> 0 <= j && j < i@ ==> entries@.contains(exts@[j].key))]
@@ -651,7 +696,11 @@ pub fn dm_initialize(d: &mut Dm) -> Out<Result<(), DmError>> {
 #[ensures(wf(*d) ==> wf_pool(^d))]
 #[ensures(wf(*d) ==> wf_fwd(^d))]
 #[ensures(wf(*d) ==> wf_back(^d))]
-#[ensures(rest_same(*result.1, ^d))]
+#[ensures(rest_same_u(*result.1, ^d))]
+#[ensures(match result.0 { Ok(_) => has(*result.1, key) && (*result.1).ep != None, Err(_) => false } ==>
+          uses(^d) == uses(*result.1).push_back(ent(*result.1, key).eviction_handle))]
+#[ensures(!match result.0 { Ok(_) => has(*result.1, key) && (*result.1).ep != None, Err(_) => false } ==>
+          uses(^d) == uses(*result.1))]
 #[ensures(!pred_holds(*result.1, key, Pred::NoWriter) ==> result.0 == Err(DmError::Timeout(key)) && same_map(^d, *result.1))]
 #[ensures(pred_holds(*result.1, key, Pred::NoWriter) && !has(*result.1, key) ==>
           result.0 == Ok(LookupResult::NotExist) && same_map(^d, *result.1))]
@@ -893,6 +942,7 @@ pub fn dm_downgrade_reference(d: &mut Dm, key: u64) -> Result<(), DmError> {
           && ((^d).ep == None) == ((*d).ep == None) && npools(^d) == npools(*d)
           && !trk(^d).contains(ent(*d, key).eviction_handle)
           && (forall<h: Handle> h != ent(*d, key).eviction_handle ==> trk(^d).get(h) == trk(*d).get(h)))]
+#[ensures(uses(^d) == uses(*d))]
 #[ensures(wf(*d) ==> wf_entries(^d))]
 #[ensures(wf(*d) ==> wf_pool(^d))]
 #[ensures(wf(*d) ==> wf_fwd(^d))]
@@ -919,7 +969,10 @@ pub fn dm_remove(d: &mut Dm, key: u64) -> Result<(), DmError> {
 /// `touch` (lib.rs:349-361).
 #[ensures(!has(*d, key) ==> result == Err(DmError::KeyNotFound(key)))]
 #[ensures(has(*d, key) ==> result == Ok(()))]
-#[ensures(same_map(^d, *d) && rest_same(*d, ^d))]
+#[ensures(same_map(^d, *d) && rest_same_u(*d, ^d))]
+#[ensures(has(*d, key) && (*d).ep != None ==> uses(^d) == uses(*d).push_back(ent(*d, key).eviction_handle))]
+#[ensures(!(has(*d, key) && (*d).ep != None) ==> uses(^d) == uses(*d))]
+#[check(terminates)]
 #[ensures(wf(*d) ==> wf_entries(^d))]
 #[ensures(wf(*d) ==> wf_pool(^d))]
 #[ensures(wf(*d) ==> wf_fwd(^d))]
@@ -975,6 +1028,12 @@ pub fn dm_entry_size(d: &mut Dm, key: u64) -> Out<Result<u32, DmError>> {
 #[ensures(wf(*d) ==> wf_fwd(^d))]
 #[ensures(wf(*d) ==> wf_back(^d))]
 #[ensures(result == Out::Panic ==> ^d == *d)]
+#[ensures(uses(^d) == uses(*d) && ((^d).ep == None) == ((*d).ep == None))]
+#[ensures(match result {
+    Out::Ret(v) => match (^d).ep {
+        Some(e) => match (^d).pool_id { Some(p) => v@ == cands(e, p, n), None => false },
+        None => v@.len() == 0 },
+    Out::Panic => true })]
 pub fn dm_oldest_keys(d: &mut Dm, n: usize) -> Out<Vec<u64>> {
     let pool_id = match get_pool_id(d) {
         Out::Ret(p) => p,
@@ -1015,6 +1074,10 @@ pub fn dm_oldest_keys(d: &mut Dm, n: usize) -> Out<Vec<u64>> {
 #[ensures(wf(*d) && a_fr003(size) && result != Out::Panic ==> wf_fwd(^d))]
 #[ensures(wf(*d) && a_fr003(size) && result != Out::Panic ==> wf_back(^d))]
 #[ensures(result == Out::Panic ==> ^d == *d)]
+#[ensures(match result {
+    Out::Ret(Ok(())) => uses(^d) == uses(*d).push_back(ent(^d, key).eviction_handle),
+    Out::Ret(Err(_)) => uses(^d) == uses(*d),
+    Out::Panic => true })]
 pub fn dm_create_memory_tier_entry(d: &mut Dm, key: u64, pointer: *mut u8, size: u32) -> Out<Result<(), DmError>> {
     if size == 0 {
         return Out::Ret(Err(DmError::InvalidSize));
@@ -1199,6 +1262,10 @@ pub fn dm_try_evict_to_block(d: &mut Dm, key: u64) -> Result<(), DmError> {
 #[ensures(wf(*d) && a_fr023(size_blocks) && result != Out::Panic ==> wf_fwd(^d))]
 #[ensures(wf(*d) && a_fr023(size_blocks) && result != Out::Panic ==> wf_back(^d))]
 #[ensures(result == Out::Panic ==> ^d == *d)]
+#[ensures(match result {
+    Out::Ret(Ok(())) => uses(^d) == uses(*d).push_back(ent(^d, key).eviction_handle),
+    Out::Ret(Err(_)) => uses(^d) == uses(*d),
+    Out::Panic => true })]
 pub fn dm_recover_extent(d: &mut Dm, key: u64, offset: u64, size_blocks: u32) -> Out<Result<(), DmError>> {
     let pool_id = match get_pool_id(d) {
         Out::Ret(p) => p,

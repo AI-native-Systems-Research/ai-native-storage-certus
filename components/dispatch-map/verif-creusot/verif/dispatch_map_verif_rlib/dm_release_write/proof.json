@@ -4,7 +4,7 @@
     "Coma": {
       "vc_dm_release_write": {
         "tactic": "compute_specified",
-        "children": [ { "prover": "z3", "time": 0.06 } ]
+        "children": [ { "prover": "z3", "time": 0.124 } ]
       },
       "vc_elim_Some": { "prover": "alt-ergo", "time": 0.014 },
       "vc_get_mut": { "prover": "alt-ergo", "time": 0.014 },

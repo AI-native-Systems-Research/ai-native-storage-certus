@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_dm_is_evictable": { "prover": "alt-ergo", "time": 0.054 },
-      "vc_elim_MemoryTier": { "prover": "alt-ergo", "time": 0.018 },
-      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.018 },
-      "vc_get": { "prover": "alt-ergo", "time": 0.018 }
+      "vc_dm_is_evictable": { "prover": "alt-ergo", "time": 0.114 },
+      "vc_elim_MemoryTier": { "prover": "alt-ergo", "time": 0.039 },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.038 },
+      "vc_get": { "prover": "alt-ergo", "time": 0.039 }
     }
   }
 }

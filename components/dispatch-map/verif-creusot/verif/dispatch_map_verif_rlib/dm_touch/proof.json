@@ -2,8 +2,8 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_dm_touch": { "prover": "z3", "time": 0.017 },
-      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_dm_touch": { "prover": "z3", "time": 0.039 },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.03 },
       "vc_elim_Some'0": { "prover": "alt-ergo", "time": 0.015 },
       "vc_get": { "prover": "alt-ergo", "time": 0.015 },
       "vc_touch": { "prover": "alt-ergo", "time": 0.018 }

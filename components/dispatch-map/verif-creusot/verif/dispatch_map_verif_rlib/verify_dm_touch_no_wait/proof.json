@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_dm_touch": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_verify_dm_touch_no_wait": { "prover": "alt-ergo", "time": 0.036 }
+    }
+  }
+}

@@ -4,7 +4,7 @@
     "Coma": {
       "vc_dm_promote_block_to_memory_tier": {
         "prover": "alt-ergo",
-        "time": 0.017
+        "time": 0.036
       },
       "vc_verify_dm_promote_transition": {
         "prover": "alt-ergo",

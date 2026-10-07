@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_dm_recover_extent": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_dm_recover_extent": { "prover": "alt-ergo", "time": 0.036 },
       "vc_refute_dm_recover_extent_no_eviction_policy_error": {
         "prover": "alt-ergo",
-        "time": 0.03
+        "time": 0.063
       }
     }
   }

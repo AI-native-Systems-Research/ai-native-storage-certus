@@ -4,7 +4,7 @@
     "Coma": {
       "vc_dm_promote_block_to_memory_tier": {
         "prover": "alt-ergo",
-        "time": 0.017
+        "time": 0.036
       },
       "vc_sanity_refute_dm_promote_already_memory_tier": {
         "tactic": "compute_specified",

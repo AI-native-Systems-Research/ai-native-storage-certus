@@ -8,7 +8,7 @@
       },
       "vc_verify_dm_convert_memory_tier_to_block_not_memory_tier": {
         "prover": "alt-ergo",
-        "time": 0.033
+        "time": 0.068
       }
     }
   }
