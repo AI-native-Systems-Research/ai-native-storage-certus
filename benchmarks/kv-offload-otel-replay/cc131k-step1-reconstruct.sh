@@ -26,6 +26,9 @@ STATS_ONLY="${STATS_ONLY:-0}" # 1 = print reconstruction stats and write nothing
 # SHARED_PREFIX=N injects a synthetic N-token system prompt reused by every
 # conversation -> cross-conversation reuse that drives external-cache hits.
 SHARED_PREFIX="${SHARED_PREFIX:-0}"
+# ZERO_LATENCY=1 emits 0 inter-turn latency (old saturating plan). Default (0)
+# carries the mooncake timestamps as per-turn gaps -> honored at TIME_SCALE>0.
+ZERO_LATENCY="${ZERO_LATENCY:-0}"
 
 if [[ ! -f "$MOONCAKE" ]]; then
   echo "error: mooncake trace not found: $MOONCAKE" >&2
@@ -37,6 +40,7 @@ ARGS=("$MOONCAKE" "$PLAN")
 [[ -n "$MAX_ROWS" ]] && ARGS+=(--max-rows "$MAX_ROWS")
 [[ "$STATS_ONLY" == "1" ]] && ARGS+=(--stats-only)
 [[ "$SHARED_PREFIX" != "0" ]] && ARGS+=(--shared-prefix "$SHARED_PREFIX")
+[[ "$ZERO_LATENCY" == "1" ]] && ARGS+=(--zero-latency)
 
 echo "[step1] mooncake  : ${MOONCAKE}"
 echo "[step1] plan out  : ${PLAN}${STATS_ONLY:+ (stats-only: ${STATS_ONLY})}"

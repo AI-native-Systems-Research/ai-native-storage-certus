@@ -95,6 +95,11 @@ def main() -> None:
                          "prefix). Drives cross-conversation external-cache reuse so "
                          "vllm_external_prefix_cache_hits_total can rise above 0; "
                          "0 = use only the detected prefix.")
+    ap.add_argument("--zero-latency", action="store_true",
+                    help="emit 0 inter-turn latency instead of carrying the mooncake "
+                         "timestamps (the old saturating-replay default). By default "
+                         "each turn's latency = within-chain ts[next]-ts[cur] (clamped "
+                         ">= 0), which TIME_SCALE>0 honors as real pacing.")
     ap.add_argument("--stats-only", action="store_true",
                     help="print reconstruction stats and exit; do not write")
     args = ap.parse_args()
@@ -185,7 +190,8 @@ def main() -> None:
     clamped = 0        # incremental input < 1 token (bumped to 1)
     out_clamped = 0    # output_length 0 -> 1 (replay requires max_tokens >= 1)
     in_hi_clamped = 0  # per-turn input truncated to --max-input (window headroom)
-    all_turns, all_in, all_out = [], [], []
+    neg_gap_clamped = 0  # within-chain ts went backwards -> gap clamped to 0
+    all_turns, all_in, all_out, all_lat = [], [], [], []
     for cid, chain in enumerate(chains):
         turns = []
         for pos, ri in enumerate(chain):
@@ -207,9 +213,22 @@ def main() -> None:
             if out_tok < 1:
                 out_tok = 1
                 out_clamped += 1
-            turns.append([int(in_tok), out_tok, 0.0])
+            # Inter-turn latency = gap to the NEXT turn in this chain, from the
+            # mooncake arrival timestamps (ts[next]-ts[cur]). trace_to_otel encodes
+            # it as the span-to-span wait; TIME_SCALE>0 replays it as real pacing.
+            # The last turn has no successor -> 0. Clamp the (rare) backwards gap.
+            if args.zero_latency or pos == len(chain) - 1:
+                lat = 0.0
+            else:
+                lat = float(rows[chain[pos + 1]].get("timestamp", 0.0)) \
+                    - float(r.get("timestamp", 0.0))
+                if lat < 0:
+                    lat = 0.0
+                    neg_gap_clamped += 1
+            turns.append([int(in_tok), out_tok, lat])
             all_in.append(int(in_tok))
             all_out.append(out_tok)
+            all_lat.append(lat)
         all_turns.append(len(turns))
         conversations.append({
             "id": cid,
@@ -219,6 +238,7 @@ def main() -> None:
         })
 
     multiturn = sum(1 for c in chains if len(c) > 1)
+    total_delay = float(sum(all_lat))
     meta_totals = {
         "total_turns": int(sum(all_turns)),
         "mean_turns_per_conversation": round(statistics.mean(all_turns), 2),
@@ -226,6 +246,8 @@ def main() -> None:
         "max_turns": int(max(all_turns)),
         "sum_input_tokens": int(sum(all_in)),
         "sum_output_tokens": int(sum(all_out)),
+        "total_delay_sec": round(total_delay, 1),
+        "mean_inter_turn_gap_sec": round(statistics.mean(all_lat), 3) if all_lat else 0.0,
     }
 
     print(f"rows read                : {n}")
@@ -243,6 +265,14 @@ def main() -> None:
     print(f"input >{args.max_input} clamps : {in_hi_clamped}")
     print(f"sum input/output tokens  : {meta_totals['sum_input_tokens']} / "
           f"{meta_totals['sum_output_tokens']}")
+    if args.zero_latency:
+        print(f"inter-turn latency       : ZEROED (--zero-latency)")
+    else:
+        print(f"inter-turn latency       : from timestamps  "
+              f"total {meta_totals['total_delay_sec']:,}s "
+              f"({meta_totals['total_delay_sec']/3600:.2f}h), "
+              f"mean gap {meta_totals['mean_inter_turn_gap_sec']}s, "
+              f"{neg_gap_clamped} backward gaps clamped")
     print(f"elapsed                  : {time.time() - t0:.1f}s")
 
     if args.stats_only:
@@ -255,7 +285,10 @@ def main() -> None:
             "block_size": block_size,
             "shared_system_prompt_len": shared_system_prompt_len,
             "note": "Reconstructed from mooncake hash_ids prefix chains. Per-turn "
-                    "input is INCREMENTAL user tokens; latency 0 (TIME_SCALE=0 replay).",
+                    "input is INCREMENTAL user tokens; per-turn latency is the "
+                    "within-chain mooncake timestamp gap (ts[next]-ts[cur], clamped "
+                    ">=0), honored at TIME_SCALE>0. Pass --zero-latency for the old "
+                    "saturating 0-latency plan.",
             "turn_fields": ["input_tokens", "output_tokens", "tool_call_latency_sec"],
             "totals": meta_totals,
         },
