@@ -15,12 +15,18 @@ patches:
   - path: patch-certus.yaml
 
 # Swap the stock vLLM image for the connector-bearing build published by
-# ../publish-image.sh. Pin the exact tag after each build rather than editing by
-# hand:
+# ../publish-image.sh.
+#
+# newName carries a REGISTRY/REPO placeholder so that no particular site's
+# registry is committed here. ../install.sh rewrites it from CERTUS_REGISTRY and
+# CERTUS_REPO -- the same variables publish-image.sh pushes with -- in the copy
+# it materializes under the llm-d checkout, and fails loudly if they are unset.
+#
+# Pin the exact tag after each build rather than editing it by hand:
 #   (cd a30-certus && kustomize edit set image \
 #      docker.io/vllm/vllm-openai=<registry>/<repo>/llm-d-vllm-certus:<tag>)
 # Tag scheme: vllm<version>-<certus sha of the source the image was built from>.
 images:
   - name: docker.io/vllm/vllm-openai
-    newName: registry.example.com/my-team-docker-local/llm-d-vllm-certus
+    newName: REGISTRY/REPO/llm-d-vllm-certus
     newTag: vllm0.30.0-45b4f2a3

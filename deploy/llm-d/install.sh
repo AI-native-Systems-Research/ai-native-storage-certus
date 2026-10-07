@@ -97,6 +97,23 @@ if [ "${WITH_CERTUS}" != "0" ]; then
     # copied; Dockerfile and build-image-and-push.sh stay in this repo.
     install_overlay a30-certus kustomization.yaml patch-certus.yaml entrypoint-certus.sh
     OVERLAY="${VLLM_DIR}/a30-certus"
+
+    # The committed overlay pins a REGISTRY/REPO placeholder rather than a real
+    # registry, so resolve it here against the variables publish-image.sh pushed
+    # with. Done on the materialized copy, so the sources stay site-neutral.
+    certus_km="${OVERLAY}/kustomization.yaml"
+    if grep -q 'REGISTRY/REPO/' "${certus_km}"; then
+        if [ -z "${CERTUS_REGISTRY:-}" ] || [ -z "${CERTUS_REPO:-}" ]; then
+            echo "ERROR: a30-certus/kustomization.yaml pins the REGISTRY/REPO placeholder," >&2
+            echo "       so there is no image to pull. Export CERTUS_REGISTRY and" >&2
+            echo "       CERTUS_REPO (the values publish-image.sh pushed with), e.g." >&2
+            echo "         export CERTUS_REGISTRY=registry.example.com" >&2
+            echo "         export CERTUS_REPO=my-team-docker-local" >&2
+            exit 1
+        fi
+        sed -i "s|REGISTRY/REPO/|${CERTUS_REGISTRY}/${CERTUS_REPO}/|" "${certus_km}"
+        echo "[install] image registry -> ${CERTUS_REGISTRY}/${CERTUS_REPO}"
+    fi
     echo "[install] certus KV-cache offload ENABLED"
 else
     echo "[install] plain A30 deployment (set WITH_CERTUS=1 for certus offload)"
