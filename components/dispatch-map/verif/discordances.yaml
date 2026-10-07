@@ -204,6 +204,7 @@ discordances:
   status: candidate
   assume_in_level2: the memory-tier byte size is at most 4,294,963,200 bytes (4 GiB minus 4 KiB), so its rounded-up
     size fits in 32 bits
+  assume_rust: size <= u32::MAX - 4095
   excluded_properties: []
 - id: D-RANGE-FR-023-388782
   name: 'Input range: recovered extent block count small enough for its byte size to fit in 32 bits'
@@ -231,6 +232,7 @@ discordances:
   - lib.rs:98
   status: candidate
   assume_in_level2: a recovered extent's block count is at most 1,048,575 (so the extent is smaller than 4 GiB)
+  assume_rust: size_blocks <= u32::MAX / 4096
   excluded_properties: []
 - id: D-RANGE-AS-1.3-193445
   name: 'Input range: memory pointer must be non-null'
@@ -256,6 +258,7 @@ discordances:
   - lib.rs:490
   status: candidate
   assume_in_level2: the memory pointer passed in is not null
+  assume_rust: '!pointer.is_null()'
   excluded_properties: []
 - id: D-RANGE-FR-012-437b1e
   name: 'Configuration: an eviction-policy component must be connected'
@@ -278,6 +281,7 @@ discordances:
   - lib.rs:68-71
   status: candidate
   assume_in_level2: an eviction-policy component is connected when initialize is called
+  assume_rust: self.eviction_policy.get().is_ok()
   excluded_properties: []
 - id: D-RANGE-FR-020-fd9bf8
   name: 'State: initialize runs on a map holding no entry for a reported key'
@@ -301,6 +305,7 @@ discordances:
   - lib.rs:87-108
   status: candidate
   assume_in_level2: when initialize runs, the map holds no entry for any key the extent manager reports
+  assume_rust: 'for every extent e reported by for_each_extent: !inner.entries.contains_key(&e.key)'
   excluded_properties:
   - DM-INITIALIZE-PRESERVES-REFERENCED-ENTRY
 routed_to_other_tools:
