@@ -23,6 +23,9 @@ MOONCAKE="${MOONCAKE:-/mnt/certus1/cc-traces-weka-062126.mooncake-131k.jsonl}"
 PLAN="${PLAN:-/mnt/certus1/inference-perf-syn-data/cc131k.plan.json}"
 MAX_ROWS="${MAX_ROWS:-}"      # empty = all rows; set N for a quick test
 STATS_ONLY="${STATS_ONLY:-0}" # 1 = print reconstruction stats and write nothing
+# SHARED_PREFIX=N injects a synthetic N-token system prompt reused by every
+# conversation -> cross-conversation reuse that drives external-cache hits.
+SHARED_PREFIX="${SHARED_PREFIX:-0}"
 
 if [[ ! -f "$MOONCAKE" ]]; then
   echo "error: mooncake trace not found: $MOONCAKE" >&2
@@ -33,10 +36,12 @@ mkdir -p "$(dirname "$PLAN")"
 ARGS=("$MOONCAKE" "$PLAN")
 [[ -n "$MAX_ROWS" ]] && ARGS+=(--max-rows "$MAX_ROWS")
 [[ "$STATS_ONLY" == "1" ]] && ARGS+=(--stats-only)
+[[ "$SHARED_PREFIX" != "0" ]] && ARGS+=(--shared-prefix "$SHARED_PREFIX")
 
 echo "[step1] mooncake  : ${MOONCAKE}"
 echo "[step1] plan out  : ${PLAN}${STATS_ONLY:+ (stats-only: ${STATS_ONLY})}"
 echo "[step1] max rows  : ${MAX_ROWS:-all}"
+echo "[step1] shared prefix: ${SHARED_PREFIX} tokens"
 echo
 
 "$PY" "${SCRIPT_DIR}/trace-gen/mooncake_to_plan.py" "${ARGS[@]}"

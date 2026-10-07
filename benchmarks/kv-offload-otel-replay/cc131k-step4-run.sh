@@ -8,16 +8,21 @@
 #   shmq      -> Certus-shmq  (REQUIRES step 3 server up on the same SHM_PATH)
 #   offload   -> CPUOffload   (self-contained vLLM)
 #   nooffload -> NoOffload baseline (CPUOffload image, OFFLOAD_MODE=none)
-#   cputier   -> CPU + fs disk tier
+#   cputier   -> CPU + fs disk tier (fs dir = FS_TIER_HOST, default
+#                /mnt/certus1/kv-fs-tier; CPU tier size = CPU_BYTES)
 #
-# Override via env:
+# Default = Option A: Qwen2.5-7B, TP=1, pinned to GPU 0 (single A100-40G).
+# Override via env (this example switches to the 14B / two-GPU config):
 #   ARM=shmq PROM=1 \
 #   OTEL_HOST=/mnt/certus1/inference-perf-syn-data/otel_cc131k \
 #   MODEL=Qwen/Qwen2.5-14B-Instruct NUM_CONVS=200 TIME_SCALE=0 \
-#   TENSOR_PARALLEL_SIZE=2 \
+#   GPU=all TENSOR_PARALLEL_SIZE=2 \
 #   SHM_PATH=/dev/shm/certus-shmq SLAB_SIZE_BYTES=2097152 \
-#   CPU_BYTES=$((13*(1<<30))) DISK_DIR_HOST=/mnt/certus1/kv-fs-tier \
+#   CPU_BYTES=$((13*(1<<30))) FS_TIER_HOST=/mnt/certus1/kv-fs-tier \
 #   ./cc131k-step4-run.sh
+#
+# cputier on one GPU, custom fs-tier dir:
+#   ARM=cputier FS_TIER_HOST=/mnt/certus1/kv-fs-tier ./cc131k-step4-run.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -27,11 +32,25 @@ PROM="${PROM:-1}"                        # 1 = -prom variant (Prometheus metrics
 
 # cc131k corpus + model defaults, exported so the arm scripts + common file see
 # them. These must match what step 2 produced / step 4 serves.
+# Default = Option A: Qwen2.5-7B on a SINGLE A100-40G (TP=1, GPU 0). 7B weights
+# (~14 GiB) leave ~22 GiB for KV, enough for a ~120k-token prompt on one card;
+# the 14B (TP=2) config does NOT fit on one 40G GPU. 7B and 14B share the Qwen2.5
+# tokenizer, so the corpus built in step 2 is valid for either.
 export OTEL_HOST="${OTEL_HOST:-/mnt/certus1/inference-perf-syn-data/otel_cc131k}"
-export MODEL="${MODEL:-Qwen/Qwen2.5-14B-Instruct}"
+export MODEL="${MODEL:-Qwen/Qwen2.5-7B-Instruct}"
 export NUM_CONVS="${NUM_CONVS:-200}"
 export TIME_SCALE="${TIME_SCALE:-0}"     # saturating by default (stress the tier)
-export TENSOR_PARALLEL_SIZE="${TENSOR_PARALLEL_SIZE:-2}"  # cc131k = 14B on 2 GPUs
+export TENSOR_PARALLEL_SIZE="${TENSOR_PARALLEL_SIZE:-1}"  # single GPU
+export GPU="${GPU:-0}"                    # pin to one A100 (set GPU=all for both)
+
+# EXTERNAL_HITS=1: shrink the GPU prefix cache so reused prefixes (especially a
+# synthetic SHARED_PREFIX corpus, see step 1) spill off-GPU and get RELOADED from
+# the offload tier -- which is what increments vllm_external_prefix_cache_hits_total.
+# Pair with a SHARED_PREFIX corpus and, for an even stronger effect, TIME_SCALE=1.0.
+if [[ "${EXTERNAL_HITS:-0}" == "1" ]]; then
+  export GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.55}"
+  echo "[step4] EXTERNAL_HITS=1 -> GPU_MEM_UTIL=${GPU_MEM_UTIL} (small GPU KV cache to force tier reloads)"
+fi
 
 suffix=""; [[ "$PROM" == "1" ]] && suffix="-prom"
 
@@ -50,7 +69,9 @@ case "$ARM" in
     ;;
   cputier)
     export CPU_BYTES="${CPU_BYTES:-$((13*(1<<30)))}"
-    export DISK_DIR_HOST="${DISK_DIR_HOST:-/mnt/certus1/kv-fs-tier}"
+    # FS_TIER_HOST is the user-facing name for the host dir backing the fs disk
+    # tier; falls back to DISK_DIR_HOST (what the arm script reads) then default.
+    export DISK_DIR_HOST="${FS_TIER_HOST:-${DISK_DIR_HOST:-/mnt/certus1/kv-fs-tier}}"
     arm_script="run-docker-otel-cputier${suffix}.sh"
     ;;
   *)

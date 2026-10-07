@@ -89,6 +89,12 @@ def main() -> None:
                     help="ceiling for per-turn input tokens; keep below the model "
                          "window (131072) with headroom for filler-text drift. Must "
                          "be <= the step-2 --cap.")
+    ap.add_argument("--shared-prefix", type=int, default=0,
+                    help="inject a synthetic shared system prompt of N tokens reused "
+                         "by EVERY conversation (overrides the detected common-root "
+                         "prefix). Drives cross-conversation external-cache reuse so "
+                         "vllm_external_prefix_cache_hits_total can rise above 0; "
+                         "0 = use only the detected prefix.")
     ap.add_argument("--stats-only", action="store_true",
                     help="print reconstruction stats and exit; do not write")
     args = ap.parse_args()
@@ -165,10 +171,14 @@ def main() -> None:
             branch_roots += 1
             chains.append(build_chain(i))
 
-    # 5. global shared system prompt = common hash_id prefix across chain roots.
+    # 5. global shared system prompt = common hash_id prefix across chain roots,
+    #    unless --shared-prefix injects a synthetic one reused by every conv.
     root_tuples = [full[c[0]] for c in chains]
     sys_blocks = common_prefix_len(root_tuples)
     shared_system_prompt_len = sys_blocks * block_size
+    synthetic_prefix = args.shared_prefix > 0
+    if synthetic_prefix:
+        shared_system_prompt_len = args.shared_prefix
 
     # 4. emit conversations
     conversations = []
@@ -223,8 +233,9 @@ def main() -> None:
     print(f"conversations (chains)   : {len(chains)}  (multi-turn: {multiturn}, "
           f"single-turn: {len(chains) - multiturn})")
     print(f"branch roots (lost reuse): {branch_roots}")
-    print(f"shared system prefix     : {sys_blocks} blocks = "
-          f"{shared_system_prompt_len} tokens")
+    print(f"shared system prefix     : {shared_system_prompt_len} tokens"
+          + (" (SYNTHETIC/injected)" if synthetic_prefix
+             else f" ({sys_blocks} detected blocks)"))
     print(f"turns/conv mean/min/max  : {meta_totals['mean_turns_per_conversation']} / "
           f"{meta_totals['min_turns']} / {meta_totals['max_turns']}")
     print(f"clamped (<1 tok) turns   : {clamped}")

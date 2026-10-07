@@ -14,7 +14,7 @@
 # Override via env:
 #   PLAN=/mnt/certus1/inference-perf-syn-data/cc131k.plan.json \
 #   OTEL_HOST=/mnt/certus1/inference-perf-syn-data/otel_cc131k \
-#   NUM_CONVS=200 CAP=120000 MODEL=Qwen/Qwen2.5-14B-Instruct SEED=7 VALIDATE=1 \
+#   NUM_CONVS=200 CAP=120000 MODEL=Qwen/Qwen2.5-7B-Instruct SEED=7 VALIDATE=1 \
 #   ./cc131k-step2-corpus.sh
 set -euo pipefail
 
@@ -28,8 +28,10 @@ PLAN="${PLAN:-/mnt/certus1/inference-perf-syn-data/cc131k.plan.json}"
 OTEL_HOST="${OTEL_HOST:-/mnt/certus1/inference-perf-syn-data/otel_cc131k}"
 NUM_CONVS="${NUM_CONVS:-200}"            # bounded by default; up to 2612
 CAP="${CAP:-120000}"                     # accounted-prompt cap (< 131072 window)
-# Match the tokenizer to the model you will SERVE in step 4 (cc131k = 14B).
-MODEL="${MODEL:-Qwen/Qwen2.5-14B-Instruct}"
+# Match the tokenizer to the model you will SERVE in step 4. Default = Qwen2.5-7B
+# (Option A, single A100-40G). The whole Qwen2.5 family shares one tokenizer, so
+# this corpus is also valid if you later serve the 14B.
+MODEL="${MODEL:-Qwen/Qwen2.5-7B-Instruct}"
 SEED="${SEED:-7}"
 VALIDATE="${VALIDATE:-1}"                # 1 = round-trip first file through loader
 HF_CACHE="${HF_CACHE:-/mnt/certus1/hf-cache}"

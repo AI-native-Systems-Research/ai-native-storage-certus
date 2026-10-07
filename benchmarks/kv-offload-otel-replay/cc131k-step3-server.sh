@@ -5,14 +5,14 @@
 # process) and do NOT need this — skip straight to step 4 for those.
 #
 # PREREQUISITES (not done here):
-#   * certus-server built:   CERTUS_PROFILE=full-optimized cargo build -r \
-#                              -p certus-server --features spdk
+#   * certus-server-yaml built:  ./cc131k-step0-build.sh
+#                                (full-optimized profile, --features spdk)
 #   * NVMe bound to vfio-pci + 1 GiB hugepages:  sudo tools/configure-bench.sh
 # This script runs in the FOREGROUND and holds the terminal — start it in its
 # own shell/tmux, then run step 4 in another.
 #
 # Override via env (defaults mirror HOWTO.manually-run.md):
-#   SERVER_BIN=target/release/certus-server \
+#   SERVER_BIN=target/release/certus-server-yaml \
 #   DEVICE_PCIS="0000:61:00.0 0000:62:00.0 0000:63:00.0" \
 #   SHM_PATH=/dev/shm/certus-shmq MEMORY_TIER_SIZE=13G CHANNELS=32 \
 #   ./cc131k-step3-server.sh
@@ -21,7 +21,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
-SERVER_BIN="${SERVER_BIN:-${REPO_ROOT}/target/release/certus-server}"
+SERVER_BIN="${SERVER_BIN:-${REPO_ROOT}/target/release/certus-server-yaml}"
 DEVICE_PCIS="${DEVICE_PCIS:-0000:61:00.0 0000:62:00.0 0000:63:00.0 0000:64:00.0}"
 SHM_PATH="${SHM_PATH:-/dev/shm/certus-shmq}"
 MEMORY_TIER_SIZE="${MEMORY_TIER_SIZE:-32G}"
@@ -34,7 +34,7 @@ CPUNODE="${CPUNODE:-0}"
 
 if [[ ! -x "$SERVER_BIN" ]]; then
   echo "error: certus-server binary not found/executable: $SERVER_BIN" >&2
-  echo "       build it:  CERTUS_PROFILE=full-optimized cargo build -r -p certus-server --features spdk" >&2
+  echo "       build it:  ./cc131k-step0-build.sh" >&2
   exit 1
 fi
 
