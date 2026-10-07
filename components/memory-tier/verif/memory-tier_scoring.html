@@ -1,4 +1,4 @@
-<!-- memory-tier scoring — rendered from /home/cornel/SEPT_2026/SEPT_28/memory-tier/unified_properties.yaml -->
+<!-- memory-tier scoring — rendered from unified_properties.yaml -->
 <title>memory-tier — formal-verification scoring</title>
 <style>
     :root{--bg:#ffffff;--fg:#1a1f27;--muted:#5c6674;--line:#d8dde3;--head:#eef1f5;--card:#f8fafc;
@@ -59,7 +59,7 @@
     ul.left{margin:4px 0 0;padding-left:18px}ul.left li{margin:2px 0}
     </style><div class='wrap'>
 <h1>memory-tier — per-method coverage scoring</h1>
-<p class='sub'>Interface <code>IMemoryTier</code> · <b>17</b> public methods · <b>95</b> verifiable properties (+39 non-verifiable) · run pin <code>d14dfb9a</code> · 2026-10-04</p>
+<p class='sub'>Interface <code>IMemoryTier</code> · <b>17</b> public methods · <b>95</b> verifiable properties (+39 non-verifiable) · run pin <code>d14dfb9a</code> · 2026-10-07</p>
 <p class='foot' style='border-left:4px solid #b00;padding:2px 10px'>⚠ the Kani column is run on a 5-property sample only. <a href='#notes'>Details at the end of the page.</a></p>
 <div class='cards'>
 <div class='kpi warn' style='flex:1 1 100%'><div class='big'>8 / 17 methods verified</div><div class='lbl'>every verifiable property of the method carries a machine-checked proof from Creusot and/or Kani, or is soundly delegated to a named external tool &mdash; the combined result across both tools</div><div class='foot' style='margin-top:8px'><b>8</b> more are verified on their own properties and held back only by 2 shared global properties: <code>MT-CLEAR-POST-EMPTY</code> (not yet proved; touches 6 methods), <code>MT-FREELIST-NEW-POST</code> (not yet proved; touches 5 methods); <b>1</b> have an open property of their own. <b>Level 1</b>: reconciling the specification with the code found <b>44</b> spec&harr;code discordances; the properties built from them are not formally verified here (<a href='memory-tier_discordances.html'>see the list</a>). Properties are also attached to 3 entry points outside the interface (<code>free_capacity</code>, <code>Drop for MemoryTierState</code>, <code>Default for MemoryTierState</code>); they count in every property figure but not in this method total. A method counts as <b>verified</b> only when <i>every</i> one of its verifiable properties is covered; <b>17</b> is the interface's full set of public methods. Each tool's own contribution is shown by property just below.</div></div>
