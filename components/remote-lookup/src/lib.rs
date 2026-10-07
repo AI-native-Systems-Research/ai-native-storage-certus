@@ -227,6 +227,9 @@ impl IRemoteLookup for RemoteLookupComponent {
                 dispatch_map,
                 memory_tier,
                 logger,
+                // Also on the worker's ServerDeps; the actor needs it to schedule a
+                // fetched entry's write-through, which is non-blocking.
+                dispatcher: self.dispatcher.get().ok(),
             },
             local_endpoint,
             local_rkey,

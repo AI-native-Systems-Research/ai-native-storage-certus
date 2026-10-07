@@ -19,3 +19,22 @@ documentation-only source cleanup that was outside this sync's editable scope
   with a transport-specific example that named the pre-`97e26738` control
   transport; the guidance was to reword to the shm-queue control handler or drop
   the example. Superseded by the `6d7ba234` deletion above.
+
+## Task DISP-RESERVE-REASON (OPEN, Low) — "already cached" is reported as a failure
+
+`op_reserve` writes a flat `0` for any `Err`, so a reserve refused because the key is
+**already resident** is indistinguishable on the wire from one refused for want of space.
+Measured: 7 224 of 121 430 reserves refused, **100% of them already-resident**, with
+capacity-driven refusals at exactly **0** (`store_backpressure_events` and
+`store_drops_on_full` both 0, `eviction_scans_exhausted` 0).
+
+The same `mt.insert` → `AlreadyExists` is treated as a **hit** on the load path
+(`serve_concurrently_promoted`, whose contract is that observing `MemoryTier` means the
+data is resident) and as a **failure** on the store path. A declined block stays in GPU
+HBM, so ~6% of stores currently waste device memory for data that is already safely
+cached.
+
+Options: carry a reason code on the wire, or report already-resident as reserved. Either
+changes the client contract, hence deferred. Specified in **interfaces FR-018a**;
+`store_already_resident` measures it.
+

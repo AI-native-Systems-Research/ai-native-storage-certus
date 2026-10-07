@@ -672,6 +672,8 @@ mod tests {
         let serve = interfaces::RemoteServeStats {
             peer_served_keys: 118,
             peer_triggered_promotions: 41,
+            peer_pins_held: 0,
+            peer_pin_hold_us_max: 0,
         };
         let line = format_tier_stats(&tier, &serve);
 

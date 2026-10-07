@@ -1180,17 +1180,23 @@ def bench_contention(
 
 def bench_scheduler_step(
     stack: CputierStack, batch_size: int, min_duration: float,
-    *, requests_per_step: int = 8, num_sessions: int = 4, num_blocks: int = 128,
+    *, requests_per_step: int = 8, num_sessions: int = 32, num_blocks: int = 128,
 ) -> BenchResult:
-    """Simulate continuous-batching scheduler steps with prefix sharing.
+    """Simulate continuous-batching scheduler steps matching production vLLM.
 
-    Each step admits ``requests_per_step`` requests drawn from
-    ``num_sessions`` conversations. Each request is a session prefix (should
-    hit) plus a fresh suffix (miss → store). Per request: on_new_request,
-    touch, maximal-prefix lookup and prepare_load (``touch_lookup`` /
-    ``prepare_load`` are per request); then each request's prepare_store, all
-    transfer jobs of the step are submitted and drained, and the step ends
-    with on_request_finished + on_schedule_end + take_events.
+    Same call pattern as certus-connector-bench's scheduler-step mode, so the
+    two backends compare directly:
+      - Per-request maximal prefix scan (break on the first miss). The hits are
+        pinned right after the request's lookup, like the connector's
+        update_state_after_alloc(), before later requests' stores can evict them.
+      - Sessions share one prefix pool and diverge at geometric points, so
+        short prefixes miss more (like production prefix caching).
+      - Loads and stores are deduplicated across the step's requests.
+      - Stores are submitted after the load drain and drained at the start of
+        the next step (untimed); drain_workers measures only loads. A request
+        with a store in flight finishes once that store completes, as vLLM
+        delays freeing it.
+      - touch_lookup, prepare_load and prepare_store are timed per step.
     """
     keys_per_request = max(4, num_blocks // requests_per_step)
     prefix_len = keys_per_request // 2
@@ -1199,20 +1205,48 @@ def bench_scheduler_step(
     phases = _phases("touch_lookup", "prepare_store", "prepare_load", "submit",
                      "drain_workers", "complete", "schedule_end", "take_events")
 
+    # Build a shared prefix pool, then give each session a prefix slice of
+    # geometric length. Fresh keys each run: the fs tier can't remove blocks.
     base_seed = _fresh_seed()
+    max_prefix_pool = min(prefix_len * 4, num_blocks * 2)
+    shared_prefix_pool = make_content_keys(max_prefix_pool, seed=base_seed)
+    populate_keys(stack, shared_prefix_pool, batch_size)
+
     session_prefixes: list[list[bytes]] = []
-    for s in range(num_sessions):
-        prefix_keys = make_content_keys(prefix_len, seed=base_seed + s * 10_000)
-        populate_keys(stack, prefix_keys, batch_size)
-        session_prefixes.append(prefix_keys)
+    rng = random.Random(42)
+    for _ in range(num_sessions):
+        geo_len = max(2, min(len(shared_prefix_pool), int(rng.expovariate(1.0 / prefix_len))))
+        session_prefixes.append(shared_prefix_pool[:geo_len])
 
     total_blocks = total_steps = total_prefix_hits = total_suffix_stores = drops = 0
+    # Previous step's deferred store: (job ids, [(ctx, keys_to_store)]).
+    prev_store: tuple[list[int], list[tuple[ReqContext, list[bytes]]]] | None = None
     wall_start = time.perf_counter()
 
+    def drain_prev_store():
+        nonlocal total_blocks
+        job_ids, stored = prev_store
+        stack.wait_jobs(job_ids)
+        for ctx, keys in stored:
+            stack.complete_store(keys, ctx, success=True)
+            total_blocks += len(keys)
+        with stack.lock:
+            for ctx, _ in stored:
+                stack.manager.on_request_finished(ctx)
+
     while (time.perf_counter() - wall_start) < min_duration or total_steps < 3:
+        # Drain the PREVIOUS step's deferred store (not timed: production
+        # processes store completions asynchronously between steps).
+        if prev_store is not None:
+            drain_prev_store()
+            prev_store = None
+
         # (ctx, load_keys, store_keys)
         plan: list[tuple[ReqContext, list[bytes], list[bytes]]] = []
         load_specs = []
+        seen_load: set[bytes] = set()
+        seen_store: set[bytes] = set()
+        t_touch_lookup = t_prepare_load = 0.0
 
         for r in range(requests_per_step):
             s_idx = (total_steps * requests_per_step + r) % num_sessions
@@ -1225,52 +1259,64 @@ def bench_scheduler_step(
             t0 = time.perf_counter()
             stack.touch(req_keys, ctx)
             prefix_hits, _ = resolve_lookups(stack, req_keys, ctx, prefix_stop=True)
-            _rec(phases, "touch_lookup", t0)
-            # Like the connector's update_state_after_alloc(): pin the hits
-            # immediately, before later requests' stores can evict them.
+            t_touch_lookup += time.perf_counter() - t0
+
+            load_keys = [k for k in prefix_hits if k not in seen_load]
+            seen_load.update(load_keys)
+            store_keys = [k for k in req_keys[len(prefix_hits):] if k not in seen_store]
+            seen_store.update(store_keys)
+
             t0 = time.perf_counter()
-            load_specs.append(stack.prepare_load(prefix_hits, ctx) if prefix_hits else None)
-            _rec(phases, "prepare_load", t0)
-            plan.append((ctx, prefix_hits, req_keys[len(prefix_hits):]))
+            load_specs.append(stack.prepare_load(load_keys, ctx) if load_keys else None)
+            t_prepare_load += time.perf_counter() - t0
+            plan.append((ctx, load_keys, store_keys))
             total_prefix_hits += len(prefix_hits)
             total_suffix_stores += len(req_keys) - len(prefix_hits)
 
-        t0 = time.perf_counter()
-        store_results = []
-        for ctx, _, store_keys in plan:
-            res = stack.prepare_store(store_keys, ctx) if store_keys else None
-            if store_keys and res is None:
-                drops += len(store_keys)
-            store_results.append(res)
-        _rec(phases, "prepare_store", t0)
+        phases["touch_lookup"].record(t_touch_lookup)
+        if any(spec is not None for spec in load_specs):
+            phases["prepare_load"].record(t_prepare_load)
 
+        store_results = []
+        if any(sk for _, _, sk in plan):
+            t0 = time.perf_counter()
+            for ctx, _, store_keys in plan:
+                res = stack.prepare_store(store_keys, ctx) if store_keys else None
+                if store_keys and res is None:
+                    drops += len(store_keys)
+                store_results.append(res)
+            _rec(phases, "prepare_store", t0)
+        else:
+            store_results = [None] * len(plan)
+
+        # Submit loads only; stores are deferred to after the drain.
         t0 = time.perf_counter()
-        jobs = []
-        for (ctx, lk, _), res, lspec in zip(plan, store_results, load_specs):
-            if res is not None and res.keys_to_store:
-                jobs.append(stack.submit_store(res.store_spec, len(res.keys_to_store)))
-            if lspec is not None:
-                jobs.append(stack.submit_load(lspec, len(lk)))
+        load_jobs = [stack.submit_load(lspec, len(lk))
+                     for (_, lk, _), lspec in zip(plan, load_specs) if lspec is not None]
         _rec(phases, "submit", t0)
 
+        # Drain workers: only the loads (production behavior).
         t0 = time.perf_counter()
-        stack.wait_jobs(jobs)
+        stack.wait_jobs(load_jobs)
         _rec(phases, "drain_workers", t0)
 
         t0 = time.perf_counter()
-        for (ctx, lk, _), res in zip(plan, store_results):
-            if res is not None and res.keys_to_store:
-                stack.complete_store(res.keys_to_store, ctx, success=True)
-                total_blocks += len(res.keys_to_store)
+        for ctx, lk, _ in plan:
             if lk:
                 stack.complete_load(lk, ctx)
                 total_blocks += len(lk)
         _rec(phases, "complete", t0)
 
+        # Requests without a store in flight finish now; the rest finish once
+        # their store completes (next step).
+        stored = [(ctx, res.keys_to_store) for (ctx, _, _), res in zip(plan, store_results)
+                  if res is not None and res.keys_to_store]
+        storing = {id(ctx) for ctx, _ in stored}
         t0 = time.perf_counter()
         with stack.lock:
             for ctx, _, _ in plan:
-                stack.manager.on_request_finished(ctx)
+                if id(ctx) not in storing:
+                    stack.manager.on_request_finished(ctx)
         stack.step_end(new_req_ids=[ctx.req_id for ctx, _, _ in plan])
         _rec(phases, "schedule_end", t0)
 
@@ -1279,6 +1325,16 @@ def bench_scheduler_step(
         _rec(phases, "take_events", t0)
 
         total_steps += 1
+
+        # Submit stores after the drain; they are drained at the next step's start.
+        if stored:
+            job_ids = [stack.submit_store(res.store_spec, len(res.keys_to_store))
+                       for res in store_results if res is not None and res.keys_to_store]
+            prev_store = (job_ids, stored)
+
+    # Drain the last step's deferred store.
+    if prev_store is not None:
+        drain_prev_store()
 
     wall = time.perf_counter() - wall_start
     result = BenchResult(
@@ -1516,7 +1572,7 @@ def main():
                         help="(prefix-miss) Fraction of keys pre-stored (0.0-1.0)")
     parser.add_argument("--requests-per-step", type=int, default=8,
                         help="(scheduler-step) Requests per scheduler step")
-    parser.add_argument("--num-sessions", type=int, default=4,
+    parser.add_argument("--num-sessions", type=int, default=32,
                         help="(scheduler-step) Distinct conversations in the pool")
     args = parser.parse_args()
 
