@@ -9,6 +9,8 @@ counts:
   spec_not_found_in_code: 5
   input_range_mismatch: 0
   properties_excluded_from_level2: 22
+  routed_to_other_tools: 0
+  reader_missed_sent_to_level2: 0
   confirmed: 0
   withdrawn: 0
 discordances:
@@ -277,7 +279,7 @@ discordances:
   - initialize_or_format
   spec_says: The partition type identifier recorded for each finished partition is exactly the type identifier the
     caller asked for, unchanged and not reordered.
-  code_does: Nothing found.
+  code_does: No matching guarantee stated by the code reader.
   spec_pointers:
   - AS-US1-1
   code_pointers:
@@ -320,7 +322,7 @@ discordances:
   - initialize_or_format
   spec_says: The combined read-or-create operation must be given a partition layout that would itself be acceptable
     to a plain format request, because it may have to fall back to formatting the drive.
-  code_does: Nothing found.
+  code_does: No matching guarantee stated by the code reader.
   spec_pointers:
   - FR-005
   - FR-006
@@ -500,7 +502,7 @@ discordances:
   - initialize_or_format
   spec_says: Within a single formatted drive, no two partitions are given the same unique identifier, and no partition
     shares the drive's own identifier.
-  code_does: Nothing found.
+  code_does: No matching guarantee stated by the code reader.
   spec_pointers:
   - FR-008
   code_pointers:
@@ -523,7 +525,7 @@ discordances:
   - initialize_or_format
   spec_says: The sector size the component works with, and the sector size it reports back in a partition table,
     is always either 512 bytes or 4096 bytes, the two sizes the component promises to support.
-  code_does: Nothing found.
+  code_does: No matching guarantee stated by the code reader.
   spec_pointers:
   - FR-011
   code_pointers:
@@ -544,7 +546,7 @@ discordances:
   spec_says: The three partition kinds this system defines — the metadata region, the data region and the extended-metadata
     region — each have one fixed published identifier value that never changes, so a drive formatted by one version
     of the software is recognised by another.
-  code_does: Nothing found.
+  code_does: No matching guarantee stated by the code reader.
   spec_pointers: []
   code_pointers:
   - ipartition_table.rs
@@ -649,3 +651,4 @@ discordances:
     - DPM-INV-NSID-CONSISTENT
     code:
     - DPM-FORMAT-NSID-DIVERGENCE
+routed_to_other_tools: []
