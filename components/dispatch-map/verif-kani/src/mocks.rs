@@ -3,7 +3,9 @@
 // RECEPTACLE PROVIDERS (mocks of the CONSUMED interfaces, not of dispatch-map):
 //   MockEp      IEvictionPolicy. Records every call (create_pool, track, touch, remove,
 //               get_eviction_candidates) in a fixed-size log so harnesses can state the
-//               eviction-tracking obligations. It honours the IEvictionPolicy contract as
+//               eviction-tracking obligations; track/touch/remove are also logged in call
+//               ORDER (`events`, MAXE entries), and the exact list the last
+//               get_eviction_candidates returned is kept (`last_cands`). It honours the IEvictionPolicy contract as
 //               documented in interfaces/src/ieviction_policy.rs: `track` of a key already
 //               tracked in the pool returns the existing handle; `get_eviction_candidates`
 //               returns up to `n` keys currently tracked in that pool (which ones is left
@@ -89,6 +91,17 @@ pub fn waits() -> u32 {
 // ------------------------------------------------------------------------- eviction policy
 
 pub const MAXT: usize = 3;
+/// Capacity of the ordered event log (further events set `events_overflow`, never panic).
+pub const MAXE: usize = 4;
+
+/// One call dispatch-map made on the policy, in call order (create_pool / candidates excluded).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Ev {
+    /// track(pool, key) answered with this handle
+    Track(CacheKey, EvictionHandle),
+    Touch(EvictionHandle),
+    Remove(EvictionHandle),
+}
 
 #[derive(Clone, Copy)]
 pub struct TrackRec {
@@ -110,6 +123,22 @@ pub struct EpLog {
     pub last_remove: Option<EvictionHandle>,
     pub cand_calls: u32,
     pub other_pool_calls: u32,
+    pub events: [Option<Ev>; MAXE],
+    pub nevents: usize,
+    pub events_overflow: bool,
+    /// The exact list the most recent get_eviction_candidates call returned.
+    pub last_cands: [CacheKey; MAXT],
+    pub last_cands_len: usize,
+}
+
+fn push_ev(l: &mut EpLog, e: Ev) {
+    let n = l.nevents;
+    if n < MAXE {
+        l.events[n] = Some(e);
+        l.nevents = n + 1;
+    } else {
+        l.events_overflow = true;
+    }
 }
 
 pub struct MockEp {
@@ -131,6 +160,11 @@ impl MockEp {
                 last_remove: None,
                 cand_calls: 0,
                 other_pool_calls: 0,
+                events: [None; MAXE],
+                nevents: 0,
+                events_overflow: false,
+                last_cands: [0; MAXT],
+                last_cands_len: 0,
             }),
         }
     }
@@ -171,6 +205,28 @@ impl MockEp {
     /// one this mock handed out.
     pub fn other_pool_calls(&self) -> u32 {
         self.log.lock().unwrap().other_pool_calls
+    }
+    /// Number of logged events (and whether more happened than MAXE).
+    pub fn nevents(&self) -> usize {
+        self.log.lock().unwrap().nevents
+    }
+    pub fn events_overflow(&self) -> bool {
+        self.log.lock().unwrap().events_overflow
+    }
+    pub fn event(&self, i: usize) -> Option<Ev> {
+        let l = self.log.lock().unwrap();
+        if i < MAXE { l.events[i] } else { None }
+    }
+    /// Does `v` equal, element for element, what the last get_eviction_candidates returned?
+    pub fn same_as_last_cands(&self, v: &[CacheKey]) -> bool {
+        let l = self.log.lock().unwrap();
+        if v.len() != l.last_cands_len {
+            return false;
+        }
+        // unrolled over MAXT = 3
+        (v.len() < 1 || v[0] == l.last_cands[0])
+            && (v.len() < 2 || v[1] == l.last_cands[1])
+            && (v.len() < 3 || v[2] == l.last_cands[2])
     }
     pub fn pool(&self) -> PoolId {
         self.log.lock().unwrap().pool_base
@@ -242,7 +298,9 @@ impl IEvictionPolicy for MockEp {
         }
         // Contract: re-registering a key already tracked in `pool` returns the existing handle.
         if let Some(i) = find_key(&l, pool, key) {
-            return Ok(l.tracks[i].unwrap().handle);
+            let h = l.tracks[i].unwrap().handle;
+            push_ev(&mut l, Ev::Track(key, h));
+            return Ok(h);
         }
         let handle = EvictionHandle::new(pool, kani::any());
         // Contract (IEvictionPolicy: "a handle for O(1) touch/remove"): a handle identifies ONE
@@ -254,6 +312,7 @@ impl IEvictionPolicy for MockEp {
         assert!(n < MAXT, "mock eviction log full: raise MAXT");
         l.tracks[n] = Some(TrackRec { active: true, pool, key, handle });
         l.ntracks = n + 1;
+        push_ev(&mut l, Ev::Track(key, handle));
         Ok(handle)
     }
 
@@ -261,6 +320,7 @@ impl IEvictionPolicy for MockEp {
         let mut l = self.log.lock().unwrap();
         l.touch_calls += 1;
         l.last_touch = Some(handle);
+        push_ev(&mut l, Ev::Touch(handle));
         Ok(())
     }
 
@@ -272,6 +332,7 @@ impl IEvictionPolicy for MockEp {
         let mut l = self.log.lock().unwrap();
         l.remove_calls += 1;
         l.last_remove = Some(handle);
+        push_ev(&mut l, Ev::Remove(handle));
         // unrolled over the MAXT = 3 slots (no loop, so no unwind bound is spent here)
         let hit = if is_handle(&l.tracks[0], handle) {
             Some(0)
@@ -315,6 +376,11 @@ impl IEvictionPolicy for MockEp {
         if v.len() < n && is_key_in(&l.tracks[2], pool) && kani::any::<bool>() {
             v.push(l.tracks[2].unwrap().key);
         }
+        // record the exact answer (unrolled; v.len() <= MAXT)
+        l.last_cands_len = v.len();
+        if v.len() >= 1 { l.last_cands[0] = v[0]; }
+        if v.len() >= 2 { l.last_cands[1] = v[1]; }
+        if v.len() >= 3 { l.last_cands[2] = v[2]; }
         v
     }
 

@@ -4,11 +4,13 @@ level: 1
 what: 'spec<->code discordances found while reconciling the specification with the code. Each is EXCLUDED from formal
   verification (level 2). status: candidate until a test confirms it (confirmed) or shows it was a misreading (withdrawn).'
 counts:
-  discordances: 18
-  spec_and_code_differ: 7
-  spec_not_found_in_code: 6
+  discordances: 10
+  spec_and_code_differ: 3
+  spec_not_found_in_code: 2
   input_range_mismatch: 5
-  properties_excluded_from_level2: 15
+  properties_excluded_from_level2: 9
+  routed_to_other_tools: 2
+  reader_missed_sent_to_level2: 6
   confirmed: 0
   withdrawn: 0
 discordances:
@@ -36,100 +38,12 @@ discordances:
     - DM-INITIALIZE-EVICTION-POLICY-REQUIRED
     code:
     - DM-INITIALIZE-NO-EVICTION-POLICY-ERROR
-- id: D-FR-004-lib.rs:144-7c1ad2
-  name: Lookup refreshes eviction priority
-  kind: spec-and-code-differ
-  methods:
-  - lookup
-  spec_says: A successful lookup of an existing entry makes that entry the most recently used for eviction ordering,
-    so it is listed after all other entries by oldest_keys.
-  code_does: A lookup that finds the key reports an access for that entry's eviction handle to the eviction policy,
-    so the entry's eviction ranking is refreshed.
-  spec_pointers:
-  - FR-004
-  - AS-8.2
-  - contract:lookup
-  - contract:invariant-6
-  code_pointers:
-  - lib.rs:144
-  - lib.rs:154-157
-  status: candidate
-  excluded_properties:
-  - DM-LOOKUP-REFRESHES-EVICTION-PRIORITY
-  extraction_sides:
-    spec:
-    - DM-LOOKUP-REFRESHES-EVICTION-PRIORITY
-    code:
-    - DM-LOOKUP-TOUCHES-EVICTION
-- id: D-FR-016-lib.rs:355360-e732ba
-  name: Touch refreshes priority
-  kind: spec-and-code-differ
-  methods:
-  - touch
-  spec_says: After touch succeeds, the entry becomes the most recently used for eviction ordering, so oldest_keys
-    lists it after all other entries.
-  code_does: touch on an existing key reports an access for that entry's eviction handle to the eviction policy
-    and returns success.
-  spec_pointers:
-  - FR-016
-  - AS-7.1
-  - US-7
-  - contract:touch
-  - contract:invariant-7
-  code_pointers:
-  - lib.rs:355-360
-  status: candidate
-  excluded_properties:
-  - DM-TOUCH-REFRESHES-PRIORITY
-  extraction_sides:
-    spec:
-    - DM-TOUCH-REFRESHES-PRIORITY
-    code:
-    - DM-TOUCH-RECORDS-ACCESS
-- id: D-FR-016-nocode-f046ed
-  name: Touch no wait
-  kind: spec-not-found-in-code
-  methods:
-  - touch
-  spec_says: 'touch never waits for references to be released: it completes even while another caller holds a read
-    or write reference on the entry, and never reports a Timeout.'
-  code_does: Nothing found.
-  spec_pointers:
-  - FR-016
-  code_pointers: []
-  status: candidate
-  excluded_properties:
-  - DM-TOUCH-NO-WAIT
-  extraction_sides:
-    spec:
-    - DM-TOUCH-NO-WAIT
-    code: []
-- id: D-FR-017-lib.rs:373375-9abd35
-  name: Oldest keys order
-  kind: spec-and-code-differ
-  methods:
-  - oldest_keys
-  spec_says: oldest_keys returns keys ordered least recently used first, where an entry counts as used when it is
-    created, recovered, looked up or touched.
-  code_does: oldest_keys(n) returns the keys the eviction policy would evict next from the dispatch map's pool,
-    in the policy's eviction order, so with a recency policy a key accessed through lookup or touch is listed after
-    keys not accessed since.
-  spec_pointers:
-  - FR-017
-  - AS-8.1
-  - AS-8.2
-  - US-8
-  - contract:oldest_keys
-  code_pointers:
-  - lib.rs:373-375
-  status: candidate
-  excluded_properties:
-  - DM-OLDEST-KEYS-ORDER
-  extraction_sides:
-    spec:
-    - DM-OLDEST-KEYS-ORDER
-    code:
-    - DM-OLDEST-KEYS-EVICTION-ORDER
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - lib.rs:68
+  - lib.rs:50-58
+  - lib.rs:55
+  - lib.rs:69-71
 - id: D-AS-8.1-nocode-06c396
   name: Oldest keys fills to n
   kind: spec-not-found-in-code
@@ -137,7 +51,7 @@ discordances:
   - oldest_keys
   spec_says: When at least n entries are tracked, oldest_keys(n) returns exactly n keys (for example, two of three
     created keys when n is two).
-  code_does: Nothing found.
+  code_does: No matching guarantee stated by the code reader.
   spec_pointers:
   - AS-8.1
   code_pointers: []
@@ -148,13 +62,16 @@ discordances:
     spec:
     - DM-OLDEST-KEYS-FILLS-TO-N
     code: []
+  classified: classifiers disagree - needs a person
 - id: D-AS-8.3-nocode-b3bb81
   name: Oldest keys empty
   kind: spec-not-found-in-code
   methods:
   - oldest_keys
   spec_says: On an empty map, oldest_keys returns an empty list for any n.
-  code_does: Nothing found.
+  code_does: With an eviction policy connected an empty map gives an empty list, but on a fresh map with no eviction
+    policy connected oldest_keys calls get_pool_id, which unwraps the missing policy and crashes instead of reaching
+    the empty-list fallback on line 377.
   spec_pointers:
   - AS-8.3
   code_pointers: []
@@ -165,30 +82,13 @@ discordances:
     spec:
     - DM-OLDEST-KEYS-EMPTY
     code: []
-- id: D-FR-003-lib.rs:399-435c50
-  name: Create memory tier entry registers eviction
-  kind: spec-and-code-differ
-  methods:
-  - create_memory_tier_entry
-  spec_says: After create_memory_tier_entry succeeds, the new key is tracked for eviction ordering as the most recently
-    used entry, so oldest_keys lists entries in creation order.
-  code_does: After create_memory_tier_entry succeeds, the key is tracked by the eviction policy in the dispatch
-    map's pool and the entry keeps the returned handle.
-  spec_pointers:
-  - FR-003
-  - AS-8.1
-  - contract:create_memory_tier_entry
-  code_pointers:
-  - lib.rs:399
-  - lib.rs:409
-  status: candidate
-  excluded_properties:
-  - DM-CREATE-MEMORY-TIER-ENTRY-REGISTERS-EVICTION
-  extraction_sides:
-    spec:
-    - DM-CREATE-MEMORY-TIER-ENTRY-REGISTERS-EVICTION
-    code:
-    - DM-CREATE-MEMORY-TIER-ENTRY-TRACKS
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - lib.rs:373
+  - lib.rs:55
+  - lib.rs:374-377
+  - lib.rs:50-58
+  - lib.rs:374-378
 - id: D-AS-1.3-lib.rs:384404-d34bed
   name: Create memory tier entry null pointer
   kind: spec-and-code-differ
@@ -214,27 +114,13 @@ discordances:
     - DM-CREATE-MEMORY-TIER-ENTRY-NULL-POINTER
     code:
     - NV-CODE-POINTER-VALIDITY
-- id: D-FR-026-nocode-6bf518
-  name: Try evict to block atomic
-  kind: spec-not-found-in-code
-  methods:
-  - try_evict_to_block
-  spec_says: try_evict_to_block checks evictability and performs the move to the block device as one indivisible
-    step, so no other caller can acquire a reference on the entry between the check and the move.
-  code_does: Nothing found.
-  spec_pointers:
-  - FR-026
-  - EC-try-evict-single-lock
-  - contract:invariant-10
-  - US-11
-  code_pointers: []
-  status: candidate
-  excluded_properties:
-  - DM-TRY-EVICT-TO-BLOCK-ATOMIC
-  extraction_sides:
-    spec:
-    - DM-TRY-EVICT-TO-BLOCK-ATOMIC
-    code: []
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - lib.rs:381-415
+  - lib.rs:387-389
+  - lib.rs:401-405
+  - lib.rs:384-389
+  - lib.rs:399-415
 - id: D-CLAR-INVALID-OPS-ERROR-lib.rs:9193-241570
   name: No panic
   kind: spec-and-code-differ
@@ -279,74 +165,18 @@ discordances:
     - DM-INV-NO-PANIC
     code:
     - DM-INV-NO-ABRUPT-TERMINATION-ON-TRACK-FAILURE
-- id: D-FR-014-nocode-ed74e3
-  name: No error log
-  kind: spec-not-found-in-code
-  methods:
-  - initialize
-  - lookup
-  - convert_to_storage
-  - take_read
-  - take_write
-  - release_read
-  - release_write
-  - downgrade_reference
-  - remove
-  - touch
-  - entry_size
-  - create_memory_tier_entry
-  - convert_memory_tier_to_block
-  - promote_block_to_memory_tier
-  - try_evict_to_block
-  - recover_extent
-  - set_checksum
-  spec_says: When an operation returns an error, the component reports it only through the returned error value
-    and does not emit an error-level log message.
-  code_does: Nothing found.
-  spec_pointers:
-  - FR-014
-  code_pointers: []
-  status: candidate
-  excluded_properties:
-  - DM-INV-NO-ERROR-LOG
-  extraction_sides:
-    spec:
-    - DM-INV-NO-ERROR-LOG
-    code: []
-- id: D-FR-002-nocode-e2613f
-  name: Operations are key local
-  kind: spec-not-found-in-code
-  methods:
-  - initialize
-  - lookup
-  - convert_to_storage
-  - take_read
-  - take_write
-  - release_read
-  - release_write
-  - downgrade_reference
-  - remove
-  - touch
-  - create_memory_tier_entry
-  - convert_memory_tier_to_block
-  - promote_block_to_memory_tier
-  - try_evict_to_block
-  - recover_extent
-  - set_checksum
-  spec_says: Every operation that names a key changes at most that key's entry; no other key's location, size or
-    reference counts are changed by it.
-  code_does: Nothing found.
-  spec_pointers:
-  - FR-002
-  - contract:interface-methods
-  code_pointers: []
-  status: candidate
-  excluded_properties:
-  - DM-INV-OPERATIONS-ARE-KEY-LOCAL
-  extraction_sides:
-    spec:
-    - DM-INV-OPERATIONS-ARE-KEY-LOCAL
-    code: []
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - lib.rs:55
+  - lib.rs:92-93
+  - lib.rs:392
+  - lib.rs:399
+  - lib.rs:573
+  - lib.rs:579
+  - lib.rs:369
+  - lib.rs:184-186
+  - lib.rs:68
+  - lib.rs:91-93
 - id: D-RANGE-FR-003-8e9f6a
   name: 'Input range: memory-tier byte size small enough for its 4 KiB-rounded size to fit in 32 bits'
   kind: input-range-mismatch
@@ -473,3 +303,40 @@ discordances:
   assume_in_level2: when initialize runs, the map holds no entry for any key the extent manager reports
   excluded_properties:
   - DM-INITIALIZE-PRESERVES-REFERENCED-ENTRY
+routed_to_other_tools:
+- property: DM-TRY-EVICT-TO-BLOCK-ATOMIC
+  name: Try evict to block atomic
+  methods:
+  - try_evict_to_block
+  statement: try_evict_to_block checks evictability and performs the move to the block device as one indivisible
+    step, so no other caller can acquire a reference on the entry between the check and the move.
+  reason: interleaving
+  checked_by: loom
+  why: Whether another caller can grab a reference between the check and the move is a question about how threads
+    interleave; the code does both under one lock hold, which a thread-interleaving checker can confirm.
+- property: DM-INV-NO-ERROR-LOG
+  name: No error log
+  methods:
+  - initialize
+  - lookup
+  - convert_to_storage
+  - take_read
+  - take_write
+  - release_read
+  - release_write
+  - downgrade_reference
+  - remove
+  - touch
+  - entry_size
+  - create_memory_tier_entry
+  - convert_memory_tier_to_block
+  - promote_block_to_memory_tier
+  - try_evict_to_block
+  - recover_extent
+  - set_checksum
+  statement: When an operation returns an error, the component reports it only through the returned error value
+    and does not emit an error-level log message.
+  reason: logging-io
+  checked_by: test
+  why: This is about what the component writes to the log, which the provers do not model; a test with a capturing
+    logger can check it (the code only calls logger.info and logger.debug).

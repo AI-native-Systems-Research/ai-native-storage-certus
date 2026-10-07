@@ -435,6 +435,8 @@ properties:
     code:
     - DM-INITIALIZE-RESTORES-EACH-EXTENT
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_initialize_recovers_all_extents
@@ -442,21 +444,19 @@ properties:
       - get_pool_id
       - dm_lookup
       result: Proved
-      wall_clock_s: 0.52
-      peak_rss_mb: 56
+      wall_clock_s: 0.54
+      peak_rss_mb: 57
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_initialize_recovers_all_extents
       result: SUCCESS
-      wall_clock_s: 170.23
-      peak_rss_mb: 2826
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 194.05
+      peak_rss_mb: 3735
     status: proved
     _scored_by: scorer_kani
 - id: DM-INITIALIZE-RECOVERED-SIZE
@@ -487,27 +487,27 @@ properties:
     code:
     - DM-INITIALIZE-RESTORED-SIZE
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_initialize_recovered_size
       - dm_initialize
       - get_pool_id
       result: Proved
-      wall_clock_s: 0.49
-      peak_rss_mb: 52
+      wall_clock_s: 0.59
+      peak_rss_mb: 54
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_initialize_recovered_size
       result: SUCCESS
-      wall_clock_s: 162.08
-      peak_rss_mb: 2238
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 146.56
+      peak_rss_mb: 2446
     status: proved
     _scored_by: scorer_kani
 - id: DM-INITIALIZE-EMPTY-EXTENT-MANAGER
@@ -541,27 +541,27 @@ properties:
     - DM-INITIALIZE-RETURNS-OK
   delta_note: Code states success for any number of extents; the shared obligation is the empty case.
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_initialize_empty_extent_manager
       - dm_initialize
       - get_pool_id
       result: Proved
-      wall_clock_s: 0.49
-      peak_rss_mb: 52
+      wall_clock_s: 0.5
+      peak_rss_mb: 54
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_initialize_empty_extent_manager
       result: SUCCESS
-      wall_clock_s: 26.98
-      peak_rss_mb: 682
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 28.02
+      peak_rss_mb: 683
     status: proved
     _scored_by: scorer_kani
 - id: DM-INITIALIZE-NO-EXTENT-MANAGER-OK
@@ -598,27 +598,27 @@ properties:
     code:
     - DM-INITIALIZE-NO-EM-EMPTY-OK
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_initialize_no_extent_manager_ok
       - dm_initialize
       - get_pool_id
       result: Proved
-      wall_clock_s: 0.49
-      peak_rss_mb: 52
+      wall_clock_s: 0.5
+      peak_rss_mb: 54
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_initialize_no_extent_manager_ok
       result: SUCCESS
-      wall_clock_s: 24.9
-      peak_rss_mb: 669
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 25.92
+      peak_rss_mb: 675
     status: proved
     _scored_by: scorer_kani
 - id: DM-INITIALIZE-RESTORED-ZERO-REFS
@@ -644,27 +644,27 @@ properties:
     code:
     - DM-INITIALIZE-RESTORED-ZERO-REFS
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_initialize_restored_zero_refs
       - dm_initialize
       - get_pool_id
       result: Proved
-      wall_clock_s: 0.49
-      peak_rss_mb: 52
+      wall_clock_s: 0.57
+      peak_rss_mb: 54
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_initialize_restored_zero_refs
       result: SUCCESS
-      wall_clock_s: 138.43
-      peak_rss_mb: 2190
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 146.09
+      peak_rss_mb: 2539
     status: proved
     _scored_by: scorer_kani
 - id: DM-INITIALIZE-TRACKS-EVICTION
@@ -692,27 +692,27 @@ properties:
     code:
     - DM-INITIALIZE-TRACKS-EVICTION
   creusot:
+    fidelity: trusted-boundary
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_initialize_tracks_eviction
       - dm_initialize
       - get_pool_id
       result: Proved
-      wall_clock_s: 0.49
-      peak_rss_mb: 52
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
       lever: null
-    fidelity: trusted-boundary
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_initialize_tracks_eviction
       result: SUCCESS
-      wall_clock_s: 150.62
-      peak_rss_mb: 2255
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 156.01
+      peak_rss_mb: 2264
     status: proved
     _scored_by: scorer_kani
 - id: DM-INITIALIZE-FRAME-UNREPORTED-KEYS
@@ -737,27 +737,27 @@ properties:
     code:
     - DM-INITIALIZE-FRAME-UNREPORTED-KEYS
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_initialize_frame_unreported_keys
       - dm_initialize
       - get_pool_id
       result: Proved
-      wall_clock_s: 0.49
-      peak_rss_mb: 52
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_initialize_frame_unreported_keys
       result: SUCCESS
-      wall_clock_s: 201.55
-      peak_rss_mb: 2728
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 194.82999999999998
+      peak_rss_mb: 2722
     status: proved
     _scored_by: scorer_kani
 - id: DM-INITIALIZE-PRESERVES-REFERENCED-ENTRY
@@ -826,6 +826,8 @@ properties:
     code:
     - DM-LOOKUP-ABSENT-NOT-EXIST
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_lookup_not_exist
@@ -833,21 +835,19 @@ properties:
       - wait_for
       - check_pred
       result: Proved
-      wall_clock_s: 0.48
-      peak_rss_mb: 51
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_lookup_not_exist
       result: SUCCESS
-      wall_clock_s: 21.51
-      peak_rss_mb: 661
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 21.7
+      peak_rss_mb: 664
     status: proved
     _scored_by: scorer_kani
 - id: DM-LOOKUP-MEMORY-TIER-RESULT
@@ -880,6 +880,8 @@ properties:
     code:
     - DM-LOOKUP-MEMORY-TIER-RESULT
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_lookup_memory_tier_result
@@ -887,21 +889,19 @@ properties:
       - wait_for
       - check_pred
       result: Proved
-      wall_clock_s: 0.48
-      peak_rss_mb: 51
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_lookup_memory_tier_result
       result: SUCCESS
-      wall_clock_s: 29.45
-      peak_rss_mb: 656
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 29.07
+      peak_rss_mb: 658
     status: proved
     _scored_by: scorer_kani
 - id: DM-LOOKUP-BLOCK-DEVICE-RESULT
@@ -936,6 +936,8 @@ properties:
     code:
     - DM-LOOKUP-BLOCK-DEVICE-RESULT
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_lookup_block_device_result
@@ -943,21 +945,19 @@ properties:
       - wait_for
       - check_pred
       result: Proved
-      wall_clock_s: 0.49
-      peak_rss_mb: 51
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_lookup_block_device_result
       result: SUCCESS
-      wall_clock_s: 110.23
-      peak_rss_mb: 316
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 28.54
+      peak_rss_mb: 660
     status: proved
     _scored_by: scorer_kani
 - id: DM-LOOKUP-INCREMENTS-READ-REF
@@ -994,6 +994,8 @@ properties:
     code:
     - DM-LOOKUP-TAKES-READ-REF
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_lookup_increments_read_ref
@@ -1001,21 +1003,19 @@ properties:
       - wait_for
       - check_pred
       result: Proved
-      wall_clock_s: 0.48
-      peak_rss_mb: 51
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_lookup_increments_read_ref
       result: SUCCESS
-      wall_clock_s: 50.64
-      peak_rss_mb: 658
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 29.37
+      peak_rss_mb: 660
     status: proved
     _scored_by: scorer_kani
 - id: DM-LOOKUP-WAITS-FOR-WRITER
@@ -1052,6 +1052,8 @@ properties:
     code:
     - DM-LOOKUP-WAITS-FOR-WRITER
   creusot:
+    fidelity: trusted-boundary
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_lookup_waits_for_writer
@@ -1059,21 +1061,19 @@ properties:
       - wait_for
       - check_pred
       result: Proved
-      wall_clock_s: 0.47
-      peak_rss_mb: 51
+      wall_clock_s: 0.58
+      peak_rss_mb: 53
       lever: null
-    fidelity: trusted-boundary
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_lookup_waits_for_writer
       result: SUCCESS
-      wall_clock_s: 28.86
-      peak_rss_mb: 658
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 29.25
+      peak_rss_mb: 661
     status: proved
     _scored_by: scorer_kani
 - id: DM-LOOKUP-TIMEOUT
@@ -1108,6 +1108,8 @@ properties:
     code:
     - DM-LOOKUP-TIMEOUT
   creusot:
+    fidelity: trusted-boundary
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_lookup_timeout
@@ -1115,21 +1117,19 @@ properties:
       - wait_for
       - check_pred
       result: Proved
-      wall_clock_s: 0.48
-      peak_rss_mb: 51
+      wall_clock_s: 0.51
+      peak_rss_mb: 53
       lever: null
-    fidelity: trusted-boundary
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_lookup_timeout
       result: SUCCESS
-      wall_clock_s: 28.19
+      wall_clock_s: 28.12
       peak_rss_mb: 659
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
     _scored_by: scorer_kani
 - id: DM-LOOKUP-REFRESHES-EVICTION-PRIORITY
@@ -1170,13 +1170,53 @@ properties:
     eviction policy and discards its result, so the resulting order depends on that policy, not on this
     component.
   creusot:
-    evidence: null
-    fidelity: null
-    note: null
+    fidelity: trusted-boundary
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to:
+      component: eviction-policy
+      obligation: touch(h) on a handle tracked in pool p makes it the most recently used entry of p, so
+        get_eviction_candidates(p, n) lists its key after every other key tracked in p (until another
+        track/touch)
+    evidence:
+      modules:
+      - verify_dm_lookup_refreshes_eviction_priority
+      - dm_lookup
+      - wait_for
+      - check_pred
+      - dm_new
+      - get_pool_id
+      - dm_initialize
+      - dm_convert_to_storage
+      - dm_take_read
+      - dm_take_write
+      - dm_release_read
+      - dm_release_write
+      - dm_downgrade_reference
+      - dm_remove
+      - dm_touch
+      - dm_entry_size
+      - dm_oldest_keys
+      - dm_create_memory_tier_entry
+      - dm_convert_memory_tier_to_block
+      - dm_promote_block_to_memory_tier
+      - dm_is_evictable
+      - dm_try_evict_to_block
+      - dm_recover_extent
+      - dm_set_checksum
+      - dm_get_checksum
+    status: delegated
+    _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to:
+      component: eviction-policy
+      obligation: touch(h) on a handle tracked in pool makes its key the most recently used of that pool,
+        so get_eviction_candidates(pool, n) lists it after every other tracked key of that pool (until
+        another key is tracked or touched).
     evidence: null
-    fidelity: null
-    note: null
+    status: delegated
+    _scored_by: scorer_kani
 - id: DM-LOOKUP-NEVER-MISMATCH-SIZE
   subject: lookup
   methods:
@@ -1206,6 +1246,8 @@ properties:
     code:
     - DM-LOOKUP-RESULT-VARIANTS
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_lookup_never_mismatch_size
@@ -1213,21 +1255,19 @@ properties:
       - wait_for
       - check_pred
       result: Proved
-      wall_clock_s: 0.48
-      peak_rss_mb: 51
+      wall_clock_s: 0.51
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_lookup_never_mismatch_size
       result: SUCCESS
-      wall_clock_s: 28.43
-      peak_rss_mb: 657
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 28.65
+      peak_rss_mb: 658
     status: proved
     _scored_by: scorer_kani
 - id: DM-LOOKUP-REFCOUNT-OVERFLOW
@@ -1258,6 +1298,8 @@ properties:
     code:
     - DM-LOOKUP-OVERFLOW
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_lookup_refcount_overflow
@@ -1286,21 +1328,19 @@ properties:
       - dm_set_checksum
       - dm_get_checksum
       result: Proved
-      wall_clock_s: 0.48
-      peak_rss_mb: 51
+      wall_clock_s: 0.58
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_lookup_refcount_overflow
       result: SUCCESS
       wall_clock_s: 28.48
       peak_rss_mb: 659
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
     _scored_by: scorer_kani
 - id: DM-LOOKUP-FRAME
@@ -1333,6 +1373,8 @@ properties:
   delta_note: Code also states other entries are unchanged and the eviction handle is unchanged; spec
     covers other keys in DM-INV-OPERATIONS-ARE-KEY-LOCAL.
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_lookup_frame
@@ -1340,21 +1382,19 @@ properties:
       - wait_for
       - check_pred
       result: Proved
-      wall_clock_s: 0.5
-      peak_rss_mb: 51
+      wall_clock_s: 0.58
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_lookup_frame
       result: SUCCESS
-      wall_clock_s: 58.7
-      peak_rss_mb: 962
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 119.25
+      peak_rss_mb: 974
     status: proved
     _scored_by: scorer_kani
 - id: DM-CONVERT-TO-STORAGE-SETS-SSD-OFFSET
@@ -1389,26 +1429,26 @@ properties:
     code:
     - DM-CONVERT-TO-STORAGE-RECORDS-SSD-OFFSET
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_convert_to_storage_sets_ssd_offset
       - dm_convert_to_storage
       result: Proved
-      wall_clock_s: 0.5
-      peak_rss_mb: 54
+      wall_clock_s: 0.52
+      peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_convert_to_storage_sets_ssd_offset
       result: SUCCESS
-      wall_clock_s: 25.41
-      peak_rss_mb: 632
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 25.64
+      peak_rss_mb: 633
     status: proved
     _scored_by: scorer_kani
 - id: DM-CONVERT-TO-STORAGE-STAYS-MEMORY-TIER
@@ -1444,27 +1484,27 @@ properties:
     - DM-CONVERT-TO-STORAGE-STAYS-MEMORY-TIER
   delta_note: Spec classes it as a frame, code as a postcondition; same obligation.
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_convert_to_storage_stays_memory_tier
       - dm_convert_to_storage
       - dm_lookup
       result: Proved
-      wall_clock_s: 0.53
-      peak_rss_mb: 56
+      wall_clock_s: 0.6
+      peak_rss_mb: 57
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_convert_to_storage_stays_memory_tier
       result: SUCCESS
-      wall_clock_s: 31.49
+      wall_clock_s: 31.99
       peak_rss_mb: 658
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
     _scored_by: scorer_kani
 - id: DM-CONVERT-TO-STORAGE-RELEASES-READ-REF
@@ -1496,26 +1536,26 @@ properties:
     code: *id002
   delta_note: Spec states the positive and the zero case as two records; code states both in one.
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_convert_to_storage_releases_read_ref
       - dm_convert_to_storage
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 54
+      wall_clock_s: 0.53
+      peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_convert_to_storage_releases_read_ref
       result: SUCCESS
-      wall_clock_s: 25.9
+      wall_clock_s: 25.7
       peak_rss_mb: 633
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
     _scored_by: scorer_kani
 - id: DM-CONVERT-TO-STORAGE-FRAME
@@ -1547,26 +1587,26 @@ properties:
     - DM-CONVERT-TO-STORAGE-FRAME
   delta_note: Spec names only the write reference; code also names size, eviction handle and other entries.
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_convert_to_storage_frame
       - dm_convert_to_storage
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 54
+      wall_clock_s: 0.52
+      peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_convert_to_storage_frame
       result: SUCCESS
-      wall_clock_s: 37.28
-      peak_rss_mb: 681
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 52.92
+      peak_rss_mb: 700
     status: proved
     _scored_by: scorer_kani
 - id: DM-CONVERT-TO-STORAGE-NOT-FOUND
@@ -1600,26 +1640,26 @@ properties:
     - DM-CONVERT-TO-STORAGE-NOT-FOUND
   delta_note: Spec leaves the error unnamed; code returns KeyNotFound.
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_convert_to_storage_not_found
       - dm_convert_to_storage
       result: Proved
-      wall_clock_s: 0.5
-      peak_rss_mb: 54
+      wall_clock_s: 0.53
+      peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_convert_to_storage_not_found
       result: SUCCESS
-      wall_clock_s: 25.43
-      peak_rss_mb: 629
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 24.45
+      peak_rss_mb: 634
     status: proved
     _scored_by: scorer_kani
 - id: DM-CONVERT-TO-STORAGE-BLOCK-DEVICE
@@ -1655,26 +1695,26 @@ properties:
     - DM-CONVERT-TO-STORAGE-BLOCK-DEVICE-INVALID
   delta_note: Spec leaves the error unnamed (data model suggests InvalidState); code returns InvalidState.
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_convert_to_storage_block_device
       - dm_convert_to_storage
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 54
+      wall_clock_s: 0.53
+      peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_convert_to_storage_block_device
       result: SUCCESS
-      wall_clock_s: 25.6
-      peak_rss_mb: 633
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 25.67
+      peak_rss_mb: 634
     status: proved
     _scored_by: scorer_kani
 - id: DM-TAKE-READ-INCREMENTS
@@ -1707,6 +1747,8 @@ properties:
     code:
     - DM-TAKE-READ-INCREMENTS
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_take_read_increments
@@ -1714,21 +1756,19 @@ properties:
       - wait_for
       - check_pred
       result: Proved
-      wall_clock_s: 0.48
-      peak_rss_mb: 51
+      wall_clock_s: 0.49
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_take_read_increments
       result: SUCCESS
-      wall_clock_s: 29.07
-      peak_rss_mb: 642
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 29.4
+      peak_rss_mb: 643
     status: proved
     _scored_by: scorer_kani
 - id: DM-TAKE-READ-WAITS-FOR-WRITER
@@ -1765,6 +1805,8 @@ properties:
     code:
     - DM-TAKE-READ-WAITS-FOR-WRITER
   creusot:
+    fidelity: trusted-boundary
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_take_read_waits_for_writer
@@ -1772,21 +1814,19 @@ properties:
       - wait_for
       - check_pred
       result: Proved
-      wall_clock_s: 0.48
-      peak_rss_mb: 51
+      wall_clock_s: 0.66
+      peak_rss_mb: 53
       lever: null
-    fidelity: trusted-boundary
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_take_read_waits_for_writer
       result: SUCCESS
-      wall_clock_s: 27.98
-      peak_rss_mb: 644
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 28.45
+      peak_rss_mb: 646
     status: proved
     _scored_by: scorer_kani
 - id: DM-TAKE-READ-TIMEOUT
@@ -1819,6 +1859,8 @@ properties:
     code:
     - DM-TAKE-READ-TIMEOUT
   creusot:
+    fidelity: trusted-boundary
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_take_read_timeout
@@ -1826,21 +1868,19 @@ properties:
       - wait_for
       - check_pred
       result: Proved
-      wall_clock_s: 0.48
-      peak_rss_mb: 51
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
       lever: null
-    fidelity: trusted-boundary
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_take_read_timeout
       result: SUCCESS
-      wall_clock_s: 27.33
-      peak_rss_mb: 644
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 27.34
+      peak_rss_mb: 641
     status: proved
     _scored_by: scorer_kani
 - id: DM-TAKE-READ-NOT-FOUND
@@ -1870,6 +1910,8 @@ properties:
     code:
     - DM-TAKE-READ-NOT-FOUND
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_take_read_not_found
@@ -1877,21 +1919,19 @@ properties:
       - wait_for
       - check_pred
       result: Proved
-      wall_clock_s: 0.48
-      peak_rss_mb: 51
+      wall_clock_s: 0.65
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_take_read_not_found
       result: SUCCESS
-      wall_clock_s: 22.57
+      wall_clock_s: 22.98
       peak_rss_mb: 647
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
     _scored_by: scorer_kani
 - id: DM-TAKE-READ-REFCOUNT-OVERFLOW
@@ -1920,6 +1960,8 @@ properties:
     code:
     - DM-TAKE-READ-OVERFLOW
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_take_read_refcount_overflow
@@ -1948,21 +1990,19 @@ properties:
       - dm_set_checksum
       - dm_get_checksum
       result: Proved
-      wall_clock_s: 0.48
-      peak_rss_mb: 51
+      wall_clock_s: 0.51
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_take_read_refcount_overflow
       result: SUCCESS
-      wall_clock_s: 27.85
-      peak_rss_mb: 645
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 28.1
+      peak_rss_mb: 643
     status: proved
     _scored_by: scorer_kani
 - id: DM-TAKE-READ-FRAME
@@ -1988,6 +2028,8 @@ properties:
     code:
     - DM-TAKE-READ-FRAME
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_take_read_frame
@@ -1995,21 +2037,19 @@ properties:
       - wait_for
       - check_pred
       result: Proved
-      wall_clock_s: 0.48
-      peak_rss_mb: 51
+      wall_clock_s: 0.49
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_take_read_frame
       result: SUCCESS
-      wall_clock_s: 131.74
-      peak_rss_mb: 989
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 132.76
+      peak_rss_mb: 990
     status: proved
     _scored_by: scorer_kani
 - id: DM-TAKE-WRITE-SETS-WRITE-REF
@@ -2041,6 +2081,8 @@ properties:
     code:
     - DM-TAKE-WRITE-SETS-WRITE-REF
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_take_write_sets_write_ref
@@ -2048,21 +2090,19 @@ properties:
       - wait_for
       - check_pred
       result: Proved
-      wall_clock_s: 0.48
-      peak_rss_mb: 51
+      wall_clock_s: 0.51
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_take_write_sets_write_ref
       result: SUCCESS
-      wall_clock_s: 27.37
-      peak_rss_mb: 642
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 27.3
+      peak_rss_mb: 644
     status: proved
     _scored_by: scorer_kani
 - id: DM-TAKE-WRITE-REQUIRES-NO-REFS
@@ -2099,6 +2139,8 @@ properties:
     code:
     - DM-TAKE-WRITE-WAITS-FOR-ALL-REFS
   creusot:
+    fidelity: trusted-boundary
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_take_write_requires_no_refs
@@ -2106,21 +2148,19 @@ properties:
       - wait_for
       - check_pred
       result: Proved
-      wall_clock_s: 0.48
-      peak_rss_mb: 51
+      wall_clock_s: 0.69
+      peak_rss_mb: 53
       lever: null
-    fidelity: trusted-boundary
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_take_write_requires_no_refs
       result: SUCCESS
-      wall_clock_s: 26.56
+      wall_clock_s: 26.53
       peak_rss_mb: 640
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
     _scored_by: scorer_kani
 - id: DM-TAKE-WRITE-TIMEOUT
@@ -2153,6 +2193,8 @@ properties:
     code:
     - DM-TAKE-WRITE-TIMEOUT
   creusot:
+    fidelity: trusted-boundary
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_take_write_timeout
@@ -2160,21 +2202,19 @@ properties:
       - wait_for
       - check_pred
       result: Proved
-      wall_clock_s: 0.47
-      peak_rss_mb: 51
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
       lever: null
-    fidelity: trusted-boundary
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_take_write_timeout
       result: SUCCESS
       wall_clock_s: 26.47
-      peak_rss_mb: 643
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      peak_rss_mb: 642
     status: proved
     _scored_by: scorer_kani
 - id: DM-TAKE-WRITE-NOT-FOUND
@@ -2204,6 +2244,8 @@ properties:
     code:
     - DM-TAKE-WRITE-NOT-FOUND
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_take_write_not_found
@@ -2211,21 +2253,19 @@ properties:
       - wait_for
       - check_pred
       result: Proved
-      wall_clock_s: 0.48
-      peak_rss_mb: 51
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_take_write_not_found
       result: SUCCESS
-      wall_clock_s: 21.95
-      peak_rss_mb: 643
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 22.1
+      peak_rss_mb: 646
     status: proved
     _scored_by: scorer_kani
 - id: DM-TAKE-WRITE-FRAME
@@ -2251,6 +2291,8 @@ properties:
     code:
     - DM-TAKE-WRITE-FRAME
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_take_write_frame
@@ -2258,21 +2300,19 @@ properties:
       - wait_for
       - check_pred
       result: Proved
-      wall_clock_s: 0.48
-      peak_rss_mb: 51
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_take_write_frame
       result: SUCCESS
-      wall_clock_s: 45.57
+      wall_clock_s: 54.16
       peak_rss_mb: 918
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
     _scored_by: scorer_kani
 - id: DM-RELEASE-READ-DECREMENTS
@@ -2305,26 +2345,26 @@ properties:
     code:
     - DM-RELEASE-READ-DECREMENTS
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_release_read_decrements
       - dm_release_read
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 54
+      wall_clock_s: 0.59
+      peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_release_read_decrements
       result: SUCCESS
-      wall_clock_s: 24.06
-      peak_rss_mb: 631
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 23.86
+      peak_rss_mb: 633
     status: proved
     _scored_by: scorer_kani
 - id: DM-RELEASE-READ-UNDERFLOW
@@ -2359,26 +2399,26 @@ properties:
     code:
     - DM-RELEASE-READ-UNDERFLOW
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_release_read_underflow
       - dm_release_read
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 54
+      wall_clock_s: 0.57
+      peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_release_read_underflow
       result: SUCCESS
-      wall_clock_s: 22.28
-      peak_rss_mb: 625
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 22.31
+      peak_rss_mb: 631
     status: proved
     _scored_by: scorer_kani
 - id: DM-RELEASE-READ-NOT-FOUND
@@ -2409,26 +2449,26 @@ properties:
     code:
     - DM-RELEASE-READ-NOT-FOUND
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_release_read_not_found
       - dm_release_read
       result: Proved
-      wall_clock_s: 0.5
-      peak_rss_mb: 54
+      wall_clock_s: 0.52
+      peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_release_read_not_found
       result: SUCCESS
-      wall_clock_s: 24.51
-      peak_rss_mb: 629
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 24.44
+      peak_rss_mb: 630
     status: proved
     _scored_by: scorer_kani
 - id: DM-RELEASE-READ-FRAME
@@ -2454,26 +2494,26 @@ properties:
     code:
     - DM-RELEASE-READ-FRAME
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_release_read_frame
       - dm_release_read
       result: Proved
-      wall_clock_s: 0.5
-      peak_rss_mb: 54
+      wall_clock_s: 0.52
+      peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_release_read_frame
       result: SUCCESS
-      wall_clock_s: 38.78
-      peak_rss_mb: 787
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 41.94
+      peak_rss_mb: 783
     status: proved
     _scored_by: scorer_kani
 - id: DM-RELEASE-WRITE-CLEARS
@@ -2505,26 +2545,26 @@ properties:
     code:
     - DM-RELEASE-WRITE-CLEARS
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_release_write_clears
       - dm_release_write
       result: Proved
-      wall_clock_s: 0.5
-      peak_rss_mb: 54
+      wall_clock_s: 0.52
+      peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_release_write_clears
       result: SUCCESS
       wall_clock_s: 23.22
-      peak_rss_mb: 632
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      peak_rss_mb: 633
     status: proved
     _scored_by: scorer_kani
 - id: DM-RELEASE-WRITE-UNDERFLOW
@@ -2559,26 +2599,26 @@ properties:
     code:
     - DM-RELEASE-WRITE-UNDERFLOW
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_release_write_underflow
       - dm_release_write
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 54
+      wall_clock_s: 0.6
+      peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_release_write_underflow
       result: SUCCESS
-      wall_clock_s: 22.02
-      peak_rss_mb: 625
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 22.18
+      peak_rss_mb: 623
     status: proved
     _scored_by: scorer_kani
 - id: DM-RELEASE-WRITE-NOT-FOUND
@@ -2609,26 +2649,26 @@ properties:
     code:
     - DM-RELEASE-WRITE-NOT-FOUND
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_release_write_not_found
       - dm_release_write
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 54
+      wall_clock_s: 0.67
+      peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_release_write_not_found
       result: SUCCESS
-      wall_clock_s: 24.45
-      peak_rss_mb: 633
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 24.08
+      peak_rss_mb: 632
     status: proved
     _scored_by: scorer_kani
 - id: DM-RELEASE-WRITE-FRAME
@@ -2661,26 +2701,26 @@ properties:
   delta_note: Spec names only the read-reference count; code also names location, size, eviction handle
     and other entries.
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_release_write_frame
       - dm_release_write
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 54
+      wall_clock_s: 0.53
+      peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_release_write_frame
       result: SUCCESS
-      wall_clock_s: 49.45
-      peak_rss_mb: 634
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 48.69
+      peak_rss_mb: 633
     status: proved
     _scored_by: scorer_kani
 - id: DM-DOWNGRADE-REFERENCE-SWAPS
@@ -2717,26 +2757,26 @@ properties:
     code: *id004
   delta_note: Spec states the swap and its atomicity as two records; code states both in one.
   creusot:
+    fidelity: trusted-boundary
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_downgrade_reference_swaps
       - dm_downgrade_reference
       result: Proved
-      wall_clock_s: 0.51
+      wall_clock_s: 0.53
       peak_rss_mb: 55
       lever: null
-    fidelity: trusted-boundary
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_downgrade_reference_swaps
       result: SUCCESS
-      wall_clock_s: 25.31
-      peak_rss_mb: 630
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 25.42
+      peak_rss_mb: 634
     status: proved
     _scored_by: scorer_kani
 - id: DM-DOWNGRADE-REFERENCE-NO-WRITE-REF
@@ -2771,26 +2811,26 @@ properties:
     code:
     - DM-DOWNGRADE-REFERENCE-NO-WRITE-REF
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_downgrade_reference_no_write_ref
       - dm_downgrade_reference
       result: Proved
-      wall_clock_s: 0.51
+      wall_clock_s: 0.59
       peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_downgrade_reference_no_write_ref
       result: SUCCESS
-      wall_clock_s: 23.3
-      peak_rss_mb: 626
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 23.53
+      peak_rss_mb: 634
     status: proved
     _scored_by: scorer_kani
 - id: DM-DOWNGRADE-REFERENCE-NOT-FOUND
@@ -2822,26 +2862,26 @@ properties:
     - DM-DOWNGRADE-REFERENCE-NOT-FOUND
   delta_note: Spec leaves the error unnamed; code returns KeyNotFound.
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_downgrade_reference_not_found
       - dm_downgrade_reference
       result: Proved
-      wall_clock_s: 0.51
+      wall_clock_s: 0.53
       peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_downgrade_reference_not_found
       result: SUCCESS
-      wall_clock_s: 24.57
+      wall_clock_s: 24.3
       peak_rss_mb: 632
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
     _scored_by: scorer_kani
 - id: DM-DOWNGRADE-REFERENCE-REFCOUNT-OVERFLOW
@@ -2901,26 +2941,26 @@ properties:
     code:
     - DM-DOWNGRADE-REFERENCE-FRAME
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_downgrade_reference_frame
       - dm_downgrade_reference
       result: Proved
-      wall_clock_s: 0.51
+      wall_clock_s: 0.59
       peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_downgrade_reference_frame
       result: SUCCESS
-      wall_clock_s: 51.91
-      peak_rss_mb: 824
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 58.8
+      peak_rss_mb: 847
     status: proved
     _scored_by: scorer_kani
 - id: DM-INV-RELEASE-WAKES-WAITERS
@@ -2977,6 +3017,8 @@ properties:
   delta_note: Spec states the wake-up per method (release_read, release_write, downgrade_reference); code
     states one invariant that also covers convert_to_storage.
   creusot:
+    fidelity: trusted-boundary
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_inv_release_wakes_waiters
@@ -3005,21 +3047,19 @@ properties:
       - dm_set_checksum
       - dm_get_checksum
       result: Proved
-      wall_clock_s: 0.48
-      peak_rss_mb: 51
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
       lever: null
-    fidelity: trusted-boundary
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_inv_release_wakes_waiters
       result: SUCCESS
-      wall_clock_s: 35.69
-      peak_rss_mb: 720
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 35.6
+      peak_rss_mb: 722
     status: proved
     _scored_by: scorer_kani
 - id: DM-REMOVE-DELETES
@@ -3054,27 +3094,27 @@ properties:
     code:
     - DM-REMOVE-DELETES
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_remove_deletes
       - dm_remove
       - dm_lookup
       result: Proved
-      wall_clock_s: 0.53
-      peak_rss_mb: 56
+      wall_clock_s: 0.54
+      peak_rss_mb: 57
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_remove_deletes
       result: SUCCESS
-      wall_clock_s: 43.79
-      peak_rss_mb: 685
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 45.88
+      peak_rss_mb: 691
     status: proved
     _scored_by: scorer_kani
 - id: DM-REMOVE-ACTIVE-REFERENCES
@@ -3112,26 +3152,26 @@ properties:
     - DM-REMOVE-ACTIVE-REFERENCES
   delta_note: Code also states the entry stays tracked for eviction.
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_remove_active_references
       - dm_remove
       result: Proved
-      wall_clock_s: 0.56
-      peak_rss_mb: 56
+      wall_clock_s: 0.76
+      peak_rss_mb: 58
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_remove_active_references
       result: SUCCESS
-      wall_clock_s: 38.55
-      peak_rss_mb: 673
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 38.63
+      peak_rss_mb: 679
     status: proved
     _scored_by: scorer_kani
 - id: DM-REMOVE-NOT-FOUND
@@ -3163,26 +3203,26 @@ properties:
     code:
     - DM-REMOVE-NOT-FOUND
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_remove_not_found
       - dm_remove
       result: Proved
-      wall_clock_s: 0.56
-      peak_rss_mb: 56
+      wall_clock_s: 0.59
+      peak_rss_mb: 58
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_remove_not_found
       result: SUCCESS
-      wall_clock_s: 30.8
-      peak_rss_mb: 664
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 32.46
+      peak_rss_mb: 674
     status: proved
     _scored_by: scorer_kani
 - id: DM-REMOVE-UNTRACKS
@@ -3210,6 +3250,8 @@ properties:
     code:
     - DM-REMOVE-UNTRACKS
   creusot:
+    fidelity: trusted-boundary
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_remove_untracks
@@ -3238,21 +3280,19 @@ properties:
       - dm_set_checksum
       - dm_get_checksum
       result: Proved
-      wall_clock_s: 0.48
-      peak_rss_mb: 51
+      wall_clock_s: 0.49
+      peak_rss_mb: 53
       lever: null
-    fidelity: trusted-boundary
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_remove_untracks
       result: SUCCESS
-      wall_clock_s: 57.91
-      peak_rss_mb: 1777
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 120.25
+      peak_rss_mb: 1750
     status: proved
     _scored_by: scorer_kani
 - id: DM-REMOVE-FRAME
@@ -3277,26 +3317,26 @@ properties:
     code:
     - DM-REMOVE-FRAME
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_remove_frame
       - dm_remove
       result: Proved
-      wall_clock_s: 0.57
-      peak_rss_mb: 56
+      wall_clock_s: 0.59
+      peak_rss_mb: 58
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_remove_frame
       result: SUCCESS
-      wall_clock_s: 46.34
-      peak_rss_mb: 675
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 51.21
+      peak_rss_mb: 677
     status: proved
     _scored_by: scorer_kani
 - id: DM-TOUCH-REFRESHES-PRIORITY
@@ -3336,13 +3376,53 @@ properties:
     oldest_keys (a strict most-recently-used order); the code reports the access to the connected eviction
     policy and discards its result, so the order depends on that policy.
   creusot:
-    evidence: null
-    fidelity: null
-    note: null
+    fidelity: trusted-boundary
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to:
+      component: eviction-policy
+      obligation: touch(h) on a handle tracked in pool p makes it the most recently used entry of p, so
+        get_eviction_candidates(p, n) lists its key after every other key tracked in p (until another
+        track/touch)
+    evidence:
+      modules:
+      - verify_dm_touch_refreshes_priority
+      - dm_touch
+      - dm_new
+      - get_pool_id
+      - wait_for
+      - check_pred
+      - dm_initialize
+      - dm_lookup
+      - dm_convert_to_storage
+      - dm_take_read
+      - dm_take_write
+      - dm_release_read
+      - dm_release_write
+      - dm_downgrade_reference
+      - dm_remove
+      - dm_entry_size
+      - dm_oldest_keys
+      - dm_create_memory_tier_entry
+      - dm_convert_memory_tier_to_block
+      - dm_promote_block_to_memory_tier
+      - dm_is_evictable
+      - dm_try_evict_to_block
+      - dm_recover_extent
+      - dm_set_checksum
+      - dm_get_checksum
+    status: delegated
+    _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to:
+      component: eviction-policy
+      obligation: touch(h) on a handle tracked in pool makes its key the most recently used of that pool,
+        so get_eviction_candidates(pool, n) lists it after every other tracked key of that pool (until
+        another key is tracked or touched).
     evidence: null
-    fidelity: null
-    note: null
+    status: delegated
+    _scored_by: scorer_kani
 - id: DM-TOUCH-FRAME
   subject: touch
   methods:
@@ -3375,26 +3455,26 @@ properties:
     code:
     - DM-TOUCH-FRAME
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_touch_frame
       - dm_touch
       result: Proved
-      wall_clock_s: 0.5
-      peak_rss_mb: 53
+      wall_clock_s: 0.66
+      peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_touch_frame
       result: SUCCESS
-      wall_clock_s: 37.2
-      peak_rss_mb: 655
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 34.51
+      peak_rss_mb: 659
     status: proved
     _scored_by: scorer_kani
 - id: DM-TOUCH-NOT-FOUND
@@ -3426,26 +3506,26 @@ properties:
     code:
     - DM-TOUCH-NOT-FOUND
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_touch_not_found
       - dm_touch
       result: Proved
-      wall_clock_s: 0.5
-      peak_rss_mb: 53
+      wall_clock_s: 0.53
+      peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_touch_not_found
       result: SUCCESS
-      wall_clock_s: 22.68
-      peak_rss_mb: 648
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 23.82
+      peak_rss_mb: 654
     status: proved
     _scored_by: scorer_kani
 - id: DM-TOUCH-NO-WAIT
@@ -3473,13 +3553,28 @@ properties:
   divergence_note: Not stated by the code reader; touch has no waiting step in the code reader's account,
     so this is probably an extraction gap rather than missing behaviour.
   creusot:
-    evidence: null
-    fidelity: null
-    note: null
+    fidelity: trusted-boundary
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_dm_touch_no_wait
+      - dm_touch
+      result: Proved
+      wall_clock_s: 0.52
+      peak_rss_mb: 55
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani:
-    evidence: null
-    fidelity: null
-    note: null
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    evidence:
+      harness: verify_dm_touch_no_wait
+      result: SUCCESS
+      wall_clock_s: 34.61
+      peak_rss_mb: 682
+    status: proved
+    _scored_by: scorer_kani
 - id: DM-ENTRY-SIZE-BLOCK-MULTIPLE
   subject: entry_size
   methods:
@@ -3510,6 +3605,8 @@ properties:
     code:
     - DM-ENTRY-SIZE-BLOCKS-TIMES-4096
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_entry_size_block_multiple
@@ -3538,21 +3635,19 @@ properties:
       - dm_set_checksum
       - dm_get_checksum
       result: Proved
-      wall_clock_s: 0.49
-      peak_rss_mb: 51
+      wall_clock_s: 0.58
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_entry_size_block_multiple
       result: SUCCESS
-      wall_clock_s: 18.3
-      peak_rss_mb: 610
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 18.58
+      peak_rss_mb: 612
     status: proved
     _scored_by: scorer_kani
 - id: DM-ENTRY-SIZE-ROUNDS-UP-MEMORY-TIER
@@ -3585,6 +3680,8 @@ properties:
     code:
     - DM-ENTRY-SIZE-MEMORY-TIER-COVERS-SIZE
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_entry_size_rounds_up_memory_tier
@@ -3593,21 +3690,19 @@ properties:
       - dm_entry_size
       - get_pool_id
       result: Proved
-      wall_clock_s: 0.49
-      peak_rss_mb: 52
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_entry_size_rounds_up_memory_tier
       result: SUCCESS
-      wall_clock_s: 39.98
-      peak_rss_mb: 682
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 43.96
+      peak_rss_mb: 684
     status: proved
     _scored_by: scorer_kani
 - id: DM-ENTRY-SIZE-FRAME
@@ -3638,26 +3733,26 @@ properties:
     code:
     - DM-ENTRY-SIZE-FRAME
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_entry_size_frame
       - dm_entry_size
       result: Proved
-      wall_clock_s: 0.49
-      peak_rss_mb: 52
+      wall_clock_s: 0.82
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_entry_size_frame
       result: SUCCESS
-      wall_clock_s: 26.69
+      wall_clock_s: 28.98
       peak_rss_mb: 596
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
     _scored_by: scorer_kani
 - id: DM-ENTRY-SIZE-NOT-FOUND
@@ -3687,26 +3782,26 @@ properties:
     code:
     - DM-ENTRY-SIZE-NOT-FOUND
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_entry_size_not_found
       - dm_entry_size
       result: Proved
-      wall_clock_s: 0.49
-      peak_rss_mb: 52
+      wall_clock_s: 0.67
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_entry_size_not_found
       result: SUCCESS
-      wall_clock_s: 16.94
-      peak_rss_mb: 593
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 17.22
+      peak_rss_mb: 596
     status: proved
     _scored_by: scorer_kani
 - id: DM-ENTRY-SIZE-NO-ARITHMETIC-OVERFLOW
@@ -3744,6 +3839,8 @@ properties:
     code:
     - DM-ENTRY-SIZE-NO-ARITHMETIC-OVERFLOW
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_entry_size_no_arithmetic_overflow
@@ -3772,21 +3869,19 @@ properties:
       - dm_set_checksum
       - dm_get_checksum
       result: Proved
-      wall_clock_s: 0.49
-      peak_rss_mb: 51
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_entry_size_no_arithmetic_overflow
       result: SUCCESS
-      wall_clock_s: 152.29000000000002
-      peak_rss_mb: 2264
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 152.23
+      peak_rss_mb: 2181
     status: proved
     _scored_by: scorer_kani
 - id: DM-OLDEST-KEYS-AT-MOST-N
@@ -3820,27 +3915,27 @@ properties:
     code:
     - DM-OLDEST-KEYS-AT-MOST-N
   creusot:
+    fidelity: trusted-boundary
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_oldest_keys_at_most_n
       - dm_oldest_keys
       - get_pool_id
       result: Proved
-      wall_clock_s: 0.49
-      peak_rss_mb: 52
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
       lever: null
-    fidelity: trusted-boundary
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_oldest_keys_at_most_n
       result: SUCCESS
-      wall_clock_s: 46.35
-      peak_rss_mb: 667
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 137.08
+      peak_rss_mb: 2036
     status: proved
     _scored_by: scorer_kani
 - id: DM-OLDEST-KEYS-ORDER
@@ -3880,13 +3975,52 @@ properties:
     lookup and touch as uses; the code returns whatever order the connected eviction policy gives, which
     is least-recently-used only if that policy is a recency policy.
   creusot:
-    evidence: null
-    fidelity: null
-    note: null
+    fidelity: trusted-boundary
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to:
+      component: eviction-policy
+      obligation: for one pool, track(pool, key) registers the key as the most recently used and touch(h)
+        on a tracked handle makes it the most recently used, so get_eviction_candidates(pool, n) returns
+        the pool's tracked keys least recently used (by that track/touch history) first
+    evidence:
+      modules:
+      - verify_dm_oldest_keys_order
+      - dm_new
+      - get_pool_id
+      - wait_for
+      - check_pred
+      - dm_initialize
+      - dm_lookup
+      - dm_convert_to_storage
+      - dm_take_read
+      - dm_take_write
+      - dm_release_read
+      - dm_release_write
+      - dm_downgrade_reference
+      - dm_remove
+      - dm_touch
+      - dm_entry_size
+      - dm_oldest_keys
+      - dm_create_memory_tier_entry
+      - dm_convert_memory_tier_to_block
+      - dm_promote_block_to_memory_tier
+      - dm_is_evictable
+      - dm_try_evict_to_block
+      - dm_recover_extent
+      - dm_set_checksum
+      - dm_get_checksum
+    status: delegated
+    _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to:
+      component: eviction-policy
+      obligation: get_eviction_candidates(pool, n) returns up to n tracked keys of pool ordered least
+        recently used first, where a key's last use is its most recent track or touch call in that pool.
     evidence: null
-    fidelity: null
-    note: null
+    status: delegated
+    _scored_by: scorer_kani
 - id: DM-OLDEST-KEYS-FILLS-TO-N
   subject: oldest_keys
   methods:
@@ -3978,27 +4112,27 @@ properties:
     code:
     - DM-OLDEST-KEYS-FRAME
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_oldest_keys_frame
       - dm_oldest_keys
       - get_pool_id
       result: Proved
-      wall_clock_s: 0.49
-      peak_rss_mb: 52
+      wall_clock_s: 0.52
+      peak_rss_mb: 54
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_oldest_keys_frame
       result: SUCCESS
-      wall_clock_s: 53.78
-      peak_rss_mb: 737
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 160.05
+      peak_rss_mb: 2158
     status: proved
     _scored_by: scorer_kani
 - id: DM-OLDEST-KEYS-ONLY-PRESENT-KEYS
@@ -4026,6 +4160,8 @@ properties:
     code:
     - DM-OLDEST-KEYS-ONLY-PRESENT-KEYS
   creusot:
+    fidelity: trusted-boundary
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_oldest_keys_only_present_keys
@@ -4054,21 +4190,19 @@ properties:
       - dm_set_checksum
       - dm_get_checksum
       result: Proved
-      wall_clock_s: 0.48
-      peak_rss_mb: 51
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
       lever: null
-    fidelity: trusted-boundary
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_oldest_keys_only_present_keys
       result: SUCCESS
-      wall_clock_s: 239.04
-      peak_rss_mb: 3223
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 263.22
+      peak_rss_mb: 3520
     status: proved
     _scored_by: scorer_kani
 - id: DM-OLDEST-KEYS-NO-EVICTION-POLICY-EMPTY
@@ -4096,27 +4230,27 @@ properties:
     code:
     - DM-OLDEST-KEYS-NO-EVICTION-POLICY-EMPTY
   creusot:
-    evidence:
-      refutation: refute_dm_oldest_keys_no_eviction_policy_empty
-      result: Proved (negation)
-      wall_clock_s: 0.5
-      peak_rss_mb: 53
     fidelity: ghost-mirror
     note: 'REFUTED — the negation ''refute_dm_oldest_keys_no_eviction_policy_empty'' is machine-proved,
       so the code violates this obligation. This is a finding, not a gap: see the spec and code locations
       on the property record.'
+    evidence:
+      refutation: refute_dm_oldest_keys_no_eviction_policy_empty
+      result: Proved (negation)
+      wall_clock_s: 0.81
+      peak_rss_mb: 56
     status: refuted
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      refutation: refute_dm_oldest_keys_no_eviction_policy_empty
-      result: violation demonstrated
-      wall_clock_s: 9.27
-      peak_rss_mb: 515
     fidelity: representative
     note: 'REFUTED — ''refute_dm_oldest_keys_no_eviction_policy_empty'' demonstrates a reachable violation,
       so the code breaks this obligation. This is a finding, not a gap: see the spec and code locations
       on the property record.'
+    evidence:
+      refutation: refute_dm_oldest_keys_no_eviction_policy_empty
+      result: violation demonstrated
+      wall_clock_s: 9.52
+      peak_rss_mb: 517
     status: refuted
     _scored_by: scorer_kani
 - id: DM-CREATE-MEMORY-TIER-ENTRY-LOCATION
@@ -4157,6 +4291,8 @@ properties:
   delta_note: Spec states the location and the absent on-disk offset as two records; code states both
     in one. Spec adds that the entry is therefore not evictable, covered by the is_evictable records.
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_create_memory_tier_entry_location
@@ -4164,20 +4300,18 @@ properties:
       - get_pool_id
       result: Proved
       wall_clock_s: 0.5
-      peak_rss_mb: 52
+      peak_rss_mb: 54
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_create_memory_tier_entry_location
       result: SUCCESS
-      wall_clock_s: 34.13
-      peak_rss_mb: 668
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 36.85
+      peak_rss_mb: 673
     status: proved
     _scored_by: scorer_kani
 - id: DM-CREATE-MEMORY-TIER-ENTRY-WRITE-REF
@@ -4212,27 +4346,27 @@ properties:
     code:
     - DM-CREATE-MEMORY-TIER-ENTRY-HOLDS-WRITE-REF
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_create_memory_tier_entry_write_ref
       - dm_create_memory_tier_entry
       - get_pool_id
       result: Proved
-      wall_clock_s: 0.5
-      peak_rss_mb: 52
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_create_memory_tier_entry_write_ref
       result: SUCCESS
-      wall_clock_s: 39.3
-      peak_rss_mb: 690
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 41.98
+      peak_rss_mb: 697
     status: proved
     _scored_by: scorer_kani
 - id: DM-CREATE-MEMORY-TIER-ENTRY-REGISTERS-EVICTION
@@ -4270,13 +4404,30 @@ properties:
     lists entries in creation order; the code registers the key with the connected eviction policy and
     keeps the handle, and the resulting order is the policy's.
   creusot:
-    evidence: null
-    fidelity: null
-    note: null
+    fidelity: trusted-boundary
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to:
+      component: eviction-policy
+      obligation: track(p, key) registers key as the most recently used entry of pool p, so get_eviction_candidates(p,
+        n) lists keys in the order they were tracked (absent later touches)
+    evidence:
+      modules:
+      - verify_dm_create_memory_tier_entry_registers_eviction
+      - dm_create_memory_tier_entry
+      - get_pool_id
+    status: delegated
+    _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to:
+      component: eviction-policy
+      obligation: track(pool, key) of a key not yet tracked in pool registers it as the most recently
+        used entry of that pool, so get_eviction_candidates(pool, n) lists tracked keys in order of their
+        last track/touch, least recent first (keys created in sequence come back in creation order).
     evidence: null
-    fidelity: null
-    note: null
+    status: delegated
+    _scored_by: scorer_kani
 - id: DM-CREATE-MEMORY-TIER-ENTRY-ALREADY-EXISTS
   subject: create_memory_tier_entry
   methods:
@@ -4309,27 +4460,27 @@ properties:
     code:
     - DM-CREATE-MEMORY-TIER-ENTRY-ALREADY-EXISTS
   creusot:
-    evidence:
-      refutation: refute_dm_create_memory_tier_entry_already_exists
-      result: Proved (negation)
-      wall_clock_s: 0.49
-      peak_rss_mb: 52
     fidelity: ghost-mirror
     note: 'REFUTED — the negation ''refute_dm_create_memory_tier_entry_already_exists'' is machine-proved,
       so the code violates this obligation. This is a finding, not a gap: see the spec and code locations
       on the property record.'
+    evidence:
+      refutation: refute_dm_create_memory_tier_entry_already_exists
+      result: Proved (negation)
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
     status: refuted
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      refutation: refute_dm_create_memory_tier_entry_already_exists
-      result: violation demonstrated
-      wall_clock_s: 14.94
-      peak_rss_mb: 574
     fidelity: representative
     note: 'REFUTED — ''refute_dm_create_memory_tier_entry_already_exists'' demonstrates a reachable violation,
       so the code breaks this obligation. This is a finding, not a gap: see the spec and code locations
       on the property record.'
+    evidence:
+      refutation: refute_dm_create_memory_tier_entry_already_exists
+      result: violation demonstrated
+      wall_clock_s: 15.69
+      peak_rss_mb: 576
     status: refuted
     _scored_by: scorer_kani
 - id: DM-CREATE-MEMORY-TIER-ENTRY-NULL-POINTER
@@ -4404,27 +4555,27 @@ properties:
     code:
     - DM-CREATE-MEMORY-TIER-ENTRY-INVALID-SIZE
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_create_memory_tier_entry_zero_size
       - dm_create_memory_tier_entry
       - get_pool_id
       result: Proved
-      wall_clock_s: 0.49
-      peak_rss_mb: 52
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_create_memory_tier_entry_zero_size
       result: SUCCESS
-      wall_clock_s: 21.46
-      peak_rss_mb: 642
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 21.42
+      peak_rss_mb: 645
     status: proved
     _scored_by: scorer_kani
 - id: DM-CREATE-MEMORY-TIER-ENTRY-SIZE-BLOCKS
@@ -4450,27 +4601,27 @@ properties:
     code:
     - DM-CREATE-MEMORY-TIER-ENTRY-SIZE-BLOCKS
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_create_memory_tier_entry_size_blocks
       - dm_create_memory_tier_entry
       - get_pool_id
       result: Proved
-      wall_clock_s: 0.49
-      peak_rss_mb: 52
+      wall_clock_s: 0.5
+      peak_rss_mb: 54
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_create_memory_tier_entry_size_blocks
       result: SUCCESS
-      wall_clock_s: 34.65
-      peak_rss_mb: 670
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 37.37
+      peak_rss_mb: 673
     status: proved
     _scored_by: scorer_kani
 - id: DM-CREATE-MEMORY-TIER-ENTRY-NO-EVICTION-POLICY-ERROR
@@ -4498,27 +4649,27 @@ properties:
     code:
     - DM-CREATE-MEMORY-TIER-ENTRY-NO-EVICTION-POLICY-ERROR
   creusot:
-    evidence:
-      refutation: refute_dm_create_memory_tier_entry_no_eviction_policy_error
-      result: Proved (negation)
-      wall_clock_s: 0.51
-      peak_rss_mb: 52
     fidelity: ghost-mirror
     note: 'REFUTED — the negation ''refute_dm_create_memory_tier_entry_no_eviction_policy_error'' is machine-proved,
       so the code violates this obligation. This is a finding, not a gap: see the spec and code locations
       on the property record.'
+    evidence:
+      refutation: refute_dm_create_memory_tier_entry_no_eviction_policy_error
+      result: Proved (negation)
+      wall_clock_s: 0.66
+      peak_rss_mb: 54
     status: refuted
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      refutation: refute_dm_create_memory_tier_entry_no_eviction_policy_error
-      result: violation demonstrated
-      wall_clock_s: 11.06
-      peak_rss_mb: 546
     fidelity: representative
     note: 'REFUTED — ''refute_dm_create_memory_tier_entry_no_eviction_policy_error'' demonstrates a reachable
       violation, so the code breaks this obligation. This is a finding, not a gap: see the spec and code
       locations on the property record.'
+    evidence:
+      refutation: refute_dm_create_memory_tier_entry_no_eviction_policy_error
+      result: violation demonstrated
+      wall_clock_s: 11.35
+      peak_rss_mb: 545
     status: refuted
     _scored_by: scorer_kani
 - id: DM-CREATE-MEMORY-TIER-ENTRY-FRAME
@@ -4543,27 +4694,27 @@ properties:
     code:
     - DM-CREATE-MEMORY-TIER-ENTRY-FRAME
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_create_memory_tier_entry_frame
       - dm_create_memory_tier_entry
       - get_pool_id
       result: Proved
-      wall_clock_s: 0.49
-      peak_rss_mb: 52
+      wall_clock_s: 0.5
+      peak_rss_mb: 54
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_create_memory_tier_entry_frame
       result: SUCCESS
-      wall_clock_s: 41.13
-      peak_rss_mb: 673
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 42.88
+      peak_rss_mb: 672
     status: proved
     _scored_by: scorer_kani
 - id: DM-CONVERT-MEMORY-TIER-TO-BLOCK-TRANSITION
@@ -4599,27 +4750,27 @@ properties:
     code:
     - DM-CONVERT-MEMORY-TIER-TO-BLOCK-TRANSITIONS
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_convert_memory_tier_to_block_transition
       - dm_convert_memory_tier_to_block
       - dm_lookup
       result: Proved
-      wall_clock_s: 0.52
-      peak_rss_mb: 55
+      wall_clock_s: 0.54
+      peak_rss_mb: 57
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_convert_memory_tier_to_block_transition
       result: SUCCESS
-      wall_clock_s: 30.89
-      peak_rss_mb: 672
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 31.27
+      peak_rss_mb: 676
     status: proved
     _scored_by: scorer_kani
 - id: DM-CONVERT-MEMORY-TIER-TO-BLOCK-NO-SSD-OFFSET
@@ -4650,26 +4801,26 @@ properties:
     code:
     - DM-CONVERT-MEMORY-TIER-TO-BLOCK-NO-SSD-OFFSET
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_convert_memory_tier_to_block_no_ssd_offset
       - dm_convert_memory_tier_to_block
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 54
+      wall_clock_s: 0.69
+      peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_convert_memory_tier_to_block_no_ssd_offset
       result: SUCCESS
-      wall_clock_s: 26.34
+      wall_clock_s: 25.81
       peak_rss_mb: 636
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
     _scored_by: scorer_kani
 - id: DM-CONVERT-MEMORY-TIER-TO-BLOCK-NOT-MEMORY-TIER
@@ -4700,26 +4851,26 @@ properties:
     code:
     - DM-CONVERT-MEMORY-TIER-TO-BLOCK-NOT-MEMORY-TIER
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_convert_memory_tier_to_block_not_memory_tier
       - dm_convert_memory_tier_to_block
       result: Proved
-      wall_clock_s: 0.52
-      peak_rss_mb: 54
+      wall_clock_s: 0.58
+      peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_convert_memory_tier_to_block_not_memory_tier
       result: SUCCESS
-      wall_clock_s: 25.43
-      peak_rss_mb: 629
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 25.94
+      peak_rss_mb: 634
     status: proved
     _scored_by: scorer_kani
 - id: DM-CONVERT-MEMORY-TIER-TO-BLOCK-NOT-FOUND
@@ -4753,26 +4904,26 @@ properties:
     - DM-CONVERT-MEMORY-TIER-TO-BLOCK-NOT-FOUND
   delta_note: Spec leaves the error unnamed; code returns KeyNotFound.
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_convert_memory_tier_to_block_not_found
       - dm_convert_memory_tier_to_block
       result: Proved
-      wall_clock_s: 0.5
-      peak_rss_mb: 54
+      wall_clock_s: 0.52
+      peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_convert_memory_tier_to_block_not_found
       result: SUCCESS
-      wall_clock_s: 24.35
-      peak_rss_mb: 632
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 25.55
+      peak_rss_mb: 635
     status: proved
     _scored_by: scorer_kani
 - id: DM-CONVERT-MEMORY-TIER-TO-BLOCK-FRAME
@@ -4798,26 +4949,26 @@ properties:
     code:
     - DM-CONVERT-MEMORY-TIER-TO-BLOCK-FRAME
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_convert_memory_tier_to_block_frame
       - dm_convert_memory_tier_to_block
       result: Proved
-      wall_clock_s: 0.5
-      peak_rss_mb: 54
+      wall_clock_s: 0.52
+      peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_convert_memory_tier_to_block_frame
       result: SUCCESS
-      wall_clock_s: 44.98
-      peak_rss_mb: 785
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 43.88
+      peak_rss_mb: 791
     status: proved
     _scored_by: scorer_kani
 - id: DM-PROMOTE-TRANSITION
@@ -4853,26 +5004,26 @@ properties:
   delta_note: Spec states the new location and the retained on-disk offset as two records; code states
     both in one.
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_promote_transition
       - dm_promote_block_to_memory_tier
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 54
+      wall_clock_s: 0.59
+      peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_promote_transition
       result: SUCCESS
-      wall_clock_s: 26.1
-      peak_rss_mb: 633
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 26.09
+      peak_rss_mb: 634
     status: proved
     _scored_by: scorer_kani
 - id: DM-PROMOTE-RECOMPUTES-SIZE
@@ -4903,27 +5054,27 @@ properties:
     code:
     - DM-PROMOTE-BLOCK-TO-MEMORY-TIER-SIZE-BLOCKS
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_promote_recomputes_size
       - dm_promote_block_to_memory_tier
       - dm_entry_size
       result: Proved
-      wall_clock_s: 0.49
-      peak_rss_mb: 52
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_promote_recomputes_size
       result: SUCCESS
-      wall_clock_s: 27.07
-      peak_rss_mb: 642
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 27.38
+      peak_rss_mb: 637
     status: proved
     _scored_by: scorer_kani
 - id: DM-PROMOTE-PRESERVES-REFS
@@ -4961,26 +5112,26 @@ properties:
   delta_note: Spec states 'allowed while pinned' and 'reference counts unchanged' as two records; code
     states both in one.
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_promote_preserves_refs
       - dm_promote_block_to_memory_tier
       result: Proved
       wall_clock_s: 0.52
-      peak_rss_mb: 54
+      peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_promote_preserves_refs
       result: SUCCESS
-      wall_clock_s: 37.55
-      peak_rss_mb: 635
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 36.3
+      peak_rss_mb: 632
     status: proved
     _scored_by: scorer_kani
 - id: DM-INV-HANDLE-STABLE
@@ -5025,6 +5176,8 @@ properties:
     (which depends on the eviction policy); code states that the handle never changes across demotion,
     eviction and promotion.
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_inv_handle_stable
@@ -5053,21 +5206,19 @@ properties:
       - dm_set_checksum
       - dm_get_checksum
       result: Proved
-      wall_clock_s: 0.48
-      peak_rss_mb: 51
+      wall_clock_s: 0.51
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_inv_handle_stable
       result: SUCCESS
-      wall_clock_s: 172.08
-      peak_rss_mb: 2196
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 184.46
+      peak_rss_mb: 2205
     status: proved
     _scored_by: scorer_kani
 - id: DM-PROMOTE-ALREADY-MEMORY-TIER
@@ -5102,27 +5253,27 @@ properties:
     code:
     - DM-PROMOTE-BLOCK-TO-MEMORY-TIER-ALREADY-MEMORY-TIER
   creusot:
-    evidence:
-      refutation: refute_dm_promote_already_memory_tier
-      result: Proved (negation)
-      wall_clock_s: 0.49
-      peak_rss_mb: 52
     fidelity: ghost-mirror
     note: 'REFUTED — the negation ''refute_dm_promote_already_memory_tier'' is machine-proved, so the
       code violates this obligation. This is a finding, not a gap: see the spec and code locations on
       the property record.'
+    evidence:
+      refutation: refute_dm_promote_already_memory_tier
+      result: Proved (negation)
+      wall_clock_s: 0.55
+      peak_rss_mb: 53
     status: refuted
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      refutation: refute_dm_promote_already_memory_tier
-      result: violation demonstrated
-      wall_clock_s: 11.54
-      peak_rss_mb: 540
     fidelity: representative
     note: 'REFUTED — ''refute_dm_promote_already_memory_tier'' demonstrates a reachable violation, so
       the code breaks this obligation. This is a finding, not a gap: see the spec and code locations on
       the property record.'
+    evidence:
+      refutation: refute_dm_promote_already_memory_tier
+      result: violation demonstrated
+      wall_clock_s: 11.69
+      peak_rss_mb: 539
     status: refuted
     _scored_by: scorer_kani
 - id: DM-PROMOTE-NOT-FOUND
@@ -5156,26 +5307,26 @@ properties:
     - DM-PROMOTE-BLOCK-TO-MEMORY-TIER-NOT-FOUND
   delta_note: Code states the size check comes first, so the not-found error applies to a non-zero size.
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_promote_not_found
       - dm_promote_block_to_memory_tier
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 54
+      wall_clock_s: 0.52
+      peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_promote_not_found
       result: SUCCESS
-      wall_clock_s: 24.32
-      peak_rss_mb: 629
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 24.42
+      peak_rss_mb: 631
     status: proved
     _scored_by: scorer_kani
 - id: DM-PROMOTE-ZERO-SIZE
@@ -5210,26 +5361,26 @@ properties:
     code:
     - DM-PROMOTE-BLOCK-TO-MEMORY-TIER-INVALID-SIZE
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_promote_zero_size
       - dm_promote_block_to_memory_tier
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 54
+      wall_clock_s: 0.53
+      peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_promote_zero_size
       result: SUCCESS
-      wall_clock_s: 21.18
-      peak_rss_mb: 630
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 21.26
+      peak_rss_mb: 629
     status: proved
     _scored_by: scorer_kani
 - id: DM-IS-EVICTABLE-EXACT-CONDITION
@@ -5270,26 +5421,26 @@ properties:
   delta_note: Spec states the true case and three false cases as four records; code states the exact condition
     as one.
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_is_evictable_exact_condition
       - dm_is_evictable
       result: Proved
-      wall_clock_s: 0.48
-      peak_rss_mb: 51
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_is_evictable_exact_condition
       result: SUCCESS
-      wall_clock_s: 17.2
-      peak_rss_mb: 595
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 17.41
+      peak_rss_mb: 597
     status: proved
     _scored_by: scorer_kani
 - id: DM-IS-EVICTABLE-NOT-FOUND
@@ -5321,26 +5472,26 @@ properties:
     code:
     - DM-IS-EVICTABLE-ABSENT-FALSE
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_is_evictable_not_found
       - dm_is_evictable
       result: Proved
-      wall_clock_s: 0.49
-      peak_rss_mb: 51
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_is_evictable_not_found
       result: SUCCESS
-      wall_clock_s: 15.76
-      peak_rss_mb: 591
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 15.96
+      peak_rss_mb: 594
     status: proved
     _scored_by: scorer_kani
 - id: DM-IS-EVICTABLE-FRAME
@@ -5371,26 +5522,26 @@ properties:
     code:
     - DM-IS-EVICTABLE-FRAME
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_is_evictable_frame
       - dm_is_evictable
       result: Proved
-      wall_clock_s: 0.48
-      peak_rss_mb: 51
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_is_evictable_frame
       result: SUCCESS
-      wall_clock_s: 42.68
-      peak_rss_mb: 647
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 38.6
+      peak_rss_mb: 646
     status: proved
     _scored_by: scorer_kani
 - id: DM-IS-EVICTABLE-AGREES-WITH-TRY-EVICT
@@ -5426,27 +5577,27 @@ properties:
     code:
     - DM-TRY-EVICT-TO-BLOCK-AGREES-WITH-IS-EVICTABLE
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_is_evictable_agrees_with_try_evict
       - dm_is_evictable
       - dm_try_evict_to_block
       result: Proved
-      wall_clock_s: 0.6
-      peak_rss_mb: 54
+      wall_clock_s: 0.54
+      peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_is_evictable_agrees_with_try_evict
       result: SUCCESS
-      wall_clock_s: 21.31
-      peak_rss_mb: 596
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 21.55
+      peak_rss_mb: 601
     status: proved
     _scored_by: scorer_kani
 - id: DM-TRY-EVICT-TO-BLOCK-SUCCESS
@@ -5481,26 +5632,26 @@ properties:
   delta_note: Spec states the move and 'the old pointer is no longer returned' as two records; code states
     both in one.
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_try_evict_to_block_success
       - dm_try_evict_to_block
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 54
+      wall_clock_s: 0.61
+      peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_try_evict_to_block_success
       result: SUCCESS
-      wall_clock_s: 30.74
-      peak_rss_mb: 683
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 31.38
+      peak_rss_mb: 675
     status: proved
     _scored_by: scorer_kani
 - id: DM-TRY-EVICT-TO-BLOCK-ACTIVE-REFS
@@ -5533,26 +5684,26 @@ properties:
     code:
     - DM-TRY-EVICT-TO-BLOCK-ACTIVE-REFS
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_try_evict_to_block_active_refs
       - dm_try_evict_to_block
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 54
+      wall_clock_s: 0.59
+      peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_try_evict_to_block_active_refs
       result: SUCCESS
-      wall_clock_s: 23.35
-      peak_rss_mb: 597
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 23.85
+      peak_rss_mb: 600
     status: proved
     _scored_by: scorer_kani
 - id: DM-TRY-EVICT-TO-BLOCK-NO-SSD-OFFSET
@@ -5585,26 +5736,26 @@ properties:
     code:
     - DM-TRY-EVICT-TO-BLOCK-NO-SSD-OFFSET
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_try_evict_to_block_no_ssd_offset
       - dm_try_evict_to_block
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 54
+      wall_clock_s: 0.6
+      peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_try_evict_to_block_no_ssd_offset
       result: SUCCESS
-      wall_clock_s: 23.3
-      peak_rss_mb: 596
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 24.18
+      peak_rss_mb: 598
     status: proved
     _scored_by: scorer_kani
 - id: DM-TRY-EVICT-TO-BLOCK-NOT-MEMORY-TIER
@@ -5635,26 +5786,26 @@ properties:
     code:
     - DM-TRY-EVICT-TO-BLOCK-NOT-MEMORY-TIER
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_try_evict_to_block_not_memory_tier
       - dm_try_evict_to_block
       result: Proved
       wall_clock_s: 0.52
-      peak_rss_mb: 54
+      peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_try_evict_to_block_not_memory_tier
       result: SUCCESS
-      wall_clock_s: 22.89
-      peak_rss_mb: 595
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 22.98
+      peak_rss_mb: 599
     status: proved
     _scored_by: scorer_kani
 - id: DM-TRY-EVICT-TO-BLOCK-NOT-FOUND
@@ -5686,26 +5837,26 @@ properties:
     code:
     - DM-TRY-EVICT-TO-BLOCK-NOT-FOUND
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_try_evict_to_block_not_found
       - dm_try_evict_to_block
       result: Proved
-      wall_clock_s: 0.52
-      peak_rss_mb: 54
+      wall_clock_s: 0.61
+      peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_try_evict_to_block_not_found
       result: SUCCESS
-      wall_clock_s: 20.88
-      peak_rss_mb: 597
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 22.25
+      peak_rss_mb: 601
     status: proved
     _scored_by: scorer_kani
 - id: DM-TRY-EVICT-TO-BLOCK-ATOMIC
@@ -5770,26 +5921,26 @@ properties:
     code:
     - DM-TRY-EVICT-TO-BLOCK-FRAME
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_try_evict_to_block_frame
       - dm_try_evict_to_block
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 54
+      wall_clock_s: 0.53
+      peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_try_evict_to_block_frame
       result: SUCCESS
-      wall_clock_s: 130.35
-      peak_rss_mb: 744
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 129.12
+      peak_rss_mb: 764
     status: proved
     _scored_by: scorer_kani
 - id: DM-RECOVER-EXTENT-INSERTS
@@ -5825,6 +5976,8 @@ properties:
   delta_note: Spec states location and size as two records; code states both in one. The size claim depends
     on the input-range assumption on size_blocks (see domain_discordances).
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_recover_extent_inserts
@@ -5834,20 +5987,18 @@ properties:
       - dm_lookup
       result: Proved
       wall_clock_s: 0.53
-      peak_rss_mb: 56
+      peak_rss_mb: 57
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_recover_extent_inserts
       result: SUCCESS
-      wall_clock_s: 33.41
-      peak_rss_mb: 692
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 36.46
+      peak_rss_mb: 696
     status: proved
     _scored_by: scorer_kani
 - id: DM-RECOVER-EXTENT-REGISTERS-EVICTION
@@ -5880,27 +6031,27 @@ properties:
     code:
     - DM-RECOVER-EXTENT-TRACKS
   creusot:
+    fidelity: trusted-boundary
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_recover_extent_registers_eviction
       - dm_recover_extent
       - get_pool_id
       result: Proved
-      wall_clock_s: 0.49
-      peak_rss_mb: 52
+      wall_clock_s: 0.66
+      peak_rss_mb: 54
       lever: null
-    fidelity: trusted-boundary
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_recover_extent_registers_eviction
       result: SUCCESS
-      wall_clock_s: 28.23
-      peak_rss_mb: 655
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 30.71
+      peak_rss_mb: 659
     status: proved
     _scored_by: scorer_kani
 - id: DM-RECOVER-EXTENT-ALREADY-EXISTS
@@ -5933,6 +6084,8 @@ properties:
     code:
     - DM-RECOVER-EXTENT-ALREADY-EXISTS
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_recover_extent_already_exists
@@ -5961,21 +6114,19 @@ properties:
       - dm_set_checksum
       - dm_get_checksum
       result: Proved
-      wall_clock_s: 0.53
-      peak_rss_mb: 51
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_recover_extent_already_exists
       result: SUCCESS
-      wall_clock_s: 30.61
-      peak_rss_mb: 659
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 31.35
+      peak_rss_mb: 660
     status: proved
     _scored_by: scorer_kani
 - id: DM-RECOVER-EXTENT-ZERO-REFS
@@ -6000,27 +6151,27 @@ properties:
     code:
     - DM-RECOVER-EXTENT-ZERO-REFS
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_recover_extent_zero_refs
       - dm_recover_extent
       - get_pool_id
       result: Proved
-      wall_clock_s: 0.49
-      peak_rss_mb: 52
+      wall_clock_s: 0.5
+      peak_rss_mb: 54
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_recover_extent_zero_refs
       result: SUCCESS
-      wall_clock_s: 27.91
-      peak_rss_mb: 655
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 30.34
+      peak_rss_mb: 659
     status: proved
     _scored_by: scorer_kani
 - id: DM-RECOVER-EXTENT-NO-EVICTION-POLICY-ERROR
@@ -6048,27 +6199,27 @@ properties:
     code:
     - DM-RECOVER-EXTENT-NO-EVICTION-POLICY-ERROR
   creusot:
-    evidence:
-      refutation: refute_dm_recover_extent_no_eviction_policy_error
-      result: Proved (negation)
-      wall_clock_s: 0.48
-      peak_rss_mb: 52
     fidelity: ghost-mirror
     note: 'REFUTED — the negation ''refute_dm_recover_extent_no_eviction_policy_error'' is machine-proved,
       so the code violates this obligation. This is a finding, not a gap: see the spec and code locations
       on the property record.'
+    evidence:
+      refutation: refute_dm_recover_extent_no_eviction_policy_error
+      result: Proved (negation)
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
     status: refuted
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      refutation: refute_dm_recover_extent_no_eviction_policy_error
-      result: violation demonstrated
-      wall_clock_s: 9.79
-      peak_rss_mb: 529
     fidelity: representative
     note: 'REFUTED — ''refute_dm_recover_extent_no_eviction_policy_error'' demonstrates a reachable violation,
       so the code breaks this obligation. This is a finding, not a gap: see the spec and code locations
       on the property record.'
+    evidence:
+      refutation: refute_dm_recover_extent_no_eviction_policy_error
+      result: violation demonstrated
+      wall_clock_s: 9.96
+      peak_rss_mb: 531
     status: refuted
     _scored_by: scorer_kani
 - id: DM-RECOVER-EXTENT-FRAME
@@ -6093,27 +6244,27 @@ properties:
     code:
     - DM-RECOVER-EXTENT-FRAME
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_recover_extent_frame
       - dm_recover_extent
       - get_pool_id
       result: Proved
-      wall_clock_s: 0.49
-      peak_rss_mb: 52
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_recover_extent_frame
       result: SUCCESS
-      wall_clock_s: 32.5
-      peak_rss_mb: 658
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 35.45
+      peak_rss_mb: 656
     status: proved
     _scored_by: scorer_kani
 - id: DM-SET-CHECKSUM-RECORDS
@@ -6150,27 +6301,27 @@ properties:
     code:
     - DM-SET-CHECKSUM-RECORDS
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_set_checksum_records
       - dm_set_checksum
       - dm_get_checksum
       result: Proved
-      wall_clock_s: 0.49
-      peak_rss_mb: 51
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_set_checksum_records
       result: SUCCESS
-      wall_clock_s: 19.28
-      peak_rss_mb: 595
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 19.6
+      peak_rss_mb: 596
     status: proved
     _scored_by: scorer_kani
 - id: DM-SET-CHECKSUM-NOT-FOUND
@@ -6202,26 +6353,26 @@ properties:
     code:
     - DM-SET-CHECKSUM-NOT-FOUND
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_set_checksum_not_found
       - dm_set_checksum
       result: Proved
-      wall_clock_s: 0.52
-      peak_rss_mb: 54
+      wall_clock_s: 0.61
+      peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_set_checksum_not_found
       result: SUCCESS
-      wall_clock_s: 17.61
-      peak_rss_mb: 596
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 17.78
+      peak_rss_mb: 597
     status: proved
     _scored_by: scorer_kani
 - id: DM-SET-CHECKSUM-FRAME
@@ -6252,26 +6403,26 @@ properties:
     code:
     - DM-SET-CHECKSUM-FRAME
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_set_checksum_frame
       - dm_set_checksum
       result: Proved
       wall_clock_s: 0.52
-      peak_rss_mb: 54
+      peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_set_checksum_frame
       result: SUCCESS
-      wall_clock_s: 39.76
-      peak_rss_mb: 730
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 35.84
+      peak_rss_mb: 718
     status: proved
     _scored_by: scorer_kani
 - id: DM-GET-CHECKSUM-NONE-UNSET
@@ -6313,6 +6464,8 @@ properties:
   delta_note: Spec states it for any entry with no recorded checksum; code states that entries added by
     create, recover and initialize start without one.
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_get_checksum_none_unset
@@ -6326,18 +6479,16 @@ properties:
       wall_clock_s: 0.5
       peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_get_checksum_none_unset
       result: SUCCESS
-      wall_clock_s: 129.16
-      peak_rss_mb: 1542
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 128.65
+      peak_rss_mb: 1449
     status: proved
     _scored_by: scorer_kani
 - id: DM-GET-CHECKSUM-ZERO-IS-NONE
@@ -6370,26 +6521,26 @@ properties:
     code:
     - DM-GET-CHECKSUM-ZERO-IS-UNSET
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_get_checksum_zero_is_none
       - dm_get_checksum
       result: Proved
-      wall_clock_s: 0.49
-      peak_rss_mb: 51
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_get_checksum_zero_is_none
       result: SUCCESS
-      wall_clock_s: 16.84
-      peak_rss_mb: 593
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 17.11
+      peak_rss_mb: 597
     status: proved
     _scored_by: scorer_kani
 - id: DM-GET-CHECKSUM-ABSENT-KEY
@@ -6419,26 +6570,26 @@ properties:
     code:
     - DM-GET-CHECKSUM-ABSENT-NONE
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_get_checksum_absent_key
       - dm_get_checksum
       result: Proved
-      wall_clock_s: 0.48
-      peak_rss_mb: 51
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_get_checksum_absent_key
       result: SUCCESS
-      wall_clock_s: 15.77
-      peak_rss_mb: 592
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 16.01
+      peak_rss_mb: 597
     status: proved
     _scored_by: scorer_kani
 - id: DM-GET-CHECKSUM-FRAME
@@ -6468,26 +6619,26 @@ properties:
     code:
     - DM-GET-CHECKSUM-FRAME
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_get_checksum_frame
       - dm_get_checksum
       result: Proved
-      wall_clock_s: 0.49
-      peak_rss_mb: 51
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_get_checksum_frame
       result: SUCCESS
-      wall_clock_s: 28.03
-      peak_rss_mb: 597
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 25.81
+      peak_rss_mb: 602
     status: proved
     _scored_by: scorer_kani
 - id: DM-INV-WAIT-TIMES-OUT-ONLY-IF-BLOCKED
@@ -6525,6 +6676,8 @@ properties:
   delta_note: Spec states 'without waiting' per method for lookup and take_read; code states the soundness
     of the shared waiting step.
   creusot:
+    fidelity: trusted-boundary
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_inv_wait_times_out_only_if_blocked
@@ -6534,21 +6687,19 @@ properties:
       - wait_for
       - check_pred
       result: Proved
-      wall_clock_s: 0.48
-      peak_rss_mb: 51
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
       lever: null
-    fidelity: trusted-boundary
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_inv_wait_times_out_only_if_blocked
       result: SUCCESS
-      wall_clock_s: 36.54
-      peak_rss_mb: 797
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 37.27
+      peak_rss_mb: 783
     status: proved
     _scored_by: scorer_kani
 - id: DM-INV-WRITE-REF-AT-MOST-ONE
@@ -6596,6 +6747,8 @@ properties:
     code:
     - DM-INV-WRITE-REF-AT-MOST-ONE
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_inv_write_ref_at_most_one
@@ -6624,21 +6777,19 @@ properties:
       - dm_set_checksum
       - dm_get_checksum
       result: Proved
-      wall_clock_s: 0.48
-      peak_rss_mb: 51
+      wall_clock_s: 0.49
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_inv_write_ref_at_most_one
       result: SUCCESS
-      wall_clock_s: 265.74
-      peak_rss_mb: 3566
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 331.46000000000004
+      peak_rss_mb: 5612
     status: proved
     _scored_by: scorer_kani
 - id: DM-INV-READ-WRITE-EXCLUSIVE
@@ -6685,6 +6836,8 @@ properties:
     code:
     - DM-INV-READ-WRITE-EXCLUSIVE
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_inv_read_write_exclusive
@@ -6713,21 +6866,19 @@ properties:
       - dm_set_checksum
       - dm_get_checksum
       result: Proved
-      wall_clock_s: 0.48
-      peak_rss_mb: 51
+      wall_clock_s: 0.49
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_inv_read_write_exclusive
       result: SUCCESS
-      wall_clock_s: 270.77
-      peak_rss_mb: 3579
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 350.6
+      peak_rss_mb: 5448
     status: proved
     _scored_by: scorer_kani
 - id: DM-INV-REFCOUNT-CONSERVATION
@@ -6776,6 +6927,8 @@ properties:
   delta_note: Code states that the count never wraps and moves by exactly one per acquire or release;
     spec states the resulting exact accounting under concurrency.
   creusot:
+    fidelity: trusted-boundary
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_inv_refcount_conservation
@@ -6804,21 +6957,19 @@ properties:
       - dm_set_checksum
       - dm_get_checksum
       result: Proved
-      wall_clock_s: 0.49
-      peak_rss_mb: 51
+      wall_clock_s: 0.57
+      peak_rss_mb: 53
       lever: null
-    fidelity: trusted-boundary
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_inv_refcount_conservation
       result: SUCCESS
-      wall_clock_s: 188.92000000000002
-      peak_rss_mb: 2292
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 198.23000000000002
+      peak_rss_mb: 2199
     status: proved
     _scored_by: scorer_kani
 - id: DM-INV-NO-PANIC
@@ -6977,13 +7128,51 @@ properties:
     records: no other entry changes) rather than as one invariant, so there is no single code record to
     pair with; this is a granularity difference, not missing behaviour.'
   creusot:
-    evidence: null
-    fidelity: null
-    note: null
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_dm_inv_operations_are_key_local
+      - dm_new
+      - get_pool_id
+      - wait_for
+      - check_pred
+      - dm_initialize
+      - dm_lookup
+      - dm_convert_to_storage
+      - dm_take_read
+      - dm_take_write
+      - dm_release_read
+      - dm_release_write
+      - dm_downgrade_reference
+      - dm_remove
+      - dm_touch
+      - dm_entry_size
+      - dm_oldest_keys
+      - dm_create_memory_tier_entry
+      - dm_convert_memory_tier_to_block
+      - dm_promote_block_to_memory_tier
+      - dm_is_evictable
+      - dm_try_evict_to_block
+      - dm_recover_extent
+      - dm_set_checksum
+      - dm_get_checksum
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani:
-    evidence: null
-    fidelity: null
-    note: null
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    evidence:
+      harness: verify_dm_inv_operations_are_key_local
+      result: SUCCESS
+      wall_clock_s: 384.77
+      peak_rss_mb: 4510
+    status: proved
+    _scored_by: scorer_kani
 - id: DM-INV-MEMORY-TIER-SIZE-NONZERO
   subject: global invariant (memory-tier size)
   methods:
@@ -7018,6 +7207,8 @@ properties:
     code:
     - DM-INV-MEMORY-TIER-SIZE-POSITIVE
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_inv_memory_tier_size_nonzero
@@ -7046,21 +7237,19 @@ properties:
       - dm_set_checksum
       - dm_get_checksum
       result: Proved
-      wall_clock_s: 0.49
-      peak_rss_mb: 51
+      wall_clock_s: 0.6
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_inv_memory_tier_size_nonzero
       result: SUCCESS
-      wall_clock_s: 301.88
-      peak_rss_mb: 3575
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 314.72
+      peak_rss_mb: 5645
     status: proved
     _scored_by: scorer_kani
 - id: DM-INV-ENTRY-TRACKED-FOR-EVICTION
@@ -7111,6 +7300,8 @@ properties:
   delta_note: Spec states one direction (every entry in the map is tracked); code also states the converse
     (a removed key is no longer tracked), which the spec does not mention but does not contradict.
   creusot:
+    fidelity: trusted-boundary
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_inv_entry_tracked_for_eviction
@@ -7139,21 +7330,19 @@ properties:
       - dm_set_checksum
       - dm_get_checksum
       result: Proved
-      wall_clock_s: 0.48
-      peak_rss_mb: 51
+      wall_clock_s: 0.52
+      peak_rss_mb: 53
       lever: null
-    fidelity: trusted-boundary
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_inv_entry_tracked_for_eviction
       result: SUCCESS
-      wall_clock_s: 181.18
-      peak_rss_mb: 1927
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 263.06
+      peak_rss_mb: 3456
     status: proved
     _scored_by: scorer_kani
 - id: DM-INV-CHECKSUM-SURVIVES-TRANSITIONS
@@ -7195,6 +7384,8 @@ properties:
     code:
     - DM-INV-CHECKSUM-SURVIVES-TRANSITIONS
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_inv_checksum_survives_transitions
@@ -7223,21 +7414,19 @@ properties:
       - dm_set_checksum
       - dm_get_checksum
       result: Proved
-      wall_clock_s: 0.61
-      peak_rss_mb: 51
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_inv_checksum_survives_transitions
       result: SUCCESS
-      wall_clock_s: 39.62
-      peak_rss_mb: 720
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 40.72
+      peak_rss_mb: 721
     status: proved
     _scored_by: scorer_kani
 - id: DM-INITIALIZE-EXPLICIT-ONLY
@@ -7269,26 +7458,26 @@ properties:
     - DM-INV-FRESH-STATE-EMPTY
   delta_note: Code states that a freshly constructed state has no entries and no eviction pool yet.
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_initialize_explicit_only
       - dm_new
       result: Proved
-      wall_clock_s: 0.48
-      peak_rss_mb: 51
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_initialize_explicit_only
       result: SUCCESS
-      wall_clock_s: 30.18
-      peak_rss_mb: 694
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 32.27
+      peak_rss_mb: 700
     status: proved
     _scored_by: scorer_kani
 - id: DM-INV-SINGLE-WRITER
@@ -7319,6 +7508,8 @@ properties:
     code:
     - DM-INV-SINGLE-WRITER
   creusot:
+    fidelity: trusted-boundary
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_inv_single_writer
@@ -7347,21 +7538,19 @@ properties:
       - dm_set_checksum
       - dm_get_checksum
       result: Proved
-      wall_clock_s: 0.49
-      peak_rss_mb: 51
+      wall_clock_s: 0.52
+      peak_rss_mb: 53
       lever: null
-    fidelity: trusted-boundary
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_inv_single_writer
       result: SUCCESS
-      wall_clock_s: 47.68
-      peak_rss_mb: 880
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 50.69
+      peak_rss_mb: 864
     status: proved
     _scored_by: scorer_kani
 - id: DM-INV-WAIT-THEN-ACT-ATOMIC
@@ -7396,6 +7585,8 @@ properties:
     code:
     - DM-INV-WAIT-THEN-ACT-ATOMIC
   creusot:
+    fidelity: trusted-boundary
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_inv_wait_then_act_atomic
@@ -7405,21 +7596,19 @@ properties:
       - wait_for
       - check_pred
       result: Proved
-      wall_clock_s: 0.49
-      peak_rss_mb: 51
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
       lever: null
-    fidelity: trusted-boundary
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_inv_wait_then_act_atomic
       result: SUCCESS
-      wall_clock_s: 36.85
-      peak_rss_mb: 827
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 37.58
+      peak_rss_mb: 825
     status: proved
     _scored_by: scorer_kani
 - id: DM-INV-ERROR-LEAVES-STATE-UNCHANGED
@@ -7465,6 +7654,8 @@ properties:
     code:
     - DM-INV-ERROR-LEAVES-STATE-UNCHANGED
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_inv_error_leaves_state_unchanged
@@ -7493,21 +7684,19 @@ properties:
       - dm_set_checksum
       - dm_get_checksum
       result: Proved
-      wall_clock_s: 0.49
-      peak_rss_mb: 51
+      wall_clock_s: 0.56
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_inv_error_leaves_state_unchanged
       result: SUCCESS
-      wall_clock_s: 355.09
-      peak_rss_mb: 3692
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 412.03999999999996
+      peak_rss_mb: 5464
     status: proved
     _scored_by: scorer_kani
 - id: DM-INV-SINGLE-POOL
@@ -7544,6 +7733,8 @@ properties:
     code:
     - DM-INV-SINGLE-POOL
   creusot:
+    fidelity: trusted-boundary
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_inv_single_pool
@@ -7572,21 +7763,19 @@ properties:
       - dm_set_checksum
       - dm_get_checksum
       result: Proved
-      wall_clock_s: 0.49
-      peak_rss_mb: 51
+      wall_clock_s: 0.67
+      peak_rss_mb: 53
       lever: null
-    fidelity: trusted-boundary
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_inv_single_pool
       result: SUCCESS
-      wall_clock_s: 152.15
-      peak_rss_mb: 966
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 255.12
+      peak_rss_mb: 4209
     status: proved
     _scored_by: scorer_kani
 - id: DM-INV-MEMORY-TIER-SIZE-BLOCKS-CONSISTENT
@@ -7616,6 +7805,8 @@ properties:
     code:
     - DM-INV-MEMORY-TIER-SIZE-BLOCKS-CONSISTENT
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_inv_memory_tier_size_blocks_consistent
@@ -7644,21 +7835,19 @@ properties:
       - dm_set_checksum
       - dm_get_checksum
       result: Proved
-      wall_clock_s: 0.48
-      peak_rss_mb: 51
+      wall_clock_s: 0.49
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_inv_memory_tier_size_blocks_consistent
       result: SUCCESS
-      wall_clock_s: 279.06
-      peak_rss_mb: 3602
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 340.42
+      peak_rss_mb: 5474
     status: proved
     _scored_by: scorer_kani
 - id: DM-INV-SSD-OFFSET-STICKY
@@ -7689,6 +7878,8 @@ properties:
     code:
     - DM-INV-SSD-OFFSET-STICKY
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_inv_ssd_offset_sticky
@@ -7717,21 +7908,19 @@ properties:
       - dm_set_checksum
       - dm_get_checksum
       result: Proved
-      wall_clock_s: 0.48
-      peak_rss_mb: 51
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_inv_ssd_offset_sticky
       result: SUCCESS
-      wall_clock_s: 188.76000000000002
-      peak_rss_mb: 2950
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 274.40999999999997
+      peak_rss_mb: 4587
     status: proved
     _scored_by: scorer_kani
 - id: DM-INV-LEGAL-LOCATION-TRANSITIONS
@@ -7766,6 +7955,8 @@ properties:
     code:
     - DM-INV-LEGAL-LOCATION-TRANSITIONS
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dm_inv_legal_location_transitions
@@ -7795,20 +7986,18 @@ properties:
       - dm_get_checksum
       result: Proved
       wall_clock_s: 0.49
-      peak_rss_mb: 51
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     evidence:
       harness: verify_dm_inv_legal_location_transitions
       result: SUCCESS
-      wall_clock_s: 227.77
-      peak_rss_mb: 2974
-    fidelity: representative
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+      wall_clock_s: 301.89
+      peak_rss_mb: 4624
     status: proved
     _scored_by: scorer_kani
 - id: NV-TIMEOUT-DURATION
@@ -8280,25 +8469,15 @@ properties:
     code:
     - NV-CODE-EVICTION-CALL-RESULTS-IGNORED
 run:
-  gate_commit: 5472ebda
-  gate_branch: skills/consumed-interface-contracts
-  gate_dirty: true
-  kani:
-    scored_by: scorer_kani
-    command: scorer_kani.py components/dispatch-map/verif --component-dir components/dispatch-map/verif-kani
-      --cap-seconds 60 --cap-max 600 --resume
-    started: '2026-10-06T06:47:43-07:00'
-    finished: '2026-10-06T06:50:38-07:00'
-    kani_version: cargo-kani 0.67.0
-    cap_seconds: 60
-    cap_max: 600
-    mem_max_mb: 16384
+  gate_commit: 4c83ef4c
+  gate_branch: skills/level1-classifier-cross-check
   creusot:
     scored_by: scorer_creusot
-    command: scorer_creusot.py components/dispatch-map/verif --crate-dir components/dispatch-map/verif-creusot
-      --cap-seconds 60 --cap-max 300 --resume
-    started: '2026-10-06T06:38:35-07:00'
-    finished: '2026-10-06T06:47:41-07:00'
+    command: scorer_creusot.py /home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif --crate-dir
+      /home/cornel/cv-dispatch-map-20261005/components/dispatch-map/verif-creusot --cap-seconds 60 --cap-max
+      300 --resume
+    started: '2026-10-07T02:43:31-07:00'
+    finished: '2026-10-07T02:43:31-07:00'
     creusot: v0.11.0-169-g9cf662ce6
     why3: Why3 platform, version 1.8.2+git
     provers:
@@ -8310,32 +8489,213 @@ run:
     cap_seconds: 60
     cap_max: 300
     mem_max_mb: 16384
+  kani:
+    scored_by: scorer_kani
+    command: scorer_kani.py /home/cornel/cv-dispatch-map-20261006-kani/components/dispatch-map/verif --component-dir
+      /home/cornel/cv-dispatch-map-20261006-kani/components/dispatch-map/verif-kani --cap-seconds 60 --cap-max
+      600 --resume
+    started: '2026-10-07T02:43:32-07:00'
+    finished: '2026-10-07T02:43:32-07:00'
+    kani_version: cargo-kani 0.67.0
+    cap_seconds: 60
+    cap_max: 600
+    mem_max_mb: 16384
 level2_unreachable:
 - id: DM-DOWNGRADE-REFERENCE-REFCOUNT-OVERFLOW
   reason: 'Its premise (a write reference still held while the read count is at its maximum) cannot occur
     in any state that satisfies the proved invariant DM-INV-READ-WRITE-EXCLUSIVE, so it can be neither
     proved meaningfully nor refuted. Latent ordering issue at lib.rs:308-312 (write_ref cleared before
     the checked add): worth a one-line reorder, not a defect.'
+classification:
+  DM-CREATE-MEMORY-TIER-ENTRY-NULL-POINTER:
+    class: B
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:381-415
+    - lib.rs:387-389
+    - lib.rs:401-405
+    - lib.rs:384-389
+    - lib.rs:399-415
+    why: The code only rejects size zero; a null pointer is stored in the new entry and Ok is returned,
+      and there is no error variant for it.
+  DM-CREATE-MEMORY-TIER-ENTRY-REGISTERS-EVICTION:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:391
+    - lib.rs:399
+    - lib.rs:409
+    - lib.rs:415
+    why: create_memory_tier_entry registers the new key with the eviction policy in the map's pool (track,
+      which marks it newest) and stores the returned handle in the entry.
+  DM-INITIALIZE-NO-EVICTION-POLICY-ERROR:
+    class: B
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:68
+    - lib.rs:50-58
+    - lib.rs:55
+    - lib.rs:69-71
+    why: initialize first calls get_pool_id, which does eviction_policy.get().unwrap() on the first call,
+      so with no eviction policy connected the program panics before the NotInitialized error check on
+      lines 69-71 can ever run.
+  DM-INV-NO-ERROR-LOG:
+    class: C
+    reason: logging-io
+    checked_by: test
+    evidence: []
+    why: This is about what the component writes to the log, which the provers do not model; a test with
+      a capturing logger can check it (the code only calls logger.info and logger.debug).
+  DM-INV-NO-PANIC:
+    class: B
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:55
+    - lib.rs:92-93
+    - lib.rs:392
+    - lib.rs:399
+    - lib.rs:573
+    - lib.rs:579
+    - lib.rs:369
+    - lib.rs:184-186
+    - lib.rs:68
+    - lib.rs:91-93
+    why: Several operations crash instead of returning an error (unwrap on a missing eviction policy or
+      a refused track in initialize, create_memory_tier_entry, recover_extent, oldest_keys; entry_size
+      multiplies size_blocks by 4096 with no overflow check, and recover_extent accepts any size_blocks),
+      and convert_to_storage silently skips the read-reference decrement when it is already zero.
+  DM-INV-OPERATIONS-ARE-KEY-LOCAL:
+    class: A
+    reason: null
+    checked_by: creusot
+    evidence:
+    - lib.rs:168-171
+    - lib.rs:211-214
+    - lib.rs:245-248
+    - lib.rs:259-262
+    - lib.rs:279-282
+    - lib.rs:299-302
+    - lib.rs:326-336
+    - lib.rs:395-415
+    - lib.rs:428-431
+    - lib.rs:478-481
+    - lib.rs:535-538
+    - lib.rs:576-590
+    - lib.rs:597-601
+    - lib.rs:394-415
+    - lib.rs:575-590
+    - lib.rs:596-601
+    why: Every keyed operation reads or changes only the map entry found under its own key (get_mut/insert/remove
+      on that key), so other keys' location, size and reference counts are untouched.
+  DM-LOOKUP-REFRESHES-EVICTION-PRIORITY:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:144
+    - lib.rs:154-157
+    why: After a successful lookup the code takes the entry's eviction handle and calls the eviction policy's
+      touch on it, which is the policy's "mark as most recently used" call (the policy's own error is
+      ignored).
+  DM-OLDEST-KEYS-EMPTY:
+    class: B
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:373
+    - lib.rs:55
+    - lib.rs:374-377
+    - lib.rs:50-58
+    - lib.rs:374-378
+    why: With an eviction policy connected an empty map gives an empty list, but on a fresh map with no
+      eviction policy connected oldest_keys calls get_pool_id, which unwraps the missing policy and crashes
+      instead of reaching the empty-list fallback on line 377.
+  DM-OLDEST-KEYS-FILLS-TO-N:
+    class: '?'
+    needs_human: true
+    run1:
+      class: A
+      reason: null
+      evidence:
+      - lib.rs:373-375
+      - lib.rs:399
+      - lib.rs:579
+      - lib.rs:91-92
+      why: Every entry is registered in the dispatch map's eviction pool and oldest_keys passes n straight
+        to the policy's get_eviction_candidates, which returns up to n tracked keys, so with at least
+        n entries it returns n.
+    run2:
+      class: C
+      reason: external
+      evidence: []
+      why: The dispatch map just passes n to the eviction policy and returns whatever list it gets back,
+        so how many keys come back is decided by the eviction-policy component.
+  DM-OLDEST-KEYS-ORDER:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:373-375
+    - lib.rs:91-92
+    - lib.rs:399
+    - lib.rs:579
+    - lib.rs:155-156
+    - lib.rs:357-358
+    - lib.rs:91-93
+    - lib.rs:154-157
+    - lib.rs:357-359
+    why: Every create, recover, initialize, lookup and touch reports the use to the eviction policy, and
+      oldest_keys returns the policy's candidates in its eviction order, so with a least-recently-used
+      policy the order is oldest-use first (the ordering rule itself belongs to the policy).
+  DM-TOUCH-NO-WAIT:
+    class: A
+    reason: null
+    checked_by: creusot
+    evidence:
+    - lib.rs:349-361
+    - lib.rs:349-360
+    why: touch only takes the map's short internal lock, never waits on the reference-count condition
+      and has no Timeout return path, so it completes regardless of read or write references held on the
+      entry.
+  DM-TOUCH-REFRESHES-PRIORITY:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:349-360
+    - lib.rs:355
+    - lib.rs:357-359
+    - lib.rs:355-359
+    why: touch looks up the entry, takes its eviction handle and calls the eviction policy's touch on
+      it, then returns success.
+  DM-TRY-EVICT-TO-BLOCK-ATOMIC:
+    class: C
+    reason: interleaving
+    checked_by: loom
+    evidence:
+    - lib.rs:534-563
+    why: Whether another caller can grab a reference between the check and the move is a question about
+      how threads interleave; the code does both under one lock hold, which a thread-interleaving checker
+      can confirm.
+# LEVEL 1 (level1.py): properties derived from a spec<->code discordance; see discordances.yaml. Never sent to the provers.
 level2_excluded:
 - DM-INITIALIZE-NO-EVICTION-POLICY-ERROR
-- DM-LOOKUP-REFRESHES-EVICTION-PRIORITY
-- DM-TOUCH-REFRESHES-PRIORITY
-- DM-TOUCH-NO-WAIT
-- DM-OLDEST-KEYS-ORDER
 - DM-OLDEST-KEYS-FILLS-TO-N
 - DM-OLDEST-KEYS-EMPTY
-- DM-CREATE-MEMORY-TIER-ENTRY-REGISTERS-EVICTION
 - DM-CREATE-MEMORY-TIER-ENTRY-NULL-POINTER
 - DM-TRY-EVICT-TO-BLOCK-ATOMIC
 - DM-INV-NO-PANIC
 - DM-INV-NO-ERROR-LOG
-- DM-INV-OPERATIONS-ARE-KEY-LOCAL
 - DM-INITIALIZE-PRESERVES-REFERENCED-ENTRY
 - DM-DOWNGRADE-REFERENCE-REFCOUNT-OVERFLOW
+# LEVEL 1: input-range mismatches. Level 2 proves the dependent properties UNDER these.
 level2_assumptions:
 - id: D-RANGE-FR-003-8e9f6a
-  assume: the memory-tier byte size is at most 4,294,963,200 bytes (4 GiB minus 4 KiB), so its rounded-up
-    size fits in 32 bits
+  assume: the memory-tier byte size is at most 4,294,963,200 bytes (4 GiB minus 4 KiB), so its rounded-up size fits in 32 bits
   assume_rust: size <= u32::MAX - 4095
   methods:
   - create_memory_tier_entry

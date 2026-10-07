@@ -43,3 +43,6 @@ mod proofs_inv;
 
 #[cfg(kani)]
 mod proofs_model;
+
+#[cfg(kani)]
+mod proofs_l2b;
