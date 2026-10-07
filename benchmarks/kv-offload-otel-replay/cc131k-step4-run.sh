@@ -15,7 +15,7 @@
 # Override via env (this example switches to the 14B / two-GPU config):
 #   ARM=shmq PROM=1 \
 #   OTEL_HOST=/mnt/certus1/inference-perf-syn-data/otel_cc131k \
-#   MODEL=Qwen/Qwen2.5-14B-Instruct NUM_CONVS=200 TIME_SCALE=0 \
+#   MODEL=Qwen/Qwen2.5-14B-Instruct NUM_CONVS=200 TIME_SCALE=0 ACTIVE_SESSIONS=80 \
 #   GPU=all TENSOR_PARALLEL_SIZE=2 \
 #   SHM_PATH=/dev/shm/certus-shmq SLAB_SIZE_BYTES=2097152 \
 #   CPU_BYTES=$((13*(1<<30))) FS_TIER_HOST=/mnt/certus1/kv-fs-tier \
@@ -46,6 +46,13 @@ export NUM_CONVS="${NUM_CONVS:-200}"
 export TIME_SCALE="${TIME_SCALE:-0}"     # saturating by default (stress the tier)
 export TENSOR_PARALLEL_SIZE="${TENSOR_PARALLEL_SIZE:-1}"  # single GPU
 export GPU="${GPU:-0}"                    # pin to one A100 (set GPU=all for both)
+
+# Max concurrent sessions. ACTIVE_SESSIONS caps how many conversations run at
+# once (closed-loop admission): 0 = open loop (offer them all; vLLM then runs
+# MAX_NUM_SEQS at a time), N = at most N conversations in flight. MAX_NUM_SEQS is
+# vLLM's running-batch cap. e.g. ACTIVE_SESSIONS=80 for the closed-loop profile.
+export ACTIVE_SESSIONS="${ACTIVE_SESSIONS:-0}"
+export MAX_NUM_SEQS="${MAX_NUM_SEQS:-64}"
 
 # EXTERNAL_HITS=1: shrink the GPU prefix cache so reused prefixes (especially a
 # synthetic SHARED_PREFIX corpus, see step 1) spill off-GPU and get RELOADED from
@@ -101,6 +108,7 @@ echo "[step4] arm       : ${ARM}  ->  ${arm_script}"
 echo "[step4] corpus    : ${OTEL_HOST}"
 echo "[step4] model     : ${MODEL}  (TP=${TENSOR_PARALLEL_SIZE})"
 echo "[step4] num convs : ${NUM_CONVS}  (TIME_SCALE=${TIME_SCALE})"
+echo "[step4] sessions  : ACTIVE_SESSIONS=${ACTIVE_SESSIONS} (0=open loop)  MAX_NUM_SEQS=${MAX_NUM_SEQS}"
 [[ "$ARM" == "shmq" ]] && echo "[step4] shm path  : ${SHM_PATH}  (step-3 server must be up here)"
 if [[ "$PROM" == "1" ]]; then
   echo "[step4] metrics   : http://127.0.0.1:${PROM_PORT}/metrics  (Prometheus; point Grafana/Prometheus here)"
