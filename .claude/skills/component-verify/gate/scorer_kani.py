@@ -93,6 +93,7 @@ def _stamp_run(d, tool, tool_env, started):
     run = d.get("run")
     if not isinstance(run, dict):
         run = {}
+    run.pop("gate_dirty", None)   # recomputed every run: a stale flag from an earlier run must not stick
     run.update(_gate_provenance())
     blk = {
         "scored_by": f"scorer_{tool}",
