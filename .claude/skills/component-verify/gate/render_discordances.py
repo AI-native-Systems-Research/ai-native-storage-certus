@@ -7,13 +7,24 @@ where. Nothing about provers.
 
 usage: render_discordances.py <verif_dir> [--out PATH]
 """
-import argparse, html, os, sys
+import argparse, html, os, re, sys
 import yaml
 
 esc = lambda s: html.escape(str(s if s is not None else ""))
 KIND = {"spec-and-code-differ": "spec and code differ",
         "spec-not-found-in-code": "spec item not found in code",
-        "input-range-mismatch": "input range mismatch"}
+        "input-range-mismatch": "code assumption"}
+# CODE ASSUMPTIONS (Cornel, 2026-10-07): an input-range row is NOT a disagreement or a defect. It is an assumption
+# the code makes that the spec does not state ("the pool never uses more than 2^32 slots"); the spec may be softer.
+# Properties that depend on it are proved UNDER it. Own neutral section; never counted as a discordance.
+
+
+def assumption_kind(e):
+    """range = a numeric limit (size, count); condition = a setup or state requirement (not null, connected...)."""
+    if e.get("assumption_kind"):
+        return e["assumption_kind"]
+    r = str(e.get("assume_rust") or "")
+    return "range" if re.search(r"(<=|>=|<|>)\s*[\w(]", r) and "is_null" not in r else "condition"
 
 
 def main():
@@ -25,7 +36,14 @@ def main():
     comp = d.get("component", "component")
     out = a.out or os.path.join(a.verif_dir, f"{comp}_discordances.html")
     c = d.get("counts", {})
-    rows = d.get("discordances") or []
+    allrows = d.get("discordances") or []
+    rows = [e for e in allrows if e.get("kind") != "input-range-mismatch"]
+    assum = [e for e in allrows if e.get("kind") == "input-range-mismatch"]
+    try:      # the Rust form of each assumption lives in the bundle (older discordances.yaml lack it)
+        _b = yaml.safe_load(open(os.path.join(a.verif_dir, "unified_properties.yaml"))) or {}
+    except OSError:
+        _b = {}
+    ar = {x.get("id"): x for x in (_b.get("level2_assumptions") or [])}
     P = [f"<title>{esc(comp)} discordances</title>", """<style>
 :root{--bg:#fbfaf7;--fg:#1d1d1b;--muted:#6b6a64;--line:#e4e1d8;--chip:#efece4}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1b1b19;--fg:#ecebe6;--muted:#a3a29b;--line:#3a3934;--chip:#2a2a27}}
@@ -39,7 +57,7 @@ th{font-weight:600;color:var(--muted);font-size:13px} code{font-size:12.5px}
 .chip{background:var(--chip);border-radius:4px;padding:1px 6px;font-size:12px;white-space:nowrap}
 .ptr{color:var(--muted);font-size:12.5px}
 </style><div class='wrap'>""",
-         f"<h1>{esc(comp)} — spec↔code discordances</h1>",
+         f"<h1>{esc(comp)} — spec↔code discordances and code assumptions</h1>",
          f"<p class='sub'>Pin <code>{esc(d.get('pin',''))}</code> · Level 1 of verification</p>",
          "<p>Before any formal proof, the component's specification and its code are each read "
          "independently and the two readings are compared. Where they <b>disagree</b>, or the "
@@ -49,22 +67,20 @@ th{font-weight:600;color:var(--muted);font-size:13px} code{font-size:12.5px}
          "code in step decides which side to change. Each entry is a <i>candidate</i> until a test of the "
          "specification's requirement is run on the code: if the test <b>fails</b> the entry is "
          "<i>confirmed</i>; if it <b>passes</b>, the code does it after all and the entry is <i>withdrawn</i>.</p>",
-         f"<p><b>{c.get('discordances', len(rows))}</b> discordances: "
+         f"<p><b>{len(rows)}</b> discordance{'s' if len(rows) != 1 else ''}: "
          f"{c.get('spec_and_code_differ', 0)} where spec and code differ, "
          f"{c.get('spec_not_found_in_code', 0)} where a spec item was not found in the code"
-         + (f", {c.get('input_range_mismatch', 0)} where the spec and the code accept different ranges of input"
-            if c.get('input_range_mismatch') else "") + "."
+         + "."
          + (f" {c.get('confirmed', 0)} confirmed by a test" if c.get('confirmed') else "")
          + (f", {c.get('withdrawn', 0)} withdrawn" if c.get('withdrawn') else "") + "</p>"
-         + ("<p>For an <b>input range mismatch</b>, the properties that depend on that input are still formally "
-            "verified, but only for the narrower range both sides accept, shown in the last column.</p>"
-            if c.get('input_range_mismatch') else "")]
+         + (f"<p>Separately, <b>{len(assum)}</b> <a href='#assumptions'>code assumption{'s' if len(assum) != 1 else ''}</a> "
+            "that the specification does not state. These are not faults.</p>" if assum else "")]
     if not rows:
         P.append("<p>None — the specification and the code agree everywhere they were compared.</p>")
     else:
         P.append("<div class='scroll'><table><tr><th>#</th><th>name</th><th>method</th>"
                  "<th>what the specification says</th><th>what the code does</th><th>where</th>"
-                 "<th>status</th><th>formal verification assumes</th></tr>")
+                 "<th>status</th></tr>")
         for i, e in enumerate(rows, 1):
             where = ("<b>spec</b> " + esc(", ".join(e.get("spec_pointers") or []) or "—") +
                      "<br><b>code to check</b> " + esc(", ".join(e.get("code_evidence") or e.get("code_pointers") or []) or "—"))
@@ -76,7 +92,25 @@ th{font-weight:600;color:var(--muted);font-size:13px} code{font-size:12.5px}
                      f"<td><code>{esc(', '.join(e.get('methods') or []))}</code></td>"
                      f"<td>{esc(e.get('spec_says'))}</td><td>{esc(e.get('code_does'))}</td>"
                      f"<td class='ptr'>{where}<br><code>{esc(e.get('id'))}</code></td>"
-                     f"<td>{st}</td><td>{esc(e.get('assume_in_level2') or '—')}</td></tr>")
+                     f"<td>{st}</td></tr>")
+        P.append("</table></div>")
+    if assum:
+        P.append(f"<h2 id='assumptions' style='font-size:17px;margin-top:28px'>Code assumptions ({len(assum)})</h2>"
+                 "<p>Assumptions the code makes that the specification does not state. The specification may "
+                 "deliberately leave room here, so these are <b>not faults</b>; writing them down is the point. "
+                 "Every property that depends on one is formally verified <b>under</b> it (the scoring page says "
+                 "\"Verified for: …\"). Only a failure <i>inside</i> an assumption would be a defect.</p>"
+                 "<div class='scroll'><table><tr><th>#</th><th>the code assumes</th><th>kind</th><th>method</th>"
+                 "<th>what the specification says</th><th>what the code does</th><th>where</th></tr>")
+        for i, e in enumerate(assum, 1):
+            k = assumption_kind({**e, **(ar.get(e.get("id")) or {})})
+            where = ("<b>spec</b> " + esc(", ".join(e.get("spec_pointers") or []) or "—") +
+                     "<br><b>code</b> " + esc(", ".join(e.get("code_pointers") or []) or "—"))
+            P.append(f"<tr><td>{i}</td><td><b>{esc(e.get('assume_in_level2') or e.get('name'))}</b></td>"
+                     f"<td><span class='chip'>{esc(k)}</span></td>"
+                     f"<td><code>{esc(', '.join(e.get('methods') or []))}</code></td>"
+                     f"<td>{esc(e.get('spec_says'))}</td><td>{esc(e.get('code_does'))}</td>"
+                     f"<td class='ptr'>{where}<br><code>{esc(e.get('id'))}</code></td></tr>")
         P.append("</table></div>")
     rt = d.get("routed_to_other_tools") or []
     if rt:
