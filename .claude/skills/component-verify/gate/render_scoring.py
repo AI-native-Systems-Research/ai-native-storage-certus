@@ -487,6 +487,12 @@ def main():
             "themselves are unchanged."
             + (f" {nunc} further record(s) could not be classified either way and are shown as written."
                if nunc else "") + "</p>")
+    unr = d.get("level2_unreachable") or []
+    for u in unr:
+        notes_html.append(
+            "<p class='foot' style='border-left:4px solid #b00;padding:4px 10px'>"
+            f"<b>Left out: <code>{esc(str(u.get('id','')))}</code></b> describes a situation that cannot "
+            f"occur, so it can be neither proved nor refuted. {esc(str(u.get('reason','')))}</p>")
     if triage:
         notes_html.append(
             "<p class='foot' style='border-left:4px solid #b00;padding:4px 10px'>"
@@ -500,6 +506,9 @@ def main():
             parts.append(f"{nhaz} records are worded as hazards and shown the right way round")
         if triage:
             parts.append(f"{len(triage)} refuted records are not code defects")
+        if unr:
+            parts.append(f"{len(unr)} propert{'ies' if len(unr) != 1 else 'y'} left out because "
+                         f"{'they describe situations' if len(unr) != 1 else 'it describes a situation'} that cannot occur")
         if kcs:
             parts.append(f"{len(kcs)} correction{'s' if len(kcs) != 1 else ''} (" +
                          ", ".join(esc(str(k.get('property',''))) for k in kcs) + ")")
@@ -574,7 +583,8 @@ def main():
                  + (f". {mtail[0].upper()}{mtail[1:]}" if False else ""))
     _dpath = os.path.join(verif, "discordances.yaml")
     if os.path.exists(_dpath):
-        _dn = (yaml.safe_load(open(_dpath)) or {}).get("counts", {}).get("discordances", 0)
+        _dn = sum(1 for e in ((yaml.safe_load(open(_dpath)) or {}).get("discordances") or [])
+                  if e.get("kind") != "input-range-mismatch")      # code assumptions are not discordances
         if _dn:
             mtail += (f". <b>Level 1</b>: reconciling the specification with the code found <b>{_dn}</b> "
                       f"spec&harr;code discordance{'s' if _dn != 1 else ''}; the properties built from them "
@@ -582,7 +592,7 @@ def main():
     _as = d.get("level2_assumptions") or []
     if _as:
         mtail += (". Verified for: " + "; ".join(esc(str(x.get("assume", ""))) for x in _as)
-                  + " (where the specification and the code accept different inputs; see the list)")
+                  + f" (<a href='{esc(comp)}_discordances.html#assumptions'>code assumptions</a> the specification does not state)")
     im_all = d.get("interface_methods") or all_method_names
     no_scope = [m for m in im_all if m not in methods and m in all_method_names]
     if no_scope:

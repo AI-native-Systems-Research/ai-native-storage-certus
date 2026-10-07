@@ -205,7 +205,13 @@ assumes non-zero, an `as u32` assumes a range — with file:line. Compare:
 - the spec constrains a value and the code never enforces it (dpm: sector size 512 or 4096, unchecked), or
 - the code assumes something the spec neither requires nor validates (extent-manager: `buddy.rs:136`
   assumes a power-of-two sector size; FR-002 only requires `sector_size > 0`).
-Each mismatch is ONE `domain_discordances:` entry (top level of the bundle):
+Each mismatch is ONE `domain_discordances:` entry (top level of the bundle). On the pages it is called a
+**code assumption** (Cornel, 2026-10-07): an assumption the code makes that the specification does not state.
+It is NOT a fault - the spec may deliberately leave room - and finding it is the value. Its `assume` is the
+plain-English assumption ("a pool never allocates more than 2^32 - 1 slots"); the page marks it a **range**
+(numeric limit) or a **condition** (setup/state requirement: not null, connected, no duplicate key) from
+`assume_rust`, or from an explicit `assumption_kind:` field. Only a counterexample INSIDE the assumption is a defect.
+A proof must never assume one silently: EPO's September proofs did, and fresh proofs exposed it.
 ```yaml
 domain_discordances:
   - spec_says: format() must validate only that the sector size is greater than zero (FR-002)

@@ -69,6 +69,34 @@ def stable_id(comp, p, spec, code):
     return f"D-{s}-{re.sub(r'[^A-Za-z0-9.:_]', '', c)}-{h}"
 
 
+ROLE_TAGS = {"POST", "PRE", "INV", "FRAME"}
+
+
+def readable_name(pids, methods):
+    """A short name a reader can recognise ("Inv stale handle never crashes" -> "Stale handle never crashes"),
+    made from the property id the extraction gave it: drop the component prefix and the POST/PRE/INV/FRAME
+    tag, keep the method words (stripping them left a dozen rows called just "Precondition").
+    Cornel, 2026-10-05: the page's "kind" column meant nothing to a reader; the property name is what
+    tells you which row is the stale-handle one."""
+    names = []
+    for pid in pids:
+        toks = [t for t in str(pid).split("-")[1:] if t not in ROLE_TAGS - {"PRE"}] or str(pid).split("-")[1:]
+        toks = ["error" if t == "ERR" else ("precondition" if t == "PRE" else t.lower()) for t in toks]
+        n = " ".join(toks) or str(pid)
+        names.append(n[:1].upper() + n[1:])
+    return "; ".join(dict.fromkeys(names))
+
+
+def load_confirmations(verif_dir):
+    """discordance_confirmations.yaml (record_confirmation.py) survives every regeneration of
+    discordances.yaml: a test that confirmed or withdrew a discordance stays on the record."""
+    fp = os.path.join(verif_dir, "discordance_confirmations.yaml")
+    try:
+        return (yaml.safe_load(open(fp)) or {}).get("confirmations") or []
+    except OSError:
+        return []
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("verif_dir")
@@ -78,30 +106,70 @@ def main():
     bpath = os.path.join(a.verif_dir, a.yaml) if not os.path.isabs(a.yaml) else a.yaml
     d = yaml.safe_load(open(bpath))
     comp = d.get("component", "component")
-    disc, excluded = [], []
+    # EACH SIDE IN ITS OWN WORDS (Cornel, 2026-10-04): "what the specification says" comes from the blind
+    # SPEC reader's statement and "what the code does" from the blind CODE reader's, both plain English
+    # and written independently. The unified record's statement is NOT used for either: on
+    # eviction-policy-optimized it was "adjudicated in favour of the CODE", so it showed the code's
+    # version under "spec says", and the code column was empty.
+    def _stmts(fname):
+        fp = os.path.join(os.path.dirname(bpath), fname)
+        try:
+            recs = (yaml.safe_load(open(fp)) or {}).get("properties") or []
+        except OSError:
+            return {}
+        return {r["id"]: re.sub(r"\s+", " ", str(r.get("statement", ""))).strip()
+                for r in recs if r.get("id") and r.get("statement")}
+    SPEC_TXT, CODE_TXT = _stmts("spec_properties.yaml"), _stmts("code_properties.yaml")
+    disc, excluded, routed = [], [], []
+    # CLASSIFICATION (classify_merge.py; 2026-10-07): two independent classifier agents read the CODE for
+    # every candidate. A = the code does it (reader missed it) -> level 2, not a discordance. B = real
+    # disagreement -> discordance (the repair agent's queue). C = not checkable by Creusot/Kani -> routed to
+    # the tool that can (Loom, Spin, a test, review), excluded from level 2, NOT a discordance.
+    # '?' (the two runs disagree) stays a discordance, marked for a person. No classification = as before.
+    CL = d.get("classification") or {}
     for p in d.get("properties", []):
         if not p.get("verifiable"):
             continue
         kind = LEVEL1_ORIGINS.get(str(p.get("origin", "")))
         if not kind:
             continue
+        cl = CL.get(p["id"]) or {}
+        if cl.get("class") == "A":
+            continue
+        if cl.get("class") == "C":
+            routed.append({"property": p["id"], "name": readable_name([p["id"]], list(p.get("methods") or [])),
+                           "methods": list(p.get("methods") or []),
+                           "statement": re.sub(r"\s+", " ", str(p.get("statement", ""))).strip(),
+                           "reason": cl.get("reason"), "checked_by": cl.get("checked_by"), "why": cl.get("why")})
+            excluded.append(p["id"])
+            continue
         spec, code = pointers(p)
-        pf = p.get("paired_from") or {}
+        pf = p.get("paired_from") or p.get("derived_from") or {}      # field name varies by run
         sides = {"spec": _strs(pf.get("spec")) if isinstance(pf, dict) else [],
                  "code": _strs(pf.get("code")) if isinstance(pf, dict) else []}
+        spec_txt = " ".join(dict.fromkeys(SPEC_TXT[i] for i in sides["spec"] if i in SPEC_TXT))
+        code_txt = " ".join(dict.fromkeys(CODE_TXT[i] for i in sides["code"] if i in CODE_TXT))
         entry = {
             "id": stable_id(comp, p, spec, code),
+            "name": readable_name([p["id"]], list(p.get("methods") or [])),
             "kind": kind,
             "methods": list(p.get("methods") or []),
-            "spec_says": re.sub(r"\s+", " ", str(p.get("statement", ""))).strip(),
-            "code_does": (re.sub(r"\s+", " ", str(p.get("divergence_note"))).strip() if p.get("divergence_note")
-                          else ("The code reader found nothing that does this. Either the code lacks it or the reader missed it; a test decides." if kind == "spec-not-found-in-code" else "")),
+            "spec_says": spec_txt or re.sub(r"\s+", " ", str(p.get("statement", ""))).strip(),
+            "code_does": ("No matching guarantee stated by the code reader." if kind == "spec-not-found-in-code" else
+                          code_txt or re.sub(r"\s+", " ", str(p.get("divergence_note") or p.get("note") or "")).strip()),
             "spec_pointers": spec,
             "code_pointers": code,
             "status": "candidate",
             "excluded_properties": [p["id"]],
             "extraction_sides": sides,
         }
+        if cl.get("class") == "B":
+            entry["classified"] = "real disagreement (both classifiers agree)"
+            entry["code_evidence"] = cl.get("evidence") or []
+            if cl.get("why"):
+                entry["code_does"] = cl["why"] if kind == "spec-not-found-in-code" else entry["code_does"]
+        elif cl.get("class") == "?":
+            entry["classified"] = "classifiers disagree - needs a person"
         disc.append(entry)
         excluded.append(p["id"])
     # INPUT-RANGE MISMATCHES (the level-1 sync check, build-property-inventory step 2): one entry each,
@@ -113,12 +181,25 @@ def main():
         sp = list(dd.get("spec_pointers") or []); cp = list(dd.get("code_pointers") or [])
         h = hashlib.sha1(f"{comp}|{'|'.join(sp)}|{'|'.join(cp)}|domain".encode()).hexdigest()[:6]
         did = f"D-RANGE-{(sp[0] if sp else 'nospec').upper().replace(' ', '')}-{h}"
-        disc.append({"id": did, "kind": "input-range-mismatch", "methods": list(dd.get("methods") or []),
+        disc.append({"id": did, "name": dd.get("name") or "Input range: " + str(dd.get("assume", "")).strip(),
+                     "kind": "input-range-mismatch", "methods": list(dd.get("methods") or []),
                      "spec_says": dd.get("spec_says", ""), "code_does": dd.get("code_does", ""),
                      "spec_pointers": sp, "code_pointers": cp, "status": "candidate",
-                     "assume_in_level2": dd.get("assume", ""), "excluded_properties": []})
+                     "assume_in_level2": dd.get("assume", ""), "assume_rust": dd.get("assume_rust", ""),
+                     # a property whose premise IS the excluded range would only be proved vacuously under
+                     # the assumption (dispatch-map 2026-10-06: DM-INITIALIZE-PRESERVES-REFERENCED-ENTRY
+                     # under D-RANGE-FR-020) -> it belongs to this discordance, not to level 2
+                     "excluded_properties": list(dd.get("excluded_properties") or [])})
+        excluded.extend(x for x in (dd.get("excluded_properties") or []) if x not in excluded)
         assumptions.append({"id": did, "assume": dd.get("assume", ""), "assume_rust": dd.get("assume_rust", ""),
                             "methods": list(dd.get("methods") or [])})
+    # UNREACHABLE (dispatch-map 2026-10-06): a property whose premise can never hold in any state that
+    # satisfies the component's PROVED invariants. Proving it is vacuous (no mutant can fail) and
+    # refuting it needs an impossible starting state, so it is neither proved nor a defect. Listed by the
+    # orchestrator under `level2_unreachable:` with the reason; excluded from level 2, not a discordance.
+    for u in d.get("level2_unreachable") or []:
+        if u.get("id") and u["id"] not in excluded:
+            excluded.append(u["id"])
     out = {
         "component": comp,
         "pin": d.get("pin"),
@@ -130,9 +211,31 @@ def main():
                    "spec_and_code_differ": sum(1 for e in disc if e["kind"] == "spec-and-code-differ"),
                    "spec_not_found_in_code": sum(1 for e in disc if e["kind"] == "spec-not-found-in-code"),
                    "input_range_mismatch": len(assumptions),
-                   "properties_excluded_from_level2": len(excluded)},
+                   "properties_excluded_from_level2": len(excluded),
+                   "routed_to_other_tools": len(routed),
+                   "reader_missed_sent_to_level2": sum(1 for v in CL.values() if v.get("class") == "A")},
         "discordances": disc,
+        "routed_to_other_tools": routed,
     }
+    # CONFIRMATIONS: candidate -> confirmed / withdrawn, matched by discordance id, else by property id
+    # (an id can shift if a pointer changes; the property name usually does not).
+    conf = load_confirmations(a.verif_dir)
+    used = set()
+    for e in disc:
+        for k, c in enumerate(conf):
+            if c.get("id") == e["id"] or (c.get("property") and c["property"] in e.get("excluded_properties", [])):
+                e["status"] = c.get("status", "candidate")
+                for f in ("evidence", "fix", "date"):
+                    if c.get(f):
+                        e[f"status_{f}"] = c[f]
+                used.add(k)
+                break
+    for k, c in enumerate(conf):
+        if k not in used:
+            print(f"level1: note: confirmation {c.get('id') or c.get('property')} matches no current discordance "
+                  "(fixed and re-extracted as agreement?)", file=sys.stderr)
+    out["counts"]["confirmed"] = sum(1 for e in disc if e["status"] == "confirmed")
+    out["counts"]["withdrawn"] = sum(1 for e in disc if e["status"] == "withdrawn")
     ids = [e["id"] for e in disc]
     dup = {i for i in ids if ids.count(i) > 1}
     if dup:
