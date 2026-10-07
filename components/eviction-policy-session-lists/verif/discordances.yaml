@@ -9,6 +9,8 @@ counts:
   spec_not_found_in_code: 7
   input_range_mismatch: 0
   properties_excluded_from_level2: 16
+  routed_to_other_tools: 0
+  reader_missed_sent_to_level2: 0
   confirmed: 0
   withdrawn: 0
 discordances:
@@ -79,7 +81,7 @@ discordances:
   spec_says: When the caller reports a group of accessed blocks in one operation, every block in that group has
     its most-recent-access time refreshed - not just the first or the last one - so all of them count as recently
     used afterwards.
-  code_does: Nothing found.
+  code_does: No matching guarantee stated by the code reader.
   spec_pointers:
   - FR-005
   - US-3.2
@@ -123,7 +125,7 @@ discordances:
   spec_says: Reporting a group of accesses changes only the most-recent-access times of the blocks named in that
     group. A block not named in the group keeps its most-recent-access time, no parent/child link anywhere changes,
     and the number of tracked blocks is unchanged.
-  code_does: Nothing found.
+  code_does: No matching guarantee stated by the code reader.
   spec_pointers:
   - FR-005
   code_pointers: []
@@ -204,7 +206,7 @@ discordances:
   spec_says: Whenever an eviction domain tracks at least one block, a request for a victim always returns one; the
     policy can never get into a state where it tracks blocks but reports that none of them may be evicted. This
     follows from every non-empty session having exactly one end-of-chain block, which is always eligible.
-  code_does: Nothing found.
+  code_does: No matching guarantee stated by the code reader.
   spec_pointers:
   - FR-007
   - FR-008
@@ -226,7 +228,7 @@ discordances:
   spec_says: Evicting a block changes only that block's own record and its parent's end-of-chain status. No surviving
     block's most-recent-access time changes, no other block stops being tracked, and no other session's or other
     domain's chains are touched.
-  code_does: Nothing found.
+  code_does: No matching guarantee stated by the code reader.
   spec_pointers:
   - FR-008
   - FR-009
@@ -280,7 +282,7 @@ discordances:
   - get_eviction_candidates
   spec_says: When an eviction domain currently tracks no blocks, a request for candidates returns an empty list
     rather than failing or inventing entries.
-  code_does: Nothing found.
+  code_does: No matching guarantee stated by the code reader.
   spec_pointers:
   - EC-empty-domain
   - US-1.4
@@ -337,7 +339,7 @@ discordances:
   - identify_next_to_evict
   spec_says: Every tracked block belongs to exactly one session - never to none and never to two - and the session
     it belongs to is the one named when it was registered and never changes for as long as the block is tracked.
-  code_does: Nothing found.
+  code_does: No matching guarantee stated by the code reader.
   spec_pointers:
   - FR-003
   - ASSUMPTION-caller-supplies-session
@@ -434,7 +436,7 @@ discordances:
     identifier, any handle, any cache key, any session identifier, any requested candidate count and any group of
     handles - including ones that are unknown, stale, empty or extreme - may be passed to any operation without
     the policy crashing, aborting, or overflowing. Bad inputs are reported as errors or handled harmlessly instead.'
-  code_does: Nothing found.
+  code_does: No matching guarantee stated by the code reader.
   spec_pointers:
   - FR-015
   code_pointers: []
@@ -445,3 +447,4 @@ discordances:
     spec:
     - EPSL-NO-INPUT-CAN-MAKE-AN-OPERATION-PANIC
     code: []
+routed_to_other_tools: []
