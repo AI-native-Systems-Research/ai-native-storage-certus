@@ -9,6 +9,8 @@ counts:
   spec_not_found_in_code: 22
   input_range_mismatch: 0
   properties_excluded_from_level2: 44
+  routed_to_other_tools: 0
+  reader_missed_sent_to_level2: 0
   confirmed: 0
   withdrawn: 0
 discordances:
@@ -76,7 +78,7 @@ discordances:
   - peek
   spec_says: Every address handed back when adding a cache entry starts on a four-kibibyte boundary, so that the
     memory can be used directly as the source or destination of a disk transfer without any extra copying or realignment.
-  code_does: Nothing found.
+  code_does: No matching guarantee stated by the code reader.
   spec_pointers:
   - FR-004
   - SC-4
@@ -102,7 +104,7 @@ discordances:
   - capacity
   spec_says: 'Adding a cache entry leaves every other entry untouched: their addresses, their sizes, and the bytes
     they hold are unchanged, none of them is removed, and the pool''s total capacity stays the same.'
-  code_does: Nothing found.
+  code_does: No matching guarantee stated by the code reader.
   spec_pointers:
   - US-1
   - FR-007
@@ -151,7 +153,7 @@ discordances:
   - peek
   spec_says: The non-recency-updating lookup may be called with any key at any time and never fails outright; a
     missing key or a pool that has not been set up is reported through the return value.
-  code_does: Nothing found.
+  code_does: No matching guarantee stated by the code reader.
   spec_pointers:
   - FR-012
   - FR-023
@@ -201,7 +203,7 @@ discordances:
   - contains
   spec_says: 'The non-recency-updating lookup changes no stored data: the set of keys present, every entry''s address
     and size, the bytes in use, and the total capacity are all the same afterwards.'
-  code_does: Nothing found.
+  code_does: No matching guarantee stated by the code reader.
   spec_pointers:
   - FR-006
   - FR-012
@@ -296,7 +298,7 @@ discordances:
   spec_says: With the least-recently-used policy that the system currently binds, an entry that has been read or
     explicitly refreshed more recently is never evicted before an entry that has not been used since, so refreshing
     an entry genuinely protects it while older entries remain.
-  code_does: Nothing found.
+  code_does: No matching guarantee stated by the code reader.
   spec_pointers:
   - US-2
   - FR-016
@@ -351,7 +353,7 @@ discordances:
   spec_says: Eviction keeps no hidden position or rotation counter of its own, so two runs that start from the same
     cache contents and the same policy state evict the same key; the victim never depends on how many evictions
     happened earlier.
-  code_does: Nothing found.
+  code_does: No matching guarantee stated by the code reader.
   spec_pointers:
   - FR-013
   code_pointers:
@@ -370,7 +372,7 @@ discordances:
   - evict_next_for_key
   spec_says: To free space on behalf of a particular key the pool must have been set up and the eviction policy
     connected, but the named key itself need not be present in the cache and no other condition applies to it.
-  code_does: Nothing found.
+  code_does: No matching guarantee stated by the code reader.
   spec_pointers:
   - FR-014
   - US-2
@@ -392,7 +394,7 @@ discordances:
   - insert
   spec_says: The space released by this operation is usable by any subsequent insertion, not only by an insertion
     of the key that was named, because the pool is one undivided region of memory.
-  code_does: Nothing found.
+  code_does: No matching guarantee stated by the code reader.
   spec_pointers:
   - FR-014
   - US-2
@@ -437,7 +439,7 @@ discordances:
   spec_says: Asking to free space on behalf of a key when the cache is empty reports that nothing was evicted and
     changes nothing. Asking to free space on behalf of a key before the pool has been set up reports that nothing
     was evicted.
-  code_does: Nothing found.
+  code_does: No matching guarantee stated by the code reader.
   spec_pointers:
   - FR-014
   - FR-023
@@ -459,7 +461,7 @@ discordances:
   - oldest_keys
   spec_says: The query for the oldest keys may be called with any requested count, including zero or a count larger
     than the number of entries held, and it never fails outright.
-  code_does: Nothing found.
+  code_does: No matching guarantee stated by the code reader.
   spec_pointers:
   - FR-021
   - US-2
@@ -507,7 +509,7 @@ discordances:
   - touch
   spec_says: Refreshing an entry's recency may be requested for any key at any time; it returns nothing and reports
     no error, so the caller needs no prior check that the key exists.
-  code_does: Nothing found.
+  code_does: No matching guarantee stated by the code reader.
   spec_pointers:
   - FR-016
   - US-2
@@ -556,7 +558,7 @@ discordances:
   - batch_touch
   spec_says: Refreshing many entries at once may be requested with any list of keys, including an empty list or
     keys that are not in the cache, and it never fails outright.
-  code_does: Nothing found.
+  code_does: No matching guarantee stated by the code reader.
   spec_pointers:
   - US-6
   - FR-017
@@ -576,7 +578,7 @@ discordances:
   - contains
   spec_says: The presence check may be called with any key at any time and always answers yes or no rather than
     failing.
-  code_does: Nothing found.
+  code_does: No matching guarantee stated by the code reader.
   spec_pointers:
   - US-1
   - FR-006
@@ -597,7 +599,7 @@ discordances:
   - capacity
   spec_says: The total-capacity query may be called at any time, before or after the pool is set up, and always
     returns a number rather than failing.
-  code_does: Nothing found.
+  code_does: No matching guarantee stated by the code reader.
   spec_pointers:
   - US-5
   - FR-023
@@ -642,7 +644,7 @@ discordances:
   methods:
   - used
   spec_says: The bytes-in-use query may be called at any time and always returns a number rather than failing.
-  code_does: Nothing found.
+  code_does: No matching guarantee stated by the code reader.
   spec_pointers:
   - US-5
   - FR-023
@@ -662,7 +664,7 @@ discordances:
   - pool_info
   spec_says: The query for the pool's base address and size may be called at any time and reports the absence of
     a pool through its return value instead of failing.
-  code_does: Nothing found.
+  code_does: No matching guarantee stated by the code reader.
   spec_pointers:
   - FR-022
   - US-5
@@ -683,7 +685,7 @@ discordances:
   - is_dma_capable
   spec_says: The question of whether the pool's memory can be used directly by storage hardware may be asked at
     any time and always answers yes or no rather than failing.
-  code_does: Nothing found.
+  code_does: No matching guarantee stated by the code reader.
   spec_pointers:
   - FR-020
   - US-3
@@ -764,7 +766,7 @@ discordances:
   spec_says: The telemetry snapshot may be requested at any time, including before the pool has been set up and
     regardless of whether the optional counter-tracking build option was enabled, and it always returns a set of
     numbers rather than failing.
-  code_does: Nothing found.
+  code_does: No matching guarantee stated by the code reader.
   spec_pointers:
   - US-7
   - FR-028
@@ -812,7 +814,7 @@ discordances:
   - telemetry_snapshot
   spec_says: When only one thread has ever used the component, both lock-contention counters in the snapshot remain
     zero, because a contention is recorded only when an operation fails to take the lock on its first attempt.
-  code_does: Nothing found.
+  code_does: No matching guarantee stated by the code reader.
   spec_pointers:
   - FR-027
   - US-7
@@ -991,7 +993,7 @@ discordances:
   spec_says: 'The presence check, the two lookup operations, the count returned when the cache is wiped, and the
     bytes-in-use figure all agree about which entries exist: a key reported as present is exactly a key whose lookups
     succeed and whose space is included in the bytes in use.'
-  code_does: Nothing found.
+  code_does: No matching guarantee stated by the code reader.
   spec_pointers:
   - US-1
   - US-4
@@ -1096,7 +1098,7 @@ discordances:
   spec_says: The component never silently uses its published default pool size of 256 mebibytes; the size of a pool
     is always exactly the size the caller passed when setting it up, since every set-up call requires an explicit
     size.
-  code_does: Nothing found.
+  code_does: No matching guarantee stated by the code reader.
   spec_pointers:
   - NFR-007
   code_pointers:
@@ -1121,7 +1123,7 @@ discordances:
   spec_says: All decisions about which entry to evict come from the external eviction-policy component; the memory
     tier itself stores no ordering, rotation, or region-selection information, so its eviction behaviour is fully
     determined by that policy plus the current cache contents.
-  code_does: Nothing found.
+  code_does: No matching guarantee stated by the code reader.
   spec_pointers:
   - FR-013
   - FR-014
@@ -1181,3 +1183,4 @@ discordances:
     - MT-INV-CONCURRENT-STRUCTURAL-INTEGRITY
     code:
     - MT-INV-LOCK-ORDER
+routed_to_other_tools: []
