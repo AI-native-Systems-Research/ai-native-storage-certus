@@ -54,6 +54,19 @@ export GPU="${GPU:-0}"                    # pin to one A100 (set GPU=all for bot
 export ACTIVE_SESSIONS="${ACTIVE_SESSIONS:-0}"
 export MAX_NUM_SEQS="${MAX_NUM_SEQS:-64}"
 
+# Closed-loop admission policy (only has an effect when ACTIVE_SESSIONS>0): how
+# the next session is chosen when a worker slot frees.
+#   sequential (default) = next not-yet-started conversation by ascending index
+#   random               = uniform pick from the arrival-gated ready set, seeded
+#                          by ADMIT_SEED (unset = nondeterministic draw)
+# There is no round-robin option. ADMIT_SEED is forwarded only when set.
+export ADMIT_ORDER="${ADMIT_ORDER:-sequential}"
+export ADMIT_SEED="${ADMIT_SEED:-}"
+if [[ "$ADMIT_ORDER" != "sequential" && "$ADMIT_ORDER" != "random" ]]; then
+  echo "error: ADMIT_ORDER must be 'sequential' or 'random' (got '${ADMIT_ORDER}')" >&2
+  exit 2
+fi
+
 # EXTERNAL_HITS=1: shrink the GPU prefix cache so reused prefixes (especially a
 # synthetic SHARED_PREFIX corpus, see step 1) spill off-GPU and get RELOADED from
 # the offload tier -- which is what increments vllm_external_prefix_cache_hits_total.
@@ -108,7 +121,12 @@ echo "[step4] arm       : ${ARM}  ->  ${arm_script}"
 echo "[step4] corpus    : ${OTEL_HOST}"
 echo "[step4] model     : ${MODEL}  (TP=${TENSOR_PARALLEL_SIZE})"
 echo "[step4] num convs : ${NUM_CONVS}  (TIME_SCALE=${TIME_SCALE})"
-echo "[step4] sessions  : ACTIVE_SESSIONS=${ACTIVE_SESSIONS} (0=open loop)  MAX_NUM_SEQS=${MAX_NUM_SEQS}"
+if [[ "$ACTIVE_SESSIONS" != "0" ]]; then
+  seed_note=""; [[ "$ADMIT_ORDER" == "random" ]] && seed_note=" seed=${ADMIT_SEED:-<unseeded>}"
+  echo "[step4] sessions  : ACTIVE_SESSIONS=${ACTIVE_SESSIONS}  admit=${ADMIT_ORDER}${seed_note}  MAX_NUM_SEQS=${MAX_NUM_SEQS}"
+else
+  echo "[step4] sessions  : ACTIVE_SESSIONS=0 (open loop; admit order N/A)  MAX_NUM_SEQS=${MAX_NUM_SEQS}"
+fi
 [[ "$ARM" == "shmq" ]] && echo "[step4] shm path  : ${SHM_PATH}  (step-3 server must be up here)"
 if [[ "$PROM" == "1" ]]; then
   echo "[step4] metrics   : http://127.0.0.1:${PROM_PORT}/metrics  (Prometheus; point Grafana/Prometheus here)"
