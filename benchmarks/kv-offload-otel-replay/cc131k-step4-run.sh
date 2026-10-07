@@ -28,7 +28,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 ARM="${ARM:-shmq}"
-PROM="${PROM:-1}"                        # 1 = -prom variant (Prometheus metrics)
+# Prometheus metrics are ON by default so Grafana can scrape the run: PROM=1
+# selects the -prom arm script, which publishes PROM_PORT and makes vLLM +
+# KV-offload metrics available at http://127.0.0.1:${PROM_PORT}/metrics.
+# Set PROM=0 for the non-prom (no metrics) variant.
+PROM="${PROM:-1}"
 
 # cc131k corpus + model defaults, exported so the arm scripts + common file see
 # them. These must match what step 2 produced / step 4 serves.
@@ -52,7 +56,14 @@ if [[ "${EXTERNAL_HITS:-0}" == "1" ]]; then
   echo "[step4] EXTERNAL_HITS=1 -> GPU_MEM_UTIL=${GPU_MEM_UTIL} (small GPU KV cache to force tier reloads)"
 fi
 
-suffix=""; [[ "$PROM" == "1" ]] && suffix="-prom"
+suffix=""
+if [[ "$PROM" == "1" ]]; then
+  suffix="-prom"
+  # Surface the scrape knobs here (the -prom arm scripts default them too) so the
+  # Grafana target port is explicit and overridable from step 4.
+  export PROM_PORT="${PROM_PORT:-8000}"
+  export LOG_STATS="${LOG_STATS:-1}"
+fi
 
 case "$ARM" in
   shmq)
@@ -91,6 +102,11 @@ echo "[step4] corpus    : ${OTEL_HOST}"
 echo "[step4] model     : ${MODEL}  (TP=${TENSOR_PARALLEL_SIZE})"
 echo "[step4] num convs : ${NUM_CONVS}  (TIME_SCALE=${TIME_SCALE})"
 [[ "$ARM" == "shmq" ]] && echo "[step4] shm path  : ${SHM_PATH}  (step-3 server must be up here)"
+if [[ "$PROM" == "1" ]]; then
+  echo "[step4] metrics   : http://127.0.0.1:${PROM_PORT}/metrics  (Prometheus; point Grafana/Prometheus here)"
+else
+  echo "[step4] metrics   : OFF (PROM=0)"
+fi
 echo
 
 exec "${SCRIPT_DIR}/${arm_script}"
