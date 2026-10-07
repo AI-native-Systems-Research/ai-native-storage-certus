@@ -93,6 +93,7 @@ def _stamp_run(d, tool, tool_env, started):
     run = d.get("run")
     if not isinstance(run, dict):
         run = {}
+    run.pop("gate_dirty", None)   # recomputed every run: a stale flag from an earlier run must not stick
     run.update(_gate_provenance())
     blk = {
         "scored_by": f"scorer_{tool}",
@@ -514,6 +515,17 @@ def vacuity_check(pid, present, ctx, extra=None):
     """
     mut = harness_id(pid) + "__mutant"
     if mut not in present:
+        # MISSING TWIN (2026-10-07): a missing twin used to count as "honest" on EVERY path, and the lever
+        # branches then wrote "its mutant twin ... correctly FAILED" - false. eviction-policy-optimized had
+        # 51 published bounded-shallow Kani cells credited that way, none with a twin. Where paths can be
+        # PRUNED (--no-unwinding-checks) a pass with no twin is no evidence at all -> no credit. Elsewhere a
+        # twin stays optional (skill: build one wherever the property could be vacuous), but the record must
+        # say it is absent, never that it ran.
+        if extra and "--no-unwinding-checks" in extra:
+            return (f"NOT VOUCHED: proved only with --no-unwinding-checks, which can prune every path, and there "
+                    f"is no anti-vacuity twin '{mut}' to show the proof has content. Add the twin (it must FAIL "
+                    f"under the same flags) and re-score.")
+        ctx.setdefault("mutant_absent", set()).add(pid)
         return None
     mok, mout, _, _, mtimed, _ = run_kani(
         mut, ctx["component_dir"], ctx["cap"], ctx["mem_mb"], escalate=False, extra=extra)
@@ -1001,6 +1013,12 @@ def main():
             print(f"  = {p['id']:32s} {prior['status']:13s} resumed (already scorer-owned; --resume)")
             continue
         status, ev, note = score_property(p, ctx)
+        if pid_ := p.get("id"):
+            if pid_ in ctx.get("mutant_absent", set()) and isinstance(ev, dict):
+                ev["mutant_twin"] = "absent"
+                if ev.pop("vacuity_checked_under_lever", None):
+                    note = (str(note).split(" Its mutant twin")[0].split(" mutant twin")[0].rstrip(" ;,.")
+                            + ". No anti-vacuity twin exists for this property, so none was run.")
         # A build/toolchain fault mid-run (the preflight passed, then the environment broke, or a
         # property's own lever variant fails to compile): stop the stage NOW. Grinding the rest
         # would burn compute and emit a work-list of harnesses that were never even built.

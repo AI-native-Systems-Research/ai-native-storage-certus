@@ -13,6 +13,21 @@ Fixes the CODE behind a verification finding:
   test that fails on today's code; if none can be written it was a misreading — report it withdrawn and
   change nothing.
 
+**Record the test's verdict on the discordance — every time, in the component's own verif dir** (Cornel,
+2026-10-05: a confirmed row must not keep saying "candidate"). This applies to BOTH modes: a level-2 bug
+repair whose RED-FIRST test exercises a requirement that is also a level-1 discordance confirms that
+discordance too (the EPO stale-handle repair confirmed `D-FR-012-lru_list.rs:109-…`).
+```
+python3 ../component-verify/gate/record_confirmation.py components/<c>/verif <discordance-id> \
+    confirmed|withdrawn --evidence "<test file> failed|passed on <rev> before any fix" [--fix "PR #<n>"]
+python3 ../component-verify/gate/level1.py components/<c>/verif
+python3 ../component-verify/gate/render_discordances.py components/<c>/verif
+```
+`confirmed` = the test FAILED on the unfixed code (RED-FIRST leg 2b passed). `withdrawn` = it PASSED: the
+code does it and the code reader missed it. Commit `verif/discordance_confirmations.yaml` and the
+regenerated pair on both verif branches of the component. The verdict comes from the test, never from
+reading or from the agent's own claim.
+
 The person who approves the PR may not read Rust (Cornel, 2026-10-04), so the agent does the whole job:
 it chooses the fix, implements it wherever the root cause lives — several components, a shared
 interface — adds regression tests, makes the target proofs prove, keeps every touched verified
