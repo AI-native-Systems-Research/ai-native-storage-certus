@@ -85,6 +85,10 @@ def main() -> None:
     ap.add_argument("out_plan")
     ap.add_argument("--max-rows", type=int, default=None,
                     help="only read the first N rows (for quick tests)")
+    ap.add_argument("--max-input", type=int, default=120000,
+                    help="ceiling for per-turn input tokens; keep below the model "
+                         "window (131072) with headroom for filler-text drift. Must "
+                         "be <= the step-2 --cap.")
     ap.add_argument("--stats-only", action="store_true",
                     help="print reconstruction stats and exit; do not write")
     args = ap.parse_args()
@@ -168,7 +172,9 @@ def main() -> None:
 
     # 4. emit conversations
     conversations = []
-    clamped = 0
+    clamped = 0        # incremental input < 1 token (bumped to 1)
+    out_clamped = 0    # output_length 0 -> 1 (replay requires max_tokens >= 1)
+    in_hi_clamped = 0  # per-turn input truncated to --max-input (window headroom)
     all_turns, all_in, all_out = [], [], []
     for cid, chain in enumerate(chains):
         turns = []
@@ -182,7 +188,15 @@ def main() -> None:
             if in_tok < 1:
                 in_tok = 1
                 clamped += 1
+            if in_tok > args.max_input:
+                in_tok = args.max_input
+                in_hi_clamped += 1
+            # output_tokens becomes max_tokens at replay; vLLM rejects max_tokens=0,
+            # and the mooncake trace has output_length==0 rows.
             out_tok = int(r["output_length"])
+            if out_tok < 1:
+                out_tok = 1
+                out_clamped += 1
             turns.append([int(in_tok), out_tok, 0.0])
             all_in.append(int(in_tok))
             all_out.append(out_tok)
@@ -214,6 +228,8 @@ def main() -> None:
     print(f"turns/conv mean/min/max  : {meta_totals['mean_turns_per_conversation']} / "
           f"{meta_totals['min_turns']} / {meta_totals['max_turns']}")
     print(f"clamped (<1 tok) turns   : {clamped}")
+    print(f"output 0->1 clamps       : {out_clamped}")
+    print(f"input >{args.max_input} clamps : {in_hi_clamped}")
     print(f"sum input/output tokens  : {meta_totals['sum_input_tokens']} / "
           f"{meta_totals['sum_output_tokens']}")
     print(f"elapsed                  : {time.time() - t0:.1f}s")
