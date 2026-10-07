@@ -148,7 +148,7 @@ so that the policy is safe under concurrent workloads.
   from the pool (no-op for a non-existent pool). Clearing resets the LRU list
   but does NOT reset the frequency sketch, `access_count`, or `max_len` — the
   learned frequency history persists across a clear (`src/lib.rs:231-237`;
-  `clear` on the list only, `src/lru_list.rs:186-192`).
+  `clear` on the list only, `src/lru_list.rs:197-203`).
 - **FR-010**: Methods returning `Result` (`track`, `touch`, `batch_touch`,
   `remove`) MUST return `EvictionPolicyError::InvalidPool` for a non-existent
   pool. Methods returning `Option`/collection/scalar
@@ -164,11 +164,12 @@ so that the policy is safe under concurrent workloads.
   **empty** pool the key is admitted unconditionally at the back
   (`src/lib.rs:136`). Note there is no absolute frequency threshold — the
   decision depends only on the comparison against the current victim.
-- **FR-012**: `touch` and `remove` on an already-removed handle MUST be
-  idempotent (no panic, no effect), returning `Ok(())` silently. The guard is
-  the node's `active` flag in the LRU list (`src/lru_list.rs:108-111`
-  `move_to_back`, `:159-162` `remove`). The `InvalidHandle` error variant is
-  defined in the interface but currently unused.
+- **FR-012**: `touch` and `remove` on a stale handle (one whose entry was
+  already removed, including by `clear_pool`, which discards the slots) MUST be
+  idempotent (no panic, no effect), returning `Ok(())` silently. The guard is a
+  range check on the slot index, then the node's `active` flag in the LRU list
+  (`src/lru_list.rs:113-118` `move_to_back`, `:168-173` `remove`). The
+  `InvalidHandle` error variant is defined in the interface but currently unused.
 - **FR-013**: The system MUST periodically age the frequency sketch to bound
   counter growth and let the policy adapt to shifting working sets: on each
   `track`, after updating `max_len` (the high-water mark of pool size) and

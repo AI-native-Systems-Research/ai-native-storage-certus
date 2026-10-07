@@ -47,7 +47,7 @@
 # passed through the base script's EXTRA_SERVE_ARGS hook. JSON is compact (no
 # spaces) so it survives the base word-split.
 #
-# Prereqs: the certus-offload-fix026 image in the DEFAULT podman store
+# Prereqs: the certus-offload:vllm0.29.0 image in the DEFAULT podman store
 # (build_cputier_container.sh), both A100s free, and enough host RAM for the CPU
 # tier. Unlike
 # the shmq server there is NO external certus-server and NO mailbox — cputier is

@@ -105,7 +105,14 @@ impl LruList {
     }
 
     /// Move an existing node to the back (most recently used).
+    ///
+    /// Silent no-op for a stale handle (FR-012). The range check comes FIRST: the `active` flag
+    /// can only guard a slot that still exists, and `clear` discards the slots, so after a
+    /// `clear` every handle the list ever issued names a slot past the end.
     pub fn move_to_back(&mut self, idx: u32) {
+        if idx as usize >= self.nodes.len() {
+            return;
+        }
         if !self.nodes[idx as usize].active {
             return;
         }
@@ -155,8 +162,12 @@ impl LruList {
         result
     }
 
-    /// Remove a node by index. Idempotent for already-removed nodes.
+    /// Remove a node by index. Idempotent for already-removed nodes, and for a handle whose slot
+    /// no longer exists at all (FR-012) — same range-check-first reason as `move_to_back`.
     pub fn remove(&mut self, idx: u32) {
+        if idx as usize >= self.nodes.len() {
+            return;
+        }
         if !self.nodes[idx as usize].active {
             return;
         }
@@ -322,6 +333,36 @@ mod tests {
         lru.remove(a);
         lru.remove(a); // no panic
         assert_eq!(lru.len(), 0);
+    }
+
+    #[test]
+    fn stale_handle_after_clear_is_silent_noop() {
+        // FR-012 / EPO-INV-STALE-HANDLE-NEVER-CRASHES: `clear` discards the slots, so every
+        // handle the list ever issued now names a slot past the end. Using one must be a silent
+        // no-op, not a panic (a panic here also poisons the pool's Mutex).
+        let mut lru = LruList::new();
+        let a = lru.push_back(1);
+        let b = lru.push_back(2);
+        lru.clear();
+        lru.move_to_back(a);
+        lru.move_to_back(b);
+        lru.remove(a);
+        lru.remove(b);
+        assert_eq!(lru.len(), 0);
+        assert_eq!(lru.peek_front_key(), None);
+        // and the list is still usable afterwards
+        lru.push_back(7);
+        assert_eq!(lru.pop_front(), Some(7));
+    }
+
+    #[test]
+    fn fabricated_out_of_range_handle_is_silent_noop() {
+        let mut lru = LruList::new();
+        lru.push_back(1);
+        lru.move_to_back(u32::MAX);
+        lru.remove(99);
+        assert_eq!(lru.len(), 1);
+        assert_eq!(lru.pop_front(), Some(1));
     }
 
     #[test]

@@ -155,7 +155,7 @@ pub fn serve(
             .spawn(move || {
                 while !shutdown.load(Ordering::Relaxed) {
                     thread::sleep(std::time::Duration::from_secs(2));
-                    log_r.info(&flow_r.line());
+                    log_r.debug(&flow_r.line());
                 }
             })
             .expect("spawn flow reporter");
