@@ -121,10 +121,16 @@ class Target:
     node: str
     url: str
     before: dict[str, float] = field(default_factory=dict)
+    mid: dict[str, float] = field(default_factory=dict)
     after: dict[str, float] = field(default_factory=dict)
 
     def delta(self, name: str) -> float:
         return self.after.get(name, 0.0) - self.before.get(name, 0.0)
+
+    def delta_phase2(self, name: str) -> float:
+        """Phase-2 only. Needs `mid`; falls back to the whole run without it."""
+        base = self.mid or self.before
+        return self.after.get(name, 0.0) - base.get(name, 0.0)
 
 
 def discover(ns: str, certus_ns: str, certus_ports: list[int]):
@@ -218,17 +224,27 @@ class TurnResult:
     ok: bool
     prompt_tokens: int = 0
     error: str = ""
+    phase: int = 1
 
 
 def run_session(idx: int, args, base: str, model: str, sys_words: int,
                 turn_words: int, results: list, lock: threading.Lock,
-                stop: threading.Event) -> None:
+                stop: threading.Event, histories: dict | None = None,
+                resume: list | None = None, phase: int = 1) -> None:
+    """Run one conversation. With `resume`, continue an earlier session's
+    history instead of starting a new one, which is what makes the revisit
+    phase re-request blocks the tier has since demoted to SSD."""
     rng = random.Random(args.seed + idx)
     # A per-session preamble keeps sessions from sharing a prefix with one
     # another, so the only reuse is within a session, across its turns.
-    preamble = f"Session {idx} reference notes. " + filler(sys_words, rng)
-    messages = [{"role": "system", "content": preamble}]
-    for turn in range(1, args.turns + 1):
+    if resume is not None:
+        messages = list(resume)
+        turns = 1
+    else:
+        preamble = f"Session {idx} reference notes. " + filler(sys_words, rng)
+        messages = [{"role": "system", "content": preamble}]
+        turns = args.turns
+    for turn in range(1, turns + 1):
         if stop.is_set():
             return
         messages.append({"role": "user",
@@ -247,7 +263,8 @@ def run_session(idx: int, args, base: str, model: str, sys_words: int,
             messages.append({"role": "assistant", "content": reply})
             with lock:
                 results.append(TurnResult(idx, turn, dt, True,
-                                          int(usage.get("prompt_tokens", 0))))
+                                          int(usage.get("prompt_tokens", 0)),
+                                          phase=phase))
         except urllib.error.HTTPError as e:
             dt = time.monotonic() - t0
             detail = ""
@@ -257,14 +274,19 @@ def run_session(idx: int, args, base: str, model: str, sys_words: int,
                 pass
             with lock:
                 results.append(TurnResult(idx, turn, dt, False,
-                                          error=f"HTTP {e.code} {detail}"))
+                                          error=f"HTTP {e.code} {detail}",
+                                          phase=phase))
             return
         except Exception as e:
             dt = time.monotonic() - t0
             with lock:
                 results.append(TurnResult(idx, turn, dt, False,
-                                          error=f"{type(e).__name__}: {e}"))
+                                          error=f"{type(e).__name__}: {e}",
+                                          phase=phase))
             return
+    if histories is not None:
+        with lock:
+            histories[idx] = messages
 
 
 def pct(values: list[float], p: float) -> float:
@@ -300,6 +322,12 @@ def main() -> int:
     ap.add_argument("--output-tokens", type=int, default=128)
     ap.add_argument("--timeout", type=float, default=600.0)
     ap.add_argument("--seed", type=int, default=1234)
+    ap.add_argument("--revisit", type=int, default=0, metavar="N",
+                    help="after the main phase, send one more turn to the N "
+                         "earliest sessions. By then later traffic has pushed "
+                         "their blocks out of the DRAM tier, so those turns "
+                         "read from SSD -- which a single pass cannot do, "
+                         "because it never revisits retired content.")
     ap.add_argument("--json-output")
     ap.add_argument("--dry-run", action="store_true",
                     help="resolve, calibrate and scrape, then exit")
@@ -357,6 +385,7 @@ def main() -> int:
         return 0
 
     results: list[TurnResult] = []
+    histories: dict[int, list] = {}
     lock = threading.Lock()
     stop = threading.Event()
     print(f"\nrunning {args.sessions} sessions x {args.turns} turns, "
@@ -365,7 +394,8 @@ def main() -> int:
     try:
         with ThreadPoolExecutor(max_workers=args.active_sessions) as ex:
             futs = [ex.submit(run_session, i, args, base, model, sys_words,
-                              turn_words, results, lock, stop)
+                              turn_words, results, lock, stop,
+                              histories if i < args.revisit else None)
                     for i in range(args.sessions)]
             for f in futs:
                 f.result()
@@ -373,6 +403,29 @@ def main() -> int:
         stop.set()
         print("interrupted; reporting what completed")
     elapsed = time.monotonic() - t_start
+
+    # Phase 2. Snapshot first so the revisit's counters can be read on their
+    # own -- SSD hits are a rounding error against phase 1's DRAM hits and
+    # would be invisible in a whole-run delta.
+    revisited = 0
+    if args.revisit and histories and not stop.is_set():
+        for tg in pods:
+            tg.mid = scrape(tg.url, VLLM_COUNTERS)
+        for tg in certus:
+            tg.mid = scrape(tg.url, CERTUS_COUNTERS)
+        idxs = sorted(histories)
+        print(f"\nrevisiting {len(idxs)} session(s) whose blocks phase 1 "
+              f"has since demoted ...")
+        t2 = time.monotonic()
+        with ThreadPoolExecutor(max_workers=min(args.active_sessions,
+                                                len(idxs))) as ex:
+            futs = [ex.submit(run_session, i, args, base, model, sys_words,
+                              turn_words, results, lock, stop, None,
+                              histories[i], 2) for i in idxs]
+            for f in futs:
+                f.result()
+        revisited = len(idxs)
+        print(f"revisit phase: {time.monotonic() - t2:.1f}s")
 
     for t in pods:
         t.after = scrape(t.url, VLLM_COUNTERS)
@@ -450,11 +503,39 @@ def main() -> int:
         if bp or dr:
             print(f"    backpressure {bp:,.0f}   drops-on-full {dr:,.0f}")
 
+    if revisited:
+        p2 = [r for r in results if r.phase == 2 and r.ok]
+        p2lat = [r.latency for r in p2]
+        print(f"\n=== revisit phase: {len(p2)} turns over {revisited} session(s) ===")
+        if p2lat:
+            print(f"latency  p50 {pct(p2lat,50):.2f}s  p90 {pct(p2lat,90):.2f}s")
+        print("  per certus instance, THIS PHASE ONLY:")
+        for tg in certus:
+            if not tg.after:
+                continue
+            dram = tg.delta_phase2("certus_lookup_hits_dram_total")
+            ssd = tg.delta_phase2("certus_lookup_hits_ssd_total")
+            rem = tg.delta_phase2("certus_remote_lookup_hits_total")
+            tot = dram + ssd + rem
+            if not tot:
+                continue
+            print(f"    {tg.label}")
+            print(f"      dram {dram:>8,.0f} ({100*dram/tot:4.1f}%)"
+                  f"   ssd {ssd:>8,.0f} ({100*ssd/tot:4.1f}%)"
+                  f"   remote {rem:>6,.0f} ({100*rem/tot:4.1f}%)")
+        p2load = sum(tg.delta_phase2("vllm:kv_offload_load_bytes_total")
+                     for tg in pods)
+        print(f"  loaded this phase: {gib(p2load)}")
+
     if args.json_output:
         blob = {
             "config": vars(args), "model": model, "endpoint": base,
             "elapsed_s": elapsed,
             "turns_ok": len(ok), "turns_failed": len(bad),
+            "revisited_sessions": revisited,
+            "phase2": [{"label": tg.label,
+                        "delta": {k: tg.delta_phase2(k) for k in CERTUS_COUNTERS}}
+                       for tg in certus] if revisited else [],
             "latency": {"p50": pct(lat, 50), "p90": pct(lat, 90),
                         "p99": pct(lat, 99)} if lat else {},
             "pods": [{"label": t.label, "node": t.node,
