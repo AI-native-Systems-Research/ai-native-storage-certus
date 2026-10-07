@@ -487,6 +487,12 @@ def main():
             "themselves are unchanged."
             + (f" {nunc} further record(s) could not be classified either way and are shown as written."
                if nunc else "") + "</p>")
+    unr = d.get("level2_unreachable") or []
+    for u in unr:
+        notes_html.append(
+            "<p class='foot' style='border-left:4px solid #b00;padding:4px 10px'>"
+            f"<b>Left out: <code>{esc(str(u.get('id','')))}</code></b> describes a situation that cannot "
+            f"occur, so it can be neither proved nor refuted. {esc(str(u.get('reason','')))}</p>")
     if triage:
         notes_html.append(
             "<p class='foot' style='border-left:4px solid #b00;padding:4px 10px'>"
@@ -500,6 +506,9 @@ def main():
             parts.append(f"{nhaz} records are worded as hazards and shown the right way round")
         if triage:
             parts.append(f"{len(triage)} refuted records are not code defects")
+        if unr:
+            parts.append(f"{len(unr)} propert{'ies' if len(unr) != 1 else 'y'} left out because "
+                         f"{'they describe situations' if len(unr) != 1 else 'it describes a situation'} that cannot occur")
         if kcs:
             parts.append(f"{len(kcs)} correction{'s' if len(kcs) != 1 else ''} (" +
                          ", ".join(esc(str(k.get('property',''))) for k in kcs) + ")")
