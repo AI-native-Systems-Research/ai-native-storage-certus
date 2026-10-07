@@ -47,7 +47,7 @@
 #                         (default /mnt/certus1/kv-fs-tier). FS_TIER=0 = CPU-only.
 #   The base sizes the container /dev/shm to CPU_BYTES + 4G for the tier mmap.
 #
-# Prereqs: the certus-offload-fix026 image in the DEFAULT podman store
+# Prereqs: the certus-offload:vllm0.29.0 image in the DEFAULT podman store
 # (build_cputier_container.sh), both A100s free, enough host RAM for the CPU
 # tier, and the
 # Mixtral FP8 checkpoint reachable (HF cache on /mnt/certus1). Unlike the shmq
