@@ -49,9 +49,14 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
 # Counters worth reporting per decode pod. external_prefix_cache_* is the
-# clearest "did this request reach certus" signal; kv_offload_total_bytes_total
-# is deliberately absent -- it reads 0.0 even when offload is working, so
-# kv_offload_size_sum is used for stored bytes instead.
+# clearest "did this request reach certus" signal.
+#
+# NO store-side counter is listed, because vLLM 0.30 does not populate any of
+# them with this connector: kv_offload_total_bytes_total, kv_offload_size_sum
+# and kv_offload_size_count all read 0.0 while load_bytes_total is correct and
+# ~22 GiB per instance is demonstrably resident. Stored bytes are therefore
+# reported from the certus side, as the delta of certus_memory_tier_used_bytes,
+# which does track. Do not re-add one of those three without checking it moves.
 VLLM_COUNTERS = [
     "vllm:request_success_total",
     "vllm:prompt_tokens_total",
@@ -60,7 +65,6 @@ VLLM_COUNTERS = [
     "vllm:prefix_cache_queries_total",
     "vllm:external_prefix_cache_hits_total",
     "vllm:external_prefix_cache_queries_total",
-    "vllm:kv_offload_size_sum",
     "vllm:kv_offload_load_bytes_total",
     "vllm:kv_offload_load_size_count",
     "vllm:kv_offload_lookup_sync_delay_seconds_count",
@@ -78,6 +82,9 @@ CERTUS_COUNTERS = [
     "certus_store_backpressure_events_total",
     "certus_store_drops_on_full_total",
     "certus_memory_tier_used_bytes",
+    "certus_memory_tier_free_bytes",
+    "certus_evictions_blocked_by_pin_total",
+    "certus_evictions_blocked_unpersisted_total",
 ]
 
 
@@ -406,9 +413,9 @@ def main() -> int:
               f" / queries {t.delta('vllm:prefix_cache_queries_total'):>14,.0f}")
         print(f"    certus hits      {t.delta('vllm:external_prefix_cache_hits_total'):>14,.0f}"
               f" / queries {t.delta('vllm:external_prefix_cache_queries_total'):>14,.0f}")
-        print(f"    offload stored   {gib(t.delta('vllm:kv_offload_size_sum')):>14}"
-              f"   loaded {gib(t.delta('vllm:kv_offload_load_bytes_total')):>14}"
-              f"   loads {t.delta('vllm:kv_offload_load_size_count'):.0f}")
+        print(f"    offload loaded   {gib(t.delta('vllm:kv_offload_load_bytes_total')):>14}"
+              f"   loads {t.delta('vllm:kv_offload_load_size_count'):.0f}"
+              f"   (stores are not instrumented vLLM-side; see certus below)")
 
     print("\n=== per certus instance ===")
     for t in certus:
@@ -416,9 +423,22 @@ def main() -> int:
             print(f"  {t.label:28} unreachable")
             continue
         print(f"  {t.label}")
-        print(f"    populates {t.delta('certus_populates_total'):>10,.0f}"
-              f"   evictions {t.delta('certus_evictions_total'):>10,.0f}"
-              f"   used {gib(t.after.get('certus_memory_tier_used_bytes', 0))}")
+        used = t.after.get("certus_memory_tier_used_bytes", 0.0)
+        free = t.after.get("certus_memory_tier_free_bytes", 0.0)
+        cap = used + free
+        grew = t.delta("certus_memory_tier_used_bytes")
+        pctfull = (100.0 * used / cap) if cap else 0.0
+        # used is a gauge over the DRAM tier only (used+free == --memory-tier-size)
+        # and does NOT reset between runs, so its delta is this run's net store.
+        # SSD is written through, so a low number here does not mean an empty drive.
+        print(f"    dram tier {gib(used)} of {gib(cap)} ({pctfull:.0f}% full),"
+              f" +{gib(grew)} this run")
+        print(f"    evictions {t.delta('certus_evictions_total'):>10,.0f}"
+              f"   blocked-by-pin {t.delta('certus_evictions_blocked_by_pin_total'):>8,.0f}"
+              f"   blocked-unpersisted {t.delta('certus_evictions_blocked_unpersisted_total'):>8,.0f}")
+        pops = t.delta("certus_populates_total")
+        if pops:
+            print(f"    populates {pops:>10,.0f}")
         print(f"    lookup hits {t.delta('certus_lookup_hits_total'):>8,.0f}"
               f" (dram {t.delta('certus_lookup_hits_dram_total'):,.0f},"
               f" ssd {t.delta('certus_lookup_hits_ssd_total'):,.0f})"
