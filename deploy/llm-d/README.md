@@ -139,6 +139,61 @@ that tag ever moves, a pull becomes a full ~30GB transfer into `/home`, which ha
 only ~7G of headroom above the imagefs floor. Check before bumping:
 `docker buildx imagetools inspect docker.io/vllm/vllm-openai:v<ver>`
 
+## Restarting certus orphans the running engines
+
+**After any roll of the certus DaemonSets, restart the decode pods:**
+
+```bash
+kubectl delete pod -n llm-d-quickstart -l llm-d.ai/role=decode
+```
+
+The Deployment recreates them one at a time (`maxSurge: 0, maxUnavailable: 1`),
+so this is a rolling restart, not an outage of every replica at once.
+
+Why it is needed: a certus server recreates `/dev/shm/certus-shmq-numa<N>` as a
+**new inode** when it starts. An engine that opened the previous one keeps
+writing into the orphaned segment. The server then logs `shmq-flow taken 0`
+while looking perfectly healthy, and the pod stays `Ready` with 0 restarts,
+because nothing detects the break until a request actually exercises the
+offload path. At that point the connector burns its full 30s deadline and
+raises
+
+```
+certus_shmq_connector.ring.RingError: shmq request deadline exceeded after 30s
+```
+
+which `kv_load_failure_policy='fail'` (vLLM's default) turns into
+`EngineDeadError` — killing the engine and restarting the pod.
+
+So **readiness is not evidence that the mailbox is live.** Compare when each
+side started — a decode pod is orphaned if a certus pod on its node started
+*after* it:
+
+```bash
+kubectl get pods -n certus -o custom-columns=\
+'POD:.metadata.name,NODE:.spec.nodeName,STARTED:.status.containerStatuses[0].state.running.startedAt'
+kubectl get pods -n llm-d-quickstart -l llm-d.ai/role=decode -o custom-columns=\
+'POD:.metadata.name,NODE:.spec.nodeName,STARTED:.status.containerStatuses[0].state.running.startedAt'
+```
+
+Do **not** use the mailbox's mtime for this. `/dev/shm/certus-shmq-numa<N>` is a
+file-backed shared mapping, so its mtime advances on every write — it tracks
+traffic, not creation, and on a busy server it is always a few seconds old no
+matter when the segment was made. It will report a perfectly healthy engine as
+orphaned.
+
+The other reliable signal is on the server: `shmq-flow taken` stays at 0 for an
+orphaned client no matter how much traffic its engine is serving.
+
+```bash
+kubectl logs -n certus <certus-pod> --tail=5 | grep shmq-flow
+```
+
+This is a known gap rather than a configuration error — the connector has no
+reconnect path, and the shm header already carries the `generation` and
+`heartbeat` fields a client would need to detect it. Fixing it properly belongs
+in the connector; until then, order the restarts.
+
 ## GPU / NUMA / mailbox mapping
 
 `entrypoint-certus.sh` derives this at runtime, so one Deployment covers both
