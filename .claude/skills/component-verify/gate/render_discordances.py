@@ -67,7 +67,7 @@ th{font-weight:600;color:var(--muted);font-size:13px} code{font-size:12.5px}
                  "<th>status</th><th>formal verification assumes</th></tr>")
         for i, e in enumerate(rows, 1):
             where = ("<b>spec</b> " + esc(", ".join(e.get("spec_pointers") or []) or "—") +
-                     "<br><b>code</b> " + esc(", ".join(e.get("code_pointers") or []) or "—"))
+                     "<br><b>code to check</b> " + esc(", ".join(e.get("code_evidence") or e.get("code_pointers") or []) or "—"))
             st = esc(e.get("status"))
             if e.get("status") in ("confirmed", "withdrawn"):
                 st = (f"<b>{st}</b>" + (f"<br><span class='ptr'>{esc(e.get('status_evidence'))}</span>" if e.get("status_evidence") else "")
@@ -77,6 +77,18 @@ th{font-weight:600;color:var(--muted);font-size:13px} code{font-size:12.5px}
                      f"<td>{esc(e.get('spec_says'))}</td><td>{esc(e.get('code_does'))}</td>"
                      f"<td class='ptr'>{where}<br><code>{esc(e.get('id'))}</code></td>"
                      f"<td>{st}</td><td>{esc(e.get('assume_in_level2') or '—')}</td></tr>")
+        P.append("</table></div>")
+    rt = d.get("routed_to_other_tools") or []
+    if rt:
+        P.append(f"<h2 style='font-size:17px;margin-top:28px'>Checked by another tool ({len(rt)})</h2>"
+                 "<p>These are not disagreements. They are requirements that Creusot and Kani cannot express "
+                 "(thread interleavings, timing, logging, cost), so they are left to the tool that can check them.</p>"
+                 "<div class='scroll'><table><tr><th>name</th><th>method</th><th>what the specification says</th>"
+                 "<th>checked by</th><th>why</th></tr>")
+        for r in rt:
+            P.append(f"<tr><td><b>{esc(r.get('name'))}</b></td><td><code>{esc(', '.join(r.get('methods') or []))}</code></td>"
+                     f"<td>{esc(r.get('statement'))}</td><td><span class='chip'>{esc(r.get('checked_by'))}</span></td>"
+                     f"<td>{esc(r.get('reason'))}: {esc(r.get('why'))}</td></tr>")
         P.append("</table></div>")
     P.append("</div>")
     open(out, "w", encoding="utf-8").write("\n".join(P))

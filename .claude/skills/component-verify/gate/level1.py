@@ -120,12 +120,28 @@ def main():
         return {r["id"]: re.sub(r"\s+", " ", str(r.get("statement", ""))).strip()
                 for r in recs if r.get("id") and r.get("statement")}
     SPEC_TXT, CODE_TXT = _stmts("spec_properties.yaml"), _stmts("code_properties.yaml")
-    disc, excluded = [], []
+    disc, excluded, routed = [], [], []
+    # CLASSIFICATION (classify_merge.py; 2026-10-07): two independent classifier agents read the CODE for
+    # every candidate. A = the code does it (reader missed it) -> level 2, not a discordance. B = real
+    # disagreement -> discordance (the repair agent's queue). C = not checkable by Creusot/Kani -> routed to
+    # the tool that can (Loom, Spin, a test, review), excluded from level 2, NOT a discordance.
+    # '?' (the two runs disagree) stays a discordance, marked for a person. No classification = as before.
+    CL = d.get("classification") or {}
     for p in d.get("properties", []):
         if not p.get("verifiable"):
             continue
         kind = LEVEL1_ORIGINS.get(str(p.get("origin", "")))
         if not kind:
+            continue
+        cl = CL.get(p["id"]) or {}
+        if cl.get("class") == "A":
+            continue
+        if cl.get("class") == "C":
+            routed.append({"property": p["id"], "name": readable_name([p["id"]], list(p.get("methods") or [])),
+                           "methods": list(p.get("methods") or []),
+                           "statement": re.sub(r"\s+", " ", str(p.get("statement", ""))).strip(),
+                           "reason": cl.get("reason"), "checked_by": cl.get("checked_by"), "why": cl.get("why")})
+            excluded.append(p["id"])
             continue
         spec, code = pointers(p)
         pf = p.get("paired_from") or p.get("derived_from") or {}      # field name varies by run
@@ -139,7 +155,7 @@ def main():
             "kind": kind,
             "methods": list(p.get("methods") or []),
             "spec_says": spec_txt or re.sub(r"\s+", " ", str(p.get("statement", ""))).strip(),
-            "code_does": ("Nothing found." if kind == "spec-not-found-in-code" else
+            "code_does": ("No matching guarantee stated by the code reader." if kind == "spec-not-found-in-code" else
                           code_txt or re.sub(r"\s+", " ", str(p.get("divergence_note") or p.get("note") or "")).strip()),
             "spec_pointers": spec,
             "code_pointers": code,
@@ -147,6 +163,13 @@ def main():
             "excluded_properties": [p["id"]],
             "extraction_sides": sides,
         }
+        if cl.get("class") == "B":
+            entry["classified"] = "real disagreement (both classifiers agree)"
+            entry["code_evidence"] = cl.get("evidence") or []
+            if cl.get("why"):
+                entry["code_does"] = cl["why"] if kind == "spec-not-found-in-code" else entry["code_does"]
+        elif cl.get("class") == "?":
+            entry["classified"] = "classifiers disagree - needs a person"
         disc.append(entry)
         excluded.append(p["id"])
     # INPUT-RANGE MISMATCHES (the level-1 sync check, build-property-inventory step 2): one entry each,
@@ -188,8 +211,11 @@ def main():
                    "spec_and_code_differ": sum(1 for e in disc if e["kind"] == "spec-and-code-differ"),
                    "spec_not_found_in_code": sum(1 for e in disc if e["kind"] == "spec-not-found-in-code"),
                    "input_range_mismatch": len(assumptions),
-                   "properties_excluded_from_level2": len(excluded)},
+                   "properties_excluded_from_level2": len(excluded),
+                   "routed_to_other_tools": len(routed),
+                   "reader_missed_sent_to_level2": sum(1 for v in CL.values() if v.get("class") == "A")},
         "discordances": disc,
+        "routed_to_other_tools": routed,
     }
     # CONFIRMATIONS: candidate -> confirmed / withdrawn, matched by discordance id, else by property id
     # (an id can shift if a pointer changes; the property name usually does not).

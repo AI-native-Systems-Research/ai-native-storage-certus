@@ -99,6 +99,16 @@ the verification and is reported and credited as such; it is simply not worth pr
 wrong is decided by whoever owns spec/code synchronisation, or confirmed by the repair agent with a test
 that fails on today's code. Once fixed, the next extraction sees agreement and the property enters level 2.
 
+**Level-1 classification (2026-10-07, trial; optional until validated).** Before `level1.py`, two
+INDEPENDENT classifier agents read the CODE for every candidate (divergent / spec-only) under
+`gate/classify_rubric.yaml` and write `verif/classify_run{1,2}.yaml`; `gate/classify_merge.py verif run1 run2`
+writes `classification:` into the bundle. `level1.py` then: **A** (the code does it; reader missed it, with
+cited lines) -> level 2, not a discordance; **B** (real disagreement, cited lines) -> discordance, the repair
+agent's queue (one run per component, grouped by root cause); **C** (not checkable by Creusot/Kani: interleaving,
+liveness, timing, performance, logging-io, external) -> "checked by another tool" (Loom/Spin/test/review),
+excluded, not a discordance. When the two classifiers disagree, treat it as B. Measured on the first trial:
+eviction-policy-optimized 14 -> 5 discordances, dispatch-map 13 -> 5.
+
 **Role 2 proves ONLY the level-2 set** (properties not in `level2_excluded`, and never a hazard-worded
 record). The scorers skip the excluded ids, so an excluded property can neither be scored nor fail the gate.
 
