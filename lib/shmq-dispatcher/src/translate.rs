@@ -132,27 +132,59 @@ fn ipc_cache_open(
 }
 
 fn ipc_cache_close(cache: &IpcCache, handle_bytes: &[u8; 64]) {
-    let mut map = cache.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(entry) = map.get_mut(handle_bytes) {
-        entry.refcount -= 1;
-        if entry.refcount == 0 {
-            entry.grace_until = Some(Instant::now() + IPC_GRACE_PERIOD);
+    {
+        let mut map = cache.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(entry) = map.get_mut(handle_bytes) {
+            entry.refcount -= 1;
+            if entry.refcount == 0 {
+                entry.grace_until = Some(Instant::now() + IPC_GRACE_PERIOD);
+            }
         }
     }
+    ipc_cache_reap_expired(cache);
+}
 
+/// Close every mapping whose grace period has elapsed, returning how many went.
+///
+/// This used to be the tail of `ipc_cache_close`, which meant it only ever ran
+/// as a side effect of an op completing. A client's LAST op therefore left its
+/// mappings sitting in grace with nothing scheduled to revisit them: if the
+/// client then died -- a pod rollout, an image update, a drained node -- the
+/// mappings stayed open for the lifetime of the server, holding GPU memory the
+/// dead client's KV cache used to occupy. Observed as 4436 MiB stranded on one
+/// A30 (a 4209 MiB KV cache plus context), which was enough to stop the
+/// replacement pod starting at all: vLLM wants 90% of the device and could no
+/// longer get it. Restarting certus-server was the only way to reclaim it.
+///
+/// Called both from `ipc_cache_close` (unchanged behaviour on the op path) and
+/// from the reaper thread, so an idle or vanished client's mappings are now
+/// reclaimed on a timer rather than waiting for traffic that may never come.
+///
+/// Not covered: a client that dies MID-op leaves `refcount > 0`, so its entry
+/// never enters grace and is not reaped here. Force-closing on a non-zero
+/// refcount would risk freeing a device pointer a blocking worker is still
+/// using, which is worse than the leak.
+fn ipc_cache_reap_expired(cache: &IpcCache) -> usize {
+    let mut map = cache.lock().unwrap_or_else(|e| e.into_inner());
     let now = Instant::now();
     let expired: Vec<[u8; 64]> = map
         .iter()
         .filter(|(_, e)| e.refcount == 0 && e.grace_until.map_or(false, |t| now >= t))
         .map(|(k, _)| *k)
         .collect();
+    let mut closed = 0;
     for k in expired {
         if let Some(entry) = map.remove(&k) {
+            // SAFETY: dev_ptr came from cudaIpcOpenMemHandle, refcount is 0 so no
+            // worker holds it, and it is removed from the map before closing so
+            // it cannot be handed out again.
             unsafe {
                 cuda_ffi::cudaIpcCloseMemHandle(entry.dev_ptr);
             }
+            closed += 1;
         }
     }
+    closed
 }
 
 fn ipc_cache_close_all(cache: &IpcCache) {
@@ -330,6 +362,15 @@ impl Translator {
 
     /// Reclaim reservations that were never committed/aborted within `timeout`.
     /// Called periodically by the reaper thread. Returns the number reclaimed.
+    /// Reclaim CUDA-IPC mappings whose grace period has elapsed.
+    ///
+    /// Driven by the reaper thread so a client that went away -- rather than
+    /// politely finishing another op -- does not leave GPU memory mapped for the
+    /// server's lifetime. See `ipc_cache_reap_expired`.
+    pub fn reap_expired_ipc_mappings(&self) -> usize {
+        ipc_cache_reap_expired(&self.ipc_cache)
+    }
+
     pub fn reap_stale_reservations(&self, timeout: Duration) -> usize {
         let now = Instant::now();
         let stale: Vec<u64> = {
@@ -1023,6 +1064,17 @@ mod tests {
         fn clear_memory_tier(&self) -> Result<usize, DispatcherError> {
             Ok(0)
         }
+        /// No-op: this implementation has no background writer. The real
+        /// dispatcher persists the entry so it becomes demotable; nothing here
+        /// models demotability, so there is nothing to schedule.
+        fn schedule_write_through(
+            &self,
+            _key: CacheKey,
+            _size: u32,
+        ) -> Result<(), DispatcherError> {
+            Ok(())
+        }
+
         fn flush_to_ssd(&self) -> Result<usize, DispatcherError> {
             Ok(0)
         }

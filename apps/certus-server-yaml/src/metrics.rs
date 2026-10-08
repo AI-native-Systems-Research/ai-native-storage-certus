@@ -202,7 +202,37 @@ fn render_metrics(
          certus_nvme_read_ops_total {}\n\
          # HELP certus_nvme_write_ops_total Total NVMe write operations\n\
          # TYPE certus_nvme_write_ops_total counter\n\
-         certus_nvme_write_ops_total {}\n",
+         certus_nvme_write_ops_total {}\n\
+         # HELP certus_evictions_blocked_by_pin_total Eviction candidates skipped because a read pin was held\n\
+         # TYPE certus_evictions_blocked_by_pin_total counter\n\
+         certus_evictions_blocked_by_pin_total {}\n\
+         # HELP certus_evictions_blocked_unpersisted_total Eviction candidates skipped because write-through had not landed\n\
+         # TYPE certus_evictions_blocked_unpersisted_total counter\n\
+         certus_evictions_blocked_unpersisted_total {}\n\
+         # HELP certus_eviction_scans_exhausted_total Clean-eviction scans that freed nothing, so the store had to backpressure\n\
+         # TYPE certus_eviction_scans_exhausted_total counter\n\
+         certus_eviction_scans_exhausted_total {}\n\
+         # HELP certus_peer_pins_held Read pins the responder holds for peers right now (gauge, not monotonic)\n\
+         # TYPE certus_peer_pins_held gauge\n\
+         certus_peer_pins_held {}\n\
+         # HELP certus_peer_pin_hold_us_max Longest single responder pin-batch lifetime, microseconds\n\
+         # TYPE certus_peer_pin_hold_us_max gauge\n\
+         certus_peer_pin_hold_us_max {}\n\
+         # HELP certus_oldest_sampled Oldest memory-tier keys sampled -- the window eviction scans\n\
+         # TYPE certus_oldest_sampled gauge\n\
+         certus_oldest_sampled {}\n\
+         # HELP certus_oldest_persisted Of those, how many are demotable (have an ssd_offset)\n\
+         # TYPE certus_oldest_persisted gauge\n\
+         certus_oldest_persisted {}\n\
+         # HELP certus_store_backpressure_events_total Reserve retries while the memory tier was momentarily full\n\
+         # TYPE certus_store_backpressure_events_total counter\n\
+         certus_store_backpressure_events_total {}\n\
+         # HELP certus_store_drops_on_full_total Stores dropped after the backpressure budget elapsed\n\
+         # TYPE certus_store_drops_on_full_total counter\n\
+         certus_store_drops_on_full_total {}\n\
+         # HELP certus_store_already_resident_total Reserves refused because the key was already cached, not for want of space\n\
+         # TYPE certus_store_already_resident_total counter\n\
+         certus_store_already_resident_total {}\n",
         snap.write_lock_contentions,
         snap.read_lock_contentions,
         used,
@@ -223,5 +253,15 @@ fn render_metrics(
         rw.write_bytes,
         rw.read_ops,
         rw.write_ops,
+        tier.evictions_blocked_by_pin,
+        tier.evictions_blocked_unpersisted,
+        tier.eviction_scans_exhausted,
+        serve.peer_pins_held,
+        serve.peer_pin_hold_us_max,
+        tier.oldest_sampled,
+        tier.oldest_persisted,
+        tier.store_backpressure_events,
+        tier.store_drops_on_full,
+        tier.store_already_resident,
     )
 }

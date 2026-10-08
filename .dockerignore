@@ -5,6 +5,14 @@
 target/
 deps/spdk/
 deps/spdk-build/
+# Same reasoning as SPDK: build_zyre.sh clones and builds these inside the image.
+# A host copy is worse than useless -- the script sees "Already cloned", skips the
+# clone, and cmake then refuses the stale build/CMakeCache.txt because it was
+# generated against the host checkout's path rather than /build/....
+deps/libzmq/
+deps/czmq/
+deps/zyre/
+deps/zyre-build/
 **/__pycache__/
 **/*.pyc
 **/.pytest_cache/

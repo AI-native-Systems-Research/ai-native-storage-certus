@@ -142,7 +142,10 @@ Do not fall back to the older section-`group:`/no-NV format.
 - Under-claim coverage; a bundle you are unsure is complete is flagged incomplete, not padded.
 
 ## Procedure
-1. List the `I<component>` public methods → fixes N and the empty bundles.
+1. List the `I<component>` public methods → fixes N and the empty bundles. Read them FROM THE TRAIT in
+   `components/interfaces/src/` and write them to the bundle as `interface_methods:`. Properties may also
+   attach to other entry points (Drop, Default, inherent helpers), but the method headline counts only the
+   trait's methods: memory-tier attached properties to 22 names against a 17-method trait.
 2. Run `extract-verifiable-properties` on spec and on code as two BLIND passes (each sees only its own
    artifact) → `spec_properties.yaml` and `code_properties.yaml`. Do NOT use prior verif artifacts / an
    older inventory as a source.
@@ -181,12 +184,76 @@ depending on an agent being careful:
 Measured outcome doing it this way: 0 orphans, 0 double-use, 0 ghosts across 147 input ids, and the
 assembly step cannot misplace a property because it never makes a judgement.
 
-**`origin: divergent` is the highest-value output of this whole role — never smooth it away.** When
-both sides speak to the same obligation but say materially different things, keep ONE obligation and
-record both readings in `divergence_note`. On that component 9 of 95 were divergent and **8 became
-machine-proved defects**; collapsing them into an agreed statement would have destroyed every one of
-those findings. Likewise never drop a property to make the two lists agree: M may exceed either input
-(here 95 > 88 > 59), and 36 were code-only — real guarantees the specification never mentions.
+## LEVEL 1 — the spec<->code sync check (mandatory, after reconciliation; 2026-10-04)
+
+Reconciliation produces the unified records. **Level 1 then CHECKS them**, read-only, before anything
+reaches a prover. It is not enough to trust the origin labels: on extent-manager the reconciler produced
+**0 divergent** records — the disagreements had been merged into "agreed" ones — and the provers then
+rediscovered them as 75 refutations, 28 of them one input-range mismatch. Three checks, in order:
+
+**1. Merge check.** For every `origin: spec+code` record, read its two sides (`paired_from`). If the
+merge had to NARROW, BROADEN or REWORD either side's claim to make them agree — a scope narrowed to some
+callers, "at most" vs "fewer than", one side naming an error the other does not — the record is
+`origin: divergent`, with both readings in `divergence_note`. A `delta_note` is only for a difference of
+wording with identical meaning. *If you would need to explain the difference to a reviewer, it is divergent.*
+
+**2. Input-range check, both directions.** List every constraint the SPECIFICATION places on inputs,
+configuration and state (validation lists such as "format() MUST validate …", allowed values, ranges,
+maxima, alignment, power-of-two) with its pointer. Independently list every assumption the CODE makes
+about them — a mask `x & !(n-1)` assumes a power of two, a fixed buffer assumes a maximum, a division
+assumes non-zero, an `as u32` assumes a range — with file:line. Compare:
+- the spec constrains a value and the code never enforces it (dpm: sector size 512 or 4096, unchecked), or
+- the code assumes something the spec neither requires nor validates (extent-manager: `buddy.rs:136`
+  assumes a power-of-two sector size; FR-002 only requires `sector_size > 0`).
+Each mismatch is ONE `domain_discordances:` entry (top level of the bundle). On the pages it is called a
+**code assumption** (Cornel, 2026-10-07): an assumption the code makes that the specification does not state.
+It is NOT a fault - the spec may deliberately leave room - and finding it is the value. Its `assume` is the
+plain-English assumption ("a pool never allocates more than 2^32 - 1 slots"); the page marks it a **range**
+(numeric limit) or a **condition** (setup/state requirement: not null, connected, no duplicate key) from
+`assume_rust`, or from an explicit `assumption_kind:` field. Only a counterexample INSIDE the assumption is a defect.
+A proof must never assume one silently: EPO's September proofs did, and fresh proofs exposed it.
+```yaml
+domain_discordances:
+  - spec_says: format() must validate only that the sector size is greater than zero (FR-002)
+    code_does: the buddy allocator assumes the sector size is a power of two (buddy.rs:136)
+    spec_pointers: [FR-002]
+    code_pointers: [buddy.rs:136, lib.rs:<where format takes the value>]
+    methods: [format, recover, ...]
+    assume: the sector size is a power of two       # plain English: the narrower range both sides meet
+    assume_rust: "sector_size.is_power_of_two()"    # how a proof states it, on the entry input
+```
+
+**3. Filtering.** `gate/level1.py` then writes `discordances.yaml` and excludes from level 2 every record
+that IS a discordance (divergent, spec-only, from either side). Records that merely DEPEND on a
+domain discordance are kept, and level 2 proves them **under its `assume`** — stated on the page as
+"verified for <assume>" — so one mismatch is reported once, at level 1, instead of being rediscovered as
+dozens of refutations. A level-2 refutation that disappears under a level-1 assumption was never a level-2
+finding.
+
+## Verification scope — what goes to the provers (corrected 2026-10-04)
+
+**Only `origin: spec+code` and `origin: code-only` records are verification obligations.** They are
+what the component is meant to do, according to both sides or according to the code's own documented
+intent. **`divergent` and `spec-only` records are kept in the YAML as extraction data — both readings,
+with sources — and are NOT sent to the provers, NOT scored and NOT shown on the page.** Whether the spec
+or the code should change is spec<->code synchronisation, which belongs to whoever owns that, not to
+formal verification.
+
+**Why this was corrected — measured, and it is the most important lesson in this skill.** From
+2026-09-28 this section said "`origin: divergent` is the highest-value output … 8 became machine-proved
+defects", and the full union went to the provers. Within days the same components we had verified for
+weeks with no defects produced tens of "refuted" properties: **43 of 46 across four components came from
+divergent, spec-only or hazard-worded records.** A divergent record states one side's version of
+behaviour the other side does differently; "refuting" it only re-discovers a disagreement the
+extraction had already found. It is not a verification result, and it buried the one real defect in
+pages nobody could read. Restricted to the scope above, the same proofs give: disk-partition-manager
+0 refuted (4/4 methods), eviction-policy-session-lists 0 (9/9), memory-tier 3 (8/17; 5/17 on Sept 22).
+
+A **defect is pronounced only after verification**, never by extraction: an in-scope obligation that the
+tools refute, triaged to a root cause by a human or the repair agent. It reaches the page once fixed.
+
+Never drop a record to make the two lists agree: M may exceed either input, and code-only records are
+real guarantees the specification never mentions. Keeping a record and verifying it are different things.
 
 ## Anti-patterns
 - ❌ Eyeballing a bundle size instead of counting ids. (Defect #4.)
@@ -194,6 +261,13 @@ those findings. Likewise never drop a property to make the two lists agree: M ma
 - ❌ Extracting from spec+code but not walking the whole spec, so FRs go uncovered. (Defect #2.)
 - ❌ Letting "what a prover can do" shape which properties exist. (Defect #3 — contamination.)
 - ❌ Dropping a spec-only/code-only property because it is inconvenient.
+- ❌ Sending a `divergent` or `spec-only` record to the provers. It can only re-discover the
+  disagreement already recorded; 43 of 46 published "refutations" were exactly this (2026-10-04).
+- ❌ Writing a record as a HAZARD ("a new entry's bytes can still hold the previous occupant's data").
+  Every record states what the code SHOULD do ("a new entry starts cleared"); a proof then means the
+  requirement holds. memory-tier had 22 hazard records, for which "proved" meant "the bug is real".
+- ❌ A strict relation where the code keeps a non-strict one ("always smaller" for `<=`). It refutes on
+  wording alone (memory-tier MT-INV-SIZE-ACCOUNTING).
 - ❌ Re-extracting differently inside Role 2 or Role 3. Extraction happens once, here.
 
 ## Routing

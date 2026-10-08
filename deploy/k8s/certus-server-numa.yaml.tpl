@@ -2,14 +2,53 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: certus
+  name: %%CERTUS_NAMESPACE%%
+---
+# The live remote-lookup switch.
+#
+# The pod spec REFERENCES this key rather than carrying the value, so the group
+# is neither baked into the image (the Dockerfile never mentions it; the binary
+# only reads the variable) nor embedded in the workload spec. Flip it with
+#
+#   kubectl -n %%CERTUS_NAMESPACE%% edit configmap certus-config
+#   kubectl -n %%CERTUS_NAMESPACE%% rollout restart daemonset -l app=certus-server
+#
+# A ConfigMap consumed via `env` is injected at pod creation, so it does not
+# auto-restart pods -- the explicit rollout above is required, which is what you
+# want between two measurement runs anyway.
+#
+# Missing key or missing ConfigMap mean remote-lookup is off: the variable is
+# unset and each instance forms its own isolated single-node group. A key that is
+# present but BLANK is not the same thing -- it is a startup error, because the
+# only ways to produce it are a broken template substitution or config pipeline,
+# where the intent was to join a cluster.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: certus-config
+  namespace: %%CERTUS_NAMESPACE%%
+  labels:
+    app: certus-server
+# A flow mapping so the renderer can emit a varying set of keys in one
+# substitution.
+#
+# rl-group must be ABSENT to mean "off", not blank: absence is handled by the
+# keyRef's `optional: true` -- pure Kubernetes semantics, with no dependence on
+# how the server treats a blank value -- whereas a blank value is a startup
+# error, because it can only come from a broken substitution or config pipeline
+# and silently isolating would turn a remote-lookup-ON run into an OFF one that
+# looks like "remote-lookup did not help".
+#
+# format-on-start is always emitted. Its default discards cached data, and that
+# should be visible in the manifest rather than implied by a missing key.
+data: %%CERTUS_CONFIGMAP_DATA%%
 ---
 # NUMA 0 DaemonSet (cluster-wide)
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: certus-server-numa0
-  namespace: certus
+  namespace: %%CERTUS_NAMESPACE%%
   labels:
     app: certus-server
     app.kubernetes.io/instance: numa0
@@ -66,18 +105,127 @@ spec:
           for dev in $(cat /config/drives.txt | tr ',' ' '); do
             ARGS="$ARGS --device-pci $dev"
           done
-          exec certus-server-yaml $ARGS --shm-path ${CERTUS_SHM_PATH} --channels 32 --memory-tier-size 4G
+          # Pin this instance to the GPU in its own NUMA domain.
+          #
+          # Otherwise the server serves a client on a non-zero host GPU through
+          # device 0 by peer access across the socket interconnect. It trusts the
+          # client's reported gpu_device_id, which is always 0 because the device
+          # plugin exposes only the assigned GPU inside a pod, so it selects the
+          # wrong device and CUDA_IPC_MEM_LAZY_ENABLE_PEER_ACCESS makes that
+          # succeed rather than fail. Measured on an A30 pair: 0.05 GiB/s that way
+          # versus 2.10 GiB/s same-device, a 43x penalty. Making the NUMA-local
+          # GPU the only visible one makes the client's "0" true.
+          #
+          # Derived, not hardcoded: NUMA id and CUDA ordinal are not the same
+          # mapping on every node. A two-GPU node may have GPU0 on NUMA 0 and GPU1
+          # on NUMA 1, so ordinal == NUMA id; a one-GPU node whose GPU sits on
+          # NUMA 1 has it as ordinal 0, where that equality breaks. A UUID
+          # sidesteps ordinals entirely. An instance with no NUMA-local GPU
+          # (peer-only) leaves this unset and is unaffected.
+          if [ -z "${CUDA_VISIBLE_DEVICES:-}" ]; then
+            for pair in $(nvidia-smi --query-gpu=uuid,pci.bus_id --format=csv,noheader | tr -d '[:blank:]'); do
+              uuid=${pair%%,*}
+              bdf=${pair#*,}
+              sysfs=$(printf '%s' "$bdf" | sed 's/^0000//' | tr 'A-Z' 'a-z')
+              if [ "$(cat /sys/bus/pci/devices/$sysfs/numa_node 2>/dev/null)" = "$CERTUS_NUMA_ID" ]; then
+                export CUDA_VISIBLE_DEVICES="$uuid"
+                echo "certus: pinned to NUMA-$CERTUS_NUMA_ID GPU $bdf ($uuid)"
+                break
+              fi
+            done
+            if [ -z "${CUDA_VISIBLE_DEVICES:-}" ]; then
+              echo "certus: no GPU in NUMA domain $CERTUS_NUMA_ID; CUDA_VISIBLE_DEVICES left unset"
+            fi
+          fi
+          # Matches the hand-started host-mode instances these replace, so offload
+          # measurements stay comparable across the move: 16 channels and a 30G
+          # DRAM tier rather than the template's old 32/4G. --metrics-port is new;
+          # without it the DaemonSets expose nothing to scrape and there is no way
+          # to see tier occupancy or remote-lookup hits.
+          # Default is on. Absent or unrecognised counts as "yes": the intent is a
+          # clean slate per restart, and a typo should not silently leave a run
+          # reading the previous run's cache. Writes certus's superblock and
+          # extent bitmap only -- not a device-level format.
+          case "${CERTUS_FORMAT_ON_START:-true}" in
+            false|False|FALSE|0|no|No|NO)
+              echo "certus: format-on-start disabled; recovering the existing on-disk layout" ;;
+            *)
+              ARGS="$ARGS --format"
+              echo "certus: writing a fresh certus superblock (discards cached extents; set format-on-start=false to keep them)" ;;
+          esac
+          # Pin to the CPUs of this instance's own NUMA domain.
+          #
+          # The hand-started host-mode instances this replaces ran pinned
+          # (0-15,32-47 for NUMA 0, 16-31,48-63 for NUMA 1) and the DaemonSets
+          # did not, so their poller and worker threads could land on either
+          # socket. That matters twice over: every transfer stages GPU->DRAM->SSD,
+          # so a thread on the wrong socket drags the staging buffer across the
+          # interconnect; and DPDK's EAL allocates hugepages on the socket its
+          # threads are running on, so an unpinned instance can take its 34Gi
+          # from the other NUMA node. Two unpinned instances drawing from the same
+          # one then want 68Gi, which will not fit a NUMA domain smaller than that
+          # -- so pinning also keeps the instances out of each other's hugepages.
+          #
+          # taskset rather than numactl: numactl reports "No NUMA available"
+          # unless it can read the topology, and the cpulist is right there in the
+          # sysfs mount. This matches the host-mode processes, which pinned CPUs
+          # but left memory unbound (Mems_allowed_list 0-1) -- hugepage locality
+          # follows from where the threads run rather than from an explicit
+          # --membind, so a shortfall on the local node degrades instead of
+          # failing outright.
+          CERTUS_PIN=""
+          CERTUS_CPUS=$(cat /sys/devices/system/node/node${CERTUS_NUMA_ID}/cpulist 2>/dev/null)
+          if [ -n "$CERTUS_CPUS" ]; then
+            CERTUS_PIN="taskset -c $CERTUS_CPUS"
+            echo "certus: pinning to NUMA-$CERTUS_NUMA_ID cpus $CERTUS_CPUS"
+          else
+            echo "certus: no cpulist for NUMA domain $CERTUS_NUMA_ID; running unpinned"
+          fi
+          exec $CERTUS_PIN certus-server-yaml $ARGS --shm-path ${CERTUS_SHM_PATH} --channels 16 --memory-tier-size 30G --metrics-port ${CERTUS_METRICS_PORT}
         # Each NUMA instance publishes a DISTINCT mailbox on the shared host
         # /dev/shm; a client selects an instance by pointing at its shm path.
         env:
         - name: CERTUS_SHM_PATH
           value: "/dev/shm/certus-shmq-numa0"
+        # hostNetwork is on, so this binds on the node; the two instances
+        # must differ. Same ports the host-mode servers used.
+        - name: CERTUS_METRICS_PORT
+          value: "9400"
         - name: CERTUS_NUMA_ID
           value: "0"
+        # Resolved from the certus-config ConfigMap, not from this spec -- see the
+        # ConfigMap above for the switch and how to flip it. optional: true means
+        # a missing ConfigMap or key leaves the variable unset, which is the
+        # "remote-lookup off" case.
+        - name: CERTUS_RL_GROUP
+          valueFrom:
+            configMapKeyRef:
+              name: certus-config
+              key: rl-group
+              optional: true
+        # Re-initialise certus's on-disk layout at startup -- the superblock and
+        # extent bitmap that ExtentManager::format writes. This is certus
+        # metadata only: it is not an NVMe format or a secure erase, and it
+        # discards previously cached extents rather than touching the device.
+        # Default is on, because this deployment is for testing and a clean slate
+        # per restart beats a cache that outlived a rollout. Set
+        # format-on-start to "false" to keep cached data across restarts.
+        - name: CERTUS_FORMAT_ON_START
+          valueFrom:
+            configMapKeyRef:
+              name: certus-config
+              key: format-on-start
+              optional: true
         resources:
           limits:
             rdma/rdma_shared_device_a: 1
-            hugepages-1Gi: 4Gi
+            # Tier size plus DPDK EAL/DMA overhead, not the tier size alone:
+            # setup-host.sh documents the usable tier as ~(hugepages - 3)GiB, so a
+            # 30G tier needs >=33. Requesting exactly 30Gi made every instance die
+            # on "spdk_zmalloc failed (insufficient hugepages?)" even with 64Gi free
+            # per NUMA node, because the cgroup limit -- not host availability -- was
+            # the binding constraint.
+            hugepages-1Gi: 34Gi
           requests:
             memory: 1Gi
         securityContext:
@@ -94,6 +242,10 @@ spec:
           mountPath: /dev/infiniband
         - name: dev-shm
           mountPath: /dev/shm
+        # Read-only, for the NUMA->GPU derivation above.
+        - name: sysfs
+          mountPath: /sys
+          readOnly: true
       volumes:
       - name: config
         emptyDir: {}
@@ -117,14 +269,14 @@ spec:
           path: /dev/shm
           type: Directory
       nodeSelector:
-        certus.ai/worker: "true"
+        %%CERTUS_NODE_SELECTOR_KEY%%: "%%CERTUS_NODE_SELECTOR_VALUE%%"
 ---
 # NUMA 1 DaemonSet (cluster-wide)
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: certus-server-numa1
-  namespace: certus
+  namespace: %%CERTUS_NAMESPACE%%
   labels:
     app: certus-server
     app.kubernetes.io/instance: numa1
@@ -181,18 +333,127 @@ spec:
           for dev in $(cat /config/drives.txt | tr ',' ' '); do
             ARGS="$ARGS --device-pci $dev"
           done
-          exec certus-server-yaml $ARGS --shm-path ${CERTUS_SHM_PATH} --channels 32 --memory-tier-size 4G
+          # Pin this instance to the GPU in its own NUMA domain.
+          #
+          # Otherwise the server serves a client on a non-zero host GPU through
+          # device 0 by peer access across the socket interconnect. It trusts the
+          # client's reported gpu_device_id, which is always 0 because the device
+          # plugin exposes only the assigned GPU inside a pod, so it selects the
+          # wrong device and CUDA_IPC_MEM_LAZY_ENABLE_PEER_ACCESS makes that
+          # succeed rather than fail. Measured on an A30 pair: 0.05 GiB/s that way
+          # versus 2.10 GiB/s same-device, a 43x penalty. Making the NUMA-local
+          # GPU the only visible one makes the client's "0" true.
+          #
+          # Derived, not hardcoded: NUMA id and CUDA ordinal are not the same
+          # mapping on every node. A two-GPU node may have GPU0 on NUMA 0 and GPU1
+          # on NUMA 1, so ordinal == NUMA id; a one-GPU node whose GPU sits on
+          # NUMA 1 has it as ordinal 0, where that equality breaks. A UUID
+          # sidesteps ordinals entirely. An instance with no NUMA-local GPU
+          # (peer-only) leaves this unset and is unaffected.
+          if [ -z "${CUDA_VISIBLE_DEVICES:-}" ]; then
+            for pair in $(nvidia-smi --query-gpu=uuid,pci.bus_id --format=csv,noheader | tr -d '[:blank:]'); do
+              uuid=${pair%%,*}
+              bdf=${pair#*,}
+              sysfs=$(printf '%s' "$bdf" | sed 's/^0000//' | tr 'A-Z' 'a-z')
+              if [ "$(cat /sys/bus/pci/devices/$sysfs/numa_node 2>/dev/null)" = "$CERTUS_NUMA_ID" ]; then
+                export CUDA_VISIBLE_DEVICES="$uuid"
+                echo "certus: pinned to NUMA-$CERTUS_NUMA_ID GPU $bdf ($uuid)"
+                break
+              fi
+            done
+            if [ -z "${CUDA_VISIBLE_DEVICES:-}" ]; then
+              echo "certus: no GPU in NUMA domain $CERTUS_NUMA_ID; CUDA_VISIBLE_DEVICES left unset"
+            fi
+          fi
+          # Matches the hand-started host-mode instances these replace, so offload
+          # measurements stay comparable across the move: 16 channels and a 30G
+          # DRAM tier rather than the template's old 32/4G. --metrics-port is new;
+          # without it the DaemonSets expose nothing to scrape and there is no way
+          # to see tier occupancy or remote-lookup hits.
+          # Default is on. Absent or unrecognised counts as "yes": the intent is a
+          # clean slate per restart, and a typo should not silently leave a run
+          # reading the previous run's cache. Writes certus's superblock and
+          # extent bitmap only -- not a device-level format.
+          case "${CERTUS_FORMAT_ON_START:-true}" in
+            false|False|FALSE|0|no|No|NO)
+              echo "certus: format-on-start disabled; recovering the existing on-disk layout" ;;
+            *)
+              ARGS="$ARGS --format"
+              echo "certus: writing a fresh certus superblock (discards cached extents; set format-on-start=false to keep them)" ;;
+          esac
+          # Pin to the CPUs of this instance's own NUMA domain.
+          #
+          # The hand-started host-mode instances this replaces ran pinned
+          # (0-15,32-47 for NUMA 0, 16-31,48-63 for NUMA 1) and the DaemonSets
+          # did not, so their poller and worker threads could land on either
+          # socket. That matters twice over: every transfer stages GPU->DRAM->SSD,
+          # so a thread on the wrong socket drags the staging buffer across the
+          # interconnect; and DPDK's EAL allocates hugepages on the socket its
+          # threads are running on, so an unpinned instance can take its 34Gi
+          # from the other NUMA node. Two unpinned instances drawing from the same
+          # one then want 68Gi, which will not fit a NUMA domain smaller than that
+          # -- so pinning also keeps the instances out of each other's hugepages.
+          #
+          # taskset rather than numactl: numactl reports "No NUMA available"
+          # unless it can read the topology, and the cpulist is right there in the
+          # sysfs mount. This matches the host-mode processes, which pinned CPUs
+          # but left memory unbound (Mems_allowed_list 0-1) -- hugepage locality
+          # follows from where the threads run rather than from an explicit
+          # --membind, so a shortfall on the local node degrades instead of
+          # failing outright.
+          CERTUS_PIN=""
+          CERTUS_CPUS=$(cat /sys/devices/system/node/node${CERTUS_NUMA_ID}/cpulist 2>/dev/null)
+          if [ -n "$CERTUS_CPUS" ]; then
+            CERTUS_PIN="taskset -c $CERTUS_CPUS"
+            echo "certus: pinning to NUMA-$CERTUS_NUMA_ID cpus $CERTUS_CPUS"
+          else
+            echo "certus: no cpulist for NUMA domain $CERTUS_NUMA_ID; running unpinned"
+          fi
+          exec $CERTUS_PIN certus-server-yaml $ARGS --shm-path ${CERTUS_SHM_PATH} --channels 16 --memory-tier-size 30G --metrics-port ${CERTUS_METRICS_PORT}
         # Each NUMA instance publishes a DISTINCT mailbox on the shared host
         # /dev/shm; a client selects an instance by pointing at its shm path.
         env:
         - name: CERTUS_SHM_PATH
           value: "/dev/shm/certus-shmq-numa1"
+        # hostNetwork is on, so this binds on the node; the two instances
+        # must differ. Same ports the host-mode servers used.
+        - name: CERTUS_METRICS_PORT
+          value: "9401"
         - name: CERTUS_NUMA_ID
           value: "1"
+        # Resolved from the certus-config ConfigMap, not from this spec -- see the
+        # ConfigMap above for the switch and how to flip it. optional: true means
+        # a missing ConfigMap or key leaves the variable unset, which is the
+        # "remote-lookup off" case.
+        - name: CERTUS_RL_GROUP
+          valueFrom:
+            configMapKeyRef:
+              name: certus-config
+              key: rl-group
+              optional: true
+        # Re-initialise certus's on-disk layout at startup -- the superblock and
+        # extent bitmap that ExtentManager::format writes. This is certus
+        # metadata only: it is not an NVMe format or a secure erase, and it
+        # discards previously cached extents rather than touching the device.
+        # Default is on, because this deployment is for testing and a clean slate
+        # per restart beats a cache that outlived a rollout. Set
+        # format-on-start to "false" to keep cached data across restarts.
+        - name: CERTUS_FORMAT_ON_START
+          valueFrom:
+            configMapKeyRef:
+              name: certus-config
+              key: format-on-start
+              optional: true
         resources:
           limits:
             rdma/rdma_shared_device_a: 1
-            hugepages-1Gi: 4Gi
+            # Tier size plus DPDK EAL/DMA overhead, not the tier size alone:
+            # setup-host.sh documents the usable tier as ~(hugepages - 3)GiB, so a
+            # 30G tier needs >=33. Requesting exactly 30Gi made every instance die
+            # on "spdk_zmalloc failed (insufficient hugepages?)" even with 64Gi free
+            # per NUMA node, because the cgroup limit -- not host availability -- was
+            # the binding constraint.
+            hugepages-1Gi: 34Gi
           requests:
             memory: 1Gi
         securityContext:
@@ -209,6 +470,10 @@ spec:
           mountPath: /dev/infiniband
         - name: dev-shm
           mountPath: /dev/shm
+        # Read-only, for the NUMA->GPU derivation above.
+        - name: sysfs
+          mountPath: /sys
+          readOnly: true
       volumes:
       - name: config
         emptyDir: {}
@@ -232,7 +497,7 @@ spec:
           path: /dev/shm
           type: Directory
       nodeSelector:
-        certus.ai/worker: "true"
+        %%CERTUS_NODE_SELECTOR_KEY%%: "%%CERTUS_NODE_SELECTOR_VALUE%%"
 # NOTE: no client-facing or peer Services. The shmq control transport is a
 # node-local /dev/shm mailbox (one per NUMA instance:
 # /dev/shm/certus-shmq-numa0 and -numa1), not a network endpoint — a client

@@ -82,12 +82,14 @@ SLAB_SIZE_BYTES="${SLAB_SIZE_BYTES:-2097152}"  # offload block size — MUST mat
 #   benchmarks/kv-offload-otel-replay/build-otel.sh             # -> localhost/certus-otel-shmq-connector:latest
 # build_connector_container.sh <ver> selects the vLLM base version (FULL patch
 # tag, e.g. 0.26.0 — not a bare 0.26); `--help` lists versions.
-# Default to the 0.26 connector image, matched to the cputier server's 0.26 base
-# for backend comparability; the fix#3 clamp below (VLLM_FIX3=1, default) is
-# load-bearing on 0.26. Override IMAGE= to pin another build:
-#   IMAGE=localhost/certus-shmq-connector:vllm0.30.0 ./run-serve-certus-shmq.sh
+# Default to the 0.28 connector image. 0.29 is AVOIDED here: its LBHNC KV layout
+# breaks the shmq offload store path under concurrent load (tier never populated
+# -- promotions[->memory 0] -- so external prefix-cache hits stay ~0). 0.26-0.28
+# are clean. The fix#3 clamp below (VLLM_FIX3=1, default) is non-fatal/idempotent
+# and self-adapts to the image's vLLM. Override IMAGE= to pin another build:
+#   IMAGE=localhost/certus-shmq-connector:vllm0.29.0 ./run-serve-certus-shmq.sh
 #   IMAGE=localhost/certus-otel-shmq-connector       ./run-serve-certus-shmq.sh
-IMAGE="${IMAGE:-localhost/certus-shmq-connector:vllm0.26.0}"
+IMAGE="${IMAGE:-localhost/certus-shmq-connector:vllm0.28.0}"
 PODMAN_STORE="${PODMAN_STORE:-/mnt/certus1/podman/storage}"
 PODMAN_RUNROOT="${PODMAN_RUNROOT:-/mnt/certus1/podman/run}"
 STORE_FLAGS=(--root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT")
@@ -129,11 +131,28 @@ if [[ "$VLLM_FIX3" == "1" ]]; then
   fi
 fi
 
+# ── Live connector source overlay (debug) ──────────────────────────────────────
+# The connector is `pip install -e`-installed at /workspace/certus-shmq-connector
+# in the image, so bind-mounting a host checkout over that path makes local edits
+# (e.g. manager.py diagnostics) take effect WITHOUT rebuilding the image. Set
+# CONNECTOR_SRC to the host certus-shmq-connector/ dir to enable it, e.g.:
+#   CONNECTOR_SRC=$HOME/ai-native-storage-certus/certus-shmq-connector ./run-serve-certus-shmq.sh
+CONNECTOR_SRC="${CONNECTOR_SRC:-}"
+CONNECTOR_MOUNT=()
+if [[ -n "$CONNECTOR_SRC" ]]; then
+  if [[ -d "$CONNECTOR_SRC/certus_shmq_connector" ]]; then
+    CONNECTOR_MOUNT=(-v "${CONNECTOR_SRC}:/workspace/certus-shmq-connector:ro,z")
+    echo "[serve] overlaying connector source from ${CONNECTOR_SRC} (editable install; live edits active)"
+  else
+    echo "warning: CONNECTOR_SRC=${CONNECTOR_SRC} has no certus_shmq_connector/ subdir; not overlaying" >&2
+  fi
+fi
+
 # ── Preflight ──────────────────────────────────────────────────────────────────
 if ! command podman "${STORE_FLAGS[@]}" image exists "$IMAGE"; then
   echo "error: image '$IMAGE' not found in store ${PODMAN_STORE}." >&2
-  echo "       build the default 0.26 connector image first, e.g.:" >&2
-  echo "         certus-shmq-connector/build_connector_container.sh 0.26.0   # -> certus-shmq-connector:vllm0.26.0" >&2
+  echo "       build the default 0.28 connector image first, e.g.:" >&2
+  echo "         certus-shmq-connector/build_connector_container.sh 0.28.0   # -> certus-shmq-connector:vllm0.28.0" >&2
   echo "         bash benchmarks/kv-offload-otel-replay/build-otel.sh        # -> certus-otel-shmq-connector (set IMAGE= to use)" >&2
   echo "       (build_connector_container.sh --help lists supported vLLM versions)" >&2
   exit 1
@@ -232,6 +251,8 @@ exec command podman "${STORE_FLAGS[@]}" run --rm --pull=never \
   --device "nvidia.com/gpu=${GPU}" \
   -p "${PORT}:${PORT}" \
   -e "HF_HUB_OFFLINE=0" \
+  -e "TENSOR_PARALLEL_SIZE=${TENSOR_PARALLEL}" \
   -v "${HF_CACHE}:/root/.cache/huggingface:z" \
   "${FIX3_MOUNT[@]}" \
+  "${CONNECTOR_MOUNT[@]}" \
   "${RUN_ENTRY[@]}"

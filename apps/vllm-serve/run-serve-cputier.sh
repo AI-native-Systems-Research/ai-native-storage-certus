@@ -82,22 +82,17 @@ FS_WRITE_THREADS="${FS_WRITE_THREADS:-16}"
 # ── Container / store ────────────────────────────────────────────────────────────
 # The unified offload image (vLLM + the native tiering framework) lives in the
 # DEFAULT podman store (unlike the shmq image), so no --root/--runroot flags.
-# Default to the 0.26 FIXED image (certus-offload-fix026): vLLM 0.26.0 with the
-# vllm-fix2 deferred-finalize overlay baked in (build_cputier_container.sh run
-# with FIX_TIERING=1). fix2 stops the TieringOffloadingManager _req_state KeyError
-# that crashes the tiering path under load; it is 0.26.x-ONLY, which is why the
-# default pins 0.26 here rather than a later stock base.
+# Default to the stock 0.29 offload image (certus-offload:vllm0.29.0). fix#3 (the
+# _build_store_jobs `len(offload_keys)==len(block_ids)` assert) is already UPSTREAM
+# by 0.29. CAVEAT: the vllm-fix2 _req_state deferred-finalize overlay is 0.26.x-ONLY
+# and is NOT in this stock base, so a 0.29 run can still hit the TieringOffloading
+# manager _req_state crash under heavy load until fix2 is ported. To fall back to
+# the 0.26 fixed image, override IMAGE=:
+#   IMAGE=certus-offload-fix026 ./run-serve-cputier.sh
 #
-# Override IMAGE= to pin another build, e.g. a stock 0.30 image:
-#   IMAGE=certus-offload:vllm0.30.0 ./run-serve-cputier.sh
-# On stock 0.30 fix#3 (the _build_store_jobs `len(offload_keys)==len(block_ids)`
-# assert) is already UPSTREAM, but the fix2 _req_state overlay is NOT — so a 0.30
-# run can still hit the tiering crash under load until fix2 is verified/ported.
-#
-# Build the default with:
-#   IMAGE=certus-offload-fix026 FIX_TIERING=1 \
-#     bash benchmarks/kv-offload-replay/build_cputier_container.sh 0.26.0
-IMAGE="${IMAGE:-certus-offload-fix026}"
+# Build a stock base with:
+#   bash benchmarks/kv-offload-replay/build_cputier_container.sh 0.29.0
+IMAGE="${IMAGE:-certus-offload:vllm0.29.0}"
 
 # HF cache on the large filesystem — NOT $HOME/.cache (the /home partition is
 # small and fills up mid-download).
@@ -106,9 +101,8 @@ HF_CACHE="${HF_CACHE:-/mnt/certus1/hf-cache}"
 # ── Preflight ──────────────────────────────────────────────────────────────────
 if ! command podman image exists "$IMAGE"; then
   echo "error: image '$IMAGE' not found in the default podman store." >&2
-  echo "       build the default 0.26 fixed image first, e.g.:" >&2
-  echo "         IMAGE=certus-offload-fix026 FIX_TIERING=1 \\" >&2
-  echo "           bash benchmarks/kv-offload-replay/build_cputier_container.sh 0.26.0" >&2
+  echo "       build the default 0.29 image first, e.g.:" >&2
+  echo "         bash benchmarks/kv-offload-replay/build_cputier_container.sh 0.29.0" >&2
   exit 1
 fi
 if [[ -r /proc/meminfo ]]; then

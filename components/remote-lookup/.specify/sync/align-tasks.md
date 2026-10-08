@@ -110,3 +110,37 @@ were BACKFILLED into spec 002 (FR-006, FR-014, FR-018) and applied — see
 - [ ] No behavioral change beyond logging (frames are still ignored; no `op_id` processing; no panic).
 - [ ] `cargo build -p remote-lookup` and existing tests remain green.
 - **Owner**: remote-lookup maintainer (source/test change — out of scope for this Markdown-only spec-sync pass).
+
+## Task RL-SHUTDOWN (OPEN, Medium) — the actor aborts on SIGTERM
+
+`certus-server-yaml` reliably aborts or segfaults on SIGTERM. Cores go back to at least
+**2026-09-21**, so this is long-standing, not a regression.
+
+```
+#4  __assert_fail                      (libc)
+#5  zpoller_wait                       (libczmq.so.4)
+#6  <zyre::node::ZyreNode as IZyreNode>::try_recv
+#7  remote_lookup::actor::run
+```
+
+A SIGSEGV variant is the same race landing on a null function pointer (`#0 0x0`).
+
+**Cause.** Teardown signals every actor to stop polling before any zyre node is
+destroyed — that ordering is deliberate and documented on `signal_shutdown`, which warns
+that destroying one node while another actor is mid-`try_recv` on the shared czmq context
+trips a `zpoller` assertion. The ordering is not sufficient: the actor is *already parked
+inside* `zpoller_wait` when the signal arrives, and signalling a thread blocked in C does
+not unpark it. The node is then destroyed under a live poller.
+
+**Fix shape** (not attempted): wake the poller before destroying the node — a zyre pipe
+write, or a bounded poll timeout the loop re-checks a shutdown flag on — or JOIN the actor
+thread rather than merely signalling it.
+
+**Impact.** Shutdown-only, after any metrics scrape, so no measurement is affected. It
+went unnoticed because `stress-servers.sh stop` discards the exit status. Plausibly
+related to the `EAL: Cannot open /dev/vfio/N: Device or resource busy` restart problem the
+same script polls around, and a process supervisor will SIGKILL a server that cannot exit
+cleanly, skipping any shutdown flush.
+
+Reproduce: run a server, SIGTERM it, `coredumpctl list | grep certus-server-y`.
+

@@ -42,7 +42,16 @@ fi
 
 # --- Optional environment variables with defaults ---
 CERTUS_IMAGE="${CERTUS_IMAGE:-certus}"
-CERTUS_TAG="${CERTUS_TAG:-latest}"
+# Immutable by default. Two deployments testing different certus builds push to
+# the same repo, so a shared mutable tag like `latest` lets one overwrite the
+# other and lets a node pull the wrong build. Override for a one-off.
+CERTUS_TAG="${CERTUS_TAG:-$(git rev-parse --short HEAD 2>/dev/null || echo latest)}"
+# Cargo build selection, passed through to the Dockerfile. The defaults build the
+# full-remote profile (remote-lookup over zyre + hardware RDMA), matching
+# scripts/build-certus-full-remote-spdk.sh. Overriding CERTUS_FEATURES with just
+# "spdk" reverts to a server that accepts --rl-group but cannot remote-look-up.
+CERTUS_PROFILE="${CERTUS_PROFILE:-full-remote}"
+CERTUS_FEATURES="${CERTUS_FEATURES:-spdk,rdma,remote-lookup-rdma-initiator/rdma,remote-lookup-rdma-responder/rdma}"
 
 # --- Parse command-line arguments ---
 NO_PUSH=false
@@ -59,19 +68,21 @@ FULL_IMAGE="${CERTUS_REGISTRY}/${CERTUS_REPO}/${CERTUS_IMAGE}:${CERTUS_TAG}"
 
 # --- Build the container image ---
 echo "Building image: ${FULL_IMAGE}"
-docker build -f deploy/k8s/Dockerfile -t "${FULL_IMAGE}" .
+echo "  profile:  ${CERTUS_PROFILE}"
+echo "  features: ${CERTUS_FEATURES}"
+docker build -f deploy/k8s/Dockerfile \
+    --build-arg "CERTUS_PROFILE=${CERTUS_PROFILE}" \
+    --build-arg "CERTUS_FEATURES=${CERTUS_FEATURES}" \
+    -t "${FULL_IMAGE}" .
 
 # --- Generate k8s manifests from templates ---
-echo "Generating k8s manifests..."
-for tpl in deploy/k8s/*.yaml.tpl; do
-    out="${tpl%.tpl}"
-    sed -e "s|%%CERTUS_REGISTRY%%|${CERTUS_REGISTRY}|g" \
-        -e "s|%%CERTUS_REPO%%|${CERTUS_REPO}|g" \
-        -e "s|%%CERTUS_IMAGE%%|${CERTUS_IMAGE}|g" \
-        -e "s|%%CERTUS_TAG%%|${CERTUS_TAG}|g" \
-        "$tpl" > "$out"
-    echo "  Generated: ${out}"
-done
+# Delegated so the same substitution serves both callers, and so a deployment
+# knob can be re-stamped without coming back through an image build.
+# Deployment knobs (CERTUS_NAMESPACE, CERTUS_NODE_SELECTOR_*, CERTUS_RL_GROUP)
+# are owned by render-manifests.sh and inherited from the environment -- they are
+# deliberately not redefined here, so there is one place that defines each.
+export CERTUS_REGISTRY CERTUS_REPO CERTUS_IMAGE CERTUS_TAG
+deploy/k8s/render-manifests.sh
 
 # --- Push ---
 if [ "${NO_PUSH}" = false ]; then
