@@ -994,6 +994,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
     fn poisson_seeding_is_not_exactly_the_target() {
         // The equilibrium count of an M/G/inf population is Poisson(N), so
         // seeding exactly N would start with a variance the process does not
@@ -1018,6 +1019,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
     fn poisson_draw_has_the_right_mean_and_variance() {
         // Poisson has var = mean, which is the property the pool relies on.
         let mut r = rng::substream(3, "poisson");
@@ -1269,6 +1271,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
     fn seeding_is_reproducible_from_a_seed() {
         let snapshot = |seed: u64| {
             let mut r = rng::substream(seed, "pools");

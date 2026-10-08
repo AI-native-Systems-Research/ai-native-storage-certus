@@ -32,3 +32,14 @@ serde_json = "1"
 # cannot make. `harness = false` because Criterion supplies its own.
 name = "plan"
 harness = false
+
+[features]
+# Skips tests that exceed the per-PR time budget. OFF by default, so a
+# plain `cargo test` runs everything: a developer working on the generator
+# must not have coverage hidden from them. CI opts in explicitly.
+#
+# Deliberately a feature and not a bare #[ignore]: #[ignore] is already used
+# here for tests needing a live Certus server, an agent and a GPU, and
+# overloading it would make `--include-ignored` unable to run the slow tests
+# without also running the ones that cannot pass off-cluster.
+ci-fast = []

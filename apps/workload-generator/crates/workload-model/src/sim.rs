@@ -943,6 +943,7 @@ session_classes:
     }
 
     #[test]
+    #[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
     fn the_shipped_example_simulates() {
         // The normative input schema must run, not merely parse.
         let yaml = include_str!(
