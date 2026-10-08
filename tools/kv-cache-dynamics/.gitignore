@@ -1,0 +1,4 @@
+# Generated sweep reports and saved session transcripts
+*.html
+transcript_*.md
+__pycache__/
