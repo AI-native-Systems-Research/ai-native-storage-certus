@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+# Name is already prefixed here: this patch lives in an overlay that consumes
+# ../a30 as a resource, so kustomize has applied its namePrefix already.
+metadata:
+  name: optimized-baseline-nvidia-gpu-vllm-decode
+spec:
+  template:
+    spec:
+      # Required for CUDA IPC. The connector never ships KV bytes over the ring;
+      # it hands certus-server CUDA IPC handles and the server DMAs
+      # GPU<->DRAM<->SSD out of band. This is the k8s equivalent of the bench's
+      # `podman run --ipc=host`.
+      # WARNING: hostIPC grants this pod access to ALL host shared memory and
+      # drops the IPC namespace boundary. It is a genuine privilege expansion,
+      # not a formality.
+      hostIPC: true
+      # The pull secret has to exist in this namespace too. Create it from the
+      # same source the certus namespace's copy came from, rather than copying
+      # the live object and stripping its metadata:
+      #   kubectl create secret docker-registry artifactory-creds \
+      #     -n llm-d-quickstart \
+      #     --from-file=.dockerconfigjson="${HOME}/.docker/config.json"
+      imagePullSecrets:
+        - name: artifactory-creds
+      containers:
+        - name: modelserver
+          # Replaces ["vllm","serve"]. The container's `args` (model + flags from
+          # ../a30) are passed through untouched as "$@"; the script appends the
+          # connector flags and the runtime-derived --kv-transfer-config.
+          command: ["/certus/entrypoint-certus.sh"]
+          # Safe only because build-image-and-push.sh stamps an immutable
+          # tag by default. If you push a moving tag such as :latest, switch
+          # this to Always or the nodes will serve a stale cached layer.
+          imagePullPolicy: IfNotPresent
+          env:
+            # spec.py reads TENSOR_PARALLEL_SIZE from the ENVIRONMENT (not from
+            # --tensor-parallel-size) to size its channel-claim slice, because it
+            # must be readable in every vLLM subprocess before vLLM's own
+            # distributed state exists. Keep in sync with the arg in ../a30.
+            - name: TENSOR_PARALLEL_SIZE
+              value: "1"
+            # Per-NUMA layout: one vLLM engine per mailbox, so this is the
+            # single-replica claim baseline. These MUST become DP_SIZE=2 with a
+            # distinct DP_RANK per pod if you ever point both GPUs of a two-GPU node at
+            # one shared instance -- otherwise both engines compute the same
+            # claim slice and can collide on the non-atomic owner-word claim.
+            - name: DP_SIZE
+              value: "1"
+            - name: DP_RANK
+              value: "0"
+          volumeMounts:
+            - mountPath: /certus
+              name: certus-entrypoint
+            # Host /dev/shm is exposed at a SEPARATE path so the pod keeps its own
+            # 20Gi tmpfs /dev/shm for vLLM's internals. This is safe because
+            # ring.py attaches with a plain os.open(O_RDWR)+mmap(MAP_SHARED) on
+            # the path -- it never calls shm_open, so the mailbox does not have to
+            # live under /dev/shm inside the container.
+            - mountPath: /certus-shm
+              name: certus-mailbox
+      volumes:
+        - name: certus-entrypoint
+          configMap:
+            # Name is rewritten by kustomize to the generated hash suffix, so
+            # editing the script rolls the Deployment automatically.
+            name: certus-entrypoint
+            defaultMode: 0755
+        - name: certus-mailbox
+          hostPath:
+            path: /dev/shm
+            type: Directory
