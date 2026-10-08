@@ -325,6 +325,9 @@ def simulate(
     rng=None,
     shared_fraction=0.0,
     share_groups=1,
+    decode_tokens=0,
+    decode_step_s=0.03,
+    decode_batch=1,
 ):
     """Closed-loop event simulation over a shared, tiered LRU block cache.
 
@@ -341,6 +344,11 @@ def simulate(
     ``shared_fraction`` makes the leading fraction of each conversation's live
     context (after the prefix) identical across the sessions of its share group
     (``share_groups`` groups, sessions dealt round-robin), cached once per group.
+    ``decode_tokens`` > 0 splits each turn into a prefill (prior context +
+    ``turn_tokens`` prompt) followed by that many one-token decode steps,
+    ``decode_step_s`` apart; every step re-reads the session's whole live chain
+    (interval admission only). ``decode_batch`` simulates that many steps per
+    event, weighting their lookups accordingly, to bound event count.
     Returns aggregate reuse/occupancy/eviction stats; reuse stats exclude a
     warmup of one full concurrency wave.
     """
@@ -382,6 +390,7 @@ def simulate(
     turn_idx = {}       # sid -> next turn index to execute
     turns_total = {}    # sid -> this conversation's sampled turn count
     born = {}           # sid -> session ordinal (for warmup filtering)
+    decode_left = {}    # sid -> decode steps remaining in the current turn
 
     started = 0
 
@@ -483,6 +492,12 @@ def simulate(
     # Share-group blocks looked up / found cached (measured turns), in tokens.
     shared_lookup_tokens = 0
     shared_hit_tokens = 0
+    # Decode-stage accounting (measured sessions): each one-token step reads the
+    # whole live chain; a block missing from every tier must be recomputed.
+    decode_steps = 0
+    decode_lookup_tokens = 0
+    decode_tier_hit_tokens = [0] * ntiers
+    decode_recompute_tokens = 0
 
     # Occupancy sampled per processed turn. (Time-weighting is avoided: the
     # closed-loop drain tail — a lone session drawing a huge tail-interval gap
@@ -496,9 +511,15 @@ def simulate(
         now, sid = nxt
 
         t = turn_idx[sid]
+        decoding = decode_left.get(sid, 0) > 0
+        steps = min(decode_batch, decode_left[sid]) if decoding else 0
         prior_tokens = accum_tokens[sid]
         prior_blocks = ceil_blocks(prior_tokens)
-        new_tokens = prior_tokens + turn_tokens + (prefix_rem_tokens if t == 0 else 0)
+        if decoding:
+            added = steps        # one token per decode step
+        else:
+            added = turn_tokens + (prefix_rem_tokens if t == 0 else 0)
+        new_tokens = prior_tokens + added
         new_blocks_total = ceil_blocks(new_tokens)
 
         # Rolling window: a conversation's live private KV is its trailing
@@ -534,14 +555,26 @@ def simulate(
         fresh_blocks = fresh_priv   # shared fresh blocks are counted in `carried`
 
         measured = born[sid] >= warmup_sessions
-        if measured:
+        if decoding:
+            if measured:
+                # The first of this event's one-token steps finds what eviction
+                # left since the last event; the rest are counted after the touch.
+                decode_steps += steps
+                decode_lookup_tokens += carried * block_size * steps
+                for i in range(ntiers):
+                    decode_tier_hit_tokens[i] += ((prefix_hit[i] + shared_hit[i]
+                                                   + priv_hit[i]) * block_size)
+                decode_recompute_tokens += (carried - reused) * block_size
+        elif measured:
             lookup_tokens += carried * block_size
             shared_lookup_tokens += shared_new * block_size
             shared_hit_tokens += shared_reused * block_size
             for i in range(ntiers):
                 tier_hit_tokens[i] += ((prefix_hit[i] + shared_hit[i] + priv_hit[i])
                                        * block_size)
-        if t == 0 and measured:
+        if decoding:
+            pass
+        elif t == 0 and measured:
             first_turns += 1
             first_reused_tokens += prefix_reused * block_size
             first_recompute_tokens += (carried - reused + fresh_blocks) * block_size
@@ -569,12 +602,34 @@ def simulate(
             cache.touch_head(gsid, shared_new, now)
         cache.touch(sid, new_live - shared_new, now, priv_hit)
         cache.enforce()
+        if decoding and measured and steps > 1:
+            # Steps 2..K of a batched event re-read the chain as eviction just
+            # left it: a context larger than HBM keeps spilling its tail, so
+            # every step pays the lower-tier reads again.
+            post = [a + b + c for a, b, c in zip(
+                take(cache.chain(PREFIX_SID), prefix_blocks),
+                take(cache.chain(gsid), shared_new),
+                take(cache.chain(sid), carried - prefix_blocks - shared_new))]
+            for i in range(ntiers):
+                decode_tier_hit_tokens[i] += post[i] * block_size * (steps - 1)
+            decode_recompute_tokens += ((carried - sum(post)) * block_size
+                                        * (steps - 1))
         for i, tier in enumerate(cache.tiers):
             peak_blocks[i] = max(peak_blocks[i], tier.total)
         if measured:
             for i, tier in enumerate(cache.tiers):
                 occ_sum[i] += tier.total
             occ_count += 1
+
+        # Decode: queue the next step (or the turn's first) after one step time;
+        # the turn ends, and think-time starts, when the last step is done.
+        if decoding:
+            decode_left[sid] -= steps
+        elif decode_tokens:
+            decode_left[sid] = decode_tokens
+        if decode_left.get(sid, 0) > 0:
+            admit(sid, now + decode_step_s * min(decode_batch, decode_left[sid]))
+            continue
 
         turn_idx[sid] = t + 1
         if turn_idx[sid] >= turns_total[sid]:
@@ -586,6 +641,7 @@ def simulate(
             del turn_idx[sid]
             del turns_total[sid]
             del born[sid]
+            decode_left.pop(sid, None)
             retire(sid)
             if started < total_sessions:
                 spawn(now)
@@ -618,6 +674,10 @@ def simulate(
         "promoted": cache.promoted,
         "demoted": cache.demoted,
         "dropped_blocks": cache.dropped_blocks,
+        "decode_steps": decode_steps,
+        "decode_lookup_tokens": decode_lookup_tokens,
+        "decode_tier_hit_tokens": decode_tier_hit_tokens,
+        "decode_recompute_tokens": decode_recompute_tokens,
         "mean_blocks": [(o / occ_count) if occ_count else 0.0 for o in occ_sum],
         "peak_blocks": peak_blocks,
     }
@@ -646,6 +706,18 @@ def main():
                     help="new prompt tokens added per turn (default: 512)")
     ap.add_argument("--avg-gen-tokens", type=int, default=256,
                     help="generated response tokens per turn (default: 256)")
+    ap.add_argument("--decode", action="store_true",
+                    help="emulate decode: each turn prefills prior context + the "
+                         "prompt, then generates --avg-gen-tokens one token per step, "
+                         "each step re-reading the whole live context (interval "
+                         "admission only)")
+    ap.add_argument("--decode-step-s", type=float, default=0.03,
+                    help="seconds per decode step (time per output token) with "
+                         "--decode (default: 0.03)")
+    ap.add_argument("--decode-batch", type=int, default=1,
+                    help="decode steps simulated per event with --decode; >1 trades "
+                         "recency resolution for speed, lookups still counted per "
+                         "step (default: 1 = exact)")
     ap.add_argument("--num-turns", type=int, default=5,
                     help="turns per conversation when --turn-distribution is unset (default: 5)")
     ap.add_argument("--prefix-tokens", type=int, default=0,
@@ -712,6 +784,13 @@ def main():
         ap.error("--shared-fraction must be in [0, 1]")
     if args.share_groups < 1:
         ap.error("--share-groups must be >= 1")
+    if args.decode:
+        if args.admission != "interval":
+            ap.error("--decode needs --admission interval (steps are timed events)")
+        if args.decode_step_s <= 0:
+            ap.error("--decode-step-s must be > 0")
+        if args.decode_batch < 1:
+            ap.error("--decode-batch must be >= 1")
     if args.max_model_len and args.prefix_tokens >= args.max_model_len:
         ap.error("--prefix-tokens must be < --max-model-len")
 
@@ -767,6 +846,12 @@ def main():
           f"{fmt_bytes(bytes_per_block)}/block ({args.block_size} tokens)")
     print(f"Tokens added per turn: {turn_tokens} "
           f"({args.avg_prompt_tokens} prompt + {args.avg_gen_tokens} gen)")
+    if args.decode:
+        print(f"Decode: {args.avg_gen_tokens} one-token steps/turn at "
+              f"{args.decode_step_s * 1000:g} ms/step "
+              f"({args.avg_gen_tokens * args.decode_step_s:.1f} s/turn), each re-reading "
+              f"the live context" + (f"; {args.decode_batch} steps/event"
+                                     if args.decode_batch > 1 else ""))
     for name, gb, blocks in tier_cfg:
         if blocks == math.inf:
             print(f"{name + ' tier:':10s} unbounded")
@@ -833,7 +918,8 @@ def main():
         concurrency=args.concurrent_sessions,
         num_turns_fixed=args.num_turns,
         turn_sample=turn_sample,
-        turn_tokens=turn_tokens,
+        # With --decode the prefill adds only the prompt; generation is stepped.
+        turn_tokens=args.avg_prompt_tokens if args.decode else turn_tokens,
         block_size=args.block_size,
         tiers=[(name, blocks) for name, _, blocks in tier_cfg],
         window_blocks=window_blocks,
@@ -842,6 +928,9 @@ def main():
         rng=rng,
         shared_fraction=args.shared_fraction,
         share_groups=args.share_groups,
+        decode_tokens=args.avg_gen_tokens if args.decode else 0,
+        decode_step_s=args.decode_step_s,
+        decode_batch=args.decode_batch,
     )
 
     rt = stats["return_turns"]
@@ -891,6 +980,17 @@ def main():
         remaining -= hits
     miss_share = remaining / lookup * 100 if lookup else 0.0
     print(f"{'miss':6s} {remaining:>18,} {miss_share:>10.1f}%   (recomputed)\n")
+
+    dl = stats["decode_lookup_tokens"]
+    if dl:
+        print(f"--- DECODE-STAGE LOOKUPS ({stats['decode_steps']:,} measured steps) ---")
+        print(f"Context tokens read by decode steps: {dl:,}")
+        print(f"{'tier':6s} {'hit tokens':>18s} {'of reads':>11s}")
+        for (name, _, _), hits in zip(tier_cfg, stats["decode_tier_hit_tokens"]):
+            print(f"{name:6s} {hits:>18,} {hits / dl * 100:>10.3f}%")
+        rc = stats["decode_recompute_tokens"]
+        print(f"{'miss':6s} {rc:>18,} {rc / dl * 100:>10.3f}%   (evicted mid-decode, "
+              f"recomputed)\n")
 
     print("--- TIER OCCUPANCY & MOVEMENT ---")
     print(f"{'tier':6s} {'mean blocks':>12s} {'mean size':>11s} {'% cap':>6s} "

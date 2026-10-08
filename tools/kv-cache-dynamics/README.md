@@ -56,6 +56,20 @@ samples directly.
   private turns), so it is an upper bound on prefix sharing. Because a group
   chain is one LRU entity, evicting its tail breaks the hash chain of every
   deeper member — sharing can *raise* misses when the group chains don't fit.
+- **Decode emulation** (`--decode`): each turn prefills prior context + the
+  prompt, then generates `--avg-gen-tokens` one token per step,
+  `--decode-step-s` apart (default 30 ms). Steps are timed events interleaved
+  with other sessions, and every step re-reads the whole live context; those
+  reads are reported separately (*decode-stage lookups*), so prefill stats stay
+  comparable. A context larger than HBM spills its tail on every step and pays
+  lower-tier reads per token — real engines would need KV offload during
+  attention, or preempt. `--decode-batch K` simulates K steps per event (K=1
+  exact; K=16 is within ~2 points of exact on decode-read shares and ~12× faster).
+  Interval admission only.
+- **Prefill only**: only prompt + generated tokens per turn drives context
+  growth, so a prefill-only, single-output-token workload is
+  `--avg-prompt-tokens 1761 --avg-gen-tokens 1` (no `--decode`) — identical
+  prefill stats to 364 + 1398 at the same 1,762 tokens/turn.
 - **Block / prefix model**: a turn touches all of its session's live blocks, so
   they share one recency; eviction takes tail blocks of the tier's
   least-recently-used session first, so a session's chain is always laid out as
@@ -186,6 +200,10 @@ exceed the largest level (the script refuses otherwise).
 DRAM_GB=256 ./sweep_concurrency_ssd.py -o conc-dram256.html
 ```
 
+Decode emulation runs through any of the sweeps via `DECODE=1` (with
+`DECODE_STEP_S`, `DECODE_BATCH`); the report then adds a *decode-stage reads*
+chart. For example `DECODE=1 DECODE_BATCH=16 ./sweep_concurrency_ssd.py`.
+
 For the DRAM sweep, `HBM_GB`, `NUM_TURNS`, `SESSIONS`, `TURN_DIST`, `DIST` and `DRAM_SIZES` are
 overridable by env or flag; any other `run-cc131k-example.sh` variable passes
 through from the environment. Turns are fixed (`NUM_TURNS`) unless
@@ -210,6 +228,7 @@ through from the environment. Turns are fixed (`NUM_TURNS`) unless
 | `--concurrent-sessions` | 32 | Conversations active at once (held constant) |
 | `--sessions` | 2000 | Total conversations to run through the cache |
 | `--admission` | interval | Next-turn policy: `interval`, `random` or `round-robin` |
+| `--decode` / `--decode-step-s` / `--decode-batch` | off / 0.03 / 1 | Decode emulation: one-token steps re-reading the context; seconds per step; steps per event |
 | `--seed` | — | RNG seed for reproducibility |
 | `--json PATH` | — | Also write config + raw stats as JSON (used by the sweep) |
 

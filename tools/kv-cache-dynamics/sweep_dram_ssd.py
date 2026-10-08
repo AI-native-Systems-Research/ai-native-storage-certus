@@ -92,6 +92,20 @@ def run_once(env_overrides, json_path):
         return json.load(f)
 
 
+def decode_shares(result):
+    """Per-tier % of decode-step context reads, plus % recomputed; None if off."""
+    st = result["stats"]
+    reads = st.get("decode_lookup_tokens", 0)
+    if not reads:
+        return None
+    names = [t["name"] for t in result["tiers"]]
+    shares = {n: 0.0 for n in TIERS}
+    for name, hits in zip(names, st["decode_tier_hit_tokens"]):
+        shares[name] = hits / reads * 100
+    shares["miss"] = st["decode_recompute_tokens"] / reads * 100
+    return shares
+
+
 def tier_shares(result):
     """Per-tier % of looked-up prior-context tokens, plus % missed (recomputed)."""
     st = result["stats"]
@@ -483,6 +497,28 @@ dashed line is that recompute share; the solid line is the share SSD serves inst
 <p class="note">The two lines need not match exactly: without SSD a lost block also
 breaks the hash chain behind it, so recompute can exceed what SSD served.</p>"""
 
+    decode = ""
+    if all(r.get("decode") for r in rows):
+        d_series = [("HBM", "s1", [r["decode"]["HBM"] for r in rows], False),
+                    ("DRAM", "s2", [r["decode"]["DRAM"] for r in rows], False),
+                    ("SSD", "s3", [r["decode"]["SSD"] for r in rows], False),
+                    ("Recompute", "s4", [r["decode"]["miss"] for r in rows], True)]
+        d_chart = line_chart(x_labels, d_series, x_title=axis["x_title"],
+                             aria=f"Percent of decode-step context reads served by "
+                                  f"each tier versus {axis['by']}")
+        step_ms = float(a.get("decode_step_s") or 0) * 1000
+        decode = f"""
+<h2>Decode-stage reads, by {esc(axis['by'])}</h2>
+<p class="sub">Every generated token is a decode step that re-reads the session's whole
+live context ({a['avg_gen_tokens']:,} steps per turn at {step_ms:g} ms/step). Shares
+are of those context reads. A context larger than HBM spills its tail every step, so
+the lower tiers are read again on each token.</p>
+<div class="card">{legend([(n, c, d) for n, c, _, d in d_series])}{d_chart}</div>
+<p class="note">Decode simulated {a.get('decode_batch', 1)} step(s) per event; the
+prefill charts above are unaffected by decode batching. Real engines keep a running
+sequence's KV resident in HBM, so decode reads from DRAM/SSD here indicate a context
+that would need KV offload during attention (or preemption) to run at all.</p>"""
+
     trs = []
     for r in rows:
         w, wo = r["with"], r.get("without")
@@ -519,6 +555,7 @@ under BurstGPT think-times, sweeping {esc(axis['noun'])} from {esc(x_labels[0])}
 found in each tier, over all measured turns. The three lines sum to 100% minus misses.</p>
 <div class="card">{legend([(n, c, d) for n, c, _, d in tier_series])}{tier_chart}</div>
 {impact}
+{decode}
 
 <h2>Data</h2>
 <div class="card table-wrap">{table}</div>
@@ -593,7 +630,8 @@ def main(axis_key="dram", doc=None):
     args.env_used = {k: v for k, v in common.items() if k != "DIST"}
     args.env_used["DIST"] = os.path.basename(common["DIST"])
     for k in ("CONCURRENT", "SSD_GB", "PREFIX_TOKENS", "ADMISSION", "SEED",
-              "SHARED_FRACTION", "SHARE_GROUPS"):
+              "SHARED_FRACTION", "SHARE_GROUPS", "DECODE", "DECODE_STEP_S",
+              "DECODE_BATCH", "AVG_PROMPT_TOKENS", "AVG_GEN_TOKENS"):
         if k in os.environ and k != axis["env"]:
             args.env_used[k] = os.environ[k]
 
@@ -621,7 +659,8 @@ def main(axis_key="dram", doc=None):
     rows = []
     for v in values:
         r = {"x": v, "with": tier_shares(results[(v, "with")]),
-             "with_stats": results[(v, "with")]["stats"]}
+             "with_stats": results[(v, "with")]["stats"],
+             "decode": decode_shares(results[(v, "with")])}
         if not args.no_baseline:
             r["without"] = tier_shares(results[(v, "without")])
             r["without_stats"] = results[(v, "without")]["stats"]

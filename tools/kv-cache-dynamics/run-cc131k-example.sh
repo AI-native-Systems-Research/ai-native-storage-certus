@@ -72,6 +72,15 @@ PREFIX_TOKENS="${PREFIX_TOKENS:-20000}"
 SHARED_FRACTION="${SHARED_FRACTION:-0}"
 SHARE_GROUPS="${SHARE_GROUPS:-1}"
 
+# --- Decode emulation ---------------------------------------------------------
+# DECODE=1: each turn prefills prior context + the prompt, then generates
+# AVG_GEN_TOKENS one token per step (DECODE_STEP_S apart), every step re-reading
+# the whole live context. DECODE_BATCH simulates that many steps per event
+# (1 = exact; 16 is within ~2 points of exact on decode-read shares, ~12x faster).
+DECODE="${DECODE:-0}"
+DECODE_STEP_S="${DECODE_STEP_S:-0.03}"
+DECODE_BATCH="${DECODE_BATCH:-1}"
+
 # --- Admission policy ----------------------------------------------------------
 # interval (default): turns ordered by the trace's sampled think-time gaps.
 # round-robin: cycle through active sessions (LRU worst case); random: uniform.
@@ -125,6 +134,9 @@ ARGS=(
   --sessions "$SESSIONS"
   --seed "$SEED"
 )
+if [[ "$DECODE" == "1" ]]; then
+  ARGS+=(--decode --decode-step-s "$DECODE_STEP_S" --decode-batch "$DECODE_BATCH")
+fi
 if [[ -n "$TURN_DIST" ]]; then
   ARGS+=(--turn-distribution "$TURN_DIST")
 else
