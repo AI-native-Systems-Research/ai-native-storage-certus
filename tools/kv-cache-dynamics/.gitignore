@@ -1,0 +1,5 @@
+# Generated sweep reports (reports/; the bundled ones are force-added) and
+# saved session transcripts
+*.html
+transcript_*.md
+__pycache__/
