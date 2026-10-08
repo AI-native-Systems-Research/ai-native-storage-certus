@@ -1496,8 +1496,11 @@ pub fn arith_ok(st: StateModel) -> bool {
 
 /// `IMemoryTier::initialize` (`lib.rs:261-321`).
 #[requires(mt_inv(*st))]
-#[requires(st.policy.pools@ < u64::MAX@)]
-#[requires(pool_size@ > 0 ==> pool_size@ + 4096 <= usize::MAX@)]
+// J11b: D-RANGE-FR-004-4d8626 at the ONE `create_pool` call, which is reached only past the
+// `pool_size == 0` and `initialized` guards (lib.rs:262-275). The pool-size bound
+// `pool_size + 4096 <= usize::MAX` is NOT assumed: `alloc_pool` gives `b > 0`, `b % 4096 == 0`
+// and `b + pool_size <= usize::MAX`, from which it follows.
+#[requires(pool_size@ > 0 && !st.initialized ==> st.policy.pools@ < u64::MAX@)]
 #[ensures(fl_inv((^st).allocator.regions@, (^st).allocator.capacity@))]
 #[ensures(key_inv(^st))]
 #[ensures(init_inv(^st))]
@@ -1588,7 +1591,9 @@ pub fn same_state(a: StateModel, b: StateModel) -> bool {
 #[requires(mt_inv(*st))]
 #[requires(!st.initialized)]
 #[requires(st.policy.pools@ < u64::MAX@)]
-#[requires(pool_size@ > 0 && pool_size@ + 4096 <= usize::MAX@)]
+// J11b: `pool_size + 4096 <= usize::MAX` is no longer assumed -- it follows from the allocation
+// premise below (`b > 0 && b % 4096 == 0` gives `b >= 4096`, and `b + pool_size <= usize::MAX`).
+#[requires(pool_size@ > 0)]
 #[requires(forall<b: usize> a == Some(b) ==> b@ % 4096 == 0 && b@ > 0 && b@ + pool_size@ <= usize::MAX@)]
 #[ensures(a == None ==> result == Err(MtError::AllocationFailed) && ^st == *st && ^lg == *lg)]
 #[ensures(forall<b: usize> a == Some(b) ==> result == Ok(())
@@ -1614,6 +1619,7 @@ pub fn init_logged(
         // lib.rs:221-222 `Err(AllocationFailed("mmap failed"))` -- before any store
         None => return Err(MtError::AllocationFailed),
     };
+    proof_assert!(base@ >= 4096 && pool_size@ + 4096 <= usize::MAX@);
     let pool_id = policy_create_pool(&mut st.policy); // lib.rs:312
     verify_mt_init_post_flag_published_last(st, base, pool_size, pool_id); // lib.rs:314-322
     proof_assert!(fl_inv(st.allocator.regions@, st.allocator.capacity@));
@@ -2327,11 +2333,18 @@ pub fn pid_ok(st: StateModel) -> bool {
 /// method of the component performs and `.unwrap()`s
 /// (`lib.rs:270, 333, 354, 367, 428, 438, 480, 494, 506, 523, 553, 563, 572,
 /// 581, 592, 606, 613`).
-#[requires(st.poisoned || (mt_inv(*st) && arith_ok(*st)
-           && (psz@ > 0 ==> psz@ + 4096 <= usize::MAX@)))]
+// J11b: D-RANGE-FR-004-4d8626 in its per-call form -- `next_handle < MAX` only for the op that
+// reaches `track` (op 1, insert), `pools < MAX` only for the op that can reach `create_pool`
+// (op 0 with a non-zero size on a not-set-up component). No pool-size premise: `mt_initialize`
+// derives it from `alloc_pool`.
+#[requires(st.poisoned || (mt_inv(*st)
+           && (op@ == 1 ==> st.policy.next_handle@ < u64::MAX@)
+           && (op@ == 0 && psz@ > 0 && !st.initialized ==> st.policy.pools@ < u64::MAX@)))]
 #[ensures(mt_inv(*st) ==> mt_inv(^st))]
 #[ensures((^st).poisoned == st.poisoned)]
 #[ensures(mt_inv(*st) ==> slot_stable(st.slots@, (^st).slots@))]
+// J11b: while the component stays un-set-up no policy pool is created
+#[ensures(!(^st).initialized ==> (^st).policy.pools == st.policy.pools)]
 // contract exposure for chained callers (batch 1)
 #[ensures(st.initialized ==> (^st).initialized)]
 #[ensures(st.initialized ==> (^st).pool_base == st.pool_base && (^st).pool_size == st.pool_size
@@ -2497,20 +2510,19 @@ pub fn verify_mt_inv_initialize_once_only__mutant(st: &mut StateModel, sz1: usiz
 /// "Every address handed back when adding a cache entry starts on a
 /// four-kibibyte boundary, so the memory can be used directly as the source or
 /// destination of a disk transfer without any extra copying or realignment."
-/// J11: NARROWED -- NOT a classifier-A driver: it reaches `mt_insert`/`mt_initialize`, which
-/// need the policy-mirror counter bound (`next_handle`/`pools` < u64::MAX, `arith_ok`); that
-/// bound is neither a declared range nor a proved invariant.
+/// J11b (LEVEL-2 classifier-A): over an ARBITRARY reachable state (`mt_inv`), set up or not,
+/// under D-RANGE-FR-004-4d8626 at the ONE `track` call `insert` can make (`next_handle < MAX`).
+/// No `used` bound: `mt_insert` needs none (the rounded request fits a free run inside the pool,
+/// and `mt_inv`'s `init_inv` gives `base + capacity <= usize::MAX`).
 #[requires(mt_inv(*st))]
-#[requires(st.initialized)]
-#[requires(st.allocator.used@ + 4295000000 <= usize::MAX@)]
 #[requires(st.policy.next_handle@ < u64::MAX@)]
 #[ensures(forall<p: usize> result == Ok(p) ==> p@ % 4096 == 0)]
-pub fn narrowed_verify_mt_insert_post_alignment(
+pub fn verify_mt_insert_post_alignment(
     st: &mut StateModel,
     key: Key,
     size: u32,
 ) -> Result<usize, MtError> {
-    proof_assert!(st.pool_base@ % 4096 == 0);
+    proof_assert!(st.initialized ==> st.pool_base@ % 4096 == 0);
     let r = mt_insert(st, key, size);
     // the same address is handed back by every later lookup of the entry
     let g = mt_get(st, key);
@@ -2523,16 +2535,14 @@ pub fn narrowed_verify_mt_insert_post_alignment(
 /// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
 /// body) with ensures #0 negated.
 #[requires(mt_inv(*st))]
-#[requires(st.initialized)]
-#[requires(st.allocator.used@ + 4295000000 <= usize::MAX@)]
 #[requires(st.policy.next_handle@ < u64::MAX@)]
 #[ensures(!(forall<p: usize> result == Ok(p) ==> p@ % 4096 == 0))]
-pub fn narrowed_verify_mt_insert_post_alignment__mutant(
+pub fn verify_mt_insert_post_alignment__mutant(
     st: &mut StateModel,
     key: Key,
     size: u32,
 ) -> Result<usize, MtError> {
-    proof_assert!(st.pool_base@ % 4096 == 0);
+    proof_assert!(st.initialized ==> st.pool_base@ % 4096 == 0);
     let r = mt_insert(st, key, size);
     // the same address is handed back by every later lookup of the entry
     let g = mt_get(st, key);
@@ -2723,9 +2733,14 @@ pub fn verify_mt_inv_lock_poisoning_cascade__mutant(
 /// Proved by loop invariant, so it covers every reachable state from `*st`.
 #[requires(mt_inv(*st))]
 #[requires(!st.poisoned)]
-#[requires(st.policy.next_handle@ + ops@.len() + 1 < u64::MAX@)]
-#[requires(st.policy.pools@ + ops@.len() + 1 < u64::MAX@)]
-#[requires(psz@ > 0 ==> psz@ + 4096 <= usize::MAX@)]
+// J11b: D-RANGE-FR-004-4d8626, start-state form. Each op makes AT MOST ONE `track` call (only op 1,
+// insert), so at most `n = ops.len()` calls; the last is preceded by at most `k = n - 1`, i.e.
+// `next_handle + (n - 1) < MAX`, written `next_handle + n <= MAX` (vacuous for `n == 0`).
+// `create_pool` is reached only from the not-set-up state and success sets `initialized` for good
+// (failure leaves `pools` unchanged), so over the whole run there is at most ONE call: `k = 0`,
+// and none at all when the run is empty or starts set up.
+#[requires(st.policy.next_handle@ + ops@.len() <= u64::MAX@)]
+#[requires(ops@.len() > 0 && !st.initialized ==> st.policy.pools@ < u64::MAX@)]
 #[ensures(mt_inv(^st))]
 #[ensures(!(^st).poisoned)]
 #[ensures(st.initialized ==> (^st).initialized)]
@@ -2748,6 +2763,7 @@ pub fn mt_run(st: &mut StateModel, ops: &[(u8, Key, u32)], psz: usize) {
     #[invariant(!st.poisoned)]
     #[invariant(st.policy.next_handle@ <= st0.policy.next_handle@ + i@)]
     #[invariant(st.policy.pools@ <= st0.policy.pools@ + i@)]
+    #[invariant(!st.initialized ==> st.policy.pools == st0.policy.pools)]
     #[invariant(st0.initialized ==> st.initialized)]
     #[invariant(st0.initialized ==> st.pool_base == st0.pool_base && st.pool_size == st0.pool_size
                 && st.pool_id == st0.pool_id && st.policy.pools == st0.policy.pools
@@ -2989,26 +3005,39 @@ pub fn verify_mt_inv_initialized_implies_usable_pool__mutant(st: &mut StateModel
 /// matter what sequence of insertions, lookups, deletions, evictions or wipes is
 /// performed, and the capacity the component reports is always the same as the
 /// size of the memory region it actually mapped."
-/// J11: NARROWED -- NOT a classifier-A driver: it reaches `mt_insert`/`mt_initialize`, which
-/// need the policy-mirror counter bound (`next_handle`/`pools` < u64::MAX, `arith_ok`); that
-/// bound is neither a declared range nor a proved invariant.
+/// J11b (LEVEL-2 classifier-A): over ANY set-up reachable state (`mt_inv && initialized`, poisoned
+/// or not) and ANY call sequence, under D-RANGE-FR-004-4d8626 in start-state form: at most one `track` per
+/// op, so `n = ops.len()` calls, `k = n - 1` before the last: `next_handle + (n-1) < MAX`, written
+/// `next_handle + n <= MAX`. No `create_pool` is reachable (the run starts set up), so no `pools`
+/// premise; no pool-size premise (derived from `alloc_pool` inside `mt_initialize`).
 #[requires(mt_inv(*st))]
-#[requires(!st.poisoned)]
 #[requires(st.initialized)]
-#[requires(st.policy.next_handle@ + ops@.len() + 1 < u64::MAX@)]
-#[requires(st.policy.pools@ + ops@.len() + 1 < u64::MAX@)]
-#[requires(psz@ > 0 ==> psz@ + 4096 <= usize::MAX@)]
+#[requires(st.policy.next_handle@ + ops@.len() <= u64::MAX@)]
 #[ensures((^st).pool_base == st.pool_base && (^st).pool_size == st.pool_size)]
 #[ensures(result.0 == Some((st.pool_base, st.pool_size)))]
 #[ensures(result.1 == st.pool_size)]
-pub fn narrowed_verify_mt_inv_pool_base_stable(
+pub fn verify_mt_inv_pool_base_stable(
     st: &mut StateModel,
     ops: &[(u8, Key, u32)],
     psz: usize,
 ) -> (Option<(usize, usize)>, usize) {
     let info0 = mt_pool_info(st);
     proof_assert!(info0 == Some((st.pool_base, st.pool_size)));
-    mt_run(st, ops, psz);
+    // ANY call sequence through `mt_call` (each with its lock prologue; a poisoned component
+    // panics on every call and changes nothing, so no `!poisoned` premise is needed)
+    let st0 = snapshot! { *st };
+    let n = ops.len();
+    let mut i: usize = 0;
+    #[invariant(i@ <= n@)]
+    #[invariant(mt_inv(*st))]
+    #[invariant(st.initialized)]
+    #[invariant(st.pool_base == st0.pool_base && st.pool_size == st0.pool_size)]
+    #[invariant(st.policy.next_handle@ <= st0.policy.next_handle@ + i@)]
+    while i < n {
+        let (op, key, size) = ops[i];
+        let _ = mt_call(st, op, key, size, psz);
+        i += 1;
+    }
     let info = mt_pool_info(st);
     let cap = mt_capacity(st);
     (info, cap)
@@ -3017,22 +3046,33 @@ pub fn narrowed_verify_mt_inv_pool_base_stable(
 /// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
 /// body) with ensures #0 negated.
 #[requires(mt_inv(*st))]
-#[requires(!st.poisoned)]
 #[requires(st.initialized)]
-#[requires(st.policy.next_handle@ + ops@.len() + 1 < u64::MAX@)]
-#[requires(st.policy.pools@ + ops@.len() + 1 < u64::MAX@)]
-#[requires(psz@ > 0 ==> psz@ + 4096 <= usize::MAX@)]
+#[requires(st.policy.next_handle@ + ops@.len() <= u64::MAX@)]
 #[ensures(!((^st).pool_base == st.pool_base && (^st).pool_size == st.pool_size))]
 #[ensures(result.0 == Some((st.pool_base, st.pool_size)))]
 #[ensures(result.1 == st.pool_size)]
-pub fn narrowed_verify_mt_inv_pool_base_stable__mutant(
+pub fn verify_mt_inv_pool_base_stable__mutant(
     st: &mut StateModel,
     ops: &[(u8, Key, u32)],
     psz: usize,
 ) -> (Option<(usize, usize)>, usize) {
     let info0 = mt_pool_info(st);
     proof_assert!(info0 == Some((st.pool_base, st.pool_size)));
-    mt_run(st, ops, psz);
+    // ANY call sequence through `mt_call` (each with its lock prologue; a poisoned component
+    // panics on every call and changes nothing, so no `!poisoned` premise is needed)
+    let st0 = snapshot! { *st };
+    let n = ops.len();
+    let mut i: usize = 0;
+    #[invariant(i@ <= n@)]
+    #[invariant(mt_inv(*st))]
+    #[invariant(st.initialized)]
+    #[invariant(st.pool_base == st0.pool_base && st.pool_size == st0.pool_size)]
+    #[invariant(st.policy.next_handle@ <= st0.policy.next_handle@ + i@)]
+    while i < n {
+        let (op, key, size) = ops[i];
+        let _ = mt_call(st, op, key, size, psz);
+        i += 1;
+    }
     let info = mt_pool_info(st);
     let cap = mt_capacity(st);
     (info, cap)
@@ -3767,15 +3807,15 @@ pub fn verify_mt_init_post_policy_pool__mutant(st: &mut StateModel, psz: usize, 
 /// entry's own data until that entry is explicitly deleted or evicted; until then
 /// the component never moves the entry and never re-uses its memory for a
 /// different entry."
-/// J11: NARROWED -- NOT a classifier-A driver: it reaches `mt_insert`/`mt_initialize`, which
-/// need the policy-mirror counter bound (`next_handle`/`pools` < u64::MAX, `arith_ok`); that
-/// bound is neither a declared range nor a proved invariant.
+/// J11b (LEVEL-2 classifier-A): over ANY set-up reachable state holding `k` (poisoned or not:
+/// a poisoned call panics and changes nothing) and ANY call sequence, under D-RANGE-FR-004-4d8626 in start-state form: at most one `track` per loop
+/// iteration (op 1 only), at most `n = ops.len()` iterations, `k = n - 1` calls before the last:
+/// `next_handle + n <= MAX`. The loop stays set up, so `create_pool` is never reached: no `pools`
+/// premise; no pool-size premise.
 #[requires(mt_inv(*st))]
-#[requires(!st.poisoned && st.initialized)]
+#[requires(st.initialized)]
 #[requires(slot_at(st.slots@, k))]
-#[requires(st.policy.next_handle@ + ops@.len() + 1 < u64::MAX@)]
-#[requires(st.policy.pools@ + ops@.len() + 1 < u64::MAX@)]
-#[requires(psz@ > 0 ==> psz@ + 4096 <= usize::MAX@)]
+#[requires(st.policy.next_handle@ + ops@.len() <= u64::MAX@)]
 // as long as the entry is still there, the address (and size) handed out is unchanged ...
 #[ensures(result.2 ==> result.1 == result.0 && result.0 != None)]
 // ... the pool mapping itself has not moved ...
@@ -3785,7 +3825,7 @@ pub fn verify_mt_init_post_policy_pool__mutant(st: &mut StateModel, psz: usize, 
           && (^st).slots@[i].key == k && (^st).slots@[j].key != k
           ==> disj((^st).slots@[i].offset@, sl_end((^st).slots@[i]),
                    (^st).slots@[j].offset@, sl_end((^st).slots@[j])))]
-pub fn narrowed_verify_mt_inv_pointer_stable_until_freed(
+pub fn verify_mt_inv_pointer_stable_until_freed(
     st: &mut StateModel,
     k: Key,
     ops: &[(u8, Key, u32)],
@@ -3799,7 +3839,7 @@ pub fn narrowed_verify_mt_inv_pointer_stable_until_freed(
     // run ANY calls, stopping as soon as the entry has been deleted / evicted / wiped
     #[invariant(i@ <= n@)]
     #[invariant(mt_inv(*st))]
-    #[invariant(!st.poisoned && st.initialized)]
+    #[invariant(st.initialized)]
     #[invariant(st.pool_base == st0.pool_base && st.pool_size == st0.pool_size)]
     #[invariant(st.policy.next_handle@ <= st0.policy.next_handle@ + i@)]
     #[invariant(st.policy.pools@ <= st0.policy.pools@ + i@)]
@@ -3821,11 +3861,9 @@ pub fn narrowed_verify_mt_inv_pointer_stable_until_freed(
 /// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
 /// body) with ensures #1 negated.
 #[requires(mt_inv(*st))]
-#[requires(!st.poisoned && st.initialized)]
+#[requires(st.initialized)]
 #[requires(slot_at(st.slots@, k))]
-#[requires(st.policy.next_handle@ + ops@.len() + 1 < u64::MAX@)]
-#[requires(st.policy.pools@ + ops@.len() + 1 < u64::MAX@)]
-#[requires(psz@ > 0 ==> psz@ + 4096 <= usize::MAX@)]
+#[requires(st.policy.next_handle@ + ops@.len() <= u64::MAX@)]
 // as long as the entry is still there, the address (and size) handed out is unchanged ...
 #[ensures(result.2 ==> result.1 == result.0 && result.0 != None)]
 // ... the pool mapping itself has not moved ...
@@ -3835,7 +3873,7 @@ pub fn narrowed_verify_mt_inv_pointer_stable_until_freed(
           && (^st).slots@[i].key == k && (^st).slots@[j].key != k
           ==> disj((^st).slots@[i].offset@, sl_end((^st).slots@[i]),
                    (^st).slots@[j].offset@, sl_end((^st).slots@[j])))]
-pub fn narrowed_verify_mt_inv_pointer_stable_until_freed__mutant(
+pub fn verify_mt_inv_pointer_stable_until_freed__mutant(
     st: &mut StateModel,
     k: Key,
     ops: &[(u8, Key, u32)],
@@ -3849,7 +3887,7 @@ pub fn narrowed_verify_mt_inv_pointer_stable_until_freed__mutant(
     // run ANY calls, stopping as soon as the entry has been deleted / evicted / wiped
     #[invariant(i@ <= n@)]
     #[invariant(mt_inv(*st))]
-    #[invariant(!st.poisoned && st.initialized)]
+    #[invariant(st.initialized)]
     #[invariant(st.pool_base == st0.pool_base && st.pool_size == st0.pool_size)]
     #[invariant(st.policy.next_handle@ <= st0.policy.next_handle@ + i@)]
     #[invariant(st.policy.pools@ <= st0.policy.pools@ + i@)]
@@ -5475,18 +5513,18 @@ pub fn witness_mt_inv_size_accounting_nonstrict(st: &mut StateModel, ops: &[(u8,
 /// "Adding a cache entry leaves every other entry untouched: their addresses, their
 /// sizes and the bytes they hold are unchanged, none of them is removed, and the
 /// pool's total capacity stays the same."
-/// J11: NARROWED -- NOT a classifier-A driver: it reaches `mt_insert`/`mt_initialize`, which
-/// need the policy-mirror counter bound (`next_handle`/`pools` < u64::MAX, `arith_ok`); that
-/// bound is neither a declared range nor a proved invariant.
+/// J11b (LEVEL-2 classifier-A): over an ARBITRARY reachable state (`mt_inv`), under
+/// D-RANGE-FR-004-4d8626 at the ONE `track` call the single `insert` can make
+/// (`next_handle < MAX`; was `+ 1`, one too strict). `k2 != key` is the obligation's "other".
 #[requires(mt_inv(*st))]
-#[requires(st.policy.next_handle@ + 1 < u64::MAX@)]
+#[requires(st.policy.next_handle@ < u64::MAX@)]
 #[requires(k2 != key)]
 #[ensures(result.1 == result.2)]
 #[ensures(result.3 == result.4)]
 #[ensures(forall<x: Key> x != key ==> slot_at((^st).slots@, x) == slot_at(st.slots@, x))]
 #[ensures(slot_stable(st.slots@, (^st).slots@))]
 #[ensures((^st).pool_base == st.pool_base)]
-pub fn narrowed_verify_mt_insert_frame_other_entries(st: &mut StateModel, key: Key, size: u32, k2: Key)
+pub fn verify_mt_insert_frame_other_entries(st: &mut StateModel, key: Key, size: u32, k2: Key)
     -> (Result<usize, MtError>, Option<(usize, u32)>, Option<(usize, u32)>, usize, usize) {
     let p0 = mt_peek(st, k2);
     let c0 = mt_capacity(st);
@@ -5499,14 +5537,14 @@ pub fn narrowed_verify_mt_insert_frame_other_entries(st: &mut StateModel, key: K
 /// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
 /// body) with ensures #2 negated.
 #[requires(mt_inv(*st))]
-#[requires(st.policy.next_handle@ + 1 < u64::MAX@)]
+#[requires(st.policy.next_handle@ < u64::MAX@)]
 #[requires(k2 != key)]
 #[ensures(result.1 == result.2)]
 #[ensures(result.3 == result.4)]
 #[ensures(!(forall<x: Key> x != key ==> slot_at((^st).slots@, x) == slot_at(st.slots@, x)))]
 #[ensures(slot_stable(st.slots@, (^st).slots@))]
 #[ensures((^st).pool_base == st.pool_base)]
-pub fn narrowed_verify_mt_insert_frame_other_entries__mutant(st: &mut StateModel, key: Key, size: u32, k2: Key)
+pub fn verify_mt_insert_frame_other_entries__mutant(st: &mut StateModel, key: Key, size: u32, k2: Key)
     -> (Result<usize, MtError>, Option<(usize, u32)>, Option<(usize, u32)>, usize, usize) {
     let p0 = mt_peek(st, k2);
     let c0 = mt_capacity(st);
@@ -7847,19 +7885,21 @@ pub fn verify_mt_evict_for_key_post_alias__mutant(a: &mut StateModel, b: &mut St
 /// an insertion of the key that was named, because the pool is one undivided region of memory."
 /// Evict on behalf of `named`; then insert an UNRELATED key `k2` (any key absent before,
 /// `k2 != named` allowed) of any size that fits the victim's rounded run: it succeeds.
-/// J11: NARROWED -- NOT a classifier-A driver: it reaches `mt_insert`/`mt_initialize`, which
-/// need the policy-mirror counter bound (`next_handle`/`pools` < u64::MAX, `arith_ok`); that
-/// bound is neither a declared range nor a proved invariant.
+/// J11b (LEVEL-2 classifier-A): under D-RANGE-FR-004-4d8626 at the ONE `track` call (the
+/// follow-up `insert`; `evict_next_for_key` leaves `next_handle` unchanged), so `next_handle < MAX`
+/// (was `+ 1`, one too strict). The other premises are the obligation's words: an eviction
+/// happens (set up, something tracked), a later insertion of an absent key of non-zero size
+/// that fits the released run.
 #[requires(mt_inv(*st))]
 #[requires(st.initialized && st.policy.tracked@.len() > 0)]
-#[requires(st.policy.next_handle@ + 1 < u64::MAX@)]
+#[requires(st.policy.next_handle@ < u64::MAX@)]
 #[requires(!slot_at(st.slots@, k2))]
 #[requires(sz@ > 0)]
 #[requires(forall<i: Int> 0 <= i && i < st.slots@.len() && st.slots@[i].key == (st.policy.tracked@[0]).0
            ==> align_up_l(sz@) <= align_up_l(st.slots@[i].size@))]
 #[ensures(result.0 == Some((st.policy.tracked@[0]).0))]
 #[ensures(match result.1 { Ok(_) => true, Err(_) => false })]
-pub fn narrowed_verify_mt_evict_for_key_post_space_global(st: &mut StateModel, named: Key, k2: Key, sz: u32)
+pub fn verify_mt_evict_for_key_post_space_global(st: &mut StateModel, named: Key, k2: Key, sz: u32)
     -> (Option<Key>, Result<usize, MtError>) {
     proof_assert!(tracks(st.policy.tracked@, (st.policy.tracked@[0]).0));
     proof_assert!(st.slots@.len() > 0);
@@ -7877,14 +7917,14 @@ pub fn narrowed_verify_mt_evict_for_key_post_space_global(st: &mut StateModel, n
 /// body) with ensures #1 negated.
 #[requires(mt_inv(*st))]
 #[requires(st.initialized && st.policy.tracked@.len() > 0)]
-#[requires(st.policy.next_handle@ + 1 < u64::MAX@)]
+#[requires(st.policy.next_handle@ < u64::MAX@)]
 #[requires(!slot_at(st.slots@, k2))]
 #[requires(sz@ > 0)]
 #[requires(forall<i: Int> 0 <= i && i < st.slots@.len() && st.slots@[i].key == (st.policy.tracked@[0]).0
            ==> align_up_l(sz@) <= align_up_l(st.slots@[i].size@))]
 #[ensures(result.0 == Some((st.policy.tracked@[0]).0))]
 #[ensures(!(match result.1 { Ok(_) => true, Err(_) => false }))]
-pub fn narrowed_verify_mt_evict_for_key_post_space_global__mutant(st: &mut StateModel, named: Key, k2: Key, sz: u32)
+pub fn verify_mt_evict_for_key_post_space_global__mutant(st: &mut StateModel, named: Key, k2: Key, sz: u32)
     -> (Option<Key>, Result<usize, MtError>) {
     proof_assert!(tracks(st.policy.tracked@, (st.policy.tracked@[0]).0));
     proof_assert!(st.slots@.len() > 0);
@@ -7906,18 +7946,22 @@ pub fn narrowed_verify_mt_evict_for_key_post_space_global__mutant(st: &mut State
 /// From the `Default` state: capacity 0 (not 256 MiB); a zero request is refused (no fallback
 /// to the constant); after a successful set-up with `psz` and ANY later calls, capacity and
 /// pool size are exactly `psz` -- 256 MiB only if the caller asked for 256 MiB.
-/// J11: NARROWED -- NOT a classifier-A driver: it reaches `mt_insert`/`mt_initialize`, which
-/// need the policy-mirror counter bound (`next_handle`/`pools` < u64::MAX, `arith_ok`); that
-/// bound is neither a declared range nor a proved invariant.
+/// J11b (LEVEL-2 classifier-A): under D-RANGE-FR-004-4d8626 in start-state form. With `psz == 0`
+/// the driver returns before any policy call: no premise. Otherwise: `initialize` makes no `track`
+/// call and the run makes at most one per op, so `n = ops.len()` track calls, `k = n - 1` before
+/// the last: `next_handle + n <= MAX`. `create_pool` is reached only while not set up and a
+/// success sets the component up for good (a failure leaves `pools` unchanged), so the whole
+/// driver makes AT MOST ONE `create_pool` call, `k = 0`: `pools < MAX`. `tracked == []` is
+/// `mt_default`'s precondition (the obligation's "default state": nothing is tracked for an
+/// un-set-up memory tier). No pool-size premise (derived from `alloc_pool`).
 #[requires(p.tracked@.len() == 0)]
-#[requires(p.next_handle@ + ops@.len() + 2 < u64::MAX@)]
-#[requires(p.pools@ + ops@.len() + 2 < u64::MAX@)]
-#[requires(psz@ + 4096 <= usize::MAX@)]
+#[requires(psz@ > 0 ==> p.next_handle@ + ops@.len() <= u64::MAX@)]
+#[requires(psz@ > 0 ==> p.pools@ < u64::MAX@)]
 #[ensures(result.0@ == 0 && result.0@ != DEFAULT_POOL_SIZE@)]
 #[ensures(psz@ == 0 ==> result.1 == Err(MtError::InvalidSize) && result.2@ == 0)]
 #[ensures(match result.1 { Ok(_) => result.2@ == psz@ && result.3@ == psz@, Err(_) => true })]
 #[ensures(match result.1 { Ok(_) => (result.2@ == DEFAULT_POOL_SIZE@) == (psz@ == DEFAULT_POOL_SIZE@), Err(_) => true })]
-pub fn narrowed_verify_mt_inv_default_pool_size_never_applied(p: PolicyModel, psz: usize, ops: &[(u8, Key, u32)])
+pub fn verify_mt_inv_default_pool_size_never_applied(p: PolicyModel, psz: usize, ops: &[(u8, Key, u32)])
     -> (usize, Result<(), MtError>, usize, usize) {
     let mut st = mt_default(p);
     let c0 = mt_capacity(&st);
@@ -7938,14 +7982,13 @@ pub fn narrowed_verify_mt_inv_default_pool_size_never_applied(p: PolicyModel, ps
 /// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
 /// body) with ensures #2 negated.
 #[requires(p.tracked@.len() == 0)]
-#[requires(p.next_handle@ + ops@.len() + 2 < u64::MAX@)]
-#[requires(p.pools@ + ops@.len() + 2 < u64::MAX@)]
-#[requires(psz@ + 4096 <= usize::MAX@)]
+#[requires(psz@ > 0 ==> p.next_handle@ + ops@.len() <= u64::MAX@)]
+#[requires(psz@ > 0 ==> p.pools@ < u64::MAX@)]
 #[ensures(result.0@ == 0 && result.0@ != DEFAULT_POOL_SIZE@)]
 #[ensures(psz@ == 0 ==> result.1 == Err(MtError::InvalidSize) && result.2@ == 0)]
 #[ensures(!(match result.1 { Ok(_) => result.2@ == psz@ && result.3@ == psz@, Err(_) => true }))]
 #[ensures(match result.1 { Ok(_) => (result.2@ == DEFAULT_POOL_SIZE@) == (psz@ == DEFAULT_POOL_SIZE@), Err(_) => true })]
-pub fn narrowed_verify_mt_inv_default_pool_size_never_applied__mutant(p: PolicyModel, psz: usize, ops: &[(u8, Key, u32)])
+pub fn verify_mt_inv_default_pool_size_never_applied__mutant(p: PolicyModel, psz: usize, ops: &[(u8, Key, u32)])
     -> (usize, Result<(), MtError>, usize, usize) {
     let mut st = mt_default(p);
     let c0 = mt_capacity(&st);

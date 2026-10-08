@@ -1,34 +1,34 @@
-(* #"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 6608 0 6608 85 *)
+(* #"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 6646 0 6646 85 *)
 
-let%span slib = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 6609 13 6609 30
-let%span slib'0 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 6610 21 6610 25
-let%span slib'1 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 6610 27 6610 31
-let%span slib'2 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 6610 12 6610 32
-let%span slib'3 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 6611 18 6611 31
-let%span slib'4 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 6601 11 6601 22
-let%span slib'5 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 6602 11 6602 52
-let%span slib'6 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 6603 10 6603 110
-let%span slib'7 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 6604 10 6604 110
-let%span slib'8 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 6605 10 6605 67
-let%span slib'9 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 6606 10 6606 66
-let%span slib'10 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 6607 10 6607 100
-let%span slib'11 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 2119 11 2119 22
-let%span slib'12 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 2120 10 2120 33
-let%span slib'13 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 2121 10 2121 21
-let%span slib'14 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 2122 10 2122 40
-let%span slib'15 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 2123 10 2123 46
-let%span slib'16 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 2125 10 2126 76
-let%span slib'17 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 2127 10 2128 78
-let%span slib'18 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 2130 10 2130 49
-let%span slib'19 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4242 10 4242 66
-let%span slib'20 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4244 10 4245 81
-let%span slib'21 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4247 10 4248 82
+let%span slib = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 6647 13 6647 30
+let%span slib'0 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 6648 21 6648 25
+let%span slib'1 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 6648 27 6648 31
+let%span slib'2 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 6648 12 6648 32
+let%span slib'3 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 6649 18 6649 31
+let%span slib'4 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 6639 11 6639 22
+let%span slib'5 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 6640 11 6640 52
+let%span slib'6 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 6641 10 6641 110
+let%span slib'7 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 6642 10 6642 110
+let%span slib'8 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 6643 10 6643 67
+let%span slib'9 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 6644 10 6644 66
+let%span slib'10 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 6645 10 6645 100
+let%span slib'11 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 2125 11 2125 22
+let%span slib'12 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 2126 10 2126 33
+let%span slib'13 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 2127 10 2127 21
+let%span slib'14 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 2128 10 2128 40
+let%span slib'15 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 2129 10 2129 46
+let%span slib'16 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 2131 10 2132 76
+let%span slib'17 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 2133 10 2134 78
+let%span slib'18 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 2136 10 2136 49
+let%span slib'19 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4280 10 4280 66
+let%span slib'20 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4282 10 4283 81
+let%span slib'21 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4285 10 4286 82
 let%span slib'22 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 1018 8 1022 22
 let%span slib'23 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 837 16 837 69
 let%span slib'24 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 1373 8 1373 108
-let%span slib'25 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4187 8 4189 74
-let%span slib'26 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4175 16 4175 80
-let%span slib'27 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 1824 8 1839 88
+let%span slib'25 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4225 8 4227 74
+let%span slib'26 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4213 16 4213 80
+let%span slib'27 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 1830 8 1845 88
 let%span slib'28 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 864 8 865 28
 let%span slib'29 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 874 8 879 20
 let%span slib'30 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 889 8 891 82
@@ -236,7 +236,7 @@ predicate mt_inv [#"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/
   /\ key_inv st
   /\ init_inv st /\ slot_inv (view_Vec_SlotModel_Global st.slots) (UInt64.t'int st.allocator.capacity) /\ acct_ok st
 
-predicate refresh_frame [#"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 1822 0 1822 58] (a: t_StateModel) (b: t_StateModel) =
+predicate refresh_frame [#"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 1828 0 1828 58] (a: t_StateModel) (b: t_StateModel) =
   [%#slib'27] view_Vec_SlotModel_Global b.slots = view_Vec_SlotModel_Global a.slots
   /\ view_Vec_Region_Global b.allocator.regions = view_Vec_Region_Global a.allocator.regions
   /\ b.allocator.used = a.allocator.used
@@ -326,7 +326,7 @@ type t_Vec_LkEv_Global
 
 type t_LkEv = StateRead | PoolRead | PoolWrite | PoolRelease | PolicyRefresh | PolicyOther
 
-predicate no_pool_write [#"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4174 0 4174 42] (t: Seq.seq t_LkEv) =
+predicate no_pool_write [#"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4212 0 4212 42] (t: Seq.seq t_LkEv) =
   [%#slib'26] forall i: int. 0 <= i /\ i < Seq.length t -> Seq.get t i <> PoolWrite
 
 function view_Vec_LkEv_Global (self: t_Vec_LkEv_Global) : Seq.seq t_LkEv
@@ -335,7 +335,7 @@ axiom view_Vec_LkEv_Global_spec:
   forall self: t_Vec_LkEv_Global [view_Vec_LkEv_Global self]. [%#svec] Seq.length (view_Vec_LkEv_Global self)
     <= UInt64.t'int const_MAX
 
-predicate refresh_after_release [#"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4185 0 4185 50] (t: Seq.seq t_LkEv) =
+predicate refresh_after_release [#"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4223 0 4223 50] (t: Seq.seq t_LkEv) =
   [%#slib'25] forall i: int, j: int. 0 <= j
       /\ j < i /\ i < Seq.length t /\ Seq.get t i = PolicyRefresh /\ (Seq.get t j = PoolRead \/ Seq.get t j = PoolWrite)
     -> (exists m: int. j < m /\ m < i /\ Seq.get t m = PoolRelease)
@@ -360,7 +360,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let verify_mt_touch_post_order_refresh [#"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 6608 0 6608 85]
+let verify_mt_touch_post_order_refresh [#"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 6646 0 6646 85]
   (st: MutBorrow.t t_StateModel) (key: UInt64.t) (return (x: t_Vec_LkEv_Global)) =
 {[@stop_split] [@expl:verify_mt_touch_post_order_refresh requires] ([@stop_split] [@expl:verify_mt_touch_post_order_refresh requires #0] [%#slib'4] mt_inv st.current)
   /\ ([@stop_split] [@expl:verify_mt_touch_post_order_refresh requires #1] [%#slib'5] st.current.initialized

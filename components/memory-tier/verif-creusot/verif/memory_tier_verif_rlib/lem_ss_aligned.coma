@@ -1,7 +1,7 @@
-(* #"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4563 0 4563 40 *)
+(* #"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4601 0 4601 40 *)
 
-let%span slib = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4561 10 4561 17
-let%span slib'0 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4562 10 4562 33
+let%span slib = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4599 10 4599 17
+let%span slib'0 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4600 10 4600 33
 let%span slib'1 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 929 10 929 17
 let%span slib'2 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 932 8 933 91
 let%span slib'3 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 34 16 34 46
@@ -38,7 +38,7 @@ meta "select_lsinst" "all"
 
 constant s : Seq.seq t_SlotModel
 
-function lem_ss_aligned [#"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4563 0 4563 40] (s: Seq.seq t_SlotModel) : ()
+function lem_ss_aligned [#"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4601 0 4601 40] (s: Seq.seq t_SlotModel) : ()
 
 goal vc_lem_ss_aligned: if Seq.length s <= 0 then
     [@stop_split] [@expl:lem_ss_aligned ensures] [%#slib'0] ComputerDivision.mod (slot_sum s) 4096 = 0

@@ -5,7 +5,7 @@
       "vc_alloc_mmap_m": { "prover": "alt-ergo", "time": 0.027 },
       "vc_elim_Ok": { "prover": "alt-ergo", "time": 0.017 },
       "vc_init_logged": { "prover": "alt-ergo", "time": 0.027 },
-      "vc_mt_initialize_mmap": { "prover": "cvc4", "time": 0.325 }
+      "vc_mt_initialize_mmap": { "prover": "cvc4", "time": 0.497 }
     }
   }
 }

@@ -13,7 +13,7 @@
             "children": [
               { "prover": "alt-ergo", "time": 0.023 },
               { "prover": "alt-ergo", "time": 0.044 },
-              { "prover": "alt-ergo", "time": 0.047 },
+              { "prover": "alt-ergo", "time": 0.018 },
               { "prover": "alt-ergo", "time": 0.037 },
               {
                 "tactic": "split_vc",

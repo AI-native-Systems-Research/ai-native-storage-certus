@@ -6,19 +6,7 @@
       "vc_mt_run": { "prover": "alt-ergo", "time": 0.026 },
       "vc_verify_mt_inv_entry_size_narrow_field": {
         "tactic": "compute_specified",
-        "children": [
-          {
-            "tactic": "split_vc",
-            "children": [
-              { "prover": "alt-ergo", "time": 0.018 },
-              { "prover": "alt-ergo", "time": 0.025 },
-              { "prover": "z3", "time": 0.035 },
-              { "prover": "cvc4", "time": 0.159 },
-              { "prover": "alt-ergo", "time": 0.045 },
-              { "prover": "z3", "time": 0.04 }
-            ]
-          }
-        ]
+        "children": [ { "prover": "cvc4", "time": 0.851 } ]
       }
     }
   }

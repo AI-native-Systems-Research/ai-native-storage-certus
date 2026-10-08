@@ -11,9 +11,9 @@
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.029 },
+              { "prover": "alt-ergo", "time": 0.021 },
               { "prover": "alt-ergo", "time": 0.04 },
-              { "prover": "alt-ergo", "time": 0.041 },
+              { "prover": "alt-ergo", "time": 0.021 },
               null
             ]
           }

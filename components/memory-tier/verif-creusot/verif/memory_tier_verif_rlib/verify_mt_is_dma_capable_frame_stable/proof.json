@@ -7,7 +7,7 @@
       "vc_mt_run": { "prover": "alt-ergo", "time": 0.032 },
       "vc_verify_mt_is_dma_capable_frame_stable": {
         "prover": "cvc5",
-        "time": 0.118
+        "time": 0.1
       }
     }
   }

@@ -6,7 +6,7 @@
       "vc_mt_used": { "prover": "alt-ergo", "time": 0.022 },
       "vc_verify_mt_freelist_used_post": {
         "prover": "alt-ergo",
-        "time": 0.072
+        "time": 0.034
       }
     }
   }

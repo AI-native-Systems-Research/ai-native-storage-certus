@@ -8,18 +8,7 @@
       "vc_mt_run": { "prover": "alt-ergo", "time": 0.026 },
       "vc_verify_mt_inv_entry_size_positive": {
         "tactic": "compute_specified",
-        "children": [
-          {
-            "tactic": "split_vc",
-            "children": [
-              { "prover": "alt-ergo", "time": 0.023 },
-              { "prover": "alt-ergo", "time": 0.025 },
-              { "prover": "alt-ergo", "time": 0.031 },
-              { "prover": "alt-ergo", "time": 0.026 },
-              { "prover": "cvc4", "time": 0.828 }
-            ]
-          }
-        ]
+        "children": [ { "prover": "cvc5", "time": 0.793 } ]
       }
     }
   }

@@ -8,7 +8,7 @@
       "vc_mt_used": { "prover": "alt-ergo", "time": 0.026 },
       "vc_verify_mt_inv_policy_and_pool_agree": {
         "prover": "z3",
-        "time": 0.041
+        "time": 0.045
       }
     }
   }

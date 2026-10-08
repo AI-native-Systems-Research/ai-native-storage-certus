@@ -1,9 +1,9 @@
-(* #"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 6086 0 6086 34 *)
+(* #"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 6124 0 6124 34 *)
 
-let%span slib = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 6084 11 6084 21
-let%span slib'0 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 6085 10 6085 43
+let%span slib = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 6122 11 6122 21
+let%span slib'0 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 6123 10 6123 43
 let%span slib'1 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 1018 8 1022 22
-let%span slib'2 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4355 8 4362 38
+let%span slib'2 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4393 8 4400 38
 let%span slib'3 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 874 8 879 20
 let%span slib'4 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 889 8 891 82
 let%span slib'5 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 911 8 917 86
@@ -204,7 +204,7 @@ predicate mt_inv [#"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/
   /\ key_inv st
   /\ init_inv st /\ slot_inv (view_Vec_SlotModel_Global st.slots) (UInt64.t'int st.allocator.capacity) /\ acct_ok st
 
-predicate pool_inv [#"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4353 0 4353 61] (fl: t_FreeListModel) (s: Seq.seq t_SlotModel) =
+predicate pool_inv [#"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4391 0 4391 61] (fl: t_FreeListModel) (s: Seq.seq t_SlotModel) =
   [%#slib'2] fl_inv (view_Vec_Region_Global fl.regions) (UInt64.t'int fl.capacity)
   /\ slot_inv s (UInt64.t'int fl.capacity)
   /\ slot_keys_unique s
@@ -218,7 +218,7 @@ meta "select_lsinst" "all"
 
 constant st : t_StateModel
 
-function lem_mt_pool [#"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 6086 0 6086 34] (st: t_StateModel) : ()
+function lem_mt_pool [#"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 6124 0 6124 34] (st: t_StateModel) : ()
 
 goal vc_lem_mt_pool: ([%#slib] mt_inv st)
   -> ([@stop_split] [@expl:lem_mt_pool ensures] [%#slib'0] pool_inv st.allocator (view_Vec_SlotModel_Global st.slots))

@@ -980,13 +980,17 @@ properties:
   source:
   - 'spec: MT-INSERT-POST-ALIGNMENT'
   creusot:
-    note: 'LEVEL-2 NOT CREDITED (narrowed obligation): narrowed_verify_mt_insert_post_alignment -- the
-      driver calls mt_insert, which requires the policy-mirror counter bound next_handle < u64::MAX (plus
-      a used+2^32 headroom premise); that bound is neither a declared range nor a proved invariant, and
-      it is not derivable (mt_inv does not bound the policy counters, and insert/initialize increment
-      them). Making them unbounded ghost Ints was not done: the production policy uses u64 counters, so
-      the bound mirrors real code, and the change would touch the counter contracts across the crate.'
+    note: scorer re-ran `cargo creusot` from source -> Proved
     fidelity: ghost-mirror
+    evidence:
+      modules:
+      - verify_mt_insert_post_alignment
+      result: Proved
+      wall_clock_s: 13.36
+      peak_rss_mb: 506
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani:
     evidence:
       harness: verify_mt_insert_post_alignment
@@ -1265,13 +1269,17 @@ properties:
   source:
   - 'spec: MT-INSERT-FRAME-OTHER-ENTRIES'
   creusot:
-    note: 'LEVEL-2 NOT CREDITED (narrowed obligation): narrowed_verify_mt_insert_frame_other_entries --
-      the driver calls mt_insert, which requires the policy-mirror counter bound next_handle+1 < u64::MAX;
-      that bound is neither a declared range nor a proved invariant, and it is not derivable (mt_inv does
-      not bound the policy counters, and insert/initialize increment them). Making them unbounded ghost
-      Ints was not done: the production policy uses u64 counters, so the bound mirrors real code, and
-      the change would touch the counter contracts across the crate.'
+    note: scorer re-ran `cargo creusot` from source -> Proved
     fidelity: ghost-mirror
+    evidence:
+      modules:
+      - verify_mt_insert_frame_other_entries
+      result: Proved
+      wall_clock_s: 0.82
+      peak_rss_mb: 55
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani:
     evidence: null
     fidelity: null
@@ -2763,13 +2771,17 @@ properties:
   source:
   - 'spec: MT-EVICT-FOR-KEY-POST-SPACE-GLOBAL'
   creusot:
-    note: 'LEVEL-2 NOT CREDITED (narrowed obligation): narrowed_verify_mt_evict_for_key_post_space_global
-      -- the driver chains evict_next_for_key into mt_insert, which requires the policy-mirror counter
-      bound next_handle+1 < u64::MAX; that bound is neither a declared range nor a proved invariant, and
-      it is not derivable (mt_inv does not bound the policy counters, and insert/initialize increment
-      them). Making them unbounded ghost Ints was not done: the production policy uses u64 counters, so
-      the bound mirrors real code, and the change would touch the counter contracts across the crate.'
+    note: scorer re-ran `cargo creusot` from source -> Proved
     fidelity: ghost-mirror
+    evidence:
+      modules:
+      - verify_mt_evict_for_key_post_space_global
+      result: Proved
+      wall_clock_s: 0.89
+      peak_rss_mb: 56
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani:
     evidence: null
     fidelity: null
@@ -6572,13 +6584,17 @@ properties:
   - 'spec: MT-INV-POOL-BASE-STABLE'
   - 'code: MT-INV-CAPACITY-EQUALS-POOL-SIZE'
   creusot:
-    note: 'LEVEL-2 NOT CREDITED (narrowed obligation): narrowed_verify_mt_inv_pool_base_stable -- the
-      driver runs ANY call sequence (mt_run/mt_call), whose insert/initialize steps require arith_ok (next_handle/pools
-      + ops.len() + 1 < u64::MAX); that bound is neither a declared range nor a proved invariant, and
-      it is not derivable (mt_inv does not bound the policy counters, and insert/initialize increment
-      them). Making them unbounded ghost Ints was not done: the production policy uses u64 counters, so
-      the bound mirrors real code, and the change would touch the counter contracts across the crate.'
+    note: scorer re-ran `cargo creusot` from source -> Proved
     fidelity: ghost-mirror
+    evidence:
+      modules:
+      - verify_mt_inv_pool_base_stable
+      result: Proved
+      wall_clock_s: 0.83
+      peak_rss_mb: 55
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani:
     evidence: null
     fidelity: null
@@ -6629,13 +6645,17 @@ properties:
   - 'spec: MT-INV-POINTER-STABLE-UNTIL-FREED'
   - 'code: MT-INV-OFFSET-IS-THE-ONLY-IDENTITY,MT-CLEAR-INVALIDATES-ALL-POINTERS'
   creusot:
-    note: 'LEVEL-2 NOT CREDITED (narrowed obligation): narrowed_verify_mt_inv_pointer_stable_until_freed
-      -- the driver runs ANY call sequence through mt_call, which requires arith_ok (next_handle/pools
-      counter bound); that bound is neither a declared range nor a proved invariant, and it is not derivable
-      (mt_inv does not bound the policy counters, and insert/initialize increment them). Making them unbounded
-      ghost Ints was not done: the production policy uses u64 counters, so the bound mirrors real code,
-      and the change would touch the counter contracts across the crate.'
+    note: scorer re-ran `cargo creusot` from source -> Proved
     fidelity: trusted-boundary
+    evidence:
+      modules:
+      - verify_mt_inv_pointer_stable_until_freed
+      result: Proved
+      wall_clock_s: 0.92
+      peak_rss_mb: 59
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani:
     evidence: null
     fidelity: null
@@ -6850,13 +6870,17 @@ properties:
   source:
   - 'spec: MT-INV-DEFAULT-POOL-SIZE-NEVER-APPLIED'
   creusot:
-    note: 'LEVEL-2 NOT CREDITED (narrowed obligation): narrowed_verify_mt_inv_default_pool_size_never_applied
-      -- the driver calls mt_initialize (requires policy.pools < u64::MAX) and mt_run (arith_ok); that
-      bound is neither a declared range nor a proved invariant, and it is not derivable (mt_inv does not
-      bound the policy counters, and insert/initialize increment them). Making them unbounded ghost Ints
-      was not done: the production policy uses u64 counters, so the bound mirrors real code, and the change
-      would touch the counter contracts across the crate.'
+    note: scorer re-ran `cargo creusot` from source -> Proved
     fidelity: ghost-mirror
+    evidence:
+      modules:
+      - verify_mt_inv_default_pool_size_never_applied
+      result: Proved
+      wall_clock_s: 0.83
+      peak_rss_mb: 56
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani:
     evidence: null
     fidelity: null
@@ -7855,9 +7879,9 @@ run:
   creusot:
     scored_by: scorer_creusot
     command: scorer_creusot.py components/memory-tier/verif --crate-dir components/memory-tier/verif-creusot
-      --cap-seconds 60 --cap-max 300 --resume --only MT-BATCH-TOUCH-PRE,MT-CAPACITY-ERR-NOT-INITIALIZED,MT-CAPACITY-PRE,MT-CLEAR-FRAME-POOL-MEMORY,MT-CONTAINS-PRE,MT-EVICT-FOR-KEY-FRAME-KEY-IGNORED,MT-EVICT-FOR-KEY-POST-SPACE-GLOBAL,MT-EVICT-FOR-KEY-PRE,MT-EVICT-NEXT-ERR-NO-VICTIM,MT-EVICT-NEXT-FRAME-NO-ROTATION-STATE,MT-EVICT-NEXT-POST-UNTRACKED,MT-FREE-CAPACITY-POST,MT-GET-ERR-MISS,MT-INIT-ERR-DOUBLE-INIT,MT-INIT-ERR-NO-EVICTION-POLICY,MT-INSERT-FRAME-OTHER-ENTRIES,MT-INSERT-POST-ALIGNMENT,MT-INV-DEFAULT-POOL-SIZE-NEVER-APPLIED,MT-INV-FOUR-KIB-ALIGNMENT,MT-INV-NO-INTERNAL-VICTIM-SELECTION-STATE,MT-INV-OBSERVER-CONSISTENCY,MT-INV-POINTER-STABLE-UNTIL-FREED,MT-INV-POOL-BASE-STABLE,MT-IS-DMA-CAPABLE-NO-INIT-GUARD,MT-IS-DMA-CAPABLE-PRE,MT-OLDEST-KEYS-PRE,MT-PEEK-ERR-MISS,MT-PEEK-FRAME-POOL-STATE,MT-PEEK-PRE,MT-POOL-INFO-PRE,MT-RESET-TELEMETRY-POST,MT-TELEMETRY-NO-CONTENTION-WHEN-UNCONTENDED,MT-TELEMETRY-SNAPSHOT-PRE,MT-TOUCH-PRE,MT-TOUCH-SILENT-NOOP,MT-USED-PRE
-    started: '2026-10-08T16:08:49-07:00'
-    finished: '2026-10-08T16:10:14-07:00'
+      --cap-seconds 60 --cap-max 300 --resume --only MT-EVICT-FOR-KEY-POST-SPACE-GLOBAL,MT-INSERT-FRAME-OTHER-ENTRIES,MT-INSERT-POST-ALIGNMENT,MT-INV-POOL-BASE-STABLE,MT-INV-POINTER-STABLE-UNTIL-FREED,MT-INV-DEFAULT-POOL-SIZE-NEVER-APPLIED
+    started: '2026-10-08T16:49:54-07:00'
+    finished: '2026-10-08T16:50:22-07:00'
     creusot: v0.11.0-169-g9cf662ce6
     why3: Why3 platform, version 1.8.2+git
     provers:
@@ -8565,6 +8589,27 @@ domain_discordances:
   assume: no telemetry counter is at u64::MAX on entry (no wrap during the call)
   assume_rust: state.telemetry.evictions.load(Ordering::Relaxed) < u64::MAX && state.telemetry.write_lock_contentions.load(Ordering::Relaxed)
     < u64::MAX && state.telemetry.read_lock_contentions.load(Ordering::Relaxed) < u64::MAX
+- spec_says: the specification sets no limit on how many handles or pools are created
+  code_does: 'the counters are 64-bit and are incremented without an overflow check (eviction-policy model:
+    track increments next_handle, create_pool increments the pool count; verif-creusot policy_track /
+    policy_create_pool)'
+  spec_pointers:
+  - FR-004
+  - IEvictionPolicy::track
+  - IEvictionPolicy::create_pool
+  code_pointers:
+  - verif-creusot policy_track (next_handle + 1)
+  - verif-creusot policy_create_pool (pools + 1)
+  - eviction-policy-lru/src/lib.rs:43
+  methods:
+  - insert
+  - initialize
+  assume: fewer than 2^64 handles and pools are ever created
+  assume_rust: policy.next_handle < u64::MAX && policy.pools < u64::MAX  // at every policy track / create_pool
+    call
+  note: 'J11b, green''s ruling 2026-10-08: an implementation assumption the spec does not state - a finding
+    stated openly, not a defect. NOTE: the shipped LRU builds pool ids as `pools.len() as u32` (eviction-policy-lru/src/lib.rs:43),
+    so for that implementation the effective limit is 2^32 pools.'
 level1_sync_check:
   by: orchestrator-applied ~/FV/synccheck/memory-tier/synccheck.yaml (node7 reading agent, 2026-10-05),
     applied 2026-10-07
@@ -9312,3 +9357,10 @@ level2_assumptions:
   - remove
   - batch_touch
   - telemetry_snapshot
+- id: D-RANGE-FR-004-4d8626
+  assume: fewer than 2^64 handles and pools are ever created
+  assume_rust: policy.next_handle < u64::MAX && policy.pools < u64::MAX  // at every policy track / create_pool
+    call
+  methods:
+  - insert
+  - initialize

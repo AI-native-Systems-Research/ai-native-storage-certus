@@ -3,7 +3,7 @@
   "proofs": {
     "Coma": {
       "vc_len_u8": { "prover": "alt-ergo", "time": 0.026 },
-      "vc_mt_call": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_mt_call": { "prover": "alt-ergo", "time": 0.016 },
       "vc_panic_while_holding": { "prover": "alt-ergo", "time": 0.026 },
       "vc_verify_mt_inv_lock_poisoning_cascade__mutant": {
         "tactic": "compute_specified",
@@ -11,16 +11,16 @@
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.026 },
-              { "prover": "alt-ergo", "time": 0.031 },
+              { "prover": "alt-ergo", "time": 0.027 },
+              { "prover": "alt-ergo", "time": 0.028 },
               null,
-              { "prover": "alt-ergo", "time": 0.03 },
-              { "prover": "alt-ergo", "time": 0.03 },
-              { "prover": "alt-ergo", "time": 0.036 },
-              { "prover": "alt-ergo", "time": 0.05 },
-              { "prover": "alt-ergo", "time": 0.041 },
-              { "prover": "alt-ergo", "time": 0.032 },
-              { "prover": "alt-ergo", "time": 0.024 }
+              { "prover": "alt-ergo", "time": 0.024 },
+              { "prover": "alt-ergo", "time": 0.02 },
+              { "prover": "alt-ergo", "time": 0.017 },
+              { "prover": "alt-ergo", "time": 0.024 },
+              { "prover": "alt-ergo", "time": 0.028 },
+              { "prover": "alt-ergo", "time": 0.02 },
+              { "prover": "alt-ergo", "time": 0.021 }
             ]
           }
         ]

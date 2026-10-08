@@ -3,7 +3,7 @@
   "proofs": {
     "Coma": {
       "vc_init_logged": { "prover": "alt-ergo", "time": 0.027 },
-      "vc_verify_mt_inv_logger_optional": { "prover": "cvc5", "time": 0.512 }
+      "vc_verify_mt_inv_logger_optional": { "prover": "cvc5", "time": 0.367 }
     }
   }
 }

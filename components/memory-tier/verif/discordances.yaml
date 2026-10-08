@@ -4,10 +4,10 @@ level: 1
 what: 'spec<->code discordances found while reconciling the specification with the code. Each is EXCLUDED from formal
   verification (level 2). status: candidate until a test confirms it (confirmed) or shows it was a misreading (withdrawn).'
 counts:
-  discordances: 21
+  discordances: 22
   spec_and_code_differ: 15
   spec_not_found_in_code: 1
-  input_range_mismatch: 5
+  input_range_mismatch: 6
   properties_excluded_from_level2: 17
   routed_to_other_tools: 1
   reader_missed_sent_to_level2: 36
@@ -763,6 +763,28 @@ discordances:
   assume_in_level2: no telemetry counter is at u64::MAX on entry (no wrap during the call)
   assume_rust: state.telemetry.evictions.load(Ordering::Relaxed) < u64::MAX && state.telemetry.write_lock_contentions.load(Ordering::Relaxed)
     < u64::MAX && state.telemetry.read_lock_contentions.load(Ordering::Relaxed) < u64::MAX
+  excluded_properties: []
+- id: D-RANGE-FR-004-4d8626
+  name: 'Input range: fewer than 2^64 handles and pools are ever created'
+  kind: input-range-mismatch
+  methods:
+  - insert
+  - initialize
+  spec_says: the specification sets no limit on how many handles or pools are created
+  code_does: 'the counters are 64-bit and are incremented without an overflow check (eviction-policy model: track
+    increments next_handle, create_pool increments the pool count; verif-creusot policy_track / policy_create_pool)'
+  spec_pointers:
+  - FR-004
+  - IEvictionPolicy::track
+  - IEvictionPolicy::create_pool
+  code_pointers:
+  - verif-creusot policy_track (next_handle + 1)
+  - verif-creusot policy_create_pool (pools + 1)
+  - eviction-policy-lru/src/lib.rs:43
+  status: candidate
+  assume_in_level2: fewer than 2^64 handles and pools are ever created
+  assume_rust: policy.next_handle < u64::MAX && policy.pools < u64::MAX  // at every policy track / create_pool
+    call
   excluded_properties: []
 routed_to_other_tools:
 - property: MT-EVICT-NEXT-POST-LRU-ORDER

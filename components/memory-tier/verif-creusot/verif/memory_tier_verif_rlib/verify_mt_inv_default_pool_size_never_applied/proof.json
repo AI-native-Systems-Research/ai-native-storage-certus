@@ -1,0 +1,15 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_mt_capacity": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_mt_default": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_mt_initialize": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_mt_run": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_verify_mt_inv_default_pool_size_never_applied": {
+        "prover": "cvc5",
+        "time": 0.155
+      }
+    }
+  }
+}

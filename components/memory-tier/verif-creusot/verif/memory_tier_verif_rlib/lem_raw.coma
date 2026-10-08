@@ -1,10 +1,10 @@
-(* #"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4580 0 4580 33 *)
+(* #"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4618 0 4618 33 *)
 
-let%span slib = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4575 10 4575 17
-let%span slib'0 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4576 11 4576 66
-let%span slib'1 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4577 10 4577 35
-let%span slib'2 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4578 10 4578 105
-let%span slib'3 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4579 10 4579 103
+let%span slib = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4613 10 4613 17
+let%span slib'0 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4614 11 4614 66
+let%span slib'1 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4615 10 4615 35
+let%span slib'2 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4616 10 4616 105
+let%span slib'3 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4617 10 4617 103
 let%span slib'4 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 952 11 952 16
 let%span slib'5 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 953 10 953 35
 let%span slib'6 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 954 10 954 28
@@ -12,8 +12,8 @@ let%span slib'7 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/v
 let%span slib'8 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 956 10 956 34
 let%span slib'9 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 957 10 957 46
 let%span slib'10 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 958 10 958 45
-let%span slib'11 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4551 10 4551 17
-let%span slib'12 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4554 8 4555 78
+let%span slib'11 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4589 10 4589 17
+let%span slib'12 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4592 8 4593 78
 let%span slib'13 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 929 10 929 17
 let%span slib'14 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 932 8 933 91
 let%span slib'15 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 959 22 959 24
@@ -28,7 +28,7 @@ use int.Int
 
 type t_SlotModel = { key: UInt64.t; offset: UInt64.t; size: UInt32.t; handle: UInt64.t }
 
-function raw_sum [#"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4552 0 4552 40] (s: Seq.seq t_SlotModel) : int
+function raw_sum [#"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4590 0 4590 40] (s: Seq.seq t_SlotModel) : int
 
 axiom raw_sum_def: forall s: Seq.seq t_SlotModel [raw_sum s]. raw_sum s
     = ([%#slib'12] if Seq.length s <= 0 then
@@ -77,7 +77,7 @@ meta "select_lsinst" "all"
 
 constant s : Seq.seq t_SlotModel
 
-function lem_raw [#"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4580 0 4580 33] (s: Seq.seq t_SlotModel) : ()
+function lem_raw [#"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 4618 0 4618 33] (s: Seq.seq t_SlotModel) : ()
 
 goal vc_lem_raw: ([%#slib'0] forall j: int. 0 <= j /\ j < Seq.length s -> UInt32.t'int (Seq.get s j).size > 0)
   -> (if Seq.length s <= 0 then

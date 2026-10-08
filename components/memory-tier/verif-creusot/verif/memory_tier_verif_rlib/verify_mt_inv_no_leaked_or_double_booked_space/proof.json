@@ -5,7 +5,7 @@
       "vc_mt_run": { "prover": "alt-ergo", "time": 0.026 },
       "vc_verify_mt_inv_no_leaked_or_double_booked_space": {
         "prover": "z3",
-        "time": 0.126
+        "time": 0.073
       }
     }
   }

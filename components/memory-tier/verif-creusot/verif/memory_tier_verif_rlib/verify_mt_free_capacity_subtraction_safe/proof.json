@@ -8,7 +8,7 @@
       "vc_mt_run": { "prover": "alt-ergo", "time": 0.025 },
       "vc_verify_mt_free_capacity_subtraction_safe": {
         "prover": "z3",
-        "time": 0.034
+        "time": 0.042
       }
     }
   }

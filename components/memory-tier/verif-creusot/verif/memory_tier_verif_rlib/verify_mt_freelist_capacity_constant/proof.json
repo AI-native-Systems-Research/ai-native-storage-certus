@@ -8,7 +8,7 @@
       "vc_mt_run": { "prover": "alt-ergo", "time": 0.027 },
       "vc_verify_mt_freelist_capacity_constant": {
         "prover": "cvc4",
-        "time": 0.229
+        "time": 0.218
       }
     }
   }

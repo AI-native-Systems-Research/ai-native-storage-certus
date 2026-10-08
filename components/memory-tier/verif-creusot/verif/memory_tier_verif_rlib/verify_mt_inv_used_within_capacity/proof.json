@@ -7,7 +7,7 @@
       "vc_mt_used": { "prover": "alt-ergo", "time": 0.029 },
       "vc_verify_mt_inv_used_within_capacity": {
         "prover": "z3",
-        "time": 0.039
+        "time": 0.036
       }
     }
   }

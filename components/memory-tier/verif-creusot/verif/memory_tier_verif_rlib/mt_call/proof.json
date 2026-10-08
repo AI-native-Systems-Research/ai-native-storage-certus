@@ -4,7 +4,7 @@
     "Coma": {
       "vc_lock_ok": { "prover": "alt-ergo", "time": 0.026 },
       "vc_mt_batch_touch": { "prover": "alt-ergo", "time": 0.027 },
-      "vc_mt_call": { "prover": "cvc5", "time": 0.721 },
+      "vc_mt_call": { "prover": "cvc5", "time": 0.774 },
       "vc_mt_capacity": { "prover": "alt-ergo", "time": 0.027 },
       "vc_mt_clear": { "prover": "alt-ergo", "time": 0.028 },
       "vc_mt_contains": { "prover": "alt-ergo", "time": 0.027 },

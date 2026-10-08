@@ -8,7 +8,7 @@
       "vc_mt_initialize": { "prover": "alt-ergo", "time": 0.028 },
       "vc_mt_peek": { "prover": "alt-ergo", "time": 0.03 },
       "vc_mt_used": { "prover": "alt-ergo", "time": 0.028 },
-      "vc_verify_mt_init_post_ready": { "prover": "cvc5", "time": 0.149 }
+      "vc_verify_mt_init_post_ready": { "prover": "cvc5", "time": 0.14 }
     }
   }
 }

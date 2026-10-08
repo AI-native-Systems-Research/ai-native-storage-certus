@@ -8,7 +8,7 @@
       "vc_mt_insert": { "prover": "alt-ergo", "time": 0.028 },
       "vc_support_old_refute_mt_clear_post_empty": {
         "prover": "z3",
-        "time": 0.066
+        "time": 0.047
       }
     }
   }

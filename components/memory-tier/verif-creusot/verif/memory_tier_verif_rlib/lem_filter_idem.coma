@@ -1,7 +1,7 @@
-(* #"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 8579 0 8579 55 *)
+(* #"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 8622 0 8622 55 *)
 
-let%span slib = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 8577 10 8577 18
-let%span slib'0 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 8578 10 8578 57
+let%span slib = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 8620 10 8620 18
+let%span slib'0 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 8621 10 8621 57
 let%span slib'1 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 1389 10 1389 18
 let%span slib'2 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 1392 8 1394 61
 let%span slib'3 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 837 16 837 69
@@ -43,7 +43,7 @@ constant ks : Seq.seq UInt64.t
 
 constant s : Seq.seq t_SlotModel
 
-function lem_filter_idem [#"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 8579 0 8579 55] (ks: Seq.seq UInt64.t) (s: Seq.seq t_SlotModel) : ()
+function lem_filter_idem [#"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 8622 0 8622 55] (ks: Seq.seq UInt64.t) (s: Seq.seq t_SlotModel) : ()
 
 goal vc_lem_filter_idem: if Seq.length ks <= 0 then
     [@stop_split] [@expl:lem_filter_idem ensures] [%#slib'0] filter_l (filter_l ks s) s = filter_l ks s

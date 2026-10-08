@@ -4,7 +4,7 @@
     "Coma": {
       "vc_mt_initialize": { "prover": "alt-ergo", "time": 0.017 },
       "vc_mt_run": { "prover": "alt-ergo", "time": 0.025 },
-      "vc_verify_mt_init_post_policy_pool": { "prover": "z3", "time": 0.038 }
+      "vc_verify_mt_init_post_policy_pool": { "prover": "z3", "time": 0.034 }
     }
   }
 }

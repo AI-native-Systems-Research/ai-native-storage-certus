@@ -4,7 +4,7 @@
     "Coma": {
       "vc_alloc_pool": { "prover": "alt-ergo", "time": 0.023 },
       "vc_init_logged": { "prover": "alt-ergo", "time": 0.025 },
-      "vc_mt_initialize": { "prover": "cvc5", "time": 0.517 }
+      "vc_mt_initialize": { "prover": "cvc5", "time": 0.803 }
     }
   }
 }

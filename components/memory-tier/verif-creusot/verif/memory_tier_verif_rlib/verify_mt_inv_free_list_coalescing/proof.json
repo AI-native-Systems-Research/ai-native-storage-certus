@@ -52,7 +52,7 @@
               { "prover": "alt-ergo", "time": 0.356 },
               { "prover": "alt-ergo", "time": 0.04 },
               { "prover": "z3", "time": 0.071 },
-              { "prover": "cvc5", "time": 0.159 },
+              { "prover": "cvc5", "time": 0.15 },
               {
                 "tactic": "split_vc",
                 "children": [

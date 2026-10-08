@@ -21,7 +21,7 @@
       "vc_mt_used": { "prover": "alt-ergo", "time": 0.027 },
       "vc_verify_mt_inv_initialize_once_only": {
         "prover": "z3",
-        "time": 0.09
+        "time": 0.131
       }
     }
   }

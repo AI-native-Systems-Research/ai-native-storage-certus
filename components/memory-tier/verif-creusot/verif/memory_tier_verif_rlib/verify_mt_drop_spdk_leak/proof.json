@@ -5,7 +5,7 @@
       "vc_mt_drop": { "prover": "alt-ergo", "time": 0.031 },
       "vc_mt_initialize_spdk": { "prover": "alt-ergo", "time": 0.031 },
       "vc_mt_run": { "prover": "alt-ergo", "time": 0.031 },
-      "vc_verify_mt_drop_spdk_leak": { "prover": "cvc5", "time": 0.185 }
+      "vc_verify_mt_drop_spdk_leak": { "prover": "cvc5", "time": 0.177 }
     }
   }
 }

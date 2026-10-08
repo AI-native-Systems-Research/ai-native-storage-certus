@@ -1,11 +1,11 @@
-(* #"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 10100 0 10100 70 *)
+(* #"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 10143 0 10143 70 *)
 
-let%span slib = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 10101 4 10101 25
-let%span slib'0 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 10097 11 10097 23
-let%span slib'1 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 10098 10 10098 37
-let%span slib'2 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 10099 10 10099 37
-let%span slib'3 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 2299 10 2299 37
-let%span slib'4 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 10054 16 10054 54
+let%span slib = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 10144 4 10144 25
+let%span slib'0 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 10140 11 10140 23
+let%span slib'1 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 10141 10 10141 37
+let%span slib'2 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 10142 10 10142 37
+let%span slib'3 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 2305 10 2305 37
+let%span slib'4 = "/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 10097 16 10097 54
 
 use creusot.int.UInt64
 use creusot.prelude.Any
@@ -35,14 +35,14 @@ let mt_is_dma_capable (st: t_StateModel) (return (x: bool)) = any
   [ return (result: bool) -> {[@stop_split] [@expl:mt_is_dma_capable ensures] [%#slib'3] result = st.spdk_allocated}
     (! return {result}) ]
 
-predicate dma_inv [#"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 10053 0 10053 38] (st: t_StateModel) =
+predicate dma_inv [#"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 10096 0 10096 38] (st: t_StateModel) =
   [%#slib'4] not st.initialized -> not st.spdk_allocated
 
 meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let verify_mt_is_dma_capable_no_init_guard [#"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 10100 0 10100 70]
+let verify_mt_is_dma_capable_no_init_guard [#"/home/cornel/fv-runs/j11-memory-tier/components/memory-tier/verif-creusot/src/lib.rs" 10143 0 10143 70]
   (st: t_StateModel) (return (x: bool)) =
 {[@stop_split] [@expl:verify_mt_is_dma_capable_no_init_guard requires] [%#slib'0] dma_inv st}
   (! bb0

@@ -8,8 +8,8 @@
       "vc_mt_pool_info": { "prover": "alt-ergo", "time": 0.027 },
       "vc_mt_run": { "prover": "alt-ergo", "time": 0.026 },
       "vc_verify_mt_inv_pointers_inside_pool": {
-        "tactic": "compute_specified",
-        "children": [ { "prover": "cvc4", "time": 0.749 } ]
+        "prover": "cvc4",
+        "time": 0.65
       }
     }
   }

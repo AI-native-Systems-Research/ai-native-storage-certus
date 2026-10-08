@@ -6,7 +6,7 @@
       "vc_mt_run": { "prover": "alt-ergo", "time": 0.026 },
       "vc_witness_mt_oldest_keys_post_live_membership_sequential": {
         "prover": "z3",
-        "time": 0.034
+        "time": 0.028
       }
     }
   }
