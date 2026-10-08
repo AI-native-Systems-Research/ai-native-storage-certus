@@ -39,6 +39,12 @@ DISTS = {
     "burstgpt": "burstgpt-3-intervals.yaml",
     "ccweka": "cc-trace-weka-062126-intervals.yaml",
     "wildchat": "wildchat-intervals.yaml",
+    "swebench": "exgentic-swebench-intervals.yaml",
+}
+# Turn-count distributions selectable instead of a fixed --num-turns.
+TURN_DISTS = {
+    "ccweka": "cc-trace-weka-062126-turns.yaml",
+    "swebench": "exgentic-swebench-turns.yaml",
 }
 ADMISSIONS = {"interval", "random", "round-robin"}
 TIER_NAMES = ("HBM", "DRAM", "SSD")
@@ -59,8 +65,29 @@ def _num(qs, key, default, *, cast=float, lo=None, hi=None):
     return v
 
 
+def resolve_turn_dist(qs):
+    """Resolve the turn-count source: None (fixed --num-turns), a preset YAML, or a
+    user-specified file path (absolute, or relative to this tool directory)."""
+    mode = qs.get("turnMode", ["fixed"])[0]
+    if mode == "fixed":
+        return None
+    if mode == "file":
+        raw = qs.get("turnFile", [""])[0].strip()
+        if not raw:
+            raise ValueError("choose a turn-distribution file, or switch to a fixed count")
+        path = raw if os.path.isabs(raw) else os.path.join(SCRIPT_DIR, raw)
+        if not os.path.isfile(path):
+            raise ValueError(f"turn-distribution file not found: {raw}")
+        return path
+    if mode in TURN_DISTS:
+        return os.path.join(SCRIPT_DIR, TURN_DISTS[mode])
+    raise ValueError(f"unknown turn mode: {mode}")
+
+
 def build_base_args(qs):
-    """Translate query params into kv_cache_dynamics.py flags (SSD/DRAM added later)."""
+    """Translate query params into kv_cache_dynamics.py flags (SSD/DRAM added later).
+
+    Returns (args, ssd_str, turn_dist_path_or_None)."""
     dist = qs.get("dist", ["burstgpt"])[0]
     dist_file = DISTS.get(dist, DISTS["burstgpt"])
     admission = qs.get("admission", ["interval"])[0]
@@ -88,11 +115,14 @@ def build_base_args(qs):
         "--head-dim", str(_num(qs, "headdim", 128, cast=int, lo=1)),
         "--bytes-per-element", str(_num(qs, "bpe", 2, cast=int, lo=1, hi=2)),
     ]
+    turn_dist = resolve_turn_dist(qs)
+    if turn_dist:
+        args += ["--turn-distribution", turn_dist]
     if qs.get("decode", ["0"])[0] == "1":
         args += ["--decode",
                  "--decode-step-s", str(_num(qs, "decodeStep", 0.03, lo=1e-6)),
                  "--decode-batch", str(_num(qs, "decodeBatch", 16, cast=int, lo=1))]
-    return args, ssd
+    return args, ssd, turn_dist
 
 
 def run_sim(base_args, dram_gb, ssd_gb, with_ssd):
@@ -144,7 +174,7 @@ def decode_shares(doc):
 
 
 def sweep(qs):
-    base_args, ssd = build_base_args(qs)
+    base_args, ssd, turn_dist = build_base_args(qs)
     sizes = []
     for tok in qs.get("dram", ["8,16,32,64,128,256"])[0].split(","):
         tok = tok.strip()
@@ -195,6 +225,9 @@ def sweep(qs):
         "hbmGb": a["hbm_gb"],
         "ssdGb": (None if ssd == "inf" else float(ssd)),
         "maxModelLen": a["max_model_len"],
+        "turnMode": qs.get("turnMode", ["fixed"])[0],
+        "turnDist": os.path.basename(turn_dist) if turn_dist else None,
+        "numTurns": a["num_turns"],
         "decode": bool(a.get("decode")),
     }
     return {"meta": meta, "rows": rows}
