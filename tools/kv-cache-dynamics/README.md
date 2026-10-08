@@ -164,6 +164,23 @@ ADMISSION=round-robin ./run-cc131k-example.sh       # LRU worst-case ordering
 PREFIX_TOKENS=0 SSD_GB=inf ./run-cc131k-example.sh  # no sharing, unbounded SSD
 ```
 
+### Interactive dashboard (`dram_dashboard.py`)
+
+A local web dashboard for the DRAM sweep that drives the real simulator. It
+serves a page of controls and charts, and on each run invokes
+`kv_cache_dynamics.py` (via `--json`) once per DRAM size with the SSD tier on
+and once with it off, so every number matches the CLI exactly.
+
+```bash
+./dram_dashboard.py            # serve on http://127.0.0.1:8077 and open a browser
+./dram_dashboard.py --port 9000 --no-browser
+```
+
+Stdlib only (no dependencies, localhost only). Change the workload — interval
+trace, DRAM sizes, tiers, tokens, concurrency, admission, shared fraction,
+decode — and re-run; the charts show per-tier hit shares, the SSD-vs-recompute
+comparison, and (with decode on) decode-stage reads.
+
 ### DRAM sweep report: impact of SSD tiering
 
 `sweep_dram_ssd.py` runs `run-burstgpt-example.sh` once per DRAM size (default
@@ -216,6 +233,7 @@ git-ignored; the bundled ones below were force-added:
 | `concurrency-sweep-report.html` | concurrency 1–128 | DRAM 32G, 512 sessions |
 | `*-tok1.html` | all three | 1 token added per turn (working set fits HBM) |
 | `*-decode.html` | all three | `DECODE=1 DECODE_BATCH=16` |
+| `*-prefill.html` | all three | prefill-only, 1 output token (`AVG_PROMPT_TOKENS=1761 AVG_GEN_TOKENS=1`); same numbers as the defaults |
 
 For the DRAM sweep, `HBM_GB`, `NUM_TURNS`, `SESSIONS`, `TURN_DIST`, `DIST` and `DRAM_SIZES` are
 overridable by env or flag; any other `run-cc131k-example.sh` variable passes
