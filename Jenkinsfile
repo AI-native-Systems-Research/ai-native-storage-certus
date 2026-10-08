@@ -172,19 +172,25 @@ pipeline {
         }
       }
     }
+    // ci-fast skips the generator's slow tests (~120s of the run, three times
+    // over). It is OFF by default, so `cargo test` still runs them for anyone
+    // working on the generator; only CI opts out. The generator is also the most
+    // isolated part of the tree from the code under continual development, which
+    // is what makes trading its per-PR coverage the cheapest reduction available.
+    // Full coverage belongs in a periodic job: cargo t --workspace (no feature).
     stage('Hardware-Agnostic Unit Tests') {
       steps {
-        sh '. ~/.cargo/env ; cargo t --workspace'
+        sh '. ~/.cargo/env ; cargo t --workspace --features workload-gen/ci-fast,workload-model/ci-fast,workload-node-agent/ci-fast,workload-trace/ci-fast,workload-wire/ci-fast'
       }
     }
     stage('GPU Unit Tests') {
       steps {
-        sh '. ~/.cargo/env ; cargo t --workspace --features gpu'
+        sh '. ~/.cargo/env ; cargo t --workspace --features gpu,workload-gen/ci-fast,workload-model/ci-fast,workload-node-agent/ci-fast,workload-trace/ci-fast,workload-wire/ci-fast'
       }
     }
     stage('SPDK Unit Tests') {
       steps {
-        sh '. ~/.cargo/env ; cargo t --workspace --features spdk'
+        sh '. ~/.cargo/env ; cargo t --workspace --features spdk,workload-gen/ci-fast,workload-model/ci-fast,workload-node-agent/ci-fast,workload-trace/ci-fast,workload-wire/ci-fast'
       }
     }
     stage('Benchmarks') {

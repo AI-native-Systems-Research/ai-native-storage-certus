@@ -1,0 +1,6 @@
+# Generated sweep reports (reports/; the bundled ones are force-added) and
+# saved session transcripts
+*.html
+!dram_dashboard.html
+transcript_*.md
+__pycache__/

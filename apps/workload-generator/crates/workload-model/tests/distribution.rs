@@ -26,6 +26,7 @@ fn mean(xs: &[f64]) -> f64 {
 // ---------------------------------------------------------------------------
 
 #[test]
+#[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
 fn truncation_does_not_pile_mass_at_the_bounds() {
     // Clamping would put P = Φ(-1) = 0.1587 of the mass exactly on 4.0 — a
     // sixth of every draw sitting on one value. Truncation puts none there.
@@ -77,6 +78,7 @@ fn truncated_mean_is_the_truncated_one_not_the_clamped_one() {
 }
 
 #[test]
+#[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
 fn truncated_exponential_matches_its_closed_form() {
     for (lo, hi, want) in [
         (2.0, Some(50.0), 11.601_694_186),
@@ -374,6 +376,7 @@ fn empirical_reads_samples_from_a_file() {
 // ---------------------------------------------------------------------------
 
 #[test]
+#[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
 fn sampled_quantiles_match_the_reported_quantiles() {
     // A Kolmogorov-Smirnov-flavoured check across every kind under truncation:
     // if `sample` and `quantile` were inverting different functions, one of them

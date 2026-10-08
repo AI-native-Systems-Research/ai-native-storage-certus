@@ -476,6 +476,7 @@ session_classes:
     }
 
     #[test]
+    #[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
     fn the_projection_matches_an_actual_run_within_tolerance() {
         // T035, on the shipped example. The projection is rate-based and the run is
         // stochastic, so the tolerance is stated rather than tight — but it has to

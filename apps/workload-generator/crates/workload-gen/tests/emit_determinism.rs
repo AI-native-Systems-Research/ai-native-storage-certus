@@ -138,6 +138,7 @@ fn the_report_omits_every_live_only_field() {
 }
 
 #[test]
+#[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
 fn session_counts_cover_every_class_not_just_the_first() {
     // The shipped example has more than one session class. Reporting class 0's counts
     // as the run's reads perfectly plausibly and is simply wrong, which is why this

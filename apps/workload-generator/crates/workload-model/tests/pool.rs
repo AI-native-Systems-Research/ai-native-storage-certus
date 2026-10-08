@@ -101,6 +101,7 @@ fn normal_life() -> Kind {
 }
 
 #[test]
+#[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
 fn residual_life_seeding_gives_flat_churn_from_t_zero() {
     // The requirement itself: a pool seeded from equilibrium is already in
     // equilibrium, so the very first window sees the steady-state rate. There is
@@ -134,6 +135,7 @@ fn residual_life_seeding_gives_flat_churn_from_t_zero() {
 }
 
 #[test]
+#[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
 fn lifetime_seeding_produces_the_cohort_artifact() {
     // The defect FR-015 forbids, measured rather than asserted. A shared birthday
     // means nothing can die until roughly one whole lifetime has passed.
@@ -175,6 +177,7 @@ fn lifetime_seeding_produces_the_cohort_artifact() {
 }
 
 #[test]
+#[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
 fn the_two_seedings_differ_by_far_more_than_seed_noise() {
     // Stated as a comparison so the test cannot pass by both arms being broken in
     // the same direction: whatever the digits, the two seedings must be plainly
@@ -205,6 +208,7 @@ fn the_two_seedings_differ_by_far_more_than_seed_noise() {
 }
 
 #[test]
+#[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
 fn an_exponential_lifetime_is_the_control_where_both_seedings_must_agree() {
     // Memorylessness: the equilibrium residual life of Exp(m) is Exp(m), so here
     // the two policies are the same distribution and must produce the same churn.
