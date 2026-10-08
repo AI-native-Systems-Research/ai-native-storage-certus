@@ -166,6 +166,48 @@ impl BuddyAllocator {
     }
 }
 
+// Read-only views for the Kani harnesses in `crate::verification` (cfg(kani) only).
+#[cfg(kani)]
+impl BuddyAllocator {
+    pub(crate) fn kani_free_lists(&self) -> &[Vec<u64>] {
+        &self.free_lists
+    }
+    pub(crate) fn kani_max_order(&self) -> usize {
+        self.max_order
+    }
+    /// The real allocator for this geometry (`new`), with its free lists replaced by
+    /// `free_lists` (one list per order 0..=max_order). Used to start an inductive
+    /// step from an arbitrary invariant-satisfying state.
+    pub(crate) fn kani_with_free_lists(
+        base_offset: u64,
+        total_usable_size: u64,
+        sector_size: u32,
+        free_lists: Vec<Vec<u64>>,
+    ) -> Self {
+        let mut b = Self::new(base_offset, total_usable_size, sector_size);
+        b.free_lists = free_lists;
+        b
+    }
+    /// Like `kani_with_free_lists` but without running `new()` (whose empty lists hold
+    /// dangling pointers); `max_order` is given by the caller and must equal what
+    /// `new()` computes for this geometry (checked by the harness).
+    pub(crate) fn kani_from_parts(
+        base_offset: u64,
+        total_usable_size: u64,
+        sector_size: u32,
+        max_order: usize,
+        free_lists: Vec<Vec<u64>>,
+    ) -> Self {
+        Self {
+            base_offset,
+            total_usable_size,
+            sector_size,
+            max_order,
+            free_lists,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

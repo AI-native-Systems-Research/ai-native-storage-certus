@@ -120,6 +120,25 @@ impl SizeClassManager {
     }
 }
 
+// Read-only views for the Kani harnesses in `crate::verification` (cfg(kani) only).
+#[cfg(kani)]
+impl Slab {
+    pub(crate) fn kani_rover(&self) -> usize {
+        self.rover
+    }
+    /// Put the allocation cursor at an arbitrary in-range position (inductive harnesses).
+    pub(crate) fn kani_set_rover(&mut self, rover: usize) {
+        self.rover = rover;
+    }
+}
+
+#[cfg(kani)]
+impl SizeClassManager {
+    pub(crate) fn kani_len(&self) -> usize {
+        self.map.len()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -159,3 +159,11 @@ impl RegionState {
         }
     }
 }
+
+// Read-only views for the Kani harnesses in `crate::verification` (cfg(kani) only).
+#[cfg(kani)]
+impl RegionState {
+    pub(crate) fn kani_pending_frees(&self) -> &[(u64, usize)] {
+        &self.pending_frees
+    }
+}

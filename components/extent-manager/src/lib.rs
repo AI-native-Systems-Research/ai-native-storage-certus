@@ -1,3 +1,5 @@
+#![cfg_attr(kani, feature(allocator_api))]
+#![cfg_attr(kani, recursion_limit = "256")]
 mod bitmap;
 mod block_io;
 mod buddy;
@@ -15,6 +17,9 @@ pub(crate) mod superblock;
 
 #[cfg(any(test, feature = "testing"))]
 pub mod test_support;
+
+#[cfg(kani)]
+mod verification;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};

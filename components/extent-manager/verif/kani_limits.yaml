@@ -1,0 +1,1434 @@
+component: extent-manager
+pin: 2cd35bac
+kani: 0.67.0
+run:
+  part: 1
+  steps: 0-4
+  tree: /home/cornel/fv-runs/extent-manager-2cd35bac
+  date: '2026-10-07'
+  runner: 'run2.sh: cargo kani --harness verification::<h> --exact -Z stubbing --output-format terse [flags], under
+    /usr/bin/time -v inside systemd-run --user --scope -p MemoryMax=32G -p MemorySwapMax=0, one harness at a time'
+  peak_rss_mb: /usr/bin/time -v max RSS when the run exited normally; cgroup memory.peak (sampled 1/s) when the
+    run was killed (timeout/OOM)
+  wall_s_includes: cargo build of the crate when the source changed (~5-15 s); CBMC "Verification Time" is given
+    in cost_curve where it matters
+  production_edits: none (see ~/FV/kani_study/em_production_attrs.md)
+  backup: ~/fv-runs/scratch/kani_l3/verification.rs.orig (lines 1-4124 of the current file are byte-identical)
+  logs: ~/fv-runs/scratch/kani_l3/logs/
+  totals:
+    kani_runs: 102
+    kani_wall_h: 3.05
+    max_peak_rss_mb: 32768
+probes_step0:
+  crate: ~/fv-runs/scratch/kani_probe (outside the tree)
+  results:
+  - probe: P1 loop_invariant on `for _ in 0..=n` (RangeInclusive)
+    result: 'REJECTED at compile time: "the trait `kani::KaniIntoIter` is not implemented for `std::ops::RangeInclusive<u8>`"'
+  - probe: P1b loop_invariant on `for _ in 0..n` (Range)
+    result: 'SUCCESSFUL (2.1 s) once the invariant names the hidden index via `kani::index` (an invariant not mentioning
+      it: "Check invariant after step" FAILED)'
+  - probe: P2 loop_invariant on `for _ in (0..n).rev()`
+    result: SUCCESSFUL (2.1 s); mutant FAILED
+  - probe: P3 loop_invariant on `for b in buf.iter_mut()`
+    result: 'REJECTED: "`std::slice::IterMut<_, u8>: kani::KaniIntoIter` is not satisfied"'
+  - probe: P3b loop_invariant on `for b in &mut buf[..]`
+    result: 'REJECTED: "type `u8` cannot be dereferenced" - KaniIntoIter for &mut [T] yields T by value, so writes
+      through the loop variable are impossible'
+  - probe: P4 loop_invariant on `for v in btreemap.values()`
+    result: 'REJECTED (as expected): "`btree_map::Values<_, u64, u32>: kani::KaniIntoIter` is not satisfied"'
+  - probe: P5 loop_invariant on a `while` loop, symbolic bound
+    result: SUCCESSFUL (1.0 s); mutant FAILED
+  - probe: 'P6 #[kani::requires/ensures] + proof_for_contract + stub_verified on a toy fn (-Z function-contracts)'
+    result: proof_for_contract SUCCESSFUL, stub_verified caller SUCCESSFUL, caller mutant FAILED (1.0 s each)
+  - probe: P7a real std::thread::spawn + join
+    result: 'NO VERDICT: timeout > 300 s (no unwind), > 200 s / 5.9 GB at --unwind 2, > 110 s / 3.9 GB at --unwind
+      1; compile warnings only (foreign function (30) unsupported; atomics treated as sequential)'
+  - probe: P7b generic stub of std::thread::spawn running f inline, zeroed JoinHandle
+    result: 'ACCEPTED: SUCCESSFUL (1.0 s), mutant FAILED; rustc warns invalid_value (JoinHandle not zero-initialisable)'
+  - probe: P7c Option<JoinHandle> = Some(zeroed) then dropped
+    result: 'SUCCESSFUL (6.1 s): the zeroed handle occupies the niche, i.e. it IS None - drop/join never runs (UB-adjacent,
+      disclosed in every harness using it)'
+  - probe: 'P8 #[cfg_attr(kani, kani::loop_invariant(..))] on a production-shaped while loop (crate root: feature(stmt_expr_attributes,
+      proc_macro_hygiene) under cfg_attr(kani))'
+    result: SUCCESSFUL for n <= 100000 (34.4 s); mutant FAILED (27.3 s)
+  - probe: P9a real std::fs::File::open + read_exact
+    result: 'NO VERDICT unbounded (> 300 s); --unwind 2: FAILED only on "unwinding assertion loop 0" (3255 of 3256
+      checks undetermined)'
+  - probe: P9b/c stub File::open -> Err (ErrorKind / raw os error)
+    result: 'unbounded: timeout > 300 s; --unwind 2: SUCCESSFUL (8 s) - the cost was the missing bound, not the
+      stub'
+  - probe: P9d stub <File as Read>::read_exact
+    result: 'REJECTED: "Expected type `&mut Self` for parameter 1, but found `&mut std::fs::File`"; generic stub:
+      "original function takes 0 generic parameters, stub takes 1". Workaround: stub <File as Read>::read + <OwnedFd
+      as Drop>::drop: SUCCESSFUL (5 s), mutant FAILED'
+  - probe: 'P10 --unwind on the CLI vs #[kani::unwind(20)] on the harness'
+    result: 'CLI wins: --unwind 2 gives "unwinding assertion loop 0" FAILED on a 10-iteration loop with attribute
+      20'
+  - probe: 'EM: > 15 #[kani::stub] attributes on one harness'
+    result: 'REJECTED: "recursion limit reached while expanding `#[kanitool::stub]`" (16 stubs failed, 12 work);
+      the fix (#![recursion_limit] at crate root) would be a production-line edit'
+records:
+- id: EM-FORMAT-ERR-DEVICE-NOT-CONNECTED
+  group: shallow-unattempted
+  rungs:
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION SUCCESSFUL
+    wall_s: 24.3
+    peak_rss_mb: 937
+    twin_fails: true
+  - rung: a-twin
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION FAILED
+    wall_s: 23.3
+    peak_rss_mb: 936
+    twin_fails: null
+    harness: verify_em_format_err_device_not_connected__mutant
+  outcome: proved
+  harness: verify_em_format_err_device_not_connected
+  fidelity: real-type-bounded
+  gate_reproducible: true
+  note: 'stubs: RandomState::new, Arc::drop_slow, error::nvme_to_em, Condvar::notify_all/notify_one; params fully
+    symbolic (no harness bounds) where format() is called.'
+  creusot_status: proved
+- id: EM-FORMAT-ERR-SECTOR-ZERO
+  group: shallow-unattempted
+  rungs:
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION SUCCESSFUL
+    wall_s: 28.4
+    peak_rss_mb: 965
+    twin_fails: true
+  - rung: a-twin
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION FAILED
+    wall_s: 26.4
+    peak_rss_mb: 964
+    twin_fails: null
+    harness: verify_em_format_err_sector_zero__mutant
+  outcome: proved
+  harness: verify_em_format_err_sector_zero
+  fidelity: real-type-bounded
+  gate_reproducible: true
+  note: 'stubs: RandomState::new, Arc::drop_slow, error::nvme_to_em, Condvar::notify_all/notify_one; params fully
+    symbolic (no harness bounds) where format() is called.'
+  creusot_status: proved
+- id: EM-FORMAT-ERR-MAX-EXTENT-EXCEEDS-SLAB
+  group: shallow-unattempted
+  rungs:
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION SUCCESSFUL
+    wall_s: 26.4
+    peak_rss_mb: 916
+    twin_fails: true
+  - rung: a-twin
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION FAILED
+    wall_s: 26.4
+    peak_rss_mb: 916
+    twin_fails: null
+    harness: verify_em_format_err_max_extent_exceeds_slab__mutant
+  outcome: proved
+  harness: verify_em_format_err_max_extent_exceeds_slab
+  fidelity: real-type-bounded
+  gate_reproducible: true
+  note: 'stubs: RandomState::new, Arc::drop_slow, error::nvme_to_em, Condvar::notify_all/notify_one; params fully
+    symbolic (no harness bounds) where format() is called.'
+  creusot_status: proved
+- id: EM-INIT-ERR-DEVICE-NOT-CONNECTED
+  group: shallow-unattempted
+  rungs:
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION SUCCESSFUL
+    wall_s: 32.5
+    peak_rss_mb: 1097
+    twin_fails: true
+  - rung: a-twin
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION FAILED
+    wall_s: 32.5
+    peak_rss_mb: 1096
+    twin_fails: null
+    harness: verify_em_init_err_device_not_connected__mutant
+  outcome: proved
+  harness: verify_em_init_err_device_not_connected
+  fidelity: real-type-bounded
+  gate_reproducible: true
+  note: 'stubs: RandomState::new, Arc::drop_slow, error::nvme_to_em, Condvar::notify_all/notify_one; params fully
+    symbolic (no harness bounds) where format() is called.'
+  creusot_status: proved
+- id: EM-GETEXT-UNINIT-EMPTY
+  group: shallow-unattempted
+  rungs:
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION SUCCESSFUL
+    wall_s: 15.2
+    peak_rss_mb: 620
+    twin_fails: true
+  - rung: a-twin
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION FAILED
+    wall_s: 15.3
+    peak_rss_mb: 622
+    twin_fails: null
+    harness: verify_em_getext_uninit_empty__mutant
+  outcome: proved
+  harness: verify_em_getext_uninit_empty
+  fidelity: real-type-bounded
+  gate_reproducible: true
+  note: 'stubs: RandomState::new, Arc::drop_slow, error::nvme_to_em, Condvar::notify_all/notify_one; params fully
+    symbolic (no harness bounds) where format() is called.'
+  creusot_status: proved
+- id: EM-FOREACH-UNINIT-NO-CALLS
+  group: shallow-unattempted
+  rungs:
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION SUCCESSFUL
+    wall_s: 16.3
+    peak_rss_mb: 619
+    twin_fails: true
+  - rung: a-twin
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION FAILED
+    wall_s: 16.3
+    peak_rss_mb: 619
+    twin_fails: null
+    harness: verify_em_foreach_uninit_no_calls__mutant
+  outcome: proved
+  harness: verify_em_foreach_uninit_no_calls
+  fidelity: real-type-bounded
+  gate_reproducible: true
+  note: 'stubs: RandomState::new, Arc::drop_slow, error::nvme_to_em, Condvar::notify_all/notify_one; params fully
+    symbolic (no harness bounds) where format() is called.'
+  creusot_status: proved
+- id: EM-REMOVE-ERR-NOT-INITIALIZED
+  group: shallow-unattempted
+  rungs:
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION SUCCESSFUL
+    wall_s: 30.5
+    peak_rss_mb: 881
+    twin_fails: true
+  - rung: a-twin
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION FAILED
+    wall_s: 31.5
+    peak_rss_mb: 883
+    twin_fails: null
+    harness: verify_em_remove_err_not_initialized__mutant
+  outcome: proved
+  harness: verify_em_remove_err_not_initialized
+  fidelity: real-type-bounded
+  gate_reproducible: true
+  note: 'stubs: RandomState::new, Arc::drop_slow, error::nvme_to_em, Condvar::notify_all/notify_one; params fully
+    symbolic (no harness bounds) where format() is called.'
+  creusot_status: proved
+- id: EM-CKPT-ERR-NOT-INITIALIZED
+  group: shallow-unattempted
+  rungs:
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION SUCCESSFUL
+    wall_s: 38.6
+    peak_rss_mb: 1236
+    twin_fails: true
+  - rung: a-twin
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION FAILED
+    wall_s: 38.6
+    peak_rss_mb: 1237
+    twin_fails: null
+    harness: verify_em_ckpt_err_not_initialized__mutant
+  outcome: proved
+  harness: verify_em_ckpt_err_not_initialized
+  fidelity: real-type-bounded
+  gate_reproducible: true
+  note: 'stubs: RandomState::new, Arc::drop_slow, error::nvme_to_em, Condvar::notify_all/notify_one; params fully
+    symbolic (no harness bounds) where format() is called.'
+  creusot_status: proved
+- id: EM-INSTID-ERR-NOT-INITIALIZED
+  group: shallow-unattempted
+  rungs:
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION SUCCESSFUL
+    wall_s: 10.2
+    peak_rss_mb: 479
+    twin_fails: true
+  - rung: a-twin
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION FAILED
+    wall_s: 10.2
+    peak_rss_mb: 479
+    twin_fails: null
+    harness: verify_em_instid_err_not_initialized__mutant
+  outcome: proved
+  harness: verify_em_instid_err_not_initialized
+  fidelity: real-type-bounded
+  gate_reproducible: true
+  note: 'stubs: RandomState::new, Arc::drop_slow, error::nvme_to_em, Condvar::notify_all/notify_one; params fully
+    symbolic (no harness bounds) where format() is called.'
+  creusot_status: proved
+- id: EM-USED-UNINIT-ZERO
+  group: shallow-unattempted
+  rungs:
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION SUCCESSFUL
+    wall_s: 15.3
+    peak_rss_mb: 612
+    twin_fails: true
+  - rung: a-twin
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION FAILED
+    wall_s: 15.2
+    peak_rss_mb: 611
+    twin_fails: null
+    harness: verify_em_used_uninit_zero__mutant
+  outcome: proved
+  harness: verify_em_used_uninit_zero
+  fidelity: real-type-bounded
+  gate_reproducible: true
+  note: 'stubs: RandomState::new, Arc::drop_slow, error::nvme_to_em, Condvar::notify_all/notify_one; params fully
+    symbolic (no harness bounds) where format() is called.'
+  creusot_status: proved
+- id: EM-CAP-UNINIT-ZERO
+  group: shallow-unattempted
+  rungs:
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION SUCCESSFUL
+    wall_s: 15.2
+    peak_rss_mb: 607
+    twin_fails: true
+  - rung: a-twin
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION FAILED
+    wall_s: 16.3
+    peak_rss_mb: 605
+    twin_fails: null
+    harness: verify_em_cap_uninit_zero__mutant
+  outcome: proved
+  harness: verify_em_cap_uninit_zero
+  fidelity: real-type-bounded
+  gate_reproducible: true
+  note: 'stubs: RandomState::new, Arc::drop_slow, error::nvme_to_em, Condvar::notify_all/notify_one; params fully
+    symbolic (no harness bounds) where format() is called.'
+  creusot_status: proved
+- id: EM-SETMBASE-FRAME
+  group: shallow-unattempted
+  rungs:
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION SUCCESSFUL
+    wall_s: 18.3
+    peak_rss_mb: 635
+    twin_fails: true
+  - rung: a-twin
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION FAILED
+    wall_s: 17.3
+    peak_rss_mb: 636
+    twin_fails: null
+    harness: verify_em_setmbase_frame__mutant
+  outcome: proved
+  harness: verify_em_setmbase_frame
+  fidelity: representative
+  gate_reproducible: true
+  note: 'pre-state = fresh (uninitialised) component with a symbolic data base LBA; the extent list is empty in
+    that state, so the "listed extents unchanged" clause is checked only on the empty list (initialised pre-states
+    belong to em-lifecycle-composition / region-slab-map). stubs: RandomState::new, Arc::drop_slow, error::nvme_to_em,
+    Condvar::notify_all/notify_one; params fully symbolic (no harness bounds) where format() is called.'
+  creusot_status: proved
+- id: EM-DBASE-POST-DEFAULT-ZERO
+  group: shallow-unattempted
+  rungs:
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION SUCCESSFUL
+    wall_s: 9.2
+    peak_rss_mb: 478
+    twin_fails: true
+  - rung: a-twin
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION FAILED
+    wall_s: 9.2
+    peak_rss_mb: 477
+    twin_fails: null
+    harness: verify_em_dbase_post_default_zero__mutant
+  outcome: proved
+  harness: verify_em_dbase_post_default_zero
+  fidelity: representative
+  gate_reproducible: true
+  note: 'component built by support_new_em() (the define_component! user-field defaults, verification.rs:270); the
+    define_component new_default path itself is covered by verify_em_setint_default_30s rung b. stubs: RandomState::new,
+    Arc::drop_slow, error::nvme_to_em, Condvar::notify_all/notify_one; params fully symbolic (no harness bounds)
+    where format() is called.'
+  creusot_status: proved
+- id: EM-DBASE-FRAME-READ-ONLY
+  group: shallow-unattempted
+  rungs:
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION SUCCESSFUL
+    wall_s: 18.3
+    peak_rss_mb: 643
+    twin_fails: true
+  - rung: a-twin
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION FAILED
+    wall_s: 17.3
+    peak_rss_mb: 645
+    twin_fails: null
+    harness: verify_em_dbase_frame_read_only__mutant
+  outcome: proved
+  harness: verify_em_dbase_frame_read_only
+  fidelity: representative
+  gate_reproducible: true
+  note: 'pre-state = fresh component with symbolic data/metadata base LBAs and optional ns id; on-disk metadata
+    = mock disk (empty) checked untouched. stubs: RandomState::new, Arc::drop_slow, error::nvme_to_em, Condvar::notify_all/notify_one;
+    params fully symbolic (no harness bounds) where format() is called.'
+  creusot_status: proved
+- id: EM-FORMAT-ERR-REGION-COUNT
+  group: shallow-unattempted
+  rungs:
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION SUCCESSFUL
+    wall_s: 28.4
+    peak_rss_mb: 935
+    twin_fails: true
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 3
+    result: VERIFICATION SUCCESSFUL
+    wall_s: 29.4
+    peak_rss_mb: 927
+    twin_fails: true
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 4
+    result: VERIFICATION SUCCESSFUL
+    wall_s: 21.3
+    peak_rss_mb: 294
+    twin_fails: true
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 6
+    result: VERIFICATION SUCCESSFUL
+    wall_s: 21.3
+    peak_rss_mb: 294
+    twin_fails: true
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 8
+    result: VERIFICATION SUCCESSFUL
+    wall_s: 24.4
+    peak_rss_mb: 294
+    twin_fails: true
+  - rung: a-twin
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION FAILED
+    wall_s: 30.5
+    peak_rss_mb: 934
+    twin_fails: null
+    harness: verify_em_format_err_region_count__mutant
+  outcome: proved
+  harness: verify_em_format_err_region_count
+  fidelity: real-type-bounded
+  gate_reproducible: true
+  cost_curve: 'FLAT: CBMC Verification Time 5.5-5.8 s at unwind 2,3,4,6,8 (wall differences = first-build compile,
+    ~15 s).'
+  note: 'control case: symbolic u32 region_count (iff 0 or non-power-of-two), all other FormatParams fully symbolic;
+    mutant flips the iff. stubs: RandomState::new, Arc::drop_slow, error::nvme_to_em, Condvar::notify_all/notify_one'
+  creusot_status: proved
+- id: EM-RESERVE-ERR-NOT-INITIALIZED
+  group: shallow-unattempted
+  rungs:
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: timeout (> 600 s cap, killed)
+    wall_s: 600.3
+    peak_rss_mb: 17920
+    twin_fails: null
+    harness: diag_l3_reserve_err_not_initialized_rung_a
+    note: peak = cgroup memory.peak; symex does not prune the initialised branch (alloc_extent, buddy, BTreeMap)
+      on an uninitialised component
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 3
+    result: timeout (> 600 s cap, killed)
+    wall_s: 600.0
+    peak_rss_mb: null
+    twin_fails: null
+    harness: diag_l3_reserve_err_not_initialized_rung_a
+  - rung: b
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION SUCCESSFUL
+    wall_s: 22.3
+    peak_rss_mb: 853
+    twin_fails: true
+    note: 'UNREACHABILITY stub: RegionState::alloc_extent -> assert!(false): sound without a conformance check (any
+      reach is a failed check)'
+  - rung: b
+    flags: -Z stubbing --output-format terse --exact --unwind 3
+    result: VERIFICATION SUCCESSFUL
+    wall_s: 21.3
+    peak_rss_mb: 231
+    twin_fails: true
+  - rung: b
+    flags: -Z stubbing --output-format terse --exact --unwind 4
+    result: VERIFICATION SUCCESSFUL
+    wall_s: 21.3
+    peak_rss_mb: 231
+    twin_fails: true
+  - rung: b
+    flags: -Z stubbing --output-format terse --exact --unwind 6
+    result: VERIFICATION SUCCESSFUL
+    wall_s: 20.3
+    peak_rss_mb: 232
+    twin_fails: true
+  - rung: b
+    flags: -Z stubbing --output-format terse --exact --unwind 8
+    result: VERIFICATION SUCCESSFUL
+    wall_s: 17.3
+    peak_rss_mb: 232
+    twin_fails: true
+  - rung: b-twin
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION FAILED
+    wall_s: 24.4
+    peak_rss_mb: 855
+    twin_fails: null
+    harness: verify_em_reserve_err_not_initialized__mutant
+  outcome: proved
+  harness: verify_em_reserve_err_not_initialized
+  fidelity: real-type-bounded
+  gate_reproducible: true
+  cost_curve: 'rung a: >600 s / 17.9 GB at unwind 2 (not flat: blow-up, not a bound effect); rung b FLAT: CBMC 3.9-4.1
+    s at unwind 2..8.'
+  note: symbolic key and size. The only stub besides RandomState/Arc::drop_slow is the unreachability stub.
+  creusot_status: proved
+- id: EM-SETDBASE-POST-STORED
+  group: shallow-unattempted
+  rungs:
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION SUCCESSFUL
+    wall_s: 9.2
+    peak_rss_mb: 478
+    twin_fails: true
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 3
+    result: VERIFICATION SUCCESSFUL
+    wall_s: 6.1
+    peak_rss_mb: 93
+    twin_fails: true
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 4
+    result: VERIFICATION SUCCESSFUL
+    wall_s: 7.1
+    peak_rss_mb: 93
+    twin_fails: true
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 6
+    result: VERIFICATION SUCCESSFUL
+    wall_s: 6.1
+    peak_rss_mb: 93
+    twin_fails: true
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 8
+    result: VERIFICATION SUCCESSFUL
+    wall_s: 6.1
+    peak_rss_mb: 93
+    twin_fails: true
+  - rung: a-twin
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION FAILED
+    wall_s: 9.2
+    peak_rss_mb: 478
+    twin_fails: null
+    harness: verify_em_setdbase_post_stored__mutant
+  outcome: proved
+  harness: verify_em_setdbase_post_stored
+  fidelity: real-type-bounded
+  gate_reproducible: true
+  cost_curve: 'FLAT: CBMC 1.3-1.5 s at unwind 2..8.'
+  note: symbolic b, optional interleaved set_metadata_base_lba / data_base_lba, then a second set c (the "until
+    set again" clause).
+  creusot_status: proved
+- id: EM-FORMAT-ERR-SLAB-NOT-SECTOR-MULTIPLE
+  group: shallow-unattempted
+  rungs:
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: OOM (32 GB cgroup cap, MemorySwapMax=0; scope killed, rc 143)
+    wall_s: 138.0
+    peak_rss_mb: 32607
+    twin_fails: null
+    harness: diag_l3_format_err_slab_not_sector_multiple_rung_a
+    note: fully symbolic params; symex explores format() past the failed guard (infeasible tail not pruned)
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 4
+    result: OOM (32 GB cgroup cap, MemorySwapMax=0; scope killed, rc 143)
+    wall_s: 158.2
+    peak_rss_mb: 29499
+    twin_fails: null
+    harness: diag_l3_format_err_slab_not_sector_multiple_rung_a
+  - rung: b
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: timeout (> 400 s cap, killed)
+    wall_s: 400.6
+    peak_rss_mb: 2351
+    twin_fails: null
+    harness: diag_l3_format_err_slab_not_sector_multiple_rung_b
+    note: '+ unreachability stub BuddyAllocator::new (assert false + assume false = path cut): memory 32 GB -> 2.3
+      GB, now SAT-bound'
+  - rung: b2
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: timeout (> 400 s cap, killed)
+    wall_s: 399.7
+    peak_rss_mb: 874
+    twin_fails: null
+    harness: diag_l3_format_err_slab_not_sector_multiple_rung_b2
+    note: 'cut moved to Receptacle::get (right after the 4 guards): 0.9 GB, still > 400 s: the fully symbolic u64
+      % u32 guard itself'
+  - rung: b3
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION SUCCESSFUL
+    wall_s: 28.4
+    peak_rss_mb: 946
+    twin_fails: true
+    note: + level-2 assumption D-RANGE-FR-002-217ace (sector size power of two), Receptacle::get cut kept
+  - rung: b3-twin
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION FAILED
+    wall_s: 28.4
+    peak_rss_mb: 956
+    twin_fails: null
+    harness: verify_em_format_err_slab_not_sector_multiple__mutant
+  outcome: proved
+  harness: verify_em_format_err_slab_not_sector_multiple
+  fidelity: real-type-bounded
+  gate_reproducible: true
+  assumes:
+  - D-RANGE-FR-002-217ace
+  note: 'Measured limit outside the level-2 range: with a NON-power-of-two symbolic sector size the u64 % u32 guard
+    alone is > 400 s (rung b2). Within the level-2 range it is a mask test (28 s).'
+  creusot_status: proved
+- id: EM-FORMAT-ERR-DEVICE-QUERY
+  group: shallow-unattempted
+  rungs:
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: OOM (32 GB cgroup cap, MemorySwapMax=0; scope killed, rc 143)
+    wall_s: 125.8
+    peak_rss_mb: 32679
+    twin_fails: null
+    harness: diag_l3_format_err_device_query_rung_a
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 4
+    result: OOM (32 GB cgroup cap, MemorySwapMax=0; scope killed, rc 143)
+    wall_s: 152.1
+    peak_rss_mb: 32755
+    twin_fails: null
+    harness: diag_l3_format_err_device_query_rung_a
+  - rung: b2
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: timeout (> 400 s cap, killed)
+    wall_s: 400.4
+    peak_rss_mb: 11646
+    twin_fails: null
+    note: BuddyAllocator::new unreachability cut + concrete DIVISOR dispatch (sector 512|4096 x alignment 0|4096|1MiB|AL_MAX
+      x regions 1|2, const generics); dividends symbolic
+  outcome: limit
+  harness: verify_em_format_err_device_query
+  limit_evidence: The geometry-error path (num_sectors/sector_size of a mock that always errs) still OOMs at 32
+    GB with fully symbolic params (rung a) and times out at > 400 s / 11.6 GB with the format tail cut at BuddyAllocator::new
+    and concrete divisors (rung b2); symex does not resolve the always-failing dyn IBlockDevice answer through the
+    Receptacle/Arc<dyn> indirection, so the Ok branch is explored.
+  fidelity: null
+  gate_reproducible: true
+  note: rung b3 (one concrete divisor combination, diag_l3_format_err_device_query_one_combo) written but not run
+    within the time box. c/d not applicable (no loop/contract on the cost path; a contract on the dyn mock is harness-side).
+  creusot_status: proved
+- id: EM-FORMAT-ERR-METADATA-TOO-SMALL
+  group: shallow-unattempted
+  rungs:
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: OOM (32 GB cgroup cap, MemorySwapMax=0; scope killed, rc 143)
+    wall_s: 117.7
+    peak_rss_mb: 32768
+    twin_fails: null
+    harness: diag_l3_format_err_metadata_too_small_rung_a
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 4
+    result: OOM (32 GB cgroup cap, MemorySwapMax=0; scope killed, rc 143)
+    wall_s: 134.9
+    peak_rss_mb: 32475
+    twin_fails: null
+    harness: diag_l3_format_err_metadata_too_small_rung_a
+  - rung: b2
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: 'VERIFICATION FAILED: "attempt to add with overflow"'
+    wall_s: 149.1
+    peak_rss_mb: 2178
+    twin_fails: null
+    note: BuddyAllocator::new cut + concrete divisor dispatch incl. alignment AL_MAX = u64::MAX-4095 (the largest
+      value level-2 assumption 2ee144 admits); CBMC 125 s
+  - rung: b2-control
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION SUCCESSFUL
+    wall_s: 112.5
+    peak_rss_mb: 1859
+    twin_fails: null
+    harness: diag_l3_format_err_metadata_too_small_ctrl_no_almax
+    note: 'same harness, alignment menu without AL_MAX: verifies -> the failure is exactly the overflow witness'
+  outcome: refuted
+  harness: verify_em_format_err_metadata_too_small
+  fidelity: representative
+  gate_reproducible: true
+  assumes:
+  - D-RANGE-FR-002-217ace
+  - D-RANGE-FMT-METADATA-DEVICE-LAYOUT-2ee144
+  note: 'Kani reproduces the Creusot refutation (FORMAT-ALIGN-OVERFLOW, lib.rs:423 `sb_size + alignment - 1` overflows
+    at alignment = u64::MAX-4095, a debug-build panic instead of CorruptMetadata). Not a tool limit: a conclusive
+    defect. The __mutant twin is not meaningful for a refutation; the control run is the anti-artefact check.'
+  creusot_status: refuted
+- id: EM-FORMAT-ERR-NO-USABLE-DATA
+  group: shallow-unattempted
+  rungs:
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: OOM (32 GB cgroup cap, MemorySwapMax=0; scope killed, rc 143)
+    wall_s: 117.7
+    peak_rss_mb: 32670
+    twin_fails: null
+    harness: diag_l3_format_err_no_usable_data_rung_a
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 4
+    result: OOM (32 GB cgroup cap, MemorySwapMax=0; scope killed, rc 143)
+    wall_s: 136.9
+    peak_rss_mb: 32699
+    twin_fails: null
+    harness: diag_l3_format_err_no_usable_data_rung_a
+  - rung: b2
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION SUCCESSFUL
+    wall_s: 166.3
+    peak_rss_mb: 1927
+    twin_fails: true
+    note: BuddyAllocator::new unreachability cut + concrete divisor dispatch (12 combos); CBMC 141.6 s
+  - rung: b2-twin
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION FAILED
+    wall_s: 126.8
+    peak_rss_mb: 1406
+    twin_fails: null
+    harness: verify_em_format_err_no_usable_data__mutant
+  outcome: proved
+  harness: verify_em_format_err_no_usable_data
+  fidelity: representative
+  gate_reproducible: true
+  assumes:
+  - D-RANGE-FR-002-217ace
+  - D-RANGE-FMT-METADATA-DEVICE-LAYOUT-2ee144 (tightened by 1 to exclude the FORMAT-ALIGN-OVERFLOW witness)
+  note: representative over the divisor menus (sector 512|4096, alignment 0|4096|1MiB, regions 1|2); data_disk_size,
+    metadata_region_size and device size symbolic.
+  creusot_status: proved
+- id: EM-BIO-FLUSH
+  group: gate-feature-flag
+  rungs:
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 6 --features volatile_write_cache
+    result: VERIFICATION SUCCESSFUL
+    wall_s: 39.6
+    peak_rss_mb: 624
+    twin_fails: false
+    harness: diag_l3_bio_flush_inherited
+    note: inherited body support_case_bio_flush (= boundary_em_bio_flush)
+  - rung: a-twin
+    flags: -Z stubbing --output-format terse --exact --unwind 6 --features volatile_write_cache
+    result: VERIFICATION SUCCESSFUL (twin did NOT fail)
+    wall_s: 38.5
+    peak_rss_mb: 624
+    twin_fails: null
+    harness: diag_l3_bio_flush_inherited__mutant
+    note: 'VACUITY: under the current device model support_bio_reset(true,_) faults the FIRST command (KANI_FAULT_CMD=Some(0),
+      kind 1), so the success branch `fault.is_none()` is unreachable and the mutant (which differs only there)
+      verifies'
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 10 --features volatile_write_cache
+    result: VERIFICATION SUCCESSFUL
+    wall_s: 181.6
+    peak_rss_mb: 3060
+    twin_fails: true
+    note: 'reworked case support_case_l3_bio_flush: no-fault answer + fault kinds 1..5, each in a concrete branch;
+      minisat; device model stub_chan_send/recv (check_stub_conforms_nvme_to_em, existing)'
+  - rung: a-twin
+    flags: -Z stubbing --output-format terse --exact --unwind 10 --features volatile_write_cache
+    result: VERIFICATION FAILED
+    wall_s: 185.6
+    peak_rss_mb: 3063
+    twin_fails: null
+    harness: verify_em_bio_flush__mutant
+  - rung: a-twin (inherited)
+    flags: -Z stubbing --output-format terse --exact --unwind 10 --features volatile_write_cache
+    result: VERIFICATION SUCCESSFUL (twin did NOT fail)
+    wall_s: 40.6
+    peak_rss_mb: 624
+    twin_fails: null
+    harness: diag_l3_bio_flush_inherited__mutant
+    note: 'the inherited mutant passes at unwind 10 as well: the vacuity is the model (first command always faults),
+      not the bound'
+  outcome: proved
+  harness: verify_em_bio_flush
+  gate_reproducible: true
+  needs_features: volatile_write_cache
+  note: 'Not a Kani limit. Two findings: (1) gate infra: the property only exists with --features volatile_write_cache;
+    (2) the inherited boundary_em_bio_flush body is VACUOUS for the success clause under the current device model
+    (its twin verifies at unwind 6 and 10); the reworked case proves both clauses at unwind 10 with checks ON. Unwind
+    4/6/8 not swept for the reworked case (time box).'
+  creusot_status: proved
+  fidelity: real-type-bounded
+- id: EM-FORMAT-ERR-INSTANCE-ID-GENERATION
+  group: os-file-io-urandom
+  rungs:
+  - rung: b
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: timeout (> 300 s cap, killed)
+    wall_s: 300.2
+    peak_rss_mb: 13782
+    twin_fails: null
+    harness: diag_l3_format_err_instance_id_generation_rung_a
+    note: OS model that may also succeed -> the success branch drags the superblock write into the harness
+  - rung: b
+    flags: -Z stubbing --output-format terse --exact --unwind 4
+    result: timeout (> 300 s cap, killed)
+    wall_s: 300.2
+    peak_rss_mb: 13925
+    twin_fails: null
+    harness: diag_l3_format_err_instance_id_generation_rung_a
+  - rung: b2
+    flags: -Z stubbing --output-format terse --exact --unwind 4
+    result: timeout (> 300 s cap, killed)
+    wall_s: 300.1
+    peak_rss_mb: 14240
+    twin_fails: null
+    note: 'OS model restricted to the precondition (open fails, or open ok + read fails): still > 300 s / 14.2 GB'
+  - rung: c/d
+    flags: n/a
+    result: not attempted (time box)
+    wall_s: null
+    peak_rss_mb: null
+    twin_fails: null
+  outcome: limit
+  harness: verify_em_format_err_instance_id_generation
+  gate_reproducible: true
+  note: 'OS model: File::open stub (generic over P) -> Err(os 2) | Ok(File::from_raw_fd(3)); <File as Read>::read
+    stub; <OwnedFd as Drop>::drop stub (no close). Read::read_exact cannot be stubbed for File (trait default method;
+    probe P9d) so the real default read_exact runs over the read stub. Conformance: argued against the std contract
+    only (no OS).'
+  creusot_status: proved
+  limit_evidence: format() with instance_id None and a failing /dev/urandom model times out (> 300 s, 13.8-14.2
+    GB) at unwind 2 and 4, both with an OS model that may succeed and one that always fails, while the success twin
+    (EM-FORMAT-POST-INSTANCE-ID-GENERATED) verifies in 107 s / 3.7 GB under the same stubs.
+- id: EM-FORMAT-POST-INSTANCE-ID-GENERATED
+  group: os-file-io-urandom
+  rungs:
+  - rung: b
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: 'VERIFICATION FAILED: "unwinding assertion loop 0"'
+    wall_s: 58.8
+    peak_rss_mb: 1123
+    twin_fails: null
+    note: bound too small (not a defect)
+  - rung: b
+    flags: -Z stubbing --output-format terse --exact --unwind 4
+    result: VERIFICATION SUCCESSFUL
+    wall_s: 106.5
+    peak_rss_mb: 3733
+    twin_fails: true
+    note: CBMC 85.3 s
+  - rung: b-twin
+    flags: -Z stubbing --output-format terse --exact --unwind 4
+    result: VERIFICATION FAILED
+    wall_s: 109.4
+    peak_rss_mb: 3797
+    twin_fails: null
+    harness: verify_em_format_post_instance_id_generated__mutant
+  outcome: proved
+  harness: verify_em_format_post_instance_id_generated
+  fidelity: representative
+  gate_reproducible: true
+  note: 'OS model: File::open stub (generic over P) -> Err(os 2) | Ok(File::from_raw_fd(3)); <File as Read>::read
+    stub; <OwnedFd as Drop>::drop stub (no close). Read::read_exact cannot be stubbed for File (trait default method;
+    probe P9d) so the real default read_exact runs over the read stub. Conformance: argued against the std contract
+    only (no OS). Layout L_ONE concrete, the 8 urandom bytes symbolic; checks get_instance_id() (twice) and the
+    persisted superblock (disk model v2, crc stub). The "after a later initialize()" clause is in diag_l3_format_post_instance_id_generated_reinit
+    (written, not run: em-lifecycle-composition).'
+  creusot_status: proved
+- id: EM-SETINT-DEFAULT-30S
+  group: background-timer-thread
+  rungs:
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: 'VERIFICATION FAILED: "unwinding assertion loop 0"'
+    wall_s: 170.4
+    peak_rss_mb: 2180
+    twin_fails: null
+    harness: verify_em_setint_default_30s (before the new_default stub)
+    note: spawn stubbed (deferred), real define_component! new_default (interface-map HashMap inserts on the path)
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 3
+    result: 'VERIFICATION FAILED: "unwinding assertion loop 0"'
+    wall_s: 166.3
+    peak_rss_mb: 2181
+    twin_fails: null
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 4
+    result: 'VERIFICATION FAILED: "unwinding assertion loop 0"'
+    wall_s: 167.2
+    peak_rss_mb: 2181
+    twin_fails: null
+  - rung: b
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION SUCCESSFUL
+    wall_s: 38.6
+    peak_rss_mb: 1291
+    twin_fails: true
+    note: + stub ExtentManager::new_default -> Arc::new(support_new_em())
+  - rung: b-twin
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: VERIFICATION FAILED
+    wall_s: 38.6
+    peak_rss_mb: 1289
+    twin_fails: null
+    harness: verify_em_setint_default_30s__mutant
+  outcome: proved
+  harness: verify_em_setint_default_30s
+  fidelity: representative
+  gate_reproducible: true
+  note: 'env model: spawn stub (deferred: closure stored, zeroed JoinHandle - read back as None via the Option niche,
+    probe P7c), Condvar::wait/wait_timeout stubs = one peer step per wait (peer may set_checkpoint_interval / stop;
+    timed_out = any), notify_all counter = checkpoint() count; ExtentManager::new_default model (user-field defaults,
+    empty interface map). check_stub_conforms_new_default (real constructor vs model, all user fields) written but
+    NOT run in the time box -> the new_default model is an argued, not checked, conformance.'
+  creusot_status: proved
+- id: EM-SETINT-BG-NOT-INIT-SILENT
+  group: background-timer-thread
+  rungs:
+  - rung: b
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: timeout (> 400 s cap, killed)
+    wall_s: 400.4
+    peak_rss_mb: 8063
+    twin_fails: null
+    harness: diag_l3_setint_bg_not_init_silent_rung_b2 (before log_info cut)
+    note: deferred spawn + new_default model; thread body run synchronously from the stored Box<dyn FnOnce>
+  - rung: b2
+    flags: -Z stubbing --output-format terse --exact --unwind 3
+    result: timeout (> 400 s cap, killed)
+    wall_s: 400.2
+    peak_rss_mb: 6793
+    twin_fails: null
+    harness: diag_l3_setint_bg_not_init_silent_rung_b2
+    note: + unreachability stub ExtentManager::log_info (run_checkpoint tail cut)
+  - rung: b3
+    flags: -Z stubbing --output-format terse --exact --unwind 3
+    result: timeout (> 300 s cap, killed)
+    wall_s: 300.1
+    peak_rss_mb: 5524
+    twin_fails: null
+    note: inline spawn (closure run inside the spawn call, no Box/static)
+  - rung: b3
+    flags: -Z stubbing --output-format terse --exact --unwind 4
+    result: timeout (> 300 s cap, killed)
+    wall_s: 299.9
+    peak_rss_mb: 5550
+    twin_fails: null
+  - rung: c/d
+    flags: n/a
+    result: not attempted (time box)
+    wall_s: null
+    peak_rss_mb: null
+    twin_fails: null
+    note: Cornel's cfg_attr ruling arrived after the b-rungs; a contract on run_checkpoint would not remove the
+      measured cost (the run_checkpoint tail is already cut in b2/b3)
+  outcome: limit
+  harness: verify_em_setint_bg_not_init_silent
+  limit_evidence: Running the background-thread loop body once or twice under the spawn/Condvar environment model
+    times out (> 300-400 s, 5.5-8 GB) at unwind 2-4 in every variant (deferred or inline spawn, run_checkpoint tail
+    cut), while new_inner without the body verifies in 38 s.
+  note: 'env model: spawn stub (deferred: closure stored, zeroed JoinHandle - read back as None via the Option niche,
+    probe P7c), Condvar::wait/wait_timeout stubs = one peer step per wait (peer may set_checkpoint_interval / stop;
+    timed_out = any), notify_all counter = checkpoint() count; ExtentManager::new_default model (user-field defaults,
+    empty interface map). Creusot refuted this property (NOTINIT-OVERLOADED); refute_em_setint_bg_not_init_silent
+    (formatted+disconnected witness) written, not run.'
+  creusot_status: refuted
+- id: EM-SETINT-CHANGE-NO-SPURIOUS
+  group: background-timer-thread
+  rungs:
+  - rung: b3
+    flags: -Z stubbing --output-format terse --exact --unwind 4
+    result: timeout (> 240 s cap, killed)
+    wall_s: 240.5
+    peak_rss_mb: 4037
+    twin_fails: null
+    note: 'inline spawn + new_default model + log_info unreachability cut; peer changes the interval to an arbitrary
+      Some(ms)|None during a wait; ghost check: a non-timeout wake is followed by a wait with the current interval,
+      never by checkpoint()'
+  - rung: c/d
+    flags: n/a
+    result: not attempted (time box)
+    wall_s: null
+    peak_rss_mb: null
+    twin_fails: null
+  outcome: limit
+  harness: verify_em_setint_change_no_spurious
+  limit_evidence: 'Same thread-body cost as BG-NOT-INIT-SILENT: the inline-spawn environment-model harness times
+    out (> 240 s) at unwind 4.'
+  note: 'env model: spawn stub (deferred: closure stored, zeroed JoinHandle - read back as None via the Option niche,
+    probe P7c), Condvar::wait/wait_timeout stubs = one peer step per wait (peer may set_checkpoint_interval / stop;
+    timed_out = any), notify_all counter = checkpoint() count; ExtentManager::new_default model (user-field defaults,
+    empty interface map).'
+  creusot_status: proved
+- id: EM-SETINT-POST-NONE-DISABLES
+  group: background-timer-thread
+  rungs:
+  - rung: b2
+    flags: -Z stubbing --output-format terse --exact --unwind 4
+    result: timeout (> 300 s cap, killed)
+    wall_s: 300.1
+    peak_rss_mb: 4003
+    twin_fails: null
+    harness: diag_l3_setint_post_none_disables_rung_b2
+    note: deferred spawn + new_default model + log_info cut; peer sets None during a wait
+  - rung: b3
+    flags: -Z stubbing --output-format terse --exact --unwind 4
+    result: timeout (> 240 s cap, killed)
+    wall_s: 240.5
+    peak_rss_mb: 3802
+    twin_fails: null
+    note: inline spawn
+  - rung: c/d
+    flags: n/a
+    result: not attempted (time box)
+    wall_s: null
+    peak_rss_mb: null
+    twin_fails: null
+  outcome: limit
+  harness: verify_em_setint_post_none_disables
+  limit_evidence: 'Expected refutation (Creusot TIMER-TIMEOUT-STALE: a timeout racing set_checkpoint_interval(None)
+    still checkpoints) could not be reproduced: the thread-body harness times out (> 240-300 s, 3.8-4 GB) at unwind
+    4 in both spawn models.'
+  note: 'env model: spawn stub (deferred: closure stored, zeroed JoinHandle - read back as None via the Option niche,
+    probe P7c), Condvar::wait/wait_timeout stubs = one peer step per wait (peer may set_checkpoint_interval / stop;
+    timed_out = any), notify_all counter = checkpoint() count; ExtentManager::new_default model (user-field defaults,
+    empty interface map).'
+  creusot_status: refuted
+- id: EM-SETINT-SOME-FIRES
+  group: background-timer-thread
+  rungs:
+  - rung: b2
+    flags: -Z stubbing --output-format terse --exact --unwind 4
+    result: timeout (> 300 s cap, killed)
+    wall_s: 300.0
+    peak_rss_mb: 3203
+    twin_fails: null
+    harness: diag_l3_setint_some_fires_rung_b2
+    note: 'ghost clock: each wait advances the clock by dur (timeout) or e < dur (early wake); property = no checkpoint
+      gap > interval'
+  - rung: b2-control
+    flags: -Z stubbing --output-format terse --exact --unwind 4
+    result: aborted by the runner at 79 s (no verdict; not an OOM)
+    wall_s: 79.2
+    peak_rss_mb: 2146
+    twin_fails: null
+    harness: diag_l3_setint_some_fires_control_no_early_wake
+  - rung: c/d
+    flags: n/a
+    result: not attempted (time box)
+    wall_s: null
+    peak_rss_mb: null
+    twin_fails: null
+  outcome: limit
+  harness: verify_em_setint_some_fires
+  limit_evidence: 'Expected refutation (Creusot TIMER-DEADLINE-RESET) not reached: the ghost-clock thread-body harness
+    times out (> 300 s, 3.2 GB) at unwind 4.'
+  note: 'env model: spawn stub (deferred: closure stored, zeroed JoinHandle - read back as None via the Option niche,
+    probe P7c), Condvar::wait/wait_timeout stubs = one peer step per wait (peer may set_checkpoint_interval / stop;
+    timed_out = any), notify_all counter = checkpoint() count; ExtentManager::new_default model (user-field defaults,
+    empty interface map). Inline-spawn variant (verify_em_setint_some_fires, rung b3) written, not run.'
+  creusot_status: refuted
+- id: EM-CKPT-INV-SINGLE-WRITER
+  group: multi-thread-interleaving
+  rungs:
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: timeout (> 600 s cap, killed) - no verdict
+    wall_s: 599.9
+    peak_rss_mb: 18359
+    twin_fails: null
+    harness: limit_em_ckpt_inv_single_writer
+    note: two real std::thread::spawn callers of checkpoint() on Arc<ExtentManager> (uninitialised), joined
+  outcome: limit
+  harness: limit_em_ckpt_inv_single_writer
+  limit_evidence: 'With real threads Kani gives no verdict: > 600 s / 18.4 GB at unwind 2 (scratch probe P7a, a
+    trivial spawn+join: > 300 s unbounded, > 200 s / 5.9 GB at unwind 2, > 110 s / 3.9 GB at unwind 1); the only
+    messages are the compile-time warnings that concurrency primitives are treated as sequential and foreign functions
+    are unsupported.'
+  spawn_message: 'compile-time: "warning: Found the following unsupported constructs: C string literal (1), TerminatorKind::InlineAsm
+    (1), caller_location (1), catch_unwind (3), foreign function (40) ... Verification will fail if one or more
+    of these constructs is reachable." and "warning: Kani currently does not support concurrency. The following
+    constructs will be treated as sequential operations: atomic_xsub (10), atomic_cxchgweak (45), atomic_store (15),
+    atomic_xadd (10), atomic_cxchg (45), atomic_xchg (5), thread local (replaced by static variable) (14), atomic_and
+    (5), atomic_load (21), atomic_fence (4)"; verification: NO verdict - symex of std::thread::spawn never finishes
+    (no "unsupported construct" check is ever reported)'
+  note: b (one-peer environment model through Condvar::wait) is part 2 of the study (not in steps 0-4).
+  creusot_status: proved
+- id: EM-CKPT-COMPLETED-SEQ-MONOTONIC
+  group: multi-thread-interleaving
+  rungs:
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 2
+    result: not run (same two-thread driver as EM-CKPT-INV-SINGLE-WRITER; > 600 s expected)
+    wall_s: null
+    peak_rss_mb: null
+    twin_fails: null
+    harness: limit_em_ckpt_completed_seq_monotonic
+  outcome: limit
+  harness: limit_em_ckpt_completed_seq_monotonic
+  limit_evidence: Shares the measured real-spawn limit of EM-CKPT-INV-SINGLE-WRITER (no verdict at > 600 s / 18.4
+    GB); its sequential slice is part 2.
+  spawn_message: 'compile-time: "warning: Found the following unsupported constructs: C string literal (1), TerminatorKind::InlineAsm
+    (1), caller_location (1), catch_unwind (3), foreign function (40) ... Verification will fail if one or more
+    of these constructs is reachable." and "warning: Kani currently does not support concurrency. The following
+    constructs will be treated as sequential operations: atomic_xsub (10), atomic_cxchgweak (45), atomic_store (15),
+    atomic_xadd (10), atomic_cxchg (45), atomic_xchg (5), thread local (replaced by static variable) (14), atomic_and
+    (5), atomic_load (21), atomic_fence (4)"; verification: NO verdict - symex of std::thread::spawn never finishes
+    (no "unsupported construct" check is ever reported)'
+  creusot_status: proved
+- id: EM-BUDDY-INIT-FREE
+  group: buddy-nested-vec
+  run: J8 (2026-10-08)
+  rungs:
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 2..8 (n=1,2,4 sectors, concrete)
+    result: 'VERIFICATION SUCCESSFUL from the smallest sufficient unwind (n=1: u2; n=2: u3; n=4: u4; u2/u3 below
+      that FAIL only on "unwinding assertion loop 0"); FLAT cost: n=4 5.1 s at every unwind 4..8'
+    wall_s: 5.1
+    peak_rss_mb: 139
+    twin_fails: true
+    harness: bounded_verify_em_buddy_init_free_n{1,2,4} (+__mutant, all three FAIL on the assertion)
+  - rung: a-sym
+    flags: -Z stubbing --output-format terse --exact --unwind 5
+    result: 'NO VERDICT: OOM at the 32 GB cap (rc 143) after 91.2 s with total SYMBOLIC but < 8 sectors, sector
+      512 (limit_em_buddy_init_free_sym3_nostub); same with symbolic power-of-two sector (90.3 s / 32.7 GB) and < 2^8
+      sectors at u10 (103.4 s / 32.6 GB)'
+    wall_s: 91.2
+    peak_rss_mb: 32749
+    twin_fails: null
+  - rung: a-diag
+    flags: -Z stubbing --output-format terse --exact --unwind 5
+    result: 'CAUSE ISOLATED by copies of new()''s algorithm (diag_j8_new_*, same symbolic input): flat [[u64;2];4]
+      3.1 s; [Vec<u64>;4] 10.2 s; Vec<Vec<u64>> of CONCRETE length 4 14.3 s / 0.56 GB; Vec<Vec<u64>> of SYMBOLIC
+      length built by a push loop into with_capacity(4) 13.2 s / 0.57 GB (inner Vec::new() 12.2 s); into with_capacity(64)
+      24.4 s / 2.3 GB; the production form vec![Vec::new(); max_order+1] (symbolic n) OOM 85.2 s / 31.7 GB; push
+      loop into with_capacity(mo+1) (SYMBOLIC capacity) OOM 94.2 s / 32.7 GB. => the wall is NOT nesting nor pointer
+      provenance of inner Vecs; it is a heap object of SYMBOLIC SIZE holding the inner Vec headers (std from_elem
+      allocates with_capacity(n)). The provenance hypothesis in em_groups.yaml is refuted for new().'
+    wall_s: 94.2
+    peak_rss_mb: 32691
+    twin_fails: null
+  - rung: b
+    flags: -Z stubbing --output-format terse --exact --unwind 5
+    result: 'VERIFICATION SUCCESSFUL with #[kani::stub(std::vec::from_elem, stub_j8_from_elem)] (push loop into a
+      CONCRETE capacity 64, assert!(n <= 64) as a check): total symbolic < 8 sectors, symbolic base, 41.6 s / 3.8
+      GB (was OOM). First version with capacity `if n<=64 {64} else {n}` still OOM (103.4 s / 32.7 GB): the ite is
+      a symbolic size after the merge. Stub conformance: check_stub_conforms_j8_from_elem (real vec![e; N] vs stub,
+      N=1..4, empty and one-element inner Vec) SUCCESSFUL 36.5 s / 1.6 GB, twin FAILED 9.2 s; check_j8_from_elem_stub_fires
+      FAILED as expected (stub is reached from BuddyAllocator::new).'
+    wall_s: 41.6
+    peak_rss_mb: 3796
+    twin_fails: true
+    harness: bounded_verify_em_buddy_init_free_sym3_vs (+__mutant FAILED 29.5 s / 2.8 GB)
+  - rung: b-full
+    flags: -Z stubbing --output-format terse --exact --unwind 66
+    result: 'NO VERDICT: timeout at 540 s, cgroup peak 4.7 GB (memory no longer the wall) - fully symbolic base, total,
+      power-of-two sector size (D-RANGE-FR-002-217ace) and headroom (D-RANGE-FR-002-3b58ea), from_elem stubbed;
+      up to 64 orders => new() while up to 64 iterations, total_free 64'
+    wall_s: 540.3
+    peak_rss_mb: 4714
+    twin_fails: null
+    harness: limit_em_buddy_init_free
+  - rung: c
+    result: not attempted (time box); no production attribute was added
+  - rung: d
+    result: not attempted (time box). Note the measured cost driver of rung b-full is the 64-iteration while in
+      new() + 64-iteration total_free; an invariant on new()'s `while remaining > 0` is the next lever.
+  outcome: proved-bounded
+  harness: bounded_verify_em_buddy_init_free_sym3_vs
+  limit_evidence: 'unbounded geometry: > 540 s / 4.7 GB at unwind 66 with the from_elem stub (limit_em_buddy_init_free);
+    without the stub OOM at 32 GB already at < 8 sectors (91 s).'
+  gate_reproducible: true
+  contract_proved: null
+  invariant_checked: null
+  note: proved-bounded = symbolic total < 8 sectors, sector 512, symbolic base; concrete n=1,2,4 also proved-bounded
+    at unwind 2-4 with failing twins. Not credited.
+- id: EM-BUDDY-ALLOC-ACCOUNTING
+  group: buddy-nested-vec
+  run: J8 (2026-10-08)
+  rungs:
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 2..8 (fresh new(n sectors), alloc(1 sector), concrete)
+    result: 'VERIFICATION SUCCESSFUL from the smallest sufficient unwind (n=1: u2; n=2: u3; n=4: u4, lower unwinds
+      FAIL on "unwinding assertion loop 0"). n=4 grows with unwind although already complete: u4 12.2 s / 0.67 GB,
+      u5 14.2 s / 0.74 GB, u6 16.2 s / 0.81 GB, u8 20.3 s / 0.98 GB'
+    wall_s: 12.2
+    peak_rss_mb: 669
+    twin_fails: true
+    harness: bounded_verify_em_buddy_alloc_accounting_n{1,2,4} (+__mutant, all FAIL on the assertion)
+  - rung: b
+    flags: -Z stubbing --output-format terse --exact --unwind 5
+    result: 'NO VERDICT: timeout 300 s at 31.3 GB (cap) - fresh new() with SYMBOLIC total < 4 sectors and symbolic
+      base, symbolic size <= total, from_elem stubbed (limit_em_buddy_alloc_accounting_sym2). Diagnostic with concrete
+      base and size a symbolic whole number 1..3 of sectors (no symbolic division): timeout 240 s at 31.4 GB (diag_j8_alloc_concrete_base).
+      So new() fits after the stub (rung b of INIT-FREE: 41.6 s) but ONE alloc() on a state whose free lists depend
+      on a symbolic geometry (only 4 possible geometries) does not fit 32 GB, while the concrete n=4 alloc takes 12 s.'
+    wall_s: 300.1
+    peak_rss_mb: 31303
+    twin_fails: null
+    harness: limit_em_buddy_alloc_accounting_sym2
+  - rung: c
+    result: not attempted (time box); proof_for_contract on alloc would symex the same body from the same kind
+      of state as rung b, which is the measured wall - not measured, so not claimed.
+  - rung: d
+    result: not attempted (time box)
+  - rung: e
+    result: not needed for the concrete cases (they complete with unwinding checks ON); not tried on the symbolic one
+  outcome: proved-bounded
+  harness: bounded_verify_em_buddy_alloc_accounting_n4
+  limit_evidence: 'symbolic geometry: one alloc() on a fresh allocator of < 4 symbolic sectors > 240-300 s / 31 GB
+    (two harnesses), with the new() wall already removed by the conforming from_elem stub.'
+  gate_reproducible: true
+  contract_proved: null
+  invariant_checked: null
+- id: EM-BUDDY-MERGE
+  group: buddy-nested-vec
+  run: J8 (2026-10-08)
+  rungs:
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact --unwind 2..8 (kani_from_parts concrete lists, buddy free; free() of the other half)
+    result: 'VERIFICATION SUCCESSFUL from the smallest sufficient unwind (n=1: u2; n=2: u3; n=4: u4; lower FAIL on
+      the unwinding assertion); flat ~6 s / 0.1 GB at every unwind'
+    wall_s: 6.1
+    peak_rss_mb: 106
+    twin_fails: true
+    harness: bounded_verify_em_buddy_merge_n{1,2,4} (+__mutant, all FAIL on "!merged")
+  - rung: b
+    result: not run - the symbolic-geometry alloc() it needs to build the state is the measured ALLOC-ACCOUNTING
+      wall (merge harness support_j8_alloc_free::<_,3> written, not run, removed)
+  - rung: d
+    result: not attempted (time box)
+  outcome: proved-bounded
+  harness: bounded_verify_em_buddy_merge_n4
+  limit_evidence: 'concrete states only; symbolic states go through the alloc() wall measured under EM-BUDDY-ALLOC-ACCOUNTING.'
+  gate_reproducible: true
+  contract_proved: null
+  invariant_checked: null
+- id: EM-REGION-FREE-MISSING-SLAB-NOOP
+  group: region-slab-map
+  run: J9 (2026-10-08)
+  rungs:
+  - rung: a
+    flags: -Z stubbing --output-format terse --exact (RandomState stub only; real BTreeMap<u64,Slab> + real SizeClassManager HashMap)
+    result: 'unwind 3: FAILED only on "unwinding assertion loop 0" in 9.4 s (loops not covered: btree NodeRef::len search
+      and ptr::swap_nonoverlapping_chunks::<8> on the 11-word Slab, hashbrown RawTableInner reserve). unwind 13 (needed
+      for those loops): NO VERDICT, timeout 420 s. ONE concrete slab (2 slots) at start 0, free_slot(t != 0, idx) with
+      symbolic t, idx (bounded_j9_free_missing_1).'
+    wall_s: 420
+    peak_rss_mb: null
+    twin_fails: null
+    harness: bounded_j9_free_missing_1
+  - rung: a-diag
+    flags: -Z stubbing --output-format terse --exact --default-unwind 5/8
+    result: 'with the BTreeMap model alone (layer 1 below) still NO VERDICT: timeout 300 s at unwind 5 and at unwind 8;
+      at unwind 3 the remaining unwinding failures are only hashbrown RawTableInner (Try::branch) and swap_nonoverlapping_chunks.
+      Isolation: diag_j9_sizeclass_add_get = SizeClassManager::new + ONE concrete add_slab(512, 0) + get_slabs on the
+      REAL HashMap<u32, Vec<u64>> = 74.6 s CBMC (81.9 s wall, 1.18 GB) at unwind 5 - the size-class HashMap is a wall
+      on its own, independent of the slab map.'
+    wall_s: 300
+    peak_rss_mb: 1176
+    twin_fails: null
+    harness: diag_j9_sizeclass_add_get
+  - rung: b
+    flags: -Z stubbing --output-format terse --exact --default-unwind 5
+    result: 'VERIFICATION SUCCESSFUL in 4.9 s CBMC (12.6 s wall) with TWO model layers (j9_map_stubs!): (1) side-table
+      model of the BTreeMap methods the region calls - generic stubs of std::collections::BTreeMap::{insert,get,get_mut,remove,len}
+      (2-entry static table; K/V size+align ASSERTED, capacity overflow ASSERTED; values/iter/range = unreachability
+      stubs); (2) model of crate::slab::SizeClassManager::{add_slab,remove_slab,get_slabs,kani_len}. 1 slab: 4.9 s,
+      twin FAILED 5.8 s ("!same"); 2 slabs: 6.2 s, twin FAILED 6.5 s. Was > 420 s.'
+    wall_s: 12.6
+    peak_rss_mb: 475
+    twin_fails: true
+    harness: bounded_j9m_free_missing_{1,2} (+__mutant)
+  - rung: b-conformance
+    flags: -Z stubbing --output-format terse --exact --default-unwind 4 (btree) / 5 (sizeclass)
+    result: 'NOT ESTABLISHED. The conformance checks must run the REAL containers, i.e. the wall itself: check_stub_conforms_j9_btree
+      (real BTreeMap<u64,u64> vs model, 2 symbolic inserts + 2 symbolic ops; first version 3 ops at unwind 13 > 300 s)
+      timeout 200 s, twin timeout 200 s; check_stub_conforms_j9_btree_fixed1 (1 CONCRETE insert + one op on a fully
+      symbolic key) timeout 150 s, twin timeout 150 s; ..._narrow1 (key in {0,1024,2048}) timeout 120 s. check_stub_conforms_j9_sizeclass
+      (real SizeClassManager, 2 symbolic steps) timeout 200 s (twin stopped). check_stub_conforms_j9_sizeclass_fixed1
+      and check_stub_conforms_j9_btree_fixed2 written, not run (time box). Without a passing conformance check with a
+      failing twin, the models are ASSUMPTIONS, so rung b gives no credit.'
+    wall_s: 200
+    peak_rss_mb: null
+    twin_fails: null
+  - rung: c
+    result: 'not attempted; no production attribute added. Reasoned, not measured: proof_for_contract on the real free_slot
+      body symexes the same BTreeMap::get_mut + HashMap ops that rung a measured (> 420 s), so a contract moves the wall
+      into the contract proof rather than removing it.'
+  - rung: d
+    result: 'not applicable: free_slot has no user loop (its loops are inside std BTreeMap/hashbrown, not annotatable).'
+  outcome: proved-bounded-under-unchecked-model
+  harness: bounded_j9m_free_missing_1
+  limit_evidence: 'real containers: > 420 s at unwind 13 for ONE 2-slot slab (bounded_j9_free_missing_1); one concrete
+    HashMap<u32,Vec<u64>> add+get alone 74.6 s; the real-container side of every conformance check > 120-200 s.
+    With the two models: 4.9-6.5 s.'
+  gate_reproducible: true
+  contract_proved: null
+  invariant_checked: null
+  note: 'Not credited: concrete state (1 or 2 slabs at fixed starts) AND the two models lack a passing conformance check.
+    The stub list uses only -Z stubbing (gate-compatible).'
+- id: EM-REMOVE-ERR-OFFSET-NOT-FOUND
+  group: region-slab-map
+  run: J9 (2026-10-08)
+  rungs:
+  - rung: b
+    flags: -Z stubbing
+    result: 'MODEL CANNOT BE WIRED: remove_extent_by_offset needs range(..=off).next_back(). A range() stub can record
+      the bound and return btree_map::Range::default() (compiles), but the next_back half cannot be stubbed. Exact
+      Kani 0.67 errors: `#[kani::stub(<std::collections::btree_map::Range<''_, u64, crate::slab::Slab> as DoubleEndedIterator>::next_back,
+      ..)]` -> "failed to resolve ...: unable to find `DoubleEndedIterator` inside module `verification`"; with
+      std::iter::DoubleEndedIterator -> "unable to find implementation of associated function `std::iter::DoubleEndedIterator::next_back`
+      for std::collections::btree_map::Range<''a, K, V>"; without generic args (`<std::collections::btree_map::Range
+      as std::iter::DoubleEndedIterator>::next_back`) -> same error. The map model therefore keeps range() as an
+      unreachability stub.'
+    wall_s: 2
+    peak_rss_mb: 196
+    twin_fails: null
+  - rung: a
+    result: 'harnesses bounded_j9m_remove_not_found_{pub,unpub} (+__mutant) written with real BTreeMap + SizeClassManager
+      model (j9_sc_stubs!), NOT RUN (time box). The real-BTreeMap cost they would hit is the one measured under FREE-MISSING
+      rung a (> 420 s) and in the BTreeMap conformance checks (> 120-200 s).'
+  - rung: c
+    result: not attempted (time box); the contract proof on remove_extent_by_offset would run the real range() (see rung a).
+  outcome: limit
+  harness: null
+  limit_evidence: 'the range() model needs a stub of <btree_map::Range as DoubleEndedIterator>::next_back, which Kani
+    0.67 rejects (exact errors above); the real BTreeMap path is the measured > 420 s wall.'
+  gate_reproducible: null
+  contract_proved: null
+  invariant_checked: null
+- id: EM-PUBLISH-POST-VISIBLE
+  group: region-slab-map
+  run: J9 (2026-10-08)
+  rungs:
+  - rung: b
+    result: 'not run. get_extents iterates r.slabs.values() (lib.rs:644); the side-table model cannot provide values()
+      (btree_map::Values cannot be built from outside std and its Iterator::next is a trait-impl method of a std type,
+      which Kani 0.67 does not resolve for stubbing - same error class as Range::next_back above, inferred, not run).'
+  - rung: b-part
+    flags: -Z stubbing --output-format terse --exact --default-unwind 5
+    result: 'the reserve half (RegionState::alloc_extent, which reserve_extent calls) WITH both models + stub_buddy_alloc/free:
+      bounded_j9m_alloc_offset_1 (one pre-placed slab, symbolic size 1..=1024; on Ok: off = start + idx*elem, off % 512
+      == 0, inside slab and region, slot set, key FREE_KEY) VERIFICATION SUCCESSFUL 92.5 s CBMC / 5.75 GB; twin FAILED
+      81.1 s ("!ok").'
+    wall_s: 92.5
+    peak_rss_mb: 5752
+    twin_fails: true
+    harness: bounded_j9m_alloc_offset_1 (+__mutant)
+  outcome: limit
+  harness: null
+  limit_evidence: 'values() iteration is not modelled (see above); alloc half proved-bounded under unchecked models only.'
+  gate_reproducible: null
+  contract_proved: null
+  invariant_checked: null
+groups:
+  shallow-unattempted: 'All 21 attempted. 19 proved with a failing __mutant twin under the same flags (unwinding
+    checks ON, unwind 2; the three representatives sweep 2,3,4,6,8 with a FLAT CBMC time: region-count 5.5 s, setdbase
+    1.4 s, reserve 4.0 s), 1 refuted (METADATA-TOO-SMALL: Kani reproduces the Creusot FORMAT-ALIGN-OVERFLOW witness,
+    "attempt to add with overflow" at alignment u64::MAX-4095, control without that alignment verifies), 1 limit
+    (DEVICE-QUERY). What blocks Kani here is not structure but SYMEX PRUNING: a guard that fails on a SYMBOLIC value
+    (or an uninitialised Option read through locks/dyn) does not prune the rest of format()/reserve_extent(), so
+    rung a OOMs at the 32 GB cap (format guards, 118-158 s) or times out (reserve, > 600 s / 17.9 GB). The technique
+    that overcomes it is the UNREACHABILITY STUB: replace the first deep callee on the infeasible tail (RegionState::alloc_extent,
+    BuddyAllocator::new, Receptacle::get) by assert!(false); kani::assume(false) - sound with no conformance argument,
+    because any reach is a failed check. That cut memory 32 GB -> 0.9-2.3 GB; the remaining SAT cost (symbolic 64-bit
+    divisors in the layout arithmetic) yielded to concrete DIVISOR dispatch via const generics (NO-USABLE-DATA 166
+    s) and, for the u64 % u32 slab guard, to the level-2 power-of-two sector assumption (28 s; without it > 400
+    s even with the tail cut). DEVICE-QUERY stays a measured limit (> 400 s / 11.6 GB with cut + divisor dispatch):
+    the always-failing geometry answer of the dyn IBlockDevice mock is not resolved by symex.'
+  gate-feature-flag: 'Not a Kani limit. EM-BIO-FLUSH needs --features volatile_write_cache (harness pair cfg-gated).
+    The inherited body (boundary_em_bio_flush) turned out VACUOUS for its success clause: under the reworked device
+    model the first command always faults, so its __mutant verifies (unwind 6: 38.5 s; unwind 10: 40.6 s). A reworked
+    case that drives the no-fault answer and each fault kind in concrete branches proves the property at unwind
+    10 with checks ON (181.6 s / 3.06 GB) and its twin fails (185.6 s). The mutant twin, not the unwinding check,
+    is what exposed the gap.'
+  os-file-io-urandom: 'Blocker = host syscalls (open/read of /dev/urandom). Real File::open: no verdict (> 300 s
+    unbounded; unwind 2: unwinding assertion only, 3255 checks undetermined). Technique: stub File::open (generic
+    over P) and <File as Read>::read, plus <OwnedFd as Drop>::drop (close) - Read::read_exact cannot be stubbed
+    for File in Kani 0.67 (trait default method: concrete stub rejected "Expected &mut Self", generic stub rejected
+    "0 generic parameters"), so the real default read_exact runs on the read stub. With it the SUCCESS property
+    (POST-INSTANCE-ID-GENERATED) is proved at unwind 4 (106.5 s / 3.7 GB, twin fails). The ERROR property (ERR-INSTANCE-ID-GENERATION)
+    is a measured limit: > 300 s / 13.8-14.2 GB at unwind 2 and 4 with either OS model; cause not isolated within
+    the time box.'
+  background-timer-thread: 'Blocker = std::thread::spawn + Condvar timing. Technique: spawn stub (deferred or inline;
+    zeroed JoinHandle, read back as None via the Option niche - probe P7c), Condvar::wait/wait_timeout as one nondeterministic
+    peer step per wait, notify_all as a checkpoint() counter, and a ExtentManager::new_default model (the real define_component!
+    constructor fails "unwinding assertion loop 0" at unwind 2-4, ~170 s each). DEFAULT-30S (needs only new_inner)
+    is proved at unwind 2 (38.6 s, twin fails). Every harness that RUNS the thread body (BG-NOT-INIT-SILENT, CHANGE-NO-SPURIOUS,
+    POST-NONE-DISABLES, SOME-FIRES) times out (> 240-400 s, 3.2-8 GB) at unwind 2-4 under deferred spawn, deferred
+    + run_checkpoint tail cut, and inline spawn - so the two Creusot refutations (TIMER-TIMEOUT-STALE, TIMER-DEADLINE-RESET)
+    were not reproduced. Rungs c/d (cfg_attr contracts / loop invariants, allowed late by Cornel) were not attempted
+    within the time box; the measured cost is not in a production loop that an invariant would summarise but in
+    the thread-body symex itself.'
+  multi-thread-interleaving: 'Not expressible with real threads: a harness with two real std::thread::spawn callers
+    of checkpoint() gives NO verdict (> 600 s / 18.4 GB at unwind 2); a trivial spawn+join in the scratch crate
+    likewise (> 300 s unbounded, > 200 s / 5.9 GB at unwind 2, > 110 s / 3.9 GB at unwind 1). Kani never reports
+    an "unsupported construct" check for spawn; its only messages are the compile-time warnings (foreign function
+    (40) unsupported; atomics/thread-locals "treated as sequential operations"). Only the a-rung (limit capture)
+    was in scope for part 1; the one-peer environment model is part 2.'
+  buddy-nested-vec: 'J8 (2026-10-08, 95-min box, 0 credited). All concrete small cases are CHEAP, not a wall: new()+total_free(),
+    alloc(), free()-merge on n = 1, 2, 4 sectors prove at unwind 2-4 with checks ON in 5-12 s / < 1 GB, twins fail
+    (proved-bounded). The earlier 105-113 GB measurements came from SYMBOLIC state/geometry, not from Vec<Vec<u64>>
+    as such. Wall 1 (isolated by diag_j8_new_* copies): BuddyAllocator::new''s vec![Vec::new(); max_order + 1] with
+    a symbolic length = a heap object of SYMBOLIC SIZE holding Vec headers -> OOM 32 GB in ~90 s already for < 8
+    sectors; the same Vec<Vec> of symbolic length in a CONCRETE-capacity buffer: 13-24 s. The pointer-provenance
+    hypothesis is refuted for new(). Technique: stub std::vec::from_elem by a push loop into a concrete capacity 64
+    (assert n <= 64 as a check), conformance-checked against the real vec![] (twin fails): new() with symbolic geometry
+    < 8 sectors then proves in 41.6 s / 3.8 GB (proved-bounded); fully symbolic geometry (64 orders, unwind 66) times
+    out at 540 s / 4.7 GB (time, no longer memory). Wall 2: ONE alloc() on a fresh allocator of symbolic size < 4
+    sectors still exceeds 32 GB in 240-300 s even with the stub, concrete base and whole-sector sizes - the cost is
+    alloc()''s pop/push at a symbolic order on free lists whose contents depend on the symbolic geometry. Rungs c
+    (contracts) and d (loop invariants) were not reached in the box; no production line was edited. The other 9
+    properties were not attempted: they all need alloc()/free()/mark_allocated() on a symbolic state, i.e. wall 2.'
+  region-slab-map: 'J9 (2026-10-08, 95-min box, 0 credited). Rung a confirmed the wall on ONE concrete 2-slot slab:
+    free_slot miss is > 420 s at unwind 13 (the unwind the btree node search / 11-word Slab swap loops need; unwind 3
+    fails only on unwinding assertions in 9.4 s). The wall has TWO parts, not one: the size-class HashMap<u32,Vec<u64>>
+    alone costs 74.6 s for ONE concrete add_slab+get_slabs (diag_j9_sizeclass_add_get), and modelling only the BTreeMap
+    still times out (> 300 s at unwind 5 and 8). Technique: a side-table model of the BTreeMap methods used (generic
+    -Z stubbing of BTreeMap::{insert,get,get_mut,remove,len}, the real map stays empty, K/V size and capacity asserted,
+    values/iter/range unreachability stubs) PLUS a model of SizeClassManager::{add_slab,remove_slab,get_slabs}. With
+    both: free_slot miss 4.9-6.5 s (1 and 2 slabs, twins fail); alloc_extent offset/alignment clause 92.5 s / 5.75 GB
+    (twin fails). NOT credited: (1) the conformance checks of both models run the real containers and time out (BTreeMap
+    > 120-200 s even for 1 concrete insert + 1 symbolic-key op; SizeClassManager > 200 s for 2 symbolic steps) - so
+    the models are unchecked assumptions; (2) states are concrete. Range::next_back and Values::next cannot be stubbed
+    in Kani 0.67 ("unable to find implementation of associated function std::iter::DoubleEndedIterator::next_back
+    for btree_map::Range"), so remove_extent_by_offset and get_extents/for_each_extent/checkpoint serialisation
+    (values()/iter()) are out of reach of the map model. Rungs c/d not attempted; no production line or attribute edited.
+    Next lever: conformance checks on CONCRETE op sequences only (no symbolic key into the real map), or a cfg(kani)
+    type substitution of RegionState.slabs (production-type edit, needs Cornel).'

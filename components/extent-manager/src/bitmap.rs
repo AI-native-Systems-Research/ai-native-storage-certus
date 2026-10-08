@@ -63,6 +63,14 @@ impl AllocationBitmap {
     }
 }
 
+// Read-only views for the Kani harnesses in `crate::verification` (cfg(kani) only).
+#[cfg(kani)]
+impl AllocationBitmap {
+    pub(crate) fn kani_words(&self) -> &[u64] {
+        &self.words
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

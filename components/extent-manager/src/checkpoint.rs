@@ -240,6 +240,12 @@ pub(crate) fn deserialize_slabs(
     Ok(result)
 }
 
+// Kani-only entry point for the private region serializer (cfg(kani) only).
+#[cfg(kani)]
+pub(crate) fn kani_serialize_region(region: &RegionState) -> Vec<u8> {
+    serialize_region(region)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

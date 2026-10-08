@@ -179,3 +179,11 @@ impl BlockDeviceClient {
         }
     }
 }
+
+// Read-only views for the Kani harnesses in `crate::verification` (cfg(kani) only).
+#[cfg(kani)]
+impl BlockDeviceClient {
+    pub(crate) fn kani_base_lba(&self) -> u64 {
+        self.base_lba
+    }
+}
