@@ -62,6 +62,7 @@ fn plan_bytes(seed: u64, until: f64) -> Vec<u8> {
 }
 
 #[test]
+#[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
 fn a_fixed_seed_gives_byte_identical_plans() {
     // SC-003. Repeated three times rather than twice: two identical runs could
     // both be wrong in the same way if something cached, and a third makes an
@@ -75,6 +76,7 @@ fn a_fixed_seed_gives_byte_identical_plans() {
 }
 
 #[test]
+#[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
 fn a_different_seed_gives_a_different_plan() {
     // The half that catches a seed which is not actually wired through — a failure
     // that looks *exactly* like determinism and would otherwise pass every test
@@ -131,6 +133,7 @@ fn every_substream_responds_to_the_seed() {
 }
 
 #[test]
+#[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
 fn the_span_determines_the_plan_and_nothing_else_does() {
     // A run to 1000 must be a prefix of a run to 2000 at the same seed. If it is
     // not, something depends on the total span — a lookahead, a buffer size, an
