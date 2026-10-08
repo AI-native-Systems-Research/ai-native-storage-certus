@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_format_m": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_format_m": { "prover": "alt-ergo", "time": 0.013 },
       "vc_verify_dpm_format_err_io__mutant": {
         "tactic": "split_vc",
         "children": [
@@ -11,7 +11,7 @@
             "children": [
               {
                 "tactic": "split_vc",
-                "children": [ null, { "prover": "alt-ergo", "time": 0.033 } ]
+                "children": [ null, { "prover": "alt-ergo", "time": 0.023 } ]
               }
             ]
           }

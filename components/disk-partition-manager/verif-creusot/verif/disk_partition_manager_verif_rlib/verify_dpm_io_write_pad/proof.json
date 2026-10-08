@@ -2,8 +2,8 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_verify_dpm_io_write_pad": { "prover": "alt-ergo", "time": 0.022 },
-      "vc_write_block_buffer": { "prover": "alt-ergo", "time": 0.017 }
+      "vc_verify_dpm_io_write_pad": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_write_block_buffer": { "prover": "alt-ergo", "time": 0.025 }
     }
   }
 }

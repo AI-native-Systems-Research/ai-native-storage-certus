@@ -2,9 +2,9 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_from_elem_u8": { "prover": "alt-ergo", "time": 0.016 },
-      "vc_index_mut_Vec_u8_Global": { "prover": "alt-ergo", "time": 0.015 },
-      "vc_serialize_padding_slot": { "prover": "z3", "time": 0.066 }
+      "vc_from_elem_u8": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_index_mut_Vec_u8_Global": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_serialize_padding_slot": { "prover": "z3", "time": 0.084 }
     }
   }
 }

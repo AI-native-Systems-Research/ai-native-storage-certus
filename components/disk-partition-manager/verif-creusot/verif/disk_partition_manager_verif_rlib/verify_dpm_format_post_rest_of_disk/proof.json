@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_layout_place": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_layout_place": { "prover": "alt-ergo", "time": 0.029 },
       "vc_verify_dpm_format_post_rest_of_disk": {
         "prover": "alt-ergo",
-        "time": 0.14
+        "time": 0.143
       }
     }
   }

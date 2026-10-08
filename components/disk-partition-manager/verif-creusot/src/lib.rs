@@ -389,9 +389,12 @@ pub fn sum_fixed(specs: &Vec<SpecM>, ss: u32) -> u64 {
 
 /// gpt.rs:251-277 — reject >1 rest-of-disk spec (`MultiRest`), reject an over-subscription
 /// (`Capacity`), otherwise return `rest_sectors`.
+// J4 (level-2): `total_usable >= 1` dropped (the body never needs it), and the fixed-sum bound
+// is needed only when the gpt.rs:257 multi-rest check does NOT return first (the sum is
+// gpt.rs:263, after it) - both are WEAKENINGS, so every caller still discharges them.
 #[requires(ss@ == 512 || ss@ == 4096)]
-#[requires(total_usable@ >= 1)]
-#[requires(fixed_sum_l(specs@, specs@.len(), ss@) <= 18446744073709551615)]
+#[requires(rest_count_l(specs@, specs@.len()) <= 1
+    ==> fixed_sum_l(specs@, specs@.len(), ss@) <= 18446744073709551615)]
 #[ensures(match result {
     Err(LayoutErr::MultiRest) => rest_count_l(specs@, specs@.len()) > 1,
     _ => rest_count_l(specs@, specs@.len()) <= 1,
@@ -622,10 +625,13 @@ pub fn lemma_occupied_mono(s: Seq<EntryM>, n: Int) {
 // be total where the entry range is non-degenerate. The degenerate case is not an omission: it
 // is `refute_dpm_inv_num_sectors_positive`, which models the same expression with the release
 // build's wrapping semantics.
+// J4 (level-2): the two entry-range premises are stated over the OCCUPIED slots only
+// (`type_guid != [0u8; 16]`), exactly as D-RANGE-KEYENTITY:PARTITIONINFO-6425ed; the
+// `+ 1` arithmetic (gpt.rs:139, 226) only ever runs for an occupied slot (filter-before-map).
 #[requires(entries@.len() <= 4294967295)]
-#[requires(forall<j: Int> 0 <= j && j < entries@.len()
+#[requires(forall<j: Int> 0 <= j && j < entries@.len() && !entries@[j].tg_zero
     ==> entries@[j].end@ >= entries@[j].start@)]
-#[requires(forall<j: Int> 0 <= j && j < entries@.len()
+#[requires(forall<j: Int> 0 <= j && j < entries@.len() && !entries@[j].tg_zero
     ==> entries@[j].end@ - entries@[j].start@ < 18446744073709551615)]
 #[ensures(result@.len() == occupied_l(entries@, entries@.len()))]
 // the j-th occupied slot lands at output position occupied_l(.., j) and carries the SLOT number
@@ -1422,25 +1428,60 @@ pub fn verify_dpm_init_post_cache__mutant(
 }
 
 // ---- DPM-INIT-POST-ENTRIES — one PartitionInfo per OCCUPIED slot, padding slots skipped ----
-#[requires(entries@.len() <= 4294967295)]
-#[requires(forall<j: Int> 0 <= j && j < entries@.len() ==> entries@[j].end@ >= entries@[j].start@)]
-#[requires(forall<j: Int> 0 <= j && j < entries@.len()
-    ==> entries@[j].end@ - entries@[j].start@ < 18446744073709551615)]
-#[ensures(result@.len() == occupied_l(entries@, entries@.len()))]
-#[ensures(forall<j: Int> 0 <= j && j < entries@.len() && !entries@[j].tg_zero
-    ==> result@[occupied_l(entries@, j)].start_lba@ == entries@[j].start@
-        && result@[occupied_l(entries@, j)].num_sectors@
-            == entries@[j].end@ - entries@[j].start@ + 1)]
-pub fn verify_dpm_init_post_entries(entries: &Vec<EntryM>) -> Vec<PInfoM> {
-    project(entries)
+
+/// `parse_entries(&entry_data, header.num_partition_entries)` — gpt.rs:387-405 (called at
+/// gpt.rs:131). `slots` is the entry buffer cut into its whole 128-byte slots (the
+/// `offset + 128 > data.len()` break at gpt.rs:391), so the loop keeps the first
+/// `min(count, slots.len())` of them, in order. Its length is bounded by the u32 `count`,
+/// which is what discharges `project`'s `len <= u32::MAX` — a proved fact, not a premise.
+#[ensures(result@.len() == (if count@ <= slots@.len() { count@ } else { slots@.len() }))]
+#[ensures(forall<j: Int> 0 <= j && j < result@.len() ==> result@[j] == slots@[j])]
+pub fn parse_entries_m(slots: &Vec<EntryM>, count: u32) -> Vec<EntryM> {
+    let mut out: Vec<EntryM> = Vec::new();
+    let mut i: usize = 0;
+    let n = count as usize;
+    #[invariant(i@ <= n@ && i@ <= slots@.len())]
+    #[invariant(out@.len() == i@)]
+    #[invariant(forall<j: Int> 0 <= j && j < i@ ==> out@[j] == slots@[j])]
+    while i < n && i < slots.len() {
+        out.push(slots[i]); // gpt.rs:395-402
+        i += 1;
+    }
+    out
 }
-#[requires(entries@.len() <= 4294967295)]
-#[requires(forall<j: Int> 0 <= j && j < entries@.len() ==> entries@[j].end@ >= entries@[j].start@)]
-#[requires(forall<j: Int> 0 <= j && j < entries@.len()
-    ==> entries@[j].end@ - entries@[j].start@ < 18446744073709551615)]
-#[ensures(result@.len() == entries@.len())]
-pub fn verify_dpm_init_post_entries__mutant(entries: &Vec<EntryM>) -> Vec<PInfoM> {
-    project(entries)
+
+// J4 (level-2): the ONLY premise is D-RANGE-KEYENTITY:PARTITIONINFO-6425ed verbatim —
+// `entries.iter().filter(|e| e.type_guid != [0u8; 16]).all(|e| e.starting_lba <= e.ending_lba
+// && e.ending_lba - e.starting_lba < u64::MAX)` — where `entries` is the parse_entries output,
+// i.e. the first min(count, slots.len()) slots (the `j < count@` conjunct says exactly that).
+#[requires(forall<j: Int> 0 <= j && j < slots@.len() && j < count@ && !slots@[j].tg_zero
+    ==> slots@[j].start@ <= slots@[j].end@
+        && slots@[j].end@ - slots@[j].start@ < 18446744073709551615)]
+#[ensures(forall<j: Int> 0 <= j && j < result.0@.len() ==> result.0@[j] == slots@[j])]
+#[ensures(result.1@.len() == occupied_l(result.0@, result.0@.len()))]
+#[ensures(forall<j: Int> 0 <= j && j < result.0@.len() && !result.0@[j].tg_zero
+    ==> result.1@[occupied_l(result.0@, j)].start_lba@ == result.0@[j].start@
+        && result.1@[occupied_l(result.0@, j)].num_sectors@
+            == result.0@[j].end@ - result.0@[j].start@ + 1)]
+pub fn verify_dpm_init_post_entries(slots: &Vec<EntryM>, count: u32) -> (Vec<EntryM>, Vec<PInfoM>) {
+    let entries = parse_entries_m(slots, count); // gpt.rs:131
+    let parts = project(&entries); // gpt.rs:132-144
+    (entries, parts)
+}
+// MUTANT (anti-vacuity, J4): the driver above verbatim, first ensures negated.
+#[requires(forall<j: Int> 0 <= j && j < slots@.len() && j < count@ && !slots@[j].tg_zero
+    ==> slots@[j].start@ <= slots@[j].end@
+        && slots@[j].end@ - slots@[j].start@ < 18446744073709551615)]
+#[ensures(!(forall<j: Int> 0 <= j && j < result.0@.len() ==> result.0@[j] == slots@[j]))]
+#[ensures(result.1@.len() == occupied_l(result.0@, result.0@.len()))]
+#[ensures(forall<j: Int> 0 <= j && j < result.0@.len() && !result.0@[j].tg_zero
+    ==> result.1@[occupied_l(result.0@, j)].start_lba@ == result.0@[j].start@
+        && result.1@[occupied_l(result.0@, j)].num_sectors@
+            == result.0@[j].end@ - result.0@[j].start@ + 1)]
+pub fn verify_dpm_init_post_entries__mutant(slots: &Vec<EntryM>, count: u32) -> (Vec<EntryM>, Vec<PInfoM>) {
+    let entries = parse_entries_m(slots, count); // gpt.rs:131
+    let parts = project(&entries); // gpt.rs:132-144
+    (entries, parts)
 }
 
 // ---- DPM-INIT-POST-SECTOR-SIZE — the table reports the sector size the DEVICE reported ----
@@ -1785,22 +1826,24 @@ pub fn verify_dpm_format_pre_sector_size__mutant(ss: u32, ns: u64) -> (usize, u3
 }
 
 // ---- DPM-FORMAT-ERR-LAYOUT-MULTI-GROW ----
+// J4 (level-2): premises = D-RANGE-FR-011-46880c's config conjunct + the obligation's own
+// scenario ("if two or more partitions ask for that"). SUM (D-RANGE-FR-006-9e23ee) is NOT
+// assumed: the multi-rest check (gpt.rs:257) returns before the sum (gpt.rs:263) is formed.
+// `total_usable` is universally quantified (no geometry premise): the check does not read it.
 #[requires(ss@ == 512 || ss@ == 4096)]
-#[requires(total_usable@ >= 1)]
-#[requires(fixed_sum_l(specs@, specs@.len(), ss@) <= 18446744073709551615)]
-#[ensures(rest_count_l(specs@, specs@.len()) > 1
-    ==> result == Err(LayoutErr::MultiRest))]
-#[ensures(match result { Err(LayoutErr::MultiRest) =>
-    rest_count_l(specs@, specs@.len()) > 1, _ => true })]
+#[requires(rest_count_l(specs@, specs@.len()) > 1)]
+#[ensures(result == Err(LayoutErr::MultiRest))]
+#[ensures(match result { Ok(_) => false, _ => true })]
 pub fn verify_dpm_format_err_layout_multi_grow(
     specs: &Vec<SpecM>, ss: u32, total_usable: u64,
 ) -> Result<u64, LayoutErr> {
     layout_classify(specs, ss, total_usable)
 }
+// MUTANT (anti-vacuity, J4): the driver above verbatim, first ensures negated.
 #[requires(ss@ == 512 || ss@ == 4096)]
-#[requires(total_usable@ >= 1)]
-#[requires(fixed_sum_l(specs@, specs@.len(), ss@) <= 18446744073709551615)]
-#[ensures(rest_count_l(specs@, specs@.len()) == 1 ==> result == Err(LayoutErr::MultiRest))]
+#[requires(rest_count_l(specs@, specs@.len()) > 1)]
+#[ensures(!(result == Err(LayoutErr::MultiRest)))]
+#[ensures(match result { Ok(_) => false, _ => true })]
 pub fn verify_dpm_format_err_layout_multi_grow__mutant(
     specs: &Vec<SpecM>, ss: u32, total_usable: u64,
 ) -> Result<u64, LayoutErr> {
@@ -1808,8 +1851,11 @@ pub fn verify_dpm_format_err_layout_multi_grow__mutant(
 }
 
 // ---- DPM-FORMAT-ERR-LAYOUT-CAPACITY ----
+// J4 (level-2): premises = D-RANGE-FR-011-46880c's config conjunct + D-RANGE-FR-006-9e23ee
+// verbatim (the try_fold/checked_add over the ceil-sectors of every partition is_some() iff
+// their exact sum fits a u64, every term being non-negative). The former `total_usable >= 1`
+// is dropped: `total_usable` is universally quantified.
 #[requires(ss@ == 512 || ss@ == 4096)]
-#[requires(total_usable@ >= 1)]
 #[requires(fixed_sum_l(specs@, specs@.len(), ss@) <= 18446744073709551615)]
 #[ensures(rest_count_l(specs@, specs@.len()) <= 1
     && fixed_sum_l(specs@, specs@.len(), ss@) > total_usable@
@@ -1821,11 +1867,14 @@ pub fn verify_dpm_format_err_layout_capacity(
 ) -> Result<u64, LayoutErr> {
     layout_classify(specs, ss, total_usable)
 }
+// MUTANT (anti-vacuity, J4): the driver above verbatim, first ensures negated.
 #[requires(ss@ == 512 || ss@ == 4096)]
-#[requires(total_usable@ >= 1)]
 #[requires(fixed_sum_l(specs@, specs@.len(), ss@) <= 18446744073709551615)]
+#[ensures(!(rest_count_l(specs@, specs@.len()) <= 1
+    && fixed_sum_l(specs@, specs@.len(), ss@) > total_usable@
+    ==> result == Err(LayoutErr::Capacity)))]
 #[ensures(match result { Err(LayoutErr::Capacity) =>
-    fixed_sum_l(specs@, specs@.len(), ss@) <= total_usable@, _ => true })]
+    fixed_sum_l(specs@, specs@.len(), ss@) > total_usable@, _ => true })]
 pub fn verify_dpm_format_err_layout_capacity__mutant(
     specs: &Vec<SpecM>, ss: u32, total_usable: u64,
 ) -> Result<u64, LayoutErr> {
@@ -1936,25 +1985,31 @@ pub fn refute_dpm_format_pre_max_128(specs: &Vec<SpecM>) -> Result<Vec<EntryM>, 
 }
 
 // ---- DPM-FORMAT-ERR-LAYOUT-UNREACHABLE ----
+// J4 (level-2): premises = D-RANGE-FR-011-46880c (config conjunct),
+// D-RANGE-KEYENTITY:PARTITIONCONFIG-90393c (config conjunct, verbatim:
+// `total_sectors >= 2 * 16384.div_ceil(sector_size) + 5`) and D-RANGE-FR-006-9e23ee. The
+// usable window is COMPUTED from the geometry exactly as gpt.rs:157-158/245 do, instead of
+// assuming `first >= 3 && first <= last && last <= u64::MAX - 1`.
 #[requires(ss@ == 512 || ss@ == 4096)]
-#[requires(first@ >= 3 && first@ <= last@)]
-#[requires(last@ <= 18446744073709551614)]
+#[requires(ns@ >= 2 * cdiv(16384, ss@) + 5)]
 #[requires(fixed_sum_l(specs@, specs@.len(), ss@) <= 18446744073709551615)]
 #[ensures(match result { Err(LayoutErr::PerPartition) => false, _ => true })]
 pub fn verify_dpm_format_err_layout_unreachable(
-    specs: &Vec<SpecM>, ss: u32, first: u64, last: u64,
+    specs: &Vec<SpecM>, ss: u32, ns: u64,
 ) -> Result<Vec<EntryM>, LayoutErr> {
-    compute_layout(specs, ss, first, last)
+    let (first, last) = usable_window(ss, ns); // gpt.rs:157-158
+    compute_layout(specs, ss, first, last) // gpt.rs:239-322
 }
+// MUTANT (anti-vacuity, J4): the driver above verbatim, first ensures negated.
 #[requires(ss@ == 512 || ss@ == 4096)]
-#[requires(first@ >= 3 && first@ <= last@)]
-#[requires(last@ <= 18446744073709551614)]
+#[requires(ns@ >= 2 * cdiv(16384, ss@) + 5)]
 #[requires(fixed_sum_l(specs@, specs@.len(), ss@) <= 18446744073709551615)]
-#[ensures(match result { Err(LayoutErr::Capacity) => false, _ => true })]
+#[ensures(!(match result { Err(LayoutErr::PerPartition) => false, _ => true }))]
 pub fn verify_dpm_format_err_layout_unreachable__mutant(
-    specs: &Vec<SpecM>, ss: u32, first: u64, last: u64,
+    specs: &Vec<SpecM>, ss: u32, ns: u64,
 ) -> Result<Vec<EntryM>, LayoutErr> {
-    compute_layout(specs, ss, first, last)
+    let (first, last) = usable_window(ss, ns); // gpt.rs:157-158
+    compute_layout(specs, ss, first, last) // gpt.rs:239-322
 }
 
 // ---- DPM-FORMAT-SUM-OVERFLOW — `.sum::<u64>()` at gpt.rs:263-268 has no overflow guard.
@@ -2097,8 +2152,11 @@ pub fn verify_dpm_format_post_rest_of_disk__mutant(
 }
 
 // ---- DPM-FORMAT-POST-MBR ----
+// J4 (level-2): premises = D-RANGE-FR-011-46880c (config conjunct) and
+// D-RANGE-KEYENTITY:PARTITIONCONFIG-90393c (config conjunct) verbatim:
+// `total_sectors >= 2 * 16384.div_ceil(sector_size) + 5` (was the derived `ns >= 1`).
 #[requires(ss@ == 512 || ss@ == 4096)]
-#[requires(ns@ >= 1)]
+#[requires(ns@ >= 2 * cdiv(16384, ss@) + 5)]
 #[ensures(result@[446]@ == 0)]
 #[ensures(result@[450]@ == 238)]
 #[ensures(le32_at(result@, 454) == 1)]
@@ -2107,16 +2165,24 @@ pub fn verify_dpm_format_post_rest_of_disk__mutant(
 pub fn verify_dpm_format_post_mbr(ss: u32, ns: u64) -> Vec<u8> {
     protective_mbr(ss, ns)
 }
+// MUTANT (anti-vacuity, J4): the driver above verbatim, first ensures negated.
 #[requires(ss@ == 512 || ss@ == 4096)]
-#[requires(ns@ >= 1)]
-#[ensures(result@[446]@ == 128)]
+#[requires(ns@ >= 2 * cdiv(16384, ss@) + 5)]
+#[ensures(!(result@[446]@ == 0))]
+#[ensures(result@[450]@ == 238)]
+#[ensures(le32_at(result@, 454) == 1)]
+#[ensures(le32_at(result@, 458) == (if ns@ - 1 <= 4294967295 { ns@ - 1 } else { 4294967295 }))]
+#[ensures(result@[510]@ == 85 && result@[511]@ == 170)]
 pub fn verify_dpm_format_post_mbr__mutant(ss: u32, ns: u64) -> Vec<u8> {
     protective_mbr(ss, ns)
 }
 
 // ---- DPM-FORMAT-POST-HEADER-PAIR ----
+// J4 (level-2): premises = D-RANGE-FR-011-46880c (config conjunct) and
+// D-RANGE-KEYENTITY:PARTITIONCONFIG-90393c (config conjunct) verbatim:
+// `total_sectors >= 2 * 16384.div_ceil(sector_size) + 5` (was the derived `>= 2 * entry_sectors + 4`).
 #[requires(ss@ == 512 || ss@ == 4096)]
-#[requires(ns@ >= 2 * entry_sectors_l(ss@) + 4)]
+#[requires(ns@ >= 2 * cdiv(16384, ss@) + 5)]
 #[ensures(result.0.my_lba@ == 1 && result.0.alternate_lba@ == ns@ - 1)]
 #[ensures(result.1.my_lba@ == ns@ - 1 && result.1.alternate_lba@ == 1)]
 #[ensures(result.0.my_lba == result.1.alternate_lba)]
@@ -2124,9 +2190,13 @@ pub fn verify_dpm_format_post_mbr__mutant(ss: u32, ns: u64) -> Vec<u8> {
 pub fn verify_dpm_format_post_header_pair(ss: u32, ns: u64, crc: u32) -> (HdrM, HdrM) {
     header_pair(ss, ns, crc)
 }
+// MUTANT (anti-vacuity, J4): the driver above verbatim, first ensures negated.
 #[requires(ss@ == 512 || ss@ == 4096)]
-#[requires(ns@ >= 2 * entry_sectors_l(ss@) + 4)]
-#[ensures(result.1.my_lba@ == 1)]
+#[requires(ns@ >= 2 * cdiv(16384, ss@) + 5)]
+#[ensures(!(result.0.my_lba@ == 1 && result.0.alternate_lba@ == ns@ - 1))]
+#[ensures(result.1.my_lba@ == ns@ - 1 && result.1.alternate_lba@ == 1)]
+#[ensures(result.0.my_lba == result.1.alternate_lba)]
+#[ensures(result.1.my_lba == result.0.alternate_lba)]
 pub fn verify_dpm_format_post_header_pair__mutant(ss: u32, ns: u64, crc: u32) -> (HdrM, HdrM) {
     header_pair(ss, ns, crc)
 }
@@ -2168,8 +2238,11 @@ pub fn verify_dpm_format_post_entry_array__mutant(
 }
 
 // ---- DPM-FORMAT-FRAME-DATA-REGIONS ----
+// J4 (level-2): premises = D-RANGE-FR-011-46880c (config conjunct) and
+// D-RANGE-KEYENTITY:PARTITIONCONFIG-90393c (config conjunct) verbatim:
+// `total_sectors >= 2 * 16384.div_ceil(sector_size) + 5` (was the derived `>= 2 * entry_sectors + 4`).
 #[requires(ss@ == 512 || ss@ == 4096)]
-#[requires(ns_sectors@ >= 2 * entry_sectors_l(ss@) + 4)]
+#[requires(ns_sectors@ >= 2 * cdiv(16384, ss@) + 5)]
 // exactly five accesses, in the documented order, all writes, all on the configured namespace
 #[ensures(result@.len() == 5)]
 #[ensures(all_ns(result@, ns@))]
@@ -2195,13 +2268,33 @@ pub fn verify_dpm_format_frame_data_regions(ns: u32, ss: u32, ns_sectors: u64) -
     };
     t
 }
+// MUTANT (anti-vacuity, J4): the driver above verbatim, first ensures negated.
 #[requires(ss@ == 512 || ss@ == 4096)]
-#[requires(ns_sectors@ >= 2 * entry_sectors_l(ss@) + 4)]
-#[ensures(result@.len() == 6)]
-pub fn verify_dpm_format_frame_data_regions__mutant(
-    ns: u32, ss: u32, ns_sectors: u64,
-) -> Vec<Acc> {
-    write_gpt_trace(ns, ss, ns_sectors)
+#[requires(ns_sectors@ >= 2 * cdiv(16384, ss@) + 5)]
+// exactly five accesses, in the documented order, all writes, all on the configured namespace
+#[ensures(!(result@.len() == 5))]
+#[ensures(all_ns(result@, ns@))]
+// and not one of them touches the usable region the partitions occupy
+#[ensures(writes_avoid(result@, first_usable_l(ss@), last_usable_l(ss@, ns_sectors@)))]
+pub fn verify_dpm_format_frame_data_regions__mutant(ns: u32, ss: u32, ns_sectors: u64) -> Vec<Acc> {
+    let t = write_gpt_trace(ns, ss, ns_sectors);
+    proof_assert! {
+        // LBA 0 and LBA 1 are below first_usable = 2 + entry_sectors
+        t@[0].lba@ < first_usable_l(ss@) && t@[1].lba@ < first_usable_l(ss@)
+    };
+    proof_assert! {
+        // the primary entry array is [2, 2 + entry_sectors) == [2, first_usable)
+        t@[2].lba@ + t@[2].sectors@ == first_usable_l(ss@)
+    };
+    proof_assert! {
+        // the backup entry array starts at last_usable + 1
+        t@[3].lba@ == last_usable_l(ss@, ns_sectors@) + 1
+    };
+    proof_assert! {
+        // and the backup header is the very last sector, above last_usable
+        t@[4].lba@ > last_usable_l(ss@, ns_sectors@)
+    };
+    t
 }
 
 // ---- DPM-FORMAT-POST-CACHE ----
@@ -2438,10 +2531,13 @@ pub fn verify_dpm_format_err_io__mutant(
 // ===========================================================================
 
 // ---- DPM-INIT-FRAME-READ-ONLY ----
+// J4 (level-2): premises = D-RANGE-FR-011-46880c (device conjunct), the read-side conjunct of
+// D-RANGE-KEYENTITY:PARTITIONCONFIG-90393c verbatim (`num_sectors >= 16384.div_ceil(sector_size)
+// + 1`) and D-RANGE-FR-001-2e9472 verbatim (`num_partition_entries == 128 &&
+// partition_entry_size == 128`), replacing the derived `1 <= decl_entries * decl_entry_size`.
 #[requires(ss@ == 512 || ss@ == 4096)]
-#[requires(ns_sectors@ >= entry_sectors_l(ss@) + 1)]
-#[requires(decl_entries@ * decl_entry_size@ >= 1)]
-#[requires(decl_entries@ * decl_entry_size@ <= 18446744073709551615)]
+#[requires(ns_sectors@ >= cdiv(16384, ss@) + 1)]
+#[requires(decl_entries@ == 128 && decl_entry_size@ == 128)]
 #[ensures(no_writes(result.0@))]
 #[ensures(no_writes(result.1@))]
 pub fn verify_dpm_init_frame_read_only(
@@ -2455,14 +2551,16 @@ pub fn verify_dpm_init_frame_read_only(
     );
     (primary, backup)
 }
+// MUTANT (anti-vacuity, J4): the driver above verbatim, first ensures negated.
 #[requires(ss@ == 512 || ss@ == 4096)]
-#[requires(ns_sectors@ >= entry_sectors_l(ss@) + 1)]
-#[requires(decl_entries@ * decl_entry_size@ >= 1)]
-#[requires(decl_entries@ * decl_entry_size@ <= 18446744073709551615)]
-#[ensures(result.0@[0].is_write)]
+#[requires(ns_sectors@ >= cdiv(16384, ss@) + 1)]
+#[requires(decl_entries@ == 128 && decl_entry_size@ == 128)]
+#[ensures(!(no_writes(result.0@)))]
+#[ensures(no_writes(result.1@))]
 pub fn verify_dpm_init_frame_read_only__mutant(
     ns: u32, ss: u32, ns_sectors: u64, decl_entries: u32, decl_entry_size: u32,
 ) -> (Vec<Acc>, Vec<Acc>) {
+    // the primary attempt (gpt.rs:68) and the backup attempt (gpt.rs:90) — both read-only
     let primary = try_read_gpt_trace(ns, ss, 1, 2, decl_entries, decl_entry_size);
     let backup = try_read_gpt_trace(
         ns, ss, ns_sectors - 1, ns_sectors - 1 - entry_sectors(ss) as u64,
@@ -2509,107 +2607,195 @@ pub fn verify_dpm_init_io_count_bounded__mutant(ns: u32, ss: u32) -> (Vec<Acc>, 
 // ---- DPM-INIT-POST-ENTRY-LBA2 — the primary entry array is read from LBA 2 whatever the
 //      header declares in `partition_entry_lba` (gpt.rs:68 passes the literal 2; gpt.rs:380
 //      parses the field and no later line reads it) ----
+// J4 (level-2): the header's declared entry count / size are parameters constrained by
+// D-RANGE-FR-001-2e9472 verbatim (was the literal 128/128), plus D-RANGE-FR-011-46880c.
 #[requires(ss@ == 512 || ss@ == 4096)]
+#[requires(decl_entries@ == 128 && decl_entry_size@ == 128)]
 #[ensures(result.0@[1].lba@ == 2)]
 #[ensures(result.1@[1].lba@ == 2)]
 #[ensures(result.0@[1].lba == result.1@[1].lba)]
 pub fn verify_dpm_init_post_entry_lba2(
-    ns: u32, ss: u32, declared_a: u64, declared_b: u64,
+    ns: u32, ss: u32, declared_a: u64, declared_b: u64, decl_entries: u32, decl_entry_size: u32,
 ) -> (Vec<Acc>, Vec<Acc>) {
     // two headers declaring DIFFERENT partition_entry_lba values; the entry read is unaffected
     let _ = declared_a;
     let _ = declared_b;
-    (try_read_gpt_trace(ns, ss, 1, 2, 128, 128), try_read_gpt_trace(ns, ss, 1, 2, 128, 128))
+    (
+        try_read_gpt_trace(ns, ss, 1, 2, decl_entries, decl_entry_size),
+        try_read_gpt_trace(ns, ss, 1, 2, decl_entries, decl_entry_size),
+    )
 }
+// MUTANT (anti-vacuity, J4): the driver above verbatim, first ensures negated.
 #[requires(ss@ == 512 || ss@ == 4096)]
-#[ensures(result.0@[1].lba == declared_a)]
+#[requires(decl_entries@ == 128 && decl_entry_size@ == 128)]
+#[ensures(!(result.0@[1].lba@ == 2))]
+#[ensures(result.1@[1].lba@ == 2)]
+#[ensures(result.0@[1].lba == result.1@[1].lba)]
 pub fn verify_dpm_init_post_entry_lba2__mutant(
-    ns: u32, ss: u32, declared_a: u64, declared_b: u64,
+    ns: u32, ss: u32, declared_a: u64, declared_b: u64, decl_entries: u32, decl_entry_size: u32,
 ) -> (Vec<Acc>, Vec<Acc>) {
+    // two headers declaring DIFFERENT partition_entry_lba values; the entry read is unaffected
     let _ = declared_a;
     let _ = declared_b;
-    (try_read_gpt_trace(ns, ss, 1, 2, 128, 128), try_read_gpt_trace(ns, ss, 1, 2, 128, 128))
+    (
+        try_read_gpt_trace(ns, ss, 1, 2, decl_entries, decl_entry_size),
+        try_read_gpt_trace(ns, ss, 1, 2, decl_entries, decl_entry_size),
+    )
 }
 
 // ---- DPM-INIT-READ-PRIMARY-FIRST ----
+// J4 (level-2): the header's declared entry count / size are parameters constrained by
+// D-RANGE-FR-001-2e9472 verbatim (was the literal 128/128), plus D-RANGE-FR-011-46880c.
 #[requires(ss@ == 512 || ss@ == 4096)]
+#[requires(decl_entries@ == 128 && decl_entry_size@ == 128)]
 #[ensures(result.0@[0].lba@ == 1)]
 #[ensures(match primary { Attempt::Ok(t) => result.1 == ReadRes::Ok(t), _ => true })]
 #[ensures(match primary { Attempt::Io => result.1 == ReadRes::Err(PtErr::IoError), _ => true })]
 pub fn verify_dpm_init_read_primary_first(
-    ns: u32, ss: u32, primary: Attempt, backup: Attempt,
+    ns: u32, ss: u32, primary: Attempt, backup: Attempt, decl_entries: u32, decl_entry_size: u32,
 ) -> (Vec<Acc>, ReadRes) {
-    (try_read_gpt_trace(ns, ss, 1, 2, 128, 128), read_gpt_m(primary, backup))
+    (try_read_gpt_trace(ns, ss, 1, 2, decl_entries, decl_entry_size), read_gpt_m(primary, backup))
 }
+// MUTANT (anti-vacuity, J4): the driver above verbatim, first ensures negated.
 #[requires(ss@ == 512 || ss@ == 4096)]
-#[ensures(result.0@[0].lba@ == 0)]
+#[requires(decl_entries@ == 128 && decl_entry_size@ == 128)]
+#[ensures(!(result.0@[0].lba@ == 1))]
+#[ensures(match primary { Attempt::Ok(t) => result.1 == ReadRes::Ok(t), _ => true })]
+#[ensures(match primary { Attempt::Io => result.1 == ReadRes::Err(PtErr::IoError), _ => true })]
 pub fn verify_dpm_init_read_primary_first__mutant(
-    ns: u32, ss: u32, primary: Attempt, backup: Attempt,
+    ns: u32, ss: u32, primary: Attempt, backup: Attempt, decl_entries: u32, decl_entry_size: u32,
 ) -> (Vec<Acc>, ReadRes) {
-    (try_read_gpt_trace(ns, ss, 1, 2, 128, 128), read_gpt_m(primary, backup))
+    (try_read_gpt_trace(ns, ss, 1, 2, decl_entries, decl_entry_size), read_gpt_m(primary, backup))
 }
 
 // ---- DPM-INV-ENTRY-SECTORS-CONSISTENT  /  DPM-INIT-INV-ROUNDTRIP ----
 // The single `entry_sectors()` value is what the write path uses for first/last usable and for
 // the backup entry array, and what the read path uses to locate that backup array — so the two
 // paths cannot disagree about the layout.
-#[requires(ss@ == 512 || ss@ == 4096)]
-#[requires(ns@ >= 2 * entry_sectors_l(ss@) + 4)]
-#[ensures(result.0@ == cdiv(16384, ss@))]
+//
+// J4 (level-2): the write path (format: `GptManager::new(bd, config.ns_id, config.sector_size,
+// config.total_sectors)`, lib.rs:90) and the read path (initialize: the DEVICE-reported
+// `sector_size` / `num_sectors` of the configured namespace, lib.rs:72-79) now get SEPARATE
+// geometry parameters; that they coincide is stated as D-RANGE-KEYENTITY:PARTITIONCONFIG-062b0c
+// verbatim instead of being smuggled in by passing one parameter to both. Premises:
+//   D-RANGE-FR-011-46880c (both conjuncts), D-RANGE-KEYENTITY:PARTITIONCONFIG-90393c (both
+//   conjuncts), D-RANGE-KEYENTITY:PARTITIONCONFIG-062b0c.
+#[requires((cfg_ss@ == 512 || cfg_ss@ == 4096) && (dev_ss@ == 512 || dev_ss@ == 4096))]
+#[requires(cfg_total@ >= 2 * cdiv(16384, cfg_ss@) + 5 && dev_ns@ >= cdiv(16384, dev_ss@) + 1)]
+#[requires(dev_ss == cfg_ss && dev_ns == cfg_total)]
+#[ensures(result.0@ == cdiv(16384, cfg_ss@))]
 #[ensures(result.1@ == 2 + result.0@)]
-#[ensures(result.2@ == ns@ - 2 - result.0@)]
+#[ensures(result.2@ == cfg_total@ - 2 - result.0@)]
 #[ensures(result.3@ == result.2@ + 1)]
-#[ensures(result.4@ == ns@ - 1 - result.0@)]
+#[ensures(result.4@ == dev_ns@ - 1 - result.5@)]
+#[ensures(result.5 == result.0)]
 #[ensures(result.3 == result.4)]
-pub fn verify_dpm_inv_entry_sectors_consistent(ss: u32, ns: u64) -> (u32, u64, u64, u64, u64) {
-    let es = entry_sectors(ss); // gpt.rs:324-327
-    let (first, last) = usable_window(ss, ns); // gpt.rs:157-158
+pub fn verify_dpm_inv_entry_sectors_consistent(
+    cfg_ss: u32, cfg_total: u64, dev_ss: u32, dev_ns: u64,
+) -> (u32, u64, u64, u64, u64, u32) {
+    let es = entry_sectors(cfg_ss); // gpt.rs:324-327 (write side)
+    let (first, last) = usable_window(cfg_ss, cfg_total); // gpt.rs:157-158
     let backup_write = last + 1; // gpt.rs:194
-    let backup_read = (ns - 1) - es as u64; // gpt.rs:87-89
-    (es, first, last, backup_write, backup_read)
+    let es_r = entry_sectors(dev_ss); // gpt.rs:324-327 (read side)
+    let backup_read = (dev_ns - 1) - es_r as u64; // gpt.rs:87-89
+    (es, first, last, backup_write, backup_read, es_r)
 }
-#[requires(ss@ == 512 || ss@ == 4096)]
-#[requires(ns@ >= 2 * entry_sectors_l(ss@) + 4)]
-#[ensures(result.3@ == result.4@ + 1)]
+// MUTANT (anti-vacuity, J4): the driver above verbatim, first ensures negated.
+#[requires((cfg_ss@ == 512 || cfg_ss@ == 4096) && (dev_ss@ == 512 || dev_ss@ == 4096))]
+#[requires(cfg_total@ >= 2 * cdiv(16384, cfg_ss@) + 5 && dev_ns@ >= cdiv(16384, dev_ss@) + 1)]
+#[requires(dev_ss == cfg_ss && dev_ns == cfg_total)]
+#[ensures(!(result.0@ == cdiv(16384, cfg_ss@)))]
+#[ensures(result.1@ == 2 + result.0@)]
+#[ensures(result.2@ == cfg_total@ - 2 - result.0@)]
+#[ensures(result.3@ == result.2@ + 1)]
+#[ensures(result.4@ == dev_ns@ - 1 - result.5@)]
+#[ensures(result.5 == result.0)]
+#[ensures(result.3 == result.4)]
 pub fn verify_dpm_inv_entry_sectors_consistent__mutant(
-    ss: u32, ns: u64,
-) -> (u32, u64, u64, u64, u64) {
-    let es = entry_sectors(ss);
-    let (first, last) = usable_window(ss, ns);
-    (es, first, last, last + 1, (ns - 1) - es as u64)
+    cfg_ss: u32, cfg_total: u64, dev_ss: u32, dev_ns: u64,
+) -> (u32, u64, u64, u64, u64, u32) {
+    let es = entry_sectors(cfg_ss); // gpt.rs:324-327 (write side)
+    let (first, last) = usable_window(cfg_ss, cfg_total); // gpt.rs:157-158
+    let backup_write = last + 1; // gpt.rs:194
+    let es_r = entry_sectors(dev_ss); // gpt.rs:324-327 (read side)
+    let backup_read = (dev_ns - 1) - es_r as u64; // gpt.rs:87-89
+    (es, first, last, backup_write, backup_read, es_r)
 }
 
-#[requires(ss@ == 512 || ss@ == 4096)]
-#[requires(nsect@ >= 2 * entry_sectors_l(ss@) + 4)]
+// J4 (level-2): DPM-INIT-INV-ROUNDTRIP. Format writes with the CONFIG namespace / geometry
+// (lib.rs:90); initialize reads with the CONFIGURED namespace `get_ns_id()` (lib.rs:72) and the
+// DEVICE geometry (lib.rs:73-79). The read's declared entry count / size come from the header
+// the format itself wrote (`header_pair`, proved = 128/128), not from a literal. Premises:
+//   D-RANGE-FR-011-46880c (both conjuncts), D-RANGE-KEYENTITY:PARTITIONCONFIG-90393c (both
+//   conjuncts), D-RANGE-KEYENTITY:PARTITIONCONFIG-062b0c, D-RANGE-FR-010-fceb34
+//   (`config.ns_id == self.ns_id.lock().unwrap().unwrap_or(1)`).
+#[requires((cfg_ss@ == 512 || cfg_ss@ == 4096) && (dev_ss@ == 512 || dev_ss@ == 4096))]
+#[requires(cfg_total@ >= 2 * cdiv(16384, cfg_ss@) + 5 && dev_ns@ >= cdiv(16384, dev_ss@) + 1)]
+#[requires(dev_ss == cfg_ss && dev_ns == cfg_total)]
+#[requires(cfg_ns@ == match ns_st { None => 1, Some(v) => v@ })]
 // the four locations the format writes ...
 #[ensures(result.0@[1].lba@ == 1)]
 #[ensures(result.0@[2].lba@ == 2)]
-#[ensures(result.0@[3].lba@ == backup_entry_lba_write_l(ss@, nsect@))]
-#[ensures(result.0@[4].lba@ == nsect@ - 1)]
+#[ensures(result.0@[3].lba@ == backup_entry_lba_write_l(cfg_ss@, cfg_total@))]
+#[ensures(result.0@[4].lba@ == cfg_total@ - 1)]
 // ... are exactly the four the read looks at
 #[ensures(result.1@[0].lba == result.0@[1].lba)]
 #[ensures(result.1@[1].lba == result.0@[2].lba)]
 #[ensures(result.2@[0].lba == result.0@[4].lba)]
 #[ensures(result.2@[1].lba == result.0@[3].lba)]
-pub fn verify_dpm_init_inv_roundtrip(ns: u32, ss: u32, nsect: u64) -> (Vec<Acc>, Vec<Acc>, Vec<Acc>) {
-    let w = write_gpt_trace(ns, ss, nsect);
-    let rp = try_read_gpt_trace(ns, ss, 1, 2, 128, 128);
+// ... with the same entry-array extent, on the same namespace
+#[ensures(result.1@[1].sectors == result.0@[2].sectors)]
+#[ensures(result.2@[1].sectors == result.0@[3].sectors)]
+#[ensures(all_ns(result.0@, cfg_ns@) && all_ns(result.1@, cfg_ns@) && all_ns(result.2@, cfg_ns@))]
+pub fn verify_dpm_init_inv_roundtrip(
+    cfg_ns: u32, cfg_ss: u32, cfg_total: u64, ns_st: Option<u32>, dev_ss: u32, dev_ns: u64,
+    crc: u32,
+) -> (Vec<Acc>, Vec<Acc>, Vec<Acc>) {
+    let w = write_gpt_trace(cfg_ns, cfg_ss, cfg_total); // format: gpt.rs:204-216
+    let (p, b) = header_pair(cfg_ss, cfg_total, crc); // the headers it wrote, gpt.rs:175-201
+    let rd_ns = get_ns_id_m(ns_st); // initialize: lib.rs:72
+    let rp = try_read_gpt_trace(
+        rd_ns, dev_ss, 1, 2, p.num_partition_entries, p.partition_entry_size,
+    ); // gpt.rs:68
     let rb = try_read_gpt_trace(
-        ns, ss, nsect - 1, (nsect - 1) - entry_sectors(ss) as u64, 128, 128,
-    );
+        rd_ns, dev_ss, dev_ns - 1, (dev_ns - 1) - entry_sectors(dev_ss) as u64,
+        b.num_partition_entries, b.partition_entry_size,
+    ); // gpt.rs:87-90
     (w, rp, rb)
 }
-#[requires(ss@ == 512 || ss@ == 4096)]
-#[requires(nsect@ >= 2 * entry_sectors_l(ss@) + 4)]
-#[ensures(result.2@[1].lba == result.0@[2].lba)]
+// MUTANT (anti-vacuity, J4): the driver above verbatim, first ensures negated.
+#[requires((cfg_ss@ == 512 || cfg_ss@ == 4096) && (dev_ss@ == 512 || dev_ss@ == 4096))]
+#[requires(cfg_total@ >= 2 * cdiv(16384, cfg_ss@) + 5 && dev_ns@ >= cdiv(16384, dev_ss@) + 1)]
+#[requires(dev_ss == cfg_ss && dev_ns == cfg_total)]
+#[requires(cfg_ns@ == match ns_st { None => 1, Some(v) => v@ })]
+// the four locations the format writes ...
+#[ensures(!(result.0@[1].lba@ == 1))]
+#[ensures(result.0@[2].lba@ == 2)]
+#[ensures(result.0@[3].lba@ == backup_entry_lba_write_l(cfg_ss@, cfg_total@))]
+#[ensures(result.0@[4].lba@ == cfg_total@ - 1)]
+// ... are exactly the four the read looks at
+#[ensures(result.1@[0].lba == result.0@[1].lba)]
+#[ensures(result.1@[1].lba == result.0@[2].lba)]
+#[ensures(result.2@[0].lba == result.0@[4].lba)]
+#[ensures(result.2@[1].lba == result.0@[3].lba)]
+// ... with the same entry-array extent, on the same namespace
+#[ensures(result.1@[1].sectors == result.0@[2].sectors)]
+#[ensures(result.2@[1].sectors == result.0@[3].sectors)]
+#[ensures(all_ns(result.0@, cfg_ns@) && all_ns(result.1@, cfg_ns@) && all_ns(result.2@, cfg_ns@))]
 pub fn verify_dpm_init_inv_roundtrip__mutant(
-    ns: u32, ss: u32, nsect: u64,
+    cfg_ns: u32, cfg_ss: u32, cfg_total: u64, ns_st: Option<u32>, dev_ss: u32, dev_ns: u64,
+    crc: u32,
 ) -> (Vec<Acc>, Vec<Acc>, Vec<Acc>) {
-    let w = write_gpt_trace(ns, ss, nsect);
-    let rp = try_read_gpt_trace(ns, ss, 1, 2, 128, 128);
+    let w = write_gpt_trace(cfg_ns, cfg_ss, cfg_total); // format: gpt.rs:204-216
+    let (p, b) = header_pair(cfg_ss, cfg_total, crc); // the headers it wrote, gpt.rs:175-201
+    let rd_ns = get_ns_id_m(ns_st); // initialize: lib.rs:72
+    let rp = try_read_gpt_trace(
+        rd_ns, dev_ss, 1, 2, p.num_partition_entries, p.partition_entry_size,
+    ); // gpt.rs:68
     let rb = try_read_gpt_trace(
-        ns, ss, nsect - 1, (nsect - 1) - entry_sectors(ss) as u64, 128, 128,
-    );
+        rd_ns, dev_ss, dev_ns - 1, (dev_ns - 1) - entry_sectors(dev_ss) as u64,
+        b.num_partition_entries, b.partition_entry_size,
+    ); // gpt.rs:87-90
     (w, rp, rb)
 }
 
@@ -3298,15 +3484,28 @@ pub fn verify_dpm_read_stride_mismatch__mutant(
 
 // ---- DPM-IO-READ-LENGTH — `read_bytes` returns exactly `num_bytes`, assembled in order from
 //      consecutive single-sector reads, the final sector contributing only the remainder ----
+// J4 (level-2): `nbytes` is no longer a free parameter with a `nbytes >= 1` premise. It is
+// computed at the component's two `read_bytes` call sites: `read_sector` (gpt.rs:448,
+// `sector_size` bytes; header reads gpt.rs:103) and the entry-array read (gpt.rs:118-120,
+// `num_partition_entries * partition_entry_size` bytes from the on-disk header). Premises:
+// D-RANGE-FR-011-46880c (device conjunct) and D-RANGE-FR-001-2e9472 verbatim.
 #[requires(ss@ == 512 || ss@ == 4096)]
-#[requires(nbytes@ >= 1)]
-#[ensures(result.0@ == nbytes@)]
-#[ensures(result.1@ == cdiv(nbytes@, ss@))]
-#[ensures(result.2@ == nbytes@ - (cdiv(nbytes@, ss@) - 1) * ss@)]
-#[ensures(result.2@ <= ss@)]
-pub fn verify_dpm_io_read_length(ss: u32, nbytes: u64) -> (u64, u64, u64) {
+#[requires(decl_entries@ == 128 && decl_entry_size@ == 128)]
+#[ensures(result.0@ == (if entry_read { decl_entries@ * decl_entry_size@ } else { ss@ }))]
+#[ensures(result.1@ == result.0@)]
+#[ensures(result.2@ == cdiv(result.0@, ss@))]
+#[ensures(result.3@ == result.0@ - (cdiv(result.0@, ss@) - 1) * ss@)]
+#[ensures(result.3@ <= ss@)]
+pub fn verify_dpm_io_read_length(
+    ss: u32, decl_entries: u32, decl_entry_size: u32, entry_read: bool,
+) -> (u64, u64, u64, u64) {
     proof_assert! { lemma_cdiv_all(ss@); true };
     let ssu = ss as u64;
+    let nbytes: u64 = if entry_read {
+        decl_entries as u64 * decl_entry_size as u64 // gpt.rs:118-119
+    } else {
+        ssu // gpt.rs:448 read_sector
+    };
     let num_blocks = cdiv64(nbytes, ssu); // gpt.rs:452
     let mut got: u64 = 0;
     let mut i: u64 = 0;
@@ -3323,24 +3522,43 @@ pub fn verify_dpm_io_read_length(ss: u32, nbytes: u64) -> (u64, u64, u64) {
         last = to_copy;
         i += 1;
     }
-    (got, num_blocks, last)
+    (nbytes, got, num_blocks, last)
 }
+// MUTANT (anti-vacuity, J4): the driver above verbatim, first ensures negated.
 #[requires(ss@ == 512 || ss@ == 4096)]
-#[requires(nbytes@ >= 1)]
-#[ensures(result.0@ == nbytes@ + 1)]
-pub fn verify_dpm_io_read_length__mutant(ss: u32, nbytes: u64) -> (u64, u64, u64) {
+#[requires(decl_entries@ == 128 && decl_entry_size@ == 128)]
+#[ensures(!(result.0@ == (if entry_read { decl_entries@ * decl_entry_size@ } else { ss@ })))]
+#[ensures(result.1@ == result.0@)]
+#[ensures(result.2@ == cdiv(result.0@, ss@))]
+#[ensures(result.3@ == result.0@ - (cdiv(result.0@, ss@) - 1) * ss@)]
+#[ensures(result.3@ <= ss@)]
+pub fn verify_dpm_io_read_length__mutant(
+    ss: u32, decl_entries: u32, decl_entry_size: u32, entry_read: bool,
+) -> (u64, u64, u64, u64) {
+    proof_assert! { lemma_cdiv_all(ss@); true };
     let ssu = ss as u64;
-    let num_blocks = cdiv64(nbytes, ssu);
+    let nbytes: u64 = if entry_read {
+        decl_entries as u64 * decl_entry_size as u64 // gpt.rs:118-119
+    } else {
+        ssu // gpt.rs:448 read_sector
+    };
+    let num_blocks = cdiv64(nbytes, ssu); // gpt.rs:452
     let mut got: u64 = 0;
     let mut i: u64 = 0;
+    let mut last: u64 = 0;
     #[invariant(i@ <= num_blocks@)]
+    #[invariant(i@ < num_blocks@ ==> got@ == i@ * ss@)]
+    #[invariant(i@ == num_blocks@ ==> got@ == nbytes@)]
+    #[invariant(i@ > 0 && i@ < num_blocks@ ==> last@ == ss@)]
+    #[invariant(i@ == num_blocks@ ==> last@ == nbytes@ - (num_blocks@ - 1) * ss@)]
     while i < num_blocks {
-        let remaining = nbytes - got;
-        let to_copy = if remaining < ssu { remaining } else { ssu };
-        got += to_copy;
+        let remaining = nbytes - got; // gpt.rs:474
+        let to_copy = if remaining < ssu { remaining } else { ssu }; // gpt.rs:475
+        got += to_copy; // gpt.rs:476 `result.extend_from_slice(&locked.as_slice()[..to_copy])`
+        last = to_copy;
         i += 1;
     }
-    (got, num_blocks, 0)
+    (nbytes, got, num_blocks, last)
 }
 
 /// `alloc_dma_buffer` (gpt.rs:556-562) is called BEFORE the command is queued, at gpt.rs:457
@@ -3439,20 +3657,49 @@ pub fn write_bytes_lbas(ss: u32, lba: u64, len: u64) -> Vec<u64> {
 }
 
 // ---- DPM-IO-WRITE-LENGTH ----
+// J4 (level-2): `lba` / `len` are no longer free parameters carrying `len >= 1` and
+// `lba + ceil(len/ss) <= u64::MAX`. They are computed at the component's five `write_bytes`
+// call sites, in source order (gpt.rs:204 MBR at 0, 207 primary header at 1, 210 primary
+// entries at 2, 213 backup entries at last_usable + 1, 216 backup header at num_sectors - 1;
+// sector-sized payloads gpt.rs:330/408, 128*128-byte entry array gpt.rs:433), on the
+// geometry format builds from the request (lib.rs:90). Premises: D-RANGE-FR-011-46880c
+// (config conjunct) and D-RANGE-KEYENTITY:PARTITIONCONFIG-90393c (config conjunct) verbatim.
 #[requires(ss@ == 512 || ss@ == 4096)]
-#[requires(len@ >= 1)]
-#[requires(lba@ + cdiv(len@, ss@) <= 18446744073709551615)]
-#[ensures(result@.len() == cdiv(len@, ss@))]
-#[ensures(forall<i: Int> 0 <= i && i < result@.len() ==> result@[i]@ == lba@ + i)]
-pub fn verify_dpm_io_write_length(ss: u32, lba: u64, len: u64) -> Vec<u64> {
-    write_bytes_lbas(ss, lba, len)
+#[requires(ns@ >= 2 * cdiv(16384, ss@) + 5)]
+#[ensures(result.2@.len() == cdiv(result.1@, ss@))]
+#[ensures(forall<i: Int> 0 <= i && i < result.2@.len() ==> result.2@[i]@ == result.0@ + i)]
+#[ensures(result.0@ + result.2@.len() <= ns@)]
+pub fn verify_dpm_io_write_length(ss: u32, ns: u64, site: u32) -> (u64, u64, Vec<u64>) {
+    let (_first, last) = usable_window(ss, ns); // gpt.rs:157-158
+    let ssu = ss as u64;
+    let (lba, len): (u64, u64) = match site {
+        0 => (0, ssu),                              // gpt.rs:354 write_protective_mbr
+        1 => (1, ssu),                              // gpt.rs:207 primary header
+        2 => (2, ENTRY_ARRAY_BYTES as u64),         // gpt.rs:210 primary entries
+        3 => (last + 1, ENTRY_ARRAY_BYTES as u64),  // gpt.rs:213 backup entries
+        _ => (ns - 1, ssu),                         // gpt.rs:216 backup header
+    };
+    let lbas = write_bytes_lbas(ss, lba, len); // gpt.rs:497-505
+    (lba, len, lbas)
 }
+// MUTANT (anti-vacuity, J4): the driver above verbatim, first ensures negated.
 #[requires(ss@ == 512 || ss@ == 4096)]
-#[requires(len@ >= 1)]
-#[requires(lba@ + cdiv(len@, ss@) <= 18446744073709551615)]
-#[ensures(forall<i: Int> 0 <= i && i < result@.len() ==> result@[i]@ == lba@ + 2 * i)]
-pub fn verify_dpm_io_write_length__mutant(ss: u32, lba: u64, len: u64) -> Vec<u64> {
-    write_bytes_lbas(ss, lba, len)
+#[requires(ns@ >= 2 * cdiv(16384, ss@) + 5)]
+#[ensures(!(result.2@.len() == cdiv(result.1@, ss@)))]
+#[ensures(forall<i: Int> 0 <= i && i < result.2@.len() ==> result.2@[i]@ == result.0@ + i)]
+#[ensures(result.0@ + result.2@.len() <= ns@)]
+pub fn verify_dpm_io_write_length__mutant(ss: u32, ns: u64, site: u32) -> (u64, u64, Vec<u64>) {
+    let (_first, last) = usable_window(ss, ns); // gpt.rs:157-158
+    let ssu = ss as u64;
+    let (lba, len): (u64, u64) = match site {
+        0 => (0, ssu),                              // gpt.rs:354 write_protective_mbr
+        1 => (1, ssu),                              // gpt.rs:207 primary header
+        2 => (2, ENTRY_ARRAY_BYTES as u64),         // gpt.rs:210 primary entries
+        3 => (last + 1, ENTRY_ARRAY_BYTES as u64),  // gpt.rs:213 backup entries
+        _ => (ns - 1, ssu),                         // gpt.rs:216 backup header
+    };
+    let lbas = write_bytes_lbas(ss, lba, len); // gpt.rs:497-505
+    (lba, len, lbas)
 }
 
 // ---- DPM-IO-WRITE-PARTIAL — one command per sector, stopping at the first failure, so when
@@ -3781,24 +4028,34 @@ pub fn verify_dpm_inv_entry_array_shape__mutant(ss: u32) -> (u32, u32, u32, u32)
 //      same field before hashing. The two byte sequences therefore coincide, so the recomputed
 //      value equals the stored one FOR EVERY hash function `h` — which is strictly stronger
 //      than naming CRC-32, and cannot be satisfied by a degenerate choice of `h`. ----
+// J4 (level-2): the `pre.len() >= 92` premise is gone. The header buffer is CONSTRUCTED as one
+// sector — `vec![0u8; self.sector_size as usize]` (gpt.rs:408) on the write side, `read_sector`
+// = `read_bytes(lba, sector_size)` (gpt.rs:448) on the read side — as `Seq::create(ss, bytes)`
+// for an ARBITRARY byte function `bytes`, so every one-sector buffer is covered. Premises:
+// D-RANGE-FR-011-46880c (`ss` is 512 or 4096) and the obligation's own words (a): the
+// checksum field [16..20] is zero when the writer hashes.
 #[logic]
-#[requires(pre.len() >= 92)]
-#[requires(pre[16]@ == 0 && pre[17]@ == 0 && pre[18]@ == 0 && pre[19]@ == 0)]
-#[ensures(h.get(set4(set4(pre, 16, b0, b1, b2, b3), 16, 0u8, 0u8, 0u8, 0u8)) == h.get(pre))]
+#[requires(ss@ == 512 || ss@ == 4096)]
+#[requires(bytes.get(16)@ == 0 && bytes.get(17)@ == 0 && bytes.get(18)@ == 0
+    && bytes.get(19)@ == 0)]
+#[ensures(h.get(set4(set4(Seq::create(ss@, bytes), 16, b0, b1, b2, b3), 16, 0u8, 0u8, 0u8, 0u8))
+    == h.get(Seq::create(ss@, bytes)))]
 pub fn verify_dpm_inv_crc_self_consistent(
-    h: Mapping<Seq<u8>, u32>, pre: Seq<u8>, b0: u8, b1: u8, b2: u8, b3: u8,
+    h: Mapping<Seq<u8>, u32>, ss: u32, bytes: Mapping<Int, u8>, b0: u8, b1: u8, b2: u8, b3: u8,
 ) {
-    pearlite! { lemma_crc_field_roundtrip(pre, b0, b1, b2, b3) }
+    pearlite! { lemma_crc_field_roundtrip(Seq::create(ss@, bytes), b0, b1, b2, b3) }
 }
-// MUTANT: claims the reader would get the same value WITHOUT re-zeroing the CRC field.
+// MUTANT (anti-vacuity, J4): the driver above verbatim, first ensures negated.
 #[logic]
-#[requires(pre.len() >= 92)]
-#[requires(pre[16]@ == 0 && pre[17]@ == 0 && pre[18]@ == 0 && pre[19]@ == 0)]
-#[ensures(h.get(set4(pre, 16, b0, b1, b2, b3)) == h.get(pre))]
+#[requires(ss@ == 512 || ss@ == 4096)]
+#[requires(bytes.get(16)@ == 0 && bytes.get(17)@ == 0 && bytes.get(18)@ == 0
+    && bytes.get(19)@ == 0)]
+#[ensures(!(h.get(set4(set4(Seq::create(ss@, bytes), 16, b0, b1, b2, b3), 16, 0u8, 0u8, 0u8, 0u8))
+    == h.get(Seq::create(ss@, bytes))))]
 pub fn verify_dpm_inv_crc_self_consistent__mutant(
-    h: Mapping<Seq<u8>, u32>, pre: Seq<u8>, b0: u8, b1: u8, b2: u8, b3: u8,
+    h: Mapping<Seq<u8>, u32>, ss: u32, bytes: Mapping<Int, u8>, b0: u8, b1: u8, b2: u8, b3: u8,
 ) {
-    pearlite! { lemma_crc_field_roundtrip(pre, b0, b1, b2, b3) }
+    pearlite! { lemma_crc_field_roundtrip(Seq::create(ss@, bytes), b0, b1, b2, b3) }
 }
 
 /// The byte ranges the two sides hash, as constants, so the "same recipe" claim is anchored to
@@ -3844,8 +4101,11 @@ pub fn verify_dpm_inv_signature_revision__mutant(
 }
 
 // ---- DPM-INV-BACKUP-MIRRORS-PRIMARY ----
+// J4 (level-2): premises = D-RANGE-FR-011-46880c (config conjunct) and
+// D-RANGE-KEYENTITY:PARTITIONCONFIG-90393c (config conjunct) verbatim:
+// `total_sectors >= 2 * 16384.div_ceil(sector_size) + 5` (was the derived `>= 2 * entry_sectors + 4`).
 #[requires(ss@ == 512 || ss@ == 4096)]
-#[requires(ns@ >= 2 * entry_sectors_l(ss@) + 4)]
+#[requires(ns@ >= 2 * cdiv(16384, ss@) + 5)]
 // the two entry-array copies are written from the SAME `entry_data` buffer (gpt.rs:210, 213)
 #[ensures(result.2@[2].sectors == result.2@[3].sectors)]
 // and the backup header differs from the primary in exactly the three position fields
@@ -3865,9 +4125,21 @@ pub fn verify_dpm_inv_backup_mirrors_primary(
     let t = write_gpt_trace(nsid, ss, ns);
     (p, b, t)
 }
+// MUTANT (anti-vacuity, J4): the driver above verbatim, first ensures negated.
 #[requires(ss@ == 512 || ss@ == 4096)]
-#[requires(ns@ >= 2 * entry_sectors_l(ss@) + 4)]
-#[ensures(result.1.partition_entry_lba == result.0.partition_entry_lba)]
+#[requires(ns@ >= 2 * cdiv(16384, ss@) + 5)]
+// the two entry-array copies are written from the SAME `entry_data` buffer (gpt.rs:210, 213)
+#[ensures(!(result.2@[2].sectors == result.2@[3].sectors))]
+// and the backup header differs from the primary in exactly the three position fields
+#[ensures(result.1.signature == result.0.signature)]
+#[ensures(result.1.revision == result.0.revision)]
+#[ensures(result.1.header_size == result.0.header_size)]
+#[ensures(result.1.first_usable_lba == result.0.first_usable_lba)]
+#[ensures(result.1.last_usable_lba == result.0.last_usable_lba)]
+#[ensures(result.1.num_partition_entries == result.0.num_partition_entries)]
+#[ensures(result.1.partition_entry_size == result.0.partition_entry_size)]
+#[ensures(result.1.partition_entry_crc32 == result.0.partition_entry_crc32)]
+#[ensures(result.1.my_lba == result.0.alternate_lba && result.1.alternate_lba == result.0.my_lba)]
 pub fn verify_dpm_inv_backup_mirrors_primary__mutant(
     nsid: u32, ss: u32, ns: u64, crc: u32,
 ) -> (HdrM, HdrM, Vec<Acc>) {

@@ -2,34 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_try_read_gpt_at_m": {
-        "tactic": "compute_specified",
-        "children": [
-          {
-            "tactic": "split_vc",
-            "children": [
-              { "prover": "alt-ergo", "time": 0.027 },
-              { "prover": "alt-ergo", "time": 0.024 },
-              { "prover": "alt-ergo", "time": 0.027 },
-              { "prover": "alt-ergo", "time": 0.031 },
-              { "prover": "alt-ergo", "time": 0.032 },
-              { "prover": "alt-ergo", "time": 0.035 },
-              {
-                "tactic": "split_vc",
-                "children": [
-                  { "prover": "alt-ergo", "time": 0.014 },
-                  { "prover": "alt-ergo", "time": 0.016 },
-                  { "prover": "alt-ergo", "time": 0.017 },
-                  { "prover": "alt-ergo", "time": 0.016 },
-                  { "prover": "alt-ergo", "time": 0.016 },
-                  { "prover": "alt-ergo", "time": 0.014 },
-                  { "prover": "alt-ergo", "time": 0.017 }
-                ]
-              }
-            ]
-          }
-        ]
-      }
+      "vc_try_read_gpt_at_m": { "prover": "alt-ergo", "time": 0.032 }
     }
   }
 }

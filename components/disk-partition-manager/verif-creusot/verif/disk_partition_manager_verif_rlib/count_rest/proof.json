@@ -2,9 +2,9 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_count_rest": { "prover": "alt-ergo", "time": 0.047 },
-      "vc_index_Vec_SpecM_Global": { "prover": "alt-ergo", "time": 0.014 },
-      "vc_len_SpecM": { "prover": "alt-ergo", "time": 0.013 }
+      "vc_count_rest": { "prover": "alt-ergo", "time": 0.05 },
+      "vc_index_Vec_SpecM_Global": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_len_SpecM": { "prover": "alt-ergo", "time": 0.017 }
     }
   }
 }

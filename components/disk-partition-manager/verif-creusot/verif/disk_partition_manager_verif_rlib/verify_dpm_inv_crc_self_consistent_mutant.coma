@@ -1,13 +1,13 @@
-(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3798 0 3800 1 *)
+(* #"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 4055 0 4057 1 *)
 
-let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3795 11 3795 26
-let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3796 11 3796 75
-let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3797 10 3797 60
-let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 864 11 864 26
-let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 865 11 865 75
-let%span slib'4 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 866 10 866 81
-let%span slib'5 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 855 16 855 77
-let%span slib'6 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 867 79 867 81
+let%span slib = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 4050 11 4050 36
+let%span slib'0 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 4051 11 4052 26
+let%span slib'1 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 4053 10 4054 38
+let%span slib'2 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 870 11 870 26
+let%span slib'3 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 871 11 871 75
+let%span slib'4 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 872 10 872 81
+let%span slib'5 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 861 16 861 77
+let%span slib'6 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 873 79 873 81
 
 use creusot.int.UInt8
 use seq.Seq
@@ -15,10 +15,10 @@ use creusot.int.UInt32
 use map.Map
 use int.Int
 
-function set4 [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 854 0 854 75] (s: Seq.seq UInt8.t) (at': int) (b0: UInt8.t) (b1: UInt8.t) (b2: UInt8.t) (b3: UInt8.t) : Seq.seq UInt8.t
+function set4 [#"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 860 0 860 75] (s: Seq.seq UInt8.t) (at': int) (b0: UInt8.t) (b1: UInt8.t) (b2: UInt8.t) (b3: UInt8.t) : Seq.seq UInt8.t
  = [%#slib'5] Seq.set (Seq.set (Seq.set (Seq.set s at' b0) (at' + 1) b1) (at' + 2) b2) (at' + 3) b3
 
-function lemma_crc_field_roundtrip [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 867 0 867 78] (pre: Seq.seq UInt8.t) (b0: UInt8.t) (b1: UInt8.t) (b2: UInt8.t) (b3: UInt8.t) : ()
+function lemma_crc_field_roundtrip [#"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 873 0 873 78] (pre: Seq.seq UInt8.t) (b0: UInt8.t) (b1: UInt8.t) (b2: UInt8.t) (b3: UInt8.t) : ()
  = [%#slib'6] ()
 
 axiom lemma_crc_field_roundtrip_spec:
@@ -33,7 +33,9 @@ meta "select_lsinst" "all"
 
 constant h : Map.map (Seq.seq UInt8.t) UInt32.t
 
-constant pre : Seq.seq UInt8.t
+constant ss : UInt32.t
+
+constant bytes : Map.map int UInt8.t
 
 constant b0 : UInt8.t
 
@@ -43,15 +45,18 @@ constant b2 : UInt8.t
 
 constant b3 : UInt8.t
 
-function verify_dpm_inv_crc_self_consistent__mutant [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 3798 0 3800 1] (h: Map.map (Seq.seq UInt8.t) UInt32.t) (pre: Seq.seq UInt8.t) (b0: UInt8.t) (b1: UInt8.t) (b2: UInt8.t) (b3: UInt8.t) : ()
+function verify_dpm_inv_crc_self_consistent__mutant [#"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 4055 0 4057 1] (h: Map.map (Seq.seq UInt8.t) UInt32.t) (ss: UInt32.t) (bytes: Map.map int UInt8.t) (b0: UInt8.t) (b1: UInt8.t) (b2: UInt8.t) (b3: UInt8.t) : ()
 
-goal vc_verify_dpm_inv_crc_self_consistent__mutant: ([%#slib] Seq.length pre >= 92)
-  -> ([%#slib'0] UInt8.t'int (Seq.get pre 16) = 0
-    /\ UInt8.t'int (Seq.get pre 17) = 0 /\ UInt8.t'int (Seq.get pre 18) = 0 /\ UInt8.t'int (Seq.get pre 19) = 0)
-  -> ([@stop_split] [@expl:lemma_crc_field_roundtrip requires] ([@stop_split] [@expl:lemma_crc_field_roundtrip requires #0] [%#slib'2] Seq.length pre
+goal vc_verify_dpm_inv_crc_self_consistent__mutant: ([%#slib] UInt32.t'int ss = 512 \/ UInt32.t'int ss = 4096)
+  -> ([%#slib'0] UInt8.t'int (Map.get bytes 16) = 0
+    /\ UInt8.t'int (Map.get bytes 17) = 0 /\ UInt8.t'int (Map.get bytes 18) = 0 /\ UInt8.t'int (Map.get bytes 19) = 0)
+  -> ([@stop_split] [@expl:lemma_crc_field_roundtrip requires] ([@stop_split] [@expl:lemma_crc_field_roundtrip requires #0] [%#slib'2] Seq.length (Seq.create (UInt32.t'int ss) bytes)
       >= 92)
-    /\ ([@stop_split] [@expl:lemma_crc_field_roundtrip requires #1] [%#slib'3] UInt8.t'int (Seq.get pre 16) = 0
-    /\ UInt8.t'int (Seq.get pre 17) = 0 /\ UInt8.t'int (Seq.get pre 18) = 0 /\ UInt8.t'int (Seq.get pre 19) = 0))
-  /\ (([@stop_split] [@expl:lemma_crc_field_roundtrip ensures] [%#slib'4] Seq.(==) (set4 (set4 pre 16 b0 b1 b2 b3) 16 (0: UInt8.t) (0: UInt8.t) (0: UInt8.t) (0: UInt8.t)) pre)
-  -> ([@stop_split] [@expl:verify_dpm_inv_crc_self_consistent__mutant ensures] [%#slib'1] Map.get h (set4 pre 16 b0 b1 b2 b3)
-  = Map.get h pre))
+    /\ ([@stop_split] [@expl:lemma_crc_field_roundtrip requires #1] [%#slib'3] UInt8.t'int (Seq.get (Seq.create (UInt32.t'int ss) bytes) 16)
+      = 0
+    /\ UInt8.t'int (Seq.get (Seq.create (UInt32.t'int ss) bytes) 17) = 0
+    /\ UInt8.t'int (Seq.get (Seq.create (UInt32.t'int ss) bytes) 18) = 0
+    /\ UInt8.t'int (Seq.get (Seq.create (UInt32.t'int ss) bytes) 19) = 0))
+  /\ (([@stop_split] [@expl:lemma_crc_field_roundtrip ensures] [%#slib'4] Seq.(==) (set4 (set4 (Seq.create (UInt32.t'int ss) bytes) 16 b0 b1 b2 b3) 16 (0: UInt8.t) (0: UInt8.t) (0: UInt8.t) (0: UInt8.t)) (Seq.create (UInt32.t'int ss) bytes))
+  -> ([@stop_split] [@expl:verify_dpm_inv_crc_self_consistent__mutant ensures] [%#slib'1] not Map.get h (set4 (set4 (Seq.create (UInt32.t'int ss) bytes) 16 b0 b1 b2 b3) 16 (0: UInt8.t) (0: UInt8.t) (0: UInt8.t) (0: UInt8.t))
+  = Map.get h (Seq.create (UInt32.t'int ss) bytes)))

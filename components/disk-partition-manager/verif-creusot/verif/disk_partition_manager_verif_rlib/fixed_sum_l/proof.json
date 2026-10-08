@@ -1,6 +1,6 @@
 {
   "profile": [],
   "proofs": {
-    "Coma": { "vc_fixed_sum_l": { "prover": "alt-ergo", "time": 0.017 } }
+    "Coma": { "vc_fixed_sum_l": { "prover": "alt-ergo", "time": 0.013 } }
   }
 }

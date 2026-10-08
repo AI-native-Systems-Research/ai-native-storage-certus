@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_lemma_crc_field_roundtrip": { "prover": "alt-ergo", "time": 0.039 }
+      "vc_lemma_crc_field_roundtrip": { "prover": "alt-ergo", "time": 0.046 }
     }
   }
 }

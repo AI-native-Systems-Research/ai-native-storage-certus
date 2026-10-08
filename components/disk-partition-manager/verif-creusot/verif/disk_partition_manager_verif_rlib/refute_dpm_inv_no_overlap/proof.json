@@ -2,8 +2,8 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_project": { "prover": "alt-ergo", "time": 0.014 },
-      "vc_refute_dpm_inv_no_overlap": { "prover": "alt-ergo", "time": 0.065 }
+      "vc_project": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_refute_dpm_inv_no_overlap": { "prover": "alt-ergo", "time": 0.066 }
     }
   }
 }

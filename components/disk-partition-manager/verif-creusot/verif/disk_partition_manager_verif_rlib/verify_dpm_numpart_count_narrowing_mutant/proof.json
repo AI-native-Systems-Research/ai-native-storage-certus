@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_count_as_u32": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_count_as_u32": { "prover": "alt-ergo", "time": 0.015 },
       "vc_verify_dpm_numpart_count_narrowing__mutant": null
     }
   }

@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_get_ns_id_m": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_get_ns_id_m": { "prover": "alt-ergo", "time": 0.013 },
       "vc_verify_dpm_nsid_default__mutant": null
     }
   }

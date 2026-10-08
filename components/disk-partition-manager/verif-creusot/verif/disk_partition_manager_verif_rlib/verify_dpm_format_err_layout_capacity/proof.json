@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_layout_classify": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_layout_classify": { "prover": "alt-ergo", "time": 0.028 },
       "vc_verify_dpm_format_err_layout_capacity": {
         "prover": "alt-ergo",
-        "time": 0.062
+        "time": 0.092
       }
     }
   }

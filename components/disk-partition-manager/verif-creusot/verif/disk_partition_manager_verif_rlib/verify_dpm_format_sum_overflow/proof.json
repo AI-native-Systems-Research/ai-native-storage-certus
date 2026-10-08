@@ -4,9 +4,9 @@
     "Coma": {
       "vc_verify_dpm_format_sum_overflow": {
         "prover": "alt-ergo",
-        "time": 0.03
+        "time": 0.043
       },
-      "vc_wrapping_add": { "prover": "alt-ergo", "time": 0.014 }
+      "vc_wrapping_add": { "prover": "alt-ergo", "time": 0.023 }
     }
   }
 }

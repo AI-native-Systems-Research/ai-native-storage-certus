@@ -2,14 +2,14 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_entry_array_bytes": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_entry_array_bytes": { "prover": "alt-ergo", "time": 0.012 },
       "vc_entry_sectors": { "prover": "alt-ergo", "time": 0.011 },
       "vc_verify_dpm_inv_entry_array_shape__mutant": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
-            "children": [ { "prover": "alt-ergo", "time": 0.025 }, null ]
+            "children": [ { "prover": "alt-ergo", "time": 0.021 }, null ]
           }
         ]
       }

@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_parse_header_guard": { "prover": "alt-ergo", "time": 0.019 }
+      "vc_parse_header_guard": { "prover": "alt-ergo", "time": 0.018 }
     }
   }
 }

@@ -3,10 +3,10 @@
   "proofs": {
     "Coma": {
       "vc_init_reads_sectors": { "prover": "alt-ergo", "time": 0.016 },
-      "vc_initialize_m": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_initialize_m": { "prover": "alt-ergo", "time": 0.013 },
       "vc_verify_dpm_init_err_geometry": {
         "prover": "alt-ergo",
-        "time": 0.021
+        "time": 0.016
       }
     }
   }

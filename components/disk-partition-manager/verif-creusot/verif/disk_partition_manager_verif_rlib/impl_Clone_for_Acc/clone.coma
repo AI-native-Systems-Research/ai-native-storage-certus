@@ -1,4 +1,4 @@
-(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 105 9 105 29 *)
+(* #"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 105 9 105 29 *)
 
 (* <Acc as std::clone::Clone> *)
 
@@ -12,7 +12,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let clone_Acc [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 105 9 105 29]
+let clone_Acc [#"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 105 9 105 29]
   (self: t_Acc) (return (x: t_Acc)) = (! bb0
   [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
   [ & _ret: t_Acc = Any.any_l () | & self: t_Acc = self ]) [ return (result: t_Acc) -> (! return {result}) ]

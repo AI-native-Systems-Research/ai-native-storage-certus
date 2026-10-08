@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_header_pair": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_header_pair": { "prover": "alt-ergo", "time": 0.021 },
       "vc_verify_dpm_format_post_header_pair": {
         "prover": "alt-ergo",
-        "time": 0.031
+        "time": 0.053
       }
     }
   }

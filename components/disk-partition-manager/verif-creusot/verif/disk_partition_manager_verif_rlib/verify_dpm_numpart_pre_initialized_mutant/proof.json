@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_num_partitions_m": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_num_partitions_m": { "prover": "alt-ergo", "time": 0.015 },
       "vc_verify_dpm_numpart_pre_initialized__mutant": {
         "tactic": "split_vc",
-        "children": [ { "prover": "alt-ergo", "time": 0.029 }, null ]
+        "children": [ { "prover": "alt-ergo", "time": 0.016 }, null ]
       }
     }
   }

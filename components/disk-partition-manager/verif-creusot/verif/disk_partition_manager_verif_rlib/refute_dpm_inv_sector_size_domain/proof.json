@@ -4,9 +4,9 @@
     "Coma": {
       "vc_refute_dpm_inv_sector_size_domain": {
         "prover": "alt-ergo",
-        "time": 0.016
+        "time": 0.026
       },
-      "vc_sector_size_used": { "prover": "alt-ergo", "time": 0.014 }
+      "vc_sector_size_used": { "prover": "alt-ergo", "time": 0.022 }
     }
   }
 }

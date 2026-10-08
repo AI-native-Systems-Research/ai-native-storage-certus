@@ -2,11 +2,11 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_header_pair": { "prover": "alt-ergo", "time": 0.018 },
-      "vc_try_read_gpt_at_m": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_header_pair": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_try_read_gpt_at_m": { "prover": "alt-ergo", "time": 0.023 },
       "vc_verify_dpm_inv_signature_revision__mutant": {
         "tactic": "split_vc",
-        "children": [ { "prover": "alt-ergo", "time": 0.036 }, null ]
+        "children": [ { "prover": "alt-ergo", "time": 0.028 }, null ]
       }
     }
   }

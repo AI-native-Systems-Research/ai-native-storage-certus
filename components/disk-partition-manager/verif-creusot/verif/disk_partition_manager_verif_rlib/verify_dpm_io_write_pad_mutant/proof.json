@@ -4,9 +4,9 @@
     "Coma": {
       "vc_verify_dpm_io_write_pad__mutant": {
         "tactic": "split_vc",
-        "children": [ { "prover": "alt-ergo", "time": 0.03 }, null ]
+        "children": [ { "prover": "alt-ergo", "time": 0.037 }, null ]
       },
-      "vc_write_block_buffer": { "prover": "alt-ergo", "time": 0.02 }
+      "vc_write_block_buffer": { "prover": "alt-ergo", "time": 0.025 }
     }
   }
 }

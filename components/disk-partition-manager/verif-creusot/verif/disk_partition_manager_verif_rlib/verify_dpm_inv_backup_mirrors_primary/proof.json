@@ -2,12 +2,12 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_header_pair": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_header_pair": { "prover": "alt-ergo", "time": 0.018 },
       "vc_verify_dpm_inv_backup_mirrors_primary": {
         "prover": "alt-ergo",
-        "time": 0.042
+        "time": 0.048
       },
-      "vc_write_gpt_trace": { "prover": "alt-ergo", "time": 0.017 }
+      "vc_write_gpt_trace": { "prover": "alt-ergo", "time": 0.012 }
     }
   }
 }

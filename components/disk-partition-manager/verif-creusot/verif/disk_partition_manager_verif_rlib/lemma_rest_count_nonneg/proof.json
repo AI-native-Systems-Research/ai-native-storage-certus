@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_lemma_rest_count_nonneg": { "prover": "alt-ergo", "time": 0.021 }
+      "vc_lemma_rest_count_nonneg": { "prover": "alt-ergo", "time": 0.016 }
     }
   }
 }

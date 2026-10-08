@@ -2,11 +2,8 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_layout_place": { "prover": "alt-ergo", "time": 0.017 },
-      "vc_verify_dpm_inv_order_monotonic": {
-        "prover": "alt-ergo",
-        "time": 1.6
-      }
+      "vc_layout_place": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_verify_dpm_inv_order_monotonic": { "prover": "z3", "time": 0.096 }
     }
   }
 }

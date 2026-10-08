@@ -2,8 +2,8 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_cdiv32": { "prover": "alt-ergo", "time": 0.014 },
-      "vc_entry_sectors": { "prover": "alt-ergo", "time": 0.015 }
+      "vc_cdiv32": { "prover": "alt-ergo", "time": 0.011 },
+      "vc_entry_sectors": { "prover": "alt-ergo", "time": 0.011 }
     }
   }
 }

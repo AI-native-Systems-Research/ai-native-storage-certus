@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_accept_completion'0": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_accept_completion'0": { "prover": "alt-ergo", "time": 0.019 },
       "vc_verify_dpm_io_completion_pairing__mutant": null
     }
   }

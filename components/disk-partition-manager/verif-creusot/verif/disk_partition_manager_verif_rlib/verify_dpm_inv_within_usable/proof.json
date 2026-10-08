@@ -2,13 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_layout_place": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_layout_place": { "prover": "alt-ergo", "time": 0.029 },
       "vc_verify_dpm_inv_within_usable": {
-        "tactic": "split_vc",
-        "children": [
-          { "prover": "alt-ergo", "time": 0.038 },
-          { "prover": "alt-ergo", "time": 0.047 }
-        ]
+        "prover": "alt-ergo",
+        "time": 0.35
       }
     }
   }

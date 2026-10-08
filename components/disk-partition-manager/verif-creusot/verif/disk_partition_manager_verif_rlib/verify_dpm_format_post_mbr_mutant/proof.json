@@ -2,10 +2,22 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_protective_mbr": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_protective_mbr": { "prover": "alt-ergo", "time": 0.019 },
       "vc_verify_dpm_format_post_mbr__mutant": {
         "tactic": "split_vc",
-        "children": [ { "prover": "alt-ergo", "time": 0.034 }, null ]
+        "children": [
+          { "prover": "alt-ergo", "time": 0.035 },
+          {
+            "tactic": "split_vc",
+            "children": [
+              null,
+              { "prover": "alt-ergo", "time": 0.035 },
+              { "prover": "alt-ergo", "time": 0.023 },
+              { "prover": "alt-ergo", "time": 0.028 },
+              { "prover": "alt-ergo", "time": 0.027 }
+            ]
+          }
+        ]
       }
     }
   }

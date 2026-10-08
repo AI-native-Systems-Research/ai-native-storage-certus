@@ -6,16 +6,16 @@
         "prover": "alt-ergo",
         "time": 0.016
       },
-      "vc_compute_layout": { "prover": "alt-ergo", "time": 0.985 },
-      "vc_elim_Break": { "prover": "alt-ergo", "time": 0.02 },
-      "vc_elim_Continue": { "prover": "alt-ergo", "time": 0.02 },
-      "vc_from_LayoutErr": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_compute_layout": { "prover": "z3", "time": 0.023 },
+      "vc_elim_Break": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_elim_Continue": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_from_LayoutErr": { "prover": "alt-ergo", "time": 0.023 },
       "vc_from_residual_Result_Vec_EntryM_Global_LayoutErr": {
         "prover": "alt-ergo",
-        "time": 0.016
+        "time": 0.023
       },
-      "vc_layout_classify": { "prover": "alt-ergo", "time": 0.02 },
-      "vc_layout_place": { "prover": "alt-ergo", "time": 0.02 }
+      "vc_layout_classify": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_layout_place": { "prover": "alt-ergo", "time": 0.016 }
     }
   }
 }

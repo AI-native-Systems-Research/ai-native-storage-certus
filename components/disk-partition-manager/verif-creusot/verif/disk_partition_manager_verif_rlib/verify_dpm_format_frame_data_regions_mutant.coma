@@ -1,24 +1,33 @@
-(* #"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2201 0 2203 13 *)
+(* #"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 2279 0 2279 98 *)
 
-let%span slib = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2204 4 2204 39
-let%span slib'0 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2198 11 2198 36
-let%span slib'1 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2199 11 2199 54
-let%span slib'2 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2200 10 2200 28
-let%span slib'3 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 740 11 740 36
-let%span slib'4 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 741 11 741 54
-let%span slib'5 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 742 10 742 28
-let%span slib'6 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 743 10 743 81
-let%span slib'7 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 744 10 744 81
-let%span slib'8 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 745 10 746 50
-let%span slib'9 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 747 10 748 50
-let%span slib'10 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 749 10 749 95
-let%span slib'11 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 750 10 750 30
-let%span slib'12 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 85 16 85 31
-let%span slib'13 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 688 16 688 41
-let%span slib'14 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 132 16 132 70
-let%span slib'15 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 58 16 58 74
-let%span slib'16 = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 682 16 682 48
-let%span svec = "/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span slib = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 2280 12 2280 47
+let%span slib'0 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 2283 8 2283 76
+let%span slib'1 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 2287 8 2287 58
+let%span slib'2 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 2291 8 2291 57
+let%span slib'3 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 2295 8 2295 52
+let%span slib'4 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 2272 11 2272 36
+let%span slib'5 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 2273 11 2273 50
+let%span slib'6 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 2275 10 2275 31
+let%span slib'7 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 2276 10 2276 30
+let%span slib'8 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 2278 10 2278 85
+let%span slib'9 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 746 11 746 36
+let%span slib'10 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 747 11 747 54
+let%span slib'11 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 748 10 748 28
+let%span slib'12 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 749 10 749 81
+let%span slib'13 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 750 10 750 81
+let%span slib'14 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 751 10 752 50
+let%span slib'15 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 753 10 754 50
+let%span slib'16 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 755 10 755 95
+let%span slib'17 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 756 10 756 30
+let%span slib'18 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 682 16 682 39
+let%span slib'19 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 688 16 688 48
+let%span slib'20 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 58 16 58 74
+let%span slib'21 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 132 16 132 70
+let%span slib'22 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 138 8 139 32
+let%span slib'23 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 85 16 85 31
+let%span slib'24 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 694 16 694 41
+let%span slib'25 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 119 16 119 54
+let%span svec = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
 
 use creusot.int.UInt32
 use creusot.int.UInt64
@@ -29,11 +38,11 @@ use int.Int
 
 type t_Vec_Acc_Global
 
-function cdiv [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 57 0 57 34] (n: int) (d: int) : int
- = [%#slib'15] EuclideanDivision.div n d + (if EuclideanDivision.mod n d = 0 then 0 else 1)
+function cdiv [#"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 57 0 57 34] (n: int) (d: int) : int
+ = [%#slib'20] EuclideanDivision.div n d + (if EuclideanDivision.mod n d = 0 then 0 else 1)
 
-function entry_sectors_l [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 84 0 84 38] (ss: int) : int
- = [%#slib'12] cdiv 16384 ss
+function entry_sectors_l [#"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 84 0 84 38] (ss: int) : int
+ = [%#slib'23] cdiv 16384 ss
 
 type t_Acc = { is_write: bool; ns: UInt32.t; lba: UInt64.t; sectors: UInt64.t }
 
@@ -45,64 +54,92 @@ axiom view_Vec_Acc_Global_spec:
   forall self: t_Vec_Acc_Global [view_Vec_Acc_Global self]. [%#svec] Seq.length (view_Vec_Acc_Global self)
     <= UInt64.t'int const_MAX
 
-function last_usable_l [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 681 0 681 45] (ss: int) (ns'0: int) : int
- = [%#slib'16] ns'0 - 1 - entry_sectors_l ss - 1
+function last_usable_l [#"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 687 0 687 45] (ss: int) (ns'0: int) : int
+ = [%#slib'19] ns'0 - 1 - entry_sectors_l ss - 1
 
-function backup_entry_lba_write_l [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 687 0 687 56] (ss: int) (ns'0: int) : int
- = [%#slib'13] last_usable_l ss ns'0 + 1
+function backup_entry_lba_write_l [#"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 693 0 693 56] (ss: int) (ns'0: int) : int
+ = [%#slib'24] last_usable_l ss ns'0 + 1
 
-predicate all_ns [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 131 0 131 39] (t: Seq.seq t_Acc) (n: int) =
-  [%#slib'14] forall i: int. 0 <= i /\ i < Seq.length t -> UInt32.t'int (Seq.get t i).ns = n
+predicate all_ns [#"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 131 0 131 39] (t: Seq.seq t_Acc) (n: int) =
+  [%#slib'21] forall i: int. 0 <= i /\ i < Seq.length t -> UInt32.t'int (Seq.get t i).ns = n
 
 let write_gpt_trace (ns'0: UInt32.t) (ss: UInt32.t) (ns_sectors: UInt64.t) (return (x: t_Vec_Acc_Global)) =
-{[@stop_split] [@expl:write_gpt_trace requires] ([@stop_split] [@expl:write_gpt_trace requires #0] [%#slib'3] UInt32.t'int ss
+{[@stop_split] [@expl:write_gpt_trace requires] ([@stop_split] [@expl:write_gpt_trace requires #0] [%#slib'9] UInt32.t'int ss
       = 512
     \/ UInt32.t'int ss = 4096)
-  /\ ([@stop_split] [@expl:write_gpt_trace requires #1] [%#slib'4] UInt64.t'int ns_sectors
+  /\ ([@stop_split] [@expl:write_gpt_trace requires #1] [%#slib'10] UInt64.t'int ns_sectors
   >= 2 * entry_sectors_l (UInt32.t'int ss) + 4)}
   any
   [ return (result: t_Vec_Acc_Global) ->
-  {[@stop_split] [@expl:write_gpt_trace ensures] ([@stop_split] [@expl:write_gpt_trace ensures #0] [%#slib'5] Seq.length (view_Vec_Acc_Global result)
+  {[@stop_split] [@expl:write_gpt_trace ensures] ([@stop_split] [@expl:write_gpt_trace ensures #0] [%#slib'11] Seq.length (view_Vec_Acc_Global result)
       = 5)
-    /\ ([@stop_split] [@expl:write_gpt_trace ensures #1] [%#slib'6] (Seq.get (view_Vec_Acc_Global result) 0).is_write
+    /\ ([@stop_split] [@expl:write_gpt_trace ensures #1] [%#slib'12] (Seq.get (view_Vec_Acc_Global result) 0).is_write
       /\ UInt64.t'int (Seq.get (view_Vec_Acc_Global result) 0).lba = 0
       /\ UInt64.t'int (Seq.get (view_Vec_Acc_Global result) 0).sectors = 1)
-    /\ ([@stop_split] [@expl:write_gpt_trace ensures #2] [%#slib'7] (Seq.get (view_Vec_Acc_Global result) 1).is_write
+    /\ ([@stop_split] [@expl:write_gpt_trace ensures #2] [%#slib'13] (Seq.get (view_Vec_Acc_Global result) 1).is_write
       /\ UInt64.t'int (Seq.get (view_Vec_Acc_Global result) 1).lba = 1
       /\ UInt64.t'int (Seq.get (view_Vec_Acc_Global result) 1).sectors = 1)
-    /\ ([@stop_split] [@expl:write_gpt_trace ensures #3] [%#slib'8] (Seq.get (view_Vec_Acc_Global result) 2).is_write
+    /\ ([@stop_split] [@expl:write_gpt_trace ensures #3] [%#slib'14] (Seq.get (view_Vec_Acc_Global result) 2).is_write
       /\ UInt64.t'int (Seq.get (view_Vec_Acc_Global result) 2).lba = 2
       /\ UInt64.t'int (Seq.get (view_Vec_Acc_Global result) 2).sectors = entry_sectors_l (UInt32.t'int ss))
-    /\ ([@stop_split] [@expl:write_gpt_trace ensures #4] [%#slib'9] (Seq.get (view_Vec_Acc_Global result) 3).is_write
+    /\ ([@stop_split] [@expl:write_gpt_trace ensures #4] [%#slib'15] (Seq.get (view_Vec_Acc_Global result) 3).is_write
       /\ UInt64.t'int (Seq.get (view_Vec_Acc_Global result) 3).lba
         = backup_entry_lba_write_l (UInt32.t'int ss) (UInt64.t'int ns_sectors)
       /\ UInt64.t'int (Seq.get (view_Vec_Acc_Global result) 3).sectors = entry_sectors_l (UInt32.t'int ss))
-    /\ ([@stop_split] [@expl:write_gpt_trace ensures #5] [%#slib'10] (Seq.get (view_Vec_Acc_Global result) 4).is_write
+    /\ ([@stop_split] [@expl:write_gpt_trace ensures #5] [%#slib'16] (Seq.get (view_Vec_Acc_Global result) 4).is_write
       /\ UInt64.t'int (Seq.get (view_Vec_Acc_Global result) 4).lba = UInt64.t'int ns_sectors - 1
       /\ UInt64.t'int (Seq.get (view_Vec_Acc_Global result) 4).sectors = 1)
-    /\ ([@stop_split] [@expl:write_gpt_trace ensures #6] [%#slib'11] all_ns (view_Vec_Acc_Global result) (UInt32.t'int ns'0))}
+    /\ ([@stop_split] [@expl:write_gpt_trace ensures #6] [%#slib'17] all_ns (view_Vec_Acc_Global result) (UInt32.t'int ns'0))}
     (! return {result}) ]
+
+function first_usable_l [#"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 681 0 681 37] (ss: int) : int
+ = [%#slib'18] 2 + entry_sectors_l ss
+
+predicate touches [#"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 118 0 118 38] (a: t_Acc) (l: int) =
+  [%#slib'25] UInt64.t'int a.lba <= l /\ l < UInt64.t'int a.lba + UInt64.t'int a.sectors
+
+predicate writes_avoid [#"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 136 0 136 55] (t: Seq.seq t_Acc) (lo: int) (hi: int) =
+  [%#slib'22] forall i: int, l: int. 0 <= i /\ i < Seq.length t /\ (Seq.get t i).is_write /\ touches (Seq.get t i) l
+    -> l < lo \/ hi < l
 
 meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let verify_dpm_format_frame_data_regions__mutant [#"/home/cornel/cv-disk-partition-manager-20260930/components/disk-partition-manager/verif-creusot/src/lib.rs" 2201 0 2203 13]
+let verify_dpm_format_frame_data_regions__mutant [#"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 2279 0 2279 98]
   (ns'0: UInt32.t) (ss: UInt32.t) (ns_sectors: UInt64.t) (return (x: t_Vec_Acc_Global)) =
-{[@stop_split] [@expl:verify_dpm_format_frame_data_regions__mutant requires] ([@stop_split] [@expl:verify_dpm_format_frame_data_regions__mutant requires #0] [%#slib'0] UInt32.t'int ss
+{[@stop_split] [@expl:verify_dpm_format_frame_data_regions__mutant requires] ([@stop_split] [@expl:verify_dpm_format_frame_data_regions__mutant requires #0] [%#slib'4] UInt32.t'int ss
       = 512
     \/ UInt32.t'int ss = 4096)
-  /\ ([@stop_split] [@expl:verify_dpm_format_frame_data_regions__mutant requires #1] [%#slib'1] UInt64.t'int ns_sectors
-  >= 2 * entry_sectors_l (UInt32.t'int ss) + 4)}
+  /\ ([@stop_split] [@expl:verify_dpm_format_frame_data_regions__mutant requires #1] [%#slib'5] UInt64.t'int ns_sectors
+  >= 2 * cdiv 16384 (UInt32.t'int ss) + 5)}
   (! bb0
   [ bb0 = s0
-    [ s0 = write_gpt_trace [%#slib] {ns'0} {ss} {ns_sectors} (fun (_x: t_Vec_Acc_Global) -> [ &_ret <- _x ] s1)
-    | s1 = return {_ret} ] ]
+    [ s0 = write_gpt_trace [%#slib] {ns'0} {ss} {ns_sectors} (fun (_x: t_Vec_Acc_Global) -> [ &t <- _x ] s1)
+    | s1 = {[@expl:assertion] [%#slib'0] UInt64.t'int (Seq.get (view_Vec_Acc_Global t) 0).lba
+        < first_usable_l (UInt32.t'int ss)
+      /\ UInt64.t'int (Seq.get (view_Vec_Acc_Global t) 1).lba < first_usable_l (UInt32.t'int ss)}
+      s2
+    | s2 = {[@expl:assertion] [%#slib'1] UInt64.t'int (Seq.get (view_Vec_Acc_Global t) 2).lba
+        + UInt64.t'int (Seq.get (view_Vec_Acc_Global t) 2).sectors
+      = first_usable_l (UInt32.t'int ss)}
+      s3
+    | s3 = {[@expl:assertion] [%#slib'2] UInt64.t'int (Seq.get (view_Vec_Acc_Global t) 3).lba
+      = last_usable_l (UInt32.t'int ss) (UInt64.t'int ns_sectors) + 1}
+      s4
+    | s4 = {[@expl:assertion] [%#slib'3] UInt64.t'int (Seq.get (view_Vec_Acc_Global t) 4).lba
+      > last_usable_l (UInt32.t'int ss) (UInt64.t'int ns_sectors)}
+      s5
+    | s5 = [ &_ret <- t ] s6
+    | s6 = return {_ret} ] ]
   [ & _ret: t_Vec_Acc_Global = Any.any_l ()
   | & ns'0: UInt32.t = ns'0
   | & ss: UInt32.t = ss
-  | & ns_sectors: UInt64.t = ns_sectors ])
+  | & ns_sectors: UInt64.t = ns_sectors
+  | & t: t_Vec_Acc_Global = Any.any_l () ])
   [ return (result: t_Vec_Acc_Global) ->
-  {[@stop_split] [@expl:verify_dpm_format_frame_data_regions__mutant ensures] [%#slib'2] Seq.length (view_Vec_Acc_Global result)
-    = 6}
+  {[@stop_split] [@expl:verify_dpm_format_frame_data_regions__mutant ensures] ([@stop_split] [@expl:verify_dpm_format_frame_data_regions__mutant ensures #0] [%#slib'6] not Seq.length (view_Vec_Acc_Global result)
+      = 5)
+    /\ ([@stop_split] [@expl:verify_dpm_format_frame_data_regions__mutant ensures #1] [%#slib'7] all_ns (view_Vec_Acc_Global result) (UInt32.t'int ns'0))
+    /\ ([@stop_split] [@expl:verify_dpm_format_frame_data_regions__mutant ensures #2] [%#slib'8] writes_avoid (view_Vec_Acc_Global result) (first_usable_l (UInt32.t'int ss)) (last_usable_l (UInt32.t'int ss) (UInt64.t'int ns_sectors)))}
     (! return {result}) ]

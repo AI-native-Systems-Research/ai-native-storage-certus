@@ -2,11 +2,11 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_entry_type_guid": { "prover": "alt-ergo", "time": 0.022 },
-      "vc_layout_place": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_entry_type_guid": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_layout_place": { "prover": "alt-ergo", "time": 0.018 },
       "vc_verify_dpm_format_post_type_guid_echo": {
         "prover": "alt-ergo",
-        "time": 0.099
+        "time": 0.136
       }
     }
   }

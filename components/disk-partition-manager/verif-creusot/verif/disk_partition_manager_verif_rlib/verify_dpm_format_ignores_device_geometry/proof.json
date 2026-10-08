@@ -4,7 +4,7 @@
     "Coma": {
       "vc_verify_dpm_format_ignores_device_geometry": {
         "prover": "alt-ergo",
-        "time": 0.02
+        "time": 0.025
       }
     }
   }

@@ -2,10 +2,15 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_compute_layout": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_compute_layout": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_usable_window": { "prover": "alt-ergo", "time": 0.019 },
       "vc_verify_dpm_format_err_layout_unreachable__mutant": {
         "tactic": "split_vc",
-        "children": [ { "prover": "alt-ergo", "time": 0.033 }, null ]
+        "children": [
+          { "prover": "alt-ergo", "time": 0.034 },
+          { "prover": "alt-ergo", "time": 0.065 },
+          null
+        ]
       }
     }
   }

@@ -96,3 +96,15 @@ twins — every base proof and every refutation discharges, every anti-vacuity t
 
 Artifacts: 274 `.coma` files (258 distinct module basenames) in
 `verif-creusot/verif/disk_partition_manager_verif_rlib/`.
+
+## J4 (level-2 exact-range re-proof, 2026-10-08)
+The 17 proof-carries-range drivers of `verif/.run/t3_dependents.yaml` now assume only the
+declared `assume_rust` (per-path conjunct, pearlite-faithful) or the obligation's own words;
+derived premises (`ns >= 1`, `>= 2E+4`, `first/last` bounds, `total_usable >= 1`,
+`nbytes/len >= 1`, `lba + n <= u64::MAX`, `pre.len() >= 92`, literal 128/128, implicit
+config==device / config-ns==read-ns) are gone. Model-layer changes are weakenings only:
+`project` requires the entry ranges over OCCUPIED slots; `layout_classify` drops
+`total_usable >= 1` and needs the fixed-sum bound only when `rest_count <= 1`. New mirror
+`parse_entries_m` (gpt.rs:387-405). Every changed driver's `__mutant` is now the driver
+verbatim with its first ensures negated. Forced whole-crate run: 91 unproved == the 91
+`__mutant` twins; 0 `#[trusted]`. Advisory: `verif/.run/j4_advisory.yaml`.

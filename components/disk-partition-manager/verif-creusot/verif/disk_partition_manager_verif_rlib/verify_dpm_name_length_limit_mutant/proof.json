@@ -2,14 +2,14 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_decode_units": { "prover": "alt-ergo", "time": 0.03 },
-      "vc_encode_units": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_decode_units": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_encode_units": { "prover": "alt-ergo", "time": 0.015 },
       "vc_verify_dpm_name_length_limit__mutant": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
-            "children": [ { "prover": "alt-ergo", "time": 0.037 }, null ]
+            "children": [ { "prover": "alt-ergo", "time": 0.042 }, null ]
           }
         ]
       }

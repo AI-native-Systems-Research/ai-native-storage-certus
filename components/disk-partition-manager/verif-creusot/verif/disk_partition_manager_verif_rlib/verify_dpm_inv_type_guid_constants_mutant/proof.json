@@ -3,8 +3,8 @@
   "proofs": {
     "Coma": {
       "vc_set_CERTUS_DATA": { "prover": "alt-ergo", "time": 0.015 },
-      "vc_set_CERTUS_EXTERNAL_META": { "prover": "alt-ergo", "time": 0.016 },
-      "vc_set_CERTUS_METADATA": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_set_CERTUS_EXTERNAL_META": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_set_CERTUS_METADATA": { "prover": "alt-ergo", "time": 0.021 },
       "vc_verify_dpm_inv_type_guid_constants__mutant": {
         "tactic": "compute_specified",
         "children": [
@@ -13,7 +13,7 @@
             "children": [
               {
                 "tactic": "split_vc",
-                "children": [ { "prover": "alt-ergo", "time": 0.037 }, null ]
+                "children": [ { "prover": "alt-ergo", "time": 0.041 }, null ]
               }
             ]
           }
