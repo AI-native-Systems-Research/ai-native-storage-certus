@@ -164,6 +164,23 @@ ADMISSION=round-robin ./run-cc131k-example.sh       # LRU worst-case ordering
 PREFIX_TOKENS=0 SSD_GB=inf ./run-cc131k-example.sh  # no sharing, unbounded SSD
 ```
 
+### Interactive dashboard (`dram_dashboard.py`)
+
+A local web dashboard for the DRAM sweep that drives the real simulator. It
+serves a page of controls and charts, and on each run invokes
+`kv_cache_dynamics.py` (via `--json`) once per DRAM size with the SSD tier on
+and once with it off, so every number matches the CLI exactly.
+
+```bash
+./dram_dashboard.py            # serve on http://127.0.0.1:8077 and open a browser
+./dram_dashboard.py --port 9000 --no-browser
+```
+
+Stdlib only (no dependencies, localhost only). Change the workload — interval
+trace, DRAM sizes, tiers, tokens, concurrency, admission, shared fraction,
+decode — and re-run; the charts show per-tier hit shares, the SSD-vs-recompute
+comparison, and (with decode on) decode-stage reads.
+
 ### DRAM sweep report: impact of SSD tiering
 
 `sweep_dram_ssd.py` runs `run-burstgpt-example.sh` once per DRAM size (default

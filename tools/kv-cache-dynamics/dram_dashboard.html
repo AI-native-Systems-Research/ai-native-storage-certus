@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>KV Cache DRAM Sweep</title>
+<style>
+  /* Layout: fixed control rail (left on wide, top when narrow) + results column.
+     Palette = validated dataviz categorical slots (HBM/DRAM/SSD/recompute). */
+  :root {
+    --page:#f3f3f0; --surface:#fcfcfb; --surface-2:#f6f6f3;
+    --ink:#141413; --ink-2:#52514e; --muted:#898781;
+    --grid:#e4e3dc; --axis:#c3c2b7; --border:rgba(20,20,19,0.12);
+    --accent:#2a78d6; --danger:#d03b3b;
+    --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100;
+    --font:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+    --mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+    color-scheme:light;
+  }
+  @media (prefers-color-scheme:dark){ :root:not([data-theme="light"]){
+    --page:#0d0d0c; --surface:#1a1a19; --surface-2:#222220;
+    --ink:#f5f5f0; --ink-2:#c3c2b7; --muted:#898781;
+    --grid:#2c2c2a; --axis:#3a3a37; --border:rgba(255,255,255,0.12);
+    --accent:#3987e5; --danger:#e66767;
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500;
+    color-scheme:dark;
+  }}
+  :root[data-theme="dark"]{
+    --page:#0d0d0c; --surface:#1a1a19; --surface-2:#222220;
+    --ink:#f5f5f0; --ink-2:#c3c2b7; --muted:#898781;
+    --grid:#2c2c2a; --axis:#3a3a37; --border:rgba(255,255,255,0.12);
+    --accent:#3987e5; --danger:#e66767;
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500;
+    color-scheme:dark;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:var(--page);color:var(--ink);font-family:var(--font);
+    font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  img{max-width:100%}
+  [hidden]{display:none!important}
+  .wrap{max-width:1200px;margin:0 auto;padding-block:28px;padding-inline:16px}
+  header h1{font-size:clamp(22px,3.2vw,30px);margin:0;letter-spacing:-0.015em;text-wrap:balance}
+  header p{margin:6px 0 0;color:var(--ink-2);max-width:64ch}
+  .layout{display:grid;grid-template-columns:300px 1fr;gap:20px;margin-top:22px;align-items:start}
+  @media (max-width:820px){ .layout{grid-template-columns:1fr} }
+  .panel{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px}
+  .panel h2{font-size:12px;text-transform:uppercase;letter-spacing:0.07em;color:var(--muted);
+    margin:0 0 12px;font-weight:600}
+  .rail{position:sticky;top:env(safe-area-inset-top,0px);display:flex;flex-direction:column;gap:14px}
+  @media (max-width:820px){ .rail{position:static} }
+  fieldset{border:0;margin:0;padding:0;display:grid;gap:10px}
+  fieldset + fieldset{margin-top:4px;padding-top:14px;border-top:1px solid var(--grid)}
+  legend{font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--muted);
+    padding:0;margin-bottom:2px}
+  .field{display:grid;gap:3px}
+  .field.row{grid-template-columns:1fr auto;align-items:center;gap:10px}
+  label{font-size:12.5px;color:var(--ink-2)}
+  input,select{font:inherit;font-size:13px;color:var(--ink);background:var(--surface-2);
+    border:1px solid var(--border);border-radius:7px;padding:6px 8px;width:100%;min-width:0}
+  input[type="range"]{padding:0;background:transparent;border:0}
+  input[type="checkbox"]{width:auto}
+  input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .hint{font-size:11px;color:var(--muted)}
+  button.run{font:inherit;font-weight:600;font-size:14px;color:#fff;background:var(--accent);
+    border:0;border-radius:8px;padding:10px 14px;cursor:pointer;width:100%}
+  button.run[disabled]{opacity:.6;cursor:progress}
+  button.ghost{font:inherit;font-size:12px;color:var(--ink-2);background:transparent;
+    border:1px solid var(--border);border-radius:7px;padding:6px 8px;cursor:pointer}
+  .results{display:flex;flex-direction:column;gap:18px;min-width:0}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+  .tile{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px}
+  .tile .k{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em}
+  .tile .v{font-size:22px;font-weight:600;font-family:var(--mono);margin-top:2px;
+    font-variant-numeric:tabular-nums;line-height:1.2}
+  .tile .v small{font-size:13px;color:var(--ink-2);font-weight:500}
+  .tile .d{font-size:11.5px;color:var(--ink-2);margin-top:3px}
+  .chart-card h3{margin:0 0 2px;font-size:16px;letter-spacing:-0.01em}
+  .chart-card p.sub{margin:0 0 10px;color:var(--ink-2);font-size:13px;max-width:72ch}
+  .legend{display:flex;flex-wrap:wrap;gap:14px;margin-bottom:6px;font-size:12.5px;color:var(--ink-2)}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .legend i{width:16px;height:0;border-top:3px solid;border-radius:2px}
+  .legend i.dash{border-top-style:dashed}
+  .chart-wrap{overflow-x:auto}
+  svg{display:block;width:100%;height:auto;overflow:visible}
+  .grid-line{stroke:var(--grid);stroke-width:1}
+  .axis-line{stroke:var(--axis);stroke-width:1}
+  .tick{fill:var(--muted);font-size:12px;font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .axis-title{fill:var(--ink-2);font-size:12px}
+  .ln{fill:none;stroke-width:2.5;stroke-linejoin:round;stroke-linecap:round}
+  .dot{stroke:var(--surface);stroke-width:2}
+  .hit{fill:transparent;cursor:crosshair}
+  .hit:hover{fill:var(--grid);fill-opacity:.4}
+  .end-label{font-size:12px;font-weight:600;fill:var(--ink)}
+  table{border-collapse:collapse;width:100%;font-size:12.5px;font-family:var(--mono);
+    font-variant-numeric:tabular-nums}
+  th,td{text-align:right;padding:6px 9px;border-bottom:1px solid var(--grid);white-space:nowrap}
+  th:first-child,td:first-child{text-align:left}
+  th{color:var(--ink-2);font-weight:600;font-family:var(--font)}
+  .note{font-size:12px;color:var(--muted);max-width:80ch}
+  .note code{font-family:var(--mono);font-size:11.5px;background:var(--surface-2);
+    padding:1px 4px;border-radius:4px}
+  #tip{position:fixed;pointer-events:none;z-index:20;display:none;background:var(--surface);
+    color:var(--ink);border:1px solid var(--border);border-radius:8px;padding:7px 9px;
+    font-size:12px;font-family:var(--mono);white-space:pre;box-shadow:0 6px 20px rgba(0,0,0,.18)}
+  .status{font-size:12px;color:var(--muted);min-height:1.2em}
+  .status.err{color:var(--danger)}
+  .bar{height:4px;background:var(--grid);border-radius:2px;overflow:hidden;margin-top:8px}
+  .bar>i{display:block;height:100%;width:30%;background:var(--accent);
+    animation:slide 1s linear infinite}
+  @keyframes slide{0%{transform:translateX(-100%)}100%{transform:translateX(400%)}}
+  @media (prefers-reduced-motion:reduce){ .bar>i{animation:none;width:100%} }
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>KV Cache DRAM Sweep</h1>
+    <p>A three-tier HBM&nbsp;&rarr;&nbsp;DRAM&nbsp;&rarr;&nbsp;SSD block-LRU cache under trace-derived
+      think-times. Change the workload and re-run the sweep to see where KV lookups land and what the
+      SSD tier absorbs. Every point is a live run of <code style="font-family:var(--mono)">kv_cache_dynamics.py</code>.</p>
+  </header>
+
+  <div class="layout">
+    <form class="rail" id="controls">
+      <div class="panel">
+        <h2>Workload</h2>
+        <fieldset>
+          <div class="field">
+            <label for="dist">Think-time intervals</label>
+            <select id="dist">
+              <option value="burstgpt" selected>BurstGPT (median 2.2m)</option>
+              <option value="ccweka">cc-weka 062126 (median 17s)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="dram">DRAM sweep (GiB, comma-separated)</label>
+            <input id="dram" value="8,16,32,64,128,256" inputmode="text">
+          </div>
+          <div class="two">
+            <div class="field"><label for="concurrent">Concurrent</label>
+              <input id="concurrent" type="number" min="1" step="1" value="8"></div>
+            <div class="field"><label for="sessions">Sessions</label>
+              <input id="sessions" type="number" min="1" step="1" value="100"></div>
+          </div>
+          <div class="field"><label for="turns">Turns / conversation</label>
+            <input id="turns" type="number" min="1" step="1" value="100"></div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Tiers</legend>
+          <div class="two">
+            <div class="field"><label for="hbm">HBM (GiB)</label>
+              <input id="hbm" type="number" min="0.1" step="any" value="10"></div>
+            <div class="field"><label for="ssd">SSD (GiB)</label>
+              <input id="ssd" value="20000" inputmode="text"></div>
+          </div>
+          <p class="hint">SSD accepts <code>inf</code> for unbounded. DRAM is the swept axis.</p>
+        </fieldset>
+
+        <fieldset>
+          <legend>Context &amp; tokens</legend>
+          <div class="field"><label for="mml">Context window (tokens, 0 = unbounded)</label>
+            <input id="mml" type="number" min="0" step="1" value="131072"></div>
+          <div class="field"><label for="prefix">Shared prefix (tokens)</label>
+            <input id="prefix" type="number" min="0" step="1" value="20000"></div>
+          <div class="two">
+            <div class="field"><label for="prompt">Prompt tok/turn</label>
+              <input id="prompt" type="number" min="0" step="1" value="364"></div>
+            <div class="field"><label for="gen">Gen tok/turn</label>
+              <input id="gen" type="number" min="0" step="1" value="1398"></div>
+          </div>
+          <div class="field row">
+            <label for="shared">Shared fraction <span id="sharedVal" class="hint"></span></label>
+            <input id="shared" type="range" min="0" max="1" step="0.05" value="0" style="width:120px">
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Scheduling &amp; model</legend>
+          <div class="field"><label for="admission">Admission</label>
+            <select id="admission">
+              <option value="interval" selected>interval (think-time)</option>
+              <option value="round-robin">round-robin</option>
+              <option value="random">random</option>
+            </select></div>
+          <div class="field row">
+            <label for="decode">Emulate decode stage</label>
+            <input id="decode" type="checkbox">
+          </div>
+          <div class="two">
+            <div class="field"><label for="block">Block size</label>
+              <input id="block" type="number" min="1" step="1" value="64"></div>
+            <div class="field"><label for="seed">Seed</label>
+              <input id="seed" type="number" step="1" value="1"></div>
+          </div>
+          <div class="two">
+            <div class="field"><label for="layers">Layers</label>
+              <input id="layers" type="number" min="1" step="1" value="48"></div>
+            <div class="field"><label for="kvheads">KV heads</label>
+              <input id="kvheads" type="number" min="1" step="1" value="8"></div>
+          </div>
+          <div class="two">
+            <div class="field"><label for="headdim">Head dim</label>
+              <input id="headdim" type="number" min="1" step="1" value="128"></div>
+            <div class="field"><label for="bpe">Bytes/elem</label>
+              <select id="bpe"><option value="2" selected>2 (BF16)</option><option value="1">1 (FP8)</option></select></div>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <button class="run" id="runBtn" type="submit">Run sweep</button>
+          <button class="ghost" id="resetBtn" type="button">Reset to cc131k defaults</button>
+          <div class="status" id="status"></div>
+          <div class="bar" id="barWrap" hidden><i></i></div>
+        </fieldset>
+      </div>
+    </form>
+
+    <div class="results">
+      <div class="tiles" id="tiles"></div>
+
+      <div class="panel chart-card">
+        <h3>Where lookups are served</h3>
+        <p class="sub">Share of in-window prior-context tokens (prefix included) found in each tier,
+          across all measured turns, versus DRAM size.</p>
+        <div class="legend" id="legend1"></div>
+        <div class="chart-wrap"><div id="chart1"></div></div>
+      </div>
+
+      <div class="panel chart-card">
+        <h3>What the SSD tier absorbs</h3>
+        <p class="sub">SSD's share with the tier on, against the recompute (prefill) share when the
+          same sweep runs with no SSD tier &mdash; blocks pushed out of DRAM are then lost and the next
+          turn recomputes them.</p>
+        <div class="legend" id="legend2"></div>
+        <div class="chart-wrap"><div id="chart2"></div></div>
+      </div>
+
+      <div class="panel chart-card" id="decodeCard" hidden>
+        <h3>Decode-stage reads</h3>
+        <p class="sub">Share of per-token decode reads served by each tier. A context larger than HBM
+          spills its tail every step, so the lower tiers are read again on each generated token.</p>
+        <div class="legend" id="legend3"></div>
+        <div class="chart-wrap"><div id="chart3"></div></div>
+      </div>
+
+      <div class="panel chart-card">
+        <h3>Data</h3>
+        <div class="chart-wrap"><table id="table"></table></div>
+        <p class="note" id="footnote"></p>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="tip" role="tooltip"></div>
+
+<script>
+"use strict";
+const TIERS=["HBM","DRAM","SSD"], GiB=1024**3;
+const DIST_META={burstgpt:{label:"BurstGPT",median:"2.2m"},ccweka:{label:"cc-weka",median:"17s"}};
+
+/* ---- charts ---- */
+const W=760,H=320,PL=52,PR=118,PT=14,PB=42;
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function lineChart(xLabels,series,xTitle,yMax){
+  const n=xLabels.length,pw=W-PL-PR,ph=H-PT-PB;
+  const xs=xLabels.map((_,i)=>PL+(n>1?pw*i/(n-1):pw/2));
+  const yOf=v=>PT+ph-v/yMax*ph;
+  let s=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(xTitle)}">`;
+  for(let k=0;k<=4;k++){const v=yMax*k/4,y=yOf(v);
+    s+=`<line class="grid-line" x1="${PL}" x2="${PL+pw}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}"/>`;
+    s+=`<text class="tick" x="${PL-8}" y="${(y+4).toFixed(1)}" text-anchor="end">${(+v.toFixed(1))}%</text>`;}
+  xLabels.forEach((lab,i)=>{s+=`<text class="tick" x="${xs[i].toFixed(1)}" y="${PT+ph+18}" text-anchor="middle">${esc(lab)}</text>`;});
+  s+=`<line class="axis-line" x1="${PL}" x2="${PL+pw}" y1="${PT+ph}" y2="${PT+ph}"/>`;
+  s+=`<text class="axis-title" x="${PL+pw/2}" y="${H-6}" text-anchor="middle">${esc(xTitle)}</text>`;
+  const ends=series.map(se=>({y:yOf(se.vals[n-1]),name:se.name,cls:se.cls})).sort((a,b)=>a.y-b.y);
+  const placed=[];for(const e of ends){let y=e.y;if(placed.length&&y-placed[placed.length-1].y<14)y=placed[placed.length-1].y+14;placed.push({...e,y});}
+  const floor=PT+ph-4;if(placed.length&&placed[placed.length-1].y>floor){const sh=placed[placed.length-1].y-floor;placed.forEach(e=>e.y-=sh);}
+  for(const se of series){
+    const pts=xs.map((x,i)=>`${x.toFixed(1)},${yOf(se.vals[i]).toFixed(1)}`).join(" ");
+    s+=`<polyline class="ln" points="${pts}" style="stroke:var(--${se.cls})${se.dash?';stroke-dasharray:6 5':''}"/>`;
+    xs.forEach((x,i)=>{s+=`<circle class="dot" cx="${x.toFixed(1)}" cy="${yOf(se.vals[i]).toFixed(1)}" r="4" style="fill:var(--${se.cls})"/>`;});
+  }
+  placed.forEach(e=>{s+=`<text class="end-label" x="${PL+pw+10}" y="${(e.y+4).toFixed(1)}"><tspan style="fill:var(--${e.cls})">&#9644;</tspan> ${esc(e.name)}</text>`;});
+  const col=pw/Math.max(n-1,1);
+  xs.forEach((x,i)=>{const tip=`${xTitle}: ${xLabels[i]}\n`+series.map(se=>`${se.name}: ${se.vals[i].toFixed(1)}%`).join("\n");
+    s+=`<rect class="hit" x="${(x-col/2).toFixed(1)}" y="${PT}" width="${col.toFixed(1)}" height="${ph}" data-tip="${esc(tip)}"/>`;});
+  return s+`</svg>`;
+}
+function legend(el,items){el.innerHTML=items.map(it=>`<span><i class="${it.dash?'dash':''}" style="border-color:var(--${it.cls})"></i>${esc(it.name)}</span>`).join("");}
+
+function fmtGb(gb){if(gb===null||gb===undefined)return "&infin;";return gb>=1024?(gb/1024).toLocaleString(undefined,{maximumFractionDigits:2})+" TiB":gb+" GiB";}
+function fmtTok(n){const a=Math.abs(n);if(a>=1e9)return (n/1e9).toFixed(1)+"B";if(a>=1e6)return (n/1e6).toFixed(1)+"M";if(a>=1e3)return (n/1e3).toFixed(1)+"K";return ""+Math.round(n);}
+function dramLabel(gb){return gb>=1024?(gb/1024)+"T":gb+"G";}
+
+/* ---- render ---- */
+function tile(k,v,d){return `<div class="tile"><div class="k">${esc(k)}</div><div class="v">${v}</div>${d?`<div class="d">${esc(d)}</div>`:""}</div>`;}
+function render(cfg,data){
+  const {meta,rows}=data;
+  const windowGb=meta.windowBlocks?meta.windowBlocks*meta.bytesPerBlock/GiB:null;
+  const workingGb=meta.workingBlocksEst?meta.workingBlocksEst*meta.bytesPerBlock/GiB:null;
+  const dm=DIST_META[meta.distKey]||{label:meta.distKey,median:"?"};
+  document.getElementById("tiles").innerHTML=[
+    tile("Interval source",dm.label,"median "+dm.median),
+    tile("HBM tier",fmtGb(meta.hbmGb)+' <small>/ SSD '+fmtGb(meta.ssdGb)+"</small>","DRAM swept"),
+    workingGb?tile("Working set",workingGb.toFixed(0)+" GB",meta.oversub.toFixed(1)+"× HBM"):"",
+    tile("Tokens / turn",meta.turnTokens.toLocaleString(),meta.promptTok+" prompt + "+meta.genTok+" gen"),
+    tile("Context window",meta.maxModelLen?meta.maxModelLen.toLocaleString():"unbounded",windowGb?windowGb.toFixed(1)+" GB cap":""),
+    tile("SSD @ "+dramLabel(rows[0].dram),rows[0].with.SSD.toFixed(1)+"<small>%</small>","of lookups"),
+  ].join("");
+
+  const xLabels=rows.map(r=>dramLabel(r.dram));
+  const s1=[{name:"HBM",cls:"s1",vals:rows.map(r=>r.with.HBM)},
+            {name:"DRAM",cls:"s2",vals:rows.map(r=>r.with.DRAM)},
+            {name:"SSD",cls:"s3",vals:rows.map(r=>r.with.SSD)}];
+  legend(document.getElementById("legend1"),s1);
+  document.getElementById("chart1").innerHTML=lineChart(xLabels,s1,"DRAM tier size",100);
+
+  const ssd=rows.map(r=>r.with.SSD),miss=rows.map(r=>r.without?r.without.miss:0);
+  const ymax=Math.max(10,Math.ceil(Math.max(...ssd,...miss)/10)*10);
+  const s2=[{name:"SSD hits (with SSD)",cls:"s3",vals:ssd},
+            {name:"Recompute (no SSD)",cls:"s4",vals:miss,dash:true}];
+  legend(document.getElementById("legend2"),s2);
+  document.getElementById("chart2").innerHTML=lineChart(xLabels,s2,"DRAM tier size",ymax);
+
+  const decodeCard=document.getElementById("decodeCard");
+  if(rows[0].decode){
+    const d=[{name:"HBM",cls:"s1",vals:rows.map(r=>r.decode.HBM)},
+             {name:"DRAM",cls:"s2",vals:rows.map(r=>r.decode.DRAM)},
+             {name:"SSD",cls:"s3",vals:rows.map(r=>r.decode.SSD)},
+             {name:"Recompute",cls:"s4",vals:rows.map(r=>r.decode.miss),dash:true}];
+    legend(document.getElementById("legend3"),d);
+    document.getElementById("chart3").innerHTML=lineChart(xLabels,d,"DRAM tier size",100);
+    decodeCard.hidden=false;
+  } else decodeCard.hidden=true;
+
+  const head=["DRAM","HBM hit","DRAM hit","SSD hit","Miss","Prefill tok","Miss (no SSD)","Prefill tok (no SSD)"];
+  let html="<thead><tr>"+head.map(h=>`<th>${esc(h)}</th>`).join("")+"</tr></thead><tbody>";
+  for(const r of rows){const w=r.with,wo=r.without;
+    const cells=[fmtGb(r.dram),w.HBM.toFixed(1)+"%",w.DRAM.toFixed(1)+"%",w.SSD.toFixed(1)+"%",
+      w.miss.toFixed(1)+"%",fmtTok(r.withRecompute),
+      wo?wo.miss.toFixed(1)+"%":"–",wo?fmtTok(r.withoutRecompute):"–"];
+    html+="<tr>"+cells.map(c=>`<td>${c}</td>`).join("")+"</tr>";}
+  document.getElementById("table").innerHTML=html+"</tbody>";
+
+  document.getElementById("footnote").innerHTML=
+    `Measured ${rows[0].measuredConvs} of ${cfg.sessions} conversations `+
+    `(a warmup wave of ${cfg.concurrent} is excluded). Each point is a real run of `+
+    `<code>kv_cache_dynamics.py</code>; tiers model capacity and placement only (no bandwidth or latency).`+
+    (rows[0].decode?" Decode reads are per generated token and reported separately from prefill.":"");
+}
+
+/* ---- run (fetch from the local simulator-backed server) ---- */
+const IDS=["dist","dram","concurrent","sessions","turns","hbm","ssd","mml","prefix",
+  "prompt","gen","shared","admission","block","seed","layers","kvheads","headdim","bpe"];
+function formCfg(){const c={};for(const id of IDS)c[id]=document.getElementById(id).value;
+  c.decode=document.getElementById("decode").checked?"1":"0";return c;}
+let running=false;
+async function run(){
+  if(running)return;running=true;
+  const btn=document.getElementById("runBtn"),status=document.getElementById("status"),bar=document.getElementById("barWrap");
+  const cfg=formCfg();
+  const qs=new URLSearchParams(cfg).toString();
+  btn.disabled=true;bar.hidden=false;status.className="status";status.textContent="Running kv_cache_dynamics.py…";
+  try{
+    const resp=await fetch("/api/sweep?"+qs);
+    const data=await resp.json();
+    if(!resp.ok||data.error) throw new Error(data.error||("HTTP "+resp.status));
+    render(cfg,data);
+    status.textContent="Done · "+data.rows.length+" DRAM sizes · seed "+cfg.seed;
+  }catch(e){
+    status.className="status err";status.textContent="Error: "+e.message;
+  }finally{ bar.hidden=true;btn.disabled=false;running=false; }
+}
+
+/* ---- tooltips ---- */
+const tip=document.getElementById("tip");
+document.addEventListener("mousemove",e=>{
+  const el=e.target.closest&&e.target.closest("[data-tip]");
+  if(!el){tip.style.display="none";return;}
+  tip.textContent=el.getAttribute("data-tip");tip.style.display="block";
+  const r=tip.getBoundingClientRect();let x=e.clientX+14,y=e.clientY+14;
+  if(x+r.width>innerWidth-8)x=e.clientX-r.width-14;
+  if(y+r.height>innerHeight-8)y=e.clientY-r.height-14;
+  tip.style.left=x+"px";tip.style.top=y+"px";
+});
+
+/* ---- wiring ---- */
+const DEFAULTS={dist:"burstgpt",dram:"8,16,32,64,128,256",concurrent:"8",sessions:"100",
+  turns:"100",hbm:"10",ssd:"20000",mml:"131072",prefix:"20000",prompt:"364",gen:"1398",
+  shared:"0",admission:"interval",block:"64",seed:"1",layers:"48",kvheads:"8",headdim:"128",bpe:"2"};
+function setShared(){const v=+document.getElementById("shared").value;
+  document.getElementById("sharedVal").textContent=(v*100).toFixed(0)+"%";}
+document.getElementById("shared").addEventListener("input",setShared);
+document.getElementById("controls").addEventListener("submit",e=>{e.preventDefault();run();});
+document.getElementById("resetBtn").addEventListener("click",()=>{
+  for(const [k,v] of Object.entries(DEFAULTS))document.getElementById(k).value=v;
+  document.getElementById("decode").checked=false;setShared();run();});
+setShared();
+run();
+</script>
+</body>
+</html>
