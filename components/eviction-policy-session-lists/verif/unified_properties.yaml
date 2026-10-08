@@ -62,8 +62,8 @@ properties:
       modules:
       - verify_epsl_create_pool_starts_empty
       result: Proved
-      wall_clock_s: 11.95
-      peak_rss_mb: 344
+      wall_clock_s: 11.49
+      peak_rss_mb: 352
       lever: null
     status: proved
     _scored_by: scorer_creusot
@@ -101,8 +101,8 @@ properties:
       modules:
       - verify_epsl_create_pool_issues_a_fresh_sequential_identifier
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 55
+      wall_clock_s: 0.77
+      peak_rss_mb: 54
       lever: null
     status: proved
     _scored_by: scorer_creusot
@@ -248,8 +248,8 @@ properties:
       modules:
       - verify_epsl_pool_count_assumed_below_u32_max
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 54
+      wall_clock_s: 0.66
+      peak_rss_mb: 53
       lever: null
     status: proved
     _scored_by: scorer_creusot
@@ -266,7 +266,7 @@ properties:
   verifiable: true
   global: true
   attachments: 4
-  origin: spec+code
+  origin: divergent
   source:
     spec:
     - FR-001
@@ -295,6 +295,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani: {}
+  origin_before_level1: spec+code
+  divergence_note: 'SPEC (FR-001; spec record EPSL-TRACK-RETURNS-USABLE-HANDLE): using the returned handle
+    afterwards to refresh or stop tracking succeeds and acts on that same block and no other. CODE (lib.rs:140,
+    ieviction_policy.rs:9-16, session_list.rs:80-82,182): the handle is only (pool, arena slot) and a
+    freed slot is recycled, so after the block is removed/evicted/cleared the same handle acts on whatever
+    block later occupies the slot. The merge replaced the spec''s behavioural guarantee (''acts on that
+    block and no other'') with the code''s representational fact (''carries pool and slot''), hiding the
+    handle-aliasing gap (domain discordance D1, FV-BUG-002).'
 - id: EPSL-TRACK-FIRST-BLOCK-IS-HEAD-AND-LEAF
   subject: track
   methods:
@@ -331,8 +339,8 @@ properties:
       modules:
       - verify_epsl_track_first_block_is_head_and_leaf
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 54
+      wall_clock_s: 0.73
+      peak_rss_mb: 53
       lever: null
     status: proved
     _scored_by: scorer_creusot
@@ -373,8 +381,8 @@ properties:
       modules:
       - verify_epsl_track_links_under_current_leaf
       result: Proved
-      wall_clock_s: 0.53
-      peak_rss_mb: 55
+      wall_clock_s: 0.82
+      peak_rss_mb: 54
       lever: null
     status: proved
     _scored_by: scorer_creusot
@@ -438,7 +446,7 @@ properties:
   verifiable: true
   global: true
   attachments: 4
-  origin: spec+code
+  origin: divergent
   source:
     spec:
     - FR-004
@@ -469,6 +477,13 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani: {}
+  origin_before_level1: spec+code
+  divergence_note: 'SPEC (FR-004, Assumptions ''Current time for recency is a monotonic time source''):
+    a newly registered block is stamped with the current time, newer than every block registered/accessed
+    before it. CODE (session_list.rs:62-65,96,226): recency is a per-pool logical counter that clear()
+    resets to 0, so stamps handed out after clear_pool repeat stamps handed out before it. The unified
+    ''strictly newer than every recency value handed out before it in the same domain'' is literally false
+    across a clear; same disagreement as divergent EPSL-INV-RECENCY-STRICTLY-ADVANCES.'
 - id: EPSL-TRACK-REREGISTRATION-IS-IDEMPOTENT
   subject: track
   methods:
@@ -506,8 +521,8 @@ properties:
       modules:
       - verify_epsl_track_reregistration_is_idempotent
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 55
+      wall_clock_s: 0.67
+      peak_rss_mb: 53
       lever: null
     status: proved
     _scored_by: scorer_creusot
@@ -625,8 +640,8 @@ properties:
       modules:
       - verify_epsl_track_does_not_disturb_other_blocks
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 54
+      wall_clock_s: 0.64
+      peak_rss_mb: 53
       lever: null
     status: proved
     _scored_by: scorer_creusot
@@ -663,8 +678,8 @@ properties:
       modules:
       - verify_epsl_track_fresh_key_becomes_the_session_leaf
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 54
+      wall_clock_s: 0.79
+      peak_rss_mb: 53
       lever: null
     status: proved
     _scored_by: scorer_creusot
@@ -700,8 +715,8 @@ properties:
       modules:
       - verify_epsl_track_demotes_the_previous_leaf
       result: Proved
-      wall_clock_s: 0.52
-      peak_rss_mb: 55
+      wall_clock_s: 0.65
+      peak_rss_mb: 54
       lever: null
     status: proved
     _scored_by: scorer_creusot
@@ -805,7 +820,7 @@ properties:
       modules:
       - verify_epsl_track_keys_are_scoped_to_one_pool
       result: Proved
-      wall_clock_s: 0.53
+      wall_clock_s: 0.66
       peak_rss_mb: 55
       lever: null
     status: proved
@@ -840,10 +855,9 @@ properties:
     evidence:
       modules:
       - verify_epsl_arena_slot_count_assumed_below_u32_max
-      - pool_register
       result: Proved
-      wall_clock_s: 1.2
-      peak_rss_mb: 87
+      wall_clock_s: 0.65
+      peak_rss_mb: 53
       lever: null
     status: proved
     _scored_by: scorer_creusot
@@ -880,8 +894,8 @@ properties:
       modules:
       - verify_epsl_touch_refreshes_recency
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 54
+      wall_clock_s: 0.64
+      peak_rss_mb: 53
       lever: null
     status: proved
     _scored_by: scorer_creusot
@@ -945,7 +959,7 @@ properties:
   verifiable: true
   global: true
   attachments: 3
-  origin: spec+code
+  origin: divergent
   source:
     spec:
     - FR-015
@@ -971,6 +985,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani: {}
+  origin_before_level1: spec+code
+  divergence_note: 'SPEC (FR-015; spec record): a handle naming a non-existent domain makes touch/batch_touch/remove
+    report AN error; the spec explicitly does not pin which error kind. CODE (lib.rs:145-148 for touch
+    only in the paired code record; lib.rs:169-177 for batch_touch): InvalidPool(id), but batch_touch
+    first applies every earlier handle in the slice and only then returns InvalidPool for a later handle
+    with an unknown pool. The merge BROADENED to ''specifically an invalid-domain error'' and to all three
+    methods, and added ''changes nothing'', which batch_touch violates (domain discordance D2). This record
+    is the boundary itself for batch_touch.'
 - id: EPSL-TOUCH-CHANGES-ONLY-RECENCY
   subject: touch
   methods:
@@ -1003,8 +1025,8 @@ properties:
       modules:
       - verify_epsl_touch_changes_only_recency
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 54
+      wall_clock_s: 0.64
+      peak_rss_mb: 53
       lever: null
     status: proved
     _scored_by: scorer_creusot
@@ -1041,8 +1063,8 @@ properties:
       modules:
       - verify_epsl_touch_of_a_leaf_moves_it_last_in_the_candidate_order
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 54
+      wall_clock_s: 0.65
+      peak_rss_mb: 53
       lever: null
     status: proved
     _scored_by: scorer_creusot
@@ -1077,8 +1099,8 @@ properties:
       modules:
       - verify_epsl_touch_of_an_interior_block_keeps_the_candidate_set
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 54
+      wall_clock_s: 0.71
+      peak_rss_mb: 53
       lever: null
     status: proved
     _scored_by: scorer_creusot
@@ -1126,7 +1148,7 @@ properties:
   verifiable: true
   global: true
   attachments: 2
-  origin: spec+code
+  origin: divergent
   source:
     spec:
     - FR-005
@@ -1155,6 +1177,13 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani: {}
+  origin_before_level1: spec+code
+  divergence_note: 'SPEC (FR-005; spec record): a group refresh ALWAYS leaves the same state as the one-at-a-time
+    sequence; batching never changes the outcome. CODE (lib.rs:169-182): equivalence holds only when every
+    handle is valid; on the first invalid handle batch_touch returns, leaving earlier handles refreshed
+    and later ones not, whereas one-at-a-time reporting would still apply the later valid handles. The
+    merge NARROWED the spec to ''when a group recency refresh succeeds''. (Spec NV-11 records the atomicity
+    gap.)'
 - id: EPSL-BATCH-TOUCH-INVALID-HANDLE-IS-AN-ERROR
   subject: batch_touch
   methods:
@@ -1308,8 +1337,8 @@ properties:
       modules:
       - verify_epsl_batch_touch_rejects_unknown_pool
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 54
+      wall_clock_s: 0.66
+      peak_rss_mb: 53
       lever: null
     status: proved
     _scored_by: scorer_creusot
@@ -1407,16 +1436,13 @@ properties:
     different domains, so a group that alternates between two domains changes domains on every step.
   creusot:
     fidelity: trusted-boundary
-    note: scorer re-ran `cargo creusot` from source -> Proved
-    evidence:
-      modules:
-      - verify_epsl_batch_touch_relocks_when_the_pool_changes
-      result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 54
-      lever: null
-    status: proved
-    _scored_by: scorer_creusot
+    note: 'LEVEL-2 NOT CREDITED (narrowed obligation): the same-pool case refreshes one pool twice in
+      one batch_touch call, ticking its clock twice; under exactly D6 (pool.clock < u64::MAX at the call)
+      the second tick overflows at clock == u64::MAX - 1, so the property is not provable under the declared
+      range (D6 is too weak for batch_touch: it would need clock + handles-in-that-pool <= u64::MAX).
+      Driver and twin renamed narrowed_verify_epsl_batch_touch_relocks_when_the_pool_changes[__mutant]
+      and keep the old ready(s,t) constant-margin premise, so the gate cannot credit them. D2 (D-RANGE-FR-005-e924ec)
+      does not help: it requires occupancy, not clock room.'
   kani: {}
 - id: EPSL-REMOVE-STOPS-TRACKING-THE-BLOCK
   subject: remove
@@ -1473,7 +1499,7 @@ properties:
   verifiable: true
   global: true
   attachments: 2
-  origin: spec+code
+  origin: divergent
   source:
     spec:
     - FR-011
@@ -1506,6 +1532,13 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani: {}
+  origin_before_level1: spec+code
+  divergence_note: 'SPEC (FR-011, Edge Cases ''Explicit removal of an interior block''; spec record):
+    covers both the interior case AND the head case - ''if the removed block was the start of the chain,
+    its child becomes the new start and has no parent''. CODE (session_list.rs:154-159): handles both
+    (child.parent = parent, which is None for a head). The unified statement keeps only the middle-of-chain
+    case, silently dropping the spec''s head-removal clause; the head case is no longer an obligation
+    anywhere in this record.'
 - id: EPSL-REMOVE-LAST-BLOCK-EMPTIES-THE-SESSION
   subject: remove
   methods:
@@ -1984,7 +2017,7 @@ properties:
   verifiable: true
   global: false
   attachments: 1
-  origin: spec+code
+  origin: divergent
   source:
     spec:
     - FR-006
@@ -2014,6 +2047,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani: {}
+  origin_before_level1: spec+code
+  divergence_note: 'SPEC (FR-006, User Story 3 scenario 3; spec record): evicting a block never refreshes
+    that block''s recency. CODE (session_list.rs:190-193 plus code record EPSL-EVICT-DOES-NOT-REFRESH-RECENCY):
+    the clock does not advance, and the code extraction adds ''repeated victim requests walk steadily
+    through the candidates from oldest to newest''. The merge BROADENED the spec with that extra clause,
+    which conflicts with parent promotion (session_list.rs:164-168): an evicted leaf''s parent re-enters
+    the leaf set at its own, possibly older, stamp, so successive victims'' recencies are not monotone
+    (same issue as divergent EPSL-CANDIDATES-LISTED-IN-EVICTION-ORDER).'
 - id: EPSL-EVICT-NONEMPTY-DOMAIN-ALWAYS-YIELDS-A-VICTIM
   subject: identify_next_to_evict
   methods:
@@ -2095,7 +2136,7 @@ properties:
   verifiable: true
   global: true
   attachments: 4
-  origin: spec+code
+  origin: divergent
   source:
     spec:
     - FR-015
@@ -2124,6 +2165,13 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani: {}
+  origin_before_level1: spec+code
+  divergence_note: 'SPEC (FR-015 second sentence; spec record): all four error-less ops on an unknown
+    domain degrade to None / empty list / 0 / no-op respectively, and none panics. CODE (paired record
+    EPSL-EVICT-UNKNOWN-POOL-RETURNS-NOTHING, lib.rs:200-202): covers identify_next_to_evict only. The
+    merge NARROWED the per-op results to the victim case (candidates->empty and len->0 are no longer stated)
+    and dropped ''none of them crashes'', which the code does not guarantee anyway (every op .unwrap()s
+    the RwLock/Mutex, lib.rs:201,203,208,210,216,218,224,226 - domain discordance D6).'
 - id: EPSL-INV-A-BLOCK-WITH-A-DESCENDANT-IS-NEVER-EVICTED
   subject: 'global invariant: only end-of-chain blocks may be evicted'
   methods:
@@ -2628,7 +2676,7 @@ properties:
   verifiable: true
   global: true
   attachments: 4
-  origin: spec+code
+  origin: divergent
   source:
     spec:
     - FR-014
@@ -2659,6 +2707,13 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani: {}
+  origin_before_level1: spec+code
+  divergence_note: 'SPEC (FR-014; spec record): clearing removes every block; size 0, sessions empty,
+    no victim, no candidates. CODE (session_list.rs:220-228): also discards the arena and free list (slot
+    numbering restarts) and resets the recency clock to 0. The merge BROADENED the spec with the clock
+    reset and arena discard, which the spec contradicts elsewhere (Assumptions: monotonic time source;
+    FR-015: a pre-clear handle is ''already-removed'' and must be rejected) - the very mechanism behind
+    divergent EPSL-CLEAR-INVALIDATES-EXISTING-HANDLES and EPSL-INV-RECENCY-STRICTLY-ADVANCES.'
 - id: EPSL-CLEAR-INVALIDATES-EXISTING-HANDLES
   subject: clear_pool
   methods:
@@ -2856,7 +2911,7 @@ properties:
       modules:
       - verify_epsl_inv_at_most_one_child
       result: Proved
-      wall_clock_s: 0.54
+      wall_clock_s: 0.69
       peak_rss_mb: 55
       lever: null
     status: proved
@@ -2906,7 +2961,7 @@ properties:
       modules:
       - verify_epsl_inv_exactly_one_leaf_per_session
       result: Proved
-      wall_clock_s: 0.53
+      wall_clock_s: 0.68
       peak_rss_mb: 55
       lever: null
     status: proved
@@ -2950,8 +3005,8 @@ properties:
       modules:
       - verify_epsl_inv_no_cycles_in_lineage
       result: Proved
-      wall_clock_s: 0.54
-      peak_rss_mb: 56
+      wall_clock_s: 0.68
+      peak_rss_mb: 55
       lever: null
     status: proved
     _scored_by: scorer_creusot
@@ -2999,8 +3054,8 @@ properties:
       modules:
       - verify_epsl_inv_no_orphaned_blocks
       result: Proved
-      wall_clock_s: 0.54
-      peak_rss_mb: 56
+      wall_clock_s: 0.67
+      peak_rss_mb: 55
       lever: null
     status: proved
     _scored_by: scorer_creusot
@@ -3048,8 +3103,8 @@ properties:
       modules:
       - verify_epsl_inv_eligible_set_is_exactly_the_childless
       result: Proved
-      wall_clock_s: 0.53
-      peak_rss_mb: 56
+      wall_clock_s: 0.66
+      peak_rss_mb: 55
       lever: null
     status: proved
     _scored_by: scorer_creusot
@@ -3090,7 +3145,7 @@ properties:
       modules:
       - verify_epsl_inv_session_points_at_its_own_end_of_chain
       result: Proved
-      wall_clock_s: 0.52
+      wall_clock_s: 0.79
       peak_rss_mb: 55
       lever: null
     status: proved
@@ -3137,8 +3192,8 @@ properties:
       modules:
       - verify_epsl_inv_one_tracked_block_per_cache_key
       result: Proved
-      wall_clock_s: 0.52
-      peak_rss_mb: 55
+      wall_clock_s: 0.79
+      peak_rss_mb: 54
       lever: null
     status: proved
     _scored_by: scorer_creusot
@@ -3186,8 +3241,8 @@ properties:
       modules:
       - verify_epsl_inv_size_accounting_is_exact
       result: Proved
-      wall_clock_s: 0.54
-      peak_rss_mb: 56
+      wall_clock_s: 0.71
+      peak_rss_mb: 55
       lever: null
     status: proved
     _scored_by: scorer_creusot
@@ -3232,7 +3287,7 @@ properties:
       modules:
       - verify_epsl_inv_lineage_never_crosses_sessions
       result: Proved
-      wall_clock_s: 0.52
+      wall_clock_s: 0.68
       peak_rss_mb: 55
       lever: null
     status: proved
@@ -3550,7 +3605,7 @@ properties:
       modules:
       - verify_epsl_inv_active_stamps_are_distinct
       result: Proved
-      wall_clock_s: 0.51
+      wall_clock_s: 0.66
       peak_rss_mb: 55
       lever: null
     status: proved
@@ -3591,7 +3646,7 @@ properties:
       modules:
       - verify_epsl_inv_free_list_is_exactly_the_empty_slots
       result: Proved
-      wall_clock_s: 0.52
+      wall_clock_s: 0.74
       peak_rss_mb: 55
       lever: null
     status: proved
@@ -3635,8 +3690,8 @@ properties:
       modules:
       - verify_epsl_inv_no_live_link_points_at_an_empty_slot
       result: Proved
-      wall_clock_s: 0.54
-      peak_rss_mb: 56
+      wall_clock_s: 0.69
+      peak_rss_mb: 55
       lever: null
     status: proved
     _scored_by: scorer_creusot
@@ -3753,7 +3808,7 @@ properties:
       modules:
       - verify_epsl_access_clock_assumed_not_to_overflow
       result: Proved
-      wall_clock_s: 0.53
+      wall_clock_s: 0.72
       peak_rss_mb: 53
       lever: null
     status: proved
@@ -3806,8 +3861,8 @@ properties:
       modules:
       - verify_epsl_locks_assumed_never_poisoned
       result: Proved
-      wall_clock_s: 0.5
-      peak_rss_mb: 55
+      wall_clock_s: 0.66
+      peak_rss_mb: 54
       lever: null
     status: proved
     _scored_by: scorer_creusot
@@ -4151,24 +4206,23 @@ properties:
     spec: null
     code: NV-12
 run:
-  gate_commit: 86719fae
-  gate_branch: skills/kani-loop-contracts
+  gate_commit: 7acfc58d
+  gate_branch: HEAD
   creusot:
     scored_by: scorer_creusot
-    command: scorer_creusot.py /home/cornel/gate-final-session-lists-20260930/verif --crate-dir /home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot
-      --cap-seconds 120 --cap-max 600
-    started: '2026-09-30T01:02:19-07:00'
-    finished: '2026-09-30T01:04:45-07:00'
+    command: scorer_creusot.py components/eviction-policy-session-lists/verif --crate-dir components/eviction-policy-session-lists/verif-creusot
+      --cap-seconds 60 --cap-max 300 --resume
+    started: '2026-10-08T00:36:09-07:00'
+    finished: '2026-10-08T00:40:49-07:00'
     creusot: v0.11.0-169-g9cf662ce6
     why3: Why3 platform, version 1.8.2+git
     provers:
     - Alt-Ergo 2.6.2
     - CVC4 1.8
     - CVC5 1.3.1
-    - Coq 8.20.1
     - Z3 4.16.0
-    cap_seconds: 120
-    cap_max: 600
+    cap_seconds: 60
+    cap_max: 300
     mem_max_mb: 16384
 tool_notes:
 - tool: kani
@@ -4189,14 +4243,14 @@ tool_notes:
 bugs:
   FV-BUG-002:
     title: A handle is only a slot number, and freed slots are reused
-    root_cause: An eviction handle is (pool or domain, slot) with nothing that says WHICH use of the slot it belongs
-      to, and a freed slot is handed straight to the next registration. An old handle therefore comes to name a
-      different, live entry, and every operation taking it acts on that entry while reporting success. Needs a generation
-      tag in the shared handle type.
-    location: components/interfaces/src/ieviction_policy.rs (EvictionHandle), shared by every eviction policy
+    root_cause: An eviction handle is (pool or domain, slot) with nothing that says WHICH use of the slot
+      it belongs to, and a freed slot is handed straight to the next registration. An old handle therefore
+      comes to name a different, live entry, and every operation taking it acts on that entry while reporting
+      success. Needs a generation tag in the shared handle type.
+    location: components/interfaces/src/ieviction_policy.rs (EvictionHandle), shared by every eviction
+      policy
     status: escalated
     fix: design change in components/interfaces/ (generation tag) — not a local patch
-# Orchestrator-written: the IEvictionPolicy trait's own methods (components/interfaces/src/ieviction_policy.rs), the method-headline denominator.
 interface_methods:
 - create_pool
 - track
@@ -4207,21 +4261,264 @@ interface_methods:
 - get_eviction_candidates
 - len
 - clear_pool
-# LEVEL 1 (level1.py): properties derived from a spec<->code discordance; see discordances.yaml. Never sent to the provers.
+domain_discordances:
+- id: D1
+  spec_says: touch, batch_touch and remove MUST report an error for an invalid or already-removed handle,
+    and acting on a block that is no longer tracked (after eviction, removal or clear) is an invalid operation
+    (FR-015; Edge Cases 'Access or removal after eviction'; interface InvalidHandle doc 'invalid or already
+    removed')
+  code_does: accepts ANY handle whose (pool_id, index) names a currently occupied arena slot; the handle
+    has no generation, freed slots are recycled via the free list and clear() restarts slot numbering,
+    and EvictionHandle::new is public, so stale or forged handles silently act on an unrelated live block
+  spec_pointers:
+  - FR-015
+  - 'Edge Cases: Access or removal after eviction'
+  - FR-001
+  - 'contract ieviction_policy_track.md: Error semantics'
+  - spec NV-12 (gap)
+  code_pointers:
+  - session_list.rs:80-82
+  - session_list.rs:123-126
+  - session_list.rs:206-209
+  - session_list.rs:69-71
+  - session_list.rs:182
+  - session_list.rs:220-221
+  - lib.rs:140
+  - lib.rs:150
+  - lib.rs:179
+  - lib.rs:193
+  - ieviction_policy.rs:9-16
+  methods:
+  - track
+  - touch
+  - batch_touch
+  - remove
+  - clear_pool
+  assume: every handle passed in was returned by track on the same pool and its block has not since been
+    evicted, removed or cleared (i.e. the slot still holds the key it was issued for)
+  assume_rust: 'state.pools[handle.pool_id() as usize].lock().unwrap().by_key.get(&issued_key) == Some(&handle.index())  /*
+    issued_key = the key passed to the track() call that returned `handle`; for batch_touch: handles.iter().zip(issued_keys).all(|(h,
+    k)| <same, per h>) */'
+- id: D2
+  spec_says: no operation may leave tracking state corrupted; a fallible operation given an invalid handle
+    or non-existent domain reports an error rather than silently succeeding (FR-015); spec is silent on
+    whether a batch is all-or-nothing (spec NV-11)
+  code_does: batch_touch refreshes handles one at a time and returns on the first invalid pool or invalid
+    handle, leaving every earlier handle refreshed (eviction order permanently changed by a call reported
+    as failed)
+  spec_pointers:
+  - FR-005
+  - FR-015
+  - spec NV-11 (gap)
+  code_pointers:
+  - lib.rs:169-182
+  - lib.rs:173-176
+  - lib.rs:179-181
+  methods:
+  - batch_touch
+  assume: every handle in the batch names an existing pool and an occupied slot of it
+  assume_rust: handles.iter().all(|h| (h.pool_id() as usize) < state.pools.len() && state.pools[h.pool_id()
+    as usize].lock().unwrap().is_active(h.index()))
+- id: D3
+  spec_says: a block belongs to exactly one session, the session supplied by the caller at registration
+    (FR-003, Assumptions 'session ... is supplied by the caller'); re-registration is an idempotent refresh
+    (FR-017); spec does not restrict a re-registration to carry the same session
+  code_does: on a key already tracked, register() takes the idempotent path and ignores the supplied session
+    id entirely, so re-registering under a different session silently keeps the original session
+  spec_pointers:
+  - FR-003
+  - FR-017
+  - 'Assumptions: session supplied by the caller'
+  - contract row 4
+  code_pointers:
+  - session_list.rs:90-94
+  - lib.rs:139
+  methods:
+  - track
+  assume: a key that is already tracked is only ever re-registered with the session it was first registered
+    under
+  assume_rust: pool.by_key.get(&key).map_or(true, |&i| pool.nodes[i as usize].session == semantics.session_id)
+- id: D4
+  spec_says: create_pool hands back an identifier different from every domain created before it (interface
+    create_pool, FR-013/FR-014 domain model); no bound on the number of domains
+  code_does: the new id is state.pools.len() as u32; once 2^32 pools exist the cast wraps and a previously
+    issued id (0, 1, ...) is handed out again, aliasing an existing pool
+  spec_pointers:
+  - IFACE-create_pool
+  - 'Key Entities: Eviction Domain'
+  - 'Assumptions: pool mapping'
+  code_pointers:
+  - lib.rs:105
+  - lib.rs:106
+  - ieviction_policy.rs:29
+  methods:
+  - create_pool
+  assume: fewer than 2^32 pools have been created before the call
+  assume_rust: state.pools.len() <= u32::MAX as usize
+- id: D5
+  spec_says: correctness does not depend on chain depth or domain size; register/touch/remove stay correct
+    (and O(1)) from thousands to at least one million blocks; no maximum domain size is stated (SC-002,
+    SC-003, Edge Cases 'Deep chains')
+  code_does: a new arena slot index is self.nodes.len() as u32 and handles carry a u32 index; at 2^32
+    arena slots the cast wraps, so a new node's handle/leaf entry names slot 0.. while the node is pushed
+    at a different position
+  spec_pointers:
+  - SC-002
+  - SC-003
+  - 'Edge Cases: Deep chains'
+  code_pointers:
+  - session_list.rs:73
+  - session_list.rs:74
+  - ieviction_policy.rs:11
+  - lib.rs:140
+  methods:
+  - track
+  assume: a pool's arena holds at most u32::MAX slots before a registration that appends
+  assume_rust: pool.nodes.len() <= u32::MAX as usize
+- id: D6
+  spec_says: recency comes from a monotonic time source; every registration/access is stamped newer than
+    all earlier ones (FR-004, Assumptions 'monotonic time source'); no bound on the number of accesses
+  code_does: the recency source is a per-pool u64 logical counter incremented with unchecked `+= 1` (panics
+    in debug, wraps to 0 in release at u64::MAX, after which new stamps sort as oldest)
+  spec_pointers:
+  - FR-004
+  - FR-012
+  - 'Assumptions: monotonic time source'
+  code_pointers:
+  - session_list.rs:62-65
+  - session_list.rs:96
+  - session_list.rs:130
+  methods:
+  - track
+  - touch
+  - batch_touch
+  assume: the pool's logical clock has not reached u64::MAX
+  assume_rust: pool.clock < u64::MAX
+- id: D7
+  spec_says: the read-only queries MUST degrade safely on a non-existent domain without panicking, and
+    in no case may any operation corrupt tracking state (FR-015); hot-path operations may be invoked concurrently
+    and must remain safe (Assumptions)
+  code_does: every operation does self.state.read()/write().unwrap() and pool_mutex.lock().unwrap(), so
+    once any thread has panicked while holding the RwLock or a pool Mutex (e.g. via the clock overflow
+    of D6 in debug) every subsequent call on that pool / component panics
+  spec_pointers:
+  - FR-015
+  - 'Assumptions: concurrent invocation must remain safe'
+  code_pointers:
+  - lib.rs:104
+  - lib.rs:129
+  - lib.rs:138
+  - lib.rs:144
+  - lib.rs:149
+  - lib.rs:161
+  - lib.rs:167
+  - lib.rs:177
+  - lib.rs:187
+  - lib.rs:192
+  - lib.rs:201
+  - lib.rs:203
+  - lib.rs:208
+  - lib.rs:210
+  - lib.rs:216
+  - lib.rs:218
+  - lib.rs:224
+  - lib.rs:226
+  methods:
+  - create_pool
+  - track
+  - touch
+  - batch_touch
+  - remove
+  - identify_next_to_evict
+  - get_eviction_candidates
+  - len
+  - clear_pool
+  assume: neither the component's state lock nor any pool mutex is poisoned at entry
+  assume_rust: '!self.state.is_poisoned() && self.state.read().map_or(false, |s| s.pools.iter().all(|m|
+    !m.is_poisoned()))'
+level1_sync_check:
+  by: orchestrator-applied ~/FV/synccheck/eviction-policy-session-lists/synccheck.yaml (node7 reading
+    agent, 2026-10-05), applied 2026-10-07
+  reclassified: 8
+  domain_discordances: 7
 level2_excluded:
+- EPSL-TRACK-RETURNS-USABLE-HANDLE
 - EPSL-TRACK-SESSION-COMES-FROM-CALLER
+- EPSL-TRACK-SETS-INITIAL-RECENCY
 - EPSL-TOUCH-INVALID-HANDLE-IS-AN-ERROR
+- EPSL-HANDLE-OPERATIONS-REJECT-UNKNOWN-DOMAIN
 - EPSL-BATCH-TOUCH-REFRESHES-EVERY-BLOCK
+- EPSL-BATCH-TOUCH-MATCHES-ONE-AT-A-TIME
 - EPSL-BATCH-TOUCH-INVALID-HANDLE-IS-AN-ERROR
 - EPSL-BATCH-TOUCH-TOUCHES-NOTHING-ELSE
 - EPSL-INV-FAILED-OPERATIONS-CHANGE-NOTHING
+- EPSL-REMOVE-RELINKS-THE-CHAIN
 - EPSL-REMOVE-INVALID-HANDLE-IS-AN-ERROR
+- EPSL-EVICT-DOES-NOT-REFRESH-THE-VICTIM
 - EPSL-EVICT-NONEMPTY-DOMAIN-ALWAYS-YIELDS-A-VICTIM
 - EPSL-EVICT-DISTURBS-ONLY-VICTIM-AND-PARENT
+- EPSL-READONLY-QUERIES-DEGRADE-SAFELY-ON-UNKNOWN-DOMAIN
 - EPSL-CANDIDATES-LISTED-IN-EVICTION-ORDER
 - EPSL-CANDIDATES-EMPTY-DOMAIN-RETURNS-EMPTY-LIST
+- EPSL-CLEAR-RETURNS-DOMAIN-TO-EMPTY
 - EPSL-CLEAR-INVALIDATES-EXISTING-HANDLES
 - EPSL-INV-BLOCK-BELONGS-TO-EXACTLY-ONE-SESSION
 - EPSL-INV-RECENCY-STRICTLY-ADVANCES
 - EPSL-INV-HANDLES-KEEP-NAMING-THEIR-BLOCK
 - EPSL-NO-INPUT-CAN-MAKE-AN-OPERATION-PANIC
+level2_assumptions:
+- id: D-RANGE-FR-015-e29de5
+  assume: every handle passed in was returned by track on the same pool and its block has not since been
+    evicted, removed or cleared (i.e. the slot still holds the key it was issued for)
+  assume_rust: 'state.pools[handle.pool_id() as usize].lock().unwrap().by_key.get(&issued_key) == Some(&handle.index())  /*
+    issued_key = the key passed to the track() call that returned `handle`; for batch_touch: handles.iter().zip(issued_keys).all(|(h,
+    k)| <same, per h>) */'
+  methods:
+  - track
+  - touch
+  - batch_touch
+  - remove
+  - clear_pool
+- id: D-RANGE-FR-005-e924ec
+  assume: every handle in the batch names an existing pool and an occupied slot of it
+  assume_rust: handles.iter().all(|h| (h.pool_id() as usize) < state.pools.len() && state.pools[h.pool_id()
+    as usize].lock().unwrap().is_active(h.index()))
+  methods:
+  - batch_touch
+- id: D-RANGE-FR-003-96515c
+  assume: a key that is already tracked is only ever re-registered with the session it was first registered
+    under
+  assume_rust: pool.by_key.get(&key).map_or(true, |&i| pool.nodes[i as usize].session == semantics.session_id)
+  methods:
+  - track
+- id: D-RANGE-IFACE-CREATE_POOL-4eb401
+  assume: fewer than 2^32 pools have been created before the call
+  assume_rust: state.pools.len() <= u32::MAX as usize
+  methods:
+  - create_pool
+- id: D-RANGE-SC-002-d0657c
+  assume: a pool's arena holds at most u32::MAX slots before a registration that appends
+  assume_rust: pool.nodes.len() <= u32::MAX as usize
+  methods:
+  - track
+- id: D-RANGE-FR-004-7a18db
+  assume: the pool's logical clock has not reached u64::MAX
+  assume_rust: pool.clock < u64::MAX
+  methods:
+  - track
+  - touch
+  - batch_touch
+- id: D-RANGE-FR-015-e06e85
+  assume: neither the component's state lock nor any pool mutex is poisoned at entry
+  assume_rust: '!self.state.is_poisoned() && self.state.read().map_or(false, |s| s.pools.iter().all(|m|
+    !m.is_poisoned()))'
+  methods:
+  - create_pool
+  - track
+  - touch
+  - batch_touch
+  - remove
+  - identify_next_to_evict
+  - get_eviction_candidates
+  - len
+  - clear_pool
