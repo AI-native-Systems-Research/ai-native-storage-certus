@@ -549,6 +549,46 @@ one-sided write into a reclaimed slot).
   meant to be plumbed through.
 
 
+- **FR-038** *(New 2026-10-02; narrowed 2026-10-05 — CODE CHANGE)*: The responder MUST report the
+  lifetime of the read pins it holds on peers' behalf, through `RemoteServeStats`:
+  `peer_pins_held` (gauge) and `peer_pin_hold_us_max`. The accounting MUST live in the
+  `PinnedBatch` guard rather than at its call sites, because the guard is the only place that
+  knows both when a pin was taken and when it was released.
+  - **Narrowed from four fields to two.** `peer_pins_taken` and `peer_pin_hold_us_total` were
+    required by the original wording and have been **removed** from the type; requiring them here
+    made this an unsatisfiable MUST. `peer_pins_taken` measured 1.000× the already-published
+    `peer_served_keys` on every run, and `peer_pin_hold_us_total` accumulated per batch while all
+    key counts are per key, so it could not yield the mean it existed for. See interfaces
+    `001-interfaces` FR-023 for the full supersession note.
+  - **Rationale.** A pin held for a peer keeps `read_ref > 0`, which
+    `IDispatchMap::try_evict_to_block` refuses, so responder pins are unevictable DRAM on this
+    node. The type's own documentation states that a leaked pin is indistinguishable from a live
+    reader and that **no leak detector exists**; `peer_pins_held` returning to zero between serves
+    is that detector.
+  - Hold time MUST be attributed per batch, and a batch that pinned nothing MUST record nothing:
+    a serve finding nothing servable still constructs a batch, and counting those would pull the
+    mean hold time toward zero and hide the long holds that matter.
+  - **This requirement exists to be able to FALSIFY a hypothesis, not to confirm one.** Peer
+    serving was measured to cause store declines (72.1% with peers against 0.17% without, one
+    variable changed), and a held pin was the leading mechanism. But the rate of serves — about 32
+    keys per second — only blocks eviction if hold times are long, which nothing established. These
+    counters decide it either way, and a near-zero `peer_pin_hold_us_max` refutes the hypothesis.
+- **FR-039** *(New 2026-10-02)*: On publishing a successfully-fetched value, the requester
+  MUST schedule its write-through via `IDispatcher::schedule_write_through`. Publishing
+  alone leaves `ssd_offset == None`, and nothing else in the system will ever persist a
+  remotely-fetched entry.
+  - **Consequence if omitted**, measured rather than argued: the entry can never be
+    demoted and never be removed, so it accumulates at the oldest end of the LRU where
+    the eviction scan looks. Four instances showed 0 of 64 sampled oldest keys demotable,
+    865 864 eviction candidates refused for a missing `ssd_offset` and **none** for a held
+    pin, and 72.5% of client stores declined. The identical workload with peers
+    unreachable declined 0.17%.
+  - The call MUST be best-effort and MUST NOT fail the fetch: an unscheduled entry is
+    still correctly cached and readable. Failing the fetch would convert a performance
+    defect into a correctness one.
+  - The requester MUST schedule it; the **serving** node MUST NOT, since it published no
+    new entry and would be rewriting a key it already holds.
+
 ### Key Entities
 
 - **Operation**: One `batch_lookup` invocation, keyed by `op_id`. Holds the unsatisfied set,

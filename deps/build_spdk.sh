@@ -27,18 +27,32 @@ cd "${SRC_DIR}"
 echo "Updating submodules..."
 git submodule update --init
 
-# Patch DPDK memseg limit so a single spdk_zmalloc can exceed the stock 32 GiB
-# per-memseg-list cap (RTE_MAX_MEM_MB_PER_LIST). The Certus DRAM tier does one
-# large spdk_zmalloc for the whole pool; without this a >32 GiB tier fails.
-# deps/spdk is gitignored, so apply the patch here to keep it reproducible.
+# Patch DPDK memory caps so a single spdk_zmalloc can exceed the stock 32 GiB
+# per-memseg-list cap. The Certus DRAM tier does one large spdk_zmalloc for the
+# whole pool, so two limits bind:
+#   RTE_MAX_MEM_MB_PER_LIST  — max MiB in one memseg list (one allocation).
+#   RTE_MAX_MEM_MB_PER_TYPE  — max MiB for one (page-size + NUMA-node) type; this
+#                              is the real ceiling on a single-node tier.
+# Both are raised to 266240 (260 GiB) so a 260 GiB tier fits on one node.
+# NOTE: use 1 GiB hugepages (260 segments for a 260 GiB tier); with 2 MiB
+# hugepages the segment count exceeds RTE_MAX_MEMSEG_PER_LIST (8192) and the
+# allocation fails. deps/spdk is gitignored, so patch here to keep it
+# reproducible. RTE_MAX_MEM_MB (global, 524288 = 512 GiB on x86) still bounds
+# the total, so raising this past ~512 GiB needs that bumped too.
+TIER_CAP_MB=266240
 DPDK_RTE_CONFIG="${SRC_DIR}/dpdk/config/rte_config.h"
 if [ -f "${DPDK_RTE_CONFIG}" ]; then
-    if grep -q '#define RTE_MAX_MEM_MB_PER_LIST 32768' "${DPDK_RTE_CONFIG}"; then
-        echo "Patching RTE_MAX_MEM_MB_PER_LIST 32768 -> 65536 (allow >32G single alloc)..."
-        sed -i 's/#define RTE_MAX_MEM_MB_PER_LIST 32768/#define RTE_MAX_MEM_MB_PER_LIST 65536/' "${DPDK_RTE_CONFIG}"
-    else
-        echo "RTE_MAX_MEM_MB_PER_LIST already patched (or unexpected value) — leaving as-is."
-    fi
+    for key in RTE_MAX_MEM_MB_PER_LIST RTE_MAX_MEM_MB_PER_TYPE; do
+        cur="$(sed -n "s/^#define ${key} \([0-9]*\)/\1/p" "${DPDK_RTE_CONFIG}")"
+        if [ -z "${cur}" ]; then
+            echo "WARNING: ${key} not found in ${DPDK_RTE_CONFIG} — DPDK layout changed, not patching."
+        elif [ "${cur}" -lt "${TIER_CAP_MB}" ]; then
+            echo "Patching ${key} ${cur} -> ${TIER_CAP_MB} (allow up to 128G single-node tier)..."
+            sed -i "s/^#define ${key} ${cur}/#define ${key} ${TIER_CAP_MB}/" "${DPDK_RTE_CONFIG}"
+        else
+            echo "${key} already >= ${TIER_CAP_MB} (${cur}) — leaving as-is."
+        fi
+    done
 fi
 
 # Configure

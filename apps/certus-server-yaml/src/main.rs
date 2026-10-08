@@ -180,6 +180,9 @@ struct Cli {
     /// single-node cluster and does not interfere with other users' nodes. Set
     /// the same value on every node that should share a cluster. Env fallback:
     /// CERTUS_RL_GROUP (this flag takes precedence).
+    ///
+    /// Omit it to run without a cluster. A present-but-blank value is an error,
+    /// not a synonym for omitted -- see `validate_rl_group`.
     #[arg(long = "rl-group", env = "CERTUS_RL_GROUP")]
     rl_group: Option<String>,
 }
@@ -220,6 +223,35 @@ fn validate_pci_address(addr: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Reject a present-but-blank `--rl-group` / `CERTUS_RL_GROUP`.
+///
+/// Absent and blank are deliberately NOT the same thing. Absent means "no
+/// cluster": the remote-lookup init hook generates a unique group so this node
+/// is its own single-node cluster. Blank can only come from a mistake -- a
+/// template substitution that produced nothing, a config pipeline that yielded
+/// an empty value, a hand-edit that cleared the value but left the key behind --
+/// and in every one of those the intent was to JOIN a cluster.
+///
+/// Silently treating blank as absent would be the expensive failure: a
+/// remote-lookup-ON run would quietly become an OFF run, and zero remote hits
+/// reads exactly like "remote-lookup did not help". That corrupts the very
+/// comparison the group exists to enable, and nothing about it looks wrong. So
+/// fail at startup and say how to mean "off" on purpose.
+///
+/// (clap resolves `env` by presence, which is why blank is reachable at all: a
+/// variable that is set but empty arrives as `Some("")`.)
+fn validate_rl_group(group: Option<&str>) -> Result<(), String> {
+    match group {
+        Some(g) if g.trim().is_empty() => Err(
+            "--rl-group / CERTUS_RL_GROUP is set but empty. Omit it entirely to run \
+             without a cluster (each node forms its own single-node group), or give it \
+             a name to join one."
+                .to_string(),
+        ),
+        _ => Ok(()),
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
@@ -228,6 +260,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for addr in &cli.device_pci {
         validate_pci_address(addr).map_err(Box::<dyn std::error::Error>::from)?;
     }
+    validate_rl_group(cli.rl_group.as_deref()).map_err(Box::<dyn std::error::Error>::from)?;
+
     if cli.device_pci.is_empty() && cli.drive_count.is_none() && cli.device_path.is_empty() {
         return Err(
             "one of --device-pci, --drive-count, or --device-path must be specified".into(),
@@ -446,6 +480,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(test)]
 mod tests {
+    /// Blank must be rejected rather than silently meaning "no cluster".
+    ///
+    /// The manifests express "off" by OMITTING the ConfigMap key, so a blank
+    /// value never arrives from a correct deployment -- only from a broken one.
+    /// If blank were accepted as off, a remote-lookup-ON measurement could
+    /// quietly run isolated and look like evidence that remote-lookup does not
+    /// help, which is the one wrong answer that is hard to notice.
+    #[test]
+    fn a_blank_rl_group_is_rejected() {
+        use super::validate_rl_group;
+        // Absent is how you mean "off" on purpose.
+        assert!(validate_rl_group(None).is_ok());
+        // A real name joins a cluster, and is taken verbatim.
+        assert!(validate_rl_group(Some("llmd_a")).is_ok());
+        assert!(validate_rl_group(Some(" padded ")).is_ok());
+        // Present-but-blank is a misconfiguration.
+        assert!(validate_rl_group(Some("")).is_err());
+        assert!(validate_rl_group(Some("   ")).is_err());
+        assert!(validate_rl_group(Some("\t\n")).is_err());
+    }
+
     use super::*;
 
     /// The kvprofile parser contract: `promotions[...] evictions[...]` must keep its
@@ -493,6 +548,8 @@ mod tests {
         let serve = interfaces::RemoteServeStats {
             peer_served_keys: 118,
             peer_triggered_promotions: 41,
+            peer_pins_held: 0,
+            peer_pin_hold_us_max: 0,
         };
         let line = format_cache_stats(&tier, &serve);
 

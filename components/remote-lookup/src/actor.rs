@@ -20,9 +20,9 @@ use std::time::{Duration, Instant};
 use component_core::channel::mpsc::{MpscReceiver, MpscSender};
 use component_core::channel::ChannelError;
 use interfaces::{
-    CacheKey, ControlChannel, DispatchMapError, Endpoint, IDispatchMap, ILogger, IMemoryTier,
-    IZyreNode, LookupConfig, PeerId, RemoteLookupError, ResponderCommand, ResponderEvent,
-    ZyreEvent,
+    CacheKey, ControlChannel, DispatchMapError, Endpoint, IDispatchMap, IDispatcher, ILogger,
+    IMemoryTier, IZyreNode, LookupConfig, PeerId, RemoteLookupError, ResponderCommand,
+    ResponderEvent, ZyreEvent,
 };
 
 use crate::operation::{KeyState, LandingSlot, Operation, PeerReply, Phase};
@@ -121,12 +121,22 @@ struct Orphan {
 }
 
 /// Resolved receptacle handles the actor needs on the poll-loop thread. The
-/// server-role handles (`initiator`, `dispatcher`) live on the off-loop worker
-/// instead (see [`crate::worker`]), reached via [`ActorState::initiator_tx`].
+/// server-role `initiator` lives on the off-loop worker instead (see
+/// [`crate::worker`]), reached via [`ActorState::initiator_tx`], because its
+/// connects and serves block.
+///
+/// `dispatcher` is held here as well as on the worker, for one narrow use:
+/// `publish_success` schedules the fetched entry's write-through. That is safe on
+/// the poll loop specifically because `schedule_write_through` does not block —
+/// it is a brief mutex plus a send on an *unbounded* crossbeam channel. Nothing
+/// else on this thread may use the handle for an operation that can block, or the
+/// zyre poll loop stalls and all peer messaging stalls with it.
 pub(crate) struct Deps {
     pub dispatch_map: Arc<dyn IDispatchMap + Send + Sync>,
     pub memory_tier: Arc<dyn IMemoryTier + Send + Sync>,
     pub logger: Option<Arc<dyn ILogger + Send + Sync>>,
+    /// Non-blocking uses only — see the note above.
+    pub dispatcher: Option<Arc<dyn IDispatcher + Send + Sync>>,
 }
 
 /// Everything `initialize` hands to the spawned actor thread.
@@ -593,6 +603,32 @@ impl ActorState {
         {
             Ok(()) => {
                 let _ = self.deps.dispatch_map.release_write(key);
+
+                // Schedule the write-through that nothing else will.
+                //
+                // A client store is persisted as a side effect of the dispatcher's
+                // `copy_gpu_to_memory_completed`; a value fetched from a peer is
+                // published here instead and never passes through that path. Without
+                // this the entry keeps `ssd_offset == None` permanently, and permanently
+                // matters: `try_evict_to_block` refuses an unpersisted entry, and the
+                // clean-eviction scan will not `remove` one either (that would turn a
+                // resident key into `NotExist` under the Check→Pin race). So the entry
+                // has no exit from the memory tier, ages to the oldest end of the LRU,
+                // and the eviction scan — which looks at exactly the oldest keys —
+                // eventually sees nothing else. Measured before this fix: 0 of 64
+                // sampled oldest keys demotable on every instance, 865 864 eviction
+                // candidates refused for want of an `ssd_offset`, none for a held pin,
+                // and 72.5% of client stores declined. With peers unreachable and so no
+                // fetches to publish, the same workload declined 0.17%.
+                //
+                // Best-effort and deliberately not surfaced as a failure: the key is
+                // correctly cached and readable either way. Failing the fetch because its
+                // write-through could not be queued would turn a performance problem into
+                // a correctness one.
+                if let Some(dispatcher) = self.deps.dispatcher.as_ref() {
+                    let _ = dispatcher.schedule_write_through(key, len);
+                }
+
                 op.set_state(key, KeyState::Satisfied);
             }
             Err(DispatchMapError::AlreadyExists(_)) => {

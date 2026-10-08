@@ -115,19 +115,24 @@ Reports per-thread throughput and latency. Compare against `--mode default` to s
 
 #### Scheduler-step mode (`--mode scheduler-step`)
 
-Simulates full continuous-batching scheduler steps: multiple requests per step, each with touch + maximal-prefix-lookup, pipelined dispatch, and event drain. Models multi-turn conversation prefix sharing.
+Simulates continuous-batching scheduler steps with the production vLLM call pattern:
+
+- Each step runs `--requests-per-step` requests. Each request does `touch` plus a maximal-prefix lookup (per-key `lookup`, stopping at the first miss). Hits are loaded; the rest of the request is stored.
+- Sessions share one prefix pool and diverge at geometric points (mean = half a request), so short prefixes miss more, as with production prefix caching. Keys are never removed between steps, so the cache fills and evicts naturally.
+- Loads and stores are deduplicated across the step's requests.
+- Stores are submitted after the load drain and drained, untimed, at the start of the next step. `drain_workers` therefore measures only load completion, as vLLM never blocks a step on its stores.
 
 ```bash
 python tools/certus-connector-bench/bench_connector_lifecycle.py \
-    --mode scheduler-step --requests-per-step 8 --num-sessions 4
+    --mode scheduler-step --requests-per-step 8 --num-sessions 32
 
 # Heavier load
 python tools/certus-connector-bench/bench_connector_lifecycle.py \
-    --mode scheduler-step --requests-per-step 16 --num-sessions 8 \
+    --mode scheduler-step --requests-per-step 16 --num-sessions 64 \
     --min-duration 30
 ```
 
-Reports steps/sec, per-step phase breakdown (touch_lookup, prepare, submit, drain, complete, events), and prefix hit/suffix store counts.
+Reports steps/sec, per-step phase times (touch_lookup, prepare_store, prepare_load, submit, drain_workers, complete, take_events), and prefix hit/suffix store counts. `--pipeline-depth` has no effect in this mode: each step submits one load and waits for it.
 
 #### Pattern mode (`--pattern`)
 
@@ -166,11 +171,11 @@ python tools/certus-connector-bench/bench_connector_lifecycle.py --mode all --mi
 #### Per-mode options
 
 ```
---pipeline-depth N     (pipelined, scheduler-step) Batches in-flight before reaping (default: 4)
+--pipeline-depth N     (pipelined) Batches in-flight before reaping (default: 4)
 --direction DIR        (pipelined) store, load, or both (default: both)
 --hit-ratio F          (prefix-miss) Fraction of keys pre-stored, 0.0-1.0 (default: 0.75)
 --requests-per-step N  (scheduler-step) Requests per scheduler step (default: 8)
---num-sessions N       (scheduler-step) Distinct conversations in the pool (default: 4)
+--num-sessions N       (scheduler-step) Distinct conversations sharing the prefix pool (default: 32)
 ```
 
 ### bench_connector_path.py

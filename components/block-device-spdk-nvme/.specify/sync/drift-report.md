@@ -1,9 +1,9 @@
 ---
 spec_sync_component: block-device-spdk-nvme
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-05T19:05:49Z
-spec_sync_git_commit: d102a00b
-spec_sync_inputs_sha256: 9115a4a49b86c817d0d74c577c3228945ef91ba4845bf932558f42feb8693f04
+spec_sync_synced_at: 2026-10-06T00:17:03Z
+spec_sync_git_commit: bd1598f5
+spec_sync_inputs_sha256: f8fccf2582f77c77a320cb9e8006a05ad01d269e0178b5586f4e32746ec598b7
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Sync 2026-10-05 (branch `fix/poller-cpu-placement-logging`).** Delta analysis on a certified baseline: this component's existing clean stamp was re-verified to equal the spec-sync hash of `git archive origin/unstable`, so the only new inputs are this branch's src/specs/interfaces changes. Every FR/SC touching CPU placement, NUMA pinning, threads or SPDK init was located by grep over specs/** and re-checked against the changed code.

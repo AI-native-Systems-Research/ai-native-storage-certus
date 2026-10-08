@@ -1,11 +1,17 @@
 ---
 spec_sync_component: interfaces
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-05T19:05:49Z
-spec_sync_git_commit: d102a00b
-spec_sync_inputs_sha256: 07985dfb7f3a52f1b62ae6697886bbd116eed45fe64bf72d9c3f7e06e4f64199
+spec_sync_synced_at: 2026-10-06T00:17:04Z
+spec_sync_git_commit: bd1598f5
+spec_sync_inputs_sha256: cee2412a4eb5de01d900823eff412190f4cfcbe9b4ec331fcd270342c625176b
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-10-05 (branch `fix/store-declines-root-cause`).** Delta analysis on a certified baseline: `origin/unstable` (`08a5ae88`) changed no component `src/`or `specs/` after its `fa4adab0` re-stamp, so the only new inputs are this branch's changes. Every FR naming a counter, a `TierEventStats`/`RemoteServeStats` field, or an `IDispatcher` method was located by grep over `specs/**` and re-checked against the changed code.
+>
+> - **FR-023 `RemoteServeStats` field list — DRIFTED (major).** The spec declared a **6-field** type and named `peer_pins_taken` and `peer_pin_hold_us_total`; the shipped type has **4 fields** and neither of those exists. Both were removed deliberately in `4e185dd2` after measurement — `peer_pins_taken` read 1.000x the already-published `peer_served_keys` on all three runs, and `peer_pin_hold_us_total` accumulated per batch against per-key counts so it could not form the mean it existed for. The spec text had been added by earlier commits *on this same branch* and was not revised in place when the counters went. **Resolution**: code authoritative. Field list corrected to 4, both removed fields recorded as SUPERSEDED with the measured reason, and the two hold-time bullets reworded — with `_total` gone there is no mean, so `peer_pin_hold_us_max` is now stated as the only hold-time field and deliberately a high-water mark.
+> - **FR-018a / FR-031a — ALIGNED, verified not assumed.** All three store-refusal counters are published by `apps/certus-server-yaml/src/metrics.rs`; `schedule_write_through` has four implementations, none blocking, and its best-effort contract holds at `remote-lookup/src/actor.rs:629`.
+>
+> No actionable drift remains for this component.
 > **Sync 2026-10-05 (branch `fix/poller-cpu-placement-logging`).** Delta analysis on a certified baseline: this component's existing clean stamp was re-verified to equal the spec-sync hash of `git archive origin/unstable`, so the only new inputs are this branch's src/specs/interfaces changes. Every FR/SC touching CPU placement, NUMA pinning, threads or SPDK init was located by grep over specs/** and re-checked against the changed code.
 >
 > - **DispatcherConfig::poller_base_cpu doc comment — ALIGN (doc) (minor).** The dispatchers assign NUMA-local cores round-robin, excluding each node's first two; block-device fallback / unpinned cases as in dispatcher FR-011. `components/interfaces/src/idispatcher.rs:46-56`. *Pre-existing doc drift; user chose to fix in this PR and re-stamp all components.* Resolution: Doc comment corrected. FR-018 lists `poller_base_cpu` by name only, so no spec text change was needed.
