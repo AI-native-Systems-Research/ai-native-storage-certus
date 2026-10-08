@@ -182,7 +182,7 @@ properties:
   statement: If the caller asks for the pool memory to be pinned to a particular processor memory node
     and that pinning cannot be carried out, setting up the pool still succeeds and the pool is fully usable
     under whatever memory placement the operating system chose instead.
-  origin: spec+code
+  origin: divergent
   global: false
   attachments: 1
   paired_from:
@@ -218,6 +218,13 @@ properties:
     evidence: null
     fidelity: null
     note: null
+  origin_before_level1: spec+code
+  divergence_note: 'SPEC (FR-019, US-3 spec.md:71, imemory_tier.rs:57-60): a NUMA binding that cannot
+    be carried out falls back gracefully and initialize still succeeds. CODE (lib.rs:225-253 vs lib.rs:278-295):
+    only the mmap path falls back (mbind failure just logs a warning); when the SPDK env is active the
+    node is passed to spdk_zmalloc as the socket id (lib.rs:280,287) and a failure there returns AllocationFailed
+    with no fallback. The merged statement drops the code side''s mmap-path scope, so under SPDK an unsatisfiable
+    node request fails instead of succeeding.'
 - id: MT-INIT-POST-HUGEPAGE-FALLBACK
   subject: initialize
   methods:
@@ -229,7 +236,7 @@ properties:
   statement: Setting up the pool prefers large memory pages but still succeeds with the full requested
     capacity available when large pages cannot be obtained, because the allocator transparently retries
     with an ordinary anonymous mapping.
-  origin: spec+code
+  origin: divergent
   global: true
   attachments: 2
   paired_from:
@@ -263,6 +270,13 @@ properties:
     evidence: null
     fidelity: null
     note: null
+  origin_before_level1: spec+code
+  divergence_note: 'SPEC (FR-002, US-3 spec.md:69): hugepage backing preferred with automatic fallback
+    to regular pages, so initialize succeeds with full capacity when hugepages are unavailable. CODE (lib.rs:195-223
+    vs lib.rs:278-295): only the mmap path retries without MAP_HUGETLB; with the SPDK env active, spdk_zmalloc
+    failure (''insufficient hugepages?'') returns AllocationFailed with no regular-page fallback. The
+    merged statement is unscoped (adopts the spec reading) while the code side covered only the mmap fallback
+    allocator.'
 - id: MT-INIT-ERR-DOUBLE-INIT
   subject: initialize
   methods:
@@ -460,7 +474,7 @@ properties:
   statement: 'When setting up the pool fails for any reason the component is left exactly as it was before
     the call: it still reports itself as not set up, reports no capacity and no bytes in use, holds no
     entries, and retains no partially built pool that a later call could stumble over.'
-  origin: spec+code
+  origin: divergent
   global: true
   attachments: 6
   paired_from:
@@ -496,6 +510,13 @@ properties:
     evidence: null
     fidelity: null
     note: null
+  origin_before_level1: spec+code
+  divergence_note: 'SPEC side (US-3, FR-023): any failed set-up leaves the component ''still not set up,
+    no capacity, no bytes in use, no entries''. CODE (lib.rs:271-274): the double-initialization failure
+    returns AllocationFailed(''already initialized'') on a component that IS set up and keeps its capacity,
+    used bytes and entries; the code side only claimed ''state unchanged''. The merged statement keeps
+    the spec''s ''still reports not set up / no capacity'' wording, which is false for the already-initialized
+    failure path.'
 - id: MT-INIT-POST-POLICY-POOL
   subject: initialize
   methods:
@@ -1182,7 +1203,7 @@ properties:
   verifiable: true
   statement: Attempting to add a cache entry before the pool has been set up fails with the not-initialized
     error, carrying the message that the pool is not initialized, rather than reading or writing any memory.
-  origin: spec+code
+  origin: divergent
   global: false
   attachments: 1
   paired_from:
@@ -1214,6 +1235,12 @@ properties:
     evidence: null
     fidelity: null
     note: null
+  origin_before_level1: spec+code
+  divergence_note: 'SPEC (FR-023 spec.md:172): all operations check the initialized flag before proceeding,
+    so insert before set-up fails with NotInitialized. CODE (lib.rs:329-331 then lib.rs:334-338): the
+    size==0 check runs first, so insert(key, 0) on an uninitialized component returns InvalidSize, not
+    NotInitialized. Both extracted statements (and the merge) are unconditional; the code only delivers
+    NotInitialized for size > 0.'
 - id: MT-INSERT-FRAME-OTHER-ENTRIES
   subject: insert
   methods:
@@ -1490,7 +1517,7 @@ properties:
   statement: A successful recency-updating lookup marks the key as the most recently used entry, so it
     will be chosen for eviction only after entries that have not been used since, and the refresh is applied
     only after the pool lock has been released.
-  origin: spec+code
+  origin: divergent
   global: true
   attachments: 4
   paired_from:
@@ -1524,6 +1551,13 @@ properties:
     evidence: null
     fidelity: null
     note: null
+  origin_before_level1: spec+code
+  divergence_note: 'SPEC (US-1 spec.md:32, FR-011): get ''updates LRU recency'', i.e. the key becomes
+    most-recently-used and is evicted after entries not used since. CODE (lib.rs:406-408): get only calls
+    ep.touch(handle) and discards its Result; the consumed contract (ieviction_policy.rs:89-92) says touch
+    ''updates its eviction ranking'' and is MRU only ''for a recency policy; other policies may update
+    a frequency count or score''. The merged MRU/eviction-order claim holds only when the bound policy
+    is LRU and touch succeeds.'
 - id: MT-GET-ERR-MISS
   subject: get
   methods:
@@ -2885,7 +2919,7 @@ properties:
     component for this pool, returning no more keys than the caller asked for and no more than the policy
     is currently tracking, ordered with the entry that would be evicted first at the front and progressively
     newer entries after it.
-  origin: spec+code
+  origin: divergent
   global: false
   attachments: 1
   paired_from:
@@ -2925,6 +2959,12 @@ properties:
     evidence: null
     fidelity: null
     note: null
+  origin_before_level1: spec+code
+  divergence_note: 'SPEC (US-2 spec.md:54, FR-021): oldest_keys returns up to N keys ''in oldest-first
+    order'' (the N oldest keys). CODE (lib.rs:430-431): returns ep.get_eviction_candidates(pool_id, n)
+    verbatim, whose contract (ieviction_policy.rs:106-108) is ''keys the policy would evict next, in eviction
+    order ... ordering is policy-defined''. The merged statement fuses eviction order with ''progressively
+    newer entries after it'', which is the same thing only for an LRU policy.'
 - id: MT-OLDEST-KEYS-POST-LIVE-MEMBERSHIP
   subject: oldest_keys
   methods:
@@ -3112,7 +3152,7 @@ properties:
   statement: Refreshing a key that is present makes it the most recently used entry, so it will be evicted
     only after entries that have not been used since, no data is returned to the caller, and the refresh
     is applied only after the pool lock has been released.
-  origin: spec+code
+  origin: divergent
   global: true
   attachments: 4
   paired_from:
@@ -3147,6 +3187,12 @@ properties:
     evidence: null
     fidelity: null
     note: null
+  origin_before_level1: spec+code
+  divergence_note: 'SPEC (FR-016, US-2): touch makes the key the most recently used entry, evicted only
+    after entries not used since. CODE (lib.rs:513-516): touch forwards to ep.touch(handle) and ignores
+    its Result; the consumed IEvictionPolicy contract (ieviction_policy.rs:89-92) defines touch as policy-defined
+    ranking update (MRU only for a recency policy). The merged statement asserts LRU semantics the code
+    delegates to a pluggable policy whose contract does not promise them.'
 - id: MT-TOUCH-SILENT-NOOP
   subject: touch
   methods:
@@ -3380,7 +3426,7 @@ properties:
   statement: Refreshing an empty list of keys, or refreshing before the pool has been set up, returns
     immediately without taking any lock and without calling the eviction policy, and has no observable
     effect of any kind on the cache or on the eviction order.
-  origin: spec+code
+  origin: divergent
   global: false
   attachments: 1
   paired_from:
@@ -3415,6 +3461,12 @@ properties:
     evidence: null
     fidelity: null
     note: null
+  origin_before_level1: spec+code
+  divergence_note: 'SPEC (US-6 spec.md:119, FR-023): an empty batch, or a batch before set-up, has no
+    observable effect. CODE (lib.rs:521-527): an empty batch returns before any lock; an uninitialized
+    component returns only AFTER taking the component state read lock (lib.rs:524). The merged statement
+    extends the code side''s ''without taking any lock'' (true only for the empty list) to the uninitialized
+    case, where it is false.'
 - id: MT-BATCH-TOUCH-FRAME
   subject: batch_touch
   methods:
@@ -4491,14 +4543,15 @@ properties:
   - 'code: MT-CLEAR-POST-EMPTY'
   creusot:
     fidelity: trusted-boundary
-    note: 'REFUTED — the negation ''refute_mt_clear_post_empty'' is machine-proved, so the code violates
-      this obligation. This is a finding, not a gap: see the spec and code locations on the property record.'
-    status: refuted
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
-      refutation: refute_mt_clear_post_empty
-      result: Proved (negation)
-      wall_clock_s: 0.68
-      peak_rss_mb: 56
+      modules:
+      - verify_mt_clear_post_empty
+      result: Proved
+      wall_clock_s: 15.83
+      peak_rss_mb: 504
+      lever: null
+    status: proved
     _scored_by: scorer_creusot
   kani:
     evidence: null
@@ -4755,15 +4808,15 @@ properties:
   - 'spec: MT-TELEMETRY-SNAPSHOT-POST-ZERO-WHEN-DISABLED'
   - 'code: MT-TELEMETRY-SNAPSHOT-POST'
   creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_mt_telemetry_snapshot_post
       result: Proved
-      wall_clock_s: 0.64
+      wall_clock_s: 0.67
       peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -5116,17 +5169,14 @@ properties:
   source:
   - 'code: MT-TELEMETRY-INHERENT-POST'
   creusot:
-    evidence:
-      modules:
-      - verify_mt_telemetry_inherent_post
-      result: Proved
-      wall_clock_s: 0.6
-      peak_rss_mb: 48
-      lever: null
     fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
-    status: proved
-    _scored_by: scorer_creusot
+    note: 'LEVEL-2 UNDER ASSUMPTION assumes: [D-RANGE-US-7-010573] — the former premise t.evictions@ +
+      1 < u64::MAX@ && t.write_lock_contentions@ + 1 < u64::MAX@ (stronger than the range) was replaced
+      by exactly the US-7 assume_rust (all three counters < u64::MAX). Each counter is bumped once, so
+      the torn read (e, w, r) still differs from every instant the counters passed through. Anti-vacuity
+      twin (same requires) fails.'
+    evidence:
+      module: verify_mt_telemetry_inherent_post
   kani:
     evidence: null
     fidelity: null
@@ -5388,8 +5438,8 @@ properties:
     evidence:
       refutation: refute_mt_freelist_new_post
       result: Proved (negation)
-      wall_clock_s: 0.78
-      peak_rss_mb: 53
+      wall_clock_s: 0.64
+      peak_rss_mb: 52
     _scored_by: scorer_creusot
   kani:
     evidence: null
@@ -6632,7 +6682,7 @@ properties:
     so the sizes of all free runs plus the bytes-in-use total always equal the capacity and the bytes-in-use
     total is always exactly the sum of the rounded sizes of the entries held; repeatedly adding and removing
     entries can therefore never lose space permanently and never hand the same space out twice.
-  origin: spec+code
+  origin: divergent
   global: true
   attachments: 8
   paired_from:
@@ -6675,6 +6725,13 @@ properties:
     evidence: null
     fidelity: null
     note: null
+  origin_before_level1: spec+code
+  divergence_note: 'SPEC (FR-007, FR-026, SC-5): every byte is either free or owned by exactly one live
+    entry, so space is never lost. CODE side MT-INV-USED-EQUALS-SUM-OF-ENTRIES (lib.rs:360-367): used
+    == sum of rounded entry sizes ''with the single exception of an insert whose tracking step panics''
+    - allocate() at lib.rs:360 reserves space before ep.track(...).unwrap() at lib.rs:365-367, so a track
+    failure leaves reserved bytes with no slot. The merged statement drops that exception and states the
+    invariant unconditionally.'
 - id: MT-INV-FREE-LIST-COALESCING
   subject: 'global invariant: adjacent freed space merges back into one run'
   methods:
@@ -7805,7 +7862,7 @@ properties:
     be required; the monotonic growth of each counter is recorded as a property instead.
   traces: []
 run:
-  gate_commit: d14dfb9a
+  gate_commit: unknown — gate dir is not a git checkout
   gate_branch: unstable
   kani:
     scored_by: scorer_kani
@@ -7821,9 +7878,9 @@ run:
   creusot:
     scored_by: scorer_creusot
     command: scorer_creusot.py components/memory-tier/verif --crate-dir components/memory-tier/verif-creusot
-      --cap-seconds 120 --cap-max 600 --resume --only MT-INIT-NUMA-ONLY-ON-MMAP-PATH,MT-INIT-FLAG-ORDERING-MIX,MT-INSERT-TRACK-FAILURE-PANICS,MT-REMOVE-IGNORES-POLICY-ERROR,MT-OLDEST-KEYS-POST-LIVE-MEMBERSHIP,MT-BATCH-TOUCH-EMPTY-NOOP,MT-CLEAR-POST-EMPTY,MT-CLEAR-DISCARDS-HANDLES,MT-TELEMETRY-EVICTION-COUNT,MT-TELEMETRY-COUNTERS-MONOTONIC,MT-RESET-TELEMETRY-POST,MT-FREELIST-NEW-POST,MT-FREELIST-ALLOCATE-ROUNDING-OVERFLOW,MT-INV-SIZE-ACCOUNTING
-    started: '2026-10-02T06:13:29-07:00'
-    finished: '2026-10-02T06:14:01-07:00'
+      --resume
+    started: '2026-10-07T23:27:32-07:00'
+    finished: '2026-10-07T23:27:54-07:00'
     creusot: v0.11.0-169-g9cf662ce6
     why3: Why3 platform, version 1.8.2+git
     provers:
@@ -7831,12 +7888,9 @@ run:
     - CVC4 1.8
     - CVC5 1.3.1
     - Z3 4.16.0
-    cap_seconds: 120
-    cap_max: 600
+    cap_seconds: 60
+    cap_max: 300
     mem_max_mb: 16384
-
-# Orchestrator-written, NOT scorer-written: how each record is worded (node7, 2026-10-03).
-# HAZARD = the record states a defect, so a proof CONFIRMS the defect. Used by the renderer only.
 polarity:
   MT-ALLOC-MMAP-ERR-BOTH-FAIL:
     polarity: REQUIREMENT
@@ -7909,7 +7963,8 @@ polarity:
     why: States the correct precondition for the operation.
   MT-DEFAULT-POOL-ID-AMBIGUOUS:
     polarity: UNCLEAR
-    why: Mixes a hazard (id 0 collides with a valid policy pool id) with a requirement (every op must gate on the set-up flag).
+    why: Mixes a hazard (id 0 collides with a valid policy pool id) with a requirement (every op must
+      gate on the set-up flag).
   MT-DEFAULT-STATE-POST:
     polarity: REQUIREMENT
     why: States the correct post-state the operation must produce.
@@ -7927,7 +7982,8 @@ polarity:
     why: States the correct error/empty outcome the operation must produce.
   MT-EVICT-FOR-KEY-FRAME-KEY-IGNORED:
     polarity: UNCLEAR
-    why: Divergence note says spec reads 'key ignored, may evict itself' as intended while code extraction reads it as a defect; leans REQUIREMENT per spec.
+    why: Divergence note says spec reads 'key ignored, may evict itself' as intended while code extraction
+      reads it as a defect; leans REQUIREMENT per spec.
   MT-EVICT-FOR-KEY-POST-ALIAS:
     polarity: REQUIREMENT
     why: States the spec-intended alias-to-evict_next behaviour.
@@ -7999,7 +8055,8 @@ polarity:
     why: States the correct post-state the operation must produce.
   MT-FREELIST-DEALLOCATE-PRE:
     polarity: UNCLEAR
-    why: States a caller precondition (requirement) but also asserts it is never checked (hazard-flavoured); proving 'unchecked' would confirm a defect.
+    why: States a caller precondition (requirement) but also asserts it is never checked (hazard-flavoured);
+      proving 'unchecked' would confirm a defect.
   MT-FREELIST-DEALLOCATE-UNDERFLOW:
     polarity: HAZARD
     why: Asserts an unmatched release wraps the bytes-used total to a huge number.
@@ -8014,7 +8071,8 @@ polarity:
     why: States the correct post-state the operation must produce.
   MT-GET-ERR-MISS:
     polarity: REQUIREMENT
-    why: Statement requires a clean miss instead of a stale address; the indistinguishability complaint is only in the note.
+    why: Statement requires a clean miss instead of a stale address; the indistinguishability complaint
+      is only in the note.
   MT-GET-FRAME:
     polarity: REQUIREMENT
     why: States what the operation must leave unchanged.
@@ -8083,7 +8141,8 @@ polarity:
     why: States the correct error/empty outcome the operation must produce.
   MT-INSERT-ERR-POOL-FULL:
     polarity: REQUIREMENT
-    why: Requires pool-full rather than a short/overlapping block; fragmentation clause is an accepted consequence.
+    why: Requires pool-full rather than a short/overlapping block; fragmentation clause is an accepted
+      consequence.
   MT-INSERT-FRAME-ON-ERROR:
     polarity: REQUIREMENT
     why: States what the operation must leave unchanged.
@@ -8260,7 +8319,8 @@ polarity:
     why: States what the operation must leave unchanged.
   MT-REMOVE-IGNORES-POLICY-ERROR:
     polarity: HAZARD
-    why: Asserts a failed untrack is swallowed so remove reports success while the policy keeps a dead key.
+    why: Asserts a failed untrack is swallowed so remove reports success while the policy keeps a dead
+      key.
   MT-REMOVE-INVALIDATES-POINTER-SILENTLY:
     polarity: HAZARD
     why: Asserts stale addresses go unmarked and the same bytes can be handed to a different caller.
@@ -8333,37 +8393,36 @@ tool_notes:
 bugs:
   FV-BUG-006:
     title: evict_next chooses its victim before taking the pool lock
-    root_cause: evict_next asks the eviction policy for a victim BEFORE locking the pool. A concurrent remove(k)
-      + insert(k) can land in between, and the eviction then frees the NEW entry, whose owner keeps a pointer into
-      freed memory. The policy obeys its contract throughout.
+    root_cause: evict_next asks the eviction policy for a victim BEFORE locking the pool. A concurrent
+      remove(k) + insert(k) can land in between, and the eviction then frees the NEW entry, whose owner
+      keeps a pointer into freed memory. The policy obeys its contract throughout.
     location: components/memory-tier/src/lib.rs (evict_next)
     status: open
   FV-BUG-007:
     title: Pool memory is reused without a generation and without clearing
-    root_cause: A freed offset is handed to the next insert with nothing marking which use it belongs to and without
-      clearing it, so an old pointer reaches the new entry and the new entry starts with the previous occupant's
-      bytes. Same design flaw as FV-BUG-002, in memory-tier's own pool.
+    root_cause: A freed offset is handed to the next insert with nothing marking which use it belongs
+      to and without clearing it, so an old pointer reaches the new entry and the new entry starts with
+      the previous occupant's bytes. Same design flaw as FV-BUG-002, in memory-tier's own pool.
     location: components/memory-tier/src/lib.rs (insert/remove) and src/allocator.rs
     status: open
   FV-BUG-008:
     title: The free list trusts every release it is given
-    root_cause: FreeList::deallocate does not detect a double free, and its `used` counter is decremented without
-      a check, so an unmatched release underflows it.
+    root_cause: FreeList::deallocate does not detect a double free, and its `used` counter is decremented
+      without a check, so an unmatched release underflows it.
     location: components/memory-tier/src/allocator.rs (FreeList::deallocate)
     status: open
   FV-BUG-009:
     title: A pool size that is not a multiple of 4 KiB is accepted
-    root_cause: Nothing requires the pool size to be a whole number of 4 KiB units (e.g. 5000 is accepted), so the
-      tail can never be allocated and a full-size request is refused.
+    root_cause: Nothing requires the pool size to be a whole number of 4 KiB units (e.g. 5000 is accepted),
+      so the tail can never be allocated and a full-size request is refused.
     location: components/memory-tier/src/lib.rs (initialize) and src/allocator.rs (FreeList::new)
     status: open
   FV-BUG-010:
     title: Internal failures panic instead of returning errors
-    root_cause: Seven .unwrap()s on the eviction-policy receptacle, and lock results unwrapped everywhere, so one
-      panic while a lock is held poisons it and every later call panics too.
+    root_cause: Seven .unwrap()s on the eviction-policy receptacle, and lock results unwrapped everywhere,
+      so one panic while a lock is held poisons it and every later call panics too.
     location: components/memory-tier/src/lib.rs (receptacle lookups, lock acquisitions)
     status: open
-# Orchestrator-written: the IMemoryTier trait's own methods (components/interfaces/src/imemory_tier.rs), the method-headline denominator.
 interface_methods:
 - initialize
 - insert
@@ -8382,12 +8441,168 @@ interface_methods:
 - is_dma_capable
 - clear
 - telemetry_snapshot
-# LEVEL 1 (level1.py): properties derived from a spec<->code discordance; see discordances.yaml. Never sent to the provers.
+domain_discordances:
+- spec_says: initialize allocates a pool of the specified size, only zero is rejected, and capacity()
+    returns the total pool size (US-3 spec.md:68,73; US-5 spec.md:103); after clear the whole pool is
+    reusable (FR-018, US-4 spec.md:89-90); free_capacity = capacity - used for proactive-eviction triggers
+    (FR-029). The spec places no alignment requirement on pool_size.
+  code_does: FreeList::new(pool_size) seeds one free run of pool_size bytes (lib.rs:314, lib.rs:605, allocator.rs:16-19)
+    but every request is rounded up to 4096 (allocator.rs:42), so the trailing pool_size % 4096 bytes
+    can never be allocated, while capacity() (lib.rs:573) and free_capacity() (lib.rs:186) still count
+    them; e.g. after clear an insert of capacity() bytes returns PoolFull. pool_size is never checked
+    for 4 KiB alignment (lib.rs:262 checks only != 0).
+  spec_pointers:
+  - US-3
+  - US-5
+  - FR-004
+  - FR-018
+  - FR-029
+  - spec.md:68
+  - spec.md:73
+  - spec.md:103
+  - spec.md:243
+  code_pointers:
+  - lib.rs:262
+  - lib.rs:314
+  - lib.rs:605
+  - allocator.rs:19
+  - allocator.rs:42
+  - lib.rs:573
+  - lib.rs:186
+  methods:
+  - initialize
+  - insert
+  - capacity
+  - free_capacity
+  - clear
+  assume: the requested pool size is a whole multiple of 4 KiB
+  assume_rust: pool_size % 4096 == 0
+- spec_says: hugepage backing (MAP_HUGETLB) is preferred with automatic fallback (FR-002), and pool memory
+    is properly freed on Drop via munmap or spdk_free (NFR-006, SC-2 'no memory leaks'); the spec places
+    no constraint on pool_size other than > 0 (US-3 spec.md:73).
+  code_does: alloc_mmap maps pool_size bytes with MAP_HUGETLB first (lib.rs:196-203); the kernel rounds
+    the mapping up to the hugepage size, but Drop calls munmap(pool_ptr, pool_size) and ignores the return
+    value (lib.rs:132). For a hugetlb mapping munmap requires a hugepage-multiple length (unaligned split
+    of a hugetlb VMA is EINVAL), so a pool_size that is not a multiple of the hugepage size (2 MiB default)
+    is silently leaked on Drop; the same length is passed to mbind (lib.rs:233-243), which then fails
+    into the warning path.
+  spec_pointers:
+  - FR-002
+  - NFR-006
+  - Success Criteria 2 (spec.md:230)
+  - US-3
+  code_pointers:
+  - lib.rs:196-203
+  - lib.rs:206
+  - lib.rs:132
+  - lib.rs:233-243
+  - lib.rs:311
+  methods:
+  - initialize
+  - Drop for MemoryTierState
+  assume: the requested pool size is a whole multiple of the system's default hugepage size (2 MiB) whenever
+    the hugepage mapping is the one used
+  assume_rust: pool_size % (2 * 1024 * 1024) == 0
+- spec_says: insert(key, size) allocates a slot of the requested size (US-1 spec.md:31; FR-008..FR-010)
+    and after clear all memory is back in the free pool (FR-018, US-4); the spec states no maximum entry
+    size, and initialize takes pool_size as an unbounded usize (US-3).
+  code_does: 'the entry size is a 32-bit field end to end: IMemoryTier::insert takes size: u32 (imemory_tier.rs:67),
+    Slot.size is u32 (lib.rs:72), get/peek return u32 (imemory_tier.rs:73,80), while pool_size is usize
+    (lib.rs:261, lib.rs:314). So no single entry can exceed u32::MAX bytes (4 GiB after rounding); for
+    pool_size > u32::MAX the ''a single insertion as large as the entire pool capacity'' consequence of
+    clear/coalescing is unreachable.'
+  spec_pointers:
+  - US-1
+  - US-4
+  - FR-018
+  - FR-026
+  - spec.md:31
+  - spec.md:68
+  code_pointers:
+  - imemory_tier.rs:61
+  - imemory_tier.rs:67
+  - lib.rs:72
+  - lib.rs:261
+  - lib.rs:314
+  - lib.rs:362
+  methods:
+  - insert
+  - clear
+  - initialize
+  - get
+  - peek
+  assume: the pool size is no larger than the largest single entry size (u32::MAX bytes)
+  assume_rust: pool_size <= u32::MAX as usize
+- spec_says: numa_node is Option<i32>; Some(node) with node >= 0 binds the pool via mbind(MPOL_BIND),
+    None uses default placement, and a failed binding falls back gracefully (imemory_tier.rs:57-60, FR-019,
+    US-3 spec.md:71). No upper bound on node is stated, and negative Some values are not described.
+  code_does: 'mmap path: negative nodes are silently ignored (lib.rs:226); node_id >= 64 leaves the one-word
+    nodemask at 0 (lib.rs:228-231) yet mbind is still called with maxnode = node_id + 2 (lib.rs:240),
+    which for node_id >= 64 makes the kernel read BITS_TO_LONGS(node_id+1) words from an 8-byte stack
+    variable (out-of-bounds user read; bits beyond word 0 are garbage). SPDK path: the raw value (or -1
+    for None) is passed unchecked to spdk_zmalloc as the socket id (lib.rs:280,287), so a negative value
+    other than -1 or an out-of-range node yields AllocationFailed instead of default placement.'
+  spec_pointers:
+  - FR-019
+  - US-3
+  - imemory_tier.rs:57-60
+  - spec.md:71
+  code_pointers:
+  - lib.rs:225-231
+  - lib.rs:240
+  - lib.rs:280
+  - lib.rs:287
+  - lib.rs:291-295
+  methods:
+  - initialize
+  assume: the NUMA node is absent, -1 (any), or a node id in 0..64 that fits the single-word nodemask
+  assume_rust: numa_node.map_or(true, |n| n == -1 || (0..64).contains(&n))
+- spec_says: with the telemetry feature the component tracks the total eviction count and the write/read
+    lock-contention counts; telemetry_snapshot returns the current cumulative counters and only reset_telemetry
+    decreases them (US-7 spec.md:131-136, FR-027, FR-028). No counter range or wrap behaviour is stated.
+  code_does: the counters are AtomicU64 bumped with fetch_add(1, Relaxed) (lib.rs:349, lib.rs:396, lib.rs:460,
+    plus the identical blocks at lib.rs:449, lib.rs:489, lib.rs:540), which wraps silently to 0 at u64::MAX;
+    nothing saturates or checks.
+  spec_pointers:
+  - US-7
+  - FR-027
+  - FR-028
+  - spec.md:131-136
+  code_pointers:
+  - lib.rs:40-42
+  - lib.rs:349
+  - lib.rs:396
+  - lib.rs:449
+  - lib.rs:460
+  - lib.rs:489
+  - lib.rs:540
+  - lib.rs:620-628
+  methods:
+  - insert
+  - get
+  - evict_next
+  - evict_next_for_key
+  - remove
+  - batch_touch
+  - telemetry_snapshot
+  assume: no telemetry counter is at u64::MAX on entry (no wrap during the call)
+  assume_rust: state.telemetry.evictions.load(Ordering::Relaxed) < u64::MAX && state.telemetry.write_lock_contentions.load(Ordering::Relaxed)
+    < u64::MAX && state.telemetry.read_lock_contentions.load(Ordering::Relaxed) < u64::MAX
+level1_sync_check:
+  by: orchestrator-applied ~/FV/synccheck/memory-tier/synccheck.yaml (node7 reading agent, 2026-10-05),
+    applied 2026-10-07
+  reclassified: 9
+  domain_discordances: 5
 level2_excluded:
+- MT-INIT-POST-NUMA-FALLBACK
+- MT-INIT-POST-HUGEPAGE-FALLBACK
 - MT-INIT-ERR-DOUBLE-INIT
 - MT-INIT-ERR-NO-EVICTION-POLICY
+- MT-INIT-FRAME-ON-FAILURE
 - MT-INSERT-POST-ALIGNMENT
+- MT-INSERT-ERR-NOT-INITIALIZED
 - MT-INSERT-FRAME-OTHER-ENTRIES
+- MT-GET-POST-TOUCH
 - MT-GET-ERR-MISS
 - MT-PEEK-PRE
 - MT-PEEK-ERR-MISS
@@ -8402,10 +8617,13 @@ level2_excluded:
 - MT-EVICT-FOR-KEY-FRAME-KEY-IGNORED
 - MT-EVICT-FOR-KEY-ERR-NO-VICTIM
 - MT-OLDEST-KEYS-PRE
+- MT-OLDEST-KEYS-POST-SHAPE
 - MT-OLDEST-KEYS-POST-LIVE-MEMBERSHIP
 - MT-TOUCH-PRE
+- MT-TOUCH-POST-ORDER-REFRESH
 - MT-TOUCH-SILENT-NOOP
 - MT-BATCH-TOUCH-PRE
+- MT-BATCH-TOUCH-EMPTY-NOOP
 - MT-CONTAINS-PRE
 - MT-CAPACITY-PRE
 - MT-CAPACITY-ERR-NOT-INITIALIZED
@@ -8425,6 +8643,50 @@ level2_excluded:
 - MT-INV-OBSERVER-CONSISTENCY
 - MT-INV-POOL-BASE-STABLE
 - MT-INV-POINTER-STABLE-UNTIL-FREED
+- MT-INV-NO-LEAKED-OR-DOUBLE-BOOKED-SPACE
 - MT-INV-DEFAULT-POOL-SIZE-NEVER-APPLIED
 - MT-INV-NO-INTERNAL-VICTIM-SELECTION-STATE
 - MT-INV-CONCURRENT-STRUCTURAL-INTEGRITY
+level2_assumptions:
+- id: D-RANGE-US-3-ec579e
+  assume: the requested pool size is a whole multiple of 4 KiB
+  assume_rust: pool_size % 4096 == 0
+  methods:
+  - initialize
+  - insert
+  - capacity
+  - free_capacity
+  - clear
+- id: D-RANGE-FR-002-fad39d
+  assume: the requested pool size is a whole multiple of the system's default hugepage size (2 MiB) whenever
+    the hugepage mapping is the one used
+  assume_rust: pool_size % (2 * 1024 * 1024) == 0
+  methods:
+  - initialize
+  - Drop for MemoryTierState
+- id: D-RANGE-US-1-e5a999
+  assume: the pool size is no larger than the largest single entry size (u32::MAX bytes)
+  assume_rust: pool_size <= u32::MAX as usize
+  methods:
+  - insert
+  - clear
+  - initialize
+  - get
+  - peek
+- id: D-RANGE-FR-019-b98877
+  assume: the NUMA node is absent, -1 (any), or a node id in 0..64 that fits the single-word nodemask
+  assume_rust: numa_node.map_or(true, |n| n == -1 || (0..64).contains(&n))
+  methods:
+  - initialize
+- id: D-RANGE-US-7-010573
+  assume: no telemetry counter is at u64::MAX on entry (no wrap during the call)
+  assume_rust: state.telemetry.evictions.load(Ordering::Relaxed) < u64::MAX && state.telemetry.write_lock_contentions.load(Ordering::Relaxed)
+    < u64::MAX && state.telemetry.read_lock_contentions.load(Ordering::Relaxed) < u64::MAX
+  methods:
+  - insert
+  - get
+  - evict_next
+  - evict_next_for_key
+  - remove
+  - batch_touch
+  - telemetry_snapshot
