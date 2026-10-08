@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# A real overlay on llm-d's own base, rather than a copy of base with text edits
+# replayed over it. The previous approach (cp base/* a30/ then two `ex` scripts)
+# failed silently when upstream changed a line the scripts matched on: the
+# substitution simply did not fire and the overlay stayed identical to base, with
+# nothing to notice. Here, upstream changes flow through, and structural
+# breakage surfaces when install.sh runs `kubectl kustomize`.
+resources:
+  - ../base
+
+# Overrides base's llm-d.ai/model on every resource it labelled -- including the
+# ServiceAccount, which a Deployment-only patch leaves stale. includeSelectors is
+# false on purpose: a Deployment's spec.selector is immutable once created, so it
+# is set explicitly in the patch instead of being rewritten by a transformer.
+labels:
+  - pairs:
+      llm-d.ai/model: Qwen3-8B
+    includeSelectors: false
+    includeTemplates: true
+
+patches:
+  - path: patch-a30.yaml
