@@ -1,0 +1,11 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_index_Vec_u8_Global": { "prover": "alt-ergo", "time": 0.011 },
+      "vc_new_u8": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_push_u8": { "prover": "alt-ergo", "time": 0.011 },
+      "vc_slice_vec": { "prover": "alt-ergo", "time": 0.071 }
+    }
+  }
+}

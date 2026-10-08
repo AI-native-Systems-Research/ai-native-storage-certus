@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_support_old_refute_em_inv_within_usable_range": {
+        "prover": "cvc4",
+        "time": 3.0
+      },
+      "vc_w3_reserve6": { "prover": "alt-ergo", "time": 0.033 },
+      "vc_w3_stale": { "prover": "alt-ergo", "time": 0.041 }
+    }
+  }
+}

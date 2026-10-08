@@ -1,0 +1,122 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1659 0 1659 108 *)
+
+let%span sb3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 410 11 410 23
+let%span sb3'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 411 10 411 57
+let%span sb3'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 412 10 412 93
+let%span sb3'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 413 10 414 71
+let%span sb3'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 415 10 416 129
+let%span sbatch3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1660 26 1660 27
+let%span sbatch3'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1660 15 1660 27
+let%span sbatch3'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1661 4 1661 61
+let%span sbatch3'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1656 11 1656 45
+let%span sbatch3'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1657 11 1657 67
+let%span sbatch3'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1658 10 1658 49
+
+use creusot.int.UInt64
+use creusot.int.UInt8
+use creusot.int.UInt32
+use seq.Seq
+use creusot.prelude.Any
+use int.Int
+
+type t_BTreeMap_u64_Slab_Global
+
+type t_SlabMap = { inner: t_BTreeMap_u64_Slab_Global }
+
+type t_HashMap_u32_Vec_u64_Global_RandomState_Global
+
+type t_SizeClassManager = { map: t_HashMap_u32_Vec_u64_Global_RandomState_Global }
+
+type t_Vec_Vec_u64_Global_Global
+
+type t_BuddyAllocator = {
+  base_offset: UInt64.t;
+  total_usable_size: UInt64.t;
+  sector_size: UInt32.t;
+  max_order: UInt64.t;
+  free_lists: t_Vec_Vec_u64_Global_Global }
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_FormatParams = {
+  data_disk_size'0: UInt64.t;
+  slab_size'0: UInt64.t;
+  max_extent_size'0: UInt32.t;
+  sector_size'0: UInt32.t;
+  region_count'0: UInt32.t;
+  metadata_alignment'0: UInt64.t;
+  instance_id'0: t_Option_u64;
+  metadata_disk_ns_id'0: UInt32.t;
+  metadata_region_size'0: UInt64.t }
+
+type t_Vec_tup2_u64_usize_Global
+
+type t_RegionState = {
+  slabs: t_SlabMap;
+  size_classes: t_SizeClassManager;
+  buddy: t_BuddyAllocator;
+  dirty: bool;
+  format_params: t_FormatParams;
+  pending_frees: t_Vec_tup2_u64_usize_Global }
+
+type t_CkCopy = { seq: UInt64.t; img: Seq.seq t_RegionState }
+
+type t_Option_CkCopy = None'0 | Some'0 t_CkCopy
+
+type t_CkDev = { sb_seq: UInt64.t; sb_active: UInt8.t; copy0: t_Option_CkCopy; copy1: t_Option_CkCopy }
+
+type t_RdOut = DevErr | Bad | Good UInt64.t
+
+type t_Recovered = Empty | Copy UInt8.t
+
+type t_EmError = CorruptMetadata | IoError | NotInitialized | OffsetNotFound UInt64.t | OutOfSpace
+
+type t_Result_Recovered_EmError = Ok t_Recovered | Err t_EmError
+
+let recover_rd (sb_seq'0: UInt64.t) (active: UInt8.t) (act: t_RdOut) (inact: t_RdOut)
+  (return (x: t_Result_Recovered_EmError)) = {[@stop_split] [@expl:recover_rd requires] [%#sb3] UInt8.t'int active <= 1}
+  any
+  [ return (result: t_Result_Recovered_EmError) ->
+  {[@stop_split] [@expl:recover_rd ensures] ([@stop_split] [@expl:recover_rd ensures #0] [%#sb3'0] UInt64.t'int sb_seq'0
+        = 0 -> result = Ok (Empty))
+    /\ ([@stop_split] [@expl:recover_rd ensures #1] [%#sb3'1] UInt64.t'int sb_seq'0 > 0 /\ act = Good sb_seq'0
+      -> result = Ok (Copy active))
+    /\ ([@stop_split] [@expl:recover_rd ensures #2] [%#sb3'2] forall q: UInt64.t. UInt64.t'int sb_seq'0 > 1
+          /\ UInt64.t'int q = UInt64.t'int sb_seq'0 - 1 /\ act <> Good sb_seq'0 /\ inact = Good q
+        -> result = Ok (Copy (if UInt8.t'int active = 0 then (1: UInt8.t) else (0: UInt8.t))))
+    /\ ([@stop_split] [@expl:recover_rd ensures #3] [%#sb3'3] UInt64.t'int sb_seq'0 > 0
+      /\ act <> Good sb_seq'0
+      /\ (UInt64.t'int sb_seq'0 = 1
+      \/ (forall q: UInt64.t. UInt64.t'int q = UInt64.t'int sb_seq'0 - 1 -> inact <> Good q))
+    -> result = Err (CorruptMetadata))}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_em_init_post_fallback_to_inactive__mutant [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1659 0 1659 108]
+  (d: t_CkDev) (act: t_RdOut) (return (x: t_Result_Recovered_EmError)) =
+{[@stop_split] [@expl:verify_em_init_post_fallback_to_inactive__mutant requires] ([@stop_split] [@expl:verify_em_init_post_fallback_to_inactive__mutant requires #0] [%#sbatch3'2] UInt64.t'int d.sb_seq
+      > 1
+    /\ UInt8.t'int d.sb_active <= 1)
+  /\ ([@stop_split] [@expl:verify_em_init_post_fallback_to_inactive__mutant requires #1] [%#sbatch3'3] match act with
+    | Good s -> s <> d.sb_seq
+    | _ -> true
+    end)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = UInt64.sub [%#sbatch3'0] {d.sb_seq} {[%#sbatch3] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &prev <- _x ] s1)
+    | s1 = [ &_14 <- Good prev ] s2
+    | s2 = recover_rd [%#sbatch3'1] {d.sb_seq} {d.sb_active} {act} {_14}
+        (fun (_x: t_Result_Recovered_EmError) -> [ &_ret <- _x ] s3)
+    | s3 = return {_ret} ] ]
+  [ & _ret: t_Result_Recovered_EmError = Any.any_l ()
+  | & d: t_CkDev = d
+  | & act: t_RdOut = act
+  | & prev: UInt64.t = Any.any_l ()
+  | & _14: t_RdOut = Any.any_l () ])
+  [ return (result: t_Result_Recovered_EmError) ->
+  {[@stop_split] [@expl:verify_em_init_post_fallback_to_inactive__mutant ensures] [%#sbatch3'4] result
+    = Err (CorruptMetadata)}
+    (! return {result}) ]

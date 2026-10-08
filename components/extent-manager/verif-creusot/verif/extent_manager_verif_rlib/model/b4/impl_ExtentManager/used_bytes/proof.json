@@ -1,0 +1,17 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.012 },
+      "vc_index_Vec_RegionState_Global": {
+        "prover": "alt-ergo",
+        "time": 0.023
+      },
+      "vc_index_Vec_usize_Global": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_len_usize": { "prover": "alt-ergo", "time": 0.012 },
+      "vc_total_free": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_total_usable_size": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_used_bytes": { "prover": "cvc4", "time": 0.184 }
+    }
+  }
+}

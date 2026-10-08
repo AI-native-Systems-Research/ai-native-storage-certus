@@ -1,0 +1,54 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_append": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_as_u32": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_build_blob": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.012 },
+              { "prover": "alt-ergo", "time": 0.016 },
+              { "prover": "alt-ergo", "time": 0.02 },
+              { "prover": "alt-ergo", "time": 0.015 },
+              { "prover": "alt-ergo", "time": 0.022 },
+              { "prover": "alt-ergo", "time": 0.018 },
+              { "prover": "alt-ergo", "time": 0.017 },
+              { "prover": "alt-ergo", "time": 0.032 },
+              { "prover": "alt-ergo", "time": 0.093 },
+              { "prover": "alt-ergo", "time": 0.018 },
+              { "prover": "alt-ergo", "time": 0.048 },
+              { "prover": "alt-ergo", "time": 0.023 },
+              { "prover": "alt-ergo", "time": 0.025 },
+              { "prover": "alt-ergo", "time": 0.162 },
+              { "prover": "alt-ergo", "time": 0.022 },
+              { "prover": "alt-ergo", "time": 0.021 },
+              { "prover": "alt-ergo", "time": 0.019 },
+              { "prover": "alt-ergo", "time": 0.019 },
+              { "prover": "alt-ergo", "time": 0.066 },
+              { "prover": "alt-ergo", "time": 0.068 },
+              { "prover": "alt-ergo", "time": 0.02 },
+              { "prover": "alt-ergo", "time": 0.018 },
+              { "prover": "z3", "time": 0.036 },
+              { "prover": "alt-ergo", "time": 1.0 },
+              { "prover": "alt-ergo", "time": 0.039 },
+              { "prover": "alt-ergo", "time": 0.031 },
+              { "prover": "alt-ergo", "time": 0.041 },
+              { "prover": "alt-ergo", "time": 0.094 }
+            ]
+          }
+        ]
+      },
+      "vc_crc32_hash": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_len_u8": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_new_u8": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_push_u8": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_put32b": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_to_le_bytes32": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_to_le_bytes64": { "prover": "alt-ergo", "time": 0.019 }
+    }
+  }
+}

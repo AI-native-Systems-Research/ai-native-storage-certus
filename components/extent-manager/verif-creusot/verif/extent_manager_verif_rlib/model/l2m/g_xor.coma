@@ -1,0 +1,88 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 78 0 78 65 *)
+
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 57 10 57 15
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 56 11 56 27
+let%span sbuddy'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 58 10 58 30
+let%span sbuddy'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 33 16 33 29
+let%span sl2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 258 10 258 11
+let%span sl2'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 260 16 260 56
+let%span sl2'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 15 16 15 54
+let%span sl2'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 281 11 281 27
+let%span sl2'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 282 10 282 48
+let%span sl2'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 283 10 283 46
+let%span sl2m = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 79 31 79 45
+let%span sl2m'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 79 4 79 48
+let%span sl2m'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 80 20 80 53
+let%span sl2m'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 81 20 81 112
+let%span sl2m'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 82 20 82 105
+let%span sl2m'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 76 11 76 78
+let%span sl2m'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 77 10 77 40
+let%span sl2m'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 45 11 45 33
+let%span sl2m'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 46 10 46 69
+
+use creusot.int.UInt64
+use int.ComputerDivision
+use bv.Pow2int
+use creusot.prelude.Any
+use int.Int
+
+function log2 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 259 0 259 26] (x: int) : int
+
+axiom log2_def: forall x: int [log2 x]. log2 x = ([%#sl2'0] if x <= 1 then 0 else 1 + log2 (ComputerDivision.div x 2))
+
+let xor_fact (a: UInt64.t) (s: UInt64.t) (e: int) (return (x: ())) =
+{[@stop_split] [@expl:xor_fact requires] [%#sl2m'6] UInt64.t'int s > 0
+  /\ ComputerDivision.mod (UInt64.t'int a) (UInt64.t'int s) = 0}
+  any
+  [ return (result: ()) -> {[@stop_split] [@expl:xor_fact ensures] [%#sl2m'7] 0 <= e
+      /\ e < 64 /\ UInt64.t'int s = Pow2int.pow2 e
+    -> ComputerDivision.mod (UInt64.t'int (UInt64.bw_xor a s)) (UInt64.t'int s) = 0}
+    (! return {result}) ]
+
+predicate p2 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 14 0 14 25] (x: int) =
+  [%#sl2'1] exists k: int. 0 <= k /\ Pow2int.pow2 k = x
+
+function span [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 32 0 32 35] (ss: int) (o: int) : int
+ = [%#sbuddy'2] Pow2int.pow2 o * ss
+
+function lemma_span_p2 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 284 0 284 37] (ss: int) (o: int) : ()
+
+axiom lemma_span_p2_spec: forall ss: int, o: int. ([%#sl2'2] p2 ss /\ 0 <= o)
+    -> ([%#sl2'3] 0 <= log2 ss /\ ss = Pow2int.pow2 (log2 ss))
+
+axiom lemma_span_p2_spec'0: forall ss: int, o: int. ([%#sl2'2] p2 ss /\ 0 <= o)
+    -> ([%#sl2'4] span ss o = Pow2int.pow2 (o + log2 ss))
+
+function lemma_pow2_mono [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 59 0 59 38] (a: int) (b: int) : ()
+
+axiom lemma_pow2_mono_spec: forall a: int, b: int. ([%#sbuddy'0] 0 <= a /\ a <= b)
+    -> ([%#sbuddy'1] Pow2int.pow2 a <= Pow2int.pow2 b)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let g_xor [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 78 0 78 65]
+  (a: UInt64.t) (s: UInt64.t) (ss: int) (o: int) (return (x: ())) =
+{[@stop_split] [@expl:g_xor requires] [%#sl2m'4] UInt64.t'int s = span ss o
+  /\ ss > 0 /\ 0 <= o /\ UInt64.t'int s > 0 /\ ComputerDivision.mod (UInt64.t'int a) (UInt64.t'int s) = 0}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = xor_fact [%#sl2m'0] {a} {s} {[%#sl2m] o + log2 ss} (fun (_x: ()) -> [ &_14 <- _x ] s1)
+    | s1 = {[@expl:assertion] [%#sl2m'1] Pow2int.pow2 64 = 18446744073709551616} s2
+    | s2 = {[@expl:assertion] [%#sl2m'2] p2 ss
+      -> (let _ = lemma_span_p2 ss o in 0 <= o + log2 ss /\ UInt64.t'int s = Pow2int.pow2 (o + log2 ss))}
+      s3
+    | s3 = {[@expl:assertion] [%#sl2m'3] p2 ss
+      -> o + log2 ss >= 64 -> (let _ = lemma_pow2_mono 64 (o + log2 ss) in false)}
+      s4
+    | s4 = return {_ret} ] ]
+  [ & _ret: () = Any.any_l ()
+  | & a: UInt64.t = a
+  | & s: UInt64.t = s
+  | & ss: int = ss
+  | & o: int = o
+  | & _14: () = Any.any_l () ])
+  [ return (result: ()) -> {[@stop_split] [@expl:g_xor ensures] [%#sl2m'5] p2 ss
+    -> ComputerDivision.mod (UInt64.t'int (UInt64.bw_xor a s)) (UInt64.t'int s) = 0}
+    (! return {result}) ]

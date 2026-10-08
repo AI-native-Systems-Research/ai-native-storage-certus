@@ -1,0 +1,27 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 230 4 230 34 *)
+
+(* model::b3::DmaCfg *)
+
+let%span sb3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 231 53 231 54
+let%span sb3'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 229 14 229 72
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_DmaCfg = { dma_alloc: t_Option_u64; metadata_base_lba: UInt64.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let new_default [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 230 4 230 34]
+  (return (x: t_DmaCfg)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_2 <- None ] s1
+    | s1 = [ &_ret <- { dma_alloc = _2; metadata_base_lba = ([%#sb3] (0: UInt64.t)) } ] s2
+    | s2 = return {_ret} ] ] [ & _ret: t_DmaCfg = Any.any_l () | & _2: t_Option_u64 = Any.any_l () ])
+  [ return (result: t_DmaCfg) -> {[@stop_split] [@expl:new_default ensures] [%#sb3'0] result.dma_alloc = None
+    /\ UInt64.t'int result.metadata_base_lba = 0}
+    (! return {result}) ]

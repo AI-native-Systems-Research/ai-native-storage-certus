@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_lemma_slab_unfold": { "prover": "cvc4", "time": 0.216 } }
+  }
+}

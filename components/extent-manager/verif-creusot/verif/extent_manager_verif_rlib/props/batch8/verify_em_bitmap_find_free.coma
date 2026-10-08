@@ -1,0 +1,80 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 145 0 145 87 *)
+
+let%span sbitmap = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 207 15 207 27
+let%span sbitmap'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 208 15 208 63
+let%span sbitmap'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 209 14 213 5
+let%span sbitmap'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 28 16 28 60
+let%span sbitmap'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 34 16 34 49
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sbatch8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 146 4 146 28
+let%span sbatch8'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 140 11 140 21
+let%span sbatch8'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 141 11 141 55
+let%span sbatch8'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 142 10 142 92
+let%span sbatch8'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 143 10 143 94
+let%span sbatch8'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 144 10 144 92
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use seq.Seq
+use int.ComputerDivision
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_u64_Global
+
+type t_AllocationBitmap = { words: t_Vec_u64_Global; num_slots: UInt32.t; allocated_count: UInt32.t }
+
+type t_Option_usize = None | Some UInt64.t
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_u64_Global (self: t_Vec_u64_Global) : Seq.seq UInt64.t
+
+axiom view_Vec_u64_Global_spec:
+  forall self: t_Vec_u64_Global [view_Vec_u64_Global self]. [%#svec] Seq.length (view_Vec_u64_Global self)
+    <= UInt64.t'int const_MAX
+
+predicate bm_wf [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 27 0 27 42] (bm: t_AllocationBitmap) =
+  [%#sbitmap'2] Seq.length (view_Vec_u64_Global bm.words) = ComputerDivision.div (UInt32.t'int bm.num_slots + 63) 64
+
+predicate slot_bit [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 33 0 33 53] (bm: t_AllocationBitmap) (i: int) =
+  [%#sbitmap'3] UInt64.nth (Seq.get (view_Vec_u64_Global bm.words) (ComputerDivision.div i 64)) (ComputerDivision.mod i 64)
+
+let find_free_from (self: t_AllocationBitmap) (start: UInt64.t) (return (x: t_Option_usize)) =
+{[@stop_split] [@expl:find_free_from requires] ([@stop_split] [@expl:find_free_from requires #0] [%#sbitmap] bm_wf self)
+  /\ ([@stop_split] [@expl:find_free_from requires #1] [%#sbitmap'0] UInt32.t'int self.num_slots = 0
+  \/ UInt64.t'int start < UInt32.t'int self.num_slots)}
+  any
+  [ return (result: t_Option_usize) -> {[@stop_split] [@expl:find_free_from ensures] [%#sbitmap'1] match result with
+      | Some i -> UInt64.t'int i < UInt32.t'int self.num_slots
+      /\ not slot_bit self (UInt64.t'int i)
+      /\ (UInt64.t'int start <= UInt64.t'int i
+      -> (forall j: int. UInt64.t'int start <= j /\ j < UInt64.t'int i -> slot_bit self j))
+      | None -> forall j: int. 0 <= j /\ j < UInt32.t'int self.num_slots -> slot_bit self j
+      end}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_em_bitmap_find_free [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 145 0 145 87]
+  (bm: t_AllocationBitmap) (start: UInt64.t) (return (x: t_Option_usize)) =
+{[@stop_split] [@expl:verify_em_bitmap_find_free requires] ([@stop_split] [@expl:verify_em_bitmap_find_free requires #0] [%#sbatch8'0] bm_wf bm)
+  /\ ([@stop_split] [@expl:verify_em_bitmap_find_free requires #1] [%#sbatch8'1] UInt32.t'int bm.num_slots = 0
+  \/ UInt64.t'int start < UInt32.t'int bm.num_slots)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = find_free_from [%#sbatch8] {bm} {start} (fun (_x: t_Option_usize) -> [ &_ret <- _x ] s1)
+    | s1 = return {_ret} ] ]
+  [ & _ret: t_Option_usize = Any.any_l () | & bm: t_AllocationBitmap = bm | & start: UInt64.t = start ])
+  [ return (result: t_Option_usize) ->
+  {[@stop_split] [@expl:verify_em_bitmap_find_free ensures] ([@stop_split] [@expl:verify_em_bitmap_find_free ensures #0] [%#sbatch8'2] match result with
+        | Some i -> UInt64.t'int i < UInt32.t'int bm.num_slots /\ not slot_bit bm (UInt64.t'int i)
+        | None -> true
+        end)
+    /\ ([@stop_split] [@expl:verify_em_bitmap_find_free ensures #1] [%#sbatch8'3] (exists j: int. 0 <= j
+          /\ j < UInt32.t'int bm.num_slots /\ not slot_bit bm j) -> result <> None)
+    /\ ([@stop_split] [@expl:verify_em_bitmap_find_free ensures #2] [%#sbatch8'4] result = None
+    -> (forall j: int. 0 <= j /\ j < UInt32.t'int bm.num_slots -> slot_bit bm j))}
+    (! return {result}) ]

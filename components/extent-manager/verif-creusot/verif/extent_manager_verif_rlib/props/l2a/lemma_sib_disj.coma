@@ -1,0 +1,66 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2a.rs" 92 0 92 58 *)
+
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 93 11 93 17
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 94 10 94 44
+let%span sbuddy'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 102 11 102 38
+let%span sbuddy'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 103 10 103 36
+let%span sbuddy'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 111 11 111 27
+let%span sbuddy'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 112 10 112 27
+let%span sbuddy'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 113 10 113 25
+let%span sbuddy'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 33 16 33 29
+let%span sl2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 33 16 33 46
+let%span sl2a = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2a.rs" 90 11 90 39
+let%span sl2a'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2a.rs" 91 10 91 82
+
+use bv.Pow2int
+use int.Int
+
+predicate disj [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 32 0 32 55] (x1: int) (l1: int) (x2: int) (l2: int) =
+  [%#sl2] x1 + l1 <= x2 \/ x2 + l2 <= x1
+
+function span [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 32 0 32 35] (ss: int) (o: int) : int
+ = [%#sbuddy'6] Pow2int.pow2 o * ss
+
+function lemma_span_succ [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 95 0 95 39] (ss: int) (o: int) : ()
+
+axiom lemma_span_succ_spec: forall ss: int, o: int. ([%#sbuddy] 0 <= o)
+    -> ([%#sbuddy'0] span ss (o + 1) = 2 * span ss o)
+
+function lemma_span_mono [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 104 0 104 47] (ss: int) (a: int) (b: int) : ()
+
+axiom lemma_span_mono_spec: forall ss: int, a: int, b: int. ([%#sbuddy'1] 0 <= a /\ a <= b /\ 0 <= ss)
+    -> ([%#sbuddy'2] span ss a <= span ss b)
+
+function lemma_span_pos [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 114 0 114 38] (ss: int) (o: int) : ()
+
+axiom lemma_span_pos_spec: forall ss: int, o: int. ([%#sbuddy'3] ss > 0 /\ 0 <= o) -> ([%#sbuddy'4] span ss o >= ss)
+
+axiom lemma_span_pos_spec'0: forall ss: int, o: int. ([%#sbuddy'3] ss > 0 /\ 0 <= o) -> ([%#sbuddy'5] span ss o > 0)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant ss : int
+
+constant loc : int
+
+constant o1 : int
+
+constant o2 : int
+
+function lemma_sib_disj [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2a.rs" 92 0 92 58] (ss: int) (loc: int) (o1: int) (o2: int) : ()
+
+goal vc_lemma_sib_disj: ([%#sl2a] ss > 0 /\ 0 <= o1 /\ o1 < o2)
+  -> ([@stop_split] [@expl:lemma_span_succ requires] [%#sbuddy] 0 <= o1)
+  /\ (([@stop_split] [@expl:lemma_span_succ ensures] [%#sbuddy'0] span ss (o1 + 1) = 2 * span ss o1)
+  -> (let _ = lemma_span_succ ss o1 in ([@stop_split] [@expl:lemma_span_mono requires] [%#sbuddy'1] 0 <= o1 + 1
+    /\ o1 + 1 <= o2 /\ 0 <= ss)
+  /\ (([@stop_split] [@expl:lemma_span_mono ensures] [%#sbuddy'2] span ss (o1 + 1) <= span ss o2)
+  -> (let _ = lemma_span_mono ss (o1 + 1) o2 in ([@stop_split] [@expl:lemma_span_pos requires] [%#sbuddy'3] ss > 0
+    /\ 0 <= o1)
+  /\ (([@stop_split] [@expl:lemma_span_pos ensures] ([@stop_split] [@expl:lemma_span_pos ensures #0] [%#sbuddy'4] span ss o1
+      >= ss)
+    /\ ([@stop_split] [@expl:lemma_span_pos ensures #1] [%#sbuddy'5] span ss o1 > 0))
+  -> ([@stop_split] [@expl:lemma_sib_disj ensures] [%#sl2a'0] disj (loc + span ss o1) (span ss o1) (loc
+  + span ss o2) (span ss o2)))))))

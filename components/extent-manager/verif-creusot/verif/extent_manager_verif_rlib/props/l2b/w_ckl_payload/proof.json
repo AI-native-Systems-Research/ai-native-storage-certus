@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_append": { "prover": "alt-ergo", "time": 0.043 },
+      "vc_new_u8": { "prover": "alt-ergo", "time": 0.046 },
+      "vc_serialize_region": { "prover": "alt-ergo", "time": 0.04 },
+      "vc_to_le_bytes32": { "prover": "alt-ergo", "time": 0.043 },
+      "vc_w_ckl_payload": { "prover": "alt-ergo", "time": 0.186 },
+      "vc_w_ckl_region": { "prover": "alt-ergo", "time": 0.045 }
+    }
+  }
+}

@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE why3session PUBLIC "-//Why3//proof session v5//EN"
+"https://www.why3.org/why3session.dtd">
+<why3session shape_version="6">
+<prover id="0" name="Z3" version="4.16.0" timelimit="2.40923" memlimit="1000"/>
+<prover id="1" name="CVC4" version="1.8" timelimit="4" memlimit="1000"/>
+<prover id="2" name="Alt-Ergo" version="2.6.2" timelimit="0.161513" memlimit="1000"/>
+<prover id="3" name="CVC5" version="1.3.1" timelimit="0.749004" memlimit="1000"/>
+<file format="coma">
+<path name=".."/><path name="lemma_bh_alloc.coma"/>
+<theory name="Coma">
+ <goal name="vc_lemma_bh_alloc">
+ <transf name="compute_specified" >
+  <goal name="vc_lemma_bh_alloc.0">
+  <transf name="split_vc" >
+   <goal name="vc_lemma_bh_alloc.0.0" expl="lemma_alloc_disj requires" proved="true">
+   <proof prover="2" timelimit="0.084065"><result status="valid" time="0.084065" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_bh_alloc.0.1" expl="lemma_alloc_merge requires" proved="true">
+   <proof prover="2" timelimit="0.166207"><result status="valid" time="0.166207" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_bh_alloc.0.2" expl="lemma_span_pos requires" proved="true">
+   <proof prover="2" timelimit="0.094731"><result status="valid" time="0.094731" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_bh_alloc.0.3" expl="lemma_ord_span requires" proved="true">
+   <proof prover="2" timelimit="0.133392"><result status="valid" time="0.133392" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_bh_alloc.0.4" proved="true">
+   <proof prover="2" timelimit="0.066734"><result status="valid" time="0.066734" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_bh_alloc.0.5" proved="true">
+   <proof prover="2" timelimit="0.051538"><result status="valid" time="0.051538" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_bh_alloc.0.6" proved="true">
+   <proof prover="3" timelimit="0.127421"><result status="valid" time="0.127421" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_bh_alloc.0.7" proved="true">
+   <proof prover="2" timelimit="0.10938"><result status="valid" time="0.109380" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_bh_alloc.0.8" expl="lemma_span_pos requires" proved="true">
+   <proof prover="3" timelimit="0.298673"><result status="valid" time="0.298673" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_bh_alloc.0.9" proved="true">
+   <proof prover="3" timelimit="0.178977"><result status="valid" time="0.178977" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_bh_alloc.0.10" proved="true">
+   <proof prover="3"><result status="valid" time="0.749004" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_bh_alloc.0.11" proved="true">
+   <proof prover="3" timelimit="0.8001"><result status="valid" time="0.800100" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_bh_alloc.0.12" proved="true">
+   <proof prover="3" timelimit="0.190038"><result status="valid" time="0.190038" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_bh_alloc.0.13">
+   <proof prover="0"><result status="unknown" time="2.409225" steps="0"/></proof>
+   <proof prover="1"><result status="timeout" time="4.000000" steps="0"/></proof>
+   <proof prover="2" timelimit="4"><result status="timeout" time="4.000000" steps="0"/></proof>
+   <proof prover="3" timelimit="4"><result status="timeout" time="4.000000" steps="0"/></proof>
+   <transf name="split_vc" >
+    <goal name="vc_lemma_bh_alloc.0.13.0">
+    <proof prover="0" timelimit="2.96517"><result status="unknown" time="2.965172" steps="0"/></proof>
+    <proof prover="1" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+    <proof prover="2" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+    <proof prover="3" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+    </goal>
+   </transf>
+   </goal>
+   <goal name="vc_lemma_bh_alloc.0.14" expl="lemma_bh_alloc ensures" proved="true">
+   <proof prover="2"><result status="valid" time="0.161513" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_bh_alloc.0.15" proved="true">
+   <proof prover="2" timelimit="0.088977"><result status="valid" time="0.088977" steps="0"/></proof>
+   </goal>
+  </transf>
+  </goal>
+ </transf>
+ </goal>
+</theory>
+</file>
+</why3session>

@@ -1,0 +1,14 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_l3_sb_c8": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_read_ckpt": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_recover_rd": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_refute_em_err_device_as_ioerror": {
+        "prover": "cvc5",
+        "time": 0.134
+      }
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_apply_lop": { "prover": "alt-ergo", "time": 0.033 },
+      "vc_remove_extent_by_offset": { "prover": "alt-ergo", "time": 0.033 },
+      "vc_reserve_h": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_verify_em_bitmap_index_in_range": {
+        "prover": "cvc4",
+        "time": 0.171
+      }
+    }
+  }
+}

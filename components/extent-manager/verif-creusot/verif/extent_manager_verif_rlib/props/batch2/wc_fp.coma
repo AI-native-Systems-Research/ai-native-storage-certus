@@ -1,0 +1,78 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 470 0 470 50 *)
+
+let%span sbatch2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 478 26 478 27
+let%span sbatch2'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 474 25 474 26
+let%span sbatch2'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 475 21 475 22
+let%span sbatch2'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 476 22 476 23
+let%span sbatch2'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 477 28 477 29
+let%span sbatch2'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 479 29 479 30
+let%span sbatch2'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 480 30 480 31
+let%span sbatch2'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 466 11 466 38
+let%span sbatch2'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 467 10 467 95
+let%span sbatch2'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 468 10 468 67
+let%span sbatch2'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 469 10 469 39
+let%span sbatch2'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 445 16 449 5
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.prelude.Any
+use int.ComputerDivision
+use int.Int
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_FormatParams = {
+  data_disk_size: UInt64.t;
+  slab_size: UInt64.t;
+  max_extent_size: UInt32.t;
+  sector_size: UInt32.t;
+  region_count: UInt32.t;
+  metadata_alignment: UInt64.t;
+  instance_id: t_Option_u64;
+  metadata_disk_ns_id: UInt32.t;
+  metadata_region_size: UInt64.t }
+
+function wc_fp_l [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 444 0 444 52] (slab: UInt64.t) (disk: UInt64.t) : t_FormatParams
+ = [%#sbatch2'10] { data_disk_size = disk;
+                    slab_size = slab;
+                    max_extent_size = (4: UInt32.t);
+                    sector_size = (4: UInt32.t);
+                    region_count = (1: UInt32.t);
+                    metadata_alignment = (0: UInt64.t);
+                    instance_id = Some (1: UInt64.t);
+                    metadata_disk_ns_id = (1: UInt32.t);
+                    metadata_region_size = (0: UInt64.t) }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let wc_fp [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 470 0 470 50]
+  (slab: UInt64.t) (disk: UInt64.t) (return (x: t_FormatParams)) =
+{[@stop_split] [@expl:wc_fp requires] [%#sbatch2'6] ComputerDivision.mod (UInt64.t'int slab) 4 = 0
+  /\ UInt64.t'int slab > 0}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_14 <- Some ([%#sbatch2] (1: UInt64.t)) ] s1
+    | s1 = [ &_ret <- { data_disk_size = disk;
+                        slab_size = slab;
+                        max_extent_size = ([%#sbatch2'0] (4: UInt32.t));
+                        sector_size = ([%#sbatch2'1] (4: UInt32.t));
+                        region_count = ([%#sbatch2'2] (1: UInt32.t));
+                        metadata_alignment = ([%#sbatch2'3] (0: UInt64.t));
+                        instance_id = _14;
+                        metadata_disk_ns_id = ([%#sbatch2'4] (1: UInt32.t));
+                        metadata_region_size = ([%#sbatch2'5] (0: UInt64.t)) } ] s2
+    | s2 = return {_ret} ] ]
+  [ & _ret: t_FormatParams = Any.any_l ()
+  | & slab: UInt64.t = slab
+  | & disk: UInt64.t = disk
+  | & _14: t_Option_u64 = Any.any_l () ])
+  [ return (result: t_FormatParams) ->
+  {[@stop_split] [@expl:wc_fp ensures] ([@stop_split] [@expl:wc_fp ensures #0] [%#sbatch2'7] UInt32.t'int result.sector_size
+        = 4
+      /\ result.slab_size = slab /\ result.data_disk_size = disk)
+    /\ ([@stop_split] [@expl:wc_fp ensures #1] [%#sbatch2'8] UInt32.t'int result.region_count = 1
+      /\ UInt32.t'int result.max_extent_size = 4)
+    /\ ([@stop_split] [@expl:wc_fp ensures #2] [%#sbatch2'9] result = wc_fp_l slab disk)}
+    (! return {result}) ]

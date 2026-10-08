@@ -1,0 +1,94 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 700 0 700 101 *)
+
+let%span sregion = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 231 16 231 41
+let%span sbatch8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 701 22 701 23
+let%span sbatch8'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 701 25 701 26
+let%span sbatch8'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 701 13 701 27
+let%span sbatch8'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 702 30 702 42
+let%span sbatch8'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 698 10 698 24
+let%span sbatch8'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 699 10 699 132
+let%span sbatch8'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 717 11 717 46
+let%span sbatch8'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 718 10 718 40
+let%span sbatch8'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 657 11 657 19
+let%span sbatch8'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 658 10 661 1
+
+use creusot.int.UInt32
+use int.ComputerDivision
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+constant const_MAX: UInt32.t = (4294967295: UInt32.t)
+
+function align_l [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 230 0 230 41] (size: int) (ss: int) : int
+ = [%#sregion] ComputerDivision.div (size + ss - 1) ss * ss
+
+let align_l8 (size: UInt32.t) (ss: UInt32.t) (return (x: UInt32.t)) =
+{[@stop_split] [@expl:align_l8 requires] [%#sbatch8'5] UInt32.t'int ss > 0
+  /\ UInt32.t'int size + UInt32.t'int ss <= UInt32.t'int const_MAX}
+  any
+  [ return (result: UInt32.t) -> {[@stop_split] [@expl:align_l8 ensures] [%#sbatch8'6] UInt32.t'int result
+    = align_l (UInt32.t'int size) (UInt32.t'int ss)}
+    (! return {result}) ]
+
+type t_EmError = CorruptMetadata | IoError | NotInitialized | OffsetNotFound UInt64.t | OutOfSpace
+
+type t_Result_unit_EmError = Ok () | Err t_EmError
+
+type t_Option_u64 = None | Some UInt64.t
+
+type tup4_Result_unit_EmError_Option_u64_Option_u64_u64 = {
+  f0: t_Result_unit_EmError;
+  f1: t_Option_u64;
+  f2: t_Option_u64;
+  f3: UInt64.t }
+
+let w8_carve (es: UInt32.t) (return (x: tup4_Result_unit_EmError_Option_u64_Option_u64_u64)) =
+{[@stop_split] [@expl:w8_carve requires] [%#sbatch8'7] UInt32.t'int es <= 4}
+  any
+  [ return (result: tup4_Result_unit_EmError_Option_u64_Option_u64_u64) ->
+  {[@stop_split] [@expl:w8_carve ensures] [%#sbatch8'8] match result.f0 with
+      | Ok () -> result.f1 = None /\ result.f2 = Some (0: UInt64.t) /\ UInt64.t'int result.f3 = 4
+      | Err e -> e = IoError
+      end}
+    (! return {result}) ]
+
+type tup5_u32_Result_unit_EmError_Option_u64_Option_u64_u64 = {
+  f0'0: UInt32.t;
+  f1'0: t_Result_unit_EmError;
+  f2'0: t_Option_u64;
+  f3'0: t_Option_u64;
+  f4'0: UInt64.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let refute_em_reserve_err_zero_size [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 700 0 700 101]
+  (return (x: tup5_u32_Result_unit_EmError_Option_u64_Option_u64_u64)) = (! bb0
+  [ bb0 = s0
+    [ s0 = align_l8 [%#sbatch8'1] {[%#sbatch8] (0: UInt32.t)} {[%#sbatch8'0] (4: UInt32.t)}
+        (fun (_x: UInt32.t) -> [ &es <- _x ] s1)
+    | s1 = w8_carve [%#sbatch8'2] {es}
+        (fun (_x: tup4_Result_unit_EmError_Option_u64_Option_u64_u64) -> [ &_8 <- _x ] s2)
+    | s2 = [ &r <- _8.f0 ] s3
+    | s3 = [ &first <- _8.f1 ] s4
+    | s4 = [ &d <- _8.f2 ] s5
+    | s5 = [ &slab <- _8.f3 ] s6
+    | s6 = [ &_ret <- { f0'0 = es; f1'0 = r; f2'0 = first; f3'0 = d; f4'0 = slab } ] s7
+    | s7 = return {_ret} ] ]
+  [ & _ret: tup5_u32_Result_unit_EmError_Option_u64_Option_u64_u64 = Any.any_l ()
+  | & es: UInt32.t = Any.any_l ()
+  | & r: t_Result_unit_EmError = Any.any_l ()
+  | & first: t_Option_u64 = Any.any_l ()
+  | & d: t_Option_u64 = Any.any_l ()
+  | & slab: UInt64.t = Any.any_l ()
+  | & _8: tup4_Result_unit_EmError_Option_u64_Option_u64_u64 = Any.any_l () ])
+  [ return (result: tup5_u32_Result_unit_EmError_Option_u64_Option_u64_u64) ->
+  {[@stop_split] [@expl:refute_em_reserve_err_zero_size ensures] ([@stop_split] [@expl:refute_em_reserve_err_zero_size ensures #0] [%#sbatch8'3] UInt32.t'int result.f0'0
+      = 0)
+    /\ ([@stop_split] [@expl:refute_em_reserve_err_zero_size ensures #1] [%#sbatch8'4] match result.f1'0 with
+      | Ok () -> result.f2'0 = None /\ result.f3'0 = Some (0: UInt64.t) /\ UInt64.t'int result.f4'0 = 4
+      | Err e -> e = IoError
+      end)}
+    (! return {result}) ]

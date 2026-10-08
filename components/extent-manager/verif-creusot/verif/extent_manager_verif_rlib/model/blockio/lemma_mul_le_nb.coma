@@ -1,0 +1,30 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 262 0 262 47 *)
+
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 154 11 154 37
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 155 10 155 24
+let%span sblockio = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 260 11 260 36
+let%span sblockio'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 261 10 261 29
+
+use int.Int
+
+function lemma_mul_le [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 156 0 156 43] (a: int) (b: int) (c: int) : ()
+
+axiom lemma_mul_le_spec: forall a: int, b: int, c: int. ([%#sbuddy] 0 <= a /\ a <= b /\ 0 <= c)
+    -> ([%#sbuddy'0] a * c <= b * c)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant i : int
+
+constant nb : int
+
+constant d : int
+
+function lemma_mul_le_nb [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 262 0 262 47] (i: int) (nb: int) (d: int) : ()
+
+goal vc_lemma_mul_le_nb: ([%#sblockio] 0 <= i /\ i < nb /\ d > 0)
+  -> ([@stop_split] [@expl:lemma_mul_le requires] [%#sbuddy] 0 <= i + 1 /\ i + 1 <= nb /\ 0 <= d)
+  /\ (([@stop_split] [@expl:lemma_mul_le ensures] [%#sbuddy'0] (i + 1) * d <= nb * d)
+  -> ([@stop_split] [@expl:lemma_mul_le_nb ensures] [%#sblockio'0] i * d + d <= nb * d))

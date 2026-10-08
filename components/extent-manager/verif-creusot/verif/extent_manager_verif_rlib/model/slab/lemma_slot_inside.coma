@@ -1,0 +1,76 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 102 0 102 41 *)
+
+let%span sslab = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 98 11 98 23
+let%span sslab'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 99 11 99 44
+let%span sslab'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 100 10 100 43
+let%span sslab'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 101 10 101 76
+let%span sslab'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 90 11 90 23
+let%span sslab'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 91 10 91 63
+let%span sslab'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 92 10 92 63
+let%span sslab'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 50 8 52 54
+let%span sslab'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 85 16 85 53
+let%span sslab'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 93 32 94 1
+let%span sslab'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 43 16 43 55
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use int.ComputerDivision
+use int.Int
+
+type t_Vec_u64_Global
+
+type t_AllocationBitmap = { words: t_Vec_u64_Global; num_slots: UInt32.t; allocated_count: UInt32.t }
+
+type t_Slab = {
+  start_offset: UInt64.t;
+  slab_size: UInt64.t;
+  element_size: UInt32.t;
+  bitmap: t_AllocationBitmap;
+  keys: t_Vec_u64_Global;
+  rover: UInt64.t }
+
+function slots_of [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 42 0 42 57] (slab_size'0: int) (element_size'0: int) : int
+ = [%#sslab'9] ComputerDivision.mod (ComputerDivision.div slab_size'0 element_size'0) 4294967296
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+predicate slab_geom [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 48 0 48 33] (s: t_Slab) =
+  [%#sslab'6] UInt32.t'int s.element_size > 0
+  /\ UInt32.t'int s.bitmap.num_slots = slots_of (UInt64.t'int s.slab_size) (UInt32.t'int s.element_size)
+  /\ UInt64.t'int s.start_offset + UInt64.t'int s.slab_size <= UInt64.t'int const_MAX
+
+function slot_off [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 84 0 84 39] (s: t_Slab) (i: int) : int
+ = [%#sslab'7] UInt64.t'int s.start_offset + i * UInt32.t'int s.element_size
+
+function lemma_slots_fit [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 93 0 93 31] (s: t_Slab) : ()
+ = [%#sslab'8] ()
+
+axiom lemma_slots_fit_spec: forall s: t_Slab. ([%#sslab'3] slab_geom s)
+    -> ([%#sslab'4] UInt32.t'int s.bitmap.num_slots
+    <= ComputerDivision.div (UInt64.t'int s.slab_size) (UInt32.t'int s.element_size))
+
+axiom lemma_slots_fit_spec'0: forall s: t_Slab. ([%#sslab'3] slab_geom s)
+    -> ([%#sslab'5] UInt32.t'int s.bitmap.num_slots * UInt32.t'int s.element_size <= UInt64.t'int s.slab_size)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant s : t_Slab
+
+constant i : int
+
+function lemma_slot_inside [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 102 0 102 41] (s: t_Slab) (i: int) : ()
+
+goal vc_lemma_slot_inside: ([%#sslab] slab_geom s)
+  -> ([%#sslab'0] 0 <= i /\ i < UInt32.t'int s.bitmap.num_slots)
+  -> ([@stop_split] [@expl:lemma_slots_fit requires] [%#sslab'3] slab_geom s)
+  /\ (([@stop_split] [@expl:lemma_slots_fit ensures] ([@stop_split] [@expl:lemma_slots_fit ensures #0] [%#sslab'4] UInt32.t'int s.bitmap.num_slots
+      <= ComputerDivision.div (UInt64.t'int s.slab_size) (UInt32.t'int s.element_size))
+    /\ ([@stop_split] [@expl:lemma_slots_fit ensures #1] [%#sslab'5] UInt32.t'int s.bitmap.num_slots
+      * UInt32.t'int s.element_size
+    <= UInt64.t'int s.slab_size))
+  -> (let _ = lemma_slots_fit s in [@stop_split] [@expl:lemma_slot_inside ensures] ([@stop_split] [@expl:lemma_slot_inside ensures #0] [%#sslab'1] UInt64.t'int s.start_offset
+    <= slot_off s i)
+  /\ ([@stop_split] [@expl:lemma_slot_inside ensures #1] [%#sslab'2] slot_off s i + UInt32.t'int s.element_size
+  <= UInt64.t'int s.start_offset + UInt64.t'int s.slab_size)))

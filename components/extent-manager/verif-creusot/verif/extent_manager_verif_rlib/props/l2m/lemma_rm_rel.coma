@@ -1,0 +1,33 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2m.rs" 286 0 286 69 *)
+
+let%span sl2m = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2m.rs" 284 11 284 103
+let%span sl2m'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2m.rs" 285 10 285 27
+let%span sl2m'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2m.rs" 278 8 279 99
+
+use creusot.int.UInt64
+use seq.Seq
+use int.Int
+
+type tup2_u64_u64 = { f0: UInt64.t; f1: UInt64.t }
+
+predicate rm_rel [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2m.rs" 276 0 276 71] (lb: Seq.seq tup2_u64_u64) (la: Seq.seq tup2_u64_u64) (i: int) =
+  [%#sl2m'1] 0 <= i
+  /\ i < Seq.length la
+  /\ Seq.length lb = Seq.length la - 1
+  /\ (forall p: int. 0 <= p /\ p < Seq.length lb -> Seq.get lb p = (if p < i then Seq.get la p else Seq.get la (p + 1)))
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant lb : Seq.seq tup2_u64_u64
+
+constant la : Seq.seq tup2_u64_u64
+
+constant i : int
+
+function lemma_rm_rel [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2m.rs" 286 0 286 69] (lb: Seq.seq tup2_u64_u64) (la: Seq.seq tup2_u64_u64) (i: int) : ()
+
+goal vc_lemma_rm_rel: ([%#sl2m] 0 <= i
+    /\ i < Seq.length la /\ lb = Seq.(++) (Seq.([..]) la 0 i) (Seq.([..]) la (i + 1) (Seq.length la)))
+  -> ([@stop_split] [@expl:lemma_rm_rel ensures] [%#sl2m'0] rm_rel lb la i)

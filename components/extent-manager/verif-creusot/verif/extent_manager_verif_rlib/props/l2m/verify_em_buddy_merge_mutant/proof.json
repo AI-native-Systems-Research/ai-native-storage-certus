@@ -1,0 +1,34 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_g_merge_facts": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_rebuilt_bops": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_run_bops": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_verify_em_buddy_merge__mutant": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.079 },
+          { "prover": "alt-ergo", "time": 0.083 },
+          { "prover": "alt-ergo", "time": 0.114 },
+          { "prover": "alt-ergo", "time": 0.139 },
+          { "prover": "alt-ergo", "time": 0.069 },
+          { "prover": "alt-ergo", "time": 0.047 },
+          { "prover": "alt-ergo", "time": 0.081 },
+          { "prover": "alt-ergo", "time": 0.044 },
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.051 },
+              { "prover": "alt-ergo", "time": 0.103 },
+              null,
+              { "prover": "alt-ergo", "time": 0.052 },
+              { "prover": "alt-ergo", "time": 0.102 },
+              { "prover": "alt-ergo", "time": 0.095 }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

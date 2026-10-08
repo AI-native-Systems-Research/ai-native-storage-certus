@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_mark_slot_allocated": { "prover": "z3", "time": 0.116 },
+      "vc_set": { "prover": "alt-ergo", "time": 0.023 }
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lemma_coal_pu": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.035 },
+              { "prover": "alt-ergo", "time": 0.029 },
+              { "prover": "alt-ergo", "time": 0.071 },
+              { "prover": "alt-ergo", "time": 0.193 },
+              { "prover": "cvc5", "time": 0.244 },
+              { "prover": "cvc5", "time": 3.1 },
+              { "prover": "alt-ergo", "time": 0.149 }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_run6": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_verify_em_ckpt_post_hook_invoked": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.016 },
+              {
+                "tactic": "split_vc",
+                "children": [
+                  {
+                    "tactic": "split_vc",
+                    "children": [
+                      { "prover": "z3", "time": 0.03 },
+                      { "prover": "z3", "time": 0.025 },
+                      { "prover": "z3", "time": 0.033 },
+                      { "prover": "z3", "time": 0.027 },
+                      { "prover": "cvc5", "time": 0.503 }
+                    ]
+                  },
+                  { "prover": "cvc5", "time": 2.4 },
+                  { "prover": "alt-ergo", "time": 0.022 }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

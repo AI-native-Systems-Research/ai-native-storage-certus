@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_deser7": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_verify_em_ckpt_decode_truncated__mutant": {
+        "tactic": "split_vc",
+        "children": [ { "prover": "alt-ergo", "time": 0.017 }, null ]
+      }
+    }
+  }
+}

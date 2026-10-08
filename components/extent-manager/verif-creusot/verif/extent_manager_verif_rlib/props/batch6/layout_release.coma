@@ -1,0 +1,144 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 528 0 528 85 *)
+
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 180 11 180 26
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 181 10 181 34
+let%span sbuddy'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 182 10 182 33
+let%span sbuddy'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 183 10 183 20
+let%span sb6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 520 11 520 25
+let%span sb6'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 521 10 521 50
+let%span sb6'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 522 10 522 58
+let%span sbatch6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 529 41 529 57
+let%span sbatch6'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 530 43 530 44
+let%span sbatch6'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 531 77 531 127
+let%span sbatch6'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 531 137 531 138
+let%span sbatch6'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 533 20 533 66
+let%span sbatch6'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 534 46 534 47
+let%span sbatch6'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 534 33 534 48
+let%span sbatch6'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 534 33 534 66
+let%span sbatch6'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 534 33 534 84
+let%span sbatch6'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 535 33 535 34
+let%span sbatch6'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 536 46 536 68
+let%span sbatch6'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 536 78 536 79
+let%span sbatch6'11 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 524 11 524 41
+let%span sbatch6'12 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 525 10 525 79
+let%span sbatch6'13 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 526 10 526 93
+let%span sbatch6'14 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 527 10 527 26
+
+use creusot.int.UInt64
+use int.ComputerDivision
+use creusot.int.UInt32
+use creusot.prelude.Any
+use int.Int
+
+type tup2_u64_u64 = { f0: UInt64.t; f1: UInt64.t }
+
+let ckoff_release (alignment: UInt64.t) (return (x: tup2_u64_u64)) =
+{[@stop_split] [@expl:ckoff_release requires] [%#sb6] UInt64.t'int alignment > 0}
+  any
+  [ return (result: tup2_u64_u64) ->
+  {[@stop_split] [@expl:ckoff_release ensures] ([@stop_split] [@expl:ckoff_release ensures #0] [%#sb6'0] result.f0
+      = UInt64.add (4096: UInt64.t) (UInt64.sub alignment (1: UInt64.t)))
+    /\ ([@stop_split] [@expl:ckoff_release ensures #1] [%#sb6'1] UInt64.t'int result.f1
+    = ComputerDivision.div (UInt64.t'int result.f0) (UInt64.t'int alignment) * UInt64.t'int alignment)}
+    (! return {result}) ]
+
+function lemma_divmod [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 184 0 184 35] (x: int) (m: int) : ()
+
+axiom lemma_divmod_spec: forall x: int, m: int. ([%#sbuddy] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'0] x = m * ComputerDivision.div x m + ComputerDivision.mod x m)
+
+axiom lemma_divmod_spec'0: forall x: int, m: int. ([%#sbuddy] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'1] 0 <= ComputerDivision.mod x m /\ ComputerDivision.mod x m < m)
+
+axiom lemma_divmod_spec'1: forall x: int, m: int. ([%#sbuddy] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'2] ComputerDivision.div x m >= 0)
+
+type tup3_u64_u64_u64 = { f0'0: UInt64.t; f1'0: UInt64.t; f2'0: UInt64.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let layout_release [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 528 0 528 85]
+  (md: UInt64.t) (mrs: UInt64.t) (a: UInt64.t) (ss: UInt32.t) (dd: UInt64.t) (return (x: tup3_u64_u64_u64)) =
+{[@stop_split] [@expl:layout_release requires] [%#sbatch6'11] UInt64.t'int a > 0
+  /\ UInt32.t'int ss > 0 /\ UInt64.t'int mrs = 0}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = ckoff_release [%#sbatch6] {a} (fun (_x: tup2_u64_u64) -> [ &_19 <- _x ] s1)
+    | s1 = [ &checkpoint_region_offset <- _19.f1 ] s2
+    | s2 = [ &_22 <- UInt64.gt mrs ([%#sbatch6'0] (0: UInt64.t)) ] s3
+    | s3 = any [ br0 -> {_22 = false} (! bb6) | br1 -> {_22} (! bb2) ] ]
+  | bb2 = s0 [ s0 = [ &_24 <- UInt64.le md mrs ] s1 | s1 = any [ br0 -> {_24 = false} (! bb4) | br1 -> {_24} (! bb3) ] ]
+  | bb3 = s0 [ s0 = [ &effective_metadata_size <- md ] s1 | s1 = bb7 ]
+  | bb4 = s0 [ s0 = [ &effective_metadata_size <- mrs ] s1 | s1 = bb7 ]
+  | bb6 = s0 [ s0 = [ &effective_metadata_size <- md ] s1 | s1 = bb7 ]
+  | bb7 = s0
+    [ s0 = [ &_28 <- UInt64.ge effective_metadata_size checkpoint_region_offset ] s1
+    | s1 = any [ br0 -> {_28 = false} (! bb9) | br1 -> {_28} (! bb8) ] ]
+  | bb8 = s0
+    [ s0 = UInt64.sub [%#sbatch6'1] {effective_metadata_size} {checkpoint_region_offset}
+        (fun (_x: UInt64.t) -> [ &remaining <- _x ] s1)
+    | s1 = bb10 ]
+  | bb9 = s0 [ s0 = [ &remaining <- [%#sbatch6'2] (0: UInt64.t) ] s1 | s1 = bb10 ]
+  | bb10 = s0
+    [ s0 = [ &sector_size_u64 <- UInt64.of_int (UInt32.t'int ss) ] s1
+    | s1 =
+      {[@expl:assertion] [%#sbatch6'3] let _ = lemma_divmod (ComputerDivision.div (UInt64.t'int remaining) 2) (UInt64.t'int sector_size_u64) in ComputerDivision.div (ComputerDivision.div (UInt64.t'int remaining) 2) (UInt64.t'int sector_size_u64)
+        * UInt64.t'int sector_size_u64
+      <= ComputerDivision.div (UInt64.t'int remaining) 2}
+      s2
+    | s2 = [ &_43 <- ([%#sbatch6'4] (2: UInt64.t)) = ([%#sbatch6'5] (0: UInt64.t)) ] s3
+    | s3 = {[@expl:division by zero] [%#sbatch6'5] not _43} s4
+    | s4 = UInt64.div [%#sbatch6'5] {remaining} {[%#sbatch6'4] (2: UInt64.t)} (fun (_x: UInt64.t) -> [ &_41 <- _x ] s5)
+    | s5 = [ &_44 <- sector_size_u64 ] s6
+    | s6 = [ &_45 <- _44 = ([%#sbatch6'6] (0: UInt64.t)) ] s7
+    | s7 = {[@expl:division by zero] [%#sbatch6'6] not _45} s8
+    | s8 = UInt64.div [%#sbatch6'6] {_41} {_44} (fun (_x: UInt64.t) -> [ &_40 <- _x ] s9)
+    | s9 = UInt64.mul [%#sbatch6'7] {_40} {sector_size_u64}
+        (fun (_x: UInt64.t) -> [ &checkpoint_region_size <- _x ] s10)
+    | s10 = [ &data_start_offset <- [%#sbatch6'8] (0: UInt64.t) ] s11
+    | s11 = [ &_49 <- UInt64.ge dd data_start_offset ] s12
+    | s12 = any [ br0 -> {_49 = false} (! bb14) | br1 -> {_49} (! bb13) ] ]
+  | bb13 = s0
+    [ s0 = UInt64.sub [%#sbatch6'9] {dd} {data_start_offset} (fun (_x: UInt64.t) -> [ &usable <- _x ] s1) | s1 = bb15 ]
+  | bb14 = s0 [ s0 = [ &usable <- [%#sbatch6'10] (0: UInt64.t) ] s1 | s1 = bb15 ]
+  | bb15 = s0
+    [ s0 = [ &_ret <- { f0'0 = checkpoint_region_offset; f1'0 = checkpoint_region_size; f2'0 = usable } ] s1
+    | s1 = return {_ret} ] ]
+  [ & _ret: tup3_u64_u64_u64 = Any.any_l ()
+  | & md: UInt64.t = md
+  | & mrs: UInt64.t = mrs
+  | & a: UInt64.t = a
+  | & ss: UInt32.t = ss
+  | & dd: UInt64.t = dd
+  | & checkpoint_region_offset: UInt64.t = Any.any_l ()
+  | & _19: tup2_u64_u64 = Any.any_l ()
+  | & effective_metadata_size: UInt64.t = Any.any_l ()
+  | & _22: bool = Any.any_l ()
+  | & _24: bool = Any.any_l ()
+  | & remaining: UInt64.t = Any.any_l ()
+  | & _28: bool = Any.any_l ()
+  | & sector_size_u64: UInt64.t = Any.any_l ()
+  | & checkpoint_region_size: UInt64.t = Any.any_l ()
+  | & _40: UInt64.t = Any.any_l ()
+  | & _41: UInt64.t = Any.any_l ()
+  | & _43: bool = Any.any_l ()
+  | & _44: UInt64.t = Any.any_l ()
+  | & _45: bool = Any.any_l ()
+  | & data_start_offset: UInt64.t = Any.any_l ()
+  | & usable: UInt64.t = Any.any_l ()
+  | & _49: bool = Any.any_l () ])
+  [ return (result: tup3_u64_u64_u64) ->
+  {[@stop_split] [@expl:layout_release ensures] ([@stop_split] [@expl:layout_release ensures #0] [%#sbatch6'12] exists w: UInt64.t. w
+          = UInt64.add (4096: UInt64.t) (UInt64.sub a (1: UInt64.t))
+        /\ UInt64.t'int result.f0'0 = ComputerDivision.div (UInt64.t'int w) (UInt64.t'int a) * UInt64.t'int a)
+    /\ ([@stop_split] [@expl:layout_release ensures #1] [%#sbatch6'13] UInt64.t'int result.f1'0
+      = (if UInt64.t'int md >= UInt64.t'int result.f0'0 then
+        ComputerDivision.div (ComputerDivision.div (UInt64.t'int md - UInt64.t'int result.f0'0) 2) (UInt32.t'int ss)
+        * UInt32.t'int ss
+      else
+        0
+      ))
+    /\ ([@stop_split] [@expl:layout_release ensures #2] [%#sbatch6'14] UInt64.t'int result.f2'0 = UInt64.t'int dd)}
+    (! return {result}) ]

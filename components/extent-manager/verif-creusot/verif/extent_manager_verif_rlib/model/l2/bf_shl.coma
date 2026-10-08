@@ -1,0 +1,22 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 318 0 318 29 *)
+
+let%span sl2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 316 11 316 37
+let%span sl2'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 317 10 317 24
+
+use creusot.prelude.Any
+use creusot.int.UInt64BW
+use bv.Pow2int
+use int.Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let bf_shl [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 318 0 318 29]
+  (s: UInt64BW.t) (m: UInt64BW.t) (return (x: ())) = {[@stop_split] [@expl:bf_shl requires] [%#sl2] UInt64BW.t'int m
+    < 64
+  /\ UInt64BW.t'int s = Pow2int.pow2 (UInt64BW.t'int m)}
+  (! bb0
+  [ bb0 = return {_ret} ] [ & _ret: () = Any.any_l () ])
+  [ return (result: ()) -> {[@stop_split] [@expl:bf_shl ensures] [%#sl2'0] s = UInt64BW.shl (1: UInt64BW.t) m}
+    (! return {result}) ]

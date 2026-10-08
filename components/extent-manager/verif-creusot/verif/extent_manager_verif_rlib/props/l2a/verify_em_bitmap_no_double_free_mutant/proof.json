@@ -1,0 +1,23 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_apply_lop": { "prover": "alt-ergo", "time": 0.033 },
+      "vc_verify_em_bitmap_no_double_free__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.049 },
+              { "prover": "alt-ergo", "time": 0.031 },
+              null,
+              { "prover": "alt-ergo", "time": 0.029 },
+              { "prover": "alt-ergo", "time": 0.031 }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

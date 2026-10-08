@@ -1,0 +1,33 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 169 0 169 63 *)
+
+let%span sl2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 165 11 165 25
+let%span sl2'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 166 11 166 35
+let%span sl2'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 167 11 167 47
+let%span sl2'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 168 10 168 55
+let%span sl2'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 33 16 33 46
+
+use int.Int
+
+predicate disj [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 32 0 32 55] (x1: int) (l1: int) (x2: int) (l2: int) =
+  [%#sl2'3] x1 + l1 <= x2 \/ x2 + l2 <= x1
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant y : int
+
+constant l : int
+
+constant c : int
+
+constant d : int
+
+constant s : int
+
+function lemma_disj_union [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 169 0 169 63] (y: int) (l: int) (c: int) (d: int) (s: int) : ()
+
+goal vc_lemma_disj_union: ([%#sl2] s > 0 /\ l > 0)
+  -> ([%#sl2'0] d = c + s \/ d = c - s)
+  -> ([%#sl2'1] disj y l c s /\ disj y l d s)
+  -> ([@stop_split] [@expl:lemma_disj_union ensures] [%#sl2'2] disj y l (if c <= d then c else d) (2 * s))

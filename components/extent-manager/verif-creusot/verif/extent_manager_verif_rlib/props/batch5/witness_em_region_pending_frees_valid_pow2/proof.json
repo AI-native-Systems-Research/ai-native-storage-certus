@@ -1,0 +1,52 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_alloc_extent": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_remove_extent_by_offset": { "prover": "alt-ergo", "time": 0.041 },
+      "vc_w5p_rec": { "prover": "alt-ergo", "time": 0.042 },
+      "vc_witness_em_region_pending_frees_valid_pow2": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.066 },
+              { "prover": "alt-ergo", "time": 0.066 },
+              { "prover": "alt-ergo", "time": 0.031 },
+              { "prover": "alt-ergo", "time": 0.065 },
+              { "prover": "alt-ergo", "time": 0.117 },
+              { "prover": "cvc4", "time": 0.318 },
+              { "prover": "alt-ergo", "time": 0.095 },
+              { "prover": "alt-ergo", "time": 0.068 },
+              { "prover": "alt-ergo", "time": 0.077 },
+              { "prover": "alt-ergo", "time": 0.173 },
+              { "prover": "cvc4", "time": 0.529 },
+              { "prover": "cvc4", "time": 0.2 },
+              { "prover": "cvc4", "time": 0.408 },
+              { "prover": "cvc4", "time": 0.325 },
+              { "prover": "cvc4", "time": 0.234 },
+              { "prover": "alt-ergo", "time": 0.115 },
+              { "prover": "cvc4", "time": 0.192 },
+              { "prover": "cvc4", "time": 0.283 },
+              {
+                "tactic": "split_vc",
+                "children": [
+                  { "prover": "alt-ergo", "time": 0.042 },
+                  { "prover": "z3", "time": 0.113 },
+                  {
+                    "tactic": "split_vc",
+                    "children": [ { "prover": "cvc4", "time": 6.0 } ]
+                  }
+                ]
+              },
+              { "prover": "alt-ergo", "time": 0.048 },
+              { "prover": "alt-ergo", "time": 0.033 },
+              { "prover": "alt-ergo", "time": 0.025 }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

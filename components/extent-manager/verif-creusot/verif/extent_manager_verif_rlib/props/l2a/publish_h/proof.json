@@ -1,0 +1,56 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_free_slot": { "prover": "alt-ergo", "time": 0.042 },
+      "vc_index_Vec_tup2_u64_usize_Global": {
+        "prover": "alt-ergo",
+        "time": 0.02
+      },
+      "vc_publish_h": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.035 },
+              { "prover": "cvc4", "time": 0.296 },
+              { "prover": "cvc4", "time": 0.258 },
+              { "prover": "cvc4", "time": 0.568 },
+              { "prover": "alt-ergo", "time": 0.177 },
+              { "prover": "alt-ergo", "time": 0.16 },
+              { "prover": "alt-ergo", "time": 0.171 },
+              { "prover": "alt-ergo", "time": 0.041 },
+              { "prover": "alt-ergo", "time": 0.702 },
+              { "prover": "alt-ergo", "time": 0.036 },
+              { "prover": "alt-ergo", "time": 0.032 },
+              { "prover": "alt-ergo", "time": 0.129 },
+              { "prover": "alt-ergo", "time": 0.037 },
+              { "prover": "alt-ergo", "time": 0.12 },
+              {
+                "tactic": "split_vc",
+                "children": [
+                  { "prover": "alt-ergo", "time": 0.633 },
+                  { "prover": "alt-ergo", "time": 0.281 },
+                  { "prover": "alt-ergo", "time": 0.193 },
+                  { "prover": "cvc4", "time": 0.65 },
+                  { "prover": "alt-ergo", "time": 0.058 },
+                  { "prover": "alt-ergo", "time": 0.909 },
+                  { "prover": "alt-ergo", "time": 0.054 },
+                  { "prover": "alt-ergo", "time": 0.068 },
+                  { "prover": "alt-ergo", "time": 0.069 },
+                  { "prover": "alt-ergo", "time": 0.473 },
+                  { "prover": "alt-ergo", "time": 0.064 }
+                ]
+              },
+              { "prover": "alt-ergo", "time": 0.035 },
+              { "prover": "alt-ergo", "time": 0.037 }
+            ]
+          }
+        ]
+      },
+      "vc_publish_slot": { "prover": "alt-ergo", "time": 0.056 },
+      "vc_remove_tup2_u64_usize": { "prover": "alt-ergo", "time": 0.041 }
+    }
+  }
+}

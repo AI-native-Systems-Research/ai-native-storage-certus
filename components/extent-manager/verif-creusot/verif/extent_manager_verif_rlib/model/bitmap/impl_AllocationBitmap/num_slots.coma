@@ -1,0 +1,23 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 242 4 242 34 *)
+
+(* model::bitmap::AllocationBitmap *)
+
+let%span sbitmap = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 241 14 241 38
+
+use creusot.int.UInt32
+use creusot.prelude.Any
+
+type t_Vec_u64_Global
+
+type t_AllocationBitmap = { words: t_Vec_u64_Global; num_slots: UInt32.t; allocated_count: UInt32.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let num_slots'0 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 242 4 242 34]
+  (self: t_AllocationBitmap) (return (x: UInt32.t)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self.num_slots ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: UInt32.t = Any.any_l () | & self: t_AllocationBitmap = self ])
+  [ return (result: UInt32.t) -> {[@stop_split] [@expl:num_slots ensures] [%#sbitmap] result = self.num_slots}
+    (! return {result}) ]

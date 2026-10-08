@@ -1,0 +1,95 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 371 4 371 24 *)
+
+(* model::slab::SizeClassManager *)
+
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sslab = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 372 20 372 28
+let%span sslab'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 371 20 371 24
+let%span sslab'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 370 14 370 62
+let%span sslab'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 313 19 313 41
+let%span sslab'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 312 10 312 34
+let%span sslab'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 296 16 296 75
+let%span sfmap = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/fmap.rs" 45 14 45 31
+let%span sfmap'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/fmap.rs" 46 14 46 55
+let%span sfmap'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/fmap.rs" 88 8 88 32
+let%span sfmap'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/fmap.rs" 54 14 54 25
+
+use map.Map
+use map.Const
+use creusot.prelude.Any
+use creusot.int.UInt64
+use seq.Seq
+use int.Int
+
+type t_HashMap_u32_Vec_u64_Global_RandomState_Global
+
+predicate inv_HashMap_u32_Vec_u64_Global_RandomState_Global (_1: t_HashMap_u32_Vec_u64_Global_RandomState_Global)
+
+type t_FMap_Int_Vec_u64_Global
+
+function view_HashMap_u32_Vec_u64_Global_RandomState_Global (self: t_HashMap_u32_Vec_u64_Global_RandomState_Global) : t_FMap_Int_Vec_u64_Global
+
+function len_Int (self: t_FMap_Int_Vec_u64_Global) : int
+
+axiom len_Int_spec: forall self: t_FMap_Int_Vec_u64_Global [len_Int self]. [%#sfmap'2] len_Int self >= 0
+
+type t_Vec_u64_Global
+
+type t_Option_Vec_u64_Global = None | Some t_Vec_u64_Global
+
+function to_mapping_Int (self: t_FMap_Int_Vec_u64_Global) : Map.map int t_Option_Vec_u64_Global
+
+constant empty_Int : t_FMap_Int_Vec_u64_Global
+
+axiom empty_Int_spec: [%#sfmap] len_Int empty_Int = 0
+
+axiom empty_Int_spec'0: [%#sfmap'0] to_mapping_Int empty_Int = Const.const (None)
+
+let hm_new (return (x: t_HashMap_u32_Vec_u64_Global_RandomState_Global)) = any
+  [ return (result: t_HashMap_u32_Vec_u64_Global_RandomState_Global) ->
+  {[@stop_split] [@expl:hm_new ensures] ([@stop_split] [@expl:hm_new result type invariant] [%#sslab'2] inv_HashMap_u32_Vec_u64_Global_RandomState_Global result)
+    /\ ([@stop_split] [@expl:hm_new ensures] [%#sslab'3] view_HashMap_u32_Vec_u64_Global_RandomState_Global result
+    = empty_Int)}
+    (! return {result}) ]
+
+type t_SizeClassManager = { map: t_HashMap_u32_Vec_u64_Global_RandomState_Global }
+
+predicate inv_SizeClassManager (_1: t_SizeClassManager)
+
+axiom inv_axiom [@rewrite]: forall x: t_SizeClassManager [inv_SizeClassManager x]. inv_SizeClassManager x
+    = inv_HashMap_u32_Vec_u64_Global_RandomState_Global x.map
+
+function get_Int [@inline:trivial] (self: t_FMap_Int_Vec_u64_Global) (k: int) : t_Option_Vec_u64_Global =
+  [%#sfmap'1] Map.get (to_mapping_Int self) k
+
+meta "rewrite_def" function get_Int
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_u64_Global (self: t_Vec_u64_Global) : Seq.seq UInt64.t
+
+axiom view_Vec_u64_Global_spec:
+  forall self: t_Vec_u64_Global [view_Vec_u64_Global self]. [%#svec] Seq.length (view_Vec_u64_Global self)
+    <= UInt64.t'int const_MAX
+
+function sc_get [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 295 0 295 54] (m: t_SizeClassManager) (e: int) : Seq.seq UInt64.t
+ = [%#sslab'4] match get_Int (view_HashMap_u32_Vec_u64_Global_RandomState_Global m.map) e with
+    | Some v -> view_Vec_u64_Global v
+    | None -> Seq.empty: Seq.seq UInt64.t
+    end
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let new [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 371 4 371 24]
+  (return (x: t_SizeClassManager)) = (! bb0
+  [ bb0 = s0
+    [ s0 = hm_new [%#sslab] (fun (_x: t_HashMap_u32_Vec_u64_Global_RandomState_Global) -> [ &_2 <- _x ] s1)
+    | s1 = [ &_ret <- { map = _2 } ] s2
+    | s2 = return {_ret} ] ]
+  [ & _ret: t_SizeClassManager = Any.any_l () | & _2: t_HashMap_u32_Vec_u64_Global_RandomState_Global = Any.any_l () ])
+  [ return (result: t_SizeClassManager) ->
+  {[@stop_split] [@expl:new ensures] ([@stop_split] [@expl:new result type invariant] [%#sslab'0] inv_SizeClassManager result)
+    /\ ([@stop_split] [@expl:new ensures] [%#sslab'1] forall e: int. sc_get result e = (Seq.empty: Seq.seq UInt64.t))}
+    (! return {result}) ]

@@ -1,0 +1,10 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_fact_pow2_one": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_refute_em_format_err_metadata_too_small__mutant": null,
+      "vc_wtoo_params": { "prover": "alt-ergo", "time": 0.026 }
+    }
+  }
+}

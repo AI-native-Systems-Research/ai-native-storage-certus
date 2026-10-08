@@ -1,0 +1,19 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1210 0 1210 19 *)
+
+let%span sbatch3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1209 10 1209 69
+
+use creusot.prelude.Any
+use creusot.int.UInt64BW
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let fact_and_7 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1210 0 1210 19]
+  (return (x: ())) = (! bb0
+  [ bb0 = return {_ret} ] [ & _ret: () = Any.any_l () ])
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:fact_and_7 ensures] [%#sbatch3] UInt64BW.bw_and (15: UInt64BW.t) (7: UInt64BW.t)
+      = (7: UInt64BW.t)
+    /\ UInt64BW.bw_and (7: UInt64BW.t) (7: UInt64BW.t) = (7: UInt64BW.t)}
+    (! return {result}) ]

@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lemma_free_case_pending": { "prover": "cvc5", "time": 0.196 }
+    }
+  }
+}

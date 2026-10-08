@@ -1,0 +1,29 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1196 0 1196 70 *)
+
+let%span sbatch3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1197 4 1197 32
+let%span sbatch3'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1195 10 1195 30
+let%span sbatch3'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1111 10 1111 60
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type tup3_u64_u64_u64 = { f0: UInt64.t; f1: UInt64.t; f2: UInt64.t }
+
+let wa_recovered_reserve_abort (return (x: tup3_u64_u64_u64)) = any
+  [ return (result: tup3_u64_u64_u64) ->
+  {[@stop_split] [@expl:wa_recovered_reserve_abort ensures] [%#sbatch3'1] UInt64.t'int result.f0 = 8
+    /\ UInt64.t'int result.f1 = 8 /\ UInt64.t'int result.f2 = 0}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let refute_em_abort_post_used_restored__mutant [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1196 0 1196 70]
+  (return (x: tup3_u64_u64_u64)) = (! bb0
+  [ bb0 = s0
+    [ s0 = wa_recovered_reserve_abort [%#sbatch3] (fun (_x: tup3_u64_u64_u64) -> [ &_ret <- _x ] s1)
+    | s1 = return {_ret} ] ] [ & _ret: tup3_u64_u64_u64 = Any.any_l () ])
+  [ return (result: tup3_u64_u64_u64) ->
+  {[@stop_split] [@expl:refute_em_abort_post_used_restored__mutant ensures] [%#sbatch3'0] result.f2 = result.f0}
+    (! return {result}) ]

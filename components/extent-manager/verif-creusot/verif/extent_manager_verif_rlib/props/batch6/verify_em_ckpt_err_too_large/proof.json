@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_run6": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_verify_em_ckpt_err_too_large": { "prover": "z3", "time": 0.107 }
+    }
+  }
+}

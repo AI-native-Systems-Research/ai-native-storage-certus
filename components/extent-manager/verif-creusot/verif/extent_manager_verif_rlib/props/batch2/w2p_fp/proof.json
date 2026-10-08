@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_w2p_fp": { "prover": "alt-ergo", "time": 0.023 } }
+  }
+}

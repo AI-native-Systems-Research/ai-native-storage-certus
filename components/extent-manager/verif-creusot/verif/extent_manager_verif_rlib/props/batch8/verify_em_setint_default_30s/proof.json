@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_th_enter": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_tsys_new8": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_verify_em_setint_default_30s": {
+        "prover": "alt-ergo",
+        "time": 0.022
+      }
+    }
+  }
+}

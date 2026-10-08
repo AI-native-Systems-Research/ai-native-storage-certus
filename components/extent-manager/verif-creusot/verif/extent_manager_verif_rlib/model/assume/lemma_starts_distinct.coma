@@ -1,0 +1,64 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 399 0 399 75 *)
+
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sl2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 33 16 33 46
+let%span sregion = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 1223 16 1223 115
+let%span sassume = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 396 11 396 40
+let%span sassume'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 397 11 397 73
+let%span sassume'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 398 10 398 29
+let%span sassume'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 157 8 159 99
+let%span sassume'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 146 8 148 83
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use int.ComputerDivision
+use int.Int
+
+type t_Vec_u64_Global
+
+type t_SlabDescriptor = { start_offset: UInt64.t; slab_size: UInt64.t; element_size: UInt32.t; keys: t_Vec_u64_Global }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_u64_Global (self: t_Vec_u64_Global) : Seq.seq UInt64.t
+
+axiom view_Vec_u64_Global_spec:
+  forall self: t_Vec_u64_Global [view_Vec_u64_Global self]. [%#svec] Seq.length (view_Vec_u64_Global self)
+    <= UInt64.t'int const_MAX
+
+predicate a_980f61_d [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 144 0 144 66] (d: t_SlabDescriptor) (base: int) (size: int) =
+  [%#sassume'3] UInt32.t'int d.element_size > 0
+  /\ UInt32.t'int d.element_size <= UInt64.t'int d.slab_size
+  /\ Seq.length (view_Vec_u64_Global d.keys)
+    = ComputerDivision.div (UInt64.t'int d.slab_size) (UInt32.t'int d.element_size)
+  /\ base <= UInt64.t'int d.start_offset /\ UInt64.t'int d.start_offset + UInt64.t'int d.slab_size <= base + size
+
+predicate disj [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 32 0 32 55] (x1: int) (l1: int) (x2: int) (l2: int) =
+  [%#sl2] x1 + l1 <= x2 \/ x2 + l2 <= x1
+
+predicate a_980f61_list [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 155 0 155 75] (ds: Seq.seq t_SlabDescriptor) (base: int) (size: int) =
+  [%#sassume'2] forall p: int. 0 <= p /\ p < Seq.length ds
+    -> a_980f61_d (Seq.get ds p) base size
+    /\ (forall q: int. 0 <= q /\ q < Seq.length ds /\ q <> p
+      -> disj (UInt64.t'int (Seq.get ds p).start_offset) (UInt64.t'int (Seq.get ds p).slab_size) (UInt64.t'int (Seq.get ds q).start_offset) (UInt64.t'int (Seq.get ds q).slab_size))
+
+predicate starts_distinct [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 1222 0 1222 55] (ds: Seq.seq t_SlabDescriptor) =
+  [%#sregion] forall p: int, q: int. 0 <= p /\ p < q /\ q < Seq.length ds
+    -> (Seq.get ds p).start_offset <> (Seq.get ds q).start_offset
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant ds : Seq.seq t_SlabDescriptor
+
+constant base : int
+
+constant size : int
+
+function lemma_starts_distinct [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 399 0 399 75] (ds: Seq.seq t_SlabDescriptor) (base: int) (size: int) : ()
+
+goal vc_lemma_starts_distinct: ([%#sassume] a_980f61_list ds base size)
+  -> ([%#sassume'0] forall p: int. 0 <= p /\ p < Seq.length ds -> UInt64.t'int (Seq.get ds p).slab_size > 0)
+  -> ([@stop_split] [@expl:lemma_starts_distinct ensures] [%#sassume'1] starts_distinct ds)

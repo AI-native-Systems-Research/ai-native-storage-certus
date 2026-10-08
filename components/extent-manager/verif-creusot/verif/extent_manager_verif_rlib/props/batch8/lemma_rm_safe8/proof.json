@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_lemma_rm_safe8": { "prover": "z3", "time": 0.022 } }
+  }
+}

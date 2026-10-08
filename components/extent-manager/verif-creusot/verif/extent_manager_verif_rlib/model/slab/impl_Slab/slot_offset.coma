@@ -1,0 +1,56 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 224 4 224 55 *)
+
+(* model::slab::Slab *)
+
+let%span sslab = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 225 28 225 72
+let%span sslab'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 225 8 225 72
+let%span sslab'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 222 15 222 56
+let%span sslab'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 223 14 223 53
+let%span sslab'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 85 16 85 53
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_u64_Global
+
+type t_AllocationBitmap = { words: t_Vec_u64_Global; num_slots: UInt32.t; allocated_count: UInt32.t }
+
+type t_Slab = {
+  start_offset: UInt64.t;
+  slab_size: UInt64.t;
+  element_size: UInt32.t;
+  bitmap: t_AllocationBitmap;
+  keys: t_Vec_u64_Global;
+  rover: UInt64.t }
+
+function slot_off [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 84 0 84 39] (s: t_Slab) (i: int) : int
+ = [%#sslab'3] UInt64.t'int s.start_offset + i * UInt32.t'int s.element_size
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let slot_offset [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 224 4 224 55]
+  (self: t_Slab) (slot_index: UInt64.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:slot_offset requires] [%#sslab'1] slot_off self (UInt64.t'int slot_index)
+  <= UInt64.t'int const_MAX}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_11 <- UInt64.of_int (UInt64.t'int slot_index) ] s1
+    | s1 = [ &_13 <- UInt64.of_int (UInt32.t'int self.element_size) ] s2
+    | s2 = UInt64.mul [%#sslab] {_11} {_13} (fun (_x: UInt64.t) -> [ &_10 <- _x ] s3)
+    | s3 = UInt64.add [%#sslab'0] {self.start_offset} {_10} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s4)
+    | s4 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l ()
+  | & self: t_Slab = self
+  | & slot_index: UInt64.t = slot_index
+  | & _10: UInt64.t = Any.any_l ()
+  | & _11: UInt64.t = Any.any_l ()
+  | & _13: UInt64.t = Any.any_l () ])
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:slot_offset ensures] [%#sslab'2] UInt64.t'int result
+    = slot_off self (UInt64.t'int slot_index)}
+    (! return {result}) ]

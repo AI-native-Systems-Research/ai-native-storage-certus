@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_format6": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_witness_em_format_err_metadata_too_small_bounded": {
+        "prover": "cvc5",
+        "time": 0.196
+      }
+    }
+  }
+}

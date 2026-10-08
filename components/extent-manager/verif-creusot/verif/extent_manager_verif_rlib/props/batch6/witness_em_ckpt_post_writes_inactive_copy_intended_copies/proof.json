@@ -1,0 +1,14 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_ck_begin": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_ck_write": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_witness_em_ckpt_post_writes_inactive_copy_intended_copies": {
+        "prover": "alt-ergo",
+        "time": 0.191
+      }
+    }
+  }
+}

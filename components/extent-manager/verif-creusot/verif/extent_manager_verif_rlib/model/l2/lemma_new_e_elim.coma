@@ -1,0 +1,70 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 560 0 560 60 *)
+
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 33 16 33 29
+let%span sl2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 558 11 558 28
+let%span sl2'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 559 10 559 42
+let%span sl2'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 549 16 549 48
+let%span sl2'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 40 8 41 76
+let%span sl2'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 78 8 78 125
+let%span sl2'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 21 16 21 68
+let%span sl2'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 33 16 33 46
+let%span sl2'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 27 16 27 26
+let%span sl2'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 69 8 69 125
+
+use seq.Seq
+use creusot.int.UInt64
+use bv.Pow2int
+use int.ComputerDivision
+use int.Int
+
+type t_Vec_u64_Global
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_u64_Global (self: t_Vec_u64_Global) : Seq.seq UInt64.t
+
+axiom view_Vec_u64_Global_spec:
+  forall self: t_Vec_u64_Global [view_Vec_u64_Global self]. [%#svec] Seq.length (view_Vec_u64_Global self)
+    <= UInt64.t'int const_MAX
+
+predicate fv [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 20 0 20 52] (fl: Seq.seq t_Vec_u64_Global) (o: int) (k: int) =
+  [%#sl2'4] 0 <= o /\ o < Seq.length fl /\ 0 <= k /\ k < Seq.length (view_Vec_u64_Global (Seq.get fl o))
+
+predicate disj [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 32 0 32 55] (x1: int) (l1: int) (x2: int) (l2: int) =
+  [%#sl2'5] x1 + l1 <= x2 \/ x2 + l2 <= x1
+
+function fs [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 26 0 26 51] (fl: Seq.seq t_Vec_u64_Global) (o: int) (k: int) : int
+ = [%#sl2'6] UInt64.t'int (Seq.get (view_Vec_u64_Global (Seq.get fl o)) k)
+
+function span [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 32 0 32 35] (ss: int) (o: int) : int
+ = [%#sbuddy] Pow2int.pow2 o * ss
+
+predicate fdisj [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 38 0 38 48] (fl: Seq.seq t_Vec_u64_Global) (ss: int) =
+  [%#sl2'2] forall o1: int, k1: int, o2: int, k2: int. fv fl o1 k1 /\ fv fl o2 k2 /\ (o1 <> o2 \/ k1 <> k2)
+    -> disj (fs fl o1 k1) (span ss o1) (fs fl o2 k2) (span ss o2)
+
+predicate inblk [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 67 0 67 65] (fl: Seq.seq t_Vec_u64_Global) (ss: int) (kk: int) (t: int) =
+  [%#sl2'7] exists o: int, k: int. fv fl o k /\ o >= kk /\ fs fl o k <= t /\ t + span ss kk <= fs fl o k + span ss o
+
+predicate cov [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 76 0 76 55] (fl: Seq.seq t_Vec_u64_Global) (ss: int) (hi: int) =
+  [%#sl2'3] forall kk: int, t: int. 0 <= kk /\ 0 <= t /\ ComputerDivision.mod t (span ss kk) = 0 /\ t + span ss kk <= hi
+    -> inblk fl ss kk t
+
+predicate new_e [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 548 0 548 57] (fl: Seq.seq t_Vec_u64_Global) (ss: int) (hi: int) =
+  [%#sl2'1] fdisj fl ss /\ cov fl ss hi
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant fl : Seq.seq t_Vec_u64_Global
+
+constant ss : int
+
+constant hi : int
+
+function lemma_new_e_elim [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 560 0 560 60] (fl: Seq.seq t_Vec_u64_Global) (ss: int) (hi: int) : ()
+
+goal vc_lemma_new_e_elim: ([%#sl2] new_e fl ss hi)
+  -> ([@stop_split] [@expl:lemma_new_e_elim ensures] [%#sl2'0] fdisj fl ss /\ cov fl ss hi)

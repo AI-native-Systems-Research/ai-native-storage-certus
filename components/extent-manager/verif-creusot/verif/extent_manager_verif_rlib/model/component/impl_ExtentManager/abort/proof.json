@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_abort": { "prover": "cvc4", "time": 0.148 },
+      "vc_free_slot": { "prover": "alt-ergo", "time": 0.047 },
+      "vc_index_mut_Vec_RegionState_Global": {
+        "prover": "alt-ergo",
+        "time": 0.025
+      }
+    }
+  }
+}

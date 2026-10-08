@@ -1,0 +1,21 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 213 9 213 29 *)
+
+(* <model::b3::EvClient as std::clone::Clone> *)
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_AllocSel = Default | User UInt64.t
+
+type t_EvClient = { sector_size: UInt32.t; ns_id: UInt32.t; base_lba: UInt64.t; alloc: t_AllocSel }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_EvClient [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 213 9 213 29]
+  (self: t_EvClient) (return (x: t_EvClient)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_EvClient = Any.any_l () | & self: t_EvClient = self ])
+  [ return (result: t_EvClient) -> (! return {result}) ]

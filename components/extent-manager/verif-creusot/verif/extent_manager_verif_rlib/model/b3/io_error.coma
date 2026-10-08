@@ -1,0 +1,18 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 37 0 37 28 *)
+
+let%span sb3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 36 10 36 36
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_EmError = CorruptMetadata | IoError | NotInitialized | OffsetNotFound UInt64.t | OutOfSpace
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let io_error [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 37 0 37 28]
+  (return (x: t_EmError)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- IoError ] s1 | s1 = return {_ret} ] ] [ & _ret: t_EmError = Any.any_l () ])
+  [ return (result: t_EmError) -> {[@stop_split] [@expl:io_error ensures] [%#sb3] result = IoError}
+    (! return {result}) ]

@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_mark_allocated": { "prover": "alt-ergo", "time": 0.038 },
+      "vc_mark_checked": { "prover": "alt-ergo", "time": 0.142 }
+    }
+  }
+}

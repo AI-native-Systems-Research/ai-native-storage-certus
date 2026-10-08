@@ -1,0 +1,47 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 495 4 495 56 *)
+
+let%span swell_founded = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 494 14 494 15
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 33 16 33 29
+
+use seq.Seq
+use creusot.int.UInt64
+use bv.Pow2int
+use int.Int
+
+type t_Vec_u64_Global
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_u64_Global (self: t_Vec_u64_Global) : Seq.seq UInt64.t
+
+axiom view_Vec_u64_Global_spec:
+  forall self: t_Vec_u64_Global [view_Vec_u64_Global self]. [%#svec] Seq.length (view_Vec_u64_Global self)
+    <= UInt64.t'int const_MAX
+
+function span [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 32 0 32 35] (ss: int) (o: int) : int
+ = [%#sbuddy'0] Pow2int.pow2 o * ss
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant fl : Seq.seq t_Vec_u64_Global
+
+constant ss : int
+
+constant n : int
+
+function tf [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 495 4 495 56] (fl: Seq.seq t_Vec_u64_Global) (ss: int) (n: int) : int
+
+goal vc_tf: if n <= 0 then
+    true
+  else
+    [@expl:variant decreases] well_founded_relation_Int ([%#sbuddy] n) ([%#sbuddy] n - 1)
+  

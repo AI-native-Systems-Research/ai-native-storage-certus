@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_apply_sop": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_index_Vec_SOp_Global": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_len_SOp": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_slab_from_descriptor": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_slab_life_rec": { "prover": "z3", "time": 0.038 }
+    }
+  }
+}

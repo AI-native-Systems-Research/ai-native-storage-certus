@@ -1,0 +1,79 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2r.rs" 108 0 108 117 *)
+
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sslab = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 296 16 296 75
+let%span sfmap = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/fmap.rs" 88 8 88 32
+let%span sregion = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 888 16 888 68
+let%span sl2r = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2r.rs" 105 11 105 34
+let%span sl2r'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2r.rs" 106 11 106 112
+let%span sl2r'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2r.rs" 107 10 107 33
+let%span sl2r'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2r.rs" 37 8 38 88
+
+use creusot.int.UInt64
+use seq.Seq
+use map.Map
+use int.Int
+
+type t_HashMap_u32_Vec_u64_Global_RandomState_Global
+
+type t_SizeClassManager = { map: t_HashMap_u32_Vec_u64_Global_RandomState_Global }
+
+type t_Vec_u64_Global
+
+type t_Option_Vec_u64_Global = None | Some t_Vec_u64_Global
+
+type t_FMap_Int_Vec_u64_Global
+
+function to_mapping_Int (self: t_FMap_Int_Vec_u64_Global) : Map.map int t_Option_Vec_u64_Global
+
+function get_Int [@inline:trivial] (self: t_FMap_Int_Vec_u64_Global) (k: int) : t_Option_Vec_u64_Global =
+  [%#sfmap] Map.get (to_mapping_Int self) k
+
+meta "rewrite_def" function get_Int
+
+function view_HashMap_u32_Vec_u64_Global_RandomState_Global (self: t_HashMap_u32_Vec_u64_Global_RandomState_Global) : t_FMap_Int_Vec_u64_Global
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_u64_Global (self: t_Vec_u64_Global) : Seq.seq UInt64.t
+
+axiom view_Vec_u64_Global_spec:
+  forall self: t_Vec_u64_Global [view_Vec_u64_Global self]. [%#svec] Seq.length (view_Vec_u64_Global self)
+    <= UInt64.t'int const_MAX
+
+function sc_get [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 295 0 295 54] (m: t_SizeClassManager) (e: int) : Seq.seq UInt64.t
+ = [%#sslab] match get_Int (view_HashMap_u32_Vec_u64_Global_RandomState_Global m.map) e with
+    | Some v -> view_Vec_u64_Global v
+    | None -> Seq.empty: Seq.seq UInt64.t
+    end
+
+predicate listed [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 887 0 887 43] (sq: Seq.seq UInt64.t) (k: int) =
+  [%#sregion] exists p: int. 0 <= p /\ p < Seq.length sq /\ UInt64.t'int (Seq.get sq p) = k
+
+predicate sc_sub [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2r.rs" 35 0 35 80] (a: t_SizeClassManager) (b: t_SizeClassManager) (es: int) (d: int) =
+  [%#sl2r'2] forall e: int, p: int. 0 <= p /\ p < Seq.length (sc_get b e)
+    -> listed (sc_get a e) (UInt64.t'int (Seq.get (sc_get b e) p))
+    \/ e = es /\ UInt64.t'int (Seq.get (sc_get b e) p) = d
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant old' : t_SizeClassManager
+
+constant it : t_SizeClassManager
+
+constant nw : t_SizeClassManager
+
+constant es : int
+
+constant d : UInt64.t
+
+constant c : bool
+
+function lemma_sc_sub_push [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2r.rs" 108 0 108 117] (old': t_SizeClassManager) (it: t_SizeClassManager) (nw: t_SizeClassManager) (es: int) (d: UInt64.t) (c: bool) : ()
+
+goal vc_lemma_sc_sub_push: ([%#sl2r] sc_sub old' it es (- 1))
+  -> ([%#sl2r'0] forall e: int. sc_get nw e = (if e = es /\ c then Seq.snoc (sc_get it e) d else sc_get it e))
+  -> (forall e: int, v: int. listed (sc_get it e) v /\ v >= 0 -> listed (sc_get old' e) v)
+  && ([@stop_split] [@expl:lemma_sc_sub_push ensures] [%#sl2r'1] sc_sub old' nw es (UInt64.t'int d))

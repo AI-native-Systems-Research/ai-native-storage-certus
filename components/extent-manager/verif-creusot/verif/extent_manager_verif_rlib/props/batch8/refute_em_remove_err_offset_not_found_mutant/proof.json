@@ -1,0 +1,27 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_is_err_unit": { "prover": "alt-ergo", "time": 0.044 },
+      "vc_refute_em_remove_err_offset_not_found__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "cvc5", "time": 0.072 },
+              {
+                "tactic": "split_vc",
+                "children": [ { "prover": "alt-ergo", "time": 0.056 }, null ]
+              },
+              { "prover": "alt-ergo", "time": 0.047 },
+              { "prover": "alt-ergo", "time": 0.069 }
+            ]
+          }
+        ]
+      },
+      "vc_remove_extent8": { "prover": "alt-ergo", "time": 0.05 },
+      "vc_w8_rb0_format": { "prover": "alt-ergo", "time": 0.044 }
+    }
+  }
+}

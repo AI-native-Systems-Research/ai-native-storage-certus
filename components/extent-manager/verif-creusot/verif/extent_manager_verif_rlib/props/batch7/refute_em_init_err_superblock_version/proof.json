@@ -1,0 +1,16 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_dev7": { "prover": "alt-ergo", "time": 0.011 },
+      "vc_initialize7": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_mk_sb7": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_new_inner": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_refute_em_init_err_superblock_version": {
+        "prover": "alt-ergo",
+        "time": 0.707
+      },
+      "vc_sb_bytes7": { "prover": "alt-ergo", "time": 0.026 }
+    }
+  }
+}

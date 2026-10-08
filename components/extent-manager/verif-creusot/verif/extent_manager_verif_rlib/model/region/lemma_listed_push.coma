@@ -1,0 +1,27 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 905 0 905 54 *)
+
+let%span sregion = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 903 11 903 24
+let%span sregion'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 904 10 904 36
+let%span sregion'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 888 16 888 68
+
+use creusot.int.UInt64
+use seq.Seq
+use int.Int
+
+predicate listed [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 887 0 887 43] (sq: Seq.seq UInt64.t) (k: int) =
+  [%#sregion'1] exists p: int. 0 <= p /\ p < Seq.length sq /\ UInt64.t'int (Seq.get sq p) = k
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant sq : Seq.seq UInt64.t
+
+constant a : UInt64.t
+
+constant k : int
+
+function lemma_listed_push [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 905 0 905 54] (sq: Seq.seq UInt64.t) (a: UInt64.t) (k: int) : ()
+
+goal vc_lemma_listed_push: ([%#sregion] listed sq k)
+  -> ([@stop_split] [@expl:lemma_listed_push ensures] [%#sregion'0] listed (Seq.snoc sq a) k)

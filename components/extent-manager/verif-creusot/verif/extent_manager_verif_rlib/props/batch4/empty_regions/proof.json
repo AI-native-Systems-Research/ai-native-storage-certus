@@ -1,0 +1,17 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_empty_regions": { "prover": "alt-ergo", "time": 0.043 },
+      "vc_new_SlabDescriptor": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_new_Vec_SlabDescriptor_Global": {
+        "prover": "alt-ergo",
+        "time": 0.018
+      },
+      "vc_push_Vec_SlabDescriptor_Global": {
+        "prover": "alt-ergo",
+        "time": 0.021
+      }
+    }
+  }
+}

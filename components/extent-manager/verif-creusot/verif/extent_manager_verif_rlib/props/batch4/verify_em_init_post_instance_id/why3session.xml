@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE why3session PUBLIC "-//Why3//proof session v5//EN"
+"https://www.why3.org/why3session.dtd">
+<why3session shape_version="6">
+<prover id="0" name="Z3" version="4.16.0" timelimit="0.011433" memlimit="1000"/>
+<prover id="1" name="CVC4" version="1.8" timelimit="4" memlimit="1000"/>
+<prover id="2" name="Alt-Ergo" version="2.6.2" timelimit="0.029716" memlimit="1000"/>
+<prover id="3" name="CVC5" version="1.3.1" timelimit="4" memlimit="1000"/>
+<file format="coma">
+<path name=".."/><path name="verify_em_init_post_instance_id.coma"/>
+<theory name="Coma">
+ <goal name="vc_initialize" proved="true">
+ <proof prover="2" timelimit="0.02292"><result status="valid" time="0.022920" steps="0"/></proof>
+ </goal>
+ <goal name="vc_get_instance_id" proved="true">
+ <proof prover="2" timelimit="0.03051"><result status="valid" time="0.030510" steps="0"/></proof>
+ </goal>
+ <goal name="vc_format" proved="true">
+ <proof prover="2"><result status="valid" time="0.029716" steps="0"/></proof>
+ </goal>
+ <goal name="vc_is_ok_unit" proved="true">
+ <proof prover="2"><result status="valid" time="0.029716" steps="0"/></proof>
+ </goal>
+ <goal name="vc_elim_Some" proved="true">
+ <proof prover="2"><result status="valid" time="0.029716" steps="0"/></proof>
+ </goal>
+ <goal name="vc_new_Vec_SlabDescriptor_Global" proved="true">
+ <proof prover="2"><result status="valid" time="0.029716" steps="0"/></proof>
+ </goal>
+ <goal name="vc_verify_em_init_post_instance_id">
+ <transf name="compute_specified" >
+  <goal name="vc_verify_em_init_post_instance_id.0">
+  <transf name="split_vc" >
+   <goal name="vc_verify_em_init_post_instance_id.0.0" expl="initialize requires" proved="true">
+   <proof prover="2" timelimit="0.032999"><result status="valid" time="0.032999" steps="0"/></proof>
+   </goal>
+   <goal name="vc_verify_em_init_post_instance_id.0.1" expl="get_instance_id &#39;self&#39; type invariant" proved="true">
+   <proof prover="2" timelimit="0.032344"><result status="valid" time="0.032344" steps="0"/></proof>
+   </goal>
+   <goal name="vc_verify_em_init_post_instance_id.0.2" expl="format requires" proved="true">
+   <proof prover="2" timelimit="0.03233"><result status="valid" time="0.032330" steps="0"/></proof>
+   </goal>
+   <goal name="vc_verify_em_init_post_instance_id.0.3" expl="verify_em_init_post_instance_id ensures" proved="true">
+   <proof prover="0" timelimit="0.033711"><result status="valid" time="0.033711" steps="0"/></proof>
+   </goal>
+   <goal name="vc_verify_em_init_post_instance_id.0.4" expl="type invariant" proved="true">
+   <proof prover="2" timelimit="0.037654"><result status="valid" time="0.037654" steps="0"/></proof>
+   </goal>
+   <goal name="vc_verify_em_init_post_instance_id.0.5" expl="type invariant" proved="true">
+   <proof prover="2" timelimit="0.046757"><result status="valid" time="0.046757" steps="0"/></proof>
+   </goal>
+   <goal name="vc_verify_em_init_post_instance_id.0.6" expl="get_instance_id &#39;self&#39; type invariant" proved="true">
+   <proof prover="2" timelimit="0.038647"><result status="valid" time="0.038647" steps="0"/></proof>
+   </goal>
+   <goal name="vc_verify_em_init_post_instance_id.0.7" expl="verify_em_init_post_instance_id ensures" proved="true">
+   <proof prover="0"><result status="valid" time="0.011433" steps="0"/></proof>
+   </goal>
+   <goal name="vc_verify_em_init_post_instance_id.0.8" expl="type invariant" proved="true">
+   <proof prover="2" timelimit="0.03882"><result status="valid" time="0.038820" steps="0"/></proof>
+   </goal>
+   <goal name="vc_verify_em_init_post_instance_id.0.9" expl="type invariant" proved="true">
+   <proof prover="2" timelimit="0.037935"><result status="valid" time="0.037935" steps="0"/></proof>
+   </goal>
+   <goal name="vc_verify_em_init_post_instance_id.0.10" expl="assertion">
+   <transf name="split_vc" >
+    <goal name="vc_verify_em_init_post_instance_id.0.10.0" expl="assertion">
+    <proof prover="0" timelimit="2.4848"><result status="unknown" time="2.484795" steps="0"/></proof>
+    <proof prover="1"><result status="timeout" time="4.000000" steps="0"/></proof>
+    <proof prover="2" timelimit="4"><result status="timeout" time="4.000000" steps="0"/></proof>
+    <proof prover="3"><result status="timeout" time="4.000000" steps="0"/></proof>
+    <transf name="split_vc" >
+     <goal name="vc_verify_em_init_post_instance_id.0.10.0.0" expl="assertion">
+     <proof prover="0" timelimit="2.34172"><result status="unknown" time="2.341719" steps="0"/></proof>
+     <proof prover="1" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+     <proof prover="2" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+     <proof prover="3" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+     </goal>
+    </transf>
+    </goal>
+    <goal name="vc_verify_em_init_post_instance_id.0.10.1" expl="assertion" proved="true">
+    <proof prover="2" timelimit="0.102664"><result status="valid" time="0.102664" steps="0"/></proof>
+    </goal>
+   </transf>
+   </goal>
+   <goal name="vc_verify_em_init_post_instance_id.0.11" expl="initialize requires" proved="true">
+   <proof prover="2" timelimit="0.046816"><result status="valid" time="0.046816" steps="0"/></proof>
+   </goal>
+   <goal name="vc_verify_em_init_post_instance_id.0.12" expl="get_instance_id &#39;self&#39; type invariant" proved="true">
+   <proof prover="2" timelimit="0.03827"><result status="valid" time="0.038270" steps="0"/></proof>
+   </goal>
+   <goal name="vc_verify_em_init_post_instance_id.0.13" expl="verify_em_init_post_instance_id ensures" proved="true">
+   <proof prover="0" timelimit="0.02691"><result status="valid" time="0.026910" steps="0"/></proof>
+   </goal>
+   <goal name="vc_verify_em_init_post_instance_id.0.14" expl="type invariant" proved="true">
+   <proof prover="2" timelimit="0.042505"><result status="valid" time="0.042505" steps="0"/></proof>
+   </goal>
+   <goal name="vc_verify_em_init_post_instance_id.0.15" expl="type invariant" proved="true">
+   <proof prover="2" timelimit="0.047891"><result status="valid" time="0.047891" steps="0"/></proof>
+   </goal>
+   <goal name="vc_verify_em_init_post_instance_id.0.16" expl="elim Some" proved="true">
+   <proof prover="2" timelimit="0.053182"><result status="valid" time="0.053182" steps="0"/></proof>
+   </goal>
+   <goal name="vc_verify_em_init_post_instance_id.0.17" expl="type invariant" proved="true">
+   <proof prover="2" timelimit="0.040301"><result status="valid" time="0.040301" steps="0"/></proof>
+   </goal>
+   <goal name="vc_verify_em_init_post_instance_id.0.18" expl="type invariant" proved="true">
+   <proof prover="2" timelimit="0.030042"><result status="valid" time="0.030042" steps="0"/></proof>
+   </goal>
+   <goal name="vc_verify_em_init_post_instance_id.0.19" expl="type invariant" proved="true">
+   <proof prover="2" timelimit="0.033413"><result status="valid" time="0.033413" steps="0"/></proof>
+   </goal>
+   <goal name="vc_verify_em_init_post_instance_id.0.20" expl="type invariant" proved="true">
+   <proof prover="2" timelimit="0.024913"><result status="valid" time="0.024913" steps="0"/></proof>
+   </goal>
+  </transf>
+  </goal>
+ </transf>
+ </goal>
+</theory>
+</file>
+</why3session>

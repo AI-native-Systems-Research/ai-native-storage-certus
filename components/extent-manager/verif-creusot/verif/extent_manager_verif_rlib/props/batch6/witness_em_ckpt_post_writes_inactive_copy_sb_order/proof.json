@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_w6_sb_chain": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_witness_em_ckpt_post_writes_inactive_copy_sb_order": {
+        "prover": "alt-ergo",
+        "time": 0.039
+      }
+    }
+  }
+}

@@ -1,0 +1,61 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 458 0 458 45 *)
+
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 180 11 180 26
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 181 10 181 34
+let%span sbuddy'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 182 10 182 33
+let%span sbuddy'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 183 10 183 20
+let%span sbuddy'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 154 11 154 37
+let%span sbuddy'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 155 10 155 24
+let%span sl2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 456 11 456 60
+let%span sl2'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 457 10 457 26
+
+use int.ComputerDivision
+use int.Int
+
+function lemma_divmod [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 184 0 184 35] (x: int) (m: int) : ()
+
+axiom lemma_divmod_spec: forall x: int, m: int. ([%#sbuddy] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'0] x = m * ComputerDivision.div x m + ComputerDivision.mod x m)
+
+axiom lemma_divmod_spec'0: forall x: int, m: int. ([%#sbuddy] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'1] 0 <= ComputerDivision.mod x m /\ ComputerDivision.mod x m < m)
+
+axiom lemma_divmod_spec'1: forall x: int, m: int. ([%#sbuddy] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'2] ComputerDivision.div x m >= 0)
+
+function lemma_mul_le [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 156 0 156 43] (a: int) (b: int) (c: int) : ()
+
+axiom lemma_mul_le_spec: forall a: int, b: int, c: int. ([%#sbuddy'3] 0 <= a /\ a <= b /\ 0 <= c)
+    -> ([%#sbuddy'4] a * c <= b * c)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant m : int
+
+constant d : int
+
+constant n : int
+
+function lemma_floor_le [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 458 0 458 45] (m: int) (d: int) (n: int) : ()
+
+goal vc_lemma_floor_le: ([%#sl2] d > 0 /\ m >= 0 /\ n >= 0 /\ ComputerDivision.mod m d = 0 /\ m <= n)
+  -> ([@stop_split] [@expl:lemma_divmod requires] [%#sbuddy] d > 0 /\ m >= 0)
+  /\ (([@stop_split] [@expl:lemma_divmod ensures] ([@stop_split] [@expl:lemma_divmod ensures #0] [%#sbuddy'0] m
+      = d * ComputerDivision.div m d + ComputerDivision.mod m d)
+    /\ ([@stop_split] [@expl:lemma_divmod ensures #1] [%#sbuddy'1] 0 <= ComputerDivision.mod m d
+      /\ ComputerDivision.mod m d < d)
+    /\ ([@stop_split] [@expl:lemma_divmod ensures #2] [%#sbuddy'2] ComputerDivision.div m d >= 0))
+  -> (let _ = lemma_divmod m d in ([@stop_split] [@expl:lemma_divmod requires] [%#sbuddy] d > 0 /\ n >= 0)
+  /\ (([@stop_split] [@expl:lemma_divmod ensures] ([@stop_split] [@expl:lemma_divmod ensures #0] [%#sbuddy'0] n
+      = d * ComputerDivision.div n d + ComputerDivision.mod n d)
+    /\ ([@stop_split] [@expl:lemma_divmod ensures #1] [%#sbuddy'1] 0 <= ComputerDivision.mod n d
+      /\ ComputerDivision.mod n d < d)
+    /\ ([@stop_split] [@expl:lemma_divmod ensures #2] [%#sbuddy'2] ComputerDivision.div n d >= 0))
+  -> (let _ = lemma_divmod n d in ([@stop_split] [@expl:lemma_mul_le requires] [%#sbuddy'3] 0
+      <= ComputerDivision.div m d
+    /\ ComputerDivision.div m d <= ComputerDivision.div n d /\ 0 <= d)
+  /\ (([@stop_split] [@expl:lemma_mul_le ensures] [%#sbuddy'4] ComputerDivision.div m d * d
+    <= ComputerDivision.div n d * d)
+  -> ([@stop_split] [@expl:lemma_floor_le ensures] [%#sl2'0] m <= ComputerDivision.div n d * d))))))

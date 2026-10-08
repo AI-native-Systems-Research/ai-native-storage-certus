@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_recover": { "prover": "alt-ergo", "time": 0.048 },
+      "vc_run_checkpoint": { "prover": "alt-ergo", "time": 0.045 },
+      "vc_verify_em_ckpt_fail_retains_changes": {
+        "prover": "cvc4",
+        "time": 0.258
+      }
+    }
+  }
+}

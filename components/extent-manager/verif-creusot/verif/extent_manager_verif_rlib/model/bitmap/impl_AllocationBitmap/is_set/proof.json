@@ -1,0 +1,23 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_index_Vec_u64_Global": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_is_set": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.017 },
+              { "prover": "alt-ergo", "time": 0.015 },
+              { "prover": "alt-ergo", "time": 0.025 },
+              { "prover": "alt-ergo", "time": 0.03 },
+              { "prover": "cvc5", "time": 0.084 }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

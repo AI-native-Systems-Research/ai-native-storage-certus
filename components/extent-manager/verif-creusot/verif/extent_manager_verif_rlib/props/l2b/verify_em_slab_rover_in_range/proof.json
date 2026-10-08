@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_slab_life": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_slab_life_rec": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_verify_em_slab_rover_in_range": {
+        "prover": "alt-ergo",
+        "time": 0.119
+      }
+    }
+  }
+}

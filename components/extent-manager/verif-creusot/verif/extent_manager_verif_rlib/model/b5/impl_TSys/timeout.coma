@@ -1,0 +1,49 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 91 4 91 29 *)
+
+(* model::b5::TSys *)
+
+let%span sb5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 92 29 92 33
+let%span sb5'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 87 15 87 78
+let%span sb5'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 88 14 88 44
+let%span sb5'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 89 14 89 74
+let%span sb5'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 90 14 90 78
+
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_TPh = Top | Wait int | WaitInf | Woken bool | Work | Exited
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_TSys = { interval: t_Option_u64; now: int; ph: t_TPh; shutdown: bool; ckpts: UInt64.t }
+
+predicate resolve_refmut_TSys [@inline:trivial] (_1: MutBorrow.t t_TSys) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_TSys
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let timeout [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 91 4 91 29]
+  (self: MutBorrow.t t_TSys) (return (x: ())) =
+{[@stop_split] [@expl:timeout requires] [%#sb5'0] match self.current.ph with
+    | Wait dl -> self.current.now >= dl
+    | _ -> false
+    end}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_11 <- Woken ([%#sb5] true) ] s1
+    | s1 = [ &self <- { self with current = { self.current with ph = _11 } } ] s2
+    | s2 = -{resolve_refmut_TSys self}- s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: () = Any.any_l () | & self: MutBorrow.t t_TSys = self | & _11: t_TPh = Any.any_l () ])
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:timeout ensures] ([@stop_split] [@expl:timeout ensures #0] [%#sb5'1] self.final.ph = Woken true)
+    /\ ([@stop_split] [@expl:timeout ensures #1] [%#sb5'2] self.final.interval = self.current.interval
+      /\ self.final.now = self.current.now)
+    /\ ([@stop_split] [@expl:timeout ensures #2] [%#sb5'3] self.final.shutdown = self.current.shutdown
+    /\ self.final.ckpts = self.current.ckpts)}
+    (! return {result}) ]

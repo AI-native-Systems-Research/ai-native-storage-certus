@@ -1,0 +1,16 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 269 9 269 29 *)
+
+(* <model::b4::CoOp as std::clone::Clone> *)
+
+use creusot.prelude.Any
+
+type t_CoOp = Enter | Wake | Finish bool
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_CoOp [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 269 9 269 29]
+  (self: t_CoOp) (return (x: t_CoOp)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_CoOp = Any.any_l () | & self: t_CoOp = self ]) [ return (result: t_CoOp) -> (! return {result}) ]

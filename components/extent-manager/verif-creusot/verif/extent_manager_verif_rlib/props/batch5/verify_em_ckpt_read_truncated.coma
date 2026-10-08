@@ -1,0 +1,102 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 600 0 600 135 *)
+
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sb4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 326 16 326 35
+let%span sb5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 263 11 263 39
+let%span sb5'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 264 10 264 81
+let%span sb5'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 265 10 265 67
+let%span sb5'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 266 10 267 43
+let%span sb5'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 268 10 268 111
+let%span sb5'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 269 10 269 121
+let%span sb5'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 256 16 256 91
+let%span sbatch5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 601 4 601 53
+let%span sbatch5'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 596 11 596 39
+let%span sbatch5'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 597 10 597 67
+let%span sbatch5'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 598 10 598 137
+let%span sbatch5'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 599 10 599 81
+
+use creusot.int.UInt64
+use seq.Seq
+use creusot.int.UInt8
+use int.ComputerDivision
+use creusot.int.UInt32
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_u8_Global
+
+type t_EmError = CorruptMetadata | IoError | NotInitialized | OffsetNotFound UInt64.t | OutOfSpace
+
+type t_Result_Vec_u8_Global_EmError = Ok t_Vec_u8_Global | Err t_EmError
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_u8_Global (self: t_Vec_u8_Global) : Seq.seq UInt8.t
+
+axiom view_Vec_u8_Global_spec:
+  forall self: t_Vec_u8_Global [view_Vec_u8_Global self]. [%#svec] Seq.length (view_Vec_u8_Global self)
+    <= UInt64.t'int const_MAX
+
+function alignup [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 325 0 325 37] (x: int) (d: int) : int
+ = [%#sb4] ComputerDivision.div (x + d - 1) d * d
+
+function dec32 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 288 0 288 31] (b: Seq.seq UInt8.t) : UInt32.t
+
+function raw_of [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 255 0 255 60] (h: Seq.seq UInt8.t) (full: Seq.seq UInt8.t) (ss: int) : Seq.seq UInt8.t
+ = [%#sb5'5] if alignup (16 + UInt32.t'int (dec32 (Seq.([..]) h 8 12))) ss <= ss then h else full
+
+function dec64 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 282 0 282 31] (b: Seq.seq UInt8.t) : UInt64.t
+
+let read_ckpt_raw (h: t_Vec_u8_Global) (full: t_Vec_u8_Global) (ss: UInt64.t) (region_size: UInt64.t)
+  (expected: UInt64.t) (return (x: t_Result_Vec_u8_Global_EmError)) =
+{[@stop_split] [@expl:read_ckpt_raw requires] [%#sb5] UInt64.t'int ss > 0 /\ UInt64.t'int ss <= 4294967295}
+  any
+  [ return (result: t_Result_Vec_u8_Global_EmError) ->
+  {[@stop_split] [@expl:read_ckpt_raw ensures] ([@stop_split] [@expl:read_ckpt_raw ensures #0] [%#sb5'0] match result with
+        | Ok _ -> true
+        | Err e -> e = CorruptMetadata
+        end)
+    /\ ([@stop_split] [@expl:read_ckpt_raw ensures #1] [%#sb5'1] Seq.length (view_Vec_u8_Global h) < 16
+      -> result = Err (CorruptMetadata))
+    /\ ([@stop_split] [@expl:read_ckpt_raw ensures #2] [%#sb5'2] Seq.length (view_Vec_u8_Global h) >= 16
+        /\ Seq.length (raw_of (view_Vec_u8_Global h) (view_Vec_u8_Global full) (UInt64.t'int ss))
+        < 16 + UInt32.t'int (dec32 (Seq.([..]) (view_Vec_u8_Global h) 8 12)) -> result = Err (CorruptMetadata))
+    /\ ([@stop_split] [@expl:read_ckpt_raw ensures #3] [%#sb5'3] Seq.length (view_Vec_u8_Global h) >= 16
+        /\ dec64 (Seq.([..]) (view_Vec_u8_Global h) 0 8) <> expected -> result = Err (CorruptMetadata))
+    /\ ([@stop_split] [@expl:read_ckpt_raw ensures #4] [%#sb5'4] Seq.length (view_Vec_u8_Global h) >= 16
+      /\ 16 + UInt32.t'int (dec32 (Seq.([..]) (view_Vec_u8_Global h) 8 12)) > UInt64.t'int region_size
+    -> result = Err (CorruptMetadata))}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_em_ckpt_read_truncated [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 600 0 600 135]
+  (h: t_Vec_u8_Global) (full: t_Vec_u8_Global) (ss: UInt64.t) (region_size: UInt64.t) (expected: UInt64.t)
+  (return (x: t_Result_Vec_u8_Global_EmError)) =
+{[@stop_split] [@expl:verify_em_ckpt_read_truncated requires] [%#sbatch5'0] UInt64.t'int ss > 0
+  /\ UInt64.t'int ss <= 4294967295}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = read_ckpt_raw [%#sbatch5] {h} {full} {ss} {region_size} {expected}
+        (fun (_x: t_Result_Vec_u8_Global_EmError) -> [ &_ret <- _x ] s1)
+    | s1 = return {_ret} ] ]
+  [ & _ret: t_Result_Vec_u8_Global_EmError = Any.any_l ()
+  | & h: t_Vec_u8_Global = h
+  | & full: t_Vec_u8_Global = full
+  | & ss: UInt64.t = ss
+  | & region_size: UInt64.t = region_size
+  | & expected: UInt64.t = expected ])
+  [ return (result: t_Result_Vec_u8_Global_EmError) ->
+  {[@stop_split] [@expl:verify_em_ckpt_read_truncated ensures] ([@stop_split] [@expl:verify_em_ckpt_read_truncated ensures #0] [%#sbatch5'1] Seq.length (view_Vec_u8_Global h)
+        < 16 -> result = Err (CorruptMetadata))
+    /\ ([@stop_split] [@expl:verify_em_ckpt_read_truncated ensures #1] [%#sbatch5'2] Seq.length (view_Vec_u8_Global h)
+          >= 16
+        /\ Seq.length (raw_of (view_Vec_u8_Global h) (view_Vec_u8_Global full) (UInt64.t'int ss))
+        < 16 + UInt32.t'int (dec32 (Seq.([..]) (view_Vec_u8_Global h) 8 12)) -> result = Err (CorruptMetadata))
+    /\ ([@stop_split] [@expl:verify_em_ckpt_read_truncated ensures #2] [%#sbatch5'3] match result with
+      | Ok _ -> true
+      | Err e -> e = CorruptMetadata
+      end)}
+    (! return {result}) ]

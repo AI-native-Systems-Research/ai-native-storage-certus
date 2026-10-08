@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_run6": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_verify_em_ckpt_post_flush_when_enabled": {
+        "prover": "cvc4",
+        "time": 0.209
+      }
+    }
+  }
+}

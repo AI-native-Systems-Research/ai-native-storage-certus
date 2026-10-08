@@ -1,0 +1,124 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 914 0 915 103 *)
+
+let%span sbatch4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 916 4 916 15
+let%span sbatch4'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 913 10 913 72
+let%span sbatch4'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 842 10 842 34
+let%span sbatch4'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 843 10 843 43
+let%span sbatch4'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 844 10 844 85
+let%span sbatch4'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 845 10 845 93
+let%span sbatch4'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 846 10 846 85
+let%span sbatch4'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 847 10 847 72
+let%span sbatch4'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 848 10 848 59
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use creusot.int.UInt8
+use creusot.prelude.Any
+
+type t_BTreeMap_u64_Slab_Global
+
+type t_SlabMap = { inner: t_BTreeMap_u64_Slab_Global }
+
+type t_HashMap_u32_Vec_u64_Global_RandomState_Global
+
+type t_SizeClassManager = { map: t_HashMap_u32_Vec_u64_Global_RandomState_Global }
+
+type t_Vec_Vec_u64_Global_Global
+
+type t_BuddyAllocator = {
+  base_offset: UInt64.t;
+  total_usable_size: UInt64.t;
+  sector_size: UInt32.t;
+  max_order: UInt64.t;
+  free_lists: t_Vec_Vec_u64_Global_Global }
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_FormatParams = {
+  data_disk_size'0: UInt64.t;
+  slab_size'0: UInt64.t;
+  max_extent_size'0: UInt32.t;
+  sector_size'0: UInt32.t;
+  region_count'0: UInt32.t;
+  metadata_alignment'0: UInt64.t;
+  instance_id'0: t_Option_u64;
+  metadata_disk_ns_id'0: UInt32.t;
+  metadata_region_size'0: UInt64.t }
+
+type t_Vec_tup2_u64_usize_Global
+
+type t_RegionState = {
+  slabs: t_SlabMap;
+  size_classes: t_SizeClassManager;
+  buddy: t_BuddyAllocator;
+  dirty: bool;
+  format_params: t_FormatParams;
+  pending_frees: t_Vec_tup2_u64_usize_Global }
+
+type t_EmError = CorruptMetadata | IoError | NotInitialized | OffsetNotFound UInt64.t | OutOfSpace
+
+type t_Result_Snapshot_Seq_RegionState_EmError = Ok (Seq.seq t_RegionState) | Err t_EmError
+
+type t_Result_unit_EmError = Ok'0 () | Err'0 t_EmError
+
+type t_CkCopy = { seq: UInt64.t; img: Seq.seq t_RegionState }
+
+type t_Option_CkCopy = None'0 | Some'0 t_CkCopy
+
+type t_CkDev = { sb_seq: UInt64.t; sb_active: UInt8.t; copy0: t_Option_CkCopy; copy1: t_Option_CkCopy }
+
+type tup6_Result_Snapshot_Seq_RegionState_EmError_Snapshot_Seq_RegionState_Result_unit_EmError_Snapshot_CkDev_Snapshot_CkDev_Result_Snapshot_Seq_RegionState_EmError = {
+  f0: t_Result_Snapshot_Seq_RegionState_EmError;
+  f1: Seq.seq t_RegionState;
+  f2: t_Result_unit_EmError;
+  f3: t_CkDev;
+  f4: t_CkDev;
+  f5: t_Result_Snapshot_Seq_RegionState_EmError }
+
+let wfb_chain
+  (return (x: tup6_Result_Snapshot_Seq_RegionState_EmError_Snapshot_Seq_RegionState_Result_unit_EmError_Snapshot_CkDev_Snapshot_CkDev_Result_Snapshot_Seq_RegionState_EmError)) =
+any
+  [ return
+    (result: tup6_Result_Snapshot_Seq_RegionState_EmError_Snapshot_Seq_RegionState_Result_unit_EmError_Snapshot_CkDev_Snapshot_CkDev_Result_Snapshot_Seq_RegionState_EmError) ->
+  {[@stop_split] [@expl:wfb_chain ensures] ([@stop_split] [@expl:wfb_chain ensures #0] [%#sbatch4'1] result.f0
+      = Ok (result.f1))
+    /\ ([@stop_split] [@expl:wfb_chain ensures #1] [%#sbatch4'2] result.f2 = Err'0 (IoError))
+    /\ ([@stop_split] [@expl:wfb_chain ensures #2] [%#sbatch4'3] UInt64.t'int result.f3.sb_seq = 2
+      /\ UInt8.t'int result.f3.sb_active = 0 /\ result.f3.copy0 = None'0)
+    /\ ([@stop_split] [@expl:wfb_chain ensures #3] [%#sbatch4'4] match result.f3.copy1 with
+        | Some'0 c -> UInt64.t'int c.seq = 1 /\ c.img = result.f1
+        | None'0 -> false
+        end)
+    /\ ([@stop_split] [@expl:wfb_chain ensures #4] [%#sbatch4'5] UInt64.t'int result.f4.sb_seq = 2
+      /\ UInt8.t'int result.f4.sb_active = 0 /\ result.f4.copy0 = None'0)
+    /\ ([@stop_split] [@expl:wfb_chain ensures #5] [%#sbatch4'6] match result.f4.copy1 with
+        | Some'0 c -> UInt64.t'int c.seq = 3
+        | None'0 -> false
+        end)
+    /\ ([@stop_split] [@expl:wfb_chain ensures #6] [%#sbatch4'7] match result.f5 with
+      | Ok _ -> false
+      | Err _ -> true
+      end)}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let refute_em_ckpt_after_fallback_preserves_valid__mutant [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 914 0 915 103]
+  (return (x: tup6_Result_Snapshot_Seq_RegionState_EmError_Snapshot_Seq_RegionState_Result_unit_EmError_Snapshot_CkDev_Snapshot_CkDev_Result_Snapshot_Seq_RegionState_EmError)) =
+(! bb0
+  [ bb0 = s0
+    [ s0 = wfb_chain [%#sbatch4]
+        (fun (_x: tup6_Result_Snapshot_Seq_RegionState_EmError_Snapshot_Seq_RegionState_Result_unit_EmError_Snapshot_CkDev_Snapshot_CkDev_Result_Snapshot_Seq_RegionState_EmError) ->
+          [ &_ret <- _x ] s1)
+    | s1 = return {_ret} ] ]
+  [ & _ret: tup6_Result_Snapshot_Seq_RegionState_EmError_Snapshot_Seq_RegionState_Result_unit_EmError_Snapshot_CkDev_Snapshot_CkDev_Result_Snapshot_Seq_RegionState_EmError = Any.any_l () ])
+  [ return
+    (result: tup6_Result_Snapshot_Seq_RegionState_EmError_Snapshot_Seq_RegionState_Result_unit_EmError_Snapshot_CkDev_Snapshot_CkDev_Result_Snapshot_Seq_RegionState_EmError) ->
+  {[@stop_split] [@expl:refute_em_ckpt_after_fallback_preserves_valid__mutant ensures] [%#sbatch4'0] match result.f4.copy1 with
+      | Some'0 c -> UInt64.t'int c.seq = 1
+      | None'0 -> false
+      end}
+    (! return {result}) ]

@@ -1,0 +1,39 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 1020 0 1020 51 *)
+
+let%span sslab = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 85 16 85 53
+let%span sregion = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 1018 11 1018 69
+let%span sregion'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 1019 10 1019 16
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use int.Int
+
+type t_Vec_u64_Global
+
+type t_AllocationBitmap = { words: t_Vec_u64_Global; num_slots: UInt32.t; allocated_count: UInt32.t }
+
+type t_Slab = {
+  start_offset: UInt64.t;
+  slab_size: UInt64.t;
+  element_size: UInt32.t;
+  bitmap: t_AllocationBitmap;
+  keys: t_Vec_u64_Global;
+  rover: UInt64.t }
+
+function slot_off [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 84 0 84 39] (s: t_Slab) (i: int) : int
+ = [%#sslab] UInt64.t'int s.start_offset + i * UInt32.t'int s.element_size
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant sl : t_Slab
+
+constant i : int
+
+constant j : int
+
+function lemma_slot_off_inj [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 1020 0 1020 51] (sl: t_Slab) (i: int) (j: int) : ()
+
+goal vc_lemma_slot_off_inj: ([%#sregion] UInt32.t'int sl.element_size > 0 /\ slot_off sl i = slot_off sl j)
+  -> ([@stop_split] [@expl:lemma_slot_off_inj ensures] [%#sregion'0] i = j)

@@ -1,0 +1,14 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_is_err_unit": { "prover": "alt-ergo", "time": 0.044 },
+      "vc_refute_em_remove_err_offset_not_found": {
+        "prover": "cvc4",
+        "time": 0.322
+      },
+      "vc_remove_extent8": { "prover": "alt-ergo", "time": 0.05 },
+      "vc_w8_rb0_format": { "prover": "alt-ergo", "time": 0.044 }
+    }
+  }
+}

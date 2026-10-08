@@ -1,0 +1,22 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_index_mut_Vec_RegionState_Global": {
+        "prover": "alt-ergo",
+        "time": 0.028
+      },
+      "vc_l3_sb_c8": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_new": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_new'0": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_new_RegionState": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_publish_slot": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_push_RegionState": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_recover": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_run_checkpoint": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_wc8_two": { "prover": "alt-ergo", "time": 0.051 },
+      "vc_wc_fp": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_wfb_chain": { "prover": "cvc4", "time": 2.3 }
+    }
+  }
+}

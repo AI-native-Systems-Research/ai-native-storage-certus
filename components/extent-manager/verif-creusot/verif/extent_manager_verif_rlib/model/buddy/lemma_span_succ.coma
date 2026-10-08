@@ -1,0 +1,45 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 95 0 95 39 *)
+
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 93 11 93 17
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 94 10 94 44
+let%span sbuddy'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 46 11 46 17
+let%span sbuddy'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 47 10 47 23
+let%span sbuddy'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 48 10 48 40
+let%span sbuddy'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 33 16 33 29
+let%span sbuddy'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 45 10 45 11
+let%span sbuddy'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 50 4 52 5
+
+use bv.Pow2int
+use int.Int
+
+function span [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 32 0 32 35] (ss: int) (o: int) : int
+ = [%#sbuddy'4] Pow2int.pow2 o * ss
+
+function lemma_pow2 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 49 0 49 25] (o: int) : ()
+
+axiom lemma_pow2_def: forall o: int [lemma_pow2 o]. ([%#sbuddy'1] 0 <= o)
+    -> lemma_pow2 o = ([%#sbuddy'6] if o > 0 then lemma_pow2 (o - 1) else ())
+
+axiom lemma_pow2_spec: forall o: int. ([%#sbuddy'1] 0 <= o) -> ([%#sbuddy'2] Pow2int.pow2 o >= 1)
+
+axiom lemma_pow2_spec'0: forall o: int. ([%#sbuddy'1] 0 <= o)
+    -> ([%#sbuddy'3] Pow2int.pow2 (o + 1) = 2 * Pow2int.pow2 o)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant ss : int
+
+constant o : int
+
+function lemma_span_succ [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 95 0 95 39] (ss: int) (o: int) : ()
+
+goal vc_lemma_span_succ: ([%#sbuddy] 0 <= o)
+  -> ([@stop_split] [@expl:lemma_pow2 requires] [%#sbuddy'1] 0 <= o)
+  /\ (([@stop_split] [@expl:lemma_pow2 ensures] ([@stop_split] [@expl:lemma_pow2 ensures #0] [%#sbuddy'2] Pow2int.pow2 o
+      >= 1)
+    /\ ([@stop_split] [@expl:lemma_pow2 ensures #1] [%#sbuddy'3] Pow2int.pow2 (o + 1) = 2 * Pow2int.pow2 o))
+  -> (let _ = lemma_pow2 o in Pow2int.pow2 (o + 1) = 2 * Pow2int.pow2 o
+  && 2 * Pow2int.pow2 o * ss = 2 * (Pow2int.pow2 o * ss)
+  && ([@stop_split] [@expl:lemma_span_succ ensures] [%#sbuddy'0] span ss (o + 1) = 2 * span ss o)))

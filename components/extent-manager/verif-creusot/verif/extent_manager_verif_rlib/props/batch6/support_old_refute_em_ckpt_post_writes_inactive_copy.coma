@@ -1,0 +1,318 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1093 0 1093 141 *)
+
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sb6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 146 8 148 41
+let%span sb6'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 158 15 158 117
+let%span sb6'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 159 14 159 95
+let%span sb6'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 160 14 160 118
+let%span sb6'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 161 14 161 146
+let%span sb6'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 162 14 163 81
+let%span sb6'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 164 14 171 85
+let%span sb6'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 172 14 172 103
+let%span sb6'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 173 14 173 66
+let%span sb6'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 174 14 174 65
+let%span sb6'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 84 16 84 62
+let%span sb6'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 103 8 103 97
+let%span sb6'11 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 120 16 120 72
+let%span sb6'12 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 127 16 127 43
+let%span sb6'13 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 90 16 90 74
+let%span sb6'14 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 96 16 96 55
+let%span sbatch6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1094 16 1094 30
+let%span sbatch6'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1095 13 1095 21
+let%span sbatch6'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1096 20 1096 56
+let%span sbatch6'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1097 25 1097 31
+let%span sbatch6'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1098 24 1098 27
+let%span sbatch6'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1098 13 1098 28
+let%span sbatch6'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1099 20 1099 102
+let%span sbatch6'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1100 25 1100 43
+let%span sbatch6'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1102 24 1102 25
+let%span sbatch6'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1102 4 1102 26
+let%span sbatch6'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1103 20 1103 76
+let%span sbatch6'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1104 25 1104 31
+let%span sbatch6'11 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1105 24 1105 28
+let%span sbatch6'12 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1105 13 1105 29
+let%span sbatch6'13 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1106 20 1106 107
+let%span sbatch6'14 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1107 25 1107 43
+let%span sbatch6'15 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1088 10 1088 50
+let%span sbatch6'16 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1089 10 1089 70
+let%span sbatch6'17 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1090 10 1090 128
+let%span sbatch6'18 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1091 10 1091 151
+let%span sbatch6'19 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1092 10 1092 24
+let%span sbatch6'20 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1054 10 1054 81
+let%span sbatch6'21 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1055 10 1055 105
+let%span sbatch6'22 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1056 10 1056 86
+let%span sbatch6'23 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1064 10 1064 79
+let%span sbatch6'24 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 628 16 628 120
+let%span sbatch6'25 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1040 11 1040 72
+let%span sbatch6'26 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1041 10 1041 102
+let%span sbatch6'27 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1042 10 1042 110
+let%span sbatch6'28 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1043 10 1043 90
+let%span sbatch6'29 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 589 16 589 63
+
+use creusot.int.UInt8
+use creusot.int.UInt64
+use seq.Seq
+use creusot.prelude.MutBorrow
+use int.ComputerDivision
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_bool_Global
+
+type t_Option_Vec_bool_Global = None | Some t_Vec_bool_Global
+
+type t_Ev6 = Data int int int bool | Flush bool | Sb int int bool | Hook
+
+type t_Ck6 = {
+  regions: t_Option_Vec_bool_Global;
+  active: UInt8.t;
+  seq: UInt64.t;
+  ck_off: UInt64.t;
+  ck_size: UInt64.t;
+  ms: UInt64.t;
+  hook: bool;
+  vwc: bool;
+  log: Seq.seq t_Ev6 }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_bool_Global (self: t_Vec_bool_Global) : Seq.seq bool
+
+axiom view_Vec_bool_Global_spec:
+  forall self: t_Vec_bool_Global [view_Vec_bool_Global self]. [%#svec] Seq.length (view_Vec_bool_Global self)
+    <= UInt64.t'int const_MAX
+
+let w6_layout_ck (return (x: t_Ck6)) = any
+  [ return (result: t_Ck6) ->
+  {[@stop_split] [@expl:w6_layout_ck ensures] ([@stop_split] [@expl:w6_layout_ck ensures #0] [%#sbatch6'20] UInt64.t'int result.ck_off
+        = 4096
+      /\ UInt64.t'int result.ck_size = 6144 /\ UInt64.t'int result.ms = 4096)
+    /\ ([@stop_split] [@expl:w6_layout_ck ensures #1] [%#sbatch6'21] UInt8.t'int result.active = 0
+      /\ UInt64.t'int result.seq = 0 /\ not result.hook /\ not result.vwc /\ Seq.length result.log = 0)
+    /\ ([@stop_split] [@expl:w6_layout_ck ensures #2] [%#sbatch6'22] match result.regions with
+      | Some rs -> Seq.length (view_Vec_bool_Global rs) = 1 /\ Seq.get (view_Vec_bool_Global rs) 0
+      | None -> false
+      end)}
+    (! return {result}) ]
+
+type t_Io6 = { client: bool; data: bool; fl1: bool; sb: bool; fl2: bool }
+
+let io6_ok (return (x: t_Io6)) = any
+  [ return (result: t_Io6) -> {[@stop_split] [@expl:io6_ok ensures] [%#sbatch6'23] result.client
+    /\ result.data /\ result.fl1 /\ result.sb /\ result.fl2}
+    (! return {result}) ]
+
+constant const_MAX'0: UInt64.t = (18446744073709551615: UInt64.t)
+
+predicate ck6_hd [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 144 0 144 40] (s: t_Ck6) (plen: int) =
+  [%#sb6] UInt8.t'int s.active <= 1
+  /\ UInt64.t'int s.seq < UInt64.t'int const_MAX'0
+  /\ UInt64.t'int s.ms > 0
+  /\ UInt64.t'int s.ck_off + 2 * UInt64.t'int s.ck_size <= UInt64.t'int const_MAX'0
+  /\ 16 + plen + UInt64.t'int s.ms <= UInt64.t'int const_MAX'0
+
+predicate any_dirty6 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 83 0 83 40] (rs: Seq.seq bool) =
+  [%#sb6'9] exists i: int. 0 <= i /\ i < Seq.length rs /\ Seq.get rs i
+
+predicate ck6_io [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 627 0 627 49] (s: t_Ck6) (plen: int) (io: t_Io6) =
+  [%#sbatch6'24] match s.regions with
+      | Some rs -> any_dirty6 (view_Vec_bool_Global rs)
+      | None -> false
+      end
+  /\ io.client /\ 16 + plen <= UInt64.t'int s.ck_size
+
+type t_EmError = CorruptMetadata | IoError | NotInitialized | OffsetNotFound UInt64.t | OutOfSpace
+
+type t_Result_unit_EmError = Ok () | Err t_EmError
+
+function ck_start [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 89 0 89 30] (s: t_Ck6) : int
+ = [%#sb6'13] ComputerDivision.div (UInt64.t'int s.ck_off
+    + (1 - UInt8.t'int s.active) * UInt64.t'int s.ck_size) (UInt64.t'int s.ms)
+  * UInt64.t'int s.ms
+
+function ck_len [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 95 0 95 39] (s: t_Ck6) (plen: int) : int
+ = [%#sb6'14] ComputerDivision.div (16 + plen + UInt64.t'int s.ms - 1) (UInt64.t'int s.ms) * UInt64.t'int s.ms
+
+function ck_evs [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 101 0 101 53] (s: t_Ck6) (plen: int) (io: t_Io6) : Seq.seq t_Ev6
+ = [%#sb6'10] let s0 = Seq.singleton (Data (1
+  - UInt8.t'int s.active) (ck_start s) (ck_len s plen) (io.data)) in if not io.data then
+    s0
+  else
+    let s1 = if s.vwc then Seq.snoc s0 (Flush (io.fl1)) else s0 in if s.vwc /\ not io.fl1 then
+      s1
+    else
+      let s2 = Seq.snoc s1 (Sb (UInt64.t'int s.seq + 1) (1 - UInt8.t'int s.active) (io.sb)) in if not io.sb then
+        s2
+      else
+        let s3 = if s.vwc then Seq.snoc s2 (Flush (io.fl2)) else s2 in if s.vwc /\ not io.fl2 then
+          s3
+        else
+          if s.hook then Seq.snoc s3 (Hook) else s3
+      
+    
+  
+
+
+predicate io_ok [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 119 0 119 40] (io: t_Io6) (vwc'0: bool) =
+  [%#sb6'11] io.data /\ (not vwc'0 \/ io.fl1) /\ io.sb /\ (not vwc'0 \/ io.fl2)
+
+predicate io_data_ok [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 126 0 126 45] (io: t_Io6) (vwc'0: bool) =
+  [%#sb6'12] io.data /\ (not vwc'0 \/ io.fl1)
+
+let run6 (self: MutBorrow.t t_Ck6) (io: t_Io6) (plen: UInt64.t) (return (x: t_Result_unit_EmError)) =
+{[@stop_split] [@expl:run6 requires] [%#sb6'0] match self.current.regions with
+    | Some rs -> any_dirty6 (view_Vec_bool_Global rs) /\ io.client -> ck6_hd self.current (UInt64.t'int plen)
+    | None -> true
+    end}
+  any
+  [ return (result: t_Result_unit_EmError) ->
+  {[@stop_split] [@expl:run6 ensures] ([@stop_split] [@expl:run6 ensures #0] [%#sb6'1] self.current.regions = None
+      -> result = Err (NotInitialized) /\ self.final = self.current)
+    /\ ([@stop_split] [@expl:run6 ensures #1] [%#sb6'2] match self.current.regions with
+        | Some rs -> not any_dirty6 (view_Vec_bool_Global rs) -> result = Ok () /\ self.final = self.current
+        | None -> true
+        end)
+    /\ ([@stop_split] [@expl:run6 ensures #2] [%#sb6'3] match self.current.regions with
+        | Some rs -> any_dirty6 (view_Vec_bool_Global rs) /\ not io.client
+        -> result = Err (IoError) /\ self.final = self.current
+        | None -> true
+        end)
+    /\ ([@stop_split] [@expl:run6 ensures #3] [%#sb6'4] match self.current.regions with
+        | Some rs -> any_dirty6 (view_Vec_bool_Global rs)
+          /\ io.client /\ 16 + UInt64.t'int plen > UInt64.t'int self.current.ck_size
+        -> result = Err (CorruptMetadata) /\ self.final = self.current
+        | None -> true
+        end)
+    /\ ([@stop_split] [@expl:run6 ensures #4] [%#sb6'5] match self.current.regions with
+        | Some rs -> any_dirty6 (view_Vec_bool_Global rs)
+          /\ io.client /\ 16 + UInt64.t'int plen <= UInt64.t'int self.current.ck_size
+        -> self.final.log = Seq.(++) self.current.log (ck_evs self.current (UInt64.t'int plen) io)
+        /\ (result = Ok ()) = io_ok io self.current.vwc
+        /\ (result <> Ok () -> result = Err (IoError))
+        /\ (io_data_ok io self.current.vwc
+          -> UInt8.t'int self.final.active = 1 - UInt8.t'int self.current.active
+          /\ UInt64.t'int self.final.seq = UInt64.t'int self.current.seq + 1)
+        /\ (not io_data_ok io self.current.vwc
+          -> self.final.active = self.current.active /\ self.final.seq = self.current.seq)
+        /\ (io_ok io self.current.vwc
+          -> match self.final.regions with
+            | Some rs2 -> Seq.length (view_Vec_bool_Global rs2) = Seq.length (view_Vec_bool_Global rs)
+            /\ not any_dirty6 (view_Vec_bool_Global rs2)
+            | None -> false
+            end)
+        /\ (not io_ok io self.current.vwc -> self.final.regions = self.current.regions)
+        | None -> true
+        end)
+    /\ ([@stop_split] [@expl:run6 ensures #5] [%#sb6'6] self.final.ck_off = self.current.ck_off
+      /\ self.final.ck_size = self.current.ck_size /\ self.final.ms = self.current.ms)
+    /\ ([@stop_split] [@expl:run6 ensures #6] [%#sb6'7] self.final.hook = self.current.hook
+      /\ self.final.vwc = self.current.vwc)
+    /\ ([@stop_split] [@expl:run6 ensures #7] [%#sb6'8] (self.final.regions = None) = (self.current.regions = None))}
+    (! return {result}) ]
+
+type tup2_Option_Vec_bool_Global_Option_Vec_bool_Global = { f0: t_Option_Vec_bool_Global; f1: t_Option_Vec_bool_Global }
+
+let ck6_publish (c: MutBorrow.t t_Ck6) (i: UInt64.t) (return (x: ())) =
+{[@stop_split] [@expl:ck6_publish requires] [%#sbatch6'25] match c.current.regions with
+    | Some rs -> UInt64.t'int i < Seq.length (view_Vec_bool_Global rs)
+    | None -> false
+    end}
+  any
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:ck6_publish ensures] ([@stop_split] [@expl:ck6_publish ensures #0] [%#sbatch6'26] match { f0 = c.current.regions;
+                                                                                                                  f1 = c.final.regions } with
+        | {f0 = Some a; f1 = Some b} -> view_Vec_bool_Global b = Seq.set (view_Vec_bool_Global a) (UInt64.t'int i) true
+        | _ -> false
+        end)
+    /\ ([@stop_split] [@expl:ck6_publish ensures #1] [%#sbatch6'27] c.final.active = c.current.active
+      /\ c.final.seq = c.current.seq /\ c.final.ck_off = c.current.ck_off /\ c.final.ck_size = c.current.ck_size)
+    /\ ([@stop_split] [@expl:ck6_publish ensures #2] [%#sbatch6'28] c.final.ms = c.current.ms
+    /\ c.final.hook = c.current.hook /\ c.final.vwc = c.current.vwc /\ c.final.log = c.current.log)}
+    (! return {result}) ]
+
+predicate resolve_refmut_Ck6 [@inline:trivial] (_1: MutBorrow.t t_Ck6) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_Ck6
+
+type tup5_Result_unit_EmError_Result_unit_EmError_Snapshot_Ev6_Snapshot_Ev6_u8 = {
+  f0'0: t_Result_unit_EmError;
+  f1'0: t_Result_unit_EmError;
+  f2'0: t_Ev6;
+  f3'0: t_Ev6;
+  f4'0: UInt8.t }
+
+function ev_data_copy [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 588 0 588 34] (e: t_Ev6) : int
+ = [%#sbatch6'29] match e with
+    | Data c _ _ _ -> c
+    | _ -> - 1
+    end
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let support_old_refute_em_ckpt_post_writes_inactive_copy [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1093 0 1093 141]
+  (return (x: tup5_Result_unit_EmError_Result_unit_EmError_Snapshot_Ev6_Snapshot_Ev6_u8)) = (! bb0
+  [ bb0 = s0
+    [ s0 = w6_layout_ck [%#sbatch6] (fun (_x: t_Ck6) -> [ &c <- _x ] s1)
+    | s1 = io6_ok [%#sbatch6'0] (fun (_x: t_Io6) -> [ &io <- _x ] s2)
+    | s2 = {[@expl:assertion] [%#sbatch6'1] ck6_hd c 100 /\ ck6_io c 100 io} s3
+    | s3 = [ &l0 <- [%#sbatch6'2] c.log ] s4
+    | s4 = MutBorrow.borrow_mut <t_Ck6> {c} (fun (_bor: MutBorrow.t t_Ck6) -> [ &_16 <- _bor ] [ &c <- _bor.final ] s5)
+    | s5 = run6 [%#sbatch6'4] {_16} {io} {[%#sbatch6'3] (100: UInt64.t)}
+        (fun (_x: t_Result_unit_EmError) -> [ &r1 <- _x ] s6)
+    | s6 = {[@expl:assertion] [%#sbatch6'5] ComputerDivision.div (4096 + 6144) 4096 * 4096 = 8192
+      /\ ComputerDivision.div (16 + 100 + 4096 - 1) 4096 * 4096 = 4096}
+      s7
+    | s7 = [ &e1 <- [%#sbatch6'6] Seq.get c.log (Seq.length l0) ] s8
+    | s8 = [ &act <- c.active ] s9
+    | s9 = MutBorrow.borrow_mut <t_Ck6> {c} (fun (_bor: MutBorrow.t t_Ck6) -> [ &_27 <- _bor ] [ &c <- _bor.final ] s10)
+    | s10 = MutBorrow.borrow_final <t_Ck6> {_27.current} {MutBorrow.get_id _27}
+        (fun (_bor: MutBorrow.t t_Ck6) -> [ &_26 <- _bor ] [ &_27 <- { _27 with current = _bor.final } ] s11)
+    | s11 = ck6_publish [%#sbatch6'8] {_26} {[%#sbatch6'7] (0: UInt64.t)} (fun (_x: ()) -> [ &_25 <- _x ] s12)
+    | s12 = -{resolve_refmut_Ck6 _27}- s13
+    | s13 = {[@expl:assertion] [%#sbatch6'9] UInt8.t'int c.active = 1 /\ ck6_hd c 6128 /\ ck6_io c 6128 io} s14
+    | s14 = [ &l1 <- [%#sbatch6'10] c.log ] s15
+    | s15 = MutBorrow.borrow_mut <t_Ck6> {c}
+        (fun (_bor: MutBorrow.t t_Ck6) -> [ &_36 <- _bor ] [ &c <- _bor.final ] s16)
+    | s16 = run6 [%#sbatch6'12] {_36} {io} {[%#sbatch6'11] (6128: UInt64.t)}
+        (fun (_x: t_Result_unit_EmError) -> [ &r2 <- _x ] s17)
+    | s17 = {[@expl:assertion] [%#sbatch6'13] ComputerDivision.div (4096 + 0 * 6144) 4096 * 4096 = 4096
+      /\ ComputerDivision.div (16 + 6128 + 4096 - 1) 4096 * 4096 = 8192}
+      s18
+    | s18 = [ &e2 <- [%#sbatch6'14] Seq.get c.log (Seq.length l1) ] s19
+    | s19 = [ &_ret <- { f0'0 = r1; f1'0 = r2; f2'0 = e1; f3'0 = e2; f4'0 = act } ] s20
+    | s20 = return {_ret} ] ]
+  [ & _ret: tup5_Result_unit_EmError_Result_unit_EmError_Snapshot_Ev6_Snapshot_Ev6_u8 = Any.any_l ()
+  | & c: t_Ck6 = Any.any_l ()
+  | & io: t_Io6 = Any.any_l ()
+  | & l0: Seq.seq t_Ev6 = Any.any_l ()
+  | & r1: t_Result_unit_EmError = Any.any_l ()
+  | & _16: MutBorrow.t t_Ck6 = Any.any_l ()
+  | & e1: t_Ev6 = Any.any_l ()
+  | & act: UInt8.t = Any.any_l ()
+  | & _25: () = Any.any_l ()
+  | & _26: MutBorrow.t t_Ck6 = Any.any_l ()
+  | & _27: MutBorrow.t t_Ck6 = Any.any_l ()
+  | & l1: Seq.seq t_Ev6 = Any.any_l ()
+  | & r2: t_Result_unit_EmError = Any.any_l ()
+  | & _36: MutBorrow.t t_Ck6 = Any.any_l ()
+  | & e2: t_Ev6 = Any.any_l () ])
+  [ return (result: tup5_Result_unit_EmError_Result_unit_EmError_Snapshot_Ev6_Snapshot_Ev6_u8) ->
+  {[@stop_split] [@expl:support_old_refute_em_ckpt_post_writes_inactive_copy ensures] ([@stop_split] [@expl:support_old_refute_em_ckpt_post_writes_inactive_copy ensures #0] [%#sbatch6'15] result.f0'0
+        = Ok ()
+      /\ result.f1'0 = Ok ())
+    /\ ([@stop_split] [@expl:support_old_refute_em_ckpt_post_writes_inactive_copy ensures #1] [%#sbatch6'16] ev_data_copy result.f2'0
+        = 1
+      /\ ev_data_copy result.f3'0 = 0)
+    /\ ([@stop_split] [@expl:support_old_refute_em_ckpt_post_writes_inactive_copy ensures #2] [%#sbatch6'17] match result.f2'0 with
+        | Data _ st ln ok -> ok /\ st = 8192 /\ ln = 4096 /\ 4096 <= st /\ st < 10240
+        | _ -> false
+        end)
+    /\ ([@stop_split] [@expl:support_old_refute_em_ckpt_post_writes_inactive_copy ensures #3] [%#sbatch6'18] match result.f3'0 with
+        | Data _ st ln ok -> ok /\ st = 4096 /\ ln = 8192 /\ st + ln > 10240 /\ st <= 8192 /\ 8192 < st + ln
+        | _ -> false
+        end)
+    /\ ([@stop_split] [@expl:support_old_refute_em_ckpt_post_writes_inactive_copy ensures #4] [%#sbatch6'19] UInt8.t'int result.f4'0
+    = 1)}
+    (! return {result}) ]

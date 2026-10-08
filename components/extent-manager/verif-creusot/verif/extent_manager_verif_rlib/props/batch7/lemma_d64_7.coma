@@ -1,0 +1,46 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 695 0 695 46 *)
+
+let%span sbatch7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 693 11 693 55
+let%span sbatch7'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 694 10 694 24
+let%span ssbbytes = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/sbbytes.rs" 114 16 114 75
+let%span sb4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 354 11 354 80
+let%span sb4'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 355 10 355 23
+let%span sb7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 41 16 41 46
+
+use creusot.int.UInt8
+use seq.Seq
+use creusot.int.UInt64
+use int.Int
+
+function le64 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/sbbytes.rs" 17 0 17 33] (v: UInt64.t) (k: int) : UInt8.t
+
+predicate has64 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/sbbytes.rs" 113 0 113 50] (s: Seq.seq UInt8.t) (pos: int) (v: UInt64.t) =
+  [%#ssbbytes] forall k: int. 0 <= k /\ k < 8 -> Seq.get s (pos + k) = le64 v k
+
+function dec64 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 282 0 282 31] (b: Seq.seq UInt8.t) : UInt64.t
+
+function d64 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 40 0 40 37] (b: Seq.seq UInt8.t) (p: int) : UInt64.t
+ = [%#sb7] dec64 (Seq.([..]) b p (p + 8))
+
+function lemma_dec64 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 356 0 356 38] (s: Seq.seq UInt8.t) (v: UInt64.t) : ()
+
+axiom lemma_dec64_spec: forall s: Seq.seq UInt8.t, v: UInt64.t. ([%#sb4] Seq.length s = 8
+      /\ (forall k: int. 0 <= k /\ k < 8 -> Seq.get s k = le64 v k)) -> ([%#sb4'0] dec64 s = v)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant s : Seq.seq UInt8.t
+
+constant p : int
+
+constant v : UInt64.t
+
+function lemma_d64_7 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 695 0 695 46] (s: Seq.seq UInt8.t) (p: int) (v: UInt64.t) : ()
+
+goal vc_lemma_d64_7: ([%#sbatch7] 0 <= p /\ p + 8 <= Seq.length s /\ has64 s p v)
+  -> ([@stop_split] [@expl:lemma_dec64 requires] [%#sb4] Seq.length (Seq.([..]) s p (p + 8)) = 8
+    /\ (forall k: int. 0 <= k /\ k < 8 -> Seq.get (Seq.([..]) s p (p + 8)) k = le64 v k))
+  /\ (([@stop_split] [@expl:lemma_dec64 ensures] [%#sb4'0] dec64 (Seq.([..]) s p (p + 8)) = v)
+  -> ([@stop_split] [@expl:lemma_d64_7 ensures] [%#sbatch7'0] d64 s p = v))

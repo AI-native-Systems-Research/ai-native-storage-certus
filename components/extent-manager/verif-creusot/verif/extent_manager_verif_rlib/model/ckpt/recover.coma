@@ -1,0 +1,167 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 257 0 257 72 *)
+
+let%span sckpt = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 258 19 258 20
+let%span sckpt'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 260 30 260 42
+let%span sckpt'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 262 41 262 42
+let%span sckpt'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 267 38 267 44
+let%span sckpt'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 273 30 273 31
+let%span sckpt'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 273 19 273 31
+let%span sckpt'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 274 18 274 19
+let%span sckpt'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 278 42 278 48
+let%span sckpt'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 241 10 241 94
+let%span sckpt'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 242 10 245 1
+let%span sckpt'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 246 10 252 1
+let%span sckpt'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 253 10 256 27
+let%span sckpt'11 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 88 16 88 55
+
+use creusot.int.UInt64
+use creusot.int.UInt8
+use creusot.int.UInt32
+use seq.Seq
+use creusot.prelude.Any
+use int.Int
+
+type t_BTreeMap_u64_Slab_Global
+
+type t_SlabMap = { inner: t_BTreeMap_u64_Slab_Global }
+
+type t_HashMap_u32_Vec_u64_Global_RandomState_Global
+
+type t_SizeClassManager = { map: t_HashMap_u32_Vec_u64_Global_RandomState_Global }
+
+type t_Vec_Vec_u64_Global_Global
+
+type t_BuddyAllocator = {
+  base_offset: UInt64.t;
+  total_usable_size: UInt64.t;
+  sector_size: UInt32.t;
+  max_order: UInt64.t;
+  free_lists: t_Vec_Vec_u64_Global_Global }
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_FormatParams = {
+  data_disk_size'0: UInt64.t;
+  slab_size'0: UInt64.t;
+  max_extent_size'0: UInt32.t;
+  sector_size'0: UInt32.t;
+  region_count'0: UInt32.t;
+  metadata_alignment'0: UInt64.t;
+  instance_id'0: t_Option_u64;
+  metadata_disk_ns_id'0: UInt32.t;
+  metadata_region_size'0: UInt64.t }
+
+type t_Vec_tup2_u64_usize_Global
+
+type t_RegionState = {
+  slabs: t_SlabMap;
+  size_classes: t_SizeClassManager;
+  buddy: t_BuddyAllocator;
+  dirty: bool;
+  format_params: t_FormatParams;
+  pending_frees: t_Vec_tup2_u64_usize_Global }
+
+type t_CkCopy = { seq: UInt64.t; img: Seq.seq t_RegionState }
+
+type t_Option_CkCopy = None'0 | Some'0 t_CkCopy
+
+type t_CkDev = { sb_seq: UInt64.t; sb_active: UInt8.t; copy0: t_Option_CkCopy; copy1: t_Option_CkCopy }
+
+type t_EmError = CorruptMetadata | IoError | NotInitialized | OffsetNotFound UInt64.t | OutOfSpace
+
+type t_Result_Snapshot_Seq_RegionState_EmError = Ok (Seq.seq t_RegionState) | Err t_EmError
+
+type tup2_ref_Option_CkCopy_ref_Option_CkCopy = { f0: t_Option_CkCopy; f1: t_Option_CkCopy }
+
+let elim_Some (_x: t_Option_CkCopy) (return (f0'0: t_CkCopy)) = any
+  [ _k (f0'0: t_CkCopy) -> {Some'0 f0'0 = _x} (! return {f0'0})
+  | _chk -> (! {[@expl:elim Some] match _x with
+      | Some'0 _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+function copy_at [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 87 0 87 49] (d: t_CkDev) (c: UInt8.t) : t_Option_CkCopy
+ = [%#sckpt'11] if UInt8.t'int c = 0 then d.copy0 else d.copy1
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let recover [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 257 0 257 72]
+  (d: t_CkDev) (return (x: t_Result_Snapshot_Seq_RegionState_EmError)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_11 <- d.sb_seq = ([%#sckpt] (0: UInt64.t)) ] s1
+    | s1 = any [ br0 -> {_11 = false} (! bb3) | br1 -> {_11} (! bb2) ] ]
+  | bb2 = s0 [ s0 = [ &_ret <- Ok ([%#sckpt'0] Seq.empty: Seq.seq t_RegionState) ] s1 | s1 = return {_ret} ]
+  | bb3 = s0
+    [ s0 = [ &_19 <- d.sb_active = ([%#sckpt'1] (0: UInt8.t)) ] s1
+    | s1 = any [ br0 -> {_19 = false} (! bb5) | br1 -> {_19} (! bb4) ] ]
+  | bb4 = s0 [ s0 = [ &_18 <- { f0 = d.copy0; f1 = d.copy1 } ] s1 | s1 = bb6 ]
+  | bb5 = s0 [ s0 = [ &_18 <- { f0 = d.copy1; f1 = d.copy0 } ] s1 | s1 = bb6 ]
+  | bb6 = s0
+    [ s0 = [ &act <- _18.f0 ] s1
+    | s1 = [ &inact <- _18.f1 ] s2
+    | s2 = any [ br0 -> {act = None'0} (! bb14) | br1 (x0: t_CkCopy) -> {act = Some'0 x0} (! bb10) ] ]
+  | bb10 = s0
+    [ s0 = elim_Some {act} (fun (r0: t_CkCopy) -> [ &c <- r0 ] s1)
+    | s1 = [ &_28 <- c.seq = d.sb_seq ] s2
+    | s2 = any [ br0 -> {_28 = false} (! bb14) | br1 -> {_28} (! bb12) ] ]
+  | bb12 = s0 [ s0 = [ &_ret <- Ok ([%#sckpt'2] c.img) ] s1 | s1 = return {_ret} ]
+  | bb14 = s0
+    [ s0 = UInt64.sub [%#sckpt'4] {d.sb_seq} {[%#sckpt'3] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &prev_seq <- _x ] s1)
+    | s1 = [ &_38 <- UInt64.gt prev_seq ([%#sckpt'5] (0: UInt64.t)) ] s2
+    | s2 = any [ br0 -> {_38 = false} (! bb24) | br1 -> {_38} (! bb15) ] ]
+  | bb15 = any [ br0 -> {inact = None'0} (! bb24) | br1 (x0: t_CkCopy) -> {inact = Some'0 x0} (! bb19) ]
+  | bb19 = s0
+    [ s0 = elim_Some {inact} (fun (r0: t_CkCopy) -> [ &c'0 <- r0 ] s1)
+    | s1 = [ &_42 <- c'0.seq = prev_seq ] s2
+    | s2 = any [ br0 -> {_42 = false} (! bb24) | br1 -> {_42} (! bb21) ] ]
+  | bb21 = s0 [ s0 = [ &_ret <- Ok ([%#sckpt'6] c'0.img) ] s1 | s1 = return {_ret} ]
+  | bb24 = s0 [ s0 = [ &_49 <- CorruptMetadata ] s1 | s1 = [ &_ret <- Err _49 ] s2 | s2 = return {_ret} ] ]
+  [ & _ret: t_Result_Snapshot_Seq_RegionState_EmError = Any.any_l ()
+  | & d: t_CkDev = d
+  | & _11: bool = Any.any_l ()
+  | & act: t_Option_CkCopy = Any.any_l ()
+  | & inact: t_Option_CkCopy = Any.any_l ()
+  | & _18: tup2_ref_Option_CkCopy_ref_Option_CkCopy = Any.any_l ()
+  | & _19: bool = Any.any_l ()
+  | & c: t_CkCopy = Any.any_l ()
+  | & _28: bool = Any.any_l ()
+  | & prev_seq: UInt64.t = Any.any_l ()
+  | & _38: bool = Any.any_l ()
+  | & c'0: t_CkCopy = Any.any_l ()
+  | & _42: bool = Any.any_l ()
+  | & _49: t_EmError = Any.any_l () ])
+  [ return (result: t_Result_Snapshot_Seq_RegionState_EmError) ->
+  {[@stop_split] [@expl:recover ensures] ([@stop_split] [@expl:recover ensures #0] [%#sckpt'7] UInt64.t'int d.sb_seq = 0
+      -> match result with
+        | Ok img'0 -> img'0 = (Seq.empty: Seq.seq t_RegionState)
+        | Err _ -> false
+        end)
+    /\ ([@stop_split] [@expl:recover ensures #1] [%#sckpt'8] UInt64.t'int d.sb_seq > 0
+      -> match copy_at d d.sb_active with
+        | Some'0 c -> c.seq = d.sb_seq -> result = Ok (c.img)
+        | None'0 -> true
+        end)
+    /\ ([@stop_split] [@expl:recover ensures #2] [%#sckpt'9] match result with
+        | Ok img'0 -> UInt64.t'int d.sb_seq = 0
+        \/ match copy_at d d.sb_active with
+            | Some'0 c -> c.seq = d.sb_seq /\ c.img = img'0
+            | None'0 -> false
+            end
+        \/ UInt64.t'int d.sb_seq > 1
+        /\ match copy_at d (if UInt8.t'int d.sb_active = 0 then (1: UInt8.t) else (0: UInt8.t)) with
+          | Some'0 c -> UInt64.t'int c.seq = UInt64.t'int d.sb_seq - 1 /\ c.img = img'0
+          | None'0 -> false
+          end
+        | Err _ -> true
+        end)
+    /\ ([@stop_split] [@expl:recover ensures #3] [%#sckpt'10] forall c: t_CkCopy. UInt64.t'int d.sb_seq > 1
+        /\ match copy_at d d.sb_active with
+            | Some'0 a -> a.seq <> d.sb_seq
+            | None'0 -> true
+            end
+        /\ copy_at d (if UInt8.t'int d.sb_active = 0 then (1: UInt8.t) else (0: UInt8.t)) = Some'0 c
+        /\ UInt64.t'int c.seq = UInt64.t'int d.sb_seq - 1 -> result = Ok (c.img))}
+    (! return {result}) ]

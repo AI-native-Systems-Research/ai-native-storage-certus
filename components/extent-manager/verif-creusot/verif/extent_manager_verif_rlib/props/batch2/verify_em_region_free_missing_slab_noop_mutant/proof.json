@@ -1,0 +1,22 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_free_slot": { "prover": "alt-ergo", "time": 0.045 },
+      "vc_verify_em_region_free_missing_slab_noop__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.101 },
+              null,
+              { "prover": "alt-ergo", "time": 0.049 },
+              { "prover": "alt-ergo", "time": 0.043 }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

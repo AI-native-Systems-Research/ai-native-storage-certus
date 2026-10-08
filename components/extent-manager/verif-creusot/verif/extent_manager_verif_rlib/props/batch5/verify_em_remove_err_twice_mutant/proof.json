@@ -1,0 +1,26 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_remove_extent_by_offset": { "prover": "alt-ergo", "time": 0.041 },
+      "vc_verify_em_remove_err_twice__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.077 },
+              { "prover": "alt-ergo", "time": 0.064 },
+              { "prover": "alt-ergo", "time": 0.029 },
+              { "prover": "alt-ergo", "time": 0.027 },
+              { "prover": "cvc5", "time": 1.1 },
+              null,
+              { "prover": "alt-ergo", "time": 0.035 },
+              { "prover": "alt-ergo", "time": 0.036 }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

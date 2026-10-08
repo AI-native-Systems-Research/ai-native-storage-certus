@@ -1,0 +1,16 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_and_mask": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_witness_em_inv_key_sharding_pow2": {
+        "prover": "alt-ergo",
+        "time": 0.034
+      },
+      "vc_witness_em_publish_post_visible_pow2": {
+        "prover": "alt-ergo",
+        "time": 0.025
+      }
+    }
+  }
+}

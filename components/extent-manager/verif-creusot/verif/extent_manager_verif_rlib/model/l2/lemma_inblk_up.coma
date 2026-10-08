@@ -1,0 +1,69 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 591 0 591 66 *)
+
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 111 11 111 27
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 112 10 112 27
+let%span sbuddy'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 113 10 113 25
+let%span sbuddy'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 33 16 33 29
+let%span sl2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 588 11 588 69
+let%span sl2'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 589 11 589 76
+let%span sl2'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 590 10 590 131
+let%span sl2'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 69 8 69 125
+let%span sl2'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 27 16 27 26
+let%span sl2'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 21 16 21 68
+
+use seq.Seq
+use creusot.int.UInt64
+use bv.Pow2int
+use int.Int
+
+type t_Vec_u64_Global
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_u64_Global (self: t_Vec_u64_Global) : Seq.seq UInt64.t
+
+axiom view_Vec_u64_Global_spec:
+  forall self: t_Vec_u64_Global [view_Vec_u64_Global self]. [%#svec] Seq.length (view_Vec_u64_Global self)
+    <= UInt64.t'int const_MAX
+
+predicate fv [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 20 0 20 52] (fl: Seq.seq t_Vec_u64_Global) (o: int) (k: int) =
+  [%#sl2'4] 0 <= o /\ o < Seq.length fl /\ 0 <= k /\ k < Seq.length (view_Vec_u64_Global (Seq.get fl o))
+
+function fs [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 26 0 26 51] (fl: Seq.seq t_Vec_u64_Global) (o: int) (k: int) : int
+ = [%#sl2'3] UInt64.t'int (Seq.get (view_Vec_u64_Global (Seq.get fl o)) k)
+
+function span [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 32 0 32 35] (ss: int) (o: int) : int
+ = [%#sbuddy'2] Pow2int.pow2 o * ss
+
+predicate inblk [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 67 0 67 65] (fl: Seq.seq t_Vec_u64_Global) (ss: int) (kk: int) (t: int) =
+  [%#sl2'2] exists o: int, k: int. fv fl o k /\ o >= kk /\ fs fl o k <= t /\ t + span ss kk <= fs fl o k + span ss o
+
+function lemma_span_pos [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 114 0 114 38] (ss: int) (o: int) : ()
+
+axiom lemma_span_pos_spec: forall ss: int, o: int. ([%#sbuddy] ss > 0 /\ 0 <= o) -> ([%#sbuddy'0] span ss o >= ss)
+
+axiom lemma_span_pos_spec'0: forall ss: int, o: int. ([%#sbuddy] ss > 0 /\ 0 <= o) -> ([%#sbuddy'1] span ss o > 0)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant fl : Seq.seq t_Vec_u64_Global
+
+constant ss : int
+
+constant kk : int
+
+constant x : int
+
+function lemma_inblk_up [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 591 0 591 66] (fl: Seq.seq t_Vec_u64_Global) (ss: int) (kk: int) (x: int) : ()
+
+goal vc_lemma_inblk_up: ([%#sl2] inblk fl ss kk x /\ ss > 0 /\ 0 <= kk /\ kk < Seq.length fl)
+  -> ([%#sl2'0] forall q: int. 0 <= q /\ q < Seq.length (view_Vec_u64_Global (Seq.get fl kk)) -> fs fl kk q <> x)
+  -> ([@stop_split] [@expl:lemma_span_pos requires] [%#sbuddy] ss > 0 /\ 0 <= kk)
+  /\ (([@stop_split] [@expl:lemma_span_pos ensures] ([@stop_split] [@expl:lemma_span_pos ensures #0] [%#sbuddy'0] span ss kk
+      >= ss)
+    /\ ([@stop_split] [@expl:lemma_span_pos ensures #1] [%#sbuddy'1] span ss kk > 0))
+  -> ([@stop_split] [@expl:lemma_inblk_up ensures] [%#sl2'1] exists o: int, k: int. fv fl o k
+    /\ o >= kk + 1 /\ fs fl o k <= x /\ x + span ss kk <= fs fl o k + span ss o))

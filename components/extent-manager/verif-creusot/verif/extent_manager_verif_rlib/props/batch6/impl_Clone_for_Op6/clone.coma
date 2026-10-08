@@ -1,0 +1,16 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 846 9 846 29 *)
+
+(* <props::batch6::Op6 as std::clone::Clone> *)
+
+use creusot.prelude.Any
+
+type t_Op6 = Enter | Wake | Finish
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_Op6 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 846 9 846 29]
+  (self: t_Op6) (return (x: t_Op6)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Op6 = Any.any_l () | & self: t_Op6 = self ]) [ return (result: t_Op6) -> (! return {result}) ]

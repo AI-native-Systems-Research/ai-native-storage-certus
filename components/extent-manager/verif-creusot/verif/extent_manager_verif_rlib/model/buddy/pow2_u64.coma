@@ -1,0 +1,27 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 248 0 248 32 *)
+
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 249 4 249 8
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 249 4 249 13
+let%span sbuddy'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 246 11 246 18
+let%span sbuddy'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 247 10 247 30
+
+use creusot.int.UInt64BW
+use creusot.prelude.Any
+use bv.Pow2int
+use int.Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let pow2_u64 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 248 0 248 32]
+  (k: UInt64BW.t) (return (x: UInt64BW.t)) = {[@stop_split] [@expl:pow2_u64 requires] [%#sbuddy'1] UInt64BW.t'int k
+  < 64}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = UInt64BW.shl [%#sbuddy'0] {[%#sbuddy] (1: UInt64BW.t)} {UInt64BW.to_BV256 k}
+        (fun (_x: UInt64BW.t) -> [ &_ret <- _x ] s1)
+    | s1 = return {_ret} ] ] [ & _ret: UInt64BW.t = Any.any_l () | & k: UInt64BW.t = k ])
+  [ return (result: UInt64BW.t) -> {[@stop_split] [@expl:pow2_u64 ensures] [%#sbuddy'2] UInt64BW.t'int result
+    = Pow2int.pow2 (UInt64BW.t'int k)}
+    (! return {result}) ]

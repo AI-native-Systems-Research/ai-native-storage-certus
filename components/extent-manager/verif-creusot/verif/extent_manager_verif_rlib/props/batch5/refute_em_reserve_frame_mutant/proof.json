@@ -1,0 +1,23 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_alloc_extent": { "prover": "alt-ergo", "time": 0.066 },
+      "vc_refute_em_reserve_frame__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.03 },
+              null,
+              { "prover": "alt-ergo", "time": 0.042 },
+              { "prover": "alt-ergo", "time": 0.032 }
+            ]
+          }
+        ]
+      },
+      "vc_w5_h5": { "prover": "alt-ergo", "time": 0.031 }
+    }
+  }
+}

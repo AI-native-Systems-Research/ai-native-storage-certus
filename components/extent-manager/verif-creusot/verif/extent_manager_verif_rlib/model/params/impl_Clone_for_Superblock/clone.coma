@@ -1,0 +1,34 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/params.rs" 41 9 41 29 *)
+
+(* <model::params::Superblock as std::clone::Clone> *)
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.int.UInt8
+use creusot.prelude.Any
+
+type t_Superblock = {
+  magic: UInt64.t;
+  version: UInt32.t;
+  data_disk_size: UInt64.t;
+  sector_size: UInt32.t;
+  slab_size: UInt64.t;
+  max_extent_size: UInt32.t;
+  region_count: UInt32.t;
+  checkpoint_seq: UInt64.t;
+  active_copy: UInt8.t;
+  checkpoint_region_offset: UInt64.t;
+  checkpoint_region_size: UInt64.t;
+  instance_id: UInt64.t;
+  metadata_disk_ns_id: UInt32.t;
+  data_start_offset: UInt64.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_Superblock [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/params.rs" 41 9 41 29]
+  (self: t_Superblock) (return (x: t_Superblock)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Superblock = Any.any_l () | & self: t_Superblock = self ])
+  [ return (result: t_Superblock) -> (! return {result}) ]

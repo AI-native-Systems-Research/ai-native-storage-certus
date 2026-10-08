@@ -1,0 +1,143 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 60 0 60 110 *)
+
+let%span sb3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 318 15 318 36
+let%span sb3'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 319 15 319 60
+let%span sb3'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 320 15 320 108
+let%span sb3'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 321 14 321 94
+let%span sb3'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 322 14 322 119
+let%span sb3'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 323 14 323 75
+let%span sb3'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 173 8 177 9
+let%span sb3'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 203 8 208 116
+let%span sb3'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 184 16 184 64
+let%span sb3'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 190 16 190 65
+let%span sb3'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 165 16 165 63
+let%span sbatch8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 61 4 61 37
+let%span sbatch8'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 54 11 54 29
+let%span sbatch8'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 55 11 55 53
+let%span sbatch8'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 56 11 56 95
+let%span sbatch8'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 57 10 58 63
+let%span sbatch8'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 59 10 59 71
+
+use creusot.prelude.MutBorrow
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use int.ComputerDivision
+use creusot.prelude.Any
+use int.Int
+
+type t_AllocSel = Default | User UInt64.t
+
+type t_Comp = WriteDone bool | ReadDone bool | Error | Other
+
+type t_Option_Comp = None | Some t_Comp
+
+type t_Ev = Alloc t_AllocSel bool | Send UInt32.t UInt64.t bool | Recv t_Option_Comp
+
+type t_EvDev = { log: Seq.seq t_Ev }
+
+type t_EvClient = { sector_size: UInt32.t; ns_id: UInt32.t; base_lba: UInt64.t; alloc: t_AllocSel }
+
+type t_EmError = CorruptMetadata | IoError | NotInitialized | OffsetNotFound UInt64.t | OutOfSpace
+
+type t_Result_unit_EmError = Ok () | Err t_EmError
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+constant const_MAX'0: UInt64.t = (18446744073709551615: UInt64.t)
+
+predicate ev_alloc_is [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 183 0 183 46] (e: t_Ev) (a: t_AllocSel) =
+  [%#sb3'7] match e with
+    | Alloc x _ -> x = a
+    | _ -> true
+    end
+
+predicate ev_is_send [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 189 0 189 32] (e: t_Ev) =
+  [%#sb3'8] match e with
+    | Send _ _ _ -> true
+    | _ -> false
+    end
+
+predicate ev_alloc_fail [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 164 0 164 35] (e: t_Ev) =
+  [%#sb3'9] match e with
+    | Alloc _ ok -> not ok
+    | _ -> false
+    end
+
+predicate ev_dev_fail [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 171 0 171 46] (e: t_Ev) (write: bool) =
+  [%#sb3'5] match e with
+    | Send _ _ ok -> not ok
+    | Recv c -> if write then c <> Some (WriteDone true) else c <> Some (ReadDone true)
+    | _ -> false
+    end
+
+predicate io_post [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 201 0 201 93] (l: Seq.seq t_Ev) (n0: int) (a: t_AllocSel) (write: bool) (ok: bool) (err_io: bool) =
+  [%#sb3'6] n0 <= Seq.length l
+  /\ (forall p: int. n0 <= p /\ p < Seq.length l -> ev_alloc_is (Seq.get l p) a)
+  /\ (forall p: int. n0 <= p /\ p < Seq.length l /\ ev_is_send (Seq.get l p)
+      -> n0 < p /\ Seq.get l (p - 1) = Alloc a true)
+  /\ (forall p: int. n0 <= p /\ p < Seq.length l /\ (ev_alloc_fail (Seq.get l p) \/ ev_dev_fail (Seq.get l p) write)
+      -> p = Seq.length l - 1 /\ not ok /\ err_io)
+  /\ (not ok
+  -> err_io
+  /\ Seq.length l > n0
+  /\ (ev_alloc_fail (Seq.get l (Seq.length l - 1)) \/ ev_dev_fail (Seq.get l (Seq.length l - 1)) write))
+
+let read_blocks (self: t_EvClient) (dev: MutBorrow.t t_EvDev) (lba: UInt64.t) (num_bytes: UInt64.t)
+  (return (x: t_Result_unit_EmError)) =
+{[@stop_split] [@expl:read_blocks requires] ([@stop_split] [@expl:read_blocks requires #0] [%#sb3] UInt32.t'int self.sector_size
+    > 0)
+  /\ ([@stop_split] [@expl:read_blocks requires #1] [%#sb3'0] UInt64.t'int num_bytes + UInt32.t'int self.sector_size
+    <= UInt64.t'int const_MAX)
+  /\ ([@stop_split] [@expl:read_blocks requires #2] [%#sb3'1] UInt64.t'int self.base_lba + UInt64.t'int lba
+    + ComputerDivision.div (UInt64.t'int num_bytes + UInt32.t'int self.sector_size - 1) (UInt32.t'int self.sector_size)
+  <= UInt64.t'int const_MAX'0)}
+  any
+  [ return (result: t_Result_unit_EmError) ->
+  {[@stop_split] [@expl:read_blocks ensures] ([@stop_split] [@expl:read_blocks ensures #0] [%#sb3'2] forall p: int. 0
+            <= p
+          /\ p < Seq.length dev.current.log -> Seq.get dev.final.log p = Seq.get dev.current.log p)
+    /\ ([@stop_split] [@expl:read_blocks ensures #1] [%#sb3'3] io_post dev.final.log (Seq.length dev.current.log) self.alloc false (result
+      = Ok ()) (result = Err (IoError)))
+    /\ ([@stop_split] [@expl:read_blocks ensures #2] [%#sb3'4] forall e: t_EmError. result = Err e -> e = IoError)}
+    (! return {result}) ]
+
+predicate resolve_refmut_EvDev [@inline:trivial] (_1: MutBorrow.t t_EvDev) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_EvDev
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_em_bio_read_err [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 60 0 60 110]
+  (c: t_EvClient) (wd: MutBorrow.t t_EvDev) (lba: UInt64.t) (num_bytes: UInt64.t) (return (x: t_Result_unit_EmError)) =
+{[@stop_split] [@expl:verify_em_bio_read_err requires] ([@stop_split] [@expl:verify_em_bio_read_err requires #0] [%#sbatch8'0] UInt32.t'int c.sector_size
+    > 0)
+  /\ ([@stop_split] [@expl:verify_em_bio_read_err requires #1] [%#sbatch8'1] UInt64.t'int num_bytes
+      + UInt32.t'int c.sector_size
+    <= UInt64.t'int const_MAX)
+  /\ ([@stop_split] [@expl:verify_em_bio_read_err requires #2] [%#sbatch8'2] UInt64.t'int c.base_lba + UInt64.t'int lba
+    + ComputerDivision.div (UInt64.t'int num_bytes + UInt32.t'int c.sector_size - 1) (UInt32.t'int c.sector_size)
+  <= UInt64.t'int const_MAX'0)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = MutBorrow.borrow_final <t_EvDev> {wd.current} {MutBorrow.get_id wd}
+        (fun (_bor: MutBorrow.t t_EvDev) -> [ &_18 <- _bor ] [ &wd <- { wd with current = _bor.final } ] s1)
+    | s1 = read_blocks [%#sbatch8] {c} {_18} {lba} {num_bytes} (fun (_x: t_Result_unit_EmError) -> [ &_ret <- _x ] s2)
+    | s2 = -{resolve_refmut_EvDev wd}- s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: t_Result_unit_EmError = Any.any_l ()
+  | & c: t_EvClient = c
+  | & wd: MutBorrow.t t_EvDev = wd
+  | & lba: UInt64.t = lba
+  | & num_bytes: UInt64.t = num_bytes
+  | & _18: MutBorrow.t t_EvDev = Any.any_l () ])
+  [ return (result: t_Result_unit_EmError) ->
+  {[@stop_split] [@expl:verify_em_bio_read_err ensures] ([@stop_split] [@expl:verify_em_bio_read_err ensures #0] [%#sbatch8'3] forall p: int. Seq.length wd.current.log
+            <= p
+          /\ p < Seq.length wd.final.log /\ ev_dev_fail (Seq.get wd.final.log p) false
+        -> p = Seq.length wd.final.log - 1 /\ result = Err (IoError))
+    /\ ([@stop_split] [@expl:verify_em_bio_read_err ensures #1] [%#sbatch8'4] forall e: t_EmError. result = Err e
+      -> e = IoError)}
+    (! return {result}) ]

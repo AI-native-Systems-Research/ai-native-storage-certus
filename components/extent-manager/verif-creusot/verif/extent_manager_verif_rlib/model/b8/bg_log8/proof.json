@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_bg_log8": { "prover": "alt-ergo", "time": 0.037 },
+      "vc_elim_Err": { "prover": "alt-ergo", "time": 0.01 }
+    }
+  }
+}

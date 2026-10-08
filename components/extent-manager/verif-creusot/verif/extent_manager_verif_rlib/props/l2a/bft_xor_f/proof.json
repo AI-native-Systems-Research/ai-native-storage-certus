@@ -1,0 +1,4 @@
+{
+  "profile": [],
+  "proofs": { "Coma": { "vc_bft_xor_f": { "prover": "z3", "time": 0.02 } } }
+}

@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_lemma_merge_step": { "prover": "cvc5", "time": 2.5 } }
+  }
+}

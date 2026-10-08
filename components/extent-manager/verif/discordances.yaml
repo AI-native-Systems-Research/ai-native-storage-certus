@@ -1,0 +1,1650 @@
+component: extent-manager
+pin: 2cd35bac
+level: 1
+what: 'spec<->code discordances found while reconciling the specification with the code. Each is EXCLUDED from formal
+  verification (level 2). status: candidate until a test confirms it (confirmed) or shows it was a misreading (withdrawn).'
+counts:
+  discordances: 71
+  spec_and_code_differ: 24
+  spec_not_found_in_code: 26
+  input_range_mismatch: 21
+  properties_excluded_from_level2: 50
+  routed_to_other_tools: 0
+  reader_missed_sent_to_level2: 0
+  confirmed: 0
+  withdrawn: 0
+discordances:
+- id: D-FR-003-lib.rs:483-28d684
+  name: Format superblock written
+  kind: spec-not-found-in-code
+  methods:
+  - format
+  spec_says: After format() succeeds, the first block of the metadata device (block 0, counted from the configured
+    metadata base address) holds a superblock that records the format parameters, the checkpoint region layout,
+    and a CRC32 checksum over its contents.
+  code_does: No matching guarantee stated by the code reader.
+  spec_pointers:
+  - FR-003
+  - US-2
+  code_pointers:
+  - lib.rs:483
+  status: candidate
+  excluded_properties:
+  - EM-FORMAT-POST-SUPERBLOCK-WRITTEN
+  extraction_sides:
+    spec:
+    - EM-FORMAT-POST-SUPERBLOCK-WRITTEN
+    code: []
+- id: D-NOSPEC-lib.rs:418-1cc80a
+  name: Format ckpt region offset
+  kind: spec-and-code-differ
+  methods:
+  - format
+  spec_says: After format() succeeds, the recorded checkpoint region offset is the smallest multiple of the configured
+    metadata alignment that is greater than or equal to 4096 bytes (the superblock size).
+  code_does: The first checkpoint copy starts at the smallest multiple of the metadata alignment that is at least
+    the superblock size, or directly after the superblock when the alignment is zero.
+  spec_pointers: []
+  code_pointers:
+  - lib.rs:418
+  - lib.rs:418-424
+  - iextent_manager.rs:53-55
+  status: candidate
+  excluded_properties:
+  - EM-FORMAT-POST-CKPT-REGION-OFFSET
+  extraction_sides:
+    spec:
+    - EM-FORMAT-POST-CKPT-REGION-OFFSET
+    code:
+    - EM-FORMAT-POST-CHECKPOINT-OFFSET
+- id: D-FR-035-lib.rs:430-1b0387
+  name: Format ckpt region size
+  kind: spec-not-found-in-code
+  methods:
+  - format
+  spec_says: After format() succeeds in separate-device mode (metadata region size of zero), the recorded checkpoint
+    region size is half of the metadata device space remaining after the checkpoint region offset, rounded down
+    to a whole number of sectors.
+  code_does: No matching guarantee stated by the code reader.
+  spec_pointers:
+  - FR-035
+  code_pointers:
+  - lib.rs:430
+  status: candidate
+  excluded_properties:
+  - EM-FORMAT-POST-CKPT-REGION-SIZE
+  extraction_sides:
+    spec:
+    - EM-FORMAT-POST-CKPT-REGION-SIZE
+    code: []
+- id: D-EC-6-lib.rs:506-9f3dfc
+  name: Format ready
+  kind: spec-not-found-in-code
+  methods:
+  - format
+  - reserve_extent
+  - remove_extent
+  - checkpoint
+  - get_instance_id
+  spec_says: After format() succeeds, operations that previously returned NotInitialized (reserve_extent, remove_extent,
+    checkpoint, get_instance_id) no longer return NotInitialized.
+  code_does: No matching guarantee stated by the code reader.
+  spec_pointers:
+  - EC-6
+  - FR-002
+  - FR-003
+  code_pointers:
+  - lib.rs:506
+  status: candidate
+  excluded_properties:
+  - EM-FORMAT-POST-READY
+  extraction_sides:
+    spec:
+    - EM-FORMAT-POST-READY
+    code: []
+- id: D-FR-030-lib.rs:383-1c02e1
+  name: Format no flush
+  kind: spec-not-found-in-code
+  methods:
+  - format
+  spec_says: format() issues no explicit flush command to the metadata device, regardless of whether the volatile_write_cache
+    feature is enabled; flushes are issued only on the checkpoint path.
+  code_does: No matching guarantee stated by the code reader.
+  spec_pointers:
+  - FR-030
+  code_pointers:
+  - lib.rs:383
+  status: candidate
+  excluded_properties:
+  - EM-FORMAT-FRAME-NO-FLUSH
+  extraction_sides:
+    spec:
+    - EM-FORMAT-FRAME-NO-FLUSH
+    code: []
+- id: D-NOSPEC-superblock.rs:114-e6775a
+  name: Init error superblock version
+  kind: spec-and-code-differ
+  methods:
+  - initialize
+  spec_says: If the persisted superblock carries a format version other than the one this code writes, initialize()
+    fails with a CorruptMetadata error instead of interpreting the layout.
+  code_does: If the persisted superblock carries a format version other than the one this code writes, initialize
+    fails with a CorruptMetadata error instead of interpreting the layout.
+  spec_pointers: []
+  code_pointers:
+  - superblock.rs:114
+  - superblock.rs:6
+  - superblock.rs:114-115
+  status: candidate
+  excluded_properties:
+  - EM-INIT-ERR-SUPERBLOCK-VERSION
+  extraction_sides:
+    spec: []
+    code:
+    - EM-INIT-ERR-SUPERBLOCK-VERSION
+- id: D-NOSPEC-lib.rs:533-ff932c
+  name: Init error superblock geometry
+  kind: spec-and-code-differ
+  methods:
+  - initialize
+  spec_says: If a checksum-valid superblock describes an impossible geometry (sector size zero, region count zero
+    or not a power of two, slab size not a multiple of the sector size, or a data start offset beyond the data disk
+    size), initialize() fails with a CorruptMetadata error.
+  code_does: If a checksum-valid superblock describes an impossible geometry (sector size zero, region count zero
+    or not a power of two, slab size not a multiple of the sector size, or a data start offset beyond the data disk
+    size), initialize fails with a CorruptMetadata error and never crashes.
+  spec_pointers: []
+  code_pointers:
+  - lib.rs:533
+  - lib.rs:533-545
+  - lib.rs:243
+  - buddy.rs:11
+  status: candidate
+  excluded_properties:
+  - EM-INIT-ERR-SUPERBLOCK-GEOMETRY
+  extraction_sides:
+    spec: []
+    code:
+    - EM-INIT-ERR-SUPERBLOCK-GEOMETRY
+- id: D-AS-3.2-recovery.rs:39-7625c5
+  name: Init fallback to inactive
+  kind: spec-and-code-differ
+  methods:
+  - initialize
+  - get_extents
+  - for_each_extent
+  spec_says: When the active checkpoint copy is unreadable (a CRC failure or a media error, for example a corrupted
+    first sector) and the inactive copy is valid, initialize() rebuilds state from the inactive copy and restores
+    its extents.
+  code_does: When the active checkpoint copy is invalid but the other copy holds a valid checkpoint with the immediately
+    preceding sequence number, initialize succeeds and the component lists exactly the extents recorded in that
+    previous checkpoint.
+  spec_pointers:
+  - AS-3.2
+  - FR-017
+  - US-3
+  - SC-003
+  code_pointers:
+  - recovery.rs:39
+  - recovery.rs:39-58
+  status: candidate
+  excluded_properties:
+  - EM-INIT-POST-FALLBACK-TO-INACTIVE
+  extraction_sides:
+    spec:
+    - EM-INIT-POST-FALLBACK-TO-INACTIVE
+    code:
+    - EM-INIT-POST-FALLBACK
+- id: D-FR-017-recovery.rs:4870-f406c3
+  name: Init error both copies invalid
+  kind: spec-and-code-differ
+  methods:
+  - initialize
+  spec_says: When the superblock is valid but neither the active nor the inactive checkpoint copy can be read and
+    validated, initialize() returns an error instead of reporting success.
+  code_does: When the active checkpoint copy is invalid and no valid previous checkpoint exists in the other copy
+    (including when the active one is the very first checkpoint), initialize fails with a CorruptMetadata error.
+  spec_pointers:
+  - FR-017
+  - US-3
+  code_pointers:
+  - recovery.rs:48-70
+  status: candidate
+  excluded_properties:
+  - EM-INIT-ERR-BOTH-COPIES-INVALID
+  extraction_sides:
+    spec:
+    - EM-INIT-ERR-BOTH-COPIES-UNREADABLE
+    code:
+    - EM-INIT-ERR-BOTH-COPIES-INVALID
+- id: D-NOSPEC-lib.rs:552-5e6289
+  name: Init error descriptor inconsistent
+  kind: spec-and-code-differ
+  methods:
+  - initialize
+  spec_says: If a recovered checkpoint describes a slab that is internally inconsistent (element size zero, a number
+    of keys different from the number of slots its sizes imply, lying outside its region, or overlapping another
+    slab), initialize() fails with a CorruptMetadata error.
+  code_does: If a recovered checkpoint describes a slab that is internally inconsistent (element size zero, number
+    of keys different from the number of slots its sizes imply, lying outside its region, or overlapping another
+    slab), initialize fails with a CorruptMetadata error rather than crashing or silently accepting it.
+  spec_pointers: []
+  code_pointers:
+  - lib.rs:552
+  - recovery.rs:76-85
+  - lib.rs:552-565
+  - buddy.rs:117-157
+  - slab.rs:17-27
+  status: candidate
+  excluded_properties:
+  - EM-INIT-ERR-DESCRIPTOR-INCONSISTENT
+  extraction_sides:
+    spec: []
+    code:
+    - EM-INIT-ERR-DESCRIPTOR-INCONSISTENT
+- id: D-NOSPEC-lib.rs:546-69f12d
+  name: Init error region count mismatch
+  kind: spec-and-code-differ
+  methods:
+  - initialize
+  spec_says: If the recovered checkpoint records a number of regions different from the superblock's region count,
+    initialize() fails with a CorruptMetadata error rather than dropping or inventing regions.
+  code_does: If the recovered checkpoint records a number of regions different from the superblock's region count,
+    initialize fails with a CorruptMetadata error rather than dropping or inventing regions.
+  spec_pointers: []
+  code_pointers:
+  - lib.rs:546
+  - lib.rs:546-550
+  - checkpoint.rs:192-197
+  status: candidate
+  excluded_properties:
+  - EM-INIT-ERR-REGION-COUNT-MISMATCH
+  extraction_sides:
+    spec: []
+    code:
+    - EM-INIT-ERR-REGION-COUNT-MISMATCH
+- id: D-FR-031-lib.rs:552-bdbdd4
+  name: Init used bytes
+  kind: spec-and-code-differ
+  methods:
+  - initialize
+  - used_bytes
+  spec_says: After initialize() succeeds, used_bytes() equals the number of slabs recovered from the checkpoint
+    multiplied by the slab size.
+  code_does: After initialize succeeds, the reported used bytes equal the used bytes the component reported right
+    after the recovered checkpoint completed.
+  spec_pointers:
+  - FR-031
+  - FR-018
+  code_pointers:
+  - lib.rs:552
+  - lib.rs:552-555
+  - lib.rs:312-321
+  status: candidate
+  excluded_properties:
+  - EM-INIT-POST-USED-BYTES
+  extraction_sides:
+    spec:
+    - EM-INIT-POST-USED-BYTES
+    code:
+    - EM-INIT-POST-USED
+- id: D-EC-6-lib.rs:576-027346
+  name: Init ready
+  kind: spec-not-found-in-code
+  methods:
+  - initialize
+  - reserve_extent
+  - remove_extent
+  - checkpoint
+  - get_instance_id
+  spec_says: After initialize() succeeds, operations that previously returned NotInitialized (reserve_extent, remove_extent,
+    checkpoint, get_instance_id) no longer return NotInitialized.
+  code_does: No matching guarantee stated by the code reader.
+  spec_pointers:
+  - EC-6
+  - FR-004
+  code_pointers:
+  - lib.rs:576
+  status: candidate
+  excluded_properties:
+  - EM-INIT-POST-READY
+  extraction_sides:
+    spec:
+    - EM-INIT-POST-READY
+    code: []
+- id: D-FR-021-region.rs:47-9c0811
+  name: Reserve reuse existing slab
+  kind: spec-not-found-in-code
+  methods:
+  - reserve_extent
+  - used_bytes
+  spec_says: When the target region already has a slab of the required sector-aligned element size with a free slot,
+    reserve_extent() uses that slab and does not allocate a new slab, so used_bytes() does not change; a new slab
+    is taken only on demand.
+  code_does: No matching guarantee stated by the code reader.
+  spec_pointers:
+  - FR-021
+  - EC-8
+  code_pointers:
+  - region.rs:47
+  status: candidate
+  excluded_properties:
+  - EM-RESERVE-FRAME-REUSE-EXISTING-SLAB
+  extraction_sides:
+    spec:
+    - EM-RESERVE-FRAME-REUSE-EXISTING-SLAB
+    code: []
+- id: D-EC-1-region.rs:7283-4ec50c
+  name: Reserve error out of space
+  kind: spec-and-code-differ
+  methods:
+  - reserve_extent
+  spec_says: When there is no free space left on the data device to satisfy the request, reserve_extent() returns
+    an OutOfSpace error and makes no reservation.
+  code_does: When the key's region has no free slot of the required size and no room for a new slab, reserve_extent
+    fails with an OutOfSpace error.
+  spec_pointers:
+  - EC-1
+  code_pointers:
+  - region.rs:72-83
+  - region.rs:72-75
+  - region.rs:78-83
+  status: candidate
+  excluded_properties:
+  - EM-RESERVE-ERR-OUT-OF-SPACE
+  extraction_sides:
+    spec:
+    - EM-RESERVE-ERR-OUT-OF-SPACE
+    code:
+    - EM-RESERVE-ERR-OUT-OF-SPACE
+- id: D-NOSPEC-region.rs:66-43b4f8
+  name: Reserve error oversize
+  kind: spec-and-code-differ
+  methods:
+  - reserve_extent
+  spec_says: reserve_extent() rejects a size larger than the configured maximum extent size with an error and reserves
+    nothing.
+  code_does: reserve_extent rejects a size larger than the configured maximum extent size with an error and reserves
+    nothing.
+  spec_pointers: []
+  code_pointers:
+  - region.rs:66
+  - region.rs:66-70
+  - iextent_manager.rs:47
+  status: candidate
+  excluded_properties:
+  - EM-RESERVE-ERR-OVERSIZE
+  extraction_sides:
+    spec: []
+    code:
+    - EM-RESERVE-ERR-OVERSIZE
+- id: D-NOSPEC-region.rs:41-76c824
+  name: Reserve error zero size
+  kind: spec-and-code-differ
+  methods:
+  - reserve_extent
+  spec_says: reserve_extent() with a size of zero fails with an error, reserves nothing and does not crash.
+  code_does: reserve_extent with a size of zero fails with an error, reserves nothing and does not crash.
+  spec_pointers: []
+  code_pointers:
+  - region.rs:41
+  - region.rs:42
+  - slab.rs:18
+  status: candidate
+  excluded_properties:
+  - EM-RESERVE-ERR-ZERO-SIZE
+  extraction_sides:
+    spec: []
+    code:
+    - EM-RESERVE-ERR-ZERO-SIZE
+- id: D-NOSPEC-region.rs:37-0207a3
+  name: Reserve no size overflow
+  kind: spec-and-code-differ
+  methods:
+  - reserve_extent
+  spec_says: reserve_extent() with a size so large that rounding it up to a whole number of sectors would overflow
+    fails with an error and does not crash or reserve a smaller extent.
+  code_does: reserve_extent with a size so large that rounding it up to a whole number of sectors would overflow
+    fails with an error and does not crash or reserve a smaller extent.
+  spec_pointers: []
+  code_pointers:
+  - region.rs:37
+  - region.rs:37-39
+  - lib.rs:591
+  status: candidate
+  excluded_properties:
+  - EM-RESERVE-NO-SIZE-OVERFLOW
+  extraction_sides:
+    spec: []
+    code:
+    - EM-RESERVE-NO-SIZE-OVERFLOW
+- id: D-EC-2-lib.rs:584-8b0415
+  name: Reserve key zero
+  kind: spec-not-found-in-code
+  methods:
+  - reserve_extent
+  - WriteHandle::publish
+  - get_extents
+  spec_says: Key 0 is an ordinary valid key; reserving and then publishing an extent with key 0 succeeds and the
+    extent is listed by get_extents() with key 0.
+  code_does: No matching guarantee stated by the code reader.
+  spec_pointers:
+  - EC-2
+  code_pointers:
+  - lib.rs:584
+  status: candidate
+  excluded_properties:
+  - EM-RESERVE-POST-KEY-ZERO
+  extraction_sides:
+    spec:
+    - EM-RESERVE-POST-KEY-ZERO
+    code: []
+- id: D-EC-3-lib.rs:584-a3b589
+  name: Reserve free key accepted
+  kind: spec-not-found-in-code
+  methods:
+  - reserve_extent
+  spec_says: reserve_extent() with key u64::MAX (the FREE_KEY sentinel) succeeds normally and returns a write handle,
+    just as for any other key.
+  code_does: No matching guarantee stated by the code reader.
+  spec_pointers:
+  - EC-3
+  - AS-1.5
+  code_pointers:
+  - lib.rs:584
+  status: candidate
+  excluded_properties:
+  - EM-RESERVE-POST-FREE-KEY-ACCEPTED
+  extraction_sides:
+    spec:
+    - EM-RESERVE-POST-FREE-KEY-ACCEPTED
+    code: []
+- id: D-FR-006-lib.rs:603615-7226c3
+  name: Publish returned extent
+  kind: spec-and-code-differ
+  methods:
+  - WriteHandle::publish
+  - reserve_extent
+  spec_says: When publish() succeeds on a handle whose key is not u64::MAX, the extent it returns has the same key,
+    offset and size as the handle reported.
+  code_does: publish returns an extent whose key, offset and size equal the values the handle reported.
+  spec_pointers:
+  - FR-006
+  - US-6
+  code_pointers:
+  - lib.rs:603-615
+  - lib.rs:623-629
+  status: candidate
+  excluded_properties:
+  - EM-PUBLISH-POST-RETURNED-EXTENT
+  extraction_sides:
+    spec:
+    - EM-PUBLISH-POST-RETURNED-EXTENT
+    code:
+    - EM-PUBLISH-POST-RETURN
+- id: D-FR-007-lib.rs:618-65a272
+  name: Abort no key written
+  kind: spec-not-found-in-code
+  methods:
+  - WriteHandle::abort
+  spec_says: abort() records no key for the slot and does not change the key, offset, size or visibility of any
+    other extent.
+  code_does: No matching guarantee stated by the code reader.
+  spec_pointers:
+  - FR-007
+  code_pointers:
+  - lib.rs:618
+  status: candidate
+  excluded_properties:
+  - EM-ABORT-FRAME-NO-KEY-WRITTEN
+  extraction_sides:
+    spec:
+    - EM-ABORT-FRAME-NO-KEY-WRITTEN
+    code: []
+- id: D-FR-008-region.rs:147-e29366
+  name: Remove deferred free
+  kind: spec-and-code-differ
+  methods:
+  - remove_extent
+  - reserve_extent
+  - checkpoint
+  - used_bytes
+  spec_says: remove_extent() does not release the extent's disk space at the time of the call; used_bytes() does
+    not decrease as a result of the removal until a later checkpoint succeeds. After an extent is removed, no part
+    of its disk slot is handed out by any reservation until a checkpoint that began after the removal has completed
+    successfully; a reservation of the same size made before that point receives a different slot.
+  code_does: The space of a removed extent is not given to any new reservation until a checkpoint that records the
+    removal has completed.
+  spec_pointers:
+  - FR-008
+  - FR-025
+  - US-6
+  - AS-6.3
+  - EC-9
+  code_pointers:
+  - region.rs:147
+  - checkpoint.rs:303-309
+  status: candidate
+  excluded_properties:
+  - EM-REMOVE-DEFERRED-FREE
+  extraction_sides:
+    spec:
+    - EM-REMOVE-FRAME-SPACE-STILL-HELD
+    - EM-INV-DEFERRED-FREE
+    code:
+    - EM-REMOVE-POST-SPACE-HELD-UNTIL-CHECKPOINT
+- id: D-FR-014-lib.rs:276297-77ae98
+  name: Ckpt writes when dirty
+  kind: spec-not-found-in-code
+  methods:
+  - checkpoint
+  - WriteHandle::publish
+  - remove_extent
+  spec_says: When at least one extent has been published or removed since the last successful checkpoint, the next
+    checkpoint() writes a new checkpoint to the metadata device rather than skipping.
+  code_does: No matching guarantee stated by the code reader.
+  spec_pointers:
+  - FR-014
+  - FR-013
+  - US-2
+  code_pointers:
+  - lib.rs:276-297
+  status: candidate
+  excluded_properties:
+  - EM-CKPT-POST-WRITES-WHEN-DIRTY
+  extraction_sides:
+    spec:
+    - EM-CKPT-POST-WRITES-WHEN-DIRTY
+    code: []
+- id: D-US-2-lib.rs:299306-661516
+  name: Ckpt durable
+  kind: spec-and-code-differ
+  methods:
+  - checkpoint
+  - initialize
+  - get_extents
+  spec_says: When checkpoint() returns success, every extent that was published (and not removed) before the call
+    began survives a subsequent reboot followed by initialize(), with the same key, offset and size. After a reboot,
+    initialize() does not restore any extent that was published after the last successful checkpoint; recovered
+    state reflects exactly the last checkpoint.
+  code_does: After checkpoint succeeds, a fresh component that initializes from the same metadata device lists exactly
+    the extents that were published and not removed before checkpoint was called.
+  spec_pointers:
+  - US-2
+  - AS-2.1
+  - FR-013
+  - SC-002
+  - AS-2.2
+  code_pointers:
+  - lib.rs:299-306
+  - checkpoint.rs:35-115
+  - recovery.rs:11-71
+  status: candidate
+  excluded_properties:
+  - EM-CKPT-POST-DURABLE
+  extraction_sides:
+    spec:
+    - EM-CKPT-POST-DURABLE
+    - EM-INIT-POST-NO-UNCHECKPOINTED
+    code:
+    - EM-CKPT-POST-DURABLE
+- id: D-FR-015-lib.rs:729761-c05ec7
+  name: Ckpt coalesced caller covered
+  kind: spec-and-code-differ
+  methods:
+  - checkpoint
+  spec_says: A checkpoint() call that arrives while another checkpoint is in progress, and is satisfied by waiting
+    rather than by starting its own I/O, returns success only once a checkpoint has completed that includes every
+    modification made before that call began.
+  code_does: When several callers checkpoint concurrently, a call that returns success only does so after a checkpoint
+    that started after the call began has completed, so every change finished before the call is persisted.
+  spec_pointers:
+  - FR-015
+  - AS-2.4
+  code_pointers:
+  - lib.rs:729-761
+  status: candidate
+  excluded_properties:
+  - EM-CKPT-POST-COALESCED-CALLER-COVERED
+  extraction_sides:
+    spec:
+    - EM-CKPT-POST-COALESCED-CALLER-COVERED
+    code:
+    - EM-CKPT-POST-COVERS-PRIOR-CHANGES
+- id: D-SC-006-lib.rs:729761-779491
+  name: Ckpt burst bound
+  kind: spec-not-found-in-code
+  methods:
+  - checkpoint
+  spec_says: A burst of concurrent checkpoint() callers is served by at most two checkpoint I/O executions run one
+    after the other (the one already running plus at most one more); exactly two is allowed, three or more is not.
+  code_does: No matching guarantee stated by the code reader.
+  spec_pointers:
+  - SC-006
+  - AS-2.4
+  code_pointers:
+  - lib.rs:729-761
+  status: candidate
+  excluded_properties:
+  - EM-CKPT-POST-BURST-BOUND
+  extraction_sides:
+    spec:
+    - EM-CKPT-POST-BURST-BOUND
+    code: []
+- id: D-NOSPEC-checkpoint.rs:5867-2f2765
+  name: Ckpt seq increases
+  kind: spec-and-code-differ
+  methods:
+  - checkpoint
+  spec_says: Each checkpoint that performs I/O and succeeds stores in the superblock a checkpoint sequence number
+    strictly greater than the one stored before it.
+  code_does: Each checkpoint that writes increases the persisted checkpoint sequence number by exactly one and writes
+    to, then makes active, the checkpoint copy that was not active before.
+  spec_pointers: []
+  code_pointers:
+  - checkpoint.rs:58-67
+  - checkpoint.rs:106-112
+  status: candidate
+  excluded_properties:
+  - EM-CKPT-POST-SEQ-INCREASES
+  extraction_sides:
+    spec:
+    - EM-CKPT-POST-SEQ-INCREASES
+    code:
+    - EM-CKPT-POST-SEQ-AND-COPY
+- id: D-FR-013-checkpoint.rs:5867-6c3b20
+  name: Ckpt writes inactive copy
+  kind: spec-and-code-differ
+  methods:
+  - checkpoint
+  spec_says: A checkpoint that performs I/O writes its data to the checkpoint copy that was inactive when it started,
+    and on success the superblock names that copy as the new active copy. A checkpoint never writes to the checkpoint
+    copy that is active when it starts; that copy remains byte-for-byte unchanged until a later checkpoint makes
+    it the inactive target.
+  code_does: A checkpoint writes its data only into the checkpoint copy that is not currently active, and writes
+    nothing outside that copy.
+  spec_pointers:
+  - FR-013
+  - US-2
+  - ASSUMP-5
+  code_pointers:
+  - checkpoint.rs:58-67
+  - checkpoint.rs:89-97
+  status: candidate
+  excluded_properties:
+  - EM-CKPT-POST-WRITES-INACTIVE-COPY
+  extraction_sides:
+    spec:
+    - EM-CKPT-POST-WRITES-INACTIVE-COPY
+    - EM-CKPT-FRAME-ACTIVE-COPY-UNTOUCHED
+    code:
+    - EM-CKPT-WRITE-INACTIVE-COPY
+- id: D-FR-013-checkpoint.rs:8087-01996e
+  name: Ckpt header crc
+  kind: spec-not-found-in-code
+  methods:
+  - checkpoint
+  spec_says: The checkpoint data written begins with a 16-byte header whose payload length equals the length of
+    the payload that follows and whose CRC32 equals the checksum of the header plus payload computed with the CRC
+    field set to zero.
+  code_does: No matching guarantee stated by the code reader.
+  spec_pointers:
+  - FR-013
+  code_pointers:
+  - checkpoint.rs:80-87
+  status: candidate
+  excluded_properties:
+  - EM-CKPT-POST-HEADER-CRC
+  extraction_sides:
+    spec:
+    - EM-CKPT-POST-HEADER-CRC
+    code: []
+- id: D-FR-008-region.rs:104107-4cafa8
+  name: Ckpt empty slab returned
+  kind: spec-and-code-differ
+  methods:
+  - checkpoint
+  - used_bytes
+  - WriteHandle::abort
+  - WriteHandle::publish
+  spec_says: When releasing removed slots after a successful checkpoint leaves a slab with no occupied slots, that
+    slab is returned to its region's free space, and used_bytes() decreases by one slab size for each slab so returned.
+  code_does: When the last allocated slot of a slab is freed, the slab is removed and its whole space is returned
+    to the region's allocator.
+  spec_pointers:
+  - FR-008
+  - FR-031
+  - US-6
+  code_pointers:
+  - region.rs:104-107
+  status: candidate
+  excluded_properties:
+  - EM-CKPT-POST-EMPTY-SLAB-RETURNED
+  extraction_sides:
+    spec:
+    - EM-CKPT-POST-EMPTY-SLAB-RETURNED
+    code:
+    - EM-REGION-EMPTY-SLAB-RELEASED
+- id: D-FR-037-lib.rs:365367-dfc4f6
+  name: Ckpt hook invoked
+  kind: spec-and-code-differ
+  methods:
+  - checkpoint
+  spec_says: When a post-checkpoint hook is registered, each successful checkpoint invokes it exactly once, synchronously,
+    after the superblock update and before checkpoint() returns. When a checkpoint fails, the registered post-checkpoint
+    hook is not invoked for that attempt.
+  code_does: The registered post-checkpoint hook runs exactly once for each checkpoint that writes and succeeds,
+    and does not run when the checkpoint is skipped because nothing changed or when it fails.
+  spec_pointers:
+  - FR-037
+  code_pointers:
+  - lib.rs:365-367
+  - lib.rs:173-175
+  - lib.rs:284-286
+  status: candidate
+  excluded_properties:
+  - EM-CKPT-POST-HOOK-INVOKED
+  extraction_sides:
+    spec:
+    - EM-CKPT-POST-HOOK-INVOKED
+    - EM-CKPT-ERR-NO-HOOK-ON-FAILURE
+    code:
+    - EM-CKPT-HOOK-ON-SUCCESS
+- id: D-FR-034-lib.rs:297306-ec60e8
+  name: Ckpt error io failure
+  kind: spec-and-code-differ
+  methods:
+  - checkpoint
+  - initialize
+  spec_says: When a metadata-device write fails during a checkpoint, checkpoint() returns an error and the superblock
+    on disk continues to name the previously active copy, so the state of the previous successful checkpoint remains
+    recoverable.
+  code_does: When the metadata device fails during a checkpoint, checkpoint returns an IoError and the device still
+    recovers to the last completed checkpoint.
+  spec_pointers:
+  - FR-034
+  - FR-013
+  - US-2
+  - ASSUMP-5
+  code_pointers:
+  - lib.rs:297-306
+  - lib.rs:297
+  - lib.rs:306
+  - checkpoint.rs:97
+  - block_io.rs:91-104
+  status: candidate
+  excluded_properties:
+  - EM-CKPT-ERR-IO-FAILURE
+  extraction_sides:
+    spec:
+    - EM-CKPT-ERR-IO-FAILURE
+    code:
+    - EM-CKPT-ERR-IO
+- id: D-FR-030-lib.rs:308310-610af7
+  name: Ckpt no flush when disabled
+  kind: spec-not-found-in-code
+  methods:
+  - checkpoint
+  spec_says: When the volatile_write_cache feature is disabled (the default), checkpoint() issues no explicit flush
+    command to the metadata device.
+  code_does: No matching guarantee stated by the code reader.
+  spec_pointers:
+  - FR-030
+  code_pointers:
+  - lib.rs:308-310
+  status: candidate
+  excluded_properties:
+  - EM-CKPT-FRAME-NO-FLUSH-WHEN-DISABLED
+  extraction_sides:
+    spec:
+    - EM-CKPT-FRAME-NO-FLUSH-WHEN-DISABLED
+    code: []
+- id: D-FR-026-lib.rs:686-f1d7ba
+  name: Instid read only
+  kind: spec-not-found-in-code
+  methods:
+  - get_instance_id
+  spec_says: Calling get_instance_id() changes no extent, no reservation and no on-disk metadata.
+  code_does: No matching guarantee stated by the code reader.
+  spec_pointers:
+  - FR-026
+  code_pointers:
+  - lib.rs:686
+  status: candidate
+  excluded_properties:
+  - EM-INSTID-FRAME-READ-ONLY
+  extraction_sides:
+    spec:
+    - EM-INSTID-FRAME-READ-ONLY
+    code: []
+- id: D-FR-027-lib.rs:694-4fcc35
+  name: Setint state
+  kind: spec-not-found-in-code
+  methods:
+  - set_checkpoint_interval
+  spec_says: Changing the checkpoint interval does not itself change any extent, reservation, used_bytes() value
+    or capacity_bytes() value.
+  code_does: No matching guarantee stated by the code reader.
+  spec_pointers:
+  - FR-027
+  code_pointers:
+  - lib.rs:694
+  status: candidate
+  excluded_properties:
+  - EM-SETINT-FRAME-STATE
+  extraction_sides:
+    spec:
+    - EM-SETINT-FRAME-STATE
+    code: []
+- id: D-FR-031-lib.rs:698708-df5bee
+  name: Used slab granularity
+  kind: spec-not-found-in-code
+  methods:
+  - used_bytes
+  - reserve_extent
+  - checkpoint
+  spec_says: used_bytes() returns the sum of the capacities of all currently allocated slabs (the number of allocated
+    slabs times the slab size), not the sum of the sizes of individual extents.
+  code_does: No matching guarantee stated by the code reader.
+  spec_pointers:
+  - FR-031
+  code_pointers:
+  - lib.rs:698-708
+  status: candidate
+  excluded_properties:
+  - EM-USED-POST-SLAB-GRANULARITY
+  extraction_sides:
+    spec:
+    - EM-USED-POST-SLAB-GRANULARITY
+    code: []
+- id: D-FR-031-lib.rs:698-7de240
+  name: Used read only
+  kind: spec-not-found-in-code
+  methods:
+  - used_bytes
+  spec_says: Calling used_bytes() changes no extent, reservation or on-disk metadata.
+  code_does: No matching guarantee stated by the code reader.
+  spec_pointers:
+  - FR-031
+  code_pointers:
+  - lib.rs:698
+  status: candidate
+  excluded_properties:
+  - EM-USED-FRAME-READ-ONLY
+  extraction_sides:
+    spec:
+    - EM-USED-FRAME-READ-ONLY
+    code: []
+- id: D-FR-032-lib.rs:710-17afad
+  name: Cap read only
+  kind: spec-not-found-in-code
+  methods:
+  - capacity_bytes
+  spec_says: Calling capacity_bytes() changes no extent, reservation or on-disk metadata.
+  code_does: No matching guarantee stated by the code reader.
+  spec_pointers:
+  - FR-032
+  code_pointers:
+  - lib.rs:710
+  status: candidate
+  excluded_properties:
+  - EM-CAP-FRAME-READ-ONLY
+  extraction_sides:
+    spec:
+    - EM-CAP-FRAME-READ-ONLY
+    code: []
+- id: D-FR-037-lib.rs:173-823072
+  name: Hook replaces
+  kind: spec-not-found-in-code
+  methods:
+  - checkpoint
+  spec_says: After set_post_checkpoint_hook(h) is called, later successful checkpoints invoke only h; any previously
+    registered hook is no longer invoked.
+  code_does: No matching guarantee stated by the code reader.
+  spec_pointers:
+  - FR-037
+  code_pointers:
+  - lib.rs:173
+  status: candidate
+  excluded_properties:
+  - EM-HOOK-POST-REPLACES
+  extraction_sides:
+    spec:
+    - EM-HOOK-POST-REPLACES
+    code: []
+- id: D-FR-028-lib.rs:181-5fddfd
+  name: Nsid metadata namespace
+  kind: spec-and-code-differ
+  methods:
+  - initialize
+  - checkpoint
+  spec_says: After set_metadata_ns_id(n) on the concrete ExtentManager, the component addresses its metadata I/O
+    to NVMe namespace n.
+  code_does: initialize reads the superblock and checkpoints from the namespace given to set_metadata_ns_id, or
+    from namespace 1 if it was never called.
+  spec_pointers:
+  - FR-028
+  code_pointers:
+  - lib.rs:181
+  - lib.rs:177-183
+  - lib.rs:517-518
+  status: candidate
+  excluded_properties:
+  - EM-NSID-POST-METADATA-NAMESPACE
+  extraction_sides:
+    spec:
+    - EM-NSID-POST-METADATA-NAMESPACE
+    code:
+    - EM-NSID-USED-BY-INITIALIZE
+- id: D-EC-7-lib.rs:374-e27f32
+  name: Component drop no panic
+  kind: spec-not-found-in-code
+  methods:
+  - WriteHandle::drop
+  spec_says: Dropping the ExtentManager while write handles are still outstanding completes without a panic.
+  code_does: No matching guarantee stated by the code reader.
+  spec_pointers:
+  - EC-7
+  code_pointers:
+  - lib.rs:374
+  status: candidate
+  excluded_properties:
+  - EM-COMPONENT-DROP-NO-PANIC
+  extraction_sides:
+    spec:
+    - EM-COMPONENT-DROP-NO-PANIC
+    code: []
+- id: D-FR-035-iextent_manager.rs:8090-0e71f3
+  name: Fpdef metadata region size
+  kind: spec-not-found-in-code
+  methods:
+  - format
+  spec_says: Default format parameters set the metadata region size to 128 MiB (134,217,728 bytes).
+  code_does: No matching guarantee stated by the code reader.
+  spec_pointers:
+  - FR-035
+  code_pointers:
+  - iextent_manager.rs:80-90
+  status: candidate
+  excluded_properties:
+  - EM-FPDEF-POST-METADATA-REGION-SIZE
+  extraction_sides:
+    spec:
+    - EM-FPDEF-POST-METADATA-REGION-SIZE
+    code: []
+- id: D-FR-005-region.rs:37-1cf1d1
+  name: Element sector multiple
+  kind: spec-not-found-in-code
+  methods:
+  - reserve_extent
+  - initialize
+  spec_says: Every slab's element size is a positive multiple of the sector size.
+  code_does: No matching guarantee stated by the code reader.
+  spec_pointers:
+  - FR-005
+  - EC-8
+  code_pointers:
+  - region.rs:37
+  status: candidate
+  excluded_properties:
+  - EM-INV-ELEMENT-SECTOR-MULTIPLE
+  extraction_sides:
+    spec:
+    - EM-INV-ELEMENT-SECTOR-MULTIPLE
+    code: []
+- id: D-FR-002-lib.rs:483498-6e3bb1
+  name: Superblock params valid
+  kind: spec-not-found-in-code
+  methods:
+  - format
+  - initialize
+  - checkpoint
+  - get_instance_id
+  spec_says: Every superblock the component writes holds format parameters that satisfy the format validation rules
+    (sector size above zero, slab size a multiple of sector size, maximum extent size at most the slab size, region
+    count a positive power of two).
+  code_does: No matching guarantee stated by the code reader.
+  spec_pointers:
+  - FR-002
+  - FR-003
+  code_pointers:
+  - lib.rs:483-498
+  status: candidate
+  excluded_properties:
+  - EM-INV-SUPERBLOCK-PARAMS-VALID
+  extraction_sides:
+    spec:
+    - EM-INV-SUPERBLOCK-PARAMS-VALID
+    code: []
+- id: D-NOSPEC-superblock.rs:128-91de49
+  name: Sb active copy valid
+  kind: spec-and-code-differ
+  methods:
+  - initialize
+  - checkpoint
+  spec_says: The active checkpoint copy number is always 0 or 1; decoding a superblock that names any other copy
+    fails with a CorruptMetadata error instead of crashing later.
+  code_does: The active checkpoint copy number is always 0 or 1; decoding a superblock that names any other copy
+    fails with a CorruptMetadata error instead of crashing later.
+  spec_pointers: []
+  code_pointers:
+  - superblock.rs:128
+  - recovery.rs:23-26
+  - checkpoint.rs:61
+  status: candidate
+  excluded_properties:
+  - EM-SB-ACTIVE-COPY-VALID
+  extraction_sides:
+    spec: []
+    code:
+    - EM-SB-ACTIVE-COPY-VALID
+- id: D-FR-014-region.rs:118-c46ede
+  name: Clean matches disk
+  kind: spec-not-found-in-code
+  methods:
+  - checkpoint
+  - initialize
+  - get_extents
+  spec_says: Whenever no extent has been published or removed since the last successful checkpoint, a reboot followed
+    by initialize() would reproduce exactly the set of extents that get_extents() currently returns.
+  code_does: No matching guarantee stated by the code reader.
+  spec_pointers:
+  - FR-014
+  - AS-2.3
+  - US-2
+  code_pointers:
+  - region.rs:118
+  status: candidate
+  excluded_properties:
+  - EM-INV-CLEAN-MATCHES-DISK
+  extraction_sides:
+    spec:
+    - EM-INV-CLEAN-MATCHES-DISK
+    code: []
+- id: D-FR-023-lib.rs:211253-4adb89
+  name: Region lock scope
+  kind: spec-not-found-in-code
+  methods:
+  - reserve_extent
+  - WriteHandle::publish
+  - WriteHandle::abort
+  - remove_extent
+  spec_says: Hot-path operations (reserve, publish, abort, remove) acquire only the lock of the one region they
+    target, so operations on different regions never wait on each other.
+  code_does: No matching guarantee stated by the code reader.
+  spec_pointers:
+  - FR-023
+  - US-4
+  code_pointers:
+  - lib.rs:211-253
+  status: candidate
+  excluded_properties:
+  - EM-INV-REGION-LOCK-SCOPE
+  extraction_sides:
+    spec:
+    - EM-INV-REGION-LOCK-SCOPE
+    code: []
+- id: D-FR-036-lib.rs:185-4c3c55
+  name: No data device io
+  kind: spec-not-found-in-code
+  methods:
+  - format
+  - initialize
+  - checkpoint
+  - reserve_extent
+  - WriteHandle::publish
+  - remove_extent
+  spec_says: All block I/O the component issues goes to its metadata device; it never reads or writes extent data,
+    which is the caller's job using the offsets it hands out.
+  code_does: No matching guarantee stated by the code reader.
+  spec_pointers:
+  - FR-036
+  - FR-001
+  code_pointers:
+  - lib.rs:185
+  status: candidate
+  excluded_properties:
+  - EM-INV-NO-DATA-DEVICE-IO
+  extraction_sides:
+    spec:
+    - EM-INV-NO-DATA-DEVICE-IO
+    code: []
+- id: D-NOSPEC-lib.rs:420432-4f83f7
+  name: Checkpoint sector aligned
+  kind: spec-and-code-differ
+  methods:
+  - format
+  - checkpoint
+  - initialize
+  spec_says: Both checkpoint copies begin on a sector boundary of the metadata device, so a checkpoint is written
+    exactly where it will later be read.
+  code_does: Both checkpoint copies begin on a sector boundary of the metadata device, so a checkpoint is written
+    exactly where it will later be read.
+  spec_pointers: []
+  code_pointers:
+  - lib.rs:420-432
+  - checkpoint.rs:96
+  - checkpoint.rs:124
+  status: candidate
+  excluded_properties:
+  - EM-INV-CHECKPOINT-SECTOR-ALIGNED
+  extraction_sides:
+    spec: []
+    code:
+    - EM-INV-CHECKPOINT-SECTOR-ALIGNED
+- id: D-RANGE-FR-002-217ace
+  name: 'Input range: the sector size is a power of two'
+  kind: input-range-mismatch
+  methods:
+  - format
+  - initialize
+  - reserve_extent
+  - WriteHandle::publish
+  - WriteHandle::abort
+  - WriteHandle::drop
+  - remove_extent
+  - checkpoint
+  - get_extents
+  - for_each_extent
+  - used_bytes
+  - capacity_bytes
+  spec_says: format() must validate only that sector_size > 0 (FR-002; EC-4). Nothing in the spec requires a power
+    of two.
+  code_does: 'The buddy allocator assumes block spans (2^k * sector_size) are powers of two: mark_allocated aligns
+    with offset & !(block_span - 1) (buddy.rs:136), and free finds the buddy with offset ^ block_span (buddy.rs:96).
+    For a non-power-of-two sector size, recovery misses the enclosing free block and free buddies never merge. format()
+    passes params.sector_size straight to BuddyAllocator::new (lib.rs:465), and initialize() passes sb.sector_size
+    (lib.rs:552).'
+  spec_pointers:
+  - FR-002
+  - EC-4
+  - KE-FormatParams
+  code_pointers:
+  - buddy.rs:136
+  - buddy.rs:96
+  - lib.rs:384-386
+  - lib.rs:465
+  - lib.rs:552
+  status: candidate
+  assume_in_level2: the sector size is a power of two
+  excluded_properties: []
+- id: D-RANGE-FR-002-7cb7c3
+  name: 'Input range: the slab size is a power-of-two number of sectors'
+  kind: input-range-mismatch
+  methods:
+  - used_bytes
+  - reserve_extent
+  - WriteHandle::abort
+  - WriteHandle::publish
+  - checkpoint
+  - initialize
+  spec_says: slab_size need only be a multiple of sector_size (FR-002), and used_bytes() is the sum of the capacities
+    of all allocated slabs (FR-031).
+  code_does: The buddy allocator rounds every slab allocation up to 2^k sectors (alloc buddy.rs:58-63, free buddy.rs:86-91,
+    mark_allocated buddy.rs:119-124), and used_bytes() is total_usable_size - total_free (lib.rs:704). So used_bytes()
+    equals slabs x slab_size, and the tail of each block is not wasted, only when slab_size / sector_size is a power
+    of two. No refutation goes through this entry; it governs the slab-granularity records (EM-USED-POST-SLAB-GRANULARITY,
+    EM-INIT-POST-USED-BYTES).
+  spec_pointers:
+  - FR-002
+  - FR-031
+  - FMT-Checkpoint-Payload
+  code_pointers:
+  - buddy.rs:58-63
+  - buddy.rs:86-91
+  - buddy.rs:119-124
+  - region.rs:72-75
+  - lib.rs:698-708
+  status: candidate
+  assume_in_level2: the slab size is a power-of-two number of sectors
+  excluded_properties: []
+- id: D-RANGE-FR-002-c6d2c5
+  name: 'Input range: the data start offset, the usable data size and the uniform region size are all whole multiples
+    of the sector size'
+  kind: input-range-mismatch
+  methods:
+  - format
+  - initialize
+  - reserve_extent
+  - used_bytes
+  - capacity_bytes
+  spec_says: format() validates no relation between data_disk_size, the data start offset, region_count and sector_size
+    (FR-002's list is exhaustive). The spec still requires sector-aligned extent offsets (FR-005) and used_bytes()
+    = 0 right after format (FR-031, AS-5.2).
+  code_does: Regions are cut at data_start_offset + i * (usable / region_count), and the last region takes the remainder
+    (lib.rs:455-464). Each buddy tracks only whole sectors of its region (buddy.rs:11) while total_usable_size keeps
+    the full byte size. This assumes region bases and sizes are sector multiples; otherwise offsets are unaligned
+    and the sub-sector remainder counts as used (lib.rs:704).
+  spec_pointers:
+  - FR-002
+  - FR-005
+  - FR-019
+  - FR-031
+  - AS-5.2
+  - FMT-Data-Device-Layout
+  code_pointers:
+  - lib.rs:440-464
+  - buddy.rs:10-37
+  - lib.rs:704
+  - lib.rs:533-545
+  status: candidate
+  assume_in_level2: the data start offset, the usable data size and the uniform region size are all whole multiples
+    of the sector size
+  excluded_properties: []
+- id: D-RANGE-FR-002-84618e
+  name: 'Input range: the usable data size is at least the region count, so every uniform region spans at least
+    one byte'
+  kind: input-range-mismatch
+  methods:
+  - format
+  - remove_extent
+  spec_says: format() validates no lower bound relating the usable data size to region_count (FR-002); remove_extent(offset)
+    of a published extent must succeed (FR-008, AS-6.1).
+  code_does: format() accepts usable_data_size < region_count (lib.rs:447-455), so region_bytes = 0. region_for_offset
+    then returns NotInitialized('region size is zero') for every offset (lib.rs:244-247). The code assumes at least
+    one byte per uniform region.
+  spec_pointers:
+  - FR-002
+  - FR-008
+  - AS-6.1
+  - AS-6.2
+  code_pointers:
+  - lib.rs:447-455
+  - lib.rs:243-247
+  status: candidate
+  assume_in_level2: the usable data size is at least the region count, so every uniform region spans at least one
+    byte
+  excluded_properties: []
+- id: D-RANGE-FMT-METADATA-DEVICE-LAYOUT-2ee144
+  name: 'Input range: aligning the superblock size up to the metadata alignment does not overflow (lib.rs:427 adds
+    sb_size + alignment first)'
+  kind: input-range-mismatch
+  methods:
+  - format
+  spec_says: checkpoint_region_offset = align_up(4096, metadata_alignment); metadata_alignment is an unconstrained
+    u64 (FMT Metadata-Device-Layout, KE-FormatParams; it is not in FR-002's validation list).
+  code_does: 'lib.rs:423 computes (sb_size + alignment - 1) / alignment * alignment with unchecked u64 arithmetic.
+    It overflows for metadata_alignment > u64::MAX - 4095: debug builds panic, and release builds wrap to offset
+    0, so format succeeds with the checkpoint copy over the superblock.'
+  spec_pointers:
+  - FMT-Metadata-Device-Layout
+  - KE-FormatParams
+  - IFACE-FormatParams.metadata_alignment
+  - FR-002
+  code_pointers:
+  - lib.rs:418-424
+  status: candidate
+  assume_in_level2: aligning the superblock size up to the metadata alignment does not overflow (lib.rs:427 adds
+    sb_size + alignment first)
+  excluded_properties: []
+- id: D-RANGE-FMT-METADATA-DEVICE-LAYOUT-dfd6b0
+  name: 'Input range: the metadata device''s sector size divides both the checkpoint region offset and the checkpoint
+    region size'
+  kind: input-range-mismatch
+  methods:
+  - format
+  - checkpoint
+  - initialize
+  spec_says: The spec has a single FormatParams.sector_size ('Device sector size') and says the checkpoint region
+    size is 'rounded down to sector alignment' (FMT Metadata-Device-Layout). It never says whether the metadata
+    device's sector size must equal or divide sector_size or the aligned checkpoint offset.
+  code_does: format() rounds checkpoint_region_size to params.sector_size, the data sector (lib.rs:430-432), and
+    aligns the offset to metadata_alignment (lib.rs:420-424). Checkpoint writes and reads address LBA = byte_offset
+    / metadata-device sector size (checkpoint.rs:90-96, 123-124), truncating. This assumes the metadata sector size
+    divides both the offset and the size; otherwise copy 1 lands inside copy 0, or copy 0 lands on the superblock.
+  spec_pointers:
+  - FMT-Metadata-Device-Layout
+  - KE-FormatParams
+  - ASSUMP-3
+  - FR-013
+  code_pointers:
+  - lib.rs:418-432
+  - lib.rs:199
+  - checkpoint.rs:90-96
+  - checkpoint.rs:123-124
+  - recovery.rs:23-26
+  status: candidate
+  assume_in_level2: the metadata device's sector size divides both the checkpoint region offset and the checkpoint
+    region size
+  excluded_properties: []
+- id: D-RANGE-FR-036-1d780b
+  name: 'Input range: the metadata base address plus the reserved metadata area fits inside the metadata namespace'
+  kind: input-range-mismatch
+  methods:
+  - set_metadata_base_lba
+  - format
+  - initialize
+  - checkpoint
+  spec_says: 'set_metadata_base_lba(b) shifts all metadata I/O by b so the component works inside a partition (FR-036).
+    b is an unconstrained u64, and the spec says nothing about reducing the usable metadata size by b (FR-002 only:
+    device large enough for two checkpoint regions).'
+  code_does: format() sizes the layout from the whole namespace (num_sectors * sector_size, lib.rs:410-415), ignoring
+    metadata_base_lba. Every block address is base_lba + lba with unchecked u64 addition (block_io.rs:69, 119).
+    This assumes the partition [b, b + reserved metadata area) fits in the namespace and that b + lba does not overflow.
+    No refutation goes through this entry.
+  spec_pointers:
+  - FR-036
+  - FR-002
+  - FR-035
+  code_pointers:
+  - lib.rs:200-208
+  - lib.rs:410-432
+  - block_io.rs:69
+  - block_io.rs:119
+  status: candidate
+  assume_in_level2: the metadata base address plus the reserved metadata area fits inside the metadata namespace
+  excluded_properties: []
+- id: D-RANGE-FMT-CHECKPOINT-PAYLOAD-e0fe79
+  name: 'Input range: a slab holds at most u32::MAX slots of the smallest (one-sector) element size'
+  kind: input-range-mismatch
+  methods:
+  - format
+  - reserve_extent
+  - checkpoint
+  - initialize
+  spec_says: The checkpoint payload stores num_slots as a u32 equal to slab_size / element_size (FMT Checkpoint-Payload).
+    format() validates no upper bound on slab_size / sector_size (FR-002), even though the smallest element size
+    is one sector.
+  code_does: Slab::new truncates the slot count with (slab_size / element_size) as u32 (slab.rs:18). A slab with
+    2^32 or more slots gets a truncated key vector (possibly zero slots), which breaks one-key-per-slot and the
+    checkpoint round trip.
+  spec_pointers:
+  - FMT-Checkpoint-Payload
+  - FR-002
+  - FR-010
+  - SC-005
+  code_pointers:
+  - slab.rs:17-26
+  - checkpoint.rs:22-29
+  - region.rs:77
+  status: candidate
+  assume_in_level2: a slab holds at most u32::MAX slots of the smallest (one-sector) element size
+  excluded_properties: []
+- id: D-RANGE-FMT-CHECKPOINT-REGION-HEADER-87044b
+  name: 'Input range: the serialized checkpoint payload is shorter than 4 GiB'
+  kind: input-range-mismatch
+  methods:
+  - checkpoint
+  - initialize
+  spec_says: The checkpoint header stores payload_len as a u32 (FMT Checkpoint-Region-Header); neither format()
+    nor checkpoint() is required to bound the payload to 4 GiB.
+  code_does: write_checkpoint compares the full length only with region_size, a u64 (checkpoint.rs:69-75), then
+    stores payload.len() as u32 (checkpoint.rs:82). read_checkpoint_region trusts that truncated length (checkpoint.rs:133-172).
+    A payload of 4 GiB or more is persisted with a wrong length. The u32 num_slabs cast at checkpoint.rs:18 falls
+    under the same bound.
+  spec_pointers:
+  - FMT-Checkpoint-Region-Header
+  - FMT-Checkpoint-Payload
+  - FR-013
+  code_pointers:
+  - checkpoint.rs:18
+  - checkpoint.rs:69-75
+  - checkpoint.rs:82
+  - checkpoint.rs:133-172
+  status: candidate
+  assume_in_level2: the serialized checkpoint payload is shorter than 4 GiB
+  excluded_properties: []
+- id: D-RANGE-FR-005-231ab0
+  name: 'Input range: the requested size is greater than zero'
+  kind: input-range-mismatch
+  methods:
+  - reserve_extent
+  spec_says: reserve_extent(key, size) allocates a sector-aligned slot (FR-005, AS-1.1); the spec is silent on size
+    0.
+  code_does: align_to_sector_size(0) = 0 (region.rs:37-42), and Slab::new then divides slab_size by element_size
+    0 (region.rs:77 -> slab.rs:18), which panics in both debug and release.
+  spec_pointers:
+  - FR-005
+  - AS-1.1
+  - EC-8
+  code_pointers:
+  - region.rs:37-42
+  - region.rs:77
+  - slab.rs:18
+  status: candidate
+  assume_in_level2: the requested size is greater than zero
+  excluded_properties: []
+- id: D-RANGE-FR-005-3783f8
+  name: 'Input range: rounding the requested size up to a whole sector does not overflow u32 (region.rs:38, lib.rs:595
+    add size + sector_size first)'
+  kind: input-range-mismatch
+  methods:
+  - reserve_extent
+  spec_says: reserve_extent takes a u32 size (IFACE reserve_extent) and rounds it up to the sector size (FR-005);
+    the spec sets no upper bound.
+  code_does: 'The rounding is (size + sector_size - 1) / ss * ss in u32 (region.rs:38, lib.rs:591). It overflows
+    when size > u32::MAX - (ss - 1): debug builds panic, and release builds wrap to element size 0, which then divides
+    by zero at slab.rs:18.'
+  spec_pointers:
+  - FR-005
+  - IFACE-reserve_extent
+  - SUPPORT-WriteHandle-accessors
+  code_pointers:
+  - region.rs:37-39
+  - lib.rs:591
+  - slab.rs:18
+  status: candidate
+  assume_in_level2: rounding the requested size up to a whole sector does not overflow u32 (region.rs:38, lib.rs:595
+    add size + sector_size first)
+  excluded_properties: []
+- id: D-RANGE-FR-002-a27ede
+  name: 'Input range: the requested size does not exceed the configured maximum extent size'
+  kind: input-range-mismatch
+  methods:
+  - reserve_extent
+  spec_says: FormatParams has max_extent_size, the 'maximum extent size', validated <= slab_size (FR-002, KE-FormatParams,
+    IFACE FormatParams.max_extent_size). By its name this implies extents never exceed it, but the spec never states
+    that reserve_extent enforces it.
+  code_does: reserve_extent never reads max_extent_size; it rejects only aligned sizes above slab_size (region.rs:66-70).
+    A size between max_extent_size and slab_size succeeds.
+  spec_pointers:
+  - FR-002
+  - KE-FormatParams
+  - IFACE-FormatParams.max_extent_size
+  code_pointers:
+  - region.rs:66-70
+  - lib.rs:392-396
+  status: candidate
+  assume_in_level2: the requested size does not exceed the configured maximum extent size
+  excluded_properties: []
+- id: D-RANGE-FR-002-91a1f6
+  name: 'Input range: the CRC-valid superblock read by initialize satisfies format''s geometry rules (as every superblock
+    this component writes does)'
+  kind: input-range-mismatch
+  methods:
+  - initialize
+  - reserve_extent
+  - remove_extent
+  - used_bytes
+  - capacity_bytes
+  - checkpoint
+  spec_says: format() validates the geometry (FR-002). initialize() is required to validate only magic and CRC (FR-004,
+    US-3 AS-3.3/3.4), so the spec neither requires nor forbids re-checking the geometry of a CRC-valid superblock.
+  code_does: 'initialize() uses the recovered geometry unchecked: key & (regions.len() - 1) assumes region_count
+    is a non-zero power of two (lib.rs:219), usable / region_count divides by it (lib.rs:536), data_disk_size -
+    data_start_offset assumes no underflow (lib.rs:243), and BuddyAllocator::new divides by sb.sector_size (buddy.rs:11).'
+  spec_pointers:
+  - FR-002
+  - FR-004
+  - KE-Superblock
+  - KE-Region
+  code_pointers:
+  - lib.rs:519-545
+  - lib.rs:219
+  - lib.rs:243
+  - lib.rs:536
+  - buddy.rs:11
+  - superblock.rs:99-168
+  status: candidate
+  assume_in_level2: the CRC-valid superblock read by initialize satisfies format's geometry rules (as every superblock
+    this component writes does)
+  excluded_properties: []
+- id: D-RANGE-KE-SUPERBLOCK-23f855
+  name: 'Input range: the persisted superblock has the format version this code writes'
+  kind: input-range-mismatch
+  methods:
+  - initialize
+  spec_says: The superblock carries version 6 (KE-Superblock, FMT Superblock); initialize() validates only magic
+    and CRC (FR-004).
+  code_does: Superblock::deserialize reads the version (superblock.rs:114) and never compares it with FORMAT_VERSION
+    (superblock.rs:6). Every CRC-valid block with the magic is interpreted as the v6 layout.
+  spec_pointers:
+  - KE-Superblock
+  - FMT-Superblock
+  - FR-004
+  code_pointers:
+  - superblock.rs:6
+  - superblock.rs:114
+  - recovery.rs:15-16
+  status: candidate
+  assume_in_level2: the persisted superblock has the format version this code writes
+  excluded_properties: []
+- id: D-RANGE-FMT-SUPERBLOCK-0de740
+  name: 'Input range: the persisted superblock names copy 0 or copy 1 as active'
+  kind: input-range-mismatch
+  methods:
+  - initialize
+  - checkpoint
+  spec_says: active_copy is 0 or 1 (FMT Superblock offset 48); initialize() validates only magic and CRC (FR-004).
+  code_does: 'active_copy is copied unchecked (superblock.rs:128), and 1 - active_copy on a u8 (recovery.rs:26,
+    checkpoint.rs:61) underflows for values above 1: debug builds panic, and release builds wrap and address a bogus
+    copy.'
+  spec_pointers:
+  - FMT-Superblock
+  - KE-Superblock
+  - FR-004
+  code_pointers:
+  - superblock.rs:128
+  - recovery.rs:23-26
+  - checkpoint.rs:61-63
+  status: candidate
+  assume_in_level2: the persisted superblock names copy 0 or copy 1 as active
+  excluded_properties: []
+- id: D-RANGE-FMT-CHECKPOINT-PAYLOAD-980f61
+  name: 'Input range: the recovered checkpoint payload is one this component serialised for this superblock: one
+    entry per region, and every slab descriptor has a non-zero element size, exactly slab_size / element_size keys,
+    and lies on a free buddy block inside its region without overlapping another slab'
+  kind: input-range-mismatch
+  methods:
+  - initialize
+  - reserve_extent
+  - remove_extent
+  - get_extents
+  - for_each_extent
+  - used_bytes
+  - checkpoint
+  spec_says: The checkpoint payload holds region_count regions, each with slab descriptors where num_slots = slab_size
+    / element_size (FMT Checkpoint-Payload). Recovery validates the CRC and falls back on failure (FR-004, FR-017,
+    FR-018); the spec requires no further consistency checks.
+  code_does: initialize() rebuilds slabs from descriptors unchecked. element_size 0 divides by zero (recovery.rs:77
+    -> slab.rs:18). A key vector longer than the slot count indexes out of bounds (recovery.rs:78-82, bitmap.rs:18-22).
+    mark_allocated silently ignores ranges that are not free or not in the region (buddy.rs:117-157). A payload
+    region count that differs from sb.region_count is padded or truncated (lib.rs:546-550).
+  spec_pointers:
+  - FMT-Checkpoint-Payload
+  - FR-004
+  - FR-017
+  - FR-018
+  - SC-002
+  code_pointers:
+  - checkpoint.rs:183-241
+  - recovery.rs:76-85
+  - slab.rs:17-26
+  - buddy.rs:117-157
+  - lib.rs:546-565
+  status: candidate
+  assume_in_level2: 'the recovered checkpoint payload is one this component serialised for this superblock: one
+    entry per region, and every slab descriptor has a non-zero element size, exactly slab_size / element_size keys,
+    and lies on a free buddy block inside its region without overlapping another slab'
+  excluded_properties: []
+- id: D-RANGE-FR-002-3b58ea
+  name: 'Input range: twice the data disk size plus one sector fits in u64'
+  kind: input-range-mismatch
+  methods:
+  - format
+  - initialize
+  - reserve_extent
+  - remove_extent
+  - checkpoint
+  spec_says: FR-002 lists every format() validation; none bounds data_disk_size (any u64 is accepted).
+  code_does: The buddy allocator adds buddy offsets and spans with no overflow check (buddy.rs:77, buddy.rs:98 `buddy_offset
+    + block_span`); buddy offsets reach ~2*total_usable_size, so a data disk near u64::MAX overflows.
+  spec_pointers:
+  - FR-002
+  code_pointers:
+  - buddy.rs:77
+  - buddy.rs:98
+  - lib.rs:407
+  status: candidate
+  assume_in_level2: twice the data disk size plus one sector fits in u64
+  excluded_properties: []
+- id: D-RANGE-FR-002-67ea4f
+  name: 'Input range: the metadata device byte size fits in u64'
+  kind: input-range-mismatch
+  methods:
+  - format
+  spec_says: 'FR-002 requires the metadata device to be large enough; the IBlockDevice contract returns num_sectors:
+    u64 and sector_size: u32 with no bound on their product.'
+  code_does: format multiplies num_sectors * sector_size unchecked (lib.rs:414-419).
+  spec_pointers:
+  - FR-002
+  - IBlockDevice::num_sectors
+  - IBlockDevice::sector_size
+  code_pointers:
+  - lib.rs:414-419
+  status: candidate
+  assume_in_level2: the metadata device byte size fits in u64
+  excluded_properties: []
+- id: D-RANGE-FR-004-a23fc2
+  name: 'Input range: the recovered checkpoint layout (offset + 2 copies) fits in u64, as every superblock format()
+    writes does'
+  kind: input-range-mismatch
+  methods:
+  - initialize
+  spec_says: 'FR-004: initialize() reads the superblock and recovers from the checkpoint region layout it names;
+    no bound on the stored layout values.'
+  code_does: recover adds checkpoint_region_offset + active_copy*checkpoint_region_size unchecked (recovery.rs:23-26).
+  spec_pointers:
+  - FR-004
+  code_pointers:
+  - recovery.rs:23-26
+  status: candidate
+  assume_in_level2: the recovered checkpoint layout (offset + 2 copies) fits in u64, as every superblock format()
+    writes does
+  excluded_properties: []
+- id: D-RANGE-FR-003-9c0757
+  name: 'Input range: the checkpoint sequence number has not reached u64::MAX'
+  kind: input-range-mismatch
+  methods:
+  - checkpoint
+  - initialize
+  spec_says: The superblock carries a sequence number that each checkpoint advances; no limit is stated.
+  code_does: write_checkpoint computes checkpoint_seq + 1 unchecked (checkpoint.rs:65).
+  spec_pointers:
+  - FR-003
+  - spec.md:550
+  code_pointers:
+  - checkpoint.rs:65
+  status: candidate
+  assume_in_level2: the checkpoint sequence number has not reached u64::MAX
+  excluded_properties: []
+- id: D-RANGE-FR-004-3b612e
+  name: 'Input range: each recovered slab descriptor has the superblock slab size and lies on a slab-aligned block
+    inside its region (as every checkpoint this component writes does)'
+  kind: input-range-mismatch
+  methods:
+  - initialize
+  spec_says: 'FR-004: initialize() rebuilds every region from the recovered checkpoint descriptors.'
+  code_does: initialize marks each recovered descriptor allocated in the buddy allocator without checking it (lib.rs:552-565
+    -> buddy.rs:117-157); a descriptor not on a slab-sized, slab-aligned free block of its region corrupts the free
+    lists.
+  spec_pointers:
+  - FR-004
+  code_pointers:
+  - lib.rs:552-565
+  - buddy.rs:117-157
+  status: candidate
+  assume_in_level2: each recovered slab descriptor has the superblock slab size and lies on a slab-aligned block
+    inside its region (as every checkpoint this component writes does)
+  excluded_properties: []
+routed_to_other_tools: []

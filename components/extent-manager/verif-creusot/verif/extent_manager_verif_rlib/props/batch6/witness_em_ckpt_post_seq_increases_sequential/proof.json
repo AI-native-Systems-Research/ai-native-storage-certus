@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_run_checkpoint": { "prover": "alt-ergo", "time": 0.046 },
+      "vc_witness_em_ckpt_post_seq_increases_sequential": {
+        "prover": "cvc5",
+        "time": 0.095
+      }
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lemma_no_shared_slot": { "prover": "cvc4", "time": 0.198 }
+    }
+  }
+}

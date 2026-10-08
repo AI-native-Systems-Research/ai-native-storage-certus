@@ -1,0 +1,32 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 341 0 341 39 *)
+
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 342 14 342 15
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 342 9 342 16
+let%span sbuddy'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 339 11 339 17
+let%span sbuddy'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 340 10 340 35
+
+use creusot.int.UInt64BW
+use creusot.prelude.Any
+use int.Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let mask_down [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 341 0 341 39]
+  (x: UInt64BW.t) (s: UInt64BW.t) (return (x'0: UInt64BW.t)) =
+{[@stop_split] [@expl:mask_down requires] [%#sbuddy'1] UInt64BW.t'int s > 0}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = UInt64BW.sub [%#sbuddy'0] {s} {[%#sbuddy] (1: UInt64BW.t)} (fun (_x: UInt64BW.t) -> [ &_10 <- _x ] s1)
+    | s1 = [ &_9 <- UInt64BW.bw_not _10 ] s2
+    | s2 = [ &_ret <- UInt64BW.bw_and x _9 ] s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: UInt64BW.t = Any.any_l ()
+  | & x: UInt64BW.t = x
+  | & s: UInt64BW.t = s
+  | & _9: UInt64BW.t = Any.any_l ()
+  | & _10: UInt64BW.t = Any.any_l () ])
+  [ return (result: UInt64BW.t) -> {[@stop_split] [@expl:mask_down ensures] [%#sbuddy'2] result
+    = UInt64BW.bw_and x (UInt64BW.bw_not (UInt64BW.sub s (1: UInt64BW.t)))}
+    (! return {result}) ]

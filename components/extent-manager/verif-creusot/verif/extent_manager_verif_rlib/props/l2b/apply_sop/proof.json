@@ -1,0 +1,15 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_alloc_slot": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_apply_sop": { "prover": "z3", "time": 0.043 },
+      "vc_elim_Free": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_elim_Key": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_free_slot": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_is_set": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_len_u64": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_set_key": { "prover": "alt-ergo", "time": 0.025 }
+    }
+  }
+}

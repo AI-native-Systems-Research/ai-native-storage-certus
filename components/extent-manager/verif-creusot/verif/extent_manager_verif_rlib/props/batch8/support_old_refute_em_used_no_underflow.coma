@@ -1,0 +1,181 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 1158 0 1158 67 *)
+
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 617 15 617 28
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 618 14 618 86
+let%span sbuddy'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 494 14 494 15
+let%span sbuddy'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1241 14 1241 46
+let%span sbuddy'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1203 15 1203 30
+let%span sbuddy'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1204 15 1204 91
+let%span sbuddy'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1205 14 1205 88
+let%span sbuddy'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 403 8 407 92
+let%span sbuddy'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 432 16 432 60
+let%span sbuddy'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 33 16 33 29
+let%span sbuddy'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 416 8 417 64
+let%span sbuddy'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 425 8 426 83
+let%span switness = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 46 10 46 86
+let%span switness'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 47 10 47 39
+let%span switness'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 48 10 48 56
+let%span switness'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 49 10 49 56
+let%span sbatch3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 363 11 363 23
+let%span sbatch3'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 364 11 364 78
+let%span sbatch3'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 365 10 369 1
+let%span sbatch8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 1159 12 1159 22
+let%span sbatch8'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 1160 20 1160 47
+let%span sbatch8'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 1161 17 1161 38
+let%span sbatch8'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 1162 15 1162 29
+let%span sbatch8'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 1163 20 1163 31
+let%span sbatch8'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 1164 15 1164 38
+let%span sbatch8'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 1156 10 1156 67
+let%span sbatch8'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 1157 10 1157 43
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use bv.Pow2int
+use int.ComputerDivision
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_Vec_u64_Global_Global
+
+type t_BuddyAllocator = {
+  base_offset: UInt64.t;
+  total_usable_size: UInt64.t;
+  sector_size: UInt32.t;
+  max_order: UInt64.t;
+  free_lists: t_Vec_Vec_u64_Global_Global }
+
+type t_Vec_u64_Global
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_Vec_u64_Global_Global (self: t_Vec_Vec_u64_Global_Global) : Seq.seq t_Vec_u64_Global
+
+axiom view_Vec_Vec_u64_Global_Global_spec:
+  forall self: t_Vec_Vec_u64_Global_Global [view_Vec_Vec_u64_Global_Global self]. [%#svec] Seq.length (view_Vec_Vec_u64_Global_Global self)
+    <= UInt64.t'int const_MAX
+
+constant const_MAX'0: UInt64.t = (18446744073709551615: UInt64.t)
+
+function span [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 32 0 32 35] (ss: int) (o: int) : int
+ = [%#sbuddy'8] Pow2int.pow2 o * ss
+
+predicate bd_shape [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 401 0 401 42] (b: t_BuddyAllocator) =
+  [%#sbuddy'6] UInt32.t'int b.sector_size > 0
+  /\ UInt64.t'int b.max_order < 64
+  /\ Seq.length (view_Vec_Vec_u64_Global_Global b.free_lists) = UInt64.t'int b.max_order + 1
+  /\ UInt64.t'int b.base_offset + UInt64.t'int b.total_usable_size <= UInt64.t'int const_MAX'0
+  /\ (UInt64.t'int b.max_order = 0
+  \/ span (UInt32.t'int b.sector_size) (UInt64.t'int b.max_order) <= UInt64.t'int b.total_usable_size)
+
+function view_Vec_u64_Global (self: t_Vec_u64_Global) : Seq.seq UInt64.t
+
+axiom view_Vec_u64_Global_spec:
+  forall self: t_Vec_u64_Global [view_Vec_u64_Global self]. [%#svec] Seq.length (view_Vec_u64_Global self)
+    <= UInt64.t'int const_MAX
+
+predicate bd_aligned [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 414 0 414 44] (b: t_BuddyAllocator) =
+  [%#sbuddy'9] forall o: int, k: int. 0 <= o
+      /\ o < Seq.length (view_Vec_Vec_u64_Global_Global b.free_lists)
+      /\ 0 <= k /\ k < Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global b.free_lists) o))
+    -> ComputerDivision.mod (UInt64.t'int (Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global b.free_lists) o)) k)) (span (UInt32.t'int b.sector_size) o)
+    = 0
+
+predicate bd_inside [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 423 0 423 43] (b: t_BuddyAllocator) =
+  [%#sbuddy'10] forall o: int, k: int. 0 <= o
+      /\ o < Seq.length (view_Vec_Vec_u64_Global_Global b.free_lists)
+      /\ 0 <= k /\ k < Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global b.free_lists) o))
+    -> UInt64.t'int (Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global b.free_lists) o)) k)
+      + span (UInt32.t'int b.sector_size) o
+    <= UInt64.t'int b.total_usable_size
+
+predicate bd_inv [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 431 0 431 40] (b: t_BuddyAllocator) =
+  [%#sbuddy'7] bd_shape b /\ bd_aligned b /\ bd_inside b
+
+let w1_freed (return (x: t_BuddyAllocator)) = any
+  [ return (result: t_BuddyAllocator) ->
+  {[@stop_split] [@expl:w1_freed ensures] ([@stop_split] [@expl:w1_freed ensures #0] [%#switness] bd_inv result
+      /\ UInt64.t'int result.total_usable_size = 6 /\ UInt32.t'int result.sector_size = 3)
+    /\ ([@stop_split] [@expl:w1_freed ensures #1] [%#switness'0] Seq.length (view_Vec_Vec_u64_Global_Global result.free_lists)
+      = 2)
+    /\ ([@stop_split] [@expl:w1_freed ensures #2] [%#switness'1] view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global result.free_lists) 0)
+      = Seq.singleton (3: UInt64.t))
+    /\ ([@stop_split] [@expl:w1_freed ensures #3] [%#switness'2] view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global result.free_lists) 1)
+    = Seq.singleton (0: UInt64.t))}
+    (! return {result}) ]
+
+function tf [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 495 4 495 56] (fl: Seq.seq t_Vec_u64_Global) (ss: int) (n: int) : int
+
+function lemma_tf2 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 619 4 619 48] (fl: Seq.seq t_Vec_u64_Global) (ss: int) : ()
+
+axiom lemma_tf2_spec: forall fl: Seq.seq t_Vec_u64_Global, ss: int. ([%#sbuddy] Seq.length fl = 2)
+    -> ([%#sbuddy'0] tf fl ss 2
+    = Seq.length (view_Vec_u64_Global (Seq.get fl 0)) * span ss 0
+    + Seq.length (view_Vec_u64_Global (Seq.get fl 1)) * span ss 1)
+
+let total_usable_size'0 (self: t_BuddyAllocator) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:total_usable_size ensures] [%#sbuddy'2] result
+    = self.total_usable_size}
+    (! return {result}) ]
+
+let total_free (self: t_BuddyAllocator) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:total_free requires] ([@stop_split] [@expl:total_free requires #0] [%#sbuddy'3] bd_shape self)
+  /\ ([@stop_split] [@expl:total_free requires #1] [%#sbuddy'4] tf (view_Vec_Vec_u64_Global_Global self.free_lists) (UInt32.t'int self.sector_size) (Seq.length (view_Vec_Vec_u64_Global_Global self.free_lists))
+  <= UInt64.t'int const_MAX'0)}
+  any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:total_free ensures] [%#sbuddy'5] UInt64.t'int result
+    = tf (view_Vec_Vec_u64_Global_Global self.free_lists) (UInt32.t'int self.sector_size) (Seq.length (view_Vec_Vec_u64_Global_Global self.free_lists))}
+    (! return {result}) ]
+
+let region_used_release (b: t_BuddyAllocator) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:region_used_release requires] ([@stop_split] [@expl:region_used_release requires #0] [%#sbatch3] bd_shape b)
+  /\ ([@stop_split] [@expl:region_used_release requires #1] [%#sbatch3'0] tf (view_Vec_Vec_u64_Global_Global b.free_lists) (UInt32.t'int b.sector_size) (Seq.length (view_Vec_Vec_u64_Global_Global b.free_lists))
+  <= UInt64.t'int const_MAX'0)}
+  any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:region_used_release ensures] [%#sbatch3'1] UInt64.t'int result
+    = (if tf (view_Vec_Vec_u64_Global_Global b.free_lists) (UInt32.t'int b.sector_size) (Seq.length (view_Vec_Vec_u64_Global_Global b.free_lists))
+    <= UInt64.t'int b.total_usable_size then
+      UInt64.t'int b.total_usable_size
+      - tf (view_Vec_Vec_u64_Global_Global b.free_lists) (UInt32.t'int b.sector_size) (Seq.length (view_Vec_Vec_u64_Global_Global b.free_lists))
+    else
+      UInt64.t'int b.total_usable_size
+        - tf (view_Vec_Vec_u64_Global_Global b.free_lists) (UInt32.t'int b.sector_size) (Seq.length (view_Vec_Vec_u64_Global_Global b.free_lists))
+      + 18446744073709551616
+    )}
+    (! return {result}) ]
+
+type tup3_u64_u64_u64 = { f0: UInt64.t; f1: UInt64.t; f2: UInt64.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let support_old_refute_em_used_no_underflow [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 1158 0 1158 67]
+  (return (x: tup3_u64_u64_u64)) = (! bb0
+  [ bb0 = s0
+    [ s0 = w1_freed [%#sbatch8] (fun (_x: t_BuddyAllocator) -> [ &a <- _x ] s1)
+    | s1 =
+      {[@expl:assertion] [%#sbatch8'0] let _ = lemma_tf2 (view_Vec_Vec_u64_Global_Global a.free_lists) 3 in tf (view_Vec_Vec_u64_Global_Global a.free_lists) 3 2
+      = 9}
+      s2
+    | s2 = total_usable_size'0 [%#sbatch8'1] {a} (fun (_x: UInt64.t) -> [ &usable <- _x ] s3)
+    | s3 = total_free [%#sbatch8'2] {a} (fun (_x: UInt64.t) -> [ &free <- _x ] s4)
+    | s4 = {[@expl:assertion] [%#sbatch8'3] bd_shape a} s5
+    | s5 = [ &_16 <- a ] s6
+    | s6 = region_used_release [%#sbatch8'4] {_16} (fun (_x: UInt64.t) -> [ &used <- _x ] s7)
+    | s7 = [ &_ret <- { f0 = usable; f1 = free; f2 = used } ] s8
+    | s8 = return {_ret} ] ]
+  [ & _ret: tup3_u64_u64_u64 = Any.any_l ()
+  | & a: t_BuddyAllocator = Any.any_l ()
+  | & usable: UInt64.t = Any.any_l ()
+  | & free: UInt64.t = Any.any_l ()
+  | & used: UInt64.t = Any.any_l ()
+  | & _16: t_BuddyAllocator = Any.any_l () ])
+  [ return (result: tup3_u64_u64_u64) ->
+  {[@stop_split] [@expl:support_old_refute_em_used_no_underflow ensures] ([@stop_split] [@expl:support_old_refute_em_used_no_underflow ensures #0] [%#sbatch8'5] UInt64.t'int result.f0
+        = 6
+      /\ UInt64.t'int result.f1 = 9 /\ UInt64.t'int result.f1 > UInt64.t'int result.f0)
+    /\ ([@stop_split] [@expl:support_old_refute_em_used_no_underflow ensures #1] [%#sbatch8'6] UInt64.t'int result.f2
+    = 18446744073709551613)}
+    (! return {result}) ]

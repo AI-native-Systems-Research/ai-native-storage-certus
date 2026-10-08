@@ -1,0 +1,36 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 284 0 284 38 *)
+
+let%span swell_founded = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 283 10 283 16
+
+use bv.Pow2int
+use int.Int
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant b : int
+
+constant k : int
+
+function ord_from [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 284 0 284 38] (b: int) (k: int) : int
+
+goal vc_ord_from: if k >= 64 then
+    true
+  else
+    if k < 0 then
+      true
+    else
+      if Pow2int.pow2 k >= b then
+        true
+      else
+        [@expl:variant decreases] well_founded_relation_Int ([%#sbuddy] 64 - k) ([%#sbuddy] 64 - (k + 1))
+    
+  
+  

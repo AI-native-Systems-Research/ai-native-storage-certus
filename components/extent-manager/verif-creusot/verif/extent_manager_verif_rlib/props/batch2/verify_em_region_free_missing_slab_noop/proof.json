@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_free_slot": { "prover": "alt-ergo", "time": 0.045 },
+      "vc_verify_em_region_free_missing_slab_noop": {
+        "prover": "alt-ergo",
+        "time": 0.156
+      }
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lemma_slabs_within": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.05 },
+              { "prover": "alt-ergo", "time": 0.08 },
+              { "prover": "alt-ergo", "time": 0.118 },
+              { "prover": "cvc5", "time": 1.2 },
+              { "prover": "cvc4", "time": 0.627 },
+              { "prover": "cvc5", "time": 0.517 }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

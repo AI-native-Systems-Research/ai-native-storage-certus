@@ -1,0 +1,66 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 649 0 649 127 *)
+
+let%span sbatch8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 650 4 650 17
+let%span sbatch8'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 648 10 648 104
+let%span sbatch8'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 599 10 602 1
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.prelude.Any
+
+type t_EmError = CorruptMetadata | IoError | NotInitialized | OffsetNotFound UInt64.t | OutOfSpace
+
+type t_Result_unit_EmError = Ok () | Err t_EmError
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_FormatParams = {
+  data_disk_size: UInt64.t;
+  slab_size: UInt64.t;
+  max_extent_size: UInt32.t;
+  sector_size: UInt32.t;
+  region_count: UInt32.t;
+  metadata_alignment: UInt64.t;
+  instance_id: t_Option_u64;
+  metadata_disk_ns_id: UInt32.t;
+  metadata_region_size: UInt64.t }
+
+type tup3_u64_usize_u64 = { f0: UInt64.t; f1: UInt64.t; f2: UInt64.t }
+
+type t_Result_tup3_u64_usize_u64_EmError = Ok'0 tup3_u64_usize_u64 | Err'0 t_EmError
+
+type tup4_Result_unit_EmError_FormatParams_Result_tup3_u64_usize_u64_EmError_u32 = {
+  f0'0: t_Result_unit_EmError;
+  f1'0: t_FormatParams;
+  f2'0: t_Result_tup3_u64_usize_u64_EmError;
+  f3'0: UInt32.t }
+
+let w8_oversize (return (x: tup4_Result_unit_EmError_FormatParams_Result_tup3_u64_usize_u64_EmError_u32)) = any
+  [ return (result: tup4_Result_unit_EmError_FormatParams_Result_tup3_u64_usize_u64_EmError_u32) ->
+  {[@stop_split] [@expl:w8_oversize ensures] [%#sbatch8'1] match result.f0'0 with
+      | Ok () -> result.f2'0 = Ok'0 { f0 = (0: UInt64.t); f1 = (0: UInt64.t); f2 = (0: UInt64.t) }
+      /\ UInt32.t'int result.f3'0 = 8 /\ UInt32.t'int result.f1'0.max_extent_size = 4
+      | Err e -> e = IoError
+      end}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let refute_em_reserve_err_oversize__mutant [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 649 0 649 127]
+  (return (x: tup4_Result_unit_EmError_FormatParams_Result_tup3_u64_usize_u64_EmError_u32)) = (! bb0
+  [ bb0 = s0
+    [ s0 = w8_oversize [%#sbatch8]
+        (fun (_x: tup4_Result_unit_EmError_FormatParams_Result_tup3_u64_usize_u64_EmError_u32) -> [ &_ret <- _x ] s1)
+    | s1 = return {_ret} ] ]
+  [ & _ret: tup4_Result_unit_EmError_FormatParams_Result_tup3_u64_usize_u64_EmError_u32 = Any.any_l () ])
+  [ return (result: tup4_Result_unit_EmError_FormatParams_Result_tup3_u64_usize_u64_EmError_u32) ->
+  {[@stop_split] [@expl:refute_em_reserve_err_oversize__mutant ensures] [%#sbatch8'0] match result.f0'0 with
+      | Ok () -> match result.f2'0 with
+        | Ok'0 _ -> false
+        | Err'0 _ -> true
+        end
+      | Err _ -> true
+      end}
+    (! return {result}) ]

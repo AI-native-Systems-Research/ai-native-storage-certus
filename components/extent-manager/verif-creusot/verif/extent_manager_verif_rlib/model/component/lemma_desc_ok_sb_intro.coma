@@ -1,0 +1,98 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 465 0 465 86 *)
+
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sassume = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 324 11 324 53
+let%span sassume'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 325 10 325 29
+let%span sassume'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 146 8 148 83
+let%span sassume'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 207 8 208 88
+let%span sassume'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 319 16 319 42
+let%span sassume'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 410 16 410 59
+let%span scomponent = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 463 11 463 97
+let%span scomponent'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 464 10 464 39
+let%span scomponent'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 441 8 442 47
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.int.UInt8
+use seq.Seq
+use int.ComputerDivision
+use int.Int
+
+type t_Vec_u64_Global
+
+type t_SlabDescriptor = { start_offset: UInt64.t; slab_size: UInt64.t; element_size: UInt32.t; keys: t_Vec_u64_Global }
+
+type t_Superblock = {
+  magic'0: UInt64.t;
+  version'0: UInt32.t;
+  data_disk_size'0: UInt64.t;
+  sector_size'0: UInt32.t;
+  slab_size'0: UInt64.t;
+  max_extent_size'0: UInt32.t;
+  region_count'0: UInt32.t;
+  checkpoint_seq'0: UInt64.t;
+  active_copy'0: UInt8.t;
+  checkpoint_region_offset'0: UInt64.t;
+  checkpoint_region_size'0: UInt64.t;
+  instance_id'0: UInt64.t;
+  metadata_disk_ns_id'0: UInt32.t;
+  data_start_offset'0: UInt64.t }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_u64_Global (self: t_Vec_u64_Global) : Seq.seq UInt64.t
+
+axiom view_Vec_u64_Global_spec:
+  forall self: t_Vec_u64_Global [view_Vec_u64_Global self]. [%#svec] Seq.length (view_Vec_u64_Global self)
+    <= UInt64.t'int const_MAX
+
+predicate a_980f61_d [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 144 0 144 66] (d: t_SlabDescriptor) (base: int) (size: int) =
+  [%#sassume'1] UInt32.t'int d.element_size > 0
+  /\ UInt32.t'int d.element_size <= UInt64.t'int d.slab_size
+  /\ Seq.length (view_Vec_u64_Global d.keys)
+    = ComputerDivision.div (UInt64.t'int d.slab_size) (UInt32.t'int d.element_size)
+  /\ base <= UInt64.t'int d.start_offset /\ UInt64.t'int d.start_offset + UInt64.t'int d.slab_size <= base + size
+
+predicate a_3b612e_d [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 205 0 205 77] (d: t_SlabDescriptor) (base: int) (size: int) (slab: int) =
+  [%#sassume'2] UInt64.t'int d.slab_size = slab
+  /\ UInt64.t'int d.start_offset >= base
+  /\ slab <> 0
+  /\ ComputerDivision.mod (UInt64.t'int d.start_offset - base) slab = 0
+  /\ UInt64.t'int d.start_offset + slab <= base + size
+
+constant const_MAX'0: UInt32.t = (4294967295: UInt32.t)
+
+predicate t_dec_keys [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 318 0 318 44] (d: t_SlabDescriptor) =
+  [%#sassume'3] Seq.length (view_Vec_u64_Global d.keys) <= UInt32.t'int const_MAX'0
+
+predicate u_desc_slots_u32 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 409 0 409 50] (d: t_SlabDescriptor) =
+  [%#sassume'4] ComputerDivision.div (UInt64.t'int d.slab_size) (UInt32.t'int d.element_size) < 4294967296
+
+predicate desc_ok_sb [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 439 0 439 82] (d: t_SlabDescriptor) (base: int) (size: int) (sb: t_Superblock) =
+  [%#scomponent'1] a_980f61_d d base size
+  /\ a_3b612e_d d base size (UInt64.t'int sb.slab_size'0) /\ u_desc_slots_u32 d /\ t_dec_keys d
+
+function lemma_desc_slots [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 326 0 326 64] (d: t_SlabDescriptor) (base: int) (size: int) : ()
+
+axiom lemma_desc_slots_spec: forall d: t_SlabDescriptor, base: int, size: int. ([%#sassume] a_980f61_d d base size
+      /\ t_dec_keys d) -> ([%#sassume'0] u_desc_slots_u32 d)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant d : t_SlabDescriptor
+
+constant base : int
+
+constant size : int
+
+constant sb : t_Superblock
+
+function lemma_desc_ok_sb_intro [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 465 0 465 86] (d: t_SlabDescriptor) (base: int) (size: int) (sb: t_Superblock) : ()
+
+goal vc_lemma_desc_ok_sb_intro: ([%#scomponent] a_980f61_d d base size
+    /\ a_3b612e_d d base size (UInt64.t'int sb.slab_size'0) /\ t_dec_keys d)
+  -> ([@stop_split] [@expl:lemma_desc_slots requires] [%#sassume] a_980f61_d d base size /\ t_dec_keys d)
+  /\ (([@stop_split] [@expl:lemma_desc_slots ensures] [%#sassume'0] u_desc_slots_u32 d)
+  -> ([@stop_split] [@expl:lemma_desc_ok_sb_intro ensures] [%#scomponent'0] desc_ok_sb d base size sb))

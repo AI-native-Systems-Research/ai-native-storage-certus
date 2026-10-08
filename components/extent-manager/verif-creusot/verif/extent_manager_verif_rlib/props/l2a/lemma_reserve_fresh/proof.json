@@ -1,0 +1,59 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lemma_reserve_fresh": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "cvc4", "time": 0.129 },
+              { "prover": "alt-ergo", "time": 0.142 },
+              { "prover": "alt-ergo", "time": 0.081 },
+              { "prover": "cvc4", "time": 0.242 },
+              { "prover": "alt-ergo", "time": 0.091 },
+              { "prover": "alt-ergo", "time": 0.169 },
+              { "prover": "alt-ergo", "time": 0.09 },
+              { "prover": "alt-ergo", "time": 0.082 },
+              { "prover": "alt-ergo", "time": 0.052 },
+              { "prover": "alt-ergo", "time": 0.105 },
+              { "prover": "alt-ergo", "time": 0.096 },
+              { "prover": "alt-ergo", "time": 0.05 },
+              { "prover": "alt-ergo", "time": 0.048 },
+              { "prover": "alt-ergo", "time": 0.158 },
+              { "prover": "alt-ergo", "time": 0.05 },
+              { "prover": "alt-ergo", "time": 0.109 },
+              { "prover": "cvc4", "time": 0.474 },
+              { "prover": "alt-ergo", "time": 0.168 },
+              { "prover": "cvc4", "time": 0.3 },
+              { "prover": "cvc4", "time": 0.316 },
+              { "prover": "cvc4", "time": 0.194 },
+              { "prover": "cvc4", "time": 0.279 },
+              { "prover": "cvc4", "time": 0.766 },
+              { "prover": "cvc4", "time": 0.733 },
+              { "prover": "cvc4", "time": 3.4 },
+              { "prover": "cvc4", "time": 0.513 },
+              { "prover": "cvc4", "time": 0.23 },
+              { "prover": "cvc4", "time": 0.292 },
+              {
+                "tactic": "compute_specified",
+                "children": [
+                  {
+                    "tactic": "split_vc",
+                    "children": [ { "prover": "alt-ergo", "time": 2.3 } ]
+                  }
+                ]
+              },
+              { "prover": "alt-ergo", "time": 0.051 },
+              { "prover": "alt-ergo", "time": 0.117 },
+              { "prover": "alt-ergo", "time": 0.075 },
+              { "prover": "alt-ergo", "time": 0.064 },
+              { "prover": "alt-ergo", "time": 0.132 }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

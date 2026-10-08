@@ -1,0 +1,14 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_crc32_hash": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_len_u8": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_put32b": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_rd32": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_rd64": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_read_ckpt_bytes": { "prover": "cvc4", "time": 3.0 },
+      "vc_slice_vec": { "prover": "alt-ergo", "time": 0.028 }
+    }
+  }
+}

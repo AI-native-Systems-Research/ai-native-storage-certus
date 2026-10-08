@@ -1,0 +1,36 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 236 4 236 43 *)
+
+(* model::b3::DmaCfg *)
+
+let%span sb3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 235 14 235 97
+
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_DmaCfg = { dma_alloc: t_Option_u64; metadata_base_lba: UInt64.t }
+
+predicate resolve_refmut_DmaCfg [@inline:trivial] (_1: MutBorrow.t t_DmaCfg) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_DmaCfg
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let set_dma_alloc [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 236 4 236 43]
+  (self: MutBorrow.t t_DmaCfg) (a: UInt64.t) (return (x: ())) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_6 <- Some a ] s1
+    | s1 = [ &self <- { self with current = { self.current with dma_alloc = _6 } } ] s2
+    | s2 = -{resolve_refmut_DmaCfg self}- s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: () = Any.any_l ()
+  | & self: MutBorrow.t t_DmaCfg = self
+  | & a: UInt64.t = a
+  | & _6: t_Option_u64 = Any.any_l () ])
+  [ return (result: ()) -> {[@stop_split] [@expl:set_dma_alloc ensures] [%#sb3] self.final.dma_alloc = Some a
+    /\ self.final.metadata_base_lba = self.current.metadata_base_lba}
+    (! return {result}) ]

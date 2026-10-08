@@ -1,0 +1,35 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 302 0 302 49 *)
+
+let%span swell_founded = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+let%span sslab = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 301 10 301 17
+
+use creusot.int.UInt64
+use seq.Seq
+use int.Int
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant s : Seq.seq UInt64.t
+
+constant x : UInt64.t
+
+function filter_ne [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 302 0 302 49] (s: Seq.seq UInt64.t) (x: UInt64.t) : Seq.seq UInt64.t
+
+goal vc_filter_ne: if Seq.length s = 0 then
+    true
+  else
+    if Seq.get s (Seq.length s - 1) = x then
+      [@expl:variant decreases] well_founded_relation_Int ([%#sslab] Seq.length s) ([%#sslab] Seq.length (Seq.([..]) s 0 (Seq.length s
+      - 1)))
+    else
+      [@expl:variant decreases] well_founded_relation_Int ([%#sslab] Seq.length s) ([%#sslab] Seq.length (Seq.([..]) s 0 (Seq.length s
+      - 1)))
+  
+  

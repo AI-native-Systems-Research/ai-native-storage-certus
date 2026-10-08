@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_elim_Abort": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_elim_Publish": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_elim_Reserve": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_len_tup2_u64_usize": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_lop_ok": { "prover": "alt-ergo", "time": 0.045 }
+    }
+  }
+}

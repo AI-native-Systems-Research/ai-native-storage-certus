@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_index_mut_Vec_Vec_u64_Global_Global": {
+        "prover": "alt-ergo",
+        "time": 0.023
+      },
+      "vc_push_at": { "prover": "cvc4", "time": 0.748 },
+      "vc_push_u64": { "prover": "alt-ergo", "time": 0.022 }
+    }
+  }
+}

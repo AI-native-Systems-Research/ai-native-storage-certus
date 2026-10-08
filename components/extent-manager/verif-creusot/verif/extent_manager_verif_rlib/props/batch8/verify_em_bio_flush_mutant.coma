@@ -1,0 +1,38 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 44 0 44 93 *)
+
+let%span sb8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b8.rs" 44 10 47 1
+let%span sbatch8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 45 4 45 25
+let%span sbatch8'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 43 10 43 79
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_CompF = FlushDone bool | Error | Other
+
+type t_Option_CompF = None | Some t_CompF
+
+type t_EmError = CorruptMetadata | IoError | NotInitialized | OffsetNotFound UInt64.t | OutOfSpace
+
+type t_Result_unit_EmError = Ok () | Err t_EmError
+
+let flush8 (send_ok: bool) (recv: t_Option_CompF) (return (x: t_Result_unit_EmError)) = any
+  [ return (result: t_Result_unit_EmError) -> {[@stop_split] [@expl:flush8 ensures] [%#sb8] match result with
+      | Ok () -> send_ok /\ recv = Some (FlushDone true)
+      | Err e -> e = IoError /\ not (send_ok /\ recv = Some (FlushDone true))
+      end}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_em_bio_flush__mutant [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 44 0 44 93]
+  (send_ok: bool) (recv: t_Option_CompF) (return (x: t_Result_unit_EmError)) = (! bb0
+  [ bb0 = s0
+    [ s0 = flush8 [%#sbatch8] {send_ok} {recv} (fun (_x: t_Result_unit_EmError) -> [ &_ret <- _x ] s1)
+    | s1 = return {_ret} ] ]
+  [ & _ret: t_Result_unit_EmError = Any.any_l () | & send_ok: bool = send_ok | & recv: t_Option_CompF = recv ])
+  [ return (result: t_Result_unit_EmError) ->
+  {[@stop_split] [@expl:verify_em_bio_flush__mutant ensures] [%#sbatch8'0] send_ok /\ recv = Some (FlushDone false)
+    -> result = Ok ()}
+    (! return {result}) ]

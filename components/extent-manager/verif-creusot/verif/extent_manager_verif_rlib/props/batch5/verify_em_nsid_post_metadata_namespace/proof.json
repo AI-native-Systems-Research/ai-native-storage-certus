@@ -1,0 +1,21 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_get_metadata_client": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_index_Vec_tup2_u64_usize_Global": {
+        "prover": "alt-ergo",
+        "time": 0.028
+      },
+      "vc_init_ns": { "prover": "alt-ergo", "time": 0.033 },
+      "vc_len_tup2_u64_usize": { "prover": "alt-ergo", "time": 0.032 },
+      "vc_read_blocks": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_set_metadata_ns_id": { "prover": "alt-ergo", "time": 0.032 },
+      "vc_verify_em_nsid_post_metadata_namespace": {
+        "prover": "z3",
+        "time": 0.026
+      }
+    }
+  }
+}

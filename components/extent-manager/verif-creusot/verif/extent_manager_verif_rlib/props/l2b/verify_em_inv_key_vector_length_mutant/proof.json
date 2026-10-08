@@ -1,0 +1,17 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_slab_life": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_slab_life_rec": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_verify_em_inv_key_vector_length__mutant": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.014 },
+          { "prover": "alt-ergo", "time": 0.022 },
+          null
+        ]
+      }
+    }
+  }
+}

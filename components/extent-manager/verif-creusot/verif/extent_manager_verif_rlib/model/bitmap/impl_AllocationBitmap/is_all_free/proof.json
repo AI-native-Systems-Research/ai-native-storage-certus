@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_is_all_free": { "prover": "alt-ergo", "time": 0.02 } }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_apply_cop": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_format": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_initialize": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_verify_em_inv_seq_agree": { "prover": "cvc5", "time": 0.302 }
+    }
+  }
+}

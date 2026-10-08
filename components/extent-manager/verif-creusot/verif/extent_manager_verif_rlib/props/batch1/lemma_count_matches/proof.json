@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_lemma_count_matches": { "prover": "cvc4", "time": 0.255 } }
+  }
+}

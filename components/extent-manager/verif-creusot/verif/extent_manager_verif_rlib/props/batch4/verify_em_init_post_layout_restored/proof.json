@@ -1,0 +1,19 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_capacity_bytes": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_format": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_init_capacity": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_new_Vec_SlabDescriptor_Global": {
+        "prover": "alt-ergo",
+        "time": 0.028
+      },
+      "vc_verify_em_init_post_layout_restored": {
+        "prover": "cvc5",
+        "time": 3.4
+      }
+    }
+  }
+}

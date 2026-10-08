@@ -1,0 +1,17 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_read_blocks": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_verify_em_bio_read_err__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [ { "prover": "alt-ergo", "time": 0.032 }, null ]
+          }
+        ]
+      }
+    }
+  }
+}

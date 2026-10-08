@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_bft_mask_c": { "prover": "cvc4", "time": 0.494 } }
+  }
+}

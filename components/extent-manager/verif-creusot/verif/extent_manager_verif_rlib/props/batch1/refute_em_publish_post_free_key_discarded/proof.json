@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_refute_em_publish_post_free_key_discarded": {
+        "prover": "cvc4",
+        "time": 0.228
+      },
+      "vc_w2b_replaced": { "prover": "alt-ergo", "time": 0.031 }
+    }
+  }
+}

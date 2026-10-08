@@ -1,0 +1,47 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2m.rs" 431 0 431 54 *)
+
+let%span sl2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 205 11 205 73
+let%span sl2'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 206 10 206 20
+let%span sl2'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 33 16 33 46
+let%span sl2m = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2m.rs" 429 11 429 74
+let%span sl2m'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2m.rs" 430 10 430 36
+
+use int.ComputerDivision
+use int.Int
+
+predicate disj [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 32 0 32 55] (x1: int) (l1: int) (x2: int) (l2: int) =
+  [%#sl2'1] x1 + l1 <= x2 \/ x2 + l2 <= x1
+
+function lemma_aligned_disj2 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 207 0 207 50] (x: int) (y: int) (m: int) : ()
+
+axiom lemma_aligned_disj2_spec: forall x: int, y: int, m: int. ([%#sl2] m > 0
+      /\ x >= 0 /\ y >= 0 /\ ComputerDivision.mod x m = 0 /\ ComputerDivision.mod y m = 0 /\ x < y)
+    -> ([%#sl2'0] x + m <= y)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant x : int
+
+constant y : int
+
+constant m : int
+
+predicate lemma_al_disj_b [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2m.rs" 431 0 431 54] (x: int) (y: int) (m: int)
+
+goal vc_lemma_al_disj_b: ([%#sl2m] m > 0
+    /\ x >= 0 /\ y >= 0 /\ ComputerDivision.mod x m = 0 /\ ComputerDivision.mod y m = 0 /\ x <> y)
+  -> (if x < y then
+    ([@stop_split] [@expl:lemma_aligned_disj2 requires] [%#sl2] m > 0
+      /\ x >= 0 /\ y >= 0 /\ ComputerDivision.mod x m = 0 /\ ComputerDivision.mod y m = 0 /\ x < y)
+    /\ (([@stop_split] [@expl:lemma_aligned_disj2 ensures] [%#sl2'0] x + m <= y)
+    -> (let _ = lemma_aligned_disj2 x y m in [@stop_split] [@expl:lemma_al_disj_b ensures] [%#sl2m'0] true
+    /\ disj x m y m))
+  else
+    ([@stop_split] [@expl:lemma_aligned_disj2 requires] [%#sl2] m > 0
+      /\ y >= 0 /\ x >= 0 /\ ComputerDivision.mod y m = 0 /\ ComputerDivision.mod x m = 0 /\ y < x)
+    /\ (([@stop_split] [@expl:lemma_aligned_disj2 ensures] [%#sl2'0] y + m <= x)
+    -> (let _ = lemma_aligned_disj2 y x m in [@stop_split] [@expl:lemma_al_disj_b ensures] [%#sl2m'0] true
+    /\ disj x m y m))
+  )

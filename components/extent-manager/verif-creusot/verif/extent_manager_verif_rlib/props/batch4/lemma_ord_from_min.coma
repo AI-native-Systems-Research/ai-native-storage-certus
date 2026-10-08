@@ -1,0 +1,49 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 208 0 208 41 *)
+
+let%span swell_founded = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 283 10 283 16
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 285 16 285 86
+let%span sbatch4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 205 10 205 16
+let%span sbatch4'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 206 11 206 28
+let%span sbatch4'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 207 10 207 70
+
+use bv.Pow2int
+use int.Int
+
+function ord_from [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 284 0 284 38] (b: int) (k: int) : int
+
+axiom ord_from_def: forall b: int, k: int [ord_from b k]. ord_from b k
+    = ([%#sbuddy'0] if k >= 64 \/ k < 0 \/ Pow2int.pow2 k >= b then k else ord_from b (k + 1))
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant b : int
+
+constant k : int
+
+function lemma_ord_from_min [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 208 0 208 41] (b: int) (k: int) : ()
+
+goal vc_lemma_ord_from_min: ([%#sbatch4'0] 0 <= k /\ k <= 64)
+  -> (if k < 64 then
+    if Pow2int.pow2 k < b then
+      (([@stop_split] [@expl:lemma_ord_from_min requires] [%#sbatch4'0] 0 <= k + 1 /\ k + 1 <= 64)
+        /\ ([@expl:variant decreases] well_founded_relation_Int ([%#sbatch4] 64 - k) ([%#sbatch4] 64 - (k + 1))))
+      /\ (([@stop_split] [@expl:lemma_ord_from_min ensures] [%#sbatch4'1] forall j: int. k + 1 <= j
+            /\ j < ord_from b (k + 1) -> Pow2int.pow2 j < b)
+      -> ([@stop_split] [@expl:lemma_ord_from_min ensures] [%#sbatch4'1] forall j: int. k <= j /\ j < ord_from b k
+        -> Pow2int.pow2 j < b))
+    else
+      [@stop_split] [@expl:lemma_ord_from_min ensures] [%#sbatch4'1] forall j: int. k <= j /\ j < ord_from b k
+        -> Pow2int.pow2 j < b
+  
+  else
+    [@stop_split] [@expl:lemma_ord_from_min ensures] [%#sbatch4'1] forall j: int. k <= j /\ j < ord_from b k
+      -> Pow2int.pow2 j < b
+  )

@@ -1,0 +1,86 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 190 0 192 15 *)
+
+let%span sparams = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/params.rs" 61 14 61 82
+let%span sparams'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/params.rs" 62 14 62 90
+let%span sparams'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/params.rs" 63 14 63 88
+let%span sparams'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/params.rs" 64 14 64 108
+let%span sparams'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/params.rs" 65 14 65 73
+let%span sparams'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/params.rs" 66 14 66 69
+let%span sparams'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/params.rs" 67 14 67 100
+let%span sparams'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/params.rs" 68 14 68 59
+let%span sparams'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/params.rs" 37 0 37 31
+let%span sparams'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/params.rs" 38 0 38 29
+let%span sbatch8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 193 4 193 67
+let%span sbatch8'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 189 10 189 34
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.int.UInt8
+use creusot.prelude.Any
+
+type t_Superblock = {
+  magic: UInt64.t;
+  version: UInt32.t;
+  data_disk_size: UInt64.t;
+  sector_size: UInt32.t;
+  slab_size: UInt64.t;
+  max_extent_size: UInt32.t;
+  region_count: UInt32.t;
+  checkpoint_seq: UInt64.t;
+  active_copy: UInt8.t;
+  checkpoint_region_offset: UInt64.t;
+  checkpoint_region_size: UInt64.t;
+  instance_id: UInt64.t;
+  metadata_disk_ns_id: UInt32.t;
+  data_start_offset: UInt64.t }
+
+constant const_SUPERBLOCK_MAGIC: UInt64.t = [%#sparams'7] (4847371096096462388: UInt64.t)
+
+constant const_FORMAT_VERSION: UInt32.t = [%#sparams'8] (6: UInt32.t)
+
+let new (data_disk_size'0: UInt64.t) (sector_size'0: UInt32.t) (slab_size'0: UInt64.t) (max_extent_size'0: UInt32.t)
+  (region_count'0: UInt32.t) (checkpoint_region_offset'0: UInt64.t) (checkpoint_region_size'0: UInt64.t)
+  (instance_id'0: UInt64.t) (metadata_disk_ns_id'0: UInt32.t) (data_start_offset'0: UInt64.t)
+  (return (x: t_Superblock)) = any
+  [ return (result: t_Superblock) ->
+  {[@stop_split] [@expl:new ensures] ([@stop_split] [@expl:new ensures #0] [%#sparams] result.magic
+        = const_SUPERBLOCK_MAGIC
+      /\ result.version = const_FORMAT_VERSION)
+    /\ ([@stop_split] [@expl:new ensures #1] [%#sparams'0] result.data_disk_size = data_disk_size'0
+      /\ result.sector_size = sector_size'0)
+    /\ ([@stop_split] [@expl:new ensures #2] [%#sparams'1] result.slab_size = slab_size'0
+      /\ result.max_extent_size = max_extent_size'0)
+    /\ ([@stop_split] [@expl:new ensures #3] [%#sparams'2] result.region_count = region_count'0
+      /\ UInt64.t'int result.checkpoint_seq = 0 /\ UInt8.t'int result.active_copy = 0)
+    /\ ([@stop_split] [@expl:new ensures #4] [%#sparams'3] result.checkpoint_region_offset = checkpoint_region_offset'0)
+    /\ ([@stop_split] [@expl:new ensures #5] [%#sparams'4] result.checkpoint_region_size = checkpoint_region_size'0)
+    /\ ([@stop_split] [@expl:new ensures #6] [%#sparams'5] result.instance_id = instance_id'0
+      /\ result.metadata_disk_ns_id = metadata_disk_ns_id'0)
+    /\ ([@stop_split] [@expl:new ensures #7] [%#sparams'6] result.data_start_offset = data_start_offset'0)}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_em_sb_new_defaults__mutant [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 190 0 192 15]
+  (dds: UInt64.t) (ss: UInt32.t) (slab: UInt64.t) (mes: UInt32.t) (rc: UInt32.t) (cro: UInt64.t) (crs: UInt64.t)
+  (iid: UInt64.t) (ns: UInt32.t) (dso: UInt64.t) (return (x: t_Superblock)) = (! bb0
+  [ bb0 = s0
+    [ s0 = new [%#sbatch8] {dds} {ss} {slab} {mes} {rc} {cro} {crs} {iid} {ns} {dso}
+        (fun (_x: t_Superblock) -> [ &_ret <- _x ] s1)
+    | s1 = return {_ret} ] ]
+  [ & _ret: t_Superblock = Any.any_l ()
+  | & dds: UInt64.t = dds
+  | & ss: UInt32.t = ss
+  | & slab: UInt64.t = slab
+  | & mes: UInt32.t = mes
+  | & rc: UInt32.t = rc
+  | & cro: UInt64.t = cro
+  | & crs: UInt64.t = crs
+  | & iid: UInt64.t = iid
+  | & ns: UInt32.t = ns
+  | & dso: UInt64.t = dso ])
+  [ return (result: t_Superblock) ->
+  {[@stop_split] [@expl:verify_em_sb_new_defaults__mutant ensures] [%#sbatch8'0] UInt8.t'int result.active_copy = 1}
+    (! return {result}) ]

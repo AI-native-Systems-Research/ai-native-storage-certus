@@ -1,0 +1,17 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 370 9 370 29 *)
+
+(* <model::b3::RdOut as std::clone::Clone> *)
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_RdOut = DevErr | Bad | Good UInt64.t
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_RdOut [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 370 9 370 29]
+  (self: t_RdOut) (return (x: t_RdOut)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_RdOut = Any.any_l () | & self: t_RdOut = self ]) [ return (result: t_RdOut) -> (! return {result}) ]

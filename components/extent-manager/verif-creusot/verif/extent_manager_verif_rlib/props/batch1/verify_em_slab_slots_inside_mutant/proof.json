@@ -1,0 +1,16 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_slot_offset": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_verify_em_slab_slots_inside__mutant": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.032 },
+          { "prover": "alt-ergo", "time": 0.04 },
+          null
+        ]
+      }
+    }
+  }
+}

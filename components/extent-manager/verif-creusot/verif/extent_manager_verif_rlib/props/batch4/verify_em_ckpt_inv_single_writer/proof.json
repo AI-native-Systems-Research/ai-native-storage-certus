@@ -1,0 +1,22 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_co_init": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_elim_Finish": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_enter": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_finish": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_index_Vec_tup2_usize_CoOp_Global": {
+        "prover": "alt-ergo",
+        "time": 0.022
+      },
+      "vc_len_Th": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_len_tup2_usize_CoOp": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_verify_em_ckpt_inv_single_writer": {
+        "prover": "alt-ergo",
+        "time": 0.093
+      },
+      "vc_wake": { "prover": "alt-ergo", "time": 0.023 }
+    }
+  }
+}

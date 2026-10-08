@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_and_mask": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_refute_em_inv_key_sharding__mutant": null,
+      "vc_refute_em_inv_within_usable_range": {
+        "prover": "alt-ergo",
+        "time": 0.016
+      }
+    }
+  }
+}

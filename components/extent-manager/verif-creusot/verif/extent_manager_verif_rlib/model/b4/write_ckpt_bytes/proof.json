@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_as_u32": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_build_blob": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_dev_write_area": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_len_u8": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_write_ckpt_bytes": { "prover": "z3", "time": 0.162 }
+    }
+  }
+}

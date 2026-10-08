@@ -1,0 +1,351 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2a.rs" 45 0 45 87 *)
+
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 111 11 111 27
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 112 10 112 27
+let%span sbuddy'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 113 10 113 25
+let%span sbuddy'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 93 11 93 17
+let%span sbuddy'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 94 10 94 44
+let%span sbuddy'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 102 11 102 38
+let%span sbuddy'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 103 10 103 36
+let%span sbuddy'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1373 8 1373 37
+let%span sbuddy'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 432 16 432 60
+let%span sbuddy'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 33 16 33 29
+let%span sbuddy'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 438 16 438 113
+let%span sbuddy'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1392 8 1394 31
+let%span sbuddy'11 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 403 8 407 92
+let%span sbuddy'12 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 416 8 417 64
+let%span sbuddy'13 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 425 8 426 83
+let%span sl2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 40 8 41 76
+let%span sl2'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 48 16 48 93
+let%span sl2'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 33 16 33 46
+let%span sl2'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 21 16 21 68
+let%span sl2'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 27 16 27 26
+let%span sl2a = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2a.rs" 39 11 39 91
+let%span sl2a'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2a.rs" 40 11 40 53
+let%span sl2a'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2a.rs" 41 10 41 46
+let%span sl2a'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2a.rs" 42 10 42 92
+let%span sl2a'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2a.rs" 43 10 44 106
+let%span sl2a'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2a.rs" 90 11 90 39
+let%span sl2a'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2a.rs" 91 10 91 82
+let%span sl2a'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2a.rs" 93 4 93 27
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use int.ComputerDivision
+use bv.Pow2int
+use int.Int
+
+type t_Vec_Vec_u64_Global_Global
+
+type t_BuddyAllocator = {
+  base_offset: UInt64.t;
+  total_usable_size: UInt64.t;
+  sector_size: UInt32.t;
+  max_order: UInt64.t;
+  free_lists: t_Vec_Vec_u64_Global_Global }
+
+type t_Vec_u64_Global
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_u64_Global (self: t_Vec_u64_Global) : Seq.seq UInt64.t
+
+axiom view_Vec_u64_Global_spec:
+  forall self: t_Vec_u64_Global [view_Vec_u64_Global self]. [%#svec] Seq.length (view_Vec_u64_Global self)
+    <= UInt64.t'int const_MAX
+
+function view_Vec_Vec_u64_Global_Global (self: t_Vec_Vec_u64_Global_Global) : Seq.seq t_Vec_u64_Global
+
+axiom view_Vec_Vec_u64_Global_Global_spec:
+  forall self: t_Vec_Vec_u64_Global_Global [view_Vec_Vec_u64_Global_Global self]. [%#svec] Seq.length (view_Vec_Vec_u64_Global_Global self)
+    <= UInt64.t'int const_MAX
+
+function span [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 32 0 32 35] (ss: int) (o: int) : int
+ = [%#sbuddy'8] Pow2int.pow2 o * ss
+
+predicate good_block [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 437 0 437 60] (b: t_BuddyAllocator) (x: int) (o: int) =
+  [%#sbuddy'9] 0 <= o
+  /\ ComputerDivision.mod x (span (UInt32.t'int b.sector_size) o) = 0
+  /\ x + span (UInt32.t'int b.sector_size) o <= UInt64.t'int b.total_usable_size
+
+predicate pushed [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1390 0 1390 59] (new: Seq.seq UInt64.t) (old': Seq.seq UInt64.t) (v: int) =
+  [%#sbuddy'10] Seq.length new = Seq.length old' + 1
+  /\ (forall k: int. 0 <= k /\ k < Seq.length old' -> Seq.get new k = Seq.get old' k)
+  /\ UInt64.t'int (Seq.get new (Seq.length old')) = v
+
+predicate alloc_post [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1371 0 1371 93] (old': t_BuddyAllocator) (new: t_BuddyAllocator) (on: int) (fo: int) (r: int) =
+  [%#sbuddy'6] let l = view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global old'.free_lists) fo) in let local = Seq.get l (Seq.length l
+  - 1) in 0 <= on
+  /\ on <= fo
+  /\ fo <= UInt64.t'int old'.max_order
+  /\ Seq.length l > 0
+  /\ r = UInt64.t'int old'.base_offset + UInt64.t'int local
+  /\ good_block old' (UInt64.t'int local) on
+  /\ ComputerDivision.mod (UInt64.t'int local) (span (UInt32.t'int old'.sector_size) fo) = 0
+  /\ UInt64.t'int local + span (UInt32.t'int old'.sector_size) fo <= UInt64.t'int old'.total_usable_size
+  /\ view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global new.free_lists) fo)
+    = Seq.([..]) l 0 (Seq.length l - 1)
+  /\ (forall o: int. on <= o /\ o < fo
+      -> pushed (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global new.free_lists) o)) (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global old'.free_lists) o)) (UInt64.t'int local
+      + span (UInt32.t'int old'.sector_size) o))
+  /\ (forall o: int. 0 <= o /\ o < Seq.length (view_Vec_Vec_u64_Global_Global old'.free_lists) /\ (o < on \/ o > fo)
+    -> Seq.get (view_Vec_Vec_u64_Global_Global new.free_lists) o
+    = Seq.get (view_Vec_Vec_u64_Global_Global old'.free_lists) o)
+
+constant const_MAX'0: UInt64.t = (18446744073709551615: UInt64.t)
+
+predicate bd_shape [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 401 0 401 42] (b: t_BuddyAllocator) =
+  [%#sbuddy'11] UInt32.t'int b.sector_size > 0
+  /\ UInt64.t'int b.max_order < 64
+  /\ Seq.length (view_Vec_Vec_u64_Global_Global b.free_lists) = UInt64.t'int b.max_order + 1
+  /\ UInt64.t'int b.base_offset + UInt64.t'int b.total_usable_size <= UInt64.t'int const_MAX'0
+  /\ (UInt64.t'int b.max_order = 0
+  \/ span (UInt32.t'int b.sector_size) (UInt64.t'int b.max_order) <= UInt64.t'int b.total_usable_size)
+
+predicate bd_aligned [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 414 0 414 44] (b: t_BuddyAllocator) =
+  [%#sbuddy'12] forall o: int, k: int. 0 <= o
+      /\ o < Seq.length (view_Vec_Vec_u64_Global_Global b.free_lists)
+      /\ 0 <= k /\ k < Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global b.free_lists) o))
+    -> ComputerDivision.mod (UInt64.t'int (Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global b.free_lists) o)) k)) (span (UInt32.t'int b.sector_size) o)
+    = 0
+
+predicate bd_inside [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 423 0 423 43] (b: t_BuddyAllocator) =
+  [%#sbuddy'13] forall o: int, k: int. 0 <= o
+      /\ o < Seq.length (view_Vec_Vec_u64_Global_Global b.free_lists)
+      /\ 0 <= k /\ k < Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global b.free_lists) o))
+    -> UInt64.t'int (Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global b.free_lists) o)) k)
+      + span (UInt32.t'int b.sector_size) o
+    <= UInt64.t'int b.total_usable_size
+
+predicate bd_inv [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 431 0 431 40] (b: t_BuddyAllocator) =
+  [%#sbuddy'7] bd_shape b /\ bd_aligned b /\ bd_inside b
+
+predicate fv [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 20 0 20 52] (fl: Seq.seq t_Vec_u64_Global) (o: int) (k: int) =
+  [%#sl2'2] 0 <= o /\ o < Seq.length fl /\ 0 <= k /\ k < Seq.length (view_Vec_u64_Global (Seq.get fl o))
+
+predicate disj [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 32 0 32 55] (x1: int) (l1: int) (x2: int) (l2: int) =
+  [%#sl2'1] x1 + l1 <= x2 \/ x2 + l2 <= x1
+
+function fs [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 26 0 26 51] (fl: Seq.seq t_Vec_u64_Global) (o: int) (k: int) : int
+ = [%#sl2'3] UInt64.t'int (Seq.get (view_Vec_u64_Global (Seq.get fl o)) k)
+
+predicate fdisj [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 38 0 38 48] (fl: Seq.seq t_Vec_u64_Global) (ss: int) =
+  [%#sl2] forall o1: int, k1: int, o2: int, k2: int. fv fl o1 k1 /\ fv fl o2 k2 /\ (o1 <> o2 \/ k1 <> k2)
+    -> disj (fs fl o1 k1) (span ss o1) (fs fl o2 k2) (span ss o2)
+
+predicate faway [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 47 0 47 64] (fl: Seq.seq t_Vec_u64_Global) (ss: int) (y: int) (l: int) =
+  [%#sl2'0] forall o: int, k: int. fv fl o k -> disj y l (fs fl o k) (span ss o)
+
+function lemma_span_pos [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 114 0 114 38] (ss: int) (o: int) : ()
+
+axiom lemma_span_pos_spec: forall ss: int, o: int. ([%#sbuddy] ss > 0 /\ 0 <= o) -> ([%#sbuddy'0] span ss o >= ss)
+
+axiom lemma_span_pos_spec'0: forall ss: int, o: int. ([%#sbuddy] ss > 0 /\ 0 <= o) -> ([%#sbuddy'1] span ss o > 0)
+
+function lemma_span_succ [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 95 0 95 39] (ss: int) (o: int) : ()
+
+axiom lemma_span_succ_spec: forall ss: int, o: int. ([%#sbuddy'2] 0 <= o)
+    -> ([%#sbuddy'3] span ss (o + 1) = 2 * span ss o)
+
+function lemma_span_mono [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 104 0 104 47] (ss: int) (a: int) (b: int) : ()
+
+axiom lemma_span_mono_spec: forall ss: int, a: int, b: int. ([%#sbuddy'4] 0 <= a /\ a <= b /\ 0 <= ss)
+    -> ([%#sbuddy'5] span ss a <= span ss b)
+
+function lemma_sib_disj [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2a.rs" 92 0 92 58] (ss: int) (loc: int) (o1: int) (o2: int) : ()
+ = [%#sl2a'6] let _ = lemma_span_succ ss o1 in let _ = lemma_span_mono ss (o1 + 1) o2 in lemma_span_pos ss o1
+
+axiom lemma_sib_disj_spec: forall ss: int, loc: int, o1: int, o2: int. ([%#sl2a'4] ss > 0 /\ 0 <= o1 /\ o1 < o2)
+    -> ([%#sl2a'5] disj (loc + span ss o1) (span ss o1) (loc + span ss o2) (span ss o2))
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant a : t_BuddyAllocator
+
+constant b : t_BuddyAllocator
+
+constant on : int
+
+constant fo : int
+
+constant r : int
+
+function lemma_alloc_disj [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2a.rs" 45 0 45 87] (a: t_BuddyAllocator) (b: t_BuddyAllocator) (on: int) (fo: int) (r: int) : ()
+
+goal vc_lemma_alloc_disj: ([%#sl2a] alloc_post a b on fo r
+    /\ bd_inv a /\ fdisj (view_Vec_Vec_u64_Global_Global a.free_lists) (UInt32.t'int a.sector_size))
+  -> ([%#sl2a'0] Seq.length (view_Vec_Vec_u64_Global_Global b.free_lists)
+    = Seq.length (view_Vec_Vec_u64_Global_Global a.free_lists))
+  -> (forall o: int. if 0 <= o then
+        ([@stop_split] [@expl:lemma_span_pos requires] [%#sbuddy] UInt32.t'int a.sector_size > 0 /\ 0 <= o)
+        /\ (([@stop_split] [@expl:lemma_span_pos ensures] ([@stop_split] [@expl:lemma_span_pos ensures #0] [%#sbuddy'0] span (UInt32.t'int a.sector_size) o
+            >= UInt32.t'int a.sector_size)
+          /\ ([@stop_split] [@expl:lemma_span_pos ensures #1] [%#sbuddy'1] span (UInt32.t'int a.sector_size) o > 0))
+        -> (let _ = lemma_span_pos (UInt32.t'int a.sector_size) o in true))
+      else
+        true
+    )
+  /\ (forall o: int. 0 <= o
+      -> (let _ = lemma_span_pos (UInt32.t'int a.sector_size) o in span (UInt32.t'int a.sector_size) o > 0))
+  && (forall o: int. if on <= o then
+        if o < fo then
+          ([@stop_split] [@expl:lemma_span_succ requires] [%#sbuddy'2] 0 <= o)
+          /\ (([@stop_split] [@expl:lemma_span_succ ensures] [%#sbuddy'3] span (UInt32.t'int a.sector_size) (o + 1)
+            = 2 * span (UInt32.t'int a.sector_size) o)
+          -> (let _ = lemma_span_succ (UInt32.t'int a.sector_size) o in ([@stop_split] [@expl:lemma_span_mono requires] [%#sbuddy'4] 0
+              <= on
+            /\ on <= o /\ 0 <= UInt32.t'int a.sector_size)
+          /\ (([@stop_split] [@expl:lemma_span_mono ensures] [%#sbuddy'5] span (UInt32.t'int a.sector_size) on
+            <= span (UInt32.t'int a.sector_size) o)
+          -> (let _ = lemma_span_mono (UInt32.t'int a.sector_size) on o in ([@stop_split] [@expl:lemma_span_mono requires] [%#sbuddy'4] 0
+              <= o + 1
+            /\ o + 1 <= fo /\ 0 <= UInt32.t'int a.sector_size)
+          /\ (([@stop_split] [@expl:lemma_span_mono ensures] [%#sbuddy'5] span (UInt32.t'int a.sector_size) (o + 1)
+            <= span (UInt32.t'int a.sector_size) fo)
+          -> (let _ = lemma_span_mono (UInt32.t'int a.sector_size) (o + 1) fo in true))))))
+        else
+          true
+      
+      else
+        true
+    )
+  /\ (forall o: int. on <= o /\ o < fo
+      -> (let _ = lemma_span_succ (UInt32.t'int a.sector_size) o in let _ = lemma_span_mono (UInt32.t'int a.sector_size) on o in let _ = lemma_span_mono (UInt32.t'int a.sector_size) (o
+      + 1) fo in span (UInt32.t'int a.sector_size) (o + 1) = 2 * span (UInt32.t'int a.sector_size) o
+      /\ span (UInt32.t'int a.sector_size) on <= span (UInt32.t'int a.sector_size) o
+      /\ span (UInt32.t'int a.sector_size) (o + 1) <= span (UInt32.t'int a.sector_size) fo))
+  && (forall o1: int, o2: int. if on <= o1 then
+        if o1 < o2 then
+          if o2 < fo then
+            ([@stop_split] [@expl:lemma_span_mono requires] [%#sbuddy'4] 0 <= o1 + 1
+              /\ o1 + 1 <= o2 /\ 0 <= UInt32.t'int a.sector_size)
+            /\ (([@stop_split] [@expl:lemma_span_mono ensures] [%#sbuddy'5] span (UInt32.t'int a.sector_size) (o1 + 1)
+              <= span (UInt32.t'int a.sector_size) o2)
+            -> (let _ = lemma_span_mono (UInt32.t'int a.sector_size) (o1 + 1) o2 in true))
+          else
+            true
+        
+        else
+          true
+      
+      else
+        true
+    )
+  /\ (forall o1: int, o2: int. on <= o1 /\ o1 < o2 /\ o2 < fo
+      -> (let _ = lemma_span_mono (UInt32.t'int a.sector_size) (o1 + 1) o2 in span (UInt32.t'int a.sector_size) (o1 + 1)
+      <= span (UInt32.t'int a.sector_size) o2))
+  && ([@stop_split] [@expl:lemma_span_mono requires] [%#sbuddy'4] 0 <= on
+    /\ on <= fo /\ 0 <= UInt32.t'int a.sector_size)
+  /\ (([@stop_split] [@expl:lemma_span_mono ensures] [%#sbuddy'5] span (UInt32.t'int a.sector_size) on
+    <= span (UInt32.t'int a.sector_size) fo)
+  -> (let _ = lemma_span_mono (UInt32.t'int a.sector_size) on fo in ([@stop_split] [@expl:view ensures] [%#svec] Seq.length (view_Vec_Vec_u64_Global_Global a.free_lists)
+    <= UInt64.t'int const_MAX)
+  -> ([@stop_split] [@expl:view ensures] [%#svec] Seq.length (view_Vec_Vec_u64_Global_Global a.free_lists)
+    <= UInt64.t'int const_MAX)
+  -> ([@stop_split] [@expl:view ensures] [%#svec] Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global a.free_lists) fo))
+    <= UInt64.t'int const_MAX)
+  -> fv (view_Vec_Vec_u64_Global_Global a.free_lists) fo (Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global a.free_lists) fo))
+    - 1)
+  && (forall o: int, k: int. fv (view_Vec_Vec_u64_Global_Global b.free_lists) o k
+      -> on <= o
+        /\ o < fo
+        /\ k = Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global a.free_lists) o))
+        /\ fs (view_Vec_Vec_u64_Global_Global b.free_lists) o k
+        = fs (view_Vec_Vec_u64_Global_Global a.free_lists) fo (Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global a.free_lists) fo))
+          - 1)
+        + span (UInt32.t'int a.sector_size) o
+      \/ fv (view_Vec_Vec_u64_Global_Global a.free_lists) o k
+      /\ fs (view_Vec_Vec_u64_Global_Global b.free_lists) o k = fs (view_Vec_Vec_u64_Global_Global a.free_lists) o k
+      /\ (o <> fo
+      \/ k <> Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global a.free_lists) fo)) - 1))
+  && (forall o: int, k: int. fv (view_Vec_Vec_u64_Global_Global a.free_lists) o k
+        /\ (o <> fo
+        \/ k <> Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global a.free_lists) fo)) - 1)
+      -> disj (fs (view_Vec_Vec_u64_Global_Global a.free_lists) o k) (span (UInt32.t'int a.sector_size) o) (fs (view_Vec_Vec_u64_Global_Global a.free_lists) fo (Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global a.free_lists) fo))
+      - 1)) (span (UInt32.t'int a.sector_size) fo))
+  && (forall y: int, l2: int. 0 < l2
+        /\ faway (view_Vec_Vec_u64_Global_Global a.free_lists) (UInt32.t'int a.sector_size) y l2
+      -> disj y l2 (fs (view_Vec_Vec_u64_Global_Global a.free_lists) fo (Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global a.free_lists) fo))
+      - 1)) (span (UInt32.t'int a.sector_size) fo))
+  && (forall o1: int, o2: int. if on <= o1 then
+        if o1 < o2 then
+          if o2 < fo then
+            ([@stop_split] [@expl:view ensures] [%#svec] Seq.length (view_Vec_Vec_u64_Global_Global a.free_lists)
+              <= UInt64.t'int const_MAX)
+            -> ([@stop_split] [@expl:view ensures] [%#svec] Seq.length (view_Vec_Vec_u64_Global_Global a.free_lists)
+              <= UInt64.t'int const_MAX)
+            -> ([@stop_split] [@expl:view ensures] [%#svec] Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global a.free_lists) fo))
+              <= UInt64.t'int const_MAX)
+            -> ([@stop_split] [@expl:lemma_sib_disj requires] [%#sl2a'4] UInt32.t'int a.sector_size > 0
+              /\ 0 <= o1 /\ o1 < o2)
+            /\ (([@stop_split] [@expl:lemma_sib_disj ensures] [%#sl2a'5] disj (fs (view_Vec_Vec_u64_Global_Global a.free_lists) fo (Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global a.free_lists) fo))
+                - 1)
+              + span (UInt32.t'int a.sector_size) o1) (span (UInt32.t'int a.sector_size) o1) (fs (view_Vec_Vec_u64_Global_Global a.free_lists) fo (Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global a.free_lists) fo))
+                - 1)
+              + span (UInt32.t'int a.sector_size) o2) (span (UInt32.t'int a.sector_size) o2))
+            -> (let _ = lemma_sib_disj (UInt32.t'int a.sector_size) (fs (view_Vec_Vec_u64_Global_Global a.free_lists) fo (Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global a.free_lists) fo))
+            - 1)) o1 o2 in true))
+          else
+            true
+        
+        else
+          true
+      
+      else
+        true
+    )
+  /\ (forall o1: int, o2: int. on <= o1 /\ o1 < o2 /\ o2 < fo
+      -> (let _ = lemma_sib_disj (UInt32.t'int a.sector_size) (fs (view_Vec_Vec_u64_Global_Global a.free_lists) fo (Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global a.free_lists) fo))
+      - 1)) o1 o2 in disj (fs (view_Vec_Vec_u64_Global_Global a.free_lists) fo (Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global a.free_lists) fo))
+        - 1)
+      + span (UInt32.t'int a.sector_size) o1) (span (UInt32.t'int a.sector_size) o1) (fs (view_Vec_Vec_u64_Global_Global a.free_lists) fo (Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global a.free_lists) fo))
+        - 1)
+      + span (UInt32.t'int a.sector_size) o2) (span (UInt32.t'int a.sector_size) o2)))
+  && (forall o: int, k: int, o2: int. fv (view_Vec_Vec_u64_Global_Global a.free_lists) o k
+        /\ (o <> fo
+          \/ k <> Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global a.free_lists) fo)) - 1)
+        /\ on <= o2 /\ o2 < fo
+      -> disj (fs (view_Vec_Vec_u64_Global_Global a.free_lists) o k) (span (UInt32.t'int a.sector_size) o) (fs (view_Vec_Vec_u64_Global_Global a.free_lists) fo (Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global a.free_lists) fo))
+        - 1)
+      + span (UInt32.t'int a.sector_size) o2) (span (UInt32.t'int a.sector_size) o2))
+  && (forall o1: int, k1: int, o2: int, k2: int. fv (view_Vec_Vec_u64_Global_Global b.free_lists) o1 k1
+        /\ fv (view_Vec_Vec_u64_Global_Global b.free_lists) o2 k2
+        /\ (o1 <> o2 \/ k1 <> k2)
+        /\ not (on <= o1
+          /\ o1 < fo
+          /\ k1 = Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global a.free_lists) o1)))
+        /\ not (on <= o2
+        /\ o2 < fo /\ k2 = Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global a.free_lists) o2)))
+      -> disj (fs (view_Vec_Vec_u64_Global_Global b.free_lists) o1 k1) (span (UInt32.t'int a.sector_size) o1) (fs (view_Vec_Vec_u64_Global_Global b.free_lists) o2 k2) (span (UInt32.t'int a.sector_size) o2))
+  && (forall o1: int, k1: int, o2: int, k2: int. fv (view_Vec_Vec_u64_Global_Global b.free_lists) o1 k1
+        /\ fv (view_Vec_Vec_u64_Global_Global b.free_lists) o2 k2
+        /\ on <= o1
+        /\ o1 < fo
+        /\ k1 = Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global a.free_lists) o1))
+        /\ not (on <= o2
+        /\ o2 < fo /\ k2 = Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global a.free_lists) o2)))
+      -> disj (fs (view_Vec_Vec_u64_Global_Global b.free_lists) o1 k1) (span (UInt32.t'int a.sector_size) o1) (fs (view_Vec_Vec_u64_Global_Global b.free_lists) o2 k2) (span (UInt32.t'int a.sector_size) o2))
+  && (forall o1: int, k1: int, o2: int, k2: int. fv (view_Vec_Vec_u64_Global_Global b.free_lists) o1 k1
+        /\ fv (view_Vec_Vec_u64_Global_Global b.free_lists) o2 k2
+        /\ (o1 <> o2 \/ k1 <> k2)
+        /\ on <= o1
+        /\ o1 < fo
+        /\ k1 = Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global a.free_lists) o1))
+        /\ on <= o2
+        /\ o2 < fo /\ k2 = Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global a.free_lists) o2))
+      -> o1 <> o2
+      /\ disj (fs (view_Vec_Vec_u64_Global_Global b.free_lists) o1 k1) (span (UInt32.t'int a.sector_size) o1) (fs (view_Vec_Vec_u64_Global_Global b.free_lists) o2 k2) (span (UInt32.t'int a.sector_size) o2))
+  && (forall o1: int, k1: int, o2: int, k2: int. fv (view_Vec_Vec_u64_Global_Global b.free_lists) o1 k1
+        /\ fv (view_Vec_Vec_u64_Global_Global b.free_lists) o2 k2 /\ (o1 <> o2 \/ k1 <> k2)
+      -> disj (fs (view_Vec_Vec_u64_Global_Global b.free_lists) o1 k1) (span (UInt32.t'int a.sector_size) o1) (fs (view_Vec_Vec_u64_Global_Global b.free_lists) o2 k2) (span (UInt32.t'int a.sector_size) o2))
+  && ([@stop_split] [@expl:lemma_alloc_disj ensures] ([@stop_split] [@expl:lemma_alloc_disj ensures #0] [%#sl2a'1] fdisj (view_Vec_Vec_u64_Global_Global b.free_lists) (UInt32.t'int a.sector_size))
+  /\ ([@stop_split] [@expl:lemma_alloc_disj ensures #1] [%#sl2a'2] faway (view_Vec_Vec_u64_Global_Global b.free_lists) (UInt32.t'int a.sector_size) (r
+    - UInt64.t'int a.base_offset) (span (UInt32.t'int a.sector_size) on))
+  /\ ([@stop_split] [@expl:lemma_alloc_disj ensures #2] [%#sl2a'3] forall y: int, l: int. 0 < l
+      /\ faway (view_Vec_Vec_u64_Global_Global a.free_lists) (UInt32.t'int a.sector_size) y l
+    -> faway (view_Vec_Vec_u64_Global_Global b.free_lists) (UInt32.t'int a.sector_size) y l
+    /\ disj y l (r - UInt64.t'int a.base_offset) (span (UInt32.t'int a.sector_size) on)))))

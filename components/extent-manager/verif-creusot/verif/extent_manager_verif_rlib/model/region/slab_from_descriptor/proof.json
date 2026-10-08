@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_index_Vec_u64_Global": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_len_u64": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_mark_slot_allocated": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_new": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_set_key": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_slab_from_descriptor": { "prover": "z3", "time": 0.771 }
+    }
+  }
+}

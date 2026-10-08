@@ -1,0 +1,16 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_elim_Err": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_elim_Ok": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_new": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_publish": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_reserve_extent": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_verify_em_publish_post_returned_extent": {
+        "prover": "alt-ergo",
+        "time": 1.9
+      }
+    }
+  }
+}

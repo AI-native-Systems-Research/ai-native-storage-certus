@@ -1,0 +1,46 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_get_metadata_client": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_init_ns": { "prover": "alt-ergo", "time": 0.033 },
+      "vc_read_blocks": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_set_metadata_ns_id": { "prover": "alt-ergo", "time": 0.032 },
+      "vc_verify_em_nsid_post_metadata_namespace__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.022 },
+              { "prover": "alt-ergo", "time": 0.022 },
+              { "prover": "alt-ergo", "time": 0.022 },
+              { "prover": "alt-ergo", "time": 0.023 },
+              { "prover": "alt-ergo", "time": 0.024 },
+              { "prover": "alt-ergo", "time": 0.022 },
+              {
+                "tactic": "split_vc",
+                "children": [
+                  {
+                    "tactic": "split_vc",
+                    "children": [
+                      { "prover": "alt-ergo", "time": 0.037 }, null
+                    ]
+                  },
+                  {
+                    "tactic": "split_vc",
+                    "children": [
+                      { "prover": "alt-ergo", "time": 0.045 }, null
+                    ]
+                  }
+                ]
+              },
+              { "prover": "alt-ergo", "time": 0.022 }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

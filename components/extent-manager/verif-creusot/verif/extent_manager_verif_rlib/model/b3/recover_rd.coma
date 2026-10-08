@@ -1,0 +1,109 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 417 0 417 98 *)
+
+let%span sb3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 418 17 418 18
+let%span sb3'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 421 10 421 32
+let%span sb3'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 427 28 427 29
+let%span sb3'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 427 19 427 29
+let%span sb3'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 428 18 428 19
+let%span sb3'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 429 14 429 40
+let%span sb3'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 430 48 430 49
+let%span sb3'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 430 48 430 58
+let%span sb3'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 410 11 410 23
+let%span sb3'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 411 10 411 57
+let%span sb3'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 412 10 412 93
+let%span sb3'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 413 10 414 71
+let%span sb3'11 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 415 10 416 129
+let%span sb3'12 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 378 10 382 1
+
+use creusot.int.UInt64
+use creusot.int.UInt8
+use creusot.prelude.Any
+use int.Int
+
+type t_Recovered = Empty | Copy UInt8.t
+
+type t_EmError = CorruptMetadata | IoError | NotInitialized | OffsetNotFound UInt64.t | OutOfSpace
+
+type t_Result_Recovered_EmError = Ok t_Recovered | Err t_EmError
+
+type t_RdOut = DevErr | Bad | Good UInt64.t
+
+type t_Result_unit_EmError = Ok'0 () | Err'0 t_EmError
+
+let read_ckpt (o: t_RdOut) (expected: UInt64.t) (return (x: t_Result_unit_EmError)) = any
+  [ return (result: t_Result_unit_EmError) -> {[@stop_split] [@expl:read_ckpt ensures] [%#sb3'12] match o with
+      | DevErr -> result = Err'0 (IoError)
+      | Bad -> result = Err'0 (CorruptMetadata)
+      | Good s -> if s = expected then result = Ok'0 () else result = Err'0 (CorruptMetadata)
+      end}
+    (! return {result}) ]
+
+let elim_Err (_x: t_Result_unit_EmError) (return (f0: t_EmError)) = any
+  [ _k (f0: t_EmError) -> {Err'0 f0 = _x} (! return {f0})
+  | _chk -> (! {[@expl:elim Err] match _x with
+      | Err'0 _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let recover_rd [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 417 0 417 98]
+  (sb_seq: UInt64.t) (active: UInt8.t) (act: t_RdOut) (inact: t_RdOut) (return (x: t_Result_Recovered_EmError)) =
+{[@stop_split] [@expl:recover_rd requires] [%#sb3'7] UInt8.t'int active <= 1}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_23 <- sb_seq = ([%#sb3] (0: UInt64.t)) ] s1
+    | s1 = any [ br0 -> {_23 = false} (! bb2) | br1 -> {_23} (! bb1) ] ]
+  | bb1 = s0 [ s0 = [ &_26 <- Empty ] s1 | s1 = [ &_ret <- Ok _26 ] s2 | s2 = return {_ret} ]
+  | bb2 = s0
+    [ s0 = read_ckpt [%#sb3'0] {act} {sb_seq} (fun (_x: t_Result_unit_EmError) -> [ &_28 <- _x ] s1)
+    | s1 = any [ br0 (x0: ()) -> {_28 = Ok'0 x0} (! bb7) | br1 (x0: t_EmError) -> {_28 = Err'0 x0} (! bb6) ] ]
+  | bb6 = s0
+    [ s0 = elim_Err {_28} (fun (r0: t_EmError) -> [ &_e <- r0 ] s1)
+    | s1 = UInt64.sub [%#sb3'2] {sb_seq} {[%#sb3'1] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &prev_seq <- _x ] s2)
+    | s2 = [ &_39 <- UInt64.gt prev_seq ([%#sb3'3] (0: UInt64.t)) ] s3
+    | s3 = any [ br0 -> {_39 = false} (! bb15) | br1 -> {_39} (! bb8) ] ]
+  | bb8 = s0
+    [ s0 = read_ckpt [%#sb3'4] {inact} {prev_seq} (fun (_x: t_Result_unit_EmError) -> [ &_41 <- _x ] s1)
+    | s1 = any [ br0 (x0: ()) -> {_41 = Ok'0 x0} (! bb14) | br1 (x0: t_EmError) -> {_41 = Err'0 x0} (! bb13) ] ]
+  | bb13 = s0 [ s0 = elim_Err {_41} (fun (r0: t_EmError) -> [ &_e'0 <- r0 ] s1) | s1 = bb15 ]
+  | bb14 = s0
+    [ s0 = UInt8.sub [%#sb3'6] {[%#sb3'5] (1: UInt8.t)} {active} (fun (_x: UInt8.t) -> [ &_47 <- _x ] s1)
+    | s1 = [ &_46 <- Copy _47 ] s2
+    | s2 = [ &_ret <- Ok _46 ] s3
+    | s3 = return {_ret} ]
+  | bb15 = s0 [ s0 = [ &_50 <- CorruptMetadata ] s1 | s1 = [ &_ret <- Err _50 ] s2 | s2 = return {_ret} ]
+  | bb7 = s0 [ s0 = [ &_33 <- Copy active ] s1 | s1 = [ &_ret <- Ok _33 ] s2 | s2 = return {_ret} ] ]
+  [ & _ret: t_Result_Recovered_EmError = Any.any_l ()
+  | & sb_seq: UInt64.t = sb_seq
+  | & active: UInt8.t = active
+  | & act: t_RdOut = act
+  | & inact: t_RdOut = inact
+  | & _23: bool = Any.any_l ()
+  | & _26: t_Recovered = Any.any_l ()
+  | & _28: t_Result_unit_EmError = Any.any_l ()
+  | & _33: t_Recovered = Any.any_l ()
+  | & _e: t_EmError = Any.any_l ()
+  | & prev_seq: UInt64.t = Any.any_l ()
+  | & _39: bool = Any.any_l ()
+  | & _41: t_Result_unit_EmError = Any.any_l ()
+  | & _46: t_Recovered = Any.any_l ()
+  | & _47: UInt8.t = Any.any_l ()
+  | & _e'0: t_EmError = Any.any_l ()
+  | & _50: t_EmError = Any.any_l () ])
+  [ return (result: t_Result_Recovered_EmError) ->
+  {[@stop_split] [@expl:recover_rd ensures] ([@stop_split] [@expl:recover_rd ensures #0] [%#sb3'8] UInt64.t'int sb_seq
+        = 0 -> result = Ok (Empty))
+    /\ ([@stop_split] [@expl:recover_rd ensures #1] [%#sb3'9] UInt64.t'int sb_seq > 0 /\ act = Good sb_seq
+      -> result = Ok (Copy active))
+    /\ ([@stop_split] [@expl:recover_rd ensures #2] [%#sb3'10] forall q: UInt64.t. UInt64.t'int sb_seq > 1
+          /\ UInt64.t'int q = UInt64.t'int sb_seq - 1 /\ act <> Good sb_seq /\ inact = Good q
+        -> result = Ok (Copy (if UInt8.t'int active = 0 then (1: UInt8.t) else (0: UInt8.t))))
+    /\ ([@stop_split] [@expl:recover_rd ensures #3] [%#sb3'11] UInt64.t'int sb_seq > 0
+      /\ act <> Good sb_seq
+      /\ (UInt64.t'int sb_seq = 1 \/ (forall q: UInt64.t. UInt64.t'int q = UInt64.t'int sb_seq - 1 -> inact <> Good q))
+    -> result = Err (CorruptMetadata))}
+    (! return {result}) ]

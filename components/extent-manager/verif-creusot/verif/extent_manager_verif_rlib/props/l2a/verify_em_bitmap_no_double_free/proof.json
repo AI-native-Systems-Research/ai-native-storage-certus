@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_apply_lop": { "prover": "alt-ergo", "time": 0.033 },
+      "vc_verify_em_bitmap_no_double_free": {
+        "prover": "alt-ergo",
+        "time": 0.069
+      }
+    }
+  }
+}

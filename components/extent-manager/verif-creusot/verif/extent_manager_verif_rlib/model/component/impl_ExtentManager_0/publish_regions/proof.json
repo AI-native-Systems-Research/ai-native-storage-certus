@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_publish_regions": { "prover": "z3", "time": 0.012 } }
+  }
+}

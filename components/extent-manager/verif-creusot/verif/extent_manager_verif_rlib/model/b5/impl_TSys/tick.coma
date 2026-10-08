@@ -1,0 +1,43 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 82 4 82 35 *)
+
+(* model::b5::TSys *)
+
+let%span sb5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 83 31 83 46
+let%span sb5'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 79 14 79 45
+let%span sb5'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 80 14 80 72
+let%span sb5'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 81 14 81 78
+
+use creusot.prelude.MutBorrow
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_TPh = Top | Wait int | WaitInf | Woken bool | Work | Exited
+
+type t_TSys = { interval: t_Option_u64; now: int; ph: t_TPh; shutdown: bool; ckpts: UInt64.t }
+
+predicate resolve_refmut_TSys [@inline:trivial] (_1: MutBorrow.t t_TSys) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_TSys
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let tick [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 82 4 82 35]
+  (self: MutBorrow.t t_TSys) (dt: UInt64.t) (return (x: ())) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &self <- { self with current = { self.current with now = ([%#sb5] self.current.now + UInt64.t'int dt) } } ]
+      s1
+    | s1 = -{resolve_refmut_TSys self}- s2
+    | s2 = return {_ret} ] ] [ & _ret: () = Any.any_l () | & self: MutBorrow.t t_TSys = self | & dt: UInt64.t = dt ])
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:tick ensures] ([@stop_split] [@expl:tick ensures #0] [%#sb5'0] self.final.now
+      = self.current.now + UInt64.t'int dt)
+    /\ ([@stop_split] [@expl:tick ensures #1] [%#sb5'1] self.final.interval = self.current.interval
+      /\ self.final.ph = self.current.ph)
+    /\ ([@stop_split] [@expl:tick ensures #2] [%#sb5'2] self.final.shutdown = self.current.shutdown
+    /\ self.final.ckpts = self.current.ckpts)}
+    (! return {result}) ]

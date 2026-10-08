@@ -1,0 +1,217 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 1465 0 1465 97 *)
+
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sslab = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 43 16 43 55
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 321 11 321 46
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 322 10 322 28
+let%span sbuddy'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 323 10 323 37
+let%span sbuddy'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 111 11 111 27
+let%span sbuddy'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 112 10 112 27
+let%span sbuddy'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 113 10 113 25
+let%span sbuddy'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 46 11 46 17
+let%span sbuddy'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 47 10 47 23
+let%span sbuddy'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 48 10 48 40
+let%span sbuddy'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 69 11 69 27
+let%span sbuddy'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 70 10 70 39
+let%span sbuddy'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 71 10 71 65
+let%span sbuddy'11 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 291 16 291 30
+let%span sbuddy'12 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 33 16 33 29
+let%span sbuddy'13 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 45 10 45 11
+let%span sbuddy'14 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 283 10 283 16
+let%span sbuddy'15 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 285 16 285 86
+let%span sbuddy'16 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 180 11 180 26
+let%span sbuddy'17 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 181 10 181 34
+let%span sbuddy'18 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 182 10 182 33
+let%span sbuddy'19 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 183 10 183 20
+let%span sregion = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 1460 11 1460 37
+let%span sregion'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 1461 11 1461 97
+let%span sregion'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 1462 11 1462 123
+let%span sregion'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 1463 11 1463 28
+let%span sregion'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 1464 10 1464 61
+let%span sregion'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 1477 11 1477 50
+let%span sregion'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 1478 10 1478 20
+let%span sregion'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 1178 8 1183 103
+let%span sregion'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 1480 4 1480 22
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use int.ComputerDivision
+use bv.Pow2int
+use int.Int
+
+type t_Vec_u64_Global
+
+type t_SlabDescriptor = { start_offset: UInt64.t; slab_size: UInt64.t; element_size: UInt32.t; keys: t_Vec_u64_Global }
+
+type t_Vec_Vec_u64_Global_Global
+
+type t_BuddyAllocator = {
+  base_offset: UInt64.t;
+  total_usable_size: UInt64.t;
+  sector_size: UInt32.t;
+  max_order: UInt64.t;
+  free_lists: t_Vec_Vec_u64_Global_Global }
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_FormatParams = {
+  data_disk_size'0: UInt64.t;
+  slab_size'0: UInt64.t;
+  max_extent_size'0: UInt32.t;
+  sector_size'0: UInt32.t;
+  region_count'0: UInt32.t;
+  metadata_alignment'0: UInt64.t;
+  instance_id'0: t_Option_u64;
+  metadata_disk_ns_id'0: UInt32.t;
+  metadata_region_size'0: UInt64.t }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_u64_Global (self: t_Vec_u64_Global) : Seq.seq UInt64.t
+
+axiom view_Vec_u64_Global_spec:
+  forall self: t_Vec_u64_Global [view_Vec_u64_Global self]. [%#svec] Seq.length (view_Vec_u64_Global self)
+    <= UInt64.t'int const_MAX
+
+function slots_of [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 42 0 42 57] (slab_size'1: int) (element_size'0: int) : int
+ = [%#sslab] ComputerDivision.mod (ComputerDivision.div slab_size'1 element_size'0) 4294967296
+
+function span [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 32 0 32 35] (ss: int) (o: int) : int
+ = [%#sbuddy'12] Pow2int.pow2 o * ss
+
+function ord_from [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 284 0 284 38] (b: int) (k: int) : int
+
+axiom ord_from_def: forall b: int, k: int [ord_from b k]. ord_from b k
+    = ([%#sbuddy'15] if k >= 64 \/ k < 0 \/ Pow2int.pow2 k >= b then k else ord_from b (k + 1))
+
+function ord [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 290 0 290 25] (b: int) : int
+ = [%#sbuddy'11] ord_from b 0
+
+predicate desc_ok [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 1176 0 1176 81] (d: t_SlabDescriptor) (base: int) (size: int) (fp: t_FormatParams) =
+  [%#sregion'6] d.slab_size = fp.slab_size'0
+  /\ UInt32.t'int d.element_size > 0
+  /\ Seq.length (view_Vec_u64_Global d.keys) = slots_of (UInt64.t'int d.slab_size) (UInt32.t'int d.element_size)
+  /\ UInt64.t'int d.start_offset >= base
+  /\ ComputerDivision.mod (UInt64.t'int d.start_offset
+      - base) (span (UInt32.t'int fp.sector_size'0) (ord (ComputerDivision.div (UInt64.t'int fp.slab_size'0) (UInt32.t'int fp.sector_size'0))))
+    = 0
+  /\ UInt64.t'int d.start_offset - base
+    + span (UInt32.t'int fp.sector_size'0) (ord (ComputerDivision.div (UInt64.t'int fp.slab_size'0) (UInt32.t'int fp.sector_size'0)))
+  <= size
+
+function lemma_ord_ge [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 324 0 324 27] (b: int) : ()
+
+axiom lemma_ord_ge_spec: forall b: int. ([%#sbuddy] 0 <= b /\ b <= 18446744073709551616)
+    -> ([%#sbuddy'0] Pow2int.pow2 (ord b) >= b)
+
+axiom lemma_ord_ge_spec'0: forall b: int. ([%#sbuddy] 0 <= b /\ b <= 18446744073709551616)
+    -> ([%#sbuddy'1] 0 <= ord b /\ ord b <= 64)
+
+function lemma_span_pos [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 114 0 114 38] (ss: int) (o: int) : ()
+
+axiom lemma_span_pos_spec: forall ss: int, o: int. ([%#sbuddy'2] ss > 0 /\ 0 <= o) -> ([%#sbuddy'3] span ss o >= ss)
+
+axiom lemma_span_pos_spec'0: forall ss: int, o: int. ([%#sbuddy'2] ss > 0 /\ 0 <= o) -> ([%#sbuddy'4] span ss o > 0)
+
+function lemma_pow2 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 49 0 49 25] (o: int) : ()
+
+axiom lemma_pow2_spec: forall o: int. ([%#sbuddy'5] 0 <= o) -> ([%#sbuddy'6] Pow2int.pow2 o >= 1)
+
+axiom lemma_pow2_spec'0: forall o: int. ([%#sbuddy'5] 0 <= o)
+    -> ([%#sbuddy'7] Pow2int.pow2 (o + 1) = 2 * Pow2int.pow2 o)
+
+function lemma_divmod [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 184 0 184 35] (x: int) (m: int) : ()
+
+axiom lemma_divmod_spec: forall x: int, m: int. ([%#sbuddy'16] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'17] x = m * ComputerDivision.div x m + ComputerDivision.mod x m)
+
+axiom lemma_divmod_spec'0: forall x: int, m: int. ([%#sbuddy'16] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'18] 0 <= ComputerDivision.mod x m /\ ComputerDivision.mod x m < m)
+
+axiom lemma_divmod_spec'1: forall x: int, m: int. ([%#sbuddy'16] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'19] ComputerDivision.div x m >= 0)
+
+function lemma_div_le [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 1479 0 1479 43] (p: int) (d: int) (n: int) : ()
+ = [%#sregion'7] lemma_divmod n d
+
+axiom lemma_div_le_spec: forall p: int, d: int, n: int. ([%#sregion'4] d > 0 /\ p >= 0 /\ n >= 0 /\ p * d <= n)
+    -> ([%#sregion'5] p <= ComputerDivision.div n d)
+
+function lemma_pow2_strict [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 72 0 72 40] (a: int) (b: int) : ()
+
+axiom lemma_pow2_strict_spec: forall a: int, b: int. ([%#sbuddy'8] 0 <= a /\ 0 <= b)
+    -> ([%#sbuddy'9] Pow2int.pow2 a < Pow2int.pow2 b -> a < b)
+
+axiom lemma_pow2_strict_spec'0: forall a: int, b: int. ([%#sbuddy'8] 0 <= a /\ 0 <= b)
+    -> ([%#sbuddy'10] Pow2int.pow2 a <= Pow2int.pow2 b -> a <= b \/ Pow2int.pow2 a = Pow2int.pow2 b)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant d : t_SlabDescriptor
+
+constant b : t_BuddyAllocator
+
+constant base : int
+
+constant size : int
+
+constant fp : t_FormatParams
+
+function lemma_desc_k [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 1465 0 1465 97] (d: t_SlabDescriptor) (b: t_BuddyAllocator) (base: int) (size: int) (fp: t_FormatParams) : ()
+
+goal vc_lemma_desc_k: ([%#sregion] desc_ok d base size fp)
+  -> ([%#sregion'0] UInt32.t'int fp.sector_size'0 > 0
+    /\ b.sector_size = fp.sector_size'0 /\ UInt64.t'int b.total_usable_size = size)
+  -> ([%#sregion'1] ComputerDivision.div (UInt64.t'int b.total_usable_size) (UInt32.t'int b.sector_size) >= 1
+    -> ComputerDivision.div (UInt64.t'int b.total_usable_size) (UInt32.t'int b.sector_size)
+    < Pow2int.pow2 (UInt64.t'int b.max_order + 1))
+  -> ([%#sregion'2] 0 <= UInt64.t'int b.max_order)
+  -> ([@stop_split] [@expl:lemma_ord_ge requires] [%#sbuddy] 0
+      <= ComputerDivision.div (UInt64.t'int fp.slab_size'0) (UInt32.t'int fp.sector_size'0)
+    /\ ComputerDivision.div (UInt64.t'int fp.slab_size'0) (UInt32.t'int fp.sector_size'0) <= 18446744073709551616)
+  /\ (([@stop_split] [@expl:lemma_ord_ge ensures] ([@stop_split] [@expl:lemma_ord_ge ensures #0] [%#sbuddy'0] Pow2int.pow2 (ord (ComputerDivision.div (UInt64.t'int fp.slab_size'0) (UInt32.t'int fp.sector_size'0)))
+      >= ComputerDivision.div (UInt64.t'int fp.slab_size'0) (UInt32.t'int fp.sector_size'0))
+    /\ ([@stop_split] [@expl:lemma_ord_ge ensures #1] [%#sbuddy'1] 0
+      <= ord (ComputerDivision.div (UInt64.t'int fp.slab_size'0) (UInt32.t'int fp.sector_size'0))
+    /\ ord (ComputerDivision.div (UInt64.t'int fp.slab_size'0) (UInt32.t'int fp.sector_size'0)) <= 64))
+  -> (let _ = lemma_ord_ge (ComputerDivision.div (UInt64.t'int fp.slab_size'0) (UInt32.t'int fp.sector_size'0)) in ([@stop_split] [@expl:lemma_span_pos requires] [%#sbuddy'2] UInt32.t'int fp.sector_size'0
+      > 0
+    /\ 0 <= ord (ComputerDivision.div (UInt64.t'int fp.slab_size'0) (UInt32.t'int fp.sector_size'0)))
+  /\ (([@stop_split] [@expl:lemma_span_pos ensures] ([@stop_split] [@expl:lemma_span_pos ensures #0] [%#sbuddy'3] span (UInt32.t'int fp.sector_size'0) (ord (ComputerDivision.div (UInt64.t'int fp.slab_size'0) (UInt32.t'int fp.sector_size'0)))
+      >= UInt32.t'int fp.sector_size'0)
+    /\ ([@stop_split] [@expl:lemma_span_pos ensures #1] [%#sbuddy'4] span (UInt32.t'int fp.sector_size'0) (ord (ComputerDivision.div (UInt64.t'int fp.slab_size'0) (UInt32.t'int fp.sector_size'0)))
+    > 0))
+  -> (let _ = lemma_span_pos (UInt32.t'int fp.sector_size'0) (ord (ComputerDivision.div (UInt64.t'int fp.slab_size'0) (UInt32.t'int fp.sector_size'0))) in ([@stop_split] [@expl:lemma_pow2 requires] [%#sbuddy'5] 0
+    <= ord (ComputerDivision.div (UInt64.t'int fp.slab_size'0) (UInt32.t'int fp.sector_size'0)))
+  /\ (([@stop_split] [@expl:lemma_pow2 ensures] ([@stop_split] [@expl:lemma_pow2 ensures #0] [%#sbuddy'6] Pow2int.pow2 (ord (ComputerDivision.div (UInt64.t'int fp.slab_size'0) (UInt32.t'int fp.sector_size'0)))
+      >= 1)
+    /\ ([@stop_split] [@expl:lemma_pow2 ensures #1] [%#sbuddy'7] Pow2int.pow2 (ord (ComputerDivision.div (UInt64.t'int fp.slab_size'0) (UInt32.t'int fp.sector_size'0))
+      + 1)
+    = 2 * Pow2int.pow2 (ord (ComputerDivision.div (UInt64.t'int fp.slab_size'0) (UInt32.t'int fp.sector_size'0)))))
+  -> (let _ = lemma_pow2 (ord (ComputerDivision.div (UInt64.t'int fp.slab_size'0) (UInt32.t'int fp.sector_size'0))) in ([@stop_split] [@expl:lemma_div_le requires] [%#sregion'4] UInt32.t'int fp.sector_size'0
+      > 0
+    /\ Pow2int.pow2 (ord (ComputerDivision.div (UInt64.t'int fp.slab_size'0) (UInt32.t'int fp.sector_size'0))) >= 0
+    /\ size >= 0
+    /\ Pow2int.pow2 (ord (ComputerDivision.div (UInt64.t'int fp.slab_size'0) (UInt32.t'int fp.sector_size'0)))
+      * UInt32.t'int fp.sector_size'0
+    <= size)
+  /\ (([@stop_split] [@expl:lemma_div_le ensures] [%#sregion'5] Pow2int.pow2 (ord (ComputerDivision.div (UInt64.t'int fp.slab_size'0) (UInt32.t'int fp.sector_size'0)))
+    <= ComputerDivision.div size (UInt32.t'int fp.sector_size'0))
+  -> (let _ = lemma_div_le (Pow2int.pow2 (ord (ComputerDivision.div (UInt64.t'int fp.slab_size'0) (UInt32.t'int fp.sector_size'0)))) (UInt32.t'int fp.sector_size'0) size in ([@stop_split] [@expl:lemma_pow2_strict requires] [%#sbuddy'8] 0
+      <= ord (ComputerDivision.div (UInt64.t'int fp.slab_size'0) (UInt32.t'int fp.sector_size'0))
+    /\ 0 <= UInt64.t'int b.max_order + 1)
+  /\ (([@stop_split] [@expl:lemma_pow2_strict ensures] ([@stop_split] [@expl:lemma_pow2_strict ensures #0] [%#sbuddy'9] Pow2int.pow2 (ord (ComputerDivision.div (UInt64.t'int fp.slab_size'0) (UInt32.t'int fp.sector_size'0)))
+        < Pow2int.pow2 (UInt64.t'int b.max_order + 1)
+      -> ord (ComputerDivision.div (UInt64.t'int fp.slab_size'0) (UInt32.t'int fp.sector_size'0))
+      < UInt64.t'int b.max_order + 1)
+    /\ ([@stop_split] [@expl:lemma_pow2_strict ensures #1] [%#sbuddy'10] Pow2int.pow2 (ord (ComputerDivision.div (UInt64.t'int fp.slab_size'0) (UInt32.t'int fp.sector_size'0)))
+      <= Pow2int.pow2 (UInt64.t'int b.max_order + 1)
+    -> ord (ComputerDivision.div (UInt64.t'int fp.slab_size'0) (UInt32.t'int fp.sector_size'0))
+      <= UInt64.t'int b.max_order + 1
+    \/ Pow2int.pow2 (ord (ComputerDivision.div (UInt64.t'int fp.slab_size'0) (UInt32.t'int fp.sector_size'0)))
+    = Pow2int.pow2 (UInt64.t'int b.max_order + 1)))
+  -> ([@stop_split] [@expl:lemma_desc_k ensures] [%#sregion'3] ord (ComputerDivision.div (UInt64.t'int d.slab_size) (UInt32.t'int fp.sector_size'0))
+  <= UInt64.t'int b.max_order))))))))))

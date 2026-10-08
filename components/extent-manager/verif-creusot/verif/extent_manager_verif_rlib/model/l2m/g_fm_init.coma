@@ -1,0 +1,61 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 378 0 378 100 *)
+
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 33 16 33 29
+let%span sl2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 54 16 54 106
+let%span sl2'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 21 16 21 68
+let%span sl2'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 27 16 27 26
+let%span sl2m = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 376 10 376 44
+let%span sl2m'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 377 10 377 41
+let%span sl2m'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 371 8 371 110
+let%span sl2m'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 99 8 100 102
+
+use creusot.prelude.Any
+use seq.Seq
+use creusot.int.UInt64
+use bv.Pow2int
+use int.ComputerDivision
+use int.Int
+
+type t_Vec_u64_Global
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_u64_Global (self: t_Vec_u64_Global) : Seq.seq UInt64.t
+
+axiom view_Vec_u64_Global_spec:
+  forall self: t_Vec_u64_Global [view_Vec_u64_Global self]. [%#svec] Seq.length (view_Vec_u64_Global self)
+    <= UInt64.t'int const_MAX
+
+predicate fv [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 20 0 20 52] (fl: Seq.seq t_Vec_u64_Global) (o: int) (k: int) =
+  [%#sl2'0] 0 <= o /\ o < Seq.length fl /\ 0 <= k /\ k < Seq.length (view_Vec_u64_Global (Seq.get fl o))
+
+function fs [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 26 0 26 51] (fl: Seq.seq t_Vec_u64_Global) (o: int) (k: int) : int
+ = [%#sl2'1] UInt64.t'int (Seq.get (view_Vec_u64_Global (Seq.get fl o)) k)
+
+function span [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 32 0 32 35] (ss: int) (o: int) : int
+ = [%#sbuddy] Pow2int.pow2 o * ss
+
+predicate ffree [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 53 0 53 56] (fl: Seq.seq t_Vec_u64_Global) (ss: int) (z: int) =
+  [%#sl2] exists o: int, k: int. fv fl o k /\ fs fl o k <= z /\ z < fs fl o k + span ss o
+
+predicate fbi [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 369 0 369 97] (fl: Seq.seq t_Vec_u64_Global) (ss: int) (c: int) (l: int) (a: Seq.seq t_Vec_u64_Global) (x: int) (l0: int) =
+  [%#sl2m'1] forall z: int. ffree a ss z \/ x <= z /\ z < x + l0 -> ffree fl ss z \/ c <= z /\ z < c + l
+
+predicate coal [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 97 0 97 47] (fl: Seq.seq t_Vec_u64_Global) (ss: int) =
+  [%#sl2m'2] forall o: int, k1: int, k2: int. fv fl o k1
+      /\ fv fl o k2
+      /\ o + 1 < Seq.length fl /\ ComputerDivision.mod (ComputerDivision.div (fs fl o k1) (span ss o)) 2 = 0
+    -> fs fl o k2 <> fs fl o k1 + span ss o
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let g_fm_init [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 378 0 378 100]
+  (a: Seq.seq t_Vec_u64_Global) (ss: int) (x: int) (l0: int) (return (x'0: ())) = (! bb0
+  [ bb0 = return {_ret} ] [ & _ret: () = Any.any_l () ])
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:g_fm_init ensures] ([@stop_split] [@expl:g_fm_init ensures #0] [%#sl2m] fbi a ss x l0 a x l0)
+    /\ ([@stop_split] [@expl:g_fm_init ensures #1] [%#sl2m'0] coal a ss -> coal a ss)}
+    (! return {result}) ]

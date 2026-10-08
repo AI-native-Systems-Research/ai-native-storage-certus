@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_abort_h": { "prover": "alt-ergo", "time": 0.041 },
+      "vc_verify_em_handle_drop_auto_abort": {
+        "prover": "alt-ergo",
+        "time": 0.061
+      }
+    }
+  }
+}

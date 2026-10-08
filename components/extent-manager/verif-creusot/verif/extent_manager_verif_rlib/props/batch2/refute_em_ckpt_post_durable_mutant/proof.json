@@ -1,0 +1,36 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_pop_RegionState": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_refute_em_ckpt_post_durable__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.023 },
+              { "prover": "alt-ergo", "time": 0.02 },
+              {
+                "tactic": "split_vc",
+                "children": [
+                  { "prover": "alt-ergo", "time": 0.038 },
+                  {
+                    "tactic": "split_vc",
+                    "children": [
+                      null, { "prover": "alt-ergo", "time": 0.038 }
+                    ]
+                  }
+                ]
+              },
+              { "prover": "alt-ergo", "time": 0.023 },
+              { "prover": "alt-ergo", "time": 0.022 }
+            ]
+          }
+        ]
+      },
+      "vc_unwrap_RegionState": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_wck_lost_update": { "prover": "alt-ergo", "time": 0.025 }
+    }
+  }
+}

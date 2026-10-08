@@ -1,0 +1,585 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE why3session PUBLIC "-//Why3//proof session v5//EN"
+"https://www.why3.org/why3session.dtd">
+<why3session shape_version="6">
+<prover id="0" name="Z3" version="4.16.0" timelimit="8.80191" memlimit="1000"/>
+<prover id="1" name="CVC4" version="1.8" timelimit="4" memlimit="1000"/>
+<prover id="2" name="Alt-Ergo" version="2.6.2" timelimit="4" memlimit="1000"/>
+<prover id="3" name="CVC5" version="1.3.1" timelimit="4" memlimit="1000"/>
+<file format="coma">
+<path name=".."/><path name="run6.coma"/>
+<theory name="Coma">
+ <goal name="vc_elim_Some" proved="true">
+ <proof prover="2" timelimit="0.025895"><result status="valid" time="0.025895" steps="0"/></proof>
+ </goal>
+ <goal name="vc_len_bool" proved="true">
+ <proof prover="2" timelimit="0.024088"><result status="valid" time="0.024088" steps="0"/></proof>
+ </goal>
+ <goal name="vc_index_Vec_bool_Global" proved="true">
+ <proof prover="2" timelimit="0.026806"><result status="valid" time="0.026806" steps="0"/></proof>
+ </goal>
+ <goal name="vc_index_mut_Vec_bool_Global" proved="true">
+ <proof prover="2" timelimit="0.024784"><result status="valid" time="0.024784" steps="0"/></proof>
+ </goal>
+ <goal name="vc_run6">
+ <transf name="compute_specified" >
+  <goal name="vc_run6.0">
+  <transf name="split_vc" >
+   <goal name="vc_run6.0.0" expl="assertion" proved="true">
+   <proof prover="2" timelimit="0.040913"><result status="valid" time="0.040913" steps="0"/></proof>
+   </goal>
+   <goal name="vc_run6.0.1" expl="run6 ensures" proved="true">
+   <proof prover="2" timelimit="0.044427"><result status="valid" time="0.044427" steps="0"/></proof>
+   </goal>
+   <goal name="vc_run6.0.2" expl="loop invariant #0" proved="true">
+   <proof prover="2" timelimit="0.032803"><result status="valid" time="0.032803" steps="0"/></proof>
+   </goal>
+   <goal name="vc_run6.0.3" expl="loop invariant #1" proved="true">
+   <proof prover="2" timelimit="0.028552"><result status="valid" time="0.028552" steps="0"/></proof>
+   </goal>
+   <goal name="vc_run6.0.4" expl="index requires" proved="true">
+   <proof prover="2" timelimit="0.035569"><result status="valid" time="0.035569" steps="0"/></proof>
+   </goal>
+   <goal name="vc_run6.0.5" expl="integer overflow" proved="true">
+   <proof prover="2" timelimit="0.037518"><result status="valid" time="0.037518" steps="0"/></proof>
+   </goal>
+   <goal name="vc_run6.0.6" expl="loop invariant #0" proved="true">
+   <proof prover="2" timelimit="0.035242"><result status="valid" time="0.035242" steps="0"/></proof>
+   </goal>
+   <goal name="vc_run6.0.7" expl="loop invariant #1" proved="true">
+   <proof prover="2" timelimit="0.046622"><result status="valid" time="0.046622" steps="0"/></proof>
+   </goal>
+   <goal name="vc_run6.0.8" expl="elim Some" proved="true">
+   <proof prover="2" timelimit="0.030831"><result status="valid" time="0.030831" steps="0"/></proof>
+   </goal>
+   <goal name="vc_run6.0.9" expl="run6 ensures" proved="true">
+   <proof prover="0" timelimit="0.045092"><result status="valid" time="0.045092" steps="0"/></proof>
+   </goal>
+   <goal name="vc_run6.0.10" expl="run6 ensures" proved="true">
+   <proof prover="2" timelimit="0.06065"><result status="valid" time="0.060650" steps="0"/></proof>
+   </goal>
+   <goal name="vc_run6.0.11" expl="integer overflow" proved="true">
+   <proof prover="2" timelimit="0.04099"><result status="valid" time="0.040990" steps="0"/></proof>
+   </goal>
+   <goal name="vc_run6.0.12" expl="integer overflow" proved="true">
+   <proof prover="2" timelimit="0.045422"><result status="valid" time="0.045422" steps="0"/></proof>
+   </goal>
+   <goal name="vc_run6.0.13" expl="integer overflow" proved="true">
+   <proof prover="2" timelimit="0.063625"><result status="valid" time="0.063625" steps="0"/></proof>
+   </goal>
+   <goal name="vc_run6.0.14" expl="integer overflow" proved="true">
+   <proof prover="2" timelimit="0.089136"><result status="valid" time="0.089136" steps="0"/></proof>
+   </goal>
+   <goal name="vc_run6.0.15" expl="integer overflow" proved="true">
+   <proof prover="2" timelimit="0.10512"><result status="valid" time="0.105120" steps="0"/></proof>
+   </goal>
+   <goal name="vc_run6.0.16" expl="integer overflow" proved="true">
+   <proof prover="2" timelimit="0.13881"><result status="valid" time="0.138810" steps="0"/></proof>
+   </goal>
+   <goal name="vc_run6.0.17" expl="integer overflow" proved="true">
+   <proof prover="2" timelimit="0.059022"><result status="valid" time="0.059022" steps="0"/></proof>
+   </goal>
+   <goal name="vc_run6.0.18" expl="division by zero" proved="true">
+   <proof prover="2" timelimit="0.130107"><result status="valid" time="0.130107" steps="0"/></proof>
+   </goal>
+   <goal name="vc_run6.0.19" expl="division by zero" proved="true">
+   <proof prover="2" timelimit="0.061918"><result status="valid" time="0.061918" steps="0"/></proof>
+   </goal>
+   <goal name="vc_run6.0.20" expl="integer overflow" proved="true">
+   <proof prover="0" timelimit="0.024776"><result status="valid" time="0.024776" steps="0"/></proof>
+   </goal>
+   <goal name="vc_run6.0.21" expl="division by zero" proved="true">
+   <proof prover="2" timelimit="0.043"><result status="valid" time="0.043000" steps="0"/></proof>
+   </goal>
+   <goal name="vc_run6.0.22" expl="division by zero" proved="true">
+   <proof prover="2" timelimit="0.069356"><result status="valid" time="0.069356" steps="0"/></proof>
+   </goal>
+   <goal name="vc_run6.0.23" expl="run6 ensures" proved="true">
+   <transf name="split_vc" proved="true" >
+    <goal name="vc_run6.0.23.0" expl="run6 ensures #0 (run6 ensures)" proved="true">
+    <proof prover="2" timelimit="0.13503"><result status="valid" time="0.135030" steps="0"/></proof>
+    </goal>
+    <goal name="vc_run6.0.23.1" expl="run6 ensures #1 (run6 ensures)" proved="true">
+    <proof prover="0" timelimit="0.023672"><result status="valid" time="0.023672" steps="0"/></proof>
+    </goal>
+    <goal name="vc_run6.0.23.2" expl="run6 ensures #2 (run6 ensures)" proved="true">
+    <proof prover="2" timelimit="0.048165"><result status="valid" time="0.048165" steps="0"/></proof>
+    </goal>
+    <goal name="vc_run6.0.23.3" expl="run6 ensures #3 (run6 ensures)" proved="true">
+    <proof prover="2" timelimit="0.050836"><result status="valid" time="0.050836" steps="0"/></proof>
+    </goal>
+    <goal name="vc_run6.0.23.4" expl="run6 ensures #4 (run6 ensures)" proved="true">
+    <transf name="split_vc" proved="true" >
+     <goal name="vc_run6.0.23.4.0" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="2.2826"><result status="valid" time="2.282598" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.23.4.1" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.050218"><result status="valid" time="0.050218" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.23.4.2" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.138448"><result status="valid" time="0.138448" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.23.4.3" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.15372"><result status="valid" time="0.153720" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.23.4.4" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.133809"><result status="valid" time="0.133809" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.23.4.5" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.048066"><result status="valid" time="0.048066" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.23.4.6" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.044959"><result status="valid" time="0.044959" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.23.4.7" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.139633"><result status="valid" time="0.139633" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.23.4.8" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.135359"><result status="valid" time="0.135359" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.23.4.9" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.131378"><result status="valid" time="0.131378" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.23.4.10" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.047959"><result status="valid" time="0.047959" steps="0"/></proof>
+     </goal>
+    </transf>
+    </goal>
+    <goal name="vc_run6.0.23.5" expl="run6 ensures #5 (run6 ensures)" proved="true">
+    <proof prover="2" timelimit="0.045003"><result status="valid" time="0.045003" steps="0"/></proof>
+    </goal>
+    <goal name="vc_run6.0.23.6" expl="run6 ensures #6 (run6 ensures)" proved="true">
+    <proof prover="2" timelimit="0.049012"><result status="valid" time="0.049012" steps="0"/></proof>
+    </goal>
+    <goal name="vc_run6.0.23.7" expl="run6 ensures #7 (run6 ensures)" proved="true">
+    <proof prover="2" timelimit="0.047621"><result status="valid" time="0.047621" steps="0"/></proof>
+    </goal>
+   </transf>
+   </goal>
+   <goal name="vc_run6.0.24" expl="run6 ensures" proved="true">
+   <transf name="split_vc" proved="true" >
+    <goal name="vc_run6.0.24.0" expl="run6 ensures #0 (run6 ensures)" proved="true">
+    <proof prover="2" timelimit="0.135003"><result status="valid" time="0.135003" steps="0"/></proof>
+    </goal>
+    <goal name="vc_run6.0.24.1" expl="run6 ensures #1 (run6 ensures)" proved="true">
+    <proof prover="0" timelimit="0.027004"><result status="valid" time="0.027004" steps="0"/></proof>
+    </goal>
+    <goal name="vc_run6.0.24.2" expl="run6 ensures #2 (run6 ensures)" proved="true">
+    <proof prover="2" timelimit="0.045959"><result status="valid" time="0.045959" steps="0"/></proof>
+    </goal>
+    <goal name="vc_run6.0.24.3" expl="run6 ensures #3 (run6 ensures)" proved="true">
+    <proof prover="2" timelimit="0.046386"><result status="valid" time="0.046386" steps="0"/></proof>
+    </goal>
+    <goal name="vc_run6.0.24.4" expl="run6 ensures #4 (run6 ensures)" proved="true">
+    <transf name="split_vc" proved="true" >
+     <goal name="vc_run6.0.24.4.0" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="3.10394"><result status="valid" time="3.103938" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.24.4.1" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.048013"><result status="valid" time="0.048013" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.24.4.2" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.134471"><result status="valid" time="0.134471" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.24.4.3" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.134546"><result status="valid" time="0.134546" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.24.4.4" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.137844"><result status="valid" time="0.137844" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.24.4.5" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.045117"><result status="valid" time="0.045117" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.24.4.6" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.049718"><result status="valid" time="0.049718" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.24.4.7" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.140328"><result status="valid" time="0.140328" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.24.4.8" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.141719"><result status="valid" time="0.141719" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.24.4.9" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.08939"><result status="valid" time="0.089390" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.24.4.10" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.050004"><result status="valid" time="0.050004" steps="0"/></proof>
+     </goal>
+    </transf>
+    </goal>
+    <goal name="vc_run6.0.24.5" expl="run6 ensures #5 (run6 ensures)" proved="true">
+    <proof prover="2" timelimit="0.047867"><result status="valid" time="0.047867" steps="0"/></proof>
+    </goal>
+    <goal name="vc_run6.0.24.6" expl="run6 ensures #6 (run6 ensures)" proved="true">
+    <proof prover="2" timelimit="0.049493"><result status="valid" time="0.049493" steps="0"/></proof>
+    </goal>
+    <goal name="vc_run6.0.24.7" expl="run6 ensures #7 (run6 ensures)" proved="true">
+    <proof prover="2" timelimit="0.044216"><result status="valid" time="0.044216" steps="0"/></proof>
+    </goal>
+   </transf>
+   </goal>
+   <goal name="vc_run6.0.25" expl="run6 ensures" proved="true">
+   <proof prover="2" timelimit="0.223296"><result status="valid" time="0.223296" steps="0"/></proof>
+   </goal>
+   <goal name="vc_run6.0.26" expl="run6 ensures">
+   <transf name="split_vc" >
+    <goal name="vc_run6.0.26.0" expl="run6 ensures #0 (run6 ensures)" proved="true">
+    <proof prover="2" timelimit="0.254179"><result status="valid" time="0.254179" steps="0"/></proof>
+    </goal>
+    <goal name="vc_run6.0.26.1" expl="run6 ensures #1 (run6 ensures)" proved="true">
+    <proof prover="0" timelimit="0.032624"><result status="valid" time="0.032624" steps="0"/></proof>
+    </goal>
+    <goal name="vc_run6.0.26.2" expl="run6 ensures #2 (run6 ensures)" proved="true">
+    <proof prover="2" timelimit="0.072922"><result status="valid" time="0.072922" steps="0"/></proof>
+    </goal>
+    <goal name="vc_run6.0.26.3" expl="run6 ensures #3 (run6 ensures)" proved="true">
+    <proof prover="2" timelimit="0.063368"><result status="valid" time="0.063368" steps="0"/></proof>
+    </goal>
+    <goal name="vc_run6.0.26.4" expl="run6 ensures #4 (run6 ensures)">
+    <transf name="split_vc" >
+     <goal name="vc_run6.0.26.4.0" expl="run6 ensures #4">
+     <transf name="split_vc" >
+      <goal name="vc_run6.0.26.4.0.0" expl="run6 ensures #4" proved="true">
+      <proof prover="2" timelimit="4.19572"><result status="valid" time="4.195724" steps="0"/></proof>
+      </goal>
+      <goal name="vc_run6.0.26.4.0.1" expl="run6 ensures #4">
+      <proof prover="0"><result status="timeout" time="8.801914" steps="0"/></proof>
+      <proof prover="1" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+      <proof prover="2" timelimit="8.16864"><result status="timeout" time="8.168639" steps="0"/></proof>
+      <proof prover="3" timelimit="10.4375"><result status="timeout" time="10.437505" steps="0"/></proof>
+      </goal>
+     </transf>
+     </goal>
+     <goal name="vc_run6.0.26.4.1" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.06698"><result status="valid" time="0.066980" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.26.4.2" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.255317"><result status="valid" time="0.255317" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.26.4.3" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.082834"><result status="valid" time="0.082834" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.26.4.4" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.083241"><result status="valid" time="0.083241" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.26.4.5" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.263525"><result status="valid" time="0.263525" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.26.4.6" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.264334"><result status="valid" time="0.264334" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.26.4.7" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.282265"><result status="valid" time="0.282265" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.26.4.8" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.281822"><result status="valid" time="0.281822" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.26.4.9" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.279527"><result status="valid" time="0.279527" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.26.4.10" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.075324"><result status="valid" time="0.075324" steps="0"/></proof>
+     </goal>
+    </transf>
+    </goal>
+    <goal name="vc_run6.0.26.5" expl="run6 ensures #5 (run6 ensures)" proved="true">
+    <proof prover="0" timelimit="0.031736"><result status="valid" time="0.031736" steps="0"/></proof>
+    </goal>
+    <goal name="vc_run6.0.26.6" expl="run6 ensures #6 (run6 ensures)" proved="true">
+    <proof prover="0" timelimit="0.03163"><result status="valid" time="0.031630" steps="0"/></proof>
+    </goal>
+    <goal name="vc_run6.0.26.7" expl="run6 ensures #7 (run6 ensures)" proved="true">
+    <proof prover="2" timelimit="0.097535"><result status="valid" time="0.097535" steps="0"/></proof>
+    </goal>
+   </transf>
+   </goal>
+   <goal name="vc_run6.0.27" expl="run6 ensures" proved="true">
+   <transf name="split_vc" proved="true" >
+    <goal name="vc_run6.0.27.0" expl="run6 ensures #0 (run6 ensures)" proved="true">
+    <proof prover="2" timelimit="0.255237"><result status="valid" time="0.255237" steps="0"/></proof>
+    </goal>
+    <goal name="vc_run6.0.27.1" expl="run6 ensures #1 (run6 ensures)" proved="true">
+    <proof prover="0" timelimit="0.022747"><result status="valid" time="0.022747" steps="0"/></proof>
+    </goal>
+    <goal name="vc_run6.0.27.2" expl="run6 ensures #2 (run6 ensures)" proved="true">
+    <proof prover="2" timelimit="0.067545"><result status="valid" time="0.067545" steps="0"/></proof>
+    </goal>
+    <goal name="vc_run6.0.27.3" expl="run6 ensures #3 (run6 ensures)" proved="true">
+    <proof prover="2" timelimit="0.068867"><result status="valid" time="0.068867" steps="0"/></proof>
+    </goal>
+    <goal name="vc_run6.0.27.4" expl="run6 ensures #4 (run6 ensures)" proved="true">
+    <transf name="split_vc" proved="true" >
+     <goal name="vc_run6.0.27.4.0" expl="run6 ensures #4" proved="true">
+     <transf name="split_vc" proved="true" >
+      <goal name="vc_run6.0.27.4.0.0" expl="run6 ensures #4" proved="true">
+      <proof prover="2" timelimit="0.065163"><result status="valid" time="0.065163" steps="0"/></proof>
+      </goal>
+      <goal name="vc_run6.0.27.4.0.1" expl="run6 ensures #4" proved="true">
+      <proof prover="2" timelimit="4.87584"><result status="valid" time="4.875843" steps="0"/></proof>
+      </goal>
+     </transf>
+     </goal>
+     <goal name="vc_run6.0.27.4.1" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.06928"><result status="valid" time="0.069280" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.27.4.2" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.268259"><result status="valid" time="0.268259" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.27.4.3" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.087869"><result status="valid" time="0.087869" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.27.4.4" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.064705"><result status="valid" time="0.064705" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.27.4.5" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.280147"><result status="valid" time="0.280147" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.27.4.6" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.276286"><result status="valid" time="0.276286" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.27.4.7" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.314425"><result status="valid" time="0.314425" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.27.4.8" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.287972"><result status="valid" time="0.287972" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.27.4.9" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.290567"><result status="valid" time="0.290567" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.27.4.10" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.082512"><result status="valid" time="0.082512" steps="0"/></proof>
+     </goal>
+    </transf>
+    </goal>
+    <goal name="vc_run6.0.27.5" expl="run6 ensures #5 (run6 ensures)" proved="true">
+    <proof prover="2" timelimit="0.095082"><result status="valid" time="0.095082" steps="0"/></proof>
+    </goal>
+    <goal name="vc_run6.0.27.6" expl="run6 ensures #6 (run6 ensures)" proved="true">
+    <proof prover="2" timelimit="0.11381"><result status="valid" time="0.113810" steps="0"/></proof>
+    </goal>
+    <goal name="vc_run6.0.27.7" expl="run6 ensures #7 (run6 ensures)" proved="true">
+    <proof prover="2" timelimit="0.091153"><result status="valid" time="0.091153" steps="0"/></proof>
+    </goal>
+   </transf>
+   </goal>
+   <goal name="vc_run6.0.28" expl="loop invariant #0" proved="true">
+   <proof prover="2" timelimit="0.315361"><result status="valid" time="0.315361" steps="0"/></proof>
+   </goal>
+   <goal name="vc_run6.0.29" expl="loop invariant #1" proved="true">
+   <proof prover="2" timelimit="0.08924"><result status="valid" time="0.089240" steps="0"/></proof>
+   </goal>
+   <goal name="vc_run6.0.30" expl="index_mut requires" proved="true">
+   <proof prover="2" timelimit="0.091112"><result status="valid" time="0.091112" steps="0"/></proof>
+   </goal>
+   <goal name="vc_run6.0.31" expl="integer overflow" proved="true">
+   <proof prover="2" timelimit="0.377264"><result status="valid" time="0.377264" steps="0"/></proof>
+   </goal>
+   <goal name="vc_run6.0.32" expl="inferred invariant: unchanged value" proved="true">
+   <proof prover="2" timelimit="0.096752"><result status="valid" time="0.096752" steps="0"/></proof>
+   </goal>
+   <goal name="vc_run6.0.33" expl="loop invariant #0" proved="true">
+   <proof prover="2" timelimit="0.099012"><result status="valid" time="0.099012" steps="0"/></proof>
+   </goal>
+   <goal name="vc_run6.0.34" expl="loop invariant #1" proved="true">
+   <proof prover="0" timelimit="0.038189"><result status="valid" time="0.038189" steps="0"/></proof>
+   </goal>
+   <goal name="vc_run6.0.35" expl="elim Some" proved="true">
+   <proof prover="2" timelimit="0.305697"><result status="valid" time="0.305697" steps="0"/></proof>
+   </goal>
+   <goal name="vc_run6.0.36" expl="run6 ensures" proved="true">
+   <transf name="split_vc" proved="true" >
+    <goal name="vc_run6.0.36.0" expl="run6 ensures #0 (run6 ensures)" proved="true">
+    <proof prover="2" timelimit="0.332766"><result status="valid" time="0.332766" steps="0"/></proof>
+    </goal>
+    <goal name="vc_run6.0.36.1" expl="run6 ensures #1 (run6 ensures)" proved="true">
+    <proof prover="0" timelimit="0.037868"><result status="valid" time="0.037868" steps="0"/></proof>
+    </goal>
+    <goal name="vc_run6.0.36.2" expl="run6 ensures #2 (run6 ensures)" proved="true">
+    <proof prover="2" timelimit="0.1039"><result status="valid" time="0.103900" steps="0"/></proof>
+    </goal>
+    <goal name="vc_run6.0.36.3" expl="run6 ensures #3 (run6 ensures)" proved="true">
+    <proof prover="2" timelimit="0.102019"><result status="valid" time="0.102019" steps="0"/></proof>
+    </goal>
+    <goal name="vc_run6.0.36.4" expl="run6 ensures #4 (run6 ensures)" proved="true">
+    <transf name="split_vc" proved="true" >
+     <goal name="vc_run6.0.36.4.0" expl="run6 ensures #4" proved="true">
+     <transf name="split_vc" proved="true" >
+      <goal name="vc_run6.0.36.4.0.0" expl="run6 ensures #4" proved="true">
+      <proof prover="0" timelimit="0.070305"><result status="valid" time="0.070305" steps="0"/></proof>
+      </goal>
+      <goal name="vc_run6.0.36.4.0.1" expl="run6 ensures #4" proved="true">
+      <transf name="split_vc" proved="true" >
+       <goal name="vc_run6.0.36.4.0.1.0" expl="run6 ensures #4" proved="true">
+       <proof prover="0" timelimit="4"><result status="timeout" time="4.000000" steps="0"/></proof>
+       <proof prover="1"><result status="timeout" time="4.000000" steps="0"/></proof>
+       <proof prover="2"><result status="timeout" time="4.000000" steps="0"/></proof>
+       <proof prover="3"><result status="timeout" time="4.000000" steps="0"/></proof>
+       <transf name="split_vc" proved="true" >
+        <goal name="vc_run6.0.36.4.0.1.0.0" expl="run6 ensures #4" proved="true">
+        <proof prover="2"><result status="valid" time="3.695864" steps="185411"/></proof>
+        </goal>
+        <goal name="vc_run6.0.36.4.0.1.0.1" expl="run6 ensures #4" proved="true">
+        <proof prover="2" timelimit="0.2"><result status="valid" time="0.069869" steps="1438"/></proof>
+        </goal>
+       </transf>
+       </goal>
+       <goal name="vc_run6.0.36.4.0.1.1" expl="run6 ensures #4" proved="true">
+       <transf name="split_vc" proved="true" >
+        <goal name="vc_run6.0.36.4.0.1.1.0" expl="run6 ensures #4" proved="true">
+        <proof prover="2" timelimit="0.066189"><result status="valid" time="0.066189" steps="0"/></proof>
+        </goal>
+        <goal name="vc_run6.0.36.4.0.1.1.1" expl="run6 ensures #4" proved="true">
+        <proof prover="2" timelimit="6.29657"><result status="valid" time="6.296566" steps="0"/></proof>
+        </goal>
+       </transf>
+       </goal>
+      </transf>
+      </goal>
+     </transf>
+     </goal>
+     <goal name="vc_run6.0.36.4.1" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.300459"><result status="valid" time="0.300459" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.36.4.2" expl="run6 ensures #4" proved="true">
+     <proof prover="0" timelimit="0.029716"><result status="valid" time="0.029716" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.36.4.3" expl="run6 ensures #4" proved="true">
+     <proof prover="0" timelimit="0.031769"><result status="valid" time="0.031769" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.36.4.4" expl="run6 ensures #4" proved="true">
+     <proof prover="0" timelimit="0.031478"><result status="valid" time="0.031478" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.36.4.5" expl="run6 ensures #4" proved="true">
+     <proof prover="0" timelimit="0.04204"><result status="valid" time="0.042040" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.36.4.6" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.341918"><result status="valid" time="0.341918" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.36.4.7" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.349578"><result status="valid" time="0.349578" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.36.4.8" expl="run6 ensures #4" proved="true">
+     <proof prover="0" timelimit="0.028577"><result status="valid" time="0.028577" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.36.4.9" expl="run6 ensures #4" proved="true">
+     <proof prover="0" timelimit="0.028744"><result status="valid" time="0.028744" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.36.4.10" expl="run6 ensures #4" proved="true">
+     <proof prover="0" timelimit="0.039963"><result status="valid" time="0.039963" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.36.4.11" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.348459"><result status="valid" time="0.348459" steps="0"/></proof>
+     </goal>
+    </transf>
+    </goal>
+    <goal name="vc_run6.0.36.5" expl="run6 ensures #5 (run6 ensures)" proved="true">
+    <proof prover="0" timelimit="0.041519"><result status="valid" time="0.041519" steps="0"/></proof>
+    </goal>
+    <goal name="vc_run6.0.36.6" expl="run6 ensures #6 (run6 ensures)" proved="true">
+    <proof prover="0" timelimit="0.030399"><result status="valid" time="0.030399" steps="0"/></proof>
+    </goal>
+    <goal name="vc_run6.0.36.7" expl="run6 ensures #7 (run6 ensures)" proved="true">
+    <proof prover="0" timelimit="0.043039"><result status="valid" time="0.043039" steps="0"/></proof>
+    </goal>
+   </transf>
+   </goal>
+   <goal name="vc_run6.0.37" expl="run6 ensures" proved="true">
+   <transf name="split_vc" proved="true" >
+    <goal name="vc_run6.0.37.0" expl="run6 ensures #0 (run6 ensures)" proved="true">
+    <proof prover="2" timelimit="0.342492"><result status="valid" time="0.342492" steps="0"/></proof>
+    </goal>
+    <goal name="vc_run6.0.37.1" expl="run6 ensures #1 (run6 ensures)" proved="true">
+    <proof prover="0" timelimit="0.039649"><result status="valid" time="0.039649" steps="0"/></proof>
+    </goal>
+    <goal name="vc_run6.0.37.2" expl="run6 ensures #2 (run6 ensures)" proved="true">
+    <proof prover="2" timelimit="0.104692"><result status="valid" time="0.104692" steps="0"/></proof>
+    </goal>
+    <goal name="vc_run6.0.37.3" expl="run6 ensures #3 (run6 ensures)" proved="true">
+    <proof prover="2" timelimit="0.105601"><result status="valid" time="0.105601" steps="0"/></proof>
+    </goal>
+    <goal name="vc_run6.0.37.4" expl="run6 ensures #4 (run6 ensures)" proved="true">
+    <transf name="split_vc" proved="true" >
+     <goal name="vc_run6.0.37.4.0" expl="run6 ensures #4" proved="true">
+     <transf name="split_vc" proved="true" >
+      <goal name="vc_run6.0.37.4.0.0" expl="run6 ensures #4" proved="true">
+      <proof prover="0" timelimit="0.076165"><result status="valid" time="0.076165" steps="0"/></proof>
+      </goal>
+      <goal name="vc_run6.0.37.4.0.1" expl="run6 ensures #4" proved="true">
+      <transf name="split_vc" proved="true" >
+       <goal name="vc_run6.0.37.4.0.1.0" expl="run6 ensures #4" proved="true">
+       <transf name="split_vc" proved="true" >
+        <goal name="vc_run6.0.37.4.0.1.0.0" expl="run6 ensures #4" proved="true">
+        <proof prover="2" timelimit="5.22929"><result status="valid" time="5.229291" steps="0"/></proof>
+        </goal>
+        <goal name="vc_run6.0.37.4.0.1.0.1" expl="run6 ensures #4" proved="true">
+        <proof prover="2" timelimit="0.064915"><result status="valid" time="0.064915" steps="0"/></proof>
+        </goal>
+       </transf>
+       </goal>
+       <goal name="vc_run6.0.37.4.0.1.1" expl="run6 ensures #4" proved="true">
+       <transf name="split_vc" proved="true" >
+        <goal name="vc_run6.0.37.4.0.1.1.0" expl="run6 ensures #4" proved="true">
+        <proof prover="2" timelimit="0.066754"><result status="valid" time="0.066754" steps="0"/></proof>
+        </goal>
+        <goal name="vc_run6.0.37.4.0.1.1.1" expl="run6 ensures #4" proved="true">
+        <proof prover="2" timelimit="7.30106"><result status="valid" time="7.301059" steps="0"/></proof>
+        </goal>
+       </transf>
+       </goal>
+      </transf>
+      </goal>
+     </transf>
+     </goal>
+     <goal name="vc_run6.0.37.4.1" expl="run6 ensures #4" proved="true">
+     <proof prover="0" timelimit="0.030766"><result status="valid" time="0.030766" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.37.4.2" expl="run6 ensures #4" proved="true">
+     <proof prover="0" timelimit="0.032664"><result status="valid" time="0.032664" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.37.4.3" expl="run6 ensures #4" proved="true">
+     <proof prover="0" timelimit="0.03221"><result status="valid" time="0.032210" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.37.4.4" expl="run6 ensures #4" proved="true">
+     <proof prover="0" timelimit="0.041605"><result status="valid" time="0.041605" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.37.4.5" expl="run6 ensures #4" proved="true">
+     <proof prover="0" timelimit="0.045747"><result status="valid" time="0.045747" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.37.4.6" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.348029"><result status="valid" time="0.348029" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.37.4.7" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.345974"><result status="valid" time="0.345974" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.37.4.8" expl="run6 ensures #4" proved="true">
+     <proof prover="0" timelimit="0.029736"><result status="valid" time="0.029736" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.37.4.9" expl="run6 ensures #4" proved="true">
+     <proof prover="0" timelimit="0.048596"><result status="valid" time="0.048596" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.37.4.10" expl="run6 ensures #4" proved="true">
+     <proof prover="0" timelimit="0.046791"><result status="valid" time="0.046791" steps="0"/></proof>
+     </goal>
+     <goal name="vc_run6.0.37.4.11" expl="run6 ensures #4" proved="true">
+     <proof prover="2" timelimit="0.346622"><result status="valid" time="0.346622" steps="0"/></proof>
+     </goal>
+    </transf>
+    </goal>
+    <goal name="vc_run6.0.37.5" expl="run6 ensures #5 (run6 ensures)" proved="true">
+    <proof prover="0" timelimit="0.040167"><result status="valid" time="0.040167" steps="0"/></proof>
+    </goal>
+    <goal name="vc_run6.0.37.6" expl="run6 ensures #6 (run6 ensures)" proved="true">
+    <proof prover="0" timelimit="0.043664"><result status="valid" time="0.043664" steps="0"/></proof>
+    </goal>
+    <goal name="vc_run6.0.37.7" expl="run6 ensures #7 (run6 ensures)" proved="true">
+    <proof prover="0" timelimit="0.045978"><result status="valid" time="0.045978" steps="0"/></proof>
+    </goal>
+   </transf>
+   </goal>
+  </transf>
+  </goal>
+ </transf>
+ </goal>
+</theory>
+</file>
+</why3session>

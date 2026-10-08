@@ -1,0 +1,31 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_dev7": { "prover": "alt-ergo", "time": 0.011 },
+      "vc_initialize7": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_mk_sb7": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_new_inner": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_refute_em_init_err_superblock_geometry__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.029 },
+              {
+                "tactic": "split_vc",
+                "children": [ { "prover": "alt-ergo", "time": 0.087 }, null ]
+              },
+              { "prover": "alt-ergo", "time": 0.194 },
+              { "prover": "alt-ergo", "time": 0.141 },
+              { "prover": "alt-ergo", "time": 0.046 },
+              { "prover": "alt-ergo", "time": 0.031 }
+            ]
+          }
+        ]
+      },
+      "vc_sb_bytes7": { "prover": "alt-ergo", "time": 0.026 }
+    }
+  }
+}

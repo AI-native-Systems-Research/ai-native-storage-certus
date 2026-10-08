@@ -1,0 +1,11 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_alloc": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.037 },
+      "vc_refute_em_inv_no_overlap": { "prover": "alt-ergo", "time": 1.2 },
+      "vc_w1_recovered": { "prover": "alt-ergo", "time": 0.024 }
+    }
+  }
+}

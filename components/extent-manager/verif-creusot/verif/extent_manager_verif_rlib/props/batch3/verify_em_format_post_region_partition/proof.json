@@ -1,0 +1,25 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_format": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_verify_em_format_post_region_partition": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.089 },
+              { "prover": "cvc4", "time": 0.21 },
+              { "prover": "alt-ergo", "time": 2.2 },
+              { "prover": "alt-ergo", "time": 0.066 },
+              { "prover": "cvc4", "time": 1.8 },
+              { "prover": "alt-ergo", "time": 0.049 },
+              { "prover": "alt-ergo", "time": 0.046 }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

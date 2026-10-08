@@ -1,0 +1,22 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_for_each6": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_get6": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_verify_em_foreach_post_same_as_get__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.026 },
+              { "prover": "alt-ergo", "time": 0.014 },
+              null
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

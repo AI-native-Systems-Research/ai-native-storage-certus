@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_g_merge_facts": { "prover": "cvc5", "time": 0.555 } }
+  }
+}

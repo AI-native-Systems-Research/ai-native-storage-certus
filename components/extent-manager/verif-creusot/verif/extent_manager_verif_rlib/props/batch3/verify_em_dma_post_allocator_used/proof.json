@@ -1,0 +1,16 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_get_metadata_client": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_new_default": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_read_blocks": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_set_dma_alloc": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_verify_em_dma_post_allocator_used": {
+        "prover": "z3",
+        "time": 0.077
+      },
+      "vc_write_blocks": { "prover": "alt-ergo", "time": 0.027 }
+    }
+  }
+}

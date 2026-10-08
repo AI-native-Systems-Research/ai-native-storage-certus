@@ -1,0 +1,16 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 48 9 48 29 *)
+
+(* <model::b6::Io6 as std::clone::Clone> *)
+
+use creusot.prelude.Any
+
+type t_Io6 = { client: bool; data: bool; fl1: bool; sb: bool; fl2: bool }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_Io6 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 48 9 48 29]
+  (self: t_Io6) (return (x: t_Io6)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Io6 = Any.any_l () | & self: t_Io6 = self ]) [ return (result: t_Io6) -> (! return {result}) ]

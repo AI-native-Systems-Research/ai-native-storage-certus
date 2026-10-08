@@ -1,0 +1,23 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_apply_cop": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_data_base_lba'0": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_elim_Cop": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_elim_Format": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_elim_Init": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_elim_SetMBase": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_elim_SetNs": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_format": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_initialize": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_set_data_base_lba": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_set_metadata_base_lba": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_set_metadata_ns_id": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_verify_em_setdbase_post_stored": {
+        "prover": "alt-ergo",
+        "time": 1.0
+      }
+    }
+  }
+}

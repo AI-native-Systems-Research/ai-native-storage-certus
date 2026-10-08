@@ -1,0 +1,50 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 500 0 500 131 *)
+
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 583 15 583 50
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 584 15 584 74
+let%span sbuddy'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 585 14 585 58
+let%span sbuddy'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 494 14 494 15
+let%span sl2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 501 20 501 58
+let%span sl2'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 497 11 497 50
+let%span sl2'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 498 11 498 76
+let%span sl2'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 499 10 499 59
+
+use seq.Seq
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_u64_Global
+
+function tf [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 495 4 495 56] (fl: Seq.seq t_Vec_u64_Global) (ss: int) (n: int) : int
+
+function mulw [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 572 4 572 38] (a: int) (b: int) : int
+
+function lemma_acct [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 586 4 586 89] (a: Seq.seq t_Vec_u64_Global) (b: Seq.seq t_Vec_u64_Global) (ss: int) (off: int) (blocks: int) : ()
+
+axiom lemma_acct_spec:
+  forall a: Seq.seq t_Vec_u64_Global, b: Seq.seq t_Vec_u64_Global, ss: int, off: int, blocks: int. ([%#sbuddy] tf b ss (Seq.length b)
+      = mulw off ss)
+    -> ([%#sbuddy'0] tf a ss (Seq.length a) = tf b ss (Seq.length b) + mulw blocks ss)
+    -> ([%#sbuddy'1] tf a ss (Seq.length a) = mulw (off + blocks) ss)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let acct_g [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 500 0 500 131]
+  (a: Seq.seq t_Vec_u64_Global) (b: Seq.seq t_Vec_u64_Global) (ss: int) (off: int) (blocks: int) (return (x: ())) =
+{[@stop_split] [@expl:acct_g requires] ([@stop_split] [@expl:acct_g requires #0] [%#sl2'0] tf b ss (Seq.length b)
+    = mulw off ss)
+  /\ ([@stop_split] [@expl:acct_g requires #1] [%#sl2'1] tf a ss (Seq.length a)
+  = tf b ss (Seq.length b) + mulw blocks ss)}
+  (! bb0
+  [ bb0 = s0 [ s0 = {[@expl:assertion] [%#sl2] let _ = lemma_acct a b ss off blocks in true} s1 | s1 = return {_ret} ] ]
+  [ & _ret: () = Any.any_l ()
+  | & a: Seq.seq t_Vec_u64_Global = a
+  | & b: Seq.seq t_Vec_u64_Global = b
+  | & ss: int = ss
+  | & off: int = off
+  | & blocks: int = blocks ])
+  [ return (result: ()) -> {[@stop_split] [@expl:acct_g ensures] [%#sl2'2] tf a ss (Seq.length a)
+    = mulw (off + blocks) ss}
+    (! return {result}) ]

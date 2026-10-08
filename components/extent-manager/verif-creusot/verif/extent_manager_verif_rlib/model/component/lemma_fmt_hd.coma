@@ -1,0 +1,67 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 553 0 553 36 *)
+
+let%span sassume = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 251 11 251 55
+let%span sassume'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 252 10 252 32
+let%span sassume'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 87 16 87 49
+let%span sassume'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 218 16 218 40
+let%span sassume'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 179 16 179 41
+let%span scomponent = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 551 11 551 22
+let%span scomponent'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 552 10 552 129
+let%span scomponent'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 546 16 546 101
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use int.ComputerDivision
+use int.Int
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_FormatParams = {
+  data_disk_size: UInt64.t;
+  slab_size: UInt64.t;
+  max_extent_size: UInt32.t;
+  sector_size: UInt32.t;
+  region_count: UInt32.t;
+  metadata_alignment: UInt64.t;
+  instance_id: t_Option_u64;
+  metadata_disk_ns_id: UInt32.t;
+  metadata_region_size: UInt64.t }
+
+constant const_MAX: UInt32.t = (4294967295: UInt32.t)
+
+predicate a_e0fe79 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 86 0 86 43] (slab: int) (ss: int) =
+  [%#sassume'1] ss <> 0 /\ ComputerDivision.div slab ss <= UInt32.t'int const_MAX
+
+constant const_MAX'0: UInt64.t = (18446744073709551615: UInt64.t)
+
+predicate a_3b58ea [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 178 0 178 42] (dds: int) (ss: int) =
+  [%#sassume'3] 2 * dds + ss <= UInt64.t'int const_MAX'0
+
+predicate fmt_sane [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 545 0 545 40] (p: t_FormatParams) =
+  [%#scomponent'1] a_e0fe79 (UInt64.t'int p.slab_size) (UInt32.t'int p.sector_size)
+  /\ a_3b58ea (UInt64.t'int p.data_disk_size) (UInt32.t'int p.sector_size)
+
+predicate t_u32 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 217 0 217 28] (x: int) =
+  [%#sassume'2] 0 <= x /\ x <= UInt32.t'int const_MAX
+
+function lemma_e0fe79_hd [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 253 0 253 42] (slab: int) (ss: int) : ()
+
+axiom lemma_e0fe79_hd_spec: forall slab: int, ss: int. ([%#sassume] a_e0fe79 slab ss /\ 0 <= slab /\ t_u32 ss)
+    -> ([%#sassume'0] slab + ss <= UInt64.t'int const_MAX'0)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant p : t_FormatParams
+
+function lemma_fmt_hd [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 553 0 553 36] (p: t_FormatParams) : ()
+
+goal vc_lemma_fmt_hd: ([%#scomponent] fmt_sane p)
+  -> ([@stop_split] [@expl:lemma_e0fe79_hd requires] [%#sassume] a_e0fe79 (UInt64.t'int p.slab_size) (UInt32.t'int p.sector_size)
+    /\ 0 <= UInt64.t'int p.slab_size /\ t_u32 (UInt32.t'int p.sector_size))
+  /\ (([@stop_split] [@expl:lemma_e0fe79_hd ensures] [%#sassume'0] UInt64.t'int p.slab_size + UInt32.t'int p.sector_size
+    <= UInt64.t'int const_MAX'0)
+  -> ([@stop_split] [@expl:lemma_fmt_hd ensures] [%#scomponent'0] UInt32.t'int p.sector_size > 0
+  /\ UInt64.t'int p.slab_size + UInt32.t'int p.sector_size <= UInt64.t'int const_MAX'0
+  /\ 2 * UInt64.t'int p.data_disk_size + UInt32.t'int p.sector_size <= UInt64.t'int const_MAX'0))

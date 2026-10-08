@@ -1,0 +1,58 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 352 0 352 78 *)
+
+let%span sb3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 410 11 410 23
+let%span sb3'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 411 10 411 57
+let%span sb3'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 412 10 412 93
+let%span sb3'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 413 10 414 71
+let%span sb3'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 415 10 416 129
+let%span sbatch3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 353 15 353 16
+let%span sbatch3'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 353 18 353 19
+let%span sbatch3'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 353 4 353 50
+let%span sbatch3'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 351 10 351 41
+
+use creusot.int.UInt64
+use creusot.int.UInt8
+use creusot.prelude.Any
+use int.Int
+
+type t_RdOut = DevErr | Bad | Good UInt64.t
+
+type t_Recovered = Empty | Copy UInt8.t
+
+type t_EmError = CorruptMetadata | IoError | NotInitialized | OffsetNotFound UInt64.t | OutOfSpace
+
+type t_Result_Recovered_EmError = Ok t_Recovered | Err t_EmError
+
+let recover_rd (sb_seq: UInt64.t) (active: UInt8.t) (act: t_RdOut) (inact: t_RdOut)
+  (return (x: t_Result_Recovered_EmError)) = {[@stop_split] [@expl:recover_rd requires] [%#sb3] UInt8.t'int active <= 1}
+  any
+  [ return (result: t_Result_Recovered_EmError) ->
+  {[@stop_split] [@expl:recover_rd ensures] ([@stop_split] [@expl:recover_rd ensures #0] [%#sb3'0] UInt64.t'int sb_seq
+        = 0 -> result = Ok (Empty))
+    /\ ([@stop_split] [@expl:recover_rd ensures #1] [%#sb3'1] UInt64.t'int sb_seq > 0 /\ act = Good sb_seq
+      -> result = Ok (Copy active))
+    /\ ([@stop_split] [@expl:recover_rd ensures #2] [%#sb3'2] forall q: UInt64.t. UInt64.t'int sb_seq > 1
+          /\ UInt64.t'int q = UInt64.t'int sb_seq - 1 /\ act <> Good sb_seq /\ inact = Good q
+        -> result = Ok (Copy (if UInt8.t'int active = 0 then (1: UInt8.t) else (0: UInt8.t))))
+    /\ ([@stop_split] [@expl:recover_rd ensures #3] [%#sb3'3] UInt64.t'int sb_seq > 0
+      /\ act <> Good sb_seq
+      /\ (UInt64.t'int sb_seq = 1 \/ (forall q: UInt64.t. UInt64.t'int q = UInt64.t'int sb_seq - 1 -> inact <> Good q))
+    -> result = Err (CorruptMetadata))}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let refute_em_err_device_as_ioerror__mutant [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 352 0 352 78]
+  (return (x: t_Result_Recovered_EmError)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_2 <- DevErr ] s1
+    | s1 = [ &_3 <- DevErr ] s2
+    | s2 = recover_rd [%#sbatch3'1] {[%#sbatch3] (2: UInt64.t)} {[%#sbatch3'0] (0: UInt8.t)} {_2} {_3}
+        (fun (_x: t_Result_Recovered_EmError) -> [ &_ret <- _x ] s3)
+    | s3 = return {_ret} ] ]
+  [ & _ret: t_Result_Recovered_EmError = Any.any_l () | & _2: t_RdOut = Any.any_l () | & _3: t_RdOut = Any.any_l () ])
+  [ return (result: t_Result_Recovered_EmError) ->
+  {[@stop_split] [@expl:refute_em_err_device_as_ioerror__mutant ensures] [%#sbatch3'2] result = Err (IoError)}
+    (! return {result}) ]

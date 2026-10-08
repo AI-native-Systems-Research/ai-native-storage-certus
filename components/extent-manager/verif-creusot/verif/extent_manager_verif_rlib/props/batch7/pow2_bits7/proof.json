@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_fact_pow2_bits7": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_pow2_bits7": { "prover": "alt-ergo", "time": 0.191 }
+    }
+  }
+}

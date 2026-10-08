@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_lemma_lgf_flush": { "prover": "cvc4", "time": 0.265 } }
+  }
+}

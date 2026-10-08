@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_set_metadata_base_lba": { "prover": "z3", "time": 0.01 } }
+  }
+}

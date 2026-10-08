@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_recover_rd": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_refute_em_err_device_as_ioerror__mutant": {
+        "tactic": "split_vc",
+        "children": [ { "prover": "alt-ergo", "time": 0.015 }, null ]
+      }
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_crc32_hash": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_from_elem_u8": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_index_mut_Vec_u8_Global": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_put32": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_put64": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_serialize": { "prover": "z3", "time": 0.085 }
+    }
+  }
+}

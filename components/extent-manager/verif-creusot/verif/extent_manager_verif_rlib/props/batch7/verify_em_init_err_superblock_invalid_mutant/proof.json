@@ -1,0 +1,22 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_initialize7": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_verify_em_init_err_superblock_invalid__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "cvc5", "time": 0.171 },
+              null,
+              { "prover": "alt-ergo", "time": 0.036 },
+              { "prover": "alt-ergo", "time": 0.029 }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

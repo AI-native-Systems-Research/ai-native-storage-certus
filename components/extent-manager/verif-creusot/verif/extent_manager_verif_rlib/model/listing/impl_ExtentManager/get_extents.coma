@@ -1,0 +1,618 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 186 4 186 44 *)
+
+(* model::component::ExtentManager *)
+
+let%span sbitmap = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 53 16 53 44
+let%span sbitmap'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 28 16 28 60
+let%span sbitmap'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 47 16 47 61
+let%span sbitmap'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 39 10 39 11
+let%span sbitmap'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 41 16 41 97
+let%span sbitmap'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 34 16 34 49
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 102 18 102 36
+let%span svec'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 112 18 112 40
+let%span svec'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span svec'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 193 19 193 38
+let%span svec'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 194 18 194 46
+let%span svec'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 195 18 195 22
+let%span svec'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 87 20 87 30
+let%span sslice = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/slice.rs" 148 20 148 37
+let%span sslice'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/slice.rs" 153 20 153 37
+let%span sslab = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 20 0 20 23
+let%span sslab'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 71 16 71 85
+let%span sslab'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 85 16 85 53
+let%span sslab'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 50 8 52 54
+let%span sslab'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 59 16 59 52
+let%span sslab'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 65 16 65 93
+let%span sslab'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 43 16 43 55
+let%span sfmap = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/fmap.rs" 102 8 102 27
+let%span sfmap'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/fmap.rs" 96 8 96 34
+let%span sfmap'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/fmap.rs" 88 8 88 32
+let%span sinvariant = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/invariant.rs" 85 8 85 18
+let%span soption = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/option.rs" 796 15 796 27
+let%span soption'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/option.rs" 798 8 801 9
+let%span slogic = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic.rs" 39 11 39 28
+let%span slogic'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic.rs" 40 10 40 19
+let%span smapping = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/mapping.rs" 66 8 66 19
+let%span scomponent = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 135 16 135 84
+let%span scomponent'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 111 8 115 9
+let%span scomponent'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 142 8 145 9
+let%span sseq = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/seq.rs" 938 20 938 91
+let%span slisting = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 187 38 187 48
+let%span slisting'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 190 35 190 36
+let%span slisting'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 194 26 194 34
+let%span slisting'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 193 28 193 74
+let%span slisting'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 192 28 192 78
+let%span slisting'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 191 28 191 43
+let%span slisting'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 195 45 195 51
+let%span slisting'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 196 36 196 69
+let%span slisting'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 197 49 197 52
+let%span slisting'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 197 46 197 53
+let%span slisting'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 197 20 197 67
+let%span slisting'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 198 36 198 107
+let%span slisting'11 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 199 36 200 100
+let%span slisting'12 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 201 36 201 86
+let%span slisting'13 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 202 36 203 99
+let%span slisting'14 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 204 36 205 92
+let%span slisting'15 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 206 36 206 86
+let%span slisting'16 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 207 25 207 26
+let%span slisting'17 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 207 20 207 26
+let%span slisting'18 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 186 24 186 28
+let%span slisting'19 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 183 15 183 56
+let%span slisting'20 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 184 14 184 107
+let%span slisting'21 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 185 14 185 116
+let%span slisting'22 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 84 16 84 87
+let%span slisting'23 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 176 8 177 92
+let%span slisting'24 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 101 22 101 23
+let%span slisting'25 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 96 11 96 25
+let%span slisting'26 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 97 10 97 37
+let%span slisting'27 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 98 10 98 75
+let%span slisting'28 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 99 10 99 43
+let%span slisting'29 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 100 10 100 45
+let%span slisting'30 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 54 16 54 60
+let%span slisting'31 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 42 8 47 52
+let%span slisting'32 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 77 11 77 41
+let%span slisting'33 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 78 10 78 28
+let%span slisting'34 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 79 73 79 75
+let%span slisting'35 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 66 16 66 66
+let%span slisting'36 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 89 11 89 39
+let%span slisting'37 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 90 11 90 86
+let%span slisting'38 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 91 10 91 27
+let%span slisting'39 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 92 78 92 80
+let%span slisting'40 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 161 8 162 92
+let%span slisting'41 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 72 16 72 93
+let%span slisting'42 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 60 16 60 102
+
+use seq.Seq
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.int.UInt8
+use map.Map
+use int.ComputerDivision
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_Extent_Global
+
+type t_Extent = { key: UInt64.t; size: UInt32.t; offset: UInt64.t }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_Extent_Global (self: t_Vec_Extent_Global) : Seq.seq t_Extent
+
+axiom view_Vec_Extent_Global_spec:
+  forall self: t_Vec_Extent_Global [view_Vec_Extent_Global self]. [%#svec'1] Seq.length (view_Vec_Extent_Global self)
+    <= UInt64.t'int const_MAX
+
+let new_Extent (return (x: t_Vec_Extent_Global)) = any
+  [ return (result: t_Vec_Extent_Global) ->
+  {[@stop_split] [@expl:new ensures] [%#svec] Seq.length (view_Vec_Extent_Global result) = 0}
+    (! return {result}) ]
+
+type t_Vec_RegionState_Global
+
+type t_Vec_usize_Global
+
+type t_Option_Vec_usize_Global = None | Some t_Vec_usize_Global
+
+type t_Option_u64 = None'0 | Some'0 UInt64.t
+
+type t_FormatParams = {
+  data_disk_size: UInt64.t;
+  slab_size: UInt64.t;
+  max_extent_size: UInt32.t;
+  sector_size: UInt32.t;
+  region_count: UInt32.t;
+  metadata_alignment: UInt64.t;
+  instance_id: t_Option_u64;
+  metadata_disk_ns_id: UInt32.t;
+  metadata_region_size: UInt64.t }
+
+type t_Superblock = {
+  magic'0: UInt64.t;
+  version'0: UInt32.t;
+  data_disk_size'0: UInt64.t;
+  sector_size'0: UInt32.t;
+  slab_size'0: UInt64.t;
+  max_extent_size'0: UInt32.t;
+  region_count'0: UInt32.t;
+  checkpoint_seq'0: UInt64.t;
+  active_copy'0: UInt8.t;
+  checkpoint_region_offset'0: UInt64.t;
+  checkpoint_region_size'0: UInt64.t;
+  instance_id'0: UInt64.t;
+  metadata_disk_ns_id'0: UInt32.t;
+  data_start_offset'0: UInt64.t }
+
+type t_SharedState = { format_params: t_FormatParams; checkpoint_seq: UInt64.t; superblock: t_Superblock }
+
+type t_Option_SharedState = None'1 | Some'1 t_SharedState
+
+type t_Option_u32 = None'2 | Some'2 UInt32.t
+
+type t_Option_Superblock = None'3 | Some'3 t_Superblock
+
+type tup2_u64_usize = { f0: UInt64.t; f1: UInt64.t }
+
+type t_Option_tup2_u64_usize = None'4 | Some'4 tup2_u64_usize
+
+type t_MetaDevice = {
+  connected'1: bool;
+  sector_size'1: UInt32.t;
+  num_sectors'1: UInt64.t;
+  sb'1: t_Option_Superblock;
+  ckpt0'1: t_Option_tup2_u64_usize;
+  ckpt1'1: t_Option_tup2_u64_usize }
+
+type t_ExtentManager = {
+  arena: t_Vec_RegionState_Global;
+  regions: t_Option_Vec_usize_Global;
+  shared: t_Option_SharedState;
+  metadata_ns_id: t_Option_u32;
+  metadata_base_lba: UInt64.t;
+  data_base_lba: UInt64.t;
+  dev: t_MetaDevice }
+
+let elim_Some (_x: t_Option_Vec_usize_Global) (return (f0'0: t_Vec_usize_Global)) = any
+  [ _k (f0'0: t_Vec_usize_Global) -> {Some f0'0 = _x} (! return {f0'0})
+  | _chk -> (! {[@expl:elim Some] match _x with
+      | Some _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+function view_Vec_usize_Global (self: t_Vec_usize_Global) : Seq.seq UInt64.t
+
+axiom view_Vec_usize_Global_spec:
+  forall self: t_Vec_usize_Global [view_Vec_usize_Global self]. [%#svec'1] Seq.length (view_Vec_usize_Global self)
+    <= UInt64.t'int const_MAX
+
+let len_usize (self_: t_Vec_usize_Global) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:len ensures] [%#svec'0] UInt64.t'int result
+    = Seq.length (view_Vec_usize_Global self_)}
+    (! return {result}) ]
+
+type t_BTreeMap_u64_Slab_Global
+
+type t_SlabMap = { inner: t_BTreeMap_u64_Slab_Global }
+
+type t_HashMap_u32_Vec_u64_Global_RandomState_Global
+
+type t_SizeClassManager = { map: t_HashMap_u32_Vec_u64_Global_RandomState_Global }
+
+type t_Vec_Vec_u64_Global_Global
+
+type t_BuddyAllocator = {
+  base_offset'2: UInt64.t;
+  total_usable_size'2: UInt64.t;
+  sector_size'2: UInt32.t;
+  max_order'2: UInt64.t;
+  free_lists'2: t_Vec_Vec_u64_Global_Global }
+
+type t_Vec_tup2_u64_usize_Global
+
+type t_RegionState = {
+  slabs'0: t_SlabMap;
+  size_classes'0: t_SizeClassManager;
+  buddy'0: t_BuddyAllocator;
+  dirty'0: bool;
+  format_params'0: t_FormatParams;
+  pending_frees'0: t_Vec_tup2_u64_usize_Global }
+
+type t_FMap_Int_Slab
+
+type t_Vec_u64_Global
+
+type t_AllocationBitmap = { words: t_Vec_u64_Global; num_slots: UInt32.t; allocated_count: UInt32.t }
+
+type t_Slab = {
+  start_offset'1: UInt64.t;
+  slab_size'1: UInt64.t;
+  element_size'1: UInt32.t;
+  bitmap'1: t_AllocationBitmap;
+  keys'1: t_Vec_u64_Global;
+  rover'1: UInt64.t }
+
+type t_Option_Slab = None'5 | Some'5 t_Slab
+
+function to_mapping_Int (self: t_FMap_Int_Slab) : Map.map int t_Option_Slab
+
+function get_Int [@inline:trivial] (self: t_FMap_Int_Slab) (k: int) : t_Option_Slab =
+  [%#sfmap'1] Map.get (to_mapping_Int self) k
+
+meta "rewrite_def" function get_Int
+
+predicate contains_Int [@inline:trivial] (self: t_FMap_Int_Slab) (k: int) = [%#sfmap] get_Int self k <> None'5
+
+meta "rewrite_def" predicate contains_Int
+
+function view_SlabMap [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 34 4 34 36] (self: t_SlabMap) : t_FMap_Int_Slab
+
+predicate index_Mapping_Slab_bool [@inline:trivial] (self: Map.map t_Slab bool) (a: t_Slab) =
+  [%#smapping] Map.get self a
+
+meta "rewrite_def" predicate index_Mapping_Slab_bool
+
+function such_that_Slab (p: Map.map t_Slab bool) : t_Slab
+
+axiom such_that_Slab_spec:
+  forall p: Map.map t_Slab bool [such_that_Slab p]. ([%#slogic] exists x: t_Slab. index_Mapping_Slab_bool p x)
+    -> ([%#slogic'0] index_Mapping_Slab_bool p (such_that_Slab p))
+
+function unwrap_Option_Slab (self: t_Option_Slab) : t_Slab = [%#soption'0] match self with
+    | Some'5 x -> x
+    | None'5 -> such_that_Slab (fun (__0: t_Slab) -> true)
+    end
+
+function lookup_Int [@inline:trivial] (self: t_FMap_Int_Slab) (k: int) : t_Slab =
+  [%#sfmap'0] unwrap_Option_Slab (get_Int self k)
+
+meta "rewrite_def" function lookup_Int
+
+function view_Vec_u64_Global (self: t_Vec_u64_Global) : Seq.seq UInt64.t
+
+axiom view_Vec_u64_Global_spec:
+  forall self: t_Vec_u64_Global [view_Vec_u64_Global self]. [%#svec'1] Seq.length (view_Vec_u64_Global self)
+    <= UInt64.t'int const_MAX
+
+constant const_FREE_KEY: UInt64.t = [%#sslab] (18446744073709551615: UInt64.t)
+
+function slot_off [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 84 0 84 39] (s: t_Slab) (i: int) : int
+ = [%#sslab'1] UInt64.t'int s.start_offset'1 + i * UInt32.t'int s.element_size'1
+
+predicate from_slot [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 40 0 40 67] (r: t_RegionState) (k: int) (j: int) (e: t_Extent) =
+  [%#slisting'31] contains_Int (view_SlabMap r.slabs'0) k
+  /\ 0 <= j
+  /\ j < UInt32.t'int (lookup_Int (view_SlabMap r.slabs'0) k).bitmap'1.num_slots
+  /\ Seq.get (view_Vec_u64_Global (lookup_Int (view_SlabMap r.slabs'0) k).keys'1) j = e.key
+  /\ e.key <> const_FREE_KEY
+  /\ UInt64.t'int e.offset = slot_off (lookup_Int (view_SlabMap r.slabs'0) k) j
+  /\ e.size = (lookup_Int (view_SlabMap r.slabs'0) k).element_size'1
+
+predicate in_from [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 65 0 65 58] (s: Seq.seq t_Extent) (lo: int) (e: t_Extent) =
+  [%#slisting'35] exists p: int. lo <= p /\ p < Seq.length s /\ Seq.get s p = e
+
+predicate all_listed [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 71 0 71 66] (s: Seq.seq t_Extent) (lo: int) (r: t_RegionState) =
+  [%#slisting'41] forall k: int, j: int, e: t_Extent. from_slot r k j e -> in_from s lo e
+
+function view_Vec_RegionState_Global (self: t_Vec_RegionState_Global) : Seq.seq t_RegionState
+
+axiom view_Vec_RegionState_Global_spec:
+  forall self: t_Vec_RegionState_Global [view_Vec_RegionState_Global self]. [%#svec'1] Seq.length (view_Vec_RegionState_Global self)
+    <= UInt64.t'int const_MAX
+
+predicate all_regions_listed [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 83 0 83 101] (em: t_ExtentManager) (rv: Seq.seq UInt64.t) (s: Seq.seq t_Extent) (lo: int) (n: int) =
+  [%#slisting'22] forall i: int. 0 <= i /\ i < n
+    -> all_listed s lo (Seq.get (view_Vec_RegionState_Global em.arena) (UInt64.t'int (Seq.get rv i)))
+
+predicate from_region [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 53 0 53 53] (r: t_RegionState) (e: t_Extent) =
+  [%#slisting'30] exists k: int, j: int. from_slot r k j e
+
+predicate listed_ok_upto [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 174 0 174 89] (em: t_ExtentManager) (rv: Seq.seq UInt64.t) (s: Seq.seq t_Extent) (lo: int) =
+  [%#slisting'23] forall p: int. 0 <= p /\ p < lo
+    -> (Seq.get s p).key <> const_FREE_KEY
+    /\ (exists i: int. 0 <= i
+      /\ i < Seq.length rv
+      /\ from_region (Seq.get (view_Vec_RegionState_Global em.arena) (UInt64.t'int (Seq.get rv i))) (Seq.get s p))
+
+function slots_of [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 42 0 42 57] (slab_size'2: int) (element_size: int) : int
+ = [%#sslab'5] ComputerDivision.mod (ComputerDivision.div slab_size'2 element_size) 4294967296
+
+constant const_MAX'0: UInt64.t = (18446744073709551615: UInt64.t)
+
+predicate slab_geom [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 48 0 48 33] (s: t_Slab) =
+  [%#sslab'2] UInt32.t'int s.element_size'1 > 0
+  /\ UInt32.t'int s.bitmap'1.num_slots = slots_of (UInt64.t'int s.slab_size'1) (UInt32.t'int s.element_size'1)
+  /\ UInt64.t'int s.start_offset'1 + UInt64.t'int s.slab_size'1 <= UInt64.t'int const_MAX'0
+
+predicate slab_keys_len [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 58 0 58 37] (s: t_Slab) =
+  [%#sslab'3] Seq.length (view_Vec_u64_Global s.keys'1) = UInt32.t'int s.bitmap'1.num_slots
+
+predicate slab_rover [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 64 0 64 34] (s: t_Slab) =
+  [%#sslab'4] UInt64.t'int s.rover'1 < UInt32.t'int s.bitmap'1.num_slots
+  \/ UInt32.t'int s.bitmap'1.num_slots = 0 /\ UInt64.t'int s.rover'1 = 0
+
+predicate bm_wf [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 27 0 27 42] (bm: t_AllocationBitmap) =
+  [%#sbitmap'0] Seq.length (view_Vec_u64_Global bm.words) = ComputerDivision.div (UInt32.t'int bm.num_slots + 63) 64
+
+predicate slot_bit [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 33 0 33 53] (bm: t_AllocationBitmap) (i: int) =
+  [%#sbitmap'4] UInt64.nth (Seq.get (view_Vec_u64_Global bm.words) (ComputerDivision.div i 64)) (ComputerDivision.mod i 64)
+
+function cnt [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 40 0 40 47] (bm: t_AllocationBitmap) (n: int) : int
+
+axiom cnt_def: forall bm: t_AllocationBitmap, n: int [cnt bm n]. cnt bm n
+    = ([%#sbitmap'3] if n <= 0 then 0 else cnt bm (n - 1) + (if slot_bit bm (n - 1) then 1 else 0))
+
+predicate bm_count_ok [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 46 0 46 48] (bm: t_AllocationBitmap) =
+  [%#sbitmap'1] UInt32.t'int bm.allocated_count = cnt bm (UInt32.t'int bm.num_slots)
+
+predicate bm_inv [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 52 0 52 43] (bm: t_AllocationBitmap) =
+  [%#sbitmap] bm_wf bm /\ bm_count_ok bm
+
+predicate slab_inv [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 70 0 70 32] (s: t_Slab) =
+  [%#sslab'0] slab_geom s /\ slab_keys_len s /\ slab_rover s /\ bm_inv s.bitmap'1
+
+predicate rg_list_ok [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 134 0 134 41] (r: t_RegionState) =
+  [%#scomponent] forall k: int. contains_Int (view_SlabMap r.slabs'0) k
+    -> slab_inv (lookup_Int (view_SlabMap r.slabs'0) k)
+
+predicate in_bounds_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq UInt64.t) =
+  [%#sslice] UInt64.t'int self < Seq.length seq
+
+meta "rewrite_def" predicate in_bounds_usize
+
+predicate has_value_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq UInt64.t) (out: UInt64.t) =
+  [%#sslice'0] Seq.get seq (UInt64.t'int self) = out
+
+meta "rewrite_def" predicate has_value_usize
+
+let index_Vec_usize_Global (self_: t_Vec_usize_Global) (ix: UInt64.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:index requires] [%#svec'2] in_bounds_usize ix (view_Vec_usize_Global self_)}
+  any
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:index ensures] [%#svec'3] has_value_usize ix (view_Vec_usize_Global self_) result}
+    (! return {result}) ]
+
+predicate inv_BTreeMap_u64_Slab_Global (_1: t_BTreeMap_u64_Slab_Global)
+
+predicate inv_SlabMap (_1: t_SlabMap)
+
+axiom inv_axiom [@rewrite]: forall x: t_SlabMap [inv_SlabMap x]. inv_SlabMap x = inv_BTreeMap_u64_Slab_Global x.inner
+
+predicate inv_HashMap_u32_Vec_u64_Global_RandomState_Global (_1: t_HashMap_u32_Vec_u64_Global_RandomState_Global)
+
+predicate inv_SizeClassManager (_1: t_SizeClassManager)
+
+axiom inv_axiom'0 [@rewrite]: forall x: t_SizeClassManager [inv_SizeClassManager x]. inv_SizeClassManager x
+    = inv_HashMap_u32_Vec_u64_Global_RandomState_Global x.map
+
+predicate inv_RegionState (_1: t_RegionState)
+
+axiom inv_axiom'1 [@rewrite]: forall x: t_RegionState [inv_RegionState x]. inv_RegionState x
+    = (inv_SlabMap x.slabs'0 /\ inv_SizeClassManager x.size_classes'0)
+
+predicate invariant_ref_RegionState [@inline:trivial] (self: t_RegionState) = [%#sinvariant] inv_RegionState self
+
+meta "rewrite_def" predicate invariant_ref_RegionState
+
+predicate inv_ref_RegionState [@inline:trivial] (_1: t_RegionState) = invariant_ref_RegionState _1
+
+meta "rewrite_def" predicate inv_ref_RegionState
+
+predicate invariant_Seq_RegionState [@inline:trivial] (self: Seq.seq t_RegionState) =
+  [%#sseq] forall i: int. 0 <= i /\ i < Seq.length self -> inv_ref_RegionState (Seq.get self i)
+
+meta "rewrite_def" predicate invariant_Seq_RegionState
+
+predicate inv_Seq_RegionState [@inline:trivial] (_1: Seq.seq t_RegionState) = invariant_Seq_RegionState _1
+
+meta "rewrite_def" predicate inv_Seq_RegionState
+
+predicate invariant_Vec_RegionState_Global (self: t_Vec_RegionState_Global) =
+  [%#svec'5] inv_Seq_RegionState (view_Vec_RegionState_Global self)
+
+predicate inv_Vec_RegionState_Global (_1: t_Vec_RegionState_Global)
+
+axiom inv_axiom'2: forall x: t_Vec_RegionState_Global [inv_Vec_RegionState_Global x]. inv_Vec_RegionState_Global x
+    -> invariant_Vec_RegionState_Global x
+
+predicate invariant_ref_Vec_RegionState_Global [@inline:trivial] (self: t_Vec_RegionState_Global) =
+  [%#sinvariant] inv_Vec_RegionState_Global self
+
+meta "rewrite_def" predicate invariant_ref_Vec_RegionState_Global
+
+predicate inv_ref_Vec_RegionState_Global [@inline:trivial] (_1: t_Vec_RegionState_Global) =
+  invariant_ref_Vec_RegionState_Global _1
+
+meta "rewrite_def" predicate inv_ref_Vec_RegionState_Global
+
+predicate in_bounds_usize'0 [@inline:trivial] (self: UInt64.t) (seq: Seq.seq t_RegionState) =
+  [%#sslice] UInt64.t'int self < Seq.length seq
+
+meta "rewrite_def" predicate in_bounds_usize'0
+
+predicate has_value_usize'0 [@inline:trivial] (self: UInt64.t) (seq: Seq.seq t_RegionState) (out: t_RegionState) =
+  [%#sslice'0] Seq.get seq (UInt64.t'int self) = out
+
+meta "rewrite_def" predicate has_value_usize'0
+
+let index_Vec_RegionState_Global (self_: t_Vec_RegionState_Global) (ix: UInt64.t) (return (x: t_RegionState)) =
+{[@stop_split] [@expl:index_Vec_RegionState_Global requires] ([@stop_split] [@expl:index 'self_' type invariant] [%#svec'4] inv_ref_Vec_RegionState_Global self_)
+  /\ ([@stop_split] [@expl:index requires] [%#svec'2] in_bounds_usize'0 ix (view_Vec_RegionState_Global self_))}
+  any
+  [ return (result: t_RegionState) ->
+  {[@stop_split] [@expl:index_Vec_RegionState_Global ensures] ([@stop_split] [@expl:index result type invariant] inv_ref_RegionState result)
+    /\ ([@stop_split] [@expl:index ensures] [%#svec'3] has_value_usize'0 ix (view_Vec_RegionState_Global self_) result)}
+    (! return {result}) ]
+
+predicate all_from [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 59 0 59 64] (s: Seq.seq t_Extent) (lo: int) (r: t_RegionState) =
+  [%#slisting'42] forall p: int. lo <= p /\ p < Seq.length s
+    -> from_region r (Seq.get s p) /\ (Seq.get s p).key <> const_FREE_KEY
+
+let region_extents (r: t_RegionState) (out: MutBorrow.t t_Vec_Extent_Global) (return (x: ())) =
+{[@stop_split] [@expl:region_extents requires] ([@stop_split] [@expl:region_extents 'r' type invariant] [%#slisting'24] inv_ref_RegionState r)
+  /\ ([@stop_split] [@expl:region_extents requires] [%#slisting'25] rg_list_ok r)}
+  any
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:region_extents ensures] ([@stop_split] [@expl:region_extents ensures #0] [%#slisting'26] Seq.length (view_Vec_Extent_Global out.final)
+      >= Seq.length (view_Vec_Extent_Global out.current))
+    /\ ([@stop_split] [@expl:region_extents ensures #1] [%#slisting'27] forall p: int. 0 <= p
+          /\ p < Seq.length (view_Vec_Extent_Global out.current)
+        -> Seq.get (view_Vec_Extent_Global out.final) p = Seq.get (view_Vec_Extent_Global out.current) p)
+    /\ ([@stop_split] [@expl:region_extents ensures #2] [%#slisting'28] all_from (view_Vec_Extent_Global out.final) (Seq.length (view_Vec_Extent_Global out.current)) r)
+    /\ ([@stop_split] [@expl:region_extents ensures #3] [%#slisting'29] all_listed (view_Vec_Extent_Global out.final) (Seq.length (view_Vec_Extent_Global out.current)) r)}
+    (! return {result}) ]
+
+predicate resolve_refmut_Vec_Extent_Global [@inline:trivial] (_1: MutBorrow.t t_Vec_Extent_Global) =
+  _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_Vec_Extent_Global
+
+function lemma_in_from_lower [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 79 0 79 72] (s: Seq.seq t_Extent) (lo: int) (lo2: int) (e: t_Extent) : ()
+ = [%#slisting'34] ()
+
+axiom lemma_in_from_lower_spec:
+  forall s: Seq.seq t_Extent, lo: int, lo2: int, e: t_Extent. ([%#slisting'32] in_from s lo e /\ lo2 <= lo)
+    -> ([%#slisting'33] in_from s lo2 e)
+
+function lemma_in_from_grow [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 92 0 92 77] (a: Seq.seq t_Extent) (b: Seq.seq t_Extent) (lo: int) (e: t_Extent) : ()
+ = [%#slisting'39] ()
+
+axiom lemma_in_from_grow_spec: forall a: Seq.seq t_Extent, b: Seq.seq t_Extent, lo: int, e: t_Extent. ([%#slisting'36] 0
+        <= lo
+      /\ in_from a lo e)
+    -> ([%#slisting'37] Seq.length a <= Seq.length b
+      /\ (forall p: int. 0 <= p /\ p < Seq.length a -> Seq.get b p = Seq.get a p)) -> ([%#slisting'38] in_from b lo e)
+
+predicate inv_ExtentManager (_1: t_ExtentManager)
+
+axiom inv_axiom'3 [@rewrite]: forall x: t_ExtentManager [inv_ExtentManager x]. inv_ExtentManager x
+    = inv_Vec_RegionState_Global x.arena
+
+predicate invariant_ref_ExtentManager [@inline:trivial] (self: t_ExtentManager) = [%#sinvariant] inv_ExtentManager self
+
+meta "rewrite_def" predicate invariant_ref_ExtentManager
+
+predicate inv_ref_ExtentManager [@inline:trivial] (_1: t_ExtentManager) = invariant_ref_ExtentManager _1
+
+meta "rewrite_def" predicate inv_ref_ExtentManager
+
+predicate em_regions_wf [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 109 0 109 47] (em: t_ExtentManager) =
+  [%#scomponent'0] match em.regions with
+    | None -> true
+    | Some rv -> Seq.length (view_Vec_usize_Global rv) > 0
+    /\ (forall i: int. 0 <= i /\ i < Seq.length (view_Vec_usize_Global rv)
+        -> UInt64.t'int (Seq.get (view_Vec_usize_Global rv) i) < Seq.length (view_Vec_RegionState_Global em.arena))
+    /\ (forall i: int, j: int. 0 <= i /\ i < j /\ j < Seq.length (view_Vec_usize_Global rv)
+      -> Seq.get (view_Vec_usize_Global rv) i <> Seq.get (view_Vec_usize_Global rv) j)
+    end
+
+predicate em_list_ok [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 140 0 140 44] (em: t_ExtentManager) =
+  [%#scomponent'1] match em.regions with
+    | None -> true
+    | Some rv -> forall i: int. 0 <= i /\ i < Seq.length (view_Vec_usize_Global rv)
+      -> rg_list_ok (Seq.get (view_Vec_RegionState_Global em.arena) (UInt64.t'int (Seq.get (view_Vec_usize_Global rv) i)))
+    end
+
+predicate listed_ok [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 159 0 159 75] (em: t_ExtentManager) (rv: Seq.seq UInt64.t) (s: Seq.seq t_Extent) =
+  [%#slisting'40] forall p: int. 0 <= p /\ p < Seq.length s
+    -> (Seq.get s p).key <> const_FREE_KEY
+    /\ (exists i: int. 0 <= i
+      /\ i < Seq.length rv
+      /\ from_region (Seq.get (view_Vec_RegionState_Global em.arena) (UInt64.t'int (Seq.get rv i))) (Seq.get s p))
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let get_extents [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 186 4 186 44]
+  (self: t_ExtentManager) (return (x: t_Vec_Extent_Global)) =
+{[@stop_split] [@expl:get_extents requires] ([@stop_split] [@expl:get_extents 'self' type invariant] [%#slisting'18] inv_ref_ExtentManager self)
+  /\ ([@stop_split] [@expl:get_extents requires] [%#slisting'19] em_regions_wf self /\ em_list_ok self)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = new_Extent [%#slisting] (fun (_x: t_Vec_Extent_Global) -> [ &result <- _x ] s1)
+    | s1 = [ &_9 <- self.regions ] s2
+    | s2 = any [ br0 -> {_9 = None} (! bb4) | br1 (x0: t_Vec_usize_Global) -> {_9 = Some x0} (! bb5) ] ]
+  | bb5 = s0
+    [ s0 = elim_Some {_9} (fun (r0: t_Vec_usize_Global) -> [ &rv <- r0 ] s1)
+    | s1 = [ &i <- [%#slisting'0] (0: UInt64.t) ] s2
+    | s2 = bb6 ]
+  | bb6 = bb6
+    [ bb6 = {[@expl:loop invariant #0] [%#slisting'4] UInt64.t'int i <= Seq.length (view_Vec_usize_Global rv)}
+      {[@expl:loop invariant #1] [%#slisting'3] listed_ok_upto self (view_Vec_usize_Global rv) (view_Vec_Extent_Global result) (Seq.length (view_Vec_Extent_Global result))}
+      {[@expl:loop invariant #2] [%#slisting'2] all_regions_listed self (view_Vec_usize_Global rv) (view_Vec_Extent_Global result) 0 (UInt64.t'int i)}
+      (! s0)
+      [ s0 = len_usize [%#slisting'1] {rv} (fun (_x: UInt64.t) -> [ &_30 <- _x ] s1)
+      | s1 = [ &_28 <- UInt64.lt i _30 ] s2
+      | s2 = any [ br0 -> {_28 = false} (! bb14) | br1 -> {_28} (! bb9) ] ]
+      [ bb9 = s0
+        [ s0 = [ &before <- [%#slisting'5] result ] s1
+        | s1 =
+          {[@expl:assertion] [%#slisting'6] rg_list_ok (Seq.get (view_Vec_RegionState_Global self.arena) (UInt64.t'int (Seq.get (view_Vec_usize_Global rv) (UInt64.t'int i))))}
+          s2
+        | s2 = index_Vec_usize_Global [%#slisting'7] {rv} {i} (fun (_x: UInt64.t) -> [ &_46 <- _x ] s3)
+        | s3 = index_Vec_RegionState_Global [%#slisting'8] {self.arena} {_46}
+            (fun (_x: t_RegionState) -> [ &_43 <- _x ] s4)
+        | s4 = [ &_42 <- _43 ] s5
+        | s5 = MutBorrow.borrow_mut <t_Vec_Extent_Global> {result}
+            (fun (_bor: MutBorrow.t t_Vec_Extent_Global) -> [ &_50 <- _bor ] [ &result <- _bor.final ] s6)
+        | s6 = MutBorrow.borrow_final <t_Vec_Extent_Global> {_50.current} {MutBorrow.get_id _50}
+            (fun (_bor: MutBorrow.t t_Vec_Extent_Global) ->
+              [ &_49 <- _bor ] [ &_50 <- { _50 with current = _bor.final } ] s7)
+        | s7 = region_extents [%#slisting'9] {_42} {_49} (fun (_x: ()) -> [ &_40 <- _x ] s8)
+        | s8 = -{resolve_refmut_Vec_Extent_Global _50}- s9
+        | s9 = {[@expl:assertion] [%#slisting'10] forall p: int. 0 <= p
+              /\ p < Seq.length (view_Vec_Extent_Global before)
+            -> Seq.get (view_Vec_Extent_Global result) p = Seq.get (view_Vec_Extent_Global before) p}
+          s10
+        | s10 = {[@expl:assertion] [%#slisting'11] forall p: int. Seq.length (view_Vec_Extent_Global before) <= p
+              /\ p < Seq.length (view_Vec_Extent_Global result)
+            -> (Seq.get (view_Vec_Extent_Global result) p).key <> const_FREE_KEY
+            /\ from_region (Seq.get (view_Vec_RegionState_Global self.arena) (UInt64.t'int (Seq.get (view_Vec_usize_Global rv) (UInt64.t'int i)))) (Seq.get (view_Vec_Extent_Global result) p)}
+          s11
+        | s11 =
+          {[@expl:assertion] [%#slisting'12] listed_ok_upto self (view_Vec_usize_Global rv) (view_Vec_Extent_Global result) (Seq.length (view_Vec_Extent_Global result))}
+          s12
+        | s12 =
+          {[@expl:assertion] [%#slisting'13] forall k: int, j: int, e: t_Extent. from_slot (Seq.get (view_Vec_RegionState_Global self.arena) (UInt64.t'int (Seq.get (view_Vec_usize_Global rv) (UInt64.t'int i)))) k j e
+            -> (let _ = lemma_in_from_lower (view_Vec_Extent_Global result) (Seq.length (view_Vec_Extent_Global before)) 0 e in in_from (view_Vec_Extent_Global result) 0 e)}
+          s13
+        | s13 = {[@expl:assertion] [%#slisting'14] forall i2: int, k: int, j: int, e: t_Extent. 0 <= i2
+              /\ i2 < UInt64.t'int i
+              /\ from_slot (Seq.get (view_Vec_RegionState_Global self.arena) (UInt64.t'int (Seq.get (view_Vec_usize_Global rv) i2))) k j e
+            -> (let _ = lemma_in_from_grow (view_Vec_Extent_Global before) (view_Vec_Extent_Global result) 0 e in in_from (view_Vec_Extent_Global result) 0 e)}
+          s14
+        | s14 =
+          {[@expl:assertion] [%#slisting'15] all_regions_listed self (view_Vec_usize_Global rv) (view_Vec_Extent_Global result) 0 (UInt64.t'int i
+          + 1)}
+          s15
+        | s15 = UInt64.add [%#slisting'17] {i} {[%#slisting'16] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &i <- _x ] s16)
+        | s16 = bb6 ] ] ]
+  | bb14 = s0 [ s0 = [ &_ret <- result ] s1 | s1 = return {_ret} ]
+  | bb4 = s0 [ s0 = [ &_ret <- result ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Vec_Extent_Global = Any.any_l ()
+  | & self: t_ExtentManager = self
+  | & result: t_Vec_Extent_Global = Any.any_l ()
+  | & _9: t_Option_Vec_usize_Global = Any.any_l ()
+  | & rv: t_Vec_usize_Global = Any.any_l ()
+  | & i: UInt64.t = Any.any_l ()
+  | & _28: bool = Any.any_l ()
+  | & _30: UInt64.t = Any.any_l ()
+  | & before: t_Vec_Extent_Global = Any.any_l ()
+  | & _40: () = Any.any_l ()
+  | & _42: t_RegionState = Any.any_l ()
+  | & _43: t_RegionState = Any.any_l ()
+  | & _46: UInt64.t = Any.any_l ()
+  | & _49: MutBorrow.t t_Vec_Extent_Global = Any.any_l ()
+  | & _50: MutBorrow.t t_Vec_Extent_Global = Any.any_l () ])
+  [ return (result: t_Vec_Extent_Global) ->
+  {[@stop_split] [@expl:get_extents ensures] ([@stop_split] [@expl:get_extents ensures #0] [%#slisting'20] match self.regions with
+        | None -> Seq.length (view_Vec_Extent_Global result) = 0
+        | Some rv -> listed_ok self (view_Vec_usize_Global rv) (view_Vec_Extent_Global result)
+        end)
+    /\ ([@stop_split] [@expl:get_extents ensures #1] [%#slisting'21] match self.regions with
+      | None -> true
+      | Some rv -> all_regions_listed self (view_Vec_usize_Global rv) (view_Vec_Extent_Global result) 0 (Seq.length (view_Vec_usize_Global rv))
+      end)}
+    (! return {result}) ]

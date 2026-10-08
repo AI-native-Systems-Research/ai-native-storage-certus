@@ -1,0 +1,24 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_g_xor": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.018 },
+          { "prover": "alt-ergo", "time": 0.022 },
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "cvc4", "time": 0.061 },
+              { "prover": "alt-ergo", "time": 0.196 }
+            ]
+          },
+          { "prover": "alt-ergo", "time": 0.22 },
+          { "prover": "alt-ergo", "time": 0.02 }
+        ]
+      },
+      "vc_xor_fact": { "prover": "alt-ergo", "time": 0.021 }
+    }
+  }
+}

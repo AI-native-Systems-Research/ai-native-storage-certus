@@ -1,0 +1,11 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_g_merge_facts": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_rebuilt_bops": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_run_bops": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_verify_em_buddy_merge": { "prover": "cvc5", "time": 3.1 }
+    }
+  }
+}

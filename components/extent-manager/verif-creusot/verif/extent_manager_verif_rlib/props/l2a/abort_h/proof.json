@@ -1,0 +1,43 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_abort_h": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.043 },
+              { "prover": "cvc4", "time": 0.406 },
+              { "prover": "alt-ergo", "time": 0.12 },
+              { "prover": "alt-ergo", "time": 0.047 },
+              { "prover": "alt-ergo", "time": 0.143 },
+              {
+                "tactic": "split_vc",
+                "children": [
+                  { "prover": "alt-ergo", "time": 0.675 },
+                  { "prover": "alt-ergo", "time": 0.32 },
+                  { "prover": "alt-ergo", "time": 0.18 },
+                  { "prover": "cvc4", "time": 0.785 },
+                  { "prover": "cvc4", "time": 0.203 },
+                  { "prover": "alt-ergo", "time": 0.884 },
+                  { "prover": "alt-ergo", "time": 0.062 },
+                  { "prover": "alt-ergo", "time": 0.431 }
+                ]
+              },
+              { "prover": "alt-ergo", "time": 0.04 },
+              { "prover": "alt-ergo", "time": 0.038 }
+            ]
+          }
+        ]
+      },
+      "vc_free_slot": { "prover": "alt-ergo", "time": 0.044 },
+      "vc_index_Vec_tup2_u64_usize_Global": {
+        "prover": "alt-ergo",
+        "time": 0.02
+      },
+      "vc_remove_tup2_u64_usize": { "prover": "alt-ergo", "time": 0.045 }
+    }
+  }
+}

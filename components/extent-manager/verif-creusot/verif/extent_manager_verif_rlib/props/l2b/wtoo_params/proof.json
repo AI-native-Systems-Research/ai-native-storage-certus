@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_wtoo_params": { "prover": "alt-ergo", "time": 0.025 } }
+  }
+}

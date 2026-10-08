@@ -1,0 +1,209 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 50 0 50 50 *)
+
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 102 18 102 36
+let%span svec'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span svec'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 87 20 87 30
+let%span sinvariant = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/invariant.rs" 85 8 85 18
+let%span sseq = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/seq.rs" 938 20 938 91
+let%span sb3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 52 15 52 25
+let%span sb3'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 56 27 56 28
+let%span sb3'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 57 23 57 24
+let%span sb3'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 50 37 50 50
+let%span sb3'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 47 10 47 70
+let%span sb3'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 48 10 48 90
+let%span sb3'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 49 10 49 55
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use creusot.int.UInt8
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_RegionState_Global
+
+type t_BTreeMap_u64_Slab_Global
+
+type t_SlabMap = { inner: t_BTreeMap_u64_Slab_Global }
+
+type t_HashMap_u32_Vec_u64_Global_RandomState_Global
+
+type t_SizeClassManager = { map: t_HashMap_u32_Vec_u64_Global_RandomState_Global }
+
+type t_Vec_Vec_u64_Global_Global
+
+type t_BuddyAllocator = {
+  base_offset: UInt64.t;
+  total_usable_size: UInt64.t;
+  sector_size: UInt32.t;
+  max_order: UInt64.t;
+  free_lists: t_Vec_Vec_u64_Global_Global }
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_FormatParams = {
+  data_disk_size'0: UInt64.t;
+  slab_size'0: UInt64.t;
+  max_extent_size'0: UInt32.t;
+  sector_size'0: UInt32.t;
+  region_count'0: UInt32.t;
+  metadata_alignment'0: UInt64.t;
+  instance_id'0: t_Option_u64;
+  metadata_disk_ns_id'0: UInt32.t;
+  metadata_region_size'0: UInt64.t }
+
+type t_Vec_tup2_u64_usize_Global
+
+type t_RegionState = {
+  slabs: t_SlabMap;
+  size_classes: t_SizeClassManager;
+  buddy: t_BuddyAllocator;
+  dirty: bool;
+  format_params: t_FormatParams;
+  pending_frees: t_Vec_tup2_u64_usize_Global }
+
+predicate inv_BTreeMap_u64_Slab_Global (_1: t_BTreeMap_u64_Slab_Global)
+
+predicate inv_SlabMap (_1: t_SlabMap)
+
+axiom inv_axiom [@rewrite]: forall x: t_SlabMap [inv_SlabMap x]. inv_SlabMap x = inv_BTreeMap_u64_Slab_Global x.inner
+
+predicate inv_HashMap_u32_Vec_u64_Global_RandomState_Global (_1: t_HashMap_u32_Vec_u64_Global_RandomState_Global)
+
+predicate inv_SizeClassManager (_1: t_SizeClassManager)
+
+axiom inv_axiom'0 [@rewrite]: forall x: t_SizeClassManager [inv_SizeClassManager x]. inv_SizeClassManager x
+    = inv_HashMap_u32_Vec_u64_Global_RandomState_Global x.map
+
+predicate inv_RegionState (_1: t_RegionState)
+
+axiom inv_axiom'1 [@rewrite]: forall x: t_RegionState [inv_RegionState x]. inv_RegionState x
+    = (inv_SlabMap x.slabs /\ inv_SizeClassManager x.size_classes)
+
+predicate invariant_ref_RegionState [@inline:trivial] (self: t_RegionState) = [%#sinvariant] inv_RegionState self
+
+meta "rewrite_def" predicate invariant_ref_RegionState
+
+predicate inv_ref_RegionState [@inline:trivial] (_1: t_RegionState) = invariant_ref_RegionState _1
+
+meta "rewrite_def" predicate inv_ref_RegionState
+
+predicate invariant_Seq_RegionState [@inline:trivial] (self: Seq.seq t_RegionState) =
+  [%#sseq] forall i: int. 0 <= i /\ i < Seq.length self -> inv_ref_RegionState (Seq.get self i)
+
+meta "rewrite_def" predicate invariant_Seq_RegionState
+
+predicate inv_Seq_RegionState [@inline:trivial] (_1: Seq.seq t_RegionState) = invariant_Seq_RegionState _1
+
+meta "rewrite_def" predicate inv_Seq_RegionState
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_RegionState_Global (self: t_Vec_RegionState_Global) : Seq.seq t_RegionState
+
+axiom view_Vec_RegionState_Global_spec:
+  forall self: t_Vec_RegionState_Global [view_Vec_RegionState_Global self]. [%#svec'0] Seq.length (view_Vec_RegionState_Global self)
+    <= UInt64.t'int const_MAX
+
+predicate invariant_Vec_RegionState_Global (self: t_Vec_RegionState_Global) =
+  [%#svec'1] inv_Seq_RegionState (view_Vec_RegionState_Global self)
+
+predicate inv_Vec_RegionState_Global (_1: t_Vec_RegionState_Global)
+
+axiom inv_axiom'2: forall x: t_Vec_RegionState_Global [inv_Vec_RegionState_Global x]. inv_Vec_RegionState_Global x
+    -> invariant_Vec_RegionState_Global x
+
+let new_RegionState (return (x: t_Vec_RegionState_Global)) = any
+  [ return (result: t_Vec_RegionState_Global) ->
+  {[@stop_split] [@expl:new_RegionState ensures] ([@stop_split] [@expl:new result type invariant] inv_Vec_RegionState_Global result)
+    /\ ([@stop_split] [@expl:new ensures] [%#svec] Seq.length (view_Vec_RegionState_Global result) = 0)}
+    (! return {result}) ]
+
+type t_Vec_usize_Global
+
+type t_Option_Vec_usize_Global = None'0 | Some'0 t_Vec_usize_Global
+
+type t_Superblock = {
+  magic'1: UInt64.t;
+  version'1: UInt32.t;
+  data_disk_size'1: UInt64.t;
+  sector_size'1: UInt32.t;
+  slab_size'1: UInt64.t;
+  max_extent_size'1: UInt32.t;
+  region_count'1: UInt32.t;
+  checkpoint_seq'1: UInt64.t;
+  active_copy'1: UInt8.t;
+  checkpoint_region_offset'1: UInt64.t;
+  checkpoint_region_size'1: UInt64.t;
+  instance_id'1: UInt64.t;
+  metadata_disk_ns_id'1: UInt32.t;
+  data_start_offset'1: UInt64.t }
+
+type t_SharedState = { format_params'0: t_FormatParams; checkpoint_seq'0: UInt64.t; superblock'0: t_Superblock }
+
+type t_Option_SharedState = None'1 | Some'1 t_SharedState
+
+type t_Option_u32 = None'2 | Some'2 UInt32.t
+
+type t_Option_Superblock = None'3 | Some'3 t_Superblock
+
+type tup2_u64_usize = { f0: UInt64.t; f1: UInt64.t }
+
+type t_Option_tup2_u64_usize = None'4 | Some'4 tup2_u64_usize
+
+type t_MetaDevice = {
+  connected'2: bool;
+  sector_size'2: UInt32.t;
+  num_sectors'2: UInt64.t;
+  sb'2: t_Option_Superblock;
+  ckpt0'2: t_Option_tup2_u64_usize;
+  ckpt1'2: t_Option_tup2_u64_usize }
+
+type t_ExtentManager = {
+  arena: t_Vec_RegionState_Global;
+  regions: t_Option_Vec_usize_Global;
+  shared: t_Option_SharedState;
+  metadata_ns_id: t_Option_u32;
+  metadata_base_lba: UInt64.t;
+  data_base_lba: UInt64.t;
+  dev: t_MetaDevice }
+
+predicate inv_ExtentManager (_1: t_ExtentManager)
+
+axiom inv_axiom'3 [@rewrite]: forall x: t_ExtentManager [inv_ExtentManager x]. inv_ExtentManager x
+    = inv_Vec_RegionState_Global x.arena
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let new_inner [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 50 0 50 50]
+  (dev'0: t_MetaDevice) (return (x: t_ExtentManager)) = (! bb0
+  [ bb0 = s0
+    [ s0 = new_RegionState [%#sb3] (fun (_x: t_Vec_RegionState_Global) -> [ &_6 <- _x ] s1)
+    | s1 = [ &_7 <- None'0 ] s2
+    | s2 = [ &_8 <- None'1 ] s3
+    | s3 = [ &_9 <- None'2 ] s4
+    | s4 = [ &_ret <- { arena = _6;
+                        regions = _7;
+                        shared = _8;
+                        metadata_ns_id = _9;
+                        metadata_base_lba = ([%#sb3'0] (0: UInt64.t));
+                        data_base_lba = ([%#sb3'1] (0: UInt64.t));
+                        dev = dev'0 } ] s5
+    | s5 = return {_ret} ] ]
+  [ & _ret: t_ExtentManager = Any.any_l ()
+  | & dev'0: t_MetaDevice = dev'0
+  | & _6: t_Vec_RegionState_Global = Any.any_l ()
+  | & _7: t_Option_Vec_usize_Global = Any.any_l ()
+  | & _8: t_Option_SharedState = Any.any_l ()
+  | & _9: t_Option_u32 = Any.any_l () ])
+  [ return (result: t_ExtentManager) ->
+  {[@stop_split] [@expl:new_inner ensures] ([@stop_split] [@expl:new_inner result type invariant] [%#sb3'2] inv_ExtentManager result)
+    /\ ([@stop_split] [@expl:new_inner ensures #0] [%#sb3'3] UInt64.t'int result.metadata_base_lba = 0
+      /\ UInt64.t'int result.data_base_lba = 0)
+    /\ ([@stop_split] [@expl:new_inner ensures #1] [%#sb3'4] result.regions = None'0
+      /\ result.shared = None'1 /\ result.metadata_ns_id = None'2)
+    /\ ([@stop_split] [@expl:new_inner ensures #2] [%#sb3'5] Seq.length (view_Vec_RegionState_Global result.arena) = 0
+    /\ result.dev = dev'0)}
+    (! return {result}) ]

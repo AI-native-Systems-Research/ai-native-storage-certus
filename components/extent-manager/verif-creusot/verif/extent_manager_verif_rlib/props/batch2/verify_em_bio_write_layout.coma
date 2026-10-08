@@ -1,0 +1,178 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 1027 0 1027 110 *)
+
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sfmap = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/fmap.rs" 88 8 88 32
+let%span sblockio = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 74 15 74 36
+let%span sblockio'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 75 15 75 61
+let%span sblockio'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 76 15 76 109
+let%span sblockio'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 77 15 77 107
+let%span sblockio'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 78 14 78 94
+let%span sblockio'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 79 14 79 53
+let%span sblockio'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 80 14 80 113
+let%span sblockio'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 81 14 82 86
+let%span sblockio'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 83 14 92 5
+let%span sblockio'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 61 16 61 58
+let%span sbatch2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 1028 4 1028 34
+let%span sbatch2'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 1013 11 1013 29
+let%span sbatch2'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 1014 11 1014 54
+let%span sbatch2'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 1015 11 1015 96
+let%span sbatch2'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 1016 11 1016 94
+let%span sbatch2'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 1017 10 1026 1
+
+use creusot.prelude.MutBorrow
+use seq.Seq
+use creusot.int.UInt32
+use creusot.int.UInt64
+use creusot.int.UInt8
+use int.ComputerDivision
+use map.Map
+use creusot.prelude.Any
+use int.Int
+
+type t_FMap_tup2_Int_Int_Seq_u8
+
+type tup2_Int_Int = { f0: int; f1: int }
+
+type t_BDev = { store: t_FMap_tup2_Int_Int_Seq_u8; log: Seq.seq tup2_Int_Int }
+
+type t_Client = { sector_size: UInt32.t; ns_id: UInt32.t; base_lba: UInt64.t }
+
+type t_Vec_u8_Global
+
+type t_EmError = CorruptMetadata | IoError | NotInitialized | OffsetNotFound UInt64.t | OutOfSpace
+
+type t_Result_unit_EmError = Ok () | Err t_EmError
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_u8_Global (self: t_Vec_u8_Global) : Seq.seq UInt8.t
+
+axiom view_Vec_u8_Global_spec:
+  forall self: t_Vec_u8_Global [view_Vec_u8_Global self]. [%#svec] Seq.length (view_Vec_u8_Global self)
+    <= UInt64.t'int const_MAX
+
+constant const_MAX'0: UInt64.t = (18446744073709551615: UInt64.t)
+
+type t_Option_Seq_u8 = None | Some (Seq.seq UInt8.t)
+
+function to_mapping_tup2_Int_Int (self: t_FMap_tup2_Int_Int_Seq_u8) : Map.map tup2_Int_Int t_Option_Seq_u8
+
+function get_tup2_Int_Int [@inline:trivial] (self: t_FMap_tup2_Int_Int_Seq_u8) (k: tup2_Int_Int) : t_Option_Seq_u8 =
+  [%#sfmap] Map.get (to_mapping_tup2_Int_Int self) k
+
+meta "rewrite_def" function get_tup2_Int_Int
+
+function padded [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 60 0 60 42] (data: Seq.seq UInt8.t) (k: int) : UInt8.t
+ = [%#sblockio'8] if k < Seq.length data then Seq.get data k else (0: UInt8.t)
+
+let write_blocks (self: t_Client) (dev: MutBorrow.t t_BDev) (lba: UInt64.t) (data: t_Vec_u8_Global)
+  (return (x: t_Result_unit_EmError)) =
+{[@stop_split] [@expl:write_blocks requires] ([@stop_split] [@expl:write_blocks requires #0] [%#sblockio] UInt32.t'int self.sector_size
+    > 0)
+  /\ ([@stop_split] [@expl:write_blocks requires #1] [%#sblockio'0] Seq.length (view_Vec_u8_Global data)
+      + UInt32.t'int self.sector_size
+    <= UInt64.t'int const_MAX)
+  /\ ([@stop_split] [@expl:write_blocks requires #2] [%#sblockio'1] UInt64.t'int self.base_lba + UInt64.t'int lba
+      + ComputerDivision.div (Seq.length (view_Vec_u8_Global data) + UInt32.t'int self.sector_size
+      - 1) (UInt32.t'int self.sector_size)
+    <= UInt64.t'int const_MAX'0)
+  /\ ([@stop_split] [@expl:write_blocks requires #3] [%#sblockio'2] ComputerDivision.div (Seq.length (view_Vec_u8_Global data)
+        + UInt32.t'int self.sector_size
+      - 1) (UInt32.t'int self.sector_size)
+    * UInt32.t'int self.sector_size
+  <= UInt64.t'int const_MAX)}
+  any
+  [ return (result: t_Result_unit_EmError) ->
+  {[@stop_split] [@expl:write_blocks ensures] ([@stop_split] [@expl:write_blocks ensures #0] [%#sblockio'3] forall p: int. 0
+            <= p
+          /\ p < Seq.length dev.current.log -> Seq.get dev.final.log p = Seq.get dev.current.log p)
+    /\ ([@stop_split] [@expl:write_blocks ensures #1] [%#sblockio'4] Seq.length dev.current.log
+      <= Seq.length dev.final.log)
+    /\ ([@stop_split] [@expl:write_blocks ensures #2] [%#sblockio'5] Seq.length dev.final.log
+      <= Seq.length dev.current.log
+      + ComputerDivision.div (Seq.length (view_Vec_u8_Global data) + UInt32.t'int self.sector_size
+      - 1) (UInt32.t'int self.sector_size))
+    /\ ([@stop_split] [@expl:write_blocks ensures #3] [%#sblockio'6] forall p: int. Seq.length dev.current.log <= p
+          /\ p < Seq.length dev.final.log
+        -> Seq.get dev.final.log p
+        = { f0 = UInt32.t'int self.ns_id;
+            f1 = UInt64.t'int self.base_lba + UInt64.t'int lba + (p - Seq.length dev.current.log) })
+    /\ ([@stop_split] [@expl:write_blocks ensures #4] [%#sblockio'7] match result with
+      | Ok () -> Seq.length dev.final.log
+        = Seq.length dev.current.log
+        + ComputerDivision.div (Seq.length (view_Vec_u8_Global data) + UInt32.t'int self.sector_size
+        - 1) (UInt32.t'int self.sector_size)
+      /\ (forall i: int. 0 <= i
+          /\ i
+          < ComputerDivision.div (Seq.length (view_Vec_u8_Global data) + UInt32.t'int self.sector_size
+          - 1) (UInt32.t'int self.sector_size)
+        -> match get_tup2_Int_Int dev.final.store { f0 = UInt32.t'int self.ns_id;
+                                                    f1 = UInt64.t'int self.base_lba + UInt64.t'int lba + i } with
+          | Some blk -> Seq.length blk = UInt32.t'int self.sector_size
+          /\ (forall j: int. 0 <= j /\ j < UInt32.t'int self.sector_size
+            -> Seq.get blk j = padded (view_Vec_u8_Global data) (i * UInt32.t'int self.sector_size + j))
+          | None -> false
+          end)
+      | Err _ -> true
+      end)}
+    (! return {result}) ]
+
+predicate resolve_refmut_BDev [@inline:trivial] (_1: MutBorrow.t t_BDev) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_BDev
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_em_bio_write_layout [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 1027 0 1027 110]
+  (c: t_Client) (dev: MutBorrow.t t_BDev) (lba: UInt64.t) (data: t_Vec_u8_Global) (return (x: t_Result_unit_EmError)) =
+{[@stop_split] [@expl:verify_em_bio_write_layout requires] ([@stop_split] [@expl:verify_em_bio_write_layout requires #0] [%#sbatch2'0] UInt32.t'int c.sector_size
+    > 0)
+  /\ ([@stop_split] [@expl:verify_em_bio_write_layout requires #1] [%#sbatch2'1] Seq.length (view_Vec_u8_Global data)
+      + UInt32.t'int c.sector_size
+    <= UInt64.t'int const_MAX)
+  /\ ([@stop_split] [@expl:verify_em_bio_write_layout requires #2] [%#sbatch2'2] UInt64.t'int c.base_lba
+        + UInt64.t'int lba
+      + ComputerDivision.div (Seq.length (view_Vec_u8_Global data) + UInt32.t'int c.sector_size
+      - 1) (UInt32.t'int c.sector_size)
+    <= UInt64.t'int const_MAX'0)
+  /\ ([@stop_split] [@expl:verify_em_bio_write_layout requires #3] [%#sbatch2'3] ComputerDivision.div (Seq.length (view_Vec_u8_Global data)
+        + UInt32.t'int c.sector_size
+      - 1) (UInt32.t'int c.sector_size)
+    * UInt32.t'int c.sector_size
+  <= UInt64.t'int const_MAX)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = MutBorrow.borrow_final <t_BDev> {dev.current} {MutBorrow.get_id dev}
+        (fun (_bor: MutBorrow.t t_BDev) -> [ &_23 <- _bor ] [ &dev <- { dev with current = _bor.final } ] s1)
+    | s1 = write_blocks [%#sbatch2] {c} {_23} {lba} {data} (fun (_x: t_Result_unit_EmError) -> [ &_ret <- _x ] s2)
+    | s2 = -{resolve_refmut_BDev dev}- s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: t_Result_unit_EmError = Any.any_l ()
+  | & c: t_Client = c
+  | & dev: MutBorrow.t t_BDev = dev
+  | & lba: UInt64.t = lba
+  | & data: t_Vec_u8_Global = data
+  | & _23: MutBorrow.t t_BDev = Any.any_l () ])
+  [ return (result: t_Result_unit_EmError) ->
+  {[@stop_split] [@expl:verify_em_bio_write_layout ensures] [%#sbatch2'4] match result with
+      | Ok () -> forall i: int. 0 <= i
+          /\ i
+          < ComputerDivision.div (Seq.length (view_Vec_u8_Global data) + UInt32.t'int c.sector_size
+          - 1) (UInt32.t'int c.sector_size)
+        -> match get_tup2_Int_Int dev.final.store { f0 = UInt32.t'int c.ns_id;
+                                                    f1 = UInt64.t'int c.base_lba + UInt64.t'int lba + i } with
+          | Some blk -> Seq.length blk = UInt32.t'int c.sector_size
+          /\ (forall j: int. 0 <= j /\ j < UInt32.t'int c.sector_size
+            -> Seq.get blk j
+            = (if i * UInt32.t'int c.sector_size + j < Seq.length (view_Vec_u8_Global data) then
+              Seq.get (view_Vec_u8_Global data) (i * UInt32.t'int c.sector_size + j)
+            else
+              (0: UInt8.t)
+            ))
+          | None -> false
+          end
+      | Err _ -> true
+      end}
+    (! return {result}) ]

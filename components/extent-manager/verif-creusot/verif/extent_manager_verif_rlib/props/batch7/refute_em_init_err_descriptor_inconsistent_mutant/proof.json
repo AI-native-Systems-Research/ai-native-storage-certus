@@ -1,0 +1,17 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_refute_em_init_err_descriptor_inconsistent__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [ null, { "prover": "alt-ergo", "time": 0.04 } ]
+          }
+        ]
+      },
+      "vc_w7_dup": { "prover": "alt-ergo", "time": 0.028 }
+    }
+  }
+}

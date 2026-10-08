@@ -1,0 +1,609 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE why3session PUBLIC "-//Why3//proof session v5//EN"
+"https://www.why3.org/why3session.dtd">
+<why3session shape_version="6">
+<prover id="0" name="Z3" version="4.16.0" timelimit="0.022781" memlimit="1000"/>
+<prover id="1" name="CVC4" version="1.8" timelimit="0.258121" memlimit="1000"/>
+<prover id="2" name="Alt-Ergo" version="2.6.2" timelimit="0.050008" memlimit="1000"/>
+<prover id="3" name="CVC5" version="1.3.1" timelimit="0.119378" memlimit="1000"/>
+<file format="coma">
+<path name=".."/><path name="format_build.coma"/>
+<theory name="Coma">
+ <goal name="vc_fact_pow2_one" proved="true">
+ <proof prover="2" timelimit="0.045593"><result status="valid" time="0.045593" steps="0"/></proof>
+ </goal>
+ <goal name="vc_fact_pow2_eight" proved="true">
+ <proof prover="2" timelimit="0.045593"><result status="valid" time="0.045593" steps="0"/></proof>
+ </goal>
+ <goal name="vc_is_power_of_two" proved="true">
+ <proof prover="2" timelimit="0.043913"><result status="valid" time="0.043913" steps="0"/></proof>
+ </goal>
+ <goal name="vc_pow2_bits7" proved="true">
+ <proof prover="2" timelimit="0.035058"><result status="valid" time="0.035058" steps="0"/></proof>
+ </goal>
+ <goal name="vc_new_usize" proved="true">
+ <proof prover="2" timelimit="0.045519"><result status="valid" time="0.045519" steps="0"/></proof>
+ </goal>
+ <goal name="vc_region_extent" proved="true">
+ <proof prover="2" timelimit="0.034733"><result status="valid" time="0.034733" steps="0"/></proof>
+ </goal>
+ <goal name="vc_new" proved="true">
+ <proof prover="2" timelimit="0.046226"><result status="valid" time="0.046226" steps="0"/></proof>
+ </goal>
+ <goal name="vc_new&#39;0" proved="true">
+ <proof prover="2" timelimit="0.039432"><result status="valid" time="0.039432" steps="0"/></proof>
+ </goal>
+ <goal name="vc_push_RegionState" proved="true">
+ <proof prover="2" timelimit="0.050707"><result status="valid" time="0.050707" steps="0"/></proof>
+ </goal>
+ <goal name="vc_len_RegionState" proved="true">
+ <proof prover="2"><result status="valid" time="0.050008" steps="0"/></proof>
+ </goal>
+ <goal name="vc_push_usize" proved="true">
+ <proof prover="2"><result status="valid" time="0.050008" steps="0"/></proof>
+ </goal>
+ <goal name="vc_elim_Some" proved="true">
+ <proof prover="2"><result status="valid" time="0.050008" steps="0"/></proof>
+ </goal>
+ <goal name="vc_urandom_u64" proved="true">
+ <proof prover="2" timelimit="0.046686"><result status="valid" time="0.046686" steps="0"/></proof>
+ </goal>
+ <goal name="vc_branch_Result_u64_EmError" proved="true">
+ <proof prover="2" timelimit="0.053134"><result status="valid" time="0.053134" steps="0"/></proof>
+ </goal>
+ <goal name="vc_elim_Break" proved="true">
+ <proof prover="2" timelimit="0.053134"><result status="valid" time="0.053134" steps="0"/></proof>
+ </goal>
+ <goal name="vc_from_EmError" proved="true">
+ <proof prover="2" timelimit="0.052566"><result status="valid" time="0.052566" steps="0"/></proof>
+ </goal>
+ <goal name="vc_from_residual_Result_tup2_Vec_usize_Global_SharedState_EmError" proved="true">
+ <proof prover="2" timelimit="0.052566"><result status="valid" time="0.052566" steps="0"/></proof>
+ </goal>
+ <goal name="vc_elim_Continue" proved="true">
+ <proof prover="2" timelimit="0.052566"><result status="valid" time="0.052566" steps="0"/></proof>
+ </goal>
+ <goal name="vc_new&#39;1" proved="true">
+ <proof prover="2" timelimit="0.050276"><result status="valid" time="0.050276" steps="0"/></proof>
+ </goal>
+ <goal name="vc_dev_write_superblock" proved="true">
+ <proof prover="2" timelimit="0.055228"><result status="valid" time="0.055228" steps="0"/></proof>
+ </goal>
+ <goal name="vc_branch_Result_unit_EmError" proved="true">
+ <proof prover="2" timelimit="0.056457"><result status="valid" time="0.056457" steps="0"/></proof>
+ </goal>
+ <goal name="vc_elim_Break&#39;0" proved="true">
+ <proof prover="2" timelimit="0.056457"><result status="valid" time="0.056457" steps="0"/></proof>
+ </goal>
+ <goal name="vc_format_build">
+ <transf name="compute_specified" >
+  <goal name="vc_format_build.0">
+  <transf name="split_vc" >
+   <goal name="vc_format_build.0.0" expl="assertion" proved="true">
+   <proof prover="2" timelimit="0.056563"><result status="valid" time="0.056563" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.1" expl="assertion" proved="true">
+   <proof prover="2" timelimit="0.081769"><result status="valid" time="0.081769" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.2" expl="remainder by zero" proved="true">
+   <proof prover="2" timelimit="0.105614"><result status="valid" time="0.105614" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.3" expl="division by zero" proved="true">
+   <proof prover="2" timelimit="0.059642"><result status="valid" time="0.059642" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.4" expl="assertion" proved="true">
+   <proof prover="2" timelimit="0.178939"><result status="valid" time="0.178939" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.5" expl="assertion" proved="true">
+   <proof prover="2" timelimit="0.19364"><result status="valid" time="0.193640" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.6" expl="format_build ensures" proved="true">
+   <proof prover="3" timelimit="0.10302"><result status="valid" time="0.103020" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.7" expl="type invariant" proved="true">
+   <proof prover="2" timelimit="0.052708"><result status="valid" time="0.052708" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.8" expl="assertion" proved="true">
+   <proof prover="3" timelimit="0.093859"><result status="valid" time="0.093859" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.9" expl="format_build ensures" proved="true">
+   <proof prover="2" timelimit="0.161219"><result status="valid" time="0.161219" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.10" expl="type invariant" proved="true">
+   <proof prover="2" timelimit="0.065796"><result status="valid" time="0.065796" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.11" expl="integer overflow" proved="true">
+   <proof prover="2" timelimit="0.157201"><result status="valid" time="0.157201" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.12" expl="integer overflow" proved="true">
+   <proof prover="3" timelimit="0.098551"><result status="valid" time="0.098551" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.13" expl="integer overflow" proved="true">
+   <proof prover="3" timelimit="0.111905"><result status="valid" time="0.111905" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.14" expl="division by zero" proved="true">
+   <proof prover="2" timelimit="0.071223"><result status="valid" time="0.071223" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.15" expl="division by zero" proved="true">
+   <proof prover="2" timelimit="0.110108"><result status="valid" time="0.110108" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.16" expl="integer overflow" proved="true">
+   <proof prover="2" timelimit="0.569811"><result status="valid" time="0.569811" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.17" expl="format_build ensures" proved="true">
+   <proof prover="2" timelimit="0.124137"><result status="valid" time="0.124137" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.18" expl="type invariant" proved="true">
+   <proof prover="2" timelimit="0.066422"><result status="valid" time="0.066422" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.19" expl="format_build ensures" proved="true">
+   <proof prover="3" timelimit="0.15869"><result status="valid" time="0.158690" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.20" expl="type invariant" proved="true">
+   <proof prover="2" timelimit="0.064582"><result status="valid" time="0.064582" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.21" expl="format_build ensures" proved="true">
+   <proof prover="3" timelimit="0.143543"><result status="valid" time="0.143543" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.22" expl="type invariant" proved="true">
+   <proof prover="2" timelimit="0.058702"><result status="valid" time="0.058702" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.23" expl="format_build ensures" proved="true">
+   <proof prover="2" timelimit="0.048247"><result status="valid" time="0.048247" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.24" expl="type invariant" proved="true">
+   <proof prover="2" timelimit="0.045663"><result status="valid" time="0.045663" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.25" expl="integer overflow" proved="true">
+   <proof prover="0" timelimit="0.078451"><result status="valid" time="0.078451" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.26" expl="division by zero" proved="true">
+   <proof prover="2" timelimit="0.095829"><result status="valid" time="0.095829" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.27" expl="division by zero" proved="true">
+   <proof prover="2" timelimit="0.109019"><result status="valid" time="0.109019" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.28" expl="division by zero" proved="true">
+   <proof prover="0" timelimit="0.097145"><result status="valid" time="0.097145" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.29" expl="integer overflow" proved="true">
+   <proof prover="2" timelimit="1.12118"><result status="valid" time="1.121178" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.30" expl="assertion" proved="true">
+   <proof prover="2" timelimit="1.21386"><result status="valid" time="1.213860" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.31" expl="assertion" proved="true">
+   <proof prover="2" timelimit="0.981073"><result status="valid" time="0.981073" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.32" expl="assertion" proved="true">
+   <proof prover="1" timelimit="0.159397"><result status="valid" time="0.159397" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.33" expl="assertion" proved="true">
+   <proof prover="2" timelimit="1.04161"><result status="valid" time="1.041614" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.34" expl="assertion" proved="true">
+   <proof prover="1" timelimit="0.200285"><result status="valid" time="0.200285" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.35" expl="assertion" proved="true">
+   <proof prover="2" timelimit="3.04029"><result status="valid" time="3.040287" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.36" expl="assertion">
+   <transf name="split_vc" >
+    <goal name="vc_format_build.0.36.0" expl="assertion" proved="true">
+    <proof prover="0" timelimit="0.109405"><result status="valid" time="0.109405" steps="0"/></proof>
+    </goal>
+    <goal name="vc_format_build.0.36.1" expl="assertion">
+    <transf name="split_vc" >
+     <goal name="vc_format_build.0.36.1.0" expl="assertion">
+     <transf name="split_vc" >
+      <goal name="vc_format_build.0.36.1.0.0" expl="assertion" proved="true">
+      <proof prover="1" timelimit="0.153846"><result status="valid" time="0.153846" steps="0"/></proof>
+      </goal>
+      <goal name="vc_format_build.0.36.1.0.1" expl="assertion">
+      <proof prover="0" timelimit="3.28514"><result status="unknown" time="3.285140" steps="0"/></proof>
+      <proof prover="1" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+      <proof prover="2" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+      <proof prover="3" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+      </goal>
+     </transf>
+     </goal>
+     <goal name="vc_format_build.0.36.1.1" expl="assertion" proved="true">
+     <proof prover="1" timelimit="0.136225"><result status="valid" time="0.136225" steps="0"/></proof>
+     </goal>
+    </transf>
+    </goal>
+   </transf>
+   </goal>
+   <goal name="vc_format_build.0.37" expl="integer overflow" proved="true">
+   <proof prover="0" timelimit="0.127751"><result status="valid" time="0.127751" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.38" expl="integer overflow" proved="true">
+   <proof prover="1" timelimit="0.163013"><result status="valid" time="0.163013" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.39" expl="format_build ensures" proved="true">
+   <proof prover="1" timelimit="0.165076"><result status="valid" time="0.165076" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.40" expl="type invariant" proved="true">
+   <proof prover="2" timelimit="0.108692"><result status="valid" time="0.108692" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.41" expl="integer overflow" proved="true">
+   <proof prover="1" timelimit="0.167741"><result status="valid" time="0.167741" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.42" expl="inferred invariant: type invariant" proved="true">
+   <proof prover="2" timelimit="0.137281"><result status="valid" time="0.137281" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.43" expl="loop invariant #0" proved="true">
+   <proof prover="0" timelimit="0.092154"><result status="valid" time="0.092154" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.44" expl="loop invariant #1" proved="true">
+   <proof prover="2" timelimit="0.14053"><result status="valid" time="0.140530" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.45" expl="loop invariant #2" proved="true">
+   <proof prover="0" timelimit="0.103874"><result status="valid" time="0.103874" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.46" expl="loop invariant #3" proved="true">
+   <proof prover="2" timelimit="0.134696"><result status="valid" time="0.134696" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.47" expl="loop invariant #4" proved="true">
+   <proof prover="2" timelimit="0.135364"><result status="valid" time="0.135364" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.48" expl="loop invariant #5" proved="true">
+   <proof prover="2" timelimit="0.138813"><result status="valid" time="0.138813" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.49" expl="loop invariant #6" proved="true">
+   <proof prover="2" timelimit="0.14204"><result status="valid" time="0.142040" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.50" expl="loop invariant #7" proved="true">
+   <proof prover="2" timelimit="0.145354"><result status="valid" time="0.145354" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.51" expl="region_extent requires" proved="true">
+   <proof prover="1"><result status="valid" time="0.258121" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.52" expl="new requires" proved="true">
+   <proof prover="2" timelimit="0.140547"><result status="valid" time="0.140547" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.53" expl="assertion" proved="true">
+   <proof prover="2" timelimit="0.185174"><result status="valid" time="0.185174" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.54" expl="assertion" proved="true">
+   <proof prover="2" timelimit="0.784511"><result status="valid" time="0.784511" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.55" expl="assertion" proved="true">
+   <proof prover="3" timelimit="0.228921"><result status="valid" time="0.228921" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.56" expl="assertion" proved="true">
+   <proof prover="0" timelimit="0.178641"><result status="valid" time="0.178641" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.57" expl="assertion" proved="true">
+   <proof prover="0" timelimit="0.122135"><result status="valid" time="0.122135" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.58" expl="assertion" proved="true">
+   <proof prover="3" timelimit="0.096139"><result status="valid" time="0.096139" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.59" expl="assertion" proved="true">
+   <proof prover="3" timelimit="0.264106"><result status="valid" time="0.264106" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.60" expl="push_RegionState requires" proved="true">
+   <proof prover="2" timelimit="0.154133"><result status="valid" time="0.154133" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.61" expl="assertion" proved="true">
+   <proof prover="0" timelimit="0.174936"><result status="valid" time="0.174936" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.62" expl="assertion" proved="true">
+   <proof prover="1" timelimit="0.480345"><result status="valid" time="0.480345" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.63" expl="assertion" proved="true">
+   <proof prover="1" timelimit="0.336682"><result status="valid" time="0.336682" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.64" expl="assertion" proved="true">
+   <proof prover="0" timelimit="0.183688"><result status="valid" time="0.183688" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.65" expl="assertion" proved="true">
+   <proof prover="2" timelimit="3.76437"><result status="valid" time="3.764366" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.66" expl="assertion" proved="true">
+   <proof prover="2" timelimit="3.18024"><result status="valid" time="3.180236" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.67" expl="assertion" proved="true">
+   <proof prover="0" timelimit="0.023962"><result status="valid" time="0.023962" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.68" expl="assertion" proved="true">
+   <proof prover="0" timelimit="0.02448"><result status="valid" time="0.024480" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.69" expl="assertion" proved="true">
+   <proof prover="2" timelimit="3.50934"><result status="valid" time="3.509337" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.70" expl="assertion" proved="true">
+   <proof prover="1" timelimit="0.22901"><result status="valid" time="0.229010" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.71" expl="assertion" proved="true">
+   <transf name="split_vc" proved="true" >
+    <goal name="vc_format_build.0.71.0" expl="assertion" proved="true">
+    <proof prover="2" timelimit="0.074055"><result status="valid" time="0.074055" steps="0"/></proof>
+    </goal>
+    <goal name="vc_format_build.0.71.1" expl="assertion" proved="true">
+    <transf name="split_vc" proved="true" >
+     <goal name="vc_format_build.0.71.1.0" expl="assertion" proved="true">
+     <proof prover="2" timelimit="3.87618"><result status="valid" time="3.876185" steps="0"/></proof>
+     </goal>
+     <goal name="vc_format_build.0.71.1.1" expl="assertion" proved="true">
+     <proof prover="2" timelimit="3.42752"><result status="valid" time="3.427519" steps="0"/></proof>
+     </goal>
+    </transf>
+    </goal>
+   </transf>
+   </goal>
+   <goal name="vc_format_build.0.72" expl="len &#39;self_&#39; type invariant" proved="true">
+   <proof prover="0" timelimit="0.016388"><result status="valid" time="0.016388" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.73" expl="integer overflow" proved="true">
+   <proof prover="1" timelimit="0.361739"><result status="valid" time="0.361739" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.74" expl="integer overflow" proved="true">
+   <proof prover="0" timelimit="0.133879"><result status="valid" time="0.133879" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.75" expl="inferred invariant: type invariant" proved="true">
+   <proof prover="0" timelimit="0.013191"><result status="valid" time="0.013191" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.76" expl="inferred invariant: unchanged value" proved="true">
+   <proof prover="0" timelimit="0.013777"><result status="valid" time="0.013777" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.77" expl="inferred invariant: unchanged value" proved="true">
+   <proof prover="0" timelimit="0.01817"><result status="valid" time="0.018170" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.78" expl="inferred invariant: unchanged value" proved="true">
+   <proof prover="0" timelimit="0.015534"><result status="valid" time="0.015534" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.79" expl="inferred invariant: unchanged value" proved="true">
+   <proof prover="0" timelimit="0.019722"><result status="valid" time="0.019722" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.80" expl="inferred invariant: unchanged value" proved="true">
+   <proof prover="0" timelimit="0.019016"><result status="valid" time="0.019016" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.81" expl="inferred invariant: unchanged value" proved="true">
+   <proof prover="2" timelimit="0.17226"><result status="valid" time="0.172260" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.82" expl="inferred invariant: unchanged value" proved="true">
+   <proof prover="2" timelimit="0.125098"><result status="valid" time="0.125098" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.83" expl="loop invariant #0" proved="true">
+   <proof prover="1" timelimit="0.412133"><result status="valid" time="0.412133" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.84" expl="loop invariant #1" proved="true">
+   <proof prover="3" timelimit="0.266731"><result status="valid" time="0.266731" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.85" expl="loop invariant #2" proved="true">
+   <proof prover="1" timelimit="0.578492"><result status="valid" time="0.578492" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.86" expl="loop invariant #3" proved="true">
+   <proof prover="3" timelimit="0.446218"><result status="valid" time="0.446218" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.87" expl="loop invariant #4" proved="true">
+   <proof prover="2" timelimit="1.14846"><result status="valid" time="1.148455" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.88" expl="loop invariant #5" proved="true">
+   <proof prover="2" timelimit="1.14632"><result status="valid" time="1.146322" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.89" expl="loop invariant #6" proved="true">
+   <proof prover="2" timelimit="0.908682"><result status="valid" time="0.908682" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.90" expl="loop invariant #7" proved="true">
+   <proof prover="0" timelimit="0.186912"><result status="valid" time="0.186912" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.91" expl="type invariant" proved="true">
+   <proof prover="0" timelimit="0.014834"><result status="valid" time="0.014834" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.92" expl="format_build ensures" proved="true">
+   <proof prover="1" timelimit="0.240089"><result status="valid" time="0.240089" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.93" expl="type invariant" proved="true">
+   <proof prover="2" timelimit="0.129972"><result status="valid" time="0.129972" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.94" expl="assertion" proved="true">
+   <proof prover="2" timelimit="0.132884"><result status="valid" time="0.132884" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.95" expl="assertion" proved="true">
+   <proof prover="2" timelimit="0.183055"><result status="valid" time="0.183055" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.96" expl="assertion" proved="true">
+   <proof prover="0" timelimit="0.102492"><result status="valid" time="0.102492" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.97" expl="assertion" proved="true">
+   <proof prover="2" timelimit="0.168072"><result status="valid" time="0.168072" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.98" expl="assertion" proved="true">
+   <proof prover="2" timelimit="0.670181"><result status="valid" time="0.670181" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.99" expl="elim Continue" proved="true">
+   <proof prover="0" timelimit="0.033109"><result status="valid" time="0.033109" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.100" expl="from_residual &#39;residual&#39; type invariant" proved="true">
+   <proof prover="0" timelimit="0.181745"><result status="valid" time="0.181745" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.101" expl="format_build ensures" proved="true">
+   <proof prover="3" timelimit="0.606283"><result status="valid" time="0.606283" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.102" expl="elim Break" proved="true">
+   <proof prover="0" timelimit="0.035244"><result status="valid" time="0.035244" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.103" expl="type invariant" proved="true">
+   <proof prover="2" timelimit="0.181241"><result status="valid" time="0.181241" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.104" expl="elim Some" proved="true">
+   <proof prover="0" timelimit="0.03864"><result status="valid" time="0.038640" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.105" expl="dev_write_superblock requires" proved="true">
+   <proof prover="0" timelimit="0.039278"><result status="valid" time="0.039278" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.106" expl="assertion" proved="true">
+   <proof prover="0" timelimit="0.014501"><result status="valid" time="0.014501" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.107" expl="assertion" proved="true">
+   <proof prover="3"><result status="valid" time="0.119378" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.108" expl="assertion" proved="true">
+   <proof prover="0" timelimit="0.042385"><result status="valid" time="0.042385" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.109" expl="assertion" proved="true">
+   <proof prover="3" timelimit="0.11392"><result status="valid" time="0.113920" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.110" expl="assertion" proved="true">
+   <transf name="split_vc" proved="true" >
+    <goal name="vc_format_build.0.110.0" expl="assertion" proved="true">
+    <proof prover="2" timelimit="1.94345"><result status="valid" time="1.943446" steps="0"/></proof>
+    </goal>
+    <goal name="vc_format_build.0.110.1" expl="assertion" proved="true">
+    <proof prover="2" timelimit="2.1129"><result status="valid" time="2.112901" steps="0"/></proof>
+    </goal>
+   </transf>
+   </goal>
+   <goal name="vc_format_build.0.111" expl="format_build ensures" proved="true">
+   <transf name="split_vc" proved="true" >
+    <goal name="vc_format_build.0.111.0" expl="format_build ensures #0 (format_build ensures)" proved="true">
+    <proof prover="0" timelimit="0.009752"><result status="valid" time="0.009752" steps="0"/></proof>
+    </goal>
+    <goal name="vc_format_build.0.111.1" expl="format_build ensures #1 (format_build ensures)" proved="true">
+    <proof prover="0" timelimit="0.0398"><result status="valid" time="0.039800" steps="0"/></proof>
+    </goal>
+    <goal name="vc_format_build.0.111.2" expl="format_build ensures #2 (format_build ensures)" proved="true">
+    <proof prover="0" timelimit="0.135356"><result status="valid" time="0.135356" steps="0"/></proof>
+    </goal>
+    <goal name="vc_format_build.0.111.3" expl="format_build ensures #3 (format_build ensures)" proved="true">
+    <proof prover="0" timelimit="0.11977"><result status="valid" time="0.119770" steps="0"/></proof>
+    </goal>
+    <goal name="vc_format_build.0.111.4" expl="format_build ensures #4 (format_build ensures)" proved="true">
+    <proof prover="3" timelimit="0.823267"><result status="valid" time="0.823267" steps="0"/></proof>
+    </goal>
+    <goal name="vc_format_build.0.111.5" expl="format_build ensures #5 (format_build ensures)" proved="true">
+    <transf name="split_vc" proved="true" >
+     <goal name="vc_format_build.0.111.5.0" expl="format_build ensures #5" proved="true">
+     <proof prover="0" timelimit="0.172738"><result status="valid" time="0.172738" steps="0"/></proof>
+     </goal>
+     <goal name="vc_format_build.0.111.5.1" expl="format_build ensures #5" proved="true">
+     <proof prover="1" timelimit="0.352411"><result status="valid" time="0.352411" steps="0"/></proof>
+     </goal>
+     <goal name="vc_format_build.0.111.5.2" expl="format_build ensures #5" proved="true">
+     <proof prover="1" timelimit="0.352313"><result status="valid" time="0.352313" steps="0"/></proof>
+     </goal>
+     <goal name="vc_format_build.0.111.5.3" expl="format_build ensures #5" proved="true">
+     <proof prover="1" timelimit="0.245068"><result status="valid" time="0.245068" steps="0"/></proof>
+     </goal>
+     <goal name="vc_format_build.0.111.5.4" expl="format_build ensures #5" proved="true">
+     <transf name="split_vc" proved="true" >
+      <goal name="vc_format_build.0.111.5.4.0" expl="format_build ensures #5" proved="true">
+      <proof prover="2" timelimit="1.85712"><result status="valid" time="1.857125" steps="0"/></proof>
+      </goal>
+      <goal name="vc_format_build.0.111.5.4.1" expl="format_build ensures #5" proved="true">
+      <proof prover="2" timelimit="1.78813"><result status="valid" time="1.788129" steps="0"/></proof>
+      </goal>
+     </transf>
+     </goal>
+     <goal name="vc_format_build.0.111.5.5" expl="format_build ensures #5" proved="true">
+     <proof prover="1" timelimit="0.28899"><result status="valid" time="0.288990" steps="0"/></proof>
+     </goal>
+     <goal name="vc_format_build.0.111.5.6" expl="format_build ensures #5" proved="true">
+     <proof prover="0" timelimit="0.086418"><result status="valid" time="0.086418" steps="0"/></proof>
+     </goal>
+     <goal name="vc_format_build.0.111.5.7" expl="format_build ensures #5" proved="true">
+     <proof prover="0"><result status="valid" time="0.022781" steps="0"/></proof>
+     </goal>
+     <goal name="vc_format_build.0.111.5.8" expl="format_build ensures #5" proved="true">
+     <proof prover="0" timelimit="0.070017"><result status="valid" time="0.070017" steps="0"/></proof>
+     </goal>
+     <goal name="vc_format_build.0.111.5.9" expl="format_build ensures #5" proved="true">
+     <transf name="split_vc" proved="true" >
+      <goal name="vc_format_build.0.111.5.9.0" expl="format_build ensures #5" proved="true">
+      <proof prover="2" timelimit="1.31299"><result status="valid" time="1.312993" steps="0"/></proof>
+      </goal>
+      <goal name="vc_format_build.0.111.5.9.1" expl="format_build ensures #5" proved="true">
+      <proof prover="2" timelimit="2.12657"><result status="valid" time="2.126570" steps="0"/></proof>
+      </goal>
+     </transf>
+     </goal>
+    </transf>
+    </goal>
+    <goal name="vc_format_build.0.111.6" expl="format_build ensures #6 (format_build ensures)" proved="true">
+    <transf name="split_vc" proved="true" >
+     <goal name="vc_format_build.0.111.6.0" expl="format_build ensures #6" proved="true">
+     <proof prover="0" timelimit="0.014523"><result status="valid" time="0.014523" steps="0"/></proof>
+     </goal>
+     <goal name="vc_format_build.0.111.6.1" expl="format_build ensures #6" proved="true">
+     <proof prover="0" timelimit="0.085911"><result status="valid" time="0.085911" steps="0"/></proof>
+     </goal>
+     <goal name="vc_format_build.0.111.6.2" expl="format_build ensures #6" proved="true">
+     <proof prover="3" timelimit="0.388216"><result status="valid" time="0.388216" steps="0"/></proof>
+     </goal>
+     <goal name="vc_format_build.0.111.6.3" expl="format_build ensures #6" proved="true">
+     <proof prover="1" timelimit="0.258925"><result status="valid" time="0.258925" steps="0"/></proof>
+     </goal>
+     <goal name="vc_format_build.0.111.6.4" expl="format_build ensures #6" proved="true">
+     <proof prover="0" timelimit="0.007795"><result status="valid" time="0.007795" steps="0"/></proof>
+     </goal>
+     <goal name="vc_format_build.0.111.6.5" expl="format_build ensures #6" proved="true">
+     <proof prover="0" timelimit="0.008926"><result status="valid" time="0.008926" steps="0"/></proof>
+     </goal>
+     <goal name="vc_format_build.0.111.6.6" expl="format_build ensures #6" proved="true">
+     <proof prover="0" timelimit="0.009903"><result status="valid" time="0.009903" steps="0"/></proof>
+     </goal>
+     <goal name="vc_format_build.0.111.6.7" expl="format_build ensures #6" proved="true">
+     <proof prover="0" timelimit="0.007968"><result status="valid" time="0.007968" steps="0"/></proof>
+     </goal>
+     <goal name="vc_format_build.0.111.6.8" expl="format_build ensures #6" proved="true">
+     <proof prover="2" timelimit="0.129626"><result status="valid" time="0.129626" steps="0"/></proof>
+     </goal>
+     <goal name="vc_format_build.0.111.6.9" expl="format_build ensures #6" proved="true">
+     <proof prover="2" timelimit="0.106283"><result status="valid" time="0.106283" steps="0"/></proof>
+     </goal>
+     <goal name="vc_format_build.0.111.6.10" expl="format_build ensures #6" proved="true">
+     <proof prover="0" timelimit="0.00802"><result status="valid" time="0.008020" steps="0"/></proof>
+     </goal>
+     <goal name="vc_format_build.0.111.6.11" expl="format_build ensures #6" proved="true">
+     <proof prover="0" timelimit="0.009396"><result status="valid" time="0.009396" steps="0"/></proof>
+     </goal>
+     <goal name="vc_format_build.0.111.6.12" expl="format_build ensures #6" proved="true">
+     <proof prover="0" timelimit="0.011323"><result status="valid" time="0.011323" steps="0"/></proof>
+     </goal>
+     <goal name="vc_format_build.0.111.6.13" expl="format_build ensures #6" proved="true">
+     <proof prover="0" timelimit="0.037632"><result status="valid" time="0.037632" steps="0"/></proof>
+     </goal>
+     <goal name="vc_format_build.0.111.6.14" expl="format_build ensures #6" proved="true">
+     <proof prover="2" timelimit="1.24478"><result status="valid" time="1.244781" steps="0"/></proof>
+     </goal>
+     <goal name="vc_format_build.0.111.6.15" expl="format_build ensures #6" proved="true">
+     <proof prover="1" timelimit="0.286136"><result status="valid" time="0.286136" steps="0"/></proof>
+     </goal>
+     <goal name="vc_format_build.0.111.6.16" expl="format_build ensures #6" proved="true">
+     <proof prover="2" timelimit="1.80626"><result status="valid" time="1.806256" steps="0"/></proof>
+     </goal>
+     <goal name="vc_format_build.0.111.6.17" expl="format_build ensures #6" proved="true">
+     <proof prover="2" timelimit="0.995165"><result status="valid" time="0.995165" steps="0"/></proof>
+     </goal>
+     <goal name="vc_format_build.0.111.6.18" expl="format_build ensures #6" proved="true">
+     <proof prover="3" timelimit="0.384738"><result status="valid" time="0.384738" steps="0"/></proof>
+     </goal>
+     <goal name="vc_format_build.0.111.6.19" expl="format_build ensures #6" proved="true">
+     <proof prover="0" timelimit="0.09891"><result status="valid" time="0.098910" steps="0"/></proof>
+     </goal>
+    </transf>
+    </goal>
+   </transf>
+   </goal>
+   <goal name="vc_format_build.0.112" expl="from_residual &#39;residual&#39; type invariant" proved="true">
+   <proof prover="0" timelimit="0.160476"><result status="valid" time="0.160476" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.113" expl="format_build ensures" proved="true">
+   <proof prover="3" timelimit="0.82336"><result status="valid" time="0.823360" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.114" expl="elim Break" proved="true">
+   <proof prover="0" timelimit="0.023815"><result status="valid" time="0.023815" steps="0"/></proof>
+   </goal>
+   <goal name="vc_format_build.0.115" expl="type invariant" proved="true">
+   <proof prover="0" timelimit="0.108693"><result status="valid" time="0.108693" steps="0"/></proof>
+   </goal>
+  </transf>
+  </goal>
+ </transf>
+ </goal>
+</theory>
+</file>
+</why3session>

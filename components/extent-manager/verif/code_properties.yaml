@@ -1,0 +1,1876 @@
+# Blind code-only property extraction for the extent-manager component.
+# Read: components/extent-manager/src/*.rs, components/extent-manager/tests/*.rs,
+# the component's own interface declaration (interfaces/src/iextent_manager.rs) and the
+# declarations of the consumed interfaces (interfaces/src/iblock_device.rs, interfaces/src/ilogger.rs).
+# Not read: specs, README, info, other components' implementations, any spec-side property file.
+# Every statement is a requirement the code should meet; suspicions are recorded in note fields only.
+# Trace line numbers are file-relative to the file named in the trace (src/ unless tests/ or interfaces/).
+component: extent-manager
+source: code
+artifact: components/extent-manager/src/*.rs, components/extent-manager/tests/*.rs, components/interfaces/src/iextent_manager.rs (consumed contracts from components/interfaces/src/iblock_device.rs, components/interfaces/src/ilogger.rs)
+pin: 2cd35bac
+method: blind-extraction
+generated: 2026-10-04
+counts: {total: 199, methods: 14, verifiable: 185, not_verifiable: 14}
+properties:
+
+  # ------------------------------------------------------------------ format
+  - id: EM-FORMAT-ERR-DEVICE-NOT-CONNECTED
+    subject: format
+    kind: error-case
+    verifiable: true
+    statement: >
+      If no metadata block device has been connected, format fails with a NotInitialized error
+      and the component's state is left unchanged.
+    traces: ["lib.rs:406-409"]
+
+  - id: EM-FORMAT-ERR-SECTOR-ZERO
+    subject: format
+    kind: error-case
+    verifiable: true
+    statement: >
+      format rejects a sector size of zero with a CorruptMetadata error.
+    traces: ["lib.rs:384-386"]
+
+  - id: EM-FORMAT-ERR-SLAB-NOT-SECTOR-MULTIPLE
+    subject: format
+    kind: error-case
+    verifiable: true
+    statement: >
+      format rejects a slab size that is not an exact multiple of the sector size with a
+      CorruptMetadata error.
+    traces: ["lib.rs:387-391", "interfaces/src/iextent_manager.rs:45"]
+
+  - id: EM-FORMAT-ERR-MAX-EXTENT-GT-SLAB
+    subject: format
+    kind: error-case
+    verifiable: true
+    statement: >
+      format rejects a maximum extent size that is larger than the slab size with a
+      CorruptMetadata error; a maximum extent size equal to the slab size is accepted.
+    traces: ["lib.rs:392-396", "interfaces/src/iextent_manager.rs:47"]
+
+  - id: EM-FORMAT-ERR-REGION-COUNT-NOT-POW2
+    subject: format
+    kind: error-case
+    verifiable: true
+    statement: >
+      format rejects a region count that is zero or not a power of two with a CorruptMetadata
+      error.
+    traces: ["lib.rs:397-401", "interfaces/src/iextent_manager.rs:51"]
+
+  - id: EM-FORMAT-ERR-DEVICE-QUERY
+    subject: format
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the metadata device cannot report its sector count or sector size for the configured
+      metadata namespace, format fails with an IoError and the component's state is left
+      unchanged.
+    traces: ["lib.rs:410-415", "error.rs:23-25"]
+
+  - id: EM-FORMAT-ERR-METADATA-TOO-SMALL
+    subject: format
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the metadata space available after the superblock (capped by the metadata region size
+      when that is non-zero) is too small to hold two checkpoint copies of at least one sector
+      each, format fails with a CorruptMetadata error.
+    traces: ["lib.rs:425-438"]
+
+  - id: EM-FORMAT-ERR-NO-USABLE-DATA
+    subject: format
+    kind: error-case
+    verifiable: true
+    statement: >
+      If no data space remains after the metadata reservation (the data disk is not larger than
+      the data start offset), format fails with a CorruptMetadata error.
+    traces: ["lib.rs:447-452"]
+
+  - id: EM-FORMAT-ERR-INSTANCE-ID-GENERATION
+    subject: format
+    kind: error-case
+    verifiable: true
+    statement: >
+      When no instance id is supplied and a random one cannot be generated, format fails with an
+      IoError and the component's state is left unchanged.
+    traces: ["lib.rs:471-481"]
+
+  - id: EM-FORMAT-ERR-SUPERBLOCK-WRITE
+    subject: format
+    kind: error-case
+    verifiable: true
+    statement: >
+      If writing the new superblock to the metadata device fails, format returns an IoError and
+      the component does not adopt the new layout.
+    traces: ["lib.rs:496-498", "block_io.rs:49-108"]
+
+  - id: EM-FORMAT-FRAME-ON-ERROR
+    subject: format
+    kind: frame
+    verifiable: true
+    statement: >
+      When format fails for any reason, the component's in-memory state (whether it was
+      uninitialized or holding a previous layout and its extents) is exactly what it was before
+      the call.
+    traces: ["lib.rs:383-512", "lib.rs:506-507"]
+
+  - id: EM-FORMAT-POST-NO-EXTENTS
+    subject: format
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After format succeeds, the component lists no extents, even if extents existed before the
+      call.
+    traces: ["lib.rs:454-468", "lib.rs:506"]
+
+  - id: EM-FORMAT-POST-USED-ZERO
+    subject: format
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Immediately after format succeeds, the number of bytes reported as used is zero.
+    traces: ["lib.rs:454-468", "lib.rs:698-708", "buddy.rs:10-46"]
+    note: >
+      Region sizes are usable size divided by region count and need not be whole sectors; the
+      allocator only tracks whole sectors, so a non-sector-multiple region may report a non-zero
+      used figure on a fresh format.
+
+  - id: EM-FORMAT-POST-CAPACITY
+    subject: format
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After format succeeds, the reported capacity equals the data disk size minus the data
+      start offset, that is, the regions together cover the whole usable data area.
+    traces: ["lib.rs:447", "lib.rs:455-464", "lib.rs:710-715"]
+
+  - id: EM-FORMAT-POST-REGION-PARTITION
+    subject: format
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After format succeeds there are exactly region-count regions; they are contiguous,
+      non-overlapping, start at the data start offset, and together end exactly at the data disk
+      size, with every region except the last having the same size.
+    traces: ["lib.rs:454-468"]
+
+  - id: EM-FORMAT-POST-INSTANCE-ID-GIVEN
+    subject: format
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When format is given an explicit instance id and succeeds, get_instance_id returns exactly
+      that id.
+    traces: ["lib.rs:471-473", "lib.rs:686-692"]
+
+  - id: EM-FORMAT-POST-INSTANCE-ID-GENERATED
+    subject: format
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When format generates an instance id, the id returned by get_instance_id is the same id
+      that was written to the persisted superblock, so a later initialize reports the same id.
+    traces: ["lib.rs:474-481", "lib.rs:483-498", "interfaces/src/iextent_manager.rs:57-59"]
+
+  - id: EM-FORMAT-POST-PERSISTED-EMPTY
+    subject: format
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After format succeeds, a fresh component connected to the same metadata device can
+      initialize successfully and then lists no extents and reports the same instance id and
+      capacity.
+    traces: ["lib.rs:483-498", "superblock.rs:48-49", "recovery.rs:18-21"]
+
+  - id: EM-FORMAT-POST-CHECKPOINT-OFFSET
+    subject: format
+    kind: postcondition
+    verifiable: true
+    statement: >
+      The first checkpoint copy starts at the smallest multiple of the metadata alignment that is
+      at least the superblock size, or directly after the superblock when the alignment is zero.
+    traces: ["lib.rs:418-424", "interfaces/src/iextent_manager.rs:53-55"]
+
+  - id: EM-FORMAT-POST-METADATA-FITS
+    subject: format
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After format, the superblock and the two checkpoint copies lie entirely within the metadata
+      device and, when a non-zero metadata region size is configured, within that region size;
+      the two checkpoint copies do not overlap each other or the superblock.
+    traces: ["lib.rs:425-432", "interfaces/src/iextent_manager.rs:62-66"]
+
+  - id: EM-FORMAT-POST-DATA-START
+    subject: format
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When a non-zero metadata region size is configured, the data area starts immediately after
+      the second checkpoint copy; when it is zero, the data area starts at offset zero.
+    traces: ["lib.rs:440-446"]
+
+  - id: EM-FORMAT-FRAME-STALE-HANDLES
+    subject: format
+    kind: frame
+    verifiable: true
+    statement: >
+      Publishing, aborting or dropping a write handle that was reserved before a successful
+      format (or initialize) has no effect on the extents, used bytes or space of the new layout.
+    traces: ["lib.rs:506", "lib.rs:594-621"]
+
+  # -------------------------------------------------------------- initialize
+  - id: EM-INIT-ERR-DEVICE-NOT-CONNECTED
+    subject: initialize
+    kind: error-case
+    verifiable: true
+    statement: >
+      If no metadata block device has been connected, initialize fails with a NotInitialized
+      error and the component's state is left unchanged.
+    traces: ["lib.rs:185-189", "lib.rs:518"]
+
+  - id: EM-INIT-ERR-IO
+    subject: initialize
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the metadata device fails while the superblock or a checkpoint is being read, initialize
+      returns an IoError rather than recovering partial state.
+    traces: ["recovery.rs:15", "block_io.rs:110-155"]
+
+  - id: EM-INIT-ERR-SUPERBLOCK-INVALID
+    subject: initialize
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the persisted superblock is shorter than one superblock, has the wrong magic number, or
+      fails its checksum, initialize fails with a CorruptMetadata error.
+    traces: ["recovery.rs:15-16", "superblock.rs:100-112", "superblock.rs:143-150"]
+
+  - id: EM-INIT-ERR-SUPERBLOCK-VERSION
+    subject: initialize
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the persisted superblock carries a format version other than the one this code writes,
+      initialize fails with a CorruptMetadata error instead of interpreting the layout.
+    traces: ["superblock.rs:6", "superblock.rs:114-115"]
+    note: >
+      The version field is read but never compared; this requirement was derived from the
+      presence of FORMAT_VERSION.
+
+  - id: EM-INIT-ERR-SUPERBLOCK-GEOMETRY
+    subject: initialize
+    kind: error-case
+    verifiable: true
+    statement: >
+      If a checksum-valid superblock describes an impossible geometry (sector size zero, region
+      count zero or not a power of two, slab size not a multiple of the sector size, or a data
+      start offset beyond the data disk size), initialize fails with a CorruptMetadata error and
+      never crashes.
+    traces: ["lib.rs:533-545", "lib.rs:243", "buddy.rs:11"]
+    note: >
+      The format-time checks are not repeated on recovery; region_count zero divides by zero at
+      lib.rs:536 and a data start beyond the disk underflows at lib.rs:243.
+
+  - id: EM-INIT-POST-NEVER-CHECKPOINTED
+    subject: initialize
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When the persisted superblock records that no checkpoint has ever been written, initialize
+      succeeds and the component lists no extents.
+    traces: ["recovery.rs:18-21"]
+
+  - id: EM-INIT-POST-ACTIVE-CHECKPOINT
+    subject: initialize
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When the checkpoint copy named active by the superblock is valid, after initialize the
+      component lists exactly the extents recorded in that checkpoint, each with its recorded
+      key, offset and size.
+    traces: ["recovery.rs:29-37", "lib.rs:546-565", "recovery.rs:76-85"]
+
+  - id: EM-INIT-POST-FALLBACK
+    subject: initialize
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When the active checkpoint copy is invalid but the other copy holds a valid checkpoint with
+      the immediately preceding sequence number, initialize succeeds and the component lists
+      exactly the extents recorded in that previous checkpoint.
+    traces: ["recovery.rs:39-58"]
+
+  - id: EM-INIT-ERR-BOTH-COPIES-INVALID
+    subject: initialize
+    kind: error-case
+    verifiable: true
+    statement: >
+      When the active checkpoint copy is invalid and no valid previous checkpoint exists in the
+      other copy (including when the active one is the very first checkpoint), initialize fails
+      with a CorruptMetadata error.
+    traces: ["recovery.rs:48-70"]
+
+  - id: EM-INIT-ERR-PAYLOAD-MALFORMED
+    subject: initialize
+    kind: error-case
+    verifiable: true
+    statement: >
+      If a checkpoint passes its checksum but its contents are truncated (missing region count,
+      slab count, slab header or slot keys), initialize fails with a CorruptMetadata error.
+    traces: ["recovery.rs:36", "recovery.rs:57", "checkpoint.rs:186-221"]
+
+  - id: EM-INIT-ERR-DESCRIPTOR-INCONSISTENT
+    subject: initialize
+    kind: error-case
+    verifiable: true
+    statement: >
+      If a recovered checkpoint describes a slab that is internally inconsistent (element size
+      zero, number of keys different from the number of slots its sizes imply, lying outside its
+      region, or overlapping another slab), initialize fails with a CorruptMetadata error rather
+      than crashing or silently accepting it.
+    traces: ["recovery.rs:76-85", "lib.rs:552-565", "buddy.rs:117-157", "slab.rs:17-27"]
+    note: >
+      slab_from_descriptor indexes the bitmap by the key vector position, and mark_allocated
+      silently ignores a range it cannot find in its free lists.
+
+  - id: EM-INIT-ERR-REGION-COUNT-MISMATCH
+    subject: initialize
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the recovered checkpoint records a number of regions different from the superblock's
+      region count, initialize fails with a CorruptMetadata error rather than dropping or
+      inventing regions.
+    traces: ["lib.rs:546-550", "checkpoint.rs:192-197"]
+
+  - id: EM-INIT-POST-INSTANCE-ID
+    subject: initialize
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After initialize succeeds, get_instance_id returns the instance id stored in the persisted
+      superblock.
+    traces: ["lib.rs:528", "lib.rs:570-577", "lib.rs:686-692"]
+
+  - id: EM-INIT-POST-CAPACITY
+    subject: initialize
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After initialize succeeds, the reported capacity equals the data disk size minus the data
+      start offset recorded in the superblock, the same value reported right after the original
+      format.
+    traces: ["lib.rs:533-545"]
+
+  - id: EM-INIT-POST-USED
+    subject: initialize
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After initialize succeeds, the reported used bytes equal the used bytes the component
+      reported right after the recovered checkpoint completed.
+    traces: ["lib.rs:552-555", "lib.rs:312-321"]
+    note: >
+      Slabs whose slots were all pending-free or reservation-only at checkpoint time are written
+      to the checkpoint and re-reserved on recovery even if they hold no extents.
+
+  - id: EM-INIT-POST-NO-OVERLAP-WITH-RECOVERED
+    subject: initialize
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After initialize, no newly reserved extent overlaps the disk range of any recovered extent.
+    traces: ["lib.rs:552-555", "recovery.rs:76-85"]
+
+  - id: EM-INIT-POST-UNPUBLISHED-NOT-RECOVERED
+    subject: initialize
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A reservation that had not been published when a checkpoint was taken does not appear as an
+      extent after recovering from that checkpoint, and its slot is available for new
+      reservations.
+    traces: ["checkpoint.rs:27-29", "recovery.rs:79-84"]
+
+  - id: EM-INIT-POST-CONTINUE
+    subject: initialize
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After initialize succeeds, a subsequent change followed by a successful checkpoint is
+      recovered by the next initialize, that is, checkpointing continues correctly from the
+      recovered sequence number.
+    traces: ["lib.rs:570-574", "checkpoint.rs:58-67"]
+
+  - id: EM-INIT-FRAME-ON-ERROR
+    subject: initialize
+    kind: frame
+    verifiable: true
+    statement: >
+      When initialize fails for any reason, the component's in-memory state is exactly what it
+      was before the call.
+    traces: ["lib.rs:514-582", "lib.rs:576-577"]
+
+  - id: EM-INIT-NO-STALE-FORMAT
+    subject: initialize
+    kind: postcondition
+    verifiable: true
+    statement: >
+      initialize never returns extents from a checkpoint that was written under an earlier
+      format of the same metadata device.
+    traces: ["recovery.rs:29-66", "checkpoint.rs:136-140"]
+    note: >
+      Checkpoint copies are identified only by sequence number and CRC; the instance id is not
+      part of the checkpoint header.
+
+  # ----------------------------------------------------------- reserve_extent
+  - id: EM-RESERVE-ERR-NOT-INIT
+    subject: reserve_extent
+    kind: error-case
+    verifiable: true
+    statement: >
+      Before the component has been formatted or initialized, reserve_extent fails with a
+      NotInitialized error.
+    traces: ["lib.rs:211-218", "lib.rs:585"]
+
+  - id: EM-RESERVE-POST-HANDLE-FIELDS
+    subject: reserve_extent
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When reserve_extent succeeds, the returned handle reports the requested key, and an extent
+      size equal to the requested size rounded up to the next multiple of the sector size (at
+      least the requested size and less than the requested size plus one sector).
+    traces: ["lib.rs:587-592", "lib.rs:623-629", "region.rs:37-42"]
+
+  - id: EM-RESERVE-POST-IN-DATA-AREA
+    subject: reserve_extent
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A reserved extent starts at or after the data start offset and ends at or before the data
+      disk size, so it never overlaps the metadata area or runs past the end of the data disk.
+    traces: ["region.rs:72-91", "buddy.rs:57-82", "lib.rs:457-468"]
+
+  - id: EM-RESERVE-POST-REGION-BY-KEY
+    subject: reserve_extent
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A reserved extent lies inside the region selected by the key, namely region number key
+      modulo the region count.
+    traces: ["lib.rs:219", "lib.rs:585"]
+
+  - id: EM-RESERVE-POST-NO-OVERLAP
+    subject: reserve_extent
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A newly reserved extent does not overlap any other extent that is currently reserved,
+      published, or removed but not yet released by a checkpoint.
+    traces: ["region.rs:41-92", "slab.rs:29-35", "bitmap.rs:42-51"]
+
+  - id: EM-RESERVE-POST-SECTOR-ALIGNED
+    subject: reserve_extent
+    kind: postcondition
+    verifiable: true
+    statement: >
+      The offset of every reserved extent is a multiple of the sector size.
+    traces: ["lib.rs:459", "buddy.rs:28-37", "slab.rs:58-60"]
+    note: >
+      Region bases are data_start_offset plus i times usable/region_count, neither of which is
+      forced to a sector multiple.
+
+  - id: EM-RESERVE-POST-NOT-VISIBLE
+    subject: reserve_extent
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A reserved but not yet published extent is not listed by get_extents or for_each_extent.
+    traces: ["slab.rs:24", "lib.rs:641-643", "lib.rs:665-666"]
+
+  - id: EM-RESERVE-FRAME
+    subject: reserve_extent
+    kind: frame
+    verifiable: true
+    statement: >
+      reserve_extent does not change the set of listed extents, the reported capacity, or the
+      persisted metadata.
+    traces: ["lib.rs:584-630", "region.rs:41-92"]
+
+  - id: EM-RESERVE-ERR-OUT-OF-SPACE
+    subject: reserve_extent
+    kind: error-case
+    verifiable: true
+    statement: >
+      When the key's region has no free slot of the required size and no room for a new slab,
+      reserve_extent fails with an OutOfSpace error.
+    traces: ["region.rs:72-75", "region.rs:78-83"]
+
+  - id: EM-RESERVE-FRAME-ON-ERROR
+    subject: reserve_extent
+    kind: frame
+    verifiable: true
+    statement: >
+      When reserve_extent fails, the used bytes, the listed extents and the space available for
+      later reservations are the same as before the call.
+    traces: ["region.rs:68-83"]
+
+  - id: EM-RESERVE-ERR-OVERSIZE
+    subject: reserve_extent
+    kind: error-case
+    verifiable: true
+    statement: >
+      reserve_extent rejects a size larger than the configured maximum extent size with an error
+      and reserves nothing.
+    traces: ["region.rs:66-70", "interfaces/src/iextent_manager.rs:47"]
+    note: >
+      The code compares the aligned size against slab_size, not max_extent_size.
+
+  - id: EM-RESERVE-ERR-ZERO-SIZE
+    subject: reserve_extent
+    kind: error-case
+    verifiable: true
+    statement: >
+      reserve_extent with a size of zero fails with an error, reserves nothing and does not crash.
+    traces: ["region.rs:42", "slab.rs:18"]
+    note: >
+      An element size of zero reaches Slab::new, which divides by it.
+
+  - id: EM-RESERVE-NO-SIZE-OVERFLOW
+    subject: reserve_extent
+    kind: error-case
+    verifiable: true
+    statement: >
+      reserve_extent with a size so large that rounding it up to a whole number of sectors would
+      overflow fails with an error and does not crash or reserve a smaller extent.
+    traces: ["region.rs:37-39", "lib.rs:591"]
+
+  - id: EM-RESERVE-NO-SPURIOUS-OUT-OF-SPACE
+    subject: reserve_extent
+    kind: postcondition
+    verifiable: true
+    statement: >
+      reserve_extent does not report OutOfSpace while some slab in the key's region with the
+      required element size still has a free slot.
+    traces: ["region.rs:47-64", "region.rs:108-111", "lib.rs:563"]
+
+  # -------------------------------------------- WriteHandle publish / abort / drop
+  - id: EM-PUBLISH-POST-VISIBLE
+    subject: WriteHandle::publish
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After publishing a handle with an ordinary key, get_extents lists exactly one extent with
+      that handle's key, offset and size.
+    traces: ["lib.rs:597-616", "region.rs:114-119", "interfaces/src/iextent_manager.rs:132-139"]
+
+  - id: EM-PUBLISH-POST-RETURN
+    subject: WriteHandle::publish
+    kind: postcondition
+    verifiable: true
+    statement: >
+      publish returns an extent whose key, offset and size equal the values the handle reported.
+    traces: ["lib.rs:603-615", "lib.rs:623-629"]
+
+  - id: EM-PUBLISH-POST-PERSISTED-BY-CHECKPOINT
+    subject: WriteHandle::publish
+    kind: postcondition
+    verifiable: true
+    statement: >
+      An extent that was published before a successful checkpoint is listed, with the same key,
+      offset and size, after a fresh component recovers from the metadata device.
+    traces: ["region.rs:118", "lib.rs:281-286", "checkpoint.rs:15-33"]
+
+  - id: EM-PUBLISH-FREE-KEY-DISCARD
+    subject: WriteHandle::publish
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Publishing a handle whose key is the reserved value u64::MAX succeeds and returns an extent
+      with that key, but the extent is not listed and its slot is released for reuse.
+    traces: ["lib.rs:600-608", "slab.rs:5"]
+
+  - id: EM-PUBLISH-NO-LATE-ABORT
+    subject: WriteHandle::publish
+    kind: frame
+    verifiable: true
+    statement: >
+      Once a handle has been published, dropping it does not release or remove the published
+      extent.
+    traces: ["interfaces/src/iextent_manager.rs:137", "interfaces/src/iextent_manager.rs:149-155"]
+
+  - id: EM-PUBLISH-FRAME
+    subject: WriteHandle::publish
+    kind: frame
+    verifiable: true
+    statement: >
+      Publishing one handle does not change the key, offset or size of any other listed extent.
+    traces: ["region.rs:114-119"]
+
+  - id: EM-ABORT-POST-REUSABLE
+    subject: WriteHandle::abort
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After a handle is aborted its space is immediately available to new reservations, without
+      waiting for a checkpoint, and it is never listed as an extent.
+    traces: ["lib.rs:618-621", "region.rs:94-112", "interfaces/src/iextent_manager.rs:141-146"]
+
+  - id: EM-ABORT-POST-USED-RESTORED
+    subject: WriteHandle::abort
+    kind: postcondition
+    verifiable: true
+    statement: >
+      If nothing else happens in between, the used bytes after aborting a reservation equal the
+      used bytes before that reservation was made.
+    traces: ["region.rs:104-107", "lib.rs:698-708"]
+
+  - id: EM-DROP-HANDLE-ABORTS
+    subject: WriteHandle::drop
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Dropping a handle that was neither published nor aborted has the same effect as aborting
+      it, and does not crash.
+    traces: ["interfaces/src/iextent_manager.rs:149-155", "lib.rs:618-621"]
+
+  # ------------------------------------------------------------ get_extents
+  - id: EM-GET-EXTENTS-UNINIT-EMPTY
+    subject: get_extents
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Before the component is formatted or initialized, get_extents returns an empty list.
+    traces: ["lib.rs:654"]
+
+  - id: EM-GET-EXTENTS-EXACT
+    subject: get_extents
+    kind: postcondition
+    verifiable: true
+    statement: >
+      get_extents returns exactly the extents that have been published (or recovered) and not
+      removed, each exactly once, with the key, offset and size that publish returned; removed
+      extents are excluded even before the next checkpoint.
+    traces: ["lib.rs:632-656", "region.rs:143-146"]
+
+  - id: EM-GET-EXTENTS-FRAME
+    subject: get_extents
+    kind: frame
+    verifiable: true
+    statement: >
+      get_extents does not change the component's state.
+    traces: ["lib.rs:632-656"]
+
+  # -------------------------------------------------------- for_each_extent
+  - id: EM-FOREACH-SAME-AS-GET
+    subject: for_each_extent
+    kind: postcondition
+    verifiable: true
+    statement: >
+      for_each_extent calls the callback exactly once for each extent that get_extents would
+      return at the same moment, with the same key, offset and size, and for no other extent.
+    traces: ["lib.rs:658-678"]
+
+  - id: EM-FOREACH-UNINIT-NO-CALLS
+    subject: for_each_extent
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Before the component is formatted or initialized, for_each_extent never calls the callback.
+    traces: ["lib.rs:660"]
+
+  - id: EM-FOREACH-FRAME
+    subject: for_each_extent
+    kind: frame
+    verifiable: true
+    statement: >
+      for_each_extent does not itself change the component's state.
+    traces: ["lib.rs:658-678"]
+
+  # ---------------------------------------------------------- remove_extent
+  - id: EM-REMOVE-ERR-NOT-INIT
+    subject: remove_extent
+    kind: error-case
+    verifiable: true
+    statement: >
+      Before the component is formatted or initialized, remove_extent fails with a
+      NotInitialized error.
+    traces: ["lib.rs:227-236"]
+
+  - id: EM-REMOVE-ERR-NO-EXTENT
+    subject: remove_extent
+    kind: error-case
+    verifiable: true
+    statement: >
+      remove_extent with an offset that is not inside any slab (including offsets before the data
+      area or past the last region) fails with an OffsetNotFound error carrying that offset, and
+      changes nothing.
+    traces: ["lib.rs:249-253", "region.rs:122-133"]
+
+  - id: EM-REMOVE-ERR-INTERIOR-OFFSET
+    subject: remove_extent
+    kind: error-case
+    verifiable: true
+    statement: >
+      remove_extent with an offset that falls inside a slab but not at the start of a slot fails
+      with an OffsetNotFound error and changes nothing.
+    traces: ["region.rs:134-136", "slab.rs:62-76"]
+
+  - id: EM-REMOVE-ERR-UNPUBLISHED
+    subject: remove_extent
+    kind: error-case
+    verifiable: true
+    statement: >
+      remove_extent with the offset of a free slot or of a reservation that has not been published
+      fails with an OffsetNotFound error, and an outstanding reservation stays intact.
+    traces: ["region.rs:137-139"]
+
+  - id: EM-REMOVE-ERR-TWICE
+    subject: remove_extent
+    kind: error-case
+    verifiable: true
+    statement: >
+      Removing the same extent a second time fails with an OffsetNotFound error, whether or not a
+      checkpoint happened in between.
+    traces: ["region.rs:137-139", "region.rs:143-147"]
+
+  - id: EM-REMOVE-POST-NOT-LISTED
+    subject: remove_extent
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After remove_extent succeeds, the removed extent is no longer listed by get_extents or
+      for_each_extent.
+    traces: ["region.rs:143-146"]
+
+  - id: EM-REMOVE-POST-SPACE-HELD-UNTIL-CHECKPOINT
+    subject: remove_extent
+    kind: postcondition
+    verifiable: true
+    statement: >
+      The space of a removed extent is not given to any new reservation until a checkpoint that
+      records the removal has completed.
+    traces: ["region.rs:147", "tests/checkpoint.rs:303-309"]
+
+  - id: EM-REMOVE-POST-REUSABLE-AFTER-CHECKPOINT
+    subject: remove_extent
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After a removal and a subsequent successful checkpoint, the removed extent's space is
+      available again to new reservations in the same region.
+    traces: ["lib.rs:316-318", "region.rs:152-160", "tests/checkpoint.rs:334-355"]
+
+  - id: EM-REMOVE-POST-PERSISTED-BY-CHECKPOINT
+    subject: remove_extent
+    kind: postcondition
+    verifiable: true
+    statement: >
+      An extent removed before a successful checkpoint is not listed after a fresh component
+      recovers from the metadata device.
+    traces: ["region.rs:143-148", "checkpoint.rs:27-29"]
+
+  - id: EM-REMOVE-CRASH-BEFORE-CHECKPOINT
+    subject: remove_extent
+    kind: postcondition
+    verifiable: true
+    statement: >
+      If the system restarts after a removal but before the next checkpoint, recovery lists the
+      removed extent at its original offset and no other recovered extent overlaps it.
+    traces: ["region.rs:147", "tests/checkpoint.rs:281-331"]
+
+  - id: EM-REMOVE-FRAME
+    subject: remove_extent
+    kind: frame
+    verifiable: true
+    statement: >
+      remove_extent does not change any other listed extent and does not change the reported
+      capacity.
+    traces: ["region.rs:121-150"]
+
+  - id: EM-REMOVE-LAST-REGION-TAIL
+    subject: remove_extent
+    kind: postcondition
+    verifiable: true
+    statement: >
+      remove_extent finds and removes any published extent, including one placed in the extra
+      tail space that makes the last region larger than the others.
+    traces: ["lib.rs:243-253", "lib.rs:460-464"]
+    note: >
+      The offset-to-region lookup divides by the uniform region size and rejects an index equal
+      to the region count, which is where the last region's remainder lands.
+
+  - id: EM-REMOVE-NO-PANIC
+    subject: remove_extent
+    kind: error-case
+    verifiable: true
+    statement: >
+      remove_extent never crashes for any offset value; every offset that does not identify a
+      published extent yields an error.
+    traces: ["lib.rs:243-250"]
+
+  # ------------------------------------------------------------- checkpoint
+  - id: EM-CKPT-ERR-NOT-INIT
+    subject: checkpoint
+    kind: error-case
+    verifiable: true
+    statement: >
+      Before the component is formatted or initialized, checkpoint fails with a NotInitialized
+      error.
+    traces: ["lib.rs:276-282"]
+
+  - id: EM-CKPT-CLEAN-NOOP
+    subject: checkpoint
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When nothing has been published or removed since the last successful checkpoint (or since
+      format or initialize), checkpoint succeeds without writing anything to the metadata device.
+    traces: ["lib.rs:276-286", "tests/checkpoint.rs:54-61"]
+
+  - id: EM-CKPT-POST-DURABLE
+    subject: checkpoint
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After checkpoint succeeds, a fresh component that initializes from the same metadata device
+      lists exactly the extents that were published and not removed before checkpoint was
+      called.
+    traces: ["lib.rs:299-306", "checkpoint.rs:35-115", "recovery.rs:11-71"]
+
+  - id: EM-CKPT-POST-COVERS-PRIOR-CHANGES
+    subject: checkpoint
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When several callers checkpoint concurrently, a call that returns success only does so after
+      a checkpoint that started after the call began has completed, so every change finished
+      before the call is persisted.
+    traces: ["lib.rs:729-761"]
+
+  - id: EM-CKPT-POST-SEQ-AND-COPY
+    subject: checkpoint
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Each checkpoint that writes increases the persisted checkpoint sequence number by exactly
+      one and writes to, then makes active, the checkpoint copy that was not active before.
+    traces: ["checkpoint.rs:58-67", "checkpoint.rs:106-112"]
+
+  - id: EM-CKPT-ORDER-DATA-BEFORE-SUPERBLOCK
+    subject: checkpoint
+    kind: invariant
+    verifiable: true
+    statement: >
+      The superblock is only updated to point at a new checkpoint after that checkpoint's data
+      has been completely written (and, with the volatile write cache feature, flushed) to the
+      metadata device.
+    traces: ["lib.rs:299-306", "checkpoint.rs:96-112"]
+
+  - id: EM-CKPT-CRASH-ATOMIC
+    subject: checkpoint
+    kind: invariant
+    verifiable: true
+    statement: >
+      If the system crashes at any point during a checkpoint, recovery yields either the state of
+      the previous completed checkpoint or the state of the new one, never a mixture or an error.
+    traces: ["lib.rs:299-306", "checkpoint.rs:96-112", "block_io.rs:68-104", "superblock.rs:4"]
+    note: >
+      The superblock is written one device sector per command; with sectors smaller than 4 KiB
+      the superblock update itself is not a single write.
+
+  - id: EM-CKPT-FAILED-SUPERBLOCK-WRITE
+    subject: checkpoint
+    kind: postcondition
+    verifiable: true
+    statement: >
+      If a checkpoint fails after writing its data but before the superblock reaches the device,
+      later checkpoints never overwrite the checkpoint copy that the on-disk superblock still
+      names as active, so the device always recovers to a completed checkpoint.
+    traces: ["checkpoint.rs:106-112", "lib.rs:303-306"]
+    note: >
+      The in-memory active copy and sequence are advanced before the superblock write is
+      attempted, and are not rolled back on its failure.
+
+  - id: EM-CKPT-AFTER-FALLBACK-PRESERVES-VALID
+    subject: checkpoint
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After initialize recovered from the previous checkpoint copy because the active one was
+      invalid, the next checkpoint does not overwrite that only valid copy before a new valid
+      checkpoint is durable elsewhere.
+    traces: ["recovery.rs:48-58", "checkpoint.rs:61-63"]
+
+  - id: EM-CKPT-ERR-TOO-LARGE
+    subject: checkpoint
+    kind: error-case
+    verifiable: true
+    statement: >
+      When the serialized state does not fit in one checkpoint copy, checkpoint fails with a
+      CorruptMetadata error and leaves the persisted metadata and the in-memory active copy and
+      sequence number unchanged; a payload that exactly fills the copy is accepted.
+    traces: ["checkpoint.rs:69-75"]
+
+  - id: EM-CKPT-ERR-IO
+    subject: checkpoint
+    kind: error-case
+    verifiable: true
+    statement: >
+      When the metadata device fails during a checkpoint, checkpoint returns an IoError and the
+      device still recovers to the last completed checkpoint.
+    traces: ["lib.rs:297", "lib.rs:306", "checkpoint.rs:97", "block_io.rs:91-104"]
+
+  - id: EM-CKPT-FAIL-RETAINS-CHANGES
+    subject: checkpoint
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After a failed checkpoint, the changes it did not persist are still written by the next
+      successful checkpoint, and space of removed extents stays unavailable until then.
+    traces: ["lib.rs:299-321"]
+
+  - id: EM-CKPT-NO-LOST-UPDATE
+    subject: checkpoint
+    kind: invariant
+    verifiable: true
+    statement: >
+      A publish or removal that happens while a checkpoint is in progress is persisted either by
+      that checkpoint or by a later one; the component never treats such a change as already
+      persisted when it is not.
+    traces: ["checkpoint.rs:51-55", "lib.rs:312-321", "region.rs:118", "region.rs:148"]
+    note: >
+      Regions are serialized under per-region read locks and all dirty flags are cleared later in
+      a separate pass.
+
+  - id: EM-CKPT-RELEASE-ONLY-PERSISTED-REMOVALS
+    subject: checkpoint
+    kind: invariant
+    verifiable: true
+    statement: >
+      A checkpoint only makes reusable the space of removals that are recorded in the checkpoint
+      it persisted.
+    traces: ["lib.rs:316-318", "region.rs:147", "region.rs:152-160"]
+    note: >
+      flush_pending_frees releases every pending removal, including ones queued after the region
+      was serialized.
+
+  - id: EM-CKPT-MUTUAL-EXCLUSION
+    subject: checkpoint
+    kind: invariant
+    verifiable: true
+    statement: >
+      At most one checkpoint write runs at a time, regardless of how many callers (including the
+      background timer) request checkpoints concurrently.
+    traces: ["lib.rs:729-750"]
+
+  - id: EM-CKPT-COMPLETED-SEQ-MONOTONIC
+    subject: checkpoint
+    kind: invariant
+    verifiable: true
+    statement: >
+      The count of completed checkpoints used to coalesce concurrent requests never decreases.
+    traces: ["lib.rs:54-57", "lib.rs:752-756"]
+
+  - id: EM-CKPT-HOOK-ON-SUCCESS
+    subject: checkpoint
+    kind: postcondition
+    verifiable: true
+    statement: >
+      The registered post-checkpoint hook runs exactly once for each checkpoint that writes and
+      succeeds, and does not run when the checkpoint is skipped because nothing changed or when
+      it fails.
+    traces: ["lib.rs:173-175", "lib.rs:284-286", "lib.rs:365-367"]
+
+  - id: EM-CKPT-VOLATILE-SUPERBLOCK-FLUSH
+    subject: checkpoint
+    kind: postcondition
+    verifiable: true
+    statement: >
+      With the volatile write cache feature enabled, a checkpoint only reports success after the
+      superblock write has also been flushed to non-volatile media.
+    traces: ["lib.rs:308-310", "block_io.rs:161-180"]
+
+  - id: EM-CKPT-FRAME
+    subject: checkpoint
+    kind: frame
+    verifiable: true
+    statement: >
+      checkpoint does not change the set of listed extents or the reported capacity.
+    traces: ["lib.rs:275-370"]
+
+  - id: EM-CKPT-WRITE-INACTIVE-COPY
+    subject: checkpoint
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A checkpoint writes its data only into the checkpoint copy that is not currently active, and
+      writes nothing outside that copy.
+    traces: ["checkpoint.rs:58-67", "checkpoint.rs:89-97"]
+
+  - id: EM-CKPT-ROUND-TRIP
+    subject: checkpoint
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A checkpoint copy written by a checkpoint is accepted when read back with its sequence
+      number, and reading it returns exactly the payload that was written.
+    traces: ["checkpoint.rs:80-97", "checkpoint.rs:117-173"]
+
+  # -------------------------------------------------------- get_instance_id
+  - id: EM-INSTANCE-ID-ERR-NOT-INIT
+    subject: get_instance_id
+    kind: error-case
+    verifiable: true
+    statement: >
+      Before the component is formatted or initialized, get_instance_id fails with a
+      NotInitialized error.
+    traces: ["lib.rs:686-690"]
+
+  - id: EM-INSTANCE-ID-STABLE
+    subject: get_instance_id
+    kind: invariant
+    verifiable: true
+    statement: >
+      The instance id returned by get_instance_id does not change except through format or
+      initialize; reservations, publishes, removals and checkpoints leave it unchanged.
+    traces: ["lib.rs:691", "checkpoint.rs:106-112"]
+
+  # ---------------------------------------------- set_checkpoint_interval
+  - id: EM-INTERVAL-DEFAULT-30S
+    subject: set_checkpoint_interval
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A newly created component has automatic checkpoints enabled with an interval of 30 seconds.
+    traces: ["lib.rs:109-112", "interfaces/src/iextent_manager.rs:204-205"]
+
+  - id: EM-INTERVAL-NONE-DISABLES
+    subject: set_checkpoint_interval
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After the interval is set to None, the background thread never runs a checkpoint until an
+      interval is set again; only manual checkpoint calls persist state.
+    traces: ["lib.rs:137-140", "interfaces/src/iextent_manager.rs:202-204", "tests/checkpoint.rs:433-474"]
+
+  - id: EM-INTERVAL-SOME-FIRES
+    subject: set_checkpoint_interval
+    kind: postcondition
+    verifiable: true
+    statement: >
+      With an interval set, whenever a full interval elapses without the interval being changed,
+      the background thread runs a checkpoint, so changed state becomes persisted without a
+      manual call.
+    traces: ["lib.rs:132-136", "lib.rs:151-159", "tests/checkpoint.rs:389-430"]
+
+  - id: EM-INTERVAL-CHANGE-NO-SPURIOUS
+    subject: set_checkpoint_interval
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Changing the interval does not by itself trigger a background checkpoint; the thread simply
+      starts waiting with the new interval.
+    traces: ["lib.rs:70-73", "lib.rs:123-125", "lib.rs:147-149"]
+
+  - id: EM-INTERVAL-BG-NOT-INIT-SILENT
+    subject: set_checkpoint_interval
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A background checkpoint that fails only because the component is not yet initialized logs
+      no error, whereas any other background checkpoint failure is logged as an error.
+    traces: ["lib.rs:154-157"]
+
+  # ------------------------------------------------------------- used_bytes
+  - id: EM-USED-UNINIT-ZERO
+    subject: used_bytes
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Before the component is formatted or initialized, used_bytes returns zero.
+    traces: ["lib.rs:700"]
+
+  - id: EM-USED-AT-MOST-CAPACITY
+    subject: used_bytes
+    kind: invariant
+    verifiable: true
+    statement: >
+      The reported used bytes are always at most the reported capacity.
+    traces: ["lib.rs:698-715"]
+
+  - id: EM-USED-COVERS-EXTENTS
+    subject: used_bytes
+    kind: invariant
+    verifiable: true
+    statement: >
+      The reported used bytes are at least the total size of all extents that are currently
+      reserved, published, or removed but not yet released by a checkpoint.
+    traces: ["lib.rs:698-708", "region.rs:72-91"]
+
+  - id: EM-USED-NO-UNDERFLOW
+    subject: used_bytes
+    kind: invariant
+    verifiable: true
+    statement: >
+      In every region the free space tracked by the allocator never exceeds the region's usable
+      size, so computing used bytes never underflows.
+    traces: ["lib.rs:704", "buddy.rs:160-166", "buddy.rs:84-115"]
+
+  - id: EM-USED-RETURNS-AFTER-FREE
+    subject: used_bytes
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When every reservation has been aborted or published and later removed, and a checkpoint
+      has completed after the last removal, used_bytes returns to the value it had right after
+      format.
+    traces: ["region.rs:104-107", "lib.rs:316-318"]
+
+  # --------------------------------------------------------- capacity_bytes
+  - id: EM-CAP-UNINIT-ZERO
+    subject: capacity_bytes
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Before the component is formatted or initialized, capacity_bytes returns zero.
+    traces: ["lib.rs:712"]
+
+  - id: EM-CAP-CONSTANT
+    subject: capacity_bytes
+    kind: invariant
+    verifiable: true
+    statement: >
+      The reported capacity does not change through reservations, publishes, aborts, removals or
+      checkpoints; only format or initialize change it.
+    traces: ["lib.rs:710-715", "buddy.rs:53-55"]
+
+  # ------------------------------------------------- set_metadata_base_lba
+  - id: EM-MDLBA-APPLIED
+    subject: set_metadata_base_lba
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After set_metadata_base_lba(b), every subsequent metadata read and write (superblock and
+      checkpoints) by format, initialize and checkpoint is addressed b blocks beyond the address
+      it would use with a base of zero.
+    traces: ["lib.rs:200-208", "block_io.rs:69", "block_io.rs:119", "lib.rs:717-719"]
+
+  - id: EM-MDLBA-DEFAULT-ZERO
+    subject: set_metadata_base_lba
+    kind: postcondition
+    verifiable: true
+    statement: >
+      If set_metadata_base_lba is never called, the superblock is read and written at block zero
+      of the metadata namespace.
+    traces: ["lib.rs:98", "lib.rs:200", "lib.rs:498"]
+
+  - id: EM-MDLBA-FRAME
+    subject: set_metadata_base_lba
+    kind: frame
+    verifiable: true
+    statement: >
+      set_metadata_base_lba does not change the data base LBA, the listed extents or their
+      offsets.
+    traces: ["lib.rs:717-719"]
+
+  # ----------------------------------------- set_data_base_lba / data_base_lba
+  - id: EM-DATALBA-ROUND-TRIP
+    subject: set_data_base_lba
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After set_data_base_lba(b), data_base_lba returns b until it is set again.
+    traces: ["lib.rs:721-727"]
+
+  - id: EM-DATALBA-DEFAULT-ZERO
+    subject: data_base_lba
+    kind: postcondition
+    verifiable: true
+    statement: >
+      If set_data_base_lba has never been called, data_base_lba returns zero.
+    traces: ["lib.rs:99", "lib.rs:725-727"]
+
+  - id: EM-DATALBA-FRAME
+    subject: set_data_base_lba
+    kind: frame
+    verifiable: true
+    statement: >
+      set_data_base_lba does not change extent offsets, the metadata base LBA, or any metadata I/O
+      address.
+    traces: ["lib.rs:721-723"]
+
+  - id: EM-DATALBA-READ-FRAME
+    subject: data_base_lba
+    kind: frame
+    verifiable: true
+    statement: >
+      Reading data_base_lba does not change the component's state.
+    traces: ["lib.rs:725-727"]
+
+  # ------------------------------------------------ inherent public setters
+  - id: EM-NSID-USED-BY-INITIALIZE
+    subject: ExtentManager::set_metadata_ns_id
+    kind: postcondition
+    verifiable: true
+    statement: >
+      initialize reads the superblock and checkpoints from the namespace given to
+      set_metadata_ns_id, or from namespace 1 if it was never called.
+    traces: ["lib.rs:177-183", "lib.rs:517-518"]
+
+  - id: EM-DMA-ALLOC-USED
+    subject: ExtentManager::set_dma_alloc
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After set_dma_alloc, every buffer used for metadata I/O is obtained from the supplied
+      allocator; without it, the default DMA buffer allocator is used.
+    traces: ["lib.rs:169-171", "lib.rs:193-197", "block_io.rs:42-47"]
+
+  - id: EM-CKPT-USES-FORMATTED-NAMESPACE
+    subject: checkpoint
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Checkpoints write to the metadata namespace recorded at format time (or in the recovered
+      superblock), not to some other namespace.
+    traces: ["lib.rs:291-297", "lib.rs:529"]
+
+  # ------------------------------------------------- internal: bitmap
+  - id: EM-BITMAP-COUNT-MATCHES
+    subject: "global invariant: slot bitmap"
+    kind: invariant
+    verifiable: true
+    statement: >
+      A slab's count of allocated slots always equals the number of slots marked allocated in its
+      bitmap and is at most the number of slots.
+    traces: ["bitmap.rs:1-5", "bitmap.rs:17-33"]
+
+  - id: EM-BITMAP-NO-DOUBLE-ALLOC
+    subject: "global invariant: slot bitmap"
+    kind: precondition
+    verifiable: true
+    statement: >
+      A slot is only ever marked allocated when it is currently free.
+    traces: ["bitmap.rs:19"]
+
+  - id: EM-BITMAP-NO-DOUBLE-FREE
+    subject: "global invariant: slot bitmap"
+    kind: precondition
+    verifiable: true
+    statement: >
+      A slot is only ever marked free when it is currently allocated.
+    traces: ["bitmap.rs:28"]
+
+  - id: EM-BITMAP-INDEX-IN-RANGE
+    subject: "global invariant: slot bitmap"
+    kind: precondition
+    verifiable: true
+    statement: >
+      Every slot index used to set, clear or test the bitmap is less than the slab's number of
+      slots.
+    traces: ["bitmap.rs:18", "bitmap.rs:27", "bitmap.rs:36"]
+
+  - id: EM-BITMAP-FIND-FREE
+    subject: "global invariant: slot bitmap"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Searching for a free slot returns a slot that is free and within range whenever at least one
+      free slot exists, and returns nothing only when every slot is allocated.
+    traces: ["bitmap.rs:42-51"]
+
+  # ------------------------------------------------- internal: slab
+  - id: EM-SLAB-SLOTS-INSIDE
+    subject: "global invariant: slab layout"
+    kind: invariant
+    verifiable: true
+    statement: >
+      Every slot of a slab begins at or after the slab's start and ends at or before the slab's
+      end, and different slots of the same slab do not overlap.
+    traces: ["slab.rs:17-27", "slab.rs:58-60"]
+
+  - id: EM-SLAB-KEY-IMPLIES-ALLOCATED
+    subject: "global invariant: slab layout"
+    kind: invariant
+    verifiable: true
+    statement: >
+      Any slot holding a real key (not the free marker) is marked allocated in the slab's bitmap.
+    traces: ["slab.rs:37-44", "region.rs:114-119", "recovery.rs:76-85"]
+
+  - id: EM-SLAB-KEYS-LENGTH
+    subject: "global invariant: slab layout"
+    kind: invariant
+    verifiable: true
+    statement: >
+      A slab holds exactly one key entry per slot.
+    traces: ["slab.rs:18-26"]
+
+  - id: EM-SLAB-OFFSET-SLOT-INVERSE
+    subject: "global invariant: slab layout"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Looking up the slot for the start offset of slot i returns i, and looking up an offset that
+      is not the start of any slot of the slab returns no slot.
+    traces: ["slab.rs:58-76"]
+
+  - id: EM-SLAB-ROVER-IN-RANGE
+    subject: "global invariant: slab layout"
+    kind: invariant
+    verifiable: true
+    statement: >
+      The position from which a slab searches for its next free slot is always less than the
+      slab's number of slots.
+    traces: ["slab.rs:13", "slab.rs:29-35"]
+
+  - id: EM-SLAB-FREE-CLEARS-KEY
+    subject: "global invariant: slab layout"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Freeing a slot marks it free and resets its key to the free marker.
+    traces: ["slab.rs:37-40"]
+
+  - id: EM-SIZECLASS-ENTRY-SIZE-MATCH
+    subject: "global invariant: size classes"
+    kind: invariant
+    verifiable: true
+    statement: >
+      Every slab listed under a size class has exactly that element size.
+    traces: ["slab.rs:102-104", "region.rs:57", "region.rs:87", "region.rs:110", "lib.rs:563"]
+
+  - id: EM-SIZECLASS-NONFULL-LISTED
+    subject: "global invariant: size classes"
+    kind: invariant
+    verifiable: true
+    statement: >
+      Every slab that still has a free slot is listed under its element size, so its free slots
+      can be found by later reservations.
+    traces: ["region.rs:54-58", "region.rs:85-88", "region.rs:108-111", "lib.rs:559-565"]
+
+  # ------------------------------------------------- internal: region
+  - id: EM-REGION-SLABS-DISJOINT-INSIDE
+    subject: "global invariant: region layout"
+    kind: invariant
+    verifiable: true
+    statement: >
+      The slabs of a region do not overlap one another and each lies entirely within that
+      region's byte range.
+    traces: ["region.rs:72-91", "buddy.rs:57-82", "lib.rs:552-565"]
+
+  - id: EM-REGION-SLABS-NOT-FREE
+    subject: "global invariant: region layout"
+    kind: invariant
+    verifiable: true
+    statement: >
+      The space occupied by a slab is never simultaneously recorded as free in the region's
+      allocator.
+    traces: ["region.rs:72-75", "region.rs:104-107", "lib.rs:553-555"]
+
+  - id: EM-REGION-PENDING-FREES-VALID
+    subject: "global invariant: region layout"
+    kind: invariant
+    verifiable: true
+    statement: >
+      Every queued removal refers to an existing slab and a slot that is still marked allocated and
+      carries the free marker as its key, and no slot is queued twice.
+    traces: ["region.rs:16", "region.rs:137-148", "region.rs:152-160"]
+
+  - id: EM-REGION-EMPTY-SLAB-RELEASED
+    subject: "global invariant: region layout"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When the last allocated slot of a slab is freed, the slab is removed and its whole space is
+      returned to the region's allocator.
+    traces: ["region.rs:104-107"]
+
+  - id: EM-REGION-FREE-MISSING-SLAB-NOOP
+    subject: "global invariant: region layout"
+    kind: frame
+    verifiable: true
+    statement: >
+      Releasing a slot of a slab that does not exist in the region changes nothing.
+    traces: ["region.rs:96-102"]
+
+  - id: EM-REGION-NEW-SLAB-ROLLBACK
+    subject: "global invariant: region layout"
+    kind: frame
+    verifiable: true
+    statement: >
+      If a newly carved slab cannot provide even one slot, its space is returned to the allocator
+      before the reservation fails, so nothing is leaked.
+    traces: ["region.rs:77-84"]
+
+  # ------------------------------------------------- internal: buddy allocator
+  - id: EM-BUDDY-INIT-FREE
+    subject: "global invariant: buddy allocator"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A new region allocator starts with all of its whole sectors free, that is, total free space
+      equal to the region size rounded down to a multiple of the sector size.
+    traces: ["buddy.rs:10-46"]
+
+  - id: EM-BUDDY-ALLOC-WITHIN
+    subject: "global invariant: buddy allocator"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A successful allocation returns a block that starts at or after the region base, is at
+      least the requested size, and ends at or before the end of the region.
+    traces: ["buddy.rs:57-82"]
+
+  - id: EM-BUDDY-ALLOC-ALIGNED
+    subject: "global invariant: buddy allocator"
+    kind: invariant
+    verifiable: true
+    statement: >
+      Every free or allocated block of 2 to the power k sectors starts, relative to the region
+      base, at a multiple of its own size.
+    traces: ["buddy.rs:28-37", "buddy.rs:76-79", "buddy.rs:94-112"]
+
+  - id: EM-BUDDY-FREE-DISJOINT
+    subject: "global invariant: buddy allocator"
+    kind: invariant
+    verifiable: true
+    statement: >
+      Free blocks recorded by a region allocator never overlap each other.
+    traces: ["buddy.rs:6", "buddy.rs:84-115", "buddy.rs:117-157"]
+
+  - id: EM-BUDDY-ALLOC-ACCOUNTING
+    subject: "global invariant: buddy allocator"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A successful allocation reduces the total free space by exactly the size of the block
+      handed out, which is the smallest power-of-two number of sectors that holds the request.
+    traces: ["buddy.rs:57-82", "buddy.rs:160-166"]
+
+  - id: EM-BUDDY-FREE-ACCOUNTING
+    subject: "global invariant: buddy allocator"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Freeing a block that was allocated with the same size increases the total free space by
+      that block's size, so allocate-then-free restores the previous free total.
+    traces: ["buddy.rs:84-115", "buddy.rs:160-166"]
+
+  - id: EM-BUDDY-FREE-PRE
+    subject: "global invariant: buddy allocator"
+    kind: precondition
+    verifiable: true
+    statement: >
+      A block is only freed if it is currently allocated from this region, with the size it was
+      allocated with and an offset at or after the region base.
+    traces: ["buddy.rs:85-86", "region.rs:81", "region.rs:105"]
+
+  - id: EM-BUDDY-ALLOC-NONE-ONLY-IF-EXHAUSTED
+    subject: "global invariant: buddy allocator"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Allocation fails only when no free block of the needed size or larger exists.
+    traces: ["buddy.rs:65-73"]
+
+  - id: EM-BUDDY-MERGE
+    subject: "global invariant: buddy allocator"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When a freed block's buddy is also free, the two are merged, so freeing all blocks of a
+      region makes the largest original blocks available again.
+    traces: ["buddy.rs:94-112"]
+
+  - id: EM-BUDDY-MARK-ALLOCATED
+    subject: "global invariant: buddy allocator"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Marking a free range as allocated (during recovery) removes exactly that range from the free
+      space, reducing the free total by its block size, and leaves every other free byte free.
+    traces: ["buddy.rs:117-157"]
+
+  - id: EM-BUDDY-MARK-ALLOCATED-PRE
+    subject: "global invariant: buddy allocator"
+    kind: precondition
+    verifiable: true
+    statement: >
+      A range is only marked allocated when it lies in the region and is currently entirely free.
+    traces: ["buddy.rs:117-157", "lib.rs:553-555"]
+
+  # ------------------------------------------------- internal: superblock
+  - id: EM-SB-ROUND-TRIP
+    subject: "global invariant: superblock encoding"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Decoding an encoded superblock succeeds and yields every field with the value it had when it
+      was encoded.
+    traces: ["superblock.rs:58-97", "superblock.rs:99-168"]
+
+  - id: EM-SB-SIZE
+    subject: "global invariant: superblock encoding"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      An encoded superblock is exactly 4096 bytes long and all of its fields and checksum fit
+      inside it.
+    traces: ["superblock.rs:4", "superblock.rs:58-96"]
+
+  - id: EM-SB-CORRUPTION-DETECTED
+    subject: "global invariant: superblock encoding"
+    kind: error-case
+    verifiable: true
+    statement: >
+      Decoding a superblock whose checksummed bytes were altered, whose magic number is wrong, or
+      that is shorter than 4096 bytes fails with a CorruptMetadata error.
+    traces: ["superblock.rs:100-112", "superblock.rs:143-150"]
+
+  - id: EM-SB-ACTIVE-COPY-VALID
+    subject: "global invariant: superblock encoding"
+    kind: error-case
+    verifiable: true
+    statement: >
+      The active checkpoint copy number is always 0 or 1; decoding a superblock that names any
+      other copy fails with a CorruptMetadata error instead of crashing later.
+    traces: ["superblock.rs:128", "recovery.rs:23-26", "checkpoint.rs:61"]
+    note: >
+      Not validated on decode; 1 - active_copy on a u8 underflows for values above 1.
+
+  - id: EM-SB-NEW-DEFAULTS
+    subject: "global invariant: superblock encoding"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A newly created superblock carries the expected magic number and current format version,
+      a checkpoint sequence of zero and copy 0 as the active copy.
+    traces: ["superblock.rs:28-56"]
+
+  # ------------------------------------------------- internal: checkpoint codec
+  - id: EM-CKPT-READ-SEQ-MISMATCH
+    subject: "global invariant: checkpoint encoding"
+    kind: error-case
+    verifiable: true
+    statement: >
+      Reading a checkpoint copy whose recorded sequence number differs from the expected one fails
+      with a CorruptMetadata error.
+    traces: ["checkpoint.rs:136-140"]
+
+  - id: EM-CKPT-READ-OVERSIZE
+    subject: "global invariant: checkpoint encoding"
+    kind: error-case
+    verifiable: true
+    statement: >
+      Reading a checkpoint copy whose header claims more data than fits in the copy fails with a
+      CorruptMetadata error; data that exactly fills the copy is accepted.
+    traces: ["checkpoint.rs:142-147"]
+
+  - id: EM-CKPT-READ-TRUNCATED
+    subject: "global invariant: checkpoint encoding"
+    kind: error-case
+    verifiable: true
+    statement: >
+      Reading a checkpoint copy that yields fewer bytes than the header and recorded payload
+      require fails with a CorruptMetadata error.
+    traces: ["checkpoint.rs:128-130", "checkpoint.rs:158-160"]
+
+  - id: EM-CKPT-READ-CRC
+    subject: "global invariant: checkpoint encoding"
+    kind: error-case
+    verifiable: true
+    statement: >
+      Reading a checkpoint copy whose header or payload bytes were altered after writing fails
+      with a CorruptMetadata error because the checksum no longer matches.
+    traces: ["checkpoint.rs:162-170", "checkpoint.rs:80-87"]
+
+  - id: EM-CKPT-CODEC-ROUND-TRIP
+    subject: "global invariant: checkpoint encoding"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Decoding the encoded state of a set of regions yields, region by region and slab by slab in
+      order, each slab's start offset, slab size, element size and the key of every slot.
+    traces: ["checkpoint.rs:15-33", "checkpoint.rs:48-55", "checkpoint.rs:183-241"]
+
+  - id: EM-CKPT-DECODE-TRUNCATED
+    subject: "global invariant: checkpoint encoding"
+    kind: error-case
+    verifiable: true
+    statement: >
+      Decoding checkpoint contents that end before the region count, a slab count, a slab header
+      or a slab's keys are complete fails with a CorruptMetadata error and never reads past the
+      end of the data.
+    traces: ["checkpoint.rs:186-221"]
+
+  - id: EM-RECOVER-SLAB-FROM-DESCRIPTOR
+    subject: "global invariant: checkpoint encoding"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A slab rebuilt from a checkpoint has exactly the slots with real keys marked allocated,
+      carrying those keys, and every other slot free.
+    traces: ["recovery.rs:73-85"]
+
+  # ------------------------------------------------- internal: block I/O
+  - id: EM-BIO-WRITE-LAYOUT
+    subject: "global invariant: metadata block I/O"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A successful metadata write stores the given bytes, followed by zero padding up to the next
+      whole sector, in consecutive blocks starting at the base LBA plus the requested LBA, on the
+      configured namespace.
+    traces: ["block_io.rs:49-108"]
+
+  - id: EM-BIO-WRITE-ERR
+    subject: "global invariant: metadata block I/O"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the device reports an error, returns an unexpected completion, or its channel closes
+      during a metadata write, the write fails with an IoError and no further blocks of that write
+      are sent.
+    traces: ["block_io.rs:82-104"]
+
+  - id: EM-BIO-READ-LAYOUT
+    subject: "global invariant: metadata block I/O"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A successful metadata read of n bytes returns exactly n bytes, taken from consecutive blocks
+      starting at the base LBA plus the requested LBA.
+    traces: ["block_io.rs:110-155"]
+
+  - id: EM-BIO-READ-ERR
+    subject: "global invariant: metadata block I/O"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If the device reports an error, returns an unexpected completion, or its channel closes
+      during a metadata read, the read fails with an IoError.
+    traces: ["block_io.rs:125-152"]
+
+  - id: EM-BIO-ALLOC-ERR
+    subject: "global invariant: metadata block I/O"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If a DMA buffer for metadata I/O cannot be allocated, the read or write fails with an
+      IoError and nothing is sent to the device for that block.
+    traces: ["block_io.rs:42-47", "block_io.rs:57", "block_io.rs:73-75", "block_io.rs:120-122"]
+
+  - id: EM-BIO-FLUSH
+    subject: "global invariant: metadata block I/O"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      With the volatile write cache feature, a flush reports success only when the device answers
+      the flush request with a successful flush completion; any other answer is an IoError.
+    traces: ["block_io.rs:161-180"]
+
+  - id: EM-ERR-DEVICE-AS-IOERROR
+    subject: "global invariant: error mapping"
+    kind: invariant
+    verifiable: true
+    statement: >
+      Every failure reported by the metadata block device reaches the caller as an IoError.
+    traces: ["error.rs:23-25"]
+
+  # ------------------------------------------------- global invariants
+  - id: EM-INV-NO-OVERLAP
+    subject: "global invariant: extent disjointness"
+    kind: invariant
+    verifiable: true
+    statement: >
+      At all times, no two extents that are reserved, published, or removed but not yet released
+      occupy overlapping disk bytes.
+    traces: ["region.rs:41-92", "slab.rs:58-60", "buddy.rs:57-82"]
+
+  - id: EM-INV-CONCURRENT-LINEARIZABLE
+    subject: "global invariant: concurrency"
+    kind: invariant
+    verifiable: true
+    statement: >
+      When reserve, publish, abort and remove run concurrently from many threads, the resulting
+      extents and used bytes are the same as for some one-at-a-time ordering of those calls.
+    traces: ["lib.rs:584-630", "lib.rs:680-684", "tests/concurrent.rs:31-125"]
+
+  - id: EM-INV-SEQ-AGREE
+    subject: "global invariant: checkpoint sequence"
+    kind: invariant
+    verifiable: true
+    statement: >
+      The component's recorded checkpoint sequence number always equals the sequence number held
+      in its in-memory superblock.
+    traces: ["region.rs:21", "checkpoint.rs:106-112", "lib.rs:570-574", "lib.rs:500-504"]
+
+  - id: EM-INV-CHECKPOINT-SECTOR-ALIGNED
+    subject: "global invariant: metadata layout"
+    kind: invariant
+    verifiable: true
+    statement: >
+      Both checkpoint copies begin on a sector boundary of the metadata device, so a checkpoint is
+      written exactly where it will later be read.
+    traces: ["lib.rs:420-432", "checkpoint.rs:96", "checkpoint.rs:124"]
+    note: >
+      The LBA is computed by integer division by the device sector size, while the layout is
+      computed from the configured alignment and params.sector_size.
+
+  - id: EM-INV-INITIALIZED-TOGETHER
+    subject: "global invariant: lifecycle"
+    kind: invariant
+    verifiable: true
+    statement: >
+      The component is either fully initialized (regions and shared layout state both present) or
+      not initialized at all; no operation observes one without the other.
+    traces: ["lib.rs:506-507", "lib.rs:576-577"]
+
+  - id: EM-INV-FREE-KEY-NEVER-LISTED
+    subject: "global invariant: key sentinel"
+    kind: invariant
+    verifiable: true
+    statement: >
+      No listed extent ever has the key u64::MAX.
+    traces: ["lib.rs:642", "lib.rs:666", "lib.rs:600-608"]
+
+  - id: EM-INV-EXTENT-SIZE-UNIT
+    subject: "global invariant: extent size unit"
+    kind: invariant
+    verifiable: true
+    statement: >
+      The size reported for an extent is expressed in blocks, as the Extent type declares.
+    traces: ["interfaces/src/iextent_manager.rs:13", "lib.rs:591", "lib.rs:646"]
+    note: >
+      The code fills size with the element size in bytes (tests assert size >= 4096 for a 4096
+      byte request).
+
+  # ------------------------------------------------- not verifiable
+  - id: NV-1
+    scope: "logging helpers and log messages (format_bytes, log_info, log_warn, log_error; checkpoint_start, checkpoint_complete, recovery_start, recovery_complete, recovery_fallback, corruption_detected, format complete)"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      Logging content and formatting is not a correctness obligation; the one negative logging
+      rule is recorded separately.
+    traces: ["lib.rs:38-51", "lib.rs:257-273", "lib.rs:288", "lib.rs:359-363", "lib.rs:509", "lib.rs:515", "lib.rs:579", "recovery.rs:40-43", "recovery.rs:61-63"]
+
+  - id: NV-2
+    scope: "background checkpoint thread timing"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      How long the background thread actually waits before firing is wall-clock timing; only the
+      occurrence of a checkpoint is captured as a property.
+    traces: ["lib.rs:126-142"]
+
+  - id: NV-3
+    scope: "ExtentManager drop and thread shutdown"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      That dropping the component stops and joins the background thread promptly, without waiting
+      for its sleep to expire, is a liveness and timing claim.
+    traces: ["lib.rs:59-61", "lib.rs:75-78", "lib.rs:114-117", "lib.rs:160", "lib.rs:373-380"]
+
+  - id: NV-4
+    scope: "release of callers waiting on an in-flight checkpoint"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      That every waiter is eventually woken and returns is an unbounded liveness property.
+    traces: ["lib.rs:744", "lib.rs:757"]
+
+  - id: NV-5
+    scope: "WriteHandle single use and accessors"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      publish and abort take the handle by value, so a second use is excluded by the type system;
+      the accessors simply return construction values and are covered by the reserve
+      postcondition.
+    traces: ["interfaces/src/iextent_manager.rs:103-147", "interfaces/src/iextent_manager.rs:157-167"]
+
+  - id: NV-6
+    scope: "FormatParams::new and FormatParams::default constants"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      Pure configuration constants that do not by themselves gate behavior.
+    traces: ["interfaces/src/iextent_manager.rs:69-93"]
+
+  - id: NV-7
+    scope: "trivial accessors and constructors (BuddyAllocator::base_offset/total_usable_size, Slab get_key/set_key/is_empty/is_full/num_slots/mark_slot_allocated/contains_offset, AllocationBitmap new/is_set/is_all_free/count_set/num_slots, SizeClassManager new/get_slabs/remove_slab, BlockDeviceClient new/with_base_lba/sector_size, RegionState::new, error constructors)"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      Definitional accessors whose behavior is fully captured by the invariants that use them;
+      stating them separately would be tautological.
+    traces: ["buddy.rs:49-55", "slab.rs:42-56", "slab.rs:78-88", "slab.rs:96-120", "bitmap.rs:8-15", "bitmap.rs:35-40", "bitmap.rs:53-63", "block_io.rs:15-40", "block_io.rs:157-159", "region.rs:26-35", "error.rs:3-21"]
+
+  - id: NV-8
+    scope: "connection of a fresh client channel per metadata operation"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      Depends on the consumed block device's connect_client behavior and channel resources, an
+      environment assumption.
+    traces: ["lib.rs:185-209"]
+
+  - id: NV-9
+    scope: "randomness of a generated instance id"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      Whether /dev/urandom yields an unpredictable value is an environment property; consistency
+      of the stored id is captured separately.
+    traces: ["lib.rs:474-480"]
+
+  - id: NV-10
+    scope: "relaxed-ordering shutdown flag and condition-variable signalling"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      Relaxed atomic ordering and wake-up delivery are non-deterministic scheduling quantities.
+    traces: ["lib.rs:63-78", "lib.rs:129", "lib.rs:144"]
+
+  - id: NV-11
+    scope: "write_handle.rs"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      The file only contains a comment pointing at the interface crate; there is no code.
+    traces: ["write_handle.rs:1-2"]
+
+  - id: NV-12
+    scope: "test_support.rs mocks (MockBlockDevice, MockLogger, heap_dma_alloc, create_test_component)"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      Test doubles, not part of the component's behavior; properties about them are not
+      properties of the component.
+    traces: ["test_support.rs:1-316"]
+
+  - id: NV-13
+    scope: "DMA buffer memory validity and lifetime"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      Validity of the hugepage or heap memory backing a DMA buffer is a caller and environment
+      assumption.
+    traces: ["block_io.rs:42-47", "lib.rs:193-197"]
+
+  - id: NV-14
+    scope: "recovered FormatParams reconstruction fields metadata_alignment and metadata_region_size"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      These reconstructed fields are never read after initialize, so they have no observable
+      effect.
+    traces: ["lib.rs:527", "lib.rs:530"]

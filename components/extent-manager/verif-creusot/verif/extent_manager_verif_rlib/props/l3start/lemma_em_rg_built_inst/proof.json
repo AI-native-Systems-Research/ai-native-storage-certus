@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lemma_em_rg_built_inst": { "prover": "z3", "time": 0.016 }
+    }
+  }
+}

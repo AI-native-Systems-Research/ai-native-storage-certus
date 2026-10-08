@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_cap_sum": { "prover": "alt-ergo", "time": 0.026 } }
+  }
+}

@@ -1,0 +1,238 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1186 0 1186 128 *)
+
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sslab = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 20 0 20 23
+let%span sfmap = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/fmap.rs" 96 8 96 34
+let%span sfmap'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/fmap.rs" 102 8 102 27
+let%span sfmap'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/fmap.rs" 88 8 88 32
+let%span soption = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/option.rs" 796 15 796 27
+let%span soption'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/option.rs" 798 8 801 9
+let%span slogic = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic.rs" 39 11 39 28
+let%span slogic'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic.rs" 40 10 40 19
+let%span smapping = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/mapping.rs" 66 8 66 19
+let%span sbatch3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1187 14 1187 27
+let%span sbatch3'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1188 12 1188 22
+let%span sbatch3'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1189 20 1189 110
+let%span sbatch3'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1190 23 1190 51
+let%span sbatch3'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1181 10 1181 66
+let%span sbatch3'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1182 10 1185 21
+let%span sbatch3'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1018 10 1024 1
+let%span sbatch3'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1093 10 1093 28
+let%span sbatch3'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1094 10 1094 102
+let%span sbatch3'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1095 10 1095 107
+let%span sbatch3'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1111 10 1111 60
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use map.Map
+use creusot.prelude.Any
+use int.Int
+
+type t_BTreeMap_u64_Slab_Global
+
+type t_SlabMap = { inner: t_BTreeMap_u64_Slab_Global }
+
+type t_HashMap_u32_Vec_u64_Global_RandomState_Global
+
+type t_SizeClassManager = { map: t_HashMap_u32_Vec_u64_Global_RandomState_Global }
+
+type t_Vec_Vec_u64_Global_Global
+
+type t_BuddyAllocator = {
+  base_offset: UInt64.t;
+  total_usable_size: UInt64.t;
+  sector_size: UInt32.t;
+  max_order: UInt64.t;
+  free_lists: t_Vec_Vec_u64_Global_Global }
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_FormatParams = {
+  data_disk_size'0: UInt64.t;
+  slab_size'0: UInt64.t;
+  max_extent_size'0: UInt32.t;
+  sector_size'0: UInt32.t;
+  region_count'0: UInt32.t;
+  metadata_alignment'0: UInt64.t;
+  instance_id'0: t_Option_u64;
+  metadata_disk_ns_id'0: UInt32.t;
+  metadata_region_size'0: UInt64.t }
+
+type t_Vec_tup2_u64_usize_Global
+
+type t_RegionState = {
+  slabs: t_SlabMap;
+  size_classes: t_SizeClassManager;
+  buddy: t_BuddyAllocator;
+  dirty: bool;
+  format_params: t_FormatParams;
+  pending_frees: t_Vec_tup2_u64_usize_Global }
+
+type t_EmError = CorruptMetadata | IoError | NotInitialized | OffsetNotFound UInt64.t | OutOfSpace
+
+type t_Result_Snapshot_Seq_RegionState_EmError = Ok (Seq.seq t_RegionState) | Err t_EmError
+
+type t_FMap_Int_Slab
+
+type t_Vec_u64_Global
+
+type t_AllocationBitmap = { words: t_Vec_u64_Global; num_slots: UInt32.t; allocated_count: UInt32.t }
+
+type t_Slab = {
+  start_offset: UInt64.t;
+  slab_size: UInt64.t;
+  element_size: UInt32.t;
+  bitmap: t_AllocationBitmap;
+  keys: t_Vec_u64_Global;
+  rover: UInt64.t }
+
+type t_Option_Slab = None'0 | Some'0 t_Slab
+
+function to_mapping_Int (self: t_FMap_Int_Slab) : Map.map int t_Option_Slab
+
+function get_Int [@inline:trivial] (self: t_FMap_Int_Slab) (k: int) : t_Option_Slab =
+  [%#sfmap'1] Map.get (to_mapping_Int self) k
+
+meta "rewrite_def" function get_Int
+
+predicate contains_Int [@inline:trivial] (self: t_FMap_Int_Slab) (k: int) = [%#sfmap'0] get_Int self k <> None'0
+
+meta "rewrite_def" predicate contains_Int
+
+function view_SlabMap [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 34 4 34 36] (self: t_SlabMap) : t_FMap_Int_Slab
+
+predicate index_Mapping_Slab_bool [@inline:trivial] (self: Map.map t_Slab bool) (a: t_Slab) =
+  [%#smapping] Map.get self a
+
+meta "rewrite_def" predicate index_Mapping_Slab_bool
+
+function such_that_Slab (p: Map.map t_Slab bool) : t_Slab
+
+axiom such_that_Slab_spec:
+  forall p: Map.map t_Slab bool [such_that_Slab p]. ([%#slogic] exists x: t_Slab. index_Mapping_Slab_bool p x)
+    -> ([%#slogic'0] index_Mapping_Slab_bool p (such_that_Slab p))
+
+function unwrap_Option_Slab (self: t_Option_Slab) : t_Slab = [%#soption'0] match self with
+    | Some'0 x -> x
+    | None'0 -> such_that_Slab (fun (__0: t_Slab) -> true)
+    end
+
+function lookup_Int [@inline:trivial] (self: t_FMap_Int_Slab) (k: int) : t_Slab =
+  [%#sfmap] unwrap_Option_Slab (get_Int self k)
+
+meta "rewrite_def" function lookup_Int
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_u64_Global (self: t_Vec_u64_Global) : Seq.seq UInt64.t
+
+axiom view_Vec_u64_Global_spec:
+  forall self: t_Vec_u64_Global [view_Vec_u64_Global self]. [%#svec] Seq.length (view_Vec_u64_Global self)
+    <= UInt64.t'int const_MAX
+
+constant const_FREE_KEY: UInt64.t = [%#sslab] (18446744073709551615: UInt64.t)
+
+let wa_precrash (return (x: t_Result_Snapshot_Seq_RegionState_EmError)) = any
+  [ return (result: t_Result_Snapshot_Seq_RegionState_EmError) ->
+  {[@stop_split] [@expl:wa_precrash ensures] [%#sbatch3'5] match result with
+      | Ok img -> Seq.length img = 1
+      /\ contains_Int (view_SlabMap (Seq.get img 0).slabs) 0
+      /\ UInt64.t'int (lookup_Int (view_SlabMap (Seq.get img 0).slabs) 0).start_offset = 0
+      /\ UInt64.t'int (lookup_Int (view_SlabMap (Seq.get img 0).slabs) 0).slab_size = 8
+      /\ UInt32.t'int (lookup_Int (view_SlabMap (Seq.get img 0).slabs) 0).element_size = 4
+      /\ Seq.length (view_Vec_u64_Global (lookup_Int (view_SlabMap (Seq.get img 0).slabs) 0).keys) = 2
+      /\ Seq.get (view_Vec_u64_Global (lookup_Int (view_SlabMap (Seq.get img 0).slabs) 0).keys) 0 = const_FREE_KEY
+      /\ Seq.get (view_Vec_u64_Global (lookup_Int (view_SlabMap (Seq.get img 0).slabs) 0).keys) 1 = const_FREE_KEY
+      | Err _ -> false
+      end}
+    (! return {result}) ]
+
+type t_Vec_SlabDescriptor_Global
+
+type t_SlabDescriptor = {
+  start_offset'1: UInt64.t;
+  slab_size'1: UInt64.t;
+  element_size'1: UInt32.t;
+  keys'1: t_Vec_u64_Global }
+
+function view_Vec_SlabDescriptor_Global (self: t_Vec_SlabDescriptor_Global) : Seq.seq t_SlabDescriptor
+
+axiom view_Vec_SlabDescriptor_Global_spec:
+  forall self: t_Vec_SlabDescriptor_Global [view_Vec_SlabDescriptor_Global self]. [%#svec] Seq.length (view_Vec_SlabDescriptor_Global self)
+    <= UInt64.t'int const_MAX
+
+let wa_descs (return (x: t_Vec_SlabDescriptor_Global)) = any
+  [ return (result: t_Vec_SlabDescriptor_Global) ->
+  {[@stop_split] [@expl:wa_descs ensures] ([@stop_split] [@expl:wa_descs ensures #0] [%#sbatch3'6] Seq.length (view_Vec_SlabDescriptor_Global result)
+      = 1)
+    /\ ([@stop_split] [@expl:wa_descs ensures #1] [%#sbatch3'7] UInt64.t'int (Seq.get (view_Vec_SlabDescriptor_Global result) 0).start_offset'1
+        = 0
+      /\ UInt64.t'int (Seq.get (view_Vec_SlabDescriptor_Global result) 0).slab_size'1 = 8
+      /\ UInt32.t'int (Seq.get (view_Vec_SlabDescriptor_Global result) 0).element_size'1 = 4)
+    /\ ([@stop_split] [@expl:wa_descs ensures #2] [%#sbatch3'8] Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_SlabDescriptor_Global result) 0).keys'1)
+      = 2
+    /\ Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_SlabDescriptor_Global result) 0).keys'1) 0 = const_FREE_KEY
+    /\ Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_SlabDescriptor_Global result) 0).keys'1) 1 = const_FREE_KEY)}
+    (! return {result}) ]
+
+type tup3_u64_u64_u64 = { f0: UInt64.t; f1: UInt64.t; f2: UInt64.t }
+
+let wa_recovered_reserve_abort (return (x: tup3_u64_u64_u64)) = any
+  [ return (result: tup3_u64_u64_u64) ->
+  {[@stop_split] [@expl:wa_recovered_reserve_abort ensures] [%#sbatch3'9] UInt64.t'int result.f0 = 8
+    /\ UInt64.t'int result.f1 = 8 /\ UInt64.t'int result.f2 = 0}
+    (! return {result}) ]
+
+type tup5_u64_u64_u64_Result_Snapshot_Seq_RegionState_EmError_Vec_SlabDescriptor_Global = {
+  f0'0: UInt64.t;
+  f1'0: UInt64.t;
+  f2'0: UInt64.t;
+  f3'0: t_Result_Snapshot_Seq_RegionState_EmError;
+  f4'0: t_Vec_SlabDescriptor_Global }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let refute_em_abort_post_used_restored [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1186 0 1186 128]
+  (return (x: tup5_u64_u64_u64_Result_Snapshot_Seq_RegionState_EmError_Vec_SlabDescriptor_Global)) = (! bb0
+  [ bb0 = s0
+    [ s0 = wa_precrash [%#sbatch3] (fun (_x: t_Result_Snapshot_Seq_RegionState_EmError) -> [ &rec' <- _x ] s1)
+    | s1 = wa_descs [%#sbatch3'0] (fun (_x: t_Vec_SlabDescriptor_Global) -> [ &d <- _x ] s2)
+    | s2 = {[@expl:assertion] [%#sbatch3'1] match rec' with
+        | Ok img -> Seq.(==) (view_Vec_u64_Global (lookup_Int (view_SlabMap (Seq.get img 0).slabs) 0).keys) (view_Vec_u64_Global (Seq.get (view_Vec_SlabDescriptor_Global d) 0).keys'1)
+        | Err _ -> true
+        end}
+      s3
+    | s3 = wa_recovered_reserve_abort [%#sbatch3'2] (fun (_x: tup3_u64_u64_u64) -> [ &_12 <- _x ] s4)
+    | s4 = [ &u0 <- _12.f0 ] s5
+    | s5 = [ &u1 <- _12.f1 ] s6
+    | s6 = [ &u2 <- _12.f2 ] s7
+    | s7 = [ &_ret <- { f0'0 = u0; f1'0 = u1; f2'0 = u2; f3'0 = rec'; f4'0 = d } ] s8
+    | s8 = return {_ret} ] ]
+  [ & _ret: tup5_u64_u64_u64_Result_Snapshot_Seq_RegionState_EmError_Vec_SlabDescriptor_Global = Any.any_l ()
+  | & rec': t_Result_Snapshot_Seq_RegionState_EmError = Any.any_l ()
+  | & d: t_Vec_SlabDescriptor_Global = Any.any_l ()
+  | & u0: UInt64.t = Any.any_l ()
+  | & u1: UInt64.t = Any.any_l ()
+  | & u2: UInt64.t = Any.any_l ()
+  | & _12: tup3_u64_u64_u64 = Any.any_l () ])
+  [ return (result: tup5_u64_u64_u64_Result_Snapshot_Seq_RegionState_EmError_Vec_SlabDescriptor_Global) ->
+  {[@stop_split] [@expl:refute_em_abort_post_used_restored ensures] ([@stop_split] [@expl:refute_em_abort_post_used_restored ensures #0] [%#sbatch3'3] UInt64.t'int result.f0'0
+        = 8
+      /\ UInt64.t'int result.f2'0 = 0 /\ result.f0'0 <> result.f2'0)
+    /\ ([@stop_split] [@expl:refute_em_abort_post_used_restored ensures #1] [%#sbatch3'4] match result.f3'0 with
+      | Ok img -> Seq.length img = 1
+      /\ contains_Int (view_SlabMap (Seq.get img 0).slabs) 0
+      /\ view_Vec_u64_Global (lookup_Int (view_SlabMap (Seq.get img 0).slabs) 0).keys
+        = view_Vec_u64_Global (Seq.get (view_Vec_SlabDescriptor_Global result.f4'0) 0).keys'1
+      /\ (lookup_Int (view_SlabMap (Seq.get img 0).slabs) 0).start_offset
+        = (Seq.get (view_Vec_SlabDescriptor_Global result.f4'0) 0).start_offset'1
+      /\ (lookup_Int (view_SlabMap (Seq.get img 0).slabs) 0).element_size
+        = (Seq.get (view_Vec_SlabDescriptor_Global result.f4'0) 0).element_size'1
+      /\ (lookup_Int (view_SlabMap (Seq.get img 0).slabs) 0).slab_size
+      = (Seq.get (view_Vec_SlabDescriptor_Global result.f4'0) 0).slab_size'1
+      | Err _ -> false
+      end)}
+    (! return {result}) ]

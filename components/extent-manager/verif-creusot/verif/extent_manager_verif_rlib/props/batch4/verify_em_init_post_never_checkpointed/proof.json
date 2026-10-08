@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_init_never_ckpt": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_verify_em_init_post_never_checkpointed": {
+        "prover": "alt-ergo",
+        "time": 0.042
+      }
+    }
+  }
+}

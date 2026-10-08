@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_g_alloc_exist": { "prover": "z3", "time": 0.141 } }
+  }
+}

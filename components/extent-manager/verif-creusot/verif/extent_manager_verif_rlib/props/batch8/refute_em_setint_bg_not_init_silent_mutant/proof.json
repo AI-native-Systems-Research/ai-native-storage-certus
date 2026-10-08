@@ -1,0 +1,22 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_refute_em_setint_bg_not_init_silent__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              {
+                "tactic": "split_vc",
+                "children": [ { "prover": "alt-ergo", "time": 0.029 }, null ]
+              }
+            ]
+          }
+        ]
+      },
+      "vc_w8_bg_disconnected": { "prover": "alt-ergo", "time": 0.03 }
+    }
+  }
+}

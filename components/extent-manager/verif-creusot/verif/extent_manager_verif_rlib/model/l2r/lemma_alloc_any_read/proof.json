@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lemma_alloc_any_read": { "prover": "cvc5", "time": 0.168 }
+    }
+  }
+}

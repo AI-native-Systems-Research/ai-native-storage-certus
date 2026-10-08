@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_data_base_lba'0": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_verify_em_dbase_frame_read_only": {
+        "prover": "alt-ergo",
+        "time": 0.029
+      }
+    }
+  }
+}

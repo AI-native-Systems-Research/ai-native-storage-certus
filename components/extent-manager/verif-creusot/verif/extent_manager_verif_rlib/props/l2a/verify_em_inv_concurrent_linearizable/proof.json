@@ -1,0 +1,16 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_apply_lop": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_index_Vec_LOp_Global": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_len_LOp": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_lop_live": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_remove_extent_by_offset": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_verify_em_inv_concurrent_linearizable": {
+        "prover": "cvc4",
+        "time": 1.5
+      }
+    }
+  }
+}

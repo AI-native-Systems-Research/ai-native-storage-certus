@@ -1,0 +1,10 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_capacity_bytes": { "prover": "alt-ergo", "time": 0.036 },
+      "vc_new_inner": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_verify_em_cap_uninit_zero": { "prover": "alt-ergo", "time": 0.053 }
+    }
+  }
+}

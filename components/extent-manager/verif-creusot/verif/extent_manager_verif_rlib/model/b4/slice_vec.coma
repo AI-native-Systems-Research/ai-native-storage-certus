@@ -1,0 +1,105 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 384 0 384 62 *)
+
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 102 18 102 36
+let%span svec'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span svec'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 193 19 193 38
+let%span svec'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 194 18 194 46
+let%span svec'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 116 18 116 48
+let%span sslice = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/slice.rs" 148 20 148 37
+let%span sslice'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/slice.rs" 153 20 153 37
+let%span sb4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 385 25 385 35
+let%span sb4'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 388 16 388 46
+let%span sb4'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 387 16 387 36
+let%span sb4'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 390 18 390 21
+let%span sb4'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 390 8 390 22
+let%span sb4'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 391 13 391 14
+let%span sb4'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 391 8 391 14
+let%span sb4'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 392 24 392 109
+let%span sb4'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 382 11 382 39
+let%span sb4'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 383 10 383 45
+
+use seq.Seq
+use creusot.int.UInt8
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_u8_Global
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_u8_Global (self: t_Vec_u8_Global) : Seq.seq UInt8.t
+
+axiom view_Vec_u8_Global_spec:
+  forall self: t_Vec_u8_Global [view_Vec_u8_Global self]. [%#svec'0] Seq.length (view_Vec_u8_Global self)
+    <= UInt64.t'int const_MAX
+
+let new_u8 (return (x: t_Vec_u8_Global)) = any
+  [ return (result: t_Vec_u8_Global) ->
+  {[@stop_split] [@expl:new ensures] [%#svec] Seq.length (view_Vec_u8_Global result) = 0}
+    (! return {result}) ]
+
+predicate in_bounds_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq UInt8.t) =
+  [%#sslice] UInt64.t'int self < Seq.length seq
+
+meta "rewrite_def" predicate in_bounds_usize
+
+predicate has_value_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq UInt8.t) (out: UInt8.t) =
+  [%#sslice'0] Seq.get seq (UInt64.t'int self) = out
+
+meta "rewrite_def" predicate has_value_usize
+
+let index_Vec_u8_Global (self_: t_Vec_u8_Global) (ix: UInt64.t) (return (x: UInt8.t)) =
+{[@stop_split] [@expl:index requires] [%#svec'1] in_bounds_usize ix (view_Vec_u8_Global self_)}
+  any
+  [ return (result: UInt8.t) ->
+  {[@stop_split] [@expl:index ensures] [%#svec'2] has_value_usize ix (view_Vec_u8_Global self_) result}
+    (! return {result}) ]
+
+let push_u8 (self_: MutBorrow.t t_Vec_u8_Global) (v: UInt8.t) (return (x: ())) = any
+  [ return (result: ()) -> {[@stop_split] [@expl:push ensures] [%#svec'3] view_Vec_u8_Global self_.final
+    = Seq.snoc (view_Vec_u8_Global self_.current) v}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let slice_vec [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 384 0 384 62]
+  (src: t_Vec_u8_Global) (a: UInt64.t) (b: UInt64.t) (return (x: t_Vec_u8_Global)) =
+{[@stop_split] [@expl:slice_vec requires] [%#sb4'7] UInt64.t'int a <= UInt64.t'int b
+  /\ UInt64.t'int b <= Seq.length (view_Vec_u8_Global src)}
+  (! bb0
+  [ bb0 = s0 [ s0 = new_u8 [%#sb4] (fun (_x: t_Vec_u8_Global) -> [ &v <- _x ] s1) | s1 = [ &i <- a ] s2 | s2 = bb2 ]
+  | bb2 = bb2
+    [ bb2 = {[@expl:loop invariant #0] [%#sb4'1] UInt64.t'int a <= UInt64.t'int i /\ UInt64.t'int i <= UInt64.t'int b}
+      {[@expl:loop invariant #1] [%#sb4'0] view_Vec_u8_Global v
+      = Seq.([..]) (view_Vec_u8_Global src) (UInt64.t'int a) (UInt64.t'int i)}
+      (! s0)
+      [ s0 = [ &_26 <- UInt64.lt i b ] s1 | s1 = any [ br0 -> {_26 = false} (! bb7) | br1 -> {_26} (! bb4) ] ]
+      [ bb4 = s0
+        [ s0 = index_Vec_u8_Global [%#sb4'2] {src} {i} (fun (_x: UInt8.t) -> [ &_32 <- _x ] s1)
+        | s1 = MutBorrow.borrow_mut <t_Vec_u8_Global> {v}
+            (fun (_bor: MutBorrow.t t_Vec_u8_Global) -> [ &_30 <- _bor ] [ &v <- _bor.final ] s2)
+        | s2 = push_u8 [%#sb4'3] {_30} {_32} (fun (_x: ()) -> [ &_29 <- _x ] s3)
+        | s3 = UInt64.add [%#sb4'5] {i} {[%#sb4'4] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &i <- _x ] s4)
+        | s4 =
+          {[@expl:assertion] [%#sb4'6] Seq.(==) (Seq.([..]) (view_Vec_u8_Global src) (UInt64.t'int a) (UInt64.t'int i)) (Seq.snoc (Seq.([..]) (view_Vec_u8_Global src) (UInt64.t'int a) (UInt64.t'int i
+          - 1)) (Seq.get (view_Vec_u8_Global src) (UInt64.t'int i - 1)))}
+          s5
+        | s5 = bb2 ] ] ]
+  | bb7 = s0 [ s0 = [ &_ret <- v ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Vec_u8_Global = Any.any_l ()
+  | & src: t_Vec_u8_Global = src
+  | & a: UInt64.t = a
+  | & b: UInt64.t = b
+  | & v: t_Vec_u8_Global = Any.any_l ()
+  | & i: UInt64.t = Any.any_l ()
+  | & _26: bool = Any.any_l ()
+  | & _29: () = Any.any_l ()
+  | & _30: MutBorrow.t t_Vec_u8_Global = Any.any_l ()
+  | & _32: UInt8.t = Any.any_l () ])
+  [ return (result: t_Vec_u8_Global) -> {[@stop_split] [@expl:slice_vec ensures] [%#sb4'8] view_Vec_u8_Global result
+    = Seq.([..]) (view_Vec_u8_Global src) (UInt64.t'int a) (UInt64.t'int b)}
+    (! return {result}) ]

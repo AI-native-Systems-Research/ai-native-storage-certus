@@ -1,0 +1,188 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 592 0 592 107 *)
+
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sbatch7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 593 4 593 16
+let%span sbatch7'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 590 11 590 45
+let%span sbatch7'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 591 10 591 76
+let%span sb7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 294 11 294 45
+let%span sb7'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 295 10 298 1
+let%span sb7'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 158 16 158 69
+let%span sb7'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 206 8 207 89
+let%span sb7'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 140 10 140 11
+let%span sb7'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 143 8 150 9
+let%span sb7'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 47 16 47 46
+let%span sb7'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 190 8 191 93
+let%span sb7'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 170 10 170 11
+let%span sb7'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 172 16 172 98
+let%span sb7'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 128 10 128 11
+let%span sb7'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 131 8 134 70
+let%span sb7'11 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 179 8 182 94
+let%span sb7'12 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 163 10 163 11
+let%span sb7'13 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 165 16 165 91
+let%span sb7'14 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 41 16 41 46
+
+use creusot.int.UInt64
+use seq.Seq
+use creusot.int.UInt8
+use creusot.int.UInt32
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_u8_Global
+
+type t_Vec_Vec_SlabDescriptor_Global_Global
+
+type t_EmError = CorruptMetadata | IoError | NotInitialized | OffsetNotFound UInt64.t | OutOfSpace
+
+type t_Result_Vec_Vec_SlabDescriptor_Global_Global_EmError = Ok t_Vec_Vec_SlabDescriptor_Global_Global | Err t_EmError
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_u8_Global (self: t_Vec_u8_Global) : Seq.seq UInt8.t
+
+axiom view_Vec_u8_Global_spec:
+  forall self: t_Vec_u8_Global [view_Vec_u8_Global self]. [%#svec] Seq.length (view_Vec_u8_Global self)
+    <= UInt64.t'int const_MAX
+
+type t_Option_Int = None | Some int
+
+function dec32 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 288 0 288 31] (b: Seq.seq UInt8.t) : UInt32.t
+
+function d32 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 46 0 46 37] (b: Seq.seq UInt8.t) (p: int) : UInt32.t
+ = [%#sb7'5] dec32 (Seq.([..]) b p (p + 4))
+
+function end_slabs [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 129 0 129 61] (d: Seq.seq UInt8.t) (pos: int) (k: int) : t_Option_Int
+
+axiom end_slabs_def: forall d: Seq.seq UInt8.t, pos: int, k: int [end_slabs d pos k]. end_slabs d pos k
+    = ([%#sb7'10] if k <= 0 then
+      Some pos
+    else
+      if pos + 24 > Seq.length d then
+        None
+      else
+        if pos + 24 + 8 * UInt32.t'int (d32 d (pos + 20)) > Seq.length d then
+          None
+        else
+          end_slabs d (pos + 24 + 8 * UInt32.t'int (d32 d (pos + 20))) (k - 1)
+      
+    
+    )
+
+function end_regions [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 141 0 141 63] (d: Seq.seq UInt8.t) (pos: int) (n: int) : t_Option_Int
+
+axiom end_regions_def: forall d: Seq.seq UInt8.t, pos: int, n: int [end_regions d pos n]. end_regions d pos n
+    = ([%#sb7'4] if n <= 0 then
+      Some pos
+    else
+      if pos + 4 > Seq.length d then
+        None
+      else
+        match end_slabs d (pos + 4) (UInt32.t'int (d32 d pos)) with
+          | None -> None
+          | Some p -> end_regions d p (n - 1)
+          end
+    
+    )
+
+predicate ck_complete [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 157 0 157 38] (d: Seq.seq UInt8.t) =
+  [%#sb7'1] Seq.length d >= 4 /\ end_regions d 4 (UInt32.t'int (d32 d 0)) <> None
+
+type t_Vec_SlabDescriptor_Global
+
+type t_Vec_u64_Global
+
+type t_SlabDescriptor = { start_offset: UInt64.t; slab_size: UInt64.t; element_size: UInt32.t; keys: t_Vec_u64_Global }
+
+function dec64 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 282 0 282 31] (b: Seq.seq UInt8.t) : UInt64.t
+
+function d64 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 40 0 40 37] (b: Seq.seq UInt8.t) (p: int) : UInt64.t
+ = [%#sb7'14] dec64 (Seq.([..]) b p (p + 8))
+
+function view_Vec_u64_Global (self: t_Vec_u64_Global) : Seq.seq UInt64.t
+
+axiom view_Vec_u64_Global_spec:
+  forall self: t_Vec_u64_Global [view_Vec_u64_Global self]. [%#svec] Seq.length (view_Vec_u64_Global self)
+    <= UInt64.t'int const_MAX
+
+predicate slab_at [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 177 0 177 61] (d: Seq.seq UInt8.t) (q: int) (s: t_SlabDescriptor) =
+  [%#sb7'11] q + 24 <= Seq.length d
+  /\ s.start_offset = d64 d q
+  /\ s.slab_size = d64 d (q + 8)
+  /\ s.element_size = d32 d (q + 16)
+  /\ Seq.length (view_Vec_u64_Global s.keys) = UInt32.t'int (d32 d (q + 20))
+  /\ q + 24 + 8 * Seq.length (view_Vec_u64_Global s.keys) <= Seq.length d
+  /\ (forall t: int. 0 <= t /\ t < Seq.length (view_Vec_u64_Global s.keys)
+    -> Seq.get (view_Vec_u64_Global s.keys) t = d64 d (q + 24 + 8 * t))
+
+function sl_len [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 164 0 164 53] (ss: Seq.seq t_SlabDescriptor) (k: int) : int
+
+axiom sl_len_def: forall ss: Seq.seq t_SlabDescriptor, k: int [sl_len ss k]. sl_len ss k
+    = ([%#sb7'13] if k <= 0 then
+      0
+    else
+      sl_len ss (k - 1) + 24 + 8 * Seq.length (view_Vec_u64_Global (Seq.get ss (k - 1)).keys)
+    )
+
+predicate region_at [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 188 0 188 69] (d: Seq.seq UInt8.t) (p: int) (ss: Seq.seq t_SlabDescriptor) =
+  [%#sb7'6] p + 4 <= Seq.length d
+  /\ UInt32.t'int (d32 d p) = Seq.length ss
+  /\ (forall s: int. 0 <= s /\ s < Seq.length ss -> slab_at d (p + 4 + sl_len ss s) (Seq.get ss s))
+
+function view_Vec_SlabDescriptor_Global (self: t_Vec_SlabDescriptor_Global) : Seq.seq t_SlabDescriptor
+
+axiom view_Vec_SlabDescriptor_Global_spec:
+  forall self: t_Vec_SlabDescriptor_Global [view_Vec_SlabDescriptor_Global self]. [%#svec] Seq.length (view_Vec_SlabDescriptor_Global self)
+    <= UInt64.t'int const_MAX
+
+function rg_len [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 171 0 171 57] (v: Seq.seq t_Vec_SlabDescriptor_Global) (r: int) : int
+
+axiom rg_len_def: forall v: Seq.seq t_Vec_SlabDescriptor_Global, r: int [rg_len v r]. rg_len v r
+    = ([%#sb7'8] if r <= 0 then
+      0
+    else
+      rg_len v (r - 1) + 4
+      + sl_len (view_Vec_SlabDescriptor_Global (Seq.get v (r
+      - 1))) (Seq.length (view_Vec_SlabDescriptor_Global (Seq.get v (r - 1))))
+    )
+
+predicate parsed [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 204 0 204 62] (d: Seq.seq UInt8.t) (v: Seq.seq t_Vec_SlabDescriptor_Global) =
+  [%#sb7'2] Seq.length d >= 4
+  /\ UInt32.t'int (d32 d 0) = Seq.length v
+  /\ (forall r: int. 0 <= r /\ r < Seq.length v
+    -> region_at d (4 + rg_len v r) (view_Vec_SlabDescriptor_Global (Seq.get v r)))
+
+function view_Vec_Vec_SlabDescriptor_Global_Global (self: t_Vec_Vec_SlabDescriptor_Global_Global) : Seq.seq t_Vec_SlabDescriptor_Global
+
+axiom view_Vec_Vec_SlabDescriptor_Global_Global_spec:
+  forall self: t_Vec_Vec_SlabDescriptor_Global_Global [view_Vec_Vec_SlabDescriptor_Global_Global self]. [%#svec] Seq.length (view_Vec_Vec_SlabDescriptor_Global_Global self)
+    <= UInt64.t'int const_MAX
+
+let deser7 (data: t_Vec_u8_Global) (return (x: t_Result_Vec_Vec_SlabDescriptor_Global_Global_EmError)) =
+{[@stop_split] [@expl:deser7 requires] [%#sb7] Seq.length (view_Vec_u8_Global data) <= 9223372036854775807}
+  any
+  [ return (result: t_Result_Vec_Vec_SlabDescriptor_Global_Global_EmError) ->
+  {[@stop_split] [@expl:deser7 ensures] [%#sb7'0] match result with
+      | Ok v -> ck_complete (view_Vec_u8_Global data)
+      /\ parsed (view_Vec_u8_Global data) (view_Vec_Vec_SlabDescriptor_Global_Global v)
+      | Err e -> not ck_complete (view_Vec_u8_Global data) /\ e = CorruptMetadata
+      end}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_em_ckpt_decode_truncated__mutant [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 592 0 592 107]
+  (data: t_Vec_u8_Global) (return (x: t_Result_Vec_Vec_SlabDescriptor_Global_Global_EmError)) =
+{[@stop_split] [@expl:verify_em_ckpt_decode_truncated__mutant requires] [%#sbatch7'0] Seq.length (view_Vec_u8_Global data)
+  <= 9223372036854775807}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = deser7 [%#sbatch7] {data}
+        (fun (_x: t_Result_Vec_Vec_SlabDescriptor_Global_Global_EmError) -> [ &_ret <- _x ] s1)
+    | s1 = return {_ret} ] ]
+  [ & _ret: t_Result_Vec_Vec_SlabDescriptor_Global_Global_EmError = Any.any_l () | & data: t_Vec_u8_Global = data ])
+  [ return (result: t_Result_Vec_Vec_SlabDescriptor_Global_Global_EmError) ->
+  {[@stop_split] [@expl:verify_em_ckpt_decode_truncated__mutant ensures] [%#sbatch7'1] not (not ck_complete (view_Vec_u8_Global data)
+    -> result = Err (CorruptMetadata))}
+    (! return {result}) ]

@@ -1,0 +1,24 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_refute_em_init_post_recovered_slots_occupied__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              {
+                "tactic": "split_vc",
+                "children": [ { "prover": "alt-ergo", "time": 0.049 }, null ]
+              },
+              { "prover": "alt-ergo", "time": 0.024 }
+            ]
+          }
+        ]
+      },
+      "vc_w2_recovered": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_w2b_replaced": { "prover": "alt-ergo", "time": 0.02 }
+    }
+  }
+}

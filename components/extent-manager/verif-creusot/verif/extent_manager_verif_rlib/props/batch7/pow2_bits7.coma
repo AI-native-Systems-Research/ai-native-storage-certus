@@ -1,0 +1,126 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 37 0 37 25 *)
+
+let%span sbatch7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 38 4 38 22
+let%span sbatch7'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 39 20 39 47
+let%span sbatch7'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 40 20 40 47
+let%span sbatch7'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 41 20 41 47
+let%span sbatch7'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 42 20 42 47
+let%span sbatch7'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 43 20 43 49
+let%span sbatch7'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 44 20 44 49
+let%span sbatch7'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 45 20 45 49
+let%span sbatch7'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 46 20 46 51
+let%span sbatch7'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 47 20 47 51
+let%span sbatch7'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 48 20 48 51
+let%span sbatch7'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 49 20 49 54
+let%span sbatch7'11 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 50 20 50 54
+let%span sbatch7'12 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 51 20 51 54
+let%span sbatch7'13 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 52 20 52 54
+let%span sbatch7'14 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 53 20 53 56
+let%span sbatch7'15 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 54 20 54 56
+let%span sbatch7'16 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 55 20 55 56
+let%span sbatch7'17 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 56 20 56 58
+let%span sbatch7'18 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 57 20 57 58
+let%span sbatch7'19 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 58 20 58 58
+let%span sbatch7'20 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 59 20 59 60
+let%span sbatch7'21 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 60 20 60 60
+let%span sbatch7'22 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 61 20 61 60
+let%span sbatch7'23 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 62 20 62 60
+let%span sbatch7'24 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 63 20 63 62
+let%span sbatch7'25 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 64 20 64 62
+let%span sbatch7'26 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 65 20 65 62
+let%span sbatch7'27 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 66 20 66 64
+let%span sbatch7'28 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 67 20 67 64
+let%span sbatch7'29 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 68 20 68 64
+let%span sbatch7'30 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 69 20 69 66
+let%span sbatch7'31 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 70 20 70 66
+let%span sbatch7'32 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 36 10 36 64
+let%span sbatch7'33 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 32 10 32 599
+let%span sbatch7'34 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 27 16 27 55
+
+use creusot.int.UInt32
+use bv.Pow2int
+use creusot.prelude.Any
+use int.Int
+
+let fact_pow2_bits7 (x: UInt32.t) (return (x'0: ())) = any
+  [ return (result: ()) -> {[@stop_split] [@expl:fact_pow2_bits7 ensures] [%#sbatch7'33] x <> (0: UInt32.t)
+      /\ UInt32.bw_and x (UInt32.sub x (1: UInt32.t)) = (0: UInt32.t)
+    -> x = (1: UInt32.t)
+    \/ x = (2: UInt32.t)
+    \/ x = (4: UInt32.t)
+    \/ x = (8: UInt32.t)
+    \/ x = (16: UInt32.t)
+    \/ x = (32: UInt32.t)
+    \/ x = (64: UInt32.t)
+    \/ x = (128: UInt32.t)
+    \/ x = (256: UInt32.t)
+    \/ x = (512: UInt32.t)
+    \/ x = (1024: UInt32.t)
+    \/ x = (2048: UInt32.t)
+    \/ x = (4096: UInt32.t)
+    \/ x = (8192: UInt32.t)
+    \/ x = (16384: UInt32.t)
+    \/ x = (32768: UInt32.t)
+    \/ x = (65536: UInt32.t)
+    \/ x = (131072: UInt32.t)
+    \/ x = (262144: UInt32.t)
+    \/ x = (524288: UInt32.t)
+    \/ x = (1048576: UInt32.t)
+    \/ x = (2097152: UInt32.t)
+    \/ x = (4194304: UInt32.t)
+    \/ x = (8388608: UInt32.t)
+    \/ x = (16777216: UInt32.t)
+    \/ x = (33554432: UInt32.t)
+    \/ x = (67108864: UInt32.t)
+    \/ x = (134217728: UInt32.t)
+    \/ x = (268435456: UInt32.t)
+    \/ x = (536870912: UInt32.t) \/ x = (1073741824: UInt32.t) \/ x = (2147483648: UInt32.t)}
+    (! return {result}) ]
+
+predicate is_pow2_7 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 26 0 26 32] (x: UInt32.t) =
+  [%#sbatch7'34] exists k: int. 0 <= k /\ Pow2int.pow2 k = UInt32.t'int x
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let pow2_bits7 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 37 0 37 25]
+  (x: UInt32.t) (return (x'0: ())) = (! bb0
+  [ bb0 = s0
+    [ s0 = fact_pow2_bits7 [%#sbatch7] {x} (fun (_x: ()) -> [ &_4 <- _x ] s1)
+    | s1 = {[@expl:assertion] [%#sbatch7'0] x = (1: UInt32.t) -> Pow2int.pow2 0 = 1} s2
+    | s2 = {[@expl:assertion] [%#sbatch7'1] x = (2: UInt32.t) -> Pow2int.pow2 1 = 2} s3
+    | s3 = {[@expl:assertion] [%#sbatch7'2] x = (4: UInt32.t) -> Pow2int.pow2 2 = 4} s4
+    | s4 = {[@expl:assertion] [%#sbatch7'3] x = (8: UInt32.t) -> Pow2int.pow2 3 = 8} s5
+    | s5 = {[@expl:assertion] [%#sbatch7'4] x = (16: UInt32.t) -> Pow2int.pow2 4 = 16} s6
+    | s6 = {[@expl:assertion] [%#sbatch7'5] x = (32: UInt32.t) -> Pow2int.pow2 5 = 32} s7
+    | s7 = {[@expl:assertion] [%#sbatch7'6] x = (64: UInt32.t) -> Pow2int.pow2 6 = 64} s8
+    | s8 = {[@expl:assertion] [%#sbatch7'7] x = (128: UInt32.t) -> Pow2int.pow2 7 = 128} s9
+    | s9 = {[@expl:assertion] [%#sbatch7'8] x = (256: UInt32.t) -> Pow2int.pow2 8 = 256} s10
+    | s10 = {[@expl:assertion] [%#sbatch7'9] x = (512: UInt32.t) -> Pow2int.pow2 9 = 512} s11
+    | s11 = {[@expl:assertion] [%#sbatch7'10] x = (1024: UInt32.t) -> Pow2int.pow2 10 = 1024} s12
+    | s12 = {[@expl:assertion] [%#sbatch7'11] x = (2048: UInt32.t) -> Pow2int.pow2 11 = 2048} s13
+    | s13 = {[@expl:assertion] [%#sbatch7'12] x = (4096: UInt32.t) -> Pow2int.pow2 12 = 4096} s14
+    | s14 = {[@expl:assertion] [%#sbatch7'13] x = (8192: UInt32.t) -> Pow2int.pow2 13 = 8192} s15
+    | s15 = {[@expl:assertion] [%#sbatch7'14] x = (16384: UInt32.t) -> Pow2int.pow2 14 = 16384} s16
+    | s16 = {[@expl:assertion] [%#sbatch7'15] x = (32768: UInt32.t) -> Pow2int.pow2 15 = 32768} s17
+    | s17 = {[@expl:assertion] [%#sbatch7'16] x = (65536: UInt32.t) -> Pow2int.pow2 16 = 65536} s18
+    | s18 = {[@expl:assertion] [%#sbatch7'17] x = (131072: UInt32.t) -> Pow2int.pow2 17 = 131072} s19
+    | s19 = {[@expl:assertion] [%#sbatch7'18] x = (262144: UInt32.t) -> Pow2int.pow2 18 = 262144} s20
+    | s20 = {[@expl:assertion] [%#sbatch7'19] x = (524288: UInt32.t) -> Pow2int.pow2 19 = 524288} s21
+    | s21 = {[@expl:assertion] [%#sbatch7'20] x = (1048576: UInt32.t) -> Pow2int.pow2 20 = 1048576} s22
+    | s22 = {[@expl:assertion] [%#sbatch7'21] x = (2097152: UInt32.t) -> Pow2int.pow2 21 = 2097152} s23
+    | s23 = {[@expl:assertion] [%#sbatch7'22] x = (4194304: UInt32.t) -> Pow2int.pow2 22 = 4194304} s24
+    | s24 = {[@expl:assertion] [%#sbatch7'23] x = (8388608: UInt32.t) -> Pow2int.pow2 23 = 8388608} s25
+    | s25 = {[@expl:assertion] [%#sbatch7'24] x = (16777216: UInt32.t) -> Pow2int.pow2 24 = 16777216} s26
+    | s26 = {[@expl:assertion] [%#sbatch7'25] x = (33554432: UInt32.t) -> Pow2int.pow2 25 = 33554432} s27
+    | s27 = {[@expl:assertion] [%#sbatch7'26] x = (67108864: UInt32.t) -> Pow2int.pow2 26 = 67108864} s28
+    | s28 = {[@expl:assertion] [%#sbatch7'27] x = (134217728: UInt32.t) -> Pow2int.pow2 27 = 134217728} s29
+    | s29 = {[@expl:assertion] [%#sbatch7'28] x = (268435456: UInt32.t) -> Pow2int.pow2 28 = 268435456} s30
+    | s30 = {[@expl:assertion] [%#sbatch7'29] x = (536870912: UInt32.t) -> Pow2int.pow2 29 = 536870912} s31
+    | s31 = {[@expl:assertion] [%#sbatch7'30] x = (1073741824: UInt32.t) -> Pow2int.pow2 30 = 1073741824} s32
+    | s32 = {[@expl:assertion] [%#sbatch7'31] x = (2147483648: UInt32.t) -> Pow2int.pow2 31 = 2147483648} s33
+    | s33 = return {_ret} ] ] [ & _ret: () = Any.any_l () | & x: UInt32.t = x | & _4: () = Any.any_l () ])
+  [ return (result: ()) -> {[@stop_split] [@expl:pow2_bits7 ensures] [%#sbatch7'32] x <> (0: UInt32.t)
+      /\ UInt32.bw_and x (UInt32.sub x (1: UInt32.t)) = (0: UInt32.t) -> is_pow2_7 x}
+    (! return {result}) ]

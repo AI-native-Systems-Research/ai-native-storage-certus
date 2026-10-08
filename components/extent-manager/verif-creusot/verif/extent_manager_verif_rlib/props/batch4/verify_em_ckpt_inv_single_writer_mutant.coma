@@ -1,0 +1,200 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 1627 0 1627 94 *)
+
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 112 18 112 40
+let%span svec'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span svec'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 193 19 193 38
+let%span svec'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 194 18 194 46
+let%span sslice = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/slice.rs" 148 20 148 37
+let%span sslice'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/slice.rs" 153 20 153 37
+let%span sb4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 157 8 158 62
+let%span sb4'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 174 16 174 61
+let%span sb4'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 139 16 139 62
+let%span sb4'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 150 16 150 97
+let%span sb4'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 167 8 168 77
+let%span sb4'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 144 16 144 85
+let%span sbatch4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 1628 18 1628 28
+let%span sbatch4'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 1629 23 1629 24
+let%span sbatch4'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 1631 14 1631 25
+let%span sbatch4'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 1630 16 1630 57
+let%span sbatch4'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 1632 27 1632 30
+let%span sbatch4'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 1633 15 1633 27
+let%span sbatch4'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 1635 31 1635 59
+let%span sbatch4'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 1639 13 1639 14
+let%span sbatch4'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 1639 8 1639 14
+let%span sbatch4'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 1626 10 1626 53
+let%span sbatch4'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 1562 10 1562 109
+let%span sbatch4'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 1610 11 1610 29
+let%span sbatch4'11 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 1611 10 1611 43
+
+use creusot.int.UInt64
+use seq.Seq
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_Co = { completed_seq: UInt64.t; in_progress: bool }
+
+type t_Vec_Th_Global
+
+type t_CoSys = { co: t_Co; ts: t_Vec_Th_Global }
+
+type t_Th = Idle | Waiting UInt64.t | Running UInt64.t
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_Th_Global (self: t_Vec_Th_Global) : Seq.seq t_Th
+
+axiom view_Vec_Th_Global_spec:
+  forall self: t_Vec_Th_Global [view_Vec_Th_Global self]. [%#svec'0] Seq.length (view_Vec_Th_Global self)
+    <= UInt64.t'int const_MAX
+
+predicate is_run [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 138 0 138 28] (t: t_Th) =
+  [%#sb4'1] match t with
+    | Running _ -> true
+    | _ -> false
+    end
+
+predicate co_run_flag [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 149 0 149 36] (s: t_CoSys) =
+  [%#sb4'2] forall i: int. 0 <= i
+      /\ i < Seq.length (view_Vec_Th_Global s.ts) /\ is_run (Seq.get (view_Vec_Th_Global s.ts) i) -> s.co.in_progress
+
+predicate co_single [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 155 0 155 34] (s: t_CoSys) =
+  [%#sb4] forall i: int, j: int. 0 <= i
+      /\ i < Seq.length (view_Vec_Th_Global s.ts)
+      /\ 0 <= j
+      /\ j < Seq.length (view_Vec_Th_Global s.ts)
+      /\ is_run (Seq.get (view_Vec_Th_Global s.ts) i) /\ is_run (Seq.get (view_Vec_Th_Global s.ts) j) -> i = j
+
+function th_need [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 143 0 143 28] (t: t_Th) : int
+ = [%#sb4'4] match t with
+    | Running n -> UInt64.t'int n
+    | Waiting n -> UInt64.t'int n
+    | Idle -> 0
+    end
+
+predicate co_bound [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 165 0 165 33] (s: t_CoSys) =
+  [%#sb4'3] forall i: int. 0 <= i /\ i < Seq.length (view_Vec_Th_Global s.ts)
+    -> th_need (Seq.get (view_Vec_Th_Global s.ts) i) <= UInt64.t'int s.co.completed_seq + 2
+    /\ (is_run (Seq.get (view_Vec_Th_Global s.ts) i)
+    -> UInt64.t'int s.co.completed_seq < th_need (Seq.get (view_Vec_Th_Global s.ts) i))
+
+predicate co_inv [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 173 0 173 31] (s: t_CoSys) =
+  [%#sb4'0] co_run_flag s /\ co_single s /\ co_bound s
+
+let co_init (n: UInt64.t) (return (x: t_CoSys)) = any
+  [ return (result: t_CoSys) -> {[@stop_split] [@expl:co_init ensures] [%#sbatch4'9] co_inv result
+    /\ Seq.length (view_Vec_Th_Global result.ts) = UInt64.t'int n
+    /\ UInt64.t'int result.co.completed_seq = 0 /\ not result.co.in_progress}
+    (! return {result}) ]
+
+type t_Vec_tup2_usize_CoOp_Global
+
+type t_CoOp = Enter | Wake | Finish bool
+
+type tup2_usize_CoOp = { f0: UInt64.t; f1: t_CoOp }
+
+function view_Vec_tup2_usize_CoOp_Global (self: t_Vec_tup2_usize_CoOp_Global) : Seq.seq tup2_usize_CoOp
+
+axiom view_Vec_tup2_usize_CoOp_Global_spec:
+  forall self: t_Vec_tup2_usize_CoOp_Global [view_Vec_tup2_usize_CoOp_Global self]. [%#svec'0] Seq.length (view_Vec_tup2_usize_CoOp_Global self)
+    <= UInt64.t'int const_MAX
+
+let len_tup2_usize_CoOp (self_: t_Vec_tup2_usize_CoOp_Global) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:len ensures] [%#svec] UInt64.t'int result
+    = Seq.length (view_Vec_tup2_usize_CoOp_Global self_)}
+    (! return {result}) ]
+
+predicate in_bounds_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq tup2_usize_CoOp) =
+  [%#sslice] UInt64.t'int self < Seq.length seq
+
+meta "rewrite_def" predicate in_bounds_usize
+
+predicate has_value_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq tup2_usize_CoOp) (out: tup2_usize_CoOp) =
+  [%#sslice'0] Seq.get seq (UInt64.t'int self) = out
+
+meta "rewrite_def" predicate has_value_usize
+
+let index_Vec_tup2_usize_CoOp_Global (self_: t_Vec_tup2_usize_CoOp_Global) (ix: UInt64.t)
+  (return (x: tup2_usize_CoOp)) =
+{[@stop_split] [@expl:index requires] [%#svec'1] in_bounds_usize ix (view_Vec_tup2_usize_CoOp_Global self_)}
+  any
+  [ return (result: tup2_usize_CoOp) ->
+  {[@stop_split] [@expl:index ensures] [%#svec'2] has_value_usize ix (view_Vec_tup2_usize_CoOp_Global self_) result}
+    (! return {result}) ]
+
+let len_Th (self_: t_Vec_Th_Global) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:len ensures] [%#svec] UInt64.t'int result
+    = Seq.length (view_Vec_Th_Global self_)}
+    (! return {result}) ]
+
+let enter_unguarded (sys: MutBorrow.t t_CoSys) (t: UInt64.t) (return (x: ())) =
+{[@stop_split] [@expl:enter_unguarded requires] [%#sbatch4'10] UInt64.t'int t
+  < Seq.length (view_Vec_Th_Global sys.current.ts)}
+  any
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:enter_unguarded ensures] [%#sbatch4'11] Seq.length (view_Vec_Th_Global sys.final.ts)
+    = Seq.length (view_Vec_Th_Global sys.current.ts)}
+    (! return {result}) ]
+
+predicate resolve_refmut_CoSys [@inline:trivial] (_1: MutBorrow.t t_CoSys) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_CoSys
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_em_ckpt_inv_single_writer__mutant [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 1627 0 1627 94]
+  (n: UInt64.t) (sched: t_Vec_tup2_usize_CoOp_Global) (return (x: t_CoSys)) = (! bb0
+  [ bb0 = s0
+    [ s0 = co_init [%#sbatch4] {n} (fun (_x: t_CoSys) -> [ &sys <- _x ] s1)
+    | s1 = [ &k <- [%#sbatch4'0] (0: UInt64.t) ] s2
+    | s2 = bb2 ]
+  | bb2 = bb2
+    [ bb2 = {[@expl:loop invariant] [%#sbatch4'2] UInt64.t'int k <= Seq.length (view_Vec_tup2_usize_CoOp_Global sched)
+      /\ Seq.length (view_Vec_Th_Global sys.ts) = UInt64.t'int n}
+      (! s0)
+      [ s0 = len_tup2_usize_CoOp [%#sbatch4'1] {sched} (fun (_x: UInt64.t) -> [ &_18 <- _x ] s1)
+      | s1 = [ &_16 <- UInt64.lt k _18 ] s2
+      | s2 = any [ br0 -> {_16 = false} (! bb15) | br1 -> {_16} (! bb5) ] ]
+      [ bb5 = s0
+        [ s0 = index_Vec_tup2_usize_CoOp_Global [%#sbatch4'3] {sched} {k}
+            (fun (_x: tup2_usize_CoOp) -> [ &_22 <- _x ] s1)
+        | s1 = [ &t <- _22.f0 ] s2
+        | s2 = [ &op <- _22.f1 ] s3
+        | s3 = len_Th [%#sbatch4'4] {sys.ts} (fun (_x: UInt64.t) -> [ &_28 <- _x ] s4)
+        | s4 = [ &_26 <- UInt64.lt t _28 ] s5
+        | s5 = any [ br0 -> {_26 = false} (! bb14) | br1 -> {_26} (! bb8) ] ]
+      | bb8 = any
+        [ br0 -> {op = Enter} (! bb11) | br1 -> {op = Wake} (! bb14) | br2 (x0: bool) -> {op = Finish x0} (! bb14) ]
+      | bb11 = s0
+        [ s0 = MutBorrow.borrow_mut <t_CoSys> {sys}
+            (fun (_bor: MutBorrow.t t_CoSys) -> [ &_32 <- _bor ] [ &sys <- _bor.final ] s1)
+        | s1 = MutBorrow.borrow_final <t_CoSys> {_32.current} {MutBorrow.get_id _32}
+            (fun (_bor: MutBorrow.t t_CoSys) -> [ &_31 <- _bor ] [ &_32 <- { _32 with current = _bor.final } ] s2)
+        | s2 = enter_unguarded [%#sbatch4'5] {_31} {t} (fun (_x: ()) -> [ &_25 <- _x ] s3)
+        | s3 = -{resolve_refmut_CoSys _32}- s4
+        | s4 = bb14 ]
+      | bb14 = s0
+        [ s0 = UInt64.add [%#sbatch4'7] {k} {[%#sbatch4'6] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &k <- _x ] s1)
+        | s1 = bb2 ] ] ]
+  | bb15 = s0 [ s0 = [ &_ret <- sys ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_CoSys = Any.any_l ()
+  | & n: UInt64.t = n
+  | & sched: t_Vec_tup2_usize_CoOp_Global = sched
+  | & sys: t_CoSys = Any.any_l ()
+  | & k: UInt64.t = Any.any_l ()
+  | & _16: bool = Any.any_l ()
+  | & _18: UInt64.t = Any.any_l ()
+  | & t: UInt64.t = Any.any_l ()
+  | & op: t_CoOp = Any.any_l ()
+  | & _22: tup2_usize_CoOp = Any.any_l ()
+  | & _25: () = Any.any_l ()
+  | & _26: bool = Any.any_l ()
+  | & _28: UInt64.t = Any.any_l ()
+  | & _31: MutBorrow.t t_CoSys = Any.any_l ()
+  | & _32: MutBorrow.t t_CoSys = Any.any_l () ])
+  [ return (result: t_CoSys) ->
+  {[@stop_split] [@expl:verify_em_ckpt_inv_single_writer__mutant ensures] [%#sbatch4'8] co_single result
+    /\ Seq.length (view_Vec_Th_Global result.ts) = UInt64.t'int n}
+    (! return {result}) ]

@@ -1,0 +1,19 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 160 0 160 42 *)
+
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 159 10 159 36
+
+use int.Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant a : int
+
+constant b : int
+
+constant c : int
+
+function lemma_assoc [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 160 0 160 42] (a: int) (b: int) (c: int) : ()
+
+goal vc_lemma_assoc: [@stop_split] [@expl:lemma_assoc ensures] [%#sbuddy] a * b * c = a * b * c

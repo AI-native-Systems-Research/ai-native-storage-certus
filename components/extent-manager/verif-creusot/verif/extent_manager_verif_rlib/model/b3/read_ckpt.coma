@@ -1,0 +1,60 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 383 0 383 64 *)
+
+let%span sb3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 385 29 385 41
+let%span sb3'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 378 10 382 1
+let%span sb3'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 30 10 30 36
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_RdOut = DevErr | Bad | Good UInt64.t
+
+let elim_Good (_x: t_RdOut) (return (f0: UInt64.t)) = any
+  [ _k (f0: UInt64.t) -> {Good f0 = _x} (! return {f0})
+  | _chk -> (! {[@expl:elim Good] match _x with
+      | Good _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+type t_EmError = CorruptMetadata | IoError | NotInitialized | OffsetNotFound UInt64.t | OutOfSpace
+
+type t_Result_unit_EmError = Ok () | Err t_EmError
+
+let nvme_to_em (return (x: t_EmError)) = any
+  [ return (result: t_EmError) -> {[@stop_split] [@expl:nvme_to_em ensures] [%#sb3'1] result = IoError}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let read_ckpt [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 383 0 383 64]
+  (o: t_RdOut) (expected: UInt64.t) (return (x: t_Result_unit_EmError)) = (! bb0
+  [ bb0 = any [ br0 -> {o = DevErr} (! bb6) | br1 -> {o = Bad} (! bb5) | br2 (x0: UInt64.t) -> {o = Good x0} (! bb4) ]
+  | bb4 = s0
+    [ s0 = elim_Good {o} (fun (r0: UInt64.t) -> [ &s <- r0 ] s1)
+    | s1 = [ &_10 <- s <> expected ] s2
+    | s2 = any [ br0 -> {_10 = false} (! bb9) | br1 -> {_10} (! bb8) ] ]
+  | bb8 = s0 [ s0 = [ &_13 <- CorruptMetadata ] s1 | s1 = [ &_ret <- Err _13 ] s2 | s2 = return {_ret} ]
+  | bb9 = s0 [ s0 = [ &_ret <- Ok _14 ] s1 | s1 = return {_ret} ]
+  | bb5 = s0 [ s0 = [ &_8 <- CorruptMetadata ] s1 | s1 = [ &_ret <- Err _8 ] s2 | s2 = return {_ret} ]
+  | bb6 = s0
+    [ s0 = nvme_to_em [%#sb3] (fun (_x: t_EmError) -> [ &_7 <- _x ] s1)
+    | s1 = [ &_ret <- Err _7 ] s2
+    | s2 = return {_ret} ] ]
+  [ & _ret: t_Result_unit_EmError = Any.any_l ()
+  | & o: t_RdOut = o
+  | & expected: UInt64.t = expected
+  | & _7: t_EmError = Any.any_l ()
+  | & _8: t_EmError = Any.any_l ()
+  | & s: UInt64.t = Any.any_l ()
+  | & _10: bool = Any.any_l ()
+  | & _13: t_EmError = Any.any_l ()
+  | & _14: () = Any.any_l () ])
+  [ return (result: t_Result_unit_EmError) -> {[@stop_split] [@expl:read_ckpt ensures] [%#sb3'0] match o with
+      | DevErr -> result = Err (IoError)
+      | Bad -> result = Err (CorruptMetadata)
+      | Good s -> if s = expected then result = Ok () else result = Err (CorruptMetadata)
+      end}
+    (! return {result}) ]

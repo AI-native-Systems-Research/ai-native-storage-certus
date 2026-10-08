@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_lemma_slot_in_block": { "prover": "cvc5", "time": 0.148 } }
+  }
+}

@@ -1,0 +1,29 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1065 0 1065 22 *)
+
+let%span sbatch6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1066 18 1066 22
+let%span sbatch6'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1066 30 1066 34
+let%span sbatch6'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1066 41 1066 45
+let%span sbatch6'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1066 51 1066 55
+let%span sbatch6'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1066 62 1066 66
+let%span sbatch6'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1064 10 1064 79
+
+use creusot.prelude.Any
+
+type t_Io6 = { client: bool; data: bool; fl1: bool; sb: bool; fl2: bool }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let io6_ok [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1065 0 1065 22]
+  (return (x: t_Io6)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_ret <- { client = ([%#sbatch6] true);
+                        data = ([%#sbatch6'0] true);
+                        fl1 = ([%#sbatch6'1] true);
+                        sb = ([%#sbatch6'2] true);
+                        fl2 = ([%#sbatch6'3] true) } ] s1
+    | s1 = return {_ret} ] ] [ & _ret: t_Io6 = Any.any_l () ])
+  [ return (result: t_Io6) -> {[@stop_split] [@expl:io6_ok ensures] [%#sbatch6'4] result.client
+    /\ result.data /\ result.fl1 /\ result.sb /\ result.fl2}
+    (! return {result}) ]

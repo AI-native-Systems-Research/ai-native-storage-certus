@@ -1,0 +1,380 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 100 0 102 41 *)
+
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span svec'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 87 20 87 30
+let%span sfmap = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/fmap.rs" 88 8 88 32
+let%span sinvariant = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/invariant.rs" 85 8 85 18
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 180 11 180 26
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 181 10 181 34
+let%span sbuddy'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 182 10 182 33
+let%span sbuddy'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 183 10 183 20
+let%span sbuddy'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 154 11 154 37
+let%span sbuddy'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 155 10 155 24
+let%span sseq = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/seq.rs" 938 20 938 91
+let%span sblockio = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 272 32 272 36
+let%span sblockio'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 271 14 271 117
+let%span sblockio'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 74 15 74 36
+let%span sblockio'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 75 15 75 61
+let%span sblockio'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 76 15 76 109
+let%span sblockio'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 77 15 77 107
+let%span sblockio'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 78 14 78 94
+let%span sblockio'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 79 14 79 53
+let%span sblockio'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 80 14 80 113
+let%span sblockio'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 81 14 82 86
+let%span sblockio'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 83 14 92 5
+let%span sblockio'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 61 16 61 58
+let%span sb3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 50 37 50 50
+let%span sb3'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 47 10 47 70
+let%span sb3'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 48 10 48 90
+let%span sb3'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 49 10 49 55
+let%span sbatch3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 103 13 103 27
+let%span sbatch3'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 104 12 104 42
+let%span sbatch3'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 105 20 105 53
+let%span sbatch3'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 107 31 107 32
+let%span sbatch3'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 107 12 107 43
+let%span sbatch3'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 97 11 97 18
+let%span sbatch3'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 98 11 98 34
+let%span sbatch3'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 102 5 102 41
+let%span sbatch3'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 99 10 99 74
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use creusot.int.UInt8
+use seq.Seq
+use int.ComputerDivision
+use creusot.prelude.MutBorrow
+use map.Map
+use creusot.prelude.Any
+use int.Int
+
+type t_Superblock = {
+  magic: UInt64.t;
+  version: UInt32.t;
+  data_disk_size: UInt64.t;
+  sector_size: UInt32.t;
+  slab_size: UInt64.t;
+  max_extent_size: UInt32.t;
+  region_count: UInt32.t;
+  checkpoint_seq: UInt64.t;
+  active_copy: UInt8.t;
+  checkpoint_region_offset: UInt64.t;
+  checkpoint_region_size: UInt64.t;
+  instance_id: UInt64.t;
+  metadata_disk_ns_id: UInt32.t;
+  data_start_offset: UInt64.t }
+
+type t_Option_Superblock = None | Some t_Superblock
+
+type tup2_u64_usize = { f0: UInt64.t; f1: UInt64.t }
+
+type t_Option_tup2_u64_usize = None'0 | Some'0 tup2_u64_usize
+
+type t_MetaDevice = {
+  connected'0: bool;
+  sector_size'0: UInt32.t;
+  num_sectors'0: UInt64.t;
+  sb'0: t_Option_Superblock;
+  ckpt0'0: t_Option_tup2_u64_usize;
+  ckpt1'0: t_Option_tup2_u64_usize }
+
+type t_Vec_RegionState_Global
+
+type t_Vec_usize_Global
+
+type t_Option_Vec_usize_Global = None'1 | Some'1 t_Vec_usize_Global
+
+type t_Option_u64 = None'2 | Some'2 UInt64.t
+
+type t_FormatParams = {
+  data_disk_size'1: UInt64.t;
+  slab_size'1: UInt64.t;
+  max_extent_size'1: UInt32.t;
+  sector_size'1: UInt32.t;
+  region_count'1: UInt32.t;
+  metadata_alignment'1: UInt64.t;
+  instance_id'1: t_Option_u64;
+  metadata_disk_ns_id'1: UInt32.t;
+  metadata_region_size'1: UInt64.t }
+
+type t_SharedState = { format_params'0: t_FormatParams; checkpoint_seq'0: UInt64.t; superblock'0: t_Superblock }
+
+type t_Option_SharedState = None'3 | Some'3 t_SharedState
+
+type t_Option_u32 = None'4 | Some'4 UInt32.t
+
+type t_ExtentManager = {
+  arena: t_Vec_RegionState_Global;
+  regions: t_Option_Vec_usize_Global;
+  shared: t_Option_SharedState;
+  metadata_ns_id: t_Option_u32;
+  metadata_base_lba: UInt64.t;
+  data_base_lba: UInt64.t;
+  dev: t_MetaDevice }
+
+type t_BTreeMap_u64_Slab_Global
+
+type t_SlabMap = { inner: t_BTreeMap_u64_Slab_Global }
+
+type t_HashMap_u32_Vec_u64_Global_RandomState_Global
+
+type t_SizeClassManager = { map: t_HashMap_u32_Vec_u64_Global_RandomState_Global }
+
+type t_Vec_Vec_u64_Global_Global
+
+type t_BuddyAllocator = {
+  base_offset'2: UInt64.t;
+  total_usable_size'2: UInt64.t;
+  sector_size'2: UInt32.t;
+  max_order'2: UInt64.t;
+  free_lists'2: t_Vec_Vec_u64_Global_Global }
+
+type t_Vec_tup2_u64_usize_Global
+
+type t_RegionState = {
+  slabs: t_SlabMap;
+  size_classes: t_SizeClassManager;
+  buddy: t_BuddyAllocator;
+  dirty: bool;
+  format_params: t_FormatParams;
+  pending_frees: t_Vec_tup2_u64_usize_Global }
+
+predicate inv_BTreeMap_u64_Slab_Global (_1: t_BTreeMap_u64_Slab_Global)
+
+predicate inv_SlabMap (_1: t_SlabMap)
+
+axiom inv_axiom [@rewrite]: forall x: t_SlabMap [inv_SlabMap x]. inv_SlabMap x = inv_BTreeMap_u64_Slab_Global x.inner
+
+predicate inv_HashMap_u32_Vec_u64_Global_RandomState_Global (_1: t_HashMap_u32_Vec_u64_Global_RandomState_Global)
+
+predicate inv_SizeClassManager (_1: t_SizeClassManager)
+
+axiom inv_axiom'0 [@rewrite]: forall x: t_SizeClassManager [inv_SizeClassManager x]. inv_SizeClassManager x
+    = inv_HashMap_u32_Vec_u64_Global_RandomState_Global x.map
+
+predicate inv_RegionState (_1: t_RegionState)
+
+axiom inv_axiom'1 [@rewrite]: forall x: t_RegionState [inv_RegionState x]. inv_RegionState x
+    = (inv_SlabMap x.slabs /\ inv_SizeClassManager x.size_classes)
+
+predicate invariant_ref_RegionState [@inline:trivial] (self: t_RegionState) = [%#sinvariant] inv_RegionState self
+
+meta "rewrite_def" predicate invariant_ref_RegionState
+
+predicate inv_ref_RegionState [@inline:trivial] (_1: t_RegionState) = invariant_ref_RegionState _1
+
+meta "rewrite_def" predicate inv_ref_RegionState
+
+predicate invariant_Seq_RegionState [@inline:trivial] (self: Seq.seq t_RegionState) =
+  [%#sseq] forall i: int. 0 <= i /\ i < Seq.length self -> inv_ref_RegionState (Seq.get self i)
+
+meta "rewrite_def" predicate invariant_Seq_RegionState
+
+predicate inv_Seq_RegionState [@inline:trivial] (_1: Seq.seq t_RegionState) = invariant_Seq_RegionState _1
+
+meta "rewrite_def" predicate inv_Seq_RegionState
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_RegionState_Global (self: t_Vec_RegionState_Global) : Seq.seq t_RegionState
+
+axiom view_Vec_RegionState_Global_spec:
+  forall self: t_Vec_RegionState_Global [view_Vec_RegionState_Global self]. [%#svec] Seq.length (view_Vec_RegionState_Global self)
+    <= UInt64.t'int const_MAX
+
+predicate invariant_Vec_RegionState_Global (self: t_Vec_RegionState_Global) =
+  [%#svec'0] inv_Seq_RegionState (view_Vec_RegionState_Global self)
+
+predicate inv_Vec_RegionState_Global (_1: t_Vec_RegionState_Global)
+
+axiom inv_axiom'2: forall x: t_Vec_RegionState_Global [inv_Vec_RegionState_Global x]. inv_Vec_RegionState_Global x
+    -> invariant_Vec_RegionState_Global x
+
+predicate inv_ExtentManager (_1: t_ExtentManager)
+
+axiom inv_axiom'3 [@rewrite]: forall x: t_ExtentManager [inv_ExtentManager x]. inv_ExtentManager x
+    = inv_Vec_RegionState_Global x.arena
+
+let new_inner (dev'0: t_MetaDevice) (return (x: t_ExtentManager)) = any
+  [ return (result: t_ExtentManager) ->
+  {[@stop_split] [@expl:new_inner ensures] ([@stop_split] [@expl:new_inner result type invariant] [%#sb3] inv_ExtentManager result)
+    /\ ([@stop_split] [@expl:new_inner ensures #0] [%#sb3'0] UInt64.t'int result.metadata_base_lba = 0
+      /\ UInt64.t'int result.data_base_lba = 0)
+    /\ ([@stop_split] [@expl:new_inner ensures #1] [%#sb3'1] result.regions = None'1
+      /\ result.shared = None'3 /\ result.metadata_ns_id = None'4)
+    /\ ([@stop_split] [@expl:new_inner ensures #2] [%#sb3'2] Seq.length (view_Vec_RegionState_Global result.arena) = 0
+    /\ result.dev = dev'0)}
+    (! return {result}) ]
+
+type t_Client = { sector_size'3: UInt32.t; ns_id'3: UInt32.t; base_lba'3: UInt64.t }
+
+predicate invariant_ref_ExtentManager [@inline:trivial] (self: t_ExtentManager) = [%#sinvariant] inv_ExtentManager self
+
+meta "rewrite_def" predicate invariant_ref_ExtentManager
+
+predicate inv_ref_ExtentManager [@inline:trivial] (_1: t_ExtentManager) = invariant_ref_ExtentManager _1
+
+meta "rewrite_def" predicate inv_ref_ExtentManager
+
+let get_metadata_client (self: t_ExtentManager) (ns_id: UInt32.t) (sector_size'4: UInt32.t) (return (x: t_Client)) =
+{[@stop_split] [@expl:get_metadata_client 'self' type invariant] [%#sblockio] inv_ref_ExtentManager self}
+  any
+  [ return (result: t_Client) -> {[@stop_split] [@expl:get_metadata_client ensures] [%#sblockio'0] result.base_lba'3
+      = self.metadata_base_lba
+    /\ result.ns_id'3 = ns_id /\ result.sector_size'3 = sector_size'4}
+    (! return {result}) ]
+
+function lemma_divmod [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 184 0 184 35] (x: int) (m: int) : ()
+
+axiom lemma_divmod_spec: forall x: int, m: int. ([%#sbuddy] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'0] x = m * ComputerDivision.div x m + ComputerDivision.mod x m)
+
+axiom lemma_divmod_spec'0: forall x: int, m: int. ([%#sbuddy] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'1] 0 <= ComputerDivision.mod x m /\ ComputerDivision.mod x m < m)
+
+axiom lemma_divmod_spec'1: forall x: int, m: int. ([%#sbuddy] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'2] ComputerDivision.div x m >= 0)
+
+function lemma_mul_le [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 156 0 156 43] (a: int) (b: int) (c: int) : ()
+
+axiom lemma_mul_le_spec: forall a: int, b: int, c: int. ([%#sbuddy'3] 0 <= a /\ a <= b /\ 0 <= c)
+    -> ([%#sbuddy'4] a * c <= b * c)
+
+type t_FMap_tup2_Int_Int_Seq_u8
+
+type tup2_Int_Int = { f0'0: int; f1'0: int }
+
+type t_BDev = { store: t_FMap_tup2_Int_Int_Seq_u8; log: Seq.seq tup2_Int_Int }
+
+type t_Vec_u8_Global
+
+type t_EmError = CorruptMetadata | IoError | NotInitialized | OffsetNotFound UInt64.t | OutOfSpace
+
+type t_Result_unit_EmError = Ok () | Err t_EmError
+
+function view_Vec_u8_Global (self: t_Vec_u8_Global) : Seq.seq UInt8.t
+
+axiom view_Vec_u8_Global_spec:
+  forall self: t_Vec_u8_Global [view_Vec_u8_Global self]. [%#svec] Seq.length (view_Vec_u8_Global self)
+    <= UInt64.t'int const_MAX
+
+constant const_MAX'0: UInt64.t = (18446744073709551615: UInt64.t)
+
+type t_Option_Seq_u8 = None'5 | Some'5 (Seq.seq UInt8.t)
+
+function to_mapping_tup2_Int_Int (self: t_FMap_tup2_Int_Int_Seq_u8) : Map.map tup2_Int_Int t_Option_Seq_u8
+
+function get_tup2_Int_Int [@inline:trivial] (self: t_FMap_tup2_Int_Int_Seq_u8) (k: tup2_Int_Int) : t_Option_Seq_u8 =
+  [%#sfmap] Map.get (to_mapping_tup2_Int_Int self) k
+
+meta "rewrite_def" function get_tup2_Int_Int
+
+function padded [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 60 0 60 42] (data: Seq.seq UInt8.t) (k: int) : UInt8.t
+ = [%#sblockio'10] if k < Seq.length data then Seq.get data k else (0: UInt8.t)
+
+let write_blocks (self: t_Client) (dev'0: MutBorrow.t t_BDev) (lba: UInt64.t) (data: t_Vec_u8_Global)
+  (return (x: t_Result_unit_EmError)) =
+{[@stop_split] [@expl:write_blocks requires] ([@stop_split] [@expl:write_blocks requires #0] [%#sblockio'1] UInt32.t'int self.sector_size'3
+    > 0)
+  /\ ([@stop_split] [@expl:write_blocks requires #1] [%#sblockio'2] Seq.length (view_Vec_u8_Global data)
+      + UInt32.t'int self.sector_size'3
+    <= UInt64.t'int const_MAX)
+  /\ ([@stop_split] [@expl:write_blocks requires #2] [%#sblockio'3] UInt64.t'int self.base_lba'3 + UInt64.t'int lba
+      + ComputerDivision.div (Seq.length (view_Vec_u8_Global data) + UInt32.t'int self.sector_size'3
+      - 1) (UInt32.t'int self.sector_size'3)
+    <= UInt64.t'int const_MAX'0)
+  /\ ([@stop_split] [@expl:write_blocks requires #3] [%#sblockio'4] ComputerDivision.div (Seq.length (view_Vec_u8_Global data)
+        + UInt32.t'int self.sector_size'3
+      - 1) (UInt32.t'int self.sector_size'3)
+    * UInt32.t'int self.sector_size'3
+  <= UInt64.t'int const_MAX)}
+  any
+  [ return (result: t_Result_unit_EmError) ->
+  {[@stop_split] [@expl:write_blocks ensures] ([@stop_split] [@expl:write_blocks ensures #0] [%#sblockio'5] forall p: int. 0
+            <= p
+          /\ p < Seq.length dev'0.current.log -> Seq.get dev'0.final.log p = Seq.get dev'0.current.log p)
+    /\ ([@stop_split] [@expl:write_blocks ensures #1] [%#sblockio'6] Seq.length dev'0.current.log
+      <= Seq.length dev'0.final.log)
+    /\ ([@stop_split] [@expl:write_blocks ensures #2] [%#sblockio'7] Seq.length dev'0.final.log
+      <= Seq.length dev'0.current.log
+      + ComputerDivision.div (Seq.length (view_Vec_u8_Global data) + UInt32.t'int self.sector_size'3
+      - 1) (UInt32.t'int self.sector_size'3))
+    /\ ([@stop_split] [@expl:write_blocks ensures #3] [%#sblockio'8] forall p: int. Seq.length dev'0.current.log <= p
+          /\ p < Seq.length dev'0.final.log
+        -> Seq.get dev'0.final.log p
+        = { f0'0 = UInt32.t'int self.ns_id'3;
+            f1'0 = UInt64.t'int self.base_lba'3 + UInt64.t'int lba + (p - Seq.length dev'0.current.log) })
+    /\ ([@stop_split] [@expl:write_blocks ensures #4] [%#sblockio'9] match result with
+      | Ok () -> Seq.length dev'0.final.log
+        = Seq.length dev'0.current.log
+        + ComputerDivision.div (Seq.length (view_Vec_u8_Global data) + UInt32.t'int self.sector_size'3
+        - 1) (UInt32.t'int self.sector_size'3)
+      /\ (forall i: int. 0 <= i
+          /\ i
+          < ComputerDivision.div (Seq.length (view_Vec_u8_Global data) + UInt32.t'int self.sector_size'3
+          - 1) (UInt32.t'int self.sector_size'3)
+        -> match get_tup2_Int_Int dev'0.final.store { f0'0 = UInt32.t'int self.ns_id'3;
+                                                      f1'0 = UInt64.t'int self.base_lba'3 + UInt64.t'int lba + i } with
+          | Some'5 blk -> Seq.length blk = UInt32.t'int self.sector_size'3
+          /\ (forall j: int. 0 <= j /\ j < UInt32.t'int self.sector_size'3
+            -> Seq.get blk j = padded (view_Vec_u8_Global data) (i * UInt32.t'int self.sector_size'3 + j))
+          | None'5 -> false
+          end)
+      | Err _ -> true
+      end)}
+    (! return {result}) ]
+
+predicate resolve_refmut_BDev [@inline:trivial] (_1: MutBorrow.t t_BDev) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_BDev
+
+type tup2_ExtentManager_Result_unit_EmError = { f0'1: t_ExtentManager; f1'1: t_Result_unit_EmError }
+
+predicate inv_tup2_ExtentManager_Result_unit_EmError [@inline:trivial] (_1: tup2_ExtentManager_Result_unit_EmError) =
+  inv_ExtentManager _1.f0'1
+
+meta "rewrite_def" predicate inv_tup2_ExtentManager_Result_unit_EmError
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_em_setmbase_post_default_zero__mutant [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 100 0 102 41]
+  (dev'0: t_MetaDevice) (ns: UInt32.t) (ss: UInt32.t) (bd: MutBorrow.t t_BDev) (sb_bytes: t_Vec_u8_Global)
+  (return (x: tup2_ExtentManager_Result_unit_EmError)) =
+{[@stop_split] [@expl:verify_em_setmbase_post_default_zero__mutant requires] ([@stop_split] [@expl:verify_em_setmbase_post_default_zero__mutant requires #0] [%#sbatch3'4] UInt32.t'int ss
+    > 0)
+  /\ ([@stop_split] [@expl:verify_em_setmbase_post_default_zero__mutant requires #1] [%#sbatch3'5] Seq.length (view_Vec_u8_Global sb_bytes)
+  = 4096)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = new_inner [%#sbatch3] {dev'0} (fun (_x: t_ExtentManager) -> [ &em <- _x ] s1)
+    | s1 = get_metadata_client [%#sbatch3'0] {em} {ns} {ss} (fun (_x: t_Client) -> [ &c <- _x ] s2)
+    | s2 = {[@expl:assertion] [%#sbatch3'1] let _ = lemma_divmod (4096 + UInt32.t'int ss
+      - 1) (UInt32.t'int ss) in let _ = lemma_mul_le 1 (UInt32.t'int ss) (ComputerDivision.div (4096 + UInt32.t'int ss
+      - 1) (UInt32.t'int ss)) in ComputerDivision.div (4096 + UInt32.t'int ss - 1) (UInt32.t'int ss) * UInt32.t'int ss
+        <= 4096 + UInt32.t'int ss - 1
+      /\ ComputerDivision.div (4096 + UInt32.t'int ss - 1) (UInt32.t'int ss) <= 4096
+      /\ ComputerDivision.div (4096 + UInt32.t'int ss - 1) (UInt32.t'int ss) >= 1}
+      s3
+    | s3 = MutBorrow.borrow_final <t_BDev> {bd.current} {MutBorrow.get_id bd}
+        (fun (_bor: MutBorrow.t t_BDev) -> [ &_24 <- _bor ] [ &bd <- { bd with current = _bor.final } ] s4)
+    | s4 = write_blocks [%#sbatch3'3] {c} {_24} {[%#sbatch3'2] (0: UInt64.t)} {sb_bytes}
+        (fun (_x: t_Result_unit_EmError) -> [ &w <- _x ] s5)
+    | s5 = -{resolve_refmut_BDev bd}- s6
+    | s6 = [ &_ret <- { f0'1 = em; f1'1 = w } ] s7
+    | s7 = return {_ret} ] ]
+  [ & _ret: tup2_ExtentManager_Result_unit_EmError = Any.any_l ()
+  | & dev'0: t_MetaDevice = dev'0
+  | & ns: UInt32.t = ns
+  | & ss: UInt32.t = ss
+  | & bd: MutBorrow.t t_BDev = bd
+  | & sb_bytes: t_Vec_u8_Global = sb_bytes
+  | & em: t_ExtentManager = Any.any_l ()
+  | & c: t_Client = Any.any_l ()
+  | & w: t_Result_unit_EmError = Any.any_l ()
+  | & _24: MutBorrow.t t_BDev = Any.any_l () ])
+  [ return (result: tup2_ExtentManager_Result_unit_EmError) ->
+  {[@stop_split] [@expl:verify_em_setmbase_post_default_zero__mutant ensures] ([@stop_split] [@expl:verify_em_setmbase_post_default_zero__mutant result type invariant] [%#sbatch3'6] inv_tup2_ExtentManager_Result_unit_EmError result)
+    /\ ([@stop_split] [@expl:verify_em_setmbase_post_default_zero__mutant ensures] [%#sbatch3'7] result.f1'1 = Ok ()
+    -> Seq.get bd.final.log (Seq.length bd.current.log) = { f0'0 = UInt32.t'int ns; f1'0 = 1 })}
+    (! return {result}) ]

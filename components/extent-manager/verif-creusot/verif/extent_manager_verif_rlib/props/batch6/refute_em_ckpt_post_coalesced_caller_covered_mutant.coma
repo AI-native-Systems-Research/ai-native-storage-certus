@@ -1,0 +1,207 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1286 0 1286 167 *)
+
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sfmap = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/fmap.rs" 102 8 102 27
+let%span sfmap'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/fmap.rs" 96 8 96 34
+let%span sfmap'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/fmap.rs" 88 8 88 32
+let%span soption = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/option.rs" 796 15 796 27
+let%span soption'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/option.rs" 798 8 801 9
+let%span slogic = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic.rs" 39 11 39 28
+let%span slogic'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic.rs" 40 10 40 19
+let%span smapping = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/mapping.rs" 66 8 66 19
+let%span sckpt = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 299 8 300 106
+let%span sbatch2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 440 0 440 18
+let%span sbatch6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1287 4 1287 23
+let%span sbatch6'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1285 10 1285 19
+let%span sbatch6'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1196 10 1196 18
+let%span sbatch6'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1197 10 1197 73
+let%span sbatch6'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1198 10 1198 73
+let%span sbatch6'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1199 10 1199 68
+let%span sbatch6'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1200 10 1200 72
+let%span sbatch6'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1201 10 1201 73
+let%span sbatch6'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1202 10 1202 81
+let%span sbatch6'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1203 10 1203 28
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use map.Map
+use creusot.prelude.Any
+use int.Int
+
+type t_Co = { completed_seq: UInt64.t; in_progress: bool }
+
+type t_Vec_Th_Global
+
+type t_Cs6 = { co: t_Co; ts: t_Vec_Th_Global }
+
+type t_BTreeMap_u64_Slab_Global
+
+type t_SlabMap = { inner: t_BTreeMap_u64_Slab_Global }
+
+type t_HashMap_u32_Vec_u64_Global_RandomState_Global
+
+type t_SizeClassManager = { map: t_HashMap_u32_Vec_u64_Global_RandomState_Global }
+
+type t_Vec_Vec_u64_Global_Global
+
+type t_BuddyAllocator = {
+  base_offset: UInt64.t;
+  total_usable_size: UInt64.t;
+  sector_size: UInt32.t;
+  max_order: UInt64.t;
+  free_lists: t_Vec_Vec_u64_Global_Global }
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_FormatParams = {
+  data_disk_size'0: UInt64.t;
+  slab_size'0: UInt64.t;
+  max_extent_size'0: UInt32.t;
+  sector_size'0: UInt32.t;
+  region_count'0: UInt32.t;
+  metadata_alignment'0: UInt64.t;
+  instance_id'0: t_Option_u64;
+  metadata_disk_ns_id'0: UInt32.t;
+  metadata_region_size'0: UInt64.t }
+
+type t_Vec_tup2_u64_usize_Global
+
+type t_RegionState = {
+  slabs: t_SlabMap;
+  size_classes: t_SizeClassManager;
+  buddy: t_BuddyAllocator;
+  dirty: bool;
+  format_params: t_FormatParams;
+  pending_frees: t_Vec_tup2_u64_usize_Global }
+
+type t_EmError = CorruptMetadata | IoError | NotInitialized | OffsetNotFound UInt64.t | OutOfSpace
+
+type t_Result_Snapshot_Seq_RegionState_EmError = Ok (Seq.seq t_RegionState) | Err t_EmError
+
+type t_Result_unit_EmError = Ok'0 () | Err'0 t_EmError
+
+type tup5_bool_Snapshot_Cs6_Snapshot_Cs6_Result_Snapshot_Seq_RegionState_EmError_Result_unit_EmError = {
+  f0: bool;
+  f1: t_Cs6;
+  f2: t_Cs6;
+  f3: t_Result_Snapshot_Seq_RegionState_EmError;
+  f4: t_Result_unit_EmError }
+
+type t_Th = Idle | Waiting UInt64.t | Running UInt64.t
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_Th_Global (self: t_Vec_Th_Global) : Seq.seq t_Th
+
+axiom view_Vec_Th_Global_spec:
+  forall self: t_Vec_Th_Global [view_Vec_Th_Global self]. [%#svec] Seq.length (view_Vec_Th_Global self)
+    <= UInt64.t'int const_MAX
+
+type t_FMap_Int_Slab
+
+type t_Vec_u64_Global
+
+type t_AllocationBitmap = { words: t_Vec_u64_Global; num_slots: UInt32.t; allocated_count: UInt32.t }
+
+type t_Slab = {
+  start_offset: UInt64.t;
+  slab_size: UInt64.t;
+  element_size: UInt32.t;
+  bitmap: t_AllocationBitmap;
+  keys: t_Vec_u64_Global;
+  rover: UInt64.t }
+
+type t_Option_Slab = None'0 | Some'0 t_Slab
+
+function to_mapping_Int (self: t_FMap_Int_Slab) : Map.map int t_Option_Slab
+
+function get_Int [@inline:trivial] (self: t_FMap_Int_Slab) (k: int) : t_Option_Slab =
+  [%#sfmap'1] Map.get (to_mapping_Int self) k
+
+meta "rewrite_def" function get_Int
+
+predicate contains_Int [@inline:trivial] (self: t_FMap_Int_Slab) (k: int) = [%#sfmap] get_Int self k <> None'0
+
+meta "rewrite_def" predicate contains_Int
+
+function view_SlabMap [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 34 4 34 36] (self: t_SlabMap) : t_FMap_Int_Slab
+
+function view_Vec_u64_Global (self: t_Vec_u64_Global) : Seq.seq UInt64.t
+
+axiom view_Vec_u64_Global_spec:
+  forall self: t_Vec_u64_Global [view_Vec_u64_Global self]. [%#svec] Seq.length (view_Vec_u64_Global self)
+    <= UInt64.t'int const_MAX
+
+predicate index_Mapping_Slab_bool [@inline:trivial] (self: Map.map t_Slab bool) (a: t_Slab) =
+  [%#smapping] Map.get self a
+
+meta "rewrite_def" predicate index_Mapping_Slab_bool
+
+function such_that_Slab (p: Map.map t_Slab bool) : t_Slab
+
+axiom such_that_Slab_spec:
+  forall p: Map.map t_Slab bool [such_that_Slab p]. ([%#slogic] exists x: t_Slab. index_Mapping_Slab_bool p x)
+    -> ([%#slogic'0] index_Mapping_Slab_bool p (such_that_Slab p))
+
+function unwrap_Option_Slab (self: t_Option_Slab) : t_Slab = [%#soption'0] match self with
+    | Some'0 x -> x
+    | None'0 -> such_that_Slab (fun (__0: t_Slab) -> true)
+    end
+
+function lookup_Int [@inline:trivial] (self: t_FMap_Int_Slab) (k: int) : t_Slab =
+  [%#sfmap'0] unwrap_Option_Slab (get_Int self k)
+
+meta "rewrite_def" function lookup_Int
+
+predicate img_lacks_key [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 297 0 297 59] (img: Seq.seq t_RegionState) (k: UInt64.t) =
+  [%#sckpt] forall i: int, s: int, j: int. 0 <= i
+      /\ i < Seq.length img
+      /\ contains_Int (view_SlabMap (Seq.get img i).slabs) s
+      /\ 0 <= j /\ j < Seq.length (view_Vec_u64_Global (lookup_Int (view_SlabMap (Seq.get img i).slabs) s).keys)
+    -> Seq.get (view_Vec_u64_Global (lookup_Int (view_SlabMap (Seq.get img i).slabs) s).keys) j <> k
+
+constant const_WK2: UInt64.t = [%#sbatch2] (12: UInt64.t)
+
+let w6_coalesce_chain
+  (return (x: tup5_bool_Snapshot_Cs6_Snapshot_Cs6_Result_Snapshot_Seq_RegionState_EmError_Result_unit_EmError)) = any
+  [ return (result: tup5_bool_Snapshot_Cs6_Snapshot_Cs6_Result_Snapshot_Seq_RegionState_EmError_Result_unit_EmError) ->
+  {[@stop_split] [@expl:w6_coalesce_chain ensures] ([@stop_split] [@expl:w6_coalesce_chain ensures #0] [%#sbatch6'1] result.f0)
+    /\ ([@stop_split] [@expl:w6_coalesce_chain ensures #1] [%#sbatch6'2] match Seq.get (view_Vec_Th_Global result.f1.ts) 1 with
+        | Running n -> UInt64.t'int n = 2
+        | _ -> false
+        end)
+    /\ ([@stop_split] [@expl:w6_coalesce_chain ensures #2] [%#sbatch6'3] match Seq.get (view_Vec_Th_Global result.f1.ts) 2 with
+        | Waiting n -> UInt64.t'int n = 2
+        | _ -> false
+        end)
+    /\ ([@stop_split] [@expl:w6_coalesce_chain ensures #3] [%#sbatch6'4] UInt64.t'int result.f1.co.completed_seq = 0
+      /\ result.f1.co.in_progress)
+    /\ ([@stop_split] [@expl:w6_coalesce_chain ensures #4] [%#sbatch6'5] UInt64.t'int result.f2.co.completed_seq = 2
+      /\ Seq.get (view_Vec_Th_Global result.f2.ts) 1 = Idle)
+    /\ ([@stop_split] [@expl:w6_coalesce_chain ensures #5] [%#sbatch6'6] match Seq.get (view_Vec_Th_Global result.f2.ts) 2 with
+        | Waiting n -> UInt64.t'int n = 2
+        | _ -> false
+        end)
+    /\ ([@stop_split] [@expl:w6_coalesce_chain ensures #6] [%#sbatch6'7] match result.f3 with
+        | Ok img -> img_lacks_key img const_WK2
+        | Err _ -> false
+        end)
+    /\ ([@stop_split] [@expl:w6_coalesce_chain ensures #7] [%#sbatch6'8] result.f4 = Ok'0 ())}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let refute_em_ckpt_post_coalesced_caller_covered__mutant [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1286 0 1286 167]
+  (return (x: tup5_bool_Snapshot_Cs6_Snapshot_Cs6_Result_Snapshot_Seq_RegionState_EmError_Result_unit_EmError)) = (! bb0
+  [ bb0 = s0
+    [ s0 = w6_coalesce_chain [%#sbatch6]
+        (fun (_x: tup5_bool_Snapshot_Cs6_Snapshot_Cs6_Result_Snapshot_Seq_RegionState_EmError_Result_unit_EmError) ->
+          [ &_ret <- _x ] s1)
+    | s1 = return {_ret} ] ]
+  [ & _ret: tup5_bool_Snapshot_Cs6_Snapshot_Cs6_Result_Snapshot_Seq_RegionState_EmError_Result_unit_EmError = Any.any_l () ])
+  [ return (result: tup5_bool_Snapshot_Cs6_Snapshot_Cs6_Result_Snapshot_Seq_RegionState_EmError_Result_unit_EmError) ->
+  {[@stop_split] [@expl:refute_em_ckpt_post_coalesced_caller_covered__mutant ensures] [%#sbatch6'0] not result.f0}
+    (! return {result}) ]

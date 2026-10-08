@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_witness_em_remove_crash_before_checkpoint_sequential": {
+        "prover": "alt-ergo",
+        "time": 0.035
+      },
+      "vc_wrc_chain": { "prover": "alt-ergo", "time": 0.025 }
+    }
+  }
+}

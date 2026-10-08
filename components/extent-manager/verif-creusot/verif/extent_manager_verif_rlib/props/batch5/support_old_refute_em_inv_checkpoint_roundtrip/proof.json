@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_serialize_region": { "prover": "alt-ergo", "time": 0.042 },
+      "vc_support_old_refute_em_inv_checkpoint_roundtrip": {
+        "prover": "alt-ergo",
+        "time": 0.2
+      },
+      "vc_w5_kvl": { "prover": "alt-ergo", "time": 0.044 }
+    }
+  }
+}

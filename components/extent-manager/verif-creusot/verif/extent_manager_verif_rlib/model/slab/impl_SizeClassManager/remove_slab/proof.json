@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_hm_get_mut": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_hm_remove": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_len_u64": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_remove_slab": { "prover": "cvc5", "time": 0.194 },
+      "vc_retain_ne": { "prover": "alt-ergo", "time": 0.028 }
+    }
+  }
+}

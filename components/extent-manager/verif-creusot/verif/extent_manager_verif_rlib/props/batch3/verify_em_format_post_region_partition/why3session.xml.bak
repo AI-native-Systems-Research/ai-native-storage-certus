@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE why3session PUBLIC "-//Why3//proof session v5//EN"
+"https://www.why3.org/why3session.dtd">
+<why3session shape_version="6">
+<prover id="0" name="Z3" version="4.16.0" timelimit="3.03122" memlimit="1000"/>
+<prover id="1" name="CVC4" version="1.8" timelimit="0.273317" memlimit="1000"/>
+<prover id="2" name="Alt-Ergo" version="2.6.2" timelimit="0.051915" memlimit="1000"/>
+<prover id="3" name="CVC5" version="1.3.1" timelimit="0.459732" memlimit="1000"/>
+<file format="coma">
+<path name=".."/><path name="verify_em_format_post_region_partition.coma"/>
+<theory name="Coma">
+ <goal name="vc_format" proved="true">
+ <proof prover="2" timelimit="0.04962"><result status="valid" time="0.049620" steps="0"/></proof>
+ </goal>
+ <goal name="vc_verify_em_format_post_region_partition">
+ <transf name="compute_specified" >
+  <goal name="vc_verify_em_format_post_region_partition.0">
+  <transf name="split_vc" >
+   <goal name="vc_verify_em_format_post_region_partition.0.0" expl="format requires" proved="true">
+   <proof prover="2"><result status="valid" time="0.051915" steps="0"/></proof>
+   </goal>
+   <goal name="vc_verify_em_format_post_region_partition.0.1" expl="assertion" proved="true">
+   <proof prover="2" timelimit="0.036319"><result status="valid" time="0.036319" steps="0"/></proof>
+   </goal>
+   <goal name="vc_verify_em_format_post_region_partition.0.2" expl="verify_em_format_post_region_partition ensures">
+   <transf name="split_vc" >
+    <goal name="vc_verify_em_format_post_region_partition.0.2.0" expl="verify_em_format_post_region_partition ensures" proved="true">
+    <proof prover="2" timelimit="0.188869"><result status="valid" time="0.188869" steps="0"/></proof>
+    </goal>
+    <goal name="vc_verify_em_format_post_region_partition.0.2.1" expl="verify_em_format_post_region_partition ensures" proved="true">
+    <proof prover="1"><result status="valid" time="0.273317" steps="0"/></proof>
+    </goal>
+    <goal name="vc_verify_em_format_post_region_partition.0.2.2" expl="verify_em_format_post_region_partition ensures" proved="true">
+    <proof prover="3" timelimit="0.438006"><result status="valid" time="0.438006" steps="0"/></proof>
+    </goal>
+    <goal name="vc_verify_em_format_post_region_partition.0.2.3" expl="verify_em_format_post_region_partition ensures" proved="true">
+    <proof prover="3"><result status="valid" time="0.459732" steps="0"/></proof>
+    </goal>
+    <goal name="vc_verify_em_format_post_region_partition.0.2.4" expl="verify_em_format_post_region_partition ensures">
+    <proof prover="0"><result status="unknown" time="3.031223" steps="0"/></proof>
+    <proof prover="1" timelimit="4"><result status="timeout" time="4.000000" steps="0"/></proof>
+    <proof prover="2" timelimit="4"><result status="timeout" time="4.000000" steps="0"/></proof>
+    <proof prover="3" timelimit="4"><result status="timeout" time="4.000000" steps="0"/></proof>
+    <transf name="split_vc" >
+     <goal name="vc_verify_em_format_post_region_partition.0.2.4.0" expl="verify_em_format_post_region_partition ensures">
+     <proof prover="0" timelimit="3.1691"><result status="unknown" time="3.169096" steps="0"/></proof>
+     <proof prover="1" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+     <proof prover="2" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+     <proof prover="3" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+     </goal>
+    </transf>
+    </goal>
+    <goal name="vc_verify_em_format_post_region_partition.0.2.5" expl="verify_em_format_post_region_partition ensures" proved="true">
+    <proof prover="2" timelimit="0.110593"><result status="valid" time="0.110593" steps="0"/></proof>
+    </goal>
+    <goal name="vc_verify_em_format_post_region_partition.0.2.6" expl="verify_em_format_post_region_partition ensures" proved="true">
+    <proof prover="2" timelimit="0.073488"><result status="valid" time="0.073488" steps="0"/></proof>
+    </goal>
+   </transf>
+   </goal>
+   <goal name="vc_verify_em_format_post_region_partition.0.3" expl="type invariant" proved="true">
+   <proof prover="2" timelimit="0.037298"><result status="valid" time="0.037298" steps="0"/></proof>
+   </goal>
+   <goal name="vc_verify_em_format_post_region_partition.0.4" expl="type invariant" proved="true">
+   <proof prover="2" timelimit="0.046927"><result status="valid" time="0.046927" steps="0"/></proof>
+   </goal>
+  </transf>
+  </goal>
+ </transf>
+ </goal>
+</theory>
+</file>
+</why3session>

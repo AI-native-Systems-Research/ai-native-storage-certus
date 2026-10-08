@@ -1,0 +1,56 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 322 0 322 30 *)
+
+let%span switness = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 330 26 330 27
+let%span switness'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 324 24 324 26
+let%span switness'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 325 19 325 21
+let%span switness'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 326 25 326 27
+let%span switness'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 327 21 327 22
+let%span switness'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 328 22 328 23
+let%span switness'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 329 28 329 29
+let%span switness'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 331 29 331 30
+let%span switness'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 332 30 332 31
+let%span switness'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 320 10 320 98
+let%span switness'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 321 10 321 100
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.prelude.Any
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_FormatParams = {
+  data_disk_size: UInt64.t;
+  slab_size: UInt64.t;
+  max_extent_size: UInt32.t;
+  sector_size: UInt32.t;
+  region_count: UInt32.t;
+  metadata_alignment: UInt64.t;
+  instance_id: t_Option_u64;
+  metadata_disk_ns_id: UInt32.t;
+  metadata_region_size: UInt64.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let w3_fp [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 322 0 322 30]
+  (return (x: t_FormatParams)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_3 <- Some ([%#switness] (1: UInt64.t)) ] s1
+    | s1 = [ &_ret <- { data_disk_size = ([%#switness'0] (24: UInt64.t));
+                        slab_size = ([%#switness'1] (12: UInt64.t));
+                        max_extent_size = ([%#switness'2] (12: UInt32.t));
+                        sector_size = ([%#switness'3] (3: UInt32.t));
+                        region_count = ([%#switness'4] (1: UInt32.t));
+                        metadata_alignment = ([%#switness'5] (0: UInt64.t));
+                        instance_id = _3;
+                        metadata_disk_ns_id = ([%#switness'6] (1: UInt32.t));
+                        metadata_region_size = ([%#switness'7] (0: UInt64.t)) } ] s2
+    | s2 = return {_ret} ] ] [ & _ret: t_FormatParams = Any.any_l () | & _3: t_Option_u64 = Any.any_l () ])
+  [ return (result: t_FormatParams) ->
+  {[@stop_split] [@expl:w3_fp ensures] ([@stop_split] [@expl:w3_fp ensures #0] [%#switness'8] UInt64.t'int result.data_disk_size
+        = 24
+      /\ UInt64.t'int result.slab_size = 12 /\ UInt32.t'int result.max_extent_size = 12)
+    /\ ([@stop_split] [@expl:w3_fp ensures #1] [%#switness'9] UInt32.t'int result.sector_size = 3
+    /\ UInt32.t'int result.region_count = 1 /\ UInt64.t'int result.metadata_region_size = 0)}
+    (! return {result}) ]

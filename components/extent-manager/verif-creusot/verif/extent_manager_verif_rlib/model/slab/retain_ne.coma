@@ -1,0 +1,147 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 350 0 350 42 *)
+
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 102 18 102 36
+let%span svec'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 112 18 112 40
+let%span svec'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span svec'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 193 19 193 38
+let%span svec'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 194 18 194 46
+let%span svec'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 116 18 116 48
+let%span sslice = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/slice.rs" 148 20 148 37
+let%span sslice'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/slice.rs" 153 20 153 37
+let%span sslab = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 351 28 351 38
+let%span sslab'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 352 23 352 24
+let%span sslab'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 353 12 353 19
+let%span sslab'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 355 16 355 59
+let%span sslab'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 354 16 354 42
+let%span sslab'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 357 17 357 20
+let%span sslab'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 358 24 358 93
+let%span sslab'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 360 12 360 23
+let%span sslab'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 362 13 362 14
+let%span sslab'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 362 8 362 14
+let%span sslab'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 364 20 364 47
+let%span sslab'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 349 10 349 35
+let%span sslab'11 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 301 10 301 17
+let%span sslab'12 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 304 8 306 86
+
+use seq.Seq
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_u64_Global
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_u64_Global (self: t_Vec_u64_Global) : Seq.seq UInt64.t
+
+axiom view_Vec_u64_Global_spec:
+  forall self: t_Vec_u64_Global [view_Vec_u64_Global self]. [%#svec'1] Seq.length (view_Vec_u64_Global self)
+    <= UInt64.t'int const_MAX
+
+let new_u64 (return (x: t_Vec_u64_Global)) = any
+  [ return (result: t_Vec_u64_Global) ->
+  {[@stop_split] [@expl:new ensures] [%#svec] Seq.length (view_Vec_u64_Global result) = 0}
+    (! return {result}) ]
+
+let len_u64 (self_: t_Vec_u64_Global) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:len ensures] [%#svec'0] UInt64.t'int result
+    = Seq.length (view_Vec_u64_Global self_)}
+    (! return {result}) ]
+
+function filter_ne [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 302 0 302 49] (s: Seq.seq UInt64.t) (x: UInt64.t) : Seq.seq UInt64.t
+
+axiom filter_ne_def: forall s: Seq.seq UInt64.t, x: UInt64.t [filter_ne s x]. filter_ne s x
+    = ([%#sslab'12] if Seq.length s = 0 then
+      Seq.empty: Seq.seq UInt64.t
+    else
+      if Seq.get s (Seq.length s - 1) = x then
+        filter_ne (Seq.([..]) s 0 (Seq.length s - 1)) x
+      else
+        Seq.snoc (filter_ne (Seq.([..]) s 0 (Seq.length s - 1)) x) (Seq.get s (Seq.length s - 1))
+    
+    )
+
+predicate in_bounds_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq UInt64.t) =
+  [%#sslice] UInt64.t'int self < Seq.length seq
+
+meta "rewrite_def" predicate in_bounds_usize
+
+predicate has_value_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq UInt64.t) (out: UInt64.t) =
+  [%#sslice'0] Seq.get seq (UInt64.t'int self) = out
+
+meta "rewrite_def" predicate has_value_usize
+
+let index_Vec_u64_Global (self_: t_Vec_u64_Global) (ix: UInt64.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:index requires] [%#svec'2] in_bounds_usize ix (view_Vec_u64_Global self_)}
+  any
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:index ensures] [%#svec'3] has_value_usize ix (view_Vec_u64_Global self_) result}
+    (! return {result}) ]
+
+let push_u64 (self_: MutBorrow.t t_Vec_u64_Global) (v: UInt64.t) (return (x: ())) = any
+  [ return (result: ()) -> {[@stop_split] [@expl:push ensures] [%#svec'4] view_Vec_u64_Global self_.final
+    = Seq.snoc (view_Vec_u64_Global self_.current) v}
+    (! return {result}) ]
+
+predicate resolve_refmut_Vec_u64_Global [@inline:trivial] (_1: MutBorrow.t t_Vec_u64_Global) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_Vec_u64_Global
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let retain_ne [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 350 0 350 42]
+  (v: MutBorrow.t t_Vec_u64_Global) (x: UInt64.t) (return (x'0: ())) = (! bb0
+  [ bb0 = s0
+    [ s0 = new_u64 [%#sslab] (fun (_x: t_Vec_u64_Global) -> [ &out <- _x ] s1)
+    | s1 = [ &i <- [%#sslab'0] (0: UInt64.t) ] s2
+    | s2 = len_u64 [%#sslab'1] {v.current} (fun (_x: UInt64.t) -> [ &n <- _x ] s3)
+    | s3 = bb3 ]
+  | bb3 = bb3
+    [ bb3 = {[@expl:loop invariant #0] [%#sslab'3] UInt64.t'int i <= UInt64.t'int n
+      /\ UInt64.t'int n = Seq.length (view_Vec_u64_Global v.current)}
+      {[@expl:loop invariant #1] [%#sslab'2] view_Vec_u64_Global out
+      = filter_ne (Seq.([..]) (view_Vec_u64_Global v.current) 0 (UInt64.t'int i)) x}
+      (! s0)
+      [ s0 = [ &_22 <- UInt64.lt i n ] s1 | s1 = any [ br0 -> {_22 = false} (! bb11) | br1 -> {_22} (! bb5) ] ]
+      [ bb5 = s0
+        [ s0 = index_Vec_u64_Global [%#sslab'4] {v.current} {i} (fun (_x: UInt64.t) -> [ &_26 <- _x ] s1)
+        | s1 = [ &e <- _26 ] s2
+        | s2 = {[@expl:assertion] [%#sslab'5] Seq.([..]) (Seq.([..]) (view_Vec_u64_Global v.current) 0 (UInt64.t'int i
+            + 1)) 0 (UInt64.t'int i)
+          = Seq.([..]) (view_Vec_u64_Global v.current) 0 (UInt64.t'int i)}
+          s3
+        | s3 = [ &_34 <- e <> x ] s4
+        | s4 = any [ br0 -> {_34 = false} (! bb10) | br1 -> {_34} (! bb7) ] ]
+      | bb7 = s0
+        [ s0 = MutBorrow.borrow_mut <t_Vec_u64_Global> {out}
+            (fun (_bor: MutBorrow.t t_Vec_u64_Global) -> [ &_38 <- _bor ] [ &out <- _bor.final ] s1)
+        | s1 = push_u64 [%#sslab'6] {_38} {e} (fun (_x: ()) -> [ &_37 <- _x ] s2)
+        | s2 = bb10 ]
+      | bb10 = s0
+        [ s0 = UInt64.add [%#sslab'8] {i} {[%#sslab'7] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &i <- _x ] s1)
+        | s1 = bb3 ] ] ]
+  | bb11 = s0
+    [ s0 = {[@expl:assertion] [%#sslab'9] Seq.([..]) (view_Vec_u64_Global v.current) 0 (UInt64.t'int n)
+      = view_Vec_u64_Global v.current}
+      s1
+    | s1 = [ &v <- { v with current = out } ] s2
+    | s2 = -{resolve_refmut_Vec_u64_Global v}- s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: () = Any.any_l ()
+  | & v: MutBorrow.t t_Vec_u64_Global = v
+  | & x: UInt64.t = x
+  | & out: t_Vec_u64_Global = Any.any_l ()
+  | & i: UInt64.t = Any.any_l ()
+  | & n: UInt64.t = Any.any_l ()
+  | & _22: bool = Any.any_l ()
+  | & e: UInt64.t = Any.any_l ()
+  | & _26: UInt64.t = Any.any_l ()
+  | & _34: bool = Any.any_l ()
+  | & _37: () = Any.any_l ()
+  | & _38: MutBorrow.t t_Vec_u64_Global = Any.any_l () ])
+  [ return (result: ()) -> {[@stop_split] [@expl:retain_ne ensures] [%#sslab'10] view_Vec_u64_Global v.final
+    = filter_ne (view_Vec_u64_Global v.current) x}
+    (! return {result}) ]

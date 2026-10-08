@@ -1,0 +1,62 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 215 0 215 71 *)
+
+let%span swell_founded = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sb7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 213 10 213 11
+let%span sb7'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 212 11 212 33
+let%span sb7'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 214 10 214 51
+let%span sb7'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 163 10 163 11
+let%span sb7'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 165 16 165 91
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use int.Int
+
+type t_Vec_u64_Global
+
+type t_SlabDescriptor = { start_offset: UInt64.t; slab_size: UInt64.t; element_size: UInt32.t; keys: t_Vec_u64_Global }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_u64_Global (self: t_Vec_u64_Global) : Seq.seq UInt64.t
+
+axiom view_Vec_u64_Global_spec:
+  forall self: t_Vec_u64_Global [view_Vec_u64_Global self]. [%#svec] Seq.length (view_Vec_u64_Global self)
+    <= UInt64.t'int const_MAX
+
+function sl_len [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 164 0 164 53] (ss: Seq.seq t_SlabDescriptor) (k: int) : int
+
+axiom sl_len_def: forall ss: Seq.seq t_SlabDescriptor, k: int [sl_len ss k]. sl_len ss k
+    = ([%#sb7'3] if k <= 0 then
+      0
+    else
+      sl_len ss (k - 1) + 24 + 8 * Seq.length (view_Vec_u64_Global (Seq.get ss (k - 1)).keys)
+    )
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant a : Seq.seq t_SlabDescriptor
+
+constant x : t_SlabDescriptor
+
+constant s : int
+
+function lemma_sl_push [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 215 0 215 71] (a: Seq.seq t_SlabDescriptor) (x: t_SlabDescriptor) (s: int) : ()
+
+goal vc_lemma_sl_push: ([%#sb7'0] 0 <= s /\ s <= Seq.length a)
+  -> (if s > 0 then
+    (([@stop_split] [@expl:lemma_sl_push requires] [%#sb7'0] 0 <= s - 1 /\ s - 1 <= Seq.length a)
+      /\ ([@expl:variant decreases] well_founded_relation_Int ([%#sb7] s) ([%#sb7] s - 1)))
+    /\ (([@stop_split] [@expl:lemma_sl_push ensures] [%#sb7'1] sl_len (Seq.snoc a x) (s - 1) = sl_len a (s - 1))
+    -> ([@stop_split] [@expl:lemma_sl_push ensures] [%#sb7'1] sl_len (Seq.snoc a x) s = sl_len a s))
+  else
+    [@stop_split] [@expl:lemma_sl_push ensures] [%#sb7'1] sl_len (Seq.snoc a x) s = sl_len a s
+  )

@@ -1,0 +1,48 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b8.rs" 325 0 325 48 *)
+
+let%span sb8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b8.rs" 329 18 329 22
+let%span sb8'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b8.rs" 328 40 328 45
+let%span sb8'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b8.rs" 327 18 327 23
+let%span sb8'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b8.rs" 324 10 324 104
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_EmError = CorruptMetadata | IoError | NotInitialized | OffsetNotFound UInt64.t | OutOfSpace
+
+type t_Result_unit_EmError = Ok () | Err t_EmError
+
+let elim_Err (_x: t_Result_unit_EmError) (return (f0: t_EmError)) = any
+  [ _k (f0: t_EmError) -> {Err f0 = _x} (! return {f0})
+  | _chk -> (! {[@expl:elim Err] match _x with
+      | Err _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let bg_log8 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b8.rs" 325 0 325 48]
+  (res: t_Result_unit_EmError) (return (x: bool)) = (! bb0
+  [ bb0 = any [ br0 (x0: ()) -> {res = Ok x0} (! bb7) | br1 (x0: t_EmError) -> {res = Err x0} (! bb3) ]
+  | bb3 = elim_Err {res}
+      (fun (r0: t_EmError) ->
+        any
+        [ br0 -> {r0 = CorruptMetadata} (! bb4)
+        | br1 -> {r0 = IoError} (! bb4)
+        | br2 -> {r0 = NotInitialized} (! bb6)
+        | br3 (x0: UInt64.t) -> {r0 = OffsetNotFound x0} (! bb4)
+        | br4 -> {r0 = OutOfSpace} (! bb4) ])
+  | bb4 = s0 [ s0 = [ &_ret <- [%#sb8] true ] s1 | s1 = return {_ret} ]
+  | bb6 = s0 [ s0 = [ &_ret <- [%#sb8'0] false ] s1 | s1 = return {_ret} ]
+  | bb7 = s0 [ s0 = [ &_ret <- [%#sb8'1] false ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: bool = Any.any_l () | & res: t_Result_unit_EmError = res ])
+  [ return (result: bool) -> {[@stop_split] [@expl:bg_log8 ensures] [%#sb8'2] result
+    = match res with
+      | Ok () -> false
+      | Err (NotInitialized) -> false
+      | Err _ -> true
+      end}
+    (! return {result}) ]

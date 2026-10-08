@@ -1,0 +1,54 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 280 4 280 59 *)
+
+(* model::slab::Slab *)
+
+let%span sslab = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 281 58 281 92
+let%span sslab'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 281 8 281 92
+let%span sslab'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 278 15 278 64
+let%span sslab'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 279 14 279 115
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_u64_Global
+
+type t_AllocationBitmap = { words: t_Vec_u64_Global; num_slots: UInt32.t; allocated_count: UInt32.t }
+
+type t_Slab = {
+  start_offset: UInt64.t;
+  slab_size: UInt64.t;
+  element_size: UInt32.t;
+  bitmap: t_AllocationBitmap;
+  keys: t_Vec_u64_Global;
+  rover: UInt64.t }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let contains_offset [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 280 4 280 59]
+  (self: t_Slab) (byte_offset: UInt64.t) (return (x: bool)) =
+{[@stop_split] [@expl:contains_offset requires] [%#sslab'1] UInt64.t'int self.start_offset + UInt64.t'int self.slab_size
+  <= UInt64.t'int const_MAX}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_8 <- UInt64.ge byte_offset self.start_offset ] s1
+    | s1 = any [ br0 -> {_8 = false} (! bb2) | br1 -> {_8} (! bb1) ] ]
+  | bb1 = s0
+    [ s0 = UInt64.add [%#sslab] {self.start_offset} {self.slab_size} (fun (_x: UInt64.t) -> [ &_12 <- _x ] s1)
+    | s1 = [ &_ret <- UInt64.lt byte_offset _12 ] s2
+    | s2 = return {_ret} ]
+  | bb2 = s0 [ s0 = [ &_ret <- [%#sslab'0] false ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: bool = Any.any_l ()
+  | & self: t_Slab = self
+  | & byte_offset: UInt64.t = byte_offset
+  | & _8: bool = Any.any_l ()
+  | & _12: UInt64.t = Any.any_l () ])
+  [ return (result: bool) -> {[@stop_split] [@expl:contains_offset ensures] [%#sslab'2] result
+    = (UInt64.t'int self.start_offset <= UInt64.t'int byte_offset
+    /\ UInt64.t'int byte_offset < UInt64.t'int self.start_offset + UInt64.t'int self.slab_size)}
+    (! return {result}) ]

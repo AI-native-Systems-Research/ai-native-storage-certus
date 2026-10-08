@@ -1,0 +1,143 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 215 0 215 84 *)
+
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 180 11 180 26
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 181 10 181 34
+let%span sbuddy'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 182 10 182 33
+let%span sbuddy'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 183 10 183 20
+let%span sbuddy'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 154 11 154 37
+let%span sbuddy'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 155 10 155 24
+let%span sbuddy'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 163 10 163 38
+let%span scomponent = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 216 23 216 40
+let%span scomponent'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 217 20 217 45
+let%span scomponent'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 218 20 218 58
+let%span scomponent'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 219 20 219 58
+let%span scomponent'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 220 20 220 54
+let%span scomponent'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 221 20 221 128
+let%span scomponent'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 222 28 222 51
+let%span scomponent'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 222 15 222 51
+let%span scomponent'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 223 26 223 27
+let%span scomponent'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 223 22 223 27
+let%span scomponent'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 223 73 223 74
+let%span scomponent'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 223 61 223 75
+let%span scomponent'11 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 223 61 223 90
+let%span scomponent'12 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 223 52 223 90
+let%span scomponent'13 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 211 11 211 66
+let%span scomponent'14 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 212 10 212 56
+let%span scomponent'15 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 213 10 213 99
+let%span scomponent'16 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 214 10 214 84
+
+use creusot.int.UInt64
+use int.ComputerDivision
+use creusot.prelude.Any
+use int.Int
+
+function lemma_divmod [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 184 0 184 35] (x: int) (m: int) : ()
+
+axiom lemma_divmod_spec: forall x: int, m: int. ([%#sbuddy] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'0] x = m * ComputerDivision.div x m + ComputerDivision.mod x m)
+
+axiom lemma_divmod_spec'0: forall x: int, m: int. ([%#sbuddy] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'1] 0 <= ComputerDivision.mod x m /\ ComputerDivision.mod x m < m)
+
+axiom lemma_divmod_spec'1: forall x: int, m: int. ([%#sbuddy] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'2] ComputerDivision.div x m >= 0)
+
+function lemma_mul_le [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 156 0 156 43] (a: int) (b: int) (c: int) : ()
+
+axiom lemma_mul_le_spec: forall a: int, b: int, c: int. ([%#sbuddy'3] 0 <= a /\ a <= b /\ 0 <= c)
+    -> ([%#sbuddy'4] a * c <= b * c)
+
+function lemma_distrib [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 164 0 164 44] (a: int) (b: int) (c: int) : ()
+
+axiom lemma_distrib_spec: forall a: int, b: int, c: int. [%#sbuddy'5] (a + b) * c = a * c + b * c
+
+type tup2_u64_u64 = { f0: UInt64.t; f1: UInt64.t }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let region_extent [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 215 0 215 84]
+  (data_start: UInt64.t) (usable: UInt64.t) (n: UInt64.t) (i: UInt64.t) (return (x: tup2_u64_u64)) =
+{[@stop_split] [@expl:region_extent requires] [%#scomponent'13] UInt64.t'int n > 0
+  /\ UInt64.t'int i < UInt64.t'int n /\ UInt64.t'int data_start + UInt64.t'int usable <= UInt64.t'int const_MAX}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_24 <- UInt64.of_int (UInt64.t'int n) ] s1
+    | s1 = [ &_26 <- _24 = ([%#scomponent] (0: UInt64.t)) ] s2
+    | s2 = {[@expl:division by zero] [%#scomponent] not _26} s3
+    | s3 = UInt64.div [%#scomponent] {usable} {_24} (fun (_x: UInt64.t) -> [ &region_bytes <- _x ] s4)
+    | s4 =
+      {[@expl:assertion] [%#scomponent'0] let _ = lemma_divmod (UInt64.t'int usable) (UInt64.t'int n) in UInt64.t'int usable
+      = UInt64.t'int n * ComputerDivision.div (UInt64.t'int usable) (UInt64.t'int n)
+      + ComputerDivision.mod (UInt64.t'int usable) (UInt64.t'int n)}
+      s5
+    | s5 = {[@expl:assertion] [%#scomponent'1] let _ = lemma_mul_le (UInt64.t'int i) (UInt64.t'int n
+      - 1) (ComputerDivision.div (UInt64.t'int usable) (UInt64.t'int n)) in UInt64.t'int i
+        * ComputerDivision.div (UInt64.t'int usable) (UInt64.t'int n)
+      <= (UInt64.t'int n - 1) * ComputerDivision.div (UInt64.t'int usable) (UInt64.t'int n)}
+      s6
+    | s6 = {[@expl:assertion] [%#scomponent'2] let _ = lemma_mul_le (UInt64.t'int n
+      - 1) (UInt64.t'int n) (ComputerDivision.div (UInt64.t'int usable) (UInt64.t'int n)) in (UInt64.t'int n - 1)
+        * ComputerDivision.div (UInt64.t'int usable) (UInt64.t'int n)
+      <= UInt64.t'int n * ComputerDivision.div (UInt64.t'int usable) (UInt64.t'int n)}
+      s7
+    | s7 =
+      {[@expl:assertion] [%#scomponent'3] let _ = lemma_distrib (UInt64.t'int i) 1 (ComputerDivision.div (UInt64.t'int usable) (UInt64.t'int n)) in (UInt64.t'int i
+          + 1)
+        * ComputerDivision.div (UInt64.t'int usable) (UInt64.t'int n)
+      = UInt64.t'int i * ComputerDivision.div (UInt64.t'int usable) (UInt64.t'int n)
+      + ComputerDivision.div (UInt64.t'int usable) (UInt64.t'int n)}
+      s8
+    | s8 = {[@expl:assertion] [%#scomponent'4] UInt64.t'int i < UInt64.t'int n - 1
+      -> (let _ = lemma_mul_le (UInt64.t'int i
+      + 1) (UInt64.t'int n) (ComputerDivision.div (UInt64.t'int usable) (UInt64.t'int n)) in (UInt64.t'int i + 1)
+        * ComputerDivision.div (UInt64.t'int usable) (UInt64.t'int n)
+      <= UInt64.t'int n * ComputerDivision.div (UInt64.t'int usable) (UInt64.t'int n))}
+      s9
+    | s9 = [ &_53 <- UInt64.of_int (UInt64.t'int i) ] s10
+    | s10 = UInt64.mul [%#scomponent'5] {_53} {region_bytes} (fun (_x: UInt64.t) -> [ &_52 <- _x ] s11)
+    | s11 = UInt64.add [%#scomponent'6] {data_start} {_52} (fun (_x: UInt64.t) -> [ &base <- _x ] s12)
+    | s12 = UInt64.sub [%#scomponent'8] {n} {[%#scomponent'7] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &_59 <- _x ] s13)
+    | s13 = [ &_57 <- UInt64.lt i _59 ] s14
+    | s14 = any [ br0 -> {_57 = false} (! bb3) | br1 -> {_57} (! bb2) ] ]
+  | bb2 = s0 [ s0 = [ &size <- region_bytes ] s1 | s1 = bb4 ]
+  | bb3 = s0
+    [ s0 = [ &_64 <- UInt64.of_int (UInt64.t'int n) ] s1
+    | s1 = UInt64.sub [%#scomponent'10] {_64} {[%#scomponent'9] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &_63 <- _x ] s2)
+    | s2 = UInt64.mul [%#scomponent'11] {_63} {region_bytes} (fun (_x: UInt64.t) -> [ &_62 <- _x ] s3)
+    | s3 = UInt64.sub [%#scomponent'12] {usable} {_62} (fun (_x: UInt64.t) -> [ &size <- _x ] s4)
+    | s4 = bb4 ]
+  | bb4 = s0 [ s0 = [ &_ret <- { f0 = base; f1 = size } ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: tup2_u64_u64 = Any.any_l ()
+  | & data_start: UInt64.t = data_start
+  | & usable: UInt64.t = usable
+  | & n: UInt64.t = n
+  | & i: UInt64.t = i
+  | & region_bytes: UInt64.t = Any.any_l ()
+  | & _24: UInt64.t = Any.any_l ()
+  | & _26: bool = Any.any_l ()
+  | & base: UInt64.t = Any.any_l ()
+  | & _52: UInt64.t = Any.any_l ()
+  | & _53: UInt64.t = Any.any_l ()
+  | & size: UInt64.t = Any.any_l ()
+  | & _57: bool = Any.any_l ()
+  | & _59: UInt64.t = Any.any_l ()
+  | & _62: UInt64.t = Any.any_l ()
+  | & _63: UInt64.t = Any.any_l ()
+  | & _64: UInt64.t = Any.any_l () ])
+  [ return (result: tup2_u64_u64) ->
+  {[@stop_split] [@expl:region_extent ensures] ([@stop_split] [@expl:region_extent ensures #0] [%#scomponent'14] UInt64.t'int result.f0
+      = UInt64.t'int data_start + UInt64.t'int i * ComputerDivision.div (UInt64.t'int usable) (UInt64.t'int n))
+    /\ ([@stop_split] [@expl:region_extent ensures #1] [%#scomponent'15] UInt64.t'int result.f1
+      = (if UInt64.t'int i < UInt64.t'int n - 1 then
+        ComputerDivision.div (UInt64.t'int usable) (UInt64.t'int n)
+      else
+        UInt64.t'int usable - (UInt64.t'int n - 1) * ComputerDivision.div (UInt64.t'int usable) (UInt64.t'int n)
+      ))
+    /\ ([@stop_split] [@expl:region_extent ensures #2] [%#scomponent'16] UInt64.t'int data_start
+      <= UInt64.t'int result.f0
+    /\ UInt64.t'int result.f0 + UInt64.t'int result.f1 <= UInt64.t'int data_start + UInt64.t'int usable)}
+    (! return {result}) ]

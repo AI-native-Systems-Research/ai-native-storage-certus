@@ -1,0 +1,106 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b8.rs" 358 0 358 48 *)
+
+let%span sslab = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 26 10 26 36
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 180 11 180 26
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 181 10 181 34
+let%span sbuddy'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 182 10 182 33
+let%span sbuddy'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 183 10 183 20
+let%span sb8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b8.rs" 359 17 359 40
+let%span sb8'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b8.rs" 359 43 359 44
+let%span sb8'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b8.rs" 359 17 359 44
+let%span sb8'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b8.rs" 360 24 360 34
+let%span sb8'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b8.rs" 360 41 360 51
+let%span sb8'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b8.rs" 360 37 360 51
+let%span sb8'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b8.rs" 361 20 361 41
+let%span sb8'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b8.rs" 362 17 362 30
+let%span sb8'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b8.rs" 362 17 362 42
+let%span sb8'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b8.rs" 363 20 363 47
+let%span sb8'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b8.rs" 364 4 364 13
+let%span sb8'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b8.rs" 355 11 355 18
+let%span sb8'11 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b8.rs" 356 10 356 83
+let%span sb8'12 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b8.rs" 357 10 357 95
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use int.ComputerDivision
+use creusot.prelude.Any
+use int.Int
+
+function lemma_divmod [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 184 0 184 35] (x: int) (m: int) : ()
+
+axiom lemma_divmod_spec: forall x: int, m: int. ([%#sbuddy] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'0] x = m * ComputerDivision.div x m + ComputerDivision.mod x m)
+
+axiom lemma_divmod_spec'0: forall x: int, m: int. ([%#sbuddy] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'1] 0 <= ComputerDivision.mod x m /\ ComputerDivision.mod x m < m)
+
+axiom lemma_divmod_spec'1: forall x: int, m: int. ([%#sbuddy] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'2] ComputerDivision.div x m >= 0)
+
+let as_u32 (x: UInt64.t) (return (x'0: UInt32.t)) = any
+  [ return (result: UInt32.t) -> {[@stop_split] [@expl:as_u32 ensures] [%#sslab] UInt32.t'int result
+    = ComputerDivision.mod (UInt64.t'int x) 4294967296}
+    (! return {result}) ]
+
+constant const_MAX: UInt32.t = (4294967295: UInt32.t)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let release_align8 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b8.rs" 358 0 358 48]
+  (size: UInt32.t) (ss: UInt32.t) (return (x: UInt32.t)) =
+{[@stop_split] [@expl:release_align8 requires] [%#sb8'10] UInt32.t'int ss > 0}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_13 <- UInt64.of_int (UInt32.t'int size) ] s1
+    | s1 = [ &_15 <- UInt64.of_int (UInt32.t'int ss) ] s2
+    | s2 = UInt64.add [%#sb8] {_13} {_15} (fun (_x: UInt64.t) -> [ &_12 <- _x ] s3)
+    | s3 = UInt64.sub [%#sb8'1] {_12} {[%#sb8'0] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &w <- _x ] s4)
+    | s4 = [ &_18 <- UInt64.gt w ([%#sb8'2] (4294967295: UInt64.t)) ] s5
+    | s5 = any [ br0 -> {_18 = false} (! bb2) | br1 -> {_18} (! bb1) ] ]
+  | bb1 = s0
+    [ s0 = UInt64.sub [%#sb8'4] {w} {[%#sb8'3] (4294967296: UInt64.t)} (fun (_x: UInt64.t) -> [ &v <- _x ] s1)
+    | s1 = bb3 ]
+  | bb2 = s0 [ s0 = [ &v <- w ] s1 | s1 = bb3 ]
+  | bb3 = s0
+    [ s0 =
+      {[@expl:assertion] [%#sb8'5] let _ = lemma_divmod (UInt64.t'int v) (UInt32.t'int ss) in ComputerDivision.div (UInt64.t'int v) (UInt32.t'int ss)
+        * UInt32.t'int ss
+      <= UInt64.t'int v}
+      s1
+    | s1 = [ &_28 <- UInt64.of_int (UInt32.t'int ss) ] s2
+    | s2 = [ &_30 <- _28 = ([%#sb8'6] (0: UInt64.t)) ] s3
+    | s3 = {[@expl:division by zero] [%#sb8'6] not _30} s4
+    | s4 = UInt64.div [%#sb8'6] {v} {_28} (fun (_x: UInt64.t) -> [ &_26 <- _x ] s5)
+    | s5 = [ &_31 <- UInt64.of_int (UInt32.t'int ss) ] s6
+    | s6 = UInt64.mul [%#sb8'7] {_26} {_31} (fun (_x: UInt64.t) -> [ &q <- _x ] s7)
+    | s7 = {[@expl:assertion] [%#sb8'8] UInt64.t'int q <= UInt64.t'int v /\ UInt64.t'int q < 4294967296} s8
+    | s8 = as_u32 [%#sb8'9] {q} (fun (_x: UInt32.t) -> [ &_ret <- _x ] s9)
+    | s9 = return {_ret} ] ]
+  [ & _ret: UInt32.t = Any.any_l ()
+  | & size: UInt32.t = size
+  | & ss: UInt32.t = ss
+  | & w: UInt64.t = Any.any_l ()
+  | & _12: UInt64.t = Any.any_l ()
+  | & _13: UInt64.t = Any.any_l ()
+  | & _15: UInt64.t = Any.any_l ()
+  | & v: UInt64.t = Any.any_l ()
+  | & _18: bool = Any.any_l ()
+  | & q: UInt64.t = Any.any_l ()
+  | & _26: UInt64.t = Any.any_l ()
+  | & _28: UInt64.t = Any.any_l ()
+  | & _30: bool = Any.any_l ()
+  | & _31: UInt64.t = Any.any_l () ])
+  [ return (result: UInt32.t) ->
+  {[@stop_split] [@expl:release_align8 ensures] ([@stop_split] [@expl:release_align8 ensures #0] [%#sb8'11] UInt32.t'int size
+            + UInt32.t'int ss
+          - 1
+        <= UInt32.t'int const_MAX
+      -> UInt32.t'int result
+      = ComputerDivision.div (UInt32.t'int size + UInt32.t'int ss - 1) (UInt32.t'int ss) * UInt32.t'int ss)
+    /\ ([@stop_split] [@expl:release_align8 ensures #1] [%#sb8'12] UInt32.t'int size + UInt32.t'int ss - 1
+      > UInt32.t'int const_MAX
+    -> UInt32.t'int result
+    = ComputerDivision.div (UInt32.t'int size + UInt32.t'int ss - 1 - 4294967296) (UInt32.t'int ss) * UInt32.t'int ss)}
+    (! return {result}) ]

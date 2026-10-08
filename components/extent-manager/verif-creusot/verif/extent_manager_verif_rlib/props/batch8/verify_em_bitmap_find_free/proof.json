@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_find_free_from": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_verify_em_bitmap_find_free": {
+        "prover": "alt-ergo",
+        "time": 0.049
+      }
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_lemma_rg_list": { "prover": "cvc4", "time": 0.166 } }
+  }
+}

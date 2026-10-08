@@ -1,0 +1,88 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 260 4 260 83 *)
+
+(* model::b3::EvClient *)
+
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sb3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 261 8 261 39
+let%span sb3'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 258 14 258 121
+let%span sb3'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 259 14 259 73
+let%span sb3'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 129 10 129 108
+let%span sb3'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 130 10 130 66
+
+use creusot.prelude.MutBorrow
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use creusot.int.UInt8
+use creusot.prelude.Any
+use int.Int
+
+type t_AllocSel = Default | User UInt64.t
+
+type t_Comp = WriteDone bool | ReadDone bool | Error | Other
+
+type t_Option_Comp = None | Some t_Comp
+
+type t_Ev = Alloc t_AllocSel bool | Send UInt32.t UInt64.t bool | Recv t_Option_Comp
+
+type t_EvDev = { log: Seq.seq t_Ev }
+
+type t_EvClient = { sector_size: UInt32.t; ns_id: UInt32.t; base_lba: UInt64.t; alloc: t_AllocSel }
+
+type t_Vec_u8_Global
+
+type t_Result_Vec_u8_Global_unit = Ok t_Vec_u8_Global | Err ()
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_u8_Global (self: t_Vec_u8_Global) : Seq.seq UInt8.t
+
+axiom view_Vec_u8_Global_spec:
+  forall self: t_Vec_u8_Global [view_Vec_u8_Global self]. [%#svec] Seq.length (view_Vec_u8_Global self)
+    <= UInt64.t'int const_MAX
+
+let dma_call (dev: MutBorrow.t t_EvDev) (a: t_AllocSel) (n: UInt64.t) (return (x: t_Result_Vec_u8_Global_unit)) = any
+  [ return (result: t_Result_Vec_u8_Global_unit) ->
+  {[@stop_split] [@expl:dma_call ensures] ([@stop_split] [@expl:dma_call ensures #0] [%#sb3'2] dev.final.log
+      = Seq.snoc dev.current.log (Alloc a (match result with
+        | Ok _ -> true
+        | Err _ -> false
+        end)))
+    /\ ([@stop_split] [@expl:dma_call ensures #1] [%#sb3'3] match result with
+      | Ok v -> Seq.length (view_Vec_u8_Global v) = UInt64.t'int n
+      | Err _ -> true
+      end)}
+    (! return {result}) ]
+
+predicate resolve_refmut_EvDev [@inline:trivial] (_1: MutBorrow.t t_EvDev) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_EvDev
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let alloc_buffer [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 260 4 260 83]
+  (self: t_EvClient) (dev: MutBorrow.t t_EvDev) (size: UInt64.t) (return (x: t_Result_Vec_u8_Global_unit)) = (! bb0
+  [ bb0 = s0
+    [ s0 = MutBorrow.borrow_final <t_EvDev> {dev.current} {MutBorrow.get_id dev}
+        (fun (_bor: MutBorrow.t t_EvDev) -> [ &_9 <- _bor ] [ &dev <- { dev with current = _bor.final } ] s1)
+    | s1 = dma_call [%#sb3] {_9} {self.alloc} {size} (fun (_x: t_Result_Vec_u8_Global_unit) -> [ &_ret <- _x ] s2)
+    | s2 = -{resolve_refmut_EvDev dev}- s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: t_Result_Vec_u8_Global_unit = Any.any_l ()
+  | & self: t_EvClient = self
+  | & dev: MutBorrow.t t_EvDev = dev
+  | & size: UInt64.t = size
+  | & _9: MutBorrow.t t_EvDev = Any.any_l () ])
+  [ return (result: t_Result_Vec_u8_Global_unit) ->
+  {[@stop_split] [@expl:alloc_buffer ensures] ([@stop_split] [@expl:alloc_buffer ensures #0] [%#sb3'0] dev.final.log
+      = Seq.snoc dev.current.log (Alloc (self.alloc) (match result with
+        | Ok _ -> true
+        | Err _ -> false
+        end)))
+    /\ ([@stop_split] [@expl:alloc_buffer ensures #1] [%#sb3'1] match result with
+      | Ok v -> Seq.length (view_Vec_u8_Global v) = UInt64.t'int size
+      | Err _ -> true
+      end)}
+    (! return {result}) ]

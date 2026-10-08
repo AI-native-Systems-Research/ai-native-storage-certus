@@ -1,0 +1,21 @@
+//! Shared state model of `components/extent-manager` (see the crate docs in lib.rs).
+pub mod bitmap;
+pub mod slab;
+pub mod buddy;
+pub mod params;
+pub mod region;
+pub mod component;
+pub mod listing;
+pub mod ckpt;
+pub mod blockio;
+pub mod sbbytes;
+pub mod b3;
+pub mod b4;
+pub mod b5;
+pub mod b6;
+pub mod b7;
+pub mod b8;
+pub mod l2;
+pub mod l2r;
+pub mod l2m;
+pub mod assume;

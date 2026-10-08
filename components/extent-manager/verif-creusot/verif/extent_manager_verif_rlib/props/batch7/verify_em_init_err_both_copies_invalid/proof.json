@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_initialize7": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_verify_em_init_err_both_copies_invalid": {
+        "prover": "cvc5",
+        "time": 0.25
+      }
+    }
+  }
+}

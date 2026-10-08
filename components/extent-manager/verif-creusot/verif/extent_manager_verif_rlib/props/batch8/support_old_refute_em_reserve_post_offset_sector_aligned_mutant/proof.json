@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_support_old_refute_em_reserve_post_offset_sector_aligned__mutant": null,
+      "vc_w8_offset6": { "prover": "alt-ergo", "time": 0.022 }
+    }
+  }
+}

@@ -1,0 +1,132 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 984 0 984 143 *)
+
+let%span sckpt = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 88 16 88 55
+let%span sbatch6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 985 31 985 44
+let%span sbatch6'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 981 10 981 28
+let%span sbatch6'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 982 10 982 50
+let%span sbatch6'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 983 10 983 50
+let%span sbatch6'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 943 10 943 72
+let%span sbatch6'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 944 10 944 59
+let%span sbatch6'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 945 10 945 81
+let%span sbatch6'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 946 10 946 59
+let%span sbatch6'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 947 10 947 81
+
+use creusot.int.UInt64
+use creusot.int.UInt8
+use creusot.int.UInt32
+use seq.Seq
+use creusot.prelude.Any
+use int.Int
+
+type t_EmError = CorruptMetadata | IoError | NotInitialized | OffsetNotFound UInt64.t | OutOfSpace
+
+type t_Result_unit_EmError = Ok () | Err t_EmError
+
+type t_BTreeMap_u64_Slab_Global
+
+type t_SlabMap = { inner: t_BTreeMap_u64_Slab_Global }
+
+type t_HashMap_u32_Vec_u64_Global_RandomState_Global
+
+type t_SizeClassManager = { map: t_HashMap_u32_Vec_u64_Global_RandomState_Global }
+
+type t_Vec_Vec_u64_Global_Global
+
+type t_BuddyAllocator = {
+  base_offset: UInt64.t;
+  total_usable_size: UInt64.t;
+  sector_size: UInt32.t;
+  max_order: UInt64.t;
+  free_lists: t_Vec_Vec_u64_Global_Global }
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_FormatParams = {
+  data_disk_size'0: UInt64.t;
+  slab_size'0: UInt64.t;
+  max_extent_size'0: UInt32.t;
+  sector_size'0: UInt32.t;
+  region_count'0: UInt32.t;
+  metadata_alignment'0: UInt64.t;
+  instance_id'0: t_Option_u64;
+  metadata_disk_ns_id'0: UInt32.t;
+  metadata_region_size'0: UInt64.t }
+
+type t_Vec_tup2_u64_usize_Global
+
+type t_RegionState = {
+  slabs: t_SlabMap;
+  size_classes: t_SizeClassManager;
+  buddy: t_BuddyAllocator;
+  dirty: bool;
+  format_params: t_FormatParams;
+  pending_frees: t_Vec_tup2_u64_usize_Global }
+
+type t_CkCopy = { seq: UInt64.t; img: Seq.seq t_RegionState }
+
+type t_Option_CkCopy = None'0 | Some'0 t_CkCopy
+
+type t_CkDev = { sb_seq: UInt64.t; sb_active: UInt8.t; copy0: t_Option_CkCopy; copy1: t_Option_CkCopy }
+
+type tup5_Result_unit_EmError_Result_unit_EmError_Result_unit_EmError_Snapshot_CkDev_Snapshot_CkDev = {
+  f0: t_Result_unit_EmError;
+  f1: t_Result_unit_EmError;
+  f2: t_Result_unit_EmError;
+  f3: t_CkDev;
+  f4: t_CkDev }
+
+function copy_at [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 87 0 87 49] (d: t_CkDev) (c: UInt8.t) : t_Option_CkCopy
+ = [%#sckpt] if UInt8.t'int c = 0 then d.copy0 else d.copy1
+
+let w6_sb_chain
+  (return (x: tup5_Result_unit_EmError_Result_unit_EmError_Result_unit_EmError_Snapshot_CkDev_Snapshot_CkDev)) = any
+  [ return (result: tup5_Result_unit_EmError_Result_unit_EmError_Result_unit_EmError_Snapshot_CkDev_Snapshot_CkDev) ->
+  {[@stop_split] [@expl:w6_sb_chain ensures] ([@stop_split] [@expl:w6_sb_chain ensures #0] [%#sbatch6'3] result.f0
+        = Ok ()
+      /\ result.f1 <> Ok () /\ result.f2 = Ok ())
+    /\ ([@stop_split] [@expl:w6_sb_chain ensures #1] [%#sbatch6'4] UInt64.t'int result.f3.sb_seq = 1
+      /\ UInt8.t'int result.f3.sb_active = 1)
+    /\ ([@stop_split] [@expl:w6_sb_chain ensures #2] [%#sbatch6'5] match copy_at result.f3 (1: UInt8.t) with
+        | Some'0 c -> UInt64.t'int c.seq = 1
+        | None'0 -> false
+        end)
+    /\ ([@stop_split] [@expl:w6_sb_chain ensures #3] [%#sbatch6'6] UInt64.t'int result.f4.sb_seq = 3
+      /\ UInt8.t'int result.f4.sb_active = 1)
+    /\ ([@stop_split] [@expl:w6_sb_chain ensures #4] [%#sbatch6'7] match copy_at result.f4 (1: UInt8.t) with
+      | Some'0 c -> UInt64.t'int c.seq = 3
+      | None'0 -> false
+      end)}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let refute_em_ckpt_post_seq_increases [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 984 0 984 143]
+  (return (x: tup5_Result_unit_EmError_Result_unit_EmError_Result_unit_EmError_Snapshot_CkDev_Snapshot_CkDev)) = (! bb0
+  [ bb0 = s0
+    [ s0 = w6_sb_chain [%#sbatch6]
+        (fun (_x: tup5_Result_unit_EmError_Result_unit_EmError_Result_unit_EmError_Snapshot_CkDev_Snapshot_CkDev) ->
+          [ &_9 <- _x ] s1)
+    | s1 = [ &r1 <- _9.f0 ] s2
+    | s2 = [ &r2 <- _9.f1 ] s3
+    | s3 = [ &r3 <- _9.f2 ] s4
+    | s4 = [ &d2 <- _9.f3 ] s5
+    | s5 = [ &d3 <- _9.f4 ] s6
+    | s6 = [ &_ret <- { f0 = r1; f1 = r2; f2 = r3; f3 = d2; f4 = d3 } ] s7
+    | s7 = return {_ret} ] ]
+  [ & _ret: tup5_Result_unit_EmError_Result_unit_EmError_Result_unit_EmError_Snapshot_CkDev_Snapshot_CkDev = Any.any_l ()
+  | & r1: t_Result_unit_EmError = Any.any_l ()
+  | & r2: t_Result_unit_EmError = Any.any_l ()
+  | & r3: t_Result_unit_EmError = Any.any_l ()
+  | & d2: t_CkDev = Any.any_l ()
+  | & d3: t_CkDev = Any.any_l ()
+  | & _9: tup5_Result_unit_EmError_Result_unit_EmError_Result_unit_EmError_Snapshot_CkDev_Snapshot_CkDev = Any.any_l () ])
+  [ return (result: tup5_Result_unit_EmError_Result_unit_EmError_Result_unit_EmError_Snapshot_CkDev_Snapshot_CkDev) ->
+  {[@stop_split] [@expl:refute_em_ckpt_post_seq_increases ensures] ([@stop_split] [@expl:refute_em_ckpt_post_seq_increases ensures #0] [%#sbatch6'0] result.f2
+      = Ok ())
+    /\ ([@stop_split] [@expl:refute_em_ckpt_post_seq_increases ensures #1] [%#sbatch6'1] UInt64.t'int result.f4.sb_seq
+      <> UInt64.t'int result.f3.sb_seq + 1)
+    /\ ([@stop_split] [@expl:refute_em_ckpt_post_seq_increases ensures #2] [%#sbatch6'2] result.f4.sb_active
+    = result.f3.sb_active)}
+    (! return {result}) ]

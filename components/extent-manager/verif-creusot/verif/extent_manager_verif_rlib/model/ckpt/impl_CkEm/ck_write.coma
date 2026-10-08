@@ -1,0 +1,293 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 140 4 140 114 *)
+
+(* model::ckpt::CkEm *)
+
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 87 20 87 30
+let%span svec'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sinvariant = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/invariant.rs" 93 20 93 44
+let%span sinvariant'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/invariant.rs" 85 8 85 18
+let%span sseq = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/seq.rs" 938 20 938 91
+let%span sckpt = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 142 45 142 46
+let%span sckpt'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 142 49 142 50
+let%span sckpt'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 142 60 142 61
+let%span sckpt'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 143 23 143 31
+let%span sckpt'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 146 33 146 34
+let%span sckpt'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 146 22 146 34
+let%span sckpt'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 151 23 151 24
+let%span sckpt'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 140 25 140 29
+let%span sckpt'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 120 14 120 45
+let%span sckpt'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 121 14 128 5
+let%span sckpt'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 129 14 133 78
+let%span sckpt'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 134 14 135 67
+let%span sckpt'11 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 136 14 136 56
+let%span sckpt'12 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 137 14 137 72
+let%span sckpt'13 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 138 14 138 104
+let%span sckpt'14 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 139 14 139 50
+let%span sckpt'15 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 88 16 88 55
+
+use creusot.int.UInt8
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_RegionState_Global
+
+type t_BTreeMap_u64_Slab_Global
+
+type t_SlabMap = { inner: t_BTreeMap_u64_Slab_Global }
+
+type t_HashMap_u32_Vec_u64_Global_RandomState_Global
+
+type t_SizeClassManager = { map: t_HashMap_u32_Vec_u64_Global_RandomState_Global }
+
+type t_Vec_Vec_u64_Global_Global
+
+type t_BuddyAllocator = {
+  base_offset: UInt64.t;
+  total_usable_size: UInt64.t;
+  sector_size: UInt32.t;
+  max_order: UInt64.t;
+  free_lists: t_Vec_Vec_u64_Global_Global }
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_FormatParams = {
+  data_disk_size'0: UInt64.t;
+  slab_size'0: UInt64.t;
+  max_extent_size'0: UInt32.t;
+  sector_size'0: UInt32.t;
+  region_count'0: UInt32.t;
+  metadata_alignment'0: UInt64.t;
+  instance_id'0: t_Option_u64;
+  metadata_disk_ns_id'0: UInt32.t;
+  metadata_region_size'0: UInt64.t }
+
+type t_Vec_tup2_u64_usize_Global
+
+type t_RegionState = {
+  slabs: t_SlabMap;
+  size_classes: t_SizeClassManager;
+  buddy: t_BuddyAllocator;
+  dirty: bool;
+  format_params: t_FormatParams;
+  pending_frees: t_Vec_tup2_u64_usize_Global }
+
+type t_CkCopy = { seq: UInt64.t; img: Seq.seq t_RegionState }
+
+type t_Option_CkCopy = None'0 | Some'0 t_CkCopy
+
+type t_CkDev = { sb_seq: UInt64.t; sb_active: UInt8.t; copy0: t_Option_CkCopy; copy1: t_Option_CkCopy }
+
+type t_CkEm = { regions'0: t_Vec_RegionState_Global; active'0: UInt8.t; seq'0: UInt64.t; dev'0: t_CkDev }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+predicate inv_BTreeMap_u64_Slab_Global (_1: t_BTreeMap_u64_Slab_Global)
+
+predicate inv_SlabMap (_1: t_SlabMap)
+
+axiom inv_axiom [@rewrite]: forall x: t_SlabMap [inv_SlabMap x]. inv_SlabMap x = inv_BTreeMap_u64_Slab_Global x.inner
+
+predicate inv_HashMap_u32_Vec_u64_Global_RandomState_Global (_1: t_HashMap_u32_Vec_u64_Global_RandomState_Global)
+
+predicate inv_SizeClassManager (_1: t_SizeClassManager)
+
+axiom inv_axiom'0 [@rewrite]: forall x: t_SizeClassManager [inv_SizeClassManager x]. inv_SizeClassManager x
+    = inv_HashMap_u32_Vec_u64_Global_RandomState_Global x.map
+
+predicate inv_RegionState (_1: t_RegionState)
+
+axiom inv_axiom'1 [@rewrite]: forall x: t_RegionState [inv_RegionState x]. inv_RegionState x
+    = (inv_SlabMap x.slabs /\ inv_SizeClassManager x.size_classes)
+
+predicate invariant_ref_RegionState [@inline:trivial] (self: t_RegionState) = [%#sinvariant'0] inv_RegionState self
+
+meta "rewrite_def" predicate invariant_ref_RegionState
+
+predicate inv_ref_RegionState [@inline:trivial] (_1: t_RegionState) = invariant_ref_RegionState _1
+
+meta "rewrite_def" predicate inv_ref_RegionState
+
+predicate invariant_Seq_RegionState [@inline:trivial] (self: Seq.seq t_RegionState) =
+  [%#sseq] forall i: int. 0 <= i /\ i < Seq.length self -> inv_ref_RegionState (Seq.get self i)
+
+meta "rewrite_def" predicate invariant_Seq_RegionState
+
+predicate inv_Seq_RegionState [@inline:trivial] (_1: Seq.seq t_RegionState) = invariant_Seq_RegionState _1
+
+meta "rewrite_def" predicate inv_Seq_RegionState
+
+constant const_MAX'0: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_RegionState_Global (self: t_Vec_RegionState_Global) : Seq.seq t_RegionState
+
+axiom view_Vec_RegionState_Global_spec:
+  forall self: t_Vec_RegionState_Global [view_Vec_RegionState_Global self]. [%#svec'0] Seq.length (view_Vec_RegionState_Global self)
+    <= UInt64.t'int const_MAX'0
+
+predicate invariant_Vec_RegionState_Global (self: t_Vec_RegionState_Global) =
+  [%#svec] inv_Seq_RegionState (view_Vec_RegionState_Global self)
+
+predicate inv_Vec_RegionState_Global (_1: t_Vec_RegionState_Global)
+
+axiom inv_axiom'2: forall x: t_Vec_RegionState_Global [inv_Vec_RegionState_Global x]. inv_Vec_RegionState_Global x
+    -> invariant_Vec_RegionState_Global x
+
+predicate inv_CkEm (_1: t_CkEm)
+
+axiom inv_axiom'3 [@rewrite]: forall x: t_CkEm [inv_CkEm x]. inv_CkEm x = inv_Vec_RegionState_Global x.regions'0
+
+predicate invariant_refmut_CkEm [@inline:trivial] (self: MutBorrow.t t_CkEm) =
+  [%#sinvariant] inv_CkEm self.current /\ inv_CkEm self.final
+
+meta "rewrite_def" predicate invariant_refmut_CkEm
+
+predicate inv_refmut_CkEm [@inline:trivial] (_1: MutBorrow.t t_CkEm) = invariant_refmut_CkEm _1
+
+meta "rewrite_def" predicate inv_refmut_CkEm
+
+predicate resolve_refmut_CkEm [@inline:trivial] (_1: MutBorrow.t t_CkEm) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_CkEm
+
+type t_EmError = CorruptMetadata | IoError | NotInitialized | OffsetNotFound UInt64.t | OutOfSpace
+
+type t_Result_unit_EmError = Ok () | Err t_EmError
+
+function copy_at [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 87 0 87 49] (d: t_CkDev) (c: UInt8.t) : t_Option_CkCopy
+ = [%#sckpt'15] if UInt8.t'int c = 0 then d.copy0 else d.copy1
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let ck_write [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/ckpt.rs" 140 4 140 114]
+  (self: MutBorrow.t t_CkEm) (img'0: Seq.seq t_RegionState) (ok_data: bool) (ok_sb: bool)
+  (return (x: t_Result_unit_EmError)) =
+{[@stop_split] [@expl:ck_write 'self' type invariant] [%#sckpt'6] inv_refmut_CkEm self}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_30 <- self.current.active'0 = ([%#sckpt] (0: UInt8.t)) ] s1
+    | s1 = any [ br0 -> {_30 = false} (! bb2) | br1 -> {_30} (! bb1) ] ]
+  | bb1 = s0 [ s0 = [ &inactive <- [%#sckpt'0] (1: UInt8.t) ] s1 | s1 = bb3 ]
+  | bb2 = s0 [ s0 = [ &inactive <- [%#sckpt'1] (0: UInt8.t) ] s1 | s1 = bb3 ]
+  | bb3 = s0
+    [ s0 = [ &_33 <- self.current.seq'0 = ([%#sckpt'2] const_MAX) ] s1
+    | s1 = any [ br0 -> {_33 = false} (! bb5) | br1 -> {_33} (! bb4) ] ]
+  | bb4 = s0
+    [ s0 = s1 [ _ck -> (! {[@expl:type invariant] inv_refmut_CkEm self} any) ]
+    | s1 = -{resolve_refmut_CkEm self}- s2
+    | s2 = [ &_36 <- CorruptMetadata ] s3
+    | s3 = [ &_ret <- Err _36 ] s4
+    | s4 = return {_ret} ]
+  | bb5 = s0
+    [ s0 = UInt64.add [%#sckpt'4] {self.current.seq'0} {[%#sckpt'3] (1: UInt64.t)}
+        (fun (_x: UInt64.t) -> [ &new_seq <- _x ] s1)
+    | s1 = any [ br0 -> {ok_data = false} (! bb7) | br1 -> {ok_data} (! bb6) ] ]
+  | bb6 = s0
+    [ s0 = [ &_44 <- inactive = ([%#sckpt'5] (0: UInt8.t)) ] s1
+    | s1 = any [ br0 -> {_44 = false} (! bb9) | br1 -> {_44} (! bb8) ] ]
+  | bb8 = s0
+    [ s0 = [ &_47 <- { seq = new_seq; img = img'0 } ] s1
+    | s1 = [ &_46 <- Some'0 _47 ] s2
+    | s2 = [ &self <- { self with current = { self.current with dev'0 = { self.current.dev'0 with copy0 = _46 } } } ] s3
+    | s3 = bb10 ]
+  | bb9 = s0
+    [ s0 = [ &_51 <- { seq = new_seq; img = img'0 } ] s1
+    | s1 = [ &_50 <- Some'0 _51 ] s2
+    | s2 = [ &self <- { self with current = { self.current with dev'0 = { self.current.dev'0 with copy1 = _50 } } } ] s3
+    | s3 = bb10 ]
+  | bb10 = s0
+    [ s0 = [ &self <- { self with current = { self.current with active'0 = inactive } } ] s1
+    | s1 = [ &self <- { self with current = { self.current with seq'0 = new_seq } } ] s2
+    | s2 = any [ br0 -> {ok_sb = false} (! bb11) | br1 -> {ok_sb} (! bb12) ] ]
+  | bb12 = s0
+    [ s0 =
+      [ &self <- { self with current = { self.current with dev'0 = { self.current.dev'0 with sb_seq = self.current.seq'0 } } } ]
+      s1
+    | s1 =
+      [ &self <- { self with current = { self.current with dev'0 = { self.current.dev'0 with sb_active = self.current.active'0 } } } ]
+      s2
+    | s2 = s3 [ _ck -> (! {[@expl:type invariant] inv_refmut_CkEm self} any) ]
+    | s3 = -{resolve_refmut_CkEm self}- s4
+    | s4 = [ &_ret <- Ok _62 ] s5
+    | s5 = return {_ret} ]
+  | bb11 = s0
+    [ s0 = s1 [ _ck -> (! {[@expl:type invariant] inv_refmut_CkEm self} any) ]
+    | s1 = -{resolve_refmut_CkEm self}- s2
+    | s2 = [ &_59 <- IoError ] s3
+    | s3 = [ &_ret <- Err _59 ] s4
+    | s4 = return {_ret} ]
+  | bb7 = s0
+    [ s0 = s1 [ _ck -> (! {[@expl:type invariant] inv_refmut_CkEm self} any) ]
+    | s1 = -{resolve_refmut_CkEm self}- s2
+    | s2 = [ &_42 <- IoError ] s3
+    | s3 = [ &_ret <- Err _42 ] s4
+    | s4 = return {_ret} ] ]
+  [ & _ret: t_Result_unit_EmError = Any.any_l ()
+  | & self: MutBorrow.t t_CkEm = self
+  | & img'0: Seq.seq t_RegionState = img'0
+  | & ok_data: bool = ok_data
+  | & ok_sb: bool = ok_sb
+  | & inactive: UInt8.t = Any.any_l ()
+  | & _30: bool = Any.any_l ()
+  | & _33: bool = Any.any_l ()
+  | & _36: t_EmError = Any.any_l ()
+  | & new_seq: UInt64.t = Any.any_l ()
+  | & _42: t_EmError = Any.any_l ()
+  | & _44: bool = Any.any_l ()
+  | & _46: t_Option_CkCopy = Any.any_l ()
+  | & _47: t_CkCopy = Any.any_l ()
+  | & _50: t_Option_CkCopy = Any.any_l ()
+  | & _51: t_CkCopy = Any.any_l ()
+  | & _59: t_EmError = Any.any_l ()
+  | & _62: () = Any.any_l () ])
+  [ return (result: t_Result_unit_EmError) ->
+  {[@stop_split] [@expl:ck_write ensures] ([@stop_split] [@expl:ck_write ensures #0] [%#sckpt'7] self.final.regions'0
+      = self.current.regions'0)
+    /\ ([@stop_split] [@expl:ck_write ensures #1] [%#sckpt'8] UInt8.t'int self.current.active'0 <= 1
+        /\ UInt64.t'int self.current.seq'0 < UInt64.t'int const_MAX
+      -> match result with
+        | Ok () -> ok_data
+        /\ ok_sb
+        /\ UInt8.t'int self.final.active'0 = 1 - UInt8.t'int self.current.active'0
+        /\ UInt64.t'int self.final.seq'0 = UInt64.t'int self.current.seq'0 + 1
+        /\ self.final.dev'0.sb_seq = self.final.seq'0
+        /\ self.final.dev'0.sb_active = self.final.active'0
+        /\ match copy_at self.final.dev'0 self.final.active'0 with
+            | Some'0 c -> c.seq = self.final.seq'0 /\ c.img = img'0
+            | None'0 -> false
+            end
+        /\ copy_at self.final.dev'0 self.current.active'0 = copy_at self.current.dev'0 self.current.active'0
+        | Err _ -> not (ok_data /\ ok_sb)
+        end)
+    /\ ([@stop_split] [@expl:ck_write ensures #2] [%#sckpt'9] UInt8.t'int self.current.active'0 <= 1
+        /\ UInt64.t'int self.current.seq'0 < UInt64.t'int const_MAX /\ ok_data /\ not ok_sb
+      -> UInt8.t'int self.final.active'0 = 1 - UInt8.t'int self.current.active'0
+      /\ UInt64.t'int self.final.seq'0 = UInt64.t'int self.current.seq'0 + 1
+      /\ self.final.dev'0.sb_seq = self.current.dev'0.sb_seq
+      /\ self.final.dev'0.sb_active = self.current.dev'0.sb_active
+      /\ match copy_at self.final.dev'0 self.final.active'0 with
+          | Some'0 c -> c.seq = self.final.seq'0 /\ c.img = img'0
+          | None'0 -> false
+          end
+      /\ copy_at self.final.dev'0 self.current.active'0 = copy_at self.current.dev'0 self.current.active'0)
+    /\ ([@stop_split] [@expl:ck_write ensures #3] [%#sckpt'10] not ok_data
+      -> self.final.dev'0.sb_seq = self.current.dev'0.sb_seq
+      /\ self.final.dev'0.sb_active = self.current.dev'0.sb_active
+      /\ self.final.active'0 = self.current.active'0 /\ self.final.seq'0 = self.current.seq'0)
+    /\ ([@stop_split] [@expl:ck_write ensures #4] [%#sckpt'11] UInt8.t'int self.current.active'0 <= 1
+      -> UInt8.t'int self.final.active'0 <= 1)
+    /\ ([@stop_split] [@expl:ck_write ensures #5] [%#sckpt'12] UInt64.t'int self.current.seq'0
+        <= UInt64.t'int self.final.seq'0
+      /\ UInt64.t'int self.final.seq'0 <= UInt64.t'int self.current.seq'0 + 1)
+    /\ ([@stop_split] [@expl:ck_write ensures #6] [%#sckpt'13] UInt64.t'int self.current.seq'0 < UInt64.t'int const_MAX
+      -> match result with
+        | Err e -> e = IoError
+        | Ok () -> true
+        end)
+    /\ ([@stop_split] [@expl:ck_write ensures #7] [%#sckpt'14] not ok_data -> self.final.dev'0 = self.current.dev'0)}
+    (! return {result}) ]

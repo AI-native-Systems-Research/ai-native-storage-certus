@@ -1,0 +1,10 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_from_elem_u8": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_payload_zero7": { "prover": "alt-ergo", "time": 0.141 },
+      "vc_put32": { "prover": "alt-ergo", "time": 0.032 }
+    }
+  }
+}

@@ -1,0 +1,159 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 255 4 255 74 *)
+
+(* model::region::RegionState *)
+
+let%span sinvariant = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/invariant.rs" 85 8 85 18
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 180 11 180 26
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 181 10 181 34
+let%span sbuddy'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 182 10 182 33
+let%span sbuddy'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 183 10 183 20
+let%span sregion = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 256 24 256 76
+let%span sregion'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 258 24 258 142
+let%span sregion'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 260 9 260 27
+let%span sregion'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 260 30 260 31
+let%span sregion'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 260 8 260 32
+let%span sregion'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 260 8 260 46
+let%span sregion'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 260 8 260 60
+let%span sregion'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 255 33 255 37
+let%span sregion'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 252 15 252 77
+let%span sregion'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 253 14 253 53
+let%span sregion'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 254 14 254 64
+let%span sregion'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 231 16 231 41
+let%span sassume = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 106 16 106 38
+
+use int.ComputerDivision
+use creusot.int.UInt32
+use creusot.prelude.Any
+use creusot.int.UInt64
+use int.Int
+
+function lemma_divmod [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 184 0 184 35] (x: int) (m: int) : ()
+
+axiom lemma_divmod_spec: forall x: int, m: int. ([%#sbuddy] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'0] x = m * ComputerDivision.div x m + ComputerDivision.mod x m)
+
+axiom lemma_divmod_spec'0: forall x: int, m: int. ([%#sbuddy] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'1] 0 <= ComputerDivision.mod x m /\ ComputerDivision.mod x m < m)
+
+axiom lemma_divmod_spec'1: forall x: int, m: int. ([%#sbuddy] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'2] ComputerDivision.div x m >= 0)
+
+type t_BTreeMap_u64_Slab_Global
+
+type t_SlabMap = { inner: t_BTreeMap_u64_Slab_Global }
+
+type t_HashMap_u32_Vec_u64_Global_RandomState_Global
+
+type t_SizeClassManager = { map: t_HashMap_u32_Vec_u64_Global_RandomState_Global }
+
+type t_Vec_Vec_u64_Global_Global
+
+type t_BuddyAllocator = {
+  base_offset: UInt64.t;
+  total_usable_size: UInt64.t;
+  sector_size: UInt32.t;
+  max_order: UInt64.t;
+  free_lists: t_Vec_Vec_u64_Global_Global }
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_FormatParams = {
+  data_disk_size'0: UInt64.t;
+  slab_size'0: UInt64.t;
+  max_extent_size'0: UInt32.t;
+  sector_size'0: UInt32.t;
+  region_count'0: UInt32.t;
+  metadata_alignment'0: UInt64.t;
+  instance_id'0: t_Option_u64;
+  metadata_disk_ns_id'0: UInt32.t;
+  metadata_region_size'0: UInt64.t }
+
+type t_Vec_tup2_u64_usize_Global
+
+type t_RegionState = {
+  slabs: t_SlabMap;
+  size_classes: t_SizeClassManager;
+  buddy: t_BuddyAllocator;
+  dirty: bool;
+  format_params: t_FormatParams;
+  pending_frees: t_Vec_tup2_u64_usize_Global }
+
+predicate inv_BTreeMap_u64_Slab_Global (_1: t_BTreeMap_u64_Slab_Global)
+
+predicate inv_SlabMap (_1: t_SlabMap)
+
+axiom inv_axiom [@rewrite]: forall x: t_SlabMap [inv_SlabMap x]. inv_SlabMap x = inv_BTreeMap_u64_Slab_Global x.inner
+
+predicate inv_HashMap_u32_Vec_u64_Global_RandomState_Global (_1: t_HashMap_u32_Vec_u64_Global_RandomState_Global)
+
+predicate inv_SizeClassManager (_1: t_SizeClassManager)
+
+axiom inv_axiom'0 [@rewrite]: forall x: t_SizeClassManager [inv_SizeClassManager x]. inv_SizeClassManager x
+    = inv_HashMap_u32_Vec_u64_Global_RandomState_Global x.map
+
+predicate inv_RegionState (_1: t_RegionState)
+
+axiom inv_axiom'1 [@rewrite]: forall x: t_RegionState [inv_RegionState x]. inv_RegionState x
+    = (inv_SlabMap x.slabs /\ inv_SizeClassManager x.size_classes)
+
+predicate invariant_ref_RegionState [@inline:trivial] (self: t_RegionState) = [%#sinvariant] inv_RegionState self
+
+meta "rewrite_def" predicate invariant_ref_RegionState
+
+predicate inv_ref_RegionState [@inline:trivial] (_1: t_RegionState) = invariant_ref_RegionState _1
+
+meta "rewrite_def" predicate inv_ref_RegionState
+
+constant const_MAX: UInt32.t = (4294967295: UInt32.t)
+
+predicate a_3783f8 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 105 0 105 43] (size: int) (ss: int) =
+  [%#sassume] size + ss <= UInt32.t'int const_MAX
+
+function align_l [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 230 0 230 41] (size: int) (ss: int) : int
+ = [%#sregion'10] ComputerDivision.div (size + ss - 1) ss * ss
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let align_to_sector_size [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 255 4 255 74]
+  (self: t_RegionState) (size: UInt32.t) (sector_size'1: UInt32.t) (return (x: UInt32.t)) =
+{[@stop_split] [@expl:align_to_sector_size requires] ([@stop_split] [@expl:align_to_sector_size 'self' type invariant] [%#sregion'6] inv_ref_RegionState self)
+  /\ ([@stop_split] [@expl:align_to_sector_size requires] [%#sregion'7] UInt32.t'int sector_size'1 > 0
+  /\ UInt32.t'int size > 0 /\ a_3783f8 (UInt32.t'int size) (UInt32.t'int sector_size'1))}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = {[@expl:assertion] [%#sregion] let _ = lemma_divmod (UInt32.t'int size + UInt32.t'int sector_size'1
+      - 1) (UInt32.t'int sector_size'1) in UInt32.t'int size + UInt32.t'int sector_size'1 - 1
+      = UInt32.t'int sector_size'1
+        * ComputerDivision.div (UInt32.t'int size + UInt32.t'int sector_size'1 - 1) (UInt32.t'int sector_size'1)
+      + ComputerDivision.mod (UInt32.t'int size + UInt32.t'int sector_size'1 - 1) (UInt32.t'int sector_size'1)}
+      s1
+    | s1 = {[@expl:assertion] [%#sregion'0] ComputerDivision.div (UInt32.t'int size + UInt32.t'int sector_size'1
+          - 1) (UInt32.t'int sector_size'1)
+        * UInt32.t'int sector_size'1
+      = UInt32.t'int sector_size'1
+      * ComputerDivision.div (UInt32.t'int size + UInt32.t'int sector_size'1 - 1) (UInt32.t'int sector_size'1)}
+      s2
+    | s2 = UInt32.add [%#sregion'1] {size} {sector_size'1} (fun (_x: UInt32.t) -> [ &_23 <- _x ] s3)
+    | s3 = UInt32.sub [%#sregion'3] {_23} {[%#sregion'2] (1: UInt32.t)} (fun (_x: UInt32.t) -> [ &_22 <- _x ] s4)
+    | s4 = [ &_26 <- sector_size'1 ] s5
+    | s5 = [ &_27 <- _26 = ([%#sregion'4] (0: UInt32.t)) ] s6
+    | s6 = {[@expl:division by zero] [%#sregion'4] not _27} s7
+    | s7 = UInt32.div [%#sregion'4] {_22} {_26} (fun (_x: UInt32.t) -> [ &_21 <- _x ] s8)
+    | s8 = UInt32.mul [%#sregion'5] {_21} {sector_size'1} (fun (_x: UInt32.t) -> [ &_ret <- _x ] s9)
+    | s9 = return {_ret} ] ]
+  [ & _ret: UInt32.t = Any.any_l ()
+  | & size: UInt32.t = size
+  | & sector_size'1: UInt32.t = sector_size'1
+  | & _21: UInt32.t = Any.any_l ()
+  | & _22: UInt32.t = Any.any_l ()
+  | & _23: UInt32.t = Any.any_l ()
+  | & _26: UInt32.t = Any.any_l ()
+  | & _27: bool = Any.any_l () ])
+  [ return (result: UInt32.t) ->
+  {[@stop_split] [@expl:align_to_sector_size ensures] ([@stop_split] [@expl:align_to_sector_size ensures #0] [%#sregion'8] UInt32.t'int result
+      = align_l (UInt32.t'int size) (UInt32.t'int sector_size'1))
+    /\ ([@stop_split] [@expl:align_to_sector_size ensures #1] [%#sregion'9] UInt32.t'int size <= UInt32.t'int result
+    /\ UInt32.t'int result < UInt32.t'int size + UInt32.t'int sector_size'1)}
+    (! return {result}) ]

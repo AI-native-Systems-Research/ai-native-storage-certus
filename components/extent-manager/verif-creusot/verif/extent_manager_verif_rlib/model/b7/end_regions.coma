@@ -1,0 +1,66 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 141 0 141 63 *)
+
+let%span swell_founded = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+let%span sb7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 140 10 140 11
+let%span sb7'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 47 16 47 46
+let%span sb7'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 128 10 128 11
+let%span sb7'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 131 8 134 70
+
+use creusot.int.UInt8
+use seq.Seq
+use creusot.int.UInt32
+use int.Int
+
+type t_Option_Int = None | Some int
+
+function dec32 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 288 0 288 31] (b: Seq.seq UInt8.t) : UInt32.t
+
+function d32 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 46 0 46 37] (b: Seq.seq UInt8.t) (p: int) : UInt32.t
+ = [%#sb7'0] dec32 (Seq.([..]) b p (p + 4))
+
+function end_slabs [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 129 0 129 61] (d: Seq.seq UInt8.t) (pos: int) (k: int) : t_Option_Int
+
+axiom end_slabs_def: forall d: Seq.seq UInt8.t, pos: int, k: int [end_slabs d pos k]. end_slabs d pos k
+    = ([%#sb7'2] if k <= 0 then
+      Some pos
+    else
+      if pos + 24 > Seq.length d then
+        None
+      else
+        if pos + 24 + 8 * UInt32.t'int (d32 d (pos + 20)) > Seq.length d then
+          None
+        else
+          end_slabs d (pos + 24 + 8 * UInt32.t'int (d32 d (pos + 20))) (k - 1)
+      
+    
+    )
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant d : Seq.seq UInt8.t
+
+constant pos : int
+
+constant n : int
+
+function end_regions [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b7.rs" 141 0 141 63] (d: Seq.seq UInt8.t) (pos: int) (n: int) : t_Option_Int
+
+goal vc_end_regions: if n <= 0 then
+    true
+  else
+    if pos + 4 > Seq.length d then
+      true
+    else
+      match end_slabs d (pos + 4) (UInt32.t'int (d32 d pos)) with
+        | None -> true
+        | Some p -> [@expl:variant decreases] well_founded_relation_Int ([%#sb7] n) ([%#sb7] n - 1)
+        end
+  
+  

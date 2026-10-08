@@ -1,0 +1,156 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1044 0 1044 41 *)
+
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 183 19 183 38
+let%span svec'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 184 18 184 46
+let%span svec'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 185 18 185 49
+let%span svec'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 186 18 186 54
+let%span svec'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 187 18 187 47
+let%span svec'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sslice = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/slice.rs" 148 20 148 37
+let%span sslice'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/slice.rs" 153 20 153 37
+let%span sslice'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/slice.rs" 158 20 158 88
+let%span sbatch6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1046 22 1046 25
+let%span sbatch6'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1046 28 1046 32
+let%span sbatch6'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1040 11 1040 72
+let%span sbatch6'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1041 10 1041 102
+let%span sbatch6'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1042 10 1042 110
+let%span sbatch6'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1043 10 1043 90
+
+use creusot.int.UInt8
+use creusot.int.UInt64
+use seq.Seq
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_bool_Global
+
+type t_Option_Vec_bool_Global = None | Some t_Vec_bool_Global
+
+type t_Ev6 = Data int int int bool | Flush bool | Sb int int bool | Hook
+
+type t_Ck6 = {
+  regions: t_Option_Vec_bool_Global;
+  active: UInt8.t;
+  seq: UInt64.t;
+  ck_off: UInt64.t;
+  ck_size: UInt64.t;
+  ms: UInt64.t;
+  hook: bool;
+  vwc: bool;
+  log: Seq.seq t_Ev6 }
+
+let elim_Some (_x: t_Option_Vec_bool_Global) (return (f0: t_Vec_bool_Global)) = any
+  [ _k (f0: t_Vec_bool_Global) -> {Some f0 = _x} (! return {f0})
+  | _chk -> (! {[@expl:elim Some] match _x with
+      | Some _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+predicate in_bounds_usize [@inline:trivial] (self: UInt64.t) (seq'0: Seq.seq bool) =
+  [%#sslice] UInt64.t'int self < Seq.length seq'0
+
+meta "rewrite_def" predicate in_bounds_usize
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_bool_Global (self: t_Vec_bool_Global) : Seq.seq bool
+
+axiom view_Vec_bool_Global_spec:
+  forall self: t_Vec_bool_Global [view_Vec_bool_Global self]. [%#svec'4] Seq.length (view_Vec_bool_Global self)
+    <= UInt64.t'int const_MAX
+
+predicate has_value_usize [@inline:trivial] (self: UInt64.t) (seq'0: Seq.seq bool) (out: bool) =
+  [%#sslice'0] Seq.get seq'0 (UInt64.t'int self) = out
+
+meta "rewrite_def" predicate has_value_usize
+
+predicate resolve_elswhere_usize [@inline:trivial] (self: UInt64.t) (old': Seq.seq bool) (fin: Seq.seq bool) =
+  [%#sslice'1] forall i: int. 0 <= i /\ i <> UInt64.t'int self /\ i < Seq.length old' -> Seq.get old' i = Seq.get fin i
+
+meta "rewrite_def" predicate resolve_elswhere_usize
+
+let index_mut_Vec_bool_Global (self_: MutBorrow.t t_Vec_bool_Global) (ix: UInt64.t) (return (x: MutBorrow.t bool)) =
+{[@stop_split] [@expl:index_mut requires] [%#svec] in_bounds_usize ix (view_Vec_bool_Global self_.current)}
+  any
+  [ return (result: MutBorrow.t bool) ->
+  {[@stop_split] [@expl:index_mut_Vec_bool_Global ensures] ([@stop_split] [@expl:index_mut ensures #0] [%#svec'0] has_value_usize ix (view_Vec_bool_Global self_.current) result.current)
+    /\ ([@stop_split] [@expl:index_mut ensures #1] [%#svec'1] has_value_usize ix (view_Vec_bool_Global self_.final) result.final)
+    /\ ([@stop_split] [@expl:index_mut ensures #2] [%#svec'2] resolve_elswhere_usize ix (view_Vec_bool_Global self_.current) (view_Vec_bool_Global self_.final))
+    /\ ([@stop_split] [@expl:index_mut ensures #3] [%#svec'3] Seq.length (view_Vec_bool_Global self_.final)
+    = Seq.length (view_Vec_bool_Global self_.current))}
+    (! return {result}) ]
+
+predicate resolve_refmut_bool [@inline:trivial] (_1: MutBorrow.t bool) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_bool
+
+predicate resolve_refmut_Vec_bool_Global [@inline:trivial] (_1: MutBorrow.t t_Vec_bool_Global) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_Vec_bool_Global
+
+predicate resolve_refmut_Option_Vec_bool_Global [@inline:trivial] (_1: MutBorrow.t t_Option_Vec_bool_Global) =
+  _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_Option_Vec_bool_Global
+
+predicate resolve_refmut_Ck6 [@inline:trivial] (_1: MutBorrow.t t_Ck6) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_Ck6
+
+type tup2_Option_Vec_bool_Global_Option_Vec_bool_Global = { f0: t_Option_Vec_bool_Global; f1: t_Option_Vec_bool_Global }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let ck6_publish [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1044 0 1044 41]
+  (c: MutBorrow.t t_Ck6) (i: UInt64.t) (return (x: ())) =
+{[@stop_split] [@expl:ck6_publish requires] [%#sbatch6'1] match c.current.regions with
+    | Some rs -> UInt64.t'int i < Seq.length (view_Vec_bool_Global rs)
+    | None -> false
+    end}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = MutBorrow.borrow_final <t_Option_Vec_bool_Global> {c.current.regions}
+        {MutBorrow.inherit_id (MutBorrow.get_id c) 0}
+        (fun (_bor: MutBorrow.t t_Option_Vec_bool_Global) ->
+          [ &_13 <- _bor ] [ &c <- { c with current = { c.current with regions = _bor.final } } ] s1)
+    | s1 = any
+      [ br0 -> {_13.current = None} (! bb3) | br1 (x0: t_Vec_bool_Global) -> {_13.current = Some x0} (! bb4) ] ]
+  | bb4 = s0
+    [ s0 = elim_Some {_13.current}
+        (fun (r0: t_Vec_bool_Global) ->
+          MutBorrow.borrow_final <t_Vec_bool_Global> {r0} {MutBorrow.inherit_id (MutBorrow.get_id _13) 0}
+            (fun (_bor: MutBorrow.t t_Vec_bool_Global) ->
+              [ &rs <- _bor ] [ &_13 <- { _13 with current = Some _bor.final } ] s1))
+    | s1 = MutBorrow.borrow_final <t_Vec_bool_Global> {rs.current} {MutBorrow.get_id rs}
+        (fun (_bor: MutBorrow.t t_Vec_bool_Global) -> [ &_17 <- _bor ] [ &rs <- { rs with current = _bor.final } ] s2)
+    | s2 = index_mut_Vec_bool_Global [%#sbatch6] {_17} {i} (fun (_x: MutBorrow.t bool) -> [ &_16 <- _x ] s3)
+    | s3 = [ &_16 <- { _16 with current = ([%#sbatch6'0] true) } ] s4
+    | s4 = -{resolve_refmut_bool _16}- s5
+    | s5 = -{resolve_refmut_Vec_bool_Global rs}- s6
+    | s6 = -{resolve_refmut_Option_Vec_bool_Global _13}- s7
+    | s7 = -{resolve_refmut_Ck6 c}- s8
+    | s8 = return {_ret} ]
+  | bb3 = s0
+    [ s0 = -{resolve_refmut_Option_Vec_bool_Global _13}- s1 | s1 = -{resolve_refmut_Ck6 c}- s2 | s2 = return {_ret} ] ]
+  [ & _ret: () = Any.any_l ()
+  | & c: MutBorrow.t t_Ck6 = c
+  | & i: UInt64.t = i
+  | & _13: MutBorrow.t t_Option_Vec_bool_Global = Any.any_l ()
+  | & rs: MutBorrow.t t_Vec_bool_Global = Any.any_l ()
+  | & _16: MutBorrow.t bool = Any.any_l ()
+  | & _17: MutBorrow.t t_Vec_bool_Global = Any.any_l () ])
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:ck6_publish ensures] ([@stop_split] [@expl:ck6_publish ensures #0] [%#sbatch6'2] match { f0 = c.current.regions;
+                                                                                                                 f1 = c.final.regions } with
+        | {f0 = Some a; f1 = Some b} -> view_Vec_bool_Global b = Seq.set (view_Vec_bool_Global a) (UInt64.t'int i) true
+        | _ -> false
+        end)
+    /\ ([@stop_split] [@expl:ck6_publish ensures #1] [%#sbatch6'3] c.final.active = c.current.active
+      /\ c.final.seq = c.current.seq /\ c.final.ck_off = c.current.ck_off /\ c.final.ck_size = c.current.ck_size)
+    /\ ([@stop_split] [@expl:ck6_publish ensures #2] [%#sbatch6'4] c.final.ms = c.current.ms
+    /\ c.final.hook = c.current.hook /\ c.final.vwc = c.current.vwc /\ c.final.log = c.current.log)}
+    (! return {result}) ]

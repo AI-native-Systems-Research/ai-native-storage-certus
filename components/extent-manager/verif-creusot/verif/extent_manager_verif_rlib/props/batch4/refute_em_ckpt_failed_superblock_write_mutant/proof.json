@@ -1,0 +1,17 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_refute_em_ckpt_failed_superblock_write__mutant": {
+        "tactic": "split_vc",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [ null, { "prover": "alt-ergo", "time": 0.02 } ]
+          }
+        ]
+      },
+      "vc_wsb_chain": { "prover": "alt-ergo", "time": 0.024 }
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_refute_em_init_post_continue__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              {
+                "tactic": "split_vc",
+                "children": [
+                  { "prover": "alt-ergo", "time": 0.031 },
+                  {
+                    "tactic": "split_vc",
+                    "children": [
+                      null, { "prover": "alt-ergo", "time": 0.036 }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "vc_wcont_lost": { "prover": "alt-ergo", "time": 0.029 }
+    }
+  }
+}

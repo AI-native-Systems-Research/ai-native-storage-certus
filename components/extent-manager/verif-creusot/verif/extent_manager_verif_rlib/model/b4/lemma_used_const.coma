@@ -1,0 +1,117 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 74 0 74 80 *)
+
+let%span swell_founded = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 494 14 494 15
+let%span sb4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 70 10 70 11
+let%span sb4'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 71 11 71 34
+let%span sb4'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 72 11 72 80
+let%span sb4'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 73 10 73 41
+let%span sb4'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 23 16 23 117
+let%span sb4'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 28 10 28 11
+let%span sb4'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 30 16 30 96
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use int.Int
+
+type t_BTreeMap_u64_Slab_Global
+
+type t_SlabMap = { inner: t_BTreeMap_u64_Slab_Global }
+
+type t_HashMap_u32_Vec_u64_Global_RandomState_Global
+
+type t_SizeClassManager = { map: t_HashMap_u32_Vec_u64_Global_RandomState_Global }
+
+type t_Vec_Vec_u64_Global_Global
+
+type t_BuddyAllocator = {
+  base_offset: UInt64.t;
+  total_usable_size: UInt64.t;
+  sector_size: UInt32.t;
+  max_order: UInt64.t;
+  free_lists: t_Vec_Vec_u64_Global_Global }
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_FormatParams = {
+  data_disk_size'0: UInt64.t;
+  slab_size'0: UInt64.t;
+  max_extent_size'0: UInt32.t;
+  sector_size'0: UInt32.t;
+  region_count'0: UInt32.t;
+  metadata_alignment'0: UInt64.t;
+  instance_id'0: t_Option_u64;
+  metadata_disk_ns_id'0: UInt32.t;
+  metadata_region_size'0: UInt64.t }
+
+type t_Vec_tup2_u64_usize_Global
+
+type t_RegionState = {
+  slabs: t_SlabMap;
+  size_classes: t_SizeClassManager;
+  buddy: t_BuddyAllocator;
+  dirty: bool;
+  format_params: t_FormatParams;
+  pending_frees: t_Vec_tup2_u64_usize_Global }
+
+type t_Vec_u64_Global
+
+function tf [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 495 4 495 56] (fl: Seq.seq t_Vec_u64_Global) (ss: int) (n: int) : int
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_Vec_u64_Global_Global (self: t_Vec_Vec_u64_Global_Global) : Seq.seq t_Vec_u64_Global
+
+axiom view_Vec_Vec_u64_Global_Global_spec:
+  forall self: t_Vec_Vec_u64_Global_Global [view_Vec_Vec_u64_Global_Global self]. [%#svec] Seq.length (view_Vec_Vec_u64_Global_Global self)
+    <= UInt64.t'int const_MAX
+
+function rg_used [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 22 0 22 37] (r: t_RegionState) : int
+ = [%#sb4'3] UInt64.t'int r.buddy.total_usable_size
+  - tf (view_Vec_Vec_u64_Global_Global r.buddy.free_lists) (UInt32.t'int r.buddy.sector_size) (Seq.length (view_Vec_Vec_u64_Global_Global r.buddy.free_lists))
+
+function used_sum [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 29 0 29 71] (arena: Seq.seq t_RegionState) (rv: Seq.seq UInt64.t) (n: int) : int
+
+axiom used_sum_def:
+  forall arena: Seq.seq t_RegionState, rv: Seq.seq UInt64.t, n: int [used_sum arena rv n]. used_sum arena rv n
+    = ([%#sb4'5] if n <= 0 then
+      0
+    else
+      used_sum arena rv (n - 1) + rg_used (Seq.get arena (UInt64.t'int (Seq.get rv (n - 1))))
+    )
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant arena : Seq.seq t_RegionState
+
+constant rv : Seq.seq UInt64.t
+
+constant c : int
+
+constant k : int
+
+function lemma_used_const [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 74 0 74 80] (arena: Seq.seq t_RegionState) (rv: Seq.seq UInt64.t) (c: int) (k: int) : ()
+
+goal vc_lemma_used_const: ([%#sb4'0] 0 <= k /\ k <= Seq.length rv)
+  -> ([%#sb4'1] forall i: int. 0 <= i /\ i < Seq.length rv -> rg_used (Seq.get arena (UInt64.t'int (Seq.get rv i))) = c)
+  -> (if k > 0 then
+    (([@stop_split] [@expl:lemma_used_const requires] ([@stop_split] [@expl:lemma_used_const requires #0] [%#sb4'0] 0
+            <= k - 1
+          /\ k - 1 <= Seq.length rv)
+        /\ ([@stop_split] [@expl:lemma_used_const requires #1] [%#sb4'1] forall i: int. 0 <= i /\ i < Seq.length rv
+          -> rg_used (Seq.get arena (UInt64.t'int (Seq.get rv i))) = c))
+      /\ ([@expl:variant decreases] well_founded_relation_Int ([%#sb4] k) ([%#sb4] k - 1)))
+    /\ (([@stop_split] [@expl:lemma_used_const ensures] [%#sb4'2] used_sum arena rv (k - 1) = (k - 1) * c)
+    -> ([@stop_split] [@expl:lemma_used_const ensures] [%#sb4'2] used_sum arena rv k = k * c))
+  else
+    [@stop_split] [@expl:lemma_used_const ensures] [%#sb4'2] used_sum arena rv k = k * c
+  )

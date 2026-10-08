@@ -1,0 +1,26 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_branch_Result_tup2_Vec_usize_Global_SharedState_EmError": {
+        "prover": "alt-ergo",
+        "time": 0.056
+      },
+      "vc_elim_Break": { "prover": "alt-ergo", "time": 0.033 },
+      "vc_elim_Continue": { "prover": "alt-ergo", "time": 0.052 },
+      "vc_format_build": { "prover": "alt-ergo", "time": 0.046 },
+      "vc_from_EmError": { "prover": "alt-ergo", "time": 0.052 },
+      "vc_from_residual_Result_tup2_Result_usize_EmError_Result_u64_EmError_EmError": {
+        "prover": "alt-ergo",
+        "time": 0.052
+      },
+      "vc_get_instance_id": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_publish_regions": { "prover": "alt-ergo", "time": 0.052 },
+      "vc_refute_em_inv_initialized_together": {
+        "prover": "cvc4",
+        "time": 0.286
+      },
+      "vc_region_for_key": { "prover": "alt-ergo", "time": 0.03 }
+    }
+  }
+}

@@ -1,0 +1,18 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 152 0 152 23 *)
+
+let%span switness = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 151 10 151 42
+
+use creusot.prelude.Any
+use creusot.int.UInt64BW
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let fact_mask_6_12 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 152 0 152 23]
+  (return (x: ())) = (! bb0
+  [ bb0 = return {_ret} ] [ & _ret: () = Any.any_l () ])
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:fact_mask_6_12 ensures] [%#switness] UInt64BW.bw_and (6: UInt64BW.t) (UInt64BW.bw_not (UInt64BW.sub (12: UInt64BW.t) (1: UInt64BW.t)))
+    = (4: UInt64BW.t)}
+    (! return {result}) ]

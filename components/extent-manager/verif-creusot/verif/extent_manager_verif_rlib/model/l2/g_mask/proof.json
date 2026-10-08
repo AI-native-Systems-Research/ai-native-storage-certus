@@ -1,0 +1,25 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_g_mask": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.036 },
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "cvc4", "time": 0.134 },
+              { "prover": "alt-ergo", "time": 0.204 }
+            ]
+          },
+          { "prover": "alt-ergo", "time": 0.419 },
+          { "prover": "cvc5", "time": 0.106 },
+          { "prover": "alt-ergo", "time": 0.554 },
+          { "prover": "z3", "time": 0.133 }
+        ]
+      },
+      "vc_mask_fact": { "prover": "alt-ergo", "time": 0.021 }
+    }
+  }
+}

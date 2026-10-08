@@ -1,0 +1,69 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 194 0 194 31 *)
+
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 180 11 180 26
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 181 10 181 34
+let%span sbuddy'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 182 10 182 33
+let%span sbuddy'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 183 10 183 20
+let%span scomponent = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 653 16 653 66
+let%span sbatch7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 192 11 192 16
+let%span sbatch7'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 193 10 193 51
+let%span sbatch7'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 204 11 204 26
+let%span sbatch7'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 205 10 205 26
+let%span sbatch7'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 207 16 207 38
+let%span sbatch6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 425 11 425 17
+let%span sbatch6'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 426 10 426 28
+
+use int.ComputerDivision
+use int.Int
+
+function ckoff_l [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 652 0 652 29] (a: int) : int
+ = [%#scomponent] if a = 0 then 4096 else ComputerDivision.div (4096 + a - 1) a * a
+
+function lemma_divmod [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 184 0 184 35] (x: int) (m: int) : ()
+
+axiom lemma_divmod_spec: forall x: int, m: int. ([%#sbuddy] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'0] x = m * ComputerDivision.div x m + ComputerDivision.mod x m)
+
+axiom lemma_divmod_spec'0: forall x: int, m: int. ([%#sbuddy] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'1] 0 <= ComputerDivision.mod x m /\ ComputerDivision.mod x m < m)
+
+axiom lemma_divmod_spec'1: forall x: int, m: int. ([%#sbuddy] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'2] ComputerDivision.div x m >= 0)
+
+function lemma_mod_mul7 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 206 0 206 37] (q: int) (a: int) : ()
+ = [%#sbatch7'3] lemma_divmod (q * a) a
+
+axiom lemma_mod_mul7_spec: forall q: int, a: int. ([%#sbatch7'1] a > 0 /\ q >= 0)
+    -> ([%#sbatch7'2] ComputerDivision.mod (q * a) a = 0)
+
+function lemma_ckoff_ge [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 427 0 427 29] (a: int) : ()
+
+axiom lemma_ckoff_ge_spec: forall a: int. ([%#sbatch6] a >= 0) -> ([%#sbatch6'0] ckoff_l a >= 4096)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant a : int
+
+function lemma_ckoff_min7 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 194 0 194 31] (a: int) : ()
+
+goal vc_lemma_ckoff_min7: ([%#sbatch7] a > 0)
+  -> ([@stop_split] [@expl:lemma_divmod requires] [%#sbuddy] a > 0 /\ 4096 + a - 1 >= 0)
+  /\ (([@stop_split] [@expl:lemma_divmod ensures] ([@stop_split] [@expl:lemma_divmod ensures #0] [%#sbuddy'0] 4096 + a
+        - 1
+      = a * ComputerDivision.div (4096 + a - 1) a + ComputerDivision.mod (4096 + a - 1) a)
+    /\ ([@stop_split] [@expl:lemma_divmod ensures #1] [%#sbuddy'1] 0 <= ComputerDivision.mod (4096 + a - 1) a
+      /\ ComputerDivision.mod (4096 + a - 1) a < a)
+    /\ ([@stop_split] [@expl:lemma_divmod ensures #2] [%#sbuddy'2] ComputerDivision.div (4096 + a - 1) a >= 0))
+  -> (let _ = lemma_divmod (4096 + a - 1) a in ([@stop_split] [@expl:lemma_mod_mul7 requires] [%#sbatch7'1] a > 0
+    /\ ComputerDivision.div (4096 + a - 1) a >= 0)
+  /\ (([@stop_split] [@expl:lemma_mod_mul7 ensures] [%#sbatch7'2] ComputerDivision.mod (ComputerDivision.div (4096 + a
+        - 1) a
+      * a) a
+    = 0)
+  -> (let _ = lemma_mod_mul7 (ComputerDivision.div (4096 + a
+  - 1) a) a in ([@stop_split] [@expl:lemma_ckoff_ge requires] [%#sbatch6] a >= 0)
+  /\ (([@stop_split] [@expl:lemma_ckoff_ge ensures] [%#sbatch6'0] ckoff_l a >= 4096)
+  -> ([@stop_split] [@expl:lemma_ckoff_min7 ensures] [%#sbatch7'0] ComputerDivision.mod (ckoff_l a) a = 0
+  /\ ckoff_l a >= 4096))))))

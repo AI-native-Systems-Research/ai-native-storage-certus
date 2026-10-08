@@ -1,0 +1,388 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 273 4 273 96 *)
+
+(* model::b3::EvClient *)
+
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 112 18 112 40
+let%span svec'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sb3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 275 26 275 36
+let%span sb3'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 275 26 275 41
+let%span sb3'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 275 44 275 45
+let%span sb3'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 275 25 275 46
+let%span sb3'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 275 25 275 51
+let%span sb3'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 276 23 276 38
+let%span sb3'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 277 29 277 37
+let%span sb3'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 278 25 278 57
+let%span sb3'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 280 33 280 45
+let%span sb3'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 282 27 282 28
+let%span sb3'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 287 20 288 76
+let%span sb3'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 286 20 286 114
+let%span sb3'11 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 285 20 285 84
+let%span sb3'12 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 284 20 284 44
+let%span sb3'13 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 283 20 283 37
+let%span sb3'14 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 290 28 290 47
+let%span sb3'15 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 290 28 290 58
+let%span sb3'16 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 291 33 291 41
+let%span sb3'17 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 292 35 292 61
+let%span sb3'18 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 296 28 296 79
+let%span sb3'19 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 297 18 297 55
+let%span sb3'20 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 301 18 301 32
+let%span sb3'21 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 311 17 311 18
+let%span sb3'22 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 311 12 311 18
+let%span sb3'23 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 294 37 294 49
+let%span sb3'24 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 299 38 299 48
+let%span sb3'25 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 309 38 309 48
+let%span sb3'26 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 308 36 308 46
+let%span sb3'27 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 307 46 307 58
+let%span sb3'28 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 304 35 304 47
+let%span sb3'29 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 266 15 266 36
+let%span sb3'30 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 267 15 267 61
+let%span sb3'31 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 268 15 268 107
+let%span sb3'32 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 269 15 269 109
+let%span sb3'33 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 270 14 270 94
+let%span sb3'34 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 271 14 271 118
+let%span sb3'35 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 272 14 272 75
+let%span sb3'36 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 258 14 258 121
+let%span sb3'37 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 259 14 259 73
+let%span sb3'38 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 30 10 30 36
+let%span sb3'39 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 190 16 190 65
+let%span sb3'40 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 154 8 158 9
+let%span sb3'41 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 138 10 138 113
+let%span sb3'42 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 145 10 145 106
+let%span sb3'43 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 36 10 36 36
+let%span sb3'44 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 203 8 208 116
+let%span sb3'45 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 184 16 184 64
+let%span sb3'46 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 165 16 165 63
+let%span sb3'47 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 173 8 177 9
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use seq.Seq
+use creusot.int.UInt8
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.ComputerDivision
+use int.Int
+
+type t_AllocSel = Default | User UInt64.t
+
+type t_EvClient = { sector_size: UInt32.t; ns_id: UInt32.t; base_lba: UInt64.t; alloc: t_AllocSel }
+
+type t_Vec_u8_Global
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_u8_Global (self: t_Vec_u8_Global) : Seq.seq UInt8.t
+
+axiom view_Vec_u8_Global_spec:
+  forall self: t_Vec_u8_Global [view_Vec_u8_Global self]. [%#svec'0] Seq.length (view_Vec_u8_Global self)
+    <= UInt64.t'int const_MAX
+
+let len_u8 (self_: t_Vec_u8_Global) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:len ensures] [%#svec] UInt64.t'int result
+    = Seq.length (view_Vec_u8_Global self_)}
+    (! return {result}) ]
+
+type t_Comp = WriteDone bool | ReadDone bool | Error | Other
+
+type t_Option_Comp = None | Some t_Comp
+
+type t_Ev = Alloc t_AllocSel bool | Send UInt32.t UInt64.t bool | Recv t_Option_Comp
+
+type t_EvDev = { log: Seq.seq t_Ev }
+
+type t_Result_Vec_u8_Global_unit = Ok t_Vec_u8_Global | Err ()
+
+let alloc_buffer (self: t_EvClient) (dev: MutBorrow.t t_EvDev) (size: UInt64.t)
+  (return (x: t_Result_Vec_u8_Global_unit)) = any
+  [ return (result: t_Result_Vec_u8_Global_unit) ->
+  {[@stop_split] [@expl:alloc_buffer ensures] ([@stop_split] [@expl:alloc_buffer ensures #0] [%#sb3'36] dev.final.log
+      = Seq.snoc dev.current.log (Alloc (self.alloc) (match result with
+        | Ok _ -> true
+        | Err _ -> false
+        end)))
+    /\ ([@stop_split] [@expl:alloc_buffer ensures #1] [%#sb3'37] match result with
+      | Ok v -> Seq.length (view_Vec_u8_Global v) = UInt64.t'int size
+      | Err _ -> true
+      end)}
+    (! return {result}) ]
+
+predicate resolve_refmut_EvDev [@inline:trivial] (_1: MutBorrow.t t_EvDev) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_EvDev
+
+type t_EmError = CorruptMetadata | IoError | NotInitialized | OffsetNotFound UInt64.t | OutOfSpace
+
+let nvme_to_em (return (x: t_EmError)) = any
+  [ return (result: t_EmError) -> {[@stop_split] [@expl:nvme_to_em ensures] [%#sb3'38] result = IoError}
+    (! return {result}) ]
+
+type t_Result_unit_EmError = Ok'0 () | Err'0 t_EmError
+
+let elim_Ok (_x: t_Result_Vec_u8_Global_unit) (return (f0: t_Vec_u8_Global)) = any
+  [ _k (f0: t_Vec_u8_Global) -> {Ok f0 = _x} (! return {f0})
+  | _chk -> (! {[@expl:elim Ok] match _x with
+      | Ok _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+predicate ev_is_send [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 189 0 189 32] (e: t_Ev) =
+  [%#sb3'39] match e with
+    | Send _ _ _ -> true
+    | _ -> false
+    end
+
+predicate ev_good [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 152 0 152 55] (e: t_Ev) (a: t_AllocSel) (write: bool) =
+  [%#sb3'40] match e with
+    | Alloc x ok -> x = a /\ ok
+    | Send _ _ ok -> ok
+    | Recv c -> if write then c = Some (WriteDone true) else c = Some (ReadDone true)
+    end
+
+type t_Result_unit_unit = Ok'1 () | Err'1 ()
+
+let chan_send (dev: MutBorrow.t t_EvDev) (ns: UInt32.t) (lba: UInt64.t) (return (x: t_Result_unit_unit)) = any
+  [ return (result: t_Result_unit_unit) -> {[@stop_split] [@expl:chan_send ensures] [%#sb3'41] dev.final.log
+    = Seq.snoc dev.current.log (Send ns lba (match result with
+      | Ok'1 _ -> true
+      | Err'1 _ -> false
+      end))}
+    (! return {result}) ]
+
+type t_Result_Comp_unit = Ok'2 t_Comp | Err'2 ()
+
+let chan_recv (dev: MutBorrow.t t_EvDev) (return (x: t_Result_Comp_unit)) = any
+  [ return (result: t_Result_Comp_unit) -> {[@stop_split] [@expl:chan_recv ensures] [%#sb3'42] dev.final.log
+    = Seq.snoc dev.current.log (Recv (match result with
+      | Ok'2 c -> Some c
+      | Err'2 _ -> None
+      end))}
+    (! return {result}) ]
+
+let elim_Ok'0 (_x: t_Result_Comp_unit) (return (f0: t_Comp)) = any
+  [ _k (f0: t_Comp) -> {Ok'2 f0 = _x} (! return {f0})
+  | _chk -> (! {[@expl:elim Ok] match _x with
+      | Ok'2 _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+let elim_WriteDone (_x: t_Comp) (return (f0: bool)) = any
+  [ _k (f0: bool) -> {WriteDone f0 = _x} (! return {f0})
+  | _chk -> (! {[@expl:elim WriteDone] match _x with
+      | WriteDone _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+let io_error (return (x: t_EmError)) = any
+  [ return (result: t_EmError) -> {[@stop_split] [@expl:io_error ensures] [%#sb3'43] result = IoError}
+    (! return {result}) ]
+
+constant const_MAX'0: UInt64.t = (18446744073709551615: UInt64.t)
+
+predicate ev_alloc_is [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 183 0 183 46] (e: t_Ev) (a: t_AllocSel) =
+  [%#sb3'45] match e with
+    | Alloc x _ -> x = a
+    | _ -> true
+    end
+
+predicate ev_alloc_fail [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 164 0 164 35] (e: t_Ev) =
+  [%#sb3'46] match e with
+    | Alloc _ ok -> not ok
+    | _ -> false
+    end
+
+predicate ev_dev_fail [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 171 0 171 46] (e: t_Ev) (write: bool) =
+  [%#sb3'47] match e with
+    | Send _ _ ok -> not ok
+    | Recv c -> if write then c <> Some (WriteDone true) else c <> Some (ReadDone true)
+    | _ -> false
+    end
+
+predicate io_post [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 201 0 201 93] (l: Seq.seq t_Ev) (n0: int) (a: t_AllocSel) (write: bool) (ok: bool) (err_io: bool) =
+  [%#sb3'44] n0 <= Seq.length l
+  /\ (forall p: int. n0 <= p /\ p < Seq.length l -> ev_alloc_is (Seq.get l p) a)
+  /\ (forall p: int. n0 <= p /\ p < Seq.length l /\ ev_is_send (Seq.get l p)
+      -> n0 < p /\ Seq.get l (p - 1) = Alloc a true)
+  /\ (forall p: int. n0 <= p /\ p < Seq.length l /\ (ev_alloc_fail (Seq.get l p) \/ ev_dev_fail (Seq.get l p) write)
+      -> p = Seq.length l - 1 /\ not ok /\ err_io)
+  /\ (not ok
+  -> err_io
+  /\ Seq.length l > n0
+  /\ (ev_alloc_fail (Seq.get l (Seq.length l - 1)) \/ ev_dev_fail (Seq.get l (Seq.length l - 1)) write))
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let write_blocks [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 273 4 273 96]
+  (self: t_EvClient) (dev: MutBorrow.t t_EvDev) (lba: UInt64.t) (data: t_Vec_u8_Global)
+  (return (x: t_Result_unit_EmError)) =
+{[@stop_split] [@expl:write_blocks requires] ([@stop_split] [@expl:write_blocks requires #0] [%#sb3'29] UInt32.t'int self.sector_size
+    > 0)
+  /\ ([@stop_split] [@expl:write_blocks requires #1] [%#sb3'30] Seq.length (view_Vec_u8_Global data)
+      + UInt32.t'int self.sector_size
+    <= UInt64.t'int const_MAX)
+  /\ ([@stop_split] [@expl:write_blocks requires #2] [%#sb3'31] ComputerDivision.div (Seq.length (view_Vec_u8_Global data)
+          + UInt32.t'int self.sector_size
+        - 1) (UInt32.t'int self.sector_size)
+      * UInt32.t'int self.sector_size
+    <= UInt64.t'int const_MAX)
+  /\ ([@stop_split] [@expl:write_blocks requires #3] [%#sb3'32] UInt64.t'int self.base_lba + UInt64.t'int lba
+    + ComputerDivision.div (Seq.length (view_Vec_u8_Global data) + UInt32.t'int self.sector_size
+    - 1) (UInt32.t'int self.sector_size)
+  <= UInt64.t'int const_MAX'0)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &ss <- UInt64.of_int (UInt32.t'int self.sector_size) ] s1
+    | s1 = len_u8 [%#sb3] {data} (fun (_x: UInt64.t) -> [ &_28 <- _x ] s2)
+    | s2 = UInt64.add [%#sb3'0] {_28} {ss} (fun (_x: UInt64.t) -> [ &_27 <- _x ] s3)
+    | s3 = UInt64.sub [%#sb3'2] {_27} {[%#sb3'1] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &_26 <- _x ] s4)
+    | s4 = [ &_31 <- ss ] s5
+    | s5 = [ &_32 <- _31 = ([%#sb3'3] (0: UInt64.t)) ] s6
+    | s6 = {[@expl:division by zero] [%#sb3'3] not _32} s7
+    | s7 = UInt64.div [%#sb3'3] {_26} {_31} (fun (_x: UInt64.t) -> [ &num_blocks <- _x ] s8)
+    | s8 = UInt64.mul [%#sb3'4] {num_blocks} {ss} (fun (_x: UInt64.t) -> [ &buf_size <- _x ] s9)
+    | s9 = [ &d0 <- [%#sb3'5] dev.current.log ] s10
+    | s10 = MutBorrow.borrow_mut <t_EvDev> {dev.current}
+        (fun (_bor: MutBorrow.t t_EvDev) -> [ &_42 <- _bor ] [ &dev <- { dev with current = _bor.final } ] s11)
+    | s11 = alloc_buffer [%#sb3'6] {self} {_42} {buf_size} (fun (_x: t_Result_Vec_u8_Global_unit) -> [ &_40 <- _x ] s12)
+    | s12 = any [ br0 (x0: t_Vec_u8_Global) -> {_40 = Ok x0} (! bb8) | br1 (x0: ()) -> {_40 = Err x0} (! bb7) ] ]
+  | bb7 = s0
+    [ s0 = -{resolve_refmut_EvDev dev}- s1
+    | s1 = nvme_to_em [%#sb3'7] (fun (_x: t_EmError) -> [ &_47 <- _x ] s2)
+    | s2 = [ &_ret <- Err'0 _47 ] s3
+    | s3 = return {_ret} ]
+  | bb8 = s0
+    [ s0 = elim_Ok {_40} (fun (r0: t_Vec_u8_Global) -> [ &b <- r0 ] s1)
+    | s1 = [ &i <- [%#sb3'8] (0: UInt64.t) ] s2
+    | s2 = [ &_old <- dev.final ] s3
+    | s3 = bb12 ]
+  | bb12 = bb12
+    [ bb12 = {[@expl:inferred invariant: unchanged value] _old = dev.final}
+      {[@expl:loop invariant #0] [%#sb3'13] UInt64.t'int i <= UInt64.t'int num_blocks}
+      {[@expl:loop invariant #1] [%#sb3'12] Seq.length d0 < Seq.length dev.current.log}
+      {[@expl:loop invariant #2] [%#sb3'11] forall p: int. 0 <= p /\ p < Seq.length d0
+        -> Seq.get dev.current.log p = Seq.get d0 p}
+      {[@expl:loop invariant #3] [%#sb3'10] forall p: int. Seq.length d0 <= p /\ p < Seq.length dev.current.log
+        -> ev_good (Seq.get dev.current.log p) self.alloc true}
+      {[@expl:loop invariant #4] [%#sb3'9] forall p: int. Seq.length d0 <= p
+          /\ p < Seq.length dev.current.log /\ ev_is_send (Seq.get dev.current.log p)
+        -> Seq.length d0 < p /\ Seq.get dev.current.log (p - 1) = Alloc (self.alloc) true}
+      (! s0)
+      [ s0 = [ &_69 <- UInt64.lt i num_blocks ] s1
+      | s1 = any [ br0 -> {_69 = false} (! bb47) | br1 -> {_69} (! bb14) ] ]
+      [ bb14 = s0
+        [ s0 = UInt64.add [%#sb3'14] {self.base_lba} {lba} (fun (_x: UInt64.t) -> [ &_73 <- _x ] s1)
+        | s1 = [ &_76 <- UInt64.of_int (UInt64.t'int i) ] s2
+        | s2 = UInt64.add [%#sb3'15] {_73} {_76} (fun (_x: UInt64.t) -> [ &block_lba <- _x ] s3)
+        | s3 = [ &l1 <- [%#sb3'16] dev.current.log ] s4
+        | s4 = MutBorrow.borrow_mut <t_EvDev> {dev.current}
+            (fun (_bor: MutBorrow.t t_EvDev) -> [ &_84 <- _bor ] [ &dev <- { dev with current = _bor.final } ] s5)
+        | s5 = alloc_buffer [%#sb3'17] {self} {_84} {ss} (fun (_x: t_Result_Vec_u8_Global_unit) -> [ &_82 <- _x ] s6)
+        | s6 = any [ br0 (x0: t_Vec_u8_Global) -> {_82 = Ok x0} (! bb20) | br1 (x0: ()) -> {_82 = Err x0} (! bb19) ] ]
+      | bb20 = s0
+        [ s0 = elim_Ok {_82} (fun (r0: t_Vec_u8_Global) -> [ &b'0 <- r0 ] s1)
+        | s1 = {[@expl:assertion] [%#sb3'18] Seq.get dev.current.log (Seq.length l1) = Alloc (self.alloc) true} s2
+        | s2 = MutBorrow.borrow_mut <t_EvDev> {dev.current}
+            (fun (_bor: MutBorrow.t t_EvDev) -> [ &_97 <- _bor ] [ &dev <- { dev with current = _bor.final } ] s3)
+        | s3 = chan_send [%#sb3'19] {_97} {self.ns_id} {block_lba} (fun (_x: t_Result_unit_unit) -> [ &_96 <- _x ] s4)
+        | s4 = any [ br0 (x0: ()) -> {_96 = Ok'1 x0} (! bb28) | br1 (x0: ()) -> {_96 = Err'1 x0} (! bb27) ] ]
+      | bb28 = s0
+        [ s0 = MutBorrow.borrow_mut <t_EvDev> {dev.current}
+            (fun (_bor: MutBorrow.t t_EvDev) -> [ &_105 <- _bor ] [ &dev <- { dev with current = _bor.final } ] s1)
+        | s1 = chan_recv [%#sb3'20] {_105} (fun (_x: t_Result_Comp_unit) -> [ &_104 <- _x ] s2)
+        | s2 = any [ br0 (x0: t_Comp) -> {_104 = Ok'2 x0} (! bb32) | br1 (x0: ()) -> {_104 = Err'2 x0} (! bb36) ] ]
+      | bb32 = elim_Ok'0 {_104}
+          (fun (r0: t_Comp) ->
+            any
+            [ br0 (x0: bool) -> {r0 = WriteDone x0} (! bb39)
+            | br1 (x0: bool) -> {r0 = ReadDone x0} (! bb33)
+            | br2 -> {r0 = Error} (! bb35)
+            | br3 -> {r0 = Other} (! bb33) ])
+      | bb39 = s0
+        [ s0 = elim_Ok'0 {_104} (fun (r0: t_Comp) -> elim_WriteDone {r0} (fun (r0'0: bool) -> [ &ok <- r0'0 ] s1))
+        | s1 = any [ br0 -> {ok = false} (! bb40) | br1 -> {ok} (! bb42) ] ]
+      | bb42 = s0
+        [ s0 = UInt64.add [%#sb3'22] {i} {[%#sb3'21] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &i <- _x ] s1)
+        | s1 = bb12 ] ] ]
+  | bb19 = s0
+    [ s0 = -{resolve_refmut_EvDev dev}- s1
+    | s1 = nvme_to_em [%#sb3'23] (fun (_x: t_EmError) -> [ &_89 <- _x ] s2)
+    | s2 = [ &_ret <- Err'0 _89 ] s3
+    | s3 = return {_ret} ]
+  | bb27 = s0
+    [ s0 = -{resolve_refmut_EvDev dev}- s1
+    | s1 = io_error [%#sb3'24] (fun (_x: t_EmError) -> [ &_102 <- _x ] s2)
+    | s2 = [ &_ret <- Err'0 _102 ] s3
+    | s3 = return {_ret} ]
+  | bb36 = s0
+    [ s0 = -{resolve_refmut_EvDev dev}- s1
+    | s1 = io_error [%#sb3'25] (fun (_x: t_EmError) -> [ &_117 <- _x ] s2)
+    | s2 = [ &_ret <- Err'0 _117 ] s3
+    | s3 = return {_ret} ]
+  | bb33 = s0
+    [ s0 = -{resolve_refmut_EvDev dev}- s1
+    | s1 = io_error [%#sb3'26] (fun (_x: t_EmError) -> [ &_115 <- _x ] s2)
+    | s2 = [ &_ret <- Err'0 _115 ] s3
+    | s3 = return {_ret} ]
+  | bb35 = s0
+    [ s0 = -{resolve_refmut_EvDev dev}- s1
+    | s1 = nvme_to_em [%#sb3'27] (fun (_x: t_EmError) -> [ &_113 <- _x ] s2)
+    | s2 = [ &_ret <- Err'0 _113 ] s3
+    | s3 = return {_ret} ]
+  | bb40 = s0
+    [ s0 = -{resolve_refmut_EvDev dev}- s1
+    | s1 = nvme_to_em [%#sb3'28] (fun (_x: t_EmError) -> [ &_111 <- _x ] s2)
+    | s2 = [ &_ret <- Err'0 _111 ] s3
+    | s3 = return {_ret} ]
+  | bb47 = s0 [ s0 = -{resolve_refmut_EvDev dev}- s1 | s1 = [ &_ret <- Ok'0 _119 ] s2 | s2 = return {_ret} ] ]
+  [ & _ret: t_Result_unit_EmError = Any.any_l ()
+  | & self: t_EvClient = self
+  | & dev: MutBorrow.t t_EvDev = dev
+  | & lba: UInt64.t = lba
+  | & data: t_Vec_u8_Global = data
+  | & ss: UInt64.t = Any.any_l ()
+  | & num_blocks: UInt64.t = Any.any_l ()
+  | & _26: UInt64.t = Any.any_l ()
+  | & _27: UInt64.t = Any.any_l ()
+  | & _28: UInt64.t = Any.any_l ()
+  | & _31: UInt64.t = Any.any_l ()
+  | & _32: bool = Any.any_l ()
+  | & buf_size: UInt64.t = Any.any_l ()
+  | & d0: Seq.seq t_Ev = Any.any_l ()
+  | & _40: t_Result_Vec_u8_Global_unit = Any.any_l ()
+  | & _42: MutBorrow.t t_EvDev = Any.any_l ()
+  | & b: t_Vec_u8_Global = Any.any_l ()
+  | & _47: t_EmError = Any.any_l ()
+  | & i: UInt64.t = Any.any_l ()
+  | & _69: bool = Any.any_l ()
+  | & block_lba: UInt64.t = Any.any_l ()
+  | & _73: UInt64.t = Any.any_l ()
+  | & _76: UInt64.t = Any.any_l ()
+  | & l1: Seq.seq t_Ev = Any.any_l ()
+  | & _82: t_Result_Vec_u8_Global_unit = Any.any_l ()
+  | & _84: MutBorrow.t t_EvDev = Any.any_l ()
+  | & b'0: t_Vec_u8_Global = Any.any_l ()
+  | & _89: t_EmError = Any.any_l ()
+  | & _96: t_Result_unit_unit = Any.any_l ()
+  | & _97: MutBorrow.t t_EvDev = Any.any_l ()
+  | & _102: t_EmError = Any.any_l ()
+  | & _104: t_Result_Comp_unit = Any.any_l ()
+  | & _105: MutBorrow.t t_EvDev = Any.any_l ()
+  | & ok: bool = Any.any_l ()
+  | & _111: t_EmError = Any.any_l ()
+  | & _113: t_EmError = Any.any_l ()
+  | & _115: t_EmError = Any.any_l ()
+  | & _117: t_EmError = Any.any_l ()
+  | & _119: () = Any.any_l ()
+  | & _old: t_EvDev = Any.any_l () ])
+  [ return (result: t_Result_unit_EmError) ->
+  {[@stop_split] [@expl:write_blocks ensures] ([@stop_split] [@expl:write_blocks ensures #0] [%#sb3'33] forall p: int. 0
+            <= p
+          /\ p < Seq.length dev.current.log -> Seq.get dev.final.log p = Seq.get dev.current.log p)
+    /\ ([@stop_split] [@expl:write_blocks ensures #1] [%#sb3'34] io_post dev.final.log (Seq.length dev.current.log) self.alloc true (result
+      = Ok'0 ()) (result = Err'0 (IoError)))
+    /\ ([@stop_split] [@expl:write_blocks ensures #2] [%#sb3'35] forall e: t_EmError. result = Err'0 e -> e = IoError)}
+    (! return {result}) ]

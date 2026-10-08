@@ -1,0 +1,96 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 298 0 298 44 *)
+
+let%span sord = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/ord.rs" 162 41 162 102
+let%span sord'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/ord.rs" 168 41 168 99
+let%span sord'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/ord.rs" 174 41 174 99
+let%span sord'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/ord.rs" 180 41 180 102
+let%span sord'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/ord.rs" 186 41 186 83
+let%span sord'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/ord.rs" 192 42 192 59
+let%span sord'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/ord.rs" 193 42 193 59
+let%span sord'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/ord.rs" 194 41 194 58
+let%span sord'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/ord.rs" 200 42 200 83
+let%span sord'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/ord.rs" 201 41 201 85
+let%span sord'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/ord.rs" 207 42 207 86
+let%span sord'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/ord.rs" 208 41 208 82
+let%span sord'11 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/ord.rs" 214 41 214 97
+let%span sord'12 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/ord.rs" 296 16 302 17
+let%span sl2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 299 4 299 9
+let%span sl2'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 295 11 295 38
+let%span sl2'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 296 10 296 28
+let%span sl2'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 297 10 297 26
+
+use creusot.int.UInt64BW
+use creusot.prelude.Any
+use int.ComputerDivision
+
+type t_Ordering = Less | Equal | Greater
+
+function cmp_log_u64 (self: UInt64BW.t) (o: UInt64BW.t) : t_Ordering = [%#sord'12] if UInt64BW.lt self o then
+    Less
+  else
+    if self = o then Equal else Greater
+
+
+function eq_cmp_u64 (x: UInt64BW.t) (y: UInt64BW.t) : ()
+
+axiom eq_cmp_u64_spec: forall x: UInt64BW.t, y: UInt64BW.t. [%#sord'11] (x = y) = (cmp_log_u64 x y = Equal)
+
+function antisym2_u64 (x: UInt64BW.t) (y: UInt64BW.t) : ()
+
+axiom antisym2_u64_spec: forall x: UInt64BW.t, y: UInt64BW.t. ([%#sord'9] cmp_log_u64 x y = Greater)
+    -> ([%#sord'10] cmp_log_u64 y x = Less)
+
+function antisym1_u64 (x: UInt64BW.t) (y: UInt64BW.t) : ()
+
+axiom antisym1_u64_spec: forall x: UInt64BW.t, y: UInt64BW.t. ([%#sord'7] cmp_log_u64 x y = Less)
+    -> ([%#sord'8] cmp_log_u64 y x = Greater)
+
+function trans_u64 (x: UInt64BW.t) (y: UInt64BW.t) (z: UInt64BW.t) (o: t_Ordering) : ()
+
+axiom trans_u64_spec: forall x: UInt64BW.t, y: UInt64BW.t, z: UInt64BW.t, o: t_Ordering. ([%#sord'4] cmp_log_u64 x y
+      = o) -> ([%#sord'5] cmp_log_u64 y z = o) -> ([%#sord'6] cmp_log_u64 x z = o)
+
+function refl_u64 (x: UInt64BW.t) : ()
+
+axiom refl_u64_spec: forall x: UInt64BW.t. [%#sord'3] cmp_log_u64 x x = Equal
+
+function cmp_gt_log_u64 (x: UInt64BW.t) (y: UInt64BW.t) : ()
+
+axiom cmp_gt_log_u64_spec: forall x: UInt64BW.t, y: UInt64BW.t. [%#sord'2] UInt64BW.gt x y = (cmp_log_u64 x y = Greater)
+
+function cmp_ge_log_u64 (x: UInt64BW.t) (y: UInt64BW.t) : ()
+
+axiom cmp_ge_log_u64_spec: forall x: UInt64BW.t, y: UInt64BW.t. [%#sord'1] UInt64BW.ge x y = (cmp_log_u64 x y <> Less)
+
+function cmp_lt_log_u64 (x: UInt64BW.t) (y: UInt64BW.t) : ()
+
+axiom cmp_lt_log_u64_spec: forall x: UInt64BW.t, y: UInt64BW.t. [%#sord'0] UInt64BW.lt x y = (cmp_log_u64 x y = Less)
+
+function cmp_le_log_u64 (x: UInt64BW.t) (y: UInt64BW.t) : ()
+
+axiom cmp_le_log_u64_spec: forall x: UInt64BW.t, y: UInt64BW.t. [%#sord] UInt64BW.le x y = (cmp_log_u64 x y <> Greater)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let bf_div [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 298 0 298 44]
+  (x: UInt64BW.t) (s: UInt64BW.t) (m: UInt64BW.t) (return (x'0: UInt64BW.t)) =
+{[@stop_split] [@expl:bf_div requires] [%#sl2'0] UInt64BW.lt m (64: UInt64BW.t) /\ s = UInt64BW.shl (1: UInt64BW.t) m}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_14 <- s ] s1
+    | s1 = [ &_15 <- _14 = ([%#sl2] (0: UInt64BW.t)) ] s2
+    | s2 = {[@expl:division by zero] [%#sl2] not _15} s3
+    | s3 = UInt64BW.div [%#sl2] {x} {_14} (fun (_x: UInt64BW.t) -> [ &_ret <- _x ] s4)
+    | s4 = return {_ret} ] ]
+  [ & _ret: UInt64BW.t = Any.any_l ()
+  | & x: UInt64BW.t = x
+  | & s: UInt64BW.t = s
+  | & _14: UInt64BW.t = Any.any_l ()
+  | & _15: bool = Any.any_l () ])
+  [ return (result: UInt64BW.t) ->
+  {[@stop_split] [@expl:bf_div ensures] ([@stop_split] [@expl:bf_div ensures #0] [%#sl2'1] UInt64BW.t'int result
+      = ComputerDivision.div (UInt64BW.t'int x) (UInt64BW.t'int s))
+    /\ ([@stop_split] [@expl:bf_div ensures #1] [%#sl2'2] result = UInt64BW.shr x m)}
+    (! return {result}) ]

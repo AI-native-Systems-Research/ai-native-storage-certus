@@ -1,0 +1,26 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 443 9 443 29 *)
+
+(* <model::b3::WH as std::clone::Clone> *)
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.prelude.Any
+
+type t_Handle = {
+  region: UInt64.t;
+  key: UInt64.t;
+  offset: UInt64.t;
+  size: UInt32.t;
+  slab_start: UInt64.t;
+  slot_idx: UInt64.t }
+
+type t_WH = { h: t_Handle; publish_fn: bool; abort_fn: bool }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_WH [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 443 9 443 29]
+  (self: t_WH) (return (x: t_WH)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ] [ & _ret: t_WH = Any.any_l () | & self: t_WH = self ])
+  [ return (result: t_WH) -> (! return {result}) ]

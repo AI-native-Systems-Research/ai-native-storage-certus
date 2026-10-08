@@ -1,0 +1,71 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 719 0 719 42 *)
+
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 180 11 180 26
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 181 10 181 34
+let%span sbuddy'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 182 10 182 33
+let%span sbuddy'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 183 10 183 20
+let%span sregion = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 231 16 231 41
+let%span sbatch8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 720 20 720 54
+let%span sbatch8'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 721 5 721 14
+let%span sbatch8'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 721 17 721 18
+let%span sbatch8'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 721 4 721 19
+let%span sbatch8'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 721 4 721 24
+let%span sbatch8'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 721 4 721 29
+let%span sbatch8'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 717 11 717 46
+let%span sbatch8'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 718 10 718 40
+
+use int.ComputerDivision
+use creusot.int.UInt32
+use creusot.prelude.Any
+use int.Int
+
+function lemma_divmod [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 184 0 184 35] (x: int) (m: int) : ()
+
+axiom lemma_divmod_spec: forall x: int, m: int. ([%#sbuddy] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'0] x = m * ComputerDivision.div x m + ComputerDivision.mod x m)
+
+axiom lemma_divmod_spec'0: forall x: int, m: int. ([%#sbuddy] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'1] 0 <= ComputerDivision.mod x m /\ ComputerDivision.mod x m < m)
+
+axiom lemma_divmod_spec'1: forall x: int, m: int. ([%#sbuddy] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'2] ComputerDivision.div x m >= 0)
+
+constant const_MAX: UInt32.t = (4294967295: UInt32.t)
+
+function align_l [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 230 0 230 41] (size: int) (ss: int) : int
+ = [%#sregion] ComputerDivision.div (size + ss - 1) ss * ss
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let align_l8 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 719 0 719 42]
+  (size: UInt32.t) (ss: UInt32.t) (return (x: UInt32.t)) =
+{[@stop_split] [@expl:align_l8 requires] [%#sbatch8'5] UInt32.t'int ss > 0
+  /\ UInt32.t'int size + UInt32.t'int ss <= UInt32.t'int const_MAX}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = {[@expl:assertion] [%#sbatch8] let _ = lemma_divmod (UInt32.t'int size + UInt32.t'int ss
+      - 1) (UInt32.t'int ss) in ComputerDivision.div (UInt32.t'int size + UInt32.t'int ss - 1) (UInt32.t'int ss)
+        * UInt32.t'int ss
+      <= UInt32.t'int size + UInt32.t'int ss - 1}
+      s1
+    | s1 = UInt32.add [%#sbatch8'0] {size} {ss} (fun (_x: UInt32.t) -> [ &_15 <- _x ] s2)
+    | s2 = UInt32.sub [%#sbatch8'2] {_15} {[%#sbatch8'1] (1: UInt32.t)} (fun (_x: UInt32.t) -> [ &_14 <- _x ] s3)
+    | s3 = [ &_18 <- ss ] s4
+    | s4 = [ &_19 <- _18 = ([%#sbatch8'3] (0: UInt32.t)) ] s5
+    | s5 = {[@expl:division by zero] [%#sbatch8'3] not _19} s6
+    | s6 = UInt32.div [%#sbatch8'3] {_14} {_18} (fun (_x: UInt32.t) -> [ &_13 <- _x ] s7)
+    | s7 = UInt32.mul [%#sbatch8'4] {_13} {ss} (fun (_x: UInt32.t) -> [ &_ret <- _x ] s8)
+    | s8 = return {_ret} ] ]
+  [ & _ret: UInt32.t = Any.any_l ()
+  | & size: UInt32.t = size
+  | & ss: UInt32.t = ss
+  | & _13: UInt32.t = Any.any_l ()
+  | & _14: UInt32.t = Any.any_l ()
+  | & _15: UInt32.t = Any.any_l ()
+  | & _18: UInt32.t = Any.any_l ()
+  | & _19: bool = Any.any_l () ])
+  [ return (result: UInt32.t) -> {[@stop_split] [@expl:align_l8 ensures] [%#sbatch8'6] UInt32.t'int result
+    = align_l (UInt32.t'int size) (UInt32.t'int ss)}
+    (! return {result}) ]

@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_refute_em_ckpt_release_only_persisted_removals__mutant": null,
+      "vc_wck_released": { "prover": "alt-ergo", "time": 0.022 }
+    }
+  }
+}

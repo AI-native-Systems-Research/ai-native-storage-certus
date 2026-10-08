@@ -1,0 +1,70 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b8.rs" 343 0 343 26 *)
+
+let%span sb5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 108 14 108 63
+let%span sb5'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 109 14 109 78
+let%span sb5'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 110 14 110 122
+let%span sb8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b8.rs" 344 56 344 57
+let%span sb8'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b8.rs" 344 85 344 90
+let%span sb8'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b8.rs" 344 99 344 100
+let%span sb8'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b8.rs" 345 24 345 26
+let%span sb8'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b8.rs" 345 4 345 28
+let%span sb8'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b8.rs" 341 10 341 107
+let%span sb8'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b8.rs" 342 10 342 26
+
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_TPh = Top | Wait int | WaitInf | Woken bool | Work | Exited
+
+type t_TSys = { interval: t_Option_u64; now: int; ph: t_TPh; shutdown: bool; ckpts: UInt64.t }
+
+let set_interval (self: MutBorrow.t t_TSys) (iv: t_Option_u64) (return (x: ())) = any
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:set_interval ensures] ([@stop_split] [@expl:set_interval ensures #0] [%#sb5] self.final.interval
+        = iv
+      /\ self.final.now = self.current.now)
+    /\ ([@stop_split] [@expl:set_interval ensures #1] [%#sb5'0] self.final.shutdown = self.current.shutdown
+      /\ self.final.ckpts = self.current.ckpts)
+    /\ ([@stop_split] [@expl:set_interval ensures #2] [%#sb5'1] self.final.ph
+    = match self.current.ph with
+      | Wait _ -> Woken false
+      | WaitInf -> Woken false
+      | p -> p
+      end)}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let tsys_new8 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b8.rs" 343 0 343 26]
+  (return (x: t_TSys)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_4 <- None ] s1
+    | s1 = [ &_7 <- Top ] s2
+    | s2 = [ &t <- { interval = _4;
+                     now = ([%#sb8] 0);
+                     ph = _7;
+                     shutdown = ([%#sb8'0] false);
+                     ckpts = ([%#sb8'1] (0: UInt64.t)) } ] s3
+    | s3 = [ &_10 <- Some ([%#sb8'2] (30: UInt64.t)) ] s4
+    | s4 = MutBorrow.borrow_mut <t_TSys> {t} (fun (_bor: MutBorrow.t t_TSys) -> [ &_9 <- _bor ] [ &t <- _bor.final ] s5)
+    | s5 = set_interval [%#sb8'3] {_9} {_10} (fun (_x: ()) -> [ &_8 <- _x ] s6)
+    | s6 = [ &_ret <- t ] s7
+    | s7 = return {_ret} ] ]
+  [ & _ret: t_TSys = Any.any_l ()
+  | & t: t_TSys = Any.any_l ()
+  | & _4: t_Option_u64 = Any.any_l ()
+  | & _7: t_TPh = Any.any_l ()
+  | & _8: () = Any.any_l ()
+  | & _9: MutBorrow.t t_TSys = Any.any_l ()
+  | & _10: t_Option_u64 = Any.any_l () ])
+  [ return (result: t_TSys) ->
+  {[@stop_split] [@expl:tsys_new8 ensures] ([@stop_split] [@expl:tsys_new8 ensures #0] [%#sb8'4] result.interval
+        = Some (30: UInt64.t)
+      /\ result.ph = Top /\ not result.shutdown /\ UInt64.t'int result.ckpts = 0)
+    /\ ([@stop_split] [@expl:tsys_new8 ensures #1] [%#sb8'5] result.now = 0)}
+    (! return {result}) ]

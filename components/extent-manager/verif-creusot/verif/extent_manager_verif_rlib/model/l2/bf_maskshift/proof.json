@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_bf_maskshift": { "prover": "z3", "time": 0.337 } }
+  }
+}

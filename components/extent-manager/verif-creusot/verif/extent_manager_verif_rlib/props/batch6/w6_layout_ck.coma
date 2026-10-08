@@ -1,0 +1,100 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1057 0 1057 28 *)
+
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 102 18 102 36
+let%span svec'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 116 18 116 48
+let%span svec'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sbatch6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1058 28 1058 38
+let%span sbatch6'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1059 12 1059 16
+let%span sbatch6'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1059 4 1059 17
+let%span sbatch6'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1060 37 1060 38
+let%span sbatch6'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1060 45 1060 46
+let%span sbatch6'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1060 56 1060 60
+let%span sbatch6'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1060 71 1060 75
+let%span sbatch6'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1060 81 1060 85
+let%span sbatch6'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1060 93 1060 98
+let%span sbatch6'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1060 105 1060 110
+let%span sbatch6'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1060 129 1060 141
+let%span sbatch6'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1054 10 1054 81
+let%span sbatch6'11 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1055 10 1055 105
+let%span sbatch6'12 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1056 10 1056 86
+
+use seq.Seq
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use creusot.int.UInt8
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_bool_Global
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_bool_Global (self: t_Vec_bool_Global) : Seq.seq bool
+
+axiom view_Vec_bool_Global_spec:
+  forall self: t_Vec_bool_Global [view_Vec_bool_Global self]. [%#svec'1] Seq.length (view_Vec_bool_Global self)
+    <= UInt64.t'int const_MAX
+
+let new_bool (return (x: t_Vec_bool_Global)) = any
+  [ return (result: t_Vec_bool_Global) ->
+  {[@stop_split] [@expl:new ensures] [%#svec] Seq.length (view_Vec_bool_Global result) = 0}
+    (! return {result}) ]
+
+let push_bool (self_: MutBorrow.t t_Vec_bool_Global) (v: bool) (return (x: ())) = any
+  [ return (result: ()) -> {[@stop_split] [@expl:push ensures] [%#svec'0] view_Vec_bool_Global self_.final
+    = Seq.snoc (view_Vec_bool_Global self_.current) v}
+    (! return {result}) ]
+
+type t_Option_Vec_bool_Global = None | Some t_Vec_bool_Global
+
+type t_Ev6 = Data int int int bool | Flush bool | Sb int int bool | Hook
+
+type t_Ck6 = {
+  regions: t_Option_Vec_bool_Global;
+  active: UInt8.t;
+  seq: UInt64.t;
+  ck_off: UInt64.t;
+  ck_size: UInt64.t;
+  ms: UInt64.t;
+  hook: bool;
+  vwc: bool;
+  log: Seq.seq t_Ev6 }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let w6_layout_ck [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 1057 0 1057 28]
+  (return (x: t_Ck6)) = (! bb0
+  [ bb0 = s0
+    [ s0 = new_bool [%#sbatch6] (fun (_x: t_Vec_bool_Global) -> [ &rs <- _x ] s1)
+    | s1 = MutBorrow.borrow_mut <t_Vec_bool_Global> {rs}
+        (fun (_bor: MutBorrow.t t_Vec_bool_Global) -> [ &_6 <- _bor ] [ &rs <- _bor.final ] s2)
+    | s2 = push_bool [%#sbatch6'1] {_6} {[%#sbatch6'0] true} (fun (_x: ()) -> [ &_5 <- _x ] s3)
+    | s3 = [ &_7 <- Some rs ] s4
+    | s4 = [ &_ret <- { regions = _7;
+                        active = ([%#sbatch6'2] (0: UInt8.t));
+                        seq = ([%#sbatch6'3] (0: UInt64.t));
+                        ck_off = ([%#sbatch6'4] (4096: UInt64.t));
+                        ck_size = ([%#sbatch6'5] (6144: UInt64.t));
+                        ms = ([%#sbatch6'6] (4096: UInt64.t));
+                        hook = ([%#sbatch6'7] false);
+                        vwc = ([%#sbatch6'8] false);
+                        log = ([%#sbatch6'9] Seq.empty: Seq.seq t_Ev6) } ] s5
+    | s5 = return {_ret} ] ]
+  [ & _ret: t_Ck6 = Any.any_l ()
+  | & rs: t_Vec_bool_Global = Any.any_l ()
+  | & _5: () = Any.any_l ()
+  | & _6: MutBorrow.t t_Vec_bool_Global = Any.any_l ()
+  | & _7: t_Option_Vec_bool_Global = Any.any_l () ])
+  [ return (result: t_Ck6) ->
+  {[@stop_split] [@expl:w6_layout_ck ensures] ([@stop_split] [@expl:w6_layout_ck ensures #0] [%#sbatch6'10] UInt64.t'int result.ck_off
+        = 4096
+      /\ UInt64.t'int result.ck_size = 6144 /\ UInt64.t'int result.ms = 4096)
+    /\ ([@stop_split] [@expl:w6_layout_ck ensures #1] [%#sbatch6'11] UInt8.t'int result.active = 0
+      /\ UInt64.t'int result.seq = 0 /\ not result.hook /\ not result.vwc /\ Seq.length result.log = 0)
+    /\ ([@stop_split] [@expl:w6_layout_ck ensures #2] [%#sbatch6'12] match result.regions with
+      | Some rs -> Seq.length (view_Vec_bool_Global rs) = 1 /\ Seq.get (view_Vec_bool_Global rs) 0
+      | None -> false
+      end)}
+    (! return {result}) ]

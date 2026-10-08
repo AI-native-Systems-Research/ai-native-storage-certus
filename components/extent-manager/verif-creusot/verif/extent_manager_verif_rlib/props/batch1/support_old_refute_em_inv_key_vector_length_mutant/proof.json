@@ -1,0 +1,17 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_support_old_refute_em_inv_key_vector_length__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [ null, { "prover": "alt-ergo", "time": 0.02 } ]
+          }
+        ]
+      },
+      "vc_w_kvl_reserve": { "prover": "alt-ergo", "time": 0.022 }
+    }
+  }
+}

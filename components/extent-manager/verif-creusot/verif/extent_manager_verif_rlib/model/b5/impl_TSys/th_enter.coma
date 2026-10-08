@@ -1,0 +1,83 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 67 4 67 30 *)
+
+(* model::b5::TSys *)
+
+let%span sb5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 73 55 73 69
+let%span sb5'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 59 15 59 34
+let%span sb5'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 60 14 60 74
+let%span sb5'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 61 14 61 78
+let%span sb5'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 62 14 62 57
+let%span sb5'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 63 14 66 5
+
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_TPh = Top | Wait int | WaitInf | Woken bool | Work | Exited
+
+type t_TSys = { interval: t_Option_u64; now: int; ph: t_TPh; shutdown: bool; ckpts: UInt64.t }
+
+predicate resolve_refmut_TSys [@inline:trivial] (_1: MutBorrow.t t_TSys) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_TSys
+
+let elim_Some (_x: t_Option_u64) (return (f0: UInt64.t)) = any
+  [ _k (f0: UInt64.t) -> {Some f0 = _x} (! return {f0})
+  | _chk -> (! {[@expl:elim Some] match _x with
+      | Some _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let th_enter [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 67 4 67 30]
+  (self: MutBorrow.t t_TSys) (return (x: ())) = {[@stop_split] [@expl:th_enter requires] [%#sb5'0] self.current.ph
+  = Top}
+  (! bb0
+  [ bb0 = any [ br0 -> {self.current.shutdown = false} (! bb2) | br1 -> {self.current.shutdown} (! bb1) ]
+  | bb1 = s0
+    [ s0 = [ &_15 <- Exited ] s1
+    | s1 = [ &self <- { self with current = { self.current with ph = _15 } } ] s2
+    | s2 = -{resolve_refmut_TSys self}- s3
+    | s3 = return {_ret} ]
+  | bb2 = any
+    [ br0 -> {self.current.interval = None} (! bb5) | br1 (x0: UInt64.t) -> {self.current.interval = Some x0} (! bb6) ]
+  | bb6 = s0
+    [ s0 = elim_Some {self.current.interval} (fun (r0: UInt64.t) -> [ &d <- r0 ] s1)
+    | s1 = [ &_18 <- Wait ([%#sb5] self.current.now + UInt64.t'int d) ] s2
+    | s2 = [ &self <- { self with current = { self.current with ph = _18 } } ] s3
+    | s3 = -{resolve_refmut_TSys self}- s4
+    | s4 = return {_ret} ]
+  | bb5 = s0
+    [ s0 = [ &_23 <- WaitInf ] s1
+    | s1 = [ &self <- { self with current = { self.current with ph = _23 } } ] s2
+    | s2 = -{resolve_refmut_TSys self}- s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: () = Any.any_l ()
+  | & self: MutBorrow.t t_TSys = self
+  | & _15: t_TPh = Any.any_l ()
+  | & d: UInt64.t = Any.any_l ()
+  | & _18: t_TPh = Any.any_l ()
+  | & _23: t_TPh = Any.any_l () ])
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:th_enter ensures] ([@stop_split] [@expl:th_enter ensures #0] [%#sb5'1] self.final.interval
+        = self.current.interval
+      /\ self.final.now = self.current.now)
+    /\ ([@stop_split] [@expl:th_enter ensures #1] [%#sb5'2] self.final.shutdown = self.current.shutdown
+      /\ self.final.ckpts = self.current.ckpts)
+    /\ ([@stop_split] [@expl:th_enter ensures #2] [%#sb5'3] self.current.shutdown -> self.final.ph = Exited)
+    /\ ([@stop_split] [@expl:th_enter ensures #3] [%#sb5'4] not self.current.shutdown
+    -> match self.current.interval with
+      | Some d -> match self.final.ph with
+        | Wait dl -> dl = self.current.now + UInt64.t'int d
+        | _ -> false
+        end
+      | None -> self.final.ph = WaitInf
+      end)}
+    (! return {result}) ]

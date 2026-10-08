@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_free_slot": { "prover": "alt-ergo", "time": 0.045 },
+      "vc_verify_em_slab_free_clears_key": { "prover": "cvc5", "time": 2.5 }
+    }
+  }
+}

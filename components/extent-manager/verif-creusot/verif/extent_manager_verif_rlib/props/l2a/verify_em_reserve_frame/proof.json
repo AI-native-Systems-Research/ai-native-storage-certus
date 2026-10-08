@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_reserve_h": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_verify_em_reserve_frame": { "prover": "alt-ergo", "time": 0.102 }
+    }
+  }
+}

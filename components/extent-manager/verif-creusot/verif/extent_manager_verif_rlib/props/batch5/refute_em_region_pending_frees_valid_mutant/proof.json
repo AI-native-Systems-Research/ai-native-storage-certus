@@ -1,0 +1,25 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_refute_em_region_pending_frees_valid": {
+        "prover": "alt-ergo",
+        "time": 0.039
+      },
+      "vc_refute_em_region_pending_frees_valid__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              {
+                "tactic": "split_vc",
+                "children": [ { "prover": "alt-ergo", "time": 0.03 }, null ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

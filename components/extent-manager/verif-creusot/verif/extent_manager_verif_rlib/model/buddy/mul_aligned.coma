@@ -1,0 +1,99 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 238 0 238 65 *)
+
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 239 20 239 34
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 240 20 240 57
+let%span sbuddy'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 241 4 241 15
+let%span sbuddy'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 235 11 235 86
+let%span sbuddy'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 236 10 236 34
+let%span sbuddy'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 237 10 237 49
+let%span sbuddy'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 45 10 45 11
+let%span sbuddy'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 46 11 46 17
+let%span sbuddy'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 47 10 47 23
+let%span sbuddy'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 48 10 48 40
+let%span sbuddy'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 50 4 52 5
+let%span sbuddy'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 224 11 224 49
+let%span sbuddy'11 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 225 10 225 32
+let%span sbuddy'12 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 227 4 227 22
+let%span sbuddy'13 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 180 11 180 26
+let%span sbuddy'14 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 181 10 181 34
+let%span sbuddy'15 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 182 10 182 33
+let%span sbuddy'16 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 183 10 183 20
+let%span sbuddy'17 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 184 36 184 38
+let%span sbuddy'18 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 167 11 167 26
+let%span sbuddy'19 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 168 10 168 26
+let%span sbuddy'20 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 169 10 169 26
+let%span sbuddy'21 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 170 38 170 40
+
+use bv.Pow2int
+use int.ComputerDivision
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+function lemma_pow2 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 49 0 49 25] (o: int) : ()
+
+axiom lemma_pow2_def: forall o: int [lemma_pow2 o]. ([%#sbuddy'6] 0 <= o)
+    -> lemma_pow2 o = ([%#sbuddy'9] if o > 0 then lemma_pow2 (o - 1) else ())
+
+axiom lemma_pow2_spec: forall o: int. ([%#sbuddy'6] 0 <= o) -> ([%#sbuddy'7] Pow2int.pow2 o >= 1)
+
+axiom lemma_pow2_spec'0: forall o: int. ([%#sbuddy'6] 0 <= o)
+    -> ([%#sbuddy'8] Pow2int.pow2 (o + 1) = 2 * Pow2int.pow2 o)
+
+function lemma_divmod [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 184 0 184 35] (x: int) (m: int) : ()
+ = [%#sbuddy'17] ()
+
+axiom lemma_divmod_spec: forall x: int, m: int. ([%#sbuddy'13] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'14] x = m * ComputerDivision.div x m + ComputerDivision.mod x m)
+
+axiom lemma_divmod_spec'0: forall x: int, m: int. ([%#sbuddy'13] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'15] 0 <= ComputerDivision.mod x m /\ ComputerDivision.mod x m < m)
+
+axiom lemma_divmod_spec'1: forall x: int, m: int. ([%#sbuddy'13] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'16] ComputerDivision.div x m >= 0)
+
+function lemma_mul_mod0 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 170 0 170 37] (m: int) (k: int) : ()
+ = [%#sbuddy'21] ()
+
+axiom lemma_mul_mod0_spec: forall m: int, k: int. ([%#sbuddy'18] m > 0 /\ k >= 0)
+    -> ([%#sbuddy'19] ComputerDivision.mod (m * k) m = 0)
+
+axiom lemma_mul_mod0_spec'0: forall m: int, k: int. ([%#sbuddy'18] m > 0 /\ k >= 0)
+    -> ([%#sbuddy'20] ComputerDivision.div (m * k) m = k)
+
+function lemma_mul_mod [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 226 0 226 44] (x: int) (p: int) (c: int) : ()
+ = [%#sbuddy'12] let _ = lemma_divmod x p in lemma_mul_mod0 (p * c) (ComputerDivision.div x p)
+
+axiom lemma_mul_mod_spec: forall x: int, p: int, c: int. ([%#sbuddy'10] p > 0
+      /\ c > 0 /\ x >= 0 /\ ComputerDivision.mod x p = 0) -> ([%#sbuddy'11] ComputerDivision.mod (x * c) (p * c) = 0)
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let mul_aligned [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 238 0 238 65]
+  (offset: UInt64.t) (ss: UInt64.t) (o: int) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:mul_aligned requires] [%#sbuddy'2] o >= 0
+  /\ UInt64.t'int ss > 0
+  /\ ComputerDivision.mod (UInt64.t'int offset) (Pow2int.pow2 o) = 0
+  /\ UInt64.t'int offset * UInt64.t'int ss <= UInt64.t'int const_MAX}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = {[@expl:assertion] [%#sbuddy] let _ = lemma_pow2 o in Pow2int.pow2 o >= 1} s1
+    | s1 =
+      {[@expl:assertion] [%#sbuddy'0] let _ = lemma_mul_mod (UInt64.t'int offset) (Pow2int.pow2 o) (UInt64.t'int ss) in ComputerDivision.mod (UInt64.t'int offset
+        * UInt64.t'int ss) (Pow2int.pow2 o * UInt64.t'int ss)
+      = 0}
+      s2
+    | s2 = UInt64.mul [%#sbuddy'1] {offset} {ss} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s3)
+    | s3 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l () | & offset: UInt64.t = offset | & ss: UInt64.t = ss | & o: int = o ])
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:mul_aligned ensures] ([@stop_split] [@expl:mul_aligned ensures #0] [%#sbuddy'3] UInt64.t'int result
+      = UInt64.t'int offset * UInt64.t'int ss)
+    /\ ([@stop_split] [@expl:mul_aligned ensures #1] [%#sbuddy'4] ComputerDivision.mod (UInt64.t'int offset
+      * UInt64.t'int ss) (Pow2int.pow2 o * UInt64.t'int ss)
+    = 0)}
+    (! return {result}) ]

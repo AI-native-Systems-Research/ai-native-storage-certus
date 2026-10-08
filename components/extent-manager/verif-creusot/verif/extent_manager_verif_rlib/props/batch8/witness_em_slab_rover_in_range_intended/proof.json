@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_alloc_slot": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_witness_em_slab_rover_in_range_intended": {
+        "prover": "alt-ergo",
+        "time": 0.098
+      }
+    }
+  }
+}

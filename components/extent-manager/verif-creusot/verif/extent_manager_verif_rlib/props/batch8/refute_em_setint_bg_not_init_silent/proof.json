@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_refute_em_setint_bg_not_init_silent": {
+        "prover": "alt-ergo",
+        "time": 0.037
+      },
+      "vc_w8_bg_disconnected": { "prover": "alt-ergo", "time": 0.03 }
+    }
+  }
+}

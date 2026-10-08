@@ -1,0 +1,18 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_new": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_total_free": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_verify_em_buddy_init_free__mutant": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.021 },
+          { "prover": "cvc4", "time": 0.183 },
+          { "prover": "alt-ergo", "time": 0.107 },
+          null
+        ]
+      }
+    }
+  }
+}

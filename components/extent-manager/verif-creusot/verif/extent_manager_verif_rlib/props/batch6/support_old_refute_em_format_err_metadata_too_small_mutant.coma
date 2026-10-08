@@ -1,0 +1,78 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 566 0 566 87 *)
+
+let%span sbatch6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 567 4 567 20
+let%span sbatch6'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 568 27 568 31
+let%span sbatch6'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 568 33 568 34
+let%span sbatch6'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 568 36 568 44
+let%span sbatch6'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 568 46 568 49
+let%span sbatch6'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 568 51 568 58
+let%span sbatch6'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 568 12 568 59
+let%span sbatch6'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 569 20 569 97
+let%span sbatch6'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 570 20 570 75
+let%span sbatch6'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 571 20 571 48
+let%span sbatch6'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 565 10 565 24
+let%span sbatch6'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 517 10 517 63
+let%span sbatch6'11 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 524 11 524 41
+let%span sbatch6'12 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 525 10 525 79
+let%span sbatch6'13 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 526 10 526 93
+let%span sbatch6'14 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 527 10 527 26
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use int.ComputerDivision
+use creusot.prelude.Any
+use int.Int
+
+let fact_wrap_4094 (return (x: ())) = any
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:fact_wrap_4094 ensures] [%#sbatch6'10] UInt64.add (4096: UInt64.t) (UInt64.sub (18446744073709551615: UInt64.t) (1: UInt64.t))
+    = (4094: UInt64.t)}
+    (! return {result}) ]
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+type tup3_u64_u64_u64 = { f0: UInt64.t; f1: UInt64.t; f2: UInt64.t }
+
+let layout_release (md: UInt64.t) (mrs: UInt64.t) (a: UInt64.t) (ss: UInt32.t) (dd: UInt64.t)
+  (return (x: tup3_u64_u64_u64)) = {[@stop_split] [@expl:layout_release requires] [%#sbatch6'11] UInt64.t'int a > 0
+  /\ UInt32.t'int ss > 0 /\ UInt64.t'int mrs = 0}
+  any
+  [ return (result: tup3_u64_u64_u64) ->
+  {[@stop_split] [@expl:layout_release ensures] ([@stop_split] [@expl:layout_release ensures #0] [%#sbatch6'12] exists w: UInt64.t. w
+          = UInt64.add (4096: UInt64.t) (UInt64.sub a (1: UInt64.t))
+        /\ UInt64.t'int result.f0 = ComputerDivision.div (UInt64.t'int w) (UInt64.t'int a) * UInt64.t'int a)
+    /\ ([@stop_split] [@expl:layout_release ensures #1] [%#sbatch6'13] UInt64.t'int result.f1
+      = (if UInt64.t'int md >= UInt64.t'int result.f0 then
+        ComputerDivision.div (ComputerDivision.div (UInt64.t'int md - UInt64.t'int result.f0) 2) (UInt32.t'int ss)
+        * UInt32.t'int ss
+      else
+        0
+      ))
+    /\ ([@stop_split] [@expl:layout_release ensures #2] [%#sbatch6'14] UInt64.t'int result.f2 = UInt64.t'int dd)}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let support_old_refute_em_format_err_metadata_too_small__mutant [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch6.rs" 566 0 566 87]
+  (return (x: tup3_u64_u64_u64)) = (! bb0
+  [ bb0 = s0
+    [ s0 = fact_wrap_4094 [%#sbatch6] (fun (_x: ()) -> [ &_2 <- _x ] s1)
+    | s1 = layout_release [%#sbatch6'5] {[%#sbatch6'0] (4608: UInt64.t)} {[%#sbatch6'1] (0: UInt64.t)}
+        {[%#sbatch6'2] const_MAX} {[%#sbatch6'3] (512: UInt32.t)} {[%#sbatch6'4] (1048576: UInt64.t)}
+        (fun (_x: tup3_u64_u64_u64) -> [ &r <- _x ] s2)
+    | s2 = {[@expl:assertion] [%#sbatch6'6] forall w: UInt64.t. w
+          = UInt64.add (4096: UInt64.t) (UInt64.sub (18446744073709551615: UInt64.t) (1: UInt64.t))
+        -> UInt64.t'int w = 4094}
+      s3
+    | s3 = {[@expl:assertion] [%#sbatch6'7] ComputerDivision.div 4094 18446744073709551615 * 18446744073709551615 = 0}
+      s4
+    | s4 = {[@expl:assertion] [%#sbatch6'8] ComputerDivision.div (ComputerDivision.div 4608 2) 512 * 512 = 2048} s5
+    | s5 = [ &_ret <- r ] s6
+    | s6 = return {_ret} ] ]
+  [ & _ret: tup3_u64_u64_u64 = Any.any_l () | & _2: () = Any.any_l () | & r: tup3_u64_u64_u64 = Any.any_l () ])
+  [ return (result: tup3_u64_u64_u64) ->
+  {[@stop_split] [@expl:support_old_refute_em_format_err_metadata_too_small__mutant ensures] [%#sbatch6'9] UInt64.t'int result.f1
+    = 0}
+    (! return {result}) ]

@@ -1,0 +1,93 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 705 0 705 78 *)
+
+let%span swell_founded = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+let%span scomponent = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 702 10 702 15
+let%span scomponent'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 703 11 703 44
+let%span scomponent'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 704 10 704 56
+let%span scomponent'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 179 10 179 11
+let%span scomponent'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 181 16 181 111
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use int.Int
+
+type t_BTreeMap_u64_Slab_Global
+
+type t_SlabMap = { inner: t_BTreeMap_u64_Slab_Global }
+
+type t_HashMap_u32_Vec_u64_Global_RandomState_Global
+
+type t_SizeClassManager = { map: t_HashMap_u32_Vec_u64_Global_RandomState_Global }
+
+type t_Vec_Vec_u64_Global_Global
+
+type t_BuddyAllocator = {
+  base_offset: UInt64.t;
+  total_usable_size: UInt64.t;
+  sector_size: UInt32.t;
+  max_order: UInt64.t;
+  free_lists: t_Vec_Vec_u64_Global_Global }
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_FormatParams = {
+  data_disk_size'0: UInt64.t;
+  slab_size'0: UInt64.t;
+  max_extent_size'0: UInt32.t;
+  sector_size'0: UInt32.t;
+  region_count'0: UInt32.t;
+  metadata_alignment'0: UInt64.t;
+  instance_id'0: t_Option_u64;
+  metadata_disk_ns_id'0: UInt32.t;
+  metadata_region_size'0: UInt64.t }
+
+type t_Vec_tup2_u64_usize_Global
+
+type t_RegionState = {
+  slabs: t_SlabMap;
+  size_classes: t_SizeClassManager;
+  buddy: t_BuddyAllocator;
+  dirty: bool;
+  format_params: t_FormatParams;
+  pending_frees: t_Vec_tup2_u64_usize_Global }
+
+function cap_sum [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 180 0 180 70] (arena: Seq.seq t_RegionState) (rv: Seq.seq UInt64.t) (n: int) : int
+
+axiom cap_sum_def:
+  forall arena: Seq.seq t_RegionState, rv: Seq.seq UInt64.t, n: int [cap_sum arena rv n]. cap_sum arena rv n
+    = ([%#scomponent'3] if n <= 0 then
+      0
+    else
+      cap_sum arena rv (n - 1)
+      + UInt64.t'int (Seq.get arena (UInt64.t'int (Seq.get rv (n - 1)))).buddy.total_usable_size
+    )
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant arena : Seq.seq t_RegionState
+
+constant rv : Seq.seq UInt64.t
+
+constant m : int
+
+constant n : int
+
+function lemma_cap_mono [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 705 0 705 78] (arena: Seq.seq t_RegionState) (rv: Seq.seq UInt64.t) (m: int) (n: int) : ()
+
+goal vc_lemma_cap_mono: ([%#scomponent'0] 0 <= m /\ m <= n /\ n <= Seq.length rv)
+  -> (if m < n then
+    (([@stop_split] [@expl:lemma_cap_mono requires] [%#scomponent'0] 0 <= m /\ m <= n - 1 /\ n - 1 <= Seq.length rv)
+      /\ ([@expl:variant decreases] well_founded_relation_Int ([%#scomponent] n - m) ([%#scomponent] n - 1 - m)))
+    /\ (([@stop_split] [@expl:lemma_cap_mono ensures] [%#scomponent'1] cap_sum arena rv m <= cap_sum arena rv (n - 1))
+    -> ([@stop_split] [@expl:lemma_cap_mono ensures] [%#scomponent'1] cap_sum arena rv m <= cap_sum arena rv n))
+  else
+    [@stop_split] [@expl:lemma_cap_mono ensures] [%#scomponent'1] cap_sum arena rv m <= cap_sum arena rv n
+  )

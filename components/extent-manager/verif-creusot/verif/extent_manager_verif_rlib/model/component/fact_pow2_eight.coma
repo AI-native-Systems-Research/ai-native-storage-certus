@@ -1,0 +1,18 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 648 0 648 24 *)
+
+let%span scomponent = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 647 10 647 40
+
+use creusot.prelude.Any
+use creusot.int.UInt32BW
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let fact_pow2_eight [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 648 0 648 24]
+  (return (x: ())) = (! bb0
+  [ bb0 = return {_ret} ] [ & _ret: () = Any.any_l () ])
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:fact_pow2_eight ensures] [%#scomponent] UInt32BW.bw_and (8: UInt32BW.t) (UInt32BW.sub (8: UInt32BW.t) (1: UInt32BW.t))
+    = (0: UInt32BW.t)}
+    (! return {result}) ]

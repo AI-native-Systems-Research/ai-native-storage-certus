@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_lemma_err_rollback": { "prover": "cvc5", "time": 1.5 } }
+  }
+}

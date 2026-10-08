@@ -1,0 +1,52 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 640 0 640 58 *)
+
+let%span swell_founded = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 639 10 639 16
+
+use seq.Seq
+use creusot.int.UInt64
+use int.Int
+
+type t_Vec_u64_Global
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_u64_Global (self: t_Vec_u64_Global) : Seq.seq UInt64.t
+
+axiom view_Vec_u64_Global_spec:
+  forall self: t_Vec_u64_Global [view_Vec_u64_Global self]. [%#svec] Seq.length (view_Vec_u64_Global self)
+    <= UInt64.t'int const_MAX
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant fl : Seq.seq t_Vec_u64_Global
+
+constant o : int
+
+constant mo : int
+
+function first_ne [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 640 0 640 58] (fl: Seq.seq t_Vec_u64_Global) (o: int) (mo: int) : int
+
+goal vc_first_ne: if o > mo then
+    true
+  else
+    if o < 0 then
+      true
+    else
+      ([@stop_split] [@expl:view ensures] [%#svec] Seq.length (view_Vec_u64_Global (Seq.get fl o))
+        <= UInt64.t'int const_MAX)
+      -> (if Seq.length (view_Vec_u64_Global (Seq.get fl o)) > 0 then
+        true
+      else
+        [@expl:variant decreases] well_founded_relation_Int ([%#sbuddy] mo - o) ([%#sbuddy] mo - (o + 1))
+      )
+  
+  

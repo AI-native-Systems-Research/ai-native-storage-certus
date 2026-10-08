@@ -1,0 +1,34 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 453 4 453 31 *)
+
+(* model::b3::WH *)
+
+let%span sb3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 454 28 454 32
+let%span sb3'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 454 44 454 48
+let%span sb3'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 452 14 452 67
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.prelude.Any
+
+type t_Handle = {
+  region: UInt64.t;
+  key: UInt64.t;
+  offset: UInt64.t;
+  size: UInt32.t;
+  slab_start: UInt64.t;
+  slot_idx: UInt64.t }
+
+type t_WH = { h: t_Handle; publish_fn: bool; abort_fn: bool }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let new [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 453 4 453 31]
+  (h'0: t_Handle) (return (x: t_WH)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_ret <- { h = h'0; publish_fn = ([%#sb3] true); abort_fn = ([%#sb3'0] true) } ] s1
+    | s1 = return {_ret} ] ] [ & _ret: t_WH = Any.any_l () | & h'0: t_Handle = h'0 ])
+  [ return (result: t_WH) -> {[@stop_split] [@expl:new ensures] [%#sb3'1] result.h = h'0
+    /\ result.publish_fn /\ result.abort_fn}
+    (! return {result}) ]

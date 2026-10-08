@@ -1,0 +1,65 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 738 0 738 27 *)
+
+let%span sbatch7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 739 28 739 32
+let%span sbatch7'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 739 47 739 50
+let%span sbatch7'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 739 65 739 67
+let%span sbatch7'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 737 10 737 26
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.int.UInt8
+use creusot.prelude.Any
+
+type t_Superblock = {
+  magic: UInt64.t;
+  version: UInt32.t;
+  data_disk_size: UInt64.t;
+  sector_size: UInt32.t;
+  slab_size: UInt64.t;
+  max_extent_size: UInt32.t;
+  region_count: UInt32.t;
+  checkpoint_seq: UInt64.t;
+  active_copy: UInt8.t;
+  checkpoint_region_offset: UInt64.t;
+  checkpoint_region_size: UInt64.t;
+  instance_id: UInt64.t;
+  metadata_disk_ns_id: UInt32.t;
+  data_start_offset: UInt64.t }
+
+type t_Option_Superblock = None | Some t_Superblock
+
+type tup2_u64_usize = { f0: UInt64.t; f1: UInt64.t }
+
+type t_Option_tup2_u64_usize = None'0 | Some'0 tup2_u64_usize
+
+type t_MetaDevice = {
+  connected'0: bool;
+  sector_size'0: UInt32.t;
+  num_sectors'0: UInt64.t;
+  sb'0: t_Option_Superblock;
+  ckpt0'0: t_Option_tup2_u64_usize;
+  ckpt1'0: t_Option_tup2_u64_usize }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let dev7 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 738 0 738 27]
+  (return (x: t_MetaDevice)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_2 <- None ] s1
+    | s1 = [ &_3 <- None'0 ] s2
+    | s2 = [ &_4 <- None'0 ] s3
+    | s3 = [ &_ret <- { connected'0 = ([%#sbatch7] true);
+                        sector_size'0 = ([%#sbatch7'0] (512: UInt32.t));
+                        num_sectors'0 = ([%#sbatch7'1] (64: UInt64.t));
+                        sb'0 = _2;
+                        ckpt0'0 = _3;
+                        ckpt1'0 = _4 } ] s4
+    | s4 = return {_ret} ] ]
+  [ & _ret: t_MetaDevice = Any.any_l ()
+  | & _2: t_Option_Superblock = Any.any_l ()
+  | & _3: t_Option_tup2_u64_usize = Any.any_l ()
+  | & _4: t_Option_tup2_u64_usize = Any.any_l () ])
+  [ return (result: t_MetaDevice) -> {[@stop_split] [@expl:dev7 ensures] [%#sbatch7'2] result.connected'0}
+    (! return {result}) ]

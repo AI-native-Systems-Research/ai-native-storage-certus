@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_format7": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_verify_em_format_err_slab_not_sector_multiple": {
+        "prover": "alt-ergo",
+        "time": 0.033
+      }
+    }
+  }
+}

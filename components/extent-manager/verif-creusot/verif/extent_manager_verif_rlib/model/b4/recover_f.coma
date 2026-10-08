@@ -1,0 +1,188 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 681 0 681 87 *)
+
+let%span sb4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 686 28 686 29
+let%span sb4'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 687 35 687 47
+let%span sb4'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 689 44 689 45
+let%span sb4'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 693 43 693 49
+let%span sb4'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 698 39 698 40
+let%span sb4'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 698 19 698 40
+let%span sb4'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 699 18 699 19
+let%span sb4'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 703 47 703 53
+let%span sb4'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 674 10 680 1
+let%span sb4'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 669 16 669 55
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.int.UInt8
+use seq.Seq
+use creusot.prelude.Any
+use int.Int
+
+type t_Superblock = {
+  magic: UInt64.t;
+  version: UInt32.t;
+  data_disk_size: UInt64.t;
+  sector_size: UInt32.t;
+  slab_size: UInt64.t;
+  max_extent_size: UInt32.t;
+  region_count: UInt32.t;
+  checkpoint_seq: UInt64.t;
+  active_copy: UInt8.t;
+  checkpoint_region_offset: UInt64.t;
+  checkpoint_region_size: UInt64.t;
+  instance_id: UInt64.t;
+  metadata_disk_ns_id: UInt32.t;
+  data_start_offset: UInt64.t }
+
+type t_Option_Superblock = None | Some t_Superblock
+
+type t_BTreeMap_u64_Slab_Global
+
+type t_SlabMap = { inner: t_BTreeMap_u64_Slab_Global }
+
+type t_HashMap_u32_Vec_u64_Global_RandomState_Global
+
+type t_SizeClassManager = { map: t_HashMap_u32_Vec_u64_Global_RandomState_Global }
+
+type t_Vec_Vec_u64_Global_Global
+
+type t_BuddyAllocator = {
+  base_offset'0: UInt64.t;
+  total_usable_size'0: UInt64.t;
+  sector_size'0: UInt32.t;
+  max_order'0: UInt64.t;
+  free_lists'0: t_Vec_Vec_u64_Global_Global }
+
+type t_Option_u64 = None'0 | Some'0 UInt64.t
+
+type t_FormatParams = {
+  data_disk_size'1: UInt64.t;
+  slab_size'1: UInt64.t;
+  max_extent_size'1: UInt32.t;
+  sector_size'1: UInt32.t;
+  region_count'1: UInt32.t;
+  metadata_alignment'1: UInt64.t;
+  instance_id'1: t_Option_u64;
+  metadata_disk_ns_id'1: UInt32.t;
+  metadata_region_size'1: UInt64.t }
+
+type t_Vec_tup2_u64_usize_Global
+
+type t_RegionState = {
+  slabs: t_SlabMap;
+  size_classes: t_SizeClassManager;
+  buddy: t_BuddyAllocator;
+  dirty: bool;
+  format_params: t_FormatParams;
+  pending_frees: t_Vec_tup2_u64_usize_Global }
+
+type t_CkCopy = { seq: UInt64.t; img: Seq.seq t_RegionState }
+
+type t_Option_CkCopy = None'1 | Some'1 t_CkCopy
+
+type t_FDev = { sb: t_Option_Superblock; copy0: t_Option_CkCopy; copy1: t_Option_CkCopy }
+
+let elim_Some (_x: t_Option_Superblock) (return (f0: t_Superblock)) = any
+  [ _k (f0: t_Superblock) -> {Some f0 = _x} (! return {f0})
+  | _chk -> (! {[@expl:elim Some] match _x with
+      | Some _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+type tup2_Superblock_Snapshot_Seq_RegionState = { f0: t_Superblock; f1: Seq.seq t_RegionState }
+
+type t_EmError = CorruptMetadata | IoError | NotInitialized | OffsetNotFound UInt64.t | OutOfSpace
+
+type t_Result_tup2_Superblock_Snapshot_Seq_RegionState_EmError =
+  | Ok tup2_Superblock_Snapshot_Seq_RegionState
+  | Err t_EmError
+
+type tup2_ref_Option_CkCopy_ref_Option_CkCopy = { f0'0: t_Option_CkCopy; f1'0: t_Option_CkCopy }
+
+let elim_Some'0 (_x: t_Option_CkCopy) (return (f0'1: t_CkCopy)) = any
+  [ _k (f0'1: t_CkCopy) -> {Some'1 f0'1 = _x} (! return {f0'1})
+  | _chk -> (! {[@expl:elim Some] match _x with
+      | Some'1 _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+function fcopy [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 668 0 668 46] (d: t_FDev) (c: UInt8.t) : t_Option_CkCopy
+ = [%#sb4'8] if UInt8.t'int c = 0 then d.copy0 else d.copy1
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let recover_f [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 681 0 681 87]
+  (d: t_FDev) (return (x: t_Result_tup2_Superblock_Snapshot_Seq_RegionState_EmError)) = (! bb0
+  [ bb0 = any [ br0 -> {d.sb = None} (! bb3) | br1 (x0: t_Superblock) -> {d.sb = Some x0} (! bb4) ]
+  | bb4 = s0
+    [ s0 = elim_Some {d.sb} (fun (r0: t_Superblock) -> [ &sb'1 <- r0 ] s1)
+    | s1 = [ &sb'0 <- sb'1 ] s2
+    | s2 = [ &_10 <- sb'0.checkpoint_seq = ([%#sb4] (0: UInt64.t)) ] s3
+    | s3 = any [ br0 -> {_10 = false} (! bb6) | br1 -> {_10} (! bb7) ] ]
+  | bb7 = s0
+    [ s0 = [ &_13 <- { f0 = sb'0; f1 = ([%#sb4'0] Seq.empty: Seq.seq t_RegionState) } ] s1
+    | s1 = [ &_ret <- Ok _13 ] s2
+    | s2 = return {_ret} ]
+  | bb6 = s0
+    [ s0 = [ &_20 <- sb'0.active_copy = ([%#sb4'1] (0: UInt8.t)) ] s1
+    | s1 = any [ br0 -> {_20 = false} (! bb9) | br1 -> {_20} (! bb8) ] ]
+  | bb8 = s0 [ s0 = [ &_19 <- { f0'0 = d.copy0; f1'0 = d.copy1 } ] s1 | s1 = bb10 ]
+  | bb9 = s0 [ s0 = [ &_19 <- { f0'0 = d.copy1; f1'0 = d.copy0 } ] s1 | s1 = bb10 ]
+  | bb10 = s0
+    [ s0 = [ &act <- _19.f0'0 ] s1
+    | s1 = [ &inact <- _19.f1'0 ] s2
+    | s2 = any [ br0 -> {act = None'1} (! bb18) | br1 (x0: t_CkCopy) -> {act = Some'1 x0} (! bb14) ] ]
+  | bb14 = s0
+    [ s0 = elim_Some'0 {act} (fun (r0: t_CkCopy) -> [ &c <- r0 ] s1)
+    | s1 = [ &_29 <- c.seq = sb'0.checkpoint_seq ] s2
+    | s2 = any [ br0 -> {_29 = false} (! bb18) | br1 -> {_29} (! bb16) ] ]
+  | bb16 = s0
+    [ s0 = [ &_33 <- { f0 = sb'0; f1 = ([%#sb4'2] c.img) } ] s1 | s1 = [ &_ret <- Ok _33 ] s2 | s2 = return {_ret} ]
+  | bb18 = s0
+    [ s0 = UInt64.sub [%#sb4'4] {sb'0.checkpoint_seq} {[%#sb4'3] (1: UInt64.t)}
+        (fun (_x: UInt64.t) -> [ &prev_seq <- _x ] s1)
+    | s1 = [ &_41 <- UInt64.gt prev_seq ([%#sb4'5] (0: UInt64.t)) ] s2
+    | s2 = any [ br0 -> {_41 = false} (! bb28) | br1 -> {_41} (! bb19) ] ]
+  | bb19 = any [ br0 -> {inact = None'1} (! bb28) | br1 (x0: t_CkCopy) -> {inact = Some'1 x0} (! bb23) ]
+  | bb23 = s0
+    [ s0 = elim_Some'0 {inact} (fun (r0: t_CkCopy) -> [ &c'0 <- r0 ] s1)
+    | s1 = [ &_45 <- c'0.seq = prev_seq ] s2
+    | s2 = any [ br0 -> {_45 = false} (! bb28) | br1 -> {_45} (! bb25) ] ]
+  | bb25 = s0
+    [ s0 = [ &_49 <- { f0 = sb'0; f1 = ([%#sb4'6] c'0.img) } ] s1 | s1 = [ &_ret <- Ok _49 ] s2 | s2 = return {_ret} ]
+  | bb28 = s0 [ s0 = [ &_54 <- CorruptMetadata ] s1 | s1 = [ &_ret <- Err _54 ] s2 | s2 = return {_ret} ]
+  | bb3 = s0 [ s0 = [ &_8 <- CorruptMetadata ] s1 | s1 = [ &_ret <- Err _8 ] s2 | s2 = return {_ret} ] ]
+  [ & _ret: t_Result_tup2_Superblock_Snapshot_Seq_RegionState_EmError = Any.any_l ()
+  | & d: t_FDev = d
+  | & sb'0: t_Superblock = Any.any_l ()
+  | & sb'1: t_Superblock = Any.any_l ()
+  | & _8: t_EmError = Any.any_l ()
+  | & _10: bool = Any.any_l ()
+  | & _13: tup2_Superblock_Snapshot_Seq_RegionState = Any.any_l ()
+  | & act: t_Option_CkCopy = Any.any_l ()
+  | & inact: t_Option_CkCopy = Any.any_l ()
+  | & _19: tup2_ref_Option_CkCopy_ref_Option_CkCopy = Any.any_l ()
+  | & _20: bool = Any.any_l ()
+  | & c: t_CkCopy = Any.any_l ()
+  | & _29: bool = Any.any_l ()
+  | & _33: tup2_Superblock_Snapshot_Seq_RegionState = Any.any_l ()
+  | & prev_seq: UInt64.t = Any.any_l ()
+  | & _41: bool = Any.any_l ()
+  | & c'0: t_CkCopy = Any.any_l ()
+  | & _45: bool = Any.any_l ()
+  | & _49: tup2_Superblock_Snapshot_Seq_RegionState = Any.any_l ()
+  | & _54: t_EmError = Any.any_l () ])
+  [ return (result: t_Result_tup2_Superblock_Snapshot_Seq_RegionState_EmError) ->
+  {[@stop_split] [@expl:recover_f ensures] [%#sb4'7] match d.sb with
+      | Some sb'0 -> UInt64.t'int sb'0.checkpoint_seq > 0 /\ UInt8.t'int sb'0.active_copy <= 1
+      -> match fcopy d sb'0.active_copy with
+        | Some'1 c -> c.seq = sb'0.checkpoint_seq -> result = Ok { f0 = sb'0; f1 = c.img }
+        | None'1 -> true
+        end
+      | None -> result = Err (CorruptMetadata)
+      end}
+    (! return {result}) ]

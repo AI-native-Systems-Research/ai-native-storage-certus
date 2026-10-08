@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_em_bio_write_layout": {
+        "prover": "alt-ergo",
+        "time": 0.119
+      },
+      "vc_write_blocks": { "prover": "alt-ergo", "time": 0.024 }
+    }
+  }
+}

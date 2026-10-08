@@ -1,0 +1,51 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 490 0 490 60 *)
+
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 163 10 163 38
+let%span scomponent = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 394 16 394 37
+let%span scomponent'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 399 16 399 84
+let%span sbatch3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 486 11 486 41
+let%span sbatch3'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 487 10 487 100
+let%span sbatch3'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 488 10 488 57
+let%span sbatch3'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 489 10 489 85
+
+use int.ComputerDivision
+use int.Int
+
+function rbase [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 393 0 393 57] (ds: int) (usable: int) (n: int) (i: int) : int
+ = [%#scomponent] ds + i * ComputerDivision.div usable n
+
+function rsize [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 398 0 398 48] (usable: int) (n: int) (i: int) : int
+ = [%#scomponent'0] if i < n - 1 then
+    ComputerDivision.div usable n
+  else
+    usable - (n - 1) * ComputerDivision.div usable n
+
+
+function lemma_distrib [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 164 0 164 44] (a: int) (b: int) (c: int) : ()
+
+axiom lemma_distrib_spec: forall a: int, b: int, c: int. [%#sbuddy] (a + b) * c = a * c + b * c
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant ds : int
+
+constant usable : int
+
+constant n : int
+
+constant i : int
+
+function lemma_partition [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 490 0 490 60] (ds: int) (usable: int) (n: int) (i: int) : ()
+
+goal vc_lemma_partition: ([%#sbatch3] n > 0 /\ 0 <= i /\ usable >= 0)
+  -> ([@stop_split] [@expl:lemma_distrib ensures] [%#sbuddy] (i + 1) * ComputerDivision.div usable n
+    = i * ComputerDivision.div usable n + 1 * ComputerDivision.div usable n)
+  -> ([@stop_split] [@expl:lemma_partition ensures] ([@stop_split] [@expl:lemma_partition ensures #0] [%#sbatch3'0] i
+        + 1
+      < n -> rbase ds usable n i + rsize usable n i = rbase ds usable n (i + 1))
+  /\ ([@stop_split] [@expl:lemma_partition ensures #1] [%#sbatch3'1] i + 1 < n
+    -> rsize usable n i = ComputerDivision.div usable n)
+  /\ ([@stop_split] [@expl:lemma_partition ensures #2] [%#sbatch3'2] i = n - 1
+  -> rbase ds usable n i + rsize usable n i = ds + usable))

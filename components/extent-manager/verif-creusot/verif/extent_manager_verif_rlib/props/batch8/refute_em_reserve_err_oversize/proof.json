@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_refute_em_reserve_err_oversize": {
+        "prover": "alt-ergo",
+        "time": 0.036
+      },
+      "vc_w8_oversize": { "prover": "alt-ergo", "time": 0.021 }
+    }
+  }
+}

@@ -1,0 +1,40 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 225 0 225 44 *)
+
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 154 11 154 37
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 155 10 155 24
+let%span sbuddy'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 163 10 163 38
+let%span sbatch7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 223 11 223 74
+let%span sbatch7'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 224 10 224 24
+
+use int.Int
+
+function lemma_mul_le [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 156 0 156 43] (a: int) (b: int) (c: int) : ()
+
+axiom lemma_mul_le_spec: forall a: int, b: int, c: int. ([%#sbuddy] 0 <= a /\ a <= b /\ 0 <= c)
+    -> ([%#sbuddy'0] a * c <= b * c)
+
+function lemma_distrib [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 164 0 164 44] (a: int) (b: int) (c: int) : ()
+
+axiom lemma_distrib_spec: forall a: int, b: int, c: int. [%#sbuddy'1] (a + b) * c = a * c + b * c
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant k : int
+
+constant q : int
+
+constant a : int
+
+function lemma_div_le7 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 225 0 225 44] (k: int) (q: int) (a: int) : ()
+
+goal vc_lemma_div_le7: ([%#sbatch7] a > 0 /\ k >= 0 /\ q >= 0 /\ q * a <= 4095 + a /\ k * a >= 4096)
+  -> (if q > k then
+    ([@stop_split] [@expl:lemma_mul_le requires] [%#sbuddy] 0 <= k + 1 /\ k + 1 <= q /\ 0 <= a)
+    /\ (([@stop_split] [@expl:lemma_mul_le ensures] [%#sbuddy'0] (k + 1) * a <= q * a)
+    -> (let _ = lemma_mul_le (k + 1) q a in ([@stop_split] [@expl:lemma_distrib ensures] [%#sbuddy'1] (k + 1) * a
+      = k * a + 1 * a) -> ([@stop_split] [@expl:lemma_div_le7 ensures] [%#sbatch7'0] q * a <= k * a)))
+  else
+    [@stop_split] [@expl:lemma_div_le7 ensures] [%#sbatch7'0] q * a <= k * a
+  )

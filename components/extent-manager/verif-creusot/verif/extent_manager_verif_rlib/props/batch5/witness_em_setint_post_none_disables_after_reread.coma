@@ -1,0 +1,394 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1500 0 1500 87 *)
+
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 112 18 112 40
+let%span svec'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 193 19 193 38
+let%span svec'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 194 18 194 46
+let%span svec'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sslice = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/slice.rs" 148 20 148 37
+let%span sslice'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/slice.rs" 153 20 153 37
+let%span sb5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 59 15 59 34
+let%span sb5'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 60 14 60 74
+let%span sb5'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 61 14 61 78
+let%span sb5'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 62 14 62 57
+let%span sb5'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 63 14 66 5
+let%span sb5'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 79 14 79 45
+let%span sb5'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 80 14 80 72
+let%span sb5'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 81 14 81 78
+let%span sb5'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 87 15 87 78
+let%span sb5'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 88 14 88 44
+let%span sb5'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 89 14 89 74
+let%span sb5'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 90 14 90 78
+let%span sb5'11 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 97 15 97 87
+let%span sb5'12 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 98 14 98 45
+let%span sb5'13 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 99 14 99 74
+let%span sb5'14 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 100 14 100 78
+let%span sb5'15 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 124 15 124 66
+let%span sb5'16 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 125 14 125 74
+let%span sb5'17 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 126 14 126 78
+let%span sb5'18 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 127 14 128 89
+let%span sb5'19 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 146 15 146 62
+let%span sb5'20 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 147 14 147 73
+let%span sb5'21 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 148 14 148 111
+let%span sb5'22 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 108 14 108 63
+let%span sb5'23 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 109 14 109 78
+let%span sb5'24 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 110 14 110 122
+let%span sbatch5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1501 25 1501 27
+let%span sbatch5'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1502 23 1502 24
+let%span sbatch5'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1504 14 1504 25
+let%span sbatch5'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1503 16 1503 54
+let%span sbatch5'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1505 24 1505 27
+let%span sbatch5'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1506 19 1506 20
+let%span sbatch5'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1508 28 1508 40
+let%span sbatch5'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1511 26 1511 27
+let%span sbatch5'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1512 19 1512 20
+let%span sbatch5'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1512 12 1512 21
+let%span sbatch5'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1513 26 1513 27
+let%span sbatch5'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1516 32 1516 43
+let%span sbatch5'11 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1519 26 1519 27
+let%span sbatch5'12 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1522 32 1522 44
+let%span sbatch5'13 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1521 32 1521 44
+let%span sbatch5'14 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1525 26 1525 27
+let%span sbatch5'15 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1527 33 1527 43
+let%span sbatch5'16 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1530 26 1530 27
+let%span sbatch5'17 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1533 33 1533 41
+let%span sbatch5'18 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1534 24 1534 32
+let%span sbatch5'19 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1539 26 1539 27
+let%span sbatch5'20 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1540 12 1540 32
+let%span sbatch5'21 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1542 13 1542 14
+let%span sbatch5'22 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1542 8 1542 14
+let%span sbatch5'23 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1498 11 1498 26
+let%span sbatch5'24 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1499 10 1499 50
+let%span sbatch5'25 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1484 8 1490 9
+
+use creusot.prelude.MutBorrow
+use creusot.int.UInt64
+use seq.Seq
+use creusot.int.UInt8
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_u8_Global
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_u8_Global (self: t_Vec_u8_Global) : Seq.seq UInt8.t
+
+axiom view_Vec_u8_Global_spec:
+  forall self: t_Vec_u8_Global [view_Vec_u8_Global self]. [%#svec'2] Seq.length (view_Vec_u8_Global self)
+    <= UInt64.t'int const_MAX
+
+let len_u8 (self_: t_Vec_u8_Global) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:len ensures] [%#svec] UInt64.t'int result
+    = Seq.length (view_Vec_u8_Global self_)}
+    (! return {result}) ]
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_TPh = Top | Wait int | WaitInf | Woken bool | Work | Exited
+
+type t_TSys = { interval: t_Option_u64; now: int; ph: t_TPh; shutdown: bool; ckpts: UInt64.t }
+
+predicate timer_quiet [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1482 0 1482 35] (t: t_TSys) =
+  [%#sbatch5'25] t.interval = None
+  /\ match t.ph with
+    | Top -> true
+    | WaitInf -> true
+    | Woken b -> not b
+    | Exited -> true
+    | _ -> false
+    end
+
+predicate in_bounds_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq UInt8.t) =
+  [%#sslice] UInt64.t'int self < Seq.length seq
+
+meta "rewrite_def" predicate in_bounds_usize
+
+predicate has_value_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq UInt8.t) (out: UInt8.t) =
+  [%#sslice'0] Seq.get seq (UInt64.t'int self) = out
+
+meta "rewrite_def" predicate has_value_usize
+
+let index_Vec_u8_Global (self_: t_Vec_u8_Global) (ix: UInt64.t) (return (x: UInt8.t)) =
+{[@stop_split] [@expl:index requires] [%#svec'0] in_bounds_usize ix (view_Vec_u8_Global self_)}
+  any
+  [ return (result: UInt8.t) ->
+  {[@stop_split] [@expl:index ensures] [%#svec'1] has_value_usize ix (view_Vec_u8_Global self_) result}
+    (! return {result}) ]
+
+let th_enter (self: MutBorrow.t t_TSys) (return (x: ())) =
+{[@stop_split] [@expl:th_enter requires] [%#sb5] self.current.ph = Top}
+  any
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:th_enter ensures] ([@stop_split] [@expl:th_enter ensures #0] [%#sb5'0] self.final.interval
+        = self.current.interval
+      /\ self.final.now = self.current.now)
+    /\ ([@stop_split] [@expl:th_enter ensures #1] [%#sb5'1] self.final.shutdown = self.current.shutdown
+      /\ self.final.ckpts = self.current.ckpts)
+    /\ ([@stop_split] [@expl:th_enter ensures #2] [%#sb5'2] self.current.shutdown -> self.final.ph = Exited)
+    /\ ([@stop_split] [@expl:th_enter ensures #3] [%#sb5'3] not self.current.shutdown
+    -> match self.current.interval with
+      | Some d -> match self.final.ph with
+        | Wait dl -> dl = self.current.now + UInt64.t'int d
+        | _ -> false
+        end
+      | None -> self.final.ph = WaitInf
+      end)}
+    (! return {result}) ]
+
+let tick (self: MutBorrow.t t_TSys) (dt: UInt64.t) (return (x: ())) = any
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:tick ensures] ([@stop_split] [@expl:tick ensures #0] [%#sb5'4] self.final.now
+      = self.current.now + UInt64.t'int dt)
+    /\ ([@stop_split] [@expl:tick ensures #1] [%#sb5'5] self.final.interval = self.current.interval
+      /\ self.final.ph = self.current.ph)
+    /\ ([@stop_split] [@expl:tick ensures #2] [%#sb5'6] self.final.shutdown = self.current.shutdown
+    /\ self.final.ckpts = self.current.ckpts)}
+    (! return {result}) ]
+
+let timeout (self: MutBorrow.t t_TSys) (return (x: ())) =
+{[@stop_split] [@expl:timeout requires] [%#sb5'7] match self.current.ph with
+    | Wait dl -> self.current.now >= dl
+    | _ -> false
+    end}
+  any
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:timeout ensures] ([@stop_split] [@expl:timeout ensures #0] [%#sb5'8] self.final.ph = Woken true)
+    /\ ([@stop_split] [@expl:timeout ensures #1] [%#sb5'9] self.final.interval = self.current.interval
+      /\ self.final.now = self.current.now)
+    /\ ([@stop_split] [@expl:timeout ensures #2] [%#sb5'10] self.final.shutdown = self.current.shutdown
+    /\ self.final.ckpts = self.current.ckpts)}
+    (! return {result}) ]
+
+let spurious (self: MutBorrow.t t_TSys) (return (x: ())) =
+{[@stop_split] [@expl:spurious requires] [%#sb5'11] match self.current.ph with
+    | Wait _ -> true
+    | WaitInf -> true
+    | _ -> false
+    end}
+  any
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:spurious ensures] ([@stop_split] [@expl:spurious ensures #0] [%#sb5'12] self.final.ph
+      = Woken false)
+    /\ ([@stop_split] [@expl:spurious ensures #1] [%#sb5'13] self.final.interval = self.current.interval
+      /\ self.final.now = self.current.now)
+    /\ ([@stop_split] [@expl:spurious ensures #2] [%#sb5'14] self.final.shutdown = self.current.shutdown
+    /\ self.final.ckpts = self.current.ckpts)}
+    (! return {result}) ]
+
+let relock (self: MutBorrow.t t_TSys) (return (x: ())) =
+{[@stop_split] [@expl:relock requires] [%#sb5'15] match self.current.ph with
+    | Woken _ -> true
+    | _ -> false
+    end}
+  any
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:relock ensures] ([@stop_split] [@expl:relock ensures #0] [%#sb5'16] self.final.interval
+        = self.current.interval
+      /\ self.final.now = self.current.now)
+    /\ ([@stop_split] [@expl:relock ensures #1] [%#sb5'17] self.final.shutdown = self.current.shutdown
+      /\ self.final.ckpts = self.current.ckpts)
+    /\ ([@stop_split] [@expl:relock ensures #2] [%#sb5'18] self.final.ph
+    = (if self.current.shutdown then
+      Exited
+    else
+      match self.current.ph with
+        | Woken t -> if t then Work else Top
+        | p -> p
+        end
+    ))}
+    (! return {result}) ]
+
+constant const_MAX'0: UInt64.t = (18446744073709551615: UInt64.t)
+
+let work (self: MutBorrow.t t_TSys) (return (x: ())) = {[@stop_split] [@expl:work requires] [%#sb5'19] self.current.ph
+    = Work
+  /\ UInt64.t'int self.current.ckpts < UInt64.t'int const_MAX'0}
+  any
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:work ensures] ([@stop_split] [@expl:work ensures #0] [%#sb5'20] UInt64.t'int self.final.ckpts
+        = UInt64.t'int self.current.ckpts + 1
+      /\ self.final.ph = Top)
+    /\ ([@stop_split] [@expl:work ensures #1] [%#sb5'21] self.final.interval = self.current.interval
+    /\ self.final.now = self.current.now /\ self.final.shutdown = self.current.shutdown)}
+    (! return {result}) ]
+
+let set_interval (self: MutBorrow.t t_TSys) (iv: t_Option_u64) (return (x: ())) = any
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:set_interval ensures] ([@stop_split] [@expl:set_interval ensures #0] [%#sb5'22] self.final.interval
+        = iv
+      /\ self.final.now = self.current.now)
+    /\ ([@stop_split] [@expl:set_interval ensures #1] [%#sb5'23] self.final.shutdown = self.current.shutdown
+      /\ self.final.ckpts = self.current.ckpts)
+    /\ ([@stop_split] [@expl:set_interval ensures #2] [%#sb5'24] self.final.ph
+    = match self.current.ph with
+      | Wait _ -> Woken false
+      | WaitInf -> Woken false
+      | p -> p
+      end)}
+    (! return {result}) ]
+
+predicate resolve_refmut_TSys [@inline:trivial] (_1: MutBorrow.t t_TSys) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_TSys
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let witness_em_setint_post_none_disables_after_reread [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1500 0 1500 87]
+  (t: MutBorrow.t t_TSys) (sched: t_Vec_u8_Global) (return (x: ())) =
+{[@stop_split] [@expl:witness_em_setint_post_none_disables_after_reread requires] [%#sbatch5'23] timer_quiet t.current}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &t0 <- [%#sbatch5] t.current ] s1
+    | s1 = [ &p <- [%#sbatch5'0] (0: UInt64.t) ] s2
+    | s2 = [ &_old <- t.final ] s3
+    | s3 = bb2 ]
+  | bb2 = bb2
+    [ bb2 = {[@expl:inferred invariant: unchanged value] _old = t.final}
+      {[@expl:loop invariant] [%#sbatch5'2] timer_quiet t.current /\ t.current.ckpts = t0.ckpts}
+      (! s0)
+      [ s0 = len_u8 [%#sbatch5'1] {sched} (fun (_x: UInt64.t) -> [ &_18 <- _x ] s1)
+      | s1 = [ &_16 <- UInt64.lt p _18 ] s2
+      | s2 = any [ br0 -> {_16 = false} (! bb56) | br1 -> {_16} (! bb5) ] ]
+      [ bb5 = s0
+        [ s0 = index_Vec_u8_Global [%#sbatch5'3] {sched} {p} (fun (_x: UInt8.t) -> [ &_21 <- _x ] s1)
+        | s1 = [ &code <- _21 ] s2
+        | s2 = [ &_25 <- code = ([%#sbatch5'4] (0: UInt8.t)) ] s3
+        | s3 = any [ br0 -> {_25 = false} (! bb12) | br1 -> {_25} (! bb7) ] ]
+      | bb7 = any
+        [ br0 -> {t.current.ph = Top} (! bb10)
+        | br1 (x0: int) -> {t.current.ph = Wait x0} (! bb55)
+        | br2 -> {t.current.ph = WaitInf} (! bb55)
+        | br3 (x0: bool) -> {t.current.ph = Woken x0} (! bb55)
+        | br4 -> {t.current.ph = Work} (! bb55)
+        | br5 -> {t.current.ph = Exited} (! bb55) ]
+      | bb10 = s0
+        [ s0 = MutBorrow.borrow_mut <t_TSys> {t.current}
+            (fun (_bor: MutBorrow.t t_TSys) -> [ &_28 <- _bor ] [ &t <- { t with current = _bor.final } ] s1)
+        | s1 = th_enter [%#sbatch5'5] {_28} (fun (_x: ()) -> [ &_24 <- _x ] s2)
+        | s2 = bb55 ]
+      | bb12 = s0
+        [ s0 = [ &_29 <- code = ([%#sbatch5'6] (1: UInt8.t)) ] s1
+        | s1 = any [ br0 -> {_29 = false} (! bb15) | br1 -> {_29} (! bb13) ] ]
+      | bb13 = s0
+        [ s0 = MutBorrow.borrow_mut <t_TSys> {t.current}
+            (fun (_bor: MutBorrow.t t_TSys) -> [ &_32 <- _bor ] [ &t <- { t with current = _bor.final } ] s1)
+        | s1 = tick [%#sbatch5'8] {_32} {[%#sbatch5'7] (1: UInt64.t)} (fun (_x: ()) -> [ &_31 <- _x ] s2)
+        | s2 = bb55 ]
+      | bb15 = s0
+        [ s0 = [ &_33 <- code = ([%#sbatch5'9] (2: UInt8.t)) ] s1
+        | s1 = any [ br0 -> {_33 = false} (! bb21) | br1 -> {_33} (! bb16) ] ]
+      | bb16 = any
+        [ br0 -> {t.current.ph = Top} (! bb55)
+        | br1 (x0: int) -> {t.current.ph = Wait x0} (! bb19)
+        | br2 -> {t.current.ph = WaitInf} (! bb55)
+        | br3 (x0: bool) -> {t.current.ph = Woken x0} (! bb55)
+        | br4 -> {t.current.ph = Work} (! bb55)
+        | br5 -> {t.current.ph = Exited} (! bb55) ]
+      | bb19 = s0
+        [ s0 = MutBorrow.borrow_mut <t_TSys> {t.current}
+            (fun (_bor: MutBorrow.t t_TSys) -> [ &_36 <- _bor ] [ &t <- { t with current = _bor.final } ] s1)
+        | s1 = timeout [%#sbatch5'10] {_36} (fun (_x: ()) -> [ &_24 <- _x ] s2)
+        | s2 = bb55 ]
+      | bb21 = s0
+        [ s0 = [ &_37 <- code = ([%#sbatch5'11] (3: UInt8.t)) ] s1
+        | s1 = any [ br0 -> {_37 = false} (! bb30) | br1 -> {_37} (! bb22) ] ]
+      | bb22 = any
+        [ br0 -> {t.current.ph = Top} (! bb55)
+        | br1 (x0: int) -> {t.current.ph = Wait x0} (! bb27)
+        | br2 -> {t.current.ph = WaitInf} (! bb26)
+        | br3 (x0: bool) -> {t.current.ph = Woken x0} (! bb55)
+        | br4 -> {t.current.ph = Work} (! bb55)
+        | br5 -> {t.current.ph = Exited} (! bb55) ]
+      | bb26 = s0
+        [ s0 = MutBorrow.borrow_mut <t_TSys> {t.current}
+            (fun (_bor: MutBorrow.t t_TSys) -> [ &_41 <- _bor ] [ &t <- { t with current = _bor.final } ] s1)
+        | s1 = spurious [%#sbatch5'12] {_41} (fun (_x: ()) -> [ &_24 <- _x ] s2)
+        | s2 = bb55 ]
+      | bb27 = s0
+        [ s0 = MutBorrow.borrow_mut <t_TSys> {t.current}
+            (fun (_bor: MutBorrow.t t_TSys) -> [ &_40 <- _bor ] [ &t <- { t with current = _bor.final } ] s1)
+        | s1 = spurious [%#sbatch5'13] {_40} (fun (_x: ()) -> [ &_24 <- _x ] s2)
+        | s2 = bb55 ]
+      | bb30 = s0
+        [ s0 = [ &_42 <- code = ([%#sbatch5'14] (4: UInt8.t)) ] s1
+        | s1 = any [ br0 -> {_42 = false} (! bb36) | br1 -> {_42} (! bb31) ] ]
+      | bb31 = any
+        [ br0 -> {t.current.ph = Top} (! bb55)
+        | br1 (x0: int) -> {t.current.ph = Wait x0} (! bb55)
+        | br2 -> {t.current.ph = WaitInf} (! bb55)
+        | br3 (x0: bool) -> {t.current.ph = Woken x0} (! bb34)
+        | br4 -> {t.current.ph = Work} (! bb55)
+        | br5 -> {t.current.ph = Exited} (! bb55) ]
+      | bb34 = s0
+        [ s0 = MutBorrow.borrow_mut <t_TSys> {t.current}
+            (fun (_bor: MutBorrow.t t_TSys) -> [ &_45 <- _bor ] [ &t <- { t with current = _bor.final } ] s1)
+        | s1 = relock [%#sbatch5'15] {_45} (fun (_x: ()) -> [ &_24 <- _x ] s2)
+        | s2 = bb55 ]
+      | bb36 = s0
+        [ s0 = [ &_46 <- code = ([%#sbatch5'16] (5: UInt8.t)) ] s1
+        | s1 = any [ br0 -> {_46 = false} (! bb45) | br1 -> {_46} (! bb37) ] ]
+      | bb37 = any
+        [ br0 -> {t.current.ph = Top} (! bb55)
+        | br1 (x0: int) -> {t.current.ph = Wait x0} (! bb55)
+        | br2 -> {t.current.ph = WaitInf} (! bb55)
+        | br3 (x0: bool) -> {t.current.ph = Woken x0} (! bb55)
+        | br4 -> {t.current.ph = Work} (! bb40)
+        | br5 -> {t.current.ph = Exited} (! bb55) ]
+      | bb40 = s0
+        [ s0 = [ &_49 <- UInt64.lt t.current.ckpts ([%#sbatch5'17] const_MAX'0) ] s1
+        | s1 = any [ br0 -> {_49 = false} (! bb55) | br1 -> {_49} (! bb41) ] ]
+      | bb41 = s0
+        [ s0 = MutBorrow.borrow_mut <t_TSys> {t.current}
+            (fun (_bor: MutBorrow.t t_TSys) -> [ &_52 <- _bor ] [ &t <- { t with current = _bor.final } ] s1)
+        | s1 = work [%#sbatch5'18] {_52} (fun (_x: ()) -> [ &_51 <- _x ] s2)
+        | s2 = bb55 ]
+      | bb45 = s0
+        [ s0 = [ &_53 <- code = ([%#sbatch5'19] (6: UInt8.t)) ] s1
+        | s1 = any [ br0 -> {_53 = false} (! bb55) | br1 -> {_53} (! bb46) ] ]
+      | bb46 = s0
+        [ s0 = [ &_57 <- None ] s1
+        | s1 = MutBorrow.borrow_mut <t_TSys> {t.current}
+            (fun (_bor: MutBorrow.t t_TSys) -> [ &_56 <- _bor ] [ &t <- { t with current = _bor.final } ] s2)
+        | s2 = set_interval [%#sbatch5'20] {_56} {_57} (fun (_x: ()) -> [ &_55 <- _x ] s3)
+        | s3 = bb55 ]
+      | bb55 = s0
+        [ s0 = UInt64.add [%#sbatch5'22] {p} {[%#sbatch5'21] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &p <- _x ] s1)
+        | s1 = bb2 ] ] ]
+  | bb56 = s0 [ s0 = -{resolve_refmut_TSys t}- s1 | s1 = return {_ret} ] ]
+  [ & _ret: () = Any.any_l ()
+  | & t: MutBorrow.t t_TSys = t
+  | & sched: t_Vec_u8_Global = sched
+  | & t0: t_TSys = Any.any_l ()
+  | & p: UInt64.t = Any.any_l ()
+  | & _16: bool = Any.any_l ()
+  | & _18: UInt64.t = Any.any_l ()
+  | & code: UInt8.t = Any.any_l ()
+  | & _21: UInt8.t = Any.any_l ()
+  | & _24: () = Any.any_l ()
+  | & _25: bool = Any.any_l ()
+  | & _28: MutBorrow.t t_TSys = Any.any_l ()
+  | & _29: bool = Any.any_l ()
+  | & _31: () = Any.any_l ()
+  | & _32: MutBorrow.t t_TSys = Any.any_l ()
+  | & _33: bool = Any.any_l ()
+  | & _36: MutBorrow.t t_TSys = Any.any_l ()
+  | & _37: bool = Any.any_l ()
+  | & _40: MutBorrow.t t_TSys = Any.any_l ()
+  | & _41: MutBorrow.t t_TSys = Any.any_l ()
+  | & _42: bool = Any.any_l ()
+  | & _45: MutBorrow.t t_TSys = Any.any_l ()
+  | & _46: bool = Any.any_l ()
+  | & _49: bool = Any.any_l ()
+  | & _51: () = Any.any_l ()
+  | & _52: MutBorrow.t t_TSys = Any.any_l ()
+  | & _53: bool = Any.any_l ()
+  | & _55: () = Any.any_l ()
+  | & _56: MutBorrow.t t_TSys = Any.any_l ()
+  | & _57: t_Option_u64 = Any.any_l ()
+  | & _old: t_TSys = Any.any_l () ])
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:witness_em_setint_post_none_disables_after_reread ensures] [%#sbatch5'24] timer_quiet t.final
+    /\ t.final.ckpts = t.current.ckpts}
+    (! return {result}) ]

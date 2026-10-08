@@ -1,0 +1,49 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_alloc_extent": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_publish_slot": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_w5p_rec": { "prover": "alt-ergo", "time": 0.042 },
+      "vc_witness_em_publish_frame_other_extents_pow2": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.082 },
+              { "prover": "alt-ergo", "time": 0.227 },
+              { "prover": "alt-ergo", "time": 0.048 },
+              { "prover": "alt-ergo", "time": 0.051 },
+              { "prover": "alt-ergo", "time": 0.103 },
+              { "prover": "alt-ergo", "time": 0.838 },
+              { "prover": "cvc4", "time": 0.175 },
+              { "prover": "alt-ergo", "time": 0.162 },
+              { "prover": "cvc4", "time": 0.211 },
+              { "prover": "alt-ergo", "time": 0.104 },
+              { "prover": "alt-ergo", "time": 0.076 },
+              { "prover": "alt-ergo", "time": 0.194 },
+              { "prover": "cvc4", "time": 0.572 },
+              { "prover": "cvc4", "time": 0.2 },
+              { "prover": "cvc4", "time": 0.431 },
+              { "prover": "cvc4", "time": 0.319 },
+              { "prover": "cvc4", "time": 0.199 },
+              { "prover": "alt-ergo", "time": 0.11 },
+              { "prover": "cvc4", "time": 0.208 },
+              { "prover": "cvc4", "time": 0.146 },
+              { "prover": "cvc5", "time": 0.112 },
+              { "prover": "cvc4", "time": 0.385 },
+              { "prover": "cvc4", "time": 0.272 },
+              { "prover": "cvc4", "time": 0.286 },
+              { "prover": "alt-ergo", "time": 0.057 },
+              { "prover": "alt-ergo", "time": 0.045 },
+              { "prover": "alt-ergo", "time": 0.047 },
+              { "prover": "alt-ergo", "time": 0.038 },
+              { "prover": "alt-ergo", "time": 0.028 }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_refute_em_ckpt_post_empty_slab_returned__mutant": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.112 },
+          { "prover": "alt-ergo", "time": 0.068 },
+          { "prover": "alt-ergo", "time": 0.142 },
+          { "prover": "alt-ergo", "time": 0.079 },
+          null
+        ]
+      },
+      "vc_total_free": { "prover": "alt-ergo", "time": 0.036 },
+      "vc_w1_freed": { "prover": "alt-ergo", "time": 0.036 },
+      "vc_w1_recovered": { "prover": "alt-ergo", "time": 0.021 }
+    }
+  }
+}

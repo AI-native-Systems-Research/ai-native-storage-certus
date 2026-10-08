@@ -1,0 +1,13 @@
+# J7 (node7, 2026-10-08): do the 6 de-credited harnesses reach a HashMap operation? cargo-kani 0.67.0
+method: "diag_j7_<id> = same unwind + same stubs (incl. stub_random_state) + same body; generic stubs on HashMap::{insert,get,get_mut,remove,entry,contains_key} doing kani::assert(false,'map op reached'); kani::cover! at body start and end"
+positive_control: "diag_j7_control_map_stubs_fire FAILED as intended (SizeClassManager add_slab/get_slabs/remove_slab and InterfaceMap insert/lookup hit the stubs)"
+production_attribute: "lib.rs:2 #![cfg_attr(kani, recursion_limit = \"256\")] (attribute only; cargo build/test without Kani identical before/after)"
+results:
+  - {id: EM-CKPT-READ-SEQ-MISMATCH, verdict: unreached, covers: both SATISFIED, wall_s: 33.2, peak_rss_mb: 868}
+  - {id: EM-CKPT-READ-OVERSIZE,     verdict: unreached, covers: both SATISFIED, wall_s: 62.3, peak_rss_mb: 1117}
+  - {id: EM-CKPT-READ-TRUNCATED,    verdict: unreached, covers: both SATISFIED, wall_s: 110.7, peak_rss_mb: 2120}
+  - {id: EM-CKPT-READ-CRC,          verdict: unreached, covers: both SATISFIED, wall_s: 63.6, peak_rss_mb: 1561}
+  - {id: EM-CKPT-DECODE-TRUNCATED,  verdict: unreached, covers: both SATISFIED, wall_s: 17.4, peak_rss_mb: 385}
+  - {id: EM-ERR-DEVICE-AS-IOERROR,  verdict: unreached, covers: both SATISFIED, wall_s: 79.4, peak_rss_mb: 2841}
+renamed_back: all 6 (+ __mutant twins); EM-SB-ACTIVE-COPY-VALID (excluded) not diagnosed, stays uncredited
+rescore: "scorer_kani.py @7acfc58d --resume --only <6>: 3 proved, ERR-DEVICE-AS-IOERROR refuted (witness start seq 1 / active 1 = format + one checkpoint, parity-consistent), CKPT-READ-TRUNCATED + CKPT-READ-CRC UNRESOLVED (anti-vacuity twin timed out at the 600 s cap -> not vouched)"

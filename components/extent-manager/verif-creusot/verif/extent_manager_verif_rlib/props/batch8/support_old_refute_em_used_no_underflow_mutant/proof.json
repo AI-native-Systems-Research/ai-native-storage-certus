@@ -1,0 +1,21 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_region_used_release": { "prover": "alt-ergo", "time": 0.037 },
+      "vc_support_old_refute_em_used_no_underflow__mutant": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.113 },
+          { "prover": "alt-ergo", "time": 0.057 },
+          { "prover": "alt-ergo", "time": 0.06 },
+          { "prover": "alt-ergo", "time": 0.043 },
+          null
+        ]
+      },
+      "vc_total_free": { "prover": "alt-ergo", "time": 0.037 },
+      "vc_total_usable_size'0": { "prover": "alt-ergo", "time": 0.037 },
+      "vc_w1_freed": { "prover": "alt-ergo", "time": 0.025 }
+    }
+  }
+}

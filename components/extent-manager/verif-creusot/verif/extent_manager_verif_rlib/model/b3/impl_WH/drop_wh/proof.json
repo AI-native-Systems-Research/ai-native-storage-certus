@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_abort": { "prover": "alt-ergo", "time": 0.038 },
+      "vc_drop_wh": { "prover": "alt-ergo", "time": 0.123 }
+    }
+  }
+}

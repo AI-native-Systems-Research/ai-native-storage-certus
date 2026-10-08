@@ -1,0 +1,14 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_deserialize": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_new": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_serialize": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_verify_em_inv_superblock_well_formed": {
+        "prover": "alt-ergo",
+        "time": 0.133
+      }
+    }
+  }
+}

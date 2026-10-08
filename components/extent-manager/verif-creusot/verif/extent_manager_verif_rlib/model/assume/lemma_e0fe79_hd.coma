@@ -1,0 +1,75 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 253 0 253 42 *)
+
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 180 11 180 26
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 181 10 181 34
+let%span sbuddy'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 182 10 182 33
+let%span sbuddy'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 183 10 183 20
+let%span sbuddy'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 154 11 154 37
+let%span sbuddy'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 155 10 155 24
+let%span sassume = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 251 11 251 55
+let%span sassume'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 252 10 252 32
+let%span sassume'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 87 16 87 49
+let%span sassume'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 218 16 218 40
+
+use int.ComputerDivision
+use creusot.int.UInt32
+use creusot.int.UInt64
+use int.Int
+
+constant const_MAX: UInt32.t = (4294967295: UInt32.t)
+
+predicate a_e0fe79 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 86 0 86 43] (slab: int) (ss: int) =
+  [%#sassume'1] ss <> 0 /\ ComputerDivision.div slab ss <= UInt32.t'int const_MAX
+
+predicate t_u32 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 217 0 217 28] (x: int) =
+  [%#sassume'2] 0 <= x /\ x <= UInt32.t'int const_MAX
+
+constant const_MAX'0: UInt64.t = (18446744073709551615: UInt64.t)
+
+function lemma_divmod [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 184 0 184 35] (x: int) (m: int) : ()
+
+axiom lemma_divmod_spec: forall x: int, m: int. ([%#sbuddy] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'0] x = m * ComputerDivision.div x m + ComputerDivision.mod x m)
+
+axiom lemma_divmod_spec'0: forall x: int, m: int. ([%#sbuddy] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'1] 0 <= ComputerDivision.mod x m /\ ComputerDivision.mod x m < m)
+
+axiom lemma_divmod_spec'1: forall x: int, m: int. ([%#sbuddy] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'2] ComputerDivision.div x m >= 0)
+
+function lemma_mul_le [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 156 0 156 43] (a: int) (b: int) (c: int) : ()
+
+axiom lemma_mul_le_spec: forall a: int, b: int, c: int. ([%#sbuddy'3] 0 <= a /\ a <= b /\ 0 <= c)
+    -> ([%#sbuddy'4] a * c <= b * c)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant slab : int
+
+constant ss : int
+
+function lemma_e0fe79_hd [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 253 0 253 42] (slab: int) (ss: int) : ()
+
+goal vc_lemma_e0fe79_hd: ([%#sassume] a_e0fe79 slab ss /\ 0 <= slab /\ t_u32 ss)
+  -> ([@stop_split] [@expl:lemma_divmod requires] [%#sbuddy] ss > 0 /\ slab >= 0)
+  /\ (([@stop_split] [@expl:lemma_divmod ensures] ([@stop_split] [@expl:lemma_divmod ensures #0] [%#sbuddy'0] slab
+      = ss * ComputerDivision.div slab ss + ComputerDivision.mod slab ss)
+    /\ ([@stop_split] [@expl:lemma_divmod ensures #1] [%#sbuddy'1] 0 <= ComputerDivision.mod slab ss
+      /\ ComputerDivision.mod slab ss < ss)
+    /\ ([@stop_split] [@expl:lemma_divmod ensures #2] [%#sbuddy'2] ComputerDivision.div slab ss >= 0))
+  -> (let _ = lemma_divmod slab ss in ([@stop_split] [@expl:lemma_mul_le requires] [%#sbuddy'3] 0
+      <= ComputerDivision.div slab ss + 2
+    /\ ComputerDivision.div slab ss + 2 <= 4294967297 /\ 0 <= ss)
+  /\ (([@stop_split] [@expl:lemma_mul_le ensures] [%#sbuddy'4] (ComputerDivision.div slab ss + 2) * ss
+    <= 4294967297 * ss)
+  -> (let _ = lemma_mul_le (ComputerDivision.div slab ss
+  + 2) 4294967297 ss in ([@stop_split] [@expl:lemma_mul_le requires] [%#sbuddy'3] 0 <= ss
+    /\ ss <= 4294967295 /\ 0 <= 4294967297)
+  /\ (([@stop_split] [@expl:lemma_mul_le ensures] [%#sbuddy'4] ss * 4294967297 <= 4294967295 * 4294967297)
+  -> (let _ = lemma_mul_le ss 4294967295 4294967297 in slab + ss <= ss * ComputerDivision.div slab ss + 2 * ss - 1
+  && ss * ComputerDivision.div slab ss + 2 * ss = (ComputerDivision.div slab ss + 2) * ss
+  && (ComputerDivision.div slab ss + 2) * ss <= 4294967297 * ss
+  && 4294967297 * ss <= 4294967297 * 4294967295
+  && ([@stop_split] [@expl:lemma_e0fe79_hd ensures] [%#sassume'0] slab + ss <= UInt64.t'int const_MAX'0)))))))

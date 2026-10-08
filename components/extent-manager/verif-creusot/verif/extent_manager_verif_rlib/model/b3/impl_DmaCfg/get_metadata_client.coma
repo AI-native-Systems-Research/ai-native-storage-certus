@@ -1,0 +1,60 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 246 4 246 79 *)
+
+(* model::b3::DmaCfg *)
+
+let%span sb3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 244 14 244 110
+let%span sb3'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 245 14 245 117
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.prelude.Any
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_DmaCfg = { dma_alloc: t_Option_u64; metadata_base_lba: UInt64.t }
+
+let elim_Some (_x: t_Option_u64) (return (f0: UInt64.t)) = any
+  [ _k (f0: UInt64.t) -> {Some f0 = _x} (! return {f0})
+  | _chk -> (! {[@expl:elim Some] match _x with
+      | Some _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+type t_AllocSel = Default | User UInt64.t
+
+type t_EvClient = { sector_size: UInt32.t; ns_id: UInt32.t; base_lba: UInt64.t; alloc: t_AllocSel }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let get_metadata_client [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 246 4 246 79]
+  (self: t_DmaCfg) (ns_id'0: UInt32.t) (sector_size'0: UInt32.t) (return (x: t_EvClient)) = (! bb0
+  [ bb0 = any [ br0 -> {self.dma_alloc = None} (! bb3) | br1 (x0: UInt64.t) -> {self.dma_alloc = Some x0} (! bb4) ]
+  | bb4 = s0
+    [ s0 = elim_Some {self.dma_alloc} (fun (r0: UInt64.t) -> [ &a <- r0 ] s1)
+    | s1 = [ &alloc'0 <- User a ] s2
+    | s2 = bb5 ]
+  | bb3 = s0 [ s0 = [ &alloc'0 <- Default ] s1 | s1 = bb5 ]
+  | bb5 = s0
+    [ s0 = [ &_ret <- { sector_size = sector_size'0;
+                        ns_id = ns_id'0;
+                        base_lba = self.metadata_base_lba;
+                        alloc = alloc'0 } ] s1
+    | s1 = return {_ret} ] ]
+  [ & _ret: t_EvClient = Any.any_l ()
+  | & self: t_DmaCfg = self
+  | & ns_id'0: UInt32.t = ns_id'0
+  | & sector_size'0: UInt32.t = sector_size'0
+  | & alloc'0: t_AllocSel = Any.any_l ()
+  | & a: UInt64.t = Any.any_l () ])
+  [ return (result: t_EvClient) ->
+  {[@stop_split] [@expl:get_metadata_client ensures] ([@stop_split] [@expl:get_metadata_client ensures #0] [%#sb3] result.alloc
+      = match self.dma_alloc with
+        | Some a -> User a
+        | None -> Default
+        end)
+    /\ ([@stop_split] [@expl:get_metadata_client ensures #1] [%#sb3'0] result.ns_id = ns_id'0
+    /\ result.sector_size = sector_size'0 /\ result.base_lba = self.metadata_base_lba)}
+    (! return {result}) ]

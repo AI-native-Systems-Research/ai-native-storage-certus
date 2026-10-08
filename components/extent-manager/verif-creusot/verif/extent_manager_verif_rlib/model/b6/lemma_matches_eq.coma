@@ -1,0 +1,46 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 605 0 605 98 *)
+
+let%span sb6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 602 11 602 49
+let%span sb6'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 603 10 603 38
+let%span sb6'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 604 10 604 73
+let%span sb6'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 597 16 597 107
+let%span sb6'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 554 16 554 42
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use int.Int
+
+type t_Extent = { key: UInt64.t; size: UInt32.t; offset: UInt64.t }
+
+type tup3_u64_Int_u32 = { f0: UInt64.t; f1: int; f2: UInt32.t }
+
+function tri [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 553 0 553 40] (e: t_Extent) : tup3_u64_Int_u32
+ = [%#sb6'3] { f0 = e.key; f1 = UInt64.t'int e.offset; f2 = e.size }
+
+predicate matches [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 596 0 596 72] (v: Seq.seq t_Extent) (lo: int) (s: Seq.seq tup3_u64_Int_u32) =
+  [%#sb6'2] Seq.length v = lo + Seq.length s
+  /\ (forall q: int. lo <= q /\ q < Seq.length v -> tri (Seq.get v q) = Seq.get s (q - lo))
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant a : Seq.seq t_Extent
+
+constant la : int
+
+constant b : Seq.seq t_Extent
+
+constant lb : int
+
+constant s : Seq.seq tup3_u64_Int_u32
+
+function lemma_matches_eq [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 605 0 605 98] (a: Seq.seq t_Extent) (la: int) (b: Seq.seq t_Extent) (lb: int) (s: Seq.seq tup3_u64_Int_u32) : ()
+
+goal vc_lemma_matches_eq: ([%#sb6] matches a la s /\ matches b lb s)
+  -> ([@stop_split] [@expl:lemma_matches_eq ensures] ([@stop_split] [@expl:lemma_matches_eq ensures #0] [%#sb6'0] Seq.length a
+      - la
+    = Seq.length b - lb)
+  /\ ([@stop_split] [@expl:lemma_matches_eq ensures #1] [%#sb6'1] forall p: int. 0 <= p /\ p < Seq.length s
+    -> Seq.get a (la + p) = Seq.get b (lb + p)))

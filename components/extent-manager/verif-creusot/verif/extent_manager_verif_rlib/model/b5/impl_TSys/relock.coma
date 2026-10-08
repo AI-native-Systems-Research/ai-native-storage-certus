@@ -1,0 +1,93 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 129 4 129 28 *)
+
+(* model::b5::TSys *)
+
+let%span sb5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 132 17 132 22
+let%span sb5'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 124 15 124 66
+let%span sb5'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 125 14 125 74
+let%span sb5'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 126 14 126 78
+let%span sb5'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 127 14 128 89
+
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_TPh = Top | Wait int | WaitInf | Woken bool | Work | Exited
+
+type t_TSys = { interval: t_Option_u64; now: int; ph: t_TPh; shutdown: bool; ckpts: UInt64.t }
+
+let elim_Woken (_x: t_TPh) (return (f0: bool)) = any
+  [ _k (f0: bool) -> {Woken f0 = _x} (! return {f0})
+  | _chk -> (! {[@expl:elim Woken] match _x with
+      | Woken _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+predicate resolve_refmut_TSys [@inline:trivial] (_1: MutBorrow.t t_TSys) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_TSys
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let relock [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 129 4 129 28]
+  (self: MutBorrow.t t_TSys) (return (x: ())) =
+{[@stop_split] [@expl:relock requires] [%#sb5'0] match self.current.ph with
+    | Woken _ -> true
+    | _ -> false
+    end}
+  (! bb0
+  [ bb0 = any
+    [ br0 -> {self.current.ph = Top} (! bb1)
+    | br1 (x0: int) -> {self.current.ph = Wait x0} (! bb1)
+    | br2 -> {self.current.ph = WaitInf} (! bb1)
+    | br3 (x0: bool) -> {self.current.ph = Woken x0} (! bb3)
+    | br4 -> {self.current.ph = Work} (! bb1)
+    | br5 -> {self.current.ph = Exited} (! bb1) ]
+  | bb1 = s0 [ s0 = [ &t <- [%#sb5] false ] s1 | s1 = bb4 ]
+  | bb3 = s0
+    [ s0 = elim_Woken {self.current.ph} (fun (r0: bool) -> [ &t'0 <- r0 ] s1) | s1 = [ &t <- t'0 ] s2 | s2 = bb4 ]
+  | bb4 = any [ br0 -> {self.current.shutdown = false} (! bb6) | br1 -> {self.current.shutdown} (! bb5) ]
+  | bb5 = s0
+    [ s0 = [ &_16 <- Exited ] s1
+    | s1 = [ &self <- { self with current = { self.current with ph = _16 } } ] s2
+    | s2 = -{resolve_refmut_TSys self}- s3
+    | s3 = return {_ret} ]
+  | bb6 = any [ br0 -> {t = false} (! bb8) | br1 -> {t} (! bb7) ]
+  | bb7 = s0
+    [ s0 = [ &_18 <- Work ] s1
+    | s1 = [ &self <- { self with current = { self.current with ph = _18 } } ] s2
+    | s2 = -{resolve_refmut_TSys self}- s3
+    | s3 = return {_ret} ]
+  | bb8 = s0
+    [ s0 = [ &_19 <- Top ] s1
+    | s1 = [ &self <- { self with current = { self.current with ph = _19 } } ] s2
+    | s2 = -{resolve_refmut_TSys self}- s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: () = Any.any_l ()
+  | & self: MutBorrow.t t_TSys = self
+  | & t: bool = Any.any_l ()
+  | & t'0: bool = Any.any_l ()
+  | & _16: t_TPh = Any.any_l ()
+  | & _18: t_TPh = Any.any_l ()
+  | & _19: t_TPh = Any.any_l () ])
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:relock ensures] ([@stop_split] [@expl:relock ensures #0] [%#sb5'1] self.final.interval
+        = self.current.interval
+      /\ self.final.now = self.current.now)
+    /\ ([@stop_split] [@expl:relock ensures #1] [%#sb5'2] self.final.shutdown = self.current.shutdown
+      /\ self.final.ckpts = self.current.ckpts)
+    /\ ([@stop_split] [@expl:relock ensures #2] [%#sb5'3] self.final.ph
+    = (if self.current.shutdown then
+      Exited
+    else
+      match self.current.ph with
+        | Woken t -> if t then Work else Top
+        | p -> p
+        end
+    ))}
+    (! return {result}) ]

@@ -1,0 +1,16 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_refute_em_setint_some_fires": {
+        "prover": "alt-ergo",
+        "time": 0.09
+      },
+      "vc_relock": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_set_interval": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_spurious": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_th_enter": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_tick": { "prover": "alt-ergo", "time": 0.019 }
+    }
+  }
+}

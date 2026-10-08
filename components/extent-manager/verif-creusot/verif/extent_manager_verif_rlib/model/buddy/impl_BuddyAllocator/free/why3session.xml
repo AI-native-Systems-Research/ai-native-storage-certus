@@ -1,0 +1,400 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE why3session PUBLIC "-//Why3//proof session v5//EN"
+"https://www.why3.org/why3session.dtd">
+<why3session shape_version="6">
+<prover id="0" name="Z3" version="4.16.0" timelimit="0.194598" memlimit="1000"/>
+<prover id="1" name="CVC4" version="1.8" timelimit="8" memlimit="1000"/>
+<prover id="2" name="Alt-Ergo" version="2.6.2" timelimit="0.040044" memlimit="1000"/>
+<prover id="3" name="CVC5" version="1.3.1" timelimit="8" memlimit="1000"/>
+<file format="coma">
+<path name=".."/><path name="free.coma"/>
+<theory name="Coma">
+ <goal name="vc_order_for_blocks" proved="true">
+ <proof prover="2" timelimit="0.034683"><result status="valid" time="0.034683" steps="0"/></proof>
+ </goal>
+ <goal name="vc_g_fm_init" proved="true">
+ <proof prover="2" timelimit="0.037713"><result status="valid" time="0.037713" steps="0"/></proof>
+ </goal>
+ <goal name="vc_pow2_u64" proved="true">
+ <proof prover="2" timelimit="0.04172"><result status="valid" time="0.041720" steps="0"/></proof>
+ </goal>
+ <goal name="vc_buddy_xor" proved="true">
+ <proof prover="2" timelimit="0.04172"><result status="valid" time="0.041720" steps="0"/></proof>
+ </goal>
+ <goal name="vc_g_xor" proved="true">
+ <proof prover="2" timelimit="0.041321"><result status="valid" time="0.041321" steps="0"/></proof>
+ </goal>
+ <goal name="vc_index_Vec_Vec_u64_Global_Global" proved="true">
+ <proof prover="2" timelimit="0.039753"><result status="valid" time="0.039753" steps="0"/></proof>
+ </goal>
+ <goal name="vc_find_pos" proved="true">
+ <proof prover="2" timelimit="0.035359"><result status="valid" time="0.035359" steps="0"/></proof>
+ </goal>
+ <goal name="vc_elim_Some" proved="true">
+ <proof prover="2" timelimit="0.035359"><result status="valid" time="0.035359" steps="0"/></proof>
+ </goal>
+ <goal name="vc_index_mut_Vec_Vec_u64_Global_Global" proved="true">
+ <proof prover="2"><result status="valid" time="0.040044" steps="0"/></proof>
+ </goal>
+ <goal name="vc_swap_remove" proved="true">
+ <proof prover="2"><result status="valid" time="0.040044" steps="0"/></proof>
+ </goal>
+ <goal name="vc_g_fm_merge" proved="true">
+ <proof prover="2" timelimit="0.041047"><result status="valid" time="0.041047" steps="0"/></proof>
+ </goal>
+ <goal name="vc_push_u64" proved="true">
+ <proof prover="2" timelimit="0.038894"><result status="valid" time="0.038894" steps="0"/></proof>
+ </goal>
+ <goal name="vc_g_fm_end" proved="true">
+ <proof prover="2" timelimit="0.044454"><result status="valid" time="0.044454" steps="0"/></proof>
+ </goal>
+ <goal name="vc_free">
+ <transf name="compute_specified" >
+  <goal name="vc_free.0">
+  <transf name="split_vc" >
+   <goal name="vc_free.0.0" expl="integer overflow" proved="true">
+   <proof prover="0"><result status="valid" time="0.194598" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.1" expl="division by zero" proved="true">
+   <proof prover="3" timelimit="0.077262"><result status="valid" time="0.077262" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.2" expl="division by zero" proved="true">
+   <proof prover="0" timelimit="0.148712"><result status="valid" time="0.148712" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.3" expl="loop invariant #0" proved="true">
+   <proof prover="3" timelimit="0.111506"><result status="valid" time="0.111506" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.4" expl="loop invariant #1" proved="true">
+   <proof prover="3" timelimit="0.103074"><result status="valid" time="0.103074" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.5" expl="loop invariant #2" proved="true">
+   <proof prover="2" timelimit="0.031762"><result status="valid" time="0.031762" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.6" expl="loop invariant #7" proved="true">
+   <proof prover="3" timelimit="0.062696"><result status="valid" time="0.062696" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.7" expl="loop invariant #13" proved="true">
+   <proof prover="2" timelimit="0.035039"><result status="valid" time="0.035039" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.8" expl="loop invariant #15" proved="true">
+   <proof prover="2" timelimit="0.025383"><result status="valid" time="0.025383" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.9" expl="assertion" proved="true">
+   <proof prover="0" timelimit="0.155889"><result status="valid" time="0.155889" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.10" expl="assertion" proved="true">
+   <proof prover="0" timelimit="0.13558"><result status="valid" time="0.135580" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.11" expl="assertion" proved="true">
+   <proof prover="3" timelimit="0.106532"><result status="valid" time="0.106532" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.12" expl="pow2_u64 requires" proved="true">
+   <proof prover="3" timelimit="0.144472"><result status="valid" time="0.144472" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.13" expl="integer overflow" proved="true">
+   <proof prover="2" timelimit="0.315617"><result status="valid" time="0.315617" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.14" expl="assertion" proved="true">
+   <proof prover="2" timelimit="0.327199"><result status="valid" time="0.327199" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.15" expl="buddy_xor requires" proved="true">
+   <proof prover="3" timelimit="0.18351"><result status="valid" time="0.183510" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.16" expl="g_xor requires" proved="true">
+   <proof prover="3" timelimit="0.11924"><result status="valid" time="0.119240" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.17" expl="integer overflow" proved="true">
+   <proof prover="3" timelimit="0.172203"><result status="valid" time="0.172203" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.18" expl="index requires" proved="true">
+   <proof prover="3" timelimit="0.119873"><result status="valid" time="0.119873" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.19" expl="assertion" proved="true">
+   <proof prover="3" timelimit="0.158514"><result status="valid" time="0.158514" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.20" expl="assertion" proved="true">
+   <proof prover="3" timelimit="0.170227"><result status="valid" time="0.170227" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.21" expl="assertion" proved="true">
+   <proof prover="3" timelimit="0.1341"><result status="valid" time="0.134100" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.22" expl="assertion" proved="true">
+   <proof prover="0" timelimit="0.144472"><result status="valid" time="0.144472" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.23" expl="assertion" proved="true">
+   <proof prover="2" timelimit="0.039449"><result status="valid" time="0.039449" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.24" expl="assertion" proved="true">
+   <proof prover="3" timelimit="2.64261"><result status="valid" time="2.642609" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.25" expl="assertion" proved="true">
+   <proof prover="3" timelimit="0.146826"><result status="valid" time="0.146826" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.26" expl="assertion" proved="true">
+   <proof prover="3" timelimit="0.167704"><result status="valid" time="0.167704" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.27" expl="assertion" proved="true">
+   <proof prover="3" timelimit="0.165508"><result status="valid" time="0.165508" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.28" expl="index_mut requires" proved="true">
+   <proof prover="3" timelimit="0.119506"><result status="valid" time="0.119506" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.29" expl="swap_remove requires" proved="true">
+   <proof prover="0" timelimit="0.125619"><result status="valid" time="0.125619" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.30" expl="assertion" proved="true">
+   <proof prover="3" timelimit="0.149732"><result status="valid" time="0.149732" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.31" expl="assertion" proved="true">
+   <proof prover="3" timelimit="0.187688"><result status="valid" time="0.187688" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.32" expl="assertion" proved="true">
+   <proof prover="0" timelimit="0.150979"><result status="valid" time="0.150979" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.33" expl="assertion" proved="true">
+   <proof prover="3" timelimit="1.80661"><result status="valid" time="1.806606" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.34" expl="assertion" proved="true">
+   <proof prover="2" timelimit="0.047396"><result status="valid" time="0.047396" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.35" expl="assertion" proved="true">
+   <proof prover="3" timelimit="0.260831"><result status="valid" time="0.260831" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.36" expl="assertion" proved="true">
+   <proof prover="3" timelimit="0.563902"><result status="valid" time="0.563902" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.37" expl="assertion" proved="true">
+   <proof prover="3" timelimit="0.375867"><result status="valid" time="0.375867" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.38" expl="assertion" proved="true">
+   <proof prover="3" timelimit="0.359494"><result status="valid" time="0.359494" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.39" expl="assertion" proved="true">
+   <proof prover="2" timelimit="0.070815"><result status="valid" time="0.070815" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.40" expl="assertion" proved="true">
+   <proof prover="3" timelimit="0.176003"><result status="valid" time="0.176003" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.41" expl="assertion" proved="true">
+   <proof prover="0" timelimit="0.161945"><result status="valid" time="0.161945" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.42" expl="assertion" proved="true">
+   <proof prover="3" timelimit="2.82881"><result status="valid" time="2.828806" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.43" expl="assertion" proved="true">
+   <proof prover="1" timelimit="2.10112"><result status="valid" time="2.101118" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.44" expl="elim Some" proved="true">
+   <proof prover="0" timelimit="0.010873"><result status="valid" time="0.010873" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.45" expl="assertion" proved="true">
+   <proof prover="3" timelimit="0.123585"><result status="valid" time="0.123585" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.46" expl="assertion" proved="true">
+   <proof prover="3" timelimit="0.315482"><result status="valid" time="0.315482" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.47" expl="g_fm_merge requires" proved="true">
+   <proof prover="3" timelimit="0.100495"><result status="valid" time="0.100495" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.48" expl="assertion" proved="true">
+   <proof prover="2" timelimit="0.073735"><result status="valid" time="0.073735" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.49" expl="assertion" proved="true">
+   <proof prover="2" timelimit="0.107101"><result status="valid" time="0.107101" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.50" expl="assertion" proved="true">
+   <proof prover="3" timelimit="0.124088"><result status="valid" time="0.124088" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.51" expl="assertion" proved="true">
+   <proof prover="1" timelimit="0.147764"><result status="valid" time="0.147764" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.52" expl="integer overflow" proved="true">
+   <proof prover="0" timelimit="0.171816"><result status="valid" time="0.171816" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.53" expl="inferred invariant: unchanged value" proved="true">
+   <proof prover="2" timelimit="0.090189"><result status="valid" time="0.090189" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.54" expl="inferred invariant: unchanged value" proved="true">
+   <proof prover="2" timelimit="0.088878"><result status="valid" time="0.088878" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.55" expl="inferred invariant: unchanged value" proved="true">
+   <proof prover="2" timelimit="0.092407"><result status="valid" time="0.092407" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.56" expl="inferred invariant: unchanged value" proved="true">
+   <proof prover="2" timelimit="0.111575"><result status="valid" time="0.111575" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.57" expl="inferred invariant: unchanged value" proved="true">
+   <proof prover="2" timelimit="0.09242"><result status="valid" time="0.092420" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.58" expl="loop invariant #0" proved="true">
+   <proof prover="2" timelimit="0.069797"><result status="valid" time="0.069797" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.59" expl="loop invariant #1">
+   <proof prover="0" timelimit="3.12361"><result status="unknown" time="3.123606" steps="0"/></proof>
+   <proof prover="1" timelimit="4"><result status="timeout" time="4.000000" steps="0"/></proof>
+   <proof prover="2" timelimit="4"><result status="timeout" time="4.000000" steps="0"/></proof>
+   <proof prover="3" timelimit="4"><result status="timeout" time="4.000000" steps="0"/></proof>
+   <transf name="split_vc" >
+    <goal name="vc_free.0.59.0" expl="loop invariant #1">
+    <proof prover="0" timelimit="3.23647"><result status="unknown" time="3.236470" steps="0"/></proof>
+    <proof prover="1"><result status="timeout" time="8.000000" steps="0"/></proof>
+    <proof prover="2" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+    <proof prover="3"><result status="timeout" time="8.000000" steps="0"/></proof>
+    </goal>
+    <goal name="vc_free.0.59.1" expl="loop invariant #1">
+    <proof prover="0" timelimit="2.88929"><result status="unknown" time="2.889287" steps="0"/></proof>
+    <proof prover="1"><result status="timeout" time="8.000000" steps="0"/></proof>
+    <proof prover="2" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+    <proof prover="3"><result status="timeout" time="8.000000" steps="0"/></proof>
+    </goal>
+   </transf>
+   </goal>
+   <goal name="vc_free.0.60" expl="loop invariant #2" proved="true">
+   <proof prover="2" timelimit="0.103102"><result status="valid" time="0.103102" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.61" expl="loop invariant #3" proved="true">
+   <proof prover="2" timelimit="0.104731"><result status="valid" time="0.104731" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.62" expl="loop invariant #4" proved="true">
+   <proof prover="2" timelimit="0.099331"><result status="valid" time="0.099331" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.63" expl="loop invariant #5" proved="true">
+   <proof prover="2" timelimit="0.073494"><result status="valid" time="0.073494" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.64" expl="loop invariant #6" proved="true">
+   <proof prover="2" timelimit="0.100537"><result status="valid" time="0.100537" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.65" expl="loop invariant #7" proved="true">
+   <proof prover="2" timelimit="0.112261"><result status="valid" time="0.112261" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.66" expl="loop invariant #8" proved="true">
+   <proof prover="2" timelimit="0.124245"><result status="valid" time="0.124245" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.67" expl="loop invariant #9" proved="true">
+   <proof prover="2" timelimit="0.135824"><result status="valid" time="0.135824" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.68" expl="loop invariant #10" proved="true">
+   <proof prover="2" timelimit="0.099859"><result status="valid" time="0.099859" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.69" expl="loop invariant #11" proved="true">
+   <proof prover="2" timelimit="0.122241"><result status="valid" time="0.122241" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.70" expl="loop invariant #12" proved="true">
+   <proof prover="3" timelimit="0.166008"><result status="valid" time="0.166008" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.71" expl="loop invariant #13" proved="true">
+   <proof prover="3" timelimit="0.124039"><result status="valid" time="0.124039" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.72" expl="loop invariant #14" proved="true">
+   <proof prover="2" timelimit="0.140481"><result status="valid" time="0.140481" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.73" expl="loop invariant #15" proved="true">
+   <proof prover="3" timelimit="0.191646"><result status="valid" time="0.191646" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.74" expl="assertion" proved="true">
+   <proof prover="3" timelimit="0.187146"><result status="valid" time="0.187146" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.75" expl="assertion" proved="true">
+   <proof prover="1" timelimit="0.598583"><result status="valid" time="0.598583" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.76" expl="index_mut requires" proved="true">
+   <proof prover="3" timelimit="0.186918"><result status="valid" time="0.186918" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.77" expl="assertion" proved="true">
+   <proof prover="3" timelimit="0.185426"><result status="valid" time="0.185426" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.78" expl="assertion" proved="true">
+   <proof prover="3" timelimit="0.160581"><result status="valid" time="0.160581" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.79" expl="assertion" proved="true">
+   <proof prover="3" timelimit="0.183478"><result status="valid" time="0.183478" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.80" expl="g_fm_end requires" proved="true">
+   <proof prover="3" timelimit="0.211006"><result status="valid" time="0.211006" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.81" expl="assertion" proved="true">
+   <proof prover="3" timelimit="1.23287"><result status="valid" time="1.232870" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.82" expl="assertion" proved="true">
+   <proof prover="3" timelimit="0.095936"><result status="valid" time="0.095936" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.83" expl="assertion" proved="true">
+   <proof prover="1" timelimit="0.385225"><result status="valid" time="0.385225" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.84" expl="assertion" proved="true">
+   <proof prover="3" timelimit="0.072303"><result status="valid" time="0.072303" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.85" expl="assertion" proved="true">
+   <proof prover="3" timelimit="0.502325"><result status="valid" time="0.502325" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.86" expl="assertion" proved="true">
+   <proof prover="3" timelimit="0.290613"><result status="valid" time="0.290613" steps="0"/></proof>
+   </goal>
+   <goal name="vc_free.0.87" expl="free ensures" proved="true">
+   <transf name="split_vc" proved="true" >
+    <goal name="vc_free.0.87.0" expl="free ensures #0 (free ensures)" proved="true">
+    <proof prover="1" timelimit="0.171571"><result status="valid" time="0.171571" steps="0"/></proof>
+    </goal>
+    <goal name="vc_free.0.87.1" expl="free ensures #1 (free ensures)" proved="true">
+    <proof prover="3" timelimit="2.41216"><result status="valid" time="2.412157" steps="0"/></proof>
+    </goal>
+    <goal name="vc_free.0.87.2" expl="free ensures #2 (free ensures)" proved="true">
+    <proof prover="1" timelimit="3.53187"><result status="valid" time="3.531869" steps="0"/></proof>
+    </goal>
+    <goal name="vc_free.0.87.3" expl="free ensures #3 (free ensures)" proved="true">
+    <transf name="split_vc" proved="true" >
+     <goal name="vc_free.0.87.3.0" expl="free ensures #3 (free ensures)" proved="true">
+     <proof prover="1" timelimit="4.98437"><result status="valid" time="4.984373" steps="0"/></proof>
+     </goal>
+     <goal name="vc_free.0.87.3.1" expl="free ensures #3 (free ensures)" proved="true">
+     <transf name="split_vc" proved="true" >
+      <goal name="vc_free.0.87.3.1.0" expl="free ensures #3 (free ensures)" proved="true">
+      <proof prover="1" timelimit="6.69245"><result status="valid" time="6.692453" steps="0"/></proof>
+      </goal>
+      <goal name="vc_free.0.87.3.1.1" expl="free ensures #3 (free ensures)" proved="true">
+      <transf name="split_vc" proved="true" >
+       <goal name="vc_free.0.87.3.1.1.0" expl="free ensures #3 (free ensures)" proved="true">
+       <proof prover="1" timelimit="7.33567"><result status="valid" time="7.335669" steps="0"/></proof>
+       </goal>
+      </transf>
+      </goal>
+     </transf>
+     </goal>
+    </transf>
+    </goal>
+    <goal name="vc_free.0.87.4" expl="free ensures #4 (free ensures)" proved="true">
+    <proof prover="3" timelimit="0.057678"><result status="valid" time="0.057678" steps="0"/></proof>
+    </goal>
+    <goal name="vc_free.0.87.5" expl="free ensures #5 (free ensures)" proved="true">
+    <proof prover="3" timelimit="0.056077"><result status="valid" time="0.056077" steps="0"/></proof>
+    </goal>
+    <goal name="vc_free.0.87.6" expl="free ensures #6 (free ensures)" proved="true">
+    <proof prover="3" timelimit="0.043082"><result status="valid" time="0.043082" steps="0"/></proof>
+    </goal>
+    <goal name="vc_free.0.87.7" expl="free ensures #7 (free ensures)" proved="true">
+    <proof prover="1" timelimit="0.487468"><result status="valid" time="0.487468" steps="0"/></proof>
+    </goal>
+    <goal name="vc_free.0.87.8" expl="free ensures #8 (free ensures)" proved="true">
+    <proof prover="3" timelimit="0.098329"><result status="valid" time="0.098329" steps="0"/></proof>
+    </goal>
+    <goal name="vc_free.0.87.9" expl="free ensures #9 (free ensures)" proved="true">
+    <proof prover="1" timelimit="0.157683"><result status="valid" time="0.157683" steps="0"/></proof>
+    </goal>
+    <goal name="vc_free.0.87.10" expl="free ensures #10 (free ensures)" proved="true">
+    <proof prover="3" timelimit="0.324393"><result status="valid" time="0.324393" steps="0"/></proof>
+    </goal>
+    <goal name="vc_free.0.87.11" expl="free ensures #11 (free ensures)" proved="true">
+    <proof prover="3" timelimit="1.42674"><result status="valid" time="1.426737" steps="0"/></proof>
+    </goal>
+    <goal name="vc_free.0.87.12" expl="free ensures #12 (free ensures)" proved="true">
+    <proof prover="1" timelimit="0.398631"><result status="valid" time="0.398631" steps="0"/></proof>
+    </goal>
+   </transf>
+   </goal>
+  </transf>
+  </goal>
+ </transf>
+ </goal>
+</theory>
+</file>
+</why3session>

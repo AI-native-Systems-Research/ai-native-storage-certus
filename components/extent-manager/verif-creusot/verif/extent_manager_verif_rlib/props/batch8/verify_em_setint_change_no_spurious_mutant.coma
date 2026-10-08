@@ -1,0 +1,151 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 1113 0 1113 81 *)
+
+let%span sb5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 108 14 108 63
+let%span sb5'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 109 14 109 78
+let%span sb5'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 110 14 110 122
+let%span sb5'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 124 15 124 66
+let%span sb5'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 125 14 125 74
+let%span sb5'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 126 14 126 78
+let%span sb5'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 127 14 128 89
+let%span sb5'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 59 15 59 34
+let%span sb5'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 60 14 60 74
+let%span sb5'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 61 14 61 78
+let%span sb5'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 62 14 62 57
+let%span sb5'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 63 14 66 5
+let%span sbatch8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 1117 13 1117 18
+let%span sbatch8'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 1116 24 1116 28
+let%span sbatch8'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 1115 24 1115 28
+let%span sbatch8'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 1119 4 1119 22
+let%span sbatch8'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 1121 8 1121 18
+let%span sbatch8'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 1122 8 1122 20
+let%span sbatch8'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 1111 11 1111 22
+let%span sbatch8'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 1112 10 1112 56
+let%span sbatch8'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 1078 16 1078 82
+
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_TPh = Top | Wait int | WaitInf | Woken bool | Work | Exited
+
+type t_TSys = { interval: t_Option_u64; now: int; ph: t_TPh; shutdown: bool; ckpts: UInt64.t }
+
+let set_interval (self: MutBorrow.t t_TSys) (iv: t_Option_u64) (return (x: ())) = any
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:set_interval ensures] ([@stop_split] [@expl:set_interval ensures #0] [%#sb5] self.final.interval
+        = iv
+      /\ self.final.now = self.current.now)
+    /\ ([@stop_split] [@expl:set_interval ensures #1] [%#sb5'0] self.final.shutdown = self.current.shutdown
+      /\ self.final.ckpts = self.current.ckpts)
+    /\ ([@stop_split] [@expl:set_interval ensures #2] [%#sb5'1] self.final.ph
+    = match self.current.ph with
+      | Wait _ -> Woken false
+      | WaitInf -> Woken false
+      | p -> p
+      end)}
+    (! return {result}) ]
+
+let relock (self: MutBorrow.t t_TSys) (return (x: ())) =
+{[@stop_split] [@expl:relock requires] [%#sb5'2] match self.current.ph with
+    | Woken _ -> true
+    | _ -> false
+    end}
+  any
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:relock ensures] ([@stop_split] [@expl:relock ensures #0] [%#sb5'3] self.final.interval
+        = self.current.interval
+      /\ self.final.now = self.current.now)
+    /\ ([@stop_split] [@expl:relock ensures #1] [%#sb5'4] self.final.shutdown = self.current.shutdown
+      /\ self.final.ckpts = self.current.ckpts)
+    /\ ([@stop_split] [@expl:relock ensures #2] [%#sb5'5] self.final.ph
+    = (if self.current.shutdown then
+      Exited
+    else
+      match self.current.ph with
+        | Woken t -> if t then Work else Top
+        | p -> p
+        end
+    ))}
+    (! return {result}) ]
+
+let th_enter (self: MutBorrow.t t_TSys) (return (x: ())) =
+{[@stop_split] [@expl:th_enter requires] [%#sb5'6] self.current.ph = Top}
+  any
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:th_enter ensures] ([@stop_split] [@expl:th_enter ensures #0] [%#sb5'7] self.final.interval
+        = self.current.interval
+      /\ self.final.now = self.current.now)
+    /\ ([@stop_split] [@expl:th_enter ensures #1] [%#sb5'8] self.final.shutdown = self.current.shutdown
+      /\ self.final.ckpts = self.current.ckpts)
+    /\ ([@stop_split] [@expl:th_enter ensures #2] [%#sb5'9] self.current.shutdown -> self.final.ph = Exited)
+    /\ ([@stop_split] [@expl:th_enter ensures #3] [%#sb5'10] not self.current.shutdown
+    -> match self.current.interval with
+      | Some d -> match self.final.ph with
+        | Wait dl -> dl = self.current.now + UInt64.t'int d
+        | _ -> false
+        end
+      | None -> self.final.ph = WaitInf
+      end)}
+    (! return {result}) ]
+
+predicate resolve_refmut_TSys [@inline:trivial] (_1: MutBorrow.t t_TSys) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_TSys
+
+predicate blocked8 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 1077 0 1077 31] (p: t_TPh) =
+  [%#sbatch8'7] match p with
+    | Wait _ -> true
+    | WaitInf -> true
+    | _ -> false
+    end
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_em_setint_change_no_spurious__mutant [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 1113 0 1113 81]
+  (t: MutBorrow.t t_TSys) (iv: t_Option_u64) (return (x: ())) =
+{[@stop_split] [@expl:verify_em_setint_change_no_spurious__mutant requires] [%#sbatch8'5] not t.current.shutdown}
+  (! bb0
+  [ bb0 = any
+    [ br0 -> {t.current.ph = Top} (! bb1)
+    | br1 (x0: int) -> {t.current.ph = Wait x0} (! bb5)
+    | br2 -> {t.current.ph = WaitInf} (! bb4)
+    | br3 (x0: bool) -> {t.current.ph = Woken x0} (! bb1)
+    | br4 -> {t.current.ph = Work} (! bb1)
+    | br5 -> {t.current.ph = Exited} (! bb1) ]
+  | bb1 = s0 [ s0 = [ &was_blocked <- [%#sbatch8] false ] s1 | s1 = bb6 ]
+  | bb4 = s0 [ s0 = [ &was_blocked <- [%#sbatch8'0] true ] s1 | s1 = bb6 ]
+  | bb5 = s0 [ s0 = [ &was_blocked <- [%#sbatch8'1] true ] s1 | s1 = bb6 ]
+  | bb6 = s0
+    [ s0 = MutBorrow.borrow_mut <t_TSys> {t.current}
+        (fun (_bor: MutBorrow.t t_TSys) -> [ &_10 <- _bor ] [ &t <- { t with current = _bor.final } ] s1)
+    | s1 = set_interval [%#sbatch8'2] {_10} {iv} (fun (_x: ()) -> [ &_9 <- _x ] s2)
+    | s2 = any [ br0 -> {was_blocked = false} (! bb11) | br1 -> {was_blocked} (! bb8) ] ]
+  | bb8 = s0
+    [ s0 = MutBorrow.borrow_mut <t_TSys> {t.current}
+        (fun (_bor: MutBorrow.t t_TSys) -> [ &_14 <- _bor ] [ &t <- { t with current = _bor.final } ] s1)
+    | s1 = relock [%#sbatch8'3] {_14} (fun (_x: ()) -> [ &_13 <- _x ] s2)
+    | s2 = MutBorrow.borrow_final <t_TSys> {t.current} {MutBorrow.get_id t}
+        (fun (_bor: MutBorrow.t t_TSys) -> [ &_16 <- _bor ] [ &t <- { t with current = _bor.final } ] s3)
+    | s3 = th_enter [%#sbatch8'4] {_16} (fun (_x: ()) -> [ &_15 <- _x ] s4)
+    | s4 = -{resolve_refmut_TSys t}- s5
+    | s5 = return {_ret} ]
+  | bb11 = s0 [ s0 = -{resolve_refmut_TSys t}- s1 | s1 = return {_ret} ] ]
+  [ & _ret: () = Any.any_l ()
+  | & t: MutBorrow.t t_TSys = t
+  | & iv: t_Option_u64 = iv
+  | & was_blocked: bool = Any.any_l ()
+  | & _9: () = Any.any_l ()
+  | & _10: MutBorrow.t t_TSys = Any.any_l ()
+  | & _13: () = Any.any_l ()
+  | & _14: MutBorrow.t t_TSys = Any.any_l ()
+  | & _15: () = Any.any_l ()
+  | & _16: MutBorrow.t t_TSys = Any.any_l () ])
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:verify_em_setint_change_no_spurious__mutant ensures] [%#sbatch8'6] blocked8 t.current.ph
+    -> UInt64.t'int t.final.ckpts = UInt64.t'int t.current.ckpts + 1}
+    (! return {result}) ]

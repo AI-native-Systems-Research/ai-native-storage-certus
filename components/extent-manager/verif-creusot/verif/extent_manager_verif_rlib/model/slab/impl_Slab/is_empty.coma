@@ -1,0 +1,40 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 211 4 211 34 *)
+
+(* model::slab::Slab *)
+
+let%span sbitmap = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 229 14 229 52
+let%span sslab = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 212 8 212 33
+let%span sslab'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 210 14 210 59
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_Vec_u64_Global
+
+type t_AllocationBitmap = { words: t_Vec_u64_Global; num_slots: UInt32.t; allocated_count: UInt32.t }
+
+type t_Slab = {
+  start_offset: UInt64.t;
+  slab_size: UInt64.t;
+  element_size: UInt32.t;
+  bitmap: t_AllocationBitmap;
+  keys: t_Vec_u64_Global;
+  rover: UInt64.t }
+
+let is_all_free (self: t_AllocationBitmap) (return (x: bool)) = any
+  [ return (result: bool) -> {[@stop_split] [@expl:is_all_free ensures] [%#sbitmap] result
+    = (UInt32.t'int self.allocated_count = 0)}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let is_empty [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 211 4 211 34]
+  (self: t_Slab) (return (x: bool)) = (! bb0
+  [ bb0 = s0 [ s0 = is_all_free [%#sslab] {self.bitmap} (fun (_x: bool) -> [ &_ret <- _x ] s1) | s1 = return {_ret} ] ]
+  [ & _ret: bool = Any.any_l () | & self: t_Slab = self ])
+  [ return (result: bool) -> {[@stop_split] [@expl:is_empty ensures] [%#sslab'0] result
+    = (UInt32.t'int self.bitmap.allocated_count = 0)}
+    (! return {result}) ]

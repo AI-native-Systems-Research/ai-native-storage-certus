@@ -1,0 +1,65 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 72 0 72 40 *)
+
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 69 11 69 27
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 70 10 70 39
+let%span sbuddy'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 71 10 71 65
+let%span sbuddy'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 56 11 56 27
+let%span sbuddy'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 58 10 58 30
+let%span sbuddy'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 57 10 57 15
+let%span sbuddy'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 60 4 60 17
+let%span sbuddy'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 45 10 45 11
+let%span sbuddy'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 46 11 46 17
+let%span sbuddy'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 47 10 47 23
+let%span sbuddy'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 48 10 48 40
+let%span sbuddy'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 50 4 52 5
+
+use bv.Pow2int
+use int.Int
+
+function lemma_pow2 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 49 0 49 25] (o: int) : ()
+
+axiom lemma_pow2_def: forall o: int [lemma_pow2 o]. ([%#sbuddy'7] 0 <= o)
+    -> lemma_pow2 o = ([%#sbuddy'10] if o > 0 then lemma_pow2 (o - 1) else ())
+
+axiom lemma_pow2_spec: forall o: int. ([%#sbuddy'7] 0 <= o) -> ([%#sbuddy'8] Pow2int.pow2 o >= 1)
+
+axiom lemma_pow2_spec'0: forall o: int. ([%#sbuddy'7] 0 <= o)
+    -> ([%#sbuddy'9] Pow2int.pow2 (o + 1) = 2 * Pow2int.pow2 o)
+
+function lemma_pow2_mono [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 59 0 59 38] (a: int) (b: int) : ()
+
+axiom lemma_pow2_mono_def: forall a: int, b: int [lemma_pow2_mono a b]. ([%#sbuddy'2] 0 <= a /\ a <= b)
+    -> lemma_pow2_mono a b
+    = ([%#sbuddy'5] let _ = lemma_pow2 a in if a < b then
+      let _ = lemma_pow2 (b - 1) in lemma_pow2_mono a (b - 1)
+    else
+      ()
+    )
+
+axiom lemma_pow2_mono_spec: forall a: int, b: int. ([%#sbuddy'2] 0 <= a /\ a <= b)
+    -> ([%#sbuddy'3] Pow2int.pow2 a <= Pow2int.pow2 b)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant a : int
+
+constant b : int
+
+function lemma_pow2_strict [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 72 0 72 40] (a: int) (b: int) : ()
+
+goal vc_lemma_pow2_strict: ([%#sbuddy] 0 <= a /\ 0 <= b)
+  -> (if b <= a then
+    ([@stop_split] [@expl:lemma_pow2_mono requires] [%#sbuddy'2] 0 <= b /\ b <= a)
+    /\ (([@stop_split] [@expl:lemma_pow2_mono ensures] [%#sbuddy'3] Pow2int.pow2 b <= Pow2int.pow2 a)
+    -> ([@stop_split] [@expl:lemma_pow2_strict ensures] ([@stop_split] [@expl:lemma_pow2_strict ensures #0] [%#sbuddy'0] Pow2int.pow2 a
+        < Pow2int.pow2 b -> a < b)
+    /\ ([@stop_split] [@expl:lemma_pow2_strict ensures #1] [%#sbuddy'1] Pow2int.pow2 a <= Pow2int.pow2 b
+    -> a <= b \/ Pow2int.pow2 a = Pow2int.pow2 b)))
+  else
+    [@stop_split] [@expl:lemma_pow2_strict ensures] ([@stop_split] [@expl:lemma_pow2_strict ensures #0] [%#sbuddy'0] Pow2int.pow2 a
+        < Pow2int.pow2 b -> a < b)
+    /\ ([@stop_split] [@expl:lemma_pow2_strict ensures #1] [%#sbuddy'1] Pow2int.pow2 a <= Pow2int.pow2 b
+    -> a <= b \/ Pow2int.pow2 a = Pow2int.pow2 b)
+  )

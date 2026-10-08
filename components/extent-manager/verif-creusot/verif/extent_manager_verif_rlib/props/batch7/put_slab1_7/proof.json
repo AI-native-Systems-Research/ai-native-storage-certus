@@ -1,0 +1,10 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_put32": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_put64": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_put_slab1_7": { "prover": "alt-ergo", "time": 0.097 }
+    }
+  }
+}

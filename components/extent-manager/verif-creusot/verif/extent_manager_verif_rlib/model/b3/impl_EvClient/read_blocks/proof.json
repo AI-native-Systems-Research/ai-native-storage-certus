@@ -1,0 +1,16 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_alloc_buffer": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_chan_recv": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_chan_send": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_elim_Ok": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_elim_Ok'0": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_elim_ReadDone": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_io_error": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_nvme_to_em": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_read_blocks": { "prover": "z3", "time": 1.4 }
+    }
+  }
+}

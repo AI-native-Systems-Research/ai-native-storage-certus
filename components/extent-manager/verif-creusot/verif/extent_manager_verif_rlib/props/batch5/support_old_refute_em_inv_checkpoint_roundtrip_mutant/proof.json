@@ -1,0 +1,25 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_serialize_region": { "prover": "alt-ergo", "time": 0.042 },
+      "vc_support_old_refute_em_inv_checkpoint_roundtrip__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.049 },
+              { "prover": "alt-ergo", "time": 0.062 },
+              {
+                "tactic": "split_vc",
+                "children": [ { "prover": "alt-ergo", "time": 0.037 }, null ]
+              }
+            ]
+          }
+        ]
+      },
+      "vc_w5_kvl": { "prover": "alt-ergo", "time": 0.044 }
+    }
+  }
+}

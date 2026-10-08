@@ -1,0 +1,25 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_new": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_support_old_refute_em_buddy_mark_allocated__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.036 },
+              { "prover": "alt-ergo", "time": 0.025 },
+              { "prover": "cvc4", "time": 0.158 },
+              { "prover": "alt-ergo", "time": 0.112 },
+              { "prover": "alt-ergo", "time": 0.132 },
+              null
+            ]
+          }
+        ]
+      },
+      "vc_w1_recovered": { "prover": "alt-ergo", "time": 0.043 }
+    }
+  }
+}

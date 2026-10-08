@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_lemma_span_mono": { "prover": "z3", "time": 0.006 } }
+  }
+}

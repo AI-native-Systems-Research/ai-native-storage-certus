@@ -1,0 +1,22 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_format6": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_verify_em_format_err_device_query__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "z3", "time": 0.017 },
+              null,
+              { "prover": "alt-ergo", "time": 0.023 },
+              { "prover": "alt-ergo", "time": 0.02 }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

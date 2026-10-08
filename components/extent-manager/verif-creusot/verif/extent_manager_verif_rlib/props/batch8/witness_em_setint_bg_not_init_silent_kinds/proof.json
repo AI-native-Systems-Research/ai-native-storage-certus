@@ -1,0 +1,14 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_bg_log8": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_elim_Err": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_run_ck_front8": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_witness_em_setint_bg_not_init_silent_kinds": {
+        "prover": "alt-ergo",
+        "time": 0.04
+      }
+    }
+  }
+}

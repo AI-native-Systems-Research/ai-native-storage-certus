@@ -1,0 +1,1784 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 976 4 976 64 *)
+
+(* model::buddy::BuddyAllocator *)
+
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span svec'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 193 19 193 38
+let%span svec'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 194 18 194 46
+let%span svec'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 183 19 183 38
+let%span svec'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 184 18 184 46
+let%span svec'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 185 18 185 49
+let%span svec'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 186 18 186 54
+let%span svec'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 187 18 187 47
+let%span svec'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 116 18 116 48
+let%span sslice = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/slice.rs" 148 20 148 37
+let%span sslice'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/slice.rs" 153 20 153 37
+let%span sslice'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/slice.rs" 158 20 158 88
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 978 21 978 50
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 979 21 979 30
+let%span sbuddy'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 980 27 980 51
+let%span sbuddy'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 981 29 981 82
+let%span sbuddy'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 982 29 982 34
+let%span sbuddy'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 983 24 983 145
+let%span sbuddy'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 984 24 984 94
+let%span sbuddy'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 986 52 986 66
+let%span sbuddy'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 986 27 986 75
+let%span sbuddy'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1014 31 1014 36
+let%span sbuddy'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1015 24 1015 145
+let%span sbuddy'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1016 24 1016 103
+let%span sbuddy'11 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1017 24 1017 68
+let%span sbuddy'12 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1018 24 1018 134
+let%span sbuddy'13 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1019 46 1019 47
+let%span sbuddy'14 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1019 31 1019 47
+let%span sbuddy'15 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1026 20 1027 94
+let%span sbuddy'16 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1025 20 1025 117
+let%span sbuddy'17 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1022 20 1024 132
+let%span sbuddy'18 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1021 20 1021 34
+let%span sbuddy'19 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1020 20 1020 54
+let%span sbuddy'20 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1029 28 1029 62
+let%span sbuddy'21 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1030 28 1030 48
+let%span sbuddy'22 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1031 28 1031 81
+let%span sbuddy'23 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1032 28 1032 80
+let%span sbuddy'24 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1033 28 1033 81
+let%span sbuddy'25 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1034 29 1034 51
+let%span sbuddy'26 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1034 29 1034 56
+let%span sbuddy'27 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1035 28 1035 67
+let%span sbuddy'28 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1036 32 1036 61
+let%span sbuddy'29 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1037 28 1037 96
+let%span sbuddy'30 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1038 66 1038 69
+let%span sbuddy'31 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1038 85 1038 98
+let%span sbuddy'32 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1038 12 1038 101
+let%span sbuddy'33 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1039 28 1039 43
+let%span sbuddy'34 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1041 56 1041 70
+let%span sbuddy'35 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1041 31 1041 86
+let%span sbuddy'36 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1183 28 1183 125
+let%span sbuddy'37 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1184 28 1185 78
+let%span sbuddy'38 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1186 28 1188 132
+let%span sbuddy'39 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1189 28 1189 156
+let%span sbuddy'40 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1190 28 1190 140
+let%span sbuddy'41 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1191 28 1191 29
+let%span sbuddy'42 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1191 12 1191 29
+let%span sbuddy'43 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1042 32 1042 105
+let%span sbuddy'44 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1043 32 1043 91
+let%span sbuddy'45 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1044 32 1046 101
+let%span sbuddy'46 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1047 32 1047 78
+let%span sbuddy'47 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1048 32 1048 100
+let%span sbuddy'48 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1049 41 1049 56
+let%span sbuddy'49 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1050 48 1050 62
+let%span sbuddy'50 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1050 16 1050 68
+let%span sbuddy'51 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1051 32 1051 134
+let%span sbuddy'52 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1052 32 1053 111
+let%span sbuddy'53 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1054 32 1055 134
+let%span sbuddy'54 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1056 32 1056 69
+let%span sbuddy'55 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1057 32 1057 86
+let%span sbuddy'56 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1058 32 1058 93
+let%span sbuddy'57 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1059 32 1059 108
+let%span sbuddy'58 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1060 32 1060 117
+let%span sbuddy'59 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1062 32 1062 58
+let%span sbuddy'60 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1063 32 1063 163
+let%span sbuddy'61 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1064 38 1064 45
+let%span sbuddy'62 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1064 61 1064 77
+let%span sbuddy'63 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1064 93 1064 96
+let%span sbuddy'64 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1064 112 1064 125
+let%span sbuddy'65 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1064 141 1064 145
+let%span sbuddy'66 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1064 16 1064 148
+let%span sbuddy'67 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1065 37 1065 71
+let%span sbuddy'68 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1066 37 1066 52
+let%span sbuddy'69 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1067 32 1070 119
+let%span sbuddy'70 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1093 28 1093 157
+let%span sbuddy'71 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1092 28 1092 63
+let%span sbuddy'72 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1091 28 1091 93
+let%span sbuddy'73 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1089 28 1090 115
+let%span sbuddy'74 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1088 28 1088 141
+let%span sbuddy'75 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1087 28 1087 148
+let%span sbuddy'76 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1086 28 1086 134
+let%span sbuddy'77 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1085 28 1085 129
+let%span sbuddy'78 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1082 28 1084 117
+let%span sbuddy'79 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1081 28 1081 110
+let%span sbuddy'80 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1080 28 1080 87
+let%span sbuddy'81 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1079 28 1079 65
+let%span sbuddy'82 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1078 28 1078 65
+let%span sbuddy'83 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1077 28 1077 100
+let%span sbuddy'84 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1076 28 1076 116
+let%span sbuddy'85 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1075 28 1075 76
+let%span sbuddy'86 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1074 28 1074 76
+let%span sbuddy'87 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1095 46 1095 51
+let%span sbuddy'88 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1096 36 1096 98
+let%span sbuddy'89 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1097 28 1097 29
+let%span sbuddy'90 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1097 20 1097 29
+let%span sbuddy'91 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1098 36 1098 99
+let%span sbuddy'92 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1099 36 1099 63
+let%span sbuddy'93 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1100 36 1100 62
+let%span sbuddy'94 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1101 36 1101 88
+let%span sbuddy'95 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1102 36 1102 68
+let%span sbuddy'96 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1103 36 1103 100
+let%span sbuddy'97 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1105 36 1105 99
+let%span sbuddy'98 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1106 36 1106 79
+let%span sbuddy'99 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1107 36 1107 81
+let%span sbuddy'100 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1108 36 1108 67
+let%span sbuddy'101 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1109 29 1109 43
+let%span sbuddy'102 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1110 36 1110 58
+let%span sbuddy'103 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1111 36 1111 43
+let%span sbuddy'104 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1112 36 1112 66
+let%span sbuddy'105 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1113 45 1113 60
+let%span sbuddy'106 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1114 42 1114 54
+let%span sbuddy'107 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1115 36 1117 79
+let%span sbuddy'108 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1118 36 1123 86
+let%span sbuddy'109 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1124 36 1126 90
+let%span sbuddy'110 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1127 36 1130 135
+let%span sbuddy'111 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1131 36 1131 53
+let%span sbuddy'112 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1132 33 1132 57
+let%span sbuddy'113 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1133 39 1133 45
+let%span sbuddy'114 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1133 24 1133 64
+let%span sbuddy'115 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1134 40 1134 94
+let%span sbuddy'116 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1135 46 1135 53
+let%span sbuddy'117 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1135 69 1135 85
+let%span sbuddy'118 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1135 101 1135 104
+let%span sbuddy'119 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1135 120 1135 125
+let%span sbuddy'120 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1136 40 1136 53
+let%span sbuddy'121 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1135 24 1136 60
+let%span sbuddy'122 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1137 40 1137 101
+let%span sbuddy'123 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1138 40 1138 109
+let%span sbuddy'124 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1140 40 1141 87
+let%span sbuddy'125 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1142 40 1143 135
+let%span sbuddy'126 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1144 40 1144 140
+let%span sbuddy'127 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1145 40 1146 142
+let%span sbuddy'128 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1147 24 1147 49
+let%span sbuddy'129 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1149 33 1149 57
+let%span sbuddy'130 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1150 39 1150 45
+let%span sbuddy'131 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1150 24 1150 54
+let%span sbuddy'132 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1151 40 1151 84
+let%span sbuddy'133 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1152 46 1152 53
+let%span sbuddy'134 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1152 69 1152 85
+let%span sbuddy'135 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1152 101 1152 104
+let%span sbuddy'136 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1152 120 1152 125
+let%span sbuddy'137 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1153 40 1153 53
+let%span sbuddy'138 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1152 24 1153 60
+let%span sbuddy'139 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1154 40 1154 91
+let%span sbuddy'140 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1155 40 1155 109
+let%span sbuddy'141 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1157 40 1158 87
+let%span sbuddy'142 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1159 40 1160 125
+let%span sbuddy'143 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1161 40 1161 120
+let%span sbuddy'144 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1162 40 1163 142
+let%span sbuddy'145 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1165 36 1166 138
+let%span sbuddy'146 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1167 36 1169 121
+let%span sbuddy'147 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1171 32 1171 88
+let%span sbuddy'148 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1172 32 1172 146
+let%span sbuddy'149 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1173 32 1173 64
+let%span sbuddy'150 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1174 32 1174 112
+let%span sbuddy'151 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1175 32 1175 116
+let%span sbuddy'152 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1176 32 1176 66
+let%span sbuddy'153 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1177 32 1177 151
+let%span sbuddy'154 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1178 32 1178 139
+let%span sbuddy'155 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1179 41 1179 55
+let%span sbuddy'156 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1179 71 1179 87
+let%span sbuddy'157 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1179 103 1179 118
+let%span sbuddy'158 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1180 32 1180 61
+let%span sbuddy'159 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1180 77 1180 105
+let%span sbuddy'160 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1179 16 1180 108
+let%span sbuddy'161 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1193 24 1193 28
+let%span sbuddy'162 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1194 24 1194 108
+let%span sbuddy'163 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1195 24 1195 58
+let%span sbuddy'164 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1196 24 1196 143
+let%span sbuddy'165 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1197 24 1197 131
+let%span sbuddy'166 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1198 33 1198 47
+let%span sbuddy'167 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1198 63 1198 79
+let%span sbuddy'168 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1198 95 1198 110
+let%span sbuddy'169 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1199 24 1199 53
+let%span sbuddy'170 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1199 69 1199 97
+let%span sbuddy'171 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1198 8 1199 100
+let%span sbuddy'172 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 987 28 987 102
+let%span sbuddy'173 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 988 28 988 72
+let%span sbuddy'174 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 989 28 989 76
+let%span sbuddy'175 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 990 28 990 108
+let%span sbuddy'176 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 991 37 991 52
+let%span sbuddy'177 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 992 44 992 58
+let%span sbuddy'178 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 992 12 992 64
+let%span sbuddy'179 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 993 28 993 130
+let%span sbuddy'180 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 994 28 995 107
+let%span sbuddy'181 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 996 28 997 130
+let%span sbuddy'182 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 998 28 998 84
+let%span sbuddy'183 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 999 28 999 82
+let%span sbuddy'184 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1000 28 1000 104
+let%span sbuddy'185 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1001 28 1001 113
+let%span sbuddy'186 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1003 28 1003 71
+let%span sbuddy'187 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1004 35 1004 42
+let%span sbuddy'188 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1004 58 1004 74
+let%span sbuddy'189 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1004 90 1004 93
+let%span sbuddy'190 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1004 109 1004 116
+let%span sbuddy'191 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1005 28 1005 41
+let%span sbuddy'192 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1005 57 1005 61
+let%span sbuddy'193 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1004 12 1005 64
+let%span sbuddy'194 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1006 28 1006 53
+let%span sbuddy'195 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1007 28 1007 147
+let%span sbuddy'196 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1008 34 1008 41
+let%span sbuddy'197 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1008 57 1008 73
+let%span sbuddy'198 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1008 89 1008 92
+let%span sbuddy'199 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1008 108 1008 121
+let%span sbuddy'200 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1008 137 1008 141
+let%span sbuddy'201 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1008 12 1008 144
+let%span sbuddy'202 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1009 37 1009 51
+let%span sbuddy'203 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1009 67 1009 83
+let%span sbuddy'204 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1009 99 1009 114
+let%span sbuddy'205 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1010 28 1010 57
+let%span sbuddy'206 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1010 73 1010 101
+let%span sbuddy'207 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1009 12 1010 104
+let%span sbuddy'208 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 956 15 956 28
+let%span sbuddy'209 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 957 15 957 47
+let%span sbuddy'210 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 958 15 958 64
+let%span sbuddy'211 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 959 14 959 29
+let%span sbuddy'212 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 960 14 960 31
+let%span sbuddy'213 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 961 14 961 30
+let%span sbuddy'214 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 962 14 962 27
+let%span sbuddy'215 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 963 14 963 108
+let%span sbuddy'216 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 964 14 964 92
+let%span sbuddy'217 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 965 14 965 65
+let%span sbuddy'218 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 966 14 971 26
+let%span sbuddy'219 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 972 14 973 71
+let%span sbuddy'220 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 974 14 974 144
+let%span sbuddy'221 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 975 14 975 141
+let%span sbuddy'222 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 329 10 329 36
+let%span sbuddy'223 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 330 10 330 33
+let%span sbuddy'224 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 291 16 291 30
+let%span sbuddy'225 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 111 11 111 27
+let%span sbuddy'226 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 112 10 112 27
+let%span sbuddy'227 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 113 10 113 25
+let%span sbuddy'228 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 115 4 115 17
+let%span sbuddy'229 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 33 16 33 29
+let%span sbuddy'230 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 368 10 371 1
+let%span sbuddy'231 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 459 8 462 53
+let%span sbuddy'232 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 102 11 102 38
+let%span sbuddy'233 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 103 10 103 36
+let%span sbuddy'234 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 105 4 105 17
+let%span sbuddy'235 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 246 11 246 18
+let%span sbuddy'236 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 247 10 247 30
+let%span sbuddy'237 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 339 11 339 17
+let%span sbuddy'238 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 340 10 340 35
+let%span sbuddy'239 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 387 11 387 24
+let%span sbuddy'240 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 388 10 388 37
+let%span sbuddy'241 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 389 10 390 62
+let%span sbuddy'242 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 416 8 417 64
+let%span sbuddy'243 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 425 8 426 83
+let%span sbuddy'244 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 542 15 542 58
+let%span sbuddy'245 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 543 15 543 78
+let%span sbuddy'246 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 544 15 544 45
+let%span sbuddy'247 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 545 15 545 31
+let%span sbuddy'248 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 546 14 546 58
+let%span sbuddy'249 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 494 14 494 15
+let%span sbuddy'250 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1392 8 1394 31
+let%span sbuddy'251 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 469 16 469 98
+let%span sbuddy'252 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 93 11 93 17
+let%span sbuddy'253 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 94 10 94 44
+let%span sbuddy'254 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 96 4 96 17
+let%span sbuddy'255 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 199 10 199 15
+let%span sbuddy'256 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 197 11 197 47
+let%span sbuddy'257 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 198 11 198 31
+let%span sbuddy'258 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 200 10 200 30
+let%span sbuddy'259 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 202 4 207 5
+let%span sbuddy'260 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 173 11 173 16
+let%span sbuddy'261 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 174 10 174 20
+let%span sbuddy'262 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 176 4 176 24
+let%span sbuddy'263 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 211 11 211 64
+let%span sbuddy'264 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 212 10 212 26
+let%span sbuddy'265 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 213 10 213 37
+let%span sbuddy'266 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 215 4 215 22
+let%span sbuddy'267 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 531 15 531 58
+let%span sbuddy'268 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 532 15 532 78
+let%span sbuddy'269 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 533 15 533 45
+let%span sbuddy'270 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 534 15 534 31
+let%span sbuddy'271 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 535 14 535 58
+let%span sbuddy'272 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 403 8 407 92
+let%span sbuddy'273 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 476 8 479 126
+let%span sbuddy'274 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 432 16 432 60
+let%span sbuddy'275 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 39 16 39 84
+let%span sbuddy'276 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 283 10 283 16
+let%span sbuddy'277 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 285 16 285 86
+let%span sbuddy'278 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 45 10 45 11
+let%span sbuddy'279 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 46 11 46 17
+let%span sbuddy'280 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 47 10 47 23
+let%span sbuddy'281 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 48 10 48 40
+let%span sbuddy'282 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 50 4 52 5
+let%span sbuddy'283 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 154 11 154 37
+let%span sbuddy'284 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 155 10 155 24
+let%span sbuddy'285 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 156 44 156 46
+let%span sbuddy'286 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 57 10 57 15
+let%span sbuddy'287 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 56 11 56 27
+let%span sbuddy'288 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 58 10 58 30
+let%span sbuddy'289 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 60 4 60 17
+let%span sbuddy'290 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 187 11 187 26
+let%span sbuddy'291 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 188 11 188 27
+let%span sbuddy'292 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 189 10 189 20
+let%span sbuddy'293 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 191 4 191 26
+let%span sbuddy'294 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 167 11 167 26
+let%span sbuddy'295 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 168 10 168 26
+let%span sbuddy'296 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 169 10 169 26
+let%span sbuddy'297 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 170 38 170 40
+let%span sbuddy'298 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 180 11 180 26
+let%span sbuddy'299 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 181 10 181 34
+let%span sbuddy'300 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 182 10 182 33
+let%span sbuddy'301 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 183 10 183 20
+let%span sbuddy'302 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 184 36 184 38
+let%span sl2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 351 16 351 109
+let%span sl2'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 27 16 27 26
+let%span sl2'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 588 11 588 69
+let%span sl2'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 589 11 589 76
+let%span sl2'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 590 10 590 131
+let%span sl2'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 21 16 21 68
+let%span sl2'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 575 11 575 88
+let%span sl2'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 576 10 576 95
+let%span sl2'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 15 16 15 54
+let%span sl2'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 598 11 598 57
+let%span sl2'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 599 11 599 128
+let%span sl2'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 600 11 600 76
+let%span sl2'11 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 601 11 601 46
+let%span sl2'12 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 602 11 602 103
+let%span sl2'13 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 603 10 603 131
+let%span sl2'14 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 382 11 382 85
+let%span sl2'15 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 383 11 383 62
+let%span sl2'16 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 384 10 384 67
+let%span sl2'17 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 86 8 89 76
+let%span sl2'18 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 128 11 128 39
+let%span sl2'19 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 129 10 129 39
+let%span sl2'20 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 130 10 130 74
+let%span sl2'21 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 131 10 131 65
+let%span sl2'22 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 132 10 132 116
+let%span sl2'23 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 133 10 133 60
+let%span sl2'24 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 134 10 134 42
+let%span sl2'25 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 48 16 48 93
+let%span sl2'26 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 33 16 33 46
+let%span sl2'27 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 61 8 61 117
+let%span sl2'28 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 54 16 54 106
+let%span sl2'29 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 40 8 41 76
+let%span sl2'30 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 216 11 216 37
+let%span sl2'31 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 217 10 217 40
+let%span sl2'32 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 205 11 205 73
+let%span sl2'33 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 206 10 206 20
+let%span sl2'34 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 185 11 185 71
+let%span sl2'35 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 186 11 186 52
+let%span sl2'36 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 187 10 187 31
+let%span sl2'37 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 97 8 99 76
+let%span sl2'38 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 148 11 148 39
+let%span sl2'39 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 149 10 149 72
+let%span sl2'40 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 150 10 150 105
+let%span sl2'41 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 151 10 151 60
+let%span sl2'42 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 152 10 152 76
+let%span sl2'43 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 153 10 153 97
+let%span sl2'44 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 154 10 154 54
+let%span sl2'45 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 155 10 155 136
+let%span sl2'46 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 156 10 156 100
+let%span sl2'47 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 157 10 157 62
+let%span sl2'48 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 367 11 367 47
+let%span sl2'49 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 368 10 368 26
+let%span sl2'50 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 358 8 362 66
+let%span sl2'51 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 537 11 537 60
+let%span sl2'52 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 538 10 538 34
+let%span sl2'53 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 564 11 564 82
+let%span sl2'54 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 565 11 565 72
+let%span sl2'55 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 566 10 566 39
+let%span sl2'56 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 69 8 69 125
+let%span sl2m = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 433 11 433 33
+let%span sl2m'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 434 10 434 41
+let%span sl2m'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 158 16 158 87
+let%span sl2m'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 442 11 442 73
+let%span sl2m'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 443 11 443 51
+let%span sl2m'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 444 11 444 49
+let%span sl2m'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 445 11 445 117
+let%span sl2m'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 446 10 446 31
+let%span sl2m'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 428 11 428 70
+let%span sl2m'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 429 10 429 36
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use bv.Pow2int
+use seq.Seq
+use int.ComputerDivision
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_Vec_u64_Global_Global
+
+type t_BuddyAllocator = {
+  base_offset: UInt64.t;
+  total_usable_size: UInt64.t;
+  sector_size: UInt32.t;
+  max_order: UInt64.t;
+  free_lists: t_Vec_Vec_u64_Global_Global }
+
+predicate is_order [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 38 0 38 39] (r: int) (b: int) =
+  [%#sbuddy'275] 0 <= r /\ r <= 64 /\ Pow2int.pow2 r >= b /\ (r = 0 \/ Pow2int.pow2 (r - 1) < b)
+
+function ord_from [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 284 0 284 38] (b: int) (k: int) : int
+
+axiom ord_from_def: forall b: int, k: int [ord_from b k]. ord_from b k
+    = ([%#sbuddy'277] if k >= 64 \/ k < 0 \/ Pow2int.pow2 k >= b then k else ord_from b (k + 1))
+
+function ord [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 290 0 290 25] (b: int) : int
+ = [%#sbuddy'224] ord_from b 0
+
+let order_for_blocks (blocks: UInt64.t) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:order_for_blocks ensures] ([@stop_split] [@expl:order_for_blocks ensures #0] [%#sbuddy'222] is_order (UInt64.t'int result) (UInt64.t'int blocks))
+    /\ ([@stop_split] [@expl:order_for_blocks ensures #1] [%#sbuddy'223] UInt64.t'int result
+    = ord (UInt64.t'int blocks))}
+    (! return {result}) ]
+
+type t_Vec_u64_Global
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_u64_Global (self: t_Vec_u64_Global) : Seq.seq UInt64.t
+
+axiom view_Vec_u64_Global_spec:
+  forall self: t_Vec_u64_Global [view_Vec_u64_Global self]. [%#svec] Seq.length (view_Vec_u64_Global self)
+    <= UInt64.t'int const_MAX
+
+predicate fv [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 20 0 20 52] (fl: Seq.seq t_Vec_u64_Global) (o: int) (k: int) =
+  [%#sl2'4] 0 <= o /\ o < Seq.length fl /\ 0 <= k /\ k < Seq.length (view_Vec_u64_Global (Seq.get fl o))
+
+predicate disj [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 32 0 32 55] (x1: int) (l1: int) (x2: int) (l2: int) =
+  [%#sl2'26] x1 + l1 <= x2 \/ x2 + l2 <= x1
+
+function fs [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 26 0 26 51] (fl: Seq.seq t_Vec_u64_Global) (o: int) (k: int) : int
+ = [%#sl2'0] UInt64.t'int (Seq.get (view_Vec_u64_Global (Seq.get fl o)) k)
+
+function span [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 32 0 32 35] (ss: int) (o: int) : int
+ = [%#sbuddy'229] Pow2int.pow2 o * ss
+
+predicate fdisj [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 38 0 38 48] (fl: Seq.seq t_Vec_u64_Global) (ss: int) =
+  [%#sl2'29] forall o1: int, k1: int, o2: int, k2: int. fv fl o1 k1 /\ fv fl o2 k2 /\ (o1 <> o2 \/ k1 <> k2)
+    -> disj (fs fl o1 k1) (span ss o1) (fs fl o2 k2) (span ss o2)
+
+predicate p2 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 14 0 14 25] (x: int) =
+  [%#sl2'7] exists k: int. 0 <= k /\ Pow2int.pow2 k = x
+
+predicate inblk [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 67 0 67 65] (fl: Seq.seq t_Vec_u64_Global) (ss: int) (kk: int) (t: int) =
+  [%#sl2'56] exists o: int, k: int. fv fl o k /\ o >= kk /\ fs fl o k <= t /\ t + span ss kk <= fs fl o k + span ss o
+
+predicate mk_hyp [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 350 0 350 66] (fl: Seq.seq t_Vec_u64_Global) (ss: int) (x: int) (kk: int) =
+  [%#sl2] fdisj fl ss /\ p2 ss /\ 0 <= x /\ 0 <= kk /\ ComputerDivision.mod x (span ss kk) = 0 /\ inblk fl ss kk x
+
+function view_Vec_Vec_u64_Global_Global (self: t_Vec_Vec_u64_Global_Global) : Seq.seq t_Vec_u64_Global
+
+axiom view_Vec_Vec_u64_Global_Global_spec:
+  forall self: t_Vec_Vec_u64_Global_Global [view_Vec_Vec_u64_Global_Global self]. [%#svec] Seq.length (view_Vec_Vec_u64_Global_Global self)
+    <= UInt64.t'int const_MAX
+
+function lemma_pow2 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 49 0 49 25] (o: int) : ()
+
+axiom lemma_pow2_def: forall o: int [lemma_pow2 o]. ([%#sbuddy'279] 0 <= o)
+    -> lemma_pow2 o = ([%#sbuddy'282] if o > 0 then lemma_pow2 (o - 1) else ())
+
+axiom lemma_pow2_spec: forall o: int. ([%#sbuddy'279] 0 <= o) -> ([%#sbuddy'280] Pow2int.pow2 o >= 1)
+
+axiom lemma_pow2_spec'0: forall o: int. ([%#sbuddy'279] 0 <= o)
+    -> ([%#sbuddy'281] Pow2int.pow2 (o + 1) = 2 * Pow2int.pow2 o)
+
+function lemma_mul_le [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 156 0 156 43] (a: int) (b: int) (c: int) : ()
+ = [%#sbuddy'285] ()
+
+axiom lemma_mul_le_spec: forall a: int, b: int, c: int. ([%#sbuddy'283] 0 <= a /\ a <= b /\ 0 <= c)
+    -> ([%#sbuddy'284] a * c <= b * c)
+
+function lemma_span_pos [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 114 0 114 38] (ss: int) (o: int) : ()
+ = [%#sbuddy'228] let _ = lemma_pow2 o in lemma_mul_le 1 (Pow2int.pow2 o) ss
+
+axiom lemma_span_pos_spec: forall ss: int, o: int. ([%#sbuddy'225] ss > 0 /\ 0 <= o) -> ([%#sbuddy'226] span ss o >= ss)
+
+axiom lemma_span_pos_spec'0: forall ss: int, o: int. ([%#sbuddy'225] ss > 0 /\ 0 <= o) -> ([%#sbuddy'227] span ss o > 0)
+
+predicate in_bounds_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq t_Vec_u64_Global) =
+  [%#sslice] UInt64.t'int self < Seq.length seq
+
+meta "rewrite_def" predicate in_bounds_usize
+
+predicate has_value_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq t_Vec_u64_Global) (out: t_Vec_u64_Global) =
+  [%#sslice'0] Seq.get seq (UInt64.t'int self) = out
+
+meta "rewrite_def" predicate has_value_usize
+
+let index_Vec_Vec_u64_Global_Global (self_: t_Vec_Vec_u64_Global_Global) (ix: UInt64.t) (return (x: t_Vec_u64_Global)) =
+{[@stop_split] [@expl:index requires] [%#svec'0] in_bounds_usize ix (view_Vec_Vec_u64_Global_Global self_)}
+  any
+  [ return (result: t_Vec_u64_Global) ->
+  {[@stop_split] [@expl:index ensures] [%#svec'1] has_value_usize ix (view_Vec_Vec_u64_Global_Global self_) result}
+    (! return {result}) ]
+
+type t_Option_usize = None | Some UInt64.t
+
+let find_pos (v: t_Vec_u64_Global) (x: UInt64.t) (return (x'0: t_Option_usize)) = any
+  [ return (result: t_Option_usize) -> {[@stop_split] [@expl:find_pos ensures] [%#sbuddy'230] match result with
+      | Some p -> UInt64.t'int p < Seq.length (view_Vec_u64_Global v)
+      /\ Seq.get (view_Vec_u64_Global v) (UInt64.t'int p) = x
+      /\ (forall q: int. 0 <= q /\ q < UInt64.t'int p -> Seq.get (view_Vec_u64_Global v) q <> x)
+      | None -> forall q: int. 0 <= q /\ q < Seq.length (view_Vec_u64_Global v)
+        -> Seq.get (view_Vec_u64_Global v) q <> x
+      end}
+    (! return {result}) ]
+
+function lemma_inblk_up [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 591 0 591 66] (fl: Seq.seq t_Vec_u64_Global) (ss: int) (kk: int) (x: int) : ()
+
+axiom lemma_inblk_up_spec: forall fl: Seq.seq t_Vec_u64_Global, ss: int, kk: int, x: int. ([%#sl2'1] inblk fl ss kk x
+      /\ ss > 0 /\ 0 <= kk /\ kk < Seq.length fl)
+    -> ([%#sl2'2] forall q: int. 0 <= q /\ q < Seq.length (view_Vec_u64_Global (Seq.get fl kk)) -> fs fl kk q <> x)
+    -> ([%#sl2'3] exists o: int, k: int. fv fl o k
+      /\ o >= kk + 1 /\ fs fl o k <= x /\ x + span ss kk <= fs fl o k + span ss o)
+
+predicate split1_pre [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 457 0 457 68] (b: t_BuddyAllocator) (x: UInt64.t) (t: int) (a: UInt64.t) =
+  [%#sbuddy'231] 0 <= t
+  /\ t + 1 <= UInt64.t'int b.max_order
+  /\ (forall q: int. 0 <= q
+        /\ q < Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global b.free_lists) t))
+      -> Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global b.free_lists) t)) q <> x)
+  /\ (forall sp: UInt64.t. UInt64.t'int sp = span (UInt32.t'int b.sector_size) (t + 1)
+      -> a = UInt64.bw_and x (UInt64.bw_not (UInt64.sub sp (1: UInt64.t))))
+  /\ view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global b.free_lists) (t + 1)) = Seq.singleton a
+
+function lemma_pow2_mono [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 59 0 59 38] (a: int) (b: int) : ()
+
+axiom lemma_pow2_mono_def: forall a: int, b: int [lemma_pow2_mono a b]. ([%#sbuddy'287] 0 <= a /\ a <= b)
+    -> lemma_pow2_mono a b
+    = ([%#sbuddy'289] let _ = lemma_pow2 a in if a < b then
+      let _ = lemma_pow2 (b - 1) in lemma_pow2_mono a (b - 1)
+    else
+      ()
+    )
+
+axiom lemma_pow2_mono_spec: forall a: int, b: int. ([%#sbuddy'287] 0 <= a /\ a <= b)
+    -> ([%#sbuddy'288] Pow2int.pow2 a <= Pow2int.pow2 b)
+
+function lemma_span_mono [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 104 0 104 47] (ss: int) (a: int) (b: int) : ()
+ =
+  [%#sbuddy'234] let _ = lemma_pow2 a in let _ = lemma_pow2_mono a b in lemma_mul_le (Pow2int.pow2 a) (Pow2int.pow2 b) ss
+
+axiom lemma_span_mono_spec: forall ss: int, a: int, b: int. ([%#sbuddy'232] 0 <= a /\ a <= b /\ 0 <= ss)
+    -> ([%#sbuddy'233] span ss a <= span ss b)
+
+let pow2_u64 (k: UInt64.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:pow2_u64 requires] [%#sbuddy'235] UInt64.t'int k < 64}
+  any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:pow2_u64 ensures] [%#sbuddy'236] UInt64.t'int result
+    = Pow2int.pow2 (UInt64.t'int k)}
+    (! return {result}) ]
+
+let mask_down (x: UInt64.t) (s: UInt64.t) (return (x'0: UInt64.t)) =
+{[@stop_split] [@expl:mask_down requires] [%#sbuddy'237] UInt64.t'int s > 0}
+  any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:mask_down ensures] [%#sbuddy'238] result
+    = UInt64.bw_and x (UInt64.bw_not (UInt64.sub s (1: UInt64.t)))}
+    (! return {result}) ]
+
+let g_mask (x: UInt64.t) (s: UInt64.t) (a: UInt64.t) (ss: int) (sq: int) (return (x'0: ())) =
+{[@stop_split] [@expl:g_mask requires] [%#sl2'5] a = UInt64.bw_and x (UInt64.bw_not (UInt64.sub s (1: UInt64.t)))
+  /\ UInt64.t'int s = span ss sq /\ ss > 0 /\ 0 <= sq /\ UInt64.t'int s > 0}
+  any
+  [ return (result: ()) -> {[@stop_split] [@expl:g_mask ensures] [%#sl2'6] p2 ss
+    -> UInt64.t'int a = UInt64.t'int x - ComputerDivision.mod (UInt64.t'int x) (UInt64.t'int s)
+    /\ UInt64.t'int a <= UInt64.t'int x
+    /\ UInt64.t'int x < UInt64.t'int a + UInt64.t'int s
+    /\ ComputerDivision.mod (UInt64.t'int a) (UInt64.t'int s) = 0 /\ UInt64.t'int a >= 0}
+    (! return {result}) ]
+
+function lemma_inblk_step [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 604 0 604 85] (fl: Seq.seq t_Vec_u64_Global) (ss: int) (kk: int) (sq: int) (x: int) (a: int) : ()
+
+axiom lemma_inblk_step_spec:
+  forall fl: Seq.seq t_Vec_u64_Global, ss: int, kk: int, sq: int, x: int, a: int. ([%#sl2'8] ss > 0
+      /\ 0 <= kk /\ kk <= sq /\ sq < Seq.length fl)
+    -> ([%#sl2'9] exists o: int, k: int. fv fl o k
+        /\ o >= sq /\ fs fl o k <= x /\ x + span ss kk <= fs fl o k + span ss o)
+    -> ([%#sl2'10] forall q: int. 0 <= q /\ q < Seq.length (view_Vec_u64_Global (Seq.get fl sq)) -> fs fl sq q <> a)
+    -> ([%#sl2'11] a = x - ComputerDivision.mod x (span ss sq) /\ x >= 0)
+    -> ([%#sl2'12] forall o: int, k: int. fv fl o k
+        -> ComputerDivision.mod (fs fl o k) (span ss o) = 0 /\ fs fl o k >= 0)
+    -> ([%#sl2'13] exists o: int, k: int. fv fl o k
+      /\ o >= sq + 1 /\ fs fl o k <= x /\ x + span ss kk <= fs fl o k + span ss o)
+
+let elim_Some (_x: t_Option_usize) (return (f0: UInt64.t)) = any
+  [ _k (f0: UInt64.t) -> {Some f0 = _x} (! return {f0})
+  | _chk -> (! {[@expl:elim Some] match _x with
+      | Some _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+function lemma_inblk_is [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 385 0 385 82] (fl: Seq.seq t_Vec_u64_Global) (ss: int) (kk: int) (x: int) (o: int) (p: int) : ()
+
+axiom lemma_inblk_is_spec:
+  forall fl: Seq.seq t_Vec_u64_Global, ss: int, kk: int, x: int, o: int, p: int. ([%#sl2'14] fdisj fl ss
+      /\ inblk fl ss kk x /\ fv fl o p /\ ss > 0 /\ 0 <= kk)
+    -> ([%#sl2'15] fs fl o p <= x /\ x < fs fl o p + span ss o)
+    -> ([%#sl2'16] o >= kk /\ x + span ss kk <= fs fl o p + span ss o)
+
+predicate resolve_elswhere_usize [@inline:trivial] (self: UInt64.t) (old': Seq.seq t_Vec_u64_Global) (fin: Seq.seq t_Vec_u64_Global) =
+  [%#sslice'1] forall i: int. 0 <= i /\ i <> UInt64.t'int self /\ i < Seq.length old' -> Seq.get old' i = Seq.get fin i
+
+meta "rewrite_def" predicate resolve_elswhere_usize
+
+let index_mut_Vec_Vec_u64_Global_Global (self_: MutBorrow.t t_Vec_Vec_u64_Global_Global) (ix: UInt64.t)
+  (return (x: MutBorrow.t t_Vec_u64_Global)) =
+{[@stop_split] [@expl:index_mut requires] [%#svec'2] in_bounds_usize ix (view_Vec_Vec_u64_Global_Global self_.current)}
+  any
+  [ return (result: MutBorrow.t t_Vec_u64_Global) ->
+  {[@stop_split] [@expl:index_mut_Vec_Vec_u64_Global_Global ensures] ([@stop_split] [@expl:index_mut ensures #0] [%#svec'3] has_value_usize ix (view_Vec_Vec_u64_Global_Global self_.current) result.current)
+    /\ ([@stop_split] [@expl:index_mut ensures #1] [%#svec'4] has_value_usize ix (view_Vec_Vec_u64_Global_Global self_.final) result.final)
+    /\ ([@stop_split] [@expl:index_mut ensures #2] [%#svec'5] resolve_elswhere_usize ix (view_Vec_Vec_u64_Global_Global self_.current) (view_Vec_Vec_u64_Global_Global self_.final))
+    /\ ([@stop_split] [@expl:index_mut ensures #3] [%#svec'6] Seq.length (view_Vec_Vec_u64_Global_Global self_.final)
+    = Seq.length (view_Vec_Vec_u64_Global_Global self_.current))}
+    (! return {result}) ]
+
+let swap_remove (v: MutBorrow.t t_Vec_u64_Global) (p: UInt64.t) (return (x: ())) =
+{[@stop_split] [@expl:swap_remove requires] [%#sbuddy'239] UInt64.t'int p < Seq.length (view_Vec_u64_Global v.current)}
+  any
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:swap_remove ensures] ([@stop_split] [@expl:swap_remove ensures #0] [%#sbuddy'240] Seq.length (view_Vec_u64_Global v.final)
+      = Seq.length (view_Vec_u64_Global v.current) - 1)
+    /\ ([@stop_split] [@expl:swap_remove ensures #1] [%#sbuddy'241] forall k: int. 0 <= k
+        /\ k < Seq.length (view_Vec_u64_Global v.final)
+      -> Seq.get (view_Vec_u64_Global v.final) k
+      = (if k = UInt64.t'int p then
+        Seq.get (view_Vec_u64_Global v.current) (Seq.length (view_Vec_u64_Global v.current) - 1)
+      else
+        Seq.get (view_Vec_u64_Global v.current) k
+      ))}
+    (! return {result}) ]
+
+predicate resolve_refmut_Vec_u64_Global [@inline:trivial] (_1: MutBorrow.t t_Vec_u64_Global) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_Vec_u64_Global
+
+predicate bd_aligned [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 414 0 414 44] (b: t_BuddyAllocator) =
+  [%#sbuddy'242] forall o: int, k: int. 0 <= o
+      /\ o < Seq.length (view_Vec_Vec_u64_Global_Global b.free_lists)
+      /\ 0 <= k /\ k < Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global b.free_lists) o))
+    -> ComputerDivision.mod (UInt64.t'int (Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global b.free_lists) o)) k)) (span (UInt32.t'int b.sector_size) o)
+    = 0
+
+predicate bd_inside [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 423 0 423 43] (b: t_BuddyAllocator) =
+  [%#sbuddy'243] forall o: int, k: int. 0 <= o
+      /\ o < Seq.length (view_Vec_Vec_u64_Global_Global b.free_lists)
+      /\ 0 <= k /\ k < Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global b.free_lists) o))
+    -> UInt64.t'int (Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global b.free_lists) o)) k)
+      + span (UInt32.t'int b.sector_size) o
+    <= UInt64.t'int b.total_usable_size
+
+predicate sr_rel [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 84 0 84 73] (a: Seq.seq t_Vec_u64_Global) (b: Seq.seq t_Vec_u64_Global) (o: int) (p: int) =
+  [%#sl2'17] Seq.length a = Seq.length b
+  /\ 0 <= o
+  /\ o < Seq.length a
+  /\ 0 <= p
+  /\ p < Seq.length (view_Vec_u64_Global (Seq.get a o))
+  /\ Seq.length (view_Vec_u64_Global (Seq.get b o)) = Seq.length (view_Vec_u64_Global (Seq.get a o)) - 1
+  /\ (forall k: int. 0 <= k /\ k < Seq.length (view_Vec_u64_Global (Seq.get b o))
+      -> Seq.get (view_Vec_u64_Global (Seq.get b o)) k
+      = (if k = p then
+        Seq.get (view_Vec_u64_Global (Seq.get a o)) (Seq.length (view_Vec_u64_Global (Seq.get a o)) - 1)
+      else
+        Seq.get (view_Vec_u64_Global (Seq.get a o)) k
+      ))
+  /\ (forall q: int. 0 <= q /\ q < Seq.length a /\ q <> o -> Seq.get b q = Seq.get a q)
+
+predicate faway [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 47 0 47 64] (fl: Seq.seq t_Vec_u64_Global) (ss: int) (y: int) (l: int) =
+  [%#sl2'25] forall o: int, k: int. fv fl o k -> disj y l (fs fl o k) (span ss o)
+
+predicate ffree [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 53 0 53 56] (fl: Seq.seq t_Vec_u64_Global) (ss: int) (z: int) =
+  [%#sl2'28] exists o: int, k: int. fv fl o k /\ fs fl o k <= z /\ z < fs fl o k + span ss o
+
+predicate fold_k [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 59 0 59 68] (nw: Seq.seq t_Vec_u64_Global) (od: Seq.seq t_Vec_u64_Global) (kk: int) =
+  [%#sl2'27] forall o: int, k: int. fv nw o k /\ o < kk -> (exists j: int. fv od o j /\ fs od o j = fs nw o k)
+
+function lemma_sr [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 135 0 135 76] (a: Seq.seq t_Vec_u64_Global) (b: Seq.seq t_Vec_u64_Global) (ss: int) (o: int) (p: int) : ()
+
+axiom lemma_sr_spec:
+  forall a: Seq.seq t_Vec_u64_Global, b: Seq.seq t_Vec_u64_Global, ss: int, o: int, p: int. ([%#sl2'18] sr_rel a b o p
+      /\ ss > 0) -> ([%#sl2'19] fdisj a ss -> fdisj b ss)
+
+axiom lemma_sr_spec'0:
+  forall a: Seq.seq t_Vec_u64_Global, b: Seq.seq t_Vec_u64_Global, ss: int, o: int, p: int. ([%#sl2'18] sr_rel a b o p
+      /\ ss > 0) -> ([%#sl2'20] forall y: int, l: int. faway a ss y l -> faway b ss y l)
+
+axiom lemma_sr_spec'1:
+  forall a: Seq.seq t_Vec_u64_Global, b: Seq.seq t_Vec_u64_Global, ss: int, o: int, p: int. ([%#sl2'18] sr_rel a b o p
+      /\ ss > 0) -> ([%#sl2'21] fdisj a ss -> faway b ss (fs a o p) (span ss o))
+
+axiom lemma_sr_spec'2:
+  forall a: Seq.seq t_Vec_u64_Global, b: Seq.seq t_Vec_u64_Global, ss: int, o: int, p: int. ([%#sl2'18] sr_rel a b o p
+      /\ ss > 0)
+    -> ([%#sl2'22] forall z: int. ffree a ss z /\ not (fs a o p <= z /\ z < fs a o p + span ss o) -> ffree b ss z)
+
+axiom lemma_sr_spec'3:
+  forall a: Seq.seq t_Vec_u64_Global, b: Seq.seq t_Vec_u64_Global, ss: int, o: int, p: int. ([%#sl2'18] sr_rel a b o p
+      /\ ss > 0) -> ([%#sl2'23] forall z: int. ffree b ss z -> ffree a ss z)
+
+axiom lemma_sr_spec'4:
+  forall a: Seq.seq t_Vec_u64_Global, b: Seq.seq t_Vec_u64_Global, ss: int, o: int, p: int. ([%#sl2'18] sr_rel a b o p
+      /\ ss > 0) -> ([%#sl2'24] forall kk: int. fold_k b a kk)
+
+function tf [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 495 4 495 56] (fl: Seq.seq t_Vec_u64_Global) (ss: int) (n: int) : int
+
+function lemma_tf_dec [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 547 4 547 84] (a: Seq.seq t_Vec_u64_Global) (b: Seq.seq t_Vec_u64_Global) (ss: int) (o: int) (d: int) : ()
+
+axiom lemma_tf_dec_spec:
+  forall a: Seq.seq t_Vec_u64_Global, b: Seq.seq t_Vec_u64_Global, ss: int, o: int, d: int. ([%#sbuddy'244] 0 <= o
+      /\ o < Seq.length a /\ Seq.length a = Seq.length b)
+    -> ([%#sbuddy'245] forall p: int. 0 <= p /\ p < Seq.length a /\ p <> o -> Seq.get a p = Seq.get b p)
+    -> ([%#sbuddy'246] Seq.length (view_Vec_u64_Global (Seq.get a o))
+      = Seq.length (view_Vec_u64_Global (Seq.get b o)) - 1)
+    -> ([%#sbuddy'247] d = span ss o) -> ([%#sbuddy'248] tf a ss (Seq.length a) = tf b ss (Seq.length b) - d)
+
+predicate coal [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 97 0 97 47] (fl: Seq.seq t_Vec_u64_Global) (ss: int)
+
+let g_coal_sr (a: Seq.seq t_Vec_u64_Global) (b: Seq.seq t_Vec_u64_Global) (ss: int) (o: int) (p: int) (return (x: ())) =
+{[@stop_split] [@expl:g_coal_sr requires] [%#sl2m] sr_rel a b o p}
+  any
+  [ return (result: ()) -> {[@stop_split] [@expl:g_coal_sr ensures] [%#sl2m'0] coal a ss -> coal b ss}
+    (! return {result}) ]
+
+predicate pushed [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 1390 0 1390 59] (new: Seq.seq UInt64.t) (old': Seq.seq UInt64.t) (v: int) =
+  [%#sbuddy'250] Seq.length new = Seq.length old' + 1
+  /\ (forall k: int. 0 <= k /\ k < Seq.length old' -> Seq.get new k = Seq.get old' k)
+  /\ UInt64.t'int (Seq.get new (Seq.length old')) = v
+
+function split1_val [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 468 0 468 67] (b: t_BuddyAllocator) (x: UInt64.t) (t: int) (a: UInt64.t) : int
+ = [%#sbuddy'251] if UInt64.t'int x >= UInt64.t'int a + span (UInt32.t'int b.sector_size) t then
+    UInt64.t'int a
+  else
+    UInt64.t'int a + span (UInt32.t'int b.sector_size) t
+
+
+function lemma_span_succ [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 95 0 95 39] (ss: int) (o: int) : ()
+ = [%#sbuddy'254] let _ = lemma_pow2 o in ()
+
+axiom lemma_span_succ_spec: forall ss: int, o: int. ([%#sbuddy'252] 0 <= o)
+    -> ([%#sbuddy'253] span ss (o + 1) = 2 * span ss o)
+
+function lemma_divmod [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 184 0 184 35] (x: int) (m: int) : ()
+ = [%#sbuddy'302] ()
+
+axiom lemma_divmod_spec: forall x: int, m: int. ([%#sbuddy'298] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'299] x = m * ComputerDivision.div x m + ComputerDivision.mod x m)
+
+axiom lemma_divmod_spec'0: forall x: int, m: int. ([%#sbuddy'298] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'300] 0 <= ComputerDivision.mod x m /\ ComputerDivision.mod x m < m)
+
+axiom lemma_divmod_spec'1: forall x: int, m: int. ([%#sbuddy'298] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'301] ComputerDivision.div x m >= 0)
+
+function lemma_mul_mod0 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 170 0 170 37] (m: int) (k: int) : ()
+ = [%#sbuddy'297] ()
+
+axiom lemma_mul_mod0_spec: forall m: int, k: int. ([%#sbuddy'294] m > 0 /\ k >= 0)
+    -> ([%#sbuddy'295] ComputerDivision.mod (m * k) m = 0)
+
+axiom lemma_mul_mod0_spec'0: forall m: int, k: int. ([%#sbuddy'294] m > 0 /\ k >= 0)
+    -> ([%#sbuddy'296] ComputerDivision.div (m * k) m = k)
+
+function lemma_mod_double [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 190 0 190 39] (x: int) (m: int) : ()
+ = [%#sbuddy'293] let _ = lemma_divmod x (2 * m) in lemma_mul_mod0 m (2 * ComputerDivision.div x (2 * m))
+
+axiom lemma_mod_double_spec: forall x: int, m: int. ([%#sbuddy'290] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'291] ComputerDivision.mod x (2 * m) = 0) -> ([%#sbuddy'292] ComputerDivision.mod x m = 0)
+
+function lemma_span_div [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 201 0 201 54] (x: int) (ss: int) (a: int) (b: int) : ()
+
+axiom lemma_span_div_def: forall x: int, ss: int, a: int, b: int [lemma_span_div x ss a b]. ([%#sbuddy'256] ss > 0
+      /\ 0 <= a /\ a <= b /\ x >= 0)
+    -> ([%#sbuddy'257] ComputerDivision.mod x (span ss b) = 0)
+    -> lemma_span_div x ss a b
+    = ([%#sbuddy'259] if a < b then
+      let _ = lemma_pow2 (b - 1) in let _ = lemma_pow2 0 in let _ = lemma_mod_double x (span ss (b
+      - 1)) in lemma_span_div x ss a (b - 1)
+    else
+      ()
+    )
+
+axiom lemma_span_div_spec: forall x: int, ss: int, a: int, b: int. ([%#sbuddy'256] ss > 0 /\ 0 <= a /\ a <= b /\ x >= 0)
+    -> ([%#sbuddy'257] ComputerDivision.mod x (span ss b) = 0)
+    -> ([%#sbuddy'258] ComputerDivision.mod x (span ss a) = 0)
+
+function lemma_mod_self [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 175 0 175 29] (m: int) : ()
+ = [%#sbuddy'262] lemma_mul_mod0 m 1
+
+axiom lemma_mod_self_spec: forall m: int. ([%#sbuddy'260] m > 0) -> ([%#sbuddy'261] ComputerDivision.mod m m = 0)
+
+function lemma_mod_add [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 214 0 214 44] (x: int) (y: int) (m: int) : ()
+ =
+  [%#sbuddy'266] let _ = lemma_divmod x m in let _ = lemma_divmod y m in let _ = lemma_mul_mod0 m (ComputerDivision.div x m
+  + ComputerDivision.div y m) in if x >= y then
+    lemma_mul_mod0 m (ComputerDivision.div x m - ComputerDivision.div y m)
+  else
+    ()
+
+
+axiom lemma_mod_add_spec: forall x: int, y: int, m: int. ([%#sbuddy'263] m > 0
+      /\ x >= 0 /\ y >= 0 /\ ComputerDivision.mod x m = 0 /\ ComputerDivision.mod y m = 0)
+    -> ([%#sbuddy'264] ComputerDivision.mod (x + y) m = 0)
+
+axiom lemma_mod_add_spec'0: forall x: int, y: int, m: int. ([%#sbuddy'263] m > 0
+      /\ x >= 0 /\ y >= 0 /\ ComputerDivision.mod x m = 0 /\ ComputerDivision.mod y m = 0)
+    -> ([%#sbuddy'265] x >= y -> ComputerDivision.mod (x - y) m = 0)
+
+constant const_MAX'0: UInt64.t = (18446744073709551615: UInt64.t)
+
+function lemma_span_mult [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 218 0 218 47] (ss: int) (a: int) (b: int) : ()
+
+axiom lemma_span_mult_spec: forall ss: int, a: int, b: int. ([%#sl2'30] ss > 0 /\ 0 <= a /\ a <= b)
+    -> ([%#sl2'31] ComputerDivision.mod (span ss b) (span ss a) = 0)
+
+function lemma_aligned_disj2 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 207 0 207 50] (x: int) (y: int) (m: int) : ()
+
+axiom lemma_aligned_disj2_spec: forall x: int, y: int, m: int. ([%#sl2'32] m > 0
+      /\ x >= 0 /\ y >= 0 /\ ComputerDivision.mod x m = 0 /\ ComputerDivision.mod y m = 0 /\ x < y)
+    -> ([%#sl2'33] x + m <= y)
+
+function lemma_away_sub [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 188 0 188 83] (fl: Seq.seq t_Vec_u64_Global) (ss: int) (y: int) (l: int) (y2: int) (l2: int) : ()
+
+axiom lemma_away_sub_spec:
+  forall fl: Seq.seq t_Vec_u64_Global, ss: int, y: int, l: int, y2: int, l2: int. ([%#sl2'34] faway fl ss y l
+      /\ y <= y2 /\ y2 + l2 <= y + l /\ l2 > 0)
+    -> ([%#sl2'35] forall o: int. 0 <= o -> span ss o > 0) -> ([%#sl2'36] faway fl ss y2 l2)
+
+predicate fal [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 157 0 157 46] (fl: Seq.seq t_Vec_u64_Global) (ss: int) =
+  [%#sl2m'1] forall o: int, k: int. fv fl o k -> ComputerDivision.mod (fs fl o k) (span ss o) = 0
+
+let push_u64 (self_: MutBorrow.t t_Vec_u64_Global) (v: UInt64.t) (return (x: ())) = any
+  [ return (result: ()) -> {[@stop_split] [@expl:push ensures] [%#svec'7] view_Vec_u64_Global self_.final
+    = Seq.snoc (view_Vec_u64_Global self_.current) v}
+    (! return {result}) ]
+
+predicate pu_rel [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 95 0 95 73] (a: Seq.seq t_Vec_u64_Global) (b: Seq.seq t_Vec_u64_Global) (o: int) (v: UInt64.t) =
+  [%#sl2'37] Seq.length a = Seq.length b
+  /\ 0 <= o
+  /\ o < Seq.length a
+  /\ view_Vec_u64_Global (Seq.get b o) = Seq.snoc (view_Vec_u64_Global (Seq.get a o)) v
+  /\ (forall q: int. 0 <= q /\ q < Seq.length a /\ q <> o -> Seq.get b q = Seq.get a q)
+
+let g_mk_push (bf: Seq.seq t_Vec_u64_Global) (af: Seq.seq t_Vec_u64_Global) (ss: int) (o: int) (v: UInt64.t) (sp: int)
+  (c: bool) (return (x: ())) =
+{[@stop_split] [@expl:g_mk_push requires] ([@stop_split] [@expl:g_mk_push requires #0] [%#sl2m'2] pu_rel bf af o v
+    /\ ss > 0 /\ 0 <= o /\ fal bf ss)
+  /\ ([@stop_split] [@expl:g_mk_push requires #1] [%#sl2m'3] sp >= 0 /\ ComputerDivision.mod sp (span ss (o + 1)) = 0)
+  /\ ([@stop_split] [@expl:g_mk_push requires #2] [%#sl2m'4] UInt64.t'int v = sp \/ UInt64.t'int v = sp + span ss o)
+  /\ ([@stop_split] [@expl:g_mk_push requires #3] [%#sl2m'5] c
+  -> faway bf ss (if UInt64.t'int v = sp then sp + span ss o else sp) (span ss o) /\ coal bf ss)}
+  any
+  [ return (result: ()) -> {[@stop_split] [@expl:g_mk_push ensures] [%#sl2m'6] c -> coal af ss} (! return {result}) ]
+
+function lemma_pu [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 158 0 158 76] (a: Seq.seq t_Vec_u64_Global) (b: Seq.seq t_Vec_u64_Global) (ss: int) (o: int) (v: UInt64.t) : ()
+
+axiom lemma_pu_spec:
+  forall a: Seq.seq t_Vec_u64_Global, b: Seq.seq t_Vec_u64_Global, ss: int, o: int, v: UInt64.t. ([%#sl2'38] pu_rel a b o v
+      /\ ss > 0) -> ([%#sl2'39] fdisj a ss /\ faway a ss (UInt64.t'int v) (span ss o) -> fdisj b ss)
+
+axiom lemma_pu_spec'0:
+  forall a: Seq.seq t_Vec_u64_Global, b: Seq.seq t_Vec_u64_Global, ss: int, o: int, v: UInt64.t. ([%#sl2'38] pu_rel a b o v
+      /\ ss > 0)
+    -> ([%#sl2'40] forall y: int, l: int. faway a ss y l /\ disj y l (UInt64.t'int v) (span ss o) -> faway b ss y l)
+
+axiom lemma_pu_spec'1:
+  forall a: Seq.seq t_Vec_u64_Global, b: Seq.seq t_Vec_u64_Global, ss: int, o: int, v: UInt64.t. ([%#sl2'38] pu_rel a b o v
+      /\ ss > 0) -> ([%#sl2'41] forall z: int. ffree a ss z -> ffree b ss z)
+
+axiom lemma_pu_spec'2:
+  forall a: Seq.seq t_Vec_u64_Global, b: Seq.seq t_Vec_u64_Global, ss: int, o: int, v: UInt64.t. ([%#sl2'38] pu_rel a b o v
+      /\ ss > 0) -> ([%#sl2'42] forall z: int. UInt64.t'int v <= z /\ z < UInt64.t'int v + span ss o -> ffree b ss z)
+
+axiom lemma_pu_spec'3:
+  forall a: Seq.seq t_Vec_u64_Global, b: Seq.seq t_Vec_u64_Global, ss: int, o: int, v: UInt64.t. ([%#sl2'38] pu_rel a b o v
+      /\ ss > 0)
+    -> ([%#sl2'43] forall z: int. ffree b ss z -> ffree a ss z \/ UInt64.t'int v <= z /\ z < UInt64.t'int v + span ss o)
+
+axiom lemma_pu_spec'4:
+  forall a: Seq.seq t_Vec_u64_Global, b: Seq.seq t_Vec_u64_Global, ss: int, o: int, v: UInt64.t. ([%#sl2'38] pu_rel a b o v
+      /\ ss > 0) -> ([%#sl2'44] forall kk: int. o >= kk -> fold_k b a kk)
+
+axiom lemma_pu_spec'5:
+  forall a: Seq.seq t_Vec_u64_Global, b: Seq.seq t_Vec_u64_Global, ss: int, o: int, v: UInt64.t. ([%#sl2'38] pu_rel a b o v
+      /\ ss > 0)
+    -> ([%#sl2'45] forall o2: int, k2: int. fv b o2 k2
+      -> o2 = o /\ k2 = Seq.length (view_Vec_u64_Global (Seq.get a o)) \/ fv a o2 k2 /\ fs b o2 k2 = fs a o2 k2)
+
+axiom lemma_pu_spec'6:
+  forall a: Seq.seq t_Vec_u64_Global, b: Seq.seq t_Vec_u64_Global, ss: int, o: int, v: UInt64.t. ([%#sl2'38] pu_rel a b o v
+      /\ ss > 0) -> ([%#sl2'46] forall o2: int, k2: int. fv a o2 k2 -> fv b o2 k2 /\ fs b o2 k2 = fs a o2 k2)
+
+axiom lemma_pu_spec'7:
+  forall a: Seq.seq t_Vec_u64_Global, b: Seq.seq t_Vec_u64_Global, ss: int, o: int, v: UInt64.t. ([%#sl2'38] pu_rel a b o v
+      /\ ss > 0)
+    -> ([%#sl2'47] fv b o (Seq.length (view_Vec_u64_Global (Seq.get a o)))
+    /\ fs b o (Seq.length (view_Vec_u64_Global (Seq.get a o))) = UInt64.t'int v)
+
+function lemma_tf_inc [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 536 4 536 84] (a: Seq.seq t_Vec_u64_Global) (b: Seq.seq t_Vec_u64_Global) (ss: int) (o: int) (d: int) : ()
+
+axiom lemma_tf_inc_spec:
+  forall a: Seq.seq t_Vec_u64_Global, b: Seq.seq t_Vec_u64_Global, ss: int, o: int, d: int. ([%#sbuddy'267] 0 <= o
+      /\ o < Seq.length a /\ Seq.length a = Seq.length b)
+    -> ([%#sbuddy'268] forall p: int. 0 <= p /\ p < Seq.length a /\ p <> o -> Seq.get a p = Seq.get b p)
+    -> ([%#sbuddy'269] Seq.length (view_Vec_u64_Global (Seq.get a o))
+      = Seq.length (view_Vec_u64_Global (Seq.get b o)) + 1)
+    -> ([%#sbuddy'270] d = span ss o) -> ([%#sbuddy'271] tf a ss (Seq.length a) = tf b ss (Seq.length b) + d)
+
+function lemma_fold_trans [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 369 0 369 86] (a: Seq.seq t_Vec_u64_Global) (b: Seq.seq t_Vec_u64_Global) (c: Seq.seq t_Vec_u64_Global) (kk: int) : ()
+
+axiom lemma_fold_trans_spec:
+  forall a: Seq.seq t_Vec_u64_Global, b: Seq.seq t_Vec_u64_Global, c: Seq.seq t_Vec_u64_Global, kk: int. ([%#sl2'48] fold_k c b kk
+      /\ fold_k b a kk) -> ([%#sl2'49] fold_k c a kk)
+
+predicate resolve_refmut_BuddyAllocator [@inline:trivial] (_1: MutBorrow.t t_BuddyAllocator) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_BuddyAllocator
+
+predicate bd_shape [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 401 0 401 42] (b: t_BuddyAllocator) =
+  [%#sbuddy'272] UInt32.t'int b.sector_size > 0
+  /\ UInt64.t'int b.max_order < 64
+  /\ Seq.length (view_Vec_Vec_u64_Global_Global b.free_lists) = UInt64.t'int b.max_order + 1
+  /\ UInt64.t'int b.base_offset + UInt64.t'int b.total_usable_size <= UInt64.t'int const_MAX'0
+  /\ (UInt64.t'int b.max_order = 0
+  \/ span (UInt32.t'int b.sector_size) (UInt64.t'int b.max_order) <= UInt64.t'int b.total_usable_size)
+
+predicate split1_post [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 474 0 474 88] (b: t_BuddyAllocator) (n: t_BuddyAllocator) (x: UInt64.t) (t: int) (a: UInt64.t) =
+  [%#sbuddy'273] Seq.length (view_Vec_Vec_u64_Global_Global n.free_lists)
+    = Seq.length (view_Vec_Vec_u64_Global_Global b.free_lists)
+  /\ Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global n.free_lists) (t + 1))) = 0
+  /\ pushed (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global n.free_lists) t)) (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global b.free_lists) t)) (split1_val b x t a)
+  /\ (forall p: int. 0 <= p /\ p < Seq.length (view_Vec_Vec_u64_Global_Global b.free_lists) /\ p <> t /\ p <> t + 1
+    -> Seq.get (view_Vec_Vec_u64_Global_Global n.free_lists) p
+    = Seq.get (view_Vec_Vec_u64_Global_Global b.free_lists) p)
+
+predicate mk_post [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 356 0 356 84] (a: Seq.seq t_Vec_u64_Global) (b: Seq.seq t_Vec_u64_Global) (ss: int) (x: int) (kk: int) =
+  [%#sl2'50] fdisj b ss
+  /\ faway b ss x (span ss kk)
+  /\ (forall y: int, l: int. 0 < l /\ faway a ss y l -> faway b ss y l)
+  /\ (forall z: int. ffree a ss z /\ not (x <= z /\ z < x + span ss kk) -> ffree b ss z)
+  /\ fold_k b a kk /\ tf b ss (Seq.length b) = tf a ss (Seq.length a) - span ss kk
+
+predicate mk_spec [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 532 0 532 84] (a: Seq.seq t_Vec_u64_Global) (b: Seq.seq t_Vec_u64_Global) (ss: int) (x: int) (kk: int)
+
+function lemma_mk_spec_intro [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 539 0 539 88] (a: Seq.seq t_Vec_u64_Global) (b: Seq.seq t_Vec_u64_Global) (ss: int) (x: int) (kk: int) : ()
+
+axiom lemma_mk_spec_intro_spec:
+  forall a: Seq.seq t_Vec_u64_Global, b: Seq.seq t_Vec_u64_Global, ss: int, x: int, kk: int. ([%#sl2'51] mk_hyp a ss x kk
+      -> mk_post a b ss x kk) -> ([%#sl2'52] mk_spec a b ss x kk)
+
+predicate mk_c [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 414 0 414 81] (a: Seq.seq t_Vec_u64_Global) (b: Seq.seq t_Vec_u64_Global) (ss: int) (x: int) (kk: int)
+
+let g_mk_c_intro (a: Seq.seq t_Vec_u64_Global) (b: Seq.seq t_Vec_u64_Global) (ss: int) (x: int) (kk: int)
+  (return (x'0: ())) = {[@stop_split] [@expl:g_mk_c_intro requires] [%#sl2m'7] mk_hyp a ss x kk /\ coal a ss
+  -> coal b ss}
+  any
+  [ return (result: ()) -> {[@stop_split] [@expl:g_mk_c_intro ensures] [%#sl2m'8] mk_c a b ss x kk}
+    (! return {result}) ]
+
+let g_mk_exact (a: Seq.seq t_Vec_u64_Global) (b: Seq.seq t_Vec_u64_Global) (ss: int) (x: int) (kk: int) (p: int)
+  (return (x'0: ())) =
+{[@stop_split] [@expl:g_mk_exact requires] ([@stop_split] [@expl:g_mk_exact requires #0] [%#sl2'53] sr_rel a b kk p
+    /\ fs a kk p = x /\ ss > 0 /\ 0 <= kk)
+  /\ ([@stop_split] [@expl:g_mk_exact requires #1] [%#sl2'54] tf b ss (Seq.length b)
+  = tf a ss (Seq.length a) - span ss kk)}
+  any
+  [ return (result: ()) -> {[@stop_split] [@expl:g_mk_exact ensures] [%#sl2'55] mk_spec a b ss x kk}
+    (! return {result}) ]
+
+predicate bd_inv [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 431 0 431 40] (b: t_BuddyAllocator) =
+  [%#sbuddy'274] bd_shape b /\ bd_aligned b /\ bd_inside b
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let mark_allocated [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 976 4 976 64]
+  (self: MutBorrow.t t_BuddyAllocator) (abs_offset: UInt64.t) (size: UInt64.t) (return (x: ())) =
+{[@stop_split] [@expl:mark_allocated requires] ([@stop_split] [@expl:mark_allocated requires #0] [%#sbuddy'208] bd_inv self.current)
+  /\ ([@stop_split] [@expl:mark_allocated requires #1] [%#sbuddy'209] UInt64.t'int abs_offset
+    >= UInt64.t'int self.current.base_offset)
+  /\ ([@stop_split] [@expl:mark_allocated requires #2] [%#sbuddy'210] ord (ComputerDivision.div (UInt64.t'int size) (UInt32.t'int self.current.sector_size))
+  <= UInt64.t'int self.current.max_order)}
+  (! bb0
+  [ bb0 = s0'0
+    [ s0'0 = [ &ss <- UInt64.of_int (UInt32.t'int self.current.sector_size) ] s1
+    | s1 = UInt64.sub [%#sbuddy] {abs_offset} {self.current.base_offset} (fun (_x: UInt64.t) -> [ &offset <- _x ] s2)
+    | s2 = [ &_50 <- ss ] s3
+    | s3 = [ &_51 <- _50 = ([%#sbuddy'0] (0: UInt64.t)) ] s4
+    | s4 = {[@expl:division by zero] [%#sbuddy'0] not _51} s5
+    | s5 = UInt64.div [%#sbuddy'0] {size} {_50} (fun (_x: UInt64.t) -> [ &blocks <- _x ] s6)
+    | s6 = order_for_blocks [%#sbuddy'1] {blocks} (fun (_x: UInt64.t) -> [ &target_order <- _x ] s7)
+    | s7 =
+      [ &hk <- [%#sbuddy'2] mk_hyp (view_Vec_Vec_u64_Global_Global self.current.free_lists) (UInt64.t'int ss) (UInt64.t'int offset) (UInt64.t'int target_order) ]
+      s8
+    | s8 = [ &s0 <- [%#sbuddy'3] self.current ] s9
+    | s9 = {[@expl:assertion] [%#sbuddy'4] UInt64.t'int ss = UInt32.t'int self.current.sector_size
+      /\ UInt64.t'int offset = UInt64.t'int abs_offset - UInt64.t'int self.current.base_offset
+      /\ UInt64.t'int target_order
+      = ord (ComputerDivision.div (UInt64.t'int size) (UInt32.t'int self.current.sector_size))}
+      s10
+    | s10 = {[@expl:assertion] [%#sbuddy'5] forall o: int. 0 <= o
+        -> (let _ = lemma_span_pos (UInt64.t'int ss) o in span (UInt64.t'int ss) o > 0)}
+      s11
+    | s11 = index_Vec_Vec_u64_Global_Global [%#sbuddy'6] {self.current.free_lists} {target_order}
+        (fun (_x: t_Vec_u64_Global) -> [ &_79 <- _x ] s12)
+    | s12 = [ &_78 <- _79 ] s13
+    | s13 = find_pos [%#sbuddy'7] {_78} {offset} (fun (_x: t_Option_usize) -> [ &_76 <- _x ] s14)
+    | s14 = any [ br0 -> {_76 = None} (! bb31) | br1 (x0: UInt64.t) -> {_76 = Some x0} (! bb8) ] ]
+  | bb31 = s0'0
+    [ s0'0 = [ &orig <- [%#sbuddy'8] self.current ] s1
+    | s1 = {[@expl:assertion] [%#sbuddy'9] forall q: int. 0 <= q
+          /\ q
+          < Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global orig.free_lists) (UInt64.t'int target_order)))
+        -> fs (view_Vec_Vec_u64_Global_Global orig.free_lists) (UInt64.t'int target_order) q <> UInt64.t'int offset}
+      s2
+    | s2 = {[@expl:assertion] [%#sbuddy'10] hk
+      -> (let _ = lemma_inblk_up (view_Vec_Vec_u64_Global_Global orig.free_lists) (UInt64.t'int ss) (UInt64.t'int target_order) (UInt64.t'int offset) in true)}
+      s3
+    | s3 = {[@expl:assertion] [%#sbuddy'11] forall x: UInt64.t. UInt64.t'int x = UInt64.t'int offset -> x = offset} s4
+    | s4 = {[@expl:assertion] [%#sbuddy'12] forall a: UInt64.t. split1_pre orig offset (UInt64.t'int target_order) a
+        -> UInt64.t'int target_order
+        = ord (ComputerDivision.div (UInt64.t'int size) (UInt32.t'int self.current.sector_size))}
+      s5
+    | s5 = UInt64.add [%#sbuddy'14] {target_order} {[%#sbuddy'13] (1: UInt64.t)}
+        (fun (_x: UInt64.t) -> [ &search_order <- _x ] s6)
+    | s6 = bb33 ]
+  | bb33 = bb33
+    [ bb33 = {[@expl:loop invariant #0] [%#sbuddy'19] UInt64.t'int target_order + 1 <= UInt64.t'int search_order}
+      {[@expl:loop invariant #1] [%#sbuddy'18] self.current = orig}
+      {[@expl:loop invariant #2] [%#sbuddy'17] forall sord'0: int, sp: UInt64.t. UInt64.t'int target_order < sord'0
+          /\ sord'0 < UInt64.t'int search_order
+          /\ sord'0 <= UInt64.t'int self.current.max_order /\ UInt64.t'int sp = span (UInt64.t'int ss) sord'0
+        -> (forall q: int. 0 <= q
+            /\ q
+            < Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) sord'0))
+          -> Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) sord'0)) q
+          <> UInt64.bw_and offset (UInt64.bw_not (UInt64.sub sp (1: UInt64.t))))}
+      {[@expl:loop invariant #3] [%#sbuddy'16] forall a: UInt64.t. split1_pre orig offset (UInt64.t'int target_order) a
+        -> UInt64.t'int search_order = UInt64.t'int target_order + 1}
+      {[@expl:loop invariant #4] [%#sbuddy'15] hk
+      -> (exists o: int, k: int. fv (view_Vec_Vec_u64_Global_Global orig.free_lists) o k
+        /\ o >= UInt64.t'int search_order
+        /\ fs (view_Vec_Vec_u64_Global_Global orig.free_lists) o k <= UInt64.t'int offset
+        /\ UInt64.t'int offset + span (UInt64.t'int ss) (UInt64.t'int target_order)
+        <= fs (view_Vec_Vec_u64_Global_Global orig.free_lists) o k + span (UInt64.t'int ss) o)}
+      (! s0'0)
+      [ s0'0 = [ &_275 <- UInt64.le search_order self.current.max_order ] s1
+      | s1 = any [ br0 -> {_275 = false} (! bb90) | br1 -> {_275} (! bb35) ] ]
+      [ bb35 = s0'0
+        [ s0'0 =
+          {[@expl:assertion] [%#sbuddy'20] let _ = lemma_span_pos (UInt64.t'int ss) (UInt64.t'int search_order) in span (UInt64.t'int ss) (UInt64.t'int search_order)
+          > 0}
+          s1
+        | s1 = {[@expl:assertion] [%#sbuddy'21] UInt64.t'int self.current.max_order >= 1} s2
+        | s2 = {[@expl:assertion] [%#sbuddy'22] span (UInt64.t'int ss) (UInt64.t'int self.current.max_order)
+          <= UInt64.t'int self.current.total_usable_size}
+          s3
+        | s3 =
+          {[@expl:assertion] [%#sbuddy'23] let _ = lemma_span_mono (UInt64.t'int ss) (UInt64.t'int search_order) (UInt64.t'int self.current.max_order) in span (UInt64.t'int ss) (UInt64.t'int search_order)
+          <= span (UInt64.t'int ss) (UInt64.t'int self.current.max_order)}
+          s4
+        | s4 = {[@expl:assertion] [%#sbuddy'24] Pow2int.pow2 (UInt64.t'int search_order) * UInt64.t'int ss
+          <= UInt64.t'int self.current.total_usable_size}
+          s5
+        | s5 = pow2_u64 [%#sbuddy'25] {search_order} (fun (_x: UInt64.t) -> [ &_301 <- _x ] s6)
+        | s6 = UInt64.mul [%#sbuddy'26] {_301} {ss} (fun (_x: UInt64.t) -> [ &block_span <- _x ] s7)
+        | s7 = {[@expl:assertion] [%#sbuddy'27] UInt64.t'int block_span
+          = span (UInt64.t'int ss) (UInt64.t'int search_order)}
+          s8
+        | s8 = mask_down [%#sbuddy'28] {offset} {block_span} (fun (_x: UInt64.t) -> [ &aligned_start <- _x ] s9)
+        | s9 = {[@expl:assertion] [%#sbuddy'29] forall sp: UInt64.t. UInt64.t'int sp
+              = span (UInt64.t'int ss) (UInt64.t'int search_order) -> sp = block_span}
+          s10
+        | s10 = g_mask [%#sbuddy'32] {offset} {block_span} {aligned_start} {[%#sbuddy'30] UInt64.t'int ss}
+            {[%#sbuddy'31] UInt64.t'int search_order} (fun (_x: ()) -> [ &_317 <- _x ] s11)
+        | s11 = {[@expl:assertion] [%#sbuddy'33] hk -> p2 (UInt64.t'int ss)} s12
+        | s12 = index_Vec_Vec_u64_Global_Global [%#sbuddy'34] {self.current.free_lists} {search_order}
+            (fun (_x: t_Vec_u64_Global) -> [ &_335 <- _x ] s13)
+        | s13 = [ &_334 <- _335 ] s14
+        | s14 = find_pos [%#sbuddy'35] {_334} {aligned_start} (fun (_x: t_Option_usize) -> [ &_332 <- _x ] s15)
+        | s15 = any [ br0 -> {_332 = None} (! bb89) | br1 (x0: UInt64.t) -> {_332 = Some x0} (! bb44) ] ]
+      | bb89 = s0'0
+        [ s0'0 =
+          {[@expl:assertion] [%#sbuddy'36] forall a: UInt64.t. split1_pre orig offset (UInt64.t'int target_order) a
+            -> UInt64.t'int search_order <> UInt64.t'int target_order + 1}
+          s1
+        | s1 = {[@expl:assertion] [%#sbuddy'37] forall sp: UInt64.t. UInt64.t'int sp
+              = span (UInt64.t'int ss) (UInt64.t'int search_order)
+            -> (forall q: int. 0 <= q
+                /\ q
+                < Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) (UInt64.t'int search_order)))
+              -> Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) (UInt64.t'int search_order))) q
+              <> UInt64.bw_and offset (UInt64.bw_not (UInt64.sub sp (1: UInt64.t))))}
+          s2
+        | s2 = {[@expl:assertion] [%#sbuddy'38] forall sord'0: int, sp: UInt64.t. UInt64.t'int target_order < sord'0
+              /\ sord'0 < UInt64.t'int search_order + 1
+              /\ sord'0 <= UInt64.t'int self.current.max_order /\ UInt64.t'int sp = span (UInt64.t'int ss) sord'0
+            -> (forall q: int. 0 <= q
+                /\ q
+                < Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) sord'0))
+              -> Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) sord'0)) q
+              <> UInt64.bw_and offset (UInt64.bw_not (UInt64.sub sp (1: UInt64.t))))}
+          s3
+        | s3 = {[@expl:assertion] [%#sbuddy'39] forall q: int. 0 <= q
+              /\ q
+              < Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global orig.free_lists) (UInt64.t'int search_order)))
+            -> fs (view_Vec_Vec_u64_Global_Global orig.free_lists) (UInt64.t'int search_order) q
+            <> UInt64.t'int aligned_start}
+          s4
+        | s4 = {[@expl:assertion] [%#sbuddy'40] hk
+          -> (let _ = lemma_inblk_step (view_Vec_Vec_u64_Global_Global orig.free_lists) (UInt64.t'int ss) (UInt64.t'int target_order) (UInt64.t'int search_order) (UInt64.t'int offset) (UInt64.t'int aligned_start) in true)}
+          s5
+        | s5 = UInt64.add [%#sbuddy'42] {search_order} {[%#sbuddy'41] (1: UInt64.t)}
+            (fun (_x: UInt64.t) -> [ &search_order <- _x ] s6)
+        | s6 = bb33 ] ] ]
+  | bb44 = s0'0
+    [ s0'0 = elim_Some {_332} (fun (r0: UInt64.t) -> [ &pos'0 <- r0 ] s1)
+    | s1 =
+      {[@expl:assertion] [%#sbuddy'43] Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) (UInt64.t'int search_order))) (UInt64.t'int pos'0)
+      = UInt64.bw_and offset (UInt64.bw_not (UInt64.sub block_span (1: UInt64.t)))}
+      s2
+    | s2 =
+      {[@expl:assertion] [%#sbuddy'44] fs (view_Vec_Vec_u64_Global_Global orig.free_lists) (UInt64.t'int search_order) (UInt64.t'int pos'0)
+      = UInt64.t'int aligned_start}
+      s3
+    | s3 = {[@expl:assertion] [%#sbuddy'45] hk
+      -> (let _ = lemma_inblk_is (view_Vec_Vec_u64_Global_Global orig.free_lists) (UInt64.t'int ss) (UInt64.t'int target_order) (UInt64.t'int offset) (UInt64.t'int search_order) (UInt64.t'int pos'0) in UInt64.t'int offset
+        + span (UInt64.t'int ss) (UInt64.t'int target_order)
+      <= UInt64.t'int aligned_start + span (UInt64.t'int ss) (UInt64.t'int search_order))}
+      s4
+    | s4 =
+      {[@expl:assertion] [%#sbuddy'46] ComputerDivision.mod (UInt64.t'int aligned_start) (span (UInt64.t'int ss) (UInt64.t'int search_order))
+      = 0}
+      s5
+    | s5 = {[@expl:assertion] [%#sbuddy'47] UInt64.t'int aligned_start
+        + span (UInt64.t'int ss) (UInt64.t'int search_order)
+      <= UInt64.t'int self.current.total_usable_size}
+      s6
+    | s6 = [ &before'0 <- [%#sbuddy'48] self.current.free_lists ] s7
+    | s7 = MutBorrow.borrow_mut <t_Vec_Vec_u64_Global_Global> {self.current.free_lists}
+        (fun (_bor: MutBorrow.t t_Vec_Vec_u64_Global_Global) ->
+          [ &_383 <- _bor ] [ &self <- { self with current = { self.current with free_lists = _bor.final } } ] s8)
+    | s8 = index_mut_Vec_Vec_u64_Global_Global [%#sbuddy'49] {_383} {search_order}
+        (fun (_x: MutBorrow.t t_Vec_u64_Global) -> [ &_382 <- _x ] s9)
+    | s9 = MutBorrow.borrow_final <t_Vec_u64_Global> {_382.current} {MutBorrow.get_id _382}
+        (fun (_bor: MutBorrow.t t_Vec_u64_Global) ->
+          [ &_381 <- _bor ] [ &_382 <- { _382 with current = _bor.final } ] s10)
+    | s10 = MutBorrow.borrow_final <t_Vec_u64_Global> {_381.current} {MutBorrow.get_id _381}
+        (fun (_bor: MutBorrow.t t_Vec_u64_Global) ->
+          [ &_380 <- _bor ] [ &_381 <- { _381 with current = _bor.final } ] s11)
+    | s11 = swap_remove [%#sbuddy'50] {_380} {pos'0} (fun (_x: ()) -> [ &_379 <- _x ] s12)
+    | s12 = -{resolve_refmut_Vec_u64_Global _382}- s13
+    | s13 = -{resolve_refmut_Vec_u64_Global _381}- s14
+    | s14 = {[@expl:assertion] [%#sbuddy'51] forall o: int. 0 <= o
+          /\ o < Seq.length (view_Vec_Vec_u64_Global_Global before'0) /\ o <> UInt64.t'int search_order
+        -> Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) o
+        = Seq.get (view_Vec_Vec_u64_Global_Global before'0) o}
+      s15
+    | s15 = {[@expl:assertion] [%#sbuddy'52] forall o: int, k: int. 0 <= o
+          /\ o < Seq.length (view_Vec_Vec_u64_Global_Global self.current.free_lists)
+          /\ 0 <= k
+          /\ k < Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) o))
+        -> (exists j: int. 0 <= j
+          /\ j < Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global before'0) o))
+          /\ Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) o)) k
+          = Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global before'0) o)) j)}
+      s16
+    | s16 = {[@expl:assertion] [%#sbuddy'53] forall o: int, k: int. 0 <= o
+          /\ o < Seq.length (view_Vec_Vec_u64_Global_Global self.current.free_lists)
+          /\ 0 <= k
+          /\ k < Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) o))
+        -> ComputerDivision.mod (UInt64.t'int (Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) o)) k)) (span (UInt64.t'int ss) o)
+          = 0
+        /\ UInt64.t'int (Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) o)) k)
+          + span (UInt64.t'int ss) o
+        <= UInt64.t'int self.current.total_usable_size}
+      s17
+    | s17 = {[@expl:assertion] [%#sbuddy'54] bd_aligned self.current /\ bd_inside self.current} s18
+    | s18 =
+      {[@expl:assertion] [%#sbuddy'55] sr_rel (view_Vec_Vec_u64_Global_Global before'0) (view_Vec_Vec_u64_Global_Global self.current.free_lists) (UInt64.t'int search_order) (UInt64.t'int pos'0)}
+      s19
+    | s19 =
+      {[@expl:assertion] [%#sbuddy'56] let _ = lemma_sr (view_Vec_Vec_u64_Global_Global before'0) (view_Vec_Vec_u64_Global_Global self.current.free_lists) (UInt64.t'int ss) (UInt64.t'int search_order) (UInt64.t'int pos'0) in true}
+      s20
+    | s20 =
+      {[@expl:assertion] [%#sbuddy'57] Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) (UInt64.t'int search_order)))
+        - Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global before'0) (UInt64.t'int search_order)))
+      = - 1}
+      s21
+    | s21 =
+      {[@expl:assertion] [%#sbuddy'58] let _ = lemma_tf_dec (view_Vec_Vec_u64_Global_Global self.current.free_lists) (view_Vec_Vec_u64_Global_Global before'0) (UInt64.t'int ss) (UInt64.t'int search_order) (span (UInt64.t'int ss) (UInt64.t'int search_order)) in tf (view_Vec_Vec_u64_Global_Global self.current.free_lists) (UInt64.t'int ss) (Seq.length (view_Vec_Vec_u64_Global_Global self.current.free_lists))
+      = tf (view_Vec_Vec_u64_Global_Global before'0) (UInt64.t'int ss) (Seq.length (view_Vec_Vec_u64_Global_Global before'0))
+      - span (UInt64.t'int ss) (UInt64.t'int search_order)}
+      s22
+    | s22 = {[@expl:assertion] [%#sbuddy'59] before'0 = orig.free_lists} s23
+    | s23 = {[@expl:assertion] [%#sbuddy'60] hk
+      -> (forall y: int, l: int. 0 < l /\ faway (view_Vec_Vec_u64_Global_Global orig.free_lists) (UInt64.t'int ss) y l
+        -> disj y l (UInt64.t'int aligned_start) (span (UInt64.t'int ss) (UInt64.t'int search_order)))}
+      s24
+    | s24 = g_coal_sr [%#sbuddy'66] {[%#sbuddy'61] view_Vec_Vec_u64_Global_Global before'0}
+        {[%#sbuddy'62] view_Vec_Vec_u64_Global_Global self.current.free_lists} {[%#sbuddy'63] UInt64.t'int ss}
+        {[%#sbuddy'64] UInt64.t'int search_order} {[%#sbuddy'65] UInt64.t'int pos'0}
+        (fun (_x: ()) -> [ &_438 <- _x ] s25)
+    | s25 = [ &cc <- [%#sbuddy'67] hk /\ coal (view_Vec_Vec_u64_Global_Global orig.free_lists) (UInt64.t'int ss) ] s26
+    | s26 = [ &ar <- [%#sbuddy'68] self.current.free_lists ] s27
+    | s27 = {[@expl:assertion] [%#sbuddy'69] forall a: UInt64.t. split1_pre orig offset (UInt64.t'int target_order) a
+        -> aligned_start = a
+        /\ UInt64.t'int pos'0 = 0
+        /\ Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global ar) (UInt64.t'int search_order)))
+          = 0
+        /\ Seq.get (view_Vec_Vec_u64_Global_Global ar) (UInt64.t'int target_order)
+          = Seq.get (view_Vec_Vec_u64_Global_Global orig.free_lists) (UInt64.t'int target_order)
+        /\ (forall o: int. 0 <= o
+            /\ o < Seq.length (view_Vec_Vec_u64_Global_Global ar) /\ o <> UInt64.t'int search_order
+          -> Seq.get (view_Vec_Vec_u64_Global_Global ar) o
+          = Seq.get (view_Vec_Vec_u64_Global_Global orig.free_lists) o)}
+      s28
+    | s28 = [ &split_offset <- aligned_start ] s29
+    | s29 = [ &sord <- search_order ] s30
+    | s30 = [ &_old <- self.final ] s31
+    | s31 = [ &_old'0 <- self.current.base_offset ] s32
+    | s32 = [ &_old'1 <- self.current.total_usable_size ] s33
+    | s33 = [ &_old'2 <- self.current.sector_size ] s34
+    | s34 = [ &_old'3 <- self.current.max_order ] s35
+    | s35 = bb56 ]
+  | bb56 = bb56
+    [ bb56 = {[@expl:inferred invariant: unchanged value] _old'3 = self.current.max_order}
+      {[@expl:inferred invariant: unchanged value] _old'2 = self.current.sector_size}
+      {[@expl:inferred invariant: unchanged value] _old'1 = self.current.total_usable_size}
+      {[@expl:inferred invariant: unchanged value] _old'0 = self.current.base_offset}
+      {[@expl:inferred invariant: unchanged value] _old = self.final}
+      {[@expl:loop invariant #0] [%#sbuddy'86] UInt64.t'int target_order <= UInt64.t'int sord
+      /\ UInt64.t'int sord <= UInt64.t'int search_order}
+      {[@expl:loop invariant #1] [%#sbuddy'85] Seq.length (view_Vec_Vec_u64_Global_Global self.current.free_lists)
+      = Seq.length (view_Vec_Vec_u64_Global_Global orig.free_lists)}
+      {[@expl:loop invariant #2] [%#sbuddy'84] self.current.base_offset = orig.base_offset
+      /\ self.current.total_usable_size = orig.total_usable_size}
+      {[@expl:loop invariant #3] [%#sbuddy'83] self.current.sector_size = orig.sector_size
+      /\ self.current.max_order = orig.max_order}
+      {[@expl:loop invariant #4] [%#sbuddy'82] bd_aligned self.current /\ bd_inside self.current}
+      {[@expl:loop invariant #5] [%#sbuddy'81] ComputerDivision.mod (UInt64.t'int split_offset) (span (UInt64.t'int ss) (UInt64.t'int sord))
+      = 0}
+      {[@expl:loop invariant #6] [%#sbuddy'80] UInt64.t'int split_offset + span (UInt64.t'int ss) (UInt64.t'int sord)
+      <= UInt64.t'int self.current.total_usable_size}
+      {[@expl:loop invariant #7] [%#sbuddy'79] UInt64.t'int sord = UInt64.t'int search_order
+      -> self.current.free_lists = ar /\ split_offset = aligned_start}
+      {[@expl:loop invariant #8] [%#sbuddy'78] forall a: UInt64.t. split1_pre orig offset (UInt64.t'int target_order) a
+          /\ UInt64.t'int sord = UInt64.t'int target_order
+        -> pushed (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) (UInt64.t'int target_order))) (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global ar) (UInt64.t'int target_order))) (split1_val orig offset (UInt64.t'int target_order) a)
+        /\ (forall o: int. 0 <= o
+            /\ o < Seq.length (view_Vec_Vec_u64_Global_Global ar) /\ o <> UInt64.t'int target_order
+          -> Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) o
+          = Seq.get (view_Vec_Vec_u64_Global_Global ar) o)}
+      {[@expl:loop invariant #9] [%#sbuddy'77] hk
+      -> fdisj (view_Vec_Vec_u64_Global_Global self.current.free_lists) (UInt64.t'int ss)
+      /\ faway (view_Vec_Vec_u64_Global_Global self.current.free_lists) (UInt64.t'int ss) (UInt64.t'int split_offset) (span (UInt64.t'int ss) (UInt64.t'int sord))}
+      {[@expl:loop invariant #10] [%#sbuddy'76] hk
+      -> UInt64.t'int split_offset <= UInt64.t'int offset
+      /\ UInt64.t'int offset + span (UInt64.t'int ss) (UInt64.t'int target_order)
+      <= UInt64.t'int split_offset + span (UInt64.t'int ss) (UInt64.t'int sord)}
+      {[@expl:loop invariant #11] [%#sbuddy'75] hk
+      -> UInt64.t'int aligned_start <= UInt64.t'int split_offset
+      /\ UInt64.t'int split_offset + span (UInt64.t'int ss) (UInt64.t'int sord)
+      <= UInt64.t'int aligned_start + span (UInt64.t'int ss) (UInt64.t'int search_order)}
+      {[@expl:loop invariant #12] [%#sbuddy'74] hk
+      -> (forall y: int, l: int. 0 < l /\ faway (view_Vec_Vec_u64_Global_Global orig.free_lists) (UInt64.t'int ss) y l
+        -> faway (view_Vec_Vec_u64_Global_Global self.current.free_lists) (UInt64.t'int ss) y l)}
+      {[@expl:loop invariant #13] [%#sbuddy'73] hk
+      -> (forall z: int. ffree (view_Vec_Vec_u64_Global_Global orig.free_lists) (UInt64.t'int ss) z
+          /\ not (UInt64.t'int offset <= z
+          /\ z < UInt64.t'int offset + span (UInt64.t'int ss) (UInt64.t'int target_order))
+        -> ffree (view_Vec_Vec_u64_Global_Global self.current.free_lists) (UInt64.t'int ss) z
+        \/ UInt64.t'int split_offset <= z
+        /\ z < UInt64.t'int split_offset + span (UInt64.t'int ss) (UInt64.t'int sord))}
+      {[@expl:loop invariant #14] [%#sbuddy'72] hk
+      -> fold_k (view_Vec_Vec_u64_Global_Global self.current.free_lists) (view_Vec_Vec_u64_Global_Global orig.free_lists) (UInt64.t'int target_order)}
+      {[@expl:loop invariant #15] [%#sbuddy'71] cc
+      -> coal (view_Vec_Vec_u64_Global_Global self.current.free_lists) (UInt64.t'int ss)}
+      {[@expl:loop invariant #16] [%#sbuddy'70] hk
+      -> tf (view_Vec_Vec_u64_Global_Global self.current.free_lists) (UInt64.t'int ss) (Seq.length (view_Vec_Vec_u64_Global_Global self.current.free_lists))
+      = tf (view_Vec_Vec_u64_Global_Global orig.free_lists) (UInt64.t'int ss) (Seq.length (view_Vec_Vec_u64_Global_Global orig.free_lists))
+      - span (UInt64.t'int ss) (UInt64.t'int sord)}
+      (! s0'0)
+      [ s0'0 = [ &_564 <- UInt64.gt sord target_order ] s1
+      | s1 = any [ br0 -> {_564 = false} (! bb82) | br1 -> {_564} (! bb58) ] ]
+      [ bb58 = s0'0
+        [ s0'0 = [ &sp_prev <- [%#sbuddy'87] UInt64.t'int sord ] s1
+        | s1 = {[@expl:assertion] [%#sbuddy'88] UInt64.t'int split_offset + span (UInt64.t'int ss) sp_prev
+          <= UInt64.t'int self.current.total_usable_size}
+          s2
+        | s2 = UInt64.sub [%#sbuddy'90] {sord} {[%#sbuddy'89] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &sord <- _x ] s3)
+        | s3 = {[@expl:assertion] [%#sbuddy'91] UInt64.t'int split_offset
+            + span (UInt64.t'int ss) (UInt64.t'int sord + 1)
+          <= UInt64.t'int self.current.total_usable_size}
+          s4
+        | s4 =
+          {[@expl:assertion] [%#sbuddy'92] let _ = lemma_span_succ (UInt64.t'int ss) (UInt64.t'int sord) in span (UInt64.t'int ss) (UInt64.t'int sord
+            + 1)
+          = 2 * span (UInt64.t'int ss) (UInt64.t'int sord)}
+          s5
+        | s5 =
+          {[@expl:assertion] [%#sbuddy'93] let _ = lemma_span_pos (UInt64.t'int ss) (UInt64.t'int sord) in span (UInt64.t'int ss) (UInt64.t'int sord)
+          > 0}
+          s6
+        | s6 =
+          {[@expl:assertion] [%#sbuddy'94] let _ = lemma_span_div (UInt64.t'int split_offset) (UInt64.t'int ss) (UInt64.t'int sord) (UInt64.t'int sord
+          + 1) in ComputerDivision.mod (UInt64.t'int split_offset) (span (UInt64.t'int ss) (UInt64.t'int sord)) = 0}
+          s7
+        | s7 =
+          {[@expl:assertion] [%#sbuddy'95] let _ = lemma_mod_self (span (UInt64.t'int ss) (UInt64.t'int sord)) in ComputerDivision.mod (span (UInt64.t'int ss) (UInt64.t'int sord)) (span (UInt64.t'int ss) (UInt64.t'int sord))
+          = 0}
+          s8
+        | s8 =
+          {[@expl:assertion] [%#sbuddy'96] let _ = lemma_mod_add (UInt64.t'int split_offset) (span (UInt64.t'int ss) (UInt64.t'int sord)) (span (UInt64.t'int ss) (UInt64.t'int sord)) in ComputerDivision.mod (UInt64.t'int split_offset
+            + span (UInt64.t'int ss) (UInt64.t'int sord)) (span (UInt64.t'int ss) (UInt64.t'int sord))
+          = 0}
+          s9
+        | s9 = {[@expl:assertion] [%#sbuddy'97] UInt64.t'int split_offset
+            + 2 * span (UInt64.t'int ss) (UInt64.t'int sord)
+          <= UInt64.t'int self.current.total_usable_size}
+          s10
+        | s10 = {[@expl:assertion] [%#sbuddy'98] span (UInt64.t'int ss) (UInt64.t'int sord)
+          <= UInt64.t'int self.current.total_usable_size}
+          s11
+        | s11 = {[@expl:assertion] [%#sbuddy'99] Pow2int.pow2 (UInt64.t'int sord) * UInt64.t'int ss
+          <= UInt64.t'int self.current.total_usable_size}
+          s12
+        | s12 = {[@expl:assertion] [%#sbuddy'100] Pow2int.pow2 (UInt64.t'int sord) * UInt64.t'int ss
+          <= UInt64.t'int const_MAX'0}
+          s13
+        | s13 = pow2_u64 [%#sbuddy'101] {sord} (fun (_x: UInt64.t) -> [ &p2'0 <- _x ] s14)
+        | s14 = {[@expl:assertion] [%#sbuddy'102] UInt64.t'int p2'0 * UInt64.t'int ss <= UInt64.t'int const_MAX'0} s15
+        | s15 = UInt64.mul [%#sbuddy'103] {p2'0} {ss} (fun (_x: UInt64.t) -> [ &half_span <- _x ] s16)
+        | s16 = {[@expl:assertion] [%#sbuddy'104] UInt64.t'int half_span = span (UInt64.t'int ss) (UInt64.t'int sord)}
+          s17
+        | s17 = [ &before'1 <- [%#sbuddy'105] self.current.free_lists ] s18
+        | s18 = [ &so0 <- [%#sbuddy'106] split_offset ] s19
+        | s19 =
+          {[@expl:assertion] [%#sbuddy'107] forall a: UInt64.t. split1_pre orig offset (UInt64.t'int target_order) a
+            -> sp_prev = UInt64.t'int search_order
+            /\ UInt64.t'int sord = UInt64.t'int target_order
+            /\ before'1 = ar
+            /\ so0 = a /\ UInt64.t'int half_span = span (UInt32.t'int orig.sector_size) (UInt64.t'int target_order)}
+          s20
+        | s20 = {[@expl:assertion] [%#sbuddy'108] hk
+          -> (let _ = lemma_span_div (UInt64.t'int split_offset) (UInt64.t'int ss) (UInt64.t'int target_order) (UInt64.t'int sord) in let _ = lemma_span_mult (UInt64.t'int ss) (UInt64.t'int target_order) (UInt64.t'int sord) in let _ = lemma_span_pos (UInt64.t'int ss) (UInt64.t'int target_order) in let _ = lemma_mod_add (UInt64.t'int split_offset) (UInt64.t'int half_span) (span (UInt64.t'int ss) (UInt64.t'int target_order)) in ComputerDivision.mod (UInt64.t'int split_offset
+            + UInt64.t'int half_span) (span (UInt64.t'int ss) (UInt64.t'int target_order))
+          = 0)}
+          s21
+        | s21 = {[@expl:assertion] [%#sbuddy'109] hk
+            /\ UInt64.t'int offset < UInt64.t'int split_offset + UInt64.t'int half_span
+          -> (let _ = lemma_aligned_disj2 (UInt64.t'int offset) (UInt64.t'int split_offset
+          + UInt64.t'int half_span) (span (UInt64.t'int ss) (UInt64.t'int target_order)) in UInt64.t'int offset
+            + span (UInt64.t'int ss) (UInt64.t'int target_order)
+          <= UInt64.t'int split_offset + UInt64.t'int half_span)}
+          s22
+        | s22 = {[@expl:assertion] [%#sbuddy'110] hk
+          -> (let _ = lemma_away_sub (view_Vec_Vec_u64_Global_Global before'1) (UInt64.t'int ss) (UInt64.t'int split_offset) (2
+          * UInt64.t'int half_span) (UInt64.t'int split_offset) (UInt64.t'int half_span) in let _ = lemma_away_sub (view_Vec_Vec_u64_Global_Global before'1) (UInt64.t'int ss) (UInt64.t'int split_offset) (2
+          * UInt64.t'int half_span) (UInt64.t'int split_offset
+          + UInt64.t'int half_span) (UInt64.t'int half_span) in faway (view_Vec_Vec_u64_Global_Global before'1) (UInt64.t'int ss) (UInt64.t'int split_offset) (UInt64.t'int half_span)
+          /\ faway (view_Vec_Vec_u64_Global_Global before'1) (UInt64.t'int ss) (UInt64.t'int split_offset
+          + UInt64.t'int half_span) (UInt64.t'int half_span))}
+          s23
+        | s23 = {[@expl:assertion] [%#sbuddy'111] fal (view_Vec_Vec_u64_Global_Global before'1) (UInt64.t'int ss)} s24
+        | s24 = UInt64.add [%#sbuddy'112] {split_offset} {half_span} (fun (_x: UInt64.t) -> [ &_686 <- _x ] s25)
+        | s25 = [ &_684 <- UInt64.ge offset _686 ] s26
+        | s26 = any [ br0 -> {_684 = false} (! bb72) | br1 -> {_684} (! bb63) ] ]
+      | bb63 = s0'0
+        [ s0'0 = MutBorrow.borrow_mut <t_Vec_Vec_u64_Global_Global> {self.current.free_lists}
+            (fun (_bor: MutBorrow.t t_Vec_Vec_u64_Global_Global) ->
+              [ &_692 <- _bor ] [ &self <- { self with current = { self.current with free_lists = _bor.final } } ] s1)
+        | s1 = index_mut_Vec_Vec_u64_Global_Global [%#sbuddy'113] {_692} {sord}
+            (fun (_x: MutBorrow.t t_Vec_u64_Global) -> [ &_691 <- _x ] s2)
+        | s2 = MutBorrow.borrow_final <t_Vec_u64_Global> {_691.current} {MutBorrow.get_id _691}
+            (fun (_bor: MutBorrow.t t_Vec_u64_Global) ->
+              [ &_690 <- _bor ] [ &_691 <- { _691 with current = _bor.final } ] s3)
+        | s3 = push_u64 [%#sbuddy'114] {_690} {split_offset} (fun (_x: ()) -> [ &_689 <- _x ] s4)
+        | s4 = -{resolve_refmut_Vec_u64_Global _691}- s5
+        | s5 =
+          {[@expl:assertion] [%#sbuddy'115] pu_rel (view_Vec_Vec_u64_Global_Global before'1) (view_Vec_Vec_u64_Global_Global self.current.free_lists) (UInt64.t'int sord) split_offset}
+          s6
+        | s6 = g_mk_push [%#sbuddy'121] {[%#sbuddy'116] view_Vec_Vec_u64_Global_Global before'1}
+            {[%#sbuddy'117] view_Vec_Vec_u64_Global_Global self.current.free_lists} {[%#sbuddy'118] UInt64.t'int ss}
+            {[%#sbuddy'119] UInt64.t'int sord} {split_offset} {[%#sbuddy'120] UInt64.t'int split_offset} {cc}
+            (fun (_x: ()) -> [ &_701 <- _x ] s7)
+        | s7 =
+          {[@expl:assertion] [%#sbuddy'122] let _ = lemma_pu (view_Vec_Vec_u64_Global_Global before'1) (view_Vec_Vec_u64_Global_Global self.current.free_lists) (UInt64.t'int ss) (UInt64.t'int sord) split_offset in true}
+          s8
+        | s8 =
+          {[@expl:assertion] [%#sbuddy'123] let _ = lemma_tf_inc (view_Vec_Vec_u64_Global_Global self.current.free_lists) (view_Vec_Vec_u64_Global_Global before'1) (UInt64.t'int ss) (UInt64.t'int sord) (span (UInt64.t'int ss) (UInt64.t'int sord)) in tf (view_Vec_Vec_u64_Global_Global self.current.free_lists) (UInt64.t'int ss) (Seq.length (view_Vec_Vec_u64_Global_Global self.current.free_lists))
+          = tf (view_Vec_Vec_u64_Global_Global before'1) (UInt64.t'int ss) (Seq.length (view_Vec_Vec_u64_Global_Global before'1))
+          + span (UInt64.t'int ss) (UInt64.t'int sord)}
+          s9
+        | s9 = {[@expl:assertion] [%#sbuddy'124] hk
+          -> (let _ = lemma_fold_trans (view_Vec_Vec_u64_Global_Global orig.free_lists) (view_Vec_Vec_u64_Global_Global before'1) (view_Vec_Vec_u64_Global_Global self.current.free_lists) (UInt64.t'int target_order) in fold_k (view_Vec_Vec_u64_Global_Global self.current.free_lists) (view_Vec_Vec_u64_Global_Global orig.free_lists) (UInt64.t'int target_order))}
+          s10
+        | s10 = {[@expl:assertion] [%#sbuddy'125] forall o: int, k: int. 0 <= o
+              /\ o < Seq.length (view_Vec_Vec_u64_Global_Global self.current.free_lists)
+              /\ 0 <= k
+              /\ k
+              < Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) o))
+            -> Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) o)) k
+            = (if o = UInt64.t'int sord
+            /\ k = Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global before'1) o)) then
+              split_offset
+            else
+              Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global before'1) o)) k
+            )}
+          s11
+        | s11 =
+          {[@expl:assertion] [%#sbuddy'126] ComputerDivision.mod (UInt64.t'int split_offset) (span (UInt64.t'int ss) (UInt64.t'int sord))
+            = 0
+          /\ UInt64.t'int split_offset + span (UInt64.t'int ss) (UInt64.t'int sord)
+          <= UInt64.t'int self.current.total_usable_size}
+          s12
+        | s12 = {[@expl:assertion] [%#sbuddy'127] forall o: int, k: int. 0 <= o
+              /\ o < Seq.length (view_Vec_Vec_u64_Global_Global self.current.free_lists)
+              /\ 0 <= k
+              /\ k
+              < Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) o))
+            -> ComputerDivision.mod (UInt64.t'int (Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) o)) k)) (span (UInt64.t'int ss) o)
+              = 0
+            /\ UInt64.t'int (Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) o)) k)
+              + span (UInt64.t'int ss) o
+            <= UInt64.t'int self.current.total_usable_size}
+          s13
+        | s13 = UInt64.add [%#sbuddy'128] {split_offset} {half_span} (fun (_x: UInt64.t) -> [ &split_offset <- _x ] s14)
+        | s14 = bb81 ]
+      | bb72 = s0'0
+        [ s0'0 = UInt64.add [%#sbuddy'129] {split_offset} {half_span} (fun (_x: UInt64.t) -> [ &up <- _x ] s1)
+        | s1 = MutBorrow.borrow_mut <t_Vec_Vec_u64_Global_Global> {self.current.free_lists}
+            (fun (_bor: MutBorrow.t t_Vec_Vec_u64_Global_Global) ->
+              [ &_763 <- _bor ] [ &self <- { self with current = { self.current with free_lists = _bor.final } } ] s2)
+        | s2 = index_mut_Vec_Vec_u64_Global_Global [%#sbuddy'130] {_763} {sord}
+            (fun (_x: MutBorrow.t t_Vec_u64_Global) -> [ &_762 <- _x ] s3)
+        | s3 = MutBorrow.borrow_final <t_Vec_u64_Global> {_762.current} {MutBorrow.get_id _762}
+            (fun (_bor: MutBorrow.t t_Vec_u64_Global) ->
+              [ &_761 <- _bor ] [ &_762 <- { _762 with current = _bor.final } ] s4)
+        | s4 = push_u64 [%#sbuddy'131] {_761} {up} (fun (_x: ()) -> [ &_760 <- _x ] s5)
+        | s5 = -{resolve_refmut_Vec_u64_Global _762}- s6
+        | s6 =
+          {[@expl:assertion] [%#sbuddy'132] pu_rel (view_Vec_Vec_u64_Global_Global before'1) (view_Vec_Vec_u64_Global_Global self.current.free_lists) (UInt64.t'int sord) up}
+          s7
+        | s7 = g_mk_push [%#sbuddy'138] {[%#sbuddy'133] view_Vec_Vec_u64_Global_Global before'1}
+            {[%#sbuddy'134] view_Vec_Vec_u64_Global_Global self.current.free_lists} {[%#sbuddy'135] UInt64.t'int ss}
+            {[%#sbuddy'136] UInt64.t'int sord} {up} {[%#sbuddy'137] UInt64.t'int split_offset} {cc}
+            (fun (_x: ()) -> [ &_772 <- _x ] s8)
+        | s8 =
+          {[@expl:assertion] [%#sbuddy'139] let _ = lemma_pu (view_Vec_Vec_u64_Global_Global before'1) (view_Vec_Vec_u64_Global_Global self.current.free_lists) (UInt64.t'int ss) (UInt64.t'int sord) up in true}
+          s9
+        | s9 =
+          {[@expl:assertion] [%#sbuddy'140] let _ = lemma_tf_inc (view_Vec_Vec_u64_Global_Global self.current.free_lists) (view_Vec_Vec_u64_Global_Global before'1) (UInt64.t'int ss) (UInt64.t'int sord) (span (UInt64.t'int ss) (UInt64.t'int sord)) in tf (view_Vec_Vec_u64_Global_Global self.current.free_lists) (UInt64.t'int ss) (Seq.length (view_Vec_Vec_u64_Global_Global self.current.free_lists))
+          = tf (view_Vec_Vec_u64_Global_Global before'1) (UInt64.t'int ss) (Seq.length (view_Vec_Vec_u64_Global_Global before'1))
+          + span (UInt64.t'int ss) (UInt64.t'int sord)}
+          s10
+        | s10 = {[@expl:assertion] [%#sbuddy'141] hk
+          -> (let _ = lemma_fold_trans (view_Vec_Vec_u64_Global_Global orig.free_lists) (view_Vec_Vec_u64_Global_Global before'1) (view_Vec_Vec_u64_Global_Global self.current.free_lists) (UInt64.t'int target_order) in fold_k (view_Vec_Vec_u64_Global_Global self.current.free_lists) (view_Vec_Vec_u64_Global_Global orig.free_lists) (UInt64.t'int target_order))}
+          s11
+        | s11 = {[@expl:assertion] [%#sbuddy'142] forall o: int, k: int. 0 <= o
+              /\ o < Seq.length (view_Vec_Vec_u64_Global_Global self.current.free_lists)
+              /\ 0 <= k
+              /\ k
+              < Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) o))
+            -> Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) o)) k
+            = (if o = UInt64.t'int sord
+            /\ k = Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global before'1) o)) then
+              up
+            else
+              Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global before'1) o)) k
+            )}
+          s12
+        | s12 =
+          {[@expl:assertion] [%#sbuddy'143] ComputerDivision.mod (UInt64.t'int up) (span (UInt64.t'int ss) (UInt64.t'int sord))
+            = 0
+          /\ UInt64.t'int up + span (UInt64.t'int ss) (UInt64.t'int sord)
+          <= UInt64.t'int self.current.total_usable_size}
+          s13
+        | s13 = {[@expl:assertion] [%#sbuddy'144] forall o: int, k: int. 0 <= o
+              /\ o < Seq.length (view_Vec_Vec_u64_Global_Global self.current.free_lists)
+              /\ 0 <= k
+              /\ k
+              < Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) o))
+            -> ComputerDivision.mod (UInt64.t'int (Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) o)) k)) (span (UInt64.t'int ss) o)
+              = 0
+            /\ UInt64.t'int (Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) o)) k)
+              + span (UInt64.t'int ss) o
+            <= UInt64.t'int self.current.total_usable_size}
+          s14
+        | s14 = bb81 ]
+      | bb81 = s0'0
+        [ s0'0 = {[@expl:assertion] [%#sbuddy'145] forall o: int, k: int. 0 <= o
+              /\ o < Seq.length (view_Vec_Vec_u64_Global_Global self.current.free_lists)
+              /\ 0 <= k
+              /\ k
+              < Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) o))
+            -> ComputerDivision.mod (UInt64.t'int (Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) o)) k)) (span (UInt64.t'int ss) o)
+              = 0
+            /\ UInt64.t'int (Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) o)) k)
+              + span (UInt64.t'int ss) o
+            <= UInt64.t'int self.current.total_usable_size}
+          s1
+        | s1 =
+          {[@expl:assertion] [%#sbuddy'146] forall a: UInt64.t. split1_pre orig offset (UInt64.t'int target_order) a
+            -> pushed (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) (UInt64.t'int sord))) (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global before'1) (UInt64.t'int sord))) (split1_val orig offset (UInt64.t'int target_order) a)
+            /\ (forall o: int. 0 <= o
+                /\ o < Seq.length (view_Vec_Vec_u64_Global_Global before'1) /\ o <> UInt64.t'int sord
+              -> Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) o
+              = Seq.get (view_Vec_Vec_u64_Global_Global before'1) o)}
+          s2
+        | s2 = bb56 ] ] ]
+  | bb82 = s0'0
+    [ s0'0 = -{resolve_refmut_BuddyAllocator self}- s1
+    | s1 = {[@expl:assertion] [%#sbuddy'147] bd_aligned self.current /\ bd_inside self.current /\ bd_shape self.current}
+      s2
+    | s2 = {[@expl:assertion] [%#sbuddy'148] forall a: UInt64.t. split1_pre orig offset (UInt64.t'int target_order) a
+        -> split1_post orig self.current offset (UInt64.t'int target_order) a}
+      s3
+    | s3 = {[@expl:assertion] [%#sbuddy'149] hk -> UInt64.t'int split_offset = UInt64.t'int offset} s4
+    | s4 = {[@expl:assertion] [%#sbuddy'150] hk
+      -> mk_post (view_Vec_Vec_u64_Global_Global orig.free_lists) (view_Vec_Vec_u64_Global_Global self.current.free_lists) (UInt64.t'int ss) (UInt64.t'int offset) (UInt64.t'int target_order)}
+      s5
+    | s5 =
+      {[@expl:assertion] [%#sbuddy'151] let _ = lemma_mk_spec_intro (view_Vec_Vec_u64_Global_Global orig.free_lists) (view_Vec_Vec_u64_Global_Global self.current.free_lists) (UInt64.t'int ss) (UInt64.t'int offset) (UInt64.t'int target_order) in true}
+      s6
+    | s6 = {[@expl:assertion] [%#sbuddy'152] view_Vec_Vec_u64_Global_Global orig.free_lists
+      = view_Vec_Vec_u64_Global_Global s0.free_lists}
+      s7
+    | s7 =
+      {[@expl:assertion] [%#sbuddy'153] mk_spec (view_Vec_Vec_u64_Global_Global s0.free_lists) (view_Vec_Vec_u64_Global_Global self.current.free_lists) (UInt32.t'int s0.sector_size) (UInt64.t'int abs_offset
+      - UInt64.t'int s0.base_offset) (ord (ComputerDivision.div (UInt64.t'int size) (UInt32.t'int s0.sector_size)))}
+      s8
+    | s8 = {[@expl:assertion] [%#sbuddy'154] hk
+      = mk_hyp (view_Vec_Vec_u64_Global_Global s0.free_lists) (UInt32.t'int s0.sector_size) (UInt64.t'int abs_offset
+      - UInt64.t'int s0.base_offset) (ord (ComputerDivision.div (UInt64.t'int size) (UInt32.t'int s0.sector_size)))}
+      s9
+    | s9 = g_mk_c_intro [%#sbuddy'160] {[%#sbuddy'155] view_Vec_Vec_u64_Global_Global s0.free_lists}
+        {[%#sbuddy'156] view_Vec_Vec_u64_Global_Global self.current.free_lists}
+        {[%#sbuddy'157] UInt32.t'int s0.sector_size} {[%#sbuddy'158] UInt64.t'int abs_offset
+        - UInt64.t'int s0.base_offset}
+        {[%#sbuddy'159] ord (ComputerDivision.div (UInt64.t'int size) (UInt32.t'int s0.sector_size))}
+        (fun (_x: ()) -> [ &_886 <- _x ] s10)
+    | s10 = return {_ret} ]
+  | bb90 = s0'0
+    [ s0'0 = -{resolve_refmut_BuddyAllocator self}- s1
+    | s1 = {[@expl:assertion] [%#sbuddy'161] not hk} s2
+    | s2 =
+      {[@expl:assertion] [%#sbuddy'162] let _ = lemma_mk_spec_intro (view_Vec_Vec_u64_Global_Global orig.free_lists) (view_Vec_Vec_u64_Global_Global self.current.free_lists) (UInt64.t'int ss) (UInt64.t'int offset) (UInt64.t'int target_order) in true}
+      s3
+    | s3 = {[@expl:assertion] [%#sbuddy'163] view_Vec_Vec_u64_Global_Global orig.free_lists
+      = view_Vec_Vec_u64_Global_Global s0.free_lists}
+      s4
+    | s4 =
+      {[@expl:assertion] [%#sbuddy'164] mk_spec (view_Vec_Vec_u64_Global_Global s0.free_lists) (view_Vec_Vec_u64_Global_Global self.current.free_lists) (UInt32.t'int s0.sector_size) (UInt64.t'int abs_offset
+      - UInt64.t'int s0.base_offset) (ord (ComputerDivision.div (UInt64.t'int size) (UInt32.t'int s0.sector_size)))}
+      s5
+    | s5 = {[@expl:assertion] [%#sbuddy'165] hk
+      = mk_hyp (view_Vec_Vec_u64_Global_Global s0.free_lists) (UInt32.t'int s0.sector_size) (UInt64.t'int abs_offset
+      - UInt64.t'int s0.base_offset) (ord (ComputerDivision.div (UInt64.t'int size) (UInt32.t'int s0.sector_size)))}
+      s6
+    | s6 = g_mk_c_intro [%#sbuddy'171] {[%#sbuddy'166] view_Vec_Vec_u64_Global_Global s0.free_lists}
+        {[%#sbuddy'167] view_Vec_Vec_u64_Global_Global self.current.free_lists}
+        {[%#sbuddy'168] UInt32.t'int s0.sector_size} {[%#sbuddy'169] UInt64.t'int abs_offset
+        - UInt64.t'int s0.base_offset}
+        {[%#sbuddy'170] ord (ComputerDivision.div (UInt64.t'int size) (UInt32.t'int s0.sector_size))}
+        (fun (_x: ()) -> [ &_965 <- _x ] s7)
+    | s7 = return {_ret} ]
+  | bb8 = s0'0
+    [ s0'0 = elim_Some {_76} (fun (r0: UInt64.t) -> [ &pos <- r0 ] s1)
+    | s1 =
+      {[@expl:assertion] [%#sbuddy'172] UInt64.t'int (Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) (UInt64.t'int target_order))) (UInt64.t'int pos))
+      = UInt64.t'int abs_offset - UInt64.t'int self.current.base_offset}
+      s2
+    | s2 = {[@expl:assertion] [%#sbuddy'173] forall x: UInt64.t. UInt64.t'int x = UInt64.t'int offset -> x = offset} s3
+    | s3 =
+      {[@expl:assertion] [%#sbuddy'174] Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) (UInt64.t'int target_order))) (UInt64.t'int pos)
+      = offset}
+      s4
+    | s4 = {[@expl:assertion] [%#sbuddy'175] forall x: UInt64.t, a: UInt64.t. UInt64.t'int x = UInt64.t'int offset
+        -> not split1_pre self.current x (UInt64.t'int target_order) a}
+      s5
+    | s5 = [ &before <- [%#sbuddy'176] self.current.free_lists ] s6
+    | s6 = MutBorrow.borrow_final <t_Vec_Vec_u64_Global_Global> {self.current.free_lists}
+        {MutBorrow.inherit_id (MutBorrow.get_id self) 4}
+        (fun (_bor: MutBorrow.t t_Vec_Vec_u64_Global_Global) ->
+          [ &_114 <- _bor ] [ &self <- { self with current = { self.current with free_lists = _bor.final } } ] s7)
+    | s7 = index_mut_Vec_Vec_u64_Global_Global [%#sbuddy'177] {_114} {target_order}
+        (fun (_x: MutBorrow.t t_Vec_u64_Global) -> [ &_113 <- _x ] s8)
+    | s8 = MutBorrow.borrow_final <t_Vec_u64_Global> {_113.current} {MutBorrow.get_id _113}
+        (fun (_bor: MutBorrow.t t_Vec_u64_Global) ->
+          [ &_112 <- _bor ] [ &_113 <- { _113 with current = _bor.final } ] s9)
+    | s9 = MutBorrow.borrow_final <t_Vec_u64_Global> {_112.current} {MutBorrow.get_id _112}
+        (fun (_bor: MutBorrow.t t_Vec_u64_Global) ->
+          [ &_111 <- _bor ] [ &_112 <- { _112 with current = _bor.final } ] s10)
+    | s10 = swap_remove [%#sbuddy'178] {_111} {pos} (fun (_x: ()) -> [ &_110 <- _x ] s11)
+    | s11 = -{resolve_refmut_Vec_u64_Global _113}- s12
+    | s12 = -{resolve_refmut_Vec_u64_Global _112}- s13
+    | s13 = -{resolve_refmut_BuddyAllocator self}- s14
+    | s14 = {[@expl:assertion] [%#sbuddy'179] forall o: int. 0 <= o
+          /\ o < Seq.length (view_Vec_Vec_u64_Global_Global before) /\ o <> UInt64.t'int target_order
+        -> Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) o
+        = Seq.get (view_Vec_Vec_u64_Global_Global before) o}
+      s15
+    | s15 = {[@expl:assertion] [%#sbuddy'180] forall o: int, k: int. 0 <= o
+          /\ o < Seq.length (view_Vec_Vec_u64_Global_Global self.current.free_lists)
+          /\ 0 <= k
+          /\ k < Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) o))
+        -> (exists j: int. 0 <= j
+          /\ j < Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global before) o))
+          /\ Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) o)) k
+          = Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global before) o)) j)}
+      s16
+    | s16 = {[@expl:assertion] [%#sbuddy'181] forall o: int, k: int. 0 <= o
+          /\ o < Seq.length (view_Vec_Vec_u64_Global_Global self.current.free_lists)
+          /\ 0 <= k
+          /\ k < Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) o))
+        -> ComputerDivision.mod (UInt64.t'int (Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) o)) k)) (span (UInt64.t'int ss) o)
+          = 0
+        /\ UInt64.t'int (Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) o)) k)
+          + span (UInt64.t'int ss) o
+        <= UInt64.t'int self.current.total_usable_size}
+      s17
+    | s17 = {[@expl:assertion] [%#sbuddy'182] bd_aligned self.current
+      /\ bd_inside self.current /\ bd_shape self.current}
+      s18
+    | s18 =
+      {[@expl:assertion] [%#sbuddy'183] sr_rel (view_Vec_Vec_u64_Global_Global before) (view_Vec_Vec_u64_Global_Global self.current.free_lists) (UInt64.t'int target_order) (UInt64.t'int pos)}
+      s19
+    | s19 =
+      {[@expl:assertion] [%#sbuddy'184] Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) (UInt64.t'int target_order)))
+        - Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global before) (UInt64.t'int target_order)))
+      = - 1}
+      s20
+    | s20 =
+      {[@expl:assertion] [%#sbuddy'185] let _ = lemma_tf_dec (view_Vec_Vec_u64_Global_Global self.current.free_lists) (view_Vec_Vec_u64_Global_Global before) (UInt64.t'int ss) (UInt64.t'int target_order) (span (UInt64.t'int ss) (UInt64.t'int target_order)) in tf (view_Vec_Vec_u64_Global_Global self.current.free_lists) (UInt64.t'int ss) (Seq.length (view_Vec_Vec_u64_Global_Global self.current.free_lists))
+      = tf (view_Vec_Vec_u64_Global_Global before) (UInt64.t'int ss) (Seq.length (view_Vec_Vec_u64_Global_Global before))
+      - span (UInt64.t'int ss) (UInt64.t'int target_order)}
+      s21
+    | s21 =
+      {[@expl:assertion] [%#sbuddy'186] fs (view_Vec_Vec_u64_Global_Global before) (UInt64.t'int target_order) (UInt64.t'int pos)
+      = UInt64.t'int offset}
+      s22
+    | s22 = g_mk_exact [%#sbuddy'193] {[%#sbuddy'187] view_Vec_Vec_u64_Global_Global before}
+        {[%#sbuddy'188] view_Vec_Vec_u64_Global_Global self.current.free_lists} {[%#sbuddy'189] UInt64.t'int ss}
+        {[%#sbuddy'190] UInt64.t'int offset} {[%#sbuddy'191] UInt64.t'int target_order}
+        {[%#sbuddy'192] UInt64.t'int pos} (fun (_x: ()) -> [ &_157 <- _x ] s23)
+    | s23 = {[@expl:assertion] [%#sbuddy'194] view_Vec_Vec_u64_Global_Global before
+      = view_Vec_Vec_u64_Global_Global s0.free_lists}
+      s24
+    | s24 =
+      {[@expl:assertion] [%#sbuddy'195] mk_spec (view_Vec_Vec_u64_Global_Global s0.free_lists) (view_Vec_Vec_u64_Global_Global self.current.free_lists) (UInt32.t'int s0.sector_size) (UInt64.t'int abs_offset
+      - UInt64.t'int s0.base_offset) (ord (ComputerDivision.div (UInt64.t'int size) (UInt32.t'int s0.sector_size)))}
+      s25
+    | s25 = g_coal_sr [%#sbuddy'201] {[%#sbuddy'196] view_Vec_Vec_u64_Global_Global before}
+        {[%#sbuddy'197] view_Vec_Vec_u64_Global_Global self.current.free_lists} {[%#sbuddy'198] UInt64.t'int ss}
+        {[%#sbuddy'199] UInt64.t'int target_order} {[%#sbuddy'200] UInt64.t'int pos}
+        (fun (_x: ()) -> [ &_186 <- _x ] s26)
+    | s26 = g_mk_c_intro [%#sbuddy'207] {[%#sbuddy'202] view_Vec_Vec_u64_Global_Global s0.free_lists}
+        {[%#sbuddy'203] view_Vec_Vec_u64_Global_Global self.current.free_lists}
+        {[%#sbuddy'204] UInt32.t'int s0.sector_size} {[%#sbuddy'205] UInt64.t'int abs_offset
+        - UInt64.t'int s0.base_offset}
+        {[%#sbuddy'206] ord (ComputerDivision.div (UInt64.t'int size) (UInt32.t'int s0.sector_size))}
+        (fun (_x: ()) -> [ &_202 <- _x ] s27)
+    | s27 = return {_ret} ] ]
+  [ & _ret: () = Any.any_l ()
+  | & self: MutBorrow.t t_BuddyAllocator = self
+  | & abs_offset: UInt64.t = abs_offset
+  | & size: UInt64.t = size
+  | & ss: UInt64.t = Any.any_l ()
+  | & offset: UInt64.t = Any.any_l ()
+  | & blocks: UInt64.t = Any.any_l ()
+  | & _50: UInt64.t = Any.any_l ()
+  | & _51: bool = Any.any_l ()
+  | & target_order: UInt64.t = Any.any_l ()
+  | & hk: bool = Any.any_l ()
+  | & s0: t_BuddyAllocator = Any.any_l ()
+  | & _76: t_Option_usize = Any.any_l ()
+  | & _78: t_Vec_u64_Global = Any.any_l ()
+  | & _79: t_Vec_u64_Global = Any.any_l ()
+  | & pos: UInt64.t = Any.any_l ()
+  | & before: t_Vec_Vec_u64_Global_Global = Any.any_l ()
+  | & _110: () = Any.any_l ()
+  | & _111: MutBorrow.t t_Vec_u64_Global = Any.any_l ()
+  | & _112: MutBorrow.t t_Vec_u64_Global = Any.any_l ()
+  | & _113: MutBorrow.t t_Vec_u64_Global = Any.any_l ()
+  | & _114: MutBorrow.t t_Vec_Vec_u64_Global_Global = Any.any_l ()
+  | & _157: () = Any.any_l ()
+  | & _186: () = Any.any_l ()
+  | & _202: () = Any.any_l ()
+  | & orig: t_BuddyAllocator = Any.any_l ()
+  | & search_order: UInt64.t = Any.any_l ()
+  | & _275: bool = Any.any_l ()
+  | & block_span: UInt64.t = Any.any_l ()
+  | & _301: UInt64.t = Any.any_l ()
+  | & aligned_start: UInt64.t = Any.any_l ()
+  | & _317: () = Any.any_l ()
+  | & _332: t_Option_usize = Any.any_l ()
+  | & _334: t_Vec_u64_Global = Any.any_l ()
+  | & _335: t_Vec_u64_Global = Any.any_l ()
+  | & pos'0: UInt64.t = Any.any_l ()
+  | & before'0: t_Vec_Vec_u64_Global_Global = Any.any_l ()
+  | & _379: () = Any.any_l ()
+  | & _380: MutBorrow.t t_Vec_u64_Global = Any.any_l ()
+  | & _381: MutBorrow.t t_Vec_u64_Global = Any.any_l ()
+  | & _382: MutBorrow.t t_Vec_u64_Global = Any.any_l ()
+  | & _383: MutBorrow.t t_Vec_Vec_u64_Global_Global = Any.any_l ()
+  | & _438: () = Any.any_l ()
+  | & cc: bool = Any.any_l ()
+  | & ar: t_Vec_Vec_u64_Global_Global = Any.any_l ()
+  | & split_offset: UInt64.t = Any.any_l ()
+  | & sord: UInt64.t = Any.any_l ()
+  | & _564: bool = Any.any_l ()
+  | & sp_prev: int = Any.any_l ()
+  | & p2'0: UInt64.t = Any.any_l ()
+  | & half_span: UInt64.t = Any.any_l ()
+  | & before'1: t_Vec_Vec_u64_Global_Global = Any.any_l ()
+  | & so0: UInt64.t = Any.any_l ()
+  | & _684: bool = Any.any_l ()
+  | & _686: UInt64.t = Any.any_l ()
+  | & _689: () = Any.any_l ()
+  | & _690: MutBorrow.t t_Vec_u64_Global = Any.any_l ()
+  | & _691: MutBorrow.t t_Vec_u64_Global = Any.any_l ()
+  | & _692: MutBorrow.t t_Vec_Vec_u64_Global_Global = Any.any_l ()
+  | & _701: () = Any.any_l ()
+  | & up: UInt64.t = Any.any_l ()
+  | & _760: () = Any.any_l ()
+  | & _761: MutBorrow.t t_Vec_u64_Global = Any.any_l ()
+  | & _762: MutBorrow.t t_Vec_u64_Global = Any.any_l ()
+  | & _763: MutBorrow.t t_Vec_Vec_u64_Global_Global = Any.any_l ()
+  | & _772: () = Any.any_l ()
+  | & _886: () = Any.any_l ()
+  | & _965: () = Any.any_l ()
+  | & _old: t_BuddyAllocator = Any.any_l ()
+  | & _old'0: UInt64.t = Any.any_l ()
+  | & _old'1: UInt64.t = Any.any_l ()
+  | & _old'2: UInt32.t = Any.any_l ()
+  | & _old'3: UInt64.t = Any.any_l () ])
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:mark_allocated ensures] ([@stop_split] [@expl:mark_allocated ensures #0] [%#sbuddy'211] bd_shape self.final)
+    /\ ([@stop_split] [@expl:mark_allocated ensures #1] [%#sbuddy'212] bd_aligned self.final)
+    /\ ([@stop_split] [@expl:mark_allocated ensures #2] [%#sbuddy'213] bd_inside self.final)
+    /\ ([@stop_split] [@expl:mark_allocated ensures #3] [%#sbuddy'214] bd_inv self.final)
+    /\ ([@stop_split] [@expl:mark_allocated ensures #4] [%#sbuddy'215] self.final.base_offset = self.current.base_offset
+      /\ self.final.total_usable_size = self.current.total_usable_size)
+    /\ ([@stop_split] [@expl:mark_allocated ensures #5] [%#sbuddy'216] self.final.sector_size = self.current.sector_size
+      /\ self.final.max_order = self.current.max_order)
+    /\ ([@stop_split] [@expl:mark_allocated ensures #6] [%#sbuddy'217] Seq.length (view_Vec_Vec_u64_Global_Global self.final.free_lists)
+      = Seq.length (view_Vec_Vec_u64_Global_Global self.current.free_lists))
+    /\ ([@stop_split] [@expl:mark_allocated ensures #7] [%#sbuddy'218] (forall q: int. 0 <= q
+              /\ q
+              < Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) (ord (ComputerDivision.div (UInt64.t'int size) (UInt32.t'int self.current.sector_size)))))
+            -> UInt64.t'int (Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) (ord (ComputerDivision.div (UInt64.t'int size) (UInt32.t'int self.current.sector_size))))) q)
+            <> UInt64.t'int abs_offset - UInt64.t'int self.current.base_offset)
+        /\ (forall sk: int, sp: UInt64.t, x: UInt64.t. ord (ComputerDivision.div (UInt64.t'int size) (UInt32.t'int self.current.sector_size))
+              < sk
+            /\ sk <= UInt64.t'int self.current.max_order
+            /\ UInt64.t'int sp = span (UInt32.t'int self.current.sector_size) sk
+            /\ UInt64.t'int x = UInt64.t'int abs_offset - UInt64.t'int self.current.base_offset
+          -> (forall q: int. 0 <= q
+              /\ q
+              < Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) sk))
+            -> Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_Vec_u64_Global_Global self.current.free_lists) sk)) q
+            <> UInt64.bw_and x (UInt64.bw_not (UInt64.sub sp (1: UInt64.t))))) -> self.final = self.current)
+    /\ ([@stop_split] [@expl:mark_allocated ensures #8] [%#sbuddy'219] forall x: UInt64.t, a: UInt64.t. UInt64.t'int x
+            = UInt64.t'int abs_offset - UInt64.t'int self.current.base_offset
+          /\ split1_pre self.current x (ord (ComputerDivision.div (UInt64.t'int size) (UInt32.t'int self.current.sector_size))) a
+        -> split1_post self.current self.final x (ord (ComputerDivision.div (UInt64.t'int size) (UInt32.t'int self.current.sector_size))) a)
+    /\ ([@stop_split] [@expl:mark_allocated ensures #9] [%#sbuddy'220] mk_spec (view_Vec_Vec_u64_Global_Global self.current.free_lists) (view_Vec_Vec_u64_Global_Global self.final.free_lists) (UInt32.t'int self.current.sector_size) (UInt64.t'int abs_offset
+      - UInt64.t'int self.current.base_offset) (ord (ComputerDivision.div (UInt64.t'int size) (UInt32.t'int self.current.sector_size))))
+    /\ ([@stop_split] [@expl:mark_allocated ensures #10] [%#sbuddy'221] mk_c (view_Vec_Vec_u64_Global_Global self.current.free_lists) (view_Vec_Vec_u64_Global_Global self.final.free_lists) (UInt32.t'int self.current.sector_size) (UInt64.t'int abs_offset
+    - UInt64.t'int self.current.base_offset) (ord (ComputerDivision.div (UInt64.t'int size) (UInt32.t'int self.current.sector_size))))}
+    (! return {result}) ]

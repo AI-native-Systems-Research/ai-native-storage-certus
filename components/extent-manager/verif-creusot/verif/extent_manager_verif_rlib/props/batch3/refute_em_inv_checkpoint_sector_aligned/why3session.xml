@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE why3session PUBLIC "-//Why3//proof session v5//EN"
+"https://www.why3.org/why3session.dtd">
+<why3session shape_version="6">
+<prover id="0" name="Z3" version="4.16.0" timelimit="3.30925" memlimit="1000"/>
+<prover id="1" name="CVC4" version="1.8" timelimit="4" memlimit="1000"/>
+<prover id="2" name="Alt-Ergo" version="2.6.2" timelimit="4" memlimit="1000"/>
+<prover id="3" name="CVC5" version="1.3.1" timelimit="4" memlimit="1000"/>
+<file format="coma">
+<path name=".."/><path name="refute_em_inv_checkpoint_sector_aligned.coma"/>
+<theory name="Coma">
+ <goal name="vc_wl_geometry" proved="true">
+ <proof prover="2" timelimit="0.024601"><result status="valid" time="0.024601" steps="0"/></proof>
+ </goal>
+ <goal name="vc_new_inner" proved="true">
+ <proof prover="2" timelimit="0.034108"><result status="valid" time="0.034108" steps="0"/></proof>
+ </goal>
+ <goal name="vc_format" proved="true">
+ <proof prover="2" timelimit="0.046898"><result status="valid" time="0.046898" steps="0"/></proof>
+ </goal>
+ <goal name="vc_elim_Some" proved="true">
+ <proof prover="2" timelimit="0.047144"><result status="valid" time="0.047144" steps="0"/></proof>
+ </goal>
+ <goal name="vc_ckpt_lba" proved="true">
+ <proof prover="2" timelimit="0.048872"><result status="valid" time="0.048872" steps="0"/></proof>
+ </goal>
+ <goal name="vc_refute_em_inv_checkpoint_sector_aligned">
+ <transf name="compute_specified" >
+  <goal name="vc_refute_em_inv_checkpoint_sector_aligned.0">
+  <transf name="split_vc" >
+   <goal name="vc_refute_em_inv_checkpoint_sector_aligned.0.0" expl="assertion" proved="true">
+   <proof prover="2" timelimit="0.129945"><result status="valid" time="0.129945" steps="0"/></proof>
+   </goal>
+   <goal name="vc_refute_em_inv_checkpoint_sector_aligned.0.1" expl="assertion" proved="true">
+   <proof prover="2" timelimit="0.150502"><result status="valid" time="0.150502" steps="0"/></proof>
+   </goal>
+   <goal name="vc_refute_em_inv_checkpoint_sector_aligned.0.2" expl="assertion" proved="true">
+   <proof prover="2" timelimit="0.157354"><result status="valid" time="0.157354" steps="0"/></proof>
+   </goal>
+   <goal name="vc_refute_em_inv_checkpoint_sector_aligned.0.3" expl="assertion" proved="true">
+   <proof prover="2" timelimit="0.17115"><result status="valid" time="0.171150" steps="0"/></proof>
+   </goal>
+   <goal name="vc_refute_em_inv_checkpoint_sector_aligned.0.4" expl="assertion" proved="true">
+   <proof prover="2" timelimit="0.238397"><result status="valid" time="0.238397" steps="0"/></proof>
+   </goal>
+   <goal name="vc_refute_em_inv_checkpoint_sector_aligned.0.5" expl="format requires" proved="true">
+   <proof prover="2" timelimit="0.054863"><result status="valid" time="0.054863" steps="0"/></proof>
+   </goal>
+   <goal name="vc_refute_em_inv_checkpoint_sector_aligned.0.6" expl="refute_em_inv_checkpoint_sector_aligned ensures" proved="true">
+   <proof prover="2" timelimit="0.11306"><result status="valid" time="0.113060" steps="0"/></proof>
+   </goal>
+   <goal name="vc_refute_em_inv_checkpoint_sector_aligned.0.7" expl="integer overflow" proved="true">
+   <proof prover="3" timelimit="0.088726"><result status="valid" time="0.088726" steps="0"/></proof>
+   </goal>
+   <goal name="vc_refute_em_inv_checkpoint_sector_aligned.0.8" expl="ckpt_lba requires" proved="true">
+   <proof prover="0" timelimit="0.149667"><result status="valid" time="0.149667" steps="0"/></proof>
+   </goal>
+   <goal name="vc_refute_em_inv_checkpoint_sector_aligned.0.9" expl="ckpt_lba requires" proved="true">
+   <proof prover="0" timelimit="0.149162"><result status="valid" time="0.149162" steps="0"/></proof>
+   </goal>
+   <goal name="vc_refute_em_inv_checkpoint_sector_aligned.0.10" expl="refute_em_inv_checkpoint_sector_aligned ensures">
+   <transf name="split_vc" >
+    <goal name="vc_refute_em_inv_checkpoint_sector_aligned.0.10.0" expl="refute_em_inv_checkpoint_sector_aligned ensures">
+    <proof prover="0" timelimit="3.22922"><result status="unknown" time="3.229224" steps="0"/></proof>
+    <proof prover="1"><result status="timeout" time="4.000000" steps="0"/></proof>
+    <proof prover="2"><result status="timeout" time="4.000000" steps="0"/></proof>
+    <proof prover="3"><result status="timeout" time="4.000000" steps="0"/></proof>
+    <transf name="split_vc" >
+     <goal name="vc_refute_em_inv_checkpoint_sector_aligned.0.10.0.0" expl="refute_em_inv_checkpoint_sector_aligned ensures">
+     <proof prover="0" timelimit="3.19657"><result status="unknown" time="3.196567" steps="0"/></proof>
+     <proof prover="1" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+     <proof prover="2" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+     <proof prover="3" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+     </goal>
+    </transf>
+    </goal>
+    <goal name="vc_refute_em_inv_checkpoint_sector_aligned.0.10.1" expl="refute_em_inv_checkpoint_sector_aligned ensures">
+    <proof prover="0" timelimit="3.2405"><result status="unknown" time="3.240498" steps="0"/></proof>
+    <proof prover="1"><result status="timeout" time="4.000000" steps="0"/></proof>
+    <proof prover="2"><result status="timeout" time="4.000000" steps="0"/></proof>
+    <proof prover="3"><result status="timeout" time="4.000000" steps="0"/></proof>
+    <transf name="split_vc" >
+     <goal name="vc_refute_em_inv_checkpoint_sector_aligned.0.10.1.0" expl="refute_em_inv_checkpoint_sector_aligned ensures">
+     <proof prover="0" timelimit="3.3287"><result status="unknown" time="3.328702" steps="0"/></proof>
+     <proof prover="1" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+     <proof prover="2" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+     <proof prover="3" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+     </goal>
+    </transf>
+    </goal>
+    <goal name="vc_refute_em_inv_checkpoint_sector_aligned.0.10.2" expl="refute_em_inv_checkpoint_sector_aligned ensures" proved="true">
+    <proof prover="3" timelimit="0.351075"><result status="valid" time="0.351075" steps="0"/></proof>
+    </goal>
+    <goal name="vc_refute_em_inv_checkpoint_sector_aligned.0.10.3" expl="refute_em_inv_checkpoint_sector_aligned ensures">
+    <proof prover="0" timelimit="3.2641"><result status="unknown" time="3.264097" steps="0"/></proof>
+    <proof prover="1"><result status="timeout" time="4.000000" steps="0"/></proof>
+    <proof prover="2"><result status="timeout" time="4.000000" steps="0"/></proof>
+    <proof prover="3"><result status="timeout" time="4.000000" steps="0"/></proof>
+    <transf name="split_vc" >
+     <goal name="vc_refute_em_inv_checkpoint_sector_aligned.0.10.3.0" expl="refute_em_inv_checkpoint_sector_aligned ensures">
+     <proof prover="0" timelimit="3.36011"><result status="unknown" time="3.360114" steps="0"/></proof>
+     <proof prover="1" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+     <proof prover="2" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+     <proof prover="3" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+     </goal>
+    </transf>
+    </goal>
+    <goal name="vc_refute_em_inv_checkpoint_sector_aligned.0.10.4" expl="refute_em_inv_checkpoint_sector_aligned ensures">
+    <proof prover="0" timelimit="3.42811"><result status="unknown" time="3.428110" steps="0"/></proof>
+    <proof prover="1"><result status="timeout" time="4.000000" steps="0"/></proof>
+    <proof prover="2"><result status="timeout" time="4.000000" steps="0"/></proof>
+    <proof prover="3"><result status="timeout" time="4.000000" steps="0"/></proof>
+    <transf name="split_vc" >
+     <goal name="vc_refute_em_inv_checkpoint_sector_aligned.0.10.4.0" expl="refute_em_inv_checkpoint_sector_aligned ensures">
+     <proof prover="0" timelimit="3.35241"><result status="unknown" time="3.352407" steps="0"/></proof>
+     <proof prover="1" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+     <proof prover="2" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+     <proof prover="3" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+     </goal>
+    </transf>
+    </goal>
+    <goal name="vc_refute_em_inv_checkpoint_sector_aligned.0.10.5" expl="refute_em_inv_checkpoint_sector_aligned ensures" proved="true">
+    <proof prover="3" timelimit="0.374131"><result status="valid" time="0.374131" steps="0"/></proof>
+    </goal>
+    <goal name="vc_refute_em_inv_checkpoint_sector_aligned.0.10.6" expl="refute_em_inv_checkpoint_sector_aligned ensures">
+    <proof prover="0" timelimit="3.2429"><result status="unknown" time="3.242905" steps="0"/></proof>
+    <proof prover="1"><result status="timeout" time="4.000000" steps="0"/></proof>
+    <proof prover="2"><result status="timeout" time="4.000000" steps="0"/></proof>
+    <proof prover="3"><result status="timeout" time="4.000000" steps="0"/></proof>
+    <transf name="split_vc" >
+     <goal name="vc_refute_em_inv_checkpoint_sector_aligned.0.10.6.0" expl="refute_em_inv_checkpoint_sector_aligned ensures">
+     <proof prover="0"><result status="unknown" time="3.309255" steps="0"/></proof>
+     <proof prover="1" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+     <proof prover="2" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+     <proof prover="3" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+     </goal>
+    </transf>
+    </goal>
+    <goal name="vc_refute_em_inv_checkpoint_sector_aligned.0.10.7" expl="refute_em_inv_checkpoint_sector_aligned ensures" proved="true">
+    <proof prover="2" timelimit="0.329681"><result status="valid" time="0.329681" steps="0"/></proof>
+    </goal>
+    <goal name="vc_refute_em_inv_checkpoint_sector_aligned.0.10.8" expl="refute_em_inv_checkpoint_sector_aligned ensures">
+    <proof prover="0" timelimit="3.26196"><result status="unknown" time="3.261958" steps="0"/></proof>
+    <proof prover="1"><result status="timeout" time="4.000000" steps="0"/></proof>
+    <proof prover="2"><result status="timeout" time="4.000000" steps="0"/></proof>
+    <proof prover="3"><result status="timeout" time="4.000000" steps="0"/></proof>
+    <transf name="split_vc" >
+     <goal name="vc_refute_em_inv_checkpoint_sector_aligned.0.10.8.0" expl="refute_em_inv_checkpoint_sector_aligned ensures">
+     <proof prover="0" timelimit="3.13552"><result status="unknown" time="3.135519" steps="0"/></proof>
+     <proof prover="1" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+     <proof prover="2" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+     <proof prover="3" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+     </goal>
+    </transf>
+    </goal>
+    <goal name="vc_refute_em_inv_checkpoint_sector_aligned.0.10.9" expl="refute_em_inv_checkpoint_sector_aligned ensures" proved="true">
+    <proof prover="2" timelimit="0.123834"><result status="valid" time="0.123834" steps="0"/></proof>
+    </goal>
+   </transf>
+   </goal>
+   <goal name="vc_refute_em_inv_checkpoint_sector_aligned.0.11" expl="elim Some" proved="true">
+   <proof prover="2" timelimit="0.115314"><result status="valid" time="0.115314" steps="0"/></proof>
+   </goal>
+   <goal name="vc_refute_em_inv_checkpoint_sector_aligned.0.12" expl="type invariant" proved="true">
+   <proof prover="2" timelimit="0.074555"><result status="valid" time="0.074555" steps="0"/></proof>
+   </goal>
+   <goal name="vc_refute_em_inv_checkpoint_sector_aligned.0.13" expl="type invariant" proved="true">
+   <proof prover="2" timelimit="0.05735"><result status="valid" time="0.057350" steps="0"/></proof>
+   </goal>
+  </transf>
+  </goal>
+ </transf>
+ </goal>
+</theory>
+</file>
+</why3session>

@@ -1,0 +1,15 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_index_Vec_RegionState_Global": {
+        "prover": "alt-ergo",
+        "time": 0.027
+      },
+      "vc_index_Vec_usize_Global": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_len_usize": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_run_ck_front8": { "prover": "z3", "time": 0.031 }
+    }
+  }
+}

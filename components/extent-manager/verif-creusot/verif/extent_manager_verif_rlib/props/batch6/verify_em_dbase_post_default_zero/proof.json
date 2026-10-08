@@ -1,0 +1,17 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_apply_cop": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_data_base_lba'0": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_format": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_initialize": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_new_inner": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_set_metadata_base_lba": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_verify_em_dbase_post_default_zero": {
+        "prover": "alt-ergo",
+        "time": 0.145
+      }
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_free": { "prover": "alt-ergo", "time": 0.039 },
+      "vc_w1_freed": { "prover": "alt-ergo", "time": 0.287 },
+      "vc_w1_recovered": { "prover": "alt-ergo", "time": 0.021 }
+    }
+  }
+}

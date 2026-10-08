@@ -1,0 +1,119 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 343 0 343 86 *)
+
+let%span swell_founded = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 163 10 163 38
+let%span scomponent = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 399 16 399 84
+let%span scomponent'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 179 10 179 11
+let%span scomponent'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 181 16 181 111
+let%span sbatch4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 339 10 339 11
+let%span sbatch4'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 340 11 340 70
+let%span sbatch4'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 341 11 341 109
+let%span sbatch4'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 342 10 342 70
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use int.ComputerDivision
+use int.Int
+
+type t_BTreeMap_u64_Slab_Global
+
+type t_SlabMap = { inner: t_BTreeMap_u64_Slab_Global }
+
+type t_HashMap_u32_Vec_u64_Global_RandomState_Global
+
+type t_SizeClassManager = { map: t_HashMap_u32_Vec_u64_Global_RandomState_Global }
+
+type t_Vec_Vec_u64_Global_Global
+
+type t_BuddyAllocator = {
+  base_offset: UInt64.t;
+  total_usable_size: UInt64.t;
+  sector_size: UInt32.t;
+  max_order: UInt64.t;
+  free_lists: t_Vec_Vec_u64_Global_Global }
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_FormatParams = {
+  data_disk_size'0: UInt64.t;
+  slab_size'0: UInt64.t;
+  max_extent_size'0: UInt32.t;
+  sector_size'0: UInt32.t;
+  region_count'0: UInt32.t;
+  metadata_alignment'0: UInt64.t;
+  instance_id'0: t_Option_u64;
+  metadata_disk_ns_id'0: UInt32.t;
+  metadata_region_size'0: UInt64.t }
+
+type t_Vec_tup2_u64_usize_Global
+
+type t_RegionState = {
+  slabs: t_SlabMap;
+  size_classes: t_SizeClassManager;
+  buddy: t_BuddyAllocator;
+  dirty: bool;
+  format_params: t_FormatParams;
+  pending_frees: t_Vec_tup2_u64_usize_Global }
+
+function rsize [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 398 0 398 48] (usable: int) (n: int) (i: int) : int
+ = [%#scomponent] if i < n - 1 then ComputerDivision.div usable n else usable - (n - 1) * ComputerDivision.div usable n
+
+function cap_sum [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 180 0 180 70] (arena: Seq.seq t_RegionState) (rv: Seq.seq UInt64.t) (n: int) : int
+
+axiom cap_sum_def:
+  forall arena: Seq.seq t_RegionState, rv: Seq.seq UInt64.t, n: int [cap_sum arena rv n]. cap_sum arena rv n
+    = ([%#scomponent'1] if n <= 0 then
+      0
+    else
+      cap_sum arena rv (n - 1)
+      + UInt64.t'int (Seq.get arena (UInt64.t'int (Seq.get rv (n - 1)))).buddy.total_usable_size
+    )
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+function lemma_distrib [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 164 0 164 44] (a: int) (b: int) (c: int) : ()
+
+axiom lemma_distrib_spec: forall a: int, b: int, c: int. [%#sbuddy] (a + b) * c = a * c + b * c
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant arena : Seq.seq t_RegionState
+
+constant rv : Seq.seq UInt64.t
+
+constant u : int
+
+constant n : int
+
+constant k : int
+
+function lemma_cap_part [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 343 0 343 86] (arena: Seq.seq t_RegionState) (rv: Seq.seq UInt64.t) (u: int) (n: int) (k: int) : ()
+
+goal vc_lemma_cap_part: ([%#sbatch4'0] 0 <= k /\ k <= Seq.length rv /\ Seq.length rv = n /\ n > 0 /\ u >= 0)
+  -> ([%#sbatch4'1] forall i: int. 0 <= i /\ i < Seq.length rv
+      -> UInt64.t'int (Seq.get arena (UInt64.t'int (Seq.get rv i))).buddy.total_usable_size = rsize u n i)
+  -> (if k > 0 then
+    (([@stop_split] [@expl:lemma_cap_part requires] ([@stop_split] [@expl:lemma_cap_part requires #0] [%#sbatch4'0] 0
+            <= k - 1
+          /\ k - 1 <= Seq.length rv /\ Seq.length rv = n /\ n > 0 /\ u >= 0)
+        /\ ([@stop_split] [@expl:lemma_cap_part requires #1] [%#sbatch4'1] forall i: int. 0 <= i /\ i < Seq.length rv
+          -> UInt64.t'int (Seq.get arena (UInt64.t'int (Seq.get rv i))).buddy.total_usable_size = rsize u n i))
+      /\ ([@expl:variant decreases] well_founded_relation_Int ([%#sbatch4] k) ([%#sbatch4] k - 1)))
+    /\ (([@stop_split] [@expl:lemma_cap_part ensures] [%#sbatch4'2] cap_sum arena rv (k - 1)
+      = (if k - 1 < n then (k - 1) * ComputerDivision.div u n else u))
+    -> (let _ = lemma_cap_part arena rv u n (k - 1) in ([@stop_split] [@expl:lemma_distrib ensures] [%#sbuddy] (k - 1
+          + 1)
+        * ComputerDivision.div u n
+      = (k - 1) * ComputerDivision.div u n + 1 * ComputerDivision.div u n)
+    -> ([@stop_split] [@expl:lemma_cap_part ensures] [%#sbatch4'2] cap_sum arena rv k
+    = (if k < n then k * ComputerDivision.div u n else u))))
+  else
+    [@stop_split] [@expl:lemma_cap_part ensures] [%#sbatch4'2] cap_sum arena rv k
+    = (if k < n then k * ComputerDivision.div u n else u)
+  )

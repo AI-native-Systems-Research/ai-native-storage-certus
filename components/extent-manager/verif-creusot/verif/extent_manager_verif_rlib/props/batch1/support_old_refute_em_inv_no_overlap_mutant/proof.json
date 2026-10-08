@@ -1,0 +1,22 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_alloc": { "prover": "alt-ergo", "time": 0.034 },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.038 },
+      "vc_support_old_refute_em_inv_no_overlap__mutant": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.038 },
+          { "prover": "alt-ergo", "time": 0.047 },
+          { "prover": "alt-ergo", "time": 0.043 },
+          { "prover": "alt-ergo", "time": 0.04 },
+          null,
+          { "prover": "alt-ergo", "time": 0.082 },
+          { "prover": "alt-ergo", "time": 0.077 }
+        ]
+      },
+      "vc_w1_recovered": { "prover": "alt-ergo", "time": 0.021 }
+    }
+  }
+}

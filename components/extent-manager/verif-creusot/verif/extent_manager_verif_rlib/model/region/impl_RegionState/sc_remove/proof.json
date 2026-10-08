@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_remove_slab": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_sc_remove": { "prover": "cvc4", "time": 0.884 }
+    }
+  }
+}

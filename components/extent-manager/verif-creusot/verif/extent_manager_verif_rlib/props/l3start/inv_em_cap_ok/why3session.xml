@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE why3session PUBLIC "-//Why3//proof session v5//EN"
+"https://www.why3.org/why3session.dtd">
+<why3session shape_version="6">
+<prover id="0" name="Z3" version="4.16.0" timelimit="0.05891" memlimit="1000"/>
+<prover id="1" name="CVC4" version="1.8" timelimit="4" memlimit="1000"/>
+<prover id="2" name="Alt-Ergo" version="2.6.2" timelimit="4" memlimit="1000"/>
+<prover id="3" name="CVC5" version="1.3.1" timelimit="4" memlimit="1000"/>
+<file format="coma">
+<path name=".."/><path name="inv_em_cap_ok.coma"/>
+<theory name="Coma">
+ <goal name="vc_new_inner" proved="true">
+ <proof prover="2" timelimit="0.02249"><result status="valid" time="0.022490" steps="0"/></proof>
+ </goal>
+ <goal name="vc_format" proved="true">
+ <proof prover="2" timelimit="0.036189"><result status="valid" time="0.036189" steps="0"/></proof>
+ </goal>
+ <goal name="vc_initialize" proved="true">
+ <proof prover="2" timelimit="0.033781"><result status="valid" time="0.033781" steps="0"/></proof>
+ </goal>
+ <goal name="vc_apply_cop" proved="true">
+ <proof prover="2" timelimit="0.05191"><result status="valid" time="0.051910" steps="0"/></proof>
+ </goal>
+ <goal name="vc_inv_em_cap_ok">
+ <transf name="compute_specified" >
+  <goal name="vc_inv_em_cap_ok.0">
+  <transf name="split_vc" >
+   <goal name="vc_inv_em_cap_ok.0.0" expl="format requires" proved="true">
+   <proof prover="2" timelimit="0.065689"><result status="valid" time="0.065689" steps="0"/></proof>
+   </goal>
+   <goal name="vc_inv_em_cap_ok.0.1" expl="assertion" proved="true">
+   <proof prover="0"><result status="valid" time="0.058910" steps="0"/></proof>
+   </goal>
+   <goal name="vc_inv_em_cap_ok.0.2" expl="assertion" proved="true">
+   <proof prover="1" timelimit="0.422211"><result status="valid" time="0.422211" steps="0"/></proof>
+   </goal>
+   <goal name="vc_inv_em_cap_ok.0.3" expl="assertion">
+   <proof prover="0" timelimit="2.92071"><result status="unknown" time="2.920715" steps="0"/></proof>
+   <proof prover="1"><result status="timeout" time="4.000000" steps="0"/></proof>
+   <proof prover="2"><result status="timeout" time="4.000000" steps="0"/></proof>
+   <proof prover="3"><result status="timeout" time="4.000000" steps="0"/></proof>
+   <transf name="split_vc" >
+    <goal name="vc_inv_em_cap_ok.0.3.0" expl="assertion">
+    <proof prover="0" timelimit="3.18522"><result status="unknown" time="3.185222" steps="0"/></proof>
+    <proof prover="1"><result status="timeout" time="4.000000" steps="0"/></proof>
+    <proof prover="2"><result status="timeout" time="4.000000" steps="0"/></proof>
+    <proof prover="3"><result status="timeout" time="4.000000" steps="0"/></proof>
+    <transf name="split_vc" >
+     <goal name="vc_inv_em_cap_ok.0.3.0.0" expl="assertion">
+     <proof prover="0" timelimit="3.15927"><result status="unknown" time="3.159266" steps="0"/></proof>
+     <proof prover="1" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+     <proof prover="2" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+     <proof prover="3" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+     </goal>
+    </transf>
+    </goal>
+   </transf>
+   </goal>
+   <goal name="vc_inv_em_cap_ok.0.4" expl="initialize requires" proved="true">
+   <proof prover="2" timelimit="0.075938"><result status="valid" time="0.075938" steps="0"/></proof>
+   </goal>
+   <goal name="vc_inv_em_cap_ok.0.5" expl="assertion" proved="true">
+   <proof prover="2" timelimit="0.117505"><result status="valid" time="0.117505" steps="0"/></proof>
+   </goal>
+   <goal name="vc_inv_em_cap_ok.0.6" expl="assertion" proved="true">
+   <proof prover="2" timelimit="0.223782"><result status="valid" time="0.223782" steps="0"/></proof>
+   </goal>
+   <goal name="vc_inv_em_cap_ok.0.7" expl="assertion" proved="true">
+   <proof prover="0" timelimit="0.528346"><result status="valid" time="0.528346" steps="0"/></proof>
+   </goal>
+   <goal name="vc_inv_em_cap_ok.0.8" expl="assertion" proved="true">
+   <proof prover="2" timelimit="0.758987"><result status="valid" time="0.758987" steps="0"/></proof>
+   </goal>
+   <goal name="vc_inv_em_cap_ok.0.9" expl="apply_cop requires" proved="true">
+   <proof prover="2" timelimit="0.085392"><result status="valid" time="0.085392" steps="0"/></proof>
+   </goal>
+   <goal name="vc_inv_em_cap_ok.0.10" expl="assertion" proved="true">
+   <proof prover="2" timelimit="0.093981"><result status="valid" time="0.093981" steps="0"/></proof>
+   </goal>
+   <goal name="vc_inv_em_cap_ok.0.11" expl="inv_em_cap_ok ensures" proved="true">
+   <transf name="split_vc" proved="true" >
+    <goal name="vc_inv_em_cap_ok.0.11.0" expl="inv_em_cap_ok result type invariant (inv_em_cap_ok ensures)" proved="true">
+    <proof prover="2" timelimit="0.090075"><result status="valid" time="0.090075" steps="0"/></proof>
+    </goal>
+    <goal name="vc_inv_em_cap_ok.0.11.1" expl="inv_em_cap_ok ensures #0 (inv_em_cap_ok ensures)" proved="true">
+    <proof prover="1" timelimit="0.272629"><result status="valid" time="0.272629" steps="0"/></proof>
+    </goal>
+    <goal name="vc_inv_em_cap_ok.0.11.2" expl="inv_em_cap_ok ensures #1 (inv_em_cap_ok ensures)" proved="true">
+    <proof prover="3" timelimit="1.20063"><result status="valid" time="1.200634" steps="0"/></proof>
+    </goal>
+    <goal name="vc_inv_em_cap_ok.0.11.3" expl="inv_em_cap_ok ensures #2 (inv_em_cap_ok ensures)" proved="true">
+    <proof prover="2" timelimit="0.290445"><result status="valid" time="0.290445" steps="0"/></proof>
+    </goal>
+    <goal name="vc_inv_em_cap_ok.0.11.4" expl="inv_em_cap_ok ensures #3 (inv_em_cap_ok ensures)" proved="true">
+    <proof prover="3" timelimit="1.26476"><result status="valid" time="1.264761" steps="0"/></proof>
+    </goal>
+   </transf>
+   </goal>
+   <goal name="vc_inv_em_cap_ok.0.12" expl="type invariant" proved="true">
+   <proof prover="2" timelimit="0.09507"><result status="valid" time="0.095070" steps="0"/></proof>
+   </goal>
+   <goal name="vc_inv_em_cap_ok.0.13" expl="type invariant" proved="true">
+   <proof prover="2" timelimit="0.084596"><result status="valid" time="0.084596" steps="0"/></proof>
+   </goal>
+   <goal name="vc_inv_em_cap_ok.0.14" expl="type invariant" proved="true">
+   <proof prover="2" timelimit="0.087339"><result status="valid" time="0.087339" steps="0"/></proof>
+   </goal>
+   <goal name="vc_inv_em_cap_ok.0.15" expl="type invariant" proved="true">
+   <proof prover="2" timelimit="0.077356"><result status="valid" time="0.077356" steps="0"/></proof>
+   </goal>
+   <goal name="vc_inv_em_cap_ok.0.16" expl="type invariant" proved="true">
+   <proof prover="2" timelimit="0.074276"><result status="valid" time="0.074276" steps="0"/></proof>
+   </goal>
+   <goal name="vc_inv_em_cap_ok.0.17" expl="type invariant" proved="true">
+   <proof prover="2" timelimit="0.040839"><result status="valid" time="0.040839" steps="0"/></proof>
+   </goal>
+  </transf>
+  </goal>
+ </transf>
+ </goal>
+</theory>
+</file>
+</why3session>

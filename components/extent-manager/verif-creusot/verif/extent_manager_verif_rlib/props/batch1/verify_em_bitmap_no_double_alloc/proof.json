@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_alloc_slot": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_slab_from_descriptor": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_verify_em_bitmap_no_double_alloc": {
+        "prover": "z3",
+        "time": 0.032
+      }
+    }
+  }
+}

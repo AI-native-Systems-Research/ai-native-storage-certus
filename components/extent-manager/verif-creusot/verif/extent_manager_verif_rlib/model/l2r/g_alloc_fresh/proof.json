@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_g_alloc_fresh": { "prover": "cvc5", "time": 0.168 } }
+  }
+}

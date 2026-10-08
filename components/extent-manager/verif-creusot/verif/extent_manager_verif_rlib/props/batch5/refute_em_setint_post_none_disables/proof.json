@@ -1,0 +1,17 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_refute_em_setint_post_none_disables": {
+        "prover": "alt-ergo",
+        "time": 0.044
+      },
+      "vc_relock": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_set_interval": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_th_enter": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_tick": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_timeout": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_work": { "prover": "alt-ergo", "time": 0.006 }
+    }
+  }
+}

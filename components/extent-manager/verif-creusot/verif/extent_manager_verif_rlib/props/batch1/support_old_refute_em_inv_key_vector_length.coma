@@ -1,0 +1,133 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch1.rs" 125 0 125 68 *)
+
+let%span sbatch1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch1.rs" 126 24 126 39
+let%span sbatch1'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch1.rs" 128 35 128 42
+let%span sbatch1'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch1.rs" 128 15 128 42
+let%span sbatch1'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch1.rs" 128 15 128 32
+let%span sbatch1'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch1.rs" 124 10 124 51
+let%span switness = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 62 26 62 46
+let%span switness'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 61 10 61 24
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.prelude.Any
+
+type t_BTreeMap_u64_Slab_Global
+
+type t_SlabMap = { inner: t_BTreeMap_u64_Slab_Global }
+
+type t_HashMap_u32_Vec_u64_Global_RandomState_Global
+
+type t_SizeClassManager = { map: t_HashMap_u32_Vec_u64_Global_RandomState_Global }
+
+type t_Vec_Vec_u64_Global_Global
+
+type t_BuddyAllocator = {
+  base_offset: UInt64.t;
+  total_usable_size: UInt64.t;
+  sector_size: UInt32.t;
+  max_order: UInt64.t;
+  free_lists: t_Vec_Vec_u64_Global_Global }
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_FormatParams = {
+  data_disk_size'0: UInt64.t;
+  slab_size'0: UInt64.t;
+  max_extent_size'0: UInt32.t;
+  sector_size'0: UInt32.t;
+  region_count'0: UInt32.t;
+  metadata_alignment'0: UInt64.t;
+  instance_id'0: t_Option_u64;
+  metadata_disk_ns_id'0: UInt32.t;
+  metadata_region_size'0: UInt64.t }
+
+type t_Vec_tup2_u64_usize_Global
+
+type t_RegionState = {
+  slabs: t_SlabMap;
+  size_classes: t_SizeClassManager;
+  buddy: t_BuddyAllocator;
+  dirty: bool;
+  format_params: t_FormatParams;
+  pending_frees: t_Vec_tup2_u64_usize_Global }
+
+type tup2_RegionState_usize = { f0: t_RegionState; f1: UInt64.t }
+
+predicate inv_BTreeMap_u64_Slab_Global (_1: t_BTreeMap_u64_Slab_Global)
+
+predicate inv_SlabMap (_1: t_SlabMap)
+
+axiom inv_axiom [@rewrite]: forall x: t_SlabMap [inv_SlabMap x]. inv_SlabMap x = inv_BTreeMap_u64_Slab_Global x.inner
+
+predicate inv_HashMap_u32_Vec_u64_Global_RandomState_Global (_1: t_HashMap_u32_Vec_u64_Global_RandomState_Global)
+
+predicate inv_SizeClassManager (_1: t_SizeClassManager)
+
+axiom inv_axiom'0 [@rewrite]: forall x: t_SizeClassManager [inv_SizeClassManager x]. inv_SizeClassManager x
+    = inv_HashMap_u32_Vec_u64_Global_RandomState_Global x.map
+
+predicate inv_RegionState (_1: t_RegionState)
+
+axiom inv_axiom'1 [@rewrite]: forall x: t_RegionState [inv_RegionState x]. inv_RegionState x
+    = (inv_SlabMap x.slabs /\ inv_SizeClassManager x.size_classes)
+
+predicate inv_tup2_RegionState_usize [@inline:trivial] (_1: tup2_RegionState_usize) = inv_RegionState _1.f0
+
+meta "rewrite_def" predicate inv_tup2_RegionState_usize
+
+let w_kvl_reserve (return (x: tup2_RegionState_usize)) = any
+  [ return (result: tup2_RegionState_usize) ->
+  {[@stop_split] [@expl:w_kvl_reserve ensures] ([@stop_split] [@expl:w_kvl_reserve result type invariant] [%#switness] inv_tup2_RegionState_usize result)
+    /\ ([@stop_split] [@expl:w_kvl_reserve ensures] [%#switness'0] UInt64.t'int result.f1 = 1)}
+    (! return {result}) ]
+
+predicate resolve_BTreeMap_u64_Slab_Global (_1: t_BTreeMap_u64_Slab_Global)
+
+predicate resolve_SlabMap (_1: t_SlabMap)
+
+axiom resolve_axiom [@rewrite]: forall x: t_SlabMap [resolve_SlabMap x]. resolve_SlabMap x
+    = resolve_BTreeMap_u64_Slab_Global x.inner
+
+predicate resolve_HashMap_u32_Vec_u64_Global_RandomState_Global (_1: t_HashMap_u32_Vec_u64_Global_RandomState_Global)
+
+predicate resolve_SizeClassManager (_1: t_SizeClassManager)
+
+axiom resolve_axiom'0 [@rewrite]: forall x: t_SizeClassManager [resolve_SizeClassManager x]. resolve_SizeClassManager x
+    = resolve_HashMap_u32_Vec_u64_Global_RandomState_Global x.map
+
+predicate resolve_RegionState (_1: t_RegionState)
+
+axiom resolve_axiom'1 [@rewrite]: forall x: t_RegionState [resolve_RegionState x]. resolve_RegionState x
+    = (resolve_SlabMap x.slabs /\ resolve_SizeClassManager x.size_classes)
+
+type tup2_usize_u64 = { f0'0: UInt64.t; f1'0: UInt64.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let support_old_refute_em_inv_key_vector_length [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch1.rs" 125 0 125 68]
+  (return (x: tup2_usize_u64)) = (! bb0
+  [ bb0 = s0
+    [ s0 = w_kvl_reserve [%#sbatch1] (fun (_x: tup2_RegionState_usize) -> [ &_4 <- _x ] s1)
+    | s1 = [ &r <- _4.f0 ] s2
+    | s2 = [ &keys_len <- _4.f1 ] s3
+    | s3 = s4 [ _ck -> (! {[@expl:type invariant] inv_RegionState r} any) ]
+    | s4 = -{resolve_RegionState r}- s5
+    | s5 = [ &_7 <- ([%#sbatch1'0] (4096: UInt64.t)) = ([%#sbatch1'1] (0: UInt64.t)) ] s6
+    | s6 = {[@expl:division by zero] [%#sbatch1'1] not _7} s7
+    | s7 = UInt64.div [%#sbatch1'1] {[%#sbatch1'2] (17592186048512: UInt64.t)} {[%#sbatch1'0] (4096: UInt64.t)}
+        (fun (_x: UInt64.t) -> [ &_6 <- _x ] s8)
+    | s8 = [ &_ret <- { f0'0 = keys_len; f1'0 = _6 } ] s9
+    | s9 = return {_ret} ] ]
+  [ & _ret: tup2_usize_u64 = Any.any_l ()
+  | & r: t_RegionState = Any.any_l ()
+  | & keys_len: UInt64.t = Any.any_l ()
+  | & _4: tup2_RegionState_usize = Any.any_l ()
+  | & _6: UInt64.t = Any.any_l ()
+  | & _7: bool = Any.any_l () ])
+  [ return (result: tup2_usize_u64) ->
+  {[@stop_split] [@expl:support_old_refute_em_inv_key_vector_length ensures] [%#sbatch1'3] UInt64.t'int result.f0'0 = 1
+    /\ UInt64.t'int result.f1'0 = 4294967297}
+    (! return {result}) ]

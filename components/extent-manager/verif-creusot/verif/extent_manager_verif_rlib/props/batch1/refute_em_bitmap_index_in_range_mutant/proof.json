@@ -1,0 +1,22 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_refute_em_bitmap_index_in_range__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              {
+                "tactic": "split_vc",
+                "children": [ { "prover": "alt-ergo", "time": 0.04 }, null ]
+              }
+            ]
+          }
+        ]
+      },
+      "vc_w2b_replaced": { "prover": "alt-ergo", "time": 0.023 }
+    }
+  }
+}

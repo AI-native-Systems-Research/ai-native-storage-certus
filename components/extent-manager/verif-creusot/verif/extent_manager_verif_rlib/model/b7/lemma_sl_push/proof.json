@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_lemma_sl_push": { "prover": "alt-ergo", "time": 0.022 } }
+  }
+}

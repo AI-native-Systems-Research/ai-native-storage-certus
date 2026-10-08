@@ -1,0 +1,22 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_apply_cop": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_checkpoint": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_format": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_get_instance_id": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_initialize": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_is_ok_unit": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_new_Vec_SlabDescriptor_Global": {
+        "prover": "alt-ergo",
+        "time": 0.03
+      },
+      "vc_verify_em_format_post_instance_id_generated": {
+        "prover": "cvc4",
+        "time": 0.642
+      }
+    }
+  }
+}

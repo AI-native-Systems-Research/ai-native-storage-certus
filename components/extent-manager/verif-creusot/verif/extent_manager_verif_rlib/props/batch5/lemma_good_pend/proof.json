@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_lemma_good_pend": { "prover": "cvc5", "time": 1.0 } }
+  }
+}

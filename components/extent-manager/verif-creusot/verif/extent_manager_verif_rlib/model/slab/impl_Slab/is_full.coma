@@ -1,0 +1,55 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 217 4 217 33 *)
+
+(* model::slab::Slab *)
+
+let%span sbitmap = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 235 14 235 46
+let%span sbitmap'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 241 14 241 38
+let%span sslab = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 218 8 218 31
+let%span sslab'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 218 35 218 58
+let%span sslab'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 216 14 216 80
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_Vec_u64_Global
+
+type t_AllocationBitmap = { words: t_Vec_u64_Global; num_slots: UInt32.t; allocated_count: UInt32.t }
+
+type t_Slab = {
+  start_offset: UInt64.t;
+  slab_size: UInt64.t;
+  element_size: UInt32.t;
+  bitmap: t_AllocationBitmap;
+  keys: t_Vec_u64_Global;
+  rover: UInt64.t }
+
+let count_set (self: t_AllocationBitmap) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:count_set ensures] [%#sbitmap] UInt64.t'int result
+    = UInt32.t'int self.allocated_count}
+    (! return {result}) ]
+
+let num_slots'0 (self: t_AllocationBitmap) (return (x: UInt32.t)) = any
+  [ return (result: UInt32.t) -> {[@stop_split] [@expl:num_slots ensures] [%#sbitmap'0] result = self.num_slots}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let is_full [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 217 4 217 33]
+  (self: t_Slab) (return (x: bool)) = (! bb0
+  [ bb0 = s0
+    [ s0 = count_set [%#sslab] {self.bitmap} (fun (_x: UInt64.t) -> [ &_4 <- _x ] s1)
+    | s1 = num_slots'0 [%#sslab'0] {self.bitmap} (fun (_x: UInt32.t) -> [ &_7 <- _x ] s2)
+    | s2 = [ &_6 <- UInt64.of_int (UInt32.t'int _7) ] s3
+    | s3 = [ &_ret <- _4 = _6 ] s4
+    | s4 = return {_ret} ] ]
+  [ & _ret: bool = Any.any_l ()
+  | & self: t_Slab = self
+  | & _4: UInt64.t = Any.any_l ()
+  | & _6: UInt64.t = Any.any_l ()
+  | & _7: UInt32.t = Any.any_l () ])
+  [ return (result: bool) -> {[@stop_split] [@expl:is_full ensures] [%#sslab'1] result
+    = (UInt32.t'int self.bitmap.allocated_count = UInt32.t'int self.bitmap.num_slots)}
+    (! return {result}) ]

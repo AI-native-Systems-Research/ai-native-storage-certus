@@ -1,0 +1,10 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_elim_Err": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_read_ckpt": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_recover_rd": { "prover": "alt-ergo", "time": 0.097 }
+    }
+  }
+}

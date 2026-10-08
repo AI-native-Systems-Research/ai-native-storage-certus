@@ -1,0 +1,16 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_deser7": { "prover": "alt-ergo", "time": 0.046 },
+      "vc_elim_Err": { "prover": "alt-ergo", "time": 0.047 },
+      "vc_elim_Ok": { "prover": "alt-ergo", "time": 0.042 },
+      "vc_support_old_refute_em_inv_checkpoint_roundtrip_len32": {
+        "prover": "cvc5",
+        "time": 0.246
+      },
+      "vc_w_ckl_copy": { "prover": "alt-ergo", "time": 0.044 },
+      "vc_w_ckl_payload": { "prover": "alt-ergo", "time": 0.043 }
+    }
+  }
+}

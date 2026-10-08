@@ -1,0 +1,75 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2b.rs" 572 0 572 47 *)
+
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 180 11 180 26
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 181 10 181 34
+let%span sbuddy'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 182 10 182 33
+let%span sbuddy'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 183 10 183 20
+let%span sregion = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 231 16 231 41
+let%span sassume = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 106 16 106 38
+let%span sl2b = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2b.rs" 573 20 573 54
+let%span sl2b'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2b.rs" 574 5 574 14
+let%span sl2b'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2b.rs" 574 17 574 18
+let%span sl2b'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2b.rs" 574 4 574 19
+let%span sl2b'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2b.rs" 574 4 574 24
+let%span sl2b'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2b.rs" 574 4 574 29
+let%span sl2b'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2b.rs" 570 11 570 55
+let%span sl2b'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2b.rs" 571 10 571 40
+
+use int.ComputerDivision
+use creusot.int.UInt32
+use creusot.prelude.Any
+use int.Int
+
+function lemma_divmod [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 184 0 184 35] (x: int) (m: int) : ()
+
+axiom lemma_divmod_spec: forall x: int, m: int. ([%#sbuddy] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'0] x = m * ComputerDivision.div x m + ComputerDivision.mod x m)
+
+axiom lemma_divmod_spec'0: forall x: int, m: int. ([%#sbuddy] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'1] 0 <= ComputerDivision.mod x m /\ ComputerDivision.mod x m < m)
+
+axiom lemma_divmod_spec'1: forall x: int, m: int. ([%#sbuddy] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'2] ComputerDivision.div x m >= 0)
+
+constant const_MAX: UInt32.t = (4294967295: UInt32.t)
+
+predicate a_3783f8 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 105 0 105 43] (size: int) (ss: int) =
+  [%#sassume] size + ss <= UInt32.t'int const_MAX
+
+function align_l [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 230 0 230 41] (size: int) (ss: int) : int
+ = [%#sregion] ComputerDivision.div (size + ss - 1) ss * ss
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let align_rel_l2b [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2b.rs" 572 0 572 47]
+  (size: UInt32.t) (ss: UInt32.t) (return (x: UInt32.t)) =
+{[@stop_split] [@expl:align_rel_l2b requires] [%#sl2b'5] UInt32.t'int ss > 0
+  /\ UInt32.t'int size > 0 /\ a_3783f8 (UInt32.t'int size) (UInt32.t'int ss)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = {[@expl:assertion] [%#sl2b] let _ = lemma_divmod (UInt32.t'int size + UInt32.t'int ss
+      - 1) (UInt32.t'int ss) in ComputerDivision.div (UInt32.t'int size + UInt32.t'int ss - 1) (UInt32.t'int ss)
+        * UInt32.t'int ss
+      <= UInt32.t'int size + UInt32.t'int ss - 1}
+      s1
+    | s1 = UInt32.add [%#sl2b'0] {size} {ss} (fun (_x: UInt32.t) -> [ &_15 <- _x ] s2)
+    | s2 = UInt32.sub [%#sl2b'2] {_15} {[%#sl2b'1] (1: UInt32.t)} (fun (_x: UInt32.t) -> [ &_14 <- _x ] s3)
+    | s3 = [ &_18 <- ss ] s4
+    | s4 = [ &_19 <- _18 = ([%#sl2b'3] (0: UInt32.t)) ] s5
+    | s5 = {[@expl:division by zero] [%#sl2b'3] not _19} s6
+    | s6 = UInt32.div [%#sl2b'3] {_14} {_18} (fun (_x: UInt32.t) -> [ &_13 <- _x ] s7)
+    | s7 = UInt32.mul [%#sl2b'4] {_13} {ss} (fun (_x: UInt32.t) -> [ &_ret <- _x ] s8)
+    | s8 = return {_ret} ] ]
+  [ & _ret: UInt32.t = Any.any_l ()
+  | & size: UInt32.t = size
+  | & ss: UInt32.t = ss
+  | & _13: UInt32.t = Any.any_l ()
+  | & _14: UInt32.t = Any.any_l ()
+  | & _15: UInt32.t = Any.any_l ()
+  | & _18: UInt32.t = Any.any_l ()
+  | & _19: bool = Any.any_l () ])
+  [ return (result: UInt32.t) -> {[@stop_split] [@expl:align_rel_l2b ensures] [%#sl2b'6] UInt32.t'int result
+    = align_l (UInt32.t'int size) (UInt32.t'int ss)}
+    (! return {result}) ]

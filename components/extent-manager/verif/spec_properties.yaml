@@ -1,0 +1,1496 @@
+# Blind SPEC-ONLY property extraction for the Certus extent-manager component.
+# Sources read: specs/001-extent-manager-v2/{spec.md, plan.md, tasks.md} and the
+# IExtentManager interface declaration (components/interfaces/src/iextent_manager.rs).
+# No implementation or test file was opened. Implementation line numbers cited inside
+# the spec prose were deliberately not carried into any trace.
+# Trace vocabulary:
+#   FR-nnn = functional requirement; US-n = user story; AS-n.m = acceptance scenario m of US-n;
+#   EC-n = n-th bullet of the Edge Cases list (1 = device full ... 9 = remove+realloc+crash);
+#   SC-nnn = success criterion; KE-<name> = Key Entities entry; ASSUMP-n = n-th Assumption bullet;
+#   FMT-<table> = On-Disk Format Reference section; SUPPORT-<item> = Additional Support Surface;
+#   SYNC-<date>-<letter> = the "Last Synced" clarification notes at the top of spec.md, in order;
+#   PLAN-<section> = plan.md section; TASKS-<item> = tasks.md; IFACE-<decl> = interface declaration.
+# Subjects include the 14 IExtentManager methods plus the WriteHandle operations, the concrete
+# ExtentManager configuration methods, component drop, FormatParams defaults, and named
+# global invariants (prefixed INV).
+component: extent-manager
+source: spec
+artifact: components/extent-manager/specs/001-extent-manager-v2/spec.md (+ plan.md, tasks.md, components/interfaces/src/iextent_manager.rs declaration)
+pin: 2cd35bac
+method: blind-extraction
+generated: 2026-10-04
+counts: {total: 157, methods: 14, verifiable: 133, not_verifiable: 24}
+properties:
+
+  # ---------------------------------------------------------------- format
+  - id: EM-FORMAT-ERR-SECTOR-ZERO
+    subject: format
+    kind: error-case
+    verifiable: true
+    statement: >
+      When format() is called with a sector size of zero, it returns a CorruptMetadata error
+      with a descriptive message.
+    traces: [FR-002, EC-4]
+
+  - id: EM-FORMAT-ERR-SLAB-NOT-SECTOR-MULTIPLE
+    subject: format
+    kind: error-case
+    verifiable: true
+    statement: >
+      When format() is called with a slab size that is not an exact multiple of the sector
+      size, it returns a CorruptMetadata error with a descriptive message.
+    traces: [FR-002, EC-4, IFACE-FormatParams.slab_size]
+
+  - id: EM-FORMAT-ERR-MAX-EXTENT-EXCEEDS-SLAB
+    subject: format
+    kind: error-case
+    verifiable: true
+    statement: >
+      When format() is called with a maximum extent size strictly greater than the slab size, it
+      returns a CorruptMetadata error; a maximum extent size equal to the slab size is accepted
+      (the rule is "less than or equal to").
+    traces: [FR-002, EC-4, IFACE-FormatParams.max_extent_size]
+
+  - id: EM-FORMAT-ERR-REGION-COUNT
+    subject: format
+    kind: error-case
+    verifiable: true
+    statement: >
+      When format() is called with a region count that is zero or is not a power of two, it
+      returns a CorruptMetadata error with a descriptive message.
+    traces: [FR-002, EC-4, KE-Region, IFACE-FormatParams.region_count]
+
+  - id: EM-FORMAT-ERR-METADATA-TOO-SMALL
+    subject: format
+    kind: error-case
+    verifiable: true
+    statement: >
+      When the metadata device is too small to hold the superblock area plus two checkpoint
+      regions, format() returns a CorruptMetadata error.
+    traces: [FR-002, EC-5]
+
+  - id: EM-FORMAT-POST-SUPERBLOCK-WRITTEN
+    subject: format
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After format() succeeds, the first block of the metadata device (block 0, counted from the
+      configured metadata base address) holds a superblock that records the format parameters,
+      the checkpoint region layout, and a CRC32 checksum over its contents.
+    traces: [FR-003, KE-Superblock, FMT-Superblock, US-2]
+
+  - id: EM-FORMAT-POST-CKPT-REGION-OFFSET
+    subject: format
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After format() succeeds, the recorded checkpoint region offset is the smallest multiple of
+      the configured metadata alignment that is greater than or equal to 4096 bytes (the
+      superblock size).
+    traces: [FMT-Metadata-Device-Layout, IFACE-FormatParams.metadata_alignment]
+
+  - id: EM-FORMAT-POST-CKPT-REGION-SIZE
+    subject: format
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After format() succeeds in separate-device mode (metadata region size of zero), the
+      recorded checkpoint region size is half of the metadata device space remaining after the
+      checkpoint region offset, rounded down to a whole number of sectors.
+    traces: [FMT-Metadata-Device-Layout, FR-035]
+
+  - id: EM-FORMAT-POST-COPIES-FIT
+    subject: format
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After format() succeeds, the checkpoint region offset plus two checkpoint region sizes is
+      less than or equal to the usable size of the metadata device, so both checkpoint copies lie
+      entirely on the device and do not overlap each other or the superblock.
+    traces: [FR-002, FMT-Metadata-Device-Layout, US-2]
+
+  - id: EM-FORMAT-POST-SHARED-METADATA-CAP
+    subject: format
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When format() succeeds with a non-zero metadata region size (shared-device mode), the
+      superblock plus both checkpoint regions together occupy at most metadata_region_size bytes
+      (equal is allowed).
+    traces: [FR-035, IFACE-FormatParams.metadata_region_size]
+
+  - id: EM-FORMAT-POST-SHARED-DATA-START
+    subject: format
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When format() succeeds with a non-zero metadata region size (shared-device mode), the
+      recorded data start offset is the first byte immediately after the reserved metadata area,
+      not zero.
+    traces: [FR-035, FMT-Superblock]
+
+  - id: EM-FORMAT-POST-SEPARATE-DATA-START-ZERO
+    subject: format
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When format() succeeds with a metadata region size of zero (separate-device mode), the
+      recorded data start offset is zero.
+    traces: [FR-035, FMT-Data-Device-Layout]
+
+  - id: EM-FORMAT-POST-INSTANCE-ID-GIVEN
+    subject: format
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When format() succeeds with an explicit instance identifier, that exact identifier is
+      stored in the superblock and get_instance_id() subsequently returns it.
+    traces: [FR-026, IFACE-FormatParams.instance_id, FMT-Superblock]
+
+  - id: EM-FORMAT-POST-INSTANCE-ID-GENERATED
+    subject: format
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When format() succeeds with no instance identifier supplied, the component chooses an
+      identifier, stores it in the superblock, and get_instance_id() returns that same value on
+      every later call (the randomness of the choice itself is not checked).
+    traces: [FR-026, IFACE-FormatParams.instance_id]
+
+  - id: EM-FORMAT-POST-EMPTY
+    subject: format
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Immediately after format() succeeds, get_extents() returns an empty list and
+      for_each_extent() never invokes its callback.
+    traces: [AS-5.2, IFACE-format]
+
+  - id: EM-FORMAT-POST-USED-ZERO
+    subject: format
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Immediately after format() succeeds, used_bytes() returns zero, because no slab has yet
+      been allocated.
+    traces: [FR-031, AS-5.2]
+
+  - id: EM-FORMAT-POST-READY
+    subject: format
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After format() succeeds, operations that previously returned NotInitialized
+      (reserve_extent, remove_extent, checkpoint, get_instance_id) no longer return
+      NotInitialized.
+    traces: [EC-6, FR-002, FR-003]
+
+  - id: EM-FORMAT-FRAME-NO-FLUSH
+    subject: format
+    kind: frame
+    verifiable: true
+    statement: >
+      format() issues no explicit flush command to the metadata device, regardless of whether
+      the volatile_write_cache feature is enabled; flushes are issued only on the checkpoint path.
+    traces: [FR-030, SYNC-2026-09-01-a]
+
+  # ---------------------------------------------------------------- initialize
+  - id: EM-INIT-ERR-BAD-MAGIC
+    subject: initialize
+    kind: error-case
+    verifiable: true
+    statement: >
+      When the superblock on the metadata device does not carry the expected magic value
+      ("CERTUSV4"), initialize() returns a CorruptMetadata error whose message identifies the
+      magic mismatch.
+    traces: [AS-3.3, FR-004, KE-Superblock]
+
+  - id: EM-INIT-ERR-BAD-CRC
+    subject: initialize
+    kind: error-case
+    verifiable: true
+    statement: >
+      When the superblock's stored CRC32 checksum does not match its contents, initialize()
+      returns a CorruptMetadata error.
+    traces: [AS-3.4, FR-004]
+
+  - id: EM-INIT-ERR-BOTH-COPIES-UNREADABLE
+    subject: initialize
+    kind: error-case
+    verifiable: true
+    statement: >
+      When the superblock is valid but neither the active nor the inactive checkpoint copy can
+      be read and validated, initialize() returns an error instead of reporting success.
+    traces: [FR-017, US-3]
+
+  - id: EM-INIT-POST-ACTIVE-COPY-USED
+    subject: initialize
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When the checkpoint copy named active by the superblock is readable and passes its CRC
+      check, initialize() rebuilds state from that active copy and restores all of its extents.
+    traces: [AS-3.1, FR-017, US-3]
+
+  - id: EM-INIT-POST-FALLBACK-TO-INACTIVE
+    subject: initialize
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When the active checkpoint copy is unreadable (a CRC failure or a media error, for example
+      a corrupted first sector) and the inactive copy is valid, initialize() rebuilds state from
+      the inactive copy and restores its extents.
+    traces: [AS-3.2, FR-017, US-3, SC-003]
+
+  - id: EM-INIT-POST-RESTORES-CHECKPOINTED
+    subject: initialize
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After a successful checkpoint and a reboot, initialize() restores every extent that was
+      published before that checkpoint, each with its original key, offset and size, so
+      get_extents() lists all of them.
+    traces: [AS-2.1, FR-018, FR-004, SC-002, US-2]
+
+  - id: EM-INIT-POST-NO-UNCHECKPOINTED
+    subject: initialize
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After a reboot, initialize() does not restore any extent that was published after the
+      last successful checkpoint; recovered state reflects exactly the last checkpoint.
+    traces: [AS-2.2, US-2]
+
+  - id: EM-INIT-POST-UNCHECKPOINTED-REMOVAL-UNDONE
+    subject: initialize
+    kind: postcondition
+    verifiable: true
+    statement: >
+      If an extent was removed after the last successful checkpoint and the system then
+      restarts, initialize() restores that extent at its original offset with its original key
+      and size, because the removal had not yet been persisted.
+    traces: [AS-6.5, EC-9, US-6]
+
+  - id: EM-INIT-POST-RECOVERED-SLOTS-OCCUPIED
+    subject: initialize
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After initialize() succeeds, every slot whose recovered key is not the FREE_KEY sentinel
+      is treated as occupied, so no later reserve_extent() returns space overlapping any
+      recovered extent.
+    traces: [FR-018, FR-004, PLAN-Recovery-Flow, SUPPORT-mark_allocated]
+
+  - id: EM-INIT-POST-FREE-SLOTS-REUSABLE
+    subject: initialize
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After initialize() succeeds, slots whose recovered key is the FREE_KEY sentinel are
+      available to be handed out by later reserve_extent() calls.
+    traces: [FR-018, FR-011, PLAN-Recovery-Flow]
+
+  - id: EM-INIT-POST-INSTANCE-ID
+    subject: initialize
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After initialize() succeeds, get_instance_id() returns the same instance identifier that
+      was stored in the superblock when the device was formatted.
+    traces: [FR-026, FR-004]
+
+  - id: EM-INIT-POST-LAYOUT-RESTORED
+    subject: initialize
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After initialize() succeeds, capacity_bytes() and the data start offset equal the values
+      established when the device was formatted, in both shared-device and separate-device mode.
+    traces: [FR-035, FR-032, FR-004]
+
+  - id: EM-INIT-POST-USED-BYTES
+    subject: initialize
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After initialize() succeeds, used_bytes() equals the number of slabs recovered from the
+      checkpoint multiplied by the slab size.
+    traces: [FR-031, FR-018]
+
+  - id: EM-INIT-POST-READY
+    subject: initialize
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After initialize() succeeds, operations that previously returned NotInitialized
+      (reserve_extent, remove_extent, checkpoint, get_instance_id) no longer return
+      NotInitialized.
+    traces: [EC-6, FR-004]
+
+  # ---------------------------------------------------------------- reserve_extent
+  - id: EM-RESERVE-POST-HANDLE-KEY
+    subject: reserve_extent
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When reserve_extent(key, size) succeeds, the returned write handle reports, through its
+      key() accessor, exactly the key that was passed in.
+    traces: [AS-1.1, FR-005, SUPPORT-WriteHandle-accessors]
+
+  - id: EM-RESERVE-POST-SIZE-SECTOR-ALIGNED
+    subject: reserve_extent
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When reserve_extent(key, size) succeeds, the returned handle's extent_size() is the
+      requested size rounded up to the next multiple of the sector size; it is therefore greater
+      than or equal to the requested size and less than the requested size plus one sector.
+    traces: [AS-1.1, FR-005, EC-8, PLAN-Space-Allocation, SUPPORT-WriteHandle-accessors]
+
+  - id: EM-RESERVE-POST-OFFSET-SECTOR-ALIGNED
+    subject: reserve_extent
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When reserve_extent(key, size) succeeds, the returned handle's extent_offset() is a disk
+      byte offset that is an exact multiple of the sector size.
+    traces: [AS-1.1, FR-005]
+
+  - id: EM-RESERVE-FRAME-NOT-VISIBLE
+    subject: reserve_extent
+    kind: frame
+    verifiable: true
+    statement: >
+      A successful reserve_extent() does not make the new extent visible; until publish() is
+      called on its handle, the extent appears neither in get_extents() nor in
+      for_each_extent().
+    traces: [FR-005, AS-5.3, US-1, US-5]
+
+  - id: EM-RESERVE-FRAME-OTHER-EXTENTS
+    subject: reserve_extent
+    kind: frame
+    verifiable: true
+    statement: >
+      reserve_extent() does not change the key, offset, size or visibility of any extent that
+      already exists.
+    traces: [FR-005, SC-001]
+
+  - id: EM-RESERVE-FRAME-REUSE-EXISTING-SLAB
+    subject: reserve_extent
+    kind: frame
+    verifiable: true
+    statement: >
+      When the target region already has a slab of the required sector-aligned element size
+      with a free slot, reserve_extent() uses that slab and does not allocate a new slab, so
+      used_bytes() does not change; a new slab is taken only on demand.
+    traces: [FR-021, EC-8, PLAN-Space-Allocation]
+
+  - id: EM-RESERVE-ERR-OUT-OF-SPACE
+    subject: reserve_extent
+    kind: error-case
+    verifiable: true
+    statement: >
+      When there is no free space left on the data device to satisfy the request, reserve_extent()
+      returns an OutOfSpace error and makes no reservation.
+    traces: [EC-1]
+
+  - id: EM-RESERVE-ERR-NOT-INITIALIZED
+    subject: reserve_extent
+    kind: error-case
+    verifiable: true
+    statement: >
+      When reserve_extent() is called before either format() or initialize() has succeeded, it
+      returns a NotInitialized error.
+    traces: [EC-6]
+
+  - id: EM-RESERVE-POST-KEY-ZERO
+    subject: reserve_extent
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Key 0 is an ordinary valid key; reserving and then publishing an extent with key 0
+      succeeds and the extent is listed by get_extents() with key 0.
+    traces: [EC-2]
+
+  - id: EM-RESERVE-POST-FREE-KEY-ACCEPTED
+    subject: reserve_extent
+    kind: postcondition
+    verifiable: true
+    statement: >
+      reserve_extent() with key u64::MAX (the FREE_KEY sentinel) succeeds normally and returns a
+      write handle, just as for any other key.
+    traces: [EC-3, AS-1.5]
+
+  # ---------------------------------------------------------------- WriteHandle::publish
+  - id: EM-PUBLISH-POST-VISIBLE
+    subject: WriteHandle::publish
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After publish() succeeds on a handle whose key is not u64::MAX, get_extents() includes an
+      extent with that handle's key, offset and size.
+    traces: [AS-1.2, FR-006, FR-009, US-1]
+
+  - id: EM-PUBLISH-POST-RETURNED-EXTENT
+    subject: WriteHandle::publish
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When publish() succeeds on a handle whose key is not u64::MAX, the extent it returns has
+      the same key, offset and size as the handle reported.
+    traces: [FR-006, US-6, IFACE-WriteHandle.publish]
+
+  - id: EM-PUBLISH-POST-FREE-KEY-DISCARDED
+    subject: WriteHandle::publish
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When publish() is called on a handle whose key is u64::MAX (the FREE_KEY sentinel), it
+      returns success, and no extent for that reservation appears in get_extents() or
+      for_each_extent().
+    traces: [AS-1.5, EC-3, FR-006, KE-FREE_KEY]
+
+  - id: EM-PUBLISH-POST-FREE-KEY-SLOT-RELEASED
+    subject: WriteHandle::publish
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When publish() is called on a handle whose key is u64::MAX, the reserved slot is released
+      immediately, so it is available to later reservations without waiting for a checkpoint.
+    traces: [FR-006, EC-3]
+
+  - id: EM-PUBLISH-FRAME-OTHER-EXTENTS
+    subject: WriteHandle::publish
+    kind: frame
+    verifiable: true
+    statement: >
+      publish() changes only the published slot; the key, offset, size and visibility of every
+      other extent stay the same.
+    traces: [FR-006, SC-001]
+
+  - id: EM-PUBLISH-FRAME-NOT-UNDONE
+    subject: WriteHandle::publish
+    kind: frame
+    verifiable: true
+    statement: >
+      Once publish() has succeeded, the handle going out of scope does not release the slot or
+      hide the extent; the published extent stays visible until it is removed.
+    traces: [FR-033, FR-007, IFACE-WriteHandle]
+
+  # ---------------------------------------------------------------- WriteHandle::abort / drop
+  - id: EM-ABORT-POST-NOT-VISIBLE
+    subject: WriteHandle::abort
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After abort() is called on a write handle, the reserved extent does not appear in
+      get_extents() or for_each_extent().
+    traces: [AS-1.3, FR-007, US-1]
+
+  - id: EM-ABORT-POST-SLOT-REUSABLE
+    subject: WriteHandle::abort
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After abort() is called on a write handle, the reserved slot is released and is available
+      for reuse by later reservations.
+    traces: [AS-1.3, FR-007, US-1]
+
+  - id: EM-ABORT-FRAME-NO-KEY-WRITTEN
+    subject: WriteHandle::abort
+    kind: frame
+    verifiable: true
+    statement: >
+      abort() records no key for the slot and does not change the key, offset, size or
+      visibility of any other extent.
+    traces: [FR-007]
+
+  - id: EM-HANDLE-DROP-POST-AUTO-ABORT
+    subject: WriteHandle::drop
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When a write handle is discarded without publish() or abort() having been called, the
+      reservation is aborted automatically, with the same observable effect as calling abort():
+      the extent is not visible and its slot is released for reuse.
+    traces: [AS-1.4, FR-007, FR-033, KE-WriteHandle]
+
+  # ---------------------------------------------------------------- get_extents
+  - id: EM-GETEXT-POST-ALL-PUBLISHED
+    subject: get_extents
+    kind: postcondition
+    verifiable: true
+    statement: >
+      get_extents() returns every extent that has been published with a key other than u64::MAX
+      and not since removed, each exactly once and with its correct key, offset and size (for
+      example, exactly 10 entries after 10 such publishes).
+    traces: [FR-009, AS-5.1, AS-1.2, US-5, SC-001]
+
+  - id: EM-GETEXT-POST-EXCLUDES-UNPUBLISHED
+    subject: get_extents
+    kind: postcondition
+    verifiable: true
+    statement: >
+      get_extents() does not include any extent that has been reserved but not yet published.
+    traces: [AS-5.3, FR-005, US-5]
+
+  - id: EM-GETEXT-POST-EXCLUDES-REMOVED
+    subject: get_extents
+    kind: postcondition
+    verifiable: true
+    statement: >
+      get_extents() does not include any extent that has been removed, even if its disk slot has
+      not yet been freed by a checkpoint.
+    traces: [FR-008, FR-009, AS-6.1, US-5, US-6]
+
+  - id: EM-GETEXT-FRAME-READ-ONLY
+    subject: get_extents
+    kind: frame
+    verifiable: true
+    statement: >
+      Calling get_extents() does not change any extent, any reservation, used_bytes(), or the
+      on-disk metadata.
+    traces: [FR-009, IFACE-get_extents]
+
+  # ---------------------------------------------------------------- for_each_extent
+  - id: EM-FOREACH-POST-ONCE-PER-EXTENT
+    subject: for_each_extent
+    kind: postcondition
+    verifiable: true
+    statement: >
+      for_each_extent(callback) invokes the callback exactly once for each extent that
+      get_extents() would return at the same moment, and for no other extent (for example,
+      exactly 5 times when 5 extents are published).
+    traces: [FR-009, FR-008, AS-5.4, US-5]
+
+  - id: EM-FOREACH-FRAME-READ-ONLY
+    subject: for_each_extent
+    kind: frame
+    verifiable: true
+    statement: >
+      Calling for_each_extent() does not itself change any extent, any reservation,
+      used_bytes(), or the on-disk metadata.
+    traces: [FR-009, IFACE-for_each_extent]
+
+  # ---------------------------------------------------------------- remove_extent
+  - id: EM-REMOVE-POST-HIDDEN
+    subject: remove_extent
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When remove_extent(offset) is called with the offset of a published extent, it succeeds
+      and that extent immediately stops appearing in get_extents() and for_each_extent().
+    traces: [AS-6.1, FR-008, US-6, AS-4.3]
+
+  - id: EM-REMOVE-ERR-OFFSET-NOT-FOUND
+    subject: remove_extent
+    kind: error-case
+    verifiable: true
+    statement: >
+      When remove_extent(offset) is called with an offset at which no allocated extent exists,
+      it returns an OffsetNotFound error.
+    traces: [AS-6.2, FR-008]
+
+  - id: EM-REMOVE-ERR-NOT-INITIALIZED
+    subject: remove_extent
+    kind: error-case
+    verifiable: true
+    statement: >
+      When remove_extent() is called before either format() or initialize() has succeeded, it
+      returns a NotInitialized error.
+    traces: [EC-6]
+
+  - id: EM-REMOVE-FRAME-SPACE-STILL-HELD
+    subject: remove_extent
+    kind: frame
+    verifiable: true
+    statement: >
+      remove_extent() does not release the extent's disk space at the time of the call;
+      used_bytes() does not decrease as a result of the removal until a later checkpoint
+      succeeds.
+    traces: [FR-008, FR-025, US-6]
+
+  - id: EM-REMOVE-FRAME-OTHER-EXTENTS
+    subject: remove_extent
+    kind: frame
+    verifiable: true
+    statement: >
+      remove_extent(offset) affects only the extent at that offset; the key, offset, size and
+      visibility of every other extent stay the same.
+    traces: [FR-008, AS-4.3]
+
+  # ---------------------------------------------------------------- checkpoint
+  - id: EM-CKPT-POST-DURABLE
+    subject: checkpoint
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When checkpoint() returns success, every extent that was published (and not removed)
+      before the call began survives a subsequent reboot followed by initialize(), with the same
+      key, offset and size.
+    traces: [US-2, AS-2.1, FR-013, SC-002]
+
+  - id: EM-CKPT-POST-WRITES-INACTIVE-COPY
+    subject: checkpoint
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A checkpoint that performs I/O writes its data to the checkpoint copy that was inactive
+      when it started, and on success the superblock names that copy as the new active copy.
+    traces: [FR-013, US-2, KE-Checkpoint-Region, PLAN-Checkpoint-Flow]
+
+  - id: EM-CKPT-FRAME-ACTIVE-COPY-UNTOUCHED
+    subject: checkpoint
+    kind: frame
+    verifiable: true
+    statement: >
+      A checkpoint never writes to the checkpoint copy that is active when it starts; that copy
+      remains byte-for-byte unchanged until a later checkpoint makes it the inactive target.
+    traces: [FR-013, US-2, ASSUMP-5]
+
+  - id: EM-CKPT-POST-SUPERBLOCK-AFTER-DATA
+    subject: checkpoint
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A checkpoint updates the superblock to switch the active copy only after the write of the
+      new checkpoint data to the inactive copy has completed successfully.
+    traces: [FR-013, US-2, PLAN-Checkpoint-Flow]
+
+  - id: EM-CKPT-POST-SEQ-INCREASES
+    subject: checkpoint
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Each checkpoint that performs I/O and succeeds stores in the superblock a checkpoint
+      sequence number strictly greater than the one stored before it.
+    traces: [PLAN-Checkpoint-Flow, FMT-Superblock, KE-Superblock]
+
+  - id: EM-CKPT-POST-SEQ-MATCHES-HEADER
+    subject: checkpoint
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After a checkpoint succeeds, the sequence number in the header of the newly active
+      checkpoint copy equals the checkpoint sequence number stored in the superblock.
+    traces: [FMT-Checkpoint-Region-Header, PLAN-Recovery-Flow, PLAN-Checkpoint-Flow]
+
+  - id: EM-CKPT-POST-SKIP-WHEN-CLEAN
+    subject: checkpoint
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When no region has been modified since the last checkpoint, checkpoint() returns success
+      without writing anything to the metadata device.
+    traces: [AS-2.3, FR-014]
+
+  - id: EM-CKPT-POST-WRITES-WHEN-DIRTY
+    subject: checkpoint
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When at least one extent has been published or removed since the last successful
+      checkpoint, the next checkpoint() writes a new checkpoint to the metadata device rather
+      than skipping.
+    traces: [FR-014, FR-013, US-2]
+
+  - id: EM-CKPT-POST-RELEASES-REMOVED-SLOTS
+    subject: checkpoint
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After a checkpoint that persists a removal completes successfully, the removed extent's
+      slot is freed and may be handed out by subsequent reservations.
+    traces: [AS-6.4, FR-008, US-6, PLAN-Checkpoint-Flow]
+
+  - id: EM-CKPT-POST-EMPTY-SLAB-RETURNED
+    subject: checkpoint
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When releasing removed slots after a successful checkpoint leaves a slab with no occupied
+      slots, that slab is returned to its region's free space, and used_bytes() decreases by one
+      slab size for each slab so returned.
+    traces: [FR-008, FR-031, US-6]
+
+  - id: EM-CKPT-POST-HOOK-INVOKED
+    subject: checkpoint
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When a post-checkpoint hook is registered, each successful checkpoint invokes it exactly
+      once, synchronously, after the superblock update and before checkpoint() returns.
+    traces: [FR-037]
+
+  - id: EM-CKPT-ERR-IO-FAILURE
+    subject: checkpoint
+    kind: error-case
+    verifiable: true
+    statement: >
+      When a metadata-device write fails during a checkpoint, checkpoint() returns an error and
+      the superblock on disk continues to name the previously active copy, so the state of the
+      previous successful checkpoint remains recoverable.
+    traces: [FR-034, FR-013, US-2, ASSUMP-5]
+
+  - id: EM-CKPT-ERR-NO-RELEASE-ON-FAILURE
+    subject: checkpoint
+    kind: error-case
+    verifiable: true
+    statement: >
+      When a checkpoint fails, slots of extents removed since the last successful checkpoint
+      stay allocated and are not handed out by later reservations.
+    traces: [FR-008, FR-025]
+
+  - id: EM-CKPT-ERR-NO-HOOK-ON-FAILURE
+    subject: checkpoint
+    kind: error-case
+    verifiable: true
+    statement: >
+      When a checkpoint fails, the registered post-checkpoint hook is not invoked for that
+      attempt.
+    traces: [FR-037]
+
+  - id: EM-CKPT-ERR-RETRY-AFTER-FAILURE
+    subject: checkpoint
+    kind: error-case
+    verifiable: true
+    statement: >
+      After a failed checkpoint, the next checkpoint() call is not skipped as "no changes"; it
+      attempts to write the pending modifications again.
+    traces: [FR-014, US-2]
+
+  - id: EM-CKPT-ERR-NOT-INITIALIZED
+    subject: checkpoint
+    kind: error-case
+    verifiable: true
+    statement: >
+      When checkpoint() is called before either format() or initialize() has succeeded, it
+      returns a NotInitialized error.
+    traces: [EC-6]
+
+  - id: EM-CKPT-FRAME-ENUMERATION-UNCHANGED
+    subject: checkpoint
+    kind: frame
+    verifiable: true
+    statement: >
+      checkpoint() does not change which extents get_extents() lists or their keys, offsets or
+      sizes.
+    traces: [FR-013, US-2]
+
+  - id: EM-CKPT-INV-SINGLE-WRITER
+    subject: checkpoint
+    kind: invariant
+    verifiable: true
+    statement: >
+      At any instant at most one checkpoint I/O operation is in progress, no matter how many
+      threads call checkpoint() concurrently (zero or one, never two in parallel).
+    traces: [FR-015, SC-006, AS-2.4, PLAN-Key-Design-Decisions-5]
+
+  - id: EM-CKPT-POST-COALESCED-CALLER-COVERED
+    subject: checkpoint
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A checkpoint() call that arrives while another checkpoint is in progress, and is satisfied
+      by waiting rather than by starting its own I/O, returns success only once a checkpoint
+      has completed that includes every modification made before that call began.
+    traces: [FR-015, AS-2.4, PLAN-Checkpoint-Flow]
+
+  - id: EM-CKPT-POST-BURST-BOUND
+    subject: checkpoint
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A burst of concurrent checkpoint() callers is served by at most two checkpoint I/O
+      executions run one after the other (the one already running plus at most one more);
+      exactly two is allowed, three or more is not.
+    traces: [SC-006, AS-2.4, PLAN-Key-Design-Decisions-5]
+
+  - id: EM-CKPT-POST-FLUSH-WHEN-ENABLED
+    subject: checkpoint
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When the volatile_write_cache feature is enabled, a checkpoint that writes data issues a
+      flush command to the metadata device after its writes and before checkpoint() returns
+      success.
+    traces: [FR-030, SYNC-2026-08-20-a, SYNC-2026-08-07-a]
+
+  - id: EM-CKPT-FRAME-NO-FLUSH-WHEN-DISABLED
+    subject: checkpoint
+    kind: frame
+    verifiable: true
+    statement: >
+      When the volatile_write_cache feature is disabled (the default), checkpoint() issues no
+      explicit flush command to the metadata device.
+    traces: [FR-030]
+
+  - id: EM-CKPT-POST-PAYLOAD-COMPLETE
+    subject: checkpoint
+    kind: postcondition
+    verifiable: true
+    statement: >
+      The checkpoint data written contains, for every region, a descriptor for every slab
+      (start offset, slab size, element size, and slot count equal to slab size divided by
+      element size) together with that slab's complete list of slot keys, with slabs listed in
+      increasing start-offset order.
+    traces: [FR-013, FMT-Checkpoint-Payload, PLAN-Checkpoint-Flow, KE-Checkpoint-Region]
+
+  - id: EM-CKPT-POST-HEADER-CRC
+    subject: checkpoint
+    kind: postcondition
+    verifiable: true
+    statement: >
+      The checkpoint data written begins with a 16-byte header whose payload length equals the
+      length of the payload that follows and whose CRC32 equals the checksum of the header plus
+      payload computed with the CRC field set to zero.
+    traces: [FR-013, FMT-Checkpoint-Region-Header]
+
+  # ---------------------------------------------------------------- get_instance_id
+  - id: EM-INSTID-POST-FROM-SUPERBLOCK
+    subject: get_instance_id
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Once the component is formatted or initialized, get_instance_id() returns success with the
+      instance identifier stored in the superblock.
+    traces: [FR-026, IFACE-get_instance_id]
+
+  - id: EM-INSTID-ERR-NOT-INITIALIZED
+    subject: get_instance_id
+    kind: error-case
+    verifiable: true
+    statement: >
+      When get_instance_id() is called before either format() or initialize() has succeeded, it
+      returns a NotInitialized error.
+    traces: [EC-6]
+
+  - id: EM-INSTID-FRAME-READ-ONLY
+    subject: get_instance_id
+    kind: frame
+    verifiable: true
+    statement: >
+      Calling get_instance_id() changes no extent, no reservation and no on-disk metadata.
+    traces: [FR-026]
+
+  # ---------------------------------------------------------------- set_checkpoint_interval
+  - id: EM-SETINT-POST-NONE-DISABLES
+    subject: set_checkpoint_interval
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After set_checkpoint_interval(None), no automatic background checkpoint is performed;
+      checkpoints happen only when checkpoint() is called explicitly.
+    traces: [FR-027, IFACE-set_checkpoint_interval]
+
+  - id: EM-SETINT-FRAME-STATE
+    subject: set_checkpoint_interval
+    kind: frame
+    verifiable: true
+    statement: >
+      Changing the checkpoint interval does not itself change any extent, reservation,
+      used_bytes() value or capacity_bytes() value.
+    traces: [FR-027]
+
+  # ---------------------------------------------------------------- used_bytes
+  - id: EM-USED-POST-SLAB-GRANULARITY
+    subject: used_bytes
+    kind: postcondition
+    verifiable: true
+    statement: >
+      used_bytes() returns the sum of the capacities of all currently allocated slabs (the number
+      of allocated slabs times the slab size), not the sum of the sizes of individual extents.
+    traces: [FR-031, IFACE-used_bytes]
+
+  - id: EM-USED-FRAME-READ-ONLY
+    subject: used_bytes
+    kind: frame
+    verifiable: true
+    statement: >
+      Calling used_bytes() changes no extent, reservation or on-disk metadata.
+    traces: [FR-031]
+
+  # ---------------------------------------------------------------- capacity_bytes
+  - id: EM-CAP-POST-SHARED-MODE
+    subject: capacity_bytes
+    kind: postcondition
+    verifiable: true
+    statement: >
+      In shared-device mode (non-zero metadata region size), capacity_bytes() returns the data
+      device size configured at format time minus the metadata area reserved on that device.
+    traces: [FR-032, FR-035, SYNC-2026-08-07-b]
+
+  - id: EM-CAP-POST-SEPARATE-MODE
+    subject: capacity_bytes
+    kind: postcondition
+    verifiable: true
+    statement: >
+      In separate-device mode (metadata region size of zero), capacity_bytes() returns exactly
+      the full data device size configured at format time.
+    traces: [FR-032, FMT-Data-Device-Layout]
+
+  - id: EM-CAP-FRAME-READ-ONLY
+    subject: capacity_bytes
+    kind: frame
+    verifiable: true
+    statement: >
+      Calling capacity_bytes() changes no extent, reservation or on-disk metadata.
+    traces: [FR-032]
+
+  # ---------------------------------------------------------------- set_metadata_base_lba
+  - id: EM-SETMBASE-POST-SHIFTS-METADATA-IO
+    subject: set_metadata_base_lba
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After set_metadata_base_lba(b), every subsequent metadata-device read or write (superblock
+      and both checkpoint regions) targets the block address it would otherwise use plus b, so
+      the superblock lives at block b.
+    traces: [FR-036]
+
+  - id: EM-SETMBASE-POST-DEFAULT-ZERO
+    subject: set_metadata_base_lba
+    kind: postcondition
+    verifiable: true
+    statement: >
+      If set_metadata_base_lba() has never been called, the metadata base offset is zero and the
+      superblock is read and written at block 0 of the metadata device.
+    traces: [FR-036, FR-003]
+
+  - id: EM-SETMBASE-FRAME-DATA-BASE
+    subject: set_metadata_base_lba
+    kind: frame
+    verifiable: true
+    statement: >
+      set_metadata_base_lba() does not change the value returned by data_base_lba().
+    traces: [FR-036]
+
+  # ---------------------------------------------------------------- set_data_base_lba
+  - id: EM-SETDBASE-POST-STORED
+    subject: set_data_base_lba
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After set_data_base_lba(b), data_base_lba() returns b until set_data_base_lba() is called
+      again.
+    traces: [FR-036, SYNC-2026-08-07-c]
+
+  - id: EM-SETDBASE-FRAME-OFFSETS-UNCHANGED
+    subject: set_data_base_lba
+    kind: frame
+    verifiable: true
+    statement: >
+      Setting the data base address does not change the extent offsets the component reports
+      from reserve_extent(), publish(), get_extents() or for_each_extent(); applying the base
+      address to data addressing is the caller's responsibility.
+    traces: [FR-036, SYNC-2026-08-07-c, PLAN-header-note]
+
+  - id: EM-SETDBASE-FRAME-METADATA
+    subject: set_data_base_lba
+    kind: frame
+    verifiable: true
+    statement: >
+      set_data_base_lba() does not change where metadata-device I/O is addressed.
+    traces: [FR-036]
+
+  # ---------------------------------------------------------------- data_base_lba
+  - id: EM-DBASE-POST-DEFAULT-ZERO
+    subject: data_base_lba
+    kind: postcondition
+    verifiable: true
+    statement: >
+      If set_data_base_lba() has never been called, data_base_lba() returns 0.
+    traces: [FR-036]
+
+  - id: EM-DBASE-FRAME-READ-ONLY
+    subject: data_base_lba
+    kind: frame
+    verifiable: true
+    statement: >
+      Calling data_base_lba() changes no stored configuration, extent or on-disk metadata.
+    traces: [FR-036, IFACE-data_base_lba]
+
+  # ---------------------------------------------------------------- concrete-type operations
+  - id: EM-HOOK-POST-REPLACES
+    subject: set_post_checkpoint_hook
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After set_post_checkpoint_hook(h) is called, later successful checkpoints invoke only h;
+      any previously registered hook is no longer invoked.
+    traces: [FR-037]
+
+  - id: EM-NSID-POST-METADATA-NAMESPACE
+    subject: set_metadata_ns_id
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After set_metadata_ns_id(n) on the concrete ExtentManager, the component addresses its
+      metadata I/O to NVMe namespace n.
+    traces: [FR-028]
+
+  - id: EM-DMA-POST-ALLOCATOR-USED
+    subject: set_dma_alloc
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After set_dma_alloc(alloc) on the concrete ExtentManager, the I/O buffers the component
+      obtains for metadata-device transfers come from the supplied allocator.
+    traces: [FR-029, ASSUMP-4]
+
+  - id: EM-COMPONENT-DROP-NO-PANIC
+    subject: ExtentManager drop
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Dropping the ExtentManager while write handles are still outstanding completes without a
+      panic.
+    traces: [EC-7]
+
+  - id: EM-FPDEF-POST-METADATA-REGION-SIZE
+    subject: FormatParams::default
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Default format parameters set the metadata region size to 128 MiB (134,217,728 bytes).
+    traces: [FR-035, KE-FormatParams, IFACE-FormatParams.metadata_region_size]
+
+  # ---------------------------------------------------------------- global invariants
+  - id: EM-INV-NO-OVERLAP
+    subject: INV extent space disjointness
+    kind: invariant
+    verifiable: true
+    statement: >
+      No two slots that are in use at the same time (reserved, published, or removed but not yet
+      freed by a checkpoint) share any byte of the data device.
+    traces: [FR-005, FR-019, FR-020, AS-4.1, SC-004]
+
+  - id: EM-INV-WITHIN-USABLE-RANGE
+    subject: INV extent placement range
+    kind: invariant
+    verifiable: true
+    statement: >
+      Every reserved or published extent lies entirely within the usable data range, which
+      starts at the data start offset and spans capacity_bytes() bytes; in shared-device mode no
+      extent overlaps the reserved metadata area.
+    traces: [FR-035, FR-032, FMT-Data-Device-Layout, PLAN-Device-Layout]
+
+  - id: EM-INV-DEFERRED-FREE
+    subject: INV deferred free
+    kind: invariant
+    verifiable: true
+    statement: >
+      After an extent is removed, no part of its disk slot is handed out by any reservation
+      until a checkpoint that began after the removal has completed successfully; a reservation
+      of the same size made before that point receives a different slot.
+    traces: [FR-025, FR-008, AS-6.3, EC-9, US-6]
+
+  - id: EM-INV-KEY-SHARDING
+    subject: INV region sharding
+    kind: invariant
+    verifiable: true
+    statement: >
+      An extent reserved for key k is placed in region number (k AND (region_count minus 1)),
+      that is, inside the contiguous data-device byte range owned by that region.
+    traces: [FR-022, US-4, PLAN-Key-Design-Decisions-3, PLAN-Key-Design-Decisions-11]
+
+  - id: EM-INV-SLAB-WITHIN-REGION
+    subject: INV slab placement
+    kind: invariant
+    verifiable: true
+    statement: >
+      Every slab occupies exactly one slab size of contiguous bytes that lie inside its own
+      region's byte range on the data device.
+    traces: [FR-019, KE-Region, PLAN-Device-Layout]
+
+  - id: EM-INV-SLAB-UNIFORM-ELEMENT
+    subject: INV slab size class
+    kind: invariant
+    verifiable: true
+    statement: >
+      All slots of a given slab have the same element size; extents whose sector-aligned sizes
+      differ are never placed in the same slab.
+    traces: [FR-020, FR-021, EC-8]
+
+  - id: EM-INV-ELEMENT-SECTOR-MULTIPLE
+    subject: INV slab size class
+    kind: invariant
+    verifiable: true
+    statement: >
+      Every slab's element size is a positive multiple of the sector size.
+    traces: [FR-005, EC-8, PLAN-Space-Allocation]
+
+  - id: EM-INV-KEY-VECTOR-LENGTH
+    subject: INV slab key vector
+    kind: invariant
+    verifiable: true
+    statement: >
+      Every slab keeps exactly one key entry per slot, so the number of key entries equals the
+      slab size divided by the element size.
+    traces: [FR-010, FMT-Checkpoint-Payload]
+
+  - id: EM-INV-KEY-IMPLIES-ALLOCATED
+    subject: INV slab key vector
+    kind: invariant
+    verifiable: true
+    statement: >
+      Any slot whose key entry is not the FREE_KEY sentinel (u64::MAX) is marked allocated in
+      its slab's allocation bitmap.
+    traces: [FR-010, FR-011, FR-018, PLAN-Per-Region-State]
+
+  - id: EM-INV-FREE-KEY-NEVER-VISIBLE
+    subject: INV FREE_KEY sentinel
+    kind: invariant
+    verifiable: true
+    statement: >
+      No extent listed by get_extents() or passed to a for_each_extent() callback ever has the
+      key u64::MAX; that value only ever marks an unoccupied slot.
+    traces: [FR-011, KE-ExtentKey, KE-FREE_KEY, EC-3]
+
+  - id: EM-INV-CRASH-CONSISTENT
+    subject: INV crash consistency
+    kind: invariant
+    verifiable: true
+    statement: >
+      At every point in time, including in the middle of a checkpoint, the superblock on the
+      metadata device is valid and names an active checkpoint copy that is complete and passes
+      its CRC check, so a crash at any moment leaves the device recoverable to the last
+      successful checkpoint (given sector-atomic writes).
+    traces: [US-2, FR-018, FR-013, ASSUMP-2, ASSUMP-5]
+
+  - id: EM-INV-SUPERBLOCK-WELL-FORMED
+    subject: INV superblock encoding
+    kind: invariant
+    verifiable: true
+    statement: >
+      Every superblock the component writes is 4096 bytes, begins with the magic value
+      0x4345_5254_5553_5634 ("CERTUSV4") and version 6, has an active-copy field of 0 or 1,
+      zero-filled reserved bytes and padding, and stores at byte 92 the CRC32 of bytes 0 to 91.
+    traces: [FR-003, KE-Superblock, FMT-Superblock, ASSUMP-3]
+
+  - id: EM-INV-SUPERBLOCK-ROUNDTRIP
+    subject: INV superblock encoding
+    kind: invariant
+    verifiable: true
+    statement: >
+      Any superblock the component writes is accepted by initialize() and reads back with
+      exactly the field values that were written.
+    traces: [FR-003, FR-004, FMT-Superblock]
+
+  - id: EM-INV-SUPERBLOCK-PARAMS-VALID
+    subject: INV superblock encoding
+    kind: invariant
+    verifiable: true
+    statement: >
+      Every superblock the component writes holds format parameters that satisfy the format
+      validation rules (sector size above zero, slab size a multiple of sector size, maximum
+      extent size at most the slab size, region count a positive power of two).
+    traces: [FR-002, FR-003]
+
+  - id: EM-INV-CHECKPOINT-ROUNDTRIP
+    subject: INV checkpoint encoding
+    kind: invariant
+    verifiable: true
+    statement: >
+      Decoding any checkpoint copy the component has written yields exactly the per-region slab
+      descriptors and key lists that were serialized into it.
+    traces: [FR-013, FR-018, SC-002, FMT-Checkpoint-Payload]
+
+  - id: EM-INV-CLEAN-MATCHES-DISK
+    subject: INV checkpoint freshness
+    kind: invariant
+    verifiable: true
+    statement: >
+      Whenever no extent has been published or removed since the last successful checkpoint,
+      a reboot followed by initialize() would reproduce exactly the set of extents that
+      get_extents() currently returns.
+    traces: [FR-014, AS-2.3, US-2]
+
+  - id: EM-INV-CONCURRENT-PUBLISH
+    subject: INV concurrent operation
+    kind: invariant
+    verifiable: true
+    statement: >
+      When several threads concurrently reserve and publish extents with distinct keys, every
+      operation succeeds without panicking and afterwards get_extents() lists exactly the total
+      number published (for example, 800 for 8 threads publishing 100 each over 8 regions).
+    traces: [AS-4.1, US-4, SC-004, FR-024]
+
+  - id: EM-INV-CONCURRENT-PUBLISH-ABORT
+    subject: INV concurrent operation
+    kind: invariant
+    verifiable: true
+    statement: >
+      When threads concurrently mix publishing and aborting reservations, afterwards exactly the
+      published extents are listed by get_extents() and none of the aborted ones are.
+    traces: [AS-4.2, US-4, SC-004]
+
+  - id: EM-INV-CONCURRENT-REMOVE
+    subject: INV concurrent operation
+    kind: invariant
+    verifiable: true
+    statement: >
+      When threads concurrently remove non-overlapping sets of existing extents by offset, every
+      removal succeeds and afterwards get_extents() lists none of the removed extents.
+    traces: [AS-4.3, US-4, SC-004]
+
+  - id: EM-INV-REGION-LOCK-SCOPE
+    subject: INV region locking
+    kind: invariant
+    verifiable: true
+    statement: >
+      Hot-path operations (reserve, publish, abort, remove) acquire only the lock of the one
+      region they target, so operations on different regions never wait on each other.
+    traces: [FR-023, US-4, KE-Region]
+
+  - id: EM-INV-CAPACITY-CONSTANT
+    subject: INV capacity
+    kind: invariant
+    verifiable: true
+    statement: >
+      Between one successful format() or initialize() and the next, capacity_bytes() returns the
+      same value no matter which reservations, publishes, removals or checkpoints occur.
+    traces: [FR-032]
+
+  - id: EM-INV-USED-AT-MOST-CAPACITY
+    subject: INV capacity
+    kind: invariant
+    verifiable: true
+    statement: >
+      used_bytes() is always less than or equal to capacity_bytes() (equality is allowed when
+      the device is completely full).
+    traces: [FR-031, FR-032, EC-1]
+
+  - id: EM-INV-NO-DATA-DEVICE-IO
+    subject: INV device usage
+    kind: invariant
+    verifiable: true
+    statement: >
+      All block I/O the component issues goes to its metadata device; it never reads or writes
+      extent data, which is the caller's job using the offsets it hands out.
+    traces: [FR-036, FR-001, SYNC-2026-08-20-b, SYNC-2026-08-07-c, PLAN-header-note]
+
+  # ---------------------------------------------------------------- not verifiable
+  - id: NV-1
+    scope: "FR-001 component name, macro and receptacle list"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      This is a structural fact about how the component is declared (its name, the macro used,
+      and its two receptacles); it is checked by the compiler and wiring, not by a behavioral
+      assertion.
+    traces: [FR-001, SYNC-2026-08-20-b]
+
+  - id: NV-2
+    scope: "FR-010 key vector is the sole record, no per-region HashMap"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      The absence of a separate index data structure is an internal layout choice; its
+      observable consequence (state is rebuilt from key vectors alone) is covered by the
+      checkpoint round-trip and recovery properties.
+    traces: [FR-010, PLAN-Key-Design-Decisions-8, TASKS-Remove-lookup_extent]
+
+  - id: NV-3
+    scope: "FR-012 slab BTreeMap with logarithmic lookup"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      The choice of container and its logarithmic lookup cost are performance and layout facts;
+      the observable obligation (remove_extent finds the owning extent) is covered by the
+      remove_extent properties.
+    traces: [FR-012, PLAN-Key-Design-Decisions-10, SC-005]
+
+  - id: NV-4
+    scope: "FR-016 periodic background checkpoint at a default 30-second interval"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      That a checkpoint eventually fires, and how many seconds apart, is wall-clock timing and
+      liveness, which a verifier cannot decide.
+    traces: [FR-016, US-2, SYNC-2026-09-01-b, SYNC-2026-09-01-c, SYNC-2026-08-07-d, IFACE-set_checkpoint_interval]
+
+  - id: NV-5
+    scope: "FR-027 Some(duration) enables periodic checkpoints at that cadence"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      The cadence of background checkpoints after enabling an interval is wall-clock timing;
+      only the negative case (None disables them) is captured as a property.
+    traces: [FR-027]
+
+  - id: NV-6
+    scope: "FR-020 bitmap rover for even distribution"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      Even spreading of allocations within a slab is a heuristic quality goal with no exact
+      pass/fail condition; slot disjointness is covered by the no-overlap invariant.
+    traces: [FR-020]
+
+  - id: NV-7
+    scope: "FR-021 amortized constant-time size-class lookup"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      Amortized running time is a performance property, not a functional assertion; the
+      observable reuse-before-new-slab behavior is captured separately.
+    traces: [FR-021, PLAN-Key-Design-Decisions-4]
+
+  - id: NV-8
+    scope: "FR-024 Send + Sync and freedom from data races"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      Thread-safety marker traits are a type-system fact checked by the compiler, and absence of
+      data races is not an assertion over observable state; the spec itself says it is not
+      enforced at compile time. The observable no-lost-update parts are covered by the
+      concurrent-operation invariants.
+    traces: [FR-024, SC-004]
+
+  - id: NV-9
+    scope: "FR-033 WriteHandle lives in the interfaces crate"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      Where a type is defined is a crate-structure fact, not behavior; the handle's commit and
+      release semantics are covered by the publish, abort and drop properties.
+    traces: [FR-033, KE-WriteHandle, TASKS-Define-IExtentManager]
+
+  - id: NV-10
+    scope: "FR-034 fault-injection test infrastructure"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      This is test-support scaffolding behind a feature gate, not part of the component's
+      production contract; it is the means by which the checkpoint failure properties are
+      exercised.
+    traces: [FR-034, SUPPORT-mock-helpers, PLAN-Testing]
+
+  - id: NV-11
+    scope: "Checkpoint telemetry log line"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      The spec explicitly classifies the checkpoint_complete log line as observability output,
+      not a functional contract; logging is excluded.
+    traces: [SUPPORT-checkpoint-telemetry]
+
+  - id: NV-12
+    scope: "BuddyAllocator::mark_allocated recovery helper"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      This names an internal helper rather than a public operation; its effect is covered by the
+      recovered-slots-occupied property of initialize().
+    traces: [SUPPORT-mark_allocated]
+
+  - id: NV-13
+    scope: "SC-001 lifecycle operations verified by tests"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      This criterion is a statement about the test suite passing, not an obligation on the
+      component itself; its content is covered by the individual lifecycle properties.
+    traces: [SC-001, TASKS-Write-integration-tests]
+
+  - id: NV-14
+    scope: "SC-005 scale target of about 100 million extents on 10 TB"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      A design scale target that the spec says is not yet benchmarked; it is a capacity and
+      performance aspiration with no exact pass/fail condition.
+    traces: [SC-005, TASKS-Run-cargo-bench, PLAN-Technical-Context]
+
+  - id: NV-15
+    scope: "Assumption 1 keys are well-distributed hashes"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      This is an assumption about the caller's key choice, not something the component must
+      guarantee.
+    traces: [ASSUMP-1, KE-ExtentKey, FR-022]
+
+  - id: NV-16
+    scope: "Assumption 2 sector-atomic block writes"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      An environment assumption about the block device; it is taken as a premise of the
+      crash-consistency invariant rather than checked.
+    traces: [ASSUMP-2, PLAN-Technical-Context]
+
+  - id: NV-17
+    scope: "Assumption 4 default DMA allocator"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      The default memory source for I/O buffers is an environment/allocation assumption; only
+      the override behavior is captured as a property.
+    traces: [ASSUMP-4, TASKS-Default-DMA-allocation]
+
+  - id: NV-18
+    scope: "Edge case 7 background checkpoint thread shuts down gracefully on drop"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      That the background thread actually terminates is a liveness property; only the no-panic
+      half of this edge case is captured.
+    traces: [EC-7]
+
+  - id: NV-19
+    scope: "reserve_extent with a zero size or a size above max_extent_size"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      The spec does not state what reserve_extent must do for these inputs, so there is no
+      obligation to check; recorded as a specification gap.
+    traces: [FR-005, FR-002]
+
+  - id: NV-20
+    scope: "get_extents, for_each_extent, used_bytes, capacity_bytes before format or initialize"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      These operations cannot return an error, and the spec's NotInitialized rule does not say
+      what they return before the component is ready; there is no stated obligation to check.
+    traces: [EC-6]
+
+  - id: NV-21
+    scope: "publish error cases and publishing a key that is already published"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      publish() returns a result, but the spec lists no error for it, and since the duplicate-key
+      error was removed it does not say whether two extents with the same key may coexist;
+      there is no stated obligation to check.
+    traces: [FR-006, TASKS-Remove-DuplicateKey]
+
+  - id: NV-22
+    scope: "tasks.md completed and open items"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      The task list tracks implementation work and review chores; it adds no behavioral
+      requirement beyond the spec and plan it refers to.
+    traces: [TASKS-Completed, TASKS-Open]
+
+  - id: NV-23
+    scope: "plan.md future considerations and project structure"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      Future work (async I/O, incremental checkpointing, compression, multiple data devices)
+      and source-tree layout are not current obligations.
+    traces: [PLAN-Future-Considerations, PLAN-Project-Structure]
+
+  - id: NV-24
+    scope: "Spec sync-history notes that are editorial only"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      The clarification notes about documentation corrections (plan diagram refresh, stale doc
+      strings, documenting helper surface) record editorial history; their behavioral content
+      is captured in the properties traced to them.
+    traces: [SYNC-2026-09-01-c, SYNC-2026-08-07-e]

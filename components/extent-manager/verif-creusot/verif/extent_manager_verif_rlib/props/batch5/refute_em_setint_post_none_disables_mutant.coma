@@ -1,0 +1,203 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1421 0 1421 67 *)
+
+let%span sb5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 59 15 59 34
+let%span sb5'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 60 14 60 74
+let%span sb5'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 61 14 61 78
+let%span sb5'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 62 14 62 57
+let%span sb5'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 63 14 66 5
+let%span sb5'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 79 14 79 45
+let%span sb5'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 80 14 80 72
+let%span sb5'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 81 14 81 78
+let%span sb5'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 87 15 87 78
+let%span sb5'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 88 14 88 44
+let%span sb5'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 89 14 89 74
+let%span sb5'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 90 14 90 78
+let%span sb5'11 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 108 14 108 63
+let%span sb5'12 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 109 14 109 78
+let%span sb5'13 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 110 14 110 122
+let%span sb5'14 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 124 15 124 66
+let%span sb5'15 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 125 14 125 74
+let%span sb5'16 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 126 14 126 78
+let%span sb5'17 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 127 14 128 89
+let%span sb5'18 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 146 15 146 62
+let%span sb5'19 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 147 14 147 73
+let%span sb5'20 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 148 14 148 111
+let%span sbatch5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1422 38 1422 40
+let%span sbatch5'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1422 60 1422 61
+let%span sbatch5'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1422 89 1422 94
+let%span sbatch5'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1422 103 1422 104
+let%span sbatch5'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1423 4 1423 16
+let%span sbatch5'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1424 11 1424 13
+let%span sbatch5'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1424 4 1424 14
+let%span sbatch5'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1425 4 1425 15
+let%span sbatch5'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1426 4 1426 24
+let%span sbatch5'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1428 4 1428 14
+let%span sbatch5'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1429 4 1429 12
+let%span sbatch5'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1420 10 1420 38
+
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_TPh = Top | Wait int | WaitInf | Woken bool | Work | Exited
+
+type t_TSys = { interval: t_Option_u64; now: int; ph: t_TPh; shutdown: bool; ckpts: UInt64.t }
+
+let th_enter (self: MutBorrow.t t_TSys) (return (x: ())) =
+{[@stop_split] [@expl:th_enter requires] [%#sb5] self.current.ph = Top}
+  any
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:th_enter ensures] ([@stop_split] [@expl:th_enter ensures #0] [%#sb5'0] self.final.interval
+        = self.current.interval
+      /\ self.final.now = self.current.now)
+    /\ ([@stop_split] [@expl:th_enter ensures #1] [%#sb5'1] self.final.shutdown = self.current.shutdown
+      /\ self.final.ckpts = self.current.ckpts)
+    /\ ([@stop_split] [@expl:th_enter ensures #2] [%#sb5'2] self.current.shutdown -> self.final.ph = Exited)
+    /\ ([@stop_split] [@expl:th_enter ensures #3] [%#sb5'3] not self.current.shutdown
+    -> match self.current.interval with
+      | Some d -> match self.final.ph with
+        | Wait dl -> dl = self.current.now + UInt64.t'int d
+        | _ -> false
+        end
+      | None -> self.final.ph = WaitInf
+      end)}
+    (! return {result}) ]
+
+let tick (self: MutBorrow.t t_TSys) (dt: UInt64.t) (return (x: ())) = any
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:tick ensures] ([@stop_split] [@expl:tick ensures #0] [%#sb5'4] self.final.now
+      = self.current.now + UInt64.t'int dt)
+    /\ ([@stop_split] [@expl:tick ensures #1] [%#sb5'5] self.final.interval = self.current.interval
+      /\ self.final.ph = self.current.ph)
+    /\ ([@stop_split] [@expl:tick ensures #2] [%#sb5'6] self.final.shutdown = self.current.shutdown
+    /\ self.final.ckpts = self.current.ckpts)}
+    (! return {result}) ]
+
+let timeout (self: MutBorrow.t t_TSys) (return (x: ())) =
+{[@stop_split] [@expl:timeout requires] [%#sb5'7] match self.current.ph with
+    | Wait dl -> self.current.now >= dl
+    | _ -> false
+    end}
+  any
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:timeout ensures] ([@stop_split] [@expl:timeout ensures #0] [%#sb5'8] self.final.ph = Woken true)
+    /\ ([@stop_split] [@expl:timeout ensures #1] [%#sb5'9] self.final.interval = self.current.interval
+      /\ self.final.now = self.current.now)
+    /\ ([@stop_split] [@expl:timeout ensures #2] [%#sb5'10] self.final.shutdown = self.current.shutdown
+    /\ self.final.ckpts = self.current.ckpts)}
+    (! return {result}) ]
+
+let set_interval (self: MutBorrow.t t_TSys) (iv: t_Option_u64) (return (x: ())) = any
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:set_interval ensures] ([@stop_split] [@expl:set_interval ensures #0] [%#sb5'11] self.final.interval
+        = iv
+      /\ self.final.now = self.current.now)
+    /\ ([@stop_split] [@expl:set_interval ensures #1] [%#sb5'12] self.final.shutdown = self.current.shutdown
+      /\ self.final.ckpts = self.current.ckpts)
+    /\ ([@stop_split] [@expl:set_interval ensures #2] [%#sb5'13] self.final.ph
+    = match self.current.ph with
+      | Wait _ -> Woken false
+      | WaitInf -> Woken false
+      | p -> p
+      end)}
+    (! return {result}) ]
+
+let relock (self: MutBorrow.t t_TSys) (return (x: ())) =
+{[@stop_split] [@expl:relock requires] [%#sb5'14] match self.current.ph with
+    | Woken _ -> true
+    | _ -> false
+    end}
+  any
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:relock ensures] ([@stop_split] [@expl:relock ensures #0] [%#sb5'15] self.final.interval
+        = self.current.interval
+      /\ self.final.now = self.current.now)
+    /\ ([@stop_split] [@expl:relock ensures #1] [%#sb5'16] self.final.shutdown = self.current.shutdown
+      /\ self.final.ckpts = self.current.ckpts)
+    /\ ([@stop_split] [@expl:relock ensures #2] [%#sb5'17] self.final.ph
+    = (if self.current.shutdown then
+      Exited
+    else
+      match self.current.ph with
+        | Woken t -> if t then Work else Top
+        | p -> p
+        end
+    ))}
+    (! return {result}) ]
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+let work (self: MutBorrow.t t_TSys) (return (x: ())) = {[@stop_split] [@expl:work requires] [%#sb5'18] self.current.ph
+    = Work
+  /\ UInt64.t'int self.current.ckpts < UInt64.t'int const_MAX}
+  any
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:work ensures] ([@stop_split] [@expl:work ensures #0] [%#sb5'19] UInt64.t'int self.final.ckpts
+        = UInt64.t'int self.current.ckpts + 1
+      /\ self.final.ph = Top)
+    /\ ([@stop_split] [@expl:work ensures #1] [%#sb5'20] self.final.interval = self.current.interval
+    /\ self.final.now = self.current.now /\ self.final.shutdown = self.current.shutdown)}
+    (! return {result}) ]
+
+type tup2_u64_TSys = { f0: UInt64.t; f1: t_TSys }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let refute_em_setint_post_none_disables__mutant [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch5.rs" 1421 0 1421 67]
+  (return (x: tup2_u64_TSys)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_3 <- Some ([%#sbatch5] (30: UInt64.t)) ] s1
+    | s1 = [ &_6 <- Top ] s2
+    | s2 = [ &t <- { interval = _3;
+                     now = ([%#sbatch5'0] 0);
+                     ph = _6;
+                     shutdown = ([%#sbatch5'1] false);
+                     ckpts = ([%#sbatch5'2] (0: UInt64.t)) } ] s3
+    | s3 = MutBorrow.borrow_mut <t_TSys> {t} (fun (_bor: MutBorrow.t t_TSys) -> [ &_8 <- _bor ] [ &t <- _bor.final ] s4)
+    | s4 = th_enter [%#sbatch5'3] {_8} (fun (_x: ()) -> [ &_7 <- _x ] s5)
+    | s5 = MutBorrow.borrow_mut <t_TSys> {t}
+        (fun (_bor: MutBorrow.t t_TSys) -> [ &_10 <- _bor ] [ &t <- _bor.final ] s6)
+    | s6 = tick [%#sbatch5'5] {_10} {[%#sbatch5'4] (30: UInt64.t)} (fun (_x: ()) -> [ &_9 <- _x ] s7)
+    | s7 = MutBorrow.borrow_mut <t_TSys> {t}
+        (fun (_bor: MutBorrow.t t_TSys) -> [ &_12 <- _bor ] [ &t <- _bor.final ] s8)
+    | s8 = timeout [%#sbatch5'6] {_12} (fun (_x: ()) -> [ &_11 <- _x ] s9)
+    | s9 = [ &_15 <- None ] s10
+    | s10 = MutBorrow.borrow_mut <t_TSys> {t}
+        (fun (_bor: MutBorrow.t t_TSys) -> [ &_14 <- _bor ] [ &t <- _bor.final ] s11)
+    | s11 = set_interval [%#sbatch5'7] {_14} {_15} (fun (_x: ()) -> [ &_13 <- _x ] s12)
+    | s12 = [ &at_set <- t.ckpts ] s13
+    | s13 = MutBorrow.borrow_mut <t_TSys> {t}
+        (fun (_bor: MutBorrow.t t_TSys) -> [ &_18 <- _bor ] [ &t <- _bor.final ] s14)
+    | s14 = relock [%#sbatch5'8] {_18} (fun (_x: ()) -> [ &_17 <- _x ] s15)
+    | s15 = MutBorrow.borrow_mut <t_TSys> {t}
+        (fun (_bor: MutBorrow.t t_TSys) -> [ &_20 <- _bor ] [ &t <- _bor.final ] s16)
+    | s16 = work [%#sbatch5'9] {_20} (fun (_x: ()) -> [ &_19 <- _x ] s17)
+    | s17 = [ &_ret <- { f0 = at_set; f1 = t } ] s18
+    | s18 = return {_ret} ] ]
+  [ & _ret: tup2_u64_TSys = Any.any_l ()
+  | & t: t_TSys = Any.any_l ()
+  | & _3: t_Option_u64 = Any.any_l ()
+  | & _6: t_TPh = Any.any_l ()
+  | & _7: () = Any.any_l ()
+  | & _8: MutBorrow.t t_TSys = Any.any_l ()
+  | & _9: () = Any.any_l ()
+  | & _10: MutBorrow.t t_TSys = Any.any_l ()
+  | & _11: () = Any.any_l ()
+  | & _12: MutBorrow.t t_TSys = Any.any_l ()
+  | & _13: () = Any.any_l ()
+  | & _14: MutBorrow.t t_TSys = Any.any_l ()
+  | & _15: t_Option_u64 = Any.any_l ()
+  | & at_set: UInt64.t = Any.any_l ()
+  | & _17: () = Any.any_l ()
+  | & _18: MutBorrow.t t_TSys = Any.any_l ()
+  | & _19: () = Any.any_l ()
+  | & _20: MutBorrow.t t_TSys = Any.any_l () ])
+  [ return (result: tup2_u64_TSys) ->
+  {[@stop_split] [@expl:refute_em_setint_post_none_disables__mutant ensures] [%#sbatch5'10] UInt64.t'int result.f1.ckpts
+    = UInt64.t'int result.f0}
+    (! return {result}) ]

@@ -1,0 +1,39 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_apply_hop": { "prover": "alt-ergo", "time": 0.032 },
+      "vc_branch_Result_unit_EmError": {
+        "prover": "alt-ergo",
+        "time": 0.026
+      },
+      "vc_elim_Break": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_format": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_from_EmError": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_from_residual_Result_unit_EmError": {
+        "prover": "alt-ergo",
+        "time": 0.029
+      },
+      "vc_verify_em_format_frame_stale_handles__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.096 },
+              { "prover": "cvc5", "time": 0.475 },
+              null,
+              { "prover": "alt-ergo", "time": 0.072 },
+              { "prover": "alt-ergo", "time": 0.075 },
+              { "prover": "alt-ergo", "time": 0.12 },
+              { "prover": "z3", "time": 0.047 },
+              { "prover": "alt-ergo", "time": 0.138 },
+              { "prover": "alt-ergo", "time": 0.058 },
+              { "prover": "alt-ergo", "time": 0.029 }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

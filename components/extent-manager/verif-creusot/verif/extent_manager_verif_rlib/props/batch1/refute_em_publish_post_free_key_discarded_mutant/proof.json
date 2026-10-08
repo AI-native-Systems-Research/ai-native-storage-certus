@@ -1,0 +1,22 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_refute_em_publish_post_free_key_discarded__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              {
+                "tactic": "split_vc",
+                "children": [ { "prover": "alt-ergo", "time": 0.036 }, null ]
+              }
+            ]
+          }
+        ]
+      },
+      "vc_w2b_replaced": { "prover": "alt-ergo", "time": 0.031 }
+    }
+  }
+}

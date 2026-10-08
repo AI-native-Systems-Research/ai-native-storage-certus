@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_find_free_from": { "prover": "z3", "time": 0.469 },
+      "vc_into_iter_Range_usize": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_is_set": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_next_Range_usize": { "prover": "alt-ergo", "time": 0.026 }
+    }
+  }
+}

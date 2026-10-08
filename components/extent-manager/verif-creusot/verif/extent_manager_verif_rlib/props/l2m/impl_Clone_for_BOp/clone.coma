@@ -1,0 +1,17 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2m.rs" 27 9 27 29 *)
+
+(* <props::l2m::BOp as std::clone::Clone> *)
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_BOp = Alloc UInt64.t | Free UInt64.t
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_BOp [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2m.rs" 27 9 27 29]
+  (self: t_BOp) (return (x: t_BOp)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_BOp = Any.any_l () | & self: t_BOp = self ]) [ return (result: t_BOp) -> (! return {result}) ]

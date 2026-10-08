@@ -1,0 +1,17 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_alloc_extent": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_apply_rop": { "prover": "cvc5", "time": 0.457 },
+      "vc_elim_Free": { "prover": "alt-ergo", "time": 0.047 },
+      "vc_elim_Publish": { "prover": "alt-ergo", "time": 0.047 },
+      "vc_elim_Remove": { "prover": "alt-ergo", "time": 0.039 },
+      "vc_elim_Reserve": { "prover": "alt-ergo", "time": 0.045 },
+      "vc_flush_pending_frees": { "prover": "alt-ergo", "time": 0.047 },
+      "vc_free_slot": { "prover": "alt-ergo", "time": 0.045 },
+      "vc_publish_slot": { "prover": "alt-ergo", "time": 0.047 },
+      "vc_remove_extent_by_offset": { "prover": "alt-ergo", "time": 0.047 }
+    }
+  }
+}

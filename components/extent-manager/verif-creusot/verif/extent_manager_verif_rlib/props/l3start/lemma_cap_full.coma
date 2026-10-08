@@ -1,0 +1,127 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l3start.rs" 220 0 220 83 *)
+
+let%span scomponent = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 399 16 399 84
+let%span scomponent'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 179 10 179 11
+let%span scomponent'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 181 16 181 111
+let%span sl3start = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l3start.rs" 217 11 217 48
+let%span sl3start'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l3start.rs" 218 11 218 114
+let%span sl3start'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l3start.rs" 219 10 219 48
+let%span sl3start'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l3start.rs" 205 11 205 75
+let%span sl3start'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l3start.rs" 206 11 206 114
+let%span sl3start'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l3start.rs" 207 10 207 61
+let%span sl3start'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l3start.rs" 208 10 208 52
+let%span sl3start'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l3start.rs" 204 10 204 11
+let%span sl3start'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l3start.rs" 210 4 212 5
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use int.ComputerDivision
+use int.Int
+
+type t_BTreeMap_u64_Slab_Global
+
+type t_SlabMap = { inner: t_BTreeMap_u64_Slab_Global }
+
+type t_HashMap_u32_Vec_u64_Global_RandomState_Global
+
+type t_SizeClassManager = { map: t_HashMap_u32_Vec_u64_Global_RandomState_Global }
+
+type t_Vec_Vec_u64_Global_Global
+
+type t_BuddyAllocator = {
+  base_offset: UInt64.t;
+  total_usable_size: UInt64.t;
+  sector_size: UInt32.t;
+  max_order: UInt64.t;
+  free_lists: t_Vec_Vec_u64_Global_Global }
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_FormatParams = {
+  data_disk_size'0: UInt64.t;
+  slab_size'0: UInt64.t;
+  max_extent_size'0: UInt32.t;
+  sector_size'0: UInt32.t;
+  region_count'0: UInt32.t;
+  metadata_alignment'0: UInt64.t;
+  instance_id'0: t_Option_u64;
+  metadata_disk_ns_id'0: UInt32.t;
+  metadata_region_size'0: UInt64.t }
+
+type t_Vec_tup2_u64_usize_Global
+
+type t_RegionState = {
+  slabs: t_SlabMap;
+  size_classes: t_SizeClassManager;
+  buddy: t_BuddyAllocator;
+  dirty: bool;
+  format_params: t_FormatParams;
+  pending_frees: t_Vec_tup2_u64_usize_Global }
+
+function rsize [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 398 0 398 48] (usable: int) (n: int) (i: int) : int
+ = [%#scomponent] if i < n - 1 then ComputerDivision.div usable n else usable - (n - 1) * ComputerDivision.div usable n
+
+function cap_sum [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 180 0 180 70] (arena: Seq.seq t_RegionState) (rv: Seq.seq UInt64.t) (n: int) : int
+
+axiom cap_sum_def:
+  forall arena: Seq.seq t_RegionState, rv: Seq.seq UInt64.t, n: int [cap_sum arena rv n]. cap_sum arena rv n
+    = ([%#scomponent'1] if n <= 0 then
+      0
+    else
+      cap_sum arena rv (n - 1)
+      + UInt64.t'int (Seq.get arena (UInt64.t'int (Seq.get rv (n - 1)))).buddy.total_usable_size
+    )
+
+function lemma_cap_part [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l3start.rs" 209 0 209 91] (arena: Seq.seq t_RegionState) (rv: Seq.seq UInt64.t) (n: int) (usable: int) (k: int) : ()
+
+axiom lemma_cap_part_def:
+  forall arena: Seq.seq t_RegionState, rv: Seq.seq UInt64.t, n: int, usable: int, k: int [lemma_cap_part arena rv n usable k]. ([%#sl3start'2] 0
+        <= k
+      /\ k <= Seq.length rv /\ Seq.length rv = n /\ n > 0 /\ usable >= 0)
+    -> ([%#sl3start'3] forall i: int. 0 <= i /\ i < Seq.length rv
+        -> UInt64.t'int (Seq.get arena (UInt64.t'int (Seq.get rv i))).buddy.total_usable_size = rsize usable n i)
+    -> lemma_cap_part arena rv n usable k
+    = ([%#sl3start'7] if k > 0 then lemma_cap_part arena rv n usable (k - 1) else ())
+
+axiom lemma_cap_part_spec:
+  forall arena: Seq.seq t_RegionState, rv: Seq.seq UInt64.t, n: int, usable: int, k: int. ([%#sl3start'2] 0 <= k
+      /\ k <= Seq.length rv /\ Seq.length rv = n /\ n > 0 /\ usable >= 0)
+    -> ([%#sl3start'3] forall i: int. 0 <= i /\ i < Seq.length rv
+        -> UInt64.t'int (Seq.get arena (UInt64.t'int (Seq.get rv i))).buddy.total_usable_size = rsize usable n i)
+    -> ([%#sl3start'4] k < n -> cap_sum arena rv k = k * ComputerDivision.div usable n)
+
+axiom lemma_cap_part_spec'0:
+  forall arena: Seq.seq t_RegionState, rv: Seq.seq UInt64.t, n: int, usable: int, k: int. ([%#sl3start'2] 0 <= k
+      /\ k <= Seq.length rv /\ Seq.length rv = n /\ n > 0 /\ usable >= 0)
+    -> ([%#sl3start'3] forall i: int. 0 <= i /\ i < Seq.length rv
+        -> UInt64.t'int (Seq.get arena (UInt64.t'int (Seq.get rv i))).buddy.total_usable_size = rsize usable n i)
+    -> ([%#sl3start'5] k = n -> cap_sum arena rv k = usable)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant arena : Seq.seq t_RegionState
+
+constant rv : Seq.seq UInt64.t
+
+constant n : int
+
+constant usable : int
+
+function lemma_cap_full [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l3start.rs" 220 0 220 83] (arena: Seq.seq t_RegionState) (rv: Seq.seq UInt64.t) (n: int) (usable: int) : ()
+
+goal vc_lemma_cap_full: ([%#sl3start] Seq.length rv = n /\ n > 0 /\ usable >= 0)
+  -> ([%#sl3start'0] forall i: int. 0 <= i /\ i < Seq.length rv
+      -> UInt64.t'int (Seq.get arena (UInt64.t'int (Seq.get rv i))).buddy.total_usable_size = rsize usable n i)
+  -> ([@stop_split] [@expl:lemma_cap_part requires] ([@stop_split] [@expl:lemma_cap_part requires #0] [%#sl3start'2] 0
+        <= Seq.length rv
+      /\ Seq.length rv <= Seq.length rv /\ Seq.length rv = n /\ n > 0 /\ usable >= 0)
+    /\ ([@stop_split] [@expl:lemma_cap_part requires #1] [%#sl3start'3] forall i: int. 0 <= i /\ i < Seq.length rv
+      -> UInt64.t'int (Seq.get arena (UInt64.t'int (Seq.get rv i))).buddy.total_usable_size = rsize usable n i))
+  /\ (([@stop_split] [@expl:lemma_cap_part ensures] ([@stop_split] [@expl:lemma_cap_part ensures #0] [%#sl3start'4] Seq.length rv
+        < n -> cap_sum arena rv (Seq.length rv) = Seq.length rv * ComputerDivision.div usable n)
+    /\ ([@stop_split] [@expl:lemma_cap_part ensures #1] [%#sl3start'5] Seq.length rv = n
+    -> cap_sum arena rv (Seq.length rv) = usable))
+  -> ([@stop_split] [@expl:lemma_cap_full ensures] [%#sl3start'1] cap_sum arena rv (Seq.length rv) = usable))

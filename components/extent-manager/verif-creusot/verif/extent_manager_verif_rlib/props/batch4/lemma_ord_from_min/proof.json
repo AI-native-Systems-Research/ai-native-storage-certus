@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_lemma_ord_from_min": { "prover": "cvc5", "time": 0.153 } }
+  }
+}

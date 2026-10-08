@@ -1,0 +1,99 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 199 4 199 44 *)
+
+(* model::bitmap::AllocationBitmap *)
+
+let%span sbitmap = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 200 25 200 27
+let%span sbitmap'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 200 19 200 27
+let%span sbitmap'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 201 24 201 26
+let%span sbitmap'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 201 18 201 26
+let%span sbitmap'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 202 19 202 25
+let%span sbitmap'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 202 8 202 33
+let%span sbitmap'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 202 36 202 37
+let%span sbitmap'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 202 41 202 42
+let%span sbitmap'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 196 15 196 27
+let%span sbitmap'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 197 15 197 37
+let%span sbitmap'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 198 14 198 45
+let%span sbitmap'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 28 16 28 60
+let%span sbitmap'11 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 34 16 34 49
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 193 19 193 38
+let%span svec'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 194 18 194 46
+let%span svec'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sslice = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/slice.rs" 148 20 148 37
+let%span sslice'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/slice.rs" 153 20 153 37
+
+use creusot.int.UInt64BW
+use creusot.int.UInt32BW
+use seq.Seq
+use creusot.prelude.Any
+use int.ComputerDivision
+use int.Int
+
+type t_Vec_u64_Global
+
+type t_AllocationBitmap = { words: t_Vec_u64_Global; num_slots: UInt32BW.t; allocated_count: UInt32BW.t }
+
+predicate in_bounds_usize [@inline:trivial] (self: UInt64BW.t) (seq: Seq.seq UInt64BW.t) =
+  [%#sslice] UInt64BW.t'int self < Seq.length seq
+
+meta "rewrite_def" predicate in_bounds_usize
+
+constant const_MAX: UInt64BW.t = (18446744073709551615: UInt64BW.t)
+
+function view_Vec_u64_Global (self: t_Vec_u64_Global) : Seq.seq UInt64BW.t
+
+axiom view_Vec_u64_Global_spec:
+  forall self: t_Vec_u64_Global [view_Vec_u64_Global self]. [%#svec'1] Seq.length (view_Vec_u64_Global self)
+    <= UInt64BW.t'int const_MAX
+
+predicate has_value_usize [@inline:trivial] (self: UInt64BW.t) (seq: Seq.seq UInt64BW.t) (out: UInt64BW.t) =
+  [%#sslice'0] Seq.get seq (UInt64BW.t'int self) = out
+
+meta "rewrite_def" predicate has_value_usize
+
+let index_Vec_u64_Global (self_: t_Vec_u64_Global) (ix: UInt64BW.t) (return (x: UInt64BW.t)) =
+{[@stop_split] [@expl:index requires] [%#svec] in_bounds_usize ix (view_Vec_u64_Global self_)}
+  any
+  [ return (result: UInt64BW.t) ->
+  {[@stop_split] [@expl:index ensures] [%#svec'0] has_value_usize ix (view_Vec_u64_Global self_) result}
+    (! return {result}) ]
+
+predicate bm_wf [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 27 0 27 42] (bm: t_AllocationBitmap) =
+  [%#sbitmap'10] Seq.length (view_Vec_u64_Global bm.words) = ComputerDivision.div (UInt32BW.t'int bm.num_slots + 63) 64
+
+predicate slot_bit [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 33 0 33 53] (bm: t_AllocationBitmap) (i: int) =
+  [%#sbitmap'11] UInt64BW.nth (Seq.get (view_Vec_u64_Global bm.words) (ComputerDivision.div i 64)) (ComputerDivision.mod i 64)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let is_set [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/bitmap.rs" 199 4 199 44]
+  (self: t_AllocationBitmap) (idx: UInt64BW.t) (return (x: bool)) =
+{[@stop_split] [@expl:is_set requires] ([@stop_split] [@expl:is_set requires #0] [%#sbitmap'7] bm_wf self)
+  /\ ([@stop_split] [@expl:is_set requires #1] [%#sbitmap'8] UInt64BW.t'int idx < UInt32BW.t'int self.num_slots)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_13 <- ([%#sbitmap] (64: UInt64BW.t)) = ([%#sbitmap'0] (0: UInt64BW.t)) ] s1
+    | s1 = {[@expl:division by zero] [%#sbitmap'0] not _13} s2
+    | s2 = UInt64BW.div [%#sbitmap'0] {idx} {[%#sbitmap] (64: UInt64BW.t)} (fun (_x: UInt64BW.t) -> [ &word <- _x ] s3)
+    | s3 = [ &_16 <- ([%#sbitmap'1] (64: UInt64BW.t)) = ([%#sbitmap'2] (0: UInt64BW.t)) ] s4
+    | s4 = {[@expl:remainder by zero] [%#sbitmap'2] not _16} s5
+    | s5 = UInt64BW.rem [%#sbitmap'2] {idx} {[%#sbitmap'1] (64: UInt64BW.t)} (fun (_x: UInt64BW.t) -> [ &bit <- _x ] s6)
+    | s6 = index_Vec_u64_Global [%#sbitmap'3] {self.words} {word} (fun (_x: UInt64BW.t) -> [ &_20 <- _x ] s7)
+    | s7 = UInt64BW.shr [%#sbitmap'4] {_20} {UInt64BW.to_BV256 bit} (fun (_x: UInt64BW.t) -> [ &_18 <- _x ] s8)
+    | s8 = [ &_17 <- UInt64BW.bw_and _18 ([%#sbitmap'5] (1: UInt64BW.t)) ] s9
+    | s9 = [ &_ret <- _17 = ([%#sbitmap'6] (1: UInt64BW.t)) ] s10
+    | s10 = return {_ret} ] ]
+  [ & _ret: bool = Any.any_l ()
+  | & self: t_AllocationBitmap = self
+  | & idx: UInt64BW.t = idx
+  | & word: UInt64BW.t = Any.any_l ()
+  | & _13: bool = Any.any_l ()
+  | & bit: UInt64BW.t = Any.any_l ()
+  | & _16: bool = Any.any_l ()
+  | & _17: UInt64BW.t = Any.any_l ()
+  | & _18: UInt64BW.t = Any.any_l ()
+  | & _20: UInt64BW.t = Any.any_l () ])
+  [ return (result: bool) -> {[@stop_split] [@expl:is_set ensures] [%#sbitmap'9] result
+    = slot_bit self (UInt64BW.t'int idx)}
+    (! return {result}) ]

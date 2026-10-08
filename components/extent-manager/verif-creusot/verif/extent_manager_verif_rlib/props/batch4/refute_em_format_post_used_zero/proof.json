@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_refute_em_format_post_used_zero": {
+        "prover": "alt-ergo",
+        "time": 0.028
+      },
+      "vc_wu_format_used": { "prover": "alt-ergo", "time": 0.019 }
+    }
+  }
+}

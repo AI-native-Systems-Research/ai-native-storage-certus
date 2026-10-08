@@ -1,0 +1,10 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_elim_Good": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_nvme_to_em": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_read_ckpt": { "prover": "z3", "time": 0.005 }
+    }
+  }
+}

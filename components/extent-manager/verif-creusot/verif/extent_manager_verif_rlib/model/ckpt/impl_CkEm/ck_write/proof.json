@@ -1,0 +1,4 @@
+{
+  "profile": [],
+  "proofs": { "Coma": { "vc_ck_write": { "prover": "z3", "time": 0.017 } } }
+}

@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_get_metadata_client": { "prover": "alt-ergo", "time": 0.023 }
+    }
+  }
+}

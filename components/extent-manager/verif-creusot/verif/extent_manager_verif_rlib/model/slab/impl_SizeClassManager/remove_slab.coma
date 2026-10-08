@@ -1,0 +1,285 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 390 4 390 71 *)
+
+(* model::slab::SizeClassManager *)
+
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 112 18 112 40
+let%span svec'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sslab = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 391 31 391 70
+let%span sslab'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 392 12 392 44
+let%span sslab'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 393 15 393 28
+let%span sslab'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 393 32 393 33
+let%span sslab'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 394 16 394 54
+let%span sslab'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 390 28 390 32
+let%span sslab'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 389 14 389 142
+let%span sslab'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 330 18 330 19
+let%span sslab'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 326 10 329 1
+let%span sslab'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 349 10 349 35
+let%span sslab'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 344 17 344 18
+let%span sslab'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 343 10 343 35
+let%span sslab'11 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 296 16 296 75
+let%span sslab'12 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 301 10 301 17
+let%span sslab'13 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 304 8 306 86
+let%span sfmap = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/fmap.rs" 88 8 88 32
+let%span sfmap'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/fmap.rs" 62 14 62 70
+let%span sfmap'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/fmap.rs" 63 14 63 88
+let%span sfmap'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/fmap.rs" 77 14 77 67
+let%span sfmap'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/fmap.rs" 78 14 78 84
+let%span sfmap'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/fmap.rs" 54 14 54 25
+let%span sfmap'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/fmap.rs" 102 8 102 27
+let%span sinvariant = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/invariant.rs" 93 20 93 44
+
+use creusot.prelude.MutBorrow
+use creusot.int.UInt32
+use map.Map
+use creusot.int.UInt64
+use seq.Seq
+use creusot.prelude.Any
+use int.Int
+
+type t_HashMap_u32_Vec_u64_Global_RandomState_Global
+
+type t_SizeClassManager = { map: t_HashMap_u32_Vec_u64_Global_RandomState_Global }
+
+predicate inv_HashMap_u32_Vec_u64_Global_RandomState_Global (_1: t_HashMap_u32_Vec_u64_Global_RandomState_Global)
+
+type t_Vec_u64_Global
+
+type t_Option_refmut_Vec_u64_Global = None | Some (MutBorrow.t t_Vec_u64_Global)
+
+predicate invariant_refmut_HashMap_u32_Vec_u64_Global_RandomState_Global [@inline:trivial] (self: MutBorrow.t t_HashMap_u32_Vec_u64_Global_RandomState_Global) =
+  [%#sinvariant] inv_HashMap_u32_Vec_u64_Global_RandomState_Global self.current
+  /\ inv_HashMap_u32_Vec_u64_Global_RandomState_Global self.final
+
+meta "rewrite_def" predicate invariant_refmut_HashMap_u32_Vec_u64_Global_RandomState_Global
+
+predicate inv_refmut_HashMap_u32_Vec_u64_Global_RandomState_Global [@inline:trivial] (_1: MutBorrow.t t_HashMap_u32_Vec_u64_Global_RandomState_Global) =
+  invariant_refmut_HashMap_u32_Vec_u64_Global_RandomState_Global _1
+
+meta "rewrite_def" predicate inv_refmut_HashMap_u32_Vec_u64_Global_RandomState_Global
+
+type t_FMap_Int_Vec_u64_Global
+
+type t_Option_Vec_u64_Global = None'0 | Some'0 t_Vec_u64_Global
+
+function to_mapping_Int (self: t_FMap_Int_Vec_u64_Global) : Map.map int t_Option_Vec_u64_Global
+
+function get_Int [@inline:trivial] (self: t_FMap_Int_Vec_u64_Global) (k: int) : t_Option_Vec_u64_Global =
+  [%#sfmap] Map.get (to_mapping_Int self) k
+
+meta "rewrite_def" function get_Int
+
+function view_HashMap_u32_Vec_u64_Global_RandomState_Global (self: t_HashMap_u32_Vec_u64_Global_RandomState_Global) : t_FMap_Int_Vec_u64_Global
+
+function len_Int (self: t_FMap_Int_Vec_u64_Global) : int
+
+axiom len_Int_spec: forall self: t_FMap_Int_Vec_u64_Global [len_Int self]. [%#sfmap'4] len_Int self >= 0
+
+predicate contains_Int [@inline:trivial] (self: t_FMap_Int_Vec_u64_Global) (k: int) =
+  [%#sfmap'5] get_Int self k <> None'0
+
+meta "rewrite_def" predicate contains_Int
+
+function insert_Int (self: t_FMap_Int_Vec_u64_Global) (k: int) (v: t_Vec_u64_Global) : t_FMap_Int_Vec_u64_Global
+
+axiom insert_Int_spec:
+  forall self: t_FMap_Int_Vec_u64_Global, k: int, v: t_Vec_u64_Global [insert_Int self k v]. [%#sfmap'0] to_mapping_Int (insert_Int self k v)
+    = Map.set (to_mapping_Int self) k (Some'0 v)
+
+axiom insert_Int_spec'0:
+  forall self: t_FMap_Int_Vec_u64_Global, k: int, v: t_Vec_u64_Global [insert_Int self k v]. [%#sfmap'1] len_Int (insert_Int self k v)
+    = (if contains_Int self k then len_Int self else len_Int self + 1)
+
+let hm_get_mut (m: MutBorrow.t t_HashMap_u32_Vec_u64_Global_RandomState_Global) (k: UInt32.t)
+  (return (x: t_Option_refmut_Vec_u64_Global)) =
+{[@stop_split] [@expl:hm_get_mut 'm' type invariant] [%#sslab'6] inv_refmut_HashMap_u32_Vec_u64_Global_RandomState_Global m}
+  any
+  [ return (result: t_Option_refmut_Vec_u64_Global) ->
+  {[@stop_split] [@expl:hm_get_mut ensures] [%#sslab'7] match result with
+      | Some v -> get_Int (view_HashMap_u32_Vec_u64_Global_RandomState_Global m.current) (UInt32.t'int k)
+        = Some'0 (v.current)
+      /\ view_HashMap_u32_Vec_u64_Global_RandomState_Global m.final
+      = insert_Int (view_HashMap_u32_Vec_u64_Global_RandomState_Global m.current) (UInt32.t'int k) v.final
+      | None -> get_Int (view_HashMap_u32_Vec_u64_Global_RandomState_Global m.current) (UInt32.t'int k) = None'0
+      /\ m.final = m.current
+      end}
+    (! return {result}) ]
+
+predicate resolve_refmut_Vec_u64_Global [@inline:trivial] (_1: MutBorrow.t t_Vec_u64_Global) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_Vec_u64_Global
+
+predicate resolve_refmut_HashMap_u32_Vec_u64_Global_RandomState_Global [@inline:trivial] (_1: MutBorrow.t t_HashMap_u32_Vec_u64_Global_RandomState_Global) =
+  _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_HashMap_u32_Vec_u64_Global_RandomState_Global
+
+predicate inv_SizeClassManager (_1: t_SizeClassManager)
+
+axiom inv_axiom [@rewrite]: forall x: t_SizeClassManager [inv_SizeClassManager x]. inv_SizeClassManager x
+    = inv_HashMap_u32_Vec_u64_Global_RandomState_Global x.map
+
+predicate invariant_refmut_SizeClassManager [@inline:trivial] (self: MutBorrow.t t_SizeClassManager) =
+  [%#sinvariant] inv_SizeClassManager self.current /\ inv_SizeClassManager self.final
+
+meta "rewrite_def" predicate invariant_refmut_SizeClassManager
+
+predicate inv_refmut_SizeClassManager [@inline:trivial] (_1: MutBorrow.t t_SizeClassManager) =
+  invariant_refmut_SizeClassManager _1
+
+meta "rewrite_def" predicate inv_refmut_SizeClassManager
+
+predicate resolve_refmut_SizeClassManager [@inline:trivial] (_1: MutBorrow.t t_SizeClassManager) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_SizeClassManager
+
+let elim_Some (_x: t_Option_refmut_Vec_u64_Global) (return (f0: MutBorrow.t t_Vec_u64_Global)) = any
+  [ _k (f0: MutBorrow.t t_Vec_u64_Global) -> {Some f0 = _x} (! return {f0})
+  | _chk -> (! {[@expl:elim Some] match _x with
+      | Some _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_u64_Global (self: t_Vec_u64_Global) : Seq.seq UInt64.t
+
+axiom view_Vec_u64_Global_spec:
+  forall self: t_Vec_u64_Global [view_Vec_u64_Global self]. [%#svec'0] Seq.length (view_Vec_u64_Global self)
+    <= UInt64.t'int const_MAX
+
+function filter_ne [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 302 0 302 49] (s: Seq.seq UInt64.t) (x: UInt64.t) : Seq.seq UInt64.t
+
+axiom filter_ne_def: forall s: Seq.seq UInt64.t, x: UInt64.t [filter_ne s x]. filter_ne s x
+    = ([%#sslab'13] if Seq.length s = 0 then
+      Seq.empty: Seq.seq UInt64.t
+    else
+      if Seq.get s (Seq.length s - 1) = x then
+        filter_ne (Seq.([..]) s 0 (Seq.length s - 1)) x
+      else
+        Seq.snoc (filter_ne (Seq.([..]) s 0 (Seq.length s - 1)) x) (Seq.get s (Seq.length s - 1))
+    
+    )
+
+let retain_ne (v: MutBorrow.t t_Vec_u64_Global) (x: UInt64.t) (return (x'0: ())) = any
+  [ return (result: ()) -> {[@stop_split] [@expl:retain_ne ensures] [%#sslab'8] view_Vec_u64_Global v.final
+    = filter_ne (view_Vec_u64_Global v.current) x}
+    (! return {result}) ]
+
+let len_u64 (self_: t_Vec_u64_Global) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:len ensures] [%#svec] UInt64.t'int result
+    = Seq.length (view_Vec_u64_Global self_)}
+    (! return {result}) ]
+
+function remove_Int (self: t_FMap_Int_Vec_u64_Global) (k: int) : t_FMap_Int_Vec_u64_Global
+
+axiom remove_Int_spec:
+  forall self: t_FMap_Int_Vec_u64_Global, k: int [remove_Int self k]. [%#sfmap'2] to_mapping_Int (remove_Int self k)
+    = Map.set (to_mapping_Int self) k (None'0)
+
+axiom remove_Int_spec'0:
+  forall self: t_FMap_Int_Vec_u64_Global, k: int [remove_Int self k]. [%#sfmap'3] len_Int (remove_Int self k)
+    = (if contains_Int self k then len_Int self - 1 else len_Int self)
+
+let hm_remove (m: MutBorrow.t t_HashMap_u32_Vec_u64_Global_RandomState_Global) (k: UInt32.t) (return (x: ())) =
+{[@stop_split] [@expl:hm_remove 'm' type invariant] [%#sslab'9] inv_refmut_HashMap_u32_Vec_u64_Global_RandomState_Global m}
+  any
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:hm_remove ensures] [%#sslab'10] view_HashMap_u32_Vec_u64_Global_RandomState_Global m.final
+    = remove_Int (view_HashMap_u32_Vec_u64_Global_RandomState_Global m.current) (UInt32.t'int k)}
+    (! return {result}) ]
+
+function sc_get [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 295 0 295 54] (m: t_SizeClassManager) (e: int) : Seq.seq UInt64.t
+ = [%#sslab'11] match get_Int (view_HashMap_u32_Vec_u64_Global_RandomState_Global m.map) e with
+    | Some'0 v -> view_Vec_u64_Global v
+    | None'0 -> Seq.empty: Seq.seq UInt64.t
+    end
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let remove_slab [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 390 4 390 71]
+  (self: MutBorrow.t t_SizeClassManager) (element_size: UInt32.t) (start_offset: UInt64.t) (return (x: ())) =
+{[@stop_split] [@expl:remove_slab 'self' type invariant] [%#sslab'4] inv_refmut_SizeClassManager self}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = MutBorrow.borrow_mut <t_HashMap_u32_Vec_u64_Global_RandomState_Global> {self.current.map}
+        (fun (_bor: MutBorrow.t t_HashMap_u32_Vec_u64_Global_RandomState_Global) ->
+          [ &_10 <- _bor ] -{inv_HashMap_u32_Vec_u64_Global_RandomState_Global _bor.final}-
+          [ &self <- { self with current = { map = _bor.final } } ] s1)
+      [ _ck -> (! {[@expl:type invariant] inv_HashMap_u32_Vec_u64_Global_RandomState_Global self.current.map} any) ]
+    | s1 = MutBorrow.borrow_final <t_HashMap_u32_Vec_u64_Global_RandomState_Global> {_10.current} {MutBorrow.get_id _10}
+        (fun (_bor: MutBorrow.t t_HashMap_u32_Vec_u64_Global_RandomState_Global) ->
+          [ &_9 <- _bor ] -{inv_HashMap_u32_Vec_u64_Global_RandomState_Global _bor.final}-
+          [ &_10 <- { _10 with current = _bor.final } ] s2)
+      [ _ck -> (! {[@expl:type invariant] inv_HashMap_u32_Vec_u64_Global_RandomState_Global _10.current} any) ]
+    | s2 = hm_get_mut [%#sslab] {_9} {element_size} (fun (_x: t_Option_refmut_Vec_u64_Global) -> [ &_8 <- _x ] s3)
+    | s3 = any [ br0 -> {_8 = None} (! bb10) | br1 (x0: MutBorrow.t t_Vec_u64_Global) -> {_8 = Some x0} (! bb3) ] ]
+  | bb10 = s0
+    [ s0 = -{match _8 with
+        | Some x -> resolve_refmut_Vec_u64_Global x
+        | _ -> true
+        end}-
+      s1
+    | s1 = s2 [ _ck -> (! {[@expl:type invariant] inv_refmut_HashMap_u32_Vec_u64_Global_RandomState_Global _10} any) ]
+    | s2 = -{resolve_refmut_HashMap_u32_Vec_u64_Global_RandomState_Global _10}- s3
+    | s3 = s4 [ _ck -> (! {[@expl:type invariant] inv_refmut_SizeClassManager self} any) ]
+    | s4 = -{resolve_refmut_SizeClassManager self}- s5
+    | s5 = return {_ret} ]
+  | bb3 = s0
+    [ s0 = elim_Some {_8} (fun (r0: MutBorrow.t t_Vec_u64_Global) -> [ &offsets <- r0 ] s1)
+    | s1 = MutBorrow.borrow_final <t_Vec_u64_Global> {offsets.current} {MutBorrow.get_id offsets}
+        (fun (_bor: MutBorrow.t t_Vec_u64_Global) ->
+          [ &_15 <- _bor ] [ &offsets <- { offsets with current = _bor.final } ] s2)
+    | s2 = retain_ne [%#sslab'0] {_15} {start_offset} (fun (_x: ()) -> [ &_14 <- _x ] s3)
+    | s3 = -{resolve_refmut_Vec_u64_Global offsets}- s4
+    | s4 = len_u64 [%#sslab'1] {offsets.current} (fun (_x: UInt64.t) -> [ &_18 <- _x ] s5)
+    | s5 = s6 [ _ck -> (! {[@expl:type invariant] inv_refmut_HashMap_u32_Vec_u64_Global_RandomState_Global _10} any) ]
+    | s6 = -{resolve_refmut_HashMap_u32_Vec_u64_Global_RandomState_Global _10}- s7
+    | s7 = [ &_17 <- _18 = ([%#sslab'2] (0: UInt64.t)) ] s8
+    | s8 = any [ br0 -> {_17 = false} (! bb8) | br1 -> {_17} (! bb6) ] ]
+  | bb6 = s0
+    [ s0 = MutBorrow.borrow_final <t_HashMap_u32_Vec_u64_Global_RandomState_Global> {self.current.map}
+        {MutBorrow.inherit_id (MutBorrow.get_id self) 0}
+        (fun (_bor: MutBorrow.t t_HashMap_u32_Vec_u64_Global_RandomState_Global) ->
+          [ &_22 <- _bor ] -{inv_HashMap_u32_Vec_u64_Global_RandomState_Global _bor.final}-
+          [ &self <- { self with current = { map = _bor.final } } ] s1)
+      [ _ck -> (! {[@expl:type invariant] inv_HashMap_u32_Vec_u64_Global_RandomState_Global self.current.map} any) ]
+    | s1 = MutBorrow.borrow_final <t_HashMap_u32_Vec_u64_Global_RandomState_Global> {_22.current} {MutBorrow.get_id _22}
+        (fun (_bor: MutBorrow.t t_HashMap_u32_Vec_u64_Global_RandomState_Global) ->
+          [ &_21 <- _bor ] -{inv_HashMap_u32_Vec_u64_Global_RandomState_Global _bor.final}-
+          [ &_22 <- { _22 with current = _bor.final } ] s2)
+      [ _ck -> (! {[@expl:type invariant] inv_HashMap_u32_Vec_u64_Global_RandomState_Global _22.current} any) ]
+    | s2 = hm_remove [%#sslab'3] {_21} {element_size} (fun (_x: ()) -> [ &_20 <- _x ] s3)
+    | s3 = s4 [ _ck -> (! {[@expl:type invariant] inv_refmut_HashMap_u32_Vec_u64_Global_RandomState_Global _22} any) ]
+    | s4 = -{resolve_refmut_HashMap_u32_Vec_u64_Global_RandomState_Global _22}- s5
+    | s5 = s6 [ _ck -> (! {[@expl:type invariant] inv_refmut_SizeClassManager self} any) ]
+    | s6 = -{resolve_refmut_SizeClassManager self}- s7
+    | s7 = return {_ret} ]
+  | bb8 = s0
+    [ s0 = s1 [ _ck -> (! {[@expl:type invariant] inv_refmut_SizeClassManager self} any) ]
+    | s1 = -{resolve_refmut_SizeClassManager self}- s2
+    | s2 = return {_ret} ] ]
+  [ & _ret: () = Any.any_l ()
+  | & self: MutBorrow.t t_SizeClassManager = self
+  | & element_size: UInt32.t = element_size
+  | & start_offset: UInt64.t = start_offset
+  | & _8: t_Option_refmut_Vec_u64_Global = Any.any_l ()
+  | & _9: MutBorrow.t t_HashMap_u32_Vec_u64_Global_RandomState_Global = Any.any_l ()
+  | & _10: MutBorrow.t t_HashMap_u32_Vec_u64_Global_RandomState_Global = Any.any_l ()
+  | & offsets: MutBorrow.t t_Vec_u64_Global = Any.any_l ()
+  | & _14: () = Any.any_l ()
+  | & _15: MutBorrow.t t_Vec_u64_Global = Any.any_l ()
+  | & _17: bool = Any.any_l ()
+  | & _18: UInt64.t = Any.any_l ()
+  | & _20: () = Any.any_l ()
+  | & _21: MutBorrow.t t_HashMap_u32_Vec_u64_Global_RandomState_Global = Any.any_l ()
+  | & _22: MutBorrow.t t_HashMap_u32_Vec_u64_Global_RandomState_Global = Any.any_l () ])
+  [ return (result: ()) -> {[@stop_split] [@expl:remove_slab ensures] [%#sslab'5] forall e: int. sc_get self.final e
+      = (if e = UInt32.t'int element_size then
+        filter_ne (sc_get self.current e) start_offset
+      else
+        sc_get self.current e
+      )}
+    (! return {result}) ]

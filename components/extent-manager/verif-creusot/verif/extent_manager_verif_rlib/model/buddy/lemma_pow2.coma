@@ -1,0 +1,40 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 49 0 49 25 *)
+
+let%span swell_founded = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 45 10 45 11
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 46 11 46 17
+let%span sbuddy'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 47 10 47 23
+let%span sbuddy'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 48 10 48 40
+
+use bv.Pow2int
+use int.Int
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant o : int
+
+function lemma_pow2 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 49 0 49 25] (o: int) : ()
+
+goal vc_lemma_pow2: ([%#sbuddy'0] 0 <= o)
+  -> (if o > 0 then
+    (([@stop_split] [@expl:lemma_pow2 requires] [%#sbuddy'0] 0 <= o - 1)
+      /\ ([@expl:variant decreases] well_founded_relation_Int ([%#sbuddy] o) ([%#sbuddy] o - 1)))
+    /\ (([@stop_split] [@expl:lemma_pow2 ensures] ([@stop_split] [@expl:lemma_pow2 ensures #0] [%#sbuddy'1] Pow2int.pow2 (o
+          - 1)
+        >= 1)
+      /\ ([@stop_split] [@expl:lemma_pow2 ensures #1] [%#sbuddy'2] Pow2int.pow2 (o - 1 + 1) = 2 * Pow2int.pow2 (o - 1)))
+    -> ([@stop_split] [@expl:lemma_pow2 ensures] ([@stop_split] [@expl:lemma_pow2 ensures #0] [%#sbuddy'1] Pow2int.pow2 o
+      >= 1)
+    /\ ([@stop_split] [@expl:lemma_pow2 ensures #1] [%#sbuddy'2] Pow2int.pow2 (o + 1) = 2 * Pow2int.pow2 o)))
+  else
+    [@stop_split] [@expl:lemma_pow2 ensures] ([@stop_split] [@expl:lemma_pow2 ensures #0] [%#sbuddy'1] Pow2int.pow2 o
+      >= 1)
+    /\ ([@stop_split] [@expl:lemma_pow2 ensures #1] [%#sbuddy'2] Pow2int.pow2 (o + 1) = 2 * Pow2int.pow2 o)
+  )

@@ -1,0 +1,19 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_get_metadata_client": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_set_dma_alloc": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_verify_em_dma_post_allocator_used__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [ { "prover": "alt-ergo", "time": 0.014 }, null ]
+          }
+        ]
+      },
+      "vc_write_blocks": { "prover": "alt-ergo", "time": 0.027 }
+    }
+  }
+}

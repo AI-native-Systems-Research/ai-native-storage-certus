@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_and_mask": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_index_Vec_usize_Global": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_len_usize": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_region_for_key": { "prover": "alt-ergo", "time": 0.037 }
+    }
+  }
+}

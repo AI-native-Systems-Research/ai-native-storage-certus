@@ -1,0 +1,22 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_support_old_refute_em_remove_err_interior_offset__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              {
+                "tactic": "split_vc",
+                "children": [ { "prover": "alt-ergo", "time": 0.026 }, null ]
+              }
+            ]
+          }
+        ]
+      },
+      "vc_w8_rb0_interior": { "prover": "alt-ergo", "time": 0.03 }
+    }
+  }
+}

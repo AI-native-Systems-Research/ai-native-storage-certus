@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_refute_em_init_no_stale_format__mutant": null,
+      "vc_wst_race": { "prover": "alt-ergo", "time": 0.026 }
+    }
+  }
+}

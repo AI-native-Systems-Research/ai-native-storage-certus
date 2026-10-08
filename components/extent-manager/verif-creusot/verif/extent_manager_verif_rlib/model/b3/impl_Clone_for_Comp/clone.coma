@@ -1,0 +1,16 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 105 9 105 29 *)
+
+(* <model::b3::Comp as std::clone::Clone> *)
+
+use creusot.prelude.Any
+
+type t_Comp = WriteDone bool | ReadDone bool | Error | Other
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_Comp [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 105 9 105 29]
+  (self: t_Comp) (return (x: t_Comp)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Comp = Any.any_l () | & self: t_Comp = self ]) [ return (result: t_Comp) -> (! return {result}) ]

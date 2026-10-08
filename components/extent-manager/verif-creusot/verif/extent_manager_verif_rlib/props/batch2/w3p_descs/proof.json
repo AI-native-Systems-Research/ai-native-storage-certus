@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_new_SlabDescriptor": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_new_u64": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_push_SlabDescriptor": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_push_u64": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_w3p_descs": { "prover": "alt-ergo", "time": 0.043 }
+    }
+  }
+}

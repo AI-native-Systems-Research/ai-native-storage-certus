@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE why3session PUBLIC "-//Why3//proof session v5//EN"
+"https://www.why3.org/why3session.dtd">
+<why3session shape_version="6">
+<prover id="0" name="Z3" version="4.16.0" timelimit="4" memlimit="1000"/>
+<prover id="1" name="CVC4" version="1.8" timelimit="4" memlimit="1000"/>
+<prover id="2" name="Alt-Ergo" version="2.6.2" timelimit="0.041539" memlimit="1000"/>
+<prover id="3" name="CVC5" version="1.3.1" timelimit="0.07387" memlimit="1000"/>
+<file format="coma">
+<path name=".."/><path name="lemma_allfree_blk.coma"/>
+<theory name="Coma">
+ <goal name="vc_lemma_allfree_blk">
+ <transf name="split_vc" >
+  <goal name="vc_lemma_allfree_blk.0" expl="lemma_span_pos requires" proved="true">
+  <proof prover="2" timelimit="0.021786"><result status="valid" time="0.021786" steps="0"/></proof>
+  </goal>
+  <goal name="vc_lemma_allfree_blk.1" proved="true">
+  <proof prover="2"><result status="valid" time="0.041539" steps="0"/></proof>
+  </goal>
+  <goal name="vc_lemma_allfree_blk.2" expl="lemma_span_mult requires" proved="true">
+  <proof prover="2" timelimit="0.064936"><result status="valid" time="0.064936" steps="0"/></proof>
+  </goal>
+  <goal name="vc_lemma_allfree_blk.3" expl="lemma_span_div requires" proved="true">
+  <proof prover="3" timelimit="0.19004"><result status="valid" time="0.190040" steps="0"/></proof>
+  </goal>
+  <goal name="vc_lemma_allfree_blk.4" expl="lemma_lam requires" proved="true">
+  <proof prover="3" timelimit="0.120103"><result status="valid" time="0.120103" steps="0"/></proof>
+  </goal>
+  <goal name="vc_lemma_allfree_blk.5" expl="lemma_inblk_intro requires" proved="true">
+  <proof prover="2" timelimit="0.059443"><result status="valid" time="0.059443" steps="0"/></proof>
+  </goal>
+  <goal name="vc_lemma_allfree_blk.6">
+  <proof prover="0"><result status="timeout" time="4.000000" steps="0"/></proof>
+  <proof prover="1"><result status="timeout" time="4.000000" steps="0"/></proof>
+  <proof prover="2" timelimit="4"><result status="timeout" time="4.000000" steps="0"/></proof>
+  <proof prover="3" timelimit="4"><result status="timeout" time="4.000000" steps="0"/></proof>
+  <transf name="split_vc" >
+   <goal name="vc_lemma_allfree_blk.6.0">
+   <proof prover="0" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+   <proof prover="1" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+   <proof prover="2" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+   <proof prover="3" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+   </goal>
+  </transf>
+  </goal>
+  <goal name="vc_lemma_allfree_blk.7" expl="lemma_allfree_blk ensures" proved="true">
+  <proof prover="2" timelimit="0.089535"><result status="valid" time="0.089535" steps="0"/></proof>
+  </goal>
+  <goal name="vc_lemma_allfree_blk.8" expl="lemma_span_succ requires" proved="true">
+  <proof prover="2" timelimit="0.023551"><result status="valid" time="0.023551" steps="0"/></proof>
+  </goal>
+  <goal name="vc_lemma_allfree_blk.9" expl="lemma_span_pos requires" proved="true">
+  <proof prover="2" timelimit="0.02202"><result status="valid" time="0.022020" steps="0"/></proof>
+  </goal>
+  <goal name="vc_lemma_allfree_blk.10" expl="lemma_span_div requires" proved="true">
+  <proof prover="2" timelimit="0.027033"><result status="valid" time="0.027033" steps="0"/></proof>
+  </goal>
+  <goal name="vc_lemma_allfree_blk.11" expl="lemma_div_succ requires" proved="true">
+  <proof prover="2" timelimit="0.021262"><result status="valid" time="0.021262" steps="0"/></proof>
+  </goal>
+  <goal name="vc_lemma_allfree_blk.12" expl="lemma_allfree_blk requires" proved="true">
+  <proof prover="3"><result status="valid" time="0.073870" steps="0"/></proof>
+  </goal>
+  <goal name="vc_lemma_allfree_blk.13" expl="variant decreases" proved="true">
+  <proof prover="2" timelimit="0.026348"><result status="valid" time="0.026348" steps="0"/></proof>
+  </goal>
+  <goal name="vc_lemma_allfree_blk.14" expl="lemma_allfree_blk requires" proved="true">
+  <proof prover="3" timelimit="0.120679"><result status="valid" time="0.120679" steps="0"/></proof>
+  </goal>
+  <goal name="vc_lemma_allfree_blk.15" expl="variant decreases" proved="true">
+  <proof prover="2" timelimit="0.027841"><result status="valid" time="0.027841" steps="0"/></proof>
+  </goal>
+  <goal name="vc_lemma_allfree_blk.16" expl="lemma_merge_step requires" proved="true">
+  <proof prover="2" timelimit="0.02881"><result status="valid" time="0.028810" steps="0"/></proof>
+  </goal>
+  <goal name="vc_lemma_allfree_blk.17" expl="lemma_allfree_blk ensures" proved="true">
+  <proof prover="2" timelimit="0.034122"><result status="valid" time="0.034122" steps="0"/></proof>
+  </goal>
+ </transf>
+ </goal>
+</theory>
+</file>
+</why3session>

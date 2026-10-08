@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lemma_slabs_disjoint": { "prover": "cvc5", "time": 0.867 }
+    }
+  }
+}

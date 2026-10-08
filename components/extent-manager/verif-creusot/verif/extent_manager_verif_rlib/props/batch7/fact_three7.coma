@@ -1,0 +1,18 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 776 0 776 20 *)
+
+let%span sbatch7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 775 10 775 40
+
+use creusot.prelude.Any
+use creusot.int.UInt32BW
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let fact_three7 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 776 0 776 20]
+  (return (x: ())) = (! bb0
+  [ bb0 = return {_ret} ] [ & _ret: () = Any.any_l () ])
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:fact_three7 ensures] [%#sbatch7] UInt32BW.bw_and (3: UInt32BW.t) (UInt32BW.sub (3: UInt32BW.t) (1: UInt32BW.t))
+    <> (0: UInt32BW.t)}
+    (! return {result}) ]

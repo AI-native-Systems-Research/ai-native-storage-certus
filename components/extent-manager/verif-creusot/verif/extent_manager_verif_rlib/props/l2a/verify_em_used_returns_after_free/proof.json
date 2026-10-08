@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_apply_lopf": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_fresh_region": { "prover": "alt-ergo", "time": 0.045 },
+      "vc_verify_em_used_returns_after_free": {
+        "prover": "cvc4",
+        "time": 0.174
+      }
+    }
+  }
+}

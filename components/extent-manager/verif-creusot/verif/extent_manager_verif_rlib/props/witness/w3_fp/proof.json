@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_w3_fp": { "prover": "alt-ergo", "time": 0.026 } }
+  }
+}

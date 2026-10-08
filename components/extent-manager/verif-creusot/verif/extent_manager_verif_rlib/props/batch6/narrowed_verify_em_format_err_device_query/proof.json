@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_format6": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_narrowed_verify_em_format_err_device_query": {
+        "prover": "z3",
+        "time": 0.018
+      }
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_branch_Result_unit_EmError": {
+        "prover": "alt-ergo",
+        "time": 0.031
+      },
+      "vc_ck_begin": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_ck_finish": { "prover": "alt-ergo", "time": 0.051 },
+      "vc_ck_write": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_elim_Break": { "prover": "alt-ergo", "time": 0.033 },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_from_EmError": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_from_residual_Result_unit_EmError": {
+        "prover": "alt-ergo",
+        "time": 0.028
+      },
+      "vc_run_checkpoint": { "prover": "cvc4", "time": 0.391 }
+    }
+  }
+}

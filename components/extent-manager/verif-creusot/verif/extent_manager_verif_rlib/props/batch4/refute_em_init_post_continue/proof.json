@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_refute_em_init_post_continue": {
+        "prover": "alt-ergo",
+        "time": 0.048
+      },
+      "vc_wcont_lost": { "prover": "alt-ergo", "time": 0.029 }
+    }
+  }
+}

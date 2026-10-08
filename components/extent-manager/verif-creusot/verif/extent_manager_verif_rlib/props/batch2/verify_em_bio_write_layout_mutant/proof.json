@@ -1,0 +1,23 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_em_bio_write_layout__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.023 },
+              {
+                "tactic": "split_vc",
+                "children": [ null, { "prover": "z3", "time": 0.037 } ]
+              }
+            ]
+          }
+        ]
+      },
+      "vc_write_blocks": { "prover": "alt-ergo", "time": 0.024 }
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_slot_offset": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_verify_em_slab_slots_inside": {
+        "prover": "alt-ergo",
+        "time": 0.106
+      }
+    }
+  }
+}

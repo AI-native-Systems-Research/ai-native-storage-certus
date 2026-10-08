@@ -1,0 +1,15 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_apply_rop": { "prover": "alt-ergo", "time": 0.045 },
+      "vc_new": { "prover": "alt-ergo", "time": 0.048 },
+      "vc_new'0": { "prover": "alt-ergo", "time": 0.045 },
+      "vc_rebuild_region": { "prover": "alt-ergo", "time": 0.049 },
+      "vc_verify_em_bitmap_count_matches": {
+        "prover": "cvc4",
+        "time": 0.176
+      }
+    }
+  }
+}

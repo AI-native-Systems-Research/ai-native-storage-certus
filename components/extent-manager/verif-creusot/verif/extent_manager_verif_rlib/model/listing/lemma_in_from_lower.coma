@@ -1,0 +1,32 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 79 0 79 72 *)
+
+let%span slisting = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 77 11 77 41
+let%span slisting'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 78 10 78 28
+let%span slisting'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 66 16 66 66
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use int.Int
+
+type t_Extent = { key: UInt64.t; size: UInt32.t; offset: UInt64.t }
+
+predicate in_from [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 65 0 65 58] (s: Seq.seq t_Extent) (lo: int) (e: t_Extent) =
+  [%#slisting'1] exists p: int. lo <= p /\ p < Seq.length s /\ Seq.get s p = e
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant s : Seq.seq t_Extent
+
+constant lo : int
+
+constant lo2 : int
+
+constant e : t_Extent
+
+function lemma_in_from_lower [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/listing.rs" 79 0 79 72] (s: Seq.seq t_Extent) (lo: int) (lo2: int) (e: t_Extent) : ()
+
+goal vc_lemma_in_from_lower: ([%#slisting] in_from s lo e /\ lo2 <= lo)
+  -> ([@stop_split] [@expl:lemma_in_from_lower ensures] [%#slisting'0] in_from s lo2 e)

@@ -1,0 +1,163 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 49 0 49 79 *)
+
+let%span swell_founded = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 403 8 407 92
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 494 14 494 15
+let%span sbuddy'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 33 16 33 29
+let%span sb4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 45 10 45 15
+let%span sb4'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 46 11 46 44
+let%span sb4'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 47 11 47 35
+let%span sb4'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 48 10 48 89
+let%span sb4'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 59 11 59 34
+let%span sb4'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 60 11 60 35
+let%span sb4'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 61 10 61 37
+let%span sb4'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 37 8 39 136
+let%span sb4'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 28 10 28 11
+let%span sb4'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 30 16 30 96
+let%span sb4'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 58 10 58 11
+let%span sb4'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 63 4 65 5
+let%span sb4'11 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 23 16 23 117
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use bv.Pow2int
+use int.Int
+
+type t_BTreeMap_u64_Slab_Global
+
+type t_SlabMap = { inner: t_BTreeMap_u64_Slab_Global }
+
+type t_HashMap_u32_Vec_u64_Global_RandomState_Global
+
+type t_SizeClassManager = { map: t_HashMap_u32_Vec_u64_Global_RandomState_Global }
+
+type t_Vec_Vec_u64_Global_Global
+
+type t_BuddyAllocator = {
+  base_offset: UInt64.t;
+  total_usable_size: UInt64.t;
+  sector_size: UInt32.t;
+  max_order: UInt64.t;
+  free_lists: t_Vec_Vec_u64_Global_Global }
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_FormatParams = {
+  data_disk_size'0: UInt64.t;
+  slab_size'0: UInt64.t;
+  max_extent_size'0: UInt32.t;
+  sector_size'0: UInt32.t;
+  region_count'0: UInt32.t;
+  metadata_alignment'0: UInt64.t;
+  instance_id'0: t_Option_u64;
+  metadata_disk_ns_id'0: UInt32.t;
+  metadata_region_size'0: UInt64.t }
+
+type t_Vec_tup2_u64_usize_Global
+
+type t_RegionState = {
+  slabs: t_SlabMap;
+  size_classes: t_SizeClassManager;
+  buddy: t_BuddyAllocator;
+  dirty: bool;
+  format_params: t_FormatParams;
+  pending_frees: t_Vec_tup2_u64_usize_Global }
+
+type t_Vec_u64_Global
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_Vec_u64_Global_Global (self: t_Vec_Vec_u64_Global_Global) : Seq.seq t_Vec_u64_Global
+
+axiom view_Vec_Vec_u64_Global_Global_spec:
+  forall self: t_Vec_Vec_u64_Global_Global [view_Vec_Vec_u64_Global_Global self]. [%#svec] Seq.length (view_Vec_Vec_u64_Global_Global self)
+    <= UInt64.t'int const_MAX
+
+constant const_MAX'0: UInt64.t = (18446744073709551615: UInt64.t)
+
+function span [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 32 0 32 35] (ss: int) (o: int) : int
+ = [%#sbuddy'1] Pow2int.pow2 o * ss
+
+predicate bd_shape [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 401 0 401 42] (b: t_BuddyAllocator) =
+  [%#sbuddy] UInt32.t'int b.sector_size > 0
+  /\ UInt64.t'int b.max_order < 64
+  /\ Seq.length (view_Vec_Vec_u64_Global_Global b.free_lists) = UInt64.t'int b.max_order + 1
+  /\ UInt64.t'int b.base_offset + UInt64.t'int b.total_usable_size <= UInt64.t'int const_MAX'0
+  /\ (UInt64.t'int b.max_order = 0
+  \/ span (UInt32.t'int b.sector_size) (UInt64.t'int b.max_order) <= UInt64.t'int b.total_usable_size)
+
+function tf [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 495 4 495 56] (fl: Seq.seq t_Vec_u64_Global) (ss: int) (n: int) : int
+
+function rg_used [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 22 0 22 37] (r: t_RegionState) : int
+ = [%#sb4'11] UInt64.t'int r.buddy.total_usable_size
+  - tf (view_Vec_Vec_u64_Global_Global r.buddy.free_lists) (UInt32.t'int r.buddy.sector_size) (Seq.length (view_Vec_Vec_u64_Global_Global r.buddy.free_lists))
+
+predicate used_terms_ok [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 35 0 35 69] (arena: Seq.seq t_RegionState) (rv: Seq.seq UInt64.t) =
+  [%#sb4'6] forall i: int. 0 <= i /\ i < Seq.length rv
+    -> bd_shape (Seq.get arena (UInt64.t'int (Seq.get rv i))).buddy
+    /\ 0 <= rg_used (Seq.get arena (UInt64.t'int (Seq.get rv i)))
+    /\ tf (view_Vec_Vec_u64_Global_Global (Seq.get arena (UInt64.t'int (Seq.get rv i))).buddy.free_lists) (UInt32.t'int (Seq.get arena (UInt64.t'int (Seq.get rv i))).buddy.sector_size) (Seq.length (view_Vec_Vec_u64_Global_Global (Seq.get arena (UInt64.t'int (Seq.get rv i))).buddy.free_lists))
+    <= UInt64.t'int const_MAX'0
+
+function used_sum [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 29 0 29 71] (arena: Seq.seq t_RegionState) (rv: Seq.seq UInt64.t) (n: int) : int
+
+axiom used_sum_def:
+  forall arena: Seq.seq t_RegionState, rv: Seq.seq UInt64.t, n: int [used_sum arena rv n]. used_sum arena rv n
+    = ([%#sb4'8] if n <= 0 then
+      0
+    else
+      used_sum arena rv (n - 1) + rg_used (Seq.get arena (UInt64.t'int (Seq.get rv (n - 1))))
+    )
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+function lemma_used_nonneg [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 62 0 62 73] (arena: Seq.seq t_RegionState) (rv: Seq.seq UInt64.t) (n: int) : ()
+
+axiom lemma_used_nonneg_def:
+  forall arena: Seq.seq t_RegionState, rv: Seq.seq UInt64.t, n: int [lemma_used_nonneg arena rv n]. ([%#sb4'3] 0 <= n
+      /\ n <= Seq.length rv)
+    -> ([%#sb4'4] used_terms_ok arena rv)
+    -> lemma_used_nonneg arena rv n = ([%#sb4'10] if n > 0 then lemma_used_nonneg arena rv (n - 1) else ())
+
+axiom lemma_used_nonneg_spec: forall arena: Seq.seq t_RegionState, rv: Seq.seq UInt64.t, n: int. ([%#sb4'3] 0 <= n
+      /\ n <= Seq.length rv) -> ([%#sb4'4] used_terms_ok arena rv) -> ([%#sb4'5] 0 <= used_sum arena rv n)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant arena : Seq.seq t_RegionState
+
+constant rv : Seq.seq UInt64.t
+
+constant m : int
+
+constant n : int
+
+function lemma_used_mono [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 49 0 49 79] (arena: Seq.seq t_RegionState) (rv: Seq.seq UInt64.t) (m: int) (n: int) : ()
+
+goal vc_lemma_used_mono: ([%#sb4'0] 0 <= m /\ m <= n /\ n <= Seq.length rv)
+  -> ([%#sb4'1] used_terms_ok arena rv)
+  -> (if m < n then
+    (([@stop_split] [@expl:lemma_used_mono requires] ([@stop_split] [@expl:lemma_used_mono requires #0] [%#sb4'0] 0 <= m
+          /\ m <= n - 1 /\ n - 1 <= Seq.length rv)
+        /\ ([@stop_split] [@expl:lemma_used_mono requires #1] [%#sb4'1] used_terms_ok arena rv))
+      /\ ([@expl:variant decreases] well_founded_relation_Int ([%#sb4] n - m) ([%#sb4] n - 1 - m)))
+    /\ (([@stop_split] [@expl:lemma_used_mono ensures] [%#sb4'2] 0 <= used_sum arena rv m
+      /\ used_sum arena rv m <= used_sum arena rv (n - 1))
+    -> ([@stop_split] [@expl:lemma_used_mono ensures] [%#sb4'2] 0 <= used_sum arena rv m
+    /\ used_sum arena rv m <= used_sum arena rv n))
+  else
+    ([@stop_split] [@expl:lemma_used_nonneg requires] ([@stop_split] [@expl:lemma_used_nonneg requires #0] [%#sb4'3] 0
+          <= m
+        /\ m <= Seq.length rv)
+      /\ ([@stop_split] [@expl:lemma_used_nonneg requires #1] [%#sb4'4] used_terms_ok arena rv))
+    /\ (([@stop_split] [@expl:lemma_used_nonneg ensures] [%#sb4'5] 0 <= used_sum arena rv m)
+    -> ([@stop_split] [@expl:lemma_used_mono ensures] [%#sb4'2] 0 <= used_sum arena rv m
+    /\ used_sum arena rv m <= used_sum arena rv n))
+  )

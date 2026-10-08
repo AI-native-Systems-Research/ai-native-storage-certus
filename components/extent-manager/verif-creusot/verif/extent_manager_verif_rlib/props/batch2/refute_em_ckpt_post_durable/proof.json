@@ -1,0 +1,14 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_pop_RegionState": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_refute_em_ckpt_post_durable": {
+        "prover": "alt-ergo",
+        "time": 0.088
+      },
+      "vc_unwrap_RegionState": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_wck_lost_update": { "prover": "alt-ergo", "time": 0.025 }
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_refute_em_buddy_free_disjoint": {
+        "prover": "alt-ergo",
+        "time": 0.081
+      },
+      "vc_w1_freed": { "prover": "alt-ergo", "time": 0.016 }
+    }
+  }
+}

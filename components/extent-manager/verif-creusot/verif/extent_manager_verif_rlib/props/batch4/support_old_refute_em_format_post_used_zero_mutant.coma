@@ -1,0 +1,38 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 708 0 708 90 *)
+
+let%span sbatch4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 709 4 709 20
+let%span sbatch4'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 707 10 707 69
+let%span sbatch4'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 661 10 661 87
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_EmError = CorruptMetadata | IoError | NotInitialized | OffsetNotFound UInt64.t | OutOfSpace
+
+type t_Result_unit_EmError = Ok () | Err t_EmError
+
+type tup2_Result_unit_EmError_u64 = { f0: t_Result_unit_EmError; f1: UInt64.t }
+
+let wu_format_used (return (x: tup2_Result_unit_EmError_u64)) = any
+  [ return (result: tup2_Result_unit_EmError_u64) ->
+  {[@stop_split] [@expl:wu_format_used ensures] [%#sbatch4'1] match result.f0 with
+      | Ok () -> UInt64.t'int result.f1 = 16
+      | Err e -> e = IoError
+      end}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let support_old_refute_em_format_post_used_zero__mutant [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 708 0 708 90]
+  (return (x: tup2_Result_unit_EmError_u64)) = (! bb0
+  [ bb0 = s0
+    [ s0 = wu_format_used [%#sbatch4] (fun (_x: tup2_Result_unit_EmError_u64) -> [ &_ret <- _x ] s1)
+    | s1 = return {_ret} ] ] [ & _ret: tup2_Result_unit_EmError_u64 = Any.any_l () ])
+  [ return (result: tup2_Result_unit_EmError_u64) ->
+  {[@stop_split] [@expl:support_old_refute_em_format_post_used_zero__mutant ensures] [%#sbatch4'0] match result.f0 with
+      | Ok () -> UInt64.t'int result.f1 = 0
+      | Err _ -> true
+      end}
+    (! return {result}) ]

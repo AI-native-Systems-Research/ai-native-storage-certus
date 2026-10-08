@@ -1,0 +1,76 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 583 0 583 30 *)
+
+let%span sbatch2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 584 20 584 21
+let%span sbatch2'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 584 34 584 35
+let%span sbatch2'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 582 10 582 103
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use creusot.int.UInt8
+use creusot.prelude.Any
+
+type t_BTreeMap_u64_Slab_Global
+
+type t_SlabMap = { inner: t_BTreeMap_u64_Slab_Global }
+
+type t_HashMap_u32_Vec_u64_Global_RandomState_Global
+
+type t_SizeClassManager = { map: t_HashMap_u32_Vec_u64_Global_RandomState_Global }
+
+type t_Vec_Vec_u64_Global_Global
+
+type t_BuddyAllocator = {
+  base_offset: UInt64.t;
+  total_usable_size: UInt64.t;
+  sector_size: UInt32.t;
+  max_order: UInt64.t;
+  free_lists: t_Vec_Vec_u64_Global_Global }
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_FormatParams = {
+  data_disk_size'0: UInt64.t;
+  slab_size'0: UInt64.t;
+  max_extent_size'0: UInt32.t;
+  sector_size'0: UInt32.t;
+  region_count'0: UInt32.t;
+  metadata_alignment'0: UInt64.t;
+  instance_id'0: t_Option_u64;
+  metadata_disk_ns_id'0: UInt32.t;
+  metadata_region_size'0: UInt64.t }
+
+type t_Vec_tup2_u64_usize_Global
+
+type t_RegionState = {
+  slabs: t_SlabMap;
+  size_classes: t_SizeClassManager;
+  buddy: t_BuddyAllocator;
+  dirty: bool;
+  format_params: t_FormatParams;
+  pending_frees: t_Vec_tup2_u64_usize_Global }
+
+type t_CkCopy = { seq: UInt64.t; img: Seq.seq t_RegionState }
+
+type t_Option_CkCopy = None'0 | Some'0 t_CkCopy
+
+type t_CkDev = { sb_seq: UInt64.t; sb_active: UInt8.t; copy0: t_Option_CkCopy; copy1: t_Option_CkCopy }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let wc_fresh_dev [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 583 0 583 30]
+  (return (x: t_CkDev)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_2 <- None'0 ] s1
+    | s1 = [ &_3 <- None'0 ] s2
+    | s2 = [ &_ret <- { sb_seq = ([%#sbatch2] (0: UInt64.t));
+                        sb_active = ([%#sbatch2'0] (0: UInt8.t));
+                        copy0 = _2;
+                        copy1 = _3 } ] s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: t_CkDev = Any.any_l () | & _2: t_Option_CkCopy = Any.any_l () | & _3: t_Option_CkCopy = Any.any_l () ])
+  [ return (result: t_CkDev) -> {[@stop_split] [@expl:wc_fresh_dev ensures] [%#sbatch2'1] UInt64.t'int result.sb_seq = 0
+    /\ UInt8.t'int result.sb_active = 0 /\ result.copy0 = None'0 /\ result.copy1 = None'0}
+    (! return {result}) ]

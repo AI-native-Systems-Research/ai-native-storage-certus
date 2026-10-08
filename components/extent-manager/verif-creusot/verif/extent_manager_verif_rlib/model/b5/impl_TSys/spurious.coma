@@ -1,0 +1,50 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 101 4 101 30 *)
+
+(* model::b5::TSys *)
+
+let%span sb5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 102 29 102 34
+let%span sb5'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 97 15 97 87
+let%span sb5'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 98 14 98 45
+let%span sb5'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 99 14 99 74
+let%span sb5'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 100 14 100 78
+
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+
+type t_TPh = Top | Wait int | WaitInf | Woken bool | Work | Exited
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_TSys = { interval: t_Option_u64; now: int; ph: t_TPh; shutdown: bool; ckpts: UInt64.t }
+
+predicate resolve_refmut_TSys [@inline:trivial] (_1: MutBorrow.t t_TSys) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_TSys
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let spurious [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 101 4 101 30]
+  (self: MutBorrow.t t_TSys) (return (x: ())) =
+{[@stop_split] [@expl:spurious requires] [%#sb5'0] match self.current.ph with
+    | Wait _ -> true
+    | WaitInf -> true
+    | _ -> false
+    end}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_10 <- Woken ([%#sb5] false) ] s1
+    | s1 = [ &self <- { self with current = { self.current with ph = _10 } } ] s2
+    | s2 = -{resolve_refmut_TSys self}- s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: () = Any.any_l () | & self: MutBorrow.t t_TSys = self | & _10: t_TPh = Any.any_l () ])
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:spurious ensures] ([@stop_split] [@expl:spurious ensures #0] [%#sb5'1] self.final.ph
+      = Woken false)
+    /\ ([@stop_split] [@expl:spurious ensures #1] [%#sb5'2] self.final.interval = self.current.interval
+      /\ self.final.now = self.current.now)
+    /\ ([@stop_split] [@expl:spurious ensures #2] [%#sb5'3] self.final.shutdown = self.current.shutdown
+    /\ self.final.ckpts = self.current.ckpts)}
+    (! return {result}) ]

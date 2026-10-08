@@ -1,0 +1,18 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 97 9 97 29 *)
+
+(* <model::b3::AllocSel as std::clone::Clone> *)
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_AllocSel = Default | User UInt64.t
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_AllocSel [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 97 9 97 29]
+  (self: t_AllocSel) (return (x: t_AllocSel)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_AllocSel = Any.any_l () | & self: t_AllocSel = self ])
+  [ return (result: t_AllocSel) -> (! return {result}) ]

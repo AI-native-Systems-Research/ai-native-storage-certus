@@ -1,0 +1,27 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_get_metadata_client": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_new_inner": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_verify_em_setmbase_post_default_zero__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.017 },
+              { "prover": "z3", "time": 0.013 },
+              { "prover": "alt-ergo", "time": 0.029 },
+              {
+                "tactic": "split_vc",
+                "children": [ { "prover": "alt-ergo", "time": 0.023 }, null ]
+              }
+            ]
+          }
+        ]
+      },
+      "vc_write_blocks": { "prover": "alt-ergo", "time": 0.035 }
+    }
+  }
+}

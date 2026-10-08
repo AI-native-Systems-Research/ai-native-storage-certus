@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_refute_em_used_at_most_capacity": { "prover": "cvc5", "time": 3.3 },
+      "vc_region_used_release": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_total_free": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_total_usable_size'0": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_w1_freed": { "prover": "alt-ergo", "time": 0.014 }
+    }
+  }
+}

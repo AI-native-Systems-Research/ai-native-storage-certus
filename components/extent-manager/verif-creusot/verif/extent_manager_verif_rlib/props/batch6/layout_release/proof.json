@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_ckoff_release": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_layout_release": { "prover": "cvc5", "time": 0.242 }
+    }
+  }
+}

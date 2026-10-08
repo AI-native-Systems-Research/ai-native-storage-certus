@@ -1,0 +1,16 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_recover_rd": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_verify_em_init_post_fallback_to_inactive__mutant": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.028 },
+          { "prover": "alt-ergo", "time": 0.025 },
+          null
+        ]
+      }
+    }
+  }
+}

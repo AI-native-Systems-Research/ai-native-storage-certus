@@ -1,0 +1,72 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 480 0 480 47 *)
+
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 180 11 180 26
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 181 10 181 34
+let%span sbuddy'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 182 10 182 33
+let%span sbuddy'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 183 10 183 20
+let%span sbuddy'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 154 11 154 37
+let%span sbuddy'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 155 10 155 24
+let%span sb4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 478 11 478 50
+let%span sb4'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 479 10 479 28
+let%span sb4'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 326 16 326 35
+
+use int.ComputerDivision
+use int.Int
+
+function alignup [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 325 0 325 37] (x: int) (d: int) : int
+ = [%#sb4'1] ComputerDivision.div (x + d - 1) d * d
+
+function lemma_divmod [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 184 0 184 35] (x: int) (m: int) : ()
+
+axiom lemma_divmod_spec: forall x: int, m: int. ([%#sbuddy] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'0] x = m * ComputerDivision.div x m + ComputerDivision.mod x m)
+
+axiom lemma_divmod_spec'0: forall x: int, m: int. ([%#sbuddy] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'1] 0 <= ComputerDivision.mod x m /\ ComputerDivision.mod x m < m)
+
+axiom lemma_divmod_spec'1: forall x: int, m: int. ([%#sbuddy] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'2] ComputerDivision.div x m >= 0)
+
+function lemma_mul_le [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 156 0 156 43] (a: int) (b: int) (c: int) : ()
+
+axiom lemma_mul_le_spec: forall a: int, b: int, c: int. ([%#sbuddy'3] 0 <= a /\ a <= b /\ 0 <= c)
+    -> ([%#sbuddy'4] a * c <= b * c)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant x : int
+
+constant s : int
+
+constant r : int
+
+function lemma_alignup_le [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 480 0 480 47] (x: int) (s: int) (r: int) : ()
+
+goal vc_lemma_alignup_le: ([%#sb4] s > 0 /\ 0 <= x /\ x <= r /\ ComputerDivision.mod r s = 0)
+  -> ([@stop_split] [@expl:lemma_divmod requires] [%#sbuddy] s > 0 /\ x + s - 1 >= 0)
+  /\ (([@stop_split] [@expl:lemma_divmod ensures] ([@stop_split] [@expl:lemma_divmod ensures #0] [%#sbuddy'0] x + s - 1
+      = s * ComputerDivision.div (x + s - 1) s + ComputerDivision.mod (x + s - 1) s)
+    /\ ([@stop_split] [@expl:lemma_divmod ensures #1] [%#sbuddy'1] 0 <= ComputerDivision.mod (x + s - 1) s
+      /\ ComputerDivision.mod (x + s - 1) s < s)
+    /\ ([@stop_split] [@expl:lemma_divmod ensures #2] [%#sbuddy'2] ComputerDivision.div (x + s - 1) s >= 0))
+  -> (let _ = lemma_divmod (x + s - 1) s in ([@stop_split] [@expl:lemma_divmod requires] [%#sbuddy] s > 0 /\ r >= 0)
+  /\ (([@stop_split] [@expl:lemma_divmod ensures] ([@stop_split] [@expl:lemma_divmod ensures #0] [%#sbuddy'0] r
+      = s * ComputerDivision.div r s + ComputerDivision.mod r s)
+    /\ ([@stop_split] [@expl:lemma_divmod ensures #1] [%#sbuddy'1] 0 <= ComputerDivision.mod r s
+      /\ ComputerDivision.mod r s < s)
+    /\ ([@stop_split] [@expl:lemma_divmod ensures #2] [%#sbuddy'2] ComputerDivision.div r s >= 0))
+  -> (let _ = lemma_divmod r s in ComputerDivision.div (x + s - 1) s * s <= x + s - 1
+  && r = s * ComputerDivision.div r s
+  && (if ComputerDivision.div (x + s - 1) s > ComputerDivision.div r s then
+    ([@stop_split] [@expl:lemma_mul_le requires] [%#sbuddy'3] 0 <= ComputerDivision.div r s + 1
+      /\ ComputerDivision.div r s + 1 <= ComputerDivision.div (x + s - 1) s /\ 0 <= s)
+    /\ (([@stop_split] [@expl:lemma_mul_le ensures] [%#sbuddy'4] (ComputerDivision.div r s + 1) * s
+      <= ComputerDivision.div (x + s - 1) s * s)
+    -> (let _ = lemma_mul_le (ComputerDivision.div r s + 1) (ComputerDivision.div (x + s
+    - 1) s) s in (ComputerDivision.div r s + 1) * s = r + s
+    && ([@stop_split] [@expl:lemma_alignup_le ensures] [%#sb4'0] alignup x s <= r)))
+  else
+    [@stop_split] [@expl:lemma_alignup_le ensures] [%#sb4'0] alignup x s <= r
+  )))))

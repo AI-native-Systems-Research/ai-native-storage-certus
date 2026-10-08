@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_lemma_ceil_next": { "prover": "alt-ergo", "time": 0.029 } }
+  }
+}

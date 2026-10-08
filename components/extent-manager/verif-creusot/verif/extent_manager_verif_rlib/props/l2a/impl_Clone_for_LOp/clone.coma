@@ -1,0 +1,18 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2a.rs" 427 9 427 29 *)
+
+(* <props::l2a::LOp as std::clone::Clone> *)
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_LOp = Reserve UInt32.t | Publish UInt64.t UInt64.t | Abort UInt64.t | Remove UInt64.t | Flush
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_LOp [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2a.rs" 427 9 427 29]
+  (self: t_LOp) (return (x: t_LOp)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_LOp = Any.any_l () | & self: t_LOp = self ]) [ return (result: t_LOp) -> (! return {result}) ]

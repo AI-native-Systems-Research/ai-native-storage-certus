@@ -1,0 +1,49 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2a.rs" 1626 0 1626 82 *)
+
+let%span sl2r = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2r.rs" 214 16 214 33
+let%span sl2r'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2r.rs" 209 16 209 88
+let%span sl2a = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2a.rs" 1624 11 1624 59
+let%span sl2a'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2a.rs" 1625 10 1625 37
+let%span sl2a'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2a.rs" 114 8 115 95
+
+use creusot.int.UInt64
+use seq.Seq
+use int.Int
+
+type tup2_u64_usize = { f0: UInt64.t; f1: UInt64.t }
+
+predicate subl [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2a.rs" 112 0 112 71] (y: Seq.seq tup2_u64_usize) (x: Seq.seq tup2_u64_usize) (j: int) =
+  [%#sl2a'1] 0 <= j
+  /\ j < Seq.length x
+  /\ Seq.length y = Seq.length x - 1
+  /\ (forall p: int. 0 <= p /\ p < Seq.length y -> Seq.get y p = (if p < j then Seq.get x p else Seq.get x (p + 1)))
+
+predicate inpf [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2r.rs" 208 0 208 67] (ps: Seq.seq tup2_u64_usize) (lo: int) (t: int) (j: int) =
+  [%#sl2r'0] exists p: int. lo <= p
+    /\ p < Seq.length ps /\ UInt64.t'int (Seq.get ps p).f0 = t /\ UInt64.t'int (Seq.get ps p).f1 = j
+
+predicate inpend [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2r.rs" 213 0 213 60] (ps: Seq.seq tup2_u64_usize) (t: int) (j: int) =
+  [%#sl2r] inpf ps 0 t j
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant y : Seq.seq tup2_u64_usize
+
+constant x : Seq.seq tup2_u64_usize
+
+constant j : int
+
+constant q : int
+
+function lemma_subl_keep [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2a.rs" 1626 0 1626 82] (y: Seq.seq tup2_u64_usize) (x: Seq.seq tup2_u64_usize) (j: int) (q: int) : ()
+
+goal vc_lemma_subl_keep: ([%#sl2a] subl y x j /\ 0 <= q /\ q < Seq.length x /\ q <> j)
+  -> (if q < j then
+    Seq.get y q = Seq.get x q
+    && ([@stop_split] [@expl:lemma_subl_keep ensures] [%#sl2a'0] inpend y (UInt64.t'int (Seq.get x q).f0) (UInt64.t'int (Seq.get x q).f1))
+  else
+    Seq.get y (q - 1) = Seq.get x q
+    && ([@stop_split] [@expl:lemma_subl_keep ensures] [%#sl2a'0] inpend y (UInt64.t'int (Seq.get x q).f0) (UInt64.t'int (Seq.get x q).f1))
+  )

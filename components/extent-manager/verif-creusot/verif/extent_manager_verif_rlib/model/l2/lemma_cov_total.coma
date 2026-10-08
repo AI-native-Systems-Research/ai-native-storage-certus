@@ -1,0 +1,162 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 444 0 444 79 *)
+
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 111 11 111 27
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 112 10 112 27
+let%span sbuddy'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 113 10 113 25
+let%span sbuddy'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 173 11 173 16
+let%span sbuddy'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 174 10 174 20
+let%span sbuddy'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 197 11 197 47
+let%span sbuddy'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 198 11 198 31
+let%span sbuddy'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 200 10 200 30
+let%span sbuddy'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 211 11 211 64
+let%span sbuddy'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 212 10 212 26
+let%span sbuddy'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 213 10 213 37
+let%span sbuddy'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 33 16 33 29
+let%span sbuddy'11 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 199 10 199 15
+let%span sbuddy'12 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 180 11 180 26
+let%span sbuddy'13 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 181 10 181 34
+let%span sbuddy'14 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 182 10 182 33
+let%span sbuddy'15 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 183 10 183 20
+let%span sbuddy'16 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 154 11 154 37
+let%span sbuddy'17 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 155 10 155 24
+let%span sl2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 441 11 441 65
+let%span sl2'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 442 11 442 82
+let%span sl2'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 443 10 443 30
+let%span sl2'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 456 11 456 60
+let%span sl2'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 457 10 457 26
+let%span sl2'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 78 8 78 125
+let%span sl2'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 69 8 69 125
+let%span sl2'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 459 4 459 22
+let%span sl2'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 21 16 21 68
+let%span sl2'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 27 16 27 26
+
+use seq.Seq
+use int.ComputerDivision
+use bv.Pow2int
+use creusot.int.UInt64
+use int.Int
+
+type t_Vec_u64_Global
+
+function span [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 32 0 32 35] (ss: int) (o: int) : int
+ = [%#sbuddy'10] Pow2int.pow2 o * ss
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_u64_Global (self: t_Vec_u64_Global) : Seq.seq UInt64.t
+
+axiom view_Vec_u64_Global_spec:
+  forall self: t_Vec_u64_Global [view_Vec_u64_Global self]. [%#svec] Seq.length (view_Vec_u64_Global self)
+    <= UInt64.t'int const_MAX
+
+predicate fv [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 20 0 20 52] (fl: Seq.seq t_Vec_u64_Global) (o: int) (k: int) =
+  [%#sl2'7] 0 <= o /\ o < Seq.length fl /\ 0 <= k /\ k < Seq.length (view_Vec_u64_Global (Seq.get fl o))
+
+function fs [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 26 0 26 51] (fl: Seq.seq t_Vec_u64_Global) (o: int) (k: int) : int
+ = [%#sl2'8] UInt64.t'int (Seq.get (view_Vec_u64_Global (Seq.get fl o)) k)
+
+predicate inblk [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 67 0 67 65] (fl: Seq.seq t_Vec_u64_Global) (ss: int) (kk: int) (t: int) =
+  [%#sl2'5] exists o: int, k: int. fv fl o k /\ o >= kk /\ fs fl o k <= t /\ t + span ss kk <= fs fl o k + span ss o
+
+predicate cov [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 76 0 76 55] (fl: Seq.seq t_Vec_u64_Global) (ss: int) (hi: int) =
+  [%#sl2'4] forall kk: int, t: int. 0 <= kk /\ 0 <= t /\ ComputerDivision.mod t (span ss kk) = 0 /\ t + span ss kk <= hi
+    -> inblk fl ss kk t
+
+function lemma_span_pos [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 114 0 114 38] (ss: int) (o: int) : ()
+
+axiom lemma_span_pos_spec: forall ss: int, o: int. ([%#sbuddy] ss > 0 /\ 0 <= o) -> ([%#sbuddy'0] span ss o >= ss)
+
+axiom lemma_span_pos_spec'0: forall ss: int, o: int. ([%#sbuddy] ss > 0 /\ 0 <= o) -> ([%#sbuddy'1] span ss o > 0)
+
+function lemma_mod_self [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 175 0 175 29] (m: int) : ()
+
+axiom lemma_mod_self_spec: forall m: int. ([%#sbuddy'2] m > 0) -> ([%#sbuddy'3] ComputerDivision.mod m m = 0)
+
+function lemma_span_div [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 201 0 201 54] (x: int) (ss: int) (a: int) (b: int) : ()
+
+axiom lemma_span_div_spec: forall x: int, ss: int, a: int, b: int. ([%#sbuddy'4] ss > 0 /\ 0 <= a /\ a <= b /\ x >= 0)
+    -> ([%#sbuddy'5] ComputerDivision.mod x (span ss b) = 0) -> ([%#sbuddy'6] ComputerDivision.mod x (span ss a) = 0)
+
+function lemma_mod_add [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 214 0 214 44] (x: int) (y: int) (m: int) : ()
+
+axiom lemma_mod_add_spec: forall x: int, y: int, m: int. ([%#sbuddy'7] m > 0
+      /\ x >= 0 /\ y >= 0 /\ ComputerDivision.mod x m = 0 /\ ComputerDivision.mod y m = 0)
+    -> ([%#sbuddy'8] ComputerDivision.mod (x + y) m = 0)
+
+axiom lemma_mod_add_spec'0: forall x: int, y: int, m: int. ([%#sbuddy'7] m > 0
+      /\ x >= 0 /\ y >= 0 /\ ComputerDivision.mod x m = 0 /\ ComputerDivision.mod y m = 0)
+    -> ([%#sbuddy'9] x >= y -> ComputerDivision.mod (x - y) m = 0)
+
+function lemma_divmod [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 184 0 184 35] (x: int) (m: int) : ()
+
+axiom lemma_divmod_spec: forall x: int, m: int. ([%#sbuddy'12] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'13] x = m * ComputerDivision.div x m + ComputerDivision.mod x m)
+
+axiom lemma_divmod_spec'0: forall x: int, m: int. ([%#sbuddy'12] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'14] 0 <= ComputerDivision.mod x m /\ ComputerDivision.mod x m < m)
+
+axiom lemma_divmod_spec'1: forall x: int, m: int. ([%#sbuddy'12] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'15] ComputerDivision.div x m >= 0)
+
+function lemma_mul_le [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 156 0 156 43] (a: int) (b: int) (c: int) : ()
+
+axiom lemma_mul_le_spec: forall a: int, b: int, c: int. ([%#sbuddy'16] 0 <= a /\ a <= b /\ 0 <= c)
+    -> ([%#sbuddy'17] a * c <= b * c)
+
+function lemma_floor_le [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 458 0 458 45] (m: int) (d: int) (n: int) : ()
+ =
+  [%#sl2'6] let _ = lemma_divmod m d in let _ = lemma_divmod n d in lemma_mul_le (ComputerDivision.div m d) (ComputerDivision.div n d) d
+
+axiom lemma_floor_le_spec: forall m: int, d: int, n: int. ([%#sl2'2] d > 0
+      /\ m >= 0 /\ n >= 0 /\ ComputerDivision.mod m d = 0 /\ m <= n) -> ([%#sl2'3] m <= ComputerDivision.div n d * d)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant fl : Seq.seq t_Vec_u64_Global
+
+constant ss : int
+
+constant total : int
+
+constant kk : int
+
+constant t : int
+
+function lemma_cov_total [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 444 0 444 79] (fl: Seq.seq t_Vec_u64_Global) (ss: int) (total: int) (kk: int) (t: int) : ()
+
+goal vc_lemma_cov_total: ([%#sl2] cov fl ss (ComputerDivision.div total ss * ss) /\ ss > 0 /\ total >= 0)
+  -> ([%#sl2'0] 0 <= kk /\ 0 <= t /\ ComputerDivision.mod t (span ss kk) = 0 /\ t + span ss kk <= total)
+  -> ([@stop_split] [@expl:lemma_span_pos requires] [%#sbuddy] ss > 0 /\ 0 <= kk)
+  /\ (([@stop_split] [@expl:lemma_span_pos ensures] ([@stop_split] [@expl:lemma_span_pos ensures #0] [%#sbuddy'0] span ss kk
+      >= ss)
+    /\ ([@stop_split] [@expl:lemma_span_pos ensures #1] [%#sbuddy'1] span ss kk > 0))
+  -> (let _ = lemma_span_pos ss kk in ([@stop_split] [@expl:lemma_mod_self requires] [%#sbuddy'2] ss > 0)
+  /\ (([@stop_split] [@expl:lemma_mod_self ensures] [%#sbuddy'3] ComputerDivision.mod ss ss = 0)
+  -> (let _ = lemma_mod_self ss in ([@stop_split] [@expl:lemma_span_div requires] ([@stop_split] [@expl:lemma_span_div requires #0] [%#sbuddy'4] ss
+        > 0
+      /\ 0 <= 0 /\ 0 <= kk /\ span ss kk >= 0)
+    /\ ([@stop_split] [@expl:lemma_span_div requires #1] [%#sbuddy'5] ComputerDivision.mod (span ss kk) (span ss kk)
+    = 0))
+  /\ (([@stop_split] [@expl:lemma_span_div ensures] [%#sbuddy'6] ComputerDivision.mod (span ss kk) (span ss 0) = 0)
+  -> (let _ = lemma_span_div (span ss kk) ss 0 kk in ([@stop_split] [@expl:lemma_mod_self requires] [%#sbuddy'2] span ss kk
+    > 0)
+  /\ (([@stop_split] [@expl:lemma_mod_self ensures] [%#sbuddy'3] ComputerDivision.mod (span ss kk) (span ss kk) = 0)
+  -> (let _ = lemma_mod_self (span ss kk) in ([@stop_split] [@expl:lemma_span_div requires] ([@stop_split] [@expl:lemma_span_div requires #0] [%#sbuddy'4] ss
+        > 0
+      /\ 0 <= 0 /\ 0 <= kk /\ t >= 0)
+    /\ ([@stop_split] [@expl:lemma_span_div requires #1] [%#sbuddy'5] ComputerDivision.mod t (span ss kk) = 0))
+  /\ (([@stop_split] [@expl:lemma_span_div ensures] [%#sbuddy'6] ComputerDivision.mod t (span ss 0) = 0)
+  -> (let _ = lemma_span_div t ss 0 kk in ([@stop_split] [@expl:lemma_mod_add requires] [%#sbuddy'7] ss > 0
+    /\ t >= 0 /\ span ss kk >= 0 /\ ComputerDivision.mod t ss = 0 /\ ComputerDivision.mod (span ss kk) ss = 0)
+  /\ (([@stop_split] [@expl:lemma_mod_add ensures] ([@stop_split] [@expl:lemma_mod_add ensures #0] [%#sbuddy'8] ComputerDivision.mod (t
+        + span ss kk) ss
+      = 0)
+    /\ ([@stop_split] [@expl:lemma_mod_add ensures #1] [%#sbuddy'9] t >= span ss kk
+    -> ComputerDivision.mod (t - span ss kk) ss = 0))
+  -> (let _ = lemma_mod_add t (span ss kk) ss in ([@stop_split] [@expl:lemma_floor_le requires] [%#sl2'2] ss > 0
+    /\ t + span ss kk >= 0 /\ total >= 0 /\ ComputerDivision.mod (t + span ss kk) ss = 0 /\ t + span ss kk <= total)
+  /\ (([@stop_split] [@expl:lemma_floor_le ensures] [%#sl2'3] t + span ss kk <= ComputerDivision.div total ss * ss)
+  -> ([@stop_split] [@expl:lemma_cov_total ensures] [%#sl2'1] inblk fl ss kk t))))))))))))))

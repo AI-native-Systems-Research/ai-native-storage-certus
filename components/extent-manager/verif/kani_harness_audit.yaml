@@ -1,0 +1,431 @@
+# J5 harness audit: the 22 `outcome: proved` records of the extent-manager Kani limitation study, part 1
+# Tree: /home/cornel/fv-runs/extent-manager-2cd35bac (pin 2cd35bac). Read-only audit; no cargo kani run.
+# Sources: components/extent-manager/src/verification.rs (V:<line>), src/lib.rs (L:<line>),
+#   verif-l3/unified_properties.yaml (statements + level2_assumptions), ~/FV/extent-manager_kani_limits.yaml,
+#   verif/kani_measurements.md (which conformance harnesses ran), ~/fv-runs/scratch/kani_l3/logs/.
+date: '2026-10-08'
+auditor: J5 (subagent, read-only)
+rule: >
+  A credited proof may assume or fix ONLY (a) what the statement says, (b) the exact assume_rust of a declared
+  level2_assumptions entry the code path really needs, or (c) a proved invariant. Fixing inputs to a finite set is a
+  BOUND. Unreachability stubs (assert!(false)[; assume(false)]) are sound. Any other behavioural stub or model is an
+  assumption unless its check_stub_conforms_* harness exists AND was run.
+classes:
+  OBL: the statement itself says it
+  ASSUME:<id>: exact assume_rust of a declared level2_assumptions entry, and the exercised path needs it
+  INV: proved fact. Used here for a stub whose check_stub_conforms_* harness exists AND ran SUCCESSFUL
+  TYPE: given by the Rust type or by the real code under test (no restriction)
+  BOUND: input / pre-state / environment fixed to a finite set or a single point
+  UNNEEDED-ASSUME: an assume the exercised path does not need for the claim (cost cutting, or narrowing a claim
+    that holds anyway)
+  UNDECLARED-ASSUME: (added by J5; neither UNNEEDED nor BOUND fits) an assume the claim really needs, but it is
+    neither in the statement nor a declared level2 assumption. The statement or the level-2 list has a gap.
+  UNCHECKED-STUB: behavioural stub/model with no conformance harness that exists and ran SUCCESSFUL
+  SOUND-UNREACH: unreachability stub (assert!(false)); allowed, since a reach shows up as a failed check
+
+# ---------------------------------------------------------------------------------------------------------------
+# Cross-cutting findings (these apply to many harnesses and are referenced as G1..G7 below)
+# ---------------------------------------------------------------------------------------------------------------
+global_findings:
+  G1_random_state:
+    text: '#[kani::stub(RandomState::new, stub_random_state)]: a fixed [0,0] SipHash seed'
+    file_line: V:47-56
+    class: UNCHECKED-STUB
+    note: >
+      REACHED in every harness that builds an ExtentManager. support_new_em (V:270) calls InterfaceMap::new(), which
+      calls HashMap::new() (component-core/src/component.rs:40), and that calls RandomState::new. There is no
+      check_stub_conforms_random_state. The argument for it (kani_RESUME.md:18: the value is in the real function's
+      range, and the map is never queried) is plausible and the risk is low, but the rule makes it an assumption.
+      Lifting it: one conformance harness, or build the empty map without RandomState under cfg(kani).
+  G2_arc_drop_slow:
+    text: '#[kani::stub(Arc::drop_slow, stub_arc_drop_slow)]: the last Arc reference leaks and Drop of the inner value is skipped'
+    file_line: V:63-66
+    class: UNCHECKED-STUB
+    note: >
+      No conformance harness. By inspection it is probably NOT reached on the shallow paths: each harness ends
+      with mem::forget(em), and the receptacle keeps one reference to every Arc it clones. If it is unreached it has
+      no effect. It is not decisive for any verdict below, but nothing has checked it.
+  G3_condvar_notify:
+    text: '#[kani::stub(Condvar::notify_all/notify_one, stub_condvar_notify)]: no-op'
+    file_line: V:85
+    class: UNCHECKED-STUB
+    note: >
+      Argued to be exact because Kani explores one thread, so there are no waiters. No conformance harness.
+      REACHED only by checkpoint() (notify_all, L:783) and by set_interval/stop (notify_one, L:76/81). It is
+      unreached on the format/initialize/getter paths.
+  G4_nvme_to_em:
+    text: '#[kani::stub(error::nvme_to_em, stub_nvme_to_em)]: always IoError("")'
+    file_line: V:3021
+    class: INV
+    note: 'check_stub_conforms_nvme_to_em (V:3035) ran SUCCESSFUL (verif/kani_measurements.md:133). Lines 1-4124 are byte-identical to the measured file.'
+  G5_support_new_em:
+    text: 'pre-state = support_new_em(): a direct struct literal (every user field Default, receptacles disconnected, empty interface map); NOT the real constructor'
+    file_line: V:270-291
+    class: BOUND
+    note: >
+      Two separate issues. (i) As a pre-state for 'before format/initialize has succeeded' (or 'no device
+      connected') it is ONE point of the pre-state family. data/metadata base LBA = 0, ns_id = None, no
+      device/logger, checkpoint_coalesce default, interval None. The getters under test read only regions/shared
+      (L:215-245, 636-719), so the bound is INESSENTIAL there. It is still a fixed pre-state that the rule does not
+      allow, and making those fields symbolic would lift it cheaply. (ii) Where the statement is about the
+      CONSTRUCTOR ('newly created', 'never called'), support_new_em is a MODEL of define_component!'s
+      new_default/new (define_component.rs:297-327). Its conformance harness check_stub_conforms_new_default
+      (V:6278) did NOT pass. CORRECTION to the brief: it WAS run. ~/fv-runs/scratch/kani_l3/logs/
+      verification__check_stub_conforms_new_default.p2u4.log (--unwind 4) gives "VERIFICATION:- FAILED", failed
+      check "unwinding assertion loop 0", 3 min, 2.2 GB. So in case (ii) the model is UNCHECKED-STUB.
+  G6_meta_device_mock:
+    text: 'support_em_with_device(sectors, geometry_fails): KaniMetaDevice mock, sector size fixed MD_SS=4096'
+    file_line: V:200-268, 294-303
+    class: INV
+    note: >
+      check_stub_conforms_iblockdevice (V:369) ran SUCCESSFUL (kani_measurements.md:48). It ran BEFORE the
+      Arc::drop_slow stub was added to that harness, so the current text has not been re-run (kani_RESUME.md:30
+      "re-measure"). It does not cover the geometry_fails=true branch. The fixed metadata sector size 4096 is a
+      BOUND wherever the path multiplies by it.
+  G7_unwind:
+    text: '#[kani::unwind(N)] with default unwinding assertions'
+    class: TYPE
+    note: 'Unwinding assertions are on and every run reports SUCCESSFUL, so the unwind value is not a hidden bound.'
+
+audits:
+# ------------------------------------------------------------------ format guards -------------------------------
+- id: EM-FORMAT-ERR-DEVICE-NOT-CONNECTED
+  harness: verify_em_format_err_device_not_connected
+  harness_line: V:4497 (mutant V:4507) -> support_case_l3_fmt_dev_not_connected V:4180
+  statement: If no metadata block device has been connected, format() fails with a NotInitialized error and leaves the component's state unchanged.
+  premises:
+  - {text: 'no device connected (support_new_em)', file_line: 'V:4181', class: OBL, note: 'the statement precondition'}
+  - {text: 'pre-state otherwise fixed to support_new_em defaults', file_line: 'V:270', class: BOUND, note: 'G5(i). Inessential: format reads only params before Receptacle::get (L:387-407)'}
+  - {text: 'FormatParams fully symbolic, instance_id always Some', file_line: 'V:4148-4160', class: BOUND, note: 'instance_id=None is excluded. Inessential: instance_id is read only after the receptacle (L:474)'}
+  - {text: 'kani::assume(sector_size.is_power_of_two())', file_line: 'V:4164', class: UNNEEDED-ASSUME, note: 'D-RANGE-FR-002-217ace is declared for format, but the path to the receptacle needs only sector_size != 0. pow2 is there to make the % guard cheap'}
+  - {text: 'kani::assume(slab % sector == 0); assume(max_extent <= slab); assume(region_count.is_power_of_two())', file_line: 'V:4165-4167', class: UNDECLARED-ASSUME, note: 'The claim NEEDS these: format validates params BEFORE the device check (L:388-401), so with an invalid param it returns CorruptMetadata and the literal statement is false. Neither the statement nor any level2 entry says this. Spec gap: the statement should say "with params that pass validation"'}
+  - {text: 'stub_random_state', file_line: 'V:47', class: UNCHECKED-STUB, note: G1, reached}
+  - {text: 'stub_arc_drop_slow', file_line: 'V:63', class: UNCHECKED-STUB, note: 'G2, probably unreached'}
+  - {text: 'stub_condvar_notify (all/one)', file_line: 'V:85', class: UNCHECKED-STUB, note: 'G3, unreached on this path'}
+  - {text: 'stub_nvme_to_em', file_line: 'V:3021', class: INV, note: 'G4, unreached on this path'}
+  coverage_note: '"state unchanged" is checked only as regions/shared still None (V:4142). That is the right check here, because format writes only those two before it fails'
+  verdict: do-not-credit
+  reason: 'undeclared guard-pass assumes (needed: the statement is false without them), one unneeded pow2 assume, and a reached unchecked RandomState stub'
+
+- id: EM-FORMAT-ERR-SECTOR-ZERO
+  harness: verify_em_format_err_sector_zero
+  harness_line: V:4517 (mutant V:4527) -> support_case_l3_fmt_sector_zero V:4194
+  statement: When format() is called with a sector size of zero, it returns a CorruptMetadata error.
+  premises:
+  - {text: 'p.sector_size = 0', file_line: 'V:4197', class: OBL, note: ''}
+  - {text: 'all other FormatParams fields symbolic (instance_id Some)', file_line: 'V:4148', class: TYPE, note: 'instance_id restriction is inessential: guard 1 returns first'}
+  - {text: 'pre-state: fresh component, no device OR a conforming mock device', file_line: 'V:4170-4178', class: BOUND, note: 'G5(i)+G6. Inessential: guard 1 (L:388) precedes every field read'}
+  - {text: 'kani::assume(sectors <= u64::MAX / MD_SS)', file_line: 'V:4175', class: UNNEEDED-ASSUME, note: 'This is the exact range of D-RANGE-FR-002-67ea4f (format), but the sector-zero path never queries the device. Not needed. Harmless'}
+  - {text: 'stub_random_state', file_line: 'V:47', class: UNCHECKED-STUB, note: G1, reached}
+  - {text: 'stub_arc_drop_slow / stub_condvar_notify', file_line: 'V:63, V:85', class: UNCHECKED-STUB, note: 'G2/G3, unreached'}
+  - {text: 'stub_nvme_to_em', file_line: 'V:3021', class: INV, note: G4}
+  verdict: do-not-credit
+  reason: 'reached unchecked RandomState stub (G1); otherwise clean apart from an unneeded but harmless device-size assume'
+
+- id: EM-FORMAT-ERR-MAX-EXTENT-EXCEEDS-SLAB
+  harness: verify_em_format_err_max_extent_exceeds_slab
+  harness_line: V:4557 (mutant V:4567) -> support_case_l3_fmt_max_extent V:4213
+  statement: When format() is called with a maximum extent size strictly greater than the slab size, it returns a CorruptMetadata error; a maximum extent size equal to the slab size is accepted.
+  premises:
+  - {text: 'gt / eq cases split on symbolic max_extent_size vs slab_size', file_line: 'V:4221-4231', class: OBL, note: ''}
+  - {text: 'kani::assume(sector_size.is_power_of_two())', file_line: 'V:4218', class: UNNEEDED-ASSUME, note: 'Clause gt: any earlier guard failure is also CorruptMetadata, so no assume is needed. Clause eq: needs only sector != 0. pow2 is there for speed'}
+  - {text: 'kani::assume(slab % sector == 0)', file_line: 'V:4219', class: UNNEEDED-ASSUME, note: 'Not needed for clause gt (an earlier failure is also Corrupt). Clause eq reads "accepted" as "this guard does not reject", which is observable only if the other guards pass, so for eq it is part of the reading of the statement'}
+  - {text: 'kani::assume(region_count.is_power_of_two())', file_line: 'V:4220', class: UNDECLARED-ASSUME, note: 'Clause eq: needed so that the later region guard does not mask "accepted". Undeclared. Arguably implied by "accepted [by this check]"'}
+  - {text: 'no device connected (support_new_em); "accepted" observed as "not CorruptMetadata" (NotInitialized)', file_line: 'V:4216, V:4231', class: BOUND, note: 'Clause eq is checked only on the no-device pre-state (one point, G5(i)). With a device, eq-acceptance would need the layout path. The harness uses a proxy observation'}
+  - {text: 'stub_random_state', file_line: 'V:47', class: UNCHECKED-STUB, note: G1, reached}
+  - {text: 'stub_arc_drop_slow / stub_condvar_notify', file_line: 'V:63, V:85', class: UNCHECKED-STUB, note: 'G2/G3, unreached'}
+  - {text: 'stub_nvme_to_em', file_line: 'V:3021', class: INV, note: G4}
+  verdict: do-not-credit
+  reason: 'unneeded pow2 assume, undeclared region-pow2 assume for the eq clause, eq clause checked only on the no-device pre-state, and the RandomState stub'
+
+- id: EM-FORMAT-ERR-REGION-COUNT
+  harness: verify_em_format_err_region_count
+  harness_line: V:4577 (mutant V:4587) -> support_case_l3_fmt_region_count V:4235
+  statement: When format() is called with a region count that is zero or is not a power of two, it returns a CorruptMetadata error.
+  premises:
+  - {text: 'symbolic u32 region_count; bad = 0 or non-pow2', file_line: 'V:4241', class: OBL, note: ''}
+  - {text: 'kani::assume(sector pow2); assume(slab % sector == 0); assume(max_extent <= slab)', file_line: 'V:4238-4240', class: UNNEEDED-ASSUME, note: 'The statement (bad -> Corrupt) holds without them, because every earlier guard also returns CorruptMetadata. They are needed only for the extra converse (good -> not Corrupt) that the harness also asserts, and the statement does not claim that. They narrow the proved domain of the statement direction'}
+  - {text: 'no device; pre-state support_new_em', file_line: 'V:4236', class: BOUND, note: 'G5(i). Inessential for the bad direction'}
+  - {text: 'stub_random_state', file_line: 'V:47', class: UNCHECKED-STUB, note: G1, reached}
+  - {text: 'stub_arc_drop_slow / stub_condvar_notify', file_line: 'V:63, V:85', class: UNCHECKED-STUB, note: 'G2/G3, unreached'}
+  - {text: 'stub_nvme_to_em', file_line: 'V:3021', class: INV, note: G4}
+  verdict: do-not-credit
+  reason: 'three guard assumes not needed for the stated direction, which narrows the domain the statement is proved on, plus the RandomState stub'
+
+- id: EM-FORMAT-ERR-SLAB-NOT-SECTOR-MULTIPLE
+  harness: verify_em_format_err_slab_not_sector_multiple
+  harness_line: V:6138 (mutant V:6147) -> support_case_l3_fmt_slab_not_multiple_b3 V:6209
+  statement: When format() is called with a slab size that is not an exact multiple of the sector size, it returns a CorruptMetadata error.
+  premises:
+  - {text: 'kani::assume(slab_size % sector_size != 0)', file_line: 'V:6213', class: OBL, note: ''}
+  - {text: 'kani::assume(sector_size.is_power_of_two())', file_line: 'V:6212', class: UNNEEDED-ASSUME, note: 'This is the exact text of D-RANGE-FR-002-217ace, but the guard L:391 is correct for any sector != 0. The record admits it was added because the general u64 % u32 guard is > 400 s and becomes a mask test under pow2. The rule forbids exactly this. Needed instead: sector_size != 0, which the statement implies (sector 0 hits guard 1, also Corrupt)'}
+  - {text: 'pre-state: no device OR mock device; assume(sectors <= u64::MAX/MD_SS)', file_line: 'V:4170-4178', class: UNNEEDED-ASSUME, note: 'Device size is never queried on this path. Pre-state otherwise G5(i), inessential'}
+  - {text: 'stub Receptacle::get -> stub_l3_unreachable_receptacle_get (assert!(false); assume(false))', file_line: 'V:6015-6021', class: SOUND-UNREACH, note: 'Sound. Also a useful witness that the guard returns before the device lookup'}
+  - {text: 'stub_random_state', file_line: 'V:47', class: UNCHECKED-STUB, note: G1, reached}
+  - {text: 'stub_arc_drop_slow', file_line: 'V:63', class: UNCHECKED-STUB, note: 'G2, unreached'}
+  - {text: 'stub_nvme_to_em', file_line: 'V:3021', class: INV, note: G4}
+  verdict: do-not-credit
+  reason: 'sector pow2 assumed only to make Kani fast (record note says so); the guard does not depend on it'
+
+- id: EM-FORMAT-ERR-NO-USABLE-DATA
+  harness: verify_em_format_err_no_usable_data
+  harness_line: V:6192 (mutant V:6201) -> support_case_l3_no_usable_b2 V:6127 -> l3_dispatch! V:6101-6119 -> support_l3_body_no_usable V:6066
+  statement: If no data space remains after the metadata reservation (the data disk is not larger than the data start offset), format() fails with a CorruptMetadata error.
+  premises:
+  - {text: 'l3_dispatch!: sector_size in {512,4096}, metadata_alignment in {0,4096,1<<20}, region_count in {1,2} (const generics)', file_line: 'V:6101-6119, V:6128, V:6023-6031', class: BOUND, note: 'ESSENTIAL: these are the divisors of the layout arithmetic (L:420-432), which is exactly what the property is about. The record fidelity says representative. Also: if a >= 3 no body runs (a vacuous but harmless branch)'}
+  - {text: 'kani::assume(slab % SSZ == 0); assume(max_extent <= slab)', file_line: 'V:6028-6029', class: UNNEEDED-ASSUME, note: 'Not needed for the claim, since earlier guard failures are also CorruptMetadata. They narrow the domain'}
+  - {text: 'kani::assume(sectors <= u64::MAX / MD_SS)', file_line: 'V:6068', class: 'ASSUME:D-RANGE-FR-002-67ea4f', note: 'Needed: the path computes num_sectors * sector_size (L:410-415). Its form is the exact assume_rust with sector_size = 4096'}
+  - {text: 'metadata device sector size fixed 4096 (MD_SS), geometry query succeeds', file_line: 'V:296-299', class: BOUND, note: 'G6. A device connected with a working geometry is implied by "after the metadata reservation" (OBL-ish). The fixed 4096 is a point bound'}
+  - {text: 'kani::assume(crs > 0 && data_disk_size <= dso), with dso recomputed by the harness', file_line: 'V:6073-6086', class: OBL, note: 'This is the statement precondition. crs > 0 drops the too-small case. That is defensible because "data start offset" is undefined when there is no checkpoint region. The harness mirror is div_ceil vs (sb+al-1)/al*al, which agree for the three menu alignments (no overflow)'}
+  - {text: 'stub BuddyAllocator::new -> stub_l3_unreachable_buddy_new (assert!(false); assume(false))', file_line: 'V:5866-5874', class: SOUND-UNREACH, note: Sound}
+  - {text: 'stub_random_state', file_line: 'V:47', class: UNCHECKED-STUB, note: G1, reached}
+  - {text: 'stub_arc_drop_slow', file_line: 'V:63', class: UNCHECKED-STUB, note: 'G2, probably unreached (receptacle keeps the device Arc)'}
+  - {text: 'stub_nvme_to_em', file_line: 'V:3021', class: INV, note: 'G4, unreached (geometry_fails=false)'}
+  - {text: 'KaniMetaDevice mock', file_line: 'V:200-268', class: INV, note: G6}
+  verdict: do-not-credit
+  reason: 'l3_dispatch! fixes sector size, alignment and region count to finite menus (BOUND on the divisors the property is about); also unneeded guard assumes'
+
+# ------------------------------------------------------------------ initialize / uninitialised getters ----------
+- id: EM-INIT-ERR-DEVICE-NOT-CONNECTED
+  harness: verify_em_init_err_device_not_connected
+  harness_line: V:4657 (mutant V:4667) -> support_case_l3_init_dev_not_connected V:4334
+  statement: If no metadata block device has been connected, initialize() fails with a NotInitialized error and leaves the component's state unchanged.
+  premises:
+  - {text: 'no device connected', file_line: 'V:4335', class: OBL, note: ''}
+  - {text: 'optional symbolic set_metadata_ns_id', file_line: 'V:4336-4338', class: TYPE, note: ''}
+  - {text: 'other pre-state fields fixed (support_new_em)', file_line: 'V:270', class: BOUND, note: 'G5(i). Inessential: initialize reads only ns_id and the logger before the receptacle (L:519-522). The logger is fixed disconnected, so log_info is a no-op'}
+  - {text: 'stub_random_state', file_line: 'V:47', class: UNCHECKED-STUB, note: G1, reached}
+  - {text: 'stub_arc_drop_slow / stub_condvar_notify', file_line: 'V:63, V:85', class: UNCHECKED-STUB, note: 'G2/G3, unreached'}
+  - {text: 'stub_nvme_to_em', file_line: 'V:3021', class: INV, note: 'G4, unreached'}
+  verdict: do-not-credit
+  reason: 'reached unchecked RandomState stub (G1) and a fixed pre-state (inessential); no other issue'
+
+- id: EM-GETEXT-UNINIT-EMPTY
+  harness: verify_em_getext_uninit_empty
+  harness_line: V:4697 (mutant V:4707) -> support_case_l3_getext_uninit V:4360
+  statement: Before the component is formatted or initialized, get_extents() returns an empty list.
+  premises:
+  - {text: 'pre-state = support_new_em (regions None)', file_line: 'V:4361', class: BOUND, note: 'G5(i). One point of the "before format/init" family. Inessential: get_extents reads only regions (L:636-660), and format/initialize write regions only on success (L:509, 579)'}
+  - {text: 'stub_random_state', file_line: 'V:47', class: UNCHECKED-STUB, note: G1, reached}
+  - {text: 'stub_arc_drop_slow / stub_condvar_notify / stub_nvme_to_em', file_line: 'V:63, V:85, V:3021', class: UNCHECKED-STUB, note: 'G2/G3 unreached. G4 checked'}
+  verdict: do-not-credit
+  reason: 'reached unchecked RandomState stub (G1) and a single fixed pre-state (inessential)'
+
+- id: EM-FOREACH-UNINIT-NO-CALLS
+  harness: verify_em_foreach_uninit_no_calls
+  harness_line: V:4717 (mutant V:4727) -> support_case_l3_foreach_uninit V:4367
+  statement: Before the component is formatted or initialized, for_each_extent() never calls the callback.
+  premises:
+  - {text: 'pre-state = support_new_em', file_line: 'V:4368', class: BOUND, note: 'G5(i), inessential (L:662-682 reads only regions)'}
+  - {text: 'one concrete counting callback', file_line: 'V:4370', class: TYPE, note: 'No calls means callback identity does not matter'}
+  - {text: 'stub_random_state', file_line: 'V:47', class: UNCHECKED-STUB, note: G1, reached}
+  - {text: 'stub_arc_drop_slow / stub_condvar_notify', file_line: 'V:63, V:85', class: UNCHECKED-STUB, note: 'G2/G3, unreached'}
+  verdict: do-not-credit
+  reason: 'reached unchecked RandomState stub (G1) and a single fixed pre-state (inessential)'
+
+- id: EM-REMOVE-ERR-NOT-INITIALIZED
+  harness: verify_em_remove_err_not_initialized
+  harness_line: V:4737 (mutant V:4747) -> support_case_l3_remove_notinit V:4375
+  statement: When remove_extent() is called before either format() or initialize() has succeeded, it returns a NotInitialized error.
+  premises:
+  - {text: 'symbolic offset', file_line: 'V:4377', class: TYPE, note: ''}
+  - {text: 'pre-state = support_new_em', file_line: 'V:4376', class: BOUND, note: 'G5(i), inessential (region_for_offset L:227-234 reads regions first)'}
+  - {text: 'stub_random_state', file_line: 'V:47', class: UNCHECKED-STUB, note: G1, reached}
+  - {text: 'stub_arc_drop_slow / stub_condvar_notify', file_line: 'V:63, V:85', class: UNCHECKED-STUB, note: 'G2/G3, unreached'}
+  verdict: do-not-credit
+  reason: 'reached unchecked RandomState stub (G1) and a single fixed pre-state (inessential)'
+
+- id: EM-CKPT-ERR-NOT-INITIALIZED
+  harness: verify_em_ckpt_err_not_initialized
+  harness_line: V:4757 (mutant V:4767) -> support_case_l3_ckpt_notinit V:4382
+  statement: When checkpoint() is called before either format() or initialize() has succeeded, it returns a NotInitialized error.
+  premises:
+  - {text: 'pre-state = support_new_em (checkpoint_coalesce default: completed_seq 0, in_progress false)', file_line: 'V:4383', class: BOUND, note: 'G5(i). Mostly inessential: needed = completed_seq+1 > completed_seq for every completed_seq < u64::MAX. completed_seq = u64::MAX would overflow at L:738, but that is unreachable from this pre-state. in_progress=true (a concurrent caller) is excluded'}
+  - {text: 'stub_condvar_notify on notify_all', file_line: 'V:85', class: UNCHECKED-STUB, note: 'G3. REACHED (L:783). Argued exact with no waiters'}
+  - {text: 'stub_random_state', file_line: 'V:47', class: UNCHECKED-STUB, note: G1, reached}
+  - {text: 'stub_arc_drop_slow', file_line: 'V:63', class: UNCHECKED-STUB, note: 'G2, unreached'}
+  - {text: 'stub_nvme_to_em', file_line: 'V:3021', class: INV, note: 'G4, unreached'}
+  verdict: do-not-credit
+  reason: 'reached unchecked RandomState and Condvar::notify_all stubs; single fixed pre-state'
+
+- id: EM-INSTID-ERR-NOT-INITIALIZED
+  harness: verify_em_instid_err_not_initialized
+  harness_line: V:4777 (mutant V:4787) -> support_case_l3_instid_notinit V:4391
+  statement: When get_instance_id() is called before either format() or initialize() has succeeded, it returns a NotInitialized error.
+  premises:
+  - {text: 'pre-state = support_new_em', file_line: 'V:4392', class: BOUND, note: 'G5(i), inessential (L:690-695 reads only shared)'}
+  - {text: 'stub_random_state', file_line: 'V:47', class: UNCHECKED-STUB, note: G1, reached}
+  - {text: 'stub_arc_drop_slow / stub_condvar_notify', file_line: 'V:63, V:85', class: UNCHECKED-STUB, note: 'G2/G3, unreached'}
+  verdict: do-not-credit
+  reason: 'reached unchecked RandomState stub (G1) and a single fixed pre-state (inessential)'
+
+- id: EM-USED-UNINIT-ZERO
+  harness: verify_em_used_uninit_zero
+  harness_line: V:4797 (mutant V:4807) -> support_case_l3_used_uninit V:4398
+  statement: Before the component is formatted or initialized, used_bytes() returns zero.
+  premises:
+  - {text: 'pre-state = support_new_em', file_line: 'V:4399', class: BOUND, note: 'G5(i), inessential (L:702-712)'}
+  - {text: 'stub_random_state', file_line: 'V:47', class: UNCHECKED-STUB, note: G1, reached}
+  - {text: 'stub_arc_drop_slow / stub_condvar_notify', file_line: 'V:63, V:85', class: UNCHECKED-STUB, note: 'G2/G3, unreached'}
+  verdict: do-not-credit
+  reason: 'reached unchecked RandomState stub (G1) and a single fixed pre-state (inessential)'
+
+- id: EM-CAP-UNINIT-ZERO
+  harness: verify_em_cap_uninit_zero
+  harness_line: V:4817 (mutant V:4827) -> support_case_l3_cap_uninit V:4404
+  statement: Before the component is formatted or initialized, capacity_bytes() returns zero.
+  premises:
+  - {text: 'pre-state = support_new_em', file_line: 'V:4405', class: BOUND, note: 'G5(i), inessential (L:714-719)'}
+  - {text: 'stub_random_state', file_line: 'V:47', class: UNCHECKED-STUB, note: G1, reached}
+  - {text: 'stub_arc_drop_slow / stub_condvar_notify', file_line: 'V:63, V:85', class: UNCHECKED-STUB, note: 'G2/G3, unreached'}
+  verdict: do-not-credit
+  reason: 'reached unchecked RandomState stub (G1) and a single fixed pre-state (inessential)'
+
+- id: EM-RESERVE-ERR-NOT-INITIALIZED
+  harness: verify_em_reserve_err_not_initialized
+  harness_line: V:5843 (mutant V:5851) -> support_case_l3_reserve_notinit V:4349
+  statement: When reserve_extent() is called before either format() or initialize() has succeeded, it returns a NotInitialized error.
+  premises:
+  - {text: 'symbolic key and size, no assume', file_line: 'V:4351', class: TYPE, note: 'Correctly, no D-RANGE-FR-005-* assume: the path does not need one'}
+  - {text: 'pre-state = support_new_em', file_line: 'V:4350', class: BOUND, note: 'G5(i), inessential (region_for_key L:215-222 reads regions first)'}
+  - {text: 'stub RegionState::alloc_extent -> stub_l3_unreachable_alloc_extent (assert!(false), then returns Err; no assume(false))', file_line: 'V:5823-5829', class: SOUND-UNREACH, note: 'Sound: a reach is a failed check, and the run is SUCCESSFUL. With no path cut, the post-stub tail would still be explored, which is fine'}
+  - {text: 'stub_random_state', file_line: 'V:47', class: UNCHECKED-STUB, note: G1, reached}
+  - {text: 'stub_arc_drop_slow', file_line: 'V:63', class: UNCHECKED-STUB, note: 'G2, unreached'}
+  verdict: do-not-credit
+  reason: 'reached unchecked RandomState stub (G1) and a single fixed pre-state (inessential); the unreachability stub itself is sound'
+
+# ------------------------------------------------------------------ base-LBA accessors --------------------------
+- id: EM-SETMBASE-FRAME
+  harness: verify_em_setmbase_frame
+  harness_line: V:4837 (mutant V:4847) -> support_case_l3_setmbase_frame V:4410
+  statement: set_metadata_base_lba() does not change the value returned by data_base_lba(), the listed extents, or their offsets.
+  premises:
+  - {text: 'symbolic d0 and m', file_line: 'V:4412, 4416', class: TYPE, note: ''}
+  - {text: 'pre-state = uninitialised support_new_em, so the extent list is always empty', file_line: 'V:4411', class: BOUND, note: 'ESSENTIAL: the statement covers every state. The "extents/offsets unchanged" clause is checked only on the empty list, never on a formatted component. The record admits this (fidelity representative)'}
+  - {text: 'stub_random_state', file_line: 'V:47', class: UNCHECKED-STUB, note: G1, reached}
+  - {text: 'stub_arc_drop_slow / stub_condvar_notify', file_line: 'V:63, V:85', class: UNCHECKED-STUB, note: 'G2/G3, unreached'}
+  verdict: do-not-credit
+  reason: 'extent clause checked only on the uninitialised (empty-list) pre-state (BOUND), plus the RandomState stub'
+
+- id: EM-SETDBASE-POST-STORED
+  harness: verify_em_setdbase_post_stored
+  harness_line: V:4857 (mutant V:4867) -> support_case_l3_setdbase_stored V:4430
+  statement: After set_data_base_lba(b), data_base_lba() returns b until set_data_base_lba() is called again.
+  premises:
+  - {text: 'symbolic b, c', file_line: 'V:4432, 4442', class: TYPE, note: ''}
+  - {text: 'interleaving limited to an optional set_metadata_base_lba and an optional data_base_lba', file_line: 'V:4435-4440', class: BOUND, note: '"until set again" spans ANY operation sequence (format, initialize, reserve, checkpoint...). Only two operations are interleaved, and the pre-state is the uninitialised support_new_em (G5(i)). By inspection only L:726 writes data_base_lba, but the harness does not show that'}
+  - {text: 'stub_random_state', file_line: 'V:47', class: UNCHECKED-STUB, note: G1, reached}
+  - {text: 'stub_arc_drop_slow / stub_condvar_notify', file_line: 'V:63, V:85', class: UNCHECKED-STUB, note: 'G2/G3, unreached'}
+  verdict: do-not-credit
+  reason: 'interleaved operations bounded to two accessors on an uninitialised pre-state (BOUND), plus the RandomState stub'
+
+- id: EM-DBASE-POST-DEFAULT-ZERO
+  harness: verify_em_dbase_post_default_zero
+  harness_line: V:4877 (mutant V:4887) -> support_case_l3_dbase_default_zero V:4454
+  statement: If set_data_base_lba() has never been called, data_base_lba() returns 0.
+  premises:
+  - {text: 'component built by support_new_em (struct literal with data_base_lba: Default::default()) instead of the real constructor', file_line: 'V:270-291 (V:285)', class: UNCHECKED-STUB, note: 'ESSENTIAL, G5(ii). The property is a fact about the constructor default. The harness supplies its own default, so it proves u64::default() == 0. The record defers to verify_em_setint_default_30s rung b, but that harness ALSO replaces new_default with the same support_new_em (stub_l3_new_default V:6271), so the argument is circular. check_stub_conforms_new_default ran and FAILED (unwinding assertion loop 0, log p2u4)'}
+  - {text: 'optional symbolic set_metadata_base_lba', file_line: 'V:4456-4458', class: TYPE, note: ''}
+  - {text: 'no other operation (format/initialize/...) before the read', file_line: 'V:4455-4459', class: BOUND, note: '"never called" covers any history without set_data_base_lba. Only one optional op is explored'}
+  - {text: 'stub_random_state', file_line: 'V:47', class: UNCHECKED-STUB, note: G1, reached}
+  - {text: 'stub_arc_drop_slow / stub_condvar_notify', file_line: 'V:63, V:85', class: UNCHECKED-STUB, note: 'G2/G3, unreached'}
+  verdict: do-not-credit
+  reason: 'constructor replaced by the harness''s own struct literal, whose conformance check FAILED (unwind), so the property is assumed, not proved'
+
+- id: EM-DBASE-FRAME-READ-ONLY
+  harness: verify_em_dbase_frame_read_only
+  harness_line: V:4897 (mutant V:4907) -> support_case_l3_dbase_read_only V:4463
+  statement: Calling data_base_lba() changes no stored configuration, extent or on-disk metadata.
+  premises:
+  - {text: 'symbolic d, m, optional ns_id', file_line: 'V:4466-4472', class: TYPE, note: ''}
+  - {text: 'pre-state = uninitialised support_new_em, no device; on-disk = empty mock KANI_DISK', file_line: 'V:4464-4465', class: BOUND, note: 'ESSENTIAL: the statement covers every state. Extents are checked only on the empty list. The "on-disk" check is vacuous because no device is connected, so nothing could write. The checked fields are data/metadata base, ns_id, extents, regions/shared. checkpoint_coalesce, timer interval, dma_alloc and hook are not compared'}
+  - {text: 'stub_random_state', file_line: 'V:47', class: UNCHECKED-STUB, note: G1, reached}
+  - {text: 'stub_arc_drop_slow / stub_condvar_notify', file_line: 'V:63, V:85', class: UNCHECKED-STUB, note: 'G2/G3, unreached'}
+  verdict: do-not-credit
+  reason: 'checked only on an uninitialised, device-less pre-state, so the extent and on-disk clauses are vacuous (BOUND), plus the RandomState stub'
+
+# ------------------------------------------------------------------ feature-gated block I/O ---------------------
+- id: EM-BIO-FLUSH
+  harness: verify_em_bio_flush
+  harness_line: V:6359 (mutant V:6370), --features volatile_write_cache -> support_case_l3_bio_flush V:6319
+  statement: With the volatile write cache feature, a flush reports success only when the device answers the flush request with a successful flush completion; any other answer is an IoError.
+  premises:
+  - {text: 'k in 0..=5 selects the device answer: 0 FlushDone{Ok}, 1 FlushDone{Err}, 2 Completion::Error, 3 wrong type, 4 recv closed, 5 send fails', file_line: 'V:6320-6327, V:2904-2950, V:2973-3010', class: OBL, note: 'The statement quantifies over the device answer, and the model enumerates the answer CLASSES'}
+  - {text: 'device answer realised by stub_chan_send / stub_chan_recv (channel replaced by a device model)', file_line: 'V:2966-3010', class: UNCHECKED-STUB, note: 'ESSENTIAL. No check_stub_conforms_* covers the channel model. check_stub_conforms_iblockdevice checks the mock geometry and disk model v1, and check_stub_conforms_nvme_to_em checks only the error mapping. The limits record cites nvme_to_em as if it covered the model. It does not'}
+  - {text: 'answer representatives: "wrong type" = AbortAck only; Completion::Error with handle None only; FlushDone Err with Timeout only; handle OpHandle(0)', file_line: 'V:2976-3006, V:2839-2841', class: BOUND, note: 'Finite representatives of "any other answer". The code uses a wildcard Ok(_) arm (block_io.rs:177), so one representative exercises it. Still a bound under the rule. The Err variant is irrelevant because nvme_to_em is stubbed (checked)'}
+  - {text: 'kani::assume(base <= u64::MAX/2 && lba <= u64::MAX/4) in support_bio_addr', file_line: 'V:3123', class: UNNEEDED-ASSUME, note: 'flush() reads neither base nor lba (block_io.rs:168-180). Not a level2 assumption'}
+  - {text: 'client: BS = 8-byte sectors, 64 sectors, support_dma_alloc model', file_line: 'V:3099-3107, V:3070', class: BOUND, note: 'Inessential: flush allocates no DMA buffer and uses no geometry'}
+  - {text: 'stub_nvme_to_em', file_line: 'V:3021', class: INV, note: 'G4. Reached for k=1,2'}
+  - {text: 'stub_arc_drop_slow', file_line: 'V:63', class: UNCHECKED-STUB, note: 'G2, client forgotten, probably unreached'}
+  coverage_note: 'The rework fixes the inherited vacuity: the k=0 success branch is reachable (cover at V:6332), and the mutant fails at unwind 10'
+  verdict: do-not-credit
+  reason: 'the device answers come from an unchecked channel model (stub_chan_send/recv) with finite representatives, plus an unneeded LBA assume'
+
+# ------------------------------------------------------------------ /dev/urandom path ---------------------------
+- id: EM-FORMAT-POST-INSTANCE-ID-GENERATED
+  harness: verify_em_format_post_instance_id_generated
+  harness_line: V:5505 (mutant V:5521) -> support_case_l3_fmt_instance_id_generated(false,false) V:5428
+  statement: When format() succeeds with no instance identifier supplied, the component chooses an identifier, stores it in the persisted superblock, and get_instance_id() returns that same value on every later call, including after a later initialize().
+  premises:
+  - {text: 'p.instance_id = None; assert format succeeds', file_line: 'V:5436-5438', class: OBL, note: ''}
+  - {text: 'FormatParams = support_layout(L_ONE): one concrete layout (512 B sectors, 1 KiB slab/disk, 1 region, alignment 4096)', file_line: 'V:5435, V:1018-1039', class: BOUND, note: 'ESSENTIAL: a single concrete layout'}
+  - {text: 'metadata device = 4 concrete 4 KiB sectors', file_line: 'V:5434', class: BOUND, note: 'single point'}
+  - {text: 'support_disk2_reset(false): no I/O errors', file_line: 'V:5429', class: OBL, note: 'Implied by "format() succeeds"'}
+  - {text: 'L3_URANDOM_MAY_FAIL = false: open and read always succeed', file_line: 'V:5431-5433', class: OBL, note: 'Implied by "format() succeeds"'}
+  - {text: 'OS model: stub_l3_file_open (fabricated File fd 3), stub_l3_file_read (one read fills exactly 8 arbitrary bytes; asserts buf.len()==8), stub_l3_ownedfd_drop (no close)', file_line: 'V:5369-5401', class: UNCHECKED-STUB, note: 'Argued against the std contract only. No conformance harness (none is possible against the OS). Short reads are not modelled. The bytes are symbolic, which is good'}
+  - {text: 'disk model v2: stub_write_blocks2 / stub_read_blocks2', file_line: 'V:1514-1600', class: INV, note: 'check_stub_conforms_disk2 SUCCESSFUL (kani_measurements.md:132)'}
+  - {text: 'stub_crc32_hash (length-only CRC)', file_line: 'V:99', class: INV, note: 'Its one relied-on contract (determinism, needed for the superblock read-back) is asserted in check_stub_conforms_iblockdevice (SUCCESSFUL, but before the drop_slow edit, G6). check_stub_conforms_crc32 covers stub_crc32_faithful, NOT this stub. Weak but adequate for round-trip'}
+  - {text: 'stub_format (all formatted text = "")', file_line: 'V:90', class: UNCHECKED-STUB, note: 'No conformance harness. Argued: no assertion reads message text. Probably reached via the log/error format! calls'}
+  - {text: 'stub_random_state', file_line: 'V:47', class: UNCHECKED-STUB, note: G1, reached}
+  - {text: 'stub_arc_drop_slow', file_line: 'V:63', class: UNCHECKED-STUB, note: G2}
+  - {text: 'stub_nvme_to_em', file_line: 'V:3021', class: INV, note: G4}
+  - {text: 'KaniMetaDevice', file_line: 'V:200', class: INV, note: G6}
+  coverage_note: 'The "including after a later initialize()" clause is NOT proved. It lives in diag_l3_format_post_instance_id_generated_reinit (V:5537), which was written but never run. So the obligation is only partly discharged'
+  verdict: do-not-credit
+  reason: 'one concrete layout (BOUND), an unchecked OS model and stub_format, and the initialize() clause is unproved'
+
+# ------------------------------------------------------------------ timer default -------------------------------
+- id: EM-SETINT-DEFAULT-30S
+  harness: verify_em_setint_default_30s
+  harness_line: V:5250 (mutant V:5264) -> support_case_l3_setint_default_30s V:5150 -> support_l3_new_inner V:5125 -> real ExtentManager::new_inner L:110
+  statement: A newly created component has automatic checkpoints enabled with an interval of 30 seconds.
+  premises:
+  - {text: 'real new_inner() (sets Some(30s), spawns the thread)', file_line: 'L:110-180', class: TYPE, note: 'The code under test'}
+  - {text: 'stub ExtentManager::new_default -> stub_l3_new_default = Arc::new(support_new_em())', file_line: 'V:6271-6273', class: UNCHECKED-STUB, note: 'G5(ii). check_stub_conforms_new_default (V:6278) RAN and FAILED with "unwinding assertion loop 0" at --unwind 4 (logs/verification__check_stub_conforms_new_default.p2u4.log). The limits record says "written but NOT run", which is inaccurate. Less essential here: new_inner overwrites the interval after new_default (L:114-116), so the asserted value does not come from the model. The "newly created" pre-state still does'}
+  - {text: 'stub std::thread::spawn -> stub_l3_spawn_deferred (closure stored, zeroed JoinHandle via MaybeUninit::zeroed().assume_init())', file_line: 'V:4983-5001', class: UNCHECKED-STUB, note: 'No conformance. The zeroed JoinHandle is UB-adjacent (disclosed). "enabled" is observed as "a closure was handed to spawn" (V:5154-5155). The thread body is not run in this harness'}
+  - {text: 'stub Condvar::wait_timeout / wait (env model) and notify_all (counter)', file_line: 'V:5058-5108', class: UNCHECKED-STUB, note: 'Installed. Unreached in this harness, because the thread body never runs'}
+  - {text: 'stub Condvar::notify_one -> stub_condvar_notify', file_line: 'V:85', class: UNCHECKED-STUB, note: 'G3. REACHED via set_interval (L:76). Argued exact with no waiters'}
+  - {text: 'stub_format', file_line: 'V:90', class: UNCHECKED-STUB, note: 'Probably unreached'}
+  - {text: 'stub_random_state', file_line: 'V:47', class: UNCHECKED-STUB, note: 'G1, reached through the new_default model'}
+  - {text: 'stub_arc_drop_slow', file_line: 'V:63', class: UNCHECKED-STUB, note: 'G2. Possibly reached (the Arc<Self> and the moved Weak/Arc clones go into the stored closure)'}
+  coverage_note: '"newly created" is read as new_inner(). If a user can obtain a component through define_component! new()/new_default() without new_inner, those components start with interval None, and the statement would be false for them. Not checked here'
+  verdict: do-not-credit
+  reason: 'the new_default model (conformance check FAILED), the spawn stub and the notify stub are unchecked behavioural stubs'
+
+summary:
+  audited: 22
+  credit: 0
+  do_not_credit: 22
+  decisive_reason_tiers:
+    only_G1_RandomState_plus_inessential_pre_state_bound:
+      note: 'Would be credit if stub_random_state got a conformance harness (or the empty map were built without it) AND the uninitialised pre-state were made symbolic in the unread fields (or accepted as inessential)'
+      ids: [EM-FORMAT-ERR-SECTOR-ZERO, EM-INIT-ERR-DEVICE-NOT-CONNECTED, EM-GETEXT-UNINIT-EMPTY, EM-FOREACH-UNINIT-NO-CALLS,
+            EM-REMOVE-ERR-NOT-INITIALIZED, EM-INSTID-ERR-NOT-INITIALIZED, EM-USED-UNINIT-ZERO, EM-CAP-UNINIT-ZERO,
+            EM-RESERVE-ERR-NOT-INITIALIZED]
+    plus_reached_condvar_stub:
+      ids: [EM-CKPT-ERR-NOT-INITIALIZED]
+    assume_violations:
+      note: 'An assume beyond (a)/(b), whether unneeded (incl. pow2 used only for speed) or undeclared'
+      ids: [EM-FORMAT-ERR-DEVICE-NOT-CONNECTED, EM-FORMAT-ERR-MAX-EXTENT-EXCEEDS-SLAB, EM-FORMAT-ERR-REGION-COUNT,
+            EM-FORMAT-ERR-SLAB-NOT-SECTOR-MULTIPLE]
+    essential_bound:
+      ids: [EM-FORMAT-ERR-NO-USABLE-DATA, EM-SETMBASE-FRAME, EM-SETDBASE-POST-STORED, EM-DBASE-FRAME-READ-ONLY,
+            EM-FORMAT-POST-INSTANCE-ID-GENERATED]
+    essential_unchecked_model:
+      ids: [EM-DBASE-POST-DEFAULT-ZERO, EM-SETINT-DEFAULT-30S, EM-BIO-FLUSH, EM-FORMAT-POST-INSTANCE-ID-GENERATED]
+  record_corrections:
+  - 'EM-SETINT-DEFAULT-30S note says check_stub_conforms_new_default was "written but NOT run". It was run (--unwind 4) and FAILED: "unwinding assertion loop 0" (~/fv-runs/scratch/kani_l3/logs/verification__check_stub_conforms_new_default.p2u4.log).'
+  - 'EM-DBASE-POST-DEFAULT-ZERO note defers the constructor default to verify_em_setint_default_30s rung b. That harness stubs new_default with the same support_new_em, so the argument is circular.'
+  - 'EM-BIO-FLUSH: the channel device model (stub_chan_send/recv) has no conformance harness. check_stub_conforms_nvme_to_em covers only the error mapping.'
+  - 'EM-FORMAT-ERR-SLAB-NOT-SECTOR-MULTIPLE: the record frames the pow2 assume as "within the level-2 range". The guard does not depend on it, so by the rule it is a speed-only assume.'
+  - 'EM-FORMAT-ERR-DEVICE-NOT-CONNECTED (and the statement): format validates params before it checks for the device, so the literal statement is false for invalid params. The statement or the level-2 list needs a "params pass validation" precondition.'

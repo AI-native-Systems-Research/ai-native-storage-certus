@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_refute_em_ckpt_failed_superblock_write": {
+        "prover": "alt-ergo",
+        "time": 0.051
+      },
+      "vc_wsb_chain": { "prover": "alt-ergo", "time": 0.024 }
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_deref_mut_Vec_u64_Global": { "prover": "alt-ergo", "time": 0.032 },
+      "vc_len_u64": { "prover": "alt-ergo", "time": 0.032 },
+      "vc_pop_u64": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_swap_remove": { "prover": "alt-ergo", "time": 0.103 },
+      "vc_swap_u64": { "prover": "alt-ergo", "time": 0.032 }
+    }
+  }
+}

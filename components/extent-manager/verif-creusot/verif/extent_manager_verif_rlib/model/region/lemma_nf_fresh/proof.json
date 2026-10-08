@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_lemma_nf_fresh": { "prover": "z3", "time": 0.024 } }
+  }
+}

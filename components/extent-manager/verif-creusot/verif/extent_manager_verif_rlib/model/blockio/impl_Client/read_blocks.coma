@@ -1,0 +1,564 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 175 4 175 101 *)
+
+(* model::blockio::Client *)
+
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 102 18 102 36
+let%span svec'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span svec'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 112 18 112 40
+let%span svec'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 193 19 193 38
+let%span svec'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 194 18 194 46
+let%span svec'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 116 18 116 48
+let%span sslice = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/slice.rs" 148 20 148 37
+let%span sslice'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/slice.rs" 153 20 153 37
+let%span sops = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/ops.rs" 704 18 707 9
+let%span sops'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/ops.rs" 721 25 721 33
+let%span sops'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/ops.rs" 717 18 720 9
+let%span sops'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/ops.rs" 179 8 179 108
+let%span sops'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/ops.rs" 185 8 185 94
+let%span sops'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/ops.rs" 190 51 190 98
+let%span sops'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/ops.rs" 136 15 136 59
+let%span sops'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/ops.rs" 140 8 140 32
+let%span sops'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/ops.rs" 145 46 145 65
+let%span sops'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/ops.rs" 150 15 150 31
+let%span sops'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/ops.rs" 151 15 151 28
+let%span sops'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/ops.rs" 156 8 156 24
+let%span sops'11 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/ops.rs" 162 8 163 104
+let%span sfmap = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/fmap.rs" 88 8 88 32
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 180 11 180 26
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 181 10 181 34
+let%span sbuddy'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 182 10 182 33
+let%span sbuddy'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 183 10 183 20
+let%span sbuddy'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 154 11 154 37
+let%span sbuddy'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 155 10 155 24
+let%span sconvert = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/convert.rs" 17 18 17 32
+let%span sblockio = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 177 26 177 40
+let%span sblockio'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 177 43 177 44
+let%span sblockio'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 177 25 177 45
+let%span sblockio'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 177 25 177 50
+let%span sblockio'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 178 34 178 44
+let%span sblockio'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 179 29 179 33
+let%span sblockio'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 180 27 180 28
+let%span sblockio'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 189 20 193 13
+let%span sblockio'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 188 20 188 95
+let%span sblockio'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 187 20 187 47
+let%span sblockio'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 185 20 186 86
+let%span sblockio'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 184 20 184 95
+let%span sblockio'11 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 183 20 183 54
+let%span sblockio'12 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 182 20 182 43
+let%span sblockio'13 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 181 20 181 37
+let%span sblockio'14 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 195 28 195 47
+let%span sblockio'15 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 195 28 195 58
+let%span sblockio'16 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 196 28 196 62
+let%span sblockio'17 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 197 22 197 67
+let%span sblockio'18 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 197 22 197 68
+let%span sblockio'19 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 199 40 199 52
+let%span sblockio'20 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 199 28 199 52
+let%span sblockio'21 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 201 31 201 32
+let%span sblockio'22 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 202 33 202 46
+let%span sblockio'23 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 203 28 203 43
+let%span sblockio'24 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 205 24 209 17
+let%span sblockio'25 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 204 24 204 67
+let%span sblockio'26 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 211 32 211 60
+let%span sblockio'27 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 212 31 212 34
+let%span sblockio'28 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 212 16 212 35
+let%span sblockio'29 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 213 21 213 22
+let%span sblockio'30 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 213 16 213 22
+let%span sblockio'31 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 215 28 215 64
+let%span sblockio'32 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 217 17 217 18
+let%span sblockio'33 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 217 12 217 18
+let%span sblockio'34 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 219 24 219 51
+let%span sblockio'35 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 158 15 158 36
+let%span sblockio'36 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 159 15 159 60
+let%span sblockio'37 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 160 15 160 108
+let%span sblockio'38 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 161 14 161 94
+let%span sblockio'39 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 162 14 162 53
+let%span sblockio'40 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 163 14 164 86
+let%span sblockio'41 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 165 14 165 41
+let%span sblockio'42 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 166 14 174 5
+let%span sblockio'43 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 234 11 234 59
+let%span sblockio'44 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 235 10 235 19
+let%span sblockio'45 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 238 8 238 55
+let%span sblockio'46 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 40 10 40 60
+let%span sblockio'47 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 41 10 41 37
+let%span sblockio'48 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 42 10 45 1
+let%span sblockio'49 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 252 11 252 45
+let%span sblockio'50 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 253 10 253 54
+let%span sblockio'51 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 255 16 255 63
+let%span sblockio'52 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 245 11 245 49
+let%span sblockio'53 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 246 10 247 85
+let%span sblockio'54 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 248 47 248 49
+let%span sblockio'55 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 226 11 226 26
+let%span sblockio'56 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 227 10 227 34
+let%span sblockio'57 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 229 16 229 63
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use seq.Seq
+use creusot.int.UInt8
+use creusot.prelude.MutBorrow
+use map.Map
+use int.ComputerDivision
+use creusot.prelude.Any
+use int.Int
+
+type t_Client = { sector_size: UInt32.t; ns_id: UInt32.t; base_lba: UInt64.t }
+
+type t_Vec_u8_Global
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_u8_Global (self: t_Vec_u8_Global) : Seq.seq UInt8.t
+
+axiom view_Vec_u8_Global_spec:
+  forall self: t_Vec_u8_Global [view_Vec_u8_Global self]. [%#svec'0] Seq.length (view_Vec_u8_Global self)
+    <= UInt64.t'int const_MAX
+
+let new_u8 (return (x: t_Vec_u8_Global)) = any
+  [ return (result: t_Vec_u8_Global) ->
+  {[@stop_split] [@expl:new ensures] [%#svec] Seq.length (view_Vec_u8_Global result) = 0}
+    (! return {result}) ]
+
+type t_Option_Seq_u8 = None | Some (Seq.seq UInt8.t)
+
+type t_FMap_tup2_Int_Int_Seq_u8
+
+type tup2_Int_Int = { f0: int; f1: int }
+
+function to_mapping_tup2_Int_Int (self: t_FMap_tup2_Int_Int_Seq_u8) : Map.map tup2_Int_Int t_Option_Seq_u8
+
+function get_tup2_Int_Int [@inline:trivial] (self: t_FMap_tup2_Int_Int_Seq_u8) (k: tup2_Int_Int) : t_Option_Seq_u8 =
+  [%#sfmap] Map.get (to_mapping_tup2_Int_Int self) k
+
+meta "rewrite_def" function get_tup2_Int_Int
+
+type t_BDev = { store: t_FMap_tup2_Int_Int_Seq_u8; log: Seq.seq tup2_Int_Int }
+
+function lemma_divmod [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 184 0 184 35] (x: int) (m: int) : ()
+
+axiom lemma_divmod_spec: forall x: int, m: int. ([%#sbuddy] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'0] x = m * ComputerDivision.div x m + ComputerDivision.mod x m)
+
+axiom lemma_divmod_spec'0: forall x: int, m: int. ([%#sbuddy] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'1] 0 <= ComputerDivision.mod x m /\ ComputerDivision.mod x m < m)
+
+axiom lemma_divmod_spec'1: forall x: int, m: int. ([%#sbuddy] m > 0 /\ x >= 0)
+    -> ([%#sbuddy'2] ComputerDivision.div x m >= 0)
+
+function lemma_mul_le [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 156 0 156 43] (a: int) (b: int) (c: int) : ()
+
+axiom lemma_mul_le_spec: forall a: int, b: int, c: int. ([%#sbuddy'3] 0 <= a /\ a <= b /\ 0 <= c)
+    -> ([%#sbuddy'4] a * c <= b * c)
+
+function lemma_ceil_lt [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 236 0 236 44] (n: int) (d: int) (i: int) : ()
+ = [%#sblockio'45] let _ = lemma_divmod (n + d - 1) d in lemma_mul_le (i + 1) (ComputerDivision.div (n + d - 1) d) d
+
+axiom lemma_ceil_lt_spec: forall n: int, d: int, i: int. ([%#sblockio'43] d > 0
+      /\ n >= 0 /\ 0 <= i /\ i < ComputerDivision.div (n + d - 1) d) -> ([%#sblockio'44] i * d < n)
+
+type t_EmError = CorruptMetadata | IoError | NotInitialized | OffsetNotFound UInt64.t | OutOfSpace
+
+type t_Result_Vec_u8_Global_EmError = Ok t_Vec_u8_Global | Err t_EmError
+
+let dev_read_sync (dev: MutBorrow.t t_BDev) (ns: UInt32.t) (lba: UInt64.t) (n: UInt64.t)
+  (return (x: t_Result_Vec_u8_Global_EmError)) = any
+  [ return (result: t_Result_Vec_u8_Global_EmError) ->
+  {[@stop_split] [@expl:dev_read_sync ensures] ([@stop_split] [@expl:dev_read_sync ensures #0] [%#sblockio'46] dev.final.log
+      = Seq.snoc dev.current.log { f0 = UInt32.t'int ns; f1 = UInt64.t'int lba })
+    /\ ([@stop_split] [@expl:dev_read_sync ensures #1] [%#sblockio'47] dev.final.store = dev.current.store)
+    /\ ([@stop_split] [@expl:dev_read_sync ensures #2] [%#sblockio'48] match result with
+      | Ok v -> Seq.length (view_Vec_u8_Global v) = UInt64.t'int n
+      /\ match get_tup2_Int_Int dev.current.store { f0 = UInt32.t'int ns; f1 = UInt64.t'int lba } with
+        | Some s -> view_Vec_u8_Global v = s
+        | None -> true
+        end
+      | Err e -> e = IoError
+      end)}
+    (! return {result}) ]
+
+type t_Result_Infallible_EmError = Ok'0 () | Err'0 t_EmError
+
+type t_ControlFlow_Result_Infallible_EmError_Vec_u8_Global =
+  | Continue t_Vec_u8_Global
+  | Break t_Result_Infallible_EmError
+
+predicate inv_Infallible [@inline:trivial] (_1: ()) = false
+
+meta "rewrite_def" predicate inv_Infallible
+
+predicate inv_Result_Infallible_EmError (_1: t_Result_Infallible_EmError)
+
+axiom inv_axiom [@rewrite]:
+  forall x: t_Result_Infallible_EmError [inv_Result_Infallible_EmError x]. inv_Result_Infallible_EmError x
+    = match x with
+      | Ok'0 f0'0 -> inv_Infallible f0'0
+      | Err'0 f0'0 -> true
+      end
+
+predicate inv_ControlFlow_Result_Infallible_EmError_Vec_u8_Global (_1: t_ControlFlow_Result_Infallible_EmError_Vec_u8_Global)
+
+axiom inv_axiom'0 [@rewrite]:
+  forall x: t_ControlFlow_Result_Infallible_EmError_Vec_u8_Global [inv_ControlFlow_Result_Infallible_EmError_Vec_u8_Global x]. inv_ControlFlow_Result_Infallible_EmError_Vec_u8_Global x
+    = match x with
+      | Continue f0'0 -> true
+      | Break f0'0 -> inv_Result_Infallible_EmError f0'0
+      end
+
+let branch_Result_Vec_u8_Global_EmError (self_: t_Result_Vec_u8_Global_EmError)
+  (return (x: t_ControlFlow_Result_Infallible_EmError_Vec_u8_Global)) = any
+  [ return (result: t_ControlFlow_Result_Infallible_EmError_Vec_u8_Global) ->
+  {[@stop_split] [@expl:branch_Result_Vec_u8_Global_EmError ensures] ([@stop_split] [@expl:branch result type invariant] inv_ControlFlow_Result_Infallible_EmError_Vec_u8_Global result)
+    /\ ([@stop_split] [@expl:branch ensures] [%#sops] match self_ with
+      | Ok v -> result = Continue v
+      | Err e -> result = Break (Err'0 e)
+      end)}
+    (! return {result}) ]
+
+let elim_Continue (_x: t_ControlFlow_Result_Infallible_EmError_Vec_u8_Global) (return (f0'0: t_Vec_u8_Global)) = any
+  [ _k (f0'0: t_Vec_u8_Global) -> {Continue f0'0 = _x} (! return {f0'0})
+  | _chk -> (! {[@expl:elim Continue] match _x with
+      | Continue _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+let len_u8 (self_: t_Vec_u8_Global) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:len ensures] [%#svec'1] UInt64.t'int result
+    = Seq.length (view_Vec_u8_Global self_)}
+    (! return {result}) ]
+
+function lemma_divmod_at [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 254 0 254 46] (i: int) (d: int) (j: int) : ()
+ = [%#sblockio'51] lemma_divmod (i * d + j) d
+
+axiom lemma_divmod_at_spec: forall i: int, d: int, j: int. ([%#sblockio'49] d > 0 /\ i >= 0 /\ 0 <= j /\ j < d)
+    -> ([%#sblockio'50] ComputerDivision.div (i * d + j) d = i /\ ComputerDivision.mod (i * d + j) d = j)
+
+predicate in_bounds_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq UInt8.t) =
+  [%#sslice] UInt64.t'int self < Seq.length seq
+
+meta "rewrite_def" predicate in_bounds_usize
+
+predicate has_value_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq UInt8.t) (out: UInt8.t) =
+  [%#sslice'0] Seq.get seq (UInt64.t'int self) = out
+
+meta "rewrite_def" predicate has_value_usize
+
+let index_Vec_u8_Global (self_: t_Vec_u8_Global) (ix: UInt64.t) (return (x: UInt8.t)) =
+{[@stop_split] [@expl:index requires] [%#svec'2] in_bounds_usize ix (view_Vec_u8_Global self_)}
+  any
+  [ return (result: UInt8.t) ->
+  {[@stop_split] [@expl:index ensures] [%#svec'3] has_value_usize ix (view_Vec_u8_Global self_) result}
+    (! return {result}) ]
+
+let push_u8 (self_: MutBorrow.t t_Vec_u8_Global) (v: UInt8.t) (return (x: ())) = any
+  [ return (result: ()) -> {[@stop_split] [@expl:push ensures] [%#svec'4] view_Vec_u8_Global self_.final
+    = Seq.snoc (view_Vec_u8_Global self_.current) v}
+    (! return {result}) ]
+
+function lemma_ceil_next [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 248 0 248 46] (n: int) (d: int) (i: int) : ()
+ = [%#sblockio'54] ()
+
+axiom lemma_ceil_next_spec: forall n: int, d: int, i: int. ([%#sblockio'52] d > 0 /\ n >= 0 /\ 0 <= i /\ i * d < n)
+    -> ([%#sblockio'53] ((i + 1) * d <= n -> (if n - i * d < d then n - i * d else d) = d)
+    /\ ((i + 1) * d > n -> i * d + (if n - i * d < d then n - i * d else d) = n))
+
+predicate resolve_refmut_BDev [@inline:trivial] (_1: MutBorrow.t t_BDev) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_BDev
+
+let elim_Break (_x: t_ControlFlow_Result_Infallible_EmError_Vec_u8_Global)
+  (return (f0'0: t_Result_Infallible_EmError)) = any
+  [ _k (f0'0: t_Result_Infallible_EmError) -> {Break f0'0 = _x} (! return {f0'0})
+  | _chk -> (! {[@expl:elim Break] match _x with
+      | Break _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+type tup2_Result_Vec_u8_Global_EmError_Result_Infallible_EmError = {
+  f0'0: t_Result_Vec_u8_Global_EmError;
+  f1'0: t_Result_Infallible_EmError }
+
+predicate postcondition_once_from (self: ()) (args: t_EmError) (result: t_EmError) =
+  let self_ = args in [%#sconvert] result = self_
+
+meta "rewrite_def" predicate postcondition_once_from
+
+predicate resolve_from [@inline:trivial] (_1: ()) = true
+
+meta "rewrite_def" predicate resolve_from
+
+predicate postcondition_mut_from (self: ()) (args: t_EmError) (result_state: ()) (result: t_EmError) =
+  let self_ = args in [%#sconvert] result = self_
+
+meta "rewrite_def" predicate postcondition_mut_from
+
+function fn_mut_once_from (self: ()) (args: t_EmError) (res: t_EmError) : ()
+
+axiom fn_mut_once_from_spec:
+  forall self: (), args: t_EmError, res: t_EmError [postcondition_once_from self args res]. [%#sops'11] postcondition_once_from self args res
+    = (exists res_state: (). postcondition_mut_from self args res_state res /\ resolve_from res_state)
+
+predicate hist_inv_from (self: ()) (result_state: ()) = true
+
+function hist_inv_trans_from (self: ()) (b: ()) (c: ()) : ()
+
+axiom hist_inv_trans_from_spec:
+  forall self: (), b: (), c: () [hist_inv_from self b, hist_inv_from b c | hist_inv_from self b, hist_inv_from self c | hist_inv_from b c, hist_inv_from self c]. ([%#sops'8] hist_inv_from self b)
+    -> ([%#sops'9] hist_inv_from b c) -> ([%#sops'10] hist_inv_from self c)
+
+function hist_inv_refl_from (self: ()) : ()
+
+axiom hist_inv_refl_from_spec: forall self: () [hist_inv_from self self]. [%#sops'7] hist_inv_from self self
+
+function postcondition_mut_hist_inv_from (self: ()) (args: t_EmError) (res_state: ()) (res: t_EmError) : ()
+
+axiom postcondition_mut_hist_inv_from_spec:
+  forall self: (), args: t_EmError, res_state: (), res: t_EmError [postcondition_mut_from self args res_state res | hist_inv_from self res_state]. ([%#sops'5] postcondition_mut_from self args res_state res)
+    -> ([%#sops'6] hist_inv_from self res_state)
+
+function fn_hist_inv_from (self: ()) (res_state: ()) : ()
+
+axiom fn_hist_inv_from_spec:
+  forall self: (), res_state: () [hist_inv_from self res_state]. [%#sops'4] hist_inv_from self res_state
+    = (self = res_state)
+
+predicate postcondition_from (self: ()) (args: t_EmError) (result: t_EmError) =
+  let self_ = args in [%#sconvert] result = self_
+
+meta "rewrite_def" predicate postcondition_from
+
+function fn_once_from (self: ()) (args: t_EmError) (res: t_EmError) : ()
+
+axiom fn_once_from_spec:
+  forall self: (), args: t_EmError, res: t_EmError [postcondition_once_from self args res]. [%#sops'3] postcondition_once_from self args res
+    = (postcondition_from self args res /\ resolve_from self)
+
+function fn_mut_from (self: ()) (args: t_EmError) (res_state: ()) (res: t_EmError) : ()
+
+axiom fn_mut_from_spec:
+  forall self: (), args: t_EmError, res_state: (), res: t_EmError [postcondition_mut_from self args res_state res]. [%#sops'2] postcondition_mut_from self args res_state res
+    = (postcondition_from self args res /\ self = res_state)
+
+let from_EmError (self_: t_EmError) (return (x: t_EmError)) = any
+  [ return (result: t_EmError) -> {[@stop_split] [@expl:from ensures] [%#sconvert] result = self_} (! return {result}) ]
+
+let from_residual_Result_Vec_u8_Global_EmError (residual: t_Result_Infallible_EmError)
+  (return (x: t_Result_Vec_u8_Global_EmError)) =
+{[@stop_split] [@expl:from_residual 'residual' type invariant] [%#sops'0] inv_Result_Infallible_EmError residual}
+  any
+  [ return (result: t_Result_Vec_u8_Global_EmError) ->
+  {[@stop_split] [@expl:from_residual ensures] [%#sops'1] match { f0'0 = result; f1'0 = residual } with
+      | {f0'0 = Err result'0; f1'0 = Err'0 residual'0} -> postcondition_from () residual'0 result'0
+      | _ -> false
+      end}
+    (! return {result}) ]
+
+function lemma_ceil [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 228 0 228 33] (n: int) (d: int) : ()
+ = [%#sblockio'57] lemma_divmod (n + d - 1) d
+
+axiom lemma_ceil_spec: forall n: int, d: int. ([%#sblockio'55] d > 0 /\ n >= 0)
+    -> ([%#sblockio'56] ComputerDivision.div (n + d - 1) d * d >= n)
+
+constant const_MAX'0: UInt64.t = (18446744073709551615: UInt64.t)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let read_blocks [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 175 4 175 101]
+  (self: t_Client) (dev: MutBorrow.t t_BDev) (lba: UInt64.t) (num_bytes: UInt64.t)
+  (return (x: t_Result_Vec_u8_Global_EmError)) =
+{[@stop_split] [@expl:read_blocks requires] ([@stop_split] [@expl:read_blocks requires #0] [%#sblockio'35] UInt32.t'int self.sector_size
+    > 0)
+  /\ ([@stop_split] [@expl:read_blocks requires #1] [%#sblockio'36] UInt64.t'int num_bytes
+      + UInt32.t'int self.sector_size
+    <= UInt64.t'int const_MAX)
+  /\ ([@stop_split] [@expl:read_blocks requires #2] [%#sblockio'37] UInt64.t'int self.base_lba + UInt64.t'int lba
+    + ComputerDivision.div (UInt64.t'int num_bytes + UInt32.t'int self.sector_size - 1) (UInt32.t'int self.sector_size)
+  <= UInt64.t'int const_MAX'0)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &ss <- UInt64.of_int (UInt32.t'int self.sector_size) ] s1
+    | s1 = UInt64.add [%#sblockio] {num_bytes} {ss} (fun (_x: UInt64.t) -> [ &_33 <- _x ] s2)
+    | s2 = UInt64.sub [%#sblockio'1] {_33} {[%#sblockio'0] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &_32 <- _x ] s3)
+    | s3 = [ &_36 <- ss ] s4
+    | s4 = [ &_37 <- _36 = ([%#sblockio'2] (0: UInt64.t)) ] s5
+    | s5 = {[@expl:division by zero] [%#sblockio'2] not _37} s6
+    | s6 = UInt64.div [%#sblockio'2] {_32} {_36} (fun (_x: UInt64.t) -> [ &num_blocks <- _x ] s7)
+    | s7 = new_u8 [%#sblockio'3] (fun (_x: t_Vec_u8_Global) -> [ &result <- _x ] s8)
+    | s8 = [ &d0 <- [%#sblockio'4] dev.current ] s9
+    | s9 = [ &i <- [%#sblockio'5] (0: UInt64.t) ] s10
+    | s10 = [ &_old <- dev.final ] s11
+    | s11 = bb4 ]
+  | bb4 = bb4
+    [ bb4 = {[@expl:inferred invariant: unchanged value] _old = dev.final}
+      {[@expl:loop invariant #0] [%#sblockio'13] UInt64.t'int i <= UInt64.t'int num_blocks}
+      {[@expl:loop invariant #1] [%#sblockio'12] dev.current.store = d0.store}
+      {[@expl:loop invariant #2] [%#sblockio'11] Seq.length dev.current.log = Seq.length d0.log + UInt64.t'int i}
+      {[@expl:loop invariant #3] [%#sblockio'10] forall p: int. 0 <= p /\ p < Seq.length d0.log
+        -> Seq.get dev.current.log p = Seq.get d0.log p}
+      {[@expl:loop invariant #4] [%#sblockio'9] forall p: int. Seq.length d0.log <= p /\ p < Seq.length dev.current.log
+        -> Seq.get dev.current.log p
+        = { f0 = UInt32.t'int self.ns_id;
+            f1 = UInt64.t'int self.base_lba + UInt64.t'int lba + (p - Seq.length d0.log) }}
+      {[@expl:loop invariant #5] [%#sblockio'8] Seq.length (view_Vec_u8_Global result) <= UInt64.t'int num_bytes}
+      {[@expl:loop invariant #6] [%#sblockio'7] Seq.length (view_Vec_u8_Global result)
+      = (if UInt64.t'int i * UInt64.t'int ss <= UInt64.t'int num_bytes then
+        UInt64.t'int i * UInt64.t'int ss
+      else
+        UInt64.t'int num_bytes
+      )}
+      {[@expl:loop invariant #7] [%#sblockio'6] forall q: int. 0 <= q /\ q < Seq.length (view_Vec_u8_Global result)
+        -> match get_tup2_Int_Int d0.store { f0 = UInt32.t'int self.ns_id;
+                                             f1 = UInt64.t'int self.base_lba + UInt64.t'int lba
+                                             + ComputerDivision.div q (UInt64.t'int ss) } with
+          | Some b -> Seq.get (view_Vec_u8_Global result) q = Seq.get b (ComputerDivision.mod q (UInt64.t'int ss))
+          | None -> true
+          end}
+      (! s0)
+      [ s0 = [ &_78 <- UInt64.lt i num_blocks ] s1 | s1 = any [ br0 -> {_78 = false} (! bb28) | br1 -> {_78} (! bb6) ] ]
+      [ bb6 = s0
+        [ s0 = UInt64.add [%#sblockio'14] {self.base_lba} {lba} (fun (_x: UInt64.t) -> [ &_82 <- _x ] s1)
+        | s1 = [ &_85 <- UInt64.of_int (UInt64.t'int i) ] s2
+        | s2 = UInt64.add [%#sblockio'15] {_82} {_85} (fun (_x: UInt64.t) -> [ &block_lba <- _x ] s3)
+        | s3 =
+          {[@expl:assertion] [%#sblockio'16] let _ = lemma_ceil_lt (UInt64.t'int num_bytes) (UInt64.t'int ss) (UInt64.t'int i) in UInt64.t'int i
+            * UInt64.t'int ss
+          < UInt64.t'int num_bytes}
+          s4
+        | s4 = MutBorrow.borrow_mut <t_BDev> {dev.current}
+            (fun (_bor: MutBorrow.t t_BDev) -> [ &_95 <- _bor ] [ &dev <- { dev with current = _bor.final } ] s5)
+        | s5 = dev_read_sync [%#sblockio'17] {_95} {self.ns_id} {block_lba} {ss}
+            (fun (_x: t_Result_Vec_u8_Global_EmError) -> [ &_94 <- _x ] s6)
+        | s6 = branch_Result_Vec_u8_Global_EmError [%#sblockio'18] {_94}
+            (fun (_x: t_ControlFlow_Result_Infallible_EmError_Vec_u8_Global) -> [ &_93 <- _x ] s7)
+        | s7 = any
+          [ br0 (x0: t_Vec_u8_Global) -> {_93 = Continue x0} (! bb11)
+          | br1 (x0: t_Result_Infallible_EmError) -> {_93 = Break x0} (! bb10) ] ]
+      | bb11 = s0
+        [ s0 = elim_Continue {_93} (fun (r0'0: t_Vec_u8_Global) -> [ &val' <- r0'0 ] s1)
+        | s1 = [ &blk <- val' ] s2
+        | s2 = len_u8 [%#sblockio'19] {result} (fun (_x: UInt64.t) -> [ &_106 <- _x ] s3)
+        | s3 = UInt64.sub [%#sblockio'20] {num_bytes} {_106} (fun (_x: UInt64.t) -> [ &remaining <- _x ] s4)
+        | s4 = [ &_109 <- UInt64.lt remaining ss ] s5
+        | s5 = any [ br0 -> {_109 = false} (! bb18) | br1 -> {_109} (! bb17) ] ]
+      | bb17 = s0 [ s0 = [ &to_copy <- remaining ] s1 | s1 = bb19 ]
+      | bb18 = s0 [ s0 = [ &to_copy <- ss ] s1 | s1 = bb19 ]
+      | bb19 = s0
+        [ s0 = [ &j <- [%#sblockio'21] (0: UInt64.t) ] s1
+        | s1 = [ &r0 <- [%#sblockio'22] Seq.length (view_Vec_u8_Global result) ] s2
+        | s2 = {[@expl:assertion] [%#sblockio'23] r0 = UInt64.t'int i * UInt64.t'int ss} s3
+        | s3 = bb21 ]
+      | bb21 = bb21
+        [ bb21 = {[@expl:loop invariant #0] [%#sblockio'25] UInt64.t'int j <= UInt64.t'int to_copy
+          /\ Seq.length (view_Vec_u8_Global result) = r0 + UInt64.t'int j}
+          {[@expl:loop invariant #1] [%#sblockio'24] forall q: int. 0 <= q /\ q < Seq.length (view_Vec_u8_Global result)
+            -> match get_tup2_Int_Int d0.store { f0 = UInt32.t'int self.ns_id;
+                                                 f1 = UInt64.t'int self.base_lba + UInt64.t'int lba
+                                                 + ComputerDivision.div q (UInt64.t'int ss) } with
+              | Some b -> Seq.get (view_Vec_u8_Global result) q = Seq.get b (ComputerDivision.mod q (UInt64.t'int ss))
+              | None -> true
+              end}
+          (! s0)
+          [ s0 = [ &_134 <- UInt64.lt j to_copy ] s1
+          | s1 = any [ br0 -> {_134 = false} (! bb26) | br1 -> {_134} (! bb23) ] ]
+          [ bb23 = s0
+            [ s0 =
+              {[@expl:assertion] [%#sblockio'26] let _ = lemma_divmod_at (UInt64.t'int i) (UInt64.t'int ss) (UInt64.t'int j) in ComputerDivision.div (r0
+                  + UInt64.t'int j) (UInt64.t'int ss)
+                = UInt64.t'int i
+              /\ ComputerDivision.mod (r0 + UInt64.t'int j) (UInt64.t'int ss) = UInt64.t'int j}
+              s1
+            | s1 = index_Vec_u8_Global [%#sblockio'27] {blk} {j} (fun (_x: UInt8.t) -> [ &_146 <- _x ] s2)
+            | s2 = MutBorrow.borrow_mut <t_Vec_u8_Global> {result}
+                (fun (_bor: MutBorrow.t t_Vec_u8_Global) -> [ &_144 <- _bor ] [ &result <- _bor.final ] s3)
+            | s3 = push_u8 [%#sblockio'28] {_144} {_146} (fun (_x: ()) -> [ &_143 <- _x ] s4)
+            | s4 = UInt64.add [%#sblockio'30] {j} {[%#sblockio'29] (1: UInt64.t)}
+                (fun (_x: UInt64.t) -> [ &j <- _x ] s5)
+            | s5 = bb21 ] ] ]
+      | bb26 = s0
+        [ s0 =
+          {[@expl:assertion] [%#sblockio'31] let _ = lemma_ceil_next (UInt64.t'int num_bytes) (UInt64.t'int ss) (UInt64.t'int i) in Seq.length (view_Vec_u8_Global result)
+          = (if (UInt64.t'int i + 1) * UInt64.t'int ss <= UInt64.t'int num_bytes then
+            (UInt64.t'int i + 1) * UInt64.t'int ss
+          else
+            UInt64.t'int num_bytes
+          )}
+          s1
+        | s1 = UInt64.add [%#sblockio'33] {i} {[%#sblockio'32] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &i <- _x ] s2)
+        | s2 = bb4 ] ] ]
+  | bb10 = s0
+    [ s0 = -{resolve_refmut_BDev dev}- s1
+    | s1 = elim_Break {_93} (fun (r0'0: t_Result_Infallible_EmError) -> [ &residual <- r0'0 ] s2)
+    | s2 = from_residual_Result_Vec_u8_Global_EmError [%#sblockio'18] {residual}
+        (fun (_x: t_Result_Vec_u8_Global_EmError) -> [ &_ret <- _x ] s3)
+    | s3 = return {_ret} ]
+  | bb28 = s0
+    [ s0 = -{resolve_refmut_BDev dev}- s1
+    | s1 =
+      {[@expl:assertion] [%#sblockio'34] let _ = lemma_ceil (UInt64.t'int num_bytes) (UInt64.t'int ss) in UInt64.t'int num_blocks
+        * UInt64.t'int ss
+      >= UInt64.t'int num_bytes}
+      s2
+    | s2 = [ &_ret <- Ok result ] s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: t_Result_Vec_u8_Global_EmError = Any.any_l ()
+  | & self: t_Client = self
+  | & dev: MutBorrow.t t_BDev = dev
+  | & lba: UInt64.t = lba
+  | & num_bytes: UInt64.t = num_bytes
+  | & ss: UInt64.t = Any.any_l ()
+  | & num_blocks: UInt64.t = Any.any_l ()
+  | & _32: UInt64.t = Any.any_l ()
+  | & _33: UInt64.t = Any.any_l ()
+  | & _36: UInt64.t = Any.any_l ()
+  | & _37: bool = Any.any_l ()
+  | & result: t_Vec_u8_Global = Any.any_l ()
+  | & d0: t_BDev = Any.any_l ()
+  | & i: UInt64.t = Any.any_l ()
+  | & _78: bool = Any.any_l ()
+  | & block_lba: UInt64.t = Any.any_l ()
+  | & _82: UInt64.t = Any.any_l ()
+  | & _85: UInt64.t = Any.any_l ()
+  | & blk: t_Vec_u8_Global = Any.any_l ()
+  | & _93: t_ControlFlow_Result_Infallible_EmError_Vec_u8_Global = Any.any_l ()
+  | & _94: t_Result_Vec_u8_Global_EmError = Any.any_l ()
+  | & _95: MutBorrow.t t_BDev = Any.any_l ()
+  | & residual: t_Result_Infallible_EmError = Any.any_l ()
+  | & val': t_Vec_u8_Global = Any.any_l ()
+  | & remaining: UInt64.t = Any.any_l ()
+  | & _106: UInt64.t = Any.any_l ()
+  | & to_copy: UInt64.t = Any.any_l ()
+  | & _109: bool = Any.any_l ()
+  | & j: UInt64.t = Any.any_l ()
+  | & r0: int = Any.any_l ()
+  | & _134: bool = Any.any_l ()
+  | & _143: () = Any.any_l ()
+  | & _144: MutBorrow.t t_Vec_u8_Global = Any.any_l ()
+  | & _146: UInt8.t = Any.any_l ()
+  | & _old: t_BDev = Any.any_l () ])
+  [ return (result: t_Result_Vec_u8_Global_EmError) ->
+  {[@stop_split] [@expl:read_blocks ensures] ([@stop_split] [@expl:read_blocks ensures #0] [%#sblockio'38] forall p: int. 0
+            <= p
+          /\ p < Seq.length dev.current.log -> Seq.get dev.final.log p = Seq.get dev.current.log p)
+    /\ ([@stop_split] [@expl:read_blocks ensures #1] [%#sblockio'39] Seq.length dev.current.log
+      <= Seq.length dev.final.log)
+    /\ ([@stop_split] [@expl:read_blocks ensures #2] [%#sblockio'40] forall p: int. Seq.length dev.current.log <= p
+          /\ p < Seq.length dev.final.log
+        -> Seq.get dev.final.log p
+        = { f0 = UInt32.t'int self.ns_id;
+            f1 = UInt64.t'int self.base_lba + UInt64.t'int lba + (p - Seq.length dev.current.log) })
+    /\ ([@stop_split] [@expl:read_blocks ensures #3] [%#sblockio'41] dev.final.store = dev.current.store)
+    /\ ([@stop_split] [@expl:read_blocks ensures #4] [%#sblockio'42] match result with
+      | Ok v -> Seq.length (view_Vec_u8_Global v) = UInt64.t'int num_bytes
+      /\ (forall q: int. 0 <= q /\ q < UInt64.t'int num_bytes
+        -> match get_tup2_Int_Int dev.current.store { f0 = UInt32.t'int self.ns_id;
+                                                      f1 = UInt64.t'int self.base_lba + UInt64.t'int lba
+                                                      + ComputerDivision.div q (UInt32.t'int self.sector_size) } with
+          | Some blk -> Seq.get (view_Vec_u8_Global v) q
+          = Seq.get blk (ComputerDivision.mod q (UInt32.t'int self.sector_size))
+          | None -> true
+          end)
+      | Err e -> e = IoError
+      end)}
+    (! return {result}) ]

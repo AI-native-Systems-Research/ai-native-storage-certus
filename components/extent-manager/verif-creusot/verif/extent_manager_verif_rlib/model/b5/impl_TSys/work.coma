@@ -1,0 +1,50 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 149 4 149 26 *)
+
+(* model::b5::TSys *)
+
+let%span sb5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 150 22 150 23
+let%span sb5'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 150 8 150 23
+let%span sb5'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 146 15 146 62
+let%span sb5'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 147 14 147 73
+let%span sb5'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 148 14 148 111
+
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_TPh = Top | Wait int | WaitInf | Woken bool | Work | Exited
+
+type t_TSys = { interval: t_Option_u64; now: int; ph: t_TPh; shutdown: bool; ckpts: UInt64.t }
+
+predicate resolve_refmut_TSys [@inline:trivial] (_1: MutBorrow.t t_TSys) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_TSys
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let work [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 149 4 149 26]
+  (self: MutBorrow.t t_TSys) (return (x: ())) = {[@stop_split] [@expl:work requires] [%#sb5'1] self.current.ph = Work
+  /\ UInt64.t'int self.current.ckpts < UInt64.t'int const_MAX}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = UInt64.add [%#sb5'0] {self.current.ckpts} {[%#sb5] (1: UInt64.t)}
+        (fun (_x: UInt64.t) -> [ &self <- { self with current = { self.current with ckpts = _x } } ] s1)
+    | s1 = [ &_9 <- Top ] s2
+    | s2 = [ &self <- { self with current = { self.current with ph = _9 } } ] s3
+    | s3 = -{resolve_refmut_TSys self}- s4
+    | s4 = return {_ret} ] ]
+  [ & _ret: () = Any.any_l () | & self: MutBorrow.t t_TSys = self | & _9: t_TPh = Any.any_l () ])
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:work ensures] ([@stop_split] [@expl:work ensures #0] [%#sb5'2] UInt64.t'int self.final.ckpts
+        = UInt64.t'int self.current.ckpts + 1
+      /\ self.final.ph = Top)
+    /\ ([@stop_split] [@expl:work ensures #1] [%#sb5'3] self.final.interval = self.current.interval
+    /\ self.final.now = self.current.now /\ self.final.shutdown = self.current.shutdown)}
+    (! return {result}) ]

@@ -1,0 +1,17 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 112 9 112 29 *)
+
+(* <model::b4::Co as std::clone::Clone> *)
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_Co = { completed_seq: UInt64.t; in_progress: bool }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_Co [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b4.rs" 112 9 112 29]
+  (self: t_Co) (return (x: t_Co)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ] [ & _ret: t_Co = Any.any_l () | & self: t_Co = self ])
+  [ return (result: t_Co) -> (! return {result}) ]

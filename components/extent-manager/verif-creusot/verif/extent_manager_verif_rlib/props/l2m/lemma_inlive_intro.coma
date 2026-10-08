@@ -1,0 +1,68 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2m.rs" 93 0 93 89 *)
+
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 33 16 33 29
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 291 16 291 30
+let%span sbuddy'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 283 10 283 16
+let%span sbuddy'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 285 16 285 86
+let%span sl2m = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2m.rs" 91 11 91 111
+let%span sl2m'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2m.rs" 92 10 92 36
+let%span sl2m'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2m.rs" 36 16 36 41
+let%span sl2m'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2m.rs" 42 16 42 46
+let%span sl2m'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2m.rs" 86 16 86 131
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use bv.Pow2int
+use int.ComputerDivision
+use int.Int
+
+type t_Vec_Vec_u64_Global_Global
+
+type t_BuddyAllocator = {
+  base_offset: UInt64.t;
+  total_usable_size: UInt64.t;
+  sector_size: UInt32.t;
+  max_order: UInt64.t;
+  free_lists: t_Vec_Vec_u64_Global_Global }
+
+type tup2_u64_u64 = { f0: UInt64.t; f1: UInt64.t }
+
+function lx [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2m.rs" 35 0 35 64] (b: t_BuddyAllocator) (lv: Seq.seq tup2_u64_u64) (i: int) : int
+ = [%#sl2m'1] UInt64.t'int (Seq.get lv i).f0 - UInt64.t'int b.base_offset
+
+function span [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 32 0 32 35] (ss: int) (o: int) : int
+ = [%#sbuddy] Pow2int.pow2 o * ss
+
+function ord_from [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 284 0 284 38] (b: int) (k: int) : int
+
+axiom ord_from_def: forall b: int, k: int [ord_from b k]. ord_from b k
+    = ([%#sbuddy'2] if k >= 64 \/ k < 0 \/ Pow2int.pow2 k >= b then k else ord_from b (k + 1))
+
+function ord [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 290 0 290 25] (b: int) : int
+ = [%#sbuddy'0] ord_from b 0
+
+function lk [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2m.rs" 41 0 41 64] (b: t_BuddyAllocator) (lv: Seq.seq tup2_u64_u64) (i: int) : int
+ = [%#sl2m'2] ord (ComputerDivision.div (UInt64.t'int (Seq.get lv i).f1) (UInt32.t'int b.sector_size))
+
+predicate inlive [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2m.rs" 85 0 85 69] (b: t_BuddyAllocator) (lv: Seq.seq tup2_u64_u64) (z: int) =
+  [%#sl2m'3] exists i: int. 0 <= i
+    /\ i < Seq.length lv /\ lx b lv i <= z /\ z < lx b lv i + span (UInt32.t'int b.sector_size) (lk b lv i)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant b : t_BuddyAllocator
+
+constant lv : Seq.seq tup2_u64_u64
+
+constant z : int
+
+constant i : int
+
+predicate lemma_inlive_intro [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2m.rs" 93 0 93 89] (b: t_BuddyAllocator) (lv: Seq.seq tup2_u64_u64) (z: int) (i: int)
+
+goal vc_lemma_inlive_intro: ([%#sl2m] 0 <= i
+    /\ i < Seq.length lv /\ lx b lv i <= z /\ z < lx b lv i + span (UInt32.t'int b.sector_size) (lk b lv i))
+  -> ([@stop_split] [@expl:lemma_inlive_intro ensures] [%#sl2m'0] true /\ inlive b lv z)

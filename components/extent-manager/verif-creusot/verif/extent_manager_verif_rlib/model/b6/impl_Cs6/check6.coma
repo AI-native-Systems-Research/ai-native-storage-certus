@@ -1,0 +1,165 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 290 4 290 59 *)
+
+(* model::b6::Cs6 *)
+
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 183 19 183 38
+let%span svec'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 184 18 184 46
+let%span svec'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 185 18 185 49
+let%span svec'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 186 18 186 54
+let%span svec'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 187 18 187 47
+let%span svec'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sslice = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/slice.rs" 148 20 148 37
+let%span sslice'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/slice.rs" 153 20 153 37
+let%span sslice'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/slice.rs" 158 20 158 88
+let%span sb6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 292 19 292 22
+let%span sb6'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 293 19 293 23
+let%span sb6'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 300 15 300 18
+let%span sb6'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 301 8 301 13
+let%span sb6'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 296 34 296 38
+let%span sb6'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 297 19 297 22
+let%span sb6'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 298 19 298 24
+let%span sb6'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 282 15 282 34
+let%span sb6'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 283 14 283 59
+let%span sb6'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 284 14 284 118
+let%span sb6'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 285 14 287 63
+let%span sb6'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 288 14 289 85
+
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use seq.Seq
+use creusot.prelude.Any
+use int.Int
+
+type t_Co = { completed_seq: UInt64.t; in_progress: bool }
+
+type t_Vec_Th_Global
+
+type t_Cs6 = { co: t_Co; ts: t_Vec_Th_Global }
+
+type t_Th = Idle | Waiting UInt64.t | Running UInt64.t
+
+predicate in_bounds_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq t_Th) =
+  [%#sslice] UInt64.t'int self < Seq.length seq
+
+meta "rewrite_def" predicate in_bounds_usize
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_Th_Global (self: t_Vec_Th_Global) : Seq.seq t_Th
+
+axiom view_Vec_Th_Global_spec:
+  forall self: t_Vec_Th_Global [view_Vec_Th_Global self]. [%#svec'4] Seq.length (view_Vec_Th_Global self)
+    <= UInt64.t'int const_MAX
+
+predicate has_value_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq t_Th) (out: t_Th) =
+  [%#sslice'0] Seq.get seq (UInt64.t'int self) = out
+
+meta "rewrite_def" predicate has_value_usize
+
+predicate resolve_elswhere_usize [@inline:trivial] (self: UInt64.t) (old': Seq.seq t_Th) (fin: Seq.seq t_Th) =
+  [%#sslice'1] forall i: int. 0 <= i /\ i <> UInt64.t'int self /\ i < Seq.length old' -> Seq.get old' i = Seq.get fin i
+
+meta "rewrite_def" predicate resolve_elswhere_usize
+
+let index_mut_Vec_Th_Global (self_: MutBorrow.t t_Vec_Th_Global) (ix: UInt64.t) (return (x: MutBorrow.t t_Th)) =
+{[@stop_split] [@expl:index_mut requires] [%#svec] in_bounds_usize ix (view_Vec_Th_Global self_.current)}
+  any
+  [ return (result: MutBorrow.t t_Th) ->
+  {[@stop_split] [@expl:index_mut_Vec_Th_Global ensures] ([@stop_split] [@expl:index_mut ensures #0] [%#svec'0] has_value_usize ix (view_Vec_Th_Global self_.current) result.current)
+    /\ ([@stop_split] [@expl:index_mut ensures #1] [%#svec'1] has_value_usize ix (view_Vec_Th_Global self_.final) result.final)
+    /\ ([@stop_split] [@expl:index_mut ensures #2] [%#svec'2] resolve_elswhere_usize ix (view_Vec_Th_Global self_.current) (view_Vec_Th_Global self_.final))
+    /\ ([@stop_split] [@expl:index_mut ensures #3] [%#svec'3] Seq.length (view_Vec_Th_Global self_.final)
+    = Seq.length (view_Vec_Th_Global self_.current))}
+    (! return {result}) ]
+
+predicate resolve_refmut_Th [@inline:trivial] (_1: MutBorrow.t t_Th) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_Th
+
+predicate resolve_refmut_Cs6 [@inline:trivial] (_1: MutBorrow.t t_Cs6) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_Cs6
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let check6 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b6.rs" 290 4 290 59]
+  (self: MutBorrow.t t_Cs6) (t: UInt64.t) (needed: UInt64.t) (return (x: bool)) =
+{[@stop_split] [@expl:check6 requires] [%#sb6'6] UInt64.t'int t < Seq.length (view_Vec_Th_Global self.current.ts)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_23 <- UInt64.ge self.current.co.completed_seq needed ] s1
+    | s1 = any [ br0 -> {_23 = false} (! bb3) | br1 -> {_23} (! bb1) ] ]
+  | bb1 = s0
+    [ s0 = [ &_27 <- Idle ] s1
+    | s1 = MutBorrow.borrow_final <t_Vec_Th_Global> {self.current.ts} {MutBorrow.inherit_id (MutBorrow.get_id self) 1}
+        (fun (_bor: MutBorrow.t t_Vec_Th_Global) ->
+          [ &_29 <- _bor ] [ &self <- { self with current = { self.current with ts = _bor.final } } ] s2)
+    | s2 = index_mut_Vec_Th_Global [%#sb6] {_29} {t} (fun (_x: MutBorrow.t t_Th) -> [ &_28 <- _x ] s3)
+    | s3 = [ &_28 <- { _28 with current = _27 } ] s4
+    | s4 = -{resolve_refmut_Th _28}- s5
+    | s5 = -{resolve_refmut_Cs6 self}- s6
+    | s6 = [ &_ret <- [%#sb6'0] true ] s7
+    | s7 = return {_ret} ]
+  | bb3 = any [ br0 -> {self.current.co.in_progress = false} (! bb5) | br1 -> {self.current.co.in_progress} (! bb4) ]
+  | bb4 = s0
+    [ s0 = [ &_39 <- Waiting needed ] s1
+    | s1 = MutBorrow.borrow_final <t_Vec_Th_Global> {self.current.ts} {MutBorrow.inherit_id (MutBorrow.get_id self) 1}
+        (fun (_bor: MutBorrow.t t_Vec_Th_Global) ->
+          [ &_42 <- _bor ] [ &self <- { self with current = { self.current with ts = _bor.final } } ] s2)
+    | s2 = index_mut_Vec_Th_Global [%#sb6'1] {_42} {t} (fun (_x: MutBorrow.t t_Th) -> [ &_41 <- _x ] s3)
+    | s3 = [ &_41 <- { _41 with current = _39 } ] s4
+    | s4 = -{resolve_refmut_Th _41}- s5
+    | s5 = -{resolve_refmut_Cs6 self}- s6
+    | s6 = [ &_ret <- [%#sb6'2] false ] s7
+    | s7 = return {_ret} ]
+  | bb5 = s0
+    [ s0 =
+      [ &self <- { self with current = { self.current with co = { self.current.co with in_progress = ([%#sb6'3] true) } } } ]
+      s1
+    | s1 = [ &_34 <- Running needed ] s2
+    | s2 = MutBorrow.borrow_final <t_Vec_Th_Global> {self.current.ts} {MutBorrow.inherit_id (MutBorrow.get_id self) 1}
+        (fun (_bor: MutBorrow.t t_Vec_Th_Global) ->
+          [ &_37 <- _bor ] [ &self <- { self with current = { self.current with ts = _bor.final } } ] s3)
+    | s3 = index_mut_Vec_Th_Global [%#sb6'4] {_37} {t} (fun (_x: MutBorrow.t t_Th) -> [ &_36 <- _x ] s4)
+    | s4 = [ &_36 <- { _36 with current = _34 } ] s5
+    | s5 = -{resolve_refmut_Th _36}- s6
+    | s6 = -{resolve_refmut_Cs6 self}- s7
+    | s7 = [ &_ret <- [%#sb6'5] false ] s8
+    | s8 = return {_ret} ] ]
+  [ & _ret: bool = Any.any_l ()
+  | & self: MutBorrow.t t_Cs6 = self
+  | & t: UInt64.t = t
+  | & needed: UInt64.t = needed
+  | & _23: bool = Any.any_l ()
+  | & _27: t_Th = Any.any_l ()
+  | & _28: MutBorrow.t t_Th = Any.any_l ()
+  | & _29: MutBorrow.t t_Vec_Th_Global = Any.any_l ()
+  | & _34: t_Th = Any.any_l ()
+  | & _36: MutBorrow.t t_Th = Any.any_l ()
+  | & _37: MutBorrow.t t_Vec_Th_Global = Any.any_l ()
+  | & _39: t_Th = Any.any_l ()
+  | & _41: MutBorrow.t t_Th = Any.any_l ()
+  | & _42: MutBorrow.t t_Vec_Th_Global = Any.any_l () ])
+  [ return (result: bool) ->
+  {[@stop_split] [@expl:check6 ensures] ([@stop_split] [@expl:check6 ensures #0] [%#sb6'7] result
+      = (UInt64.t'int self.current.co.completed_seq >= UInt64.t'int needed))
+    /\ ([@stop_split] [@expl:check6 ensures #1] [%#sb6'8] UInt64.t'int self.current.co.completed_seq
+        >= UInt64.t'int needed
+      -> self.final.co = self.current.co
+      /\ view_Vec_Th_Global self.final.ts = Seq.set (view_Vec_Th_Global self.current.ts) (UInt64.t'int t) (Idle))
+    /\ ([@stop_split] [@expl:check6 ensures #2] [%#sb6'9] UInt64.t'int self.current.co.completed_seq
+          < UInt64.t'int needed
+        /\ not self.current.co.in_progress
+      -> self.final.co.completed_seq = self.current.co.completed_seq
+      /\ self.final.co.in_progress
+      /\ view_Vec_Th_Global self.final.ts
+      = Seq.set (view_Vec_Th_Global self.current.ts) (UInt64.t'int t) (Running needed))
+    /\ ([@stop_split] [@expl:check6 ensures #3] [%#sb6'10] UInt64.t'int self.current.co.completed_seq
+        < UInt64.t'int needed
+      /\ self.current.co.in_progress
+    -> self.final.co = self.current.co
+    /\ view_Vec_Th_Global self.final.ts
+    = Seq.set (view_Vec_Th_Global self.current.ts) (UInt64.t'int t) (Waiting needed))}
+    (! return {result}) ]

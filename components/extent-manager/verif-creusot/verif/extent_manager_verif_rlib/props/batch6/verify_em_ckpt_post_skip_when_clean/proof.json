@@ -1,0 +1,14 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_alloc_extent": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_free_slot": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_run6": { "prover": "alt-ergo", "time": 0.011 },
+      "vc_verify_em_ckpt_post_skip_when_clean": {
+        "prover": "cvc4",
+        "time": 0.333
+      }
+    }
+  }
+}

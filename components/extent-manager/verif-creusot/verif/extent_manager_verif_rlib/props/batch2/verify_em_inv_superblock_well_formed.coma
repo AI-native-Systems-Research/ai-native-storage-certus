@@ -1,0 +1,218 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 1134 0 1136 85 *)
+
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sparams = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/params.rs" 61 14 61 82
+let%span sparams'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/params.rs" 62 14 62 90
+let%span sparams'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/params.rs" 63 14 63 88
+let%span sparams'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/params.rs" 64 14 64 108
+let%span sparams'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/params.rs" 65 14 65 73
+let%span sparams'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/params.rs" 66 14 66 69
+let%span sparams'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/params.rs" 67 14 67 100
+let%span sparams'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/params.rs" 68 14 68 59
+let%span sparams'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/params.rs" 37 0 37 31
+let%span sparams'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/params.rs" 38 0 38 29
+let%span sassume = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 198 16 198 31
+let%span ssbbytes = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/sbbytes.rs" 145 14 145 39
+let%span ssbbytes'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/sbbytes.rs" 172 14 175 5
+let%span ssbbytes'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/sbbytes.rs" 176 14 176 109
+let%span ssbbytes'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/sbbytes.rs" 229 16 229 100
+let%span ssbbytes'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/sbbytes.rs" 128 8 139 63
+let%span ssbbytes'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/sbbytes.rs" 114 16 114 75
+let%span ssbbytes'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/sbbytes.rs" 120 16 120 75
+let%span sbatch2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 1138 13 1138 76
+let%span sbatch2'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 1139 13 1139 27
+let%span sbatch2'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 1141 13 1141 27
+let%span sbatch2'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 1144 21 1144 22
+let%span sbatch2'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 1144 4 1144 39
+let%span sbatch2'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 1145 44 1145 45
+let%span sbatch2'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 1145 4 1145 45
+let%span sbatch2'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 1146 13 1146 27
+let%span sbatch2'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 1148 15 1148 43
+let%span sbatch2'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 1128 11 1128 53
+let%span sbatch2'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 1129 10 1129 59
+let%span sbatch2'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 1130 10 1130 58
+let%span sbatch2'11 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 1131 10 1131 86
+let%span sbatch2'12 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 1132 10 1132 59
+let%span sbatch2'13 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 1133 10 1133 29
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.int.UInt8
+use seq.Seq
+use creusot.prelude.Any
+use int.Int
+
+type t_Superblock = {
+  magic: UInt64.t;
+  version: UInt32.t;
+  data_disk_size: UInt64.t;
+  sector_size: UInt32.t;
+  slab_size: UInt64.t;
+  max_extent_size: UInt32.t;
+  region_count: UInt32.t;
+  checkpoint_seq: UInt64.t;
+  active_copy: UInt8.t;
+  checkpoint_region_offset: UInt64.t;
+  checkpoint_region_size: UInt64.t;
+  instance_id: UInt64.t;
+  metadata_disk_ns_id: UInt32.t;
+  data_start_offset: UInt64.t }
+
+constant const_SUPERBLOCK_MAGIC: UInt64.t = [%#sparams'7] (4847371096096462388: UInt64.t)
+
+constant const_FORMAT_VERSION: UInt32.t = [%#sparams'8] (6: UInt32.t)
+
+let new (data_disk_size'0: UInt64.t) (sector_size'0: UInt32.t) (slab_size'0: UInt64.t) (max_extent_size'0: UInt32.t)
+  (region_count'0: UInt32.t) (checkpoint_region_offset'0: UInt64.t) (checkpoint_region_size'0: UInt64.t)
+  (instance_id'0: UInt64.t) (metadata_disk_ns_id'0: UInt32.t) (data_start_offset'0: UInt64.t)
+  (return (x: t_Superblock)) = any
+  [ return (result: t_Superblock) ->
+  {[@stop_split] [@expl:new ensures] ([@stop_split] [@expl:new ensures #0] [%#sparams] result.magic
+        = const_SUPERBLOCK_MAGIC
+      /\ result.version = const_FORMAT_VERSION)
+    /\ ([@stop_split] [@expl:new ensures #1] [%#sparams'0] result.data_disk_size = data_disk_size'0
+      /\ result.sector_size = sector_size'0)
+    /\ ([@stop_split] [@expl:new ensures #2] [%#sparams'1] result.slab_size = slab_size'0
+      /\ result.max_extent_size = max_extent_size'0)
+    /\ ([@stop_split] [@expl:new ensures #3] [%#sparams'2] result.region_count = region_count'0
+      /\ UInt64.t'int result.checkpoint_seq = 0 /\ UInt8.t'int result.active_copy = 0)
+    /\ ([@stop_split] [@expl:new ensures #4] [%#sparams'3] result.checkpoint_region_offset = checkpoint_region_offset'0)
+    /\ ([@stop_split] [@expl:new ensures #5] [%#sparams'4] result.checkpoint_region_size = checkpoint_region_size'0)
+    /\ ([@stop_split] [@expl:new ensures #6] [%#sparams'5] result.instance_id = instance_id'0
+      /\ result.metadata_disk_ns_id = metadata_disk_ns_id'0)
+    /\ ([@stop_split] [@expl:new ensures #7] [%#sparams'6] result.data_start_offset = data_start_offset'0)}
+    (! return {result}) ]
+
+type t_Vec_u8_Global
+
+function le64 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/sbbytes.rs" 17 0 17 33] (v: UInt64.t) (k: int) : UInt8.t
+
+predicate has64 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/sbbytes.rs" 113 0 113 50] (s: Seq.seq UInt8.t) (pos: int) (v: UInt64.t) =
+  [%#ssbbytes'4] forall k: int. 0 <= k /\ k < 8 -> Seq.get s (pos + k) = le64 v k
+
+function le32 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/sbbytes.rs" 23 0 23 33] (v: UInt32.t) (k: int) : UInt8.t
+
+predicate has32 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/sbbytes.rs" 119 0 119 50] (s: Seq.seq UInt8.t) (pos: int) (v: UInt32.t) =
+  [%#ssbbytes'5] forall k: int. 0 <= k /\ k < 4 -> Seq.get s (pos + k) = le32 v k
+
+function crc32 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/sbbytes.rs" 29 0 29 31] (s: Seq.seq UInt8.t) : UInt32.t
+
+predicate sb_layout [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/sbbytes.rs" 126 0 126 52] (s: Seq.seq UInt8.t) (sb: t_Superblock) =
+  [%#ssbbytes'3] Seq.length s = 4096
+  /\ has64 s 0 sb.magic
+  /\ has32 s 8 sb.version
+  /\ has64 s 12 sb.data_disk_size
+  /\ has32 s 20 sb.sector_size
+  /\ has64 s 24 sb.slab_size
+  /\ has32 s 32 sb.max_extent_size
+  /\ has32 s 36 sb.region_count
+  /\ has64 s 40 sb.checkpoint_seq
+  /\ Seq.get s 48 = sb.active_copy
+  /\ (forall q: int. 49 <= q /\ q < 56 -> Seq.get s q = (0: UInt8.t))
+  /\ has64 s 56 sb.checkpoint_region_offset
+  /\ has64 s 64 sb.checkpoint_region_size
+  /\ has64 s 72 sb.instance_id
+  /\ has32 s 80 sb.metadata_disk_ns_id
+  /\ has64 s 84 sb.data_start_offset
+  /\ has32 s 92 (crc32 (Seq.([..]) s 0 92)) /\ (forall q: int. 96 <= q /\ q < 4096 -> Seq.get s q = (0: UInt8.t))
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_u8_Global (self: t_Vec_u8_Global) : Seq.seq UInt8.t
+
+axiom view_Vec_u8_Global_spec:
+  forall self: t_Vec_u8_Global [view_Vec_u8_Global self]. [%#svec] Seq.length (view_Vec_u8_Global self)
+    <= UInt64.t'int const_MAX
+
+let serialize (self: t_Superblock) (return (x: t_Vec_u8_Global)) = any
+  [ return (result: t_Vec_u8_Global) ->
+  {[@stop_split] [@expl:serialize ensures] [%#ssbbytes] sb_layout (view_Vec_u8_Global result) self}
+    (! return {result}) ]
+
+type t_EmError = CorruptMetadata | IoError | NotInitialized | OffsetNotFound UInt64.t | OutOfSpace
+
+type t_Result_Superblock_EmError = Ok t_Superblock | Err t_EmError
+
+let deserialize (buf: t_Vec_u8_Global) (return (x: t_Result_Superblock_EmError)) = any
+  [ return (result: t_Result_Superblock_EmError) ->
+  {[@stop_split] [@expl:deserialize ensures] ([@stop_split] [@expl:deserialize ensures #0] [%#ssbbytes'0] match result with
+        | Ok sb -> sb.magic = const_SUPERBLOCK_MAGIC
+        | Err e -> e = CorruptMetadata
+        end)
+    /\ ([@stop_split] [@expl:deserialize ensures #1] [%#ssbbytes'1] forall sb: t_Superblock. sb_layout (view_Vec_u8_Global buf) sb
+        /\ sb.magic = const_SUPERBLOCK_MAGIC -> result = Ok sb)}
+    (! return {result}) ]
+
+type tup6_Superblock_Vec_u8_Global_Vec_u8_Global_Superblock_Vec_u8_Global_Result_Superblock_EmError = {
+  f0: t_Superblock;
+  f1: t_Vec_u8_Global;
+  f2: t_Vec_u8_Global;
+  f3: t_Superblock;
+  f4: t_Vec_u8_Global;
+  f5: t_Result_Superblock_EmError }
+
+predicate sb_wf [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/sbbytes.rs" 228 0 228 36] (sb: t_Superblock) =
+  [%#ssbbytes'2] sb.magic = const_SUPERBLOCK_MAGIC
+  /\ sb.version = const_FORMAT_VERSION /\ UInt8.t'int sb.active_copy <= 1
+
+constant const_MAX'0: UInt64.t = (18446744073709551615: UInt64.t)
+
+predicate a_9c0757 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 197 0 197 33] (seq: int) =
+  [%#sassume] seq < UInt64.t'int const_MAX'0
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_em_inv_superblock_well_formed [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 1134 0 1136 85]
+  (sb: t_Superblock) (dds: UInt64.t) (ss: UInt32.t) (slab: UInt64.t) (mes: UInt32.t) (rc: UInt32.t) (cro: UInt64.t)
+  (crs: UInt64.t) (iid: UInt64.t) (ns: UInt32.t) (dso: UInt64.t)
+  (return (x: tup6_Superblock_Vec_u8_Global_Vec_u8_Global_Superblock_Vec_u8_Global_Result_Superblock_EmError)) =
+{[@stop_split] [@expl:verify_em_inv_superblock_well_formed requires] [%#sbatch2'8] sb_wf sb
+  /\ a_9c0757 (UInt64.t'int sb.checkpoint_seq)}
+  (! bb0
+  [ bb0 = s0'0
+    [ s0'0 = new [%#sbatch2] {dds} {ss} {slab} {mes} {rc} {cro} {crs} {iid} {ns} {dso}
+        (fun (_x: t_Superblock) -> [ &s0 <- _x ] s1)
+    | s1 = serialize [%#sbatch2'0] {s0} (fun (_x: t_Vec_u8_Global) -> [ &b0 <- _x ] s2'0)
+    | s2'0 = serialize [%#sbatch2'1] {sb} (fun (_x: t_Vec_u8_Global) -> [ &b1 <- _x ] s3)
+    | s3 = [ &s2 <- sb ] s4
+    | s4 = UInt8.sub [%#sbatch2'3] {[%#sbatch2'2] (1: UInt8.t)} {sb.active_copy}
+        (fun (_x: UInt8.t) -> [ &s2 <- { s2 with active_copy = _x } ] s5)
+    | s5 = UInt64.add [%#sbatch2'5] {sb.checkpoint_seq} {[%#sbatch2'4] (1: UInt64.t)}
+        (fun (_x: UInt64.t) -> [ &s2 <- { s2 with checkpoint_seq = _x } ] s6)
+    | s6 = serialize [%#sbatch2'6] {s2} (fun (_x: t_Vec_u8_Global) -> [ &b2 <- _x ] s7)
+    | s7 = [ &_43 <- b1 ] s8
+    | s8 = deserialize [%#sbatch2'7] {_43} (fun (_x: t_Result_Superblock_EmError) -> [ &back <- _x ] s9)
+    | s9 = [ &_ret <- { f0 = s0; f1 = b0; f2 = b1; f3 = s2; f4 = b2; f5 = back } ] s10
+    | s10 = return {_ret} ] ]
+  [ & _ret: tup6_Superblock_Vec_u8_Global_Vec_u8_Global_Superblock_Vec_u8_Global_Result_Superblock_EmError = Any.any_l ()
+  | & sb: t_Superblock = sb
+  | & dds: UInt64.t = dds
+  | & ss: UInt32.t = ss
+  | & slab: UInt64.t = slab
+  | & mes: UInt32.t = mes
+  | & rc: UInt32.t = rc
+  | & cro: UInt64.t = cro
+  | & crs: UInt64.t = crs
+  | & iid: UInt64.t = iid
+  | & ns: UInt32.t = ns
+  | & dso: UInt64.t = dso
+  | & s0: t_Superblock = Any.any_l ()
+  | & b0: t_Vec_u8_Global = Any.any_l ()
+  | & b1: t_Vec_u8_Global = Any.any_l ()
+  | & s2: t_Superblock = Any.any_l ()
+  | & b2: t_Vec_u8_Global = Any.any_l ()
+  | & back: t_Result_Superblock_EmError = Any.any_l ()
+  | & _43: t_Vec_u8_Global = Any.any_l () ])
+  [ return (result: tup6_Superblock_Vec_u8_Global_Vec_u8_Global_Superblock_Vec_u8_Global_Result_Superblock_EmError) ->
+  {[@stop_split] [@expl:verify_em_inv_superblock_well_formed ensures] ([@stop_split] [@expl:verify_em_inv_superblock_well_formed ensures #0] [%#sbatch2'9] sb_wf result.f0
+      /\ sb_layout (view_Vec_u8_Global result.f1) result.f0)
+    /\ ([@stop_split] [@expl:verify_em_inv_superblock_well_formed ensures #1] [%#sbatch2'10] sb_layout (view_Vec_u8_Global result.f2) sb
+      /\ UInt8.t'int (Seq.get (view_Vec_u8_Global result.f2) 48) <= 1)
+    /\ ([@stop_split] [@expl:verify_em_inv_superblock_well_formed ensures #2] [%#sbatch2'11] has64 (view_Vec_u8_Global result.f2) 0 const_SUPERBLOCK_MAGIC
+      /\ has32 (view_Vec_u8_Global result.f2) 8 const_FORMAT_VERSION)
+    /\ ([@stop_split] [@expl:verify_em_inv_superblock_well_formed ensures #3] [%#sbatch2'12] sb_wf result.f3
+      /\ sb_layout (view_Vec_u8_Global result.f4) result.f3)
+    /\ ([@stop_split] [@expl:verify_em_inv_superblock_well_formed ensures #4] [%#sbatch2'13] result.f5 = Ok sb)}
+    (! return {result}) ]

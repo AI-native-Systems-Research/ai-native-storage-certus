@@ -1,0 +1,59 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 246 0 246 37 *)
+
+let%span swell_founded = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 46 11 46 17
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 47 10 47 23
+let%span sbuddy'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 48 10 48 40
+let%span sbuddy'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 45 10 45 11
+let%span sl2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 244 10 244 11
+let%span sl2'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 243 11 243 27
+let%span sl2'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 245 10 245 47
+
+use bv.Pow2int
+use int.Int
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+function lemma_pow2 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 49 0 49 25] (o: int) : ()
+
+axiom lemma_pow2_spec: forall o: int. ([%#sbuddy] 0 <= o) -> ([%#sbuddy'0] Pow2int.pow2 o >= 1)
+
+axiom lemma_pow2_spec'0: forall o: int. ([%#sbuddy] 0 <= o) -> ([%#sbuddy'1] Pow2int.pow2 (o + 1) = 2 * Pow2int.pow2 o)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant a : int
+
+constant b : int
+
+function lemma_pow2_add [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 246 0 246 37] (a: int) (b: int) : ()
+
+goal vc_lemma_pow2_add: ([%#sl2'0] 0 <= a /\ 0 <= b)
+  -> (if b > 0 then
+    (([@stop_split] [@expl:lemma_pow2_add requires] [%#sl2'0] 0 <= a /\ 0 <= b - 1)
+      /\ ([@expl:variant decreases] well_founded_relation_Int ([%#sl2] b) ([%#sl2] b - 1)))
+    /\ (([@stop_split] [@expl:lemma_pow2_add ensures] [%#sl2'1] Pow2int.pow2 (a + (b - 1))
+      = Pow2int.pow2 a * Pow2int.pow2 (b - 1))
+    -> (let _ = lemma_pow2_add a (b - 1) in ([@stop_split] [@expl:lemma_pow2 requires] [%#sbuddy] 0 <= a + b - 1)
+    /\ (([@stop_split] [@expl:lemma_pow2 ensures] ([@stop_split] [@expl:lemma_pow2 ensures #0] [%#sbuddy'0] Pow2int.pow2 (a
+            + b
+          - 1)
+        >= 1)
+      /\ ([@stop_split] [@expl:lemma_pow2 ensures #1] [%#sbuddy'1] Pow2int.pow2 (a + b - 1 + 1)
+      = 2 * Pow2int.pow2 (a + b - 1)))
+    -> (let _ = lemma_pow2 (a + b - 1) in ([@stop_split] [@expl:lemma_pow2 requires] [%#sbuddy] 0 <= b - 1)
+    /\ (([@stop_split] [@expl:lemma_pow2 ensures] ([@stop_split] [@expl:lemma_pow2 ensures #0] [%#sbuddy'0] Pow2int.pow2 (b
+          - 1)
+        >= 1)
+      /\ ([@stop_split] [@expl:lemma_pow2 ensures #1] [%#sbuddy'1] Pow2int.pow2 (b - 1 + 1) = 2 * Pow2int.pow2 (b - 1)))
+    -> ([@stop_split] [@expl:lemma_pow2_add ensures] [%#sl2'1] Pow2int.pow2 (a + b)
+    = Pow2int.pow2 a * Pow2int.pow2 b))))))
+  else
+    Pow2int.pow2 0 = 1
+    && ([@stop_split] [@expl:lemma_pow2_add ensures] [%#sl2'1] Pow2int.pow2 (a + b) = Pow2int.pow2 a * Pow2int.pow2 b)
+  )

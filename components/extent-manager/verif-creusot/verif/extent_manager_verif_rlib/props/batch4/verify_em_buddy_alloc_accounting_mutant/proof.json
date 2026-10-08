@@ -1,0 +1,25 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_alloc": { "prover": "alt-ergo", "time": 0.038 },
+      "vc_is_some_u64": { "prover": "alt-ergo", "time": 0.038 },
+      "vc_total_free": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_verify_em_buddy_alloc_accounting__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.052 },
+              { "prover": "alt-ergo", "time": 0.044 },
+              { "prover": "alt-ergo", "time": 0.045 },
+              { "prover": "cvc5", "time": 0.378 },
+              null
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

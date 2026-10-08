@@ -1,0 +1,10 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_deserialize7": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_sb_bytes7": { "prover": "alt-ergo", "time": 0.046 },
+      "vc_serialize": { "prover": "alt-ergo", "time": 0.016 }
+    }
+  }
+}

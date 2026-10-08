@@ -1,0 +1,67 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 283 0 283 69 *)
+
+let%span swell_founded = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 93 11 93 17
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 94 10 94 44
+let%span sbuddy'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 33 16 33 29
+let%span sl2m = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 279 10 279 17
+let%span sl2m'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 280 11 280 40
+let%span sl2m'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 281 11 281 60
+let%span sl2m'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 282 10 282 107
+
+use bv.Pow2int
+use int.Int
+
+function span [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 32 0 32 35] (ss: int) (o: int) : int
+ = [%#sbuddy'1] Pow2int.pow2 o * ss
+
+function lemma_span_succ [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 95 0 95 39] (ss: int) (o: int) : ()
+
+axiom lemma_span_succ_spec: forall ss: int, o: int. ([%#sbuddy] 0 <= o)
+    -> ([%#sbuddy'0] span ss (o + 1) = 2 * span ss o)
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant ss : int
+
+constant loc : int
+
+constant on : int
+
+constant fo : int
+
+constant z : int
+
+function lemma_split_cover [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2m.rs" 283 0 283 69] (ss: int) (loc: int) (on: int) (fo: int) (z: int) : ()
+
+goal vc_lemma_split_cover: ([%#sl2m'0] ss > 0 /\ 0 <= on /\ on <= fo)
+  -> ([%#sl2m'1] loc + span ss on <= z /\ z < loc + span ss fo)
+  -> (if on < fo then
+    ([@stop_split] [@expl:lemma_span_succ requires] [%#sbuddy] 0 <= fo - 1)
+    /\ (([@stop_split] [@expl:lemma_span_succ ensures] [%#sbuddy'0] span ss (fo - 1 + 1) = 2 * span ss (fo - 1))
+    -> (let _ = lemma_span_succ ss (fo - 1) in if z < loc + span ss (fo - 1) then
+      (([@stop_split] [@expl:lemma_split_cover requires] ([@stop_split] [@expl:lemma_split_cover requires #0] [%#sl2m'0] ss
+              > 0
+            /\ 0 <= on /\ on <= fo - 1)
+          /\ ([@stop_split] [@expl:lemma_split_cover requires #1] [%#sl2m'1] loc + span ss on <= z
+          /\ z < loc + span ss (fo - 1)))
+        /\ ([@expl:variant decreases] well_founded_relation_Int ([%#sl2m] fo - on) ([%#sl2m] fo - 1 - on)))
+      /\ (([@stop_split] [@expl:lemma_split_cover ensures] [%#sl2m'2] exists o: int. on <= o
+          /\ o < fo - 1 /\ loc + span ss o <= z /\ z < loc + span ss o + span ss o)
+      -> ([@stop_split] [@expl:lemma_split_cover ensures] [%#sl2m'2] exists o: int. on <= o
+        /\ o < fo /\ loc + span ss o <= z /\ z < loc + span ss o + span ss o))
+    else
+      [@stop_split] [@expl:lemma_split_cover ensures] [%#sl2m'2] exists o: int. on <= o
+        /\ o < fo /\ loc + span ss o <= z /\ z < loc + span ss o + span ss o
+    ))
+  else
+    [@stop_split] [@expl:lemma_split_cover ensures] [%#sl2m'2] exists o: int. on <= o
+      /\ o < fo /\ loc + span ss o <= z /\ z < loc + span ss o + span ss o
+  )

@@ -1,0 +1,20 @@
+# J6 (node7, 2026-10-08): conformance of stub_random_state (verification.rs:47), cargo-kani 0.67.0
+stub: stub_random_state
+relied_on: "HashMap semantics only (the real RandomState::new returns some SipHash key pair; an arbitrary [u64;2] covers all)"
+checks:
+  - harness: verification::check_stub_conforms_random_state_empty
+    what: "empty HashMap<TypeId, Box<dyn Any+Send+Sync>> (InterfaceMap) and empty HashMap<u32, Vec<u64>> (SizeClassManager) built with the stub's keys vs arbitrary keys: is_empty/len/capacity equal, drop"
+    flags: "--exact --unwind 4"
+    result: PASS (VERIFICATION SUCCESSFUL)
+    wall_s: 6.0
+    peak_rss_mb: 384
+    twin: "check_stub_conforms_random_state_empty__mutant FAILED as required (assertion a.len() != b.len())"
+  - harness: verification::check_stub_conforms_random_state
+    what: "insert x2 / get / len / remove / get on TypeId keys, stub keys vs arbitrary keys"
+    flags: "--exact --unwind 8 (32 GB cgroup cap)"
+    result: "LIMIT - did not finish: stopped at 79 min 26 s, 6.6 GB RSS (symbolic SipHash keys through hashbrown probing)"
+    twin: "not run (base did not finish)"
+credit_decision:
+  restored: []   # no uncredited_verify_* had this stub as its SOLE objection in kani_harness_audit.yaml (all also carry stub_arc_drop_slow / stub_condvar_notify and/or bounds)
+  removed: [EM-CKPT-READ-SEQ-MISMATCH, EM-CKPT-READ-OVERSIZE, EM-CKPT-READ-TRUNCATED, EM-CKPT-READ-CRC, EM-CKPT-DECODE-TRUNCATED, EM-ERR-DEVICE-AS-IOERROR, EM-SB-ACTIVE-COPY-VALID(excluded)]
+  why_removed: "map-operation conformance did not pass; that these harnesses reach only empty-map construction is a static reading (disk models are Vec/arrays), not machine-checked -> conservative, no credit"

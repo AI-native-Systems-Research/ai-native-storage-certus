@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_bf_low_us": { "prover": "cvc4", "time": 0.381 } }
+  }
+}

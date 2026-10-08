@@ -1,0 +1,30 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lemma_remove_getx": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.158 },
+              { "prover": "cvc5", "time": 0.45 },
+              { "prover": "cvc4", "time": 0.198 },
+              { "prover": "cvc4", "time": 0.626 },
+              { "prover": "alt-ergo", "time": 0.054 },
+              { "prover": "cvc5", "time": 1.7 },
+              { "prover": "alt-ergo", "time": 0.104 },
+              { "prover": "alt-ergo", "time": 0.101 },
+              { "prover": "alt-ergo", "time": 0.106 },
+              { "prover": "alt-ergo", "time": 0.124 },
+              { "prover": "cvc4", "time": 0.441 },
+              { "prover": "cvc4", "time": 0.256 },
+              { "prover": "alt-ergo", "time": 0.043 }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

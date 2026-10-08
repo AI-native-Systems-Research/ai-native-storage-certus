@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_publish_shared": { "prover": "z3", "time": 0.011 } }
+  }
+}

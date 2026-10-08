@@ -1,0 +1,73 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 88 0 88 61 *)
+
+let%span sassume = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 192 16 192 42
+let%span sb3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 89 47 89 86
+let%span sb3'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 89 17 89 86
+let%span sb3'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 90 4 90 25
+let%span sb3'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 85 11 85 35
+let%span sb3'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 86 11 86 77
+let%span sb3'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 87 10 87 50
+let%span sb3'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 79 16 79 80
+
+use creusot.int.UInt8
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.prelude.Any
+use int.ComputerDivision
+use int.Int
+
+type t_Superblock = {
+  magic: UInt64.t;
+  version: UInt32.t;
+  data_disk_size: UInt64.t;
+  sector_size: UInt32.t;
+  slab_size: UInt64.t;
+  max_extent_size: UInt32.t;
+  region_count: UInt32.t;
+  checkpoint_seq: UInt64.t;
+  active_copy: UInt8.t;
+  checkpoint_region_offset: UInt64.t;
+  checkpoint_region_size: UInt64.t;
+  instance_id: UInt64.t;
+  metadata_disk_ns_id: UInt32.t;
+  data_start_offset: UInt64.t }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+predicate a_a23fc2 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 191 0 191 43] (cro: int) (crs: int) =
+  [%#sassume] cro + 2 * crs <= UInt64.t'int const_MAX
+
+function copy_off [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 78 0 78 49] (sb: t_Superblock) (copy: int) : int
+ = [%#sb3'5] UInt64.t'int sb.checkpoint_region_offset + copy * UInt64.t'int sb.checkpoint_region_size
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let ckpt_lba [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 88 0 88 61]
+  (sb: t_Superblock) (copy: UInt8.t) (md_ss: UInt32.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:ckpt_lba requires] ([@stop_split] [@expl:ckpt_lba requires #0] [%#sb3'2] UInt32.t'int md_ss > 0
+    /\ UInt8.t'int copy <= 1)
+  /\ ([@stop_split] [@expl:ckpt_lba requires #1] [%#sb3'3] a_a23fc2 (UInt64.t'int sb.checkpoint_region_offset) (UInt64.t'int sb.checkpoint_region_size))}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_16 <- UInt64.of_int (UInt8.t'int copy) ] s1
+    | s1 = UInt64.mul [%#sb3] {_16} {sb.checkpoint_region_size} (fun (_x: UInt64.t) -> [ &_15 <- _x ] s2)
+    | s2 = UInt64.add [%#sb3'0] {sb.checkpoint_region_offset} {_15} (fun (_x: UInt64.t) -> [ &offset <- _x ] s3)
+    | s3 = [ &_20 <- UInt64.of_int (UInt32.t'int md_ss) ] s4
+    | s4 = [ &_22 <- _20 = ([%#sb3'1] (0: UInt64.t)) ] s5
+    | s5 = {[@expl:division by zero] [%#sb3'1] not _22} s6
+    | s6 = UInt64.div [%#sb3'1] {offset} {_20} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s7)
+    | s7 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l ()
+  | & sb: t_Superblock = sb
+  | & copy: UInt8.t = copy
+  | & md_ss: UInt32.t = md_ss
+  | & offset: UInt64.t = Any.any_l ()
+  | & _15: UInt64.t = Any.any_l ()
+  | & _16: UInt64.t = Any.any_l ()
+  | & _20: UInt64.t = Any.any_l ()
+  | & _22: bool = Any.any_l () ])
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:ckpt_lba ensures] [%#sb3'4] UInt64.t'int result
+    = ComputerDivision.div (copy_off sb (UInt8.t'int copy)) (UInt32.t'int md_ss)}
+    (! return {result}) ]

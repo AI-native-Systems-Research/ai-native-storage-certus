@@ -1,0 +1,60 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2r.rs" 79 0 79 45 *)
+
+let%span swell_founded = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+let%span sslab = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 301 10 301 17
+let%span sslab'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 304 8 306 86
+let%span sregion = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 888 16 888 68
+let%span sl2r = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2r.rs" 77 10 77 18
+let%span sl2r'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2r.rs" 78 10 78 98
+
+use creusot.int.UInt64
+use seq.Seq
+use int.Int
+
+function filter_ne [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 302 0 302 49] (s: Seq.seq UInt64.t) (x: UInt64.t) : Seq.seq UInt64.t
+
+axiom filter_ne_def: forall s: Seq.seq UInt64.t, x: UInt64.t [filter_ne s x]. filter_ne s x
+    = ([%#sslab'0] if Seq.length s = 0 then
+      Seq.empty: Seq.seq UInt64.t
+    else
+      if Seq.get s (Seq.length s - 1) = x then
+        filter_ne (Seq.([..]) s 0 (Seq.length s - 1)) x
+      else
+        Seq.snoc (filter_ne (Seq.([..]) s 0 (Seq.length s - 1)) x) (Seq.get s (Seq.length s - 1))
+    
+    )
+
+predicate listed [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/region.rs" 887 0 887 43] (sq: Seq.seq UInt64.t) (k: int) =
+  [%#sregion] exists p: int. 0 <= p /\ p < Seq.length sq /\ UInt64.t'int (Seq.get sq p) = k
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant sq : Seq.seq UInt64.t
+
+constant x : UInt64.t
+
+function lemma_filter_sub [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2r.rs" 79 0 79 45] (sq: Seq.seq UInt64.t) (x: UInt64.t) : ()
+
+goal vc_lemma_filter_sub: if Seq.length sq = 0 then
+    [@stop_split] [@expl:lemma_filter_sub ensures] [%#sl2r'0] forall p: int. 0 <= p /\ p < Seq.length (filter_ne sq x)
+      -> listed sq (UInt64.t'int (Seq.get (filter_ne sq x) p))
+  else
+    ([@expl:variant decreases] well_founded_relation_Int ([%#sl2r] Seq.length sq) ([%#sl2r] Seq.length (Seq.([..]) sq 0 (Seq.length sq
+      - 1))))
+    /\ (([@stop_split] [@expl:lemma_filter_sub ensures] [%#sl2r'0] forall p: int. 0 <= p
+          /\ p < Seq.length (filter_ne (Seq.([..]) sq 0 (Seq.length sq - 1)) x)
+        -> listed (Seq.([..]) sq 0 (Seq.length sq
+        - 1)) (UInt64.t'int (Seq.get (filter_ne (Seq.([..]) sq 0 (Seq.length sq - 1)) x) p)))
+    -> (let _ = lemma_filter_sub (Seq.([..]) sq 0 (Seq.length sq - 1)) x in (forall p: int. 0 <= p
+          /\ p < Seq.length sq - 1 -> Seq.get (Seq.([..]) sq 0 (Seq.length sq - 1)) p = Seq.get sq p)
+    && (forall v: int. listed (Seq.([..]) sq 0 (Seq.length sq - 1)) v -> listed sq v)
+    && ([@stop_split] [@expl:lemma_filter_sub ensures] [%#sl2r'0] forall p: int. 0 <= p
+        /\ p < Seq.length (filter_ne sq x) -> listed sq (UInt64.t'int (Seq.get (filter_ne sq x) p)))))
+  

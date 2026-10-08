@@ -1,0 +1,49 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 822 0 822 126 *)
+
+let%span sbatch8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 823 4 823 16
+let%span sbatch8'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 818 10 821 1
+let%span sbatch8'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 766 10 769 1
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.ComputerDivision
+
+type t_EmError = CorruptMetadata | IoError | NotInitialized | OffsetNotFound UInt64.t | OutOfSpace
+
+type t_Result_unit_EmError = Ok () | Err t_EmError
+
+type tup3_u64_usize_u64 = { f0: UInt64.t; f1: UInt64.t; f2: UInt64.t }
+
+type t_Result_tup3_u64_usize_u64_EmError = Ok'0 tup3_u64_usize_u64 | Err'0 t_EmError
+
+type tup2_Result_unit_EmError_Result_tup3_u64_usize_u64_EmError = {
+  f0'0: t_Result_unit_EmError;
+  f1'0: t_Result_tup3_u64_usize_u64_EmError }
+
+let w8_offset6 (return (x: tup2_Result_unit_EmError_Result_tup3_u64_usize_u64_EmError)) = any
+  [ return (result: tup2_Result_unit_EmError_Result_tup3_u64_usize_u64_EmError) ->
+  {[@stop_split] [@expl:w8_offset6 ensures] [%#sbatch8'1] match result.f0'0 with
+      | Ok () -> result.f1'0 = Ok'0 { f0 = (6: UInt64.t); f1 = (0: UInt64.t); f2 = (6: UInt64.t) }
+      | Err e -> e = IoError
+      end}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let support_old_refute_em_reserve_post_offset_sector_aligned [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch8.rs" 822 0 822 126]
+  (return (x: tup2_Result_unit_EmError_Result_tup3_u64_usize_u64_EmError)) = (! bb0
+  [ bb0 = s0
+    [ s0 = w8_offset6 [%#sbatch8]
+        (fun (_x: tup2_Result_unit_EmError_Result_tup3_u64_usize_u64_EmError) -> [ &_ret <- _x ] s1)
+    | s1 = return {_ret} ] ] [ & _ret: tup2_Result_unit_EmError_Result_tup3_u64_usize_u64_EmError = Any.any_l () ])
+  [ return (result: tup2_Result_unit_EmError_Result_tup3_u64_usize_u64_EmError) ->
+  {[@stop_split] [@expl:support_old_refute_em_reserve_post_offset_sector_aligned ensures] [%#sbatch8'0] match result.f0'0 with
+      | Ok () -> match result.f1'0 with
+        | Ok'0 {f2 = off} -> UInt64.t'int off = 6 /\ ComputerDivision.mod (UInt64.t'int off) 4 = 2
+        | Err'0 _ -> false
+        end
+      | Err e -> e = IoError
+      end}
+    (! return {result}) ]

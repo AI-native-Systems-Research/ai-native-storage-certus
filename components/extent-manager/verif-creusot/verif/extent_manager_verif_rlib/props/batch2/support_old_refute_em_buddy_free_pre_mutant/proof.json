@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_support_old_refute_em_buddy_free_pre__mutant": null,
+      "vc_w1_recovered": { "prover": "alt-ergo", "time": 0.021 }
+    }
+  }
+}

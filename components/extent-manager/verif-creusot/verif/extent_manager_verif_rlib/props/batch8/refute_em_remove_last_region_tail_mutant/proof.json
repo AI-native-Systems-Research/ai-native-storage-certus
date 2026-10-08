@@ -1,0 +1,22 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_refute_em_remove_last_region_tail__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              {
+                "tactic": "split_vc",
+                "children": [ { "prover": "alt-ergo", "time": 0.032 }, null ]
+              }
+            ]
+          }
+        ]
+      },
+      "vc_wt_tail_remove": { "prover": "alt-ergo", "time": 0.024 }
+    }
+  }
+}

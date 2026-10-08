@@ -1,0 +1,118 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 339 0 339 40 *)
+
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 102 18 102 36
+let%span svec'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 116 18 116 48
+let%span svec'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sslab = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 20 0 20 23
+let%span switness = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 340 29 340 39
+let%span switness'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 341 14 341 18
+let%span switness'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 341 4 341 19
+let%span switness'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 342 14 342 22
+let%span switness'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 342 4 342 23
+let%span switness'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 343 43 343 45
+let%span switness'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 343 58 343 60
+let%span switness'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 343 76 343 77
+let%span switness'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 344 37 344 47
+let%span switness'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 345 4 345 13
+let%span switness'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 336 10 336 28
+let%span switness'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 337 10 337 104
+let%span switness'11 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 338 10 338 103
+let%span switness'12 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 318 0 318 19
+
+use seq.Seq
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use creusot.int.UInt32
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_u64_Global
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_u64_Global (self: t_Vec_u64_Global) : Seq.seq UInt64.t
+
+axiom view_Vec_u64_Global_spec:
+  forall self: t_Vec_u64_Global [view_Vec_u64_Global self]. [%#svec'1] Seq.length (view_Vec_u64_Global self)
+    <= UInt64.t'int const_MAX
+
+let new_u64 (return (x: t_Vec_u64_Global)) = any
+  [ return (result: t_Vec_u64_Global) ->
+  {[@stop_split] [@expl:new ensures] [%#svec] Seq.length (view_Vec_u64_Global result) = 0}
+    (! return {result}) ]
+
+constant const_W_K2: UInt64.t = [%#switness'12] (2: UInt64.t)
+
+let push_u64 (self_: MutBorrow.t t_Vec_u64_Global) (v: UInt64.t) (return (x: ())) = any
+  [ return (result: ()) -> {[@stop_split] [@expl:push ensures] [%#svec'0] view_Vec_u64_Global self_.final
+    = Seq.snoc (view_Vec_u64_Global self_.current) v}
+    (! return {result}) ]
+
+constant const_FREE_KEY: UInt64.t = [%#sslab] (18446744073709551615: UInt64.t)
+
+type t_SlabDescriptor = { start_offset: UInt64.t; slab_size: UInt64.t; element_size: UInt32.t; keys: t_Vec_u64_Global }
+
+type t_Vec_SlabDescriptor_Global
+
+function view_Vec_SlabDescriptor_Global (self: t_Vec_SlabDescriptor_Global) : Seq.seq t_SlabDescriptor
+
+axiom view_Vec_SlabDescriptor_Global_spec:
+  forall self: t_Vec_SlabDescriptor_Global [view_Vec_SlabDescriptor_Global self]. [%#svec'1] Seq.length (view_Vec_SlabDescriptor_Global self)
+    <= UInt64.t'int const_MAX
+
+let new_SlabDescriptor (return (x: t_Vec_SlabDescriptor_Global)) = any
+  [ return (result: t_Vec_SlabDescriptor_Global) ->
+  {[@stop_split] [@expl:new ensures] [%#svec] Seq.length (view_Vec_SlabDescriptor_Global result) = 0}
+    (! return {result}) ]
+
+let push_SlabDescriptor (self_: MutBorrow.t t_Vec_SlabDescriptor_Global) (v: t_SlabDescriptor) (return (x: ())) = any
+  [ return (result: ()) -> {[@stop_split] [@expl:push ensures] [%#svec'0] view_Vec_SlabDescriptor_Global self_.final
+    = Seq.snoc (view_Vec_SlabDescriptor_Global self_.current) v}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let w3_descs [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 339 0 339 40]
+  (return (x: t_Vec_SlabDescriptor_Global)) = (! bb0
+  [ bb0 = s0
+    [ s0 = new_u64 [%#switness] (fun (_x: t_Vec_u64_Global) -> [ &keys'0 <- _x ] s1)
+    | s1 = MutBorrow.borrow_mut <t_Vec_u64_Global> {keys'0}
+        (fun (_bor: MutBorrow.t t_Vec_u64_Global) -> [ &_6 <- _bor ] [ &keys'0 <- _bor.final ] s2)
+    | s2 = push_u64 [%#switness'1] {_6} {[%#switness'0] const_W_K2} (fun (_x: ()) -> [ &_5 <- _x ] s3)
+    | s3 = MutBorrow.borrow_mut <t_Vec_u64_Global> {keys'0}
+        (fun (_bor: MutBorrow.t t_Vec_u64_Global) -> [ &_8 <- _bor ] [ &keys'0 <- _bor.final ] s4)
+    | s4 = push_u64 [%#switness'3] {_8} {[%#switness'2] const_FREE_KEY} (fun (_x: ()) -> [ &_7 <- _x ] s5)
+    | s5 = [ &d <- { start_offset = ([%#switness'4] (12: UInt64.t));
+                     slab_size = ([%#switness'5] (12: UInt64.t));
+                     element_size = ([%#switness'6] (6: UInt32.t));
+                     keys = keys'0 } ] s6
+    | s6 = new_SlabDescriptor [%#switness'7] (fun (_x: t_Vec_SlabDescriptor_Global) -> [ &v <- _x ] s7)
+    | s7 = MutBorrow.borrow_mut <t_Vec_SlabDescriptor_Global> {v}
+        (fun (_bor: MutBorrow.t t_Vec_SlabDescriptor_Global) -> [ &_13 <- _bor ] [ &v <- _bor.final ] s8)
+    | s8 = push_SlabDescriptor [%#switness'8] {_13} {d} (fun (_x: ()) -> [ &_12 <- _x ] s9)
+    | s9 = [ &_ret <- v ] s10
+    | s10 = return {_ret} ] ]
+  [ & _ret: t_Vec_SlabDescriptor_Global = Any.any_l ()
+  | & keys'0: t_Vec_u64_Global = Any.any_l ()
+  | & _5: () = Any.any_l ()
+  | & _6: MutBorrow.t t_Vec_u64_Global = Any.any_l ()
+  | & _7: () = Any.any_l ()
+  | & _8: MutBorrow.t t_Vec_u64_Global = Any.any_l ()
+  | & d: t_SlabDescriptor = Any.any_l ()
+  | & v: t_Vec_SlabDescriptor_Global = Any.any_l ()
+  | & _12: () = Any.any_l ()
+  | & _13: MutBorrow.t t_Vec_SlabDescriptor_Global = Any.any_l () ])
+  [ return (result: t_Vec_SlabDescriptor_Global) ->
+  {[@stop_split] [@expl:w3_descs ensures] ([@stop_split] [@expl:w3_descs ensures #0] [%#switness'9] Seq.length (view_Vec_SlabDescriptor_Global result)
+      = 1)
+    /\ ([@stop_split] [@expl:w3_descs ensures #1] [%#switness'10] UInt64.t'int (Seq.get (view_Vec_SlabDescriptor_Global result) 0).start_offset
+        = 12
+      /\ UInt64.t'int (Seq.get (view_Vec_SlabDescriptor_Global result) 0).slab_size = 12
+      /\ UInt32.t'int (Seq.get (view_Vec_SlabDescriptor_Global result) 0).element_size = 6)
+    /\ ([@stop_split] [@expl:w3_descs ensures #2] [%#switness'11] Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_SlabDescriptor_Global result) 0).keys)
+      = 2
+    /\ Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_SlabDescriptor_Global result) 0).keys) 0 = const_W_K2
+    /\ Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_SlabDescriptor_Global result) 0).keys) 1 = const_FREE_KEY)}
+    (! return {result}) ]

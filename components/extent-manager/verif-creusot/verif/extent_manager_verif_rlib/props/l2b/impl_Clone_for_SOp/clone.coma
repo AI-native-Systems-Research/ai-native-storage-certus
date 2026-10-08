@@ -1,0 +1,17 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2b.rs" 535 9 535 29 *)
+
+(* <props::l2b::SOp as std::clone::Clone> *)
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_SOp = Alloc | Free UInt64.t | Key UInt64.t UInt64.t
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_SOp [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2b.rs" 535 9 535 29]
+  (self: t_SOp) (return (x: t_SOp)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_SOp = Any.any_l () | & self: t_SOp = self ]) [ return (result: t_SOp) -> (! return {result}) ]

@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_g_fm_merge": { "prover": "cvc4", "time": 0.235 } }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_mark_allocated": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_support_old_refute_em_buddy_mark_allocated_pre": {
+        "prover": "alt-ergo",
+        "time": 0.3
+      },
+      "vc_w1p_recovered": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_w7_dup": { "prover": "alt-ergo", "time": 0.021 }
+    }
+  }
+}

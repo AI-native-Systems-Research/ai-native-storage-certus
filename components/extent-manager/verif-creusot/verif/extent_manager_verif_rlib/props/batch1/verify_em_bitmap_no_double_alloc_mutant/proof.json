@@ -1,0 +1,21 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_mark_slot_allocated": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_verify_em_bitmap_no_double_alloc__mutant": {
+        "tactic": "split_vc",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.027 },
+              { "prover": "alt-ergo", "time": 0.018 },
+              null
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

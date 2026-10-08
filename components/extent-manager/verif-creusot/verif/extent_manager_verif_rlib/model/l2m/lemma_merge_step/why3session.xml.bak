@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE why3session PUBLIC "-//Why3//proof session v5//EN"
+"https://www.why3.org/why3session.dtd">
+<why3session shape_version="6">
+<prover id="0" name="Z3" version="4.16.0" timelimit="3.41351" memlimit="1000"/>
+<prover id="1" name="CVC4" version="1.8" timelimit="4" memlimit="1000"/>
+<prover id="2" name="Alt-Ergo" version="2.6.2" timelimit="0.047987" memlimit="1000"/>
+<prover id="3" name="CVC5" version="1.3.1" timelimit="0.667849" memlimit="1000"/>
+<file format="coma">
+<path name=".."/><path name="lemma_merge_step.coma"/>
+<theory name="Coma">
+ <goal name="vc_lemma_merge_step">
+ <transf name="compute_specified" >
+  <goal name="vc_lemma_merge_step.0">
+  <transf name="split_vc" >
+   <goal name="vc_lemma_merge_step.0.0" expl="lemma_span_succ requires" proved="true">
+   <proof prover="2" timelimit="0.046192"><result status="valid" time="0.046192" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_merge_step.0.1" expl="lemma_span_pos requires" proved="true">
+   <proof prover="2" timelimit="0.03504"><result status="valid" time="0.035040" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_merge_step.0.2" expl="lemma_span_pos requires" proved="true">
+   <proof prover="2" timelimit="0.043555"><result status="valid" time="0.043555" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_merge_step.0.3" proved="true">
+   <proof prover="2" timelimit="0.044308"><result status="valid" time="0.044308" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_merge_step.0.4" expl="lemma_even_q requires" proved="true">
+   <proof prover="2" timelimit="0.046998"><result status="valid" time="0.046998" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_merge_step.0.5" expl="lemma_ms_hi requires" proved="true">
+   <proof prover="2" timelimit="0.049774"><result status="valid" time="0.049774" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_merge_step.0.6">
+   <proof prover="0"><result status="unknown" time="3.413511" steps="0"/></proof>
+   <proof prover="1"><result status="timeout" time="4.000000" steps="0"/></proof>
+   <proof prover="2" timelimit="4"><result status="timeout" time="4.000000" steps="0"/></proof>
+   <proof prover="3" timelimit="4"><result status="timeout" time="4.000000" steps="0"/></proof>
+   <transf name="split_vc" >
+    <goal name="vc_lemma_merge_step.0.6.0">
+    <proof prover="0" timelimit="3.4325"><result status="unknown" time="3.432500" steps="0"/></proof>
+    <proof prover="1" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+    <proof prover="2" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+    <proof prover="3" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+    </goal>
+   </transf>
+   </goal>
+   <goal name="vc_lemma_merge_step.0.7" expl="lemma_ms_hi requires" proved="true">
+   <proof prover="2" timelimit="0.048445"><result status="valid" time="0.048445" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_merge_step.0.8" proved="true">
+   <proof prover="3" timelimit="0.441331"><result status="valid" time="0.441331" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_merge_step.0.9" proved="true">
+   <proof prover="2" timelimit="0.050118"><result status="valid" time="0.050118" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_merge_step.0.10" proved="true">
+   <proof prover="2" timelimit="0.05095"><result status="valid" time="0.050950" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_merge_step.0.11" proved="true">
+   <proof prover="2"><result status="valid" time="0.047987" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_merge_step.0.12" proved="true">
+   <proof prover="2" timelimit="0.049017"><result status="valid" time="0.049017" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_merge_step.0.13" proved="true">
+   <proof prover="3" timelimit="0.18128"><result status="valid" time="0.181280" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_merge_step.0.14" expl="lemma_merge_step ensures" proved="true">
+   <proof prover="3"><result status="valid" time="0.667849" steps="0"/></proof>
+   </goal>
+  </transf>
+  </goal>
+ </transf>
+ </goal>
+</theory>
+</file>
+</why3session>

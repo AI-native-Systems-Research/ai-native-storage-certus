@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_g_free_core": { "prover": "cvc4", "time": 0.229 } }
+  }
+}

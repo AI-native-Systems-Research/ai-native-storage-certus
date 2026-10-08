@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_lemma_span_div": { "prover": "alt-ergo", "time": 0.17 } }
+  }
+}

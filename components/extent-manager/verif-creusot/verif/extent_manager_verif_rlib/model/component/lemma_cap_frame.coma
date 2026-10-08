@@ -1,0 +1,103 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 190 0 190 88 *)
+
+let%span swell_founded = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+let%span scomponent = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 186 10 186 11
+let%span scomponent'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 187 11 187 34
+let%span scomponent'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 188 11 188 123
+let%span scomponent'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 189 10 189 48
+let%span scomponent'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 179 10 179 11
+let%span scomponent'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 181 16 181 111
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use int.Int
+
+type t_BTreeMap_u64_Slab_Global
+
+type t_SlabMap = { inner: t_BTreeMap_u64_Slab_Global }
+
+type t_HashMap_u32_Vec_u64_Global_RandomState_Global
+
+type t_SizeClassManager = { map: t_HashMap_u32_Vec_u64_Global_RandomState_Global }
+
+type t_Vec_Vec_u64_Global_Global
+
+type t_BuddyAllocator = {
+  base_offset: UInt64.t;
+  total_usable_size: UInt64.t;
+  sector_size: UInt32.t;
+  max_order: UInt64.t;
+  free_lists: t_Vec_Vec_u64_Global_Global }
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_FormatParams = {
+  data_disk_size'0: UInt64.t;
+  slab_size'0: UInt64.t;
+  max_extent_size'0: UInt32.t;
+  sector_size'0: UInt32.t;
+  region_count'0: UInt32.t;
+  metadata_alignment'0: UInt64.t;
+  instance_id'0: t_Option_u64;
+  metadata_disk_ns_id'0: UInt32.t;
+  metadata_region_size'0: UInt64.t }
+
+type t_Vec_tup2_u64_usize_Global
+
+type t_RegionState = {
+  slabs: t_SlabMap;
+  size_classes: t_SizeClassManager;
+  buddy: t_BuddyAllocator;
+  dirty: bool;
+  format_params: t_FormatParams;
+  pending_frees: t_Vec_tup2_u64_usize_Global }
+
+function cap_sum [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 180 0 180 70] (arena: Seq.seq t_RegionState) (rv: Seq.seq UInt64.t) (n: int) : int
+
+axiom cap_sum_def:
+  forall arena: Seq.seq t_RegionState, rv: Seq.seq UInt64.t, n: int [cap_sum arena rv n]. cap_sum arena rv n
+    = ([%#scomponent'4] if n <= 0 then
+      0
+    else
+      cap_sum arena rv (n - 1)
+      + UInt64.t'int (Seq.get arena (UInt64.t'int (Seq.get rv (n - 1)))).buddy.total_usable_size
+    )
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant a : Seq.seq t_RegionState
+
+constant b : Seq.seq t_RegionState
+
+constant rv : Seq.seq UInt64.t
+
+constant n : int
+
+function lemma_cap_frame [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 190 0 190 88] (a: Seq.seq t_RegionState) (b: Seq.seq t_RegionState) (rv: Seq.seq UInt64.t) (n: int) : ()
+
+goal vc_lemma_cap_frame: ([%#scomponent'0] 0 <= n /\ n <= Seq.length rv)
+  -> ([%#scomponent'1] forall i: int. 0 <= i /\ i < Seq.length rv
+      -> (Seq.get a (UInt64.t'int (Seq.get rv i))).buddy.total_usable_size
+      = (Seq.get b (UInt64.t'int (Seq.get rv i))).buddy.total_usable_size)
+  -> (if n > 0 then
+    (([@stop_split] [@expl:lemma_cap_frame requires] ([@stop_split] [@expl:lemma_cap_frame requires #0] [%#scomponent'0] 0
+            <= n - 1
+          /\ n - 1 <= Seq.length rv)
+        /\ ([@stop_split] [@expl:lemma_cap_frame requires #1] [%#scomponent'1] forall i: int. 0 <= i
+            /\ i < Seq.length rv
+          -> (Seq.get a (UInt64.t'int (Seq.get rv i))).buddy.total_usable_size
+          = (Seq.get b (UInt64.t'int (Seq.get rv i))).buddy.total_usable_size))
+      /\ ([@expl:variant decreases] well_founded_relation_Int ([%#scomponent] n) ([%#scomponent] n - 1)))
+    /\ (([@stop_split] [@expl:lemma_cap_frame ensures] [%#scomponent'2] cap_sum a rv (n - 1) = cap_sum b rv (n - 1))
+    -> ([@stop_split] [@expl:lemma_cap_frame ensures] [%#scomponent'2] cap_sum a rv n = cap_sum b rv n))
+  else
+    [@stop_split] [@expl:lemma_cap_frame ensures] [%#scomponent'2] cap_sum a rv n = cap_sum b rv n
+  )

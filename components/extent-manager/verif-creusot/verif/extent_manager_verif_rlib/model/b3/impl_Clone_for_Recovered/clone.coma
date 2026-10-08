@@ -1,0 +1,18 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 398 9 398 29 *)
+
+(* <model::b3::Recovered as std::clone::Clone> *)
+
+use creusot.int.UInt8
+use creusot.prelude.Any
+
+type t_Recovered = Empty | Copy UInt8.t
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_Recovered [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b3.rs" 398 9 398 29]
+  (self: t_Recovered) (return (x: t_Recovered)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Recovered = Any.any_l () | & self: t_Recovered = self ])
+  [ return (result: t_Recovered) -> (! return {result}) ]

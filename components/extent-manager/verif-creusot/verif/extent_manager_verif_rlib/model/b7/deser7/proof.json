@@ -1,0 +1,21 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_deser7": { "prover": "z3", "time": 0.94 },
+      "vc_elim_Err": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_elim_Ok": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_len_u8": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_new_Vec_SlabDescriptor_Global": {
+        "prover": "alt-ergo",
+        "time": 0.015
+      },
+      "vc_push_Vec_SlabDescriptor_Global": {
+        "prover": "alt-ergo",
+        "time": 0.027
+      },
+      "vc_rd32": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_region7": { "prover": "alt-ergo", "time": 0.027 }
+    }
+  }
+}

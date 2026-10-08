@@ -1,0 +1,17 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_read_ckpt_raw": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_verify_em_ckpt_read_truncated__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [ { "prover": "alt-ergo", "time": 0.015 }, null ]
+          }
+        ]
+      }
+    }
+  }
+}

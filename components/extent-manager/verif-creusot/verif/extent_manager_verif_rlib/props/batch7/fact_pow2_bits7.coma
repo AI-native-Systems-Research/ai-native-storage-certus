@@ -1,0 +1,47 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 33 0 33 30 *)
+
+let%span sbatch7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 32 10 32 599
+
+use creusot.prelude.Any
+use creusot.int.UInt32BW
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let fact_pow2_bits7 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch7.rs" 33 0 33 30]
+  (x: UInt32BW.t) (return (x'0: ())) = (! bb0
+  [ bb0 = return {_ret} ] [ & _ret: () = Any.any_l () ])
+  [ return (result: ()) -> {[@stop_split] [@expl:fact_pow2_bits7 ensures] [%#sbatch7] x <> (0: UInt32BW.t)
+      /\ UInt32BW.bw_and x (UInt32BW.sub x (1: UInt32BW.t)) = (0: UInt32BW.t)
+    -> x = (1: UInt32BW.t)
+    \/ x = (2: UInt32BW.t)
+    \/ x = (4: UInt32BW.t)
+    \/ x = (8: UInt32BW.t)
+    \/ x = (16: UInt32BW.t)
+    \/ x = (32: UInt32BW.t)
+    \/ x = (64: UInt32BW.t)
+    \/ x = (128: UInt32BW.t)
+    \/ x = (256: UInt32BW.t)
+    \/ x = (512: UInt32BW.t)
+    \/ x = (1024: UInt32BW.t)
+    \/ x = (2048: UInt32BW.t)
+    \/ x = (4096: UInt32BW.t)
+    \/ x = (8192: UInt32BW.t)
+    \/ x = (16384: UInt32BW.t)
+    \/ x = (32768: UInt32BW.t)
+    \/ x = (65536: UInt32BW.t)
+    \/ x = (131072: UInt32BW.t)
+    \/ x = (262144: UInt32BW.t)
+    \/ x = (524288: UInt32BW.t)
+    \/ x = (1048576: UInt32BW.t)
+    \/ x = (2097152: UInt32BW.t)
+    \/ x = (4194304: UInt32BW.t)
+    \/ x = (8388608: UInt32BW.t)
+    \/ x = (16777216: UInt32BW.t)
+    \/ x = (33554432: UInt32BW.t)
+    \/ x = (67108864: UInt32BW.t)
+    \/ x = (134217728: UInt32BW.t)
+    \/ x = (268435456: UInt32BW.t)
+    \/ x = (536870912: UInt32BW.t) \/ x = (1073741824: UInt32BW.t) \/ x = (2147483648: UInt32BW.t)}
+    (! return {result}) ]

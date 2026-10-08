@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE why3session PUBLIC "-//Why3//proof session v5//EN"
+"https://www.why3.org/why3session.dtd">
+<why3session shape_version="6">
+<prover id="0" name="Z3" version="4.16.0" timelimit="3.12263" memlimit="1000"/>
+<prover id="1" name="CVC4" version="1.8" timelimit="0.10342" memlimit="1000"/>
+<prover id="2" name="Alt-Ergo" version="2.6.2" timelimit="0.035805" memlimit="1000"/>
+<prover id="3" name="CVC5" version="1.3.1" timelimit="0.269451" memlimit="1000"/>
+<file format="coma">
+<path name=".."/><path name="lemma_bh_free.coma"/>
+<theory name="Coma">
+ <goal name="vc_lemma_bh_free">
+ <transf name="compute_specified" >
+  <goal name="vc_lemma_bh_free.0">
+  <transf name="split_vc" >
+   <goal name="vc_lemma_bh_free.0.0" expl="lemma_free_e_elim requires" proved="true">
+   <proof prover="2"><result status="valid" time="0.035805" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_bh_free.0.1" expl="lemma_free_m_elim requires" proved="true">
+   <proof prover="2" timelimit="0.038805"><result status="valid" time="0.038805" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_bh_free.0.2" proved="true">
+   <proof prover="3" timelimit="0.199465"><result status="valid" time="0.199465" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_bh_free.0.3" proved="true">
+   <proof prover="3" timelimit="0.111508"><result status="valid" time="0.111508" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_bh_free.0.4" proved="true">
+   <proof prover="2" timelimit="0.292825"><result status="valid" time="0.292825" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_bh_free.0.5" proved="true">
+   <proof prover="3" timelimit="0.155821"><result status="valid" time="0.155821" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_bh_free.0.6" expl="lemma_span_pos requires" proved="true">
+   <proof prover="3"><result status="valid" time="0.269451" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_bh_free.0.7" proved="true">
+   <proof prover="1" timelimit="0.366516"><result status="valid" time="0.366516" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_bh_free.0.8" proved="true">
+   <proof prover="1" timelimit="0.270656"><result status="valid" time="0.270656" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_bh_free.0.9" proved="true">
+   <proof prover="1" timelimit="0.310846"><result status="valid" time="0.310846" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_bh_free.0.10" expl="lemma_inlive_intro requires" proved="true">
+   <proof prover="3" timelimit="0.18969"><result status="valid" time="0.189690" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_bh_free.0.11" proved="true">
+   <proof prover="3" timelimit="0.438575"><result status="valid" time="0.438575" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_bh_free.0.12" proved="true">
+   <proof prover="2" timelimit="0.034935"><result status="valid" time="0.034935" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_bh_free.0.13" expl="lemma_inlive_intro requires" proved="true">
+   <proof prover="1"><result status="valid" time="0.103420" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_bh_free.0.14">
+   <proof prover="0"><result status="unknown" time="3.122625" steps="0"/></proof>
+   <proof prover="1" timelimit="4"><result status="timeout" time="4.000000" steps="0"/></proof>
+   <proof prover="2" timelimit="4"><result status="timeout" time="4.000000" steps="0"/></proof>
+   <proof prover="3" timelimit="4"><result status="timeout" time="4.000000" steps="0"/></proof>
+   <transf name="split_vc" >
+    <goal name="vc_lemma_bh_free.0.14.0">
+    <proof prover="0" timelimit="3.0722"><result status="unknown" time="3.072205" steps="0"/></proof>
+    <proof prover="1" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+    <proof prover="2" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+    <proof prover="3" timelimit="8"><result status="timeout" time="8.000000" steps="0"/></proof>
+    </goal>
+   </transf>
+   </goal>
+   <goal name="vc_lemma_bh_free.0.15" proved="true">
+   <proof prover="2" timelimit="0.046149"><result status="valid" time="0.046149" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_bh_free.0.16" proved="true">
+   <proof prover="2" timelimit="0.163517"><result status="valid" time="0.163517" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_bh_free.0.17" proved="true">
+   <proof prover="1" timelimit="0.154482"><result status="valid" time="0.154482" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_bh_free.0.18" proved="true">
+   <proof prover="2" timelimit="0.090725"><result status="valid" time="0.090725" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_bh_free.0.19" proved="true">
+   <proof prover="3" timelimit="0.19144"><result status="valid" time="0.191440" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_bh_free.0.20" proved="true">
+   <proof prover="2" timelimit="0.111564"><result status="valid" time="0.111564" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_bh_free.0.21" proved="true">
+   <proof prover="1" timelimit="0.20332"><result status="valid" time="0.203320" steps="0"/></proof>
+   </goal>
+   <goal name="vc_lemma_bh_free.0.22" expl="lemma_bh_free ensures" proved="true">
+   <proof prover="3" timelimit="0.137238"><result status="valid" time="0.137238" steps="0"/></proof>
+   </goal>
+  </transf>
+  </goal>
+ </transf>
+ </goal>
+</theory>
+</file>
+</why3session>

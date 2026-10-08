@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_lemma_floor_le": { "prover": "z3", "time": 0.006 } }
+  }
+}

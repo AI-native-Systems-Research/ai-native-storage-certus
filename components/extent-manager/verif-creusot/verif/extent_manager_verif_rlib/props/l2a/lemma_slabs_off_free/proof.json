@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lemma_slabs_off_free": { "prover": "cvc4", "time": 0.984 }
+    }
+  }
+}

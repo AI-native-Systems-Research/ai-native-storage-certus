@@ -1,0 +1,16 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 29 9 29 29 *)
+
+(* <model::b5::TPh as std::clone::Clone> *)
+
+use creusot.prelude.Any
+
+type t_TPh = Top | Wait int | WaitInf | Woken bool | Work | Exited
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_TPh [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/b5.rs" 29 9 29 29]
+  (self: t_TPh) (return (x: t_TPh)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_TPh = Any.any_l () | & self: t_TPh = self ]) [ return (result: t_TPh) -> (! return {result}) ]

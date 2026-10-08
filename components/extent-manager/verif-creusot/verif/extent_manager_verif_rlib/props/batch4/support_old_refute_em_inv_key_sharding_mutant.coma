@@ -1,0 +1,73 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 1285 0 1285 86 *)
+
+let%span scomponent = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 204 10 204 23
+let%span scomponent'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 205 10 205 25
+let%span sbatch1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch1.rs" 1075 10 1075 24
+let%span sbatch1'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch1.rs" 1076 10 1076 96
+let%span switness = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/witness.rs" 318 0 318 19
+let%span sbatch4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 1286 26 1286 73
+let%span sbatch4'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 1287 23 1287 27
+let%span sbatch4'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 1287 38 1287 39
+let%span sbatch4'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 1287 14 1287 40
+let%span sbatch4'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 1284 10 1284 99
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.prelude.Any
+use int.Int
+
+type tup4_u64_u64_u64_u32 = { f0: UInt64.t; f1: UInt64.t; f2: UInt64.t; f3: UInt32.t }
+
+let support_old_refute_em_inv_within_usable_range (return (x: tup4_u64_u64_u64_u32)) = any
+  [ return (result: tup4_u64_u64_u64_u32) ->
+  {[@stop_split] [@expl:support_old_refute_em_inv_within_usable_range ensures] ([@stop_split] [@expl:support_old_refute_em_inv_within_usable_range ensures #0] [%#sbatch1] UInt32.t'int result.f3
+      = 6)
+    /\ ([@stop_split] [@expl:support_old_refute_em_inv_within_usable_range ensures #1] [%#sbatch1'0] UInt64.t'int result.f0
+        + UInt32.t'int result.f3
+      > 24
+    \/ UInt64.t'int result.f1 + UInt32.t'int result.f3 > 24 \/ UInt64.t'int result.f2 + UInt32.t'int result.f3 > 24)}
+    (! return {result}) ]
+
+constant const_W_K2: UInt64.t = [%#switness] (2: UInt64.t)
+
+let and_mask (x: UInt64.t) (m: UInt64.t) (return (x'0: UInt64.t)) = any
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:and_mask ensures] ([@stop_split] [@expl:and_mask ensures #0] [%#scomponent] UInt64.t'int result
+      <= UInt64.t'int m)
+    /\ ([@stop_split] [@expl:and_mask ensures #1] [%#scomponent'0] result = UInt64.bw_and x m)}
+    (! return {result}) ]
+
+type tup5_u64_u64_u64_u32_usize = { f0'0: UInt64.t; f1'0: UInt64.t; f2'0: UInt64.t; f3'0: UInt32.t; f4'0: UInt64.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let support_old_refute_em_inv_key_sharding__mutant [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 1285 0 1285 86]
+  (return (x: tup5_u64_u64_u64_u32_usize)) = (! bb0
+  [ bb0 = s0
+    [ s0 = support_old_refute_em_inv_within_usable_range [%#sbatch4]
+        (fun (_x: tup4_u64_u64_u64_u32) -> [ &_6 <- _x ] s1)
+    | s1 = [ &o1 <- _6.f0 ] s2
+    | s2 = [ &o2 <- _6.f1 ] s3
+    | s3 = [ &o3 <- _6.f2 ] s4
+    | s4 = [ &a <- _6.f3 ] s5
+    | s5 = [ &_8 <- UInt64.of_int (UInt64.t'int ([%#sbatch4'0] const_W_K2)) ] s6
+    | s6 = and_mask [%#sbatch4'2] {_8} {[%#sbatch4'1] (0: UInt64.t)} (fun (_x: UInt64.t) -> [ &idx <- _x ] s7)
+    | s7 = [ &_ret <- { f0'0 = o1; f1'0 = o2; f2'0 = o3; f3'0 = a; f4'0 = idx } ] s8
+    | s8 = return {_ret} ] ]
+  [ & _ret: tup5_u64_u64_u64_u32_usize = Any.any_l ()
+  | & o1: UInt64.t = Any.any_l ()
+  | & o2: UInt64.t = Any.any_l ()
+  | & o3: UInt64.t = Any.any_l ()
+  | & a: UInt32.t = Any.any_l ()
+  | & _6: tup4_u64_u64_u64_u32 = Any.any_l ()
+  | & idx: UInt64.t = Any.any_l ()
+  | & _8: UInt64.t = Any.any_l () ])
+  [ return (result: tup5_u64_u64_u64_u32_usize) ->
+  {[@stop_split] [@expl:support_old_refute_em_inv_key_sharding__mutant ensures] [%#sbatch4'3] UInt64.t'int result.f0'0
+        + UInt32.t'int result.f3'0
+      <= 24
+    /\ UInt64.t'int result.f1'0 + UInt32.t'int result.f3'0 <= 24
+    /\ UInt64.t'int result.f2'0 + UInt32.t'int result.f3'0 <= 24}
+    (! return {result}) ]

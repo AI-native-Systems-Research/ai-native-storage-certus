@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lemma_rg_good_o_intro": { "prover": "alt-ergo", "time": 0.045 }
+    }
+  }
+}

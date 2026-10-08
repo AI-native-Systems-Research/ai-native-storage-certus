@@ -1,0 +1,41 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_as_u32": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_elim_Err": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_len_u8": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_read_ckpt_bytes": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_support_old_refute_em_ckpt_post_seq_matches_header": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.019 },
+              { "prover": "alt-ergo", "time": 0.026 },
+              { "prover": "alt-ergo", "time": 0.037 },
+              { "prover": "alt-ergo", "time": 0.056 },
+              { "prover": "alt-ergo", "time": 0.072 },
+              {
+                "tactic": "split_vc",
+                "children": [
+                  {
+                    "tactic": "split_vc",
+                    "children": [ { "prover": "z3", "time": 7.2 } ]
+                  }
+                ]
+              },
+              { "prover": "alt-ergo", "time": 0.018 },
+              { "prover": "alt-ergo", "time": 0.072 },
+              { "prover": "alt-ergo", "time": 0.102 },
+              { "prover": "alt-ergo", "time": 0.022 },
+              { "prover": "alt-ergo", "time": 0.019 }
+            ]
+          }
+        ]
+      },
+      "vc_write_ckpt_bytes": { "prover": "alt-ergo", "time": 0.027 }
+    }
+  }
+}

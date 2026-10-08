@@ -1,0 +1,14 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_relock": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_set_interval": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_th_enter": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_verify_em_setint_change_no_spurious": {
+        "prover": "alt-ergo",
+        "time": 0.045
+      }
+    }
+  }
+}

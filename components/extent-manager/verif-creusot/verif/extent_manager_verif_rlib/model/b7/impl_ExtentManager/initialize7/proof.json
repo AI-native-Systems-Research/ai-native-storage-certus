@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_elim_Err": { "prover": "alt-ergo", "time": 0.032 },
+      "vc_elim_Ok": { "prover": "alt-ergo", "time": 0.034 },
+      "vc_init_front7": { "prover": "alt-ergo", "time": 0.032 },
+      "vc_initialize": { "prover": "alt-ergo", "time": 0.051 },
+      "vc_initialize7": { "prover": "cvc5", "time": 0.811 }
+    }
+  }
+}

@@ -1,0 +1,115 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1096 0 1096 40 *)
+
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 102 18 102 36
+let%span svec'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 116 18 116 48
+let%span svec'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sslab = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/slab.rs" 20 0 20 23
+let%span sbatch3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1097 29 1097 39
+let%span sbatch3'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1098 14 1098 22
+let%span sbatch3'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1098 4 1098 23
+let%span sbatch3'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1099 14 1099 22
+let%span sbatch3'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1099 4 1099 23
+let%span sbatch3'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1100 37 1100 47
+let%span sbatch3'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1101 42 1101 43
+let%span sbatch3'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1101 56 1101 57
+let%span sbatch3'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1101 73 1101 74
+let%span sbatch3'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1101 4 1101 83
+let%span sbatch3'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1093 10 1093 28
+let%span sbatch3'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1094 10 1094 102
+let%span sbatch3'11 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1095 10 1095 107
+
+use seq.Seq
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use creusot.int.UInt32
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_u64_Global
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_u64_Global (self: t_Vec_u64_Global) : Seq.seq UInt64.t
+
+axiom view_Vec_u64_Global_spec:
+  forall self: t_Vec_u64_Global [view_Vec_u64_Global self]. [%#svec'1] Seq.length (view_Vec_u64_Global self)
+    <= UInt64.t'int const_MAX
+
+let new_u64 (return (x: t_Vec_u64_Global)) = any
+  [ return (result: t_Vec_u64_Global) ->
+  {[@stop_split] [@expl:new ensures] [%#svec] Seq.length (view_Vec_u64_Global result) = 0}
+    (! return {result}) ]
+
+constant const_FREE_KEY: UInt64.t = [%#sslab] (18446744073709551615: UInt64.t)
+
+let push_u64 (self_: MutBorrow.t t_Vec_u64_Global) (v: UInt64.t) (return (x: ())) = any
+  [ return (result: ()) -> {[@stop_split] [@expl:push ensures] [%#svec'0] view_Vec_u64_Global self_.final
+    = Seq.snoc (view_Vec_u64_Global self_.current) v}
+    (! return {result}) ]
+
+type t_Vec_SlabDescriptor_Global
+
+type t_SlabDescriptor = { start_offset: UInt64.t; slab_size: UInt64.t; element_size: UInt32.t; keys: t_Vec_u64_Global }
+
+function view_Vec_SlabDescriptor_Global (self: t_Vec_SlabDescriptor_Global) : Seq.seq t_SlabDescriptor
+
+axiom view_Vec_SlabDescriptor_Global_spec:
+  forall self: t_Vec_SlabDescriptor_Global [view_Vec_SlabDescriptor_Global self]. [%#svec'1] Seq.length (view_Vec_SlabDescriptor_Global self)
+    <= UInt64.t'int const_MAX
+
+let new_SlabDescriptor (return (x: t_Vec_SlabDescriptor_Global)) = any
+  [ return (result: t_Vec_SlabDescriptor_Global) ->
+  {[@stop_split] [@expl:new ensures] [%#svec] Seq.length (view_Vec_SlabDescriptor_Global result) = 0}
+    (! return {result}) ]
+
+let push_SlabDescriptor (self_: MutBorrow.t t_Vec_SlabDescriptor_Global) (v: t_SlabDescriptor) (return (x: ())) = any
+  [ return (result: ()) -> {[@stop_split] [@expl:push ensures] [%#svec'0] view_Vec_SlabDescriptor_Global self_.final
+    = Seq.snoc (view_Vec_SlabDescriptor_Global self_.current) v}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let wa_descs [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 1096 0 1096 40]
+  (return (x: t_Vec_SlabDescriptor_Global)) = (! bb0
+  [ bb0 = s0
+    [ s0 = new_u64 [%#sbatch3] (fun (_x: t_Vec_u64_Global) -> [ &keys'0 <- _x ] s1)
+    | s1 = MutBorrow.borrow_mut <t_Vec_u64_Global> {keys'0}
+        (fun (_bor: MutBorrow.t t_Vec_u64_Global) -> [ &_6 <- _bor ] [ &keys'0 <- _bor.final ] s2)
+    | s2 = push_u64 [%#sbatch3'1] {_6} {[%#sbatch3'0] const_FREE_KEY} (fun (_x: ()) -> [ &_5 <- _x ] s3)
+    | s3 = MutBorrow.borrow_mut <t_Vec_u64_Global> {keys'0}
+        (fun (_bor: MutBorrow.t t_Vec_u64_Global) -> [ &_8 <- _bor ] [ &keys'0 <- _bor.final ] s4)
+    | s4 = push_u64 [%#sbatch3'3] {_8} {[%#sbatch3'2] const_FREE_KEY} (fun (_x: ()) -> [ &_7 <- _x ] s5)
+    | s5 = new_SlabDescriptor [%#sbatch3'4] (fun (_x: t_Vec_SlabDescriptor_Global) -> [ &v <- _x ] s6)
+    | s6 = [ &_12 <- { start_offset = ([%#sbatch3'5] (0: UInt64.t));
+                       slab_size = ([%#sbatch3'6] (8: UInt64.t));
+                       element_size = ([%#sbatch3'7] (4: UInt32.t));
+                       keys = keys'0 } ] s7
+    | s7 = MutBorrow.borrow_mut <t_Vec_SlabDescriptor_Global> {v}
+        (fun (_bor: MutBorrow.t t_Vec_SlabDescriptor_Global) -> [ &_11 <- _bor ] [ &v <- _bor.final ] s8)
+    | s8 = push_SlabDescriptor [%#sbatch3'8] {_11} {_12} (fun (_x: ()) -> [ &_10 <- _x ] s9)
+    | s9 = [ &_ret <- v ] s10
+    | s10 = return {_ret} ] ]
+  [ & _ret: t_Vec_SlabDescriptor_Global = Any.any_l ()
+  | & keys'0: t_Vec_u64_Global = Any.any_l ()
+  | & _5: () = Any.any_l ()
+  | & _6: MutBorrow.t t_Vec_u64_Global = Any.any_l ()
+  | & _7: () = Any.any_l ()
+  | & _8: MutBorrow.t t_Vec_u64_Global = Any.any_l ()
+  | & v: t_Vec_SlabDescriptor_Global = Any.any_l ()
+  | & _10: () = Any.any_l ()
+  | & _11: MutBorrow.t t_Vec_SlabDescriptor_Global = Any.any_l ()
+  | & _12: t_SlabDescriptor = Any.any_l () ])
+  [ return (result: t_Vec_SlabDescriptor_Global) ->
+  {[@stop_split] [@expl:wa_descs ensures] ([@stop_split] [@expl:wa_descs ensures #0] [%#sbatch3'9] Seq.length (view_Vec_SlabDescriptor_Global result)
+      = 1)
+    /\ ([@stop_split] [@expl:wa_descs ensures #1] [%#sbatch3'10] UInt64.t'int (Seq.get (view_Vec_SlabDescriptor_Global result) 0).start_offset
+        = 0
+      /\ UInt64.t'int (Seq.get (view_Vec_SlabDescriptor_Global result) 0).slab_size = 8
+      /\ UInt32.t'int (Seq.get (view_Vec_SlabDescriptor_Global result) 0).element_size = 4)
+    /\ ([@stop_split] [@expl:wa_descs ensures #2] [%#sbatch3'11] Seq.length (view_Vec_u64_Global (Seq.get (view_Vec_SlabDescriptor_Global result) 0).keys)
+      = 2
+    /\ Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_SlabDescriptor_Global result) 0).keys) 0 = const_FREE_KEY
+    /\ Seq.get (view_Vec_u64_Global (Seq.get (view_Vec_SlabDescriptor_Global result) 0).keys) 1 = const_FREE_KEY)}
+    (! return {result}) ]

@@ -1,0 +1,114 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 644 0 644 50 *)
+
+let%span sbatch4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 645 38 645 42
+let%span sbatch4'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 645 57 645 61
+let%span sbatch4'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 645 76 645 77
+let%span sbatch4'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 653 26 653 27
+let%span sbatch4'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 647 24 647 26
+let%span sbatch4'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 648 19 648 20
+let%span sbatch4'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 649 25 649 26
+let%span sbatch4'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 650 21 650 22
+let%span sbatch4'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 651 22 651 23
+let%span sbatch4'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 652 28 652 29
+let%span sbatch4'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 654 29 654 30
+let%span sbatch4'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 655 30 655 31
+let%span sbatch4'11 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 640 10 640 91
+let%span sbatch4'12 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 641 10 641 102
+let%span sbatch4'13 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 642 10 642 104
+let%span sbatch4'14 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 643 10 643 83
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.int.UInt8
+use creusot.prelude.Any
+
+type t_Superblock = {
+  magic: UInt64.t;
+  version: UInt32.t;
+  data_disk_size: UInt64.t;
+  sector_size: UInt32.t;
+  slab_size: UInt64.t;
+  max_extent_size: UInt32.t;
+  region_count: UInt32.t;
+  checkpoint_seq: UInt64.t;
+  active_copy: UInt8.t;
+  checkpoint_region_offset: UInt64.t;
+  checkpoint_region_size: UInt64.t;
+  instance_id: UInt64.t;
+  metadata_disk_ns_id: UInt32.t;
+  data_start_offset: UInt64.t }
+
+type t_Option_Superblock = None | Some t_Superblock
+
+type tup2_u64_usize = { f0: UInt64.t; f1: UInt64.t }
+
+type t_Option_tup2_u64_usize = None'0 | Some'0 tup2_u64_usize
+
+type t_MetaDevice = {
+  connected'0: bool;
+  sector_size'0: UInt32.t;
+  num_sectors'0: UInt64.t;
+  sb'0: t_Option_Superblock;
+  ckpt0'0: t_Option_tup2_u64_usize;
+  ckpt1'0: t_Option_tup2_u64_usize }
+
+type t_Option_u64 = None'1 | Some'1 UInt64.t
+
+type t_FormatParams = {
+  data_disk_size'1: UInt64.t;
+  slab_size'1: UInt64.t;
+  max_extent_size'1: UInt32.t;
+  sector_size'1: UInt32.t;
+  region_count'1: UInt32.t;
+  metadata_alignment'1: UInt64.t;
+  instance_id'1: t_Option_u64;
+  metadata_disk_ns_id'1: UInt32.t;
+  metadata_region_size'1: UInt64.t }
+
+type tup2_MetaDevice_FormatParams = { f0'0: t_MetaDevice; f1'0: t_FormatParams }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let wu_geometry [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch4.rs" 644 0 644 50]
+  (return (x: tup2_MetaDevice_FormatParams)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_6 <- None ] s1
+    | s1 = [ &_7 <- None'0 ] s2
+    | s2 = [ &_8 <- None'0 ] s3
+    | s3 = [ &dev <- { connected'0 = ([%#sbatch4] true);
+                       sector_size'0 = ([%#sbatch4'0] (4096: UInt32.t));
+                       num_sectors'0 = ([%#sbatch4'1] (4: UInt64.t));
+                       sb'0 = _6;
+                       ckpt0'0 = _7;
+                       ckpt1'0 = _8 } ] s4
+    | s4 = [ &_10 <- Some'1 ([%#sbatch4'2] (1: UInt64.t)) ] s5
+    | s5 = [ &params <- { data_disk_size'1 = ([%#sbatch4'3] (48: UInt64.t));
+                          slab_size'1 = ([%#sbatch4'4] (4: UInt64.t));
+                          max_extent_size'1 = ([%#sbatch4'5] (4: UInt32.t));
+                          sector_size'1 = ([%#sbatch4'6] (4: UInt32.t));
+                          region_count'1 = ([%#sbatch4'7] (8: UInt32.t));
+                          metadata_alignment'1 = ([%#sbatch4'8] (0: UInt64.t));
+                          instance_id'1 = _10;
+                          metadata_disk_ns_id'1 = ([%#sbatch4'9] (1: UInt32.t));
+                          metadata_region_size'1 = ([%#sbatch4'10] (0: UInt64.t)) } ] s6
+    | s6 = [ &_ret <- { f0'0 = dev; f1'0 = params } ] s7
+    | s7 = return {_ret} ] ]
+  [ & _ret: tup2_MetaDevice_FormatParams = Any.any_l ()
+  | & dev: t_MetaDevice = Any.any_l ()
+  | & _6: t_Option_Superblock = Any.any_l ()
+  | & _7: t_Option_tup2_u64_usize = Any.any_l ()
+  | & _8: t_Option_tup2_u64_usize = Any.any_l ()
+  | & params: t_FormatParams = Any.any_l ()
+  | & _10: t_Option_u64 = Any.any_l () ])
+  [ return (result: tup2_MetaDevice_FormatParams) ->
+  {[@stop_split] [@expl:wu_geometry ensures] ([@stop_split] [@expl:wu_geometry ensures #0] [%#sbatch4'11] result.f0'0.connected'0
+      /\ UInt32.t'int result.f0'0.sector_size'0 = 4096 /\ UInt64.t'int result.f0'0.num_sectors'0 = 4)
+    /\ ([@stop_split] [@expl:wu_geometry ensures #1] [%#sbatch4'12] UInt64.t'int result.f1'0.data_disk_size'1 = 48
+      /\ UInt64.t'int result.f1'0.slab_size'1 = 4 /\ UInt32.t'int result.f1'0.max_extent_size'1 = 4)
+    /\ ([@stop_split] [@expl:wu_geometry ensures #2] [%#sbatch4'13] UInt32.t'int result.f1'0.sector_size'1 = 4
+      /\ UInt32.t'int result.f1'0.region_count'1 = 8 /\ UInt64.t'int result.f1'0.metadata_alignment'1 = 0)
+    /\ ([@stop_split] [@expl:wu_geometry ensures #3] [%#sbatch4'14] UInt64.t'int result.f1'0.metadata_region_size'1 = 0
+    /\ result.f1'0.instance_id'1 = Some'1 (1: UInt64.t))}
+    (! return {result}) ]

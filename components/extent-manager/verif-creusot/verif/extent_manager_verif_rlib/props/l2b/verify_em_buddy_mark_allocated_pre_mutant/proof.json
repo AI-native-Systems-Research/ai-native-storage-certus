@@ -1,0 +1,16 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_rebuild_marks": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_verify_em_buddy_mark_allocated_pre__mutant": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.032 },
+          { "prover": "alt-ergo", "time": 0.024 },
+          null
+        ]
+      }
+    }
+  }
+}

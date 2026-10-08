@@ -1,0 +1,24 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 170 0 170 37 *)
+
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 167 11 167 26
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 168 10 168 26
+let%span sbuddy'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 169 10 169 26
+
+use int.ComputerDivision
+use int.Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant m : int
+
+constant k : int
+
+function lemma_mul_mod0 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 170 0 170 37] (m: int) (k: int) : ()
+
+goal vc_lemma_mul_mod0: ([%#sbuddy] m > 0 /\ k >= 0)
+  -> ([@stop_split] [@expl:lemma_mul_mod0 ensures] ([@stop_split] [@expl:lemma_mul_mod0 ensures #0] [%#sbuddy'0] ComputerDivision.mod (m
+      * k) m
+    = 0)
+  /\ ([@stop_split] [@expl:lemma_mul_mod0 ensures #1] [%#sbuddy'1] ComputerDivision.div (m * k) m = k))

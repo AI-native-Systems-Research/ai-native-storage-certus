@@ -1,0 +1,14 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_new": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_support_old_refute_em_used_returns_after_free": {
+        "prover": "alt-ergo",
+        "time": 0.46
+      },
+      "vc_total_free": { "prover": "alt-ergo", "time": 0.035 },
+      "vc_w1_freed": { "prover": "alt-ergo", "time": 0.035 }
+    }
+  }
+}

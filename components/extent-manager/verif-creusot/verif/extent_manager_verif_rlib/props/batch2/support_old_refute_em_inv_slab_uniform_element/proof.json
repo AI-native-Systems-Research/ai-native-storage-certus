@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_support_old_refute_em_inv_slab_uniform_element": {
+        "prover": "alt-ergo",
+        "time": 0.124
+      },
+      "vc_w3_stale": { "prover": "alt-ergo", "time": 0.044 }
+    }
+  }
+}

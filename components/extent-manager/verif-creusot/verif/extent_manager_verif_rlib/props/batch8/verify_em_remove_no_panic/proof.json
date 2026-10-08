@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_remove_extent8": { "prover": "alt-ergo", "time": 0.047 },
+      "vc_verify_em_remove_no_panic": { "prover": "alt-ergo", "time": 0.201 }
+    }
+  }
+}

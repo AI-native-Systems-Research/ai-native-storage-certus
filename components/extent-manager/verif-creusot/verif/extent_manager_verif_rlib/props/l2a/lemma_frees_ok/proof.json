@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_lemma_frees_ok": { "prover": "cvc5", "time": 0.335 } }
+  }
+}

@@ -1,0 +1,23 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 248 0 248 46 *)
+
+let%span sblockio = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 245 11 245 49
+let%span sblockio'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 246 10 247 85
+
+use int.Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant n : int
+
+constant d : int
+
+constant i : int
+
+function lemma_ceil_next [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/blockio.rs" 248 0 248 46] (n: int) (d: int) (i: int) : ()
+
+goal vc_lemma_ceil_next: ([%#sblockio] d > 0 /\ n >= 0 /\ 0 <= i /\ i * d < n)
+  -> ([@stop_split] [@expl:lemma_ceil_next ensures] [%#sblockio'0] ((i + 1) * d <= n
+    -> (if n - i * d < d then n - i * d else d) = d)
+  /\ ((i + 1) * d > n -> i * d + (if n - i * d < d then n - i * d else d) = n))

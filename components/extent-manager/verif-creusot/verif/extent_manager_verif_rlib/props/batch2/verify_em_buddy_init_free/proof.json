@@ -1,0 +1,10 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_new": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_total_free": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_verify_em_buddy_init_free": { "prover": "cvc5", "time": 0.134 }
+    }
+  }
+}

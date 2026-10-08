@@ -1,0 +1,21 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 578 4 578 37 *)
+
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 577 14 577 33
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 573 20 573 25
+
+use int.Int
+
+function mulw [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 572 4 572 38] (a: int) (b: int) : int
+ = [%#sbuddy'0] a * b
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant a : int
+
+constant b : int
+
+function lemma_mulw [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 578 4 578 37] (a: int) (b: int) : ()
+
+goal vc_lemma_mulw: [@stop_split] [@expl:lemma_mulw ensures] [%#sbuddy] mulw a b = a * b

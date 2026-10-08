@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_leading_zeros": { "prover": "alt-ergo", "time": 0.038 },
+      "vc_order_for_blocks_bv": { "prover": "alt-ergo", "time": 3.0 }
+    }
+  }
+}

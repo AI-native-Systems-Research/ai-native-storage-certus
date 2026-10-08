@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lemma_free_m_elim": { "prover": "alt-ergo", "time": 0.129 }
+    }
+  }
+}

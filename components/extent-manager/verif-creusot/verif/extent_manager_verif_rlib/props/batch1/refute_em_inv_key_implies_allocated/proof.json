@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_publish_slot": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_refute_em_inv_key_implies_allocated": {
+        "prover": "cvc5",
+        "time": 0.687
+      },
+      "vc_w2a_replaced": { "prover": "alt-ergo", "time": 0.028 }
+    }
+  }
+}

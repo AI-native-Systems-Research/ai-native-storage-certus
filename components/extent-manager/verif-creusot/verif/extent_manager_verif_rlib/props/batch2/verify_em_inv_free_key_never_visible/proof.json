@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_for_each_extent": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_get_extents": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_verify_em_inv_free_key_never_visible": {
+        "prover": "alt-ergo",
+        "time": 0.676
+      }
+    }
+  }
+}

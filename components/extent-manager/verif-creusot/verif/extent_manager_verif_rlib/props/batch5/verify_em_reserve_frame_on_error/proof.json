@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_alloc_extent": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_verify_em_reserve_frame_on_error": {
+        "prover": "cvc4",
+        "time": 0.153
+      }
+    }
+  }
+}

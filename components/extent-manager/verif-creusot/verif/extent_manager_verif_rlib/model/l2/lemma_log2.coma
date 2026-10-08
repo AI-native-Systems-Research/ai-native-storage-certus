@@ -1,0 +1,57 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 267 0 267 25 *)
+
+let%span swell_founded = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 46 11 46 17
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 47 10 47 23
+let%span sbuddy'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 48 10 48 40
+let%span sbuddy'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 45 10 45 11
+let%span sl2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 265 10 265 11
+let%span sl2'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 264 11 264 17
+let%span sl2'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 266 10 266 29
+let%span sl2'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 258 10 258 11
+let%span sl2'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 260 16 260 56
+
+use int.ComputerDivision
+use bv.Pow2int
+use int.Int
+
+function log2 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 259 0 259 26] (x: int) : int
+
+axiom log2_def: forall x: int [log2 x]. log2 x = ([%#sl2'3] if x <= 1 then 0 else 1 + log2 (ComputerDivision.div x 2))
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+function lemma_pow2 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 49 0 49 25] (o: int) : ()
+
+axiom lemma_pow2_spec: forall o: int. ([%#sbuddy] 0 <= o) -> ([%#sbuddy'0] Pow2int.pow2 o >= 1)
+
+axiom lemma_pow2_spec'0: forall o: int. ([%#sbuddy] 0 <= o) -> ([%#sbuddy'1] Pow2int.pow2 (o + 1) = 2 * Pow2int.pow2 o)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant k : int
+
+function lemma_log2 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 267 0 267 25] (k: int) : ()
+
+goal vc_lemma_log2: ([%#sl2'0] 0 <= k)
+  -> (if k > 0 then
+    (([@stop_split] [@expl:lemma_log2 requires] [%#sl2'0] 0 <= k - 1)
+      /\ ([@expl:variant decreases] well_founded_relation_Int ([%#sl2] k) ([%#sl2] k - 1)))
+    /\ (([@stop_split] [@expl:lemma_log2 ensures] [%#sl2'1] log2 (Pow2int.pow2 (k - 1)) = k - 1)
+    -> (let _ = lemma_log2 (k - 1) in ([@stop_split] [@expl:lemma_pow2 requires] [%#sbuddy] 0 <= k - 1)
+    /\ (([@stop_split] [@expl:lemma_pow2 ensures] ([@stop_split] [@expl:lemma_pow2 ensures #0] [%#sbuddy'0] Pow2int.pow2 (k
+          - 1)
+        >= 1)
+      /\ ([@stop_split] [@expl:lemma_pow2 ensures #1] [%#sbuddy'1] Pow2int.pow2 (k - 1 + 1) = 2 * Pow2int.pow2 (k - 1)))
+    -> (let _ = lemma_pow2 (k - 1) in Pow2int.pow2 k = 2 * Pow2int.pow2 (k - 1)
+    && Pow2int.pow2 (k - 1) >= 1
+    && ComputerDivision.div (Pow2int.pow2 k) 2 = Pow2int.pow2 (k - 1)
+    && ([@stop_split] [@expl:lemma_log2 ensures] [%#sl2'1] log2 (Pow2int.pow2 k) = k)))))
+  else
+    Pow2int.pow2 0 = 1 && ([@stop_split] [@expl:lemma_log2 ensures] [%#sl2'1] log2 (Pow2int.pow2 k) = k)
+  )

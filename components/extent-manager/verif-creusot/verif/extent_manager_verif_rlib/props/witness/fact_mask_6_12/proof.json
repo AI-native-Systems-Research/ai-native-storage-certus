@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_fact_mask_6_12": { "prover": "z3", "time": 0.005 } }
+  }
+}

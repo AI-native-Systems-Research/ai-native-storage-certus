@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_g_rb2_step": { "prover": "z3", "time": 0.074 } }
+  }
+}

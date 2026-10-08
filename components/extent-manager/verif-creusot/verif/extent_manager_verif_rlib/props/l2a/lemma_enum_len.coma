@@ -1,0 +1,122 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2a.rs" 2026 0 2026 55 *)
+
+let%span swell_founded = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+let%span sfmap = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/fmap.rs" 45 14 45 31
+let%span sfmap'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/fmap.rs" 46 14 46 55
+let%span sfmap'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/fmap.rs" 168 40 168 65
+let%span sfmap'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/fmap.rs" 77 14 77 67
+let%span sfmap'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/fmap.rs" 78 14 78 84
+let%span sfmap'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/fmap.rs" 102 8 102 27
+let%span sfmap'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/fmap.rs" 54 14 54 25
+let%span sfmap'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/fmap.rs" 171 12 171 41
+let%span sfmap'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/fmap.rs" 88 8 88 32
+let%span sl2a = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2a.rs" 2021 10 2021 18
+let%span sl2a'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2a.rs" 2022 11 2022 70
+let%span sl2a'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2a.rs" 2023 11 2023 95
+let%span sl2a'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2a.rs" 2024 11 2024 84
+let%span sl2a'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2a.rs" 2025 10 2025 29
+
+use seq.Seq
+use creusot.int.UInt64
+use creusot.int.UInt32
+use map.Map
+use map.Const
+use int.Int
+
+type t_FMap_Int_Slab
+
+type t_Vec_u64_Global
+
+type t_AllocationBitmap = { words: t_Vec_u64_Global; num_slots: UInt32.t; allocated_count: UInt32.t }
+
+type t_Slab = {
+  start_offset: UInt64.t;
+  slab_size: UInt64.t;
+  element_size: UInt32.t;
+  bitmap: t_AllocationBitmap;
+  keys: t_Vec_u64_Global;
+  rover: UInt64.t }
+
+type t_Option_Slab = None | Some t_Slab
+
+function to_mapping_Int (self: t_FMap_Int_Slab) : Map.map int t_Option_Slab
+
+function get_Int [@inline:trivial] (self: t_FMap_Int_Slab) (k: int) : t_Option_Slab =
+  [%#sfmap'7] Map.get (to_mapping_Int self) k
+
+meta "rewrite_def" function get_Int
+
+predicate contains_Int [@inline:trivial] (self: t_FMap_Int_Slab) (k: int) = [%#sfmap'4] get_Int self k <> None
+
+meta "rewrite_def" predicate contains_Int
+
+function len_Int (self: t_FMap_Int_Slab) : int
+
+axiom len_Int_spec: forall self: t_FMap_Int_Slab [len_Int self]. [%#sfmap'5] len_Int self >= 0
+
+constant empty_Int : t_FMap_Int_Slab
+
+axiom empty_Int_spec: [%#sfmap] len_Int empty_Int = 0
+
+axiom empty_Int_spec'0: [%#sfmap'0] to_mapping_Int empty_Int = Const.const (None)
+
+predicate ext_eq_Int (self: t_FMap_Int_Slab) (other: t_FMap_Int_Slab) =
+  [%#sfmap'6] forall k: int. get_Int self k = get_Int other k
+
+axiom ext_eq_Int_spec: forall self: t_FMap_Int_Slab, other: t_FMap_Int_Slab [self
+    = other]. [%#sfmap'1] ext_eq_Int self other = (self = other)
+
+function remove_Int (self: t_FMap_Int_Slab) (k: int) : t_FMap_Int_Slab
+
+axiom remove_Int_spec:
+  forall self: t_FMap_Int_Slab, k: int [remove_Int self k]. [%#sfmap'2] to_mapping_Int (remove_Int self k)
+    = Map.set (to_mapping_Int self) k (None)
+
+axiom remove_Int_spec'0:
+  forall self: t_FMap_Int_Slab, k: int [remove_Int self k]. [%#sfmap'3] len_Int (remove_Int self k)
+    = (if contains_Int self k then len_Int self - 1 else len_Int self)
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant m : t_FMap_Int_Slab
+
+constant ks : Seq.seq int
+
+function lemma_enum_len [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2a.rs" 2026 0 2026 55] (m: t_FMap_Int_Slab) (ks: Seq.seq int) : ()
+
+goal vc_lemma_enum_len: ([%#sl2a'0] forall p: int. 0 <= p /\ p < Seq.length ks -> contains_Int m (Seq.get ks p))
+  -> ([%#sl2a'1] forall k: int. contains_Int m k -> (exists p: int. 0 <= p /\ p < Seq.length ks /\ Seq.get ks p = k))
+  -> ([%#sl2a'2] forall p: int, q: int. 0 <= p /\ p < q /\ q < Seq.length ks -> Seq.get ks p <> Seq.get ks q)
+  -> (if Seq.length ks = 0 then
+    ([@stop_split] [@expl:empty ensures] ([@stop_split] [@expl:empty ensures #0] [%#sfmap] len_Int empty_Int = 0)
+      /\ ([@stop_split] [@expl:empty ensures #1] [%#sfmap'0] to_mapping_Int empty_Int = Const.const (None)))
+    -> ([@stop_split] [@expl:ext_eq ensures] [%#sfmap'1] ext_eq_Int m empty_Int = (m = empty_Int))
+    -> ext_eq_Int m empty_Int && ([@stop_split] [@expl:lemma_enum_len ensures] [%#sl2a'3] Seq.length ks = len_Int m)
+  else
+    let last = Seq.get ks (Seq.length ks
+    - 1) in ([@stop_split] [@expl:remove ensures] ([@stop_split] [@expl:remove ensures #0] [%#sfmap'2] to_mapping_Int (remove_Int m last)
+        = Map.set (to_mapping_Int m) last (None))
+      /\ ([@stop_split] [@expl:remove ensures #1] [%#sfmap'3] len_Int (remove_Int m last)
+      = (if contains_Int m last then len_Int m - 1 else len_Int m)))
+    -> (let m2 = remove_Int m last in let ks2 = Seq.([..]) ks 0 (Seq.length ks - 1) in (forall p: int. 0 <= p
+          /\ p < Seq.length ks2 -> Seq.get ks2 p = Seq.get ks p /\ Seq.get ks2 p <> last)
+    && (forall k: int. contains_Int m2 k -> contains_Int m k /\ k <> last)
+    && (forall k: int. contains_Int m2 k -> (exists p: int. 0 <= p /\ p < Seq.length ks2 /\ Seq.get ks2 p = k))
+    && (([@stop_split] [@expl:lemma_enum_len requires] ([@stop_split] [@expl:lemma_enum_len requires #0] [%#sl2a'0] forall p: int. 0
+                <= p
+              /\ p < Seq.length ks2 -> contains_Int m2 (Seq.get ks2 p))
+        /\ ([@stop_split] [@expl:lemma_enum_len requires #1] [%#sl2a'1] forall k: int. contains_Int m2 k
+            -> (exists p: int. 0 <= p /\ p < Seq.length ks2 /\ Seq.get ks2 p = k))
+        /\ ([@stop_split] [@expl:lemma_enum_len requires #2] [%#sl2a'2] forall p: int, q: int. 0 <= p
+            /\ p < q /\ q < Seq.length ks2 -> Seq.get ks2 p <> Seq.get ks2 q))
+      /\ ([@expl:variant decreases] well_founded_relation_Int ([%#sl2a] Seq.length ks) ([%#sl2a] Seq.length ks2)))
+    /\ (([@stop_split] [@expl:lemma_enum_len ensures] [%#sl2a'3] Seq.length ks2 = len_Int m2)
+    -> ([@stop_split] [@expl:lemma_enum_len ensures] [%#sl2a'3] Seq.length ks = len_Int m)))
+  )

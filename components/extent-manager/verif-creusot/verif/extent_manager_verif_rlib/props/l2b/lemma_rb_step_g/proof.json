@@ -1,0 +1,36 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lemma_rb_step_g": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.112 },
+              { "prover": "alt-ergo", "time": 0.041 },
+              { "prover": "cvc5", "time": 0.139 },
+              { "prover": "alt-ergo", "time": 0.099 },
+              { "prover": "alt-ergo", "time": 0.04 },
+              { "prover": "alt-ergo", "time": 0.045 },
+              { "prover": "alt-ergo", "time": 0.046 },
+              { "prover": "alt-ergo", "time": 0.05 },
+              { "prover": "cvc5", "time": 0.192 },
+              { "prover": "cvc5", "time": 0.197 },
+              { "prover": "cvc5", "time": 0.165 },
+              { "prover": "cvc5", "time": 0.46 },
+              { "prover": "cvc5", "time": 0.196 },
+              { "prover": "alt-ergo", "time": 0.137 },
+              { "prover": "alt-ergo", "time": 0.198 },
+              { "prover": "alt-ergo", "time": 0.148 },
+              { "prover": "z3", "time": 0.109 },
+              { "prover": "alt-ergo", "time": 0.05 },
+              { "prover": "alt-ergo", "time": 0.125 }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

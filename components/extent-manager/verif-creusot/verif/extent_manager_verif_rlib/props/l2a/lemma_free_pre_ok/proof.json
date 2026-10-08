@@ -1,0 +1,19 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lemma_free_pre_ok": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "cvc5", "time": 0.108 },
+              { "prover": "cvc4", "time": 0.283 }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

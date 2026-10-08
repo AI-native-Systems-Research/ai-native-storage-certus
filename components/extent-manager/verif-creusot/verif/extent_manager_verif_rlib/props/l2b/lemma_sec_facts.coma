@@ -1,0 +1,84 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2b.rs" 289 0 289 57 *)
+
+let%span sassume = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 49 8 53 38
+let%span scomponent = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 675 16 675 83
+let%span scomponent'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 653 16 653 66
+let%span scomponent'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 668 8 668 100
+let%span scomponent'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 660 16 660 75
+let%span sl2b = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2b.rs" 285 11 285 110
+let%span sl2b'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2b.rs" 286 11 286 33
+let%span sl2b'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2b.rs" 287 10 287 84
+let%span sl2b'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2b.rs" 288 10 288 76
+let%span sl2b'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2b.rs" 250 16 250 31
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use int.ComputerDivision
+use int.Int
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_FormatParams = {
+  data_disk_size: UInt64.t;
+  slab_size: UInt64.t;
+  max_extent_size: UInt32.t;
+  sector_size: UInt32.t;
+  region_count: UInt32.t;
+  metadata_alignment: UInt64.t;
+  instance_id: t_Option_u64;
+  metadata_disk_ns_id: UInt32.t;
+  metadata_region_size: UInt64.t }
+
+function ckoff_l [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 652 0 652 29] (a: int) : int
+ = [%#scomponent'0] if a = 0 then 4096 else ComputerDivision.div (4096 + a - 1) a * a
+
+function eff_l [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 659 0 659 38] (md: int) (mrs: int) : int
+ = [%#scomponent'2] if mrs > 0 then if md <= mrs then md else mrs else md
+
+function cksize_l [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 666 0 666 58] (md: int) (mrs: int) (a: int) (ss: int) : int
+ = [%#scomponent'1] if eff_l md mrs >= ckoff_l a then
+    ComputerDivision.div (ComputerDivision.div (eff_l md mrs - ckoff_l a) 2) ss * ss
+  else
+    0
+
+
+function ds_l [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/component.rs" 674 0 674 54] (md: int) (mrs: int) (a: int) (ss: int) : int
+ = [%#scomponent] if mrs > 0 then ckoff_l a + 2 * cksize_l md mrs a ss else 0
+
+predicate a_c6d2c5 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 47 0 47 49] (md: int) (p: t_FormatParams) =
+  [%#sassume] ComputerDivision.mod (ds_l md (UInt64.t'int p.metadata_region_size) (UInt64.t'int p.metadata_alignment) (UInt32.t'int p.sector_size)) (UInt32.t'int p.sector_size)
+    = 0
+  /\ (UInt64.t'int p.data_disk_size
+    >= ds_l md (UInt64.t'int p.metadata_region_size) (UInt64.t'int p.metadata_alignment) (UInt32.t'int p.sector_size)
+  -> ComputerDivision.mod (UInt64.t'int p.data_disk_size
+      - ds_l md (UInt64.t'int p.metadata_region_size) (UInt64.t'int p.metadata_alignment) (UInt32.t'int p.sector_size)) (UInt32.t'int p.sector_size)
+    = 0
+  /\ ComputerDivision.mod (ComputerDivision.div (UInt64.t'int p.data_disk_size
+    - ds_l md (UInt64.t'int p.metadata_region_size) (UInt64.t'int p.metadata_alignment) (UInt32.t'int p.sector_size)) (UInt32.t'int p.region_count)) (UInt32.t'int p.sector_size)
+  = 0)
+
+predicate sec_layout [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2b.rs" 249 0 249 51] (md: int) (p: t_FormatParams) =
+  [%#sl2b'3] a_c6d2c5 md p
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant md : int
+
+constant p : t_FormatParams
+
+constant ds : int
+
+function lemma_sec_facts [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2b.rs" 289 0 289 57] (md: int) (p: t_FormatParams) (ds: int) : ()
+
+goal vc_lemma_sec_facts: ([%#sl2b] sec_layout md p
+    /\ ds
+    = ds_l md (UInt64.t'int p.metadata_region_size) (UInt64.t'int p.metadata_alignment) (UInt32.t'int p.sector_size))
+  -> ([%#sl2b'0] ds < UInt64.t'int p.data_disk_size)
+  -> ([@stop_split] [@expl:lemma_sec_facts ensures] ([@stop_split] [@expl:lemma_sec_facts ensures #0] [%#sl2b'1] ComputerDivision.mod ds (UInt32.t'int p.sector_size)
+      = 0
+    /\ ComputerDivision.mod (UInt64.t'int p.data_disk_size - ds) (UInt32.t'int p.sector_size) = 0)
+  /\ ([@stop_split] [@expl:lemma_sec_facts ensures #1] [%#sl2b'2] ComputerDivision.mod (ComputerDivision.div (UInt64.t'int p.data_disk_size
+    - ds) (UInt32.t'int p.region_count)) (UInt32.t'int p.sector_size)
+  = 0))

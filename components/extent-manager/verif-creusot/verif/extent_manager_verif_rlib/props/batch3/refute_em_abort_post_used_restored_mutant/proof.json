@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_refute_em_abort_post_used_restored__mutant": null,
+      "vc_wa_recovered_reserve_abort": {
+        "prover": "alt-ergo",
+        "time": 0.021
+      }
+    }
+  }
+}

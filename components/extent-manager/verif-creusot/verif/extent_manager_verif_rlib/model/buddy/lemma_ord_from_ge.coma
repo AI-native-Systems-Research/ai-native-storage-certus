@@ -1,0 +1,71 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 311 0 311 40 *)
+
+let%span swell_founded = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 308 10 308 16
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 307 11 307 67
+let%span sbuddy'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 309 10 309 36
+let%span sbuddy'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 310 10 310 53
+let%span sbuddy'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 283 10 283 16
+let%span sbuddy'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 285 16 285 86
+
+use bv.Pow2int
+use int.Int
+
+function ord_from [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 284 0 284 38] (b: int) (k: int) : int
+
+axiom ord_from_def: forall b: int, k: int [ord_from b k]. ord_from b k
+    = ([%#sbuddy'4] if k >= 64 \/ k < 0 \/ Pow2int.pow2 k >= b then k else ord_from b (k + 1))
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant b : int
+
+constant k : int
+
+function lemma_ord_from_ge [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 311 0 311 40] (b: int) (k: int) : ()
+
+goal vc_lemma_ord_from_ge: ([%#sbuddy'0] 0 <= k /\ k <= 64 /\ 0 <= b /\ b <= 18446744073709551616)
+  -> (if k < 64 then
+    if Pow2int.pow2 k < b then
+      (([@stop_split] [@expl:lemma_ord_from_ge requires] [%#sbuddy'0] 0 <= k + 1
+          /\ k + 1 <= 64 /\ 0 <= b /\ b <= 18446744073709551616)
+        /\ ([@expl:variant decreases] well_founded_relation_Int ([%#sbuddy] 64 - k) ([%#sbuddy] 64 - (k + 1))))
+      /\ (([@stop_split] [@expl:lemma_ord_from_ge ensures] ([@stop_split] [@expl:lemma_ord_from_ge ensures #0] [%#sbuddy'1] Pow2int.pow2 (ord_from b (k
+            + 1))
+          >= b)
+        /\ ([@stop_split] [@expl:lemma_ord_from_ge ensures #1] [%#sbuddy'2] k + 1 <= ord_from b (k + 1)
+        /\ ord_from b (k + 1) <= 64))
+      -> ([@stop_split] [@expl:lemma_ord_from_ge ensures] ([@stop_split] [@expl:lemma_ord_from_ge ensures #0] [%#sbuddy'1] Pow2int.pow2 (ord_from b k)
+        >= b)
+      /\ ([@stop_split] [@expl:lemma_ord_from_ge ensures #1] [%#sbuddy'2] k <= ord_from b k /\ ord_from b k <= 64)))
+    else
+      if k = 64 then
+        Pow2int.pow2 64 = 18446744073709551616
+        && ([@stop_split] [@expl:lemma_ord_from_ge ensures] ([@stop_split] [@expl:lemma_ord_from_ge ensures #0] [%#sbuddy'1] Pow2int.pow2 (ord_from b k)
+          >= b)
+        /\ ([@stop_split] [@expl:lemma_ord_from_ge ensures #1] [%#sbuddy'2] k <= ord_from b k /\ ord_from b k <= 64))
+      else
+        [@stop_split] [@expl:lemma_ord_from_ge ensures] ([@stop_split] [@expl:lemma_ord_from_ge ensures #0] [%#sbuddy'1] Pow2int.pow2 (ord_from b k)
+          >= b)
+        /\ ([@stop_split] [@expl:lemma_ord_from_ge ensures #1] [%#sbuddy'2] k <= ord_from b k /\ ord_from b k <= 64)
+    
+  
+  else
+    if k = 64 then
+      Pow2int.pow2 64 = 18446744073709551616
+      && ([@stop_split] [@expl:lemma_ord_from_ge ensures] ([@stop_split] [@expl:lemma_ord_from_ge ensures #0] [%#sbuddy'1] Pow2int.pow2 (ord_from b k)
+        >= b)
+      /\ ([@stop_split] [@expl:lemma_ord_from_ge ensures #1] [%#sbuddy'2] k <= ord_from b k /\ ord_from b k <= 64))
+    else
+      [@stop_split] [@expl:lemma_ord_from_ge ensures] ([@stop_split] [@expl:lemma_ord_from_ge ensures #0] [%#sbuddy'1] Pow2int.pow2 (ord_from b k)
+        >= b)
+      /\ ([@stop_split] [@expl:lemma_ord_from_ge ensures #1] [%#sbuddy'2] k <= ord_from b k /\ ord_from b k <= 64)
+  
+  )

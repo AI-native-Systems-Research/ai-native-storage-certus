@@ -1,0 +1,11 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_fact_mask_pow2": { "prover": "alt-ergo", "time": 0.041 },
+      "vc_mark_allocated": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_new": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_w1p_recovered": { "prover": "cvc5", "time": 2.0 }
+    }
+  }
+}

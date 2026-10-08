@@ -1,0 +1,17 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_refute_em_abort_post_used_restored": {
+        "prover": "alt-ergo",
+        "time": 0.061
+      },
+      "vc_wa_descs": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_wa_precrash": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_wa_recovered_reserve_abort": {
+        "prover": "alt-ergo",
+        "time": 0.022
+      }
+    }
+  }
+}

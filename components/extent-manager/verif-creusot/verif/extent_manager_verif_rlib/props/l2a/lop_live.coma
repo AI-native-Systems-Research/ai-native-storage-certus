@@ -1,0 +1,87 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2a.rs" 2397 0 2397 56 *)
+
+let%span svec = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 112 18 112 40
+let%span svec'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sl2a = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2a.rs" 2401 13 2401 17
+let%span sl2a'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2a.rs" 2400 29 2400 37
+let%span sl2a'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2a.rs" 2399 34 2399 42
+let%span sl2a'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2a.rs" 2396 10 2396 113
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use seq.Seq
+use creusot.prelude.Any
+use int.Int
+
+type t_LOp = Reserve UInt32.t | Publish UInt64.t UInt64.t | Abort UInt64.t | Remove UInt64.t | Flush
+
+let elim_Abort (_x: t_LOp) (return (f0: UInt64.t)) = any
+  [ _k (f0: UInt64.t) -> {Abort f0 = _x} (! return {f0})
+  | _chk -> (! {[@expl:elim Abort] match _x with
+      | Abort _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+type t_Vec_tup2_u64_usize_Global
+
+type tup2_u64_usize = { f0: UInt64.t; f1: UInt64.t }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_tup2_u64_usize_Global (self: t_Vec_tup2_u64_usize_Global) : Seq.seq tup2_u64_usize
+
+axiom view_Vec_tup2_u64_usize_Global_spec:
+  forall self: t_Vec_tup2_u64_usize_Global [view_Vec_tup2_u64_usize_Global self]. [%#svec'0] Seq.length (view_Vec_tup2_u64_usize_Global self)
+    <= UInt64.t'int const_MAX
+
+let len_tup2_u64_usize (self_: t_Vec_tup2_u64_usize_Global) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:len ensures] [%#svec] UInt64.t'int result
+    = Seq.length (view_Vec_tup2_u64_usize_Global self_)}
+    (! return {result}) ]
+
+let elim_Publish (_x: t_LOp) (return (f0'0: UInt64.t) (f1'0: UInt64.t)) = any
+  [ _k (f0'0: UInt64.t) (f1'0: UInt64.t) -> {Publish f0'0 f1'0 = _x} (! return {f0'0} {f1'0})
+  | _chk -> (! {[@expl:elim Publish] match _x with
+      | Publish _ _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let lop_live [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2a.rs" 2397 0 2397 56]
+  (hs: t_Vec_tup2_u64_usize_Global) (op: t_LOp) (return (x: bool)) = (! bb0
+  [ bb0 = any
+    [ br0 (x0: UInt32.t) -> {op = Reserve x0} (! bb1)
+    | br1 (x0: UInt64.t) (x1: UInt64.t) -> {op = Publish x0 x1} (! bb5)
+    | br2 (x0: UInt64.t) -> {op = Abort x0} (! bb4)
+    | br3 (x0: UInt64.t) -> {op = Remove x0} (! bb1)
+    | br4 -> {op = Flush} (! bb1) ]
+  | bb1 = s0 [ s0 = [ &_ret <- [%#sl2a] true ] s1 | s1 = return {_ret} ]
+  | bb4 = s0
+    [ s0 = elim_Abort {op} (fun (r0: UInt64.t) -> [ &j'0 <- r0 ] s1)
+    | s1 = len_tup2_u64_usize [%#sl2a'0] {hs} (fun (_x: UInt64.t) -> [ &_13 <- _x ] s2)
+    | s2 = [ &_ret <- UInt64.lt j'0 _13 ] s3
+    | s3 = return {_ret} ]
+  | bb5 = s0
+    [ s0 = elim_Publish {op} (fun (r0: UInt64.t) (r1: UInt64.t) -> [ &j <- r0 ] s1)
+    | s1 = len_tup2_u64_usize [%#sl2a'1] {hs} (fun (_x: UInt64.t) -> [ &_9 <- _x ] s2)
+    | s2 = [ &_ret <- UInt64.lt j _9 ] s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: bool = Any.any_l ()
+  | & hs: t_Vec_tup2_u64_usize_Global = hs
+  | & op: t_LOp = op
+  | & j: UInt64.t = Any.any_l ()
+  | & _9: UInt64.t = Any.any_l ()
+  | & j'0: UInt64.t = Any.any_l ()
+  | & _13: UInt64.t = Any.any_l () ])
+  [ return (result: bool) -> {[@stop_split] [@expl:lop_live ensures] [%#sl2a'2] result
+    = match op with
+      | Publish j _ -> UInt64.t'int j < Seq.length (view_Vec_tup2_u64_usize_Global hs)
+      | Abort j -> UInt64.t'int j < Seq.length (view_Vec_tup2_u64_usize_Global hs)
+      | _ -> true
+      end}
+    (! return {result}) ]

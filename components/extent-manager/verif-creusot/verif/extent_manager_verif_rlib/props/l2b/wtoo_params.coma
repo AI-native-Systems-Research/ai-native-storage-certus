@@ -1,0 +1,59 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2b.rs" 439 0 439 36 *)
+
+let%span sl2b = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2b.rs" 447 26 447 27
+let%span sl2b'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2b.rs" 441 24 441 31
+let%span sl2b'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2b.rs" 442 19 442 22
+let%span sl2b'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2b.rs" 443 25 443 28
+let%span sl2b'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2b.rs" 444 21 444 24
+let%span sl2b'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2b.rs" 445 22 445 23
+let%span sl2b'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2b.rs" 446 28 446 48
+let%span sl2b'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2b.rs" 448 29 448 30
+let%span sl2b'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2b.rs" 449 30 449 31
+let%span sl2b'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2b.rs" 436 10 436 90
+let%span sl2b'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2b.rs" 437 10 437 105
+let%span sl2b'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2b.rs" 438 10 438 72
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.prelude.Any
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_FormatParams = {
+  data_disk_size: UInt64.t;
+  slab_size: UInt64.t;
+  max_extent_size: UInt32.t;
+  sector_size: UInt32.t;
+  region_count: UInt32.t;
+  metadata_alignment: UInt64.t;
+  instance_id: t_Option_u64;
+  metadata_disk_ns_id: UInt32.t;
+  metadata_region_size: UInt64.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let wtoo_params [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/l2b.rs" 439 0 439 36]
+  (return (x: t_FormatParams)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_4 <- Some ([%#sl2b] (1: UInt64.t)) ] s1
+    | s1 = [ &_ret <- { data_disk_size = ([%#sl2b'0] (1048576: UInt64.t));
+                        slab_size = ([%#sl2b'1] (512: UInt64.t));
+                        max_extent_size = ([%#sl2b'2] (512: UInt32.t));
+                        sector_size = ([%#sl2b'3] (512: UInt32.t));
+                        region_count = ([%#sl2b'4] (1: UInt32.t));
+                        metadata_alignment = ([%#sl2b'5] (18446744073709547520: UInt64.t));
+                        instance_id = _4;
+                        metadata_disk_ns_id = ([%#sl2b'6] (1: UInt32.t));
+                        metadata_region_size = ([%#sl2b'7] (0: UInt64.t)) } ] s2
+    | s2 = return {_ret} ] ] [ & _ret: t_FormatParams = Any.any_l () | & _4: t_Option_u64 = Any.any_l () ])
+  [ return (result: t_FormatParams) ->
+  {[@stop_split] [@expl:wtoo_params ensures] ([@stop_split] [@expl:wtoo_params ensures #0] [%#sl2b'8] UInt64.t'int result.metadata_alignment
+        = 18446744073709547520
+      /\ UInt32.t'int result.sector_size = 512)
+    /\ ([@stop_split] [@expl:wtoo_params ensures #1] [%#sl2b'9] UInt64.t'int result.metadata_region_size = 0
+      /\ UInt64.t'int result.slab_size = 512 /\ UInt32.t'int result.max_extent_size = 512)
+    /\ ([@stop_split] [@expl:wtoo_params ensures #2] [%#sl2b'10] UInt32.t'int result.region_count = 1
+    /\ UInt64.t'int result.data_disk_size = 1048576)}
+    (! return {result}) ]

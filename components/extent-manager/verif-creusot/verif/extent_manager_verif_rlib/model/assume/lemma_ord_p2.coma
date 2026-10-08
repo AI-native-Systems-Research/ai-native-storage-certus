@@ -1,0 +1,134 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 278 0 278 27 *)
+
+let%span sbuddy = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 321 11 321 46
+let%span sbuddy'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 322 10 322 28
+let%span sbuddy'1 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 323 10 323 37
+let%span sbuddy'2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 56 11 56 27
+let%span sbuddy'3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 58 10 58 30
+let%span sbuddy'4 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 69 11 69 27
+let%span sbuddy'5 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 70 10 70 39
+let%span sbuddy'6 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 71 10 71 65
+let%span sbuddy'7 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 295 11 295 45
+let%span sbuddy'8 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 296 11 296 39
+let%span sbuddy'9 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 298 10 298 29
+let%span sbuddy'10 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 291 16 291 30
+let%span sbuddy'11 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 57 10 57 15
+let%span sbuddy'12 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 297 10 297 15
+let%span sbuddy'13 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 39 16 39 84
+let%span sbuddy'14 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 283 10 283 16
+let%span sbuddy'15 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 285 16 285 86
+let%span sl2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 15 16 15 54
+let%span sassume = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 276 11 276 45
+let%span sassume'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 277 10 277 28
+
+use bv.Pow2int
+use int.Int
+
+predicate p2 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/l2.rs" 14 0 14 25] (x: int) =
+  [%#sl2] exists k: int. 0 <= k /\ Pow2int.pow2 k = x
+
+function ord_from [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 284 0 284 38] (b: int) (k: int) : int
+
+axiom ord_from_def: forall b: int, k: int [ord_from b k]. ord_from b k
+    = ([%#sbuddy'15] if k >= 64 \/ k < 0 \/ Pow2int.pow2 k >= b then k else ord_from b (k + 1))
+
+function ord [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 290 0 290 25] (b: int) : int
+ = [%#sbuddy'10] ord_from b 0
+
+function lemma_ord_ge [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 324 0 324 27] (b: int) : ()
+
+axiom lemma_ord_ge_spec: forall b: int. ([%#sbuddy] 0 <= b /\ b <= 18446744073709551616)
+    -> ([%#sbuddy'0] Pow2int.pow2 (ord b) >= b)
+
+axiom lemma_ord_ge_spec'0: forall b: int. ([%#sbuddy] 0 <= b /\ b <= 18446744073709551616)
+    -> ([%#sbuddy'1] 0 <= ord b /\ ord b <= 64)
+
+function lemma_pow2_mono [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 59 0 59 38] (a: int) (b: int) : ()
+
+axiom lemma_pow2_mono_spec: forall a: int, b: int. ([%#sbuddy'2] 0 <= a /\ a <= b)
+    -> ([%#sbuddy'3] Pow2int.pow2 a <= Pow2int.pow2 b)
+
+function lemma_pow2_strict [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 72 0 72 40] (a: int) (b: int) : ()
+
+axiom lemma_pow2_strict_spec: forall a: int, b: int. ([%#sbuddy'4] 0 <= a /\ 0 <= b)
+    -> ([%#sbuddy'5] Pow2int.pow2 a < Pow2int.pow2 b -> a < b)
+
+axiom lemma_pow2_strict_spec'0: forall a: int, b: int. ([%#sbuddy'4] 0 <= a /\ 0 <= b)
+    -> ([%#sbuddy'6] Pow2int.pow2 a <= Pow2int.pow2 b -> a <= b \/ Pow2int.pow2 a = Pow2int.pow2 b)
+
+predicate is_order [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 38 0 38 39] (r: int) (b: int) =
+  [%#sbuddy'13] 0 <= r /\ r <= 64 /\ Pow2int.pow2 r >= b /\ (r = 0 \/ Pow2int.pow2 (r - 1) < b)
+
+function lemma_ord_eq [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/buddy.rs" 299 0 299 43] (b: int) (k: int) (r: int) : ()
+
+axiom lemma_ord_eq_spec: forall b: int, k: int, r: int. ([%#sbuddy'7] 0 <= k /\ k <= r /\ is_order r b)
+    -> ([%#sbuddy'8] k = 0 \/ Pow2int.pow2 (k - 1) < b) -> ([%#sbuddy'9] ord_from b k = r)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant n : int
+
+function lemma_ord_p2 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/model/assume.rs" 278 0 278 27] (n: int) : ()
+
+goal vc_lemma_ord_p2: ([%#sassume] p2 n /\ n <= 18446744073709551616)
+  -> (forall j: int. if 0 <= j then
+        if Pow2int.pow2 j = n then
+          ([@stop_split] [@expl:lemma_ord_ge requires] [%#sbuddy] 0 <= n /\ n <= 18446744073709551616)
+          /\ (([@stop_split] [@expl:lemma_ord_ge ensures] ([@stop_split] [@expl:lemma_ord_ge ensures #0] [%#sbuddy'0] Pow2int.pow2 (ord n)
+              >= n)
+            /\ ([@stop_split] [@expl:lemma_ord_ge ensures #1] [%#sbuddy'1] 0 <= ord n /\ ord n <= 64))
+          -> (let _ = lemma_ord_ge n in ([@stop_split] [@expl:lemma_pow2_mono requires] [%#sbuddy'2] 0 <= 0 /\ 0 <= j)
+          /\ (([@stop_split] [@expl:lemma_pow2_mono ensures] [%#sbuddy'3] Pow2int.pow2 0 <= Pow2int.pow2 j)
+          -> (let _ = lemma_pow2_mono 0 j in if j > 64 then
+            ([@stop_split] [@expl:lemma_pow2_strict requires] [%#sbuddy'4] 0 <= 64 /\ 0 <= j)
+            /\ (([@stop_split] [@expl:lemma_pow2_strict ensures] ([@stop_split] [@expl:lemma_pow2_strict ensures #0] [%#sbuddy'5] Pow2int.pow2 64
+                  < Pow2int.pow2 j -> 64 < j)
+              /\ ([@stop_split] [@expl:lemma_pow2_strict ensures #1] [%#sbuddy'6] Pow2int.pow2 64 <= Pow2int.pow2 j
+              -> 64 <= j \/ Pow2int.pow2 64 = Pow2int.pow2 j))
+            -> (let _ = lemma_pow2_strict 64 j in Pow2int.pow2 64 = 18446744073709551616))
+          else
+            if j <= 64 then
+              if j = 0 then
+                ([@stop_split] [@expl:lemma_ord_eq requires] ([@stop_split] [@expl:lemma_ord_eq requires #0] [%#sbuddy'7] 0
+                      <= 0
+                    /\ 0 <= j /\ is_order j n)
+                  /\ ([@stop_split] [@expl:lemma_ord_eq requires #1] [%#sbuddy'8] 0 = 0 \/ Pow2int.pow2 (0 - 1) < n))
+                /\ (([@stop_split] [@expl:lemma_ord_eq ensures] [%#sbuddy'9] ord_from n 0 = j)
+                -> (let _ = lemma_ord_eq n 0 j in true))
+              else
+                ([@stop_split] [@expl:lemma_pow2_strict requires] [%#sbuddy'4] 0 <= j - 1 /\ 0 <= j)
+                /\ (([@stop_split] [@expl:lemma_pow2_strict ensures] ([@stop_split] [@expl:lemma_pow2_strict ensures #0] [%#sbuddy'5] Pow2int.pow2 (j
+                        - 1)
+                      < Pow2int.pow2 j -> j - 1 < j)
+                  /\ ([@stop_split] [@expl:lemma_pow2_strict ensures #1] [%#sbuddy'6] Pow2int.pow2 (j - 1)
+                    <= Pow2int.pow2 j -> j - 1 <= j \/ Pow2int.pow2 (j - 1) = Pow2int.pow2 j))
+                -> (let _ = lemma_pow2_strict (j - 1) j in if Pow2int.pow2 (j - 1) < n then
+                  ([@stop_split] [@expl:lemma_ord_eq requires] ([@stop_split] [@expl:lemma_ord_eq requires #0] [%#sbuddy'7] 0
+                        <= 0
+                      /\ 0 <= j /\ is_order j n)
+                    /\ ([@stop_split] [@expl:lemma_ord_eq requires #1] [%#sbuddy'8] 0 = 0 \/ Pow2int.pow2 (0 - 1) < n))
+                  /\ (([@stop_split] [@expl:lemma_ord_eq ensures] [%#sbuddy'9] ord_from n 0 = j)
+                  -> (let _ = lemma_ord_eq n 0 j in true))
+                else
+                  true
+                ))
+            
+            else
+              true
+          
+          ))))
+        else
+          true
+      
+      else
+        true
+    )
+  /\ (forall j: int. 0 <= j /\ Pow2int.pow2 j = n
+      -> (let _ = lemma_ord_ge n in let _ = lemma_pow2_mono 0 j in (j > 64 -> (let _ = lemma_pow2_strict 64 j in false))
+      /\ (j <= 64
+      -> (j = 0 \/ (let _ = lemma_pow2_strict (j - 1) j in Pow2int.pow2 (j - 1) < n))
+      /\ (let _ = lemma_ord_eq n 0 j in ord n = j))))
+  && (exists j: int. 0 <= j /\ Pow2int.pow2 j = n)
+  && ([@stop_split] [@expl:lemma_ord_p2 ensures] [%#sassume'0] Pow2int.pow2 (ord n) = n)

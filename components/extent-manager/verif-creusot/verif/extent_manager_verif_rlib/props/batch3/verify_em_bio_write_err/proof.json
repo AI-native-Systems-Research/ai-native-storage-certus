@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_em_bio_write_err": { "prover": "alt-ergo", "time": 0.079 },
+      "vc_write_blocks": { "prover": "alt-ergo", "time": 0.027 }
+    }
+  }
+}

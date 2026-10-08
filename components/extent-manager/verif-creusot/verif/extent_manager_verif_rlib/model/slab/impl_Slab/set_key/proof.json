@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_index_mut_Vec_u64_Global": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_set_key": { "prover": "z3", "time": 0.044 }
+    }
+  }
+}

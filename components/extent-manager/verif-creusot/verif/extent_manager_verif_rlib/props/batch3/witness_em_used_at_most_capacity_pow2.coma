@@ -1,0 +1,33 @@
+(* #"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 410 0 410 65 *)
+
+let%span sbatch2 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch2.rs" 1400 10 1400 60
+let%span sbatch3 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 411 4 411 45
+let%span sbatch3'0 = "/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 409 10 409 74
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+type tup3_u64_u64_u64 = { f0: UInt64.t; f1: UInt64.t; f2: UInt64.t }
+
+let witness_em_used_returns_after_free_pow2 (return (x: tup3_u64_u64_u64)) = any
+  [ return (result: tup3_u64_u64_u64) ->
+  {[@stop_split] [@expl:witness_em_used_returns_after_free_pow2 ensures] [%#sbatch2] UInt64.t'int result.f0 = 8
+    /\ UInt64.t'int result.f1 = 8 /\ UInt64.t'int result.f2 = 8}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let witness_em_used_at_most_capacity_pow2 [#"/home/cornel/fv-runs/extent-manager-2cd35bac/components/extent-manager/verif-creusot-l3/src/props/batch3.rs" 410 0 410 65]
+  (return (x: tup3_u64_u64_u64)) = (! bb0
+  [ bb0 = s0
+    [ s0 = witness_em_used_returns_after_free_pow2 [%#sbatch3] (fun (_x: tup3_u64_u64_u64) -> [ &_ret <- _x ] s1)
+    | s1 = return {_ret} ] ] [ & _ret: tup3_u64_u64_u64 = Any.any_l () ])
+  [ return (result: tup3_u64_u64_u64) ->
+  {[@stop_split] [@expl:witness_em_used_at_most_capacity_pow2 ensures] [%#sbatch3'0] UInt64.t'int result.f1
+        - UInt64.t'int result.f2
+      = 0
+    /\ UInt64.t'int result.f1 - UInt64.t'int result.f2 <= UInt64.t'int result.f1}
+    (! return {result}) ]

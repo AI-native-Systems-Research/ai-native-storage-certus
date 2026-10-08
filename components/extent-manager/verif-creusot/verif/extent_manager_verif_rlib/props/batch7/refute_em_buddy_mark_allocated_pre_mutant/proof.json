@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_refute_em_buddy_mark_allocated_pre__mutant": {
+        "tactic": "split_vc",
+        "children": [ { "prover": "alt-ergo", "time": 0.113 }, null ]
+      },
+      "vc_w1p_recovered": { "prover": "alt-ergo", "time": 0.024 }
+    }
+  }
+}

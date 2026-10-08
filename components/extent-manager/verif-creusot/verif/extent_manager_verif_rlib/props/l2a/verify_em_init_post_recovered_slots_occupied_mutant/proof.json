@@ -1,0 +1,37 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_new_tup2_u64_usize": { "prover": "alt-ergo", "time": 0.045 },
+      "vc_rebuilt_region": { "prover": "alt-ergo", "time": 0.045 },
+      "vc_reserve_h": { "prover": "alt-ergo", "time": 0.046 },
+      "vc_verify_em_init_post_recovered_slots_occupied__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.046 },
+              { "prover": "alt-ergo", "time": 0.046 },
+              { "prover": "alt-ergo", "time": 0.09 },
+              { "prover": "alt-ergo", "time": 0.067 },
+              { "prover": "alt-ergo", "time": 0.057 },
+              { "prover": "alt-ergo", "time": 0.075 },
+              { "prover": "alt-ergo", "time": 0.284 },
+              { "prover": "alt-ergo", "time": 0.031 },
+              { "prover": "alt-ergo", "time": 0.141 },
+              { "prover": "cvc4", "time": 0.162 },
+              {
+                "tactic": "split_vc",
+                "children": [ { "prover": "alt-ergo", "time": 0.039 }, null ]
+              },
+              { "prover": "alt-ergo", "time": 0.04 },
+              { "prover": "alt-ergo", "time": 0.035 },
+              { "prover": "alt-ergo", "time": 0.041 }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

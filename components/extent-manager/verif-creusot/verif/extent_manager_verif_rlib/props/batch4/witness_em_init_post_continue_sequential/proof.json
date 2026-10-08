@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_recover": { "prover": "alt-ergo", "time": 0.046 },
+      "vc_run_checkpoint": { "prover": "alt-ergo", "time": 0.046 },
+      "vc_witness_em_init_post_continue_sequential": {
+        "prover": "cvc4",
+        "time": 0.274
+      }
+    }
+  }
+}
