@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Extract the request inter-arrival *interval* distribution from cc-weka traces.
+"""Extract the request inter-arrival *interval* distribution from cc-weka or
+BurstGPT traces.
 
 A cc-weka trace is JSON-lines, one conversation per line, in the schema:
 
@@ -13,6 +14,14 @@ consecutive requests, i.e. ``t[i+1] - t[i]``. These gaps span many orders of
 magnitude (sub-second to thousands of seconds), so the histogram is
 log-spaced by default.
 
+BurstGPT v2.0 CSVs (github.com/HPMLL/BurstGPT, ``BurstGPT_3.csv`` /
+``BurstGPT_without_fails_3.csv`` — the earlier files carry no ``Session ID``) are
+also accepted: ``Conversation log`` rows are grouped by ``Session ID`` and the
+interval is the gap between consecutive ``Timestamp`` values (request
+submission times, matching cc-weka's ``t``). ``API log`` rows have no session
+and are skipped. The format is picked from the file extension (``.csv`` =>
+BurstGPT) unless ``--format`` is given.
+
 The result is written as YAML: metadata, summary percentiles, and the bucketed
 histogram (counts + fractions), suitable for driving synthetic trace replay.
 
@@ -23,11 +32,16 @@ Examples
 
     # Custom output file and linear buckets
     ./extract_interval_distribution.py trace.jsonl -o dist.yaml --scale linear
+
+    # BurstGPT v2.0 conversation sessions
+    ./extract_interval_distribution.py BurstGPT_without_fails_3.csv -o burstgpt-intervals.yaml
 """
 
 from __future__ import annotations
 
 import argparse
+import collections
+import csv
 import json
 import math
 import sys
@@ -57,6 +71,28 @@ def iter_intervals(path):
             ts.sort()
             for i in range(len(ts) - 1):
                 yield ts[i + 1] - ts[i]
+
+
+def iter_intervals_burstgpt(path):
+    """Yield each intra-session interval (seconds) from a BurstGPT v2.0 CSV."""
+    sessions = collections.defaultdict(list)   # Session ID -> [Timestamp, ...]
+    with open(path, newline="", errors="replace") as f:
+        reader = csv.DictReader(f)
+        if "Session ID" not in (reader.fieldnames or []):
+            raise ValueError(f"{path}: no 'Session ID' column — only BurstGPT "
+                             f"v2.0 *_3.csv files group requests into sessions")
+        for row in reader:
+            sid = (row.get("Session ID") or "").strip()
+            if not sid or row.get("Log Type") != "Conversation log":
+                continue
+            try:
+                sessions[sid].append(float(row["Timestamp"]))
+            except (KeyError, ValueError):
+                continue
+    for ts in sessions.values():
+        ts.sort()
+        for i in range(len(ts) - 1):
+            yield ts[i + 1] - ts[i]
 
 
 def percentile(sorted_vals, q):
@@ -91,7 +127,11 @@ def make_edges(vmin, vmax, buckets, scale):
 def main():
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("trace", help="path to the cc-weka JSONL trace")
+    ap.add_argument("trace", help="path to the cc-weka JSONL or BurstGPT CSV trace")
+    ap.add_argument("--format", choices=("auto", "cc-weka", "burstgpt"),
+                    default="auto",
+                    help="trace format; auto = BurstGPT for .csv, else cc-weka "
+                         "(default: auto)")
     ap.add_argument("-o", "--output", default="interval-distribution.yaml",
                     help="output YAML file (default: interval-distribution.yaml)")
     ap.add_argument("--buckets", type=int, default=20,
@@ -106,7 +146,17 @@ def main():
 
     # First pass: collect intervals. Traces can be large, but the interval count
     # is bounded by total requests and fits comfortably in memory as floats.
-    intervals = list(iter_intervals(args.trace))
+    fmt = args.format
+    if fmt == "auto":
+        fmt = "burstgpt" if args.trace.lower().endswith(".csv") else "cc-weka"
+    try:
+        if fmt == "burstgpt":
+            intervals = list(iter_intervals_burstgpt(args.trace))
+        else:
+            intervals = list(iter_intervals(args.trace))
+    except (OSError, ValueError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
     if not intervals:
         print("error: no intervals found (need >=2 requests in a conversation)",
               file=sys.stderr)
@@ -145,6 +195,7 @@ def main():
     doc = {
         "source": args.trace,
         "units": "seconds",
+        "format": fmt,
         "metric": "intra-conversation request inter-arrival interval",
         "scale": args.scale,
         "num_intervals": n,

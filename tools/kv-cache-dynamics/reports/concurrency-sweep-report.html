@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SSD Tiering Sweep</title><style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e;
+  --muted: #898781; --grid: #e1e0d9; --axis: #c3c2b7;
+  --border: rgba(11,11,11,0.10);
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7;
+    --muted: #898781; --grid: #2c2c2a; --axis: #383835;
+    --border: rgba(255,255,255,0.10);
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7;
+  --muted: #898781; --grid: #2c2c2a; --axis: #383835;
+  --border: rgba(255,255,255,0.10);
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 820px; margin: 0 auto; padding: 32px 16px 64px; }
+h1 { font-size: 26px; margin: 0 0 4px; }
+h2 { font-size: 18px; margin: 40px 0 4px; }
+p.sub, p.note { color: var(--ink-2); margin: 0 0 12px; }
+p.note { font-size: 13px; }
+.card { background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 16px; position: relative; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 10px; margin-top: 16px; }
+.tile { background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 12px 14px; }
+.tile .k { color: var(--ink-2); font-size: 12px; }
+.tile .v { font-size: 20px; font-weight: 600; }
+.tile .d { color: var(--muted); font-size: 12px; }
+.hero { display: flex; gap: 24px; flex-wrap: wrap; align-items: baseline; }
+.hero .big { font-size: 44px; font-weight: 650; line-height: 1.1; }
+.hero .lbl { color: var(--ink-2); max-width: 520px; }
+svg { width: 100%; height: auto; display: block; overflow: visible; }
+.grid { stroke: var(--grid); stroke-width: 1; }
+.axis { stroke: var(--axis); stroke-width: 1; }
+.tick { fill: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.axis-title { fill: var(--ink-2); font-size: 12px; }
+.end-label { fill: var(--ink); font-size: 12px; }
+.bar.s1 { fill: var(--s1); }
+.line { fill: none; stroke-width: 2; stroke-linejoin: round; }
+.dot { stroke: var(--surface); stroke-width: 2; }
+.line.s1 { stroke: var(--s1); } .dot.s1, .swatch-text.s1 { fill: var(--s1); }
+.line.s2 { stroke: var(--s2); } .dot.s2, .swatch-text.s2 { fill: var(--s2); }
+.line.s3 { stroke: var(--s3); } .dot.s3, .swatch-text.s3 { fill: var(--s3); }
+.line.s4 { stroke: var(--s4); } .dot.s4, .swatch-text.s4 { fill: var(--s4); }
+.hit { fill: transparent; cursor: crosshair; }
+.hit:hover { fill: var(--grid); fill-opacity: 0.35; }
+.legend { display: flex; gap: 16px; flex-wrap: wrap; color: var(--ink-2);
+  font-size: 13px; margin-bottom: 8px; }
+.legend .sw { display: inline-block; width: 18px; height: 0; border-top: 2px solid;
+  vertical-align: middle; margin-right: 6px; }
+.legend .sw.dashed { border-top-style: dashed; }
+.legend .sw.s1 { border-color: var(--s1); } .legend .sw.s2 { border-color: var(--s2); }
+.legend .sw.s3 { border-color: var(--s3); } .legend .sw.s4 { border-color: var(--s4); }
+#tip { position: fixed; pointer-events: none; background: var(--surface); color: var(--ink);
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
+  font-size: 12px; white-space: pre; box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  display: none; z-index: 10; font-variant-numeric: tabular-nums; }
+.table-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 12px;
+  font-variant-numeric: tabular-nums; }
+th, td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--grid);
+  white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { color: var(--ink-2); font-weight: 600; }
+code { font-size: 13px; }
+</style></head>
+<body><main>
+<h1>SSD tiering: concurrency sweep</h1>
+<p class="sub">Simulated three-tier KV cache (HBM → DRAM → SSD, LRU, demote-on-evict)
+under BurstGPT think-times, sweeping concurrent sessions from 1 to
+128 (conversations in flight at once, held constant per run).</p>
+
+<h2>Workload</h2>
+<div class="tiles"><div class="tile"><div class="k">Interval source</div><div class="v">BurstGPT</div><div class="d">median 2.2m</div></div><div class="tile"><div class="k">Concurrent sessions</div><div class="v">1–128</div><div class="d">swept, 512 conversations total</div></div><div class="tile"><div class="k">Turns / conversation</div><div class="v">100 fixed</div></div><div class="tile"><div class="k">Tokens added / turn</div><div class="v">1,762</div><div class="d">364 prompt + 1398 gen</div></div><div class="tile"><div class="k">KV per token</div><div class="v">192 KB</div><div class="d">48 layers, 8 KV heads, 16-bit</div></div><div class="tile"><div class="k">Context window</div><div class="v">131,072</div><div class="d">24.0 GB KV cap</div></div><div class="tile"><div class="k">Shared prefix</div><div class="v">20,000 tok</div><div class="d">3.66 GB, held once</div></div><div class="tile"><div class="k">HBM tier</div><div class="v">10 GiB</div><div class="d">top tier</div></div><div class="tile"><div class="k">DRAM tier</div><div class="v">32 GiB</div><div class="d">middle tier</div></div><div class="tile"><div class="k">SSD tier</div><div class="v">19.5 TiB</div><div class="d">bottom tier</div></div><div class="tile"><div class="k">Working set</div><div class="v">24–2608 GB</div><div class="d">up to 260.8× HBM</div></div><div class="tile"><div class="k">Cross-session sharing</div><div class="v">none</div><div class="d">private contexts</div></div><div class="tile"><div class="k">Admission</div><div class="v">interval</div><div class="d">seed 1</div></div></div>
+
+<h2>Think-time between turns</h2>
+<p class="sub">BurstGPT v2.0 release BurstGPT_without_fails_3.csv (github.com/HPMLL/BurstGPT), Conversation-log sessions — 176,466 gaps.
+Median 2.2m, p90 39m,
+p99 22h. Longer pauses let other sessions' traffic push a
+session's KV down the tiers before it returns.</p>
+<div class="card"><svg viewBox="0 0 720 320" role="img" aria-label="Histogram of inter-turn think-time gaps">
+<line class="grid" x1="56" x2="696" y1="276.0" y2="276.0"/>
+<text class="tick" x="48" y="280.0" text-anchor="end">0%</text>
+<line class="grid" x1="56" x2="696" y1="211.0" y2="211.0"/>
+<text class="tick" x="48" y="215.0" text-anchor="end">5%</text>
+<line class="grid" x1="56" x2="696" y1="146.0" y2="146.0"/>
+<text class="tick" x="48" y="150.0" text-anchor="end">10%</text>
+<line class="grid" x1="56" x2="696" y1="81.0" y2="81.0"/>
+<text class="tick" x="48" y="85.0" text-anchor="end">15%</text>
+<line class="grid" x1="56" x2="696" y1="16.0" y2="16.0"/>
+<text class="tick" x="48" y="20.0" text-anchor="end">20%</text>
+<path class="bar s1" d="M57.0,276.0 V276.0 Q57.0,275.5 57.5,275.5 H86.5 Q87.0,275.5 87.0,276.0 V276.0 Z"/>
+<rect class="hit" x="56.0" y="16" width="32.0" height="260" data-tip="1s – 2s
+0.0% of gaps (64)"/>
+<path class="bar s1" d="M89.0,276.0 V276.0 Q89.0,273.9 91.1,273.9 H116.9 Q119.0,273.9 119.0,276.0 V276.0 Z"/>
+<rect class="hit" x="88.0" y="16" width="32.0" height="260" data-tip="2s – 5s
+0.2% of gaps (279)"/>
+<path class="bar s1" d="M121.0,276.0 V248.1 Q121.0,244.1 125.0,244.1 H147.0 Q151.0,244.1 151.0,248.1 V276.0 Z"/>
+<rect class="hit" x="120.0" y="16" width="32.0" height="260" data-tip="5s – 10s
+2.5% of gaps (4,335)"/>
+<path class="bar s1" d="M153.0,276.0 V169.4 Q153.0,165.4 157.0,165.4 H179.0 Q183.0,165.4 183.0,169.4 V276.0 Z"/>
+<rect class="hit" x="152.0" y="16" width="32.0" height="260" data-tip="10s – 22s
+8.5% of gaps (15,013)"/>
+<path class="bar s1" d="M185.0,276.0 V75.4 Q185.0,71.4 189.0,71.4 H211.0 Q215.0,71.4 215.0,75.4 V276.0 Z"/>
+<rect class="hit" x="184.0" y="16" width="32.0" height="260" data-tip="22s – 47s
+15.7% of gaps (27,769)"/>
+<path class="bar s1" d="M217.0,276.0 V51.4 Q217.0,47.4 221.0,47.4 H243.0 Q247.0,47.4 247.0,51.4 V276.0 Z"/>
+<rect class="hit" x="216.0" y="16" width="32.0" height="260" data-tip="47s – 1.7m
+17.6% of gaps (31,032)"/>
+<path class="bar s1" d="M249.0,276.0 V74.7 Q249.0,70.7 253.0,70.7 H275.0 Q279.0,70.7 279.0,74.7 V276.0 Z"/>
+<rect class="hit" x="248.0" y="16" width="32.0" height="260" data-tip="1.7m – 3.6m
+15.8% of gaps (27,868)"/>
+<path class="bar s1" d="M281.0,276.0 V111.6 Q281.0,107.6 285.0,107.6 H307.0 Q311.0,107.6 311.0,111.6 V276.0 Z"/>
+<rect class="hit" x="280.0" y="16" width="32.0" height="260" data-tip="3.6m – 7.9m
+13.0% of gaps (22,857)"/>
+<path class="bar s1" d="M313.0,276.0 V154.0 Q313.0,150.0 317.0,150.0 H339.0 Q343.0,150.0 343.0,154.0 V276.0 Z"/>
+<rect class="hit" x="312.0" y="16" width="32.0" height="260" data-tip="7.9m – 17m
+9.7% of gaps (17,100)"/>
+<path class="bar s1" d="M345.0,276.0 V193.4 Q345.0,189.4 349.0,189.4 H371.0 Q375.0,189.4 375.0,193.4 V276.0 Z"/>
+<rect class="hit" x="344.0" y="16" width="32.0" height="260" data-tip="17m – 37m
+6.7% of gaps (11,759)"/>
+<path class="bar s1" d="M377.0,276.0 V228.5 Q377.0,224.5 381.0,224.5 H403.0 Q407.0,224.5 407.0,228.5 V276.0 Z"/>
+<rect class="hit" x="376.0" y="16" width="32.0" height="260" data-tip="37m – 1.3h
+4.0% of gaps (6,991)"/>
+<path class="bar s1" d="M409.0,276.0 V247.8 Q409.0,243.8 413.0,243.8 H435.0 Q439.0,243.8 439.0,247.8 V276.0 Z"/>
+<rect class="hit" x="408.0" y="16" width="32.0" height="260" data-tip="1.3h – 2.8h
+2.5% of gaps (4,370)"/>
+<path class="bar s1" d="M441.0,276.0 V255.6 Q441.0,251.6 445.0,251.6 H467.0 Q471.0,251.6 471.0,255.6 V276.0 Z"/>
+<rect class="hit" x="440.0" y="16" width="32.0" height="260" data-tip="2.8h – 6.1h
+1.9% of gaps (3,315)"/>
+<path class="bar s1" d="M473.0,276.0 V271.5 Q473.0,267.5 477.0,267.5 H499.0 Q503.0,267.5 503.0,271.5 V276.0 Z"/>
+<rect class="hit" x="472.0" y="16" width="32.0" height="260" data-tip="6.1h – 13h
+0.7% of gaps (1,155)"/>
+<path class="bar s1" d="M505.0,276.0 V271.1 Q505.0,267.1 509.0,267.1 H531.0 Q535.0,267.1 535.0,271.1 V276.0 Z"/>
+<rect class="hit" x="504.0" y="16" width="32.0" height="260" data-tip="13h – 1.2d
+0.7% of gaps (1,206)"/>
+<path class="bar s1" d="M537.0,276.0 V276.0 Q537.0,272.8 540.2,272.8 H563.8 Q567.0,272.8 567.0,276.0 V276.0 Z"/>
+<rect class="hit" x="536.0" y="16" width="32.0" height="260" data-tip="1.2d – 2.6d
+0.2% of gaps (436)"/>
+<path class="bar s1" d="M569.0,276.0 V276.0 Q569.0,272.4 572.6,272.4 H595.4 Q599.0,272.4 599.0,276.0 V276.0 Z"/>
+<rect class="hit" x="568.0" y="16" width="32.0" height="260" data-tip="2.6d – 5.6d
+0.3% of gaps (487)"/>
+<path class="bar s1" d="M601.0,276.0 V276.0 Q601.0,274.1 602.9,274.1 H629.1 Q631.0,274.1 631.0,276.0 V276.0 Z"/>
+<rect class="hit" x="600.0" y="16" width="32.0" height="260" data-tip="5.6d – 12d
+0.1% of gaps (252)"/>
+<path class="bar s1" d="M633.0,276.0 V276.0 Q633.0,275.1 633.9,275.1 H662.1 Q663.0,275.1 663.0,276.0 V276.0 Z"/>
+<rect class="hit" x="632.0" y="16" width="32.0" height="260" data-tip="12d – 26d
+0.1% of gaps (122)"/>
+<path class="bar s1" d="M665.0,276.0 V276.0 Q665.0,275.6 665.4,275.6 H694.6 Q695.0,275.6 695.0,276.0 V276.0 Z"/>
+<rect class="hit" x="664.0" y="16" width="32.0" height="260" data-tip="26d – 56d
+0.0% of gaps (56)"/>
+<text class="tick" x="72.0" y="294" text-anchor="middle">2s</text>
+<text class="tick" x="136.0" y="294" text-anchor="middle">10s</text>
+<text class="tick" x="200.0" y="294" text-anchor="middle">47s</text>
+<text class="tick" x="264.0" y="294" text-anchor="middle">3.6m</text>
+<text class="tick" x="328.0" y="294" text-anchor="middle">17m</text>
+<text class="tick" x="392.0" y="294" text-anchor="middle">1.3h</text>
+<text class="tick" x="456.0" y="294" text-anchor="middle">6.1h</text>
+<text class="tick" x="520.0" y="294" text-anchor="middle">1.2d</text>
+<text class="tick" x="584.0" y="294" text-anchor="middle">5.6d</text>
+<text class="tick" x="648.0" y="294" text-anchor="middle">26d</text>
+<line class="axis" x1="56" x2="696" y1="276" y2="276"/>
+<text class="axis-title" x="376.0" y="314" text-anchor="middle">think-time gap between turns (bucket upper edge, log-spaced)</text>
+</svg></div>
+
+<h2>Turns per conversation</h2>
+<div class="card hero"><div class="big">100</div>
+<div class="lbl">turns in every conversation (fixed). Pass <code>--turn-dist</code> to
+sample turn counts from a distribution instead.</div></div>
+
+<h2>Where lookups are served, by concurrency</h2>
+<p class="sub">Share of in-window prior-context tokens (including the shared prefix)
+found in each tier, over all measured turns. The three lines sum to 100% minus misses.</p>
+<div class="card"><div class="legend"><span><i class="sw s1"></i>HBM</span><span><i class="sw s2"></i>DRAM</span><span><i class="sw s3"></i>SSD</span></div><svg viewBox="0 0 720 320" role="img" aria-label="Percent of KV lookups served by HBM, DRAM and SSD versus concurrency">
+<line class="grid" x1="56" x2="600" y1="276.0" y2="276.0"/>
+<text class="tick" x="48" y="280.0" text-anchor="end">0%</text>
+<line class="grid" x1="56" x2="600" y1="211.0" y2="211.0"/>
+<text class="tick" x="48" y="215.0" text-anchor="end">25%</text>
+<line class="grid" x1="56" x2="600" y1="146.0" y2="146.0"/>
+<text class="tick" x="48" y="150.0" text-anchor="end">50%</text>
+<line class="grid" x1="56" x2="600" y1="81.0" y2="81.0"/>
+<text class="tick" x="48" y="85.0" text-anchor="end">75%</text>
+<line class="grid" x1="56" x2="600" y1="16.0" y2="16.0"/>
+<text class="tick" x="48" y="20.0" text-anchor="end">100%</text>
+<text class="tick" x="56.0" y="294" text-anchor="middle">1</text>
+<text class="tick" x="133.7" y="294" text-anchor="middle">2</text>
+<text class="tick" x="211.4" y="294" text-anchor="middle">4</text>
+<text class="tick" x="289.1" y="294" text-anchor="middle">8</text>
+<text class="tick" x="366.9" y="294" text-anchor="middle">16</text>
+<text class="tick" x="444.6" y="294" text-anchor="middle">32</text>
+<text class="tick" x="522.3" y="294" text-anchor="middle">64</text>
+<text class="tick" x="600.0" y="294" text-anchor="middle">128</text>
+<line class="axis" x1="56" x2="600" y1="276" y2="276"/>
+<text class="axis-title" x="328.0" y="314" text-anchor="middle">concurrent sessions</text>
+<polyline class="line s1" points="56.0,136.7 133.7,141.1 211.4,148.0 289.1,157.7 366.9,171.7 444.6,190.0 522.3,208.9 600.0,226.0"/>
+<circle class="dot s1" cx="56.0" cy="136.7" r="4"/>
+<circle class="dot s1" cx="133.7" cy="141.1" r="4"/>
+<circle class="dot s1" cx="211.4" cy="148.0" r="4"/>
+<circle class="dot s1" cx="289.1" cy="157.7" r="4"/>
+<circle class="dot s1" cx="366.9" cy="171.7" r="4"/>
+<circle class="dot s1" cx="444.6" cy="190.0" r="4"/>
+<circle class="dot s1" cx="522.3" cy="208.9" r="4"/>
+<circle class="dot s1" cx="600.0" cy="226.0" r="4"/>
+<polyline class="line s2" points="56.0,155.3 133.7,151.8 211.4,147.4 289.1,142.2 366.9,137.1 444.6,137.6 522.3,144.0 600.0,158.7"/>
+<circle class="dot s2" cx="56.0" cy="155.3" r="4"/>
+<circle class="dot s2" cx="133.7" cy="151.8" r="4"/>
+<circle class="dot s2" cx="211.4" cy="147.4" r="4"/>
+<circle class="dot s2" cx="289.1" cy="142.2" r="4"/>
+<circle class="dot s2" cx="366.9" cy="137.1" r="4"/>
+<circle class="dot s2" cx="444.6" cy="137.6" r="4"/>
+<circle class="dot s2" cx="522.3" cy="144.0" r="4"/>
+<circle class="dot s2" cx="600.0" cy="158.7" r="4"/>
+<polyline class="line s3" points="56.0,276.0 133.7,275.1 211.4,272.6 289.1,268.2 366.9,259.2 444.6,240.4 522.3,215.0 600.0,183.3"/>
+<circle class="dot s3" cx="56.0" cy="276.0" r="4"/>
+<circle class="dot s3" cx="133.7" cy="275.1" r="4"/>
+<circle class="dot s3" cx="211.4" cy="272.6" r="4"/>
+<circle class="dot s3" cx="289.1" cy="268.2" r="4"/>
+<circle class="dot s3" cx="366.9" cy="259.2" r="4"/>
+<circle class="dot s3" cx="444.6" cy="240.4" r="4"/>
+<circle class="dot s3" cx="522.3" cy="215.0" r="4"/>
+<circle class="dot s3" cx="600.0" cy="183.3" r="4"/>
+<text class="end-label" x="610" y="162.7"><tspan class="swatch-text s2">&#9644;</tspan> DRAM</text>
+<text class="end-label" x="610" y="187.3"><tspan class="swatch-text s3">&#9644;</tspan> SSD</text>
+<text class="end-label" x="610" y="230.0"><tspan class="swatch-text s1">&#9644;</tspan> HBM</text>
+<rect class="hit" x="17.1" y="16" width="77.7" height="260" data-tip="concurrent sessions: 1
+HBM: 53.6%
+DRAM: 46.4%
+SSD: 0.0%" data-x="56.0"/>
+<rect class="hit" x="94.9" y="16" width="77.7" height="260" data-tip="concurrent sessions: 2
+HBM: 51.9%
+DRAM: 47.8%
+SSD: 0.4%" data-x="133.7"/>
+<rect class="hit" x="172.6" y="16" width="77.7" height="260" data-tip="concurrent sessions: 4
+HBM: 49.2%
+DRAM: 49.5%
+SSD: 1.3%" data-x="211.4"/>
+<rect class="hit" x="250.3" y="16" width="77.7" height="260" data-tip="concurrent sessions: 8
+HBM: 45.5%
+DRAM: 51.5%
+SSD: 3.0%" data-x="289.1"/>
+<rect class="hit" x="328.0" y="16" width="77.7" height="260" data-tip="concurrent sessions: 16
+HBM: 40.1%
+DRAM: 53.4%
+SSD: 6.5%" data-x="366.9"/>
+<rect class="hit" x="405.7" y="16" width="77.7" height="260" data-tip="concurrent sessions: 32
+HBM: 33.1%
+DRAM: 53.2%
+SSD: 13.7%" data-x="444.6"/>
+<rect class="hit" x="483.4" y="16" width="77.7" height="260" data-tip="concurrent sessions: 64
+HBM: 25.8%
+DRAM: 50.8%
+SSD: 23.4%" data-x="522.3"/>
+<rect class="hit" x="561.1" y="16" width="77.7" height="260" data-tip="concurrent sessions: 128
+HBM: 19.2%
+DRAM: 45.1%
+SSD: 35.7%" data-x="600.0"/>
+</svg></div>
+
+<h2>What the SSD tier buys</h2>
+<p class="sub">The same sweep with the SSD tier disabled (<code>SSD_GB=0</code>): blocks
+pushed out of DRAM are lost, and the next turn that needs them recomputes them. The
+dashed line is that recompute share; the solid line is the share SSD serves instead.</p>
+<div class="card"><div class="legend"><span><i class="sw s3"></i>SSD hits (with SSD)</span><span><i class="sw s4 dashed"></i>Recompute (no SSD)</span></div><svg viewBox="0 0 720 320" role="img" aria-label="SSD hit share with SSD versus recompute share without SSD, by concurrency">
+<line class="grid" x1="56" x2="600" y1="276.0" y2="276.0"/>
+<text class="tick" x="48" y="280.0" text-anchor="end">0%</text>
+<line class="grid" x1="56" x2="600" y1="211.0" y2="211.0"/>
+<text class="tick" x="48" y="215.0" text-anchor="end">10%</text>
+<line class="grid" x1="56" x2="600" y1="146.0" y2="146.0"/>
+<text class="tick" x="48" y="150.0" text-anchor="end">20%</text>
+<line class="grid" x1="56" x2="600" y1="81.0" y2="81.0"/>
+<text class="tick" x="48" y="85.0" text-anchor="end">30%</text>
+<line class="grid" x1="56" x2="600" y1="16.0" y2="16.0"/>
+<text class="tick" x="48" y="20.0" text-anchor="end">40%</text>
+<text class="tick" x="56.0" y="294" text-anchor="middle">1</text>
+<text class="tick" x="133.7" y="294" text-anchor="middle">2</text>
+<text class="tick" x="211.4" y="294" text-anchor="middle">4</text>
+<text class="tick" x="289.1" y="294" text-anchor="middle">8</text>
+<text class="tick" x="366.9" y="294" text-anchor="middle">16</text>
+<text class="tick" x="444.6" y="294" text-anchor="middle">32</text>
+<text class="tick" x="522.3" y="294" text-anchor="middle">64</text>
+<text class="tick" x="600.0" y="294" text-anchor="middle">128</text>
+<line class="axis" x1="56" x2="600" y1="276" y2="276"/>
+<text class="axis-title" x="328.0" y="314" text-anchor="middle">concurrent sessions</text>
+<polyline class="line s3" points="56.0,276.0 133.7,273.7 211.4,267.5 289.1,256.4 366.9,234.0 444.6,187.1 522.3,123.6 600.0,44.2"/>
+<circle class="dot s3" cx="56.0" cy="276.0" r="4"/>
+<circle class="dot s3" cx="133.7" cy="273.7" r="4"/>
+<circle class="dot s3" cx="211.4" cy="267.5" r="4"/>
+<circle class="dot s3" cx="289.1" cy="256.4" r="4"/>
+<circle class="dot s3" cx="366.9" cy="234.0" r="4"/>
+<circle class="dot s3" cx="444.6" cy="187.1" r="4"/>
+<circle class="dot s3" cx="522.3" cy="123.6" r="4"/>
+<circle class="dot s3" cx="600.0" cy="44.2" r="4"/>
+<polyline class="line s4" points="56.0,276.0 133.7,273.7 211.4,267.5 289.1,256.4 366.9,234.0 444.6,187.1 522.3,123.6 600.0,44.2" stroke-dasharray="6 4"/>
+<circle class="dot s4" cx="56.0" cy="276.0" r="4"/>
+<circle class="dot s4" cx="133.7" cy="273.7" r="4"/>
+<circle class="dot s4" cx="211.4" cy="267.5" r="4"/>
+<circle class="dot s4" cx="289.1" cy="256.4" r="4"/>
+<circle class="dot s4" cx="366.9" cy="234.0" r="4"/>
+<circle class="dot s4" cx="444.6" cy="187.1" r="4"/>
+<circle class="dot s4" cx="522.3" cy="123.6" r="4"/>
+<circle class="dot s4" cx="600.0" cy="44.2" r="4"/>
+<text class="end-label" x="610" y="48.2"><tspan class="swatch-text s3">&#9644;</tspan> SSD hits (with SSD)</text>
+<text class="end-label" x="610" y="62.2"><tspan class="swatch-text s4">&#9644;</tspan> Recompute (no SSD)</text>
+<rect class="hit" x="17.1" y="16" width="77.7" height="260" data-tip="concurrent sessions: 1
+SSD hits (with SSD): 0.0%
+Recompute (no SSD): 0.0%" data-x="56.0"/>
+<rect class="hit" x="94.9" y="16" width="77.7" height="260" data-tip="concurrent sessions: 2
+SSD hits (with SSD): 0.4%
+Recompute (no SSD): 0.4%" data-x="133.7"/>
+<rect class="hit" x="172.6" y="16" width="77.7" height="260" data-tip="concurrent sessions: 4
+SSD hits (with SSD): 1.3%
+Recompute (no SSD): 1.3%" data-x="211.4"/>
+<rect class="hit" x="250.3" y="16" width="77.7" height="260" data-tip="concurrent sessions: 8
+SSD hits (with SSD): 3.0%
+Recompute (no SSD): 3.0%" data-x="289.1"/>
+<rect class="hit" x="328.0" y="16" width="77.7" height="260" data-tip="concurrent sessions: 16
+SSD hits (with SSD): 6.5%
+Recompute (no SSD): 6.5%" data-x="366.9"/>
+<rect class="hit" x="405.7" y="16" width="77.7" height="260" data-tip="concurrent sessions: 32
+SSD hits (with SSD): 13.7%
+Recompute (no SSD): 13.7%" data-x="444.6"/>
+<rect class="hit" x="483.4" y="16" width="77.7" height="260" data-tip="concurrent sessions: 64
+SSD hits (with SSD): 23.4%
+Recompute (no SSD): 23.4%" data-x="522.3"/>
+<rect class="hit" x="561.1" y="16" width="77.7" height="260" data-tip="concurrent sessions: 128
+SSD hits (with SSD): 35.7%
+Recompute (no SSD): 35.7%" data-x="600.0"/>
+</svg></div>
+<p class="note">The two lines need not match exactly: without SSD a lost block also
+breaks the hash chain behind it, so recompute can exceed what SSD served.</p>
+
+<h2>Data</h2>
+<div class="card table-wrap"><table><thead><tr><th>Concurrency</th><th>HBM hit</th><th>DRAM hit</th><th>SSD hit</th><th>Miss</th><th>Prefill tok</th><th>Miss (no SSD)</th><th>Prefill tok (no SSD)</th></tr></thead><tbody><tr><td>1</td><td>53.6%</td><td>46.4%</td><td>0.0%</td><td>0.0%</td><td>89.1M</td><td>0.0%</td><td>89.1M</td></tr><tr><td>2</td><td>51.9%</td><td>47.8%</td><td>0.4%</td><td>0.0%</td><td>88.9M</td><td>0.4%</td><td>106.1M</td></tr><tr><td>4</td><td>49.2%</td><td>49.5%</td><td>1.3%</td><td>0.0%</td><td>88.6M</td><td>1.3%</td><td>151.8M</td></tr><tr><td>8</td><td>45.5%</td><td>51.5%</td><td>3.0%</td><td>0.0%</td><td>87.9M</td><td>3.0%</td><td>231.8M</td></tr><tr><td>16</td><td>40.1%</td><td>53.4%</td><td>6.5%</td><td>0.0%</td><td>86.5M</td><td>6.5%</td><td>390.5M</td></tr><tr><td>32</td><td>33.1%</td><td>53.2%</td><td>13.7%</td><td>0.0%</td><td>83.7M</td><td>13.7%</td><td>706.9M</td></tr><tr><td>64</td><td>25.8%</td><td>50.8%</td><td>23.4%</td><td>0.0%</td><td>78.1M</td><td>23.4%</td><td>1.1B</td></tr><tr><td>128</td><td>19.2%</td><td>45.1%</td><td>35.7%</td><td>0.0%</td><td>67.0M</td><td>35.7%</td><td>1.4B</td></tr></tbody></table></div>
+<p class="note">Hit columns are % of looked-up prior-context tokens. Prefill tokens are
+everything computed on measured return turns: missed prior context plus each turn's
+new prompt and generated tokens (the constant floor).</p>
+<p class="note">Generated by <code>sweep_concurrency_ssd.py</code> via
+<code>run-burstgpt-example.sh</code> with DIST=burstgpt-3-intervals.yaml DRAM_GB=32 HBM_GB=10 NUM_TURNS=100 SESSIONS=512 TURN_DIST=. Tiers model capacity and placement
+only (no transfer bandwidth or latency); a warmup of one concurrency wave is excluded
+from the hit statistics.</p>
+</main><div id="tip" role="tooltip"></div><script>
+const tip = document.getElementById('tip');
+document.querySelectorAll('[data-tip]').forEach(el => {
+  el.addEventListener('mousemove', e => {
+    tip.textContent = el.dataset.tip;
+    tip.style.display = 'block';
+    const r = tip.getBoundingClientRect();
+    let x = e.clientX + 14, y = e.clientY + 14;
+    if (x + r.width > innerWidth - 8) x = e.clientX - r.width - 14;
+    if (y + r.height > innerHeight - 8) y = e.clientY - r.height - 14;
+    tip.style.left = x + 'px'; tip.style.top = y + 'px';
+  });
+  el.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+});
+</script></body></html>

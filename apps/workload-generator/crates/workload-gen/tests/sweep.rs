@@ -344,6 +344,7 @@ fn cross(p: &Point) -> f64 {
 }
 
 #[test]
+#[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
 fn a_concentrated_workload_produces_a_curve_that_slopes() {
     let refs = references(CONCENTRATED);
     assert!(refs.len() > 5_000, "only {} references", refs.len());
@@ -356,6 +357,7 @@ fn a_concentrated_workload_produces_a_curve_that_slopes() {
 }
 
 #[test]
+#[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
 fn the_same_check_fails_under_uniform_selection() {
     // What proves the check has teeth. Under uniform popularity a cross-session hit needs a cache
     // holding a fixed fraction of the whole key space, so the hit rate rises in proportion to
@@ -376,6 +378,7 @@ fn the_same_check_fails_under_uniform_selection() {
 }
 
 #[test]
+#[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
 fn the_overall_hit_rate_is_the_wrong_curve_to_sweep() {
     // Why this file sweeps cross-session reuse rather than the hit rate an operator reads, which is
     // what Scenario 6 originally said to sweep. Asserted rather than remarked: if the overall curve
@@ -413,6 +416,7 @@ fn the_overall_hit_rate_is_the_wrong_curve_to_sweep() {
 }
 
 #[test]
+#[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
 fn the_ladder_stops_below_the_key_space_because_the_top_would_otherwise_be_free() {
     // The other thing measurement corrected. At a capacity equal to the key space nothing is ever
     // evicted, so every repeat reference hits whatever the popularity distribution is — and a
@@ -442,6 +446,7 @@ fn the_ladder_stops_below_the_key_space_because_the_top_would_otherwise_be_free(
 }
 
 #[test]
+#[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
 fn the_two_workloads_differ_in_popularity_but_not_in_how_much_they_reference() {
     // The claim underneath the sweep: `selection` changes which instances are picked, not how many
     // references a run makes. If it changed the reference count, the two curves would not be

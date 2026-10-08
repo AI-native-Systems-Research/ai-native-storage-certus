@@ -278,6 +278,7 @@ fn migration_leaves_the_prefix_alone() {
 }
 
 #[test]
+#[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
 fn the_workload_is_the_same_whatever_the_node_count() {
     // Placement is a property of the deployment, so a two-node run and a four-node run must be
     // the same workload dispatched differently — not two different workloads.

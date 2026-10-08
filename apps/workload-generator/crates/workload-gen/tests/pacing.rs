@@ -213,6 +213,7 @@ fn paced(rate: f64, until: f64) -> RunOptions {
 }
 
 #[test]
+#[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
 fn a_paced_run_costs_its_virtual_span_divided_by_the_rate() {
     // The defining behaviour, and the reason the cost is projected before a run starts: at rate
     // 1.0 the wallclock *is* the virtual span. Two virtual seconds so the assertion is cheap.
@@ -248,6 +249,7 @@ fn a_paced_run_costs_its_virtual_span_divided_by_the_rate() {
 }
 
 #[test]
+#[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
 fn the_rate_divides_the_cost_so_the_same_span_runs_faster() {
     // What makes `--rate` a calibration control rather than a convenience: the same description
     // aimed at a faster target.
@@ -269,6 +271,7 @@ fn the_rate_divides_the_cost_so_the_same_span_runs_faster() {
 }
 
 #[test]
+#[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
 fn an_unpaced_run_does_not_wait_at_all() {
     // The other mode, and the contrast that makes the one above meaningful: work-conserving issues
     // as fast as the transport allows, so the same 2 virtual seconds cost milliseconds.
@@ -299,6 +302,7 @@ fn an_unpaced_run_does_not_wait_at_all() {
 }
 
 #[test]
+#[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
 fn a_slow_node_makes_the_run_late_and_that_invalidates_it() {
     // FR-080's validity metric, and the failure it names. A node too slow to keep the schedule
     // pushes every subsequent turn past its due time; because due times are absolute from `t0`
@@ -351,6 +355,7 @@ fn a_slow_node_makes_the_run_late_and_that_invalidates_it() {
 }
 
 #[test]
+#[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
 fn a_tolerance_wide_enough_accepts_the_same_slow_run() {
     // The tolerance is a real knob rather than a constant dressed up as one: the same run that
     // fails above passes when the schedule it is held to is loose enough. This is what a rate
@@ -470,6 +475,7 @@ fn a_rate_of_zero_or_less_is_refused_rather_than_quietly_running_work_conserving
 }
 
 #[test]
+#[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
 fn the_contradiction_that_needed_a_refusal_is_now_unsayable() {
     // `--pacing none --rate 10` asked for two different things, and honouring one silently is how
     // a run gets quoted as the other. FR-081 deletes the flag instead of policing the pair: with
@@ -488,6 +494,7 @@ fn the_contradiction_that_needed_a_refusal_is_now_unsayable() {
 }
 
 #[test]
+#[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
 fn a_large_finite_rate_is_not_inf_and_keeps_its_schedule() {
     // Somebody will type a large number meaning "flat out". It is accepted, because it is a
     // legitimate calibration, and it stays *paced* — so a machine that cannot keep up records

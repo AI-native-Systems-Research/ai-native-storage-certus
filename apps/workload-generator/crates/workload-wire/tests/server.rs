@@ -515,6 +515,7 @@ fn a_verified_handshake_accepts_a_matching_agent_and_checks_capacity() {
 // ---------------------------------------------------------------------------
 
 #[test]
+#[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
 fn a_long_idle_connection_is_not_treated_as_a_failure() {
     // Under paced mode a session's think time is real waiting, so a node can legitimately
     // receive nothing for minutes. An agent that took silence for failure would exit in the
@@ -589,6 +590,7 @@ fn the_agent_exits_when_every_connection_closes() {
 }
 
 #[test]
+#[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
 fn a_freshly_launched_agent_is_not_killed_for_having_no_clients_yet() {
     // The exit applies only after at least one connection has been served. A generator may be
     // starting agents on several nodes before it connects to any of them.
