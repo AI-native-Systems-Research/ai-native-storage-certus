@@ -367,6 +367,7 @@ fn several_lanes_carry_the_same_turns_and_keep_each_sessions_order() {
 }
 
 #[test]
+#[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
 fn the_rate_and_the_pacing_mode_do_not_change_what_is_submitted() {
     // FR-080's central constraint, and the one that keeps a rate sweep interpretable: the rate is
     // a **tempo** control. It changes when a turn is submitted and nothing else — the same keys,
@@ -402,6 +403,7 @@ fn the_rate_and_the_pacing_mode_do_not_change_what_is_submitted() {
 }
 
 #[test]
+#[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
 fn the_plan_fingerprint_does_not_depend_on_the_rate() {
     // The same claim one level in, and where it is structural: the rate never reaches the
     // simulation. `RunOptions.rate` is read by the driver's schedule and by nothing that builds a
@@ -451,6 +453,7 @@ fn the_plan_fingerprint_does_not_depend_on_the_rate() {
 }
 
 #[test]
+#[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
 fn the_pipelining_depth_does_not_change_what_is_submitted() {
     // The half of `contracts/node-agent-wire.md`'s requirement that lane count does not cover:
     // "the depth of pipelining MUST be configurable and MUST be independent of lane count,
@@ -487,6 +490,7 @@ fn the_pipelining_depth_does_not_change_what_is_submitted() {
 }
 
 #[test]
+#[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
 fn depth_and_lane_count_are_independent_of_each_other() {
     // The other direction of the same requirement: neither knob may need the other adjusted, so
     // the four combinations must all submit the same work. A transport that coupled them — a

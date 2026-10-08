@@ -245,6 +245,7 @@ fn run_in(dir: &Path, extra: &[&str]) -> (i32, String) {
 }
 
 #[test]
+#[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
 fn a_hardware_file_found_by_default_is_announced() {
     // Required, not a courtesy. A file that changed a run's meaning without appearing in the
     // command line is the failure this specification keeps naming: a plausible number for a
@@ -263,6 +264,7 @@ fn a_hardware_file_found_by_default_is_announced() {
 }
 
 #[test]
+#[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
 fn no_hardware_file_means_no_announcement_and_no_configuration() {
     // The simplest invocation must stay the simplest invocation.
     let dir = tempfile::TempDir::new().unwrap();
@@ -318,6 +320,7 @@ fn the_command_line_overrides_the_file_per_field() {
 }
 
 #[test]
+#[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
 fn an_instance_flag_replaces_the_files_list_rather_than_adding_to_it() {
     // Appending would silently double a cluster on the second invocation of a sweep.
     let dir = tempfile::TempDir::new().unwrap();

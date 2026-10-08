@@ -36,3 +36,14 @@ shmq-dispatcher.workspace = true
 # but histograms do (contracts/node-agent-wire.md).
 hdrhistogram = { version = "7", features = ["serialization"] }
 clap = { version = "4", features = ["derive", "env"] }
+
+[features]
+# Skips tests that exceed the per-PR time budget. OFF by default, so a
+# plain `cargo test` runs everything: a developer working on the generator
+# must not have coverage hidden from them. CI opts in explicitly.
+#
+# Deliberately a feature and not a bare #[ignore]: #[ignore] is already used
+# here for tests needing a live Certus server, an agent and a GPU, and
+# overloading it would make `--include-ignored` unable to run the slow tests
+# without also running the ones that cannot pass off-cluster.
+ci-fast = []

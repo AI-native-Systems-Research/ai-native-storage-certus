@@ -1266,6 +1266,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
     fn a_poisson_class_realises_the_arrival_rate_littles_law_predicts() {
         // What makes "arrival rate is an output" a claim rather than a definition:
         // the realised birth count over a long run must match rate * span, and the
@@ -1303,6 +1304,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
     fn a_poisson_session_population_fluctuates_like_a_real_one() {
         // The same argument FR-016 makes for shared pools: an M/G/inf population
         // has var/mean = 1, and suppressing that would be a fidelity loss.
@@ -1356,6 +1358,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
     fn sessions_born_during_the_run_get_full_turn_counts() {
         // The counterpart: the residual applies only at t = 0. A replacement is a
         // new conversation, not the tail of an old one.
@@ -1629,6 +1632,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
     fn instances_are_sorted_within_a_class() {
         // Rule 2. `Selector::draw` guarantees it; this checks the binding does not
         // undo it, which is the only way it could be lost here.
@@ -1658,6 +1662,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
     fn overlapping_sets_produce_nested_chains_not_divergent_ones() {
         // **The reason canonical ordering exists.** Because the order is a function
         // of the set, two sessions agree on exactly the leading run their sorted
@@ -1970,6 +1975,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
     fn sessions_sharing_a_leading_run_share_exactly_that_run() {
         // The block-level form of FR-028's consequence, and the reason keys are
         // chained (FR-027): a common *leading* run gives reuse, and an object held

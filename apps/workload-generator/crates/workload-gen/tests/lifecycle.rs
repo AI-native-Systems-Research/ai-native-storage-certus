@@ -249,6 +249,7 @@ fn a_leftover_of_the_current_build_is_replaced_rather_than_reused() {
 }
 
 #[test]
+#[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
 fn a_leftover_that_will_not_answer_is_killed() {
     // The worst of the three leftovers: a process holding channels and answering nothing. It
     // cannot be asked to stop, so it must be killed, or the run would share its channels.
@@ -309,6 +310,7 @@ fn a_stale_agent_is_refused_by_name_when_it_is_the_one_that_was_started() {
 }
 
 #[test]
+#[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
 fn a_node_that_never_comes_up_is_reported_with_its_node_and_port() {
     // A launch that issues but never listens — a wrong binary path, a missing library. The
     // message has to name both, since on a cluster the next step is to go and look.
