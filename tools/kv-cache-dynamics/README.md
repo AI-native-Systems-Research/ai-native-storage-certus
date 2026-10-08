@@ -216,6 +216,7 @@ git-ignored; the bundled ones below were force-added:
 | `concurrency-sweep-report.html` | concurrency 1–128 | DRAM 32G, 512 sessions |
 | `*-tok1.html` | all three | 1 token added per turn (working set fits HBM) |
 | `*-decode.html` | all three | `DECODE=1 DECODE_BATCH=16` |
+| `*-prefill.html` | all three | prefill-only, 1 output token (`AVG_PROMPT_TOKENS=1761 AVG_GEN_TOKENS=1`); same numbers as the defaults |
 
 For the DRAM sweep, `HBM_GB`, `NUM_TURNS`, `SESSIONS`, `TURN_DIST`, `DIST` and `DRAM_SIZES` are
 overridable by env or flag; any other `run-cc131k-example.sh` variable passes
