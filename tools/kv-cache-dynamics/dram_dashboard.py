@@ -38,6 +38,7 @@ HTML = os.path.join(SCRIPT_DIR, "dram_dashboard.html")
 DISTS = {
     "burstgpt": "burstgpt-3-intervals.yaml",
     "ccweka": "cc-trace-weka-062126-intervals.yaml",
+    "wildchat": "wildchat-intervals.yaml",
 }
 ADMISSIONS = {"interval", "random", "round-robin"}
 TIER_NAMES = ("HBM", "DRAM", "SSD")
