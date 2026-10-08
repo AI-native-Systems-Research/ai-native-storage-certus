@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_pool_tick": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_pool_tick": { "prover": "alt-ergo", "time": 0.017 },
       "vc_verify_epsl_access_clock_assumed_not_to_overflow": {
         "prover": "alt-ergo",
-        "time": 0.022
+        "time": 0.029
       }
     }
   }

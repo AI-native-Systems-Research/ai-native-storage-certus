@@ -446,7 +446,10 @@ pub fn leaves_first(l: &Leaves) -> Option<(u64, u32)> {
 #[logic]
 pub fn idx_ok(p: &Pool) -> bool {
     pearlite! {
-        p.nodes@.len() <= 4294967295
+        // J3: relaxed by one (was `<= 4294967295`). D5 (D-RANGE-SC-002-d0657c) admits a
+        // registration that appends at `nodes.len() == u32::MAX`, after which the arena holds
+        // 2^32 slots (indices 0..=u32::MAX, all still u32-addressable).
+        p.nodes@.len() <= 4294967296
         && (forall<i: Int> 0 <= i && i < p.nodes@.len() ==>
               match (p.nodes@[i]).parent { Some(x) => x@ < p.nodes@.len(), None => true })
         && (forall<i: Int> 0 <= i && i < p.nodes@.len() ==>
@@ -825,7 +828,8 @@ pub fn pool_candidates(p: &Pool, n: usize) -> Vec<u64> {
 /// `Pool::alloc` (session_list.rs:68-77): reuse a spare slot, else append a new one.
 #[requires(idx_ok(p))]
 #[requires(free_exact(p))]
-#[requires((*p).nodes@.len() < 4294967295)]
+// J3: exactly D5 (D-RANGE-SC-002-d0657c) `pool.nodes.len() <= u32::MAX as usize` (was `< 4294967295`)
+#[requires((*p).nodes@.len() <= 4294967295)]
 #[ensures(result@ < (^p).nodes@.len())]
 #[ensures((^p).nodes@[result@] == node)]
 #[ensures(forall<i: Int> 0 <= i && i < (*p).nodes@.len() && i != result@ ==>
@@ -1167,7 +1171,8 @@ macro_rules! register_body {
 /// slot and link it under the session's current leaf.
 #[requires(pool_inv(p))]
 #[requires(p.clock@ < 18446744073709551615)]
-#[requires(p.nodes@.len() < 4294967295)]
+// J3: exactly D5 (D-RANGE-SC-002-d0657c) `pool.nodes.len() <= u32::MAX as usize` (was `< 4294967295`)
+#[requires(p.nodes@.len() <= 4294967295)]
 #[ensures(result@ < (^p).nodes@.len())]
 #[ensures(((^p).nodes@[result@]).active)]
 #[ensures(((^p).nodes@[result@]).key == key)]
@@ -1461,7 +1466,7 @@ pub fn pools_inv(s: &Pools) -> bool {
 pub fn pools_have_room(s: &Pools) -> bool {
     pearlite! {
         forall<i: Int> 0 <= i && i < s.pools@.len() ==>
-            (s.pools@[i]).clock@ < 18446744073709551615 && (s.pools@[i]).nodes@.len() < 4294967295
+            (s.pools@[i]).clock@ < 18446744073709551615 && (s.pools@[i]).nodes@.len() <= 4294967295
     }
 }
 
@@ -1567,7 +1572,9 @@ pub fn log_site(log: &mut Log, connected: bool, kind: u8) {
 /// `create_pool` (src/lib.rs:103-121). Takes the ONLY `RwLock::write` in the component, appends a
 /// fresh pool, and — once, and only while a logger is attached — emits the selection banner.
 #[requires(pools_inv(s))]
-#[requires((*s).pools@.len() < 4294967295)]
+// J3: exactly D4 (D-RANGE-IFACE-CREATE_POOL-4eb401) `state.pools.len() <= u32::MAX as usize`
+// (was `< 4294967295`)
+#[requires((*s).pools@.len() <= 4294967295)]
 // room for the two sites THIS call can reach, with slack for the calls before it in a driver.
 // `log_room` (the driver entry bound) is < 4294967280, so three chained calls stay inside this.
 #[requires(log.info@ < 4294967290 && log.debug@ < 4294967290 && log.warn@ < 4294967290)]
@@ -1620,7 +1627,12 @@ pub fn state_create_pool(s: &mut Pools, log: &mut Log, connected: bool, t: &mut 
 /// `track` (src/lib.rs:123-141). `Vec::get` on the pool id is the only way this can fail, and it
 /// fails with `InvalidPool`, never `InvalidHandle`.
 #[requires(pools_inv(s))]
-#[requires(pools_have_room(s))]
+// J3: the per-call ranges of `track`, on the ONE pool the call operates on and nowhere else
+// (was `pools_have_room(s)`, which constrained every pool): D6 (D-RANGE-FR-004-7a18db)
+// `pool.clock < u64::MAX` and D5 (D-RANGE-SC-002-d0657c) `pool.nodes.len() <= u32::MAX as usize`.
+#[requires(pool@ < (*s).pools@.len() ==>
+             ((*s).pools@[pool@]).clock@ < 18446744073709551615
+             && ((*s).pools@[pool@]).nodes@.len() <= 4294967295)]
 #[requires(log.info@ < 4294967294 && log.debug@ < 4294967294 && log.warn@ < 4294967294)]
 #[requires(t.reads@ < 4294967294)]
 #[ensures(pool@ >= (*s).pools@.len() ==>
@@ -1795,7 +1807,15 @@ pub fn state_remove(s: &mut Pools, h: Handle, t: &mut LockTrace) -> Result<(), P
 /// relock when consecutive handles name different pools, and the mid-walk `InvalidHandle` exit
 /// that leaves the earlier refresh applied.
 #[requires(pools_inv(s))]
-#[requires(pools_room(s))]
+// J3: was `pools_room(s)` (a constant margin on every pool). Now only what the two refreshes
+// consume: one tick on h0's pool, and one tick on h1's pool — which is the SAME counter a second
+// time when both handles name one pool (that case needs `clock + 1 < u64::MAX`, i.e. MORE than
+// D6's per-call `clock < u64::MAX`; this is a callee requirement, not a driver premise).
+#[requires(h0.pool@ < (*s).pools@.len() ==> ((*s).pools@[h0.pool@]).clock@ < 18446744073709551615)]
+#[requires(h1.pool@ < (*s).pools@.len() && h1.pool != h0.pool ==>
+             ((*s).pools@[h1.pool@]).clock@ < 18446744073709551615)]
+#[requires(h1.pool@ < (*s).pools@.len() && h1.pool == h0.pool ==>
+             ((*s).pools@[h1.pool@]).clock@ + 1 < 18446744073709551615)]
 #[requires(t.reads@ < 4294967294)]
 #[requires(t.held@ == 0 && t.peak@ == 0)]
 #[ensures(h0.pool@ >= (*s).pools@.len() ==>
@@ -2182,6 +2202,19 @@ pub fn ready(s: &Pools, t: &LockTrace) -> bool {
     }
 }
 
+/// J3: `ready` WITHOUT any range on the pools' clocks, arenas or count. It keeps only the proved
+/// invariant `pools_inv` and the bounds on the mirror-only ghost observation counters
+/// (`LockTrace`), which `ready` also carries. A driver that consumes D4/D5/D6 states that range
+/// itself, exactly as the declared `assume_rust`, on the pool/vector the call operates on.
+#[logic]
+pub fn ready_exact(s: &Pools, t: &LockTrace) -> bool {
+    pearlite! {
+        pools_inv(s)
+        && t.reads@ < 4294967280 && t.writes@ < 4294967280 && t.acquires@ < 4294967280
+        && t.held@ == 0 && t.peak@ == 0
+    }
+}
+
 /// The logger's observation counters still have room.
 #[logic]
 pub fn log_room(log: &Log) -> bool {
@@ -2203,7 +2236,8 @@ pub fn pready(p: &Pool) -> bool {
 // ======================= create_pool =======================================
 
 // ---- EPSL-CREATE-POOL-STARTS-EMPTY ----------------------------------------
-#[requires(ready(s, t))]
+#[requires(ready_exact(s, t))] // J3: `ready` minus every pool clock/arena/count range
+#[requires((*s).pools@.len() <= 4294967295)] // D4 D-RANGE-IFACE-CREATE_POOL-4eb401, exactly: state.pools.len() <= u32::MAX as usize
 #[requires(log_room(log))]
 #[ensures(result.0@ == (*s).pools@.len())]
 #[ensures(result.1@ == 0)]
@@ -2220,7 +2254,8 @@ pub fn verify_epsl_create_pool_starts_empty(
     (id, reported, victim, cands)
 }
 
-#[requires(ready(s, t))]
+#[requires(ready_exact(s, t))] // J3: `ready` minus every pool clock/arena/count range
+#[requires((*s).pools@.len() <= 4294967295)] // D4 D-RANGE-IFACE-CREATE_POOL-4eb401, exactly: state.pools.len() <= u32::MAX as usize
 #[requires(log_room(log))]
 #[ensures(result.1@ == 1)] // FALSE: a brand-new domain tracks nothing
 pub fn verify_epsl_create_pool_starts_empty__mutant(
@@ -2234,7 +2269,11 @@ pub fn verify_epsl_create_pool_starts_empty__mutant(
 }
 
 // ---- EPSL-CREATE-POOL-ISSUES-A-FRESH-SEQUENTIAL-IDENTIFIER ---------------
-#[requires(ready(s, t))]
+#[requires(ready_exact(s, t))] // J3: `ready` minus every pool clock/arena/count range
+// D4 D-RANGE-IFACE-CREATE_POOL-4eb401, exactly, stated at EACH of the two create_pool calls:
+// the first sees `len` pools, the second `len + 1` (state_create_pool appends exactly one).
+#[requires((*s).pools@.len() <= 4294967295)] // D4 at call 1
+#[requires((*s).pools@.len() + 1 <= 4294967295)] // D4 at call 2
 #[requires(log_room(log))]
 #[ensures(result.0@ == (*s).pools@.len())]
 #[ensures(result.1@ == (*s).pools@.len() + 1)]
@@ -2248,7 +2287,11 @@ pub fn verify_epsl_create_pool_issues_a_fresh_sequential_identifier(
     (a, b)
 }
 
-#[requires(ready(s, t))]
+#[requires(ready_exact(s, t))] // J3: `ready` minus every pool clock/arena/count range
+// D4 D-RANGE-IFACE-CREATE_POOL-4eb401, exactly, stated at EACH of the two create_pool calls:
+// the first sees `len` pools, the second `len + 1` (state_create_pool appends exactly one).
+#[requires((*s).pools@.len() <= 4294967295)] // D4 at call 1
+#[requires((*s).pools@.len() + 1 <= 4294967295)] // D4 at call 2
 #[requires(log_room(log))]
 #[ensures(result.0 == result.1)] // FALSE: identifiers count upwards and are never reused
 pub fn verify_epsl_create_pool_issues_a_fresh_sequential_identifier__mutant(
@@ -2332,11 +2375,11 @@ pub fn verify_epsl_announce_latch_set_only_with_a_logger__mutant(
 // The `state.pools.len() as u32` narrowing at src/lib.rs:105 is faithful only while the domain
 // count fits in a u32; the shipped code has no check, so this is a disclosed assumption, stated
 // here as the precondition under which the returned identifier really is the domain count.
-#[requires(ready(s, t))]
+#[requires(ready_exact(s, t))] // J3: `ready` minus every pool clock/arena/count range
 #[requires(log_room(log))]
-#[requires((*s).pools@.len() < 4294967295)]
+#[requires((*s).pools@.len() <= 4294967295)] // D4 D-RANGE-IFACE-CREATE_POOL-4eb401, exactly: state.pools.len() <= u32::MAX as usize
 #[ensures(result@ == (*s).pools@.len())]
-#[ensures(result@ < 4294967295)]
+#[ensures(result@ <= 4294967295)] // J3: was `< 4294967295`, the off-by-one premise speaking
 #[ensures(result@ < (^s).pools@.len())]
 pub fn verify_epsl_pool_count_assumed_below_u32_max(
     s: &mut Pools, log: &mut Log, connected: bool, t: &mut LockTrace,
@@ -2344,9 +2387,9 @@ pub fn verify_epsl_pool_count_assumed_below_u32_max(
     state_create_pool(s, log, connected, t)
 }
 
-#[requires(ready(s, t))]
+#[requires(ready_exact(s, t))] // J3: `ready` minus every pool clock/arena/count range
 #[requires(log_room(log))]
-#[requires((*s).pools@.len() < 4294967295)]
+#[requires((*s).pools@.len() <= 4294967295)] // D4 D-RANGE-IFACE-CREATE_POOL-4eb401, exactly: state.pools.len() <= u32::MAX as usize
 #[ensures(result@ == (*s).pools@.len() + 1)] // FALSE: the id is the count BEFORE the push
 pub fn verify_epsl_pool_count_assumed_below_u32_max__mutant(
     s: &mut Pools, log: &mut Log, connected: bool, t: &mut LockTrace,
@@ -2400,7 +2443,9 @@ pub fn verify_epsl_track_returns_usable_handle__mutant(
 }
 
 // ---- EPSL-TRACK-FIRST-BLOCK-IS-HEAD-AND-LEAF ---------------------------—
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
+#[requires(p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly: pool.nodes.len() <= u32::MAX as usize
 #[requires(!map_mem(p.by_key.e@, key))]
 #[requires(!map_mem(p.sessions.e@, session))]
 #[ensures(((^p).nodes@[result@]).parent == None)]
@@ -2411,7 +2456,9 @@ pub fn verify_epsl_track_first_block_is_head_and_leaf(p: &mut Pool, key: u64, se
     pool_register(p, key, session)
 }
 
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
+#[requires(p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly: pool.nodes.len() <= u32::MAX as usize
 #[requires(!map_mem(p.by_key.e@, key))]
 #[requires(!map_mem(p.sessions.e@, session))]
 #[ensures(((^p).nodes@[result@]).parent != None)] // FALSE: the first block of a session is a head
@@ -2422,7 +2469,9 @@ pub fn verify_epsl_track_first_block_is_head_and_leaf__mutant(
 }
 
 // ---- EPSL-TRACK-LINKS-UNDER-CURRENT-LEAF -------------------------------—
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
+#[requires(p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly: pool.nodes.len() <= u32::MAX as usize
 #[requires(!map_mem(p.by_key.e@, key))]
 #[requires(map_has(p.sessions.e@, session, q))]
 #[ensures(((^p).nodes@[result@]).parent == Some(q))]
@@ -2435,7 +2484,9 @@ pub fn verify_epsl_track_links_under_current_leaf(
     pool_register(p, key, session)
 }
 
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
+#[requires(p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly: pool.nodes.len() <= u32::MAX as usize
 #[requires(!map_mem(p.by_key.e@, key))]
 #[requires(map_has(p.sessions.e@, session, q))]
 #[ensures(((^p).nodes@[result@]).parent == None)] // FALSE: it is linked under the session's leaf
@@ -2473,7 +2524,9 @@ pub fn verify_epsl_track_sets_initial_recency__mutant(
 }
 
 // ---- EPSL-TRACK-REREGISTRATION-IS-IDEMPOTENT ---------------------------—
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
+#[requires(p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly: pool.nodes.len() <= u32::MAX as usize
 #[requires(map_mem(p.by_key.e@, key))]
 #[ensures(map_has((*p).by_key.e@, key, result))]
 #[ensures((^p).len == (*p).len)]
@@ -2489,7 +2542,9 @@ pub fn verify_epsl_track_reregistration_is_idempotent(
     pool_register(p, key, session)
 }
 
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
+#[requires(p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly: pool.nodes.len() <= u32::MAX as usize
 #[requires(map_mem(p.by_key.e@, key))]
 #[ensures((^p).len@ == (*p).len@ + 1)] // FALSE: re-registering allocates no second block
 pub fn verify_epsl_track_reregistration_is_idempotent__mutant(
@@ -2557,7 +2612,9 @@ pub fn verify_epsl_track_unknown_domain_is_an_error__mutant(
 // ---- EPSL-TRACK-DOES-NOT-DISTURB-OTHER-BLOCKS --------------------------—
 // Only the new block's own record and the link to the block that used to end its session's chain
 // change; no block of any other session moves.
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
+#[requires(p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly: pool.nodes.len() <= u32::MAX as usize
 #[requires(!map_mem(p.by_key.e@, key))]
 #[ensures(forall<j: Int> 0 <= j && j < (*p).nodes@.len() && j != result@
              && !map_has_i((*p).sessions.e@, session, j) ==>
@@ -2568,7 +2625,9 @@ pub fn verify_epsl_track_does_not_disturb_other_blocks(
     pool_register(p, key, session)
 }
 
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
+#[requires(p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly: pool.nodes.len() <= u32::MAX as usize
 #[requires(!map_mem(p.by_key.e@, key))]
 #[ensures(forall<j: Int> 0 <= j && j < (*p).nodes@.len() ==> (^p).nodes@[j] == (*p).nodes@[j])]
 // FALSE: the new block's own slot, and the demoted leaf's child link, do change
@@ -2579,7 +2638,9 @@ pub fn verify_epsl_track_does_not_disturb_other_blocks__mutant(
 }
 
 // ---- EPSL-TRACK-FRESH-KEY-BECOMES-THE-SESSION-LEAF ---------------------—
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
+#[requires(p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly: pool.nodes.len() <= u32::MAX as usize
 #[requires(!map_mem(p.by_key.e@, key))]
 #[ensures((^p).len@ == (*p).len@ + 1)]
 #[ensures(((^p).nodes@[result@]).child == None)]
@@ -2591,7 +2652,9 @@ pub fn verify_epsl_track_fresh_key_becomes_the_session_leaf(
     pool_register(p, key, session)
 }
 
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
+#[requires(p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly: pool.nodes.len() <= u32::MAX as usize
 #[requires(!map_mem(p.by_key.e@, key))]
 #[ensures((^p).len == (*p).len)] // FALSE: a fresh key adds exactly one block
 pub fn verify_epsl_track_fresh_key_becomes_the_session_leaf__mutant(
@@ -2601,7 +2664,9 @@ pub fn verify_epsl_track_fresh_key_becomes_the_session_leaf__mutant(
 }
 
 // ---- EPSL-TRACK-DEMOTES-THE-PREVIOUS-LEAF ------------------------------—
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
+#[requires(p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly: pool.nodes.len() <= u32::MAX as usize
 #[requires(!map_mem(p.by_key.e@, key))]
 #[requires(map_has(p.sessions.e@, session, q))]
 #[ensures(!leaves_mem((^p).leaves.e@, (((*p).nodes@[q@]).stamp, q)))]
@@ -2613,7 +2678,9 @@ pub fn verify_epsl_track_demotes_the_previous_leaf(
     pool_register(p, key, session)
 }
 
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
+#[requires(p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly: pool.nodes.len() <= u32::MAX as usize
 #[requires(!map_mem(p.by_key.e@, key))]
 #[requires(map_has(p.sessions.e@, session, q))]
 #[ensures(leaves_mem((^p).leaves.e@, (((*p).nodes@[q@]).stamp, q)))]
@@ -2650,7 +2717,9 @@ pub fn verify_epsl_track_never_reports_invalid_handle__mutant(
 // ---- EPSL-TRACK-REUSES-ONLY-FREED-SLOTS --------------------------------—
 // The slot is either one the free list held (hence empty) or a brand-new position at the end of
 // the arena; it is never a position that still holds a tracked block.
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
+#[requires(p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly: pool.nodes.len() <= u32::MAX as usize
 #[requires(!map_mem(p.by_key.e@, key))]
 #[ensures(result@ < (*p).nodes@.len() ==> !(((*p).nodes@[result@]).active))]
 #[ensures(result@ >= (*p).nodes@.len() ==> result@ == (*p).nodes@.len())]
@@ -2659,7 +2728,9 @@ pub fn verify_epsl_track_reuses_only_freed_slots(p: &mut Pool, key: u64, session
     pool_register(p, key, session)
 }
 
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
+#[requires(p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly: pool.nodes.len() <= u32::MAX as usize
 #[requires(!map_mem(p.by_key.e@, key))]
 #[ensures(result@ < (*p).nodes@.len() ==> (((*p).nodes@[result@]).active))]
 // FALSE: a reused slot was empty, never occupied
@@ -2672,7 +2743,11 @@ pub fn verify_epsl_track_reuses_only_freed_slots__mutant(
 // ---- EPSL-TRACK-KEYS-ARE-SCOPED-TO-ONE-POOL ---------------------------—
 // The key index is per domain, so the same key is tracked independently in two domains, each with
 // its own block, its own session and its own recency.
-#[requires(ready(s, t))]
+#[requires(ready_exact(s, t))] // J3: `ready` minus every pool clock/arena/count range
+// D6 D-RANGE-FR-004-7a18db and D5 D-RANGE-SC-002-d0657c, exactly, on the pool each track call
+// operates on (pa, then pb; pa != pb so the first call leaves pb untouched)
+#[requires(pa@ < (*s).pools@.len() ==> ((*s).pools@[pa@]).clock@ < 18446744073709551615 && ((*s).pools@[pa@]).nodes@.len() <= 4294967295)]
+#[requires(pb@ < (*s).pools@.len() ==> ((*s).pools@[pb@]).clock@ < 18446744073709551615 && ((*s).pools@[pb@]).nodes@.len() <= 4294967295)]
 #[requires(log_room(log))]
 #[requires(pa@ < (*s).pools@.len() && pb@ < (*s).pools@.len())]
 #[requires(pa != pb)]
@@ -2698,7 +2773,11 @@ pub fn verify_epsl_track_keys_are_scoped_to_one_pool(
     (a, b)
 }
 
-#[requires(ready(s, t))]
+#[requires(ready_exact(s, t))] // J3: `ready` minus every pool clock/arena/count range
+// D6 D-RANGE-FR-004-7a18db and D5 D-RANGE-SC-002-d0657c, exactly, on the pool each track call
+// operates on (pa, then pb; pa != pb so the first call leaves pb untouched)
+#[requires(pa@ < (*s).pools@.len() ==> ((*s).pools@[pa@]).clock@ < 18446744073709551615 && ((*s).pools@[pa@]).nodes@.len() <= 4294967295)]
+#[requires(pb@ < (*s).pools@.len() ==> ((*s).pools@[pb@]).clock@ < 18446744073709551615 && ((*s).pools@[pb@]).nodes@.len() <= 4294967295)]
 #[requires(log_room(log))]
 #[requires(pa@ < (*s).pools@.len() && pb@ < (*s).pools@.len())]
 #[requires(pa != pb)]
@@ -2718,11 +2797,14 @@ pub fn verify_epsl_track_keys_are_scoped_to_one_pool__mutant(
 // fits in a u32. The shipped code has no check, so this is a disclosed assumption, stated here as
 // the precondition under which the slot number a handle carries really names that slot.
 #[requires(pool_inv(p))]
-#[requires(p.clock@ < 18446744073709551000)]
-#[requires(p.nodes@.len() < 4294967295)]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
+#[requires(p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly: pool.nodes.len() <= u32::MAX as usize
 #[ensures(result@ < (^p).nodes@.len())]
-#[ensures(result@ < 4294967295)]
-#[ensures((^p).nodes@.len() <= 4294967295)]
+// J3: at the D5 edge (`nodes.len() == u32::MAX`, appending) the slot is u32::MAX itself and the
+// arena reaches 2^32 slots, so the former `result < u32::MAX` / `len <= u32::MAX` were the slack
+// premise speaking. What the range buys is that the cast is lossless: the slot named IS the slot.
+#[ensures(((^p).nodes@[result@]).key == key)]
+#[ensures((^p).nodes@.len() <= 4294967296)]
 pub fn verify_epsl_arena_slot_count_assumed_below_u32_max(
     p: &mut Pool, key: u64, session: u64,
 ) -> u32 {
@@ -2730,8 +2812,8 @@ pub fn verify_epsl_arena_slot_count_assumed_below_u32_max(
 }
 
 #[requires(pool_inv(p))]
-#[requires(p.clock@ < 18446744073709551000)]
-#[requires(p.nodes@.len() < 4294967295)]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
+#[requires(p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly: pool.nodes.len() <= u32::MAX as usize
 #[ensures(result@ >= (^p).nodes@.len())] // FALSE: the slot number is always in range
 pub fn verify_epsl_arena_slot_count_assumed_below_u32_max__mutant(
     p: &mut Pool, key: u64, session: u64,
@@ -2742,7 +2824,8 @@ pub fn verify_epsl_arena_slot_count_assumed_below_u32_max__mutant(
 // ======================= touch =============================================
 
 // ---- EPSL-TOUCH-REFRESHES-RECENCY ---------------------------------------—
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
 #[requires(index@ < p.nodes@.len() && (p.nodes@[index@]).active)]
 #[ensures(result)]
 #[ensures(((^p).nodes@[index@]).stamp@ > (*p).clock@)]
@@ -2753,7 +2836,8 @@ pub fn verify_epsl_touch_refreshes_recency(p: &mut Pool, index: u32) -> bool {
     pool_touch(p, index)
 }
 
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
 #[requires(index@ < p.nodes@.len() && (p.nodes@[index@]).active)]
 #[ensures(((^p).nodes@[index@]).stamp == ((*p).nodes@[index@]).stamp)] // FALSE: it is refreshed
 pub fn verify_epsl_touch_refreshes_recency__mutant(p: &mut Pool, index: u32) -> bool {
@@ -2803,7 +2887,8 @@ pub fn verify_epsl_handle_operations_reject_unknown_domain__mutant(
 }
 
 // ---- EPSL-TOUCH-CHANGES-ONLY-RECENCY -----------------------------------—
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
 #[requires(index@ < p.nodes@.len() && (p.nodes@[index@]).active)]
 #[ensures(((^p).nodes@[index@]).parent == ((*p).nodes@[index@]).parent)]
 #[ensures(((^p).nodes@[index@]).child == ((*p).nodes@[index@]).child)]
@@ -2819,7 +2904,8 @@ pub fn verify_epsl_touch_changes_only_recency(p: &mut Pool, index: u32) -> bool 
     pool_touch(p, index)
 }
 
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
 #[requires(index@ < p.nodes@.len() && (p.nodes@[index@]).active)]
 #[ensures((^p).len@ == (*p).len@ + 1)] // FALSE: a refresh adds nothing
 pub fn verify_epsl_touch_changes_only_recency__mutant(p: &mut Pool, index: u32) -> bool {
@@ -2827,7 +2913,8 @@ pub fn verify_epsl_touch_changes_only_recency__mutant(p: &mut Pool, index: u32) 
 }
 
 // ---- EPSL-TOUCH-OF-A-LEAF-MOVES-IT-LAST-IN-THE-CANDIDATE-ORDER ---------—
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
 #[requires(index@ < p.nodes@.len() && (p.nodes@[index@]).active)]
 #[requires((p.nodes@[index@]).child == None)]
 #[ensures(leaves_mem((^p).leaves.e@, ((^p).clock, index)))]
@@ -2841,7 +2928,8 @@ pub fn verify_epsl_touch_of_a_leaf_moves_it_last_in_the_candidate_order(
     pool_touch(p, index)
 }
 
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
 #[requires(index@ < p.nodes@.len() && (p.nodes@[index@]).active)]
 #[requires((p.nodes@[index@]).child == None)]
 #[ensures(leaves_mem((^p).leaves.e@, (((*p).nodes@[index@]).stamp, index)))]
@@ -2853,7 +2941,8 @@ pub fn verify_epsl_touch_of_a_leaf_moves_it_last_in_the_candidate_order__mutant(
 }
 
 // ---- EPSL-TOUCH-OF-AN-INTERIOR-BLOCK-KEEPS-THE-CANDIDATE-SET -----------—
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
 #[requires(index@ < p.nodes@.len() && (p.nodes@[index@]).active)]
 #[requires((p.nodes@[index@]).child != None)]
 #[ensures(result)]
@@ -2865,7 +2954,8 @@ pub fn verify_epsl_touch_of_an_interior_block_keeps_the_candidate_set(
     pool_touch(p, index)
 }
 
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
 #[requires(index@ < p.nodes@.len() && (p.nodes@[index@]).active)]
 #[requires((p.nodes@[index@]).child != None)]
 #[ensures(!result)] // FALSE: refreshing a protected block is allowed and succeeds
@@ -3023,7 +3113,9 @@ pub fn verify_epsl_inv_failed_operations_change_nothing(
 
 // ---- EPSL-BATCH-TOUCH-REJECTS-UNKNOWN-POOL ----------------------------—
 // The check happens when the walk first REACHES a handle for that domain, not up front.
-#[requires(ready(s, t))]
+#[requires(ready_exact(s, t))] // J3: `ready` minus every pool clock/arena/count range
+// D6 D-RANGE-FR-004-7a18db, exactly, on the one existing pool the group refreshes (h1 names no pool)
+#[requires(h0.pool@ < (*s).pools@.len() ==> ((*s).pools@[h0.pool@]).clock@ < 18446744073709551615)]
 #[requires(h0.pool@ < (*s).pools@.len())]
 #[requires(h1.pool@ >= (*s).pools@.len())]
 #[requires(h0.index@ < ((*s).pools@[h0.pool@]).nodes@.len())]
@@ -3035,7 +3127,9 @@ pub fn verify_epsl_batch_touch_rejects_unknown_pool(
     state_batch_touch2(s, h0, h1, t)
 }
 
-#[requires(ready(s, t))]
+#[requires(ready_exact(s, t))] // J3: `ready` minus every pool clock/arena/count range
+// D6 D-RANGE-FR-004-7a18db, exactly, on the one existing pool the group refreshes (h1 names no pool)
+#[requires(h0.pool@ < (*s).pools@.len() ==> ((*s).pools@[h0.pool@]).clock@ < 18446744073709551615)]
 #[requires(h0.pool@ < (*s).pools@.len())]
 #[requires(h1.pool@ >= (*s).pools@.len())]
 #[requires(h0.index@ < ((*s).pools@[h0.pool@]).nodes@.len())]
@@ -3088,13 +3182,18 @@ pub fn verify_epsl_batch_touch_spans_pools_one_lock_at_a_time__mutant(
 }
 
 // ---- EPSL-BATCH-TOUCH-RELOCKS-WHEN-THE-POOL-CHANGES -------------------—
+// J3: NOT CREDITED (narrowed obligation). Renamed `narrowed_verify_…` so the gate cannot credit
+// it. The same-pool case refreshes ONE pool twice, i.e. ticks its clock twice in one batch_touch
+// call; under exactly D6 (`pool.clock < u64::MAX` at the call) the second tick overflows when
+// clock == u64::MAX - 1, so the property is not provable under the declared range. It keeps its
+// old `ready(s, t)` premise (constant clock margin), which is why it is not credited.
 #[requires(ready(s, t))]
 #[requires(h0.pool@ < (*s).pools@.len() && h1.pool@ < (*s).pools@.len())]
 #[requires(h0.index@ < ((*s).pools@[h0.pool@]).nodes@.len())]
 #[requires((((*s).pools@[h0.pool@]).nodes@[h0.index@]).active)]
 #[ensures(h0.pool == h1.pool ==> (^t).acquires@ == (*t).acquires@ + 1)]
 #[ensures(h0.pool != h1.pool ==> (^t).acquires@ == (*t).acquires@ + 2)]
-pub fn verify_epsl_batch_touch_relocks_when_the_pool_changes(
+pub fn narrowed_verify_epsl_batch_touch_relocks_when_the_pool_changes(
     s: &mut Pools, h0: Handle, h1: Handle, t: &mut LockTrace,
 ) -> Result<(), PolicyError> {
     state_batch_touch2(s, h0, h1, t)
@@ -3105,7 +3204,7 @@ pub fn verify_epsl_batch_touch_relocks_when_the_pool_changes(
 #[requires(h0.index@ < ((*s).pools@[h0.pool@]).nodes@.len())]
 #[requires((((*s).pools@[h0.pool@]).nodes@[h0.index@]).active)]
 #[ensures((^t).acquires@ == (*t).acquires@ + 2)] // FALSE: same domain twice takes ONE lock
-pub fn verify_epsl_batch_touch_relocks_when_the_pool_changes__mutant(
+pub fn narrowed_verify_epsl_batch_touch_relocks_when_the_pool_changes__mutant(
     s: &mut Pools, h0: Handle, h1: Handle, t: &mut LockTrace,
 ) -> Result<(), PolicyError> {
     state_batch_touch2(s, h0, h1, t)
@@ -3918,7 +4017,9 @@ pub fn verify_epsl_clear_pool_leaves_other_pools_alone__mutant(
 // A `child` slot holds at most one index by construction; the content of the obligation is that the
 // chain never BRANCHES, i.e. no two live blocks record the same parent. That follows from the
 // mutual-link invariant: a parent's single `child` slot can only point back at one of them.
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
+#[requires(p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly: pool.nodes.len() <= u32::MAX as usize
 #[ensures(links_agree(&^p))]
 #[ensures(forall<a: Int, b: Int> 0 <= a && a < b && b < (^p).nodes@.len()
              && ((^p).nodes@[a]).active && ((^p).nodes@[b]).active
@@ -3930,7 +4031,9 @@ pub fn verify_epsl_inv_at_most_one_child(p: &mut Pool, key: u64, session: u64, i
     r
 }
 
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
+#[requires(p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly: pool.nodes.len() <= u32::MAX as usize
 #[ensures(!links_agree(&^p))] // FALSE: the mutual-link invariant is maintained
 pub fn verify_epsl_inv_at_most_one_child__mutant(
     p: &mut Pool, key: u64, session: u64, idx: u32,
@@ -3941,7 +4044,9 @@ pub fn verify_epsl_inv_at_most_one_child__mutant(
 }
 
 // ---- EPSL-INV-EXACTLY-ONE-LEAF-PER-SESSION ---------------------------—
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
+#[requires(p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly: pool.nodes.len() <= u32::MAX as usize
 #[ensures(one_leaf_per_session(&^p))]
 #[ensures(sessions_ok(&^p))]
 #[ensures((^p).leaves.e@.len() == (^p).sessions.e@.len())]
@@ -3954,7 +4059,9 @@ pub fn verify_epsl_inv_exactly_one_leaf_per_session(
     r
 }
 
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
+#[requires(p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly: pool.nodes.len() <= u32::MAX as usize
 #[ensures((^p).leaves.e@.len() != (^p).sessions.e@.len())]
 // FALSE: one candidate per non-empty session, always
 pub fn verify_epsl_inv_exactly_one_leaf_per_session__mutant(
@@ -3971,7 +4078,9 @@ pub fn verify_epsl_inv_exactly_one_leaf_per_session__mutant(
 // a block's parent was registered strictly earlier, the measure is a natural number bounded above
 // by the clock, so the walk up the chain strictly decreases and must terminate. No block is its own
 // parent and no two blocks are each other's parent.
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
+#[requires(p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly: pool.nodes.len() <= u32::MAX as usize
 #[ensures(chain_birth_decreases(&^p))]
 #[ensures(forall<i: Int> 0 <= i && i < (^p).nodes@.len() && ((^p).nodes@[i]).active ==>
              !opt_is(((^p).nodes@[i]).parent, i))]
@@ -3987,7 +4096,9 @@ pub fn verify_epsl_inv_no_cycles_in_lineage(
     r
 }
 
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
+#[requires(p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly: pool.nodes.len() <= u32::MAX as usize
 #[ensures(!chain_birth_decreases(&^p))] // FALSE: the measure strictly decreases along every link
 pub fn verify_epsl_inv_no_cycles_in_lineage__mutant(
     p: &mut Pool, key: u64, session: u64, idx: u32,
@@ -3999,57 +4110,127 @@ pub fn verify_epsl_inv_no_cycles_in_lineage__mutant(
 }
 
 // ---- EPSL-INV-NO-ORPHANED-BLOCKS ------------------------------------—
-#[requires(pready(p))]
+// J3: restated as ONE STEP of every mutator from any state satisfying the proved invariant,
+// each branch under exactly the declared range of the method it calls (D6 for track/touch,
+// D5 for track, nothing for remove/evict). The former fixed chain register->touch->... needed
+// the clock to survive TWO ticks, i.e. a premise stronger than D6; invariance over the chain
+// follows from this step by induction.
+#[requires(pool_inv(p))]
+#[requires(op@ <= 1 ==> p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly, at track (op 0) / touch (op 1)
+#[requires(op@ == 0 ==> p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly, at track (op 0)
 #[ensures(links_agree(&^p))]
 pub fn verify_epsl_inv_no_orphaned_blocks(
-    p: &mut Pool, key: u64, session: u64, idx: u32, ti: u32,
+    p: &mut Pool, key: u64, session: u64, idx: u32, ti: u32, op: u8,
 ) -> u32 {
-    let r = pool_register(p, key, session);
-    let _ = pool_touch(p, ti);
-    let _ = pool_remove(p, idx);
-    let _ = pool_evict_oldest(p);
-    r
+    match op {
+        0 => pool_register(p, key, session),
+        1 => {
+            let _ = pool_touch(p, ti);
+            0
+        }
+        2 => {
+            let _ = pool_remove(p, idx);
+            0
+        }
+        _ => {
+            let _ = pool_evict_oldest(p);
+            0
+        }
+    }
 }
 
-#[requires(pready(p))]
+// J3: restated as ONE STEP of every mutator from any state satisfying the proved invariant,
+// each branch under exactly the declared range of the method it calls (D6 for track/touch,
+// D5 for track, nothing for remove/evict). The former fixed chain register->touch->... needed
+// the clock to survive TWO ticks, i.e. a premise stronger than D6; invariance over the chain
+// follows from this step by induction.
+#[requires(pool_inv(p))]
+#[requires(op@ <= 1 ==> p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly, at track (op 0) / touch (op 1)
+#[requires(op@ == 0 ==> p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly, at track (op 0)
 #[ensures(!links_agree(&^p))] // FALSE: both directions of every link always agree
 pub fn verify_epsl_inv_no_orphaned_blocks__mutant(
-    p: &mut Pool, key: u64, session: u64, idx: u32, ti: u32,
+    p: &mut Pool, key: u64, session: u64, idx: u32, ti: u32, op: u8,
 ) -> u32 {
-    let r = pool_register(p, key, session);
-    let _ = pool_touch(p, ti);
-    let _ = pool_remove(p, idx);
-    let _ = pool_evict_oldest(p);
-    r
+    match op {
+        0 => pool_register(p, key, session),
+        1 => {
+            let _ = pool_touch(p, ti);
+            0
+        }
+        2 => {
+            let _ = pool_remove(p, idx);
+            0
+        }
+        _ => {
+            let _ = pool_evict_oldest(p);
+            0
+        }
+    }
 }
 
 // ---- EPSL-INV-ELIGIBLE-SET-IS-EXACTLY-THE-CHILDLESS -----------------—
-#[requires(pready(p))]
+// J3: restated as ONE STEP of every mutator from any state satisfying the proved invariant,
+// each branch under exactly the declared range of the method it calls (D6 for track/touch,
+// D5 for track, nothing for remove/evict). The former fixed chain register->touch->... needed
+// the clock to survive TWO ticks, i.e. a premise stronger than D6; invariance over the chain
+// follows from this step by induction.
+#[requires(pool_inv(p))]
+#[requires(op@ <= 1 ==> p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly, at track (op 0) / touch (op 1)
+#[requires(op@ == 0 ==> p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly, at track (op 0)
 #[ensures(leaf_set_exact(&^p))]
 pub fn verify_epsl_inv_eligible_set_is_exactly_the_childless(
-    p: &mut Pool, key: u64, session: u64, idx: u32, ti: u32,
+    p: &mut Pool, key: u64, session: u64, idx: u32, ti: u32, op: u8,
 ) -> u32 {
-    let r = pool_register(p, key, session);
-    let _ = pool_touch(p, ti);
-    let _ = pool_remove(p, idx);
-    let _ = pool_evict_oldest(p);
-    r
+    match op {
+        0 => pool_register(p, key, session),
+        1 => {
+            let _ = pool_touch(p, ti);
+            0
+        }
+        2 => {
+            let _ = pool_remove(p, idx);
+            0
+        }
+        _ => {
+            let _ = pool_evict_oldest(p);
+            0
+        }
+    }
 }
 
-#[requires(pready(p))]
+// J3: restated as ONE STEP of every mutator from any state satisfying the proved invariant,
+// each branch under exactly the declared range of the method it calls (D6 for track/touch,
+// D5 for track, nothing for remove/evict). The former fixed chain register->touch->... needed
+// the clock to survive TWO ticks, i.e. a premise stronger than D6; invariance over the chain
+// follows from this step by induction.
+#[requires(pool_inv(p))]
+#[requires(op@ <= 1 ==> p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly, at track (op 0) / touch (op 1)
+#[requires(op@ == 0 ==> p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly, at track (op 0)
 #[ensures(!leaf_set_exact(&^p))] // FALSE: the set is kept exactly in step with the chains
 pub fn verify_epsl_inv_eligible_set_is_exactly_the_childless__mutant(
-    p: &mut Pool, key: u64, session: u64, idx: u32, ti: u32,
+    p: &mut Pool, key: u64, session: u64, idx: u32, ti: u32, op: u8,
 ) -> u32 {
-    let r = pool_register(p, key, session);
-    let _ = pool_touch(p, ti);
-    let _ = pool_remove(p, idx);
-    let _ = pool_evict_oldest(p);
-    r
+    match op {
+        0 => pool_register(p, key, session),
+        1 => {
+            let _ = pool_touch(p, ti);
+            0
+        }
+        2 => {
+            let _ = pool_remove(p, idx);
+            0
+        }
+        _ => {
+            let _ = pool_evict_oldest(p);
+            0
+        }
+    }
 }
 
 // ---- EPSL-INV-SESSION-POINTS-AT-ITS-OWN-END-OF-CHAIN ---------------—
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
+#[requires(p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly: pool.nodes.len() <= u32::MAX as usize
 #[ensures(sessions_ok(&^p))]
 pub fn verify_epsl_inv_session_points_at_its_own_end_of_chain(
     p: &mut Pool, key: u64, session: u64, idx: u32,
@@ -4060,7 +4241,9 @@ pub fn verify_epsl_inv_session_points_at_its_own_end_of_chain(
     r
 }
 
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
+#[requires(p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly: pool.nodes.len() <= u32::MAX as usize
 #[ensures(!sessions_ok(&^p))] // FALSE: the remembered leaf is always live, its own and childless
 pub fn verify_epsl_inv_session_points_at_its_own_end_of_chain__mutant(
     p: &mut Pool, key: u64, session: u64, idx: u32,
@@ -4072,7 +4255,9 @@ pub fn verify_epsl_inv_session_points_at_its_own_end_of_chain__mutant(
 }
 
 // ---- EPSL-INV-ONE-TRACKED-BLOCK-PER-CACHE-KEY ---------------------—
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
+#[requires(p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly: pool.nodes.len() <= u32::MAX as usize
 #[ensures(by_key_ok(&^p))]
 #[ensures((^p).by_key.e@.len() == (^p).len@)]
 pub fn verify_epsl_inv_one_tracked_block_per_cache_key(
@@ -4084,7 +4269,9 @@ pub fn verify_epsl_inv_one_tracked_block_per_cache_key(
     r
 }
 
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
+#[requires(p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly: pool.nodes.len() <= u32::MAX as usize
 #[ensures((^p).by_key.e@.len() != (^p).len@) ] // FALSE: exactly one entry per tracked block
 pub fn verify_epsl_inv_one_tracked_block_per_cache_key__mutant(
     p: &mut Pool, key: u64, session: u64, idx: u32,
@@ -4096,34 +4283,70 @@ pub fn verify_epsl_inv_one_tracked_block_per_cache_key__mutant(
 }
 
 // ---- EPSL-INV-SIZE-ACCOUNTING-IS-EXACT ---------------------------—
-#[requires(pready(p))]
+// J3: restated as ONE STEP of every mutator from any state satisfying the proved invariant,
+// each branch under exactly the declared range of the method it calls (D6 for track/touch,
+// D5 for track, nothing for remove/evict). The former fixed chain register->touch->... needed
+// the clock to survive TWO ticks, i.e. a premise stronger than D6; invariance over the chain
+// follows from this step by induction.
+#[requires(pool_inv(p))]
+#[requires(op@ <= 1 ==> p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly, at track (op 0) / touch (op 1)
+#[requires(op@ == 0 ==> p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly, at track (op 0)
 #[ensures(size_exact(&^p))]
 #[ensures((^p).nodes@.len() == (^p).len@ + (^p).free@.len())]
 pub fn verify_epsl_inv_size_accounting_is_exact(
-    p: &mut Pool, key: u64, session: u64, idx: u32, ti: u32,
+    p: &mut Pool, key: u64, session: u64, idx: u32, ti: u32, op: u8,
 ) -> u32 {
-    let r = pool_register(p, key, session);
-    let _ = pool_touch(p, ti);
-    let _ = pool_remove(p, idx);
-    let _ = pool_evict_oldest(p);
-    r
+    match op {
+        0 => pool_register(p, key, session),
+        1 => {
+            let _ = pool_touch(p, ti);
+            0
+        }
+        2 => {
+            let _ = pool_remove(p, idx);
+            0
+        }
+        _ => {
+            let _ = pool_evict_oldest(p);
+            0
+        }
+    }
 }
 
-#[requires(pready(p))]
+// J3: restated as ONE STEP of every mutator from any state satisfying the proved invariant,
+// each branch under exactly the declared range of the method it calls (D6 for track/touch,
+// D5 for track, nothing for remove/evict). The former fixed chain register->touch->... needed
+// the clock to survive TWO ticks, i.e. a premise stronger than D6; invariance over the chain
+// follows from this step by induction.
+#[requires(pool_inv(p))]
+#[requires(op@ <= 1 ==> p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly, at track (op 0) / touch (op 1)
+#[requires(op@ == 0 ==> p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly, at track (op 0)
 #[ensures((^p).nodes@.len() != (^p).len@ + (^p).free@.len())]
 // FALSE: occupied plus spare is always the whole storage area
 pub fn verify_epsl_inv_size_accounting_is_exact__mutant(
-    p: &mut Pool, key: u64, session: u64, idx: u32, ti: u32,
+    p: &mut Pool, key: u64, session: u64, idx: u32, ti: u32, op: u8,
 ) -> u32 {
-    let r = pool_register(p, key, session);
-    let _ = pool_touch(p, ti);
-    let _ = pool_remove(p, idx);
-    let _ = pool_evict_oldest(p);
-    r
+    match op {
+        0 => pool_register(p, key, session),
+        1 => {
+            let _ = pool_touch(p, ti);
+            0
+        }
+        2 => {
+            let _ = pool_remove(p, idx);
+            0
+        }
+        _ => {
+            let _ = pool_evict_oldest(p);
+            0
+        }
+    }
 }
 
 // ---- EPSL-INV-LINEAGE-NEVER-CROSSES-SESSIONS ---------------------—
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
+#[requires(p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly: pool.nodes.len() <= u32::MAX as usize
 #[ensures(lineage_in_session(&^p))]
 pub fn verify_epsl_inv_lineage_never_crosses_sessions(
     p: &mut Pool, key: u64, session: u64, idx: u32,
@@ -4134,7 +4357,9 @@ pub fn verify_epsl_inv_lineage_never_crosses_sessions(
     r
 }
 
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
+#[requires(p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly: pool.nodes.len() <= u32::MAX as usize
 #[ensures(!lineage_in_session(&^p))] // FALSE: rejoining a chain never mixes sessions
 pub fn verify_epsl_inv_lineage_never_crosses_sessions__mutant(
     p: &mut Pool, key: u64, session: u64, idx: u32,
@@ -4329,29 +4554,69 @@ pub fn verify_epsl_handle_validation_is_occupancy_only__mutant(p: &Pool, index: 
 }
 
 // ---- EPSL-INV-ACTIVE-STAMPS-ARE-DISTINCT ------------------------—
-#[requires(pready(p))]
+// J3: restated as ONE STEP of every mutator from any state satisfying the proved invariant,
+// each branch under exactly the declared range of the method it calls (D6 for track/touch,
+// D5 for track, nothing for remove/evict). The former fixed chain register->touch->... needed
+// the clock to survive TWO ticks, i.e. a premise stronger than D6; invariance over the chain
+// follows from this step by induction.
+#[requires(pool_inv(p))]
+#[requires(op@ <= 1 ==> p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly, at track (op 0) / touch (op 1)
+#[requires(op@ == 0 ==> p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly, at track (op 0)
 #[ensures(stamps_distinct(&^p))]
 #[ensures(clock_dominates(&^p))]
 pub fn verify_epsl_inv_active_stamps_are_distinct(
-    p: &mut Pool, key: u64, session: u64, ti: u32,
+    p: &mut Pool, key: u64, session: u64, idx: u32, ti: u32, op: u8,
 ) -> u32 {
-    let r = pool_register(p, key, session);
-    let _ = pool_touch(p, ti);
-    r
+    match op {
+        0 => pool_register(p, key, session),
+        1 => {
+            let _ = pool_touch(p, ti);
+            0
+        }
+        2 => {
+            let _ = pool_remove(p, idx);
+            0
+        }
+        _ => {
+            let _ = pool_evict_oldest(p);
+            0
+        }
+    }
 }
 
-#[requires(pready(p))]
+// J3: restated as ONE STEP of every mutator from any state satisfying the proved invariant,
+// each branch under exactly the declared range of the method it calls (D6 for track/touch,
+// D5 for track, nothing for remove/evict). The former fixed chain register->touch->... needed
+// the clock to survive TWO ticks, i.e. a premise stronger than D6; invariance over the chain
+// follows from this step by induction.
+#[requires(pool_inv(p))]
+#[requires(op@ <= 1 ==> p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly, at track (op 0) / touch (op 1)
+#[requires(op@ == 0 ==> p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly, at track (op 0)
 #[ensures(!stamps_distinct(&^p))] // FALSE: every value handed out is fresh
 pub fn verify_epsl_inv_active_stamps_are_distinct__mutant(
-    p: &mut Pool, key: u64, session: u64, ti: u32,
+    p: &mut Pool, key: u64, session: u64, idx: u32, ti: u32, op: u8,
 ) -> u32 {
-    let r = pool_register(p, key, session);
-    let _ = pool_touch(p, ti);
-    r
+    match op {
+        0 => pool_register(p, key, session),
+        1 => {
+            let _ = pool_touch(p, ti);
+            0
+        }
+        2 => {
+            let _ = pool_remove(p, idx);
+            0
+        }
+        _ => {
+            let _ = pool_evict_oldest(p);
+            0
+        }
+    }
 }
 
 // ---- EPSL-INV-FREE-LIST-IS-EXACTLY-THE-EMPTY-SLOTS --------------—
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
+#[requires(p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly: pool.nodes.len() <= u32::MAX as usize
 #[ensures(free_exact(&^p))]
 pub fn verify_epsl_inv_free_list_is_exactly_the_empty_slots(
     p: &mut Pool, key: u64, session: u64, idx: u32,
@@ -4362,7 +4627,9 @@ pub fn verify_epsl_inv_free_list_is_exactly_the_empty_slots(
     r
 }
 
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
+#[requires(p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly: pool.clock < u64::MAX
+#[requires(p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly: pool.nodes.len() <= u32::MAX as usize
 #[ensures(!free_exact(&^p))] // FALSE: the spare list holds each empty slot exactly once
 pub fn verify_epsl_inv_free_list_is_exactly_the_empty_slots__mutant(
     p: &mut Pool, key: u64, session: u64, idx: u32,
@@ -4376,31 +4643,65 @@ pub fn verify_epsl_inv_free_list_is_exactly_the_empty_slots__mutant(
 // ---- EPSL-INV-NO-LIVE-LINK-POINTS-AT-AN-EMPTY-SLOT --------------—
 // Nothing stored refers to an empty position: link targets, remembered session leaves, candidate
 // entries and key-index entries all name live blocks.
-#[requires(pready(p))]
+// J3: restated as ONE STEP of every mutator from any state satisfying the proved invariant,
+// each branch under exactly the declared range of the method it calls (D6 for track/touch,
+// D5 for track, nothing for remove/evict). The former fixed chain register->touch->... needed
+// the clock to survive TWO ticks, i.e. a premise stronger than D6; invariance over the chain
+// follows from this step by induction.
+#[requires(pool_inv(p))]
+#[requires(op@ <= 1 ==> p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly, at track (op 0) / touch (op 1)
+#[requires(op@ == 0 ==> p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly, at track (op 0)
 #[ensures(links_agree(&^p))]
 #[ensures(sessions_ok(&^p))]
 #[ensures(leaf_set_exact(&^p))]
 #[ensures(by_key_ok(&^p))]
 pub fn verify_epsl_inv_no_live_link_points_at_an_empty_slot(
-    p: &mut Pool, key: u64, session: u64, idx: u32, ti: u32,
+    p: &mut Pool, key: u64, session: u64, idx: u32, ti: u32, op: u8,
 ) -> u32 {
-    let r = pool_register(p, key, session);
-    let _ = pool_touch(p, ti);
-    let _ = pool_remove(p, idx);
-    let _ = pool_evict_oldest(p);
-    r
+    match op {
+        0 => pool_register(p, key, session),
+        1 => {
+            let _ = pool_touch(p, ti);
+            0
+        }
+        2 => {
+            let _ = pool_remove(p, idx);
+            0
+        }
+        _ => {
+            let _ = pool_evict_oldest(p);
+            0
+        }
+    }
 }
 
-#[requires(pready(p))]
+// J3: restated as ONE STEP of every mutator from any state satisfying the proved invariant,
+// each branch under exactly the declared range of the method it calls (D6 for track/touch,
+// D5 for track, nothing for remove/evict). The former fixed chain register->touch->... needed
+// the clock to survive TWO ticks, i.e. a premise stronger than D6; invariance over the chain
+// follows from this step by induction.
+#[requires(pool_inv(p))]
+#[requires(op@ <= 1 ==> p.clock@ < 18446744073709551615)] // D6 D-RANGE-FR-004-7a18db, exactly, at track (op 0) / touch (op 1)
+#[requires(op@ == 0 ==> p.nodes@.len() <= 4294967295)] // D5 D-RANGE-SC-002-d0657c, exactly, at track (op 0)
 #[ensures(!by_key_ok(&^p))] // FALSE: every key-index entry names a live block holding that key
 pub fn verify_epsl_inv_no_live_link_points_at_an_empty_slot__mutant(
-    p: &mut Pool, key: u64, session: u64, idx: u32, ti: u32,
+    p: &mut Pool, key: u64, session: u64, idx: u32, ti: u32, op: u8,
 ) -> u32 {
-    let r = pool_register(p, key, session);
-    let _ = pool_touch(p, ti);
-    let _ = pool_remove(p, idx);
-    let _ = pool_evict_oldest(p);
-    r
+    match op {
+        0 => pool_register(p, key, session),
+        1 => {
+            let _ = pool_touch(p, ti);
+            0
+        }
+        2 => {
+            let _ = pool_remove(p, idx);
+            0
+        }
+        _ => {
+            let _ = pool_evict_oldest(p);
+            0
+        }
+    }
 }
 
 // ---- EPSL-INV-POOL-IDS-STAY-VALID-FOREVER -----------------------—
@@ -4494,7 +4795,9 @@ pub fn verify_epsl_access_clock_assumed_not_to_overflow__mutant(p: &mut Pool) ->
 // (`state_read_lock` / `state_write_lock` / `lock_acquire` never fail). That model IS the
 // assumption: what is proved here is that, GIVEN no lock was ever abandoned, every operation runs
 // to completion. Poisoning itself is outside the model — recorded as `trusted-boundary`.
-#[requires(ready(s, t))]
+#[requires(ready_exact(s, t))] // J3: `ready` minus every pool clock/arena/count range
+// D6 D-RANGE-FR-004-7a18db and D5 D-RANGE-SC-002-d0657c, exactly, on the pool the track call operates on
+#[requires(pool@ < (*s).pools@.len() ==> ((*s).pools@[pool@]).clock@ < 18446744073709551615 && ((*s).pools@[pool@]).nodes@.len() <= 4294967295)]
 #[requires(log_room(log))]
 #[requires(pool@ < (*s).pools@.len())]
 #[ensures((^t).reads@ > (*t).reads@)]
@@ -4509,7 +4812,9 @@ pub fn verify_epsl_locks_assumed_never_poisoned(
     h
 }
 
-#[requires(ready(s, t))]
+#[requires(ready_exact(s, t))] // J3: `ready` minus every pool clock/arena/count range
+// D6 D-RANGE-FR-004-7a18db and D5 D-RANGE-SC-002-d0657c, exactly, on the pool the track call operates on
+#[requires(pool@ < (*s).pools@.len() ==> ((*s).pools@[pool@]).clock@ < 18446744073709551615 && ((*s).pools@[pool@]).nodes@.len() <= 4294967295)]
 #[requires(log_room(log))]
 #[requires(pool@ < (*s).pools@.len())]
 #[ensures((^t).reads == (*t).reads)] // FALSE: each operation takes the shared state lock

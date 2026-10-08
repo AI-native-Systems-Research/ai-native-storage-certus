@@ -2,13 +2,13 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_pool_batch_touch": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_pool_batch_touch": { "prover": "alt-ergo", "time": 0.024 },
       "vc_verify_epsl_batch_touch_refreshes_every_block__mutant": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
-            "children": [ { "prover": "alt-ergo", "time": 0.021 }, null ]
+            "children": [ { "prover": "alt-ergo", "time": 0.026 }, null ]
           }
         ]
       }

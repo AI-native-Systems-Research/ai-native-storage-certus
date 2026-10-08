@@ -2,17 +2,17 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_state_batch_touch2": { "prover": "alt-ergo", "time": 0.014 },
-      "vc_state_candidates": { "prover": "alt-ergo", "time": 0.021 },
-      "vc_state_clear_pool": { "prover": "alt-ergo", "time": 0.021 },
-      "vc_state_evict": { "prover": "alt-ergo", "time": 0.017 },
-      "vc_state_len": { "prover": "alt-ergo", "time": 0.021 },
-      "vc_state_remove": { "prover": "alt-ergo", "time": 0.021 },
-      "vc_state_touch": { "prover": "alt-ergo", "time": 0.021 },
-      "vc_state_track": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_state_batch_touch2": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_state_candidates": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_state_clear_pool": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_state_evict": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_state_len": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_state_remove": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_state_touch": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_state_track": { "prover": "alt-ergo", "time": 0.022 },
       "vc_verify_epsl_only_pool_creation_takes_the_exclusive_lock": {
-        "prover": "cvc5",
-        "time": 3.6
+        "prover": "z3",
+        "time": 0.833
       }
     }
   }

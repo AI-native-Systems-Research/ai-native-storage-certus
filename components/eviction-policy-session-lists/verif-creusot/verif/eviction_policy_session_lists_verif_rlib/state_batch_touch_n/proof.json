@@ -2,15 +2,15 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_index_Vec_Handle_Global": { "prover": "alt-ergo", "time": 0.015 },
-      "vc_index_mut_Vec_Pool_Global": { "prover": "alt-ergo", "time": 0.016 },
-      "vc_len_Handle": { "prover": "alt-ergo", "time": 0.016 },
-      "vc_len_Pool": { "prover": "alt-ergo", "time": 0.015 },
-      "vc_lock_acquire": { "prover": "alt-ergo", "time": 0.015 },
-      "vc_lock_release": { "prover": "alt-ergo", "time": 0.017 },
-      "vc_pool_touch": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_index_Vec_Handle_Global": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_index_mut_Vec_Pool_Global": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_len_Handle": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_len_Pool": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_lock_acquire": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_lock_release": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_pool_touch": { "prover": "alt-ergo", "time": 0.021 },
       "vc_state_batch_touch_n": { "prover": "cvc5", "time": 2.0 },
-      "vc_state_read_lock": { "prover": "alt-ergo", "time": 0.017 }
+      "vc_state_read_lock": { "prover": "alt-ergo", "time": 0.016 }
     }
   }
 }

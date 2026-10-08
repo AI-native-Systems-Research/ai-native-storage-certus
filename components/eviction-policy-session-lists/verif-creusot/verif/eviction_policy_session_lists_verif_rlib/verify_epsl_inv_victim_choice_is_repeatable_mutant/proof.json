@@ -2,12 +2,12 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_pool_candidates": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_pool_candidates": { "prover": "alt-ergo", "time": 0.016 },
       "vc_verify_epsl_inv_victim_choice_is_repeatable__mutant": {
         "tactic": "split_vc",
         "children": [
-          { "prover": "alt-ergo", "time": 0.021 },
-          { "prover": "alt-ergo", "time": 0.025 },
+          { "prover": "alt-ergo", "time": 0.027 },
+          { "prover": "alt-ergo", "time": 0.029 },
           null
         ]
       }

@@ -4,32 +4,32 @@
     "Coma": {
       "vc_index_Vec_tup2_u64_u32_Global": {
         "prover": "alt-ergo",
-        "time": 0.014
+        "time": 0.017
       },
-      "vc_leaves_pos": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_leaves_pos": { "prover": "alt-ergo", "time": 0.025 },
       "vc_leaves_remove": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.016 },
-              { "prover": "alt-ergo", "time": 0.038 },
-              { "prover": "alt-ergo", "time": 0.018 },
-              { "prover": "alt-ergo", "time": 0.043 },
-              { "prover": "alt-ergo", "time": 0.019 },
-              { "prover": "alt-ergo", "time": 0.037 },
-              { "prover": "alt-ergo", "time": 0.016 },
-              { "prover": "alt-ergo", "time": 0.025 },
-              { "prover": "alt-ergo", "time": 0.029 },
-              { "prover": "alt-ergo", "time": 0.033 },
-              { "prover": "alt-ergo", "time": 0.138 }
+              { "prover": "alt-ergo", "time": 0.017 },
+              { "prover": "alt-ergo", "time": 0.047 },
+              { "prover": "alt-ergo", "time": 0.02 },
+              { "prover": "alt-ergo", "time": 0.049 },
+              { "prover": "alt-ergo", "time": 0.028 },
+              { "prover": "alt-ergo", "time": 0.048 },
+              { "prover": "alt-ergo", "time": 0.024 },
+              { "prover": "alt-ergo", "time": 0.032 },
+              { "prover": "alt-ergo", "time": 0.03 },
+              { "prover": "alt-ergo", "time": 0.044 },
+              { "prover": "alt-ergo", "time": 0.171 }
             ]
           }
         ]
       },
-      "vc_len_tup2_u64_u32": { "prover": "alt-ergo", "time": 0.016 },
-      "vc_remove_tup2_u64_u32": { "prover": "alt-ergo", "time": 0.015 }
+      "vc_len_tup2_u64_u32": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_remove_tup2_u64_u32": { "prover": "alt-ergo", "time": 0.021 }
     }
   }
 }

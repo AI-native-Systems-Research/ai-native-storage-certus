@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_narrowed_verify_epsl_batch_touch_relocks_when_the_pool_changes": {
+        "prover": "alt-ergo",
+        "time": 0.097
+      },
+      "vc_state_batch_touch2": { "prover": "alt-ergo", "time": 0.025 }
+    }
+  }
+}

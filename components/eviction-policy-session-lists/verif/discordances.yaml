@@ -4,16 +4,45 @@ level: 1
 what: 'spec<->code discordances found while reconciling the specification with the code. Each is EXCLUDED from formal
   verification (level 2). status: candidate until a test confirms it (confirmed) or shows it was a misreading (withdrawn).'
 counts:
-  discordances: 16
-  spec_and_code_differ: 9
+  discordances: 31
+  spec_and_code_differ: 17
   spec_not_found_in_code: 7
-  input_range_mismatch: 0
-  properties_excluded_from_level2: 16
+  input_range_mismatch: 7
+  properties_excluded_from_level2: 24
   routed_to_other_tools: 0
   reader_missed_sent_to_level2: 0
   confirmed: 0
   withdrawn: 0
 discordances:
+- id: D-FR-001-lib.rs:139-a7ef93
+  name: Track returns usable handle
+  kind: spec-and-code-differ
+  methods:
+  - track
+  - touch
+  - batch_touch
+  - remove
+  spec_says: When the caller successfully registers a cache block, the policy hands back a handle that identifies
+    exactly that block, and using that handle afterwards to refresh the block's recency or to stop tracking it succeeds
+    and acts on that same block and no other.
+  code_does: The handle returned when a block is tracked carries the pool number the caller asked for together with
+    the storage slot the block occupies, and those are exactly what the later refresh and stop-tracking operations
+    use to find the block again.
+  spec_pointers:
+  - FR-001
+  - CONTRACT-1
+  code_pointers:
+  - lib.rs:139
+  - lib.rs:140
+  - ieviction_policy.rs:15
+  status: candidate
+  excluded_properties:
+  - EPSL-TRACK-RETURNS-USABLE-HANDLE
+  extraction_sides:
+    spec:
+    - EPSL-TRACK-RETURNS-USABLE-HANDLE
+    code:
+    - EPSL-TRACK-RETURNS-A-HANDLE-NAMING-POOL-AND-SLOT
 - id: D-FR-003-session_list.rs:91-184f6d
   name: Track session comes from caller
   kind: spec-and-code-differ
@@ -43,6 +72,35 @@ discordances:
     - EPSL-TRACK-SESSION-COMES-FROM-CALLER
     code:
     - EPSL-TRACK-RETRACK-IGNORES-THE-SUPPLIED-SESSION
+- id: D-FR-004-session_list.rs:62-aab037
+  name: Track sets initial recency
+  kind: spec-and-code-differ
+  methods:
+  - track
+  - touch
+  - batch_touch
+  - identify_next_to_evict
+  spec_says: Registering a new block records the current time as that block's most-recent-access time, so a block
+    that has just been registered counts as more recently used than every block registered or accessed before it,
+    and a victim can be chosen sensibly even if the caller never reports an access.
+  code_does: Every tracking request that either adds a block or refreshes an existing one gives that block an access
+    number strictly larger than every access number handed out before it in the same pool, so the block is unambiguously
+    the most recently accessed one and the ordering of blocks by recency is never tied.
+  spec_pointers:
+  - FR-004
+  - US-3-rationale
+  code_pointers:
+  - session_list.rs:62
+  - session_list.rs:63
+  - session_list.rs:96
+  status: candidate
+  excluded_properties:
+  - EPSL-TRACK-SETS-INITIAL-RECENCY
+  extraction_sides:
+    spec:
+    - EPSL-TRACK-SETS-INITIAL-RECENCY
+    code:
+    - EPSL-TRACK-ASSIGNS-THE-NEWEST-STAMP
 - id: D-FR-015-session_list.rs:80-02886a
   name: Touch invalid handle is an error
   kind: spec-and-code-differ
@@ -72,6 +130,31 @@ discordances:
     - EPSL-TOUCH-INVALID-HANDLE-IS-AN-ERROR
     code:
     - EPSL-TOUCH-REJECTS-AN-UNOCCUPIED-SLOT
+- id: D-FR-015-lib.rs:145-92187d
+  name: Handle operations reject unknown domain
+  kind: spec-and-code-differ
+  methods:
+  - touch
+  - batch_touch
+  - remove
+  spec_says: If a handle refers to an eviction domain that does not exist, the operations that take handles report
+    an error instead of appearing to succeed. The specification requires an error but does not pin down which of
+    the two error kinds is reported, so only the fact that an error is reported is claimed here.
+  code_does: Refreshing a block through a handle that names a pool number that was never created fails with an invalid-pool
+    error reporting that number, and nothing changes.
+  spec_pointers:
+  - FR-015
+  code_pointers:
+  - lib.rs:145
+  - lib.rs:148
+  status: candidate
+  excluded_properties:
+  - EPSL-HANDLE-OPERATIONS-REJECT-UNKNOWN-DOMAIN
+  extraction_sides:
+    spec:
+    - EPSL-HANDLE-OPERATIONS-REJECT-UNKNOWN-DOMAIN
+    code:
+    - EPSL-TOUCH-REJECTS-UNKNOWN-POOL
 - id: D-FR-005-nocode-0efff1
   name: Batch touch refreshes every block
   kind: spec-not-found-in-code
@@ -93,6 +176,32 @@ discordances:
     spec:
     - EPSL-BATCH-TOUCH-REFRESHES-EVERY-BLOCK
     code: []
+- id: D-FR-005-lib.rs:169-fe5381
+  name: Batch touch matches one at a time
+  kind: spec-and-code-differ
+  methods:
+  - batch_touch
+  - touch
+  spec_says: Reporting a group of accesses in a single operation leaves the policy in the same condition as reporting
+    those same accesses one at a time, in the order they appear in the group; batching is a performance convenience
+    and never changes the outcome.
+  code_does: When refreshing a list of blocks succeeds, the resulting state is exactly what you would get by refreshing
+    each block one at a time in the order given. In particular, if the same block appears twice in the list, the
+    later position wins and the block ends up with the newer access number.
+  spec_pointers:
+  - FR-005
+  code_pointers:
+  - lib.rs:169
+  - lib.rs:179
+  - lib.rs:183
+  status: candidate
+  excluded_properties:
+  - EPSL-BATCH-TOUCH-MATCHES-ONE-AT-A-TIME
+  extraction_sides:
+    spec:
+    - EPSL-BATCH-TOUCH-MATCHES-ONE-AT-A-TIME
+    code:
+    - EPSL-BATCH-TOUCH-MATCHES-SEQUENTIAL-TOUCHES
 - id: D-FR-015-lib.rs:179-ec74a9
   name: Batch touch invalid handle is an error
   kind: spec-and-code-differ
@@ -169,6 +278,37 @@ discordances:
     - EPSL-INV-FAILED-OPERATIONS-CHANGE-NOTHING
     code:
     - EPSL-BATCH-TOUCH-IS-NOT-ROLLED-BACK-ON-FAILURE
+- id: D-FR-011-session_list.rs:141-ea322d
+  name: Remove relinks the chain
+  kind: spec-and-code-differ
+  methods:
+  - remove
+  - identify_next_to_evict
+  spec_says: When the block being removed sits in the middle of a session's chain, the policy joins the two ends
+    back together - the removed block's child is given the removed block's parent as its new parent - so the chain
+    stays in one piece and no block is left with a parent that is no longer tracked. If the removed block was the
+    start of the chain, its child becomes the new start and has no parent.
+  code_does: Removing a block from the middle of a session's chain joins its ancestor and its descendant directly
+    to each other, so the session is still one unbroken chain with no gap and no block left dangling. The descendant's
+    recorded ancestor becomes the removed block's ancestor, and that ancestor's recorded descendant becomes the
+    removed block's descendant.
+  spec_pointers:
+  - FR-011
+  - EC-interior-removal
+  code_pointers:
+  - session_list.rs:141
+  - session_list.rs:154
+  - session_list.rs:155
+  - session_list.rs:157
+  - session_list.rs:158
+  status: candidate
+  excluded_properties:
+  - EPSL-REMOVE-RELINKS-THE-CHAIN
+  extraction_sides:
+    spec:
+    - EPSL-REMOVE-RELINKS-THE-CHAIN
+    code:
+    - EPSL-REMOVE-RELINKS-THE-CHAIN
 - id: D-FR-015-session_list.rs:206-12b3fa
   name: Remove invalid handle is an error
   kind: spec-and-code-differ
@@ -197,6 +337,32 @@ discordances:
     - EPSL-REMOVE-INVALID-HANDLE-IS-AN-ERROR
     code:
     - EPSL-REMOVE-REJECTS-AN-UNOCCUPIED-SLOT
+- id: D-FR-006-session_list.rs:188-470482
+  name: Evict does not refresh the victim
+  kind: spec-and-code-differ
+  methods:
+  - identify_next_to_evict
+  spec_says: 'Choosing a block for eviction does not count as an access to it: the act of evicting a block never
+    refreshes that block''s most-recent-access time, so the selection cannot make the block it just selected look
+    recently used.'
+  code_does: Evicting a block does not mark it, or any surviving block, as recently accessed. The access counter
+    does not advance, so repeatedly asking for a block to evict walks steadily through the candidates from oldest
+    to newest rather than cycling.
+  spec_pointers:
+  - FR-006
+  - US-3.3
+  code_pointers:
+  - session_list.rs:188
+  - session_list.rs:189
+  - session_list.rs:192
+  status: candidate
+  excluded_properties:
+  - EPSL-EVICT-DOES-NOT-REFRESH-THE-VICTIM
+  extraction_sides:
+    spec:
+    - EPSL-EVICT-DOES-NOT-REFRESH-THE-VICTIM
+    code:
+    - EPSL-EVICT-DOES-NOT-REFRESH-RECENCY
 - id: D-FR-007-nocode-ef6e13
   name: Evict nonempty domain always yields a victim
   kind: spec-not-found-in-code
@@ -241,6 +407,35 @@ discordances:
     spec:
     - EPSL-EVICT-DISTURBS-ONLY-VICTIM-AND-PARENT
     code: []
+- id: D-FR-015-lib.rs:200-8436e2
+  name: Readonly queries degrade safely on unknown domain
+  kind: spec-and-code-differ
+  methods:
+  - identify_next_to_evict
+  - get_eviction_candidates
+  - len
+  - clear_pool
+  spec_says: 'The four operations that have no way to report an error - asking for a victim, asking for candidates,
+    asking for a size, and clearing - behave harmlessly when asked about a domain that does not exist: they respectively
+    report nothing to evict, return an empty list, report zero, and do nothing at all. None of them crashes and
+    none of them disturbs any domain that does exist.'
+  code_does: Asking an unknown pool number for a block to evict reports that there is nothing to evict, rather than
+    reporting an error. The caller cannot tell an unknown pool apart from a pool that is simply empty, even though
+    the interface has an invalid-pool error and the tracking operation does use it.
+  spec_pointers:
+  - FR-015
+  code_pointers:
+  - lib.rs:200
+  - lib.rs:202
+  - lib.rs:130
+  status: candidate
+  excluded_properties:
+  - EPSL-READONLY-QUERIES-DEGRADE-SAFELY-ON-UNKNOWN-DOMAIN
+  extraction_sides:
+    spec:
+    - EPSL-READONLY-QUERIES-DEGRADE-SAFELY-ON-UNKNOWN-DOMAIN
+    code:
+    - EPSL-EVICT-UNKNOWN-POOL-RETURNS-NOTHING
 - id: D-FR-010-ieviction_policy.rs:106-bfcdca
   name: Candidates listed in eviction order
   kind: spec-and-code-differ
@@ -294,6 +489,36 @@ discordances:
     spec:
     - EPSL-CANDIDATES-EMPTY-DOMAIN-RETURNS-EMPTY-LIST
     code: []
+- id: D-FR-014-session_list.rs:219-d273f4
+  name: Clear returns domain to empty
+  kind: spec-and-code-differ
+  methods:
+  - clear_pool
+  - len
+  - identify_next_to_evict
+  - get_eviction_candidates
+  spec_says: 'Clearing an eviction domain removes every block it was tracking: afterwards its reported size is zero,
+    every session in it is empty, a victim request reports nothing to evict, and a candidate request returns an
+    empty list.'
+  code_does: Clearing a pool discards every block it tracked, every session it knew about and every eviction candidate,
+    reports a size of zero afterwards, offers no eviction candidate, and also resets the pool's running access counter
+    back to its starting value so that the next block tracked gets the lowest possible access number again.
+  spec_pointers:
+  - FR-014
+  code_pointers:
+  - session_list.rs:219
+  - session_list.rs:220
+  - session_list.rs:221
+  - session_list.rs:226
+  - session_list.rs:227
+  status: candidate
+  excluded_properties:
+  - EPSL-CLEAR-RETURNS-DOMAIN-TO-EMPTY
+  extraction_sides:
+    spec:
+    - EPSL-CLEAR-RETURNS-DOMAIN-TO-EMPTY
+    code:
+    - EPSL-CLEAR-POOL-EMPTIES-EVERYTHING-AND-RESETS-THE-CLOCK
 - id: D-FR-014-session_list.rs:221-dec7f1
   name: Clear invalidates existing handles
   kind: spec-and-code-differ
@@ -447,4 +672,203 @@ discordances:
     spec:
     - EPSL-NO-INPUT-CAN-MAKE-AN-OPERATION-PANIC
     code: []
+- id: D-RANGE-FR-015-e29de5
+  name: 'Input range: every handle passed in was returned by track on the same pool and its block has not since
+    been evicted, removed or cleared (i.e. the slot still holds the key it was issued for)'
+  kind: input-range-mismatch
+  methods:
+  - track
+  - touch
+  - batch_touch
+  - remove
+  - clear_pool
+  spec_says: touch, batch_touch and remove MUST report an error for an invalid or already-removed handle, and acting
+    on a block that is no longer tracked (after eviction, removal or clear) is an invalid operation (FR-015; Edge
+    Cases 'Access or removal after eviction'; interface InvalidHandle doc 'invalid or already removed')
+  code_does: accepts ANY handle whose (pool_id, index) names a currently occupied arena slot; the handle has no
+    generation, freed slots are recycled via the free list and clear() restarts slot numbering, and EvictionHandle::new
+    is public, so stale or forged handles silently act on an unrelated live block
+  spec_pointers:
+  - FR-015
+  - 'Edge Cases: Access or removal after eviction'
+  - FR-001
+  - 'contract ieviction_policy_track.md: Error semantics'
+  - spec NV-12 (gap)
+  code_pointers:
+  - session_list.rs:80-82
+  - session_list.rs:123-126
+  - session_list.rs:206-209
+  - session_list.rs:69-71
+  - session_list.rs:182
+  - session_list.rs:220-221
+  - lib.rs:140
+  - lib.rs:150
+  - lib.rs:179
+  - lib.rs:193
+  - ieviction_policy.rs:9-16
+  status: candidate
+  assume_in_level2: every handle passed in was returned by track on the same pool and its block has not since been
+    evicted, removed or cleared (i.e. the slot still holds the key it was issued for)
+  assume_rust: 'state.pools[handle.pool_id() as usize].lock().unwrap().by_key.get(&issued_key) == Some(&handle.index())  /*
+    issued_key = the key passed to the track() call that returned `handle`; for batch_touch: handles.iter().zip(issued_keys).all(|(h,
+    k)| <same, per h>) */'
+  excluded_properties: []
+- id: D-RANGE-FR-005-e924ec
+  name: 'Input range: every handle in the batch names an existing pool and an occupied slot of it'
+  kind: input-range-mismatch
+  methods:
+  - batch_touch
+  spec_says: no operation may leave tracking state corrupted; a fallible operation given an invalid handle or non-existent
+    domain reports an error rather than silently succeeding (FR-015); spec is silent on whether a batch is all-or-nothing
+    (spec NV-11)
+  code_does: batch_touch refreshes handles one at a time and returns on the first invalid pool or invalid handle,
+    leaving every earlier handle refreshed (eviction order permanently changed by a call reported as failed)
+  spec_pointers:
+  - FR-005
+  - FR-015
+  - spec NV-11 (gap)
+  code_pointers:
+  - lib.rs:169-182
+  - lib.rs:173-176
+  - lib.rs:179-181
+  status: candidate
+  assume_in_level2: every handle in the batch names an existing pool and an occupied slot of it
+  assume_rust: handles.iter().all(|h| (h.pool_id() as usize) < state.pools.len() && state.pools[h.pool_id() as usize].lock().unwrap().is_active(h.index()))
+  excluded_properties: []
+- id: D-RANGE-FR-003-96515c
+  name: 'Input range: a key that is already tracked is only ever re-registered with the session it was first registered
+    under'
+  kind: input-range-mismatch
+  methods:
+  - track
+  spec_says: a block belongs to exactly one session, the session supplied by the caller at registration (FR-003,
+    Assumptions 'session ... is supplied by the caller'); re-registration is an idempotent refresh (FR-017); spec
+    does not restrict a re-registration to carry the same session
+  code_does: on a key already tracked, register() takes the idempotent path and ignores the supplied session id
+    entirely, so re-registering under a different session silently keeps the original session
+  spec_pointers:
+  - FR-003
+  - FR-017
+  - 'Assumptions: session supplied by the caller'
+  - contract row 4
+  code_pointers:
+  - session_list.rs:90-94
+  - lib.rs:139
+  status: candidate
+  assume_in_level2: a key that is already tracked is only ever re-registered with the session it was first registered
+    under
+  assume_rust: pool.by_key.get(&key).map_or(true, |&i| pool.nodes[i as usize].session == semantics.session_id)
+  excluded_properties: []
+- id: D-RANGE-IFACE-CREATE_POOL-4eb401
+  name: 'Input range: fewer than 2^32 pools have been created before the call'
+  kind: input-range-mismatch
+  methods:
+  - create_pool
+  spec_says: create_pool hands back an identifier different from every domain created before it (interface create_pool,
+    FR-013/FR-014 domain model); no bound on the number of domains
+  code_does: the new id is state.pools.len() as u32; once 2^32 pools exist the cast wraps and a previously issued
+    id (0, 1, ...) is handed out again, aliasing an existing pool
+  spec_pointers:
+  - IFACE-create_pool
+  - 'Key Entities: Eviction Domain'
+  - 'Assumptions: pool mapping'
+  code_pointers:
+  - lib.rs:105
+  - lib.rs:106
+  - ieviction_policy.rs:29
+  status: candidate
+  assume_in_level2: fewer than 2^32 pools have been created before the call
+  assume_rust: state.pools.len() <= u32::MAX as usize
+  excluded_properties: []
+- id: D-RANGE-SC-002-d0657c
+  name: 'Input range: a pool''s arena holds at most u32::MAX slots before a registration that appends'
+  kind: input-range-mismatch
+  methods:
+  - track
+  spec_says: correctness does not depend on chain depth or domain size; register/touch/remove stay correct (and
+    O(1)) from thousands to at least one million blocks; no maximum domain size is stated (SC-002, SC-003, Edge
+    Cases 'Deep chains')
+  code_does: a new arena slot index is self.nodes.len() as u32 and handles carry a u32 index; at 2^32 arena slots
+    the cast wraps, so a new node's handle/leaf entry names slot 0.. while the node is pushed at a different position
+  spec_pointers:
+  - SC-002
+  - SC-003
+  - 'Edge Cases: Deep chains'
+  code_pointers:
+  - session_list.rs:73
+  - session_list.rs:74
+  - ieviction_policy.rs:11
+  - lib.rs:140
+  status: candidate
+  assume_in_level2: a pool's arena holds at most u32::MAX slots before a registration that appends
+  assume_rust: pool.nodes.len() <= u32::MAX as usize
+  excluded_properties: []
+- id: D-RANGE-FR-004-7a18db
+  name: 'Input range: the pool''s logical clock has not reached u64::MAX'
+  kind: input-range-mismatch
+  methods:
+  - track
+  - touch
+  - batch_touch
+  spec_says: recency comes from a monotonic time source; every registration/access is stamped newer than all earlier
+    ones (FR-004, Assumptions 'monotonic time source'); no bound on the number of accesses
+  code_does: the recency source is a per-pool u64 logical counter incremented with unchecked `+= 1` (panics in debug,
+    wraps to 0 in release at u64::MAX, after which new stamps sort as oldest)
+  spec_pointers:
+  - FR-004
+  - FR-012
+  - 'Assumptions: monotonic time source'
+  code_pointers:
+  - session_list.rs:62-65
+  - session_list.rs:96
+  - session_list.rs:130
+  status: candidate
+  assume_in_level2: the pool's logical clock has not reached u64::MAX
+  assume_rust: pool.clock < u64::MAX
+  excluded_properties: []
+- id: D-RANGE-FR-015-e06e85
+  name: 'Input range: neither the component''s state lock nor any pool mutex is poisoned at entry'
+  kind: input-range-mismatch
+  methods:
+  - create_pool
+  - track
+  - touch
+  - batch_touch
+  - remove
+  - identify_next_to_evict
+  - get_eviction_candidates
+  - len
+  - clear_pool
+  spec_says: the read-only queries MUST degrade safely on a non-existent domain without panicking, and in no case
+    may any operation corrupt tracking state (FR-015); hot-path operations may be invoked concurrently and must
+    remain safe (Assumptions)
+  code_does: every operation does self.state.read()/write().unwrap() and pool_mutex.lock().unwrap(), so once any
+    thread has panicked while holding the RwLock or a pool Mutex (e.g. via the clock overflow of D6 in debug) every
+    subsequent call on that pool / component panics
+  spec_pointers:
+  - FR-015
+  - 'Assumptions: concurrent invocation must remain safe'
+  code_pointers:
+  - lib.rs:104
+  - lib.rs:129
+  - lib.rs:138
+  - lib.rs:144
+  - lib.rs:149
+  - lib.rs:161
+  - lib.rs:167
+  - lib.rs:177
+  - lib.rs:187
+  - lib.rs:192
+  - lib.rs:201
+  - lib.rs:203
+  - lib.rs:208
+  - lib.rs:210
+  - lib.rs:216
+  - lib.rs:218
+  - lib.rs:224
+  - lib.rs:226
+  status: candidate
+  assume_in_level2: neither the component's state lock nor any pool mutex is poisoned at entry
+  assume_rust: '!self.state.is_poisoned() && self.state.read().map_or(false, |s| s.pools.iter().all(|m| !m.is_poisoned()))'
+  excluded_properties: []
 routed_to_other_tools: []

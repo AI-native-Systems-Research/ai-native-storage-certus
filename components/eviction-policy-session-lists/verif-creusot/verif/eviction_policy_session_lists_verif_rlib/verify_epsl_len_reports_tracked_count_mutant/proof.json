@@ -2,17 +2,17 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_pool_len": { "prover": "alt-ergo", "time": 0.03 },
-      "vc_pool_register": { "prover": "alt-ergo", "time": 0.018 },
-      "vc_pool_remove": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_pool_len": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_pool_register": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_pool_remove": { "prover": "alt-ergo", "time": 0.019 },
       "vc_verify_epsl_len_reports_tracked_count__mutant": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.023 },
-              { "prover": "alt-ergo", "time": 0.036 },
+              { "prover": "alt-ergo", "time": 0.03 },
+              { "prover": "alt-ergo", "time": 0.047 },
               null
             ]
           }

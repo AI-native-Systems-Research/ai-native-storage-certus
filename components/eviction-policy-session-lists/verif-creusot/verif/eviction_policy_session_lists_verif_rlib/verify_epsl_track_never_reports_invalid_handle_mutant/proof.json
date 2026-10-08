@@ -2,13 +2,13 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_state_track": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_state_track": { "prover": "alt-ergo", "time": 0.022 },
       "vc_verify_epsl_track_never_reports_invalid_handle__mutant": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
-            "children": [ { "prover": "alt-ergo", "time": 0.031 }, null ]
+            "children": [ { "prover": "alt-ergo", "time": 0.065 }, null ]
           }
         ]
       }

@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_state_track": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_state_track": { "prover": "alt-ergo", "time": 0.022 },
       "vc_verify_epsl_track_keys_are_scoped_to_one_pool": {
         "prover": "z3",
-        "time": 0.552
+        "time": 0.448
       }
     }
   }

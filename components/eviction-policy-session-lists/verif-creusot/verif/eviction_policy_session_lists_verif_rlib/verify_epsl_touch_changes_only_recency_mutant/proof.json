@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_pool_touch": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_pool_touch": { "prover": "alt-ergo", "time": 0.027 },
       "vc_verify_epsl_touch_changes_only_recency__mutant": {
         "tactic": "compute_specified",
         "children": [

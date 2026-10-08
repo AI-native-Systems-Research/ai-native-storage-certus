@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_pool_candidates": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_pool_candidates": { "prover": "alt-ergo", "time": 0.016 },
       "vc_verify_epsl_inv_victim_choice_is_repeatable": {
         "prover": "alt-ergo",
-        "time": 0.748
+        "time": 0.914
       }
     }
   }

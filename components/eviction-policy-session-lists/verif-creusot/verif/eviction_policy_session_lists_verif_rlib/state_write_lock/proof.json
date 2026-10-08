@@ -1,6 +1,6 @@
 {
   "profile": [],
   "proofs": {
-    "Coma": { "vc_state_write_lock": { "prover": "z3", "time": 0.006 } }
+    "Coma": { "vc_state_write_lock": { "prover": "z3", "time": 0.016 } }
   }
 }

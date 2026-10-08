@@ -1,6 +1,6 @@
 {
   "profile": [],
   "proofs": {
-    "Coma": { "vc_state_read_lock": { "prover": "z3", "time": 0.007 } }
+    "Coma": { "vc_state_read_lock": { "prover": "z3", "time": 0.01 } }
   }
 }
