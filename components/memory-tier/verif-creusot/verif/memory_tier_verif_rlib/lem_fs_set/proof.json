@@ -1,6 +1,6 @@
 {
   "profile": [],
   "proofs": {
-    "Coma": { "vc_lem_fs_set": { "prover": "cvc4", "time": 0.22 } }
+    "Coma": { "vc_lem_fs_set": { "prover": "cvc4", "time": 0.332 } }
   }
 }

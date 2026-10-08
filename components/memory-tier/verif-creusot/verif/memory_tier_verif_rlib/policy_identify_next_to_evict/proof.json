@@ -4,9 +4,9 @@
     "Coma": {
       "vc_index_Vec_tup2_u64_u64_Global": {
         "prover": "alt-ergo",
-        "time": 0.037
+        "time": 0.019
       },
-      "vc_len_tup2_u64_u64": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_len_tup2_u64_u64": { "prover": "alt-ergo", "time": 0.019 },
       "vc_policy_identify_next_to_evict": { "prover": "z3", "time": 0.017 },
       "vc_policy_remove_key": { "prover": "alt-ergo", "time": 0.02 }
     }

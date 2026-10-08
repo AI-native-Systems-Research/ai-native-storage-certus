@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_fl_deallocate": { "prover": "alt-ergo", "time": 0.023 },
-      "vc_fl_new": { "prover": "alt-ergo", "time": 0.038 },
-      "vc_index_Vec_Region_Global": { "prover": "alt-ergo", "time": 0.019 },
-      "vc_len_Region": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_fl_deallocate": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_fl_new": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_index_Vec_Region_Global": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_len_Region": { "prover": "alt-ergo", "time": 0.034 },
       "vc_verify_mt_freelist_deallocate_pre__mutant": {
         "tactic": "compute_specified",
         "children": [
@@ -13,8 +13,8 @@
             "tactic": "split_vc",
             "children": [
               { "prover": "alt-ergo", "time": 0.025 },
-              { "prover": "alt-ergo", "time": 0.047 },
-              { "prover": "alt-ergo", "time": 0.019 },
+              { "prover": "alt-ergo", "time": 0.035 },
+              { "prover": "alt-ergo", "time": 0.02 },
               null
             ]
           }

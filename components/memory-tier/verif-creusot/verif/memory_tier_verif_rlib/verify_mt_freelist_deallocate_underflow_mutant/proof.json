@@ -2,13 +2,13 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_fl_deallocate": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_fl_deallocate": { "prover": "alt-ergo", "time": 0.018 },
       "vc_verify_mt_freelist_deallocate_underflow__mutant": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
-            "children": [ { "prover": "alt-ergo", "time": 0.016 }, null ]
+            "children": [ { "prover": "alt-ergo", "time": 0.015 }, null ]
           }
         ]
       }

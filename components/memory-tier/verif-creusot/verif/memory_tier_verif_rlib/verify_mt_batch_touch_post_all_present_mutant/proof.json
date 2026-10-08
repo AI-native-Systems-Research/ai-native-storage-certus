@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_mt_batch_touch": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_mt_batch_touch": { "prover": "alt-ergo", "time": 0.028 },
       "vc_verify_mt_batch_touch_post_all_present__mutant": {
         "tactic": "compute_specified",
         "children": [
@@ -12,7 +12,7 @@
               { "prover": "alt-ergo", "time": 0.022 },
               {
                 "tactic": "split_vc",
-                "children": [ { "prover": "alt-ergo", "time": 0.034 }, null ]
+                "children": [ { "prover": "alt-ergo", "time": 0.021 }, null ]
               }
             ]
           }

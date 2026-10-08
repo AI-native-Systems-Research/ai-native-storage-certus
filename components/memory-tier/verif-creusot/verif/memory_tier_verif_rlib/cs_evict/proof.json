@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_cs_evict": { "prover": "z3", "time": 0.309 },
-      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.029 },
-      "vc_fl_deallocate": { "prover": "alt-ergo", "time": 0.028 },
-      "vc_slots_remove": { "prover": "alt-ergo", "time": 0.027 }
+      "vc_cs_evict": { "prover": "z3", "time": 0.394 },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_fl_deallocate": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_slots_remove": { "prover": "alt-ergo", "time": 0.025 }
     }
   }
 }

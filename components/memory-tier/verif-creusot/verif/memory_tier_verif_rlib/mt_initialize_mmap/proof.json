@@ -3,9 +3,9 @@
   "proofs": {
     "Coma": {
       "vc_alloc_mmap_m": { "prover": "alt-ergo", "time": 0.027 },
-      "vc_elim_Ok": { "prover": "alt-ergo", "time": 0.026 },
-      "vc_init_logged": { "prover": "alt-ergo", "time": 0.026 },
-      "vc_mt_initialize_mmap": { "prover": "cvc4", "time": 0.542 }
+      "vc_elim_Ok": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_init_logged": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_mt_initialize_mmap": { "prover": "cvc4", "time": 0.633 }
     }
   }
 }

@@ -2,8 +2,8 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_mt_get": { "prover": "alt-ergo", "time": 0.022 },
-      "vc_verify_mt_get_pre": { "prover": "alt-ergo", "time": 0.04 }
+      "vc_mt_get": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_verify_mt_get_pre": { "prover": "alt-ergo", "time": 0.032 }
     }
   }
 }

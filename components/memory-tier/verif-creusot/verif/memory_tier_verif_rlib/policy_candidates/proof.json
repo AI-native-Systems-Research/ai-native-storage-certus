@@ -4,12 +4,12 @@
     "Coma": {
       "vc_index_Vec_tup2_u64_u64_Global": {
         "prover": "alt-ergo",
-        "time": 0.024
+        "time": 0.019
       },
-      "vc_len_tup2_u64_u64": { "prover": "alt-ergo", "time": 0.019 },
-      "vc_new_u64": { "prover": "alt-ergo", "time": 0.018 },
-      "vc_policy_candidates": { "prover": "z3", "time": 0.025 },
-      "vc_push_u64": { "prover": "alt-ergo", "time": 0.024 }
+      "vc_len_tup2_u64_u64": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_new_u64": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_policy_candidates": { "prover": "z3", "time": 0.018 },
+      "vc_push_u64": { "prover": "alt-ergo", "time": 0.015 }
     }
   }
 }

@@ -2,16 +2,16 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.021 },
       "vc_init_logged": {
         "tactic": "compute_specified",
-        "children": [ { "prover": "z3", "time": 0.347 } ]
+        "children": [ { "prover": "z3", "time": 0.34 } ]
       },
-      "vc_log_msg": { "prover": "alt-ergo", "time": 0.026 },
-      "vc_policy_create_pool": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_log_msg": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_policy_create_pool": { "prover": "alt-ergo", "time": 0.024 },
       "vc_verify_mt_init_post_flag_published_last": {
         "prover": "alt-ergo",
-        "time": 0.021
+        "time": 0.02
       }
     }
   }

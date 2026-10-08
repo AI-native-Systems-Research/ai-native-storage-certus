@@ -1,11 +1,11 @@
-(* #"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9551 0 9551 84 *)
+(* #"/home/cornel/fv-runs/apply-memory-tier-20261007/components/memory-tier/verif-creusot/src/lib.rs" 9644 0 9644 84 *)
 
-let%span slib = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9558 9 9558 10
-let%span slib'0 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9558 12 9558 13
-let%span slib'1 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9558 15 9558 16
-let%span slib'2 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9549 10 9549 40
-let%span slib'3 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9550 10 9550 51
-let%span slib'4 = "/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 6968 16 6968 80
+let%span slib = "/home/cornel/fv-runs/apply-memory-tier-20261007/components/memory-tier/verif-creusot/src/lib.rs" 9651 9 9651 10
+let%span slib'0 = "/home/cornel/fv-runs/apply-memory-tier-20261007/components/memory-tier/verif-creusot/src/lib.rs" 9651 12 9651 13
+let%span slib'1 = "/home/cornel/fv-runs/apply-memory-tier-20261007/components/memory-tier/verif-creusot/src/lib.rs" 9651 15 9651 16
+let%span slib'2 = "/home/cornel/fv-runs/apply-memory-tier-20261007/components/memory-tier/verif-creusot/src/lib.rs" 9642 10 9642 40
+let%span slib'3 = "/home/cornel/fv-runs/apply-memory-tier-20261007/components/memory-tier/verif-creusot/src/lib.rs" 9643 10 9643 51
+let%span slib'4 = "/home/cornel/fv-runs/apply-memory-tier-20261007/components/memory-tier/verif-creusot/src/lib.rs" 7061 16 7061 80
 
 use creusot.int.UInt64
 use creusot.prelude.Any
@@ -14,14 +14,14 @@ type t_TelemetryModel = { evictions: UInt64.t; write_lock_contentions: UInt64.t;
 
 type tup3_u64_u64_u64 = { f0: UInt64.t; f1: UInt64.t; f2: UInt64.t }
 
-function trip [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 6967 0 6967 49] (t: t_TelemetryModel) : tup3_u64_u64_u64
+function trip [#"/home/cornel/fv-runs/apply-memory-tier-20261007/components/memory-tier/verif-creusot/src/lib.rs" 7060 0 7060 49] (t: t_TelemetryModel) : tup3_u64_u64_u64
  = [%#slib'4] { f0 = t.evictions; f1 = t.write_lock_contentions; f2 = t.read_lock_contentions }
 
 meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let mt_telemetry_snapshot_m [#"/home/cornel/fv-runs/memory-tier-d14dfb9a/components/memory-tier/verif-creusot/src/lib.rs" 9551 0 9551 84]
+let mt_telemetry_snapshot_m [#"/home/cornel/fv-runs/apply-memory-tier-20261007/components/memory-tier/verif-creusot/src/lib.rs" 9644 0 9644 84]
   (t: t_TelemetryModel) (feature: bool) (return (x: tup3_u64_u64_u64)) = (! bb0
   [ bb0 = any [ br0 -> {feature = false} (! bb2) | br1 -> {feature} (! bb1) ]
   | bb1 = s0

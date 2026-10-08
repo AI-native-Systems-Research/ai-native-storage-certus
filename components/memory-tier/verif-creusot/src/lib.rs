@@ -3305,35 +3305,35 @@ pub fn verify_mt_freelist_deallocate_no_double_free_check__mutant() -> (Option<u
 /// spanning the whole capacity, which is why a freshly set-up or freshly wiped
 /// pool can satisfy a single request as large as its entire capacity."
 ///
-/// NEGATION, proved: (a) a free list created with a capacity that is not a
-/// multiple of 4096 (initialize accepts any pool_size > 0, lib.rs:266) does hold
-/// one run [0, capacity) -- but a single request as large as that capacity is
-/// REFUSED, because allocate rounds the request UP to 4096 (allocator.rs:42) while
-/// the run is not rounded; (b) `FreeList::new(0)` (what `Default` builds,
-/// lib.rs:109) holds NO run at all (allocator.rs:18 `if capacity > 0`).
-#[ensures(result.0 == None)]
-#[ensures(result.1@ == 5000 && result.2@ == 1)]
-#[ensures(result.3@ == 0)]
-pub fn refute_mt_freelist_new_post() -> (Option<usize>, usize, usize, usize) {
-    snapshot! { lem_al(5000) };
-    let mut fl = fl_new(5000);
-    let cap = fl.capacity;
-    let runs = fl.regions.len();
-    proof_assert!(fl.regions@[0].offset@ == 0 && fl.regions@[0].size@ == 5000 && fl.used@ == 0);
-    proof_assert!(align_up_l(5000) == 8192);
-    proof_assert!(no_region_fits(fl.regions@, align_up_l(5000)));
-    // a single request as large as the entire capacity
-    let r = fl_allocate(&mut fl, 5000u32);
-    let empty = fl_new(0);
-    (r, cap, runs, empty.regions.len())
+/// NEGATION, proved with an IN-RANGE witness only: `FreeList::new(0)` (what
+/// `Default` builds, lib.rs:109) holds NO free run at all (allocator.rs:18
+/// `if capacity > 0`), not "exactly one". Capacity 0 satisfies every declared
+/// level-2 range (asserted below on the starting state: D-RANGE-US-3
+/// `pool_size % 4096 == 0`, D-RANGE-US-1 `pool_size <= u32::MAX as usize`, and
+/// D-RANGE-FR-002 `pool_size % (2 * 1024 * 1024) == 0`), so this is a reachable start.
+/// (The former out-of-range witness `fl_new(5000)`, 5000 % 4096 != 0, was removed.)
+#[ensures(result.0@ == 0)]
+#[ensures(result.1@ == 0)]
+pub fn refute_mt_freelist_new_post() -> (usize, usize) {
+    let cap: usize = 0;
+    // reachable start: every declared range the property depends on holds
+    proof_assert!(cap@ % 4096 == 0);                 // D-RANGE-US-3
+    proof_assert!(cap@ <= u32::MAX@);                // D-RANGE-US-1
+    proof_assert!(cap@ % (2 * 1024 * 1024) == 0);    // D-RANGE-FR-002
+    let fl = fl_new(cap);
+    (fl.capacity, fl.regions.len())
 }
 
-/// Anti-vacuity twin: MUST FAIL (claims the full-capacity request succeeds).
-#[ensures(result != None)]
-pub fn refute_mt_freelist_new_post__mutant() -> Option<usize> {
-    snapshot! { lem_al(5000) };
-    let mut fl = fl_new(5000);
-    fl_allocate(&mut fl, 5000u32)
+/// Anti-vacuity twin: MUST FAIL (claims fl_new(0) holds exactly one run).
+#[ensures(result.0@ == 0)]
+#[ensures(result.1@ == 1)]
+pub fn refute_mt_freelist_new_post__mutant() -> (usize, usize) {
+    let cap: usize = 0;
+    proof_assert!(cap@ % 4096 == 0);
+    proof_assert!(cap@ <= u32::MAX@);
+    proof_assert!(cap@ % (2 * 1024 * 1024) == 0);
+    let fl = fl_new(cap);
+    (fl.capacity, fl.regions.len())
 }
 
 /// Companion (NOT a scored module): the statement DOES hold for every non-zero
@@ -3350,7 +3350,10 @@ pub fn witness_mt_freelist_new_post_aligned(c: u32) -> Option<usize> {
     r
 }
 
-/// **MT-CLEAR-POST-EMPTY** (postcondition, 7 attachments) -- REFUTED.
+/// SUPPORT (NOT the scored module for MT-CLEAR-POST-EMPTY; formerly
+/// `refute_mt_clear_post_empty`). Its witness `initialize(5000)` is OUTSIDE
+/// D-RANGE-US-3 (`pool_size % 4096 == 0`); the scored module is now
+/// `verify_mt_clear_post_empty` (below), proved under that range.
 ///
 /// Statement: "After the cache is wiped no key is reported as present, every
 /// previously cached key looks up as absent, the reported number of bytes in use
@@ -3369,7 +3372,7 @@ pub fn witness_mt_freelist_new_post_aligned(c: u32) -> Option<usize> {
 #[requires(st.policy.next_handle@ + 1 < u64::MAX@)]
 #[ensures(match result.0 { Ok(_) => match result.1 { Err(MtError::PoolFull) => true, _ => false }, Err(_) => true })]
 #[ensures(match result.0 { Ok(_) => result.2@ == 5000, Err(_) => true })]
-pub fn refute_mt_clear_post_empty(st: &mut StateModel, k: Key) -> (Result<(), MtError>, Result<usize, MtError>, usize) {
+pub fn support_old_refute_mt_clear_post_empty(st: &mut StateModel, k: Key) -> (Result<(), MtError>, Result<usize, MtError>, usize) {
     snapshot! { lem_al(5000) };
     let r = mt_initialize(st, 5000);
     let mut ins: Result<usize, MtError> = Err(MtError::InvalidSize);
@@ -3398,7 +3401,7 @@ pub fn refute_mt_clear_post_empty(st: &mut StateModel, k: Key) -> (Result<(), Mt
 #[requires(st.policy.pools@ + 1 < u64::MAX@)]
 #[requires(st.policy.next_handle@ + 1 < u64::MAX@)]
 #[ensures(match result.0 { Ok(_) => match result.1 { Ok(_) => true, _ => false }, Err(_) => true })]
-pub fn refute_mt_clear_post_empty__mutant(st: &mut StateModel, k: Key) -> (Result<(), MtError>, Result<usize, MtError>) {
+pub fn support_old_refute_mt_clear_post_empty__mutant(st: &mut StateModel, k: Key) -> (Result<(), MtError>, Result<usize, MtError>) {
     snapshot! { lem_al(5000) };
     let r = mt_initialize(st, 5000);
     let mut ins: Result<usize, MtError> = Err(MtError::InvalidSize);
@@ -3431,6 +3434,96 @@ pub fn witness_mt_clear_post_empty_aligned(st: &mut StateModel, k: Key) -> (bool
     proof_assert!(some_region_fits(st.allocator.regions@, align_up_l(ps@)));
     let ins = mt_insert(st, k, ps);
     (c, g, u, ins)
+}
+
+/// **MT-CLEAR-POST-EMPTY** (postcondition, 7 attachments) -- LEVEL-2 UNDER ASSUMPTION.
+///
+/// Statement: "After the cache is wiped no key is reported as present, every
+/// previously cached key looks up as absent, the reported number of bytes in use
+/// is zero, and all the memory is back in one single unbroken free run so that a
+/// single insertion as large as the entire pool capacity can succeed."
+///
+/// Proved from the real entry sequence on a freshly created component
+/// (`Default`, its bound policy fresh too): `initialize(pool_size)`, cache key `k`,
+/// `clear()`, then every clause. The ONLY premises are the level-2 ranges, verbatim:
+/// D-RANGE-US-3 `pool_size % 4096 == 0` and D-RANGE-US-1 `pool_size <= u32::MAX as usize`
+/// (the full-capacity insert takes a `u32` size). The clauses are conditional on
+/// `initialize` succeeding (it may fail with AllocationFailed / InvalidSize).
+#[requires(pool_size@ % 4096 == 0)]
+#[requires(pool_size@ <= u32::MAX@)]
+#[ensures(match result.0 { Ok(_) => !result.1 && result.2 == None && result.3@ == 0, Err(_) => true })]
+#[ensures(match result.0 { Ok(_) => result.4@ == 1 && result.5@ == 0 && result.6@ == pool_size@, Err(_) => true })]
+#[ensures(match result.0 { Ok(_) => match result.7 { Ok(_) => true, Err(_) => false }, Err(_) => true })]
+pub fn verify_mt_clear_post_empty(pool_size: usize, k: Key)
+    -> (Result<(), MtError>, bool, Option<(usize, u32)>, usize, usize, usize, usize, Result<usize, MtError>) {
+    let p = PolicyModel { tracked: Vec::new(), next_handle: 0, pools: 0, last_pool: 0 };
+    let mut st = mt_default(p);
+    let r = mt_initialize(&mut st, pool_size);
+    let mut c = false;
+    let mut g: Option<(usize, u32)> = None;
+    let mut u = 0usize;
+    let mut runs = 0usize;
+    let mut off = 0usize;
+    let mut sz = 0usize;
+    let mut ins: Result<usize, MtError> = Err(MtError::InvalidSize);
+    match r {
+        Ok(()) => {
+            snapshot! { lem_al(4096) };
+            let _ = mt_insert(&mut st, k, 4096u32); // a previously cached key (if it fits)
+            let _ = mt_clear(&mut st);
+            c = mt_contains(&st, k);
+            g = mt_peek(&st, k);
+            u = mt_used(&st);
+            runs = st.allocator.regions.len();
+            off = st.allocator.regions[0].offset;
+            sz = st.allocator.regions[0].size;
+            let ps = pool_size as u32;
+            snapshot! { lem_al(ps@) };
+            proof_assert!(some_region_fits(st.allocator.regions@, align_up_l(ps@)));
+            ins = mt_insert(&mut st, k, ps);
+        }
+        Err(_) => {}
+    }
+    (r, c, g, u, runs, off, sz, ins)
+}
+
+/// Anti-vacuity twin: MUST FAIL (same requires; claims the full-capacity insert is refused).
+#[requires(pool_size@ % 4096 == 0)]
+#[requires(pool_size@ <= u32::MAX@)]
+#[ensures(match result.0 { Ok(_) => !result.1 && result.2 == None && result.3@ == 0, Err(_) => true })]
+#[ensures(match result.0 { Ok(_) => result.4@ == 1 && result.5@ == 0 && result.6@ == pool_size@, Err(_) => true })]
+#[ensures(match result.0 { Ok(_) => match result.7 { Ok(_) => false, Err(_) => true }, Err(_) => true })]
+pub fn verify_mt_clear_post_empty__mutant(pool_size: usize, k: Key)
+    -> (Result<(), MtError>, bool, Option<(usize, u32)>, usize, usize, usize, usize, Result<usize, MtError>) {
+    let p = PolicyModel { tracked: Vec::new(), next_handle: 0, pools: 0, last_pool: 0 };
+    let mut st = mt_default(p);
+    let r = mt_initialize(&mut st, pool_size);
+    let mut c = false;
+    let mut g: Option<(usize, u32)> = None;
+    let mut u = 0usize;
+    let mut runs = 0usize;
+    let mut off = 0usize;
+    let mut sz = 0usize;
+    let mut ins: Result<usize, MtError> = Err(MtError::InvalidSize);
+    match r {
+        Ok(()) => {
+            snapshot! { lem_al(4096) };
+            let _ = mt_insert(&mut st, k, 4096u32);
+            let _ = mt_clear(&mut st);
+            c = mt_contains(&st, k);
+            g = mt_peek(&st, k);
+            u = mt_used(&st);
+            runs = st.allocator.regions.len();
+            off = st.allocator.regions[0].offset;
+            sz = st.allocator.regions[0].size;
+            let ps = pool_size as u32;
+            snapshot! { lem_al(ps@) };
+            proof_assert!(some_region_fits(st.allocator.regions@, align_up_l(ps@)));
+            ins = mt_insert(&mut st, k, ps);
+        }
+        Err(_) => {}
+    }
+    (r, c, g, u, runs, off, sz, ins)
 }
 
 /// Mirror of `Default for MemoryTierState` (lib.rs:102-118). The bound policy is
@@ -7934,7 +8027,7 @@ pub fn witness_mt_reset_telemetry_torn(t: &mut TelemetryModel) -> (u64, u64, u64
 /// land between its first and second load. The returned triple equals NONE of the three
 /// states the counters passed through during the read. (Each atomic op is one interleaving
 /// step; a sequentially-consistent interleaving is one of the behaviours `Relaxed` permits.)
-#[requires(t.evictions@ + 1 < u64::MAX@ && t.write_lock_contentions@ + 1 < u64::MAX@)]
+#[requires(t.evictions@ < u64::MAX@ && t.write_lock_contentions@ < u64::MAX@ && t.read_lock_contentions@ < u64::MAX@)] // D-RANGE-US-7, verbatim
 #[ensures(result.0 == result.1)]
 #[ensures(result.0 == trip(*t))]
 #[ensures(result.2 != trip(*t))]
@@ -7955,7 +8048,7 @@ pub fn verify_mt_telemetry_inherent_post(t: &mut TelemetryModel)
 }
 
 /// Anti-vacuity twin: MUST FAIL (claims the racing read returns the starting instant).
-#[requires(t.evictions@ + 1 < u64::MAX@ && t.write_lock_contentions@ + 1 < u64::MAX@)]
+#[requires(t.evictions@ < u64::MAX@ && t.write_lock_contentions@ < u64::MAX@ && t.read_lock_contentions@ < u64::MAX@)] // D-RANGE-US-7, verbatim
 #[ensures((^t).evictions@ == t.evictions@ + 1)]
 #[ensures(result.1 == trip(*t))]
 pub fn verify_mt_telemetry_inherent_post__mutant(t: &mut TelemetryModel) -> ((u64, u64, u64), (u64, u64, u64)) {
@@ -10243,7 +10336,8 @@ pub fn verify_mt_telemetry_snapshot_frame__mutant(t: &mut TelemetryModel) -> ((u
 /// reading grows by exactly the eviction it counted (cumulative, no wrap below u64::MAX).
 /// Feature off: (0, 0, 0) always. SEQUENTIAL-ONLY (three separate loads -- see
 /// MT-TELEMETRY-INHERENT-POST for the torn read).
-#[requires(mt_inv(*st) && t.evictions@ + 1 < u64::MAX@)]
+#[requires(mt_inv(*st))]
+#[requires(t.evictions@ < u64::MAX@ && t.write_lock_contentions@ < u64::MAX@ && t.read_lock_contentions@ < u64::MAX@)] // D-RANGE-US-7, verbatim
 #[ensures(feature ==> result.0 == trip(*t) && result.2 == trip(^t))]
 #[ensures(feature ==> (result.2).0@ == (result.0).0@ + match result.1 { Some(_) => 1, None => 0 })]
 #[ensures(feature ==> (result.2).1 == (result.0).1 && (result.2).2 == (result.0).2)]
@@ -10256,13 +10350,20 @@ pub fn verify_mt_telemetry_snapshot_post(st: &mut StateModel, t: &mut TelemetryM
     (a, v, b)
 }
 
-/// Anti-vacuity twin: MUST FAIL (claims a feature-less build reports the counters).
-#[requires(t.evictions@ > 0)]
-#[ensures(result == (0u64, 0u64, 0u64))]
-#[ensures(result == trip(*t))]
-pub fn verify_mt_telemetry_snapshot_post__mutant(t: &TelemetryModel) -> (u64, u64, u64) {
-    proof_assert!(t.evictions@ > 0);
-    mt_telemetry_snapshot_m(t, false)
+/// Anti-vacuity twin: MUST FAIL (same requires; the eviction-delta ensures flipped:
+/// claims the reading does NOT grow by the eviction it counted).
+#[requires(mt_inv(*st))]
+#[requires(t.evictions@ < u64::MAX@ && t.write_lock_contentions@ < u64::MAX@ && t.read_lock_contentions@ < u64::MAX@)] // D-RANGE-US-7, verbatim
+#[ensures(feature ==> result.0 == trip(*t) && result.2 == trip(^t))]
+#[ensures(feature ==> (result.2).0@ == (result.0).0@ + match result.1 { Some(_) => 0, None => 1 })]
+#[ensures(feature ==> (result.2).1 == (result.0).1 && (result.2).2 == (result.0).2)]
+#[ensures(!feature ==> result.0 == (0u64, 0u64, 0u64) && result.2 == (0u64, 0u64, 0u64))]
+pub fn verify_mt_telemetry_snapshot_post__mutant(st: &mut StateModel, t: &mut TelemetryModel, feature: bool)
+    -> ((u64, u64, u64), Option<Key>, (u64, u64, u64)) {
+    let a = mt_telemetry_snapshot_m(t, feature);
+    let v = mt_evict_next_tel(st, t);
+    let b = mt_telemetry_snapshot_m(t, feature);
+    (a, v, b)
 }
 
 /// **MT-TELEMETRY-SNAPSHOT-PRE** (precondition, spec-only)

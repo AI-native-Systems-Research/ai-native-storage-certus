@@ -8,16 +8,16 @@
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.041 },
+              { "prover": "alt-ergo", "time": 0.037 },
               {
                 "tactic": "split_vc",
-                "children": [ { "prover": "alt-ergo", "time": 0.044 }, null ]
+                "children": [ { "prover": "alt-ergo", "time": 0.032 }, null ]
               }
             ]
           }
         ]
       },
-      "vc_rx_initialize_spdk": { "prover": "alt-ergo", "time": 0.022 }
+      "vc_rx_initialize_spdk": { "prover": "alt-ergo", "time": 0.024 }
     }
   }
 }

@@ -1,6 +1,6 @@
 {
   "profile": [],
   "proofs": {
-    "Coma": { "vc_lem_ss_prefix": { "prover": "z3", "time": 0.03 } }
+    "Coma": { "vc_lem_ss_prefix": { "prover": "z3", "time": 0.025 } }
   }
 }

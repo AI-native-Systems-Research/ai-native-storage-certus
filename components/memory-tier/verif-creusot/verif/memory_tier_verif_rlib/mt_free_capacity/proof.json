@@ -1,6 +1,8 @@
 {
   "profile": [],
   "proofs": {
-    "Coma": { "vc_mt_free_capacity": { "prover": "alt-ergo", "time": 0.12 } }
+    "Coma": {
+      "vc_mt_free_capacity": { "prover": "alt-ergo", "time": 0.096 }
+    }
   }
 }

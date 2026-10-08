@@ -2,21 +2,21 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_mt_capacity": { "prover": "alt-ergo", "time": 0.02 },
-      "vc_mt_initialize": { "prover": "alt-ergo", "time": 0.02 },
-      "vc_mt_used": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_mt_capacity": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_mt_initialize": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_mt_used": { "prover": "alt-ergo", "time": 0.017 },
       "vc_verify_mt_init_post_ready__mutant": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.02 },
-              { "prover": "alt-ergo", "time": 0.021 },
-              { "prover": "alt-ergo", "time": 0.021 },
+              { "prover": "alt-ergo", "time": 0.017 },
+              { "prover": "alt-ergo", "time": 0.045 },
+              { "prover": "alt-ergo", "time": 0.036 },
               {
                 "tactic": "split_vc",
-                "children": [ { "prover": "alt-ergo", "time": 0.024 }, null ]
+                "children": [ { "prover": "alt-ergo", "time": 0.044 }, null ]
               }
             ]
           }

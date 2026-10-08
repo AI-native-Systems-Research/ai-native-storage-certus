@@ -2,11 +2,11 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_len_u8": { "prover": "alt-ergo", "time": 0.017 },
-      "vc_tel_event": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_len_u8": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_tel_event": { "prover": "alt-ergo", "time": 0.022 },
       "vc_witness_mt_telemetry_counters_monotonic_bounded": {
         "prover": "z3",
-        "time": 0.008
+        "time": 0.015
       }
     }
   }

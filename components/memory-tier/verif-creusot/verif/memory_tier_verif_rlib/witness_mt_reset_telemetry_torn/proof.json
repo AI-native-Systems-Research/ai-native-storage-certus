@@ -4,7 +4,7 @@
     "Coma": {
       "vc_witness_mt_reset_telemetry_torn": {
         "prover": "alt-ergo",
-        "time": 0.017
+        "time": 0.029
       }
     }
   }

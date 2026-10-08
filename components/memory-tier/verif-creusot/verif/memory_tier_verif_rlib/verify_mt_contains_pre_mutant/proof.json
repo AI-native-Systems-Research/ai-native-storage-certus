@@ -6,10 +6,10 @@
       "vc_verify_mt_contains_pre__mutant": {
         "tactic": "split_vc",
         "children": [
-          { "prover": "alt-ergo", "time": 0.022 },
+          { "prover": "alt-ergo", "time": 0.047 },
           {
             "tactic": "split_vc",
-            "children": [ { "prover": "alt-ergo", "time": 0.019 }, null ]
+            "children": [ { "prover": "alt-ergo", "time": 0.014 }, null ]
           }
         ]
       }

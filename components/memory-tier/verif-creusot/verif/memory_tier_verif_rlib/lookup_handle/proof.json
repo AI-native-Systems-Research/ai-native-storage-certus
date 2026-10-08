@@ -4,10 +4,10 @@
     "Coma": {
       "vc_index_Vec_SlotModel_Global": {
         "prover": "alt-ergo",
-        "time": 0.022
+        "time": 0.021
       },
-      "vc_len_SlotModel": { "prover": "alt-ergo", "time": 0.02 },
-      "vc_lookup_handle": { "prover": "cvc5", "time": 0.193 }
+      "vc_len_SlotModel": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_lookup_handle": { "prover": "cvc5", "time": 0.177 }
     }
   }
 }

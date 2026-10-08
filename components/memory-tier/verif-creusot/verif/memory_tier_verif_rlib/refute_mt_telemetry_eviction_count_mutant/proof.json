@@ -2,34 +2,34 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.029 },
-      "vc_ev_commit": { "prover": "alt-ergo", "time": 0.033 },
-      "vc_ev_identify": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_ev_commit": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_ev_identify": { "prover": "alt-ergo", "time": 0.017 },
       "vc_refute_mt_telemetry_eviction_count__mutant": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.027 },
-              { "prover": "alt-ergo", "time": 0.034 },
-              { "prover": "alt-ergo", "time": 0.083 },
-              { "prover": "alt-ergo", "time": 0.039 },
-              { "prover": "alt-ergo", "time": 0.062 },
-              { "prover": "alt-ergo", "time": 0.065 },
-              { "prover": "alt-ergo", "time": 0.028 },
+              { "prover": "alt-ergo", "time": 0.029 },
+              { "prover": "alt-ergo", "time": 0.024 },
+              { "prover": "alt-ergo", "time": 0.115 },
+              { "prover": "alt-ergo", "time": 0.026 },
+              { "prover": "alt-ergo", "time": 0.049 },
+              { "prover": "alt-ergo", "time": 0.072 },
+              { "prover": "alt-ergo", "time": 0.03 },
               {
                 "tactic": "split_vc",
-                "children": [ { "prover": "alt-ergo", "time": 0.03 }, null ]
+                "children": [ { "prover": "alt-ergo", "time": 0.033 }, null ]
               },
-              { "prover": "alt-ergo", "time": 0.027 }
+              { "prover": "alt-ergo", "time": 0.032 }
             ]
           }
         ]
       },
-      "vc_rm_concurrent": { "prover": "alt-ergo", "time": 0.029 },
-      "vc_tel_event": { "prover": "alt-ergo", "time": 0.032 },
-      "vc_tel_reset": { "prover": "alt-ergo", "time": 0.026 }
+      "vc_rm_concurrent": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_tel_event": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_tel_reset": { "prover": "alt-ergo", "time": 0.023 }
     }
   }
 }

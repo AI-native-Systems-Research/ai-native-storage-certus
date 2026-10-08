@@ -1,4 +1,4 @@
 {
   "profile": [],
-  "proofs": { "Coma": { "vc_mt_drop": { "prover": "z3", "time": 0.023 } } }
+  "proofs": { "Coma": { "vc_mt_drop": { "prover": "z3", "time": 0.015 } } }
 }

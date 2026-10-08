@@ -4,10 +4,10 @@
     "Coma": {
       "vc_mt_touch": {
         "tactic": "compute_specified",
-        "children": [ { "prover": "alt-ergo", "time": 0.529 } ]
+        "children": [ { "prover": "alt-ergo", "time": 0.815 } ]
       },
-      "vc_policy_touch_key": { "prover": "alt-ergo", "time": 0.014 },
-      "vc_slots_contains": { "prover": "alt-ergo", "time": 0.022 }
+      "vc_policy_touch_key": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_slots_contains": { "prover": "alt-ergo", "time": 0.024 }
     }
   }
 }

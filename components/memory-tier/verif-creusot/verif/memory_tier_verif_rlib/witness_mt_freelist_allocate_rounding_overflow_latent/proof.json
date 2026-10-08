@@ -4,7 +4,7 @@
     "Coma": {
       "vc_witness_mt_freelist_allocate_rounding_overflow_latent": {
         "prover": "alt-ergo",
-        "time": 0.028
+        "time": 0.039
       }
     }
   }

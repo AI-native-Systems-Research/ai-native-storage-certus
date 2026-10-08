@@ -2,29 +2,29 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.021 },
-      "vc_elim_Some'0": { "prover": "alt-ergo", "time": 0.04 },
-      "vc_fl_deallocate": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_elim_Some'0": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_fl_deallocate": { "prover": "alt-ergo", "time": 0.019 },
       "vc_mt_evict_next": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
             "children": [
+              { "prover": "alt-ergo", "time": 0.059 },
+              { "prover": "alt-ergo", "time": 0.04 },
+              { "prover": "alt-ergo", "time": 0.056 },
+              { "prover": "alt-ergo", "time": 0.022 },
               { "prover": "alt-ergo", "time": 0.067 },
-              { "prover": "alt-ergo", "time": 0.034 },
-              { "prover": "alt-ergo", "time": 0.035 },
-              { "prover": "alt-ergo", "time": 0.029 },
-              { "prover": "alt-ergo", "time": 0.108 },
-              { "prover": "alt-ergo", "time": 0.048 },
-              { "prover": "alt-ergo", "time": 0.089 },
-              { "prover": "z3", "time": 0.053 },
-              { "prover": "z3", "time": 0.034 },
+              { "prover": "alt-ergo", "time": 0.023 },
+              { "prover": "alt-ergo", "time": 0.058 },
+              { "prover": "z3", "time": 0.057 },
+              { "prover": "z3", "time": 0.051 },
               { "prover": "z3", "time": 0.046 },
-              { "prover": "cvc4", "time": 0.234 },
-              { "prover": "z3", "time": 0.681 },
-              { "prover": "alt-ergo", "time": 0.034 },
-              { "prover": "alt-ergo", "time": 0.027 }
+              { "prover": "cvc4", "time": 0.435 },
+              { "prover": "z3", "time": 0.615 },
+              { "prover": "alt-ergo", "time": 0.051 },
+              { "prover": "alt-ergo", "time": 0.021 }
             ]
           }
         ]
@@ -33,7 +33,7 @@
         "prover": "alt-ergo",
         "time": 0.021
       },
-      "vc_slots_remove": { "prover": "alt-ergo", "time": 0.035 }
+      "vc_slots_remove": { "prover": "alt-ergo", "time": 0.038 }
     }
   }
 }

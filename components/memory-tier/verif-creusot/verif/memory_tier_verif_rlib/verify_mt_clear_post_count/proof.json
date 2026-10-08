@@ -2,8 +2,11 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_mt_clear": { "prover": "alt-ergo", "time": 0.025 },
-      "vc_verify_mt_clear_post_count": { "prover": "alt-ergo", "time": 0.12 }
+      "vc_mt_clear": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_verify_mt_clear_post_count": {
+        "prover": "alt-ergo",
+        "time": 0.071
+      }
     }
   }
 }

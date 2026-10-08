@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_lem_noadj_removed": { "prover": "alt-ergo", "time": 0.149 }
+      "vc_lem_noadj_removed": { "prover": "alt-ergo", "time": 0.147 }
     }
   }
 }

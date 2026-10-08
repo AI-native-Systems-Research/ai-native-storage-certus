@@ -2,18 +2,18 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_mt_initialize_spdk": { "prover": "alt-ergo", "time": 0.026 },
-      "vc_mt_is_dma_capable": { "prover": "alt-ergo", "time": 0.032 },
+      "vc_mt_initialize_spdk": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_mt_is_dma_capable": { "prover": "alt-ergo", "time": 0.015 },
       "vc_verify_mt_is_dma_capable_post_iff_spdk__mutant": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.029 },
+              { "prover": "alt-ergo", "time": 0.022 },
               {
                 "tactic": "split_vc",
-                "children": [ { "prover": "alt-ergo", "time": 0.054 }, null ]
+                "children": [ { "prover": "alt-ergo", "time": 0.033 }, null ]
               }
             ]
           }

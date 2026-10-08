@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_mt_capacity": { "prover": "alt-ergo", "time": 0.026 },
-      "vc_mt_initialize_mmap": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_mt_capacity": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_mt_initialize_mmap": { "prover": "alt-ergo", "time": 0.023 },
       "vc_mt_pool_info": { "prover": "alt-ergo", "time": 0.022 },
-      "vc_verify_mt_init_post_poolinfo": { "prover": "cvc5", "time": 0.11 }
+      "vc_verify_mt_init_post_poolinfo": { "prover": "cvc5", "time": 0.082 }
     }
   }
 }

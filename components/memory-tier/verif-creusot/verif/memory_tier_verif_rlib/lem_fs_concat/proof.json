@@ -5,11 +5,11 @@
       "vc_lem_fs_concat": {
         "tactic": "split_vc",
         "children": [
-          { "prover": "alt-ergo", "time": 0.032 },
-          { "prover": "alt-ergo", "time": 0.028 },
-          { "prover": "alt-ergo", "time": 0.031 },
-          { "prover": "alt-ergo", "time": 0.021 },
-          { "prover": "alt-ergo", "time": 0.048 }
+          { "prover": "alt-ergo", "time": 0.017 },
+          { "prover": "alt-ergo", "time": 0.025 },
+          { "prover": "alt-ergo", "time": 0.024 },
+          { "prover": "alt-ergo", "time": 0.025 },
+          { "prover": "alt-ergo", "time": 0.05 }
         ]
       }
     }

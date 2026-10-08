@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_fl_allocate": { "prover": "alt-ergo", "time": 0.032 },
+      "vc_fl_allocate": { "prover": "alt-ergo", "time": 0.02 },
       "vc_verify_mt_freelist_allocate_first_fit__mutant": {
         "tactic": "compute_specified",
         "children": [
@@ -10,10 +10,10 @@
             "tactic": "split_vc",
             "children": [
               { "prover": "alt-ergo", "time": 0.017 },
-              { "prover": "alt-ergo", "time": 0.03 },
+              { "prover": "alt-ergo", "time": 0.018 },
               {
                 "tactic": "split_vc",
-                "children": [ { "prover": "alt-ergo", "time": 0.168 }, null ]
+                "children": [ { "prover": "alt-ergo", "time": 0.167 }, null ]
               }
             ]
           }

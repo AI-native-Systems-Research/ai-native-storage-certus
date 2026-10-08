@@ -2,9 +2,9 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_lk_evict_next": { "prover": "alt-ergo", "time": 0.198 },
-      "vc_new_LkEv": { "prover": "alt-ergo", "time": 0.023 },
-      "vc_push_LkEv": { "prover": "alt-ergo", "time": 0.023 }
+      "vc_lk_evict_next": { "prover": "alt-ergo", "time": 0.149 },
+      "vc_new_LkEv": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_push_LkEv": { "prover": "alt-ergo", "time": 0.015 }
     }
   }
 }

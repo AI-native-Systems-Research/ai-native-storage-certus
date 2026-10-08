@@ -2,9 +2,9 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_ep_get": { "prover": "alt-ergo", "time": 0.028 },
-      "vc_mt_initialize_spdk": { "prover": "alt-ergo", "time": 0.031 },
-      "vc_rx_initialize_spdk": { "prover": "cvc5", "time": 0.171 }
+      "vc_ep_get": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_mt_initialize_spdk": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_rx_initialize_spdk": { "prover": "cvc5", "time": 0.178 }
     }
   }
 }

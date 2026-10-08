@@ -2,11 +2,11 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_align_up": { "prover": "alt-ergo", "time": 0.024 },
-      "vc_mt_insert": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_align_up": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_mt_insert": { "prover": "alt-ergo", "time": 0.016 },
       "vc_refute_mt_freelist_allocate_rounding_overflow": {
         "prover": "z3",
-        "time": 0.029
+        "time": 0.055
       }
     }
   }

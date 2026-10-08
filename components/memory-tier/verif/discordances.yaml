@@ -4,16 +4,74 @@ level: 1
 what: 'spec<->code discordances found while reconciling the specification with the code. Each is EXCLUDED from formal
   verification (level 2). status: candidate until a test confirms it (confirmed) or shows it was a misreading (withdrawn).'
 counts:
-  discordances: 44
-  spec_and_code_differ: 22
+  discordances: 58
+  spec_and_code_differ: 31
   spec_not_found_in_code: 22
-  input_range_mismatch: 0
-  properties_excluded_from_level2: 44
+  input_range_mismatch: 5
+  properties_excluded_from_level2: 53
   routed_to_other_tools: 0
   reader_missed_sent_to_level2: 0
   confirmed: 0
   withdrawn: 0
 discordances:
+- id: D-FR-019-lib.rs:244256-59bd79
+  name: Init numa fallback
+  kind: spec-and-code-differ
+  methods:
+  - initialize
+  spec_says: If the caller asks for the pool memory to be pinned to a particular processor memory node and that
+    pinning cannot be carried out, setting up the pool still succeeds and the pool is fully usable with whatever
+    memory placement the operating system chose by default.
+  code_does: When a NUMA node is requested and the kernel refuses to bind the pool's pages to it, initialize still
+    succeeds and the pool remains fully usable under the default memory placement policy; the failure is only reported
+    as a warning to the logger.
+  spec_pointers:
+  - FR-019
+  - US-3
+  code_pointers:
+  - lib.rs:244-256
+  - imemory_tier.rs
+  - lib.rs:244
+  - lib.rs:247
+  - lib.rs:252
+  - lib.rs:256
+  - imemory_tier.rs:58
+  status: candidate
+  excluded_properties:
+  - MT-INIT-POST-NUMA-FALLBACK
+  extraction_sides:
+    spec:
+    - MT-INITIALIZE-POST-NUMA-FALLBACK
+    code:
+    - MT-INITIALIZE-NUMA-FALLBACK
+- id: D-FR-002-lib.rs:195212-77d2b7
+  name: Init hugepage fallback
+  kind: spec-and-code-differ
+  methods:
+  - initialize
+  - capacity
+  spec_says: Setting up the pool prefers large memory pages but must still succeed, with the full requested capacity
+    available, when large pages cannot be obtained and ordinary pages are used instead.
+  code_does: The fallback allocator first tries to map the pool from huge pages and, if that mapping is refused,
+    transparently retries with an ordinary anonymous mapping, so a machine without huge pages configured still gets
+    a working pool.
+  spec_pointers:
+  - FR-002
+  - US-3
+  code_pointers:
+  - lib.rs:195-212
+  - lib.rs:195
+  - lib.rs:200
+  - lib.rs:206
+  - lib.rs:212
+  status: candidate
+  excluded_properties:
+  - MT-INIT-POST-HUGEPAGE-FALLBACK
+  extraction_sides:
+    spec:
+    - MT-INITIALIZE-POST-HUGEPAGE-FALLBACK
+    code:
+    - MT-INITIALIZE-HUGEPAGE-FALLBACK
 - id: D-US-3-lib.rs:271-9b3c9c
   name: Init error double init
   kind: spec-and-code-differ
@@ -69,6 +127,40 @@ discordances:
     - MT-INITIALIZE-ERR-NO-EVICTION-POLICY
     code:
     - MT-INITIALIZE-ERR-POLICY-MISSING
+- id: D-US-3-lib.rs:262-d1296d
+  name: Init on failure
+  kind: spec-and-code-differ
+  methods:
+  - initialize
+  - capacity
+  - used
+  - contains
+  - pool_info
+  - is_dma_capable
+  spec_says: 'When setting up the pool fails for any reason, the component is left exactly as it was before the
+    call: it still reports itself as not set up, reports no capacity and no bytes in use, and holds no partially
+    built pool that a later successful set-up would have to clean up.'
+  code_does: 'Every failing path of initialize leaves the component exactly as it was: the initialized flag, the
+    stored base pointer, the stored pool size, the policy pool identifier and the set of cached entries are all
+    unchanged, because all of these are written only after the last operation that can fail.'
+  spec_pointers:
+  - US-3
+  - FR-023
+  - 'plan.md: Error Handling Strategy'
+  code_pointers:
+  - lib.rs:262
+  - lib.rs:271
+  - lib.rs:291
+  - lib.rs:302
+  - lib.rs:310
+  status: candidate
+  excluded_properties:
+  - MT-INIT-FRAME-ON-FAILURE
+  extraction_sides:
+    spec:
+    - MT-INITIALIZE-FRAME-ON-FAILURE
+    code:
+    - MT-INITIALIZE-FRAME-ON-ERROR
 - id: D-FR-004-lib.rs:377-444f51
   name: Insert alignment
   kind: spec-not-found-in-code
@@ -93,6 +185,30 @@ discordances:
     spec:
     - MT-INSERT-POST-ALIGNMENT
     code: []
+- id: D-FR-023-lib.rs:334336-645695
+  name: Insert error not initialized
+  kind: spec-and-code-differ
+  methods:
+  - insert
+  spec_says: Attempting to add a cache entry before the pool has been set up fails with the not-initialized error
+    rather than reading or writing any memory.
+  code_does: Inserting into a component whose pool has never been initialized fails with the not-initialized error
+    carrying the message "pool not initialized".
+  spec_pointers:
+  - FR-023
+  code_pointers:
+  - lib.rs:334-336
+  - lib.rs:334
+  - lib.rs:335
+  - lib.rs:336
+  status: candidate
+  excluded_properties:
+  - MT-INSERT-ERR-NOT-INITIALIZED
+  extraction_sides:
+    spec:
+    - MT-INSERT-ERR-NOT-INITIALIZED
+    code:
+    - MT-INSERT-ERR-NOT-INITIALIZED
 - id: D-US-1-lib.rs:360-31aa9f
   name: Insert other entries
   kind: spec-not-found-in-code
@@ -118,6 +234,36 @@ discordances:
     spec:
     - MT-INSERT-FRAME-OTHER-ENTRIES
     code: []
+- id: D-FR-011-lib.rs:405409-524c22
+  name: Get touch
+  kind: spec-and-code-differ
+  methods:
+  - get
+  - evict_next
+  - evict_next_for_key
+  - oldest_keys
+  spec_says: A successful recency-updating lookup marks the key as the most recently used entry, so it will be chosen
+    for eviction only after entries that have not been used since.
+  code_does: A successful get refreshes the entry's position in the eviction order, making it the most recently
+    used entry, and it does so only after releasing the pool lock so that the refresh never blocks other readers
+    of the pool.
+  spec_pointers:
+  - FR-011
+  - US-1
+  - US-2
+  code_pointers:
+  - lib.rs:405-409
+  - lib.rs:406
+  - lib.rs:407
+  - lib.rs:408
+  status: candidate
+  excluded_properties:
+  - MT-GET-POST-TOUCH
+  extraction_sides:
+    spec:
+    - MT-GET-POST-TOUCH
+    code:
+    - MT-GET-POST-REFRESHES-ORDER
 - id: D-FR-011-lib.rs:383-81dfd5
   name: Get error miss
   kind: spec-and-code-differ
@@ -474,7 +620,37 @@ discordances:
     spec:
     - MT-OLDEST-KEYS-PRE
     code: []
-- id: D-FR-021-lib.rs:431-56bb55
+- id: D-FR-021-lib.rs:431-56bb55-1
+  name: Oldest keys shape
+  kind: spec-and-code-differ
+  methods:
+  - oldest_keys
+  spec_says: The query for the oldest keys returns no more keys than the caller asked for, and no more than the
+    number of entries the eviction policy is currently tracking, so a short answer is normal rather than an error.
+    The keys returned by the oldest-keys query are ordered with the entry that would be evicted first at the front
+    and progressively newer entries after it. The oldest-keys query obtains its whole answer by asking the external
+    eviction-policy component once for the requested number of candidates, rather than by repeatedly sampling several
+    separate regions of the pool.
+  code_does: Asking for the oldest keys returns the eviction policy's list of up to the requested number of eviction
+    candidates for this pool, oldest first, without removing or evicting anything.
+  spec_pointers:
+  - FR-021
+  - US-2
+  code_pointers:
+  - lib.rs:431
+  - lib.rs:430
+  - imemory_tier.rs:97
+  status: candidate
+  excluded_properties:
+  - MT-OLDEST-KEYS-POST-SHAPE
+  extraction_sides:
+    spec:
+    - MT-OLDEST-KEYS-POST-BOUNDED
+    - MT-OLDEST-KEYS-POST-ORDER
+    - MT-OLDEST-KEYS-POST-SINGLE-POLICY-QUERY
+    code:
+    - MT-OLDEST-KEYS-POST
+- id: D-FR-021-lib.rs:431-56bb55-2
   name: Oldest keys live membership
   kind: spec-and-code-differ
   methods:
@@ -522,6 +698,36 @@ discordances:
     spec:
     - MT-TOUCH-PRE
     code: []
+- id: D-FR-016-lib.rs:513516-d682f8
+  name: Touch order refresh
+  kind: spec-and-code-differ
+  methods:
+  - touch
+  - evict_next
+  - evict_next_for_key
+  - oldest_keys
+  spec_says: Refreshing a key that is present makes it the most recently used entry, so it will be evicted only
+    after entries that have not been used since, and no data is returned to the caller.
+  code_does: Touching a key that the pool holds makes that entry the most recently used one in the eviction order,
+    and the refresh is performed only after the pool lock has been released.
+  spec_pointers:
+  - FR-016
+  - US-2
+  - 'plan.md: touch_updates_eviction_order'
+  code_pointers:
+  - lib.rs:513-516
+  - lib.rs:513
+  - lib.rs:514
+  - lib.rs:515
+  - lib.rs:516
+  status: candidate
+  excluded_properties:
+  - MT-TOUCH-POST-ORDER-REFRESH
+  extraction_sides:
+    spec:
+    - MT-TOUCH-POST-ORDER-REFRESH
+    code:
+    - MT-TOUCH-POST
 - id: D-FR-016-lib.rs:508-0ff7d5
   name: Touch silent noop
   kind: spec-and-code-differ
@@ -571,6 +777,33 @@ discordances:
     spec:
     - MT-BATCH-TOUCH-PRE
     code: []
+- id: D-US-6-lib.rs:520524-adc85e
+  name: Batch touch empty noop
+  kind: spec-and-code-differ
+  methods:
+  - batch_touch
+  spec_says: Refreshing an empty list of keys has no observable effect of any kind on the cache or on the eviction
+    order. Refreshing many entries at once before the pool has been set up does nothing.
+  code_does: Batch-touch with an empty list of keys returns immediately without taking any lock and without calling
+    the eviction policy, and the same silent return happens when the component is not initialized.
+  spec_pointers:
+  - US-6
+  - FR-023
+  code_pointers:
+  - lib.rs:520-524
+  - lib.rs:521
+  - lib.rs:522
+  - lib.rs:525
+  - lib.rs:526
+  status: candidate
+  excluded_properties:
+  - MT-BATCH-TOUCH-EMPTY-NOOP
+  extraction_sides:
+    spec:
+    - MT-BATCH-TOUCH-ERR-EMPTY-NOOP
+    - MT-BATCH-TOUCH-ERR-NOT-INITIALIZED
+    code:
+    - MT-BATCH-TOUCH-EMPTY-EARLY-RETURN
 - id: D-US-1-lib.rs:557-54dafa
   name: Contains precondition
   kind: spec-not-found-in-code
@@ -1089,6 +1322,53 @@ discordances:
     code:
     - MT-INV-OFFSET-IS-THE-ONLY-IDENTITY
     - MT-CLEAR-INVALIDATES-ALL-POINTERS
+- id: D-FR-007-allocator.rs:4853-a8fb3d
+  name: No leaked or double booked space
+  kind: spec-and-code-differ
+  methods:
+  - insert
+  - remove
+  - evict_next
+  - evict_next_for_key
+  - clear
+  - used
+  - capacity
+  - free_capacity
+  spec_says: Every byte of the pool is either free or belongs to exactly one entry that is currently in the cache,
+    so repeatedly adding and removing entries can never lose space permanently and can never hand the same space
+    out twice.
+  code_does: The bytes-used total is always exactly the sum of the rounded sizes of the entries the pool currently
+    holds, which is what makes the reported usage trustworthy; every operation that adds an entry reserves its space
+    in the same step and every operation that drops an entry releases its space in the same step, with the single
+    exception of an insert whose tracking step panics, which leaves reserved space with no entry behind it. The
+    sizes of all free runs added together plus the bytes-used total always equal the pool's capacity, so no byte
+    of the pool is ever lost or counted twice by the bookkeeping.
+  spec_pointers:
+  - FR-007
+  - FR-026
+  - SC-5
+  - US-4
+  code_pointers:
+  - allocator.rs:48-53
+  - lib.rs:360
+  - lib.rs:368
+  - lib.rs:456
+  - lib.rs:457
+  - lib.rs:367
+  - allocator.rs:19
+  - allocator.rs:48
+  - allocator.rs:53
+  - allocator.rs:61
+  - allocator.rs:82
+  status: candidate
+  excluded_properties:
+  - MT-INV-NO-LEAKED-OR-DOUBLE-BOOKED-SPACE
+  extraction_sides:
+    spec:
+    - MT-INV-ALLOCATOR-SLOT-MAP-AGREEMENT
+    code:
+    - MT-INV-USED-EQUALS-SUM-OF-ENTRIES
+    - MT-INV-FREE-SPACE-CONSERVATION
 - id: D-NFR-007-lib.rs:262-6f525d
   name: Default pool size never applied
   kind: spec-not-found-in-code
@@ -1183,4 +1463,168 @@ discordances:
     - MT-INV-CONCURRENT-STRUCTURAL-INTEGRITY
     code:
     - MT-INV-LOCK-ORDER
+- id: D-RANGE-US-3-ec579e
+  name: 'Input range: the requested pool size is a whole multiple of 4 KiB'
+  kind: input-range-mismatch
+  methods:
+  - initialize
+  - insert
+  - capacity
+  - free_capacity
+  - clear
+  spec_says: initialize allocates a pool of the specified size, only zero is rejected, and capacity() returns the
+    total pool size (US-3 spec.md:68,73; US-5 spec.md:103); after clear the whole pool is reusable (FR-018, US-4
+    spec.md:89-90); free_capacity = capacity - used for proactive-eviction triggers (FR-029). The spec places no
+    alignment requirement on pool_size.
+  code_does: FreeList::new(pool_size) seeds one free run of pool_size bytes (lib.rs:314, lib.rs:605, allocator.rs:16-19)
+    but every request is rounded up to 4096 (allocator.rs:42), so the trailing pool_size % 4096 bytes can never
+    be allocated, while capacity() (lib.rs:573) and free_capacity() (lib.rs:186) still count them; e.g. after clear
+    an insert of capacity() bytes returns PoolFull. pool_size is never checked for 4 KiB alignment (lib.rs:262 checks
+    only != 0).
+  spec_pointers:
+  - US-3
+  - US-5
+  - FR-004
+  - FR-018
+  - FR-029
+  - spec.md:68
+  - spec.md:73
+  - spec.md:103
+  - spec.md:243
+  code_pointers:
+  - lib.rs:262
+  - lib.rs:314
+  - lib.rs:605
+  - allocator.rs:19
+  - allocator.rs:42
+  - lib.rs:573
+  - lib.rs:186
+  status: candidate
+  assume_in_level2: the requested pool size is a whole multiple of 4 KiB
+  excluded_properties: []
+- id: D-RANGE-FR-002-fad39d
+  name: 'Input range: the requested pool size is a whole multiple of the system''s default hugepage size (2 MiB)
+    whenever the hugepage mapping is the one used'
+  kind: input-range-mismatch
+  methods:
+  - initialize
+  - Drop for MemoryTierState
+  spec_says: hugepage backing (MAP_HUGETLB) is preferred with automatic fallback (FR-002), and pool memory is properly
+    freed on Drop via munmap or spdk_free (NFR-006, SC-2 'no memory leaks'); the spec places no constraint on pool_size
+    other than > 0 (US-3 spec.md:73).
+  code_does: alloc_mmap maps pool_size bytes with MAP_HUGETLB first (lib.rs:196-203); the kernel rounds the mapping
+    up to the hugepage size, but Drop calls munmap(pool_ptr, pool_size) and ignores the return value (lib.rs:132).
+    For a hugetlb mapping munmap requires a hugepage-multiple length (unaligned split of a hugetlb VMA is EINVAL),
+    so a pool_size that is not a multiple of the hugepage size (2 MiB default) is silently leaked on Drop; the same
+    length is passed to mbind (lib.rs:233-243), which then fails into the warning path.
+  spec_pointers:
+  - FR-002
+  - NFR-006
+  - Success Criteria 2 (spec.md:230)
+  - US-3
+  code_pointers:
+  - lib.rs:196-203
+  - lib.rs:206
+  - lib.rs:132
+  - lib.rs:233-243
+  - lib.rs:311
+  status: candidate
+  assume_in_level2: the requested pool size is a whole multiple of the system's default hugepage size (2 MiB) whenever
+    the hugepage mapping is the one used
+  excluded_properties: []
+- id: D-RANGE-US-1-e5a999
+  name: 'Input range: the pool size is no larger than the largest single entry size (u32::MAX bytes)'
+  kind: input-range-mismatch
+  methods:
+  - insert
+  - clear
+  - initialize
+  - get
+  - peek
+  spec_says: insert(key, size) allocates a slot of the requested size (US-1 spec.md:31; FR-008..FR-010) and after
+    clear all memory is back in the free pool (FR-018, US-4); the spec states no maximum entry size, and initialize
+    takes pool_size as an unbounded usize (US-3).
+  code_does: 'the entry size is a 32-bit field end to end: IMemoryTier::insert takes size: u32 (imemory_tier.rs:67),
+    Slot.size is u32 (lib.rs:72), get/peek return u32 (imemory_tier.rs:73,80), while pool_size is usize (lib.rs:261,
+    lib.rs:314). So no single entry can exceed u32::MAX bytes (4 GiB after rounding); for pool_size > u32::MAX the
+    ''a single insertion as large as the entire pool capacity'' consequence of clear/coalescing is unreachable.'
+  spec_pointers:
+  - US-1
+  - US-4
+  - FR-018
+  - FR-026
+  - spec.md:31
+  - spec.md:68
+  code_pointers:
+  - imemory_tier.rs:61
+  - imemory_tier.rs:67
+  - lib.rs:72
+  - lib.rs:261
+  - lib.rs:314
+  - lib.rs:362
+  status: candidate
+  assume_in_level2: the pool size is no larger than the largest single entry size (u32::MAX bytes)
+  excluded_properties: []
+- id: D-RANGE-FR-019-b98877
+  name: 'Input range: the NUMA node is absent, -1 (any), or a node id in 0..64 that fits the single-word nodemask'
+  kind: input-range-mismatch
+  methods:
+  - initialize
+  spec_says: numa_node is Option<i32>; Some(node) with node >= 0 binds the pool via mbind(MPOL_BIND), None uses
+    default placement, and a failed binding falls back gracefully (imemory_tier.rs:57-60, FR-019, US-3 spec.md:71).
+    No upper bound on node is stated, and negative Some values are not described.
+  code_does: 'mmap path: negative nodes are silently ignored (lib.rs:226); node_id >= 64 leaves the one-word nodemask
+    at 0 (lib.rs:228-231) yet mbind is still called with maxnode = node_id + 2 (lib.rs:240), which for node_id >=
+    64 makes the kernel read BITS_TO_LONGS(node_id+1) words from an 8-byte stack variable (out-of-bounds user read;
+    bits beyond word 0 are garbage). SPDK path: the raw value (or -1 for None) is passed unchecked to spdk_zmalloc
+    as the socket id (lib.rs:280,287), so a negative value other than -1 or an out-of-range node yields AllocationFailed
+    instead of default placement.'
+  spec_pointers:
+  - FR-019
+  - US-3
+  - imemory_tier.rs:57-60
+  - spec.md:71
+  code_pointers:
+  - lib.rs:225-231
+  - lib.rs:240
+  - lib.rs:280
+  - lib.rs:287
+  - lib.rs:291-295
+  status: candidate
+  assume_in_level2: the NUMA node is absent, -1 (any), or a node id in 0..64 that fits the single-word nodemask
+  excluded_properties: []
+- id: D-RANGE-US-7-010573
+  name: 'Input range: no telemetry counter is at u64::MAX on entry (no wrap during the call)'
+  kind: input-range-mismatch
+  methods:
+  - insert
+  - get
+  - evict_next
+  - evict_next_for_key
+  - remove
+  - batch_touch
+  - telemetry_snapshot
+  spec_says: with the telemetry feature the component tracks the total eviction count and the write/read lock-contention
+    counts; telemetry_snapshot returns the current cumulative counters and only reset_telemetry decreases them (US-7
+    spec.md:131-136, FR-027, FR-028). No counter range or wrap behaviour is stated.
+  code_does: the counters are AtomicU64 bumped with fetch_add(1, Relaxed) (lib.rs:349, lib.rs:396, lib.rs:460, plus
+    the identical blocks at lib.rs:449, lib.rs:489, lib.rs:540), which wraps silently to 0 at u64::MAX; nothing
+    saturates or checks.
+  spec_pointers:
+  - US-7
+  - FR-027
+  - FR-028
+  - spec.md:131-136
+  code_pointers:
+  - lib.rs:40-42
+  - lib.rs:349
+  - lib.rs:396
+  - lib.rs:449
+  - lib.rs:460
+  - lib.rs:489
+  - lib.rs:540
+  - lib.rs:620-628
+  status: candidate
+  assume_in_level2: no telemetry counter is at u64::MAX on entry (no wrap during the call)
+  excluded_properties: []
 routed_to_other_tools: []

@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_mt_capacity": { "prover": "alt-ergo", "time": 0.022 },
-      "vc_mt_initialize": { "prover": "alt-ergo", "time": 0.022 },
-      "vc_mt_run": { "prover": "alt-ergo", "time": 0.027 },
-      "vc_verify_mt_capacity_post": { "prover": "cvc5", "time": 0.137 }
+      "vc_mt_capacity": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_mt_initialize": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_mt_run": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_verify_mt_capacity_post": { "prover": "cvc5", "time": 0.069 }
     }
   }
 }

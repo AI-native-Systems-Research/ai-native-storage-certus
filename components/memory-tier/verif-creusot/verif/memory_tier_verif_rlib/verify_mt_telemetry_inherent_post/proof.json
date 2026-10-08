@@ -2,12 +2,12 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_mt_telemetry_inherent": { "prover": "alt-ergo", "time": 0.016 },
-      "vc_tel_event": { "prover": "alt-ergo", "time": 0.013 },
-      "vc_tel_snapshot": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_mt_telemetry_inherent": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_tel_event": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_tel_snapshot": { "prover": "alt-ergo", "time": 0.023 },
       "vc_verify_mt_telemetry_inherent_post": {
         "prover": "alt-ergo",
-        "time": 0.024
+        "time": 0.037
       }
     }
   }

@@ -1,6 +1,6 @@
 {
   "profile": [],
   "proofs": {
-    "Coma": { "vc_lem_filter_idem": { "prover": "cvc4", "time": 0.149 } }
+    "Coma": { "vc_lem_filter_idem": { "prover": "cvc4", "time": 0.116 } }
   }
 }

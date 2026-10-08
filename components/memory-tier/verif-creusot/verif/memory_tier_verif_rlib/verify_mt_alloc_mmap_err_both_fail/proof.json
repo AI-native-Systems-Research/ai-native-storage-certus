@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_alloc_mmap_m": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_alloc_mmap_m": { "prover": "alt-ergo", "time": 0.025 },
       "vc_verify_mt_alloc_mmap_err_both_fail": {
         "prover": "alt-ergo",
-        "time": 0.091
+        "time": 0.073
       }
     }
   }

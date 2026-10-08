@@ -1,6 +1,6 @@
 {
   "profile": [],
   "proofs": {
-    "Coma": { "vc_lem_ta_step": { "prover": "z3", "time": 0.043 } }
+    "Coma": { "vc_lem_ta_step": { "prover": "z3", "time": 0.026 } }
   }
 }

@@ -2,9 +2,9 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_alloc_pool": { "prover": "alt-ergo", "time": 0.023 },
-      "vc_init_logged": { "prover": "alt-ergo", "time": 0.031 },
-      "vc_mt_initialize": { "prover": "cvc5", "time": 0.546 }
+      "vc_alloc_pool": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_init_logged": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_mt_initialize": { "prover": "cvc5", "time": 0.527 }
     }
   }
 }

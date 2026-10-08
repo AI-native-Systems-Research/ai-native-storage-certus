@@ -2,14 +2,14 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_mt_drop": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_mt_drop": { "prover": "alt-ergo", "time": 0.016 },
       "vc_policy_identify_next_to_evict": {
         "prover": "alt-ergo",
-        "time": 0.022
+        "time": 0.023
       },
       "vc_verify_mt_drop_does_not_untrack": {
         "prover": "cvc4",
-        "time": 0.246
+        "time": 0.29
       }
     }
   }

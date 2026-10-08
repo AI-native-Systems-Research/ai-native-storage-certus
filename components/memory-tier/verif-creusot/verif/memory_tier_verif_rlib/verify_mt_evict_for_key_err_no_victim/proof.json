@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_mt_evict_next_for_key": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_mt_evict_next_for_key": { "prover": "alt-ergo", "time": 0.03 },
       "vc_verify_mt_evict_for_key_err_no_victim": {
         "prover": "cvc5",
-        "time": 0.136
+        "time": 0.094
       }
     }
   }

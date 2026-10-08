@@ -2,11 +2,11 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_lk_remove": { "prover": "alt-ergo", "time": 0.029 },
-      "vc_mt_remove": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_lk_remove": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_mt_remove": { "prover": "alt-ergo", "time": 0.025 },
       "vc_verify_mt_remove_err_key_not_found": {
         "prover": "alt-ergo",
-        "time": 0.056
+        "time": 0.029
       }
     }
   }

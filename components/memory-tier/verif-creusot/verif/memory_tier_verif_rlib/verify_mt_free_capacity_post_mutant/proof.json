@@ -7,11 +7,11 @@
       "vc_verify_mt_free_capacity_post__mutant": {
         "tactic": "split_vc",
         "children": [
-          { "prover": "alt-ergo", "time": 0.021 },
-          { "prover": "alt-ergo", "time": 0.023 },
+          { "prover": "alt-ergo", "time": 0.024 },
+          { "prover": "alt-ergo", "time": 0.026 },
           {
             "tactic": "split_vc",
-            "children": [ { "prover": "alt-ergo", "time": 0.028 }, null ]
+            "children": [ { "prover": "alt-ergo", "time": 0.014 }, null ]
           }
         ]
       }

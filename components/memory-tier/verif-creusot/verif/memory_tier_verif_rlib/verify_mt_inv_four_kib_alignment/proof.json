@@ -2,11 +2,11 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_mt_peek": { "prover": "alt-ergo", "time": 0.03 },
-      "vc_mt_run": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_mt_peek": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_mt_run": { "prover": "alt-ergo", "time": 0.016 },
       "vc_verify_mt_inv_four_kib_alignment": {
         "prover": "cvc4",
-        "time": 0.606
+        "time": 0.648
       }
     }
   }

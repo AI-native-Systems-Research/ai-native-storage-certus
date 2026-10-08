@@ -2,8 +2,8 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_mt_telemetry_inherent": { "prover": "alt-ergo", "time": 0.016 },
-      "vc_tel_event": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_mt_telemetry_inherent": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_tel_event": { "prover": "alt-ergo", "time": 0.022 },
       "vc_verify_mt_telemetry_inherent_post__mutant": {
         "tactic": "compute_specified",
         "children": [
@@ -12,7 +12,7 @@
             "children": [
               {
                 "tactic": "split_vc",
-                "children": [ { "prover": "alt-ergo", "time": 0.032 }, null ]
+                "children": [ { "prover": "alt-ergo", "time": 0.035 }, null ]
               }
             ]
           }

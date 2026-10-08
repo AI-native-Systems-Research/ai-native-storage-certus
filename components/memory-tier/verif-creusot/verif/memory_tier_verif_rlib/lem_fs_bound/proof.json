@@ -5,10 +5,10 @@
       "vc_lem_fs_bound": {
         "tactic": "split_vc",
         "children": [
-          { "prover": "alt-ergo", "time": 0.031 },
-          { "prover": "alt-ergo", "time": 0.029 },
-          { "prover": "alt-ergo", "time": 0.027 },
-          { "prover": "z3", "time": 0.449 }
+          { "prover": "alt-ergo", "time": 0.018 },
+          { "prover": "alt-ergo", "time": 0.021 },
+          { "prover": "alt-ergo", "time": 0.016 },
+          { "prover": "z3", "time": 0.278 }
         ]
       }
     }

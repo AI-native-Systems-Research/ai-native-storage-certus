@@ -2,11 +2,11 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_lk_oldest_keys": { "prover": "alt-ergo", "time": 0.028 },
-      "vc_mt_oldest_keys": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_lk_oldest_keys": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_mt_oldest_keys": { "prover": "alt-ergo", "time": 0.017 },
       "vc_verify_mt_oldest_keys_err_empty": {
         "prover": "alt-ergo",
-        "time": 0.107
+        "time": 0.082
       }
     }
   }
