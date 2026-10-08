@@ -3,11 +3,11 @@ source: reconciled(spec,code)
 pin: d14dfb9a
 method: two-blind-extractions + deterministic assembly
 generated: '2026-09-29'
-note: 'Role 1 inventory was produced by component-sweep (extraction only). It has SINCE been
-  verified: the Creusot lane is complete and every status below was written by scorer_creusot,
-  which re-proved each property from source (see run:). The Kani lane is INCOMPLETE and is
-  withheld - see tool_notes. The earlier wording of this note ("NOT verified. No prover was
-  run") was true when the sweep wrote it and is false for this bundle.'
+note: 'Role 1 inventory was produced by component-sweep (extraction only). It has SINCE been verified:
+  the Creusot lane is complete and every status below was written by scorer_creusot, which re-proved each
+  property from source (see run:). The Kani lane is INCOMPLETE and is withheld - see tool_notes. The earlier
+  wording of this note ("NOT verified. No prover was run") was true when the sweep wrote it and is false
+  for this bundle.'
 counts:
   methods: 4
   spec_total: 82
@@ -185,15 +185,14 @@ properties:
   - 'spec: DPM-INIT-POST-TABLE,DPM-INIT-POST-NONEMPTY-ENTRIES'
   - 'code: DPM-READ-POST-FILTER'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dpm_init_post_entries
       result: Proved
-      wall_clock_s: 0.5
-      peak_rss_mb: 53
+      wall_clock_s: 5.13
+      peak_rss_mb: 252
       lever: null
-    fidelity: null
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -255,7 +254,7 @@ properties:
     have been recomputed and found to match — one over the header and one over the whole list of partition
     entries — and a mismatch of either one makes that copy fail with a corrupt-table error that reports
     the stored and the recomputed value.
-  origin: spec+code
+  origin: divergent
   global: true
   attachments: 2
   paired_from:
@@ -290,6 +289,16 @@ properties:
     evidence: null
     fidelity: null
     note: null
+  origin_before_level1: spec+code
+  divergence_note: 'SPEC (FR-002; AS-US2-3): both CRCs must be validated, and when both copies are bad
+    initialize() returns NoPartitionTable; the header CRC is a UEFI header CRC (FR-001 ''implement UEFI
+    GPT rev 1.0'', i.e. over HeaderSize bytes). CODE (gpt.rs:107-114, 123-128, 91-95): the header CRC
+    is always taken over a fixed 92 bytes, ignoring the parsed header_size (gpt.rs:373), and the CorruptTable
+    error is internal to try_read_gpt_at: on the primary it triggers fallback (gpt.rs:79) and on the backup
+    it is replaced by NoPartitionTable (gpt.rs:91), so no public method ever returns the ''corrupt-table
+    error reporting stored and recomputed value'' the merged record promises. The merge added a code-internal
+    error the spec does not name and that is not observable at initialize/initialize_or_format (see domain
+    discordance header_size == 92).'
 - id: DPM-INIT-POST-BACKUP-FALLBACK
   subject: initialize
   methods:
@@ -303,7 +312,7 @@ properties:
     zeros, the backup copy stored at the end of the drive is tried instead, and if that copy is intact
     the read succeeds and returns the partitions it describes; these are the only two conditions that
     trigger the fallback.
-  origin: spec+code
+  origin: divergent
   global: true
   attachments: 2
   paired_from:
@@ -339,6 +348,14 @@ properties:
     evidence: null
     fidelity: null
     note: null
+  origin_before_level1: spec+code
+  divergence_note: 'SPEC (FR-003, SC-002, AS-US2-2/4): if the primary is corrupt (CRC or signature) the
+    backup MUST be attempted; the spec does not say any other primary failure must NOT fall back. CODE
+    (gpt.rs:79-83): only CorruptTable and NoPartitionTable fall through; an I/O error on any primary sector
+    read (gpt.rs:103, 120) is returned immediately and the intact backup is never consulted. The merged
+    statement imported the code''s exclusivity clause (''these are the only two conditions''), which the
+    spec never states and which is reviewer-relevant: an unreadable primary sector defeats the redundancy
+    FR-003/plan decision 2 exists for.'
 - id: DPM-INIT-ERR-NO-TABLE
   subject: initialize
   methods:
@@ -562,15 +579,14 @@ properties:
   - 'spec: DPM-INIT-FRAME-READ-ONLY,DPM-INIT-FRAME-NO-REFORMAT'
   - 'code: DPM-INIT-FRAME-READONLY'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dpm_init_frame_read_only
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 53
+      wall_clock_s: 0.78
+      peak_rss_mb: 52
       lever: null
-    fidelity: null
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -692,15 +708,14 @@ properties:
   - 'spec: DPM-INIT-POST-ENTRY-LBA2'
   - 'code: DPM-READ-ENTRYLBA-IGNORED'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dpm_init_post_entry_lba2
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 53
+      wall_clock_s: 0.67
+      peak_rss_mb: 52
       lever: null
-    fidelity: null
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -730,15 +745,14 @@ properties:
   source:
   - 'code: DPM-READ-PRIMARY-FIRST'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dpm_init_read_primary_first
       result: Proved
-      wall_clock_s: 0.5
-      peak_rss_mb: 53
+      wall_clock_s: 0.65
+      peak_rss_mb: 52
       lever: null
-    fidelity: null
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -774,15 +788,14 @@ properties:
   - 'spec: DPM-INIT-INV-ROUNDTRIP'
   - 'code: DPM-READ-BACKUP-LOCATION'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dpm_init_inv_roundtrip
       result: Proved
-      wall_clock_s: 0.54
-      peak_rss_mb: 55
+      wall_clock_s: 0.66
+      peak_rss_mb: 54
       lever: null
-    fidelity: null
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -995,15 +1008,14 @@ properties:
   - 'spec: DPM-FORMAT-PRE-SINGLE-GROW,DPM-FORMAT-ERR-LAYOUT-MULTI-GROW'
   - 'code: DPM-FORMAT-ERR-LAYOUT-MULTIREST'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dpm_format_err_layout_multi_grow
       result: Proved
-      wall_clock_s: 0.52
-      peak_rss_mb: 53
+      wall_clock_s: 0.7
+      peak_rss_mb: 52
       lever: null
-    fidelity: null
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -1043,15 +1055,14 @@ properties:
   - 'spec: DPM-FORMAT-PRE-CAPACITY,DPM-FORMAT-ERR-LAYOUT-CAPACITY'
   - 'code: DPM-FORMAT-ERR-LAYOUT-OVERSUB'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dpm_format_err_layout_capacity
       result: Proved
-      wall_clock_s: 0.5
-      peak_rss_mb: 53
+      wall_clock_s: 0.65
+      peak_rss_mb: 52
       lever: null
-    fidelity: null
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -1125,7 +1136,7 @@ properties:
     those amounts from the total before the device-too-small check runs; for a smaller total the subtraction
     goes below zero, which either crashes or wraps round to a huge number that then slips past the very
     check intended to reject it.
-  origin: code-only
+  origin: divergent
   global: true
   attachments: 2
   paired_from:
@@ -1153,6 +1164,11 @@ properties:
     evidence: null
     fidelity: null
     note: null
+  origin_before_level1: code-only
+  divergence_note: Boundary record for domain discordance 'minimum device size' (spec silent; gpt.rs:158
+    underflows when total_sectors < entry_sectors + 2, gpt.rs:160 rejects a 1-sector usable region). Its
+    statement IS the out-of-range behaviour; proving it under config.total_sectors >= 2*E + 5 would be
+    vacuous.
 - id: DPM-FORMAT-PRE-MAX-128
   subject: format
   methods:
@@ -1225,15 +1241,14 @@ properties:
   source:
   - 'code: DPM-FORMAT-ERR-LAYOUT-UNREACHABLE'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dpm_format_err_layout_unreachable
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 53
+      wall_clock_s: 0.65
+      peak_rss_mb: 52
       lever: null
-    fidelity: null
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -1251,7 +1266,7 @@ properties:
   statement: The total sector demand of the explicitly sized partitions is accumulated by plain addition
     with no overflow check, so a request combining very large byte sizes with a very small sector size
     can make the running total wrap round and pass the capacity check it should have failed.
-  origin: code-only
+  origin: divergent
   global: true
   attachments: 2
   paired_from:
@@ -1279,6 +1294,10 @@ properties:
     evidence: null
     fidelity: null
     note: null
+  origin_before_level1: code-only
+  divergence_note: Boundary record for domain discordance 'fixed-size sector sum does not overflow' (FR-006
+    requires rejection; gpt.rs:263-268 sums with plain +). Its statement is the overflow behaviour itself;
+    vacuous under the no-overflow assume.
 - id: DPM-FORMAT-POST-TABLE
   subject: format
   methods:
@@ -1452,15 +1471,14 @@ properties:
   - 'spec: DPM-FORMAT-POST-MBR'
   - 'code: DPM-FORMAT-POST-MBR'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dpm_format_post_mbr
       result: Proved
-      wall_clock_s: 0.5
-      peak_rss_mb: 53
+      wall_clock_s: 0.7
+      peak_rss_mb: 52
       lever: null
-    fidelity: null
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -1503,15 +1521,14 @@ properties:
   - 'spec: DPM-FORMAT-POST-PRIMARY-HEADER,DPM-FORMAT-POST-BACKUP-HEADER'
   - 'code: DPM-FORMAT-POST-HEADERPAIR'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dpm_format_post_header_pair
       result: Proved
-      wall_clock_s: 0.48
-      peak_rss_mb: 51
+      wall_clock_s: 0.7
+      peak_rss_mb: 48
       lever: null
-    fidelity: null
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -1600,15 +1617,14 @@ properties:
   - 'spec: DPM-FORMAT-FRAME-DATA-REGIONS,DPM-FORMAT-POST-IO-COUNT-O1'
   - 'code: DPM-FORMAT-POST-WRITEORDER'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dpm_format_frame_data_regions
       result: Proved
-      wall_clock_s: 0.5
-      peak_rss_mb: 53
+      wall_clock_s: 0.71
+      peak_rss_mb: 52
       lever: null
-    fidelity: null
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -1850,7 +1866,7 @@ properties:
     number from the caller’s request and never compares them with what the connected device actually reports,
     even though the read path does ask the device for exactly those two numbers, so a caller who overstates
     the drive size has a table written that describes sectors the device does not have.
-  origin: code-only
+  origin: divergent
   global: true
   attachments: 2
   paired_from:
@@ -1879,6 +1895,11 @@ properties:
     evidence: null
     fidelity: null
     note: null
+  origin_before_level1: code-only
+  divergence_note: Boundary record for domain discordance 'format config geometry matches the device'
+    (spec Key entity PartitionConfig / SC-001 silent; lib.rs:91 never compares config.sector_size/total_sectors
+    with bd.sector_size/num_sectors). Statement is the mismatch behaviour itself; vacuous under the matching-geometry
+    assume.
 - id: DPM-FORMAT-FRAME-CACHE-ON-ERROR
   subject: format
   methods:
@@ -2801,7 +2822,7 @@ properties:
     for instance — is passed straight back unchanged with no attempt to write anything, and if the operation
     does have to format the drive and the requested layout is impossible, the layout error is reported
     as a layout error rather than as a missing partition table.'
-  origin: spec+code
+  origin: divergent
   global: false
   attachments: 1
   paired_from:
@@ -2833,6 +2854,14 @@ properties:
     evidence: null
     fidelity: null
     note: null
+  origin_before_level1: spec+code
+  divergence_note: 'SPEC (IR-003, FR-005, FR-006; SC-004): a layout error during the format branch is
+    reported, and a drive with a table must not be reformatted on restart. CODE (lib.rs:55-62 + gpt.rs:90-95):
+    non-table read errors are propagated only when they occur on the PRIMARY read; any error on the backup
+    read, including an I/O failure, is rewritten as NoPartitionTable at gpt.rs:91, which initialize_or_format
+    treats as ''blank disk'' and FORMATS (lib.rs:57-60). The merged record''s code-side claim ''an input/output
+    failure is passed straight back with no attempt to write anything'' is broader than the code does,
+    and the spec side covers only the layout-error case.'
 - id: DPM-IOF-NO-REFORMAT-ON-DAMAGED-PRIMARY
   subject: initialize_or_format
   methods:
@@ -3093,7 +3122,7 @@ properties:
     entry list, from the device’s sector count with nothing checking that the device is large enough,
     so on a very small device that subtraction goes below zero and crashes or wraps round to a nonsensical
     sector instead of reporting an error.
-  origin: code-only
+  origin: divergent
   global: true
   attachments: 2
   paired_from:
@@ -3121,6 +3150,10 @@ properties:
     evidence: null
     fidelity: null
     note: null
+  origin_before_level1: code-only
+  divergence_note: Boundary record for domain discordance 'minimum device size' on the read path (gpt.rs:87,
+    89 compute num_sectors - 1 - entry_sectors unchecked). Statement is the underflow itself; vacuous
+    under num_sectors >= entry_sectors + 1.
 - id: DPM-READ-ERR-SHORT-HEADER
   subject: parse_header
   methods:
@@ -3212,7 +3245,7 @@ properties:
     the header, but the code that splits those bytes into entries always steps forward by a fixed 128
     bytes and stops early when it runs out of data, so a header declaring any other entry size has its
     entries cut at the wrong boundaries and the partitions reported are nonsense rather than an error.
-  origin: code-only
+  origin: divergent
   global: true
   attachments: 2
   paired_from:
@@ -3241,6 +3274,10 @@ properties:
     evidence: null
     fidelity: null
     note: null
+  origin_before_level1: code-only
+  divergence_note: Boundary record for domain discordance 'on-disk entry count/size trusted' (FR-001 fixes
+    128x128; gpt.rs:118-119 uses header.partition_entry_size, gpt.rs:390 strides 128). Statement is the
+    behaviour when partition_entry_size != 128; vacuous under hdr.partition_entry_size == 128.
 - id: DPM-IO-READ-LENGTH
   subject: read_bytes
   methods:
@@ -3266,15 +3303,14 @@ properties:
   source:
   - 'code: DPM-IO-READ-LENGTH'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dpm_io_read_length
       result: Proved
-      wall_clock_s: 0.49
-      peak_rss_mb: 51
+      wall_clock_s: 0.68
+      peak_rss_mb: 48
       lever: null
-    fidelity: null
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -3385,15 +3421,14 @@ properties:
   source:
   - 'code: DPM-IO-WRITE-LENGTH'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dpm_io_write_length
       result: Proved
-      wall_clock_s: 0.5
-      peak_rss_mb: 53
+      wall_clock_s: 0.66
+      peak_rss_mb: 52
       lever: null
-    fidelity: null
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -3506,15 +3541,14 @@ properties:
   source:
   - 'code: DPM-IO-WRITE-SECTOR-TRUST'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dpm_io_write_sector_trust
       result: Proved
-      wall_clock_s: 0.48
-      peak_rss_mb: 51
+      wall_clock_s: 0.62
+      peak_rss_mb: 47
       lever: null
-    fidelity: null
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -3671,7 +3705,7 @@ properties:
   statement: A partition name made of ordinary letters, digits and punctuation comes back exactly as it
     went in after being written to the drive in the two-byte-per-character on-disk encoding and read back
     again, with no characters lost or altered.
-  origin: spec+code
+  origin: divergent
   global: true
   attachments: 4
   paired_from:
@@ -3704,6 +3738,13 @@ properties:
     evidence: null
     fidelity: null
     note: null
+  origin_before_level1: spec+code
+  divergence_note: 'SPEC (SC-003): round-trip UTF-8 -> UTF-16LE -> UTF-8 preserves ALL ASCII partition
+    names (no length or character qualifier). CODE (gpt.rs:578, 592): only names of at most 36 UTF-16
+    units containing no NUL round-trip; longer names are silently truncated to 36 units and a name containing
+    ''\0'' (an ASCII character) is cut there. The merge dropped the code side''s ''<= 36, no zero character''
+    qualifier, so the merged statement is false for an ASCII name of 37+ characters (see domain discordances
+    on name length and NUL).'
 - id: DPM-INV-NO-OVERLAP
   subject: 'Global invariant: partitions never overlap'
   methods:
@@ -3867,7 +3908,7 @@ properties:
   statement: The on-disk list of partition entries always consists of exactly 128 entries, each occupying
     exactly 128 bytes, giving a fixed 16 kilobytes of entry data for both the main and the backup copy
     whatever the drive or layout.
-  origin: spec+code
+  origin: divergent
   global: true
   attachments: 5
   paired_from:
@@ -3901,6 +3942,14 @@ properties:
     evidence: null
     fidelity: null
     note: null
+  origin_before_level1: spec+code
+  divergence_note: 'SPEC (FR-001; Implementation note ''entry padding''): the on-disk entry list ALWAYS
+    has 128 entries of 128 bytes, whatever the drive or layout, for initialize and format alike. CODE
+    (gpt.rs:310-319, 433 vs gpt.rs:118-120, 131, 389-394): only tables this component WRITES have 128x128;
+    the read path accepts whatever num_partition_entries and partition_entry_size the on-disk header declares,
+    reads count*size bytes and parses at a fixed 128-byte stride. The merged record kept the spec''s ''always''
+    while the code side is scoped to writes (methods include initialize/partition_info/num_partitions)
+    - see domain discordance on on-disk entry count/size.'
 - id: DPM-INV-ENTRY-SECTORS-CONSISTENT
   subject: 'Global invariant: entry-list size in sectors is derived identically everywhere'
   methods:
@@ -3931,15 +3980,14 @@ properties:
   source:
   - 'code: DPM-INV-ENTRY-SECTORS'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dpm_inv_entry_sectors_consistent
       result: Proved
-      wall_clock_s: 0.49
-      peak_rss_mb: 51
+      wall_clock_s: 0.57
+      peak_rss_mb: 47
       lever: null
-    fidelity: null
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -3986,15 +4034,14 @@ properties:
   - 'spec: DPM-INV-CRC-SELF-CONSISTENT'
   - 'code: DPM-FORMAT-POST-CRC,DPM-READ-CRC-SPAN'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dpm_inv_crc_self_consistent
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 52
+      wall_clock_s: 0.71
+      peak_rss_mb: 51
       lever: null
-    fidelity: null
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -4091,15 +4138,14 @@ properties:
   - 'spec: DPM-INV-BACKUP-MIRRORS-PRIMARY'
   - 'code: DPM-FORMAT-POST-MIRROR'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
     evidence:
       modules:
       - verify_dpm_inv_backup_mirrors_primary
       result: Proved
-      wall_clock_s: 0.5
-      peak_rss_mb: 53
+      wall_clock_s: 0.63
+      peak_rss_mb: 52
       lever: null
-    fidelity: null
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -4809,21 +4855,20 @@ inventory_provenance:
     pin.
   extracted_by: component-sweep on node7, 2026-09-29
 run:
-  gate_commit: d14dfb9a
+  gate_commit: 7acfc58d
   gate_branch: HEAD
   creusot:
     scored_by: scorer_creusot
     command: scorer_creusot.py components/disk-partition-manager/verif --crate-dir components/disk-partition-manager/verif-creusot
-      --cap-seconds 60 --cap-max 300
-    started: '2026-10-01T11:03:44-07:00'
-    finished: '2026-10-01T11:05:56-07:00'
+      --cap-seconds 60 --cap-max 300 --resume
+    started: '2026-10-08T01:28:59-07:00'
+    finished: '2026-10-08T01:33:01-07:00'
     creusot: v0.11.0-169-g9cf662ce6
     why3: Why3 platform, version 1.8.2+git
     provers:
     - Alt-Ergo 2.6.2
     - CVC4 1.8
     - CVC5 1.3.1
-    - Coq 8.20.1
     - Z3 4.16.0
     cap_seconds: 60
     cap_max: 300
@@ -4831,64 +4876,355 @@ run:
 tool_notes:
 - tool: kani
   headline: incomplete, and nothing in it is published.
-  detail: >-
-    The Kani lane produced 66 harnesses but left 76 of the 102 obligations with no artifact at all,
-    so it was reported as unfinished work rather than as tool boundaries. Its agent-reported figures
-    (9 proved, 2 refuted) were NOT reproduced by scorer_kani.py, so no Kani status exists in this
-    bundle and the column reads 0 proved / 102 pending. Read that as "this lane did not finish",
-    NOT as "Kani cannot prove these". Separately, one of the two agent-reported refutations
-    (DPM-INV-SECTOR-SIZE-DOMAIN) was audited and found VACUOUS as evidence: its harness
-    re-implements the protective-MBR indexing inline and never calls write_protective_mbr, so it
-    would still pass after a correct fix. That obligation is nonetheless a genuine defect, because
-    Creusot refuted it independently on its real mirror at gpt.rs:334.
-  measured: >-
-    66 harnesses (26 base, 24 mutant twins, 4 refutations, 3 discriminators, 2 splits, 7 cost
-    probes); 26 returned a verdict, 0 with undetermined checks; three walls gave no verdict at 330s
-    (compute_partition_layout's 128-slot padding loop, String::from_utf16_lossy, new_default)
+  detail: 'The Kani lane produced 66 harnesses but left 76 of the 102 obligations with no artifact at
+    all, so it was reported as unfinished work rather than as tool boundaries. Its agent-reported figures
+    (9 proved, 2 refuted) were NOT reproduced by scorer_kani.py, so no Kani status exists in this bundle
+    and the column reads 0 proved / 102 pending. Read that as "this lane did not finish", NOT as "Kani
+    cannot prove these". Separately, one of the two agent-reported refutations (DPM-INV-SECTOR-SIZE-DOMAIN)
+    was audited and found VACUOUS as evidence: its harness re-implements the protective-MBR indexing inline
+    and never calls write_protective_mbr, so it would still pass after a correct fix. That obligation
+    is nonetheless a genuine defect, because Creusot refuted it independently on its real mirror at gpt.rs:334.'
+  measured: 66 harnesses (26 base, 24 mutant twins, 4 refutations, 3 discriminators, 2 splits, 7 cost
+    probes); 26 returned a verdict, 0 with undetermined checks; three walls gave no verdict at 330s (compute_partition_layout's
+    128-slot padding loop, String::from_utf16_lossy, new_default)
 bugs:
   FV-BUG-003:
     title: The sector size is never validated
-    root_cause: config.sector_size is passed through unchecked (lib.rs:91 -> gpt.rs:58); 512 or 4096 appears only
-      in a doc comment. The protective MBR buffer is sized by it, then written at offset 446.
+    root_cause: config.sector_size is passed through unchecked (lib.rs:91 -> gpt.rs:58); 512 or 4096 appears
+      only in a doc comment. The protective MBR buffer is sized by it, then written at offset 446.
     location: components/disk-partition-manager/src/gpt.rs:58
     status: open
-    also_seen: Kani (unscored) — with a 1-byte sector size the u64 sector sum wraps and passes the capacity check
-      (DPM-FORMAT-SUM-OVERFLOW).
+    also_seen: Kani (unscored) — with a 1-byte sector size the u64 sector sum wraps and passes the capacity
+      check (DPM-FORMAT-SUM-OVERFLOW).
   FV-BUG-004:
     title: More than 128 partitions are not rejected
-    root_cause: The layout pads the entry list UP to 128 but never truncates or rejects more (gpt.rs:310), so a
-      129th entry is serialised past the fixed 16 KiB entry buffer.
+    root_cause: The layout pads the entry list UP to 128 but never truncates or rejects more (gpt.rs:310),
+      so a 129th entry is serialised past the fixed 16 KiB entry buffer.
     location: components/disk-partition-manager/src/gpt.rs:310
     status: open
   FV-BUG-005:
     title: A 'rest of disk' partition with no space left gets an inverted extent
-    root_cause: When no sectors remain, the rest-of-disk partition gets ending_lba = starting_lba - 1 (gpt.rs:293),
-      and its length is then computed as ending - starting + 1.
+    root_cause: When no sectors remain, the rest-of-disk partition gets ending_lba = starting_lba - 1
+      (gpt.rs:293), and its length is then computed as ending - starting + 1.
     location: components/disk-partition-manager/src/gpt.rs:293
     status: open
-# Orchestrator-written: the IPartitionTable trait's own methods (components/interfaces/src/ipartition_table.rs), the method-headline denominator.
 interface_methods:
 - initialize
 - format
 - partition_info
 - num_partitions
-# LEVEL 1 (level1.py): properties derived from a spec<->code discordance; see discordances.yaml. Never sent to the provers.
+domain_discordances:
+- spec_says: Sector size must be 512 or 4096 bytes (FR-011; PartitionConfig.sector_size doc 'Sector size
+    in bytes (512 or 4096)'); the implementation note admits it is never validated.
+  code_does: Never validates the sector size, from the config (format) or from the device (initialize).
+    Divides by it (entry_sectors gpt.rs:326, div_ceil gpt.rs:267, 283, 452, 502) -> panic on 0; builds
+    sector-sized MBR/header buffers and writes mbr[446..462], mbr[510], mbr[511] (gpt.rs:330-352) and
+    buf[0..92] (gpt.rs:408-423) -> index panic for sector_size < 512 (MBR) / < 92 (header); any other
+    value (e.g. 520, 1024) is silently accepted.
+  spec_pointers:
+  - FR-011
+  - 'Key entity: PartitionConfig'
+  - ipartition_table.rs:39
+  - 'Implementation note: Sector size (Sync 2026-08-07)'
+  code_pointers:
+  - gpt.rs:326
+  - gpt.rs:267
+  - gpt.rs:283
+  - gpt.rs:330
+  - gpt.rs:351
+  - gpt.rs:352
+  - gpt.rs:408
+  - gpt.rs:452
+  - gpt.rs:502
+  - lib.rs:73
+  - lib.rs:91
+  methods:
+  - format
+  - initialize
+  - initialize_or_format
+  assume: the sector size (config.sector_size for format, the device-reported size for initialize) is
+    512 or 4096
+  assume_rust: matches!(config.sector_size, 512 | 4096) && matches!(bd.sector_size(ns_id), Ok(512) | Ok(4096))
+- spec_says: The GPT has exactly 128 partition entries (FR-001), so at most 128 partitions can be requested.
+  code_does: Never checks config.partitions.len(); compute_partition_layout pushes one entry per spec
+    (gpt.rs:279-307), the pad loop is skipped when len >= 128 (gpt.rs:310), and serialize_entries indexes
+    buf[i*128..] in a fixed 16384-byte buffer (gpt.rs:433-442) -> out-of-bounds panic for the 129th partition.
+  spec_pointers:
+  - FR-001
+  - 'Implementation note: entry padding'
+  code_pointers:
+  - gpt.rs:279
+  - gpt.rs:310
+  - gpt.rs:433
+  - gpt.rs:437
+  methods:
+  - format
+  - initialize_or_format
+  assume: the format request lists at most 128 partitions
+  assume_rust: config.partitions.len() <= 128
+- spec_says: Partition names are up to 36 characters (FR-009; PartitionSpec.name doc 'max 36 UTF-16LE
+    characters').
+  code_does: Never rejects a longer name; encode_utf16le_name silently keeps the first 36 UTF-16 code
+    units (gpt.rs:578), which can also split a surrogate pair so the decoded name ends in U+FFFD (gpt.rs:594).
+    The per-iteration bounds test (gpt.rs:581) is dead.
+  spec_pointers:
+  - FR-009
+  - SC-003
+  - ipartition_table.rs:32
+  code_pointers:
+  - gpt.rs:578
+  - gpt.rs:581
+  - gpt.rs:294
+  - gpt.rs:594
+  methods:
+  - format
+  - initialize_or_format
+  - initialize
+  - partition_info
+  assume: every requested partition name is at most 36 UTF-16 code units
+  assume_rust: config.partitions.iter().all(|p| p.name.encode_utf16().count() <= 36)
+- spec_says: Round-trip name encoding preserves ALL ASCII partition names (SC-003); no character is excluded.
+  code_does: decode stops at the first zero UTF-16 unit (gpt.rs:592), so a name containing '\0' (an ASCII
+    character) comes back truncated; encode does not reject it (gpt.rs:578).
+  spec_pointers:
+  - SC-003
+  - FR-009
+  code_pointers:
+  - gpt.rs:578
+  - gpt.rs:592
+  methods:
+  - format
+  - initialize
+  - initialize_or_format
+  - partition_info
+  assume: no requested partition name contains a NUL character
+  assume_rust: config.partitions.iter().all(|p| !p.name.contains('\0'))
+- spec_says: The entry array is 128 entries of 128 bytes (FR-001); initialize reads a fixed, device-size-independent
+    set of sectors (PR-002).
+  code_does: 'Trusts the CRC-protected but externally writable header: entry_bytes = num_partition_entries
+    as usize * partition_entry_size as usize (gpt.rs:118-119, up to ~2^64 bytes -> Vec::with_capacity
+    panic / unbounded sector reads at gpt.rs:453-455), parses num_partition_entries entries (gpt.rs:131)
+    at a fixed 128-byte stride regardless of partition_entry_size (gpt.rs:389-394).'
+  spec_pointers:
+  - FR-001
+  - PR-002
+  code_pointers:
+  - gpt.rs:118
+  - gpt.rs:119
+  - gpt.rs:120
+  - gpt.rs:131
+  - gpt.rs:381
+  - gpt.rs:382
+  - gpt.rs:390
+  - gpt.rs:453
+  methods:
+  - initialize
+  - initialize_or_format
+  assume: every header read from the drive (primary at LBA 1, backup at the last LBA) declares 128 entries
+    of 128 bytes
+  assume_rust: hdr.num_partition_entries == 128 && hdr.partition_entry_size == 128
+- spec_says: Implement UEFI GPT rev 1.0 (FR-001); the implementation note scopes the read path to Certus-written
+    layouts (entry array at LBA 2) but does not require or validate it.
+  code_does: 'Parses partition_entry_lba (gpt.rs:380) and never uses it: primary entries always read from
+    LBA 2 (gpt.rs:68), backup entries from num_sectors - 1 - entry_sectors (gpt.rs:87-89); a header whose
+    entry LBA differs is read from the wrong sectors (rejected as corrupt, or misparsed if the CRC happens
+    to match).'
+  spec_pointers:
+  - FR-001
+  - 'Implementation note: Read path assumes Certus-written layout'
+  - US-2
+  code_pointers:
+  - gpt.rs:380
+  - gpt.rs:68
+  - gpt.rs:87
+  - gpt.rs:89
+  methods:
+  - initialize
+  - initialize_or_format
+  assume: the primary header names LBA 2 and the backup header names the sectors just before the last
+    LBA as their entry arrays
+  assume_rust: primary_hdr.partition_entry_lba == 2 && backup_hdr.partition_entry_lba == num_sectors -
+    1 - (16384u64).div_ceil(sector_size as u64)
+- spec_says: Validate GPT header integrity via CRC32 (FR-002) per UEFI GPT rev 1.0 (FR-001), where the
+    header CRC covers HeaderSize bytes.
+  code_does: Always computes the header CRC over the first 92 bytes (gpt.rs:107) and never uses the parsed
+    header_size (gpt.rs:373); a header with header_size != 92 is judged over the wrong span.
+  spec_pointers:
+  - FR-002
+  - FR-001
+  code_pointers:
+  - gpt.rs:107
+  - gpt.rs:373
+  - gpt.rs:426
+  methods:
+  - initialize
+  - initialize_or_format
+  assume: every header read from the drive declares a header size of 92 bytes
+  assume_rust: hdr.header_size == 92
+- spec_says: PartitionConfig carries sector size and total sectors (Key entity); SC-001 requires a formatted
+    drive to read back with identical offsets. Spec is silent on whether the config must match the device.
+  code_does: format uses config.sector_size / config.total_sectors as-is (lib.rs:91) and never compares
+    them with bd.sector_size / bd.num_sectors, which initialize does query (lib.rs:73-78); DMA buffers
+    are sized by the config value (gpt.rs:457, 509), the backup header goes to config.total_sectors -
+    1 (gpt.rs:216), and read-back locates the backup from the device's count (gpt.rs:87).
+  spec_pointers:
+  - 'Key entity: PartitionConfig'
+  - SC-001
+  - FR-011
+  - IR-002
+  code_pointers:
+  - lib.rs:91
+  - lib.rs:73
+  - lib.rs:76
+  - gpt.rs:87
+  - gpt.rs:216
+  - gpt.rs:457
+  - gpt.rs:509
+  methods:
+  - format
+  - initialize_or_format
+  - initialize
+  assume: the format request's sector size and total sector count equal what the device reports for that
+    namespace
+  assume_rust: bd.sector_size(config.ns_id) == Ok(config.sector_size) && bd.num_sectors(config.ns_id)
+    == Ok(config.total_sectors)
+- spec_says: Namespace ID is configurable (FR-010); SC-001/SC-004 require format-then-read (and restart
+    without reformat) to see the same table.
+  code_does: format addresses config.ns_id (lib.rs:91) while initialize addresses the set_ns_id value
+    or default 1 (lib.rs:35, 72); initialize_or_format reads one namespace and, on failure, formats the
+    other (lib.rs:55-59). Nothing checks they agree.
+  spec_pointers:
+  - FR-010
+  - SC-001
+  - SC-004
+  - IR-003
+  code_pointers:
+  - lib.rs:35
+  - lib.rs:72
+  - lib.rs:91
+  - lib.rs:55
+  - lib.rs:59
+  methods:
+  - initialize_or_format
+  - format
+  - initialize
+  assume: the namespace in the format request is the namespace the component is configured to read
+  assume_rust: config.ns_id == self.ns_id.lock().unwrap().unwrap_or(1)
+- spec_says: Spec silent on a minimum device size (Key entity PartitionConfig; FR-006 only rejects fixed
+    partitions exceeding usable space; FR-001 fixes the layout).
+  code_does: write_gpt computes num_sectors - 1 - E - 1 (gpt.rs:158) before its too-small check -> underflow
+    for total_sectors < E + 2; the check first_usable >= last_usable (gpt.rs:160) also rejects a usable
+    region of exactly 1 sector; read_gpt computes num_sectors - 1 - E (gpt.rs:87-89) unchecked; MBR size
+    uses num_sectors - 1 (gpt.rs:347). E = ceil(16384 / sector_size).
+  spec_pointers:
+  - 'Key entity: PartitionConfig'
+  - FR-001
+  - FR-006
+  code_pointers:
+  - gpt.rs:158
+  - gpt.rs:160
+  - gpt.rs:87
+  - gpt.rs:89
+  - gpt.rs:347
+  methods:
+  - format
+  - initialize
+  - initialize_or_format
+  assume: the device has room for both headers, both entry arrays, the MBR and at least two usable sectors
+  assume_rust: config.total_sectors >= 2 * 16384u64.div_ceil(config.sector_size as u64) + 5 && num_sectors
+    >= 16384u64.div_ceil(sector_size as u64) + 1
+- spec_says: Configurations whose fixed-size partitions exceed usable space MUST be rejected (FR-006).
+  code_does: fixed_sectors is a plain .sum() of div_ceil values (gpt.rs:263-268) and current_lba + num_sectors
+    - 1 is unchecked (gpt.rs:293); with huge size_bytes the sum wraps (release) and an over-subscribed
+    layout passes the gpt.rs:270 check, or panics (debug).
+  spec_pointers:
+  - FR-006
+  - AS-US1-2
+  code_pointers:
+  - gpt.rs:263
+  - gpt.rs:268
+  - gpt.rs:270
+  - gpt.rs:293
+  methods:
+  - format
+  - initialize_or_format
+  assume: the total sector demand of the fixed-size partitions fits in a u64
+  assume_rust: config.partitions.iter().try_fold(0u64, |a, p| a.checked_add(p.size_bytes.div_ceil(config.sector_size
+    as u64))).is_some()
+- spec_says: A size_bytes=0 partition consumes all remaining usable LBAs (FR-004); spec silent on the
+    case where nothing remains.
+  code_does: rest_sectors may be 0 (gpt.rs:277); then ending_lba = current_lba - 1 (gpt.rs:293) and the
+    result's num_sectors = ending_lba - starting_lba + 1 (gpt.rs:226; gpt.rs:139 on read-back) underflows
+    (debug panic; release wraps to 0) and a zero-length partition with ending < starting is written to
+    disk.
+  spec_pointers:
+  - FR-004
+  - 'Plan design decision 3: rest-of-disk semantics'
+  code_pointers:
+  - gpt.rs:277
+  - gpt.rs:293
+  - gpt.rs:226
+  - gpt.rs:139
+  methods:
+  - format
+  - initialize_or_format
+  - initialize
+  assume: if a rest-of-disk partition is requested, the fixed-size partitions leave at least one usable
+    sector
+  assume_rust: '!config.partitions.iter().any(|p| p.size_bytes == 0) || config.partitions.iter().map(|p|
+    p.size_bytes.div_ceil(config.sector_size as u64)).sum::<u64>() < config.total_sectors - 2 * 16384u64.div_ceil(config.sector_size
+    as u64) - 3'
+- spec_says: PartitionInfo carries start LBA and sector count (Key entity PartitionInfo) of a UEFI GPT
+    entry (FR-001, where StartingLBA <= EndingLBA).
+  code_does: 'For every occupied on-disk entry computes e.ending_lba - e.starting_lba + 1 unchecked (gpt.rs:139):
+    ending < starting underflows, and starting 0 / ending u64::MAX overflows the +1; never checks the
+    entry lies within first/last usable LBA.'
+  spec_pointers:
+  - 'Key entity: PartitionInfo'
+  - FR-001
+  code_pointers:
+  - gpt.rs:139
+  - gpt.rs:398
+  - gpt.rs:399
+  methods:
+  - initialize
+  - initialize_or_format
+  - partition_info
+  assume: every occupied entry read from the drive has starting_lba <= ending_lba and does not span the
+    whole u64 range
+  assume_rust: entries.iter().filter(|e| e.type_guid != [0u8; 16]).all(|e| e.starting_lba <= e.ending_lba
+    && e.ending_lba - e.starting_lba < u64::MAX)
+level1_sync_check:
+  by: orchestrator-applied ~/FV/synccheck/disk-partition-manager/synccheck.yaml (node7 reading agent,
+    2026-10-05), applied 2026-10-07
+  reclassified: 10
+  domain_discordances: 13
 level2_excluded:
+- DPM-INIT-POST-CRC-VALIDATION
+- DPM-INIT-POST-BACKUP-FALLBACK
 - DPM-INIT-ERR-NO-TABLE
 - DPM-INIT-ERR-IO
 - DPM-INIT-IO-COUNT-BOUNDED
 - DPM-FORMAT-PRE-SECTOR-SIZE
 - DPM-FORMAT-FRAME-NO-WRITE-ON-REJECT
+- DPM-FORMAT-PRE-GEOMETRY-MIN
 - DPM-FORMAT-PRE-MAX-128
+- DPM-FORMAT-SUM-OVERFLOW
 - DPM-FORMAT-POST-TABLE
 - DPM-FORMAT-POST-GUID-FRESH
 - DPM-FORMAT-POST-TYPE-GUID-ECHO
+- DPM-FORMAT-IGNORES-DEVICE-GEOMETRY
 - DPM-PINFO-POST-INDEX-ECHO
 - DPM-IOF-PRE-CONFIG-VALID
 - DPM-IOF-POST-MISSING-FORMATTED
+- DPM-IOF-ERR-PROPAGATE
 - DPM-IOF-NO-REFORMAT-ON-DAMAGED-PRIMARY
+- DPM-READ-BACKUP-LOCATION-UNDERFLOW
+- DPM-READ-STRIDE-MISMATCH
 - DPM-NAME-LENGTH-LIMIT
+- DPM-NAME-ROUNDTRIP
 - DPM-INV-NO-OVERLAP
+- DPM-INV-ENTRY-ARRAY-SHAPE
 - DPM-INV-SIGNATURE-REVISION
 - DPM-INV-GUID-DISTINCT
 - DPM-INV-SECTOR-SIZE-DOMAIN
@@ -4896,3 +5232,105 @@ level2_excluded:
 - DPM-INV-PARTITION-INDEX-SEQUENTIAL
 - DPM-INV-NUM-SECTORS-POSITIVE
 - DPM-INV-NSID-CONSISTENT
+level2_assumptions:
+- id: D-RANGE-FR-011-46880c
+  assume: the sector size (config.sector_size for format, the device-reported size for initialize) is
+    512 or 4096
+  assume_rust: matches!(config.sector_size, 512 | 4096) && matches!(bd.sector_size(ns_id), Ok(512) | Ok(4096))
+  methods:
+  - format
+  - initialize
+  - initialize_or_format
+- id: D-RANGE-FR-001-4b3044
+  assume: the format request lists at most 128 partitions
+  assume_rust: config.partitions.len() <= 128
+  methods:
+  - format
+  - initialize_or_format
+- id: D-RANGE-FR-009-d84272
+  assume: every requested partition name is at most 36 UTF-16 code units
+  assume_rust: config.partitions.iter().all(|p| p.name.encode_utf16().count() <= 36)
+  methods:
+  - format
+  - initialize_or_format
+  - initialize
+  - partition_info
+- id: D-RANGE-SC-003-a2168d
+  assume: no requested partition name contains a NUL character
+  assume_rust: config.partitions.iter().all(|p| !p.name.contains('\0'))
+  methods:
+  - format
+  - initialize
+  - initialize_or_format
+  - partition_info
+- id: D-RANGE-FR-001-2e9472
+  assume: every header read from the drive (primary at LBA 1, backup at the last LBA) declares 128 entries
+    of 128 bytes
+  assume_rust: hdr.num_partition_entries == 128 && hdr.partition_entry_size == 128
+  methods:
+  - initialize
+  - initialize_or_format
+- id: D-RANGE-FR-001-97e8c9
+  assume: the primary header names LBA 2 and the backup header names the sectors just before the last
+    LBA as their entry arrays
+  assume_rust: primary_hdr.partition_entry_lba == 2 && backup_hdr.partition_entry_lba == num_sectors -
+    1 - (16384u64).div_ceil(sector_size as u64)
+  methods:
+  - initialize
+  - initialize_or_format
+- id: D-RANGE-FR-002-3abcfd
+  assume: every header read from the drive declares a header size of 92 bytes
+  assume_rust: hdr.header_size == 92
+  methods:
+  - initialize
+  - initialize_or_format
+- id: D-RANGE-KEYENTITY:PARTITIONCONFIG-062b0c
+  assume: the format request's sector size and total sector count equal what the device reports for that
+    namespace
+  assume_rust: bd.sector_size(config.ns_id) == Ok(config.sector_size) && bd.num_sectors(config.ns_id)
+    == Ok(config.total_sectors)
+  methods:
+  - format
+  - initialize_or_format
+  - initialize
+- id: D-RANGE-FR-010-fceb34
+  assume: the namespace in the format request is the namespace the component is configured to read
+  assume_rust: config.ns_id == self.ns_id.lock().unwrap().unwrap_or(1)
+  methods:
+  - initialize_or_format
+  - format
+  - initialize
+- id: D-RANGE-KEYENTITY:PARTITIONCONFIG-90393c
+  assume: the device has room for both headers, both entry arrays, the MBR and at least two usable sectors
+  assume_rust: config.total_sectors >= 2 * 16384u64.div_ceil(config.sector_size as u64) + 5 && num_sectors
+    >= 16384u64.div_ceil(sector_size as u64) + 1
+  methods:
+  - format
+  - initialize
+  - initialize_or_format
+- id: D-RANGE-FR-006-9e23ee
+  assume: the total sector demand of the fixed-size partitions fits in a u64
+  assume_rust: config.partitions.iter().try_fold(0u64, |a, p| a.checked_add(p.size_bytes.div_ceil(config.sector_size
+    as u64))).is_some()
+  methods:
+  - format
+  - initialize_or_format
+- id: D-RANGE-FR-004-4d24c8
+  assume: if a rest-of-disk partition is requested, the fixed-size partitions leave at least one usable
+    sector
+  assume_rust: '!config.partitions.iter().any(|p| p.size_bytes == 0) || config.partitions.iter().map(|p|
+    p.size_bytes.div_ceil(config.sector_size as u64)).sum::<u64>() < config.total_sectors - 2 * 16384u64.div_ceil(config.sector_size
+    as u64) - 3'
+  methods:
+  - format
+  - initialize_or_format
+  - initialize
+- id: D-RANGE-KEYENTITY:PARTITIONINFO-6425ed
+  assume: every occupied entry read from the drive has starting_lba <= ending_lba and does not span the
+    whole u64 range
+  assume_rust: entries.iter().filter(|e| e.type_guid != [0u8; 16]).all(|e| e.starting_lba <= e.ending_lba
+    && e.ending_lba - e.starting_lba < u64::MAX)
+  methods:
+  - initialize
+  - initialize_or_format
+  - partition_info
