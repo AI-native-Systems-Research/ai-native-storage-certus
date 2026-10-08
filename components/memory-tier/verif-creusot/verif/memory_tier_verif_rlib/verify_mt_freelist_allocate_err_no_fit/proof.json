@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_fl_allocate": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_fl_allocate": { "prover": "alt-ergo", "time": 0.026 },
       "vc_verify_mt_freelist_allocate_err_no_fit": {
         "prover": "alt-ergo",
-        "time": 0.049
+        "time": 0.05
       }
     }
   }

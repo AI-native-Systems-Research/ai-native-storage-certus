@@ -1,6 +1,6 @@
 {
   "profile": [],
   "proofs": {
-    "Coma": { "vc_lem_filter_step": { "prover": "cvc5", "time": 0.093 } }
+    "Coma": { "vc_lem_filter_step": { "prover": "cvc5", "time": 0.103 } }
   }
 }

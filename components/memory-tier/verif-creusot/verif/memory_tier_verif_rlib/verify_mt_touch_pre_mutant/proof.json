@@ -2,7 +2,6 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_mt_default": { "prover": "alt-ergo", "time": 0.017 },
       "vc_mt_touch": { "prover": "alt-ergo", "time": 0.025 },
       "vc_verify_mt_touch_pre__mutant": {
         "tactic": "compute_specified",
@@ -10,11 +9,15 @@
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.019 },
-              { "prover": "alt-ergo", "time": 0.017 },
+              { "prover": "alt-ergo", "time": 0.026 },
               {
                 "tactic": "split_vc",
-                "children": [ { "prover": "alt-ergo", "time": 0.019 }, null ]
+                "children": [
+                  { "prover": "alt-ergo", "time": 0.029 },
+                  { "prover": "alt-ergo", "time": 0.028 },
+                  { "prover": "alt-ergo", "time": 0.033 },
+                  null
+                ]
               }
             ]
           }

@@ -2,12 +2,12 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_lk_insert": { "prover": "alt-ergo", "time": 0.019 },
-      "vc_mt_insert": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_lk_insert": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_mt_insert": { "prover": "alt-ergo", "time": 0.027 },
       "vc_slots_contains": { "prover": "alt-ergo", "time": 0.024 },
       "vc_verify_mt_insert_err_invalid_size": {
         "prover": "cvc5",
-        "time": 0.098
+        "time": 0.121
       }
     }
   }

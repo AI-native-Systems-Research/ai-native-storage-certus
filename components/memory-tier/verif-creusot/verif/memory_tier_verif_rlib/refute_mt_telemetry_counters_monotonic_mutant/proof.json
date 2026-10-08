@@ -10,14 +10,14 @@
             "children": [
               {
                 "tactic": "split_vc",
-                "children": [ { "prover": "alt-ergo", "time": 0.015 }, null ]
+                "children": [ { "prover": "alt-ergo", "time": 0.027 }, null ]
               }
             ]
           }
         ]
       },
-      "vc_tel_event": { "prover": "alt-ergo", "time": 0.023 },
-      "vc_tel_snapshot": { "prover": "alt-ergo", "time": 0.014 }
+      "vc_tel_event": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_tel_snapshot": { "prover": "alt-ergo", "time": 0.023 }
     }
   }
 }

@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_rx_initialize_spdk": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_rx_initialize_spdk": { "prover": "alt-ergo", "time": 0.015 },
       "vc_verify_mt_init_err_zero_size__mutant": {
         "tactic": "compute_specified",
         "children": [
@@ -12,7 +12,7 @@
               { "prover": "alt-ergo", "time": 0.024 },
               {
                 "tactic": "split_vc",
-                "children": [ { "prover": "alt-ergo", "time": 0.026 }, null ]
+                "children": [ { "prover": "alt-ergo", "time": 0.032 }, null ]
               }
             ]
           }

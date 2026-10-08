@@ -2,11 +2,11 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_rx_call": { "prover": "alt-ergo", "time": 0.035 },
-      "vc_rx_initialize": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_rx_call": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_rx_initialize": { "prover": "alt-ergo", "time": 0.027 },
       "vc_verify_mt_inv_receptacle_lookup_panics": {
         "prover": "z3",
-        "time": 0.027
+        "time": 0.035
       }
     }
   }

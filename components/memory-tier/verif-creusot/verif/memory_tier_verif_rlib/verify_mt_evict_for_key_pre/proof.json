@@ -2,11 +2,11 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_mt_evict_next_for_key": { "prover": "alt-ergo", "time": 0.02 },
-      "vc_rx_call": { "prover": "alt-ergo", "time": 0.037 },
+      "vc_ep_get": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_mt_evict_next_for_key": { "prover": "alt-ergo", "time": 0.027 },
       "vc_verify_mt_evict_for_key_pre": {
         "prover": "alt-ergo",
-        "time": 0.077
+        "time": 0.146
       }
     }
   }

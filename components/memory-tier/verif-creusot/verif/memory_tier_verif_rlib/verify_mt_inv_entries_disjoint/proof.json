@@ -2,9 +2,9 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_mt_peek": { "prover": "alt-ergo", "time": 0.031 },
-      "vc_mt_run": { "prover": "alt-ergo", "time": 0.016 },
-      "vc_verify_mt_inv_entries_disjoint": { "prover": "z3", "time": 0.082 }
+      "vc_mt_peek": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_mt_run": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_verify_mt_inv_entries_disjoint": { "prover": "z3", "time": 0.042 }
     }
   }
 }

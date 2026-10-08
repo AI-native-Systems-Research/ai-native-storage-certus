@@ -1,4 +1,4 @@
 {
   "profile": [],
-  "proofs": { "Coma": { "vc_lem_raw": { "prover": "cvc4", "time": 0.399 } } }
+  "proofs": { "Coma": { "vc_lem_raw": { "prover": "cvc4", "time": 0.679 } } }
 }

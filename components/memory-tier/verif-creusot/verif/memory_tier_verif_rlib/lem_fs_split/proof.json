@@ -8,8 +8,8 @@
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 1.2 },
-              { "prover": "alt-ergo", "time": 0.033 },
+              { "prover": "alt-ergo", "time": 0.925 },
+              { "prover": "alt-ergo", "time": 0.057 },
               { "prover": "alt-ergo", "time": 0.019 }
             ]
           }

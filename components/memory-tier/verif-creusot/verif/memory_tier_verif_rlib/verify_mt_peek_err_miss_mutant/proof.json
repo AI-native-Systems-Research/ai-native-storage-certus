@@ -2,13 +2,16 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_mt_peek": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_mt_peek": { "prover": "alt-ergo", "time": 0.029 },
       "vc_verify_mt_peek_err_miss__mutant": {
-        "tactic": "compute_specified",
+        "tactic": "split_vc",
         "children": [
+          { "prover": "alt-ergo", "time": 0.015 },
+          { "prover": "alt-ergo", "time": 0.019 },
+          { "prover": "alt-ergo", "time": 0.023 },
           {
             "tactic": "split_vc",
-            "children": [ { "prover": "alt-ergo", "time": 0.032 }, null ]
+            "children": [ null, { "prover": "alt-ergo", "time": 0.025 } ]
           }
         ]
       }

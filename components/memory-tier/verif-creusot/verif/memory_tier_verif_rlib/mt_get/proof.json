@@ -4,33 +4,14 @@
     "Coma": {
       "vc_index_Vec_SlotModel_Global": {
         "prover": "alt-ergo",
-        "time": 0.022
+        "time": 0.024
       },
-      "vc_len_SlotModel": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_len_SlotModel": { "prover": "alt-ergo", "time": 0.022 },
       "vc_mt_get": {
         "tactic": "compute_specified",
-        "children": [
-          {
-            "tactic": "split_vc",
-            "children": [
-              { "prover": "alt-ergo", "time": 0.047 },
-              { "prover": "alt-ergo", "time": 0.031 },
-              { "prover": "alt-ergo", "time": 0.03 },
-              { "prover": "alt-ergo", "time": 0.027 },
-              { "prover": "alt-ergo", "time": 0.116 },
-              { "prover": "alt-ergo", "time": 0.029 },
-              { "prover": "alt-ergo", "time": 0.032 },
-              { "prover": "alt-ergo", "time": 0.032 },
-              { "prover": "alt-ergo", "time": 0.033 },
-              { "prover": "alt-ergo", "time": 0.035 },
-              { "prover": "alt-ergo", "time": 0.148 },
-              { "prover": "alt-ergo", "time": 0.046 },
-              { "prover": "alt-ergo", "time": 0.839 }
-            ]
-          }
-        ]
+        "children": [ { "prover": "alt-ergo", "time": 0.831 } ]
       },
-      "vc_policy_touch_key": { "prover": "alt-ergo", "time": 0.012 }
+      "vc_policy_touch_key": { "prover": "alt-ergo", "time": 0.026 }
     }
   }
 }

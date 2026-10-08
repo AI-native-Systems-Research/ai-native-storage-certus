@@ -2,8 +2,8 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_mt_remove": { "prover": "alt-ergo", "time": 0.025 },
-      "vc_verify_mt_remove_pre": { "prover": "alt-ergo", "time": 0.113 }
+      "vc_mt_remove": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_verify_mt_remove_pre": { "prover": "alt-ergo", "time": 0.175 }
     }
   }
 }

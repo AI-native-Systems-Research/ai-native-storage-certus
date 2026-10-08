@@ -1,8 +1,6 @@
 {
   "profile": [],
   "proofs": {
-    "Coma": {
-      "vc_clone_InsOutcome": { "prover": "alt-ergo", "time": 0.021 }
-    }
+    "Coma": { "vc_clone_InsOutcome": { "prover": "alt-ergo", "time": 0.02 } }
   }
 }

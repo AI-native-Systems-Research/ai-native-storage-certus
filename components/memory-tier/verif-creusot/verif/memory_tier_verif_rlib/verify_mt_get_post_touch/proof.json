@@ -2,9 +2,9 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_lk_get": { "prover": "alt-ergo", "time": 0.023 },
-      "vc_mt_get": { "prover": "alt-ergo", "time": 0.025 },
-      "vc_verify_mt_get_post_touch": { "prover": "alt-ergo", "time": 0.095 }
+      "vc_lk_get": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_mt_get": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_verify_mt_get_post_touch": { "prover": "alt-ergo", "time": 0.178 }
     }
   }
 }

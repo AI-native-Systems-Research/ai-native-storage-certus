@@ -2,11 +2,8 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_mt_is_dma_capable": { "prover": "alt-ergo", "time": 0.01 },
-      "vc_verify_mt_is_dma_capable_no_init_guard__mutant": {
-        "tactic": "split_vc",
-        "children": [ { "prover": "alt-ergo", "time": 0.021 }, null ]
-      }
+      "vc_mt_is_dma_capable": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_verify_mt_is_dma_capable_no_init_guard__mutant": null
     }
   }
 }

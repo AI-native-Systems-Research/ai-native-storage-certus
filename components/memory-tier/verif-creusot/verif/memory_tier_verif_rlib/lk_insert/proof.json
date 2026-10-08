@@ -5,15 +5,15 @@
       "vc_lk_insert": {
         "tactic": "split_vc",
         "children": [
-          { "prover": "alt-ergo", "time": 0.03 },
-          { "prover": "alt-ergo", "time": 0.018 },
-          { "prover": "alt-ergo", "time": 0.087 },
-          { "prover": "alt-ergo", "time": 0.137 },
-          { "prover": "alt-ergo", "time": 0.188 }
+          { "prover": "alt-ergo", "time": 0.031 },
+          { "prover": "alt-ergo", "time": 0.028 },
+          { "prover": "alt-ergo", "time": 0.151 },
+          { "prover": "alt-ergo", "time": 0.148 },
+          { "prover": "alt-ergo", "time": 0.131 }
         ]
       },
-      "vc_new_LkEv": { "prover": "alt-ergo", "time": 0.012 },
-      "vc_push_LkEv": { "prover": "alt-ergo", "time": 0.023 }
+      "vc_new_LkEv": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_push_LkEv": { "prover": "alt-ergo", "time": 0.021 }
     }
   }
 }

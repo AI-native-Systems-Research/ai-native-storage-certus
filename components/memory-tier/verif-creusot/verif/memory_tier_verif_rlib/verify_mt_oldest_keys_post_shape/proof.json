@@ -2,12 +2,12 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_lk_oldest_keys": { "prover": "alt-ergo", "time": 0.024 },
-      "vc_mt_evict_next": { "prover": "alt-ergo", "time": 0.024 },
-      "vc_mt_oldest_keys": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_lk_oldest_keys": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_mt_evict_next": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_mt_oldest_keys": { "prover": "alt-ergo", "time": 0.025 },
       "vc_verify_mt_oldest_keys_post_shape": {
         "prover": "cvc5",
-        "time": 0.158
+        "time": 0.169
       }
     }
   }

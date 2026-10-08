@@ -8,23 +8,23 @@
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.017 },
-              { "prover": "alt-ergo", "time": 0.041 },
-              { "prover": "alt-ergo", "time": 0.087 },
-              { "prover": "alt-ergo", "time": 0.194 },
-              { "prover": "alt-ergo", "time": 0.13 },
-              { "prover": "alt-ergo", "time": 0.064 },
+              { "prover": "alt-ergo", "time": 0.019 },
+              { "prover": "alt-ergo", "time": 0.034 },
+              { "prover": "alt-ergo", "time": 0.106 },
+              { "prover": "alt-ergo", "time": 0.183 },
+              { "prover": "alt-ergo", "time": 0.145 },
+              { "prover": "alt-ergo", "time": 0.085 },
               { "prover": "z3", "time": 0.032 },
-              { "prover": "z3", "time": 0.043 },
-              { "prover": "z3", "time": 0.137 },
-              { "prover": "alt-ergo", "time": 0.029 }
+              { "prover": "z3", "time": 0.037 },
+              { "prover": "z3", "time": 0.123 },
+              { "prover": "alt-ergo", "time": 0.02 }
             ]
           }
         ]
       },
-      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.028 },
-      "vc_fl_deallocate": { "prover": "alt-ergo", "time": 0.029 },
-      "vc_slots_remove": { "prover": "alt-ergo", "time": 0.026 }
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_fl_deallocate": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_slots_remove": { "prover": "alt-ergo", "time": 0.025 }
     }
   }
 }

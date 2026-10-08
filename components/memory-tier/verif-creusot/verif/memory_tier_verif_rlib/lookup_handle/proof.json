@@ -6,8 +6,8 @@
         "prover": "alt-ergo",
         "time": 0.021
       },
-      "vc_len_SlotModel": { "prover": "alt-ergo", "time": 0.022 },
-      "vc_lookup_handle": { "prover": "cvc5", "time": 0.177 }
+      "vc_len_SlotModel": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_lookup_handle": { "prover": "cvc5", "time": 0.134 }
     }
   }
 }

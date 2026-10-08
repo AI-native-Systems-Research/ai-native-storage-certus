@@ -2,20 +2,20 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_mt_insert": { "prover": "alt-ergo", "time": 0.025 },
-      "vc_mt_used": { "prover": "alt-ergo", "time": 0.032 },
+      "vc_mt_insert": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_mt_used": { "prover": "alt-ergo", "time": 0.019 },
       "vc_verify_mt_insert_frame_on_error__mutant": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.029 },
-              { "prover": "alt-ergo", "time": 0.026 },
-              { "prover": "alt-ergo", "time": 0.035 },
+              { "prover": "alt-ergo", "time": 0.015 },
+              { "prover": "alt-ergo", "time": 0.017 },
+              { "prover": "alt-ergo", "time": 0.038 },
               {
                 "tactic": "split_vc",
-                "children": [ { "prover": "alt-ergo", "time": 0.157 }, null ]
+                "children": [ { "prover": "alt-ergo", "time": 0.15 }, null ]
               }
             ]
           }

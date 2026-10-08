@@ -1,0 +1,16 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_mt_capacity": { "prover": "alt-ergo", "time": 0.032 },
+      "vc_mt_used": { "prover": "alt-ergo", "time": 0.032 },
+      "vc_tel_event": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_tel_reset": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_tel_snapshot": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_verify_mt_reset_telemetry_post": {
+        "prover": "alt-ergo",
+        "time": 0.09
+      }
+    }
+  }
+}

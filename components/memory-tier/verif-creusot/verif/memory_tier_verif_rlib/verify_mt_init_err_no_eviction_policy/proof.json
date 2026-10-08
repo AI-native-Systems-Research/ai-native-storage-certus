@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_rx_initialize_spdk": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_rx_initialize_spdk": { "prover": "alt-ergo", "time": 0.014 },
       "vc_verify_mt_init_err_no_eviction_policy": {
         "prover": "alt-ergo",
-        "time": 0.096
+        "time": 0.057
       }
     }
   }

@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_mt_telemetry_inherent": { "prover": "alt-ergo", "time": 0.025 }
+      "vc_mt_telemetry_inherent": { "prover": "alt-ergo", "time": 0.02 }
     }
   }
 }

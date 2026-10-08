@@ -2,19 +2,19 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_init_logged": { "prover": "alt-ergo", "time": 0.015 },
-      "vc_mt_insert": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_init_logged": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_mt_insert": { "prover": "alt-ergo", "time": 0.027 },
       "vc_refute_mt_inv_size_accounting__mutant": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.031 },
-              { "prover": "alt-ergo", "time": 0.018 },
+              { "prover": "alt-ergo", "time": 0.024 },
+              { "prover": "alt-ergo", "time": 0.037 },
               {
                 "tactic": "split_vc",
-                "children": [ { "prover": "alt-ergo", "time": 0.04 }, null ]
+                "children": [ { "prover": "alt-ergo", "time": 0.032 }, null ]
               }
             ]
           }

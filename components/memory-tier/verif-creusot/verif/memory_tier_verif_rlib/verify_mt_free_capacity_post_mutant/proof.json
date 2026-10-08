@@ -2,16 +2,22 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_mt_capacity": { "prover": "alt-ergo", "time": 0.021 },
-      "vc_mt_free_capacity": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_mt_capacity": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_mt_free_capacity": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_mt_used": { "prover": "alt-ergo", "time": 0.024 },
       "vc_verify_mt_free_capacity_post__mutant": {
         "tactic": "split_vc",
         "children": [
-          { "prover": "alt-ergo", "time": 0.024 },
-          { "prover": "alt-ergo", "time": 0.026 },
+          { "prover": "alt-ergo", "time": 0.021 },
+          { "prover": "alt-ergo", "time": 0.022 },
+          { "prover": "alt-ergo", "time": 0.019 },
           {
             "tactic": "split_vc",
-            "children": [ { "prover": "alt-ergo", "time": 0.014 }, null ]
+            "children": [
+              { "prover": "alt-ergo", "time": 0.019 },
+              { "prover": "alt-ergo", "time": 0.021 },
+              null
+            ]
           }
         ]
       }

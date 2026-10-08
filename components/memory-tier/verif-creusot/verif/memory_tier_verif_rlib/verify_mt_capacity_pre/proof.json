@@ -3,10 +3,7 @@
   "proofs": {
     "Coma": {
       "vc_mt_capacity": { "prover": "alt-ergo", "time": 0.024 },
-      "vc_mt_default": { "prover": "alt-ergo", "time": 0.019 },
-      "vc_mt_initialize": { "prover": "alt-ergo", "time": 0.017 },
-      "vc_mt_run": { "prover": "alt-ergo", "time": 0.019 },
-      "vc_verify_mt_capacity_pre": { "prover": "cvc5", "time": 0.106 }
+      "vc_verify_mt_capacity_pre": { "prover": "alt-ergo", "time": 0.029 }
     }
   }
 }

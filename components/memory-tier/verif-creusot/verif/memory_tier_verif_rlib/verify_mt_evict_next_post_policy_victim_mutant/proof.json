@@ -3,7 +3,7 @@
   "proofs": {
     "Coma": {
       "vc_elim_Some": { "prover": "alt-ergo", "time": 0.029 },
-      "vc_ev_commit": { "prover": "alt-ergo", "time": 0.032 },
+      "vc_ev_commit": { "prover": "alt-ergo", "time": 0.03 },
       "vc_ev_identify": { "prover": "alt-ergo", "time": 0.029 },
       "vc_verify_mt_evict_next_post_policy_victim__mutant": {
         "tactic": "compute_specified",
@@ -11,14 +11,14 @@
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.024 },
+              { "prover": "alt-ergo", "time": 0.026 },
               { "prover": "alt-ergo", "time": 0.02 },
-              { "prover": "alt-ergo", "time": 0.045 },
+              { "prover": "alt-ergo", "time": 0.049 },
               {
                 "tactic": "split_vc",
-                "children": [ { "prover": "alt-ergo", "time": 0.024 }, null ]
+                "children": [ { "prover": "alt-ergo", "time": 0.034 }, null ]
               },
-              { "prover": "alt-ergo", "time": 0.021 }
+              { "prover": "alt-ergo", "time": 0.025 }
             ]
           }
         ]

@@ -2,11 +2,11 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_lk_touch": { "prover": "alt-ergo", "time": 0.026 },
-      "vc_mt_touch": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_lk_touch": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_mt_touch": { "prover": "alt-ergo", "time": 0.025 },
       "vc_verify_mt_touch_post_order_refresh": {
         "prover": "alt-ergo",
-        "time": 0.06
+        "time": 0.104
       }
     }
   }

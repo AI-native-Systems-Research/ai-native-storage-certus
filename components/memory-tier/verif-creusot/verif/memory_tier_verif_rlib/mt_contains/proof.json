@@ -2,8 +2,8 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_mt_contains": { "prover": "alt-ergo", "time": 0.021 },
-      "vc_slots_contains": { "prover": "alt-ergo", "time": 0.014 }
+      "vc_mt_contains": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_slots_contains": { "prover": "alt-ergo", "time": 0.02 }
     }
   }
 }

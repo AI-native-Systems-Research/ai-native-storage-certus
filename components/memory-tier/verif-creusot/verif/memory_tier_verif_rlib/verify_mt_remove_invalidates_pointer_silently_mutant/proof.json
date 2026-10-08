@@ -2,8 +2,8 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_init_logged": { "prover": "alt-ergo", "time": 0.015 },
-      "vc_mt_insert": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_init_logged": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_mt_insert": { "prover": "alt-ergo", "time": 0.024 },
       "vc_mt_remove": { "prover": "alt-ergo", "time": 0.026 },
       "vc_verify_mt_remove_invalidates_pointer_silently__mutant": {
         "tactic": "compute_specified",
@@ -12,13 +12,13 @@
             "tactic": "split_vc",
             "children": [
               { "prover": "alt-ergo", "time": 0.016 },
-              { "prover": "alt-ergo", "time": 0.041 },
-              { "prover": "alt-ergo", "time": 0.02 },
-              { "prover": "alt-ergo", "time": 0.022 },
-              { "prover": "alt-ergo", "time": 0.038 },
+              { "prover": "alt-ergo", "time": 0.065 },
+              { "prover": "alt-ergo", "time": 0.039 },
+              { "prover": "alt-ergo", "time": 0.04 },
+              { "prover": "alt-ergo", "time": 0.05 },
               {
                 "tactic": "split_vc",
-                "children": [ { "prover": "z3", "time": 0.045 }, null ]
+                "children": [ { "prover": "z3", "time": 0.031 }, null ]
               }
             ]
           }

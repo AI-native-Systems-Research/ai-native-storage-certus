@@ -2,8 +2,8 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_policy_track": { "prover": "alt-ergo", "time": 0.019 },
-      "vc_policy_track_r": { "prover": "alt-ergo", "time": 0.04 }
+      "vc_policy_track": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_policy_track_r": { "prover": "alt-ergo", "time": 0.047 }
     }
   }
 }

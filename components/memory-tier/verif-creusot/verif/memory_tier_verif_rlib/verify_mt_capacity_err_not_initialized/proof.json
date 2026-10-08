@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_mt_capacity": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_mt_capacity": { "prover": "alt-ergo", "time": 0.024 },
       "vc_verify_mt_capacity_err_not_initialized": {
         "prover": "alt-ergo",
-        "time": 0.026
+        "time": 0.034
       }
     }
   }

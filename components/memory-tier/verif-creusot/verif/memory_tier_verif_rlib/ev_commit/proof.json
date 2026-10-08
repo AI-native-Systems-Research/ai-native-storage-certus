@@ -2,9 +2,9 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_cs_evict": { "prover": "alt-ergo", "time": 0.03 },
-      "vc_ev_commit": { "prover": "alt-ergo", "time": 0.091 },
-      "vc_tel_event": { "prover": "alt-ergo", "time": 0.027 }
+      "vc_cs_evict": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_ev_commit": { "prover": "alt-ergo", "time": 0.092 },
+      "vc_tel_event": { "prover": "alt-ergo", "time": 0.028 }
     }
   }
 }

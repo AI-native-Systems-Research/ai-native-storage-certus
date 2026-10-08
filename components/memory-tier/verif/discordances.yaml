@@ -4,13 +4,13 @@ level: 1
 what: 'spec<->code discordances found while reconciling the specification with the code. Each is EXCLUDED from formal
   verification (level 2). status: candidate until a test confirms it (confirmed) or shows it was a misreading (withdrawn).'
 counts:
-  discordances: 58
-  spec_and_code_differ: 31
-  spec_not_found_in_code: 22
+  discordances: 21
+  spec_and_code_differ: 15
+  spec_not_found_in_code: 1
   input_range_mismatch: 5
-  properties_excluded_from_level2: 53
-  routed_to_other_tools: 0
-  reader_missed_sent_to_level2: 0
+  properties_excluded_from_level2: 17
+  routed_to_other_tools: 1
+  reader_missed_sent_to_level2: 36
   confirmed: 0
   withdrawn: 0
 discordances:
@@ -44,6 +44,12 @@ discordances:
     - MT-INITIALIZE-POST-NUMA-FALLBACK
     code:
     - MT-INITIALIZE-NUMA-FALLBACK
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - lib.rs:225-252
+  - lib.rs:278-295
+  - components/memory-tier/src/lib.rs:278-295
+  - components/memory-tier/src/lib.rs:225-253
 - id: D-FR-002-lib.rs:195212-77d2b7
   name: Init hugepage fallback
   kind: spec-and-code-differ
@@ -72,61 +78,12 @@ discordances:
     - MT-INITIALIZE-POST-HUGEPAGE-FALLBACK
     code:
     - MT-INITIALIZE-HUGEPAGE-FALLBACK
-- id: D-US-3-lib.rs:271-9b3c9c
-  name: Init error double init
-  kind: spec-and-code-differ
-  methods:
-  - initialize
-  spec_says: A second attempt to set up the memory pool on a component that is already set up fails with an error
-    instead of replacing the existing pool; the specification requires the failure but does not say which of the
-    component's error values is returned.
-  code_does: A second call to initialize on an already-initialized component fails and leaves the existing pool
-    untouched; note that the error it reports is the generic allocation-failed error carrying the text "already
-    initialized", even though nothing was allocated and the error list has no dedicated already-initialized variant,
-    so callers cannot distinguish this condition from a genuine out-of-memory failure except by matching on the
-    message text.
-  spec_pointers:
-  - US-3
-  - FR-023
-  - 'plan.md: initialize_twice_fails'
-  code_pointers:
-  - lib.rs:271
-  - lib.rs:272
-  - lib.rs:273
-  - imemory_tier.rs:28
-  status: candidate
-  excluded_properties:
-  - MT-INIT-ERR-DOUBLE-INIT
-  extraction_sides:
-    spec:
-    - MT-INITIALIZE-ERR-DOUBLE-INIT
-    code:
-    - MT-INITIALIZE-ERR-ALREADY-INITIALIZED
-- id: D-FR-024-lib.rs:266-8a9610
-  name: Init error no eviction policy
-  kind: spec-and-code-differ
-  methods:
-  - initialize
-  spec_says: If the external eviction-policy component has not been connected when the pool is set up, the set-up
-    call fails rather than producing a pool that can never choose a victim; the specification states the check happens
-    at set-up time but does not name the error returned.
-  code_does: If the eviction-policy receptacle has not been connected, initialize fails with a not-initialized error
-    whose message says the eviction policy receptacle is not connected, and it does so before allocating any memory.
-  spec_pointers:
-  - FR-024
-  - 'plan.md: Required Receptacles'
-  code_pointers:
-  - lib.rs:266
-  - lib.rs:267
-  - lib.rs:268
-  status: candidate
-  excluded_properties:
-  - MT-INIT-ERR-NO-EVICTION-POLICY
-  extraction_sides:
-    spec:
-    - MT-INITIALIZE-ERR-NO-EVICTION-POLICY
-    code:
-    - MT-INITIALIZE-ERR-POLICY-MISSING
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - lib.rs:195-223
+  - lib.rs:291-295
+  - components/memory-tier/src/lib.rs:282-295
+  - components/memory-tier/src/lib.rs:195-223
 - id: D-US-3-lib.rs:262-d1296d
   name: Init on failure
   kind: spec-and-code-differ
@@ -161,30 +118,14 @@ discordances:
     - MT-INITIALIZE-FRAME-ON-FAILURE
     code:
     - MT-INITIALIZE-FRAME-ON-ERROR
-- id: D-FR-004-lib.rs:377-444f51
-  name: Insert alignment
-  kind: spec-not-found-in-code
-  methods:
-  - insert
-  - get
-  - peek
-  spec_says: Every address handed back when adding a cache entry starts on a four-kibibyte boundary, so that the
-    memory can be used directly as the source or destination of a disk transfer without any extra copying or realignment.
-  code_does: No matching guarantee stated by the code reader.
-  spec_pointers:
-  - FR-004
-  - SC-4
-  - NFR-010
-  - US-3
-  code_pointers:
-  - lib.rs:377
-  status: candidate
-  excluded_properties:
-  - MT-INSERT-POST-ALIGNMENT
-  extraction_sides:
-    spec:
-    - MT-INSERT-POST-ALIGNMENT
-    code: []
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - lib.rs:271-274
+  - lib.rs:291-295
+  - lib.rs:302
+  - components/memory-tier/src/lib.rs:271-275
+  - components/memory-tier/src/lib.rs:262-268
+  - components/memory-tier/src/lib.rs:291-295
 - id: D-FR-023-lib.rs:334336-645695
   name: Insert error not initialized
   kind: spec-and-code-differ
@@ -209,31 +150,12 @@ discordances:
     - MT-INSERT-ERR-NOT-INITIALIZED
     code:
     - MT-INSERT-ERR-NOT-INITIALIZED
-- id: D-US-1-lib.rs:360-31aa9f
-  name: Insert other entries
-  kind: spec-not-found-in-code
-  methods:
-  - insert
-  - get
-  - peek
-  - contains
-  - capacity
-  spec_says: 'Adding a cache entry leaves every other entry untouched: their addresses, their sizes, and the bytes
-    they hold are unchanged, none of them is removed, and the pool''s total capacity stays the same.'
-  code_does: No matching guarantee stated by the code reader.
-  spec_pointers:
-  - US-1
-  - FR-007
-  - SC-5
-  code_pointers:
-  - lib.rs:360
-  status: candidate
-  excluded_properties:
-  - MT-INSERT-FRAME-OTHER-ENTRIES
-  extraction_sides:
-    spec:
-    - MT-INSERT-FRAME-OTHER-ENTRIES
-    code: []
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - lib.rs:329-331
+  - lib.rs:334-338
+  - components/memory-tier/src/lib.rs:329-331
+  - components/memory-tier/src/lib.rs:334-338
 - id: D-FR-011-lib.rs:405409-524c22
   name: Get touch
   kind: spec-and-code-differ
@@ -264,104 +186,7 @@ discordances:
     - MT-GET-POST-TOUCH
     code:
     - MT-GET-POST-REFRESHES-ORDER
-- id: D-FR-011-lib.rs:383-81dfd5
-  name: Get error miss
-  kind: spec-and-code-differ
-  methods:
-  - get
-  spec_says: Looking up a key that is not in the cache reports absence rather than returning a stale or invalid
-    memory address. Looking up any key before the pool has been set up reports absence, because the operation checks
-    that the component is set up before doing anything else.
-  code_does: Get reports nothing found both when the pool has no entry for the key and when the component has not
-    been initialized, so a caller cannot tell a genuine cache miss apart from an unusable component; in the uninitialized
-    case no eviction-order refresh happens either.
-  spec_pointers:
-  - FR-011
-  - FR-023
-  code_pointers:
-  - lib.rs:383
-  - imemory_tier.rs
-  - lib.rs:384
-  - lib.rs:403
-  status: candidate
-  excluded_properties:
-  - MT-GET-ERR-MISS
-  extraction_sides:
-    spec:
-    - MT-GET-ERR-MISS
-    - MT-GET-ERR-NOT-INITIALIZED
-    code:
-    - MT-GET-ERR-MISS
-- id: D-FR-012-lib.rs:413-86613f
-  name: Peek precondition
-  kind: spec-not-found-in-code
-  methods:
-  - peek
-  spec_says: The non-recency-updating lookup may be called with any key at any time and never fails outright; a
-    missing key or a pool that has not been set up is reported through the return value.
-  code_does: No matching guarantee stated by the code reader.
-  spec_pointers:
-  - FR-012
-  - FR-023
-  code_pointers:
-  - lib.rs:413
-  status: candidate
-  excluded_properties:
-  - MT-PEEK-PRE
-  extraction_sides:
-    spec:
-    - MT-PEEK-PRE
-    code: []
-- id: D-FR-012-lib.rs:413419-6899ba
-  name: Peek error miss
-  kind: spec-and-code-differ
-  methods:
-  - peek
-  spec_says: The non-recency-updating lookup of a key that is not in the cache reports absence rather than returning
-    an address. The non-recency-updating lookup reports absence for every key when the pool has not been set up
-    yet.
-  code_does: Peek reports nothing found when the component is uninitialized or when the pool holds no entry for
-    the key, and these two situations are indistinguishable to the caller.
-  spec_pointers:
-  - FR-012
-  - FR-023
-  code_pointers:
-  - lib.rs:413-419
-  - lib.rs:413
-  - lib.rs:414
-  - lib.rs:419
-  status: candidate
-  excluded_properties:
-  - MT-PEEK-ERR-MISS
-  extraction_sides:
-    spec:
-    - MT-PEEK-ERR-MISS
-    - MT-PEEK-ERR-NOT-INITIALIZED
-    code:
-    - MT-PEEK-ERR-MISS
-- id: D-FR-006-lib.rs:413421-384265
-  name: Peek pool state
-  kind: spec-not-found-in-code
-  methods:
-  - peek
-  - used
-  - capacity
-  - contains
-  spec_says: 'The non-recency-updating lookup changes no stored data: the set of keys present, every entry''s address
-    and size, the bytes in use, and the total capacity are all the same afterwards.'
-  code_does: No matching guarantee stated by the code reader.
-  spec_pointers:
-  - FR-006
-  - FR-012
-  code_pointers:
-  - lib.rs:413-421
-  status: candidate
-  excluded_properties:
-  - MT-PEEK-FRAME-POOL-STATE
-  extraction_sides:
-    spec:
-    - MT-PEEK-FRAME-POOL-STATE
-    code: []
+  classified: classifiers disagree - needs a person
 - id: D-US-2-lib.rs:456458-c70362
   name: Evict next entry gone and space freed
   kind: spec-and-code-differ
@@ -401,182 +226,12 @@ discordances:
     - MT-EVICT-NEXT-POST-SPACE-FREED
     code:
     - MT-EVICT-NEXT-POST-FREES-SLOT
-- id: D-FR-013-lib.rs:456462-1a89b4
-  name: Evict next untracked
-  kind: spec-and-code-differ
-  methods:
-  - evict_next
-  - evict_next_for_key
-  - oldest_keys
-  spec_says: An evicted key is also removed from the external eviction-policy component's bookkeeping, so it can
-    no longer appear in the list of oldest keys and cannot be nominated as a victim a second time.
-  code_does: 'Unlike the explicit removal operation, evict-next never tells the eviction policy to stop tracking
-    the entry it just destroyed: it drops the entry''s eviction handle on the floor, so unless the policy untracks
-    the victim by itself the policy keeps listing a key whose storage has already been freed, and every later eviction
-    attempt can keep returning that dead key.'
-  spec_pointers:
-  - FR-013
-  - FR-021
-  - US-2
-  code_pointers:
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - lib.rs:441
   - lib.rs:456-462
-  - lib.rs:456
-  - lib.rs:457
-  - lib.rs:500
-  - lib.rs:462
-  status: candidate
-  excluded_properties:
-  - MT-EVICT-NEXT-POST-UNTRACKED
-  extraction_sides:
-    spec:
-    - MT-EVICT-NEXT-POST-UNTRACKED
-    code:
-    - MT-EVICT-NEXT-DOES-NOT-UNTRACK
-- id: D-US-2-lib.rs:441-546c41
-  name: Evict next lru order
-  kind: spec-not-found-in-code
-  methods:
-  - evict_next
-  - evict_next_for_key
-  - get
-  - touch
-  - batch_touch
-  spec_says: With the least-recently-used policy that the system currently binds, an entry that has been read or
-    explicitly refreshed more recently is never evicted before an entry that has not been used since, so refreshing
-    an entry genuinely protects it while older entries remain.
-  code_does: No matching guarantee stated by the code reader.
-  spec_pointers:
-  - US-2
-  - FR-016
-  - 'plan.md: touch_updates_eviction_order'
-  code_pointers:
-  - lib.rs:441
-  status: candidate
-  excluded_properties:
-  - MT-EVICT-NEXT-POST-LRU-ORDER
-  extraction_sides:
-    spec:
-    - MT-EVICT-NEXT-POST-LRU-ORDER
-    code: []
-- id: D-US-2-lib.rs:436-399ab7
-  name: Evict next error no victim
-  kind: spec-and-code-differ
-  methods:
-  - evict_next
-  - evict_next_for_key
-  spec_says: Asking to evict when the cache holds no entries reports that there was nothing to evict and changes
-    nothing at all. Asking to evict before the pool has been set up reports that nothing was evicted, because the
-    operation checks that the component is set up first.
-  code_does: Evict-next reports that nothing was evicted when the component is uninitialized or when the eviction
-    policy names no victim; the documentation claims this means the pool is empty, but the code never consults the
-    pool's own entry list to decide, so a pool that still holds entries can report nothing evictable whenever the
-    policy has lost track of them.
-  spec_pointers:
-  - US-2
-  - FR-023
-  code_pointers:
-  - lib.rs:436
-  - imemory_tier.rs
-  - lib.rs:441
-  - lib.rs:463
-  - lib.rs:464
-  - imemory_tier.rs:84
-  status: candidate
-  excluded_properties:
-  - MT-EVICT-NEXT-ERR-NO-VICTIM
-  extraction_sides:
-    spec:
-    - MT-EVICT-NEXT-ERR-EMPTY-POOL
-    - MT-EVICT-NEXT-ERR-NOT-INITIALIZED
-    code:
-    - MT-EVICT-NEXT-ERR-NO-VICTIM
-- id: D-FR-013-lib.rs:436464-36a974
-  name: Evict next no rotation state
-  kind: spec-not-found-in-code
-  methods:
-  - evict_next
-  - evict_next_for_key
-  spec_says: Eviction keeps no hidden position or rotation counter of its own, so two runs that start from the same
-    cache contents and the same policy state evict the same key; the victim never depends on how many evictions
-    happened earlier.
-  code_does: No matching guarantee stated by the code reader.
-  spec_pointers:
-  - FR-013
-  code_pointers:
-  - lib.rs:436-464
-  status: candidate
-  excluded_properties:
-  - MT-EVICT-NEXT-FRAME-NO-ROTATION-STATE
-  extraction_sides:
-    spec:
-    - MT-EVICT-NEXT-FRAME-NO-ROTATION-STATE
-    code: []
-- id: D-FR-014-lib.rs:468-5ec7b3
-  name: Evict for key precondition
-  kind: spec-not-found-in-code
-  methods:
-  - evict_next_for_key
-  spec_says: To free space on behalf of a particular key the pool must have been set up and the eviction policy
-    connected, but the named key itself need not be present in the cache and no other condition applies to it.
-  code_does: No matching guarantee stated by the code reader.
-  spec_pointers:
-  - FR-014
-  - US-2
-  - FR-023
-  code_pointers:
-  - lib.rs:468
-  status: candidate
-  excluded_properties:
-  - MT-EVICT-FOR-KEY-PRE
-  extraction_sides:
-    spec:
-    - MT-EVICT-FOR-KEY-PRE
-    code: []
-- id: D-FR-014-lib.rs:468-0c1153
-  name: Evict for key space global
-  kind: spec-not-found-in-code
-  methods:
-  - evict_next_for_key
-  - insert
-  spec_says: The space released by this operation is usable by any subsequent insertion, not only by an insertion
-    of the key that was named, because the pool is one undivided region of memory.
-  code_does: No matching guarantee stated by the code reader.
-  spec_pointers:
-  - FR-014
-  - US-2
-  - FR-005
-  code_pointers:
-  - lib.rs:468
-  status: candidate
-  excluded_properties:
-  - MT-EVICT-FOR-KEY-POST-SPACE-GLOBAL
-  extraction_sides:
-    spec:
-    - MT-EVICT-FOR-KEY-POST-SPACE-GLOBAL
-    code: []
-- id: D-FR-014-lib.rs:468-5b3866
-  name: Evict for key key ignored
-  kind: spec-and-code-differ
-  methods:
-  - evict_next_for_key
-  spec_says: 'The key passed to this operation has no effect on what happens: it does not narrow the choice of victim,
-    it is not given any protection, and it may itself be the entry that gets evicted.'
-  code_does: Because the key argument is ignored entirely, a caller asking to free space for a key can have that
-    very key evicted and returned as the victim, which is the opposite of what the call appears to ask for.
-  spec_pointers:
-  - FR-014
-  code_pointers:
-  - lib.rs:468
-  - lib.rs:469
-  - lib.rs:441
-  status: candidate
-  excluded_properties:
-  - MT-EVICT-FOR-KEY-FRAME-KEY-IGNORED
-  extraction_sides:
-    spec:
-    - MT-EVICT-FOR-KEY-FRAME-KEY-IGNORED
-    code:
-    - MT-EVICT-NEXT-FOR-KEY-MAY-EVICT-ARGUMENT
+  - components/memory-tier/src/lib.rs:441
+  - components/memory-tier/src/lib.rs:456-462
 - id: D-FR-014-lib.rs:468-18ae23
   name: Evict for key error no victim
   kind: spec-not-found-in-code
@@ -600,26 +255,7 @@ discordances:
     - MT-EVICT-FOR-KEY-ERR-EMPTY-POOL
     - MT-EVICT-FOR-KEY-ERR-NOT-INITIALIZED
     code: []
-- id: D-FR-021-lib.rs:424-91355b
-  name: Oldest keys precondition
-  kind: spec-not-found-in-code
-  methods:
-  - oldest_keys
-  spec_says: The query for the oldest keys may be called with any requested count, including zero or a count larger
-    than the number of entries held, and it never fails outright.
-  code_does: No matching guarantee stated by the code reader.
-  spec_pointers:
-  - FR-021
-  - US-2
-  code_pointers:
-  - lib.rs:424
-  status: candidate
-  excluded_properties:
-  - MT-OLDEST-KEYS-PRE
-  extraction_sides:
-    spec:
-    - MT-OLDEST-KEYS-PRE
-    code: []
+  classified: classifiers disagree - needs a person
 - id: D-FR-021-lib.rs:431-56bb55-1
   name: Oldest keys shape
   kind: spec-and-code-differ
@@ -650,6 +286,7 @@ discordances:
     - MT-OLDEST-KEYS-POST-SINGLE-POLICY-QUERY
     code:
     - MT-OLDEST-KEYS-POST
+  classified: classifiers disagree - needs a person
 - id: D-FR-021-lib.rs:431-56bb55-2
   name: Oldest keys live membership
   kind: spec-and-code-differ
@@ -678,26 +315,12 @@ discordances:
     - MT-OLDEST-KEYS-POST-LIVE-MEMBERSHIP
     code:
     - MT-OLDEST-KEYS-UNFILTERED
-- id: D-FR-016-lib.rs:508-609b4e
-  name: Touch precondition
-  kind: spec-not-found-in-code
-  methods:
-  - touch
-  spec_says: Refreshing an entry's recency may be requested for any key at any time; it returns nothing and reports
-    no error, so the caller needs no prior check that the key exists.
-  code_does: No matching guarantee stated by the code reader.
-  spec_pointers:
-  - FR-016
-  - US-2
-  code_pointers:
-  - lib.rs:508
-  status: candidate
-  excluded_properties:
-  - MT-TOUCH-PRE
-  extraction_sides:
-    spec:
-    - MT-TOUCH-PRE
-    code: []
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - lib.rs:431
+  - components/memory-tier/src/lib.rs:430-431
+  - components/memory-tier/src/lib.rs:496-500
+  - components/memory-tier/src/lib.rs:365-375
 - id: D-FR-016-lib.rs:513516-d682f8
   name: Touch order refresh
   kind: spec-and-code-differ
@@ -728,55 +351,7 @@ discordances:
     - MT-TOUCH-POST-ORDER-REFRESH
     code:
     - MT-TOUCH-POST
-- id: D-FR-016-lib.rs:508-0ff7d5
-  name: Touch silent noop
-  kind: spec-and-code-differ
-  methods:
-  - touch
-  spec_says: Refreshing a key that is not in the cache does nothing at all and does not crash or report a problem;
-    the specification never states this case explicitly for the single-key refresh and only states it for the batched
-    form. Refreshing an entry before the pool has been set up does nothing, because the operation checks that the
-    component is set up first and has no way to report an error.
-  code_does: Touching a key the pool does not hold, or touching before the component is initialized, does nothing
-    at all and reports nothing, so a caller has no way to discover that its refresh was dropped.
-  spec_pointers:
-  - FR-016
-  - US-6
-  - FR-023
-  code_pointers:
-  - lib.rs:508
-  - lib.rs:505
-  - lib.rs:507
-  - lib.rs:513
-  status: candidate
-  excluded_properties:
-  - MT-TOUCH-SILENT-NOOP
-  extraction_sides:
-    spec:
-    - MT-TOUCH-ERR-ABSENT-KEY-NOOP
-    - MT-TOUCH-ERR-NOT-INITIALIZED
-    code:
-    - MT-TOUCH-SILENT-NOOP
-- id: D-US-6-lib.rs:520-a32548
-  name: Batch touch precondition
-  kind: spec-not-found-in-code
-  methods:
-  - batch_touch
-  spec_says: Refreshing many entries at once may be requested with any list of keys, including an empty list or
-    keys that are not in the cache, and it never fails outright.
-  code_does: No matching guarantee stated by the code reader.
-  spec_pointers:
-  - US-6
-  - FR-017
-  code_pointers:
-  - lib.rs:520
-  status: candidate
-  excluded_properties:
-  - MT-BATCH-TOUCH-PRE
-  extraction_sides:
-    spec:
-    - MT-BATCH-TOUCH-PRE
-    code: []
+  classified: classifiers disagree - needs a person
 - id: D-US-6-lib.rs:520524-adc85e
   name: Batch touch empty noop
   kind: spec-and-code-differ
@@ -804,214 +379,12 @@ discordances:
     - MT-BATCH-TOUCH-ERR-NOT-INITIALIZED
     code:
     - MT-BATCH-TOUCH-EMPTY-EARLY-RETURN
-- id: D-US-1-lib.rs:557-54dafa
-  name: Contains precondition
-  kind: spec-not-found-in-code
-  methods:
-  - contains
-  spec_says: The presence check may be called with any key at any time and always answers yes or no rather than
-    failing.
-  code_does: No matching guarantee stated by the code reader.
-  spec_pointers:
-  - US-1
-  - FR-006
-  - FR-023
-  code_pointers:
-  - lib.rs:557
-  status: candidate
-  excluded_properties:
-  - MT-CONTAINS-PRE
-  extraction_sides:
-    spec:
-    - MT-CONTAINS-PRE
-    code: []
-- id: D-US-5-lib.rs:567-6bdc69
-  name: Capacity precondition
-  kind: spec-not-found-in-code
-  methods:
-  - capacity
-  spec_says: The total-capacity query may be called at any time, before or after the pool is set up, and always
-    returns a number rather than failing.
-  code_does: No matching guarantee stated by the code reader.
-  spec_pointers:
-  - US-5
-  - FR-023
-  code_pointers:
-  - lib.rs:567
-  status: candidate
-  excluded_properties:
-  - MT-CAPACITY-PRE
-  extraction_sides:
-    spec:
-    - MT-CAPACITY-PRE
-    code: []
-- id: D-FR-023-lib.rs:568569-fcaa65
-  name: Capacity error not initialized
-  kind: spec-and-code-differ
-  methods:
-  - capacity
-  spec_says: Before the pool has been set up the total-capacity query reports zero, reflecting that no memory has
-    been reserved; the specification requires the set-up check but does not state the reported number.
-  code_does: Before initialization the reported capacity is zero, which is also what a component initialized with
-    a zero-sized pool would report if that were allowed, so zero always means "no usable pool".
-  spec_pointers:
-  - FR-023
-  - US-5
-  code_pointers:
-  - lib.rs:568-569
-  - lib.rs:568
-  - lib.rs:569
-  - lib.rs:570
-  - allocator.rs:18
-  status: candidate
-  excluded_properties:
-  - MT-CAPACITY-ERR-NOT-INITIALIZED
-  extraction_sides:
-    spec:
-    - MT-CAPACITY-ERR-NOT-INITIALIZED
-    code:
-    - MT-CAPACITY-UNINITIALIZED
-- id: D-US-5-lib.rs:576-c452fd
-  name: Used precondition
-  kind: spec-not-found-in-code
-  methods:
-  - used
-  spec_says: The bytes-in-use query may be called at any time and always returns a number rather than failing.
-  code_does: No matching guarantee stated by the code reader.
-  spec_pointers:
-  - US-5
-  - FR-023
-  code_pointers:
-  - lib.rs:576
-  status: candidate
-  excluded_properties:
-  - MT-USED-PRE
-  extraction_sides:
-    spec:
-    - MT-USED-PRE
-    code: []
-- id: D-FR-022-lib.rs:585-270fa4
-  name: Pool info precondition
-  kind: spec-not-found-in-code
-  methods:
-  - pool_info
-  spec_says: The query for the pool's base address and size may be called at any time and reports the absence of
-    a pool through its return value instead of failing.
-  code_does: No matching guarantee stated by the code reader.
-  spec_pointers:
-  - FR-022
-  - US-5
-  - FR-023
-  code_pointers:
-  - lib.rs:585
-  status: candidate
-  excluded_properties:
-  - MT-POOL-INFO-PRE
-  extraction_sides:
-    spec:
-    - MT-POOL-INFO-PRE
-    code: []
-- id: D-FR-020-lib.rs:610-1cdebd
-  name: Is dma capable precondition
-  kind: spec-not-found-in-code
-  methods:
-  - is_dma_capable
-  spec_says: The question of whether the pool's memory can be used directly by storage hardware may be asked at
-    any time and always answers yes or no rather than failing.
-  code_does: No matching guarantee stated by the code reader.
-  spec_pointers:
-  - FR-020
-  - US-3
-  code_pointers:
-  - lib.rs:610
-  status: candidate
-  excluded_properties:
-  - MT-IS-DMA-CAPABLE-PRE
-  extraction_sides:
-    spec:
-    - MT-IS-DMA-CAPABLE-PRE
-    code: []
-- id: D-FR-023-lib.rs:610612-03b2a2
-  name: Is dma capable no init guard
-  kind: spec-and-code-differ
-  methods:
-  - is_dma_capable
-  spec_says: Before the pool is set up the component answers no to being directly usable by storage hardware, because
-    there is no pool memory yet.
-  code_does: 'This is the only one of the component''s seventeen operations that does not check whether the component
-    has been initialized: it reads the stored flag directly, so an entirely uninitialized component answers "not
-    capable of direct device transfers", which is exactly the same answer a fully working memory-mapped pool gives,
-    and callers therefore cannot use this answer to detect an unusable component.'
-  spec_pointers:
-  - FR-023
-  - FR-020
-  code_pointers:
-  - lib.rs:610-612
-  - lib.rs:610
-  - lib.rs:611
-  - lib.rs:612
-  - lib.rs:569
-  status: candidate
-  excluded_properties:
-  - MT-IS-DMA-CAPABLE-NO-INIT-GUARD
-  extraction_sides:
-    spec:
-    - MT-IS-DMA-CAPABLE-ERR-NOT-INITIALIZED
-    code:
-    - MT-IS-DMA-CAPABLE-NO-INIT-GUARD
-- id: D-FR-018-lib.rs:605-4ed523
-  name: Clear pool memory
-  kind: spec-and-code-differ
-  methods:
-  - clear
-  - capacity
-  - pool_info
-  - is_dma_capable
-  spec_says: 'Wiping the cache removes the entries but keeps the pool itself: the total capacity, the pool''s base
-    address, and whether the memory is directly usable by storage hardware are all unchanged, and the component
-    remains set up and ready for new insertions.'
-  code_does: Clear rebuilds the free-space bookkeeping from the pool size stored in the component rather than from
-    the capacity the old bookkeeping reported, so the two values must always agree; if they ever diverged, clearing
-    would silently change the pool's reported capacity and could hand out addresses outside the real memory region.
-  spec_pointers:
-  - FR-018
-  - FR-022
-  - FR-020
-  - US-4
-  code_pointers:
-  - lib.rs:605
-  - lib.rs:311
-  - lib.rs:314
-  - allocator.rs:16
-  status: candidate
-  excluded_properties:
-  - MT-CLEAR-FRAME-POOL-MEMORY
-  extraction_sides:
-    spec:
-    - MT-CLEAR-FRAME-POOL-MEMORY
-    code:
-    - MT-CLEAR-CAPACITY-SOURCE
-- id: D-US-7-lib.rs:615-f7a48d
-  name: Telemetry snapshot precondition
-  kind: spec-not-found-in-code
-  methods:
-  - telemetry_snapshot
-  spec_says: The telemetry snapshot may be requested at any time, including before the pool has been set up and
-    regardless of whether the optional counter-tracking build option was enabled, and it always returns a set of
-    numbers rather than failing.
-  code_does: No matching guarantee stated by the code reader.
-  spec_pointers:
-  - US-7
-  - FR-028
-  code_pointers:
-  - lib.rs:615
-  status: candidate
-  excluded_properties:
-  - MT-TELEMETRY-SNAPSHOT-PRE
-  extraction_sides:
-    spec:
-    - MT-TELEMETRY-SNAPSHOT-PRE
-    code: []
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - lib.rs:521-523
+  - lib.rs:524-527
+  - components/memory-tier/src/lib.rs:521-523
+  - components/memory-tier/src/lib.rs:524-527
 - id: D-FR-027-lib.rs:460-e90984
   name: Telemetry eviction count
   kind: spec-and-code-differ
@@ -1040,26 +413,11 @@ discordances:
     - MT-TELEMETRY-SNAPSHOT-POST-EVICTION-COUNT
     code:
     - MT-EVICT-NEXT-TELEMETRY
-- id: D-FR-027-lib.rs:619620-a6f57a
-  name: Telemetry no contention when uncontended
-  kind: spec-not-found-in-code
-  methods:
-  - telemetry_snapshot
-  spec_says: When only one thread has ever used the component, both lock-contention counters in the snapshot remain
-    zero, because a contention is recorded only when an operation fails to take the lock on its first attempt.
-  code_does: No matching guarantee stated by the code reader.
-  spec_pointers:
-  - FR-027
-  - US-7
-  code_pointers:
-  - lib.rs:619-620
-  status: candidate
-  excluded_properties:
-  - MT-TELEMETRY-NO-CONTENTION-WHEN-UNCONTENDED
-  extraction_sides:
-    spec:
-    - MT-TELEMETRY-SNAPSHOT-POST-NO-CONTENTION-WHEN-UNCONTENDED
-    code: []
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - lib.rs:456-460
+  - components/memory-tier/src/lib.rs:441
+  - components/memory-tier/src/lib.rs:456-460
 - id: D-FR-027-lib.rs:619-9ddd97
   name: Telemetry counters monotonic
   kind: spec-and-code-differ
@@ -1093,95 +451,7 @@ discordances:
     - MT-TELEMETRY-SNAPSHOT-INV-MONOTONIC
     code:
     - MT-TELEMETRY-COUNTERS-MONOTONIC
-- id: D-FR-029-lib.rs:180186-f76665
-  name: Free capacity
-  kind: spec-and-code-differ
-  methods:
-  - free_capacity
-  - capacity
-  - used
-  spec_says: The free-space query reports the total pool capacity minus the bytes currently in use, so a caller
-    watching for memory pressure can see exactly how much room is left; this operation is described in the requirements
-    but is not one of the operations offered on the component's public interface.
-  code_does: The free-capacity helper reports the total capacity minus the bytes currently used, and reports zero
-    for a component that has not been initialized.
-  spec_pointers:
-  - FR-029
-  code_pointers:
-  - lib.rs:180-186
-  - lib.rs:180
-  - lib.rs:182
-  - lib.rs:183
-  - lib.rs:186
-  status: candidate
-  excluded_properties:
-  - MT-FREE-CAPACITY-POST
-  extraction_sides:
-    spec:
-    - MT-FREE-CAPACITY-POST
-    code:
-    - MT-FREE-CAPACITY-POST
-- id: D-FR-028-lib.rs:174175-510a90
-  name: Reset telemetry
-  kind: spec-and-code-differ
-  methods:
-  - reset_telemetry
-  - telemetry_snapshot
-  spec_says: After the telemetry counters are explicitly reset, a fresh snapshot reports zero for every counter,
-    while the cache contents, capacity, and bytes in use are all left untouched.
-  code_does: Resetting telemetry sets all three counters, evictions and write- and read-lock contentions, back to
-    zero, and it is the only way any counter ever decreases; note that it takes only a shared lock on the component
-    state while mutating those counters, which is sound only because the counters are atomic.
-  spec_pointers:
-  - FR-028
-  - US-7
-  code_pointers:
-  - lib.rs:174-175
-  - lib.rs:174
-  - lib.rs:175
-  - lib.rs:56
-  - lib.rs:57
-  - lib.rs:58
-  status: candidate
-  excluded_properties:
-  - MT-RESET-TELEMETRY-POST
-  extraction_sides:
-    spec:
-    - MT-RESET-TELEMETRY-POST
-    code:
-    - MT-RESET-TELEMETRY-POST
-- id: D-FR-004-allocator.rs:4253-9d82b6
-  name: Four kib alignment
-  kind: spec-and-code-differ
-  methods:
-  - insert
-  - get
-  - peek
-  - used
-  - free_capacity
-  spec_says: Every entry's position within the pool and every entry's reserved length are whole multiples of four
-    kibibytes, which is what makes the addresses usable for direct disk transfers.
-  code_does: The bytes-used total is always a multiple of 4096, because every amount added to it and every amount
-    taken from it is first rounded up to the next 4 KiB boundary.
-  spec_pointers:
-  - FR-004
-  - SC-4
-  - NFR-010
-  code_pointers:
-  - allocator.rs:42-53
-  - allocator.rs:5
-  - allocator.rs:42
-  - allocator.rs:53
-  - allocator.rs:60
-  - allocator.rs:61
-  status: candidate
-  excluded_properties:
-  - MT-INV-FOUR-KIB-ALIGNMENT
-  extraction_sides:
-    spec:
-    - MT-INV-FOUR-KIB-ALIGNMENT
-    code:
-    - MT-INV-USED-IS-ALIGNED
+  classified: classifiers disagree - needs a person
 - id: D-FR-004-lib.rs:371-cf2666
   name: Size accounting
   kind: spec-and-code-differ
@@ -1214,114 +484,17 @@ discordances:
     - MT-INV-SIZE-ACCOUNTING
     code:
     - MT-USED-ROUNDING-DRIFT
-- id: D-US-1-lib.rs:563-6f2914
-  name: Observer consistency
-  kind: spec-not-found-in-code
-  methods:
-  - contains
-  - get
-  - peek
-  - used
-  - clear
-  spec_says: 'The presence check, the two lookup operations, the count returned when the cache is wiped, and the
-    bytes-in-use figure all agree about which entries exist: a key reported as present is exactly a key whose lookups
-    succeed and whose space is included in the bytes in use.'
-  code_does: No matching guarantee stated by the code reader.
-  spec_pointers:
-  - US-1
-  - US-4
-  - US-5
-  - FR-018
-  code_pointers:
-  - lib.rs:563
-  status: candidate
-  excluded_properties:
-  - MT-INV-OBSERVER-CONSISTENCY
-  extraction_sides:
-    spec:
-    - MT-INV-OBSERVER-CONSISTENCY
-    code: []
-- id: D-FR-022-lib.rs:311-2db46d
-  name: Pool base stable
-  kind: spec-and-code-differ
-  methods:
-  - initialize
-  - pool_info
-  - capacity
-  - insert
-  - get
-  - peek
-  - remove
-  - evict_next
-  - clear
-  spec_says: Once the pool exists, its starting address and total size stay the same no matter what sequence of
-    insertions, lookups, deletions, evictions, or wipes is performed, which is what makes it safe for an outside
-    party such as a GPU driver to register that range once and keep using it.
-  code_does: The capacity the component reports is always the same as the size of the memory region it actually
-    mapped, both immediately after initialization and after any clear.
-  spec_pointers:
-  - FR-022
-  - US-5
-  - FR-001
-  code_pointers:
-  - lib.rs:311
-  - lib.rs:314
-  - lib.rs:605
-  - lib.rs:573
-  status: candidate
-  excluded_properties:
-  - MT-INV-POOL-BASE-STABLE
-  extraction_sides:
-    spec:
-    - MT-INV-POOL-BASE-STABLE
-    code:
-    - MT-INV-CAPACITY-EQUALS-POOL-SIZE
-- id: D-FR-011-lib.rs:377-4ea7a4
-  name: Pointer stable until freed
-  kind: spec-and-code-differ
-  methods:
-  - insert
-  - get
-  - peek
-  - remove
-  - evict_next
-  - evict_next_for_key
-  - clear
-  spec_says: The address given out for an entry remains valid and keeps pointing at that entry's own data until
-    the entry is explicitly deleted or evicted; until then the component never moves the entry and never re-uses
-    its memory for a different entry.
-  code_does: 'The only thing that identifies an entry''s storage is its byte position in the pool, and positions
-    are freely recycled: when an entry is removed, evicted or cleared away, its position goes straight back into
-    the free space and the very next allocation of a similar size is given the same position again, with no generation
-    number, epoch, or any other tag distinguishing one use of a position from the next; consequently an address
-    the component handed out earlier cannot be told apart from a currently valid address for a different key, and
-    the interface''s promise that an address is "valid until the slot is evicted or removed" is unenforceable because
-    nothing in the component can detect that a caller is still holding the old one. Clear makes every address previously
-    handed out by the component reusable, even though the interface documentation promises only that an address
-    stays valid until its own entry is evicted or removed and never mentions clearing as a third way of invalidating
-    it.'
-  spec_pointers:
-  - FR-011
-  - US-1
-  code_pointers:
-  - lib.rs:377
-  - imemory_tier.rs
-  - lib.rs:71
-  - lib.rs:501
-  - allocator.rs:44
-  - allocator.rs:82
-  - imemory_tier.rs:65
-  - lib.rs:604
-  - lib.rs:605
-  status: candidate
-  excluded_properties:
-  - MT-INV-POINTER-STABLE-UNTIL-FREED
-  extraction_sides:
-    spec:
-    - MT-INV-POINTER-STABLE-UNTIL-FREED
-    code:
-    - MT-INV-OFFSET-IS-THE-ONLY-IDENTITY
-    - MT-CLEAR-INVALIDATES-ALL-POINTERS
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - lib.rs:372
+  - lib.rs:405
+  - lib.rs:421
+  - allocator.rs:42
+  - allocator.rs:53
+  - components/memory-tier/src/lib.rs:372
+  - components/memory-tier/src/lib.rs:405
+  - components/memory-tier/src/allocator.rs:42
+  - components/memory-tier/src/allocator.rs:53
 - id: D-FR-007-allocator.rs:4853-a8fb3d
   name: No leaked or double booked space
   kind: spec-and-code-differ
@@ -1369,54 +542,11 @@ discordances:
     code:
     - MT-INV-USED-EQUALS-SUM-OF-ENTRIES
     - MT-INV-FREE-SPACE-CONSERVATION
-- id: D-NFR-007-lib.rs:262-6f525d
-  name: Default pool size never applied
-  kind: spec-not-found-in-code
-  methods:
-  - initialize
-  - capacity
-  spec_says: The component never silently uses its published default pool size of 256 mebibytes; the size of a pool
-    is always exactly the size the caller passed when setting it up, since every set-up call requires an explicit
-    size.
-  code_does: No matching guarantee stated by the code reader.
-  spec_pointers:
-  - NFR-007
-  code_pointers:
-  - lib.rs:262
-  status: candidate
-  excluded_properties:
-  - MT-INV-DEFAULT-POOL-SIZE-NEVER-APPLIED
-  extraction_sides:
-    spec:
-    - MT-INV-DEFAULT-POOL-SIZE-NEVER-APPLIED
-    code: []
-- id: D-FR-013-lib.rs:441-c90d91
-  name: No internal victim selection state
-  kind: spec-not-found-in-code
-  methods:
-  - evict_next
-  - evict_next_for_key
-  - oldest_keys
-  - get
-  - touch
-  - batch_touch
-  spec_says: All decisions about which entry to evict come from the external eviction-policy component; the memory
-    tier itself stores no ordering, rotation, or region-selection information, so its eviction behaviour is fully
-    determined by that policy plus the current cache contents.
-  code_does: No matching guarantee stated by the code reader.
-  spec_pointers:
-  - FR-013
-  - FR-014
-  - FR-024
-  code_pointers:
-  - lib.rs:441
-  status: candidate
-  excluded_properties:
-  - MT-INV-NO-INTERNAL-VICTIM-SELECTION-STATE
-  extraction_sides:
-    spec:
-    - MT-INV-NO-INTERNAL-VICTIM-SELECTION-STATE
-    code: []
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - lib.rs:360-367
+  - components/memory-tier/src/lib.rs:360-367
+  - components/memory-tier/src/allocator.rs:59-61
 - id: D-SC-3-lib.rs:333-2fb813
   name: Concurrent structural integrity
   kind: spec-and-code-differ
@@ -1463,6 +593,7 @@ discordances:
     - MT-INV-CONCURRENT-STRUCTURAL-INTEGRITY
     code:
     - MT-INV-LOCK-ORDER
+  classified: classifiers disagree - needs a person
 - id: D-RANGE-US-3-ec579e
   name: 'Input range: the requested pool size is a whole multiple of 4 KiB'
   kind: input-range-mismatch
@@ -1501,6 +632,7 @@ discordances:
   - lib.rs:186
   status: candidate
   assume_in_level2: the requested pool size is a whole multiple of 4 KiB
+  assume_rust: pool_size % 4096 == 0
   excluded_properties: []
 - id: D-RANGE-FR-002-fad39d
   name: 'Input range: the requested pool size is a whole multiple of the system''s default hugepage size (2 MiB)
@@ -1531,6 +663,7 @@ discordances:
   status: candidate
   assume_in_level2: the requested pool size is a whole multiple of the system's default hugepage size (2 MiB) whenever
     the hugepage mapping is the one used
+  assume_rust: pool_size % (2 * 1024 * 1024) == 0
   excluded_properties: []
 - id: D-RANGE-US-1-e5a999
   name: 'Input range: the pool size is no larger than the largest single entry size (u32::MAX bytes)'
@@ -1564,6 +697,7 @@ discordances:
   - lib.rs:362
   status: candidate
   assume_in_level2: the pool size is no larger than the largest single entry size (u32::MAX bytes)
+  assume_rust: pool_size <= u32::MAX as usize
   excluded_properties: []
 - id: D-RANGE-FR-019-b98877
   name: 'Input range: the NUMA node is absent, -1 (any), or a node id in 0..64 that fits the single-word nodemask'
@@ -1592,6 +726,7 @@ discordances:
   - lib.rs:291-295
   status: candidate
   assume_in_level2: the NUMA node is absent, -1 (any), or a node id in 0..64 that fits the single-word nodemask
+  assume_rust: numa_node.map_or(true, |n| n == -1 || (0..64).contains(&n))
   excluded_properties: []
 - id: D-RANGE-US-7-010573
   name: 'Input range: no telemetry counter is at u64::MAX on entry (no wrap during the call)'
@@ -1626,5 +761,21 @@ discordances:
   - lib.rs:620-628
   status: candidate
   assume_in_level2: no telemetry counter is at u64::MAX on entry (no wrap during the call)
+  assume_rust: state.telemetry.evictions.load(Ordering::Relaxed) < u64::MAX && state.telemetry.write_lock_contentions.load(Ordering::Relaxed)
+    < u64::MAX && state.telemetry.read_lock_contentions.load(Ordering::Relaxed) < u64::MAX
   excluded_properties: []
-routed_to_other_tools: []
+routed_to_other_tools:
+- property: MT-EVICT-NEXT-POST-LRU-ORDER
+  name: Evict next lru order
+  methods:
+  - evict_next
+  - evict_next_for_key
+  - get
+  - touch
+  - batch_touch
+  statement: With the least-recently-used policy that the system currently binds, an entry that has been read or
+    explicitly refreshed more recently is never evicted before an entry that has not been used since.
+  reason: external
+  checked_by: test
+  why: The victim ordering is computed entirely inside the bound eviction-policy-lru component; the memory tier
+    only forwards touches and asks for a victim.

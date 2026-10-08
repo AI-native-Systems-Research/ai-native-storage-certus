@@ -5,7 +5,7 @@
       "vc_alloc_mmap_m": { "prover": "alt-ergo", "time": 0.024 },
       "vc_verify_mt_alloc_mmap_nodemask_guard": {
         "prover": "alt-ergo",
-        "time": 0.041
+        "time": 0.054
       }
     }
   }

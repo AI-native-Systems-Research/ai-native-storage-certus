@@ -2,13 +2,13 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_mt_capacity": { "prover": "alt-ergo", "time": 0.025 },
-      "vc_mt_contains": { "prover": "alt-ergo", "time": 0.025 },
-      "vc_mt_get": { "prover": "alt-ergo", "time": 0.022 },
-      "vc_mt_initialize": { "prover": "alt-ergo", "time": 0.025 },
-      "vc_mt_peek": { "prover": "alt-ergo", "time": 0.025 },
-      "vc_mt_used": { "prover": "alt-ergo", "time": 0.025 },
-      "vc_verify_mt_init_post_ready": { "prover": "cvc5", "time": 0.111 }
+      "vc_mt_capacity": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_mt_contains": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_mt_get": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_mt_initialize": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_mt_peek": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_mt_used": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_verify_mt_init_post_ready": { "prover": "cvc5", "time": 0.149 }
     }
   }
 }

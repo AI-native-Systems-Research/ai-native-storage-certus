@@ -2,15 +2,18 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_index_Vec_Region_Global": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_index_Vec_Region_Global": { "prover": "alt-ergo", "time": 0.023 },
       "vc_index_mut_Vec_Region_Global": {
         "prover": "alt-ergo",
-        "time": 0.023
+        "time": 0.016
       },
-      "vc_insert_Region": { "prover": "alt-ergo", "time": 0.028 },
-      "vc_len_Region": { "prover": "alt-ergo", "time": 0.036 },
-      "vc_lower_bound": { "prover": "alt-ergo", "time": 0.038 },
-      "vc_map_insert": { "prover": "alt-ergo", "time": 0.712 }
+      "vc_insert_Region": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_len_Region": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_lower_bound": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_map_insert": {
+        "tactic": "compute_specified",
+        "children": [ { "prover": "alt-ergo", "time": 0.819 } ]
+      }
     }
   }
 }

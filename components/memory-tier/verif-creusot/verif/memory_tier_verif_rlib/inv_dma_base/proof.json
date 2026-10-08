@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_inv_dma_base": { "prover": "alt-ergo", "time": 0.035 },
+      "vc_mt_default": { "prover": "alt-ergo", "time": 0.017 }
+    }
+  }
+}

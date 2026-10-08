@@ -2,11 +2,8 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_mt_touch": {
-        "tactic": "compute_specified",
-        "children": [ { "prover": "alt-ergo", "time": 0.815 } ]
-      },
-      "vc_policy_touch_key": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_mt_touch": { "prover": "alt-ergo", "time": 0.784 },
+      "vc_policy_touch_key": { "prover": "alt-ergo", "time": 0.025 },
       "vc_slots_contains": { "prover": "alt-ergo", "time": 0.024 }
     }
   }

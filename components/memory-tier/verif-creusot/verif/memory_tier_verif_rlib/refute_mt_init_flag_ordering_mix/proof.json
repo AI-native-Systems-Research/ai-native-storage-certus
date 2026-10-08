@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_mt_initialize": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_mt_initialize": { "prover": "alt-ergo", "time": 0.028 },
       "vc_refute_mt_init_flag_ordering_mix": {
         "prover": "cvc5",
-        "time": 0.085
+        "time": 0.079
       }
     }
   }

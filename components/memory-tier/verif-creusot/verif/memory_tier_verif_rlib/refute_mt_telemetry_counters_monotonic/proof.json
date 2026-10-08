@@ -4,10 +4,10 @@
     "Coma": {
       "vc_refute_mt_telemetry_counters_monotonic": {
         "prover": "alt-ergo",
-        "time": 0.027
+        "time": 0.025
       },
-      "vc_tel_event": { "prover": "alt-ergo", "time": 0.023 },
-      "vc_tel_snapshot": { "prover": "alt-ergo", "time": 0.014 }
+      "vc_tel_event": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_tel_snapshot": { "prover": "alt-ergo", "time": 0.023 }
     }
   }
 }

@@ -2,20 +2,20 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_ev_commit": { "prover": "alt-ergo", "time": 0.018 },
-      "vc_ev_identify": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_ev_commit": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_ev_identify": { "prover": "alt-ergo", "time": 0.032 },
       "vc_index_Vec_SlotModel_Global": {
         "prover": "alt-ergo",
-        "time": 0.022
+        "time": 0.023
       },
-      "vc_ins_concurrent": { "prover": "alt-ergo", "time": 0.032 },
-      "vc_len_tup2_u64_u64": { "prover": "alt-ergo", "time": 0.031 },
-      "vc_ok_concurrent": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_ins_concurrent": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_len_tup2_u64_u64": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_ok_concurrent": { "prover": "alt-ergo", "time": 0.032 },
       "vc_refute_mt_oldest_keys_post_live_membership": {
         "prover": "z3",
-        "time": 0.187
+        "time": 0.248
       },
-      "vc_rm_concurrent": { "prover": "alt-ergo", "time": 0.027 }
+      "vc_rm_concurrent": { "prover": "alt-ergo", "time": 0.03 }
     }
   }
 }

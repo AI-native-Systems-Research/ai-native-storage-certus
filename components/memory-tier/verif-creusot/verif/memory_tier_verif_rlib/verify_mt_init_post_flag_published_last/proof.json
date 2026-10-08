@@ -2,11 +2,11 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_fl_new": { "prover": "alt-ergo", "time": 0.024 },
-      "vc_new_SlotModel": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_fl_new": { "prover": "alt-ergo", "time": 0.012 },
+      "vc_new_SlotModel": { "prover": "alt-ergo", "time": 0.012 },
       "vc_verify_mt_init_post_flag_published_last": {
         "prover": "z3",
-        "time": 0.055
+        "time": 0.031
       }
     }
   }

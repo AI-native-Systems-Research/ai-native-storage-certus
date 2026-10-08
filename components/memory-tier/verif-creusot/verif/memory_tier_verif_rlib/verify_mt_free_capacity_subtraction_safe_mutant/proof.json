@@ -4,7 +4,7 @@
     "Coma": {
       "vc_verify_mt_free_capacity_subtraction_safe__mutant": {
         "tactic": "split_vc",
-        "children": [ null, { "prover": "alt-ergo", "time": 0.027 } ]
+        "children": [ null, { "prover": "alt-ergo", "time": 0.02 } ]
       }
     }
   }

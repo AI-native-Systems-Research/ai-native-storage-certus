@@ -2,17 +2,17 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_mt_used": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_mt_used": { "prover": "alt-ergo", "time": 0.026 },
       "vc_verify_mt_used_frame__mutant": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.02 },
+              { "prover": "alt-ergo", "time": 0.03 },
               {
                 "tactic": "split_vc",
-                "children": [ { "prover": "alt-ergo", "time": 0.026 }, null ]
+                "children": [ { "prover": "alt-ergo", "time": 0.027 }, null ]
               }
             ]
           }

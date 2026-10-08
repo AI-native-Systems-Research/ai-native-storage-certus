@@ -2497,12 +2497,15 @@ pub fn verify_mt_inv_initialize_once_only__mutant(st: &mut StateModel, sz1: usiz
 /// "Every address handed back when adding a cache entry starts on a
 /// four-kibibyte boundary, so the memory can be used directly as the source or
 /// destination of a disk transfer without any extra copying or realignment."
+/// J11: NARROWED -- NOT a classifier-A driver: it reaches `mt_insert`/`mt_initialize`, which
+/// need the policy-mirror counter bound (`next_handle`/`pools` < u64::MAX, `arith_ok`); that
+/// bound is neither a declared range nor a proved invariant.
 #[requires(mt_inv(*st))]
 #[requires(st.initialized)]
 #[requires(st.allocator.used@ + 4295000000 <= usize::MAX@)]
 #[requires(st.policy.next_handle@ < u64::MAX@)]
 #[ensures(forall<p: usize> result == Ok(p) ==> p@ % 4096 == 0)]
-pub fn verify_mt_insert_post_alignment(
+pub fn narrowed_verify_mt_insert_post_alignment(
     st: &mut StateModel,
     key: Key,
     size: u32,
@@ -2517,18 +2520,26 @@ pub fn verify_mt_insert_post_alignment(
     r
 }
 
-/// Anti-vacuity twin of `verify_mt_insert_post_alignment`: MUST FAIL.
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #0 negated.
 #[requires(mt_inv(*st))]
 #[requires(st.initialized)]
 #[requires(st.allocator.used@ + 4295000000 <= usize::MAX@)]
 #[requires(st.policy.next_handle@ < u64::MAX@)]
-#[ensures(forall<p: usize> result == Ok(p) ==> p@ % 4096 == 1)]
-pub fn verify_mt_insert_post_alignment__mutant(
+#[ensures(!(forall<p: usize> result == Ok(p) ==> p@ % 4096 == 0))]
+pub fn narrowed_verify_mt_insert_post_alignment__mutant(
     st: &mut StateModel,
     key: Key,
     size: u32,
 ) -> Result<usize, MtError> {
-    mt_insert(st, key, size)
+    proof_assert!(st.pool_base@ % 4096 == 0);
+    let r = mt_insert(st, key, size);
+    // the same address is handed back by every later lookup of the entry
+    let g = mt_get(st, key);
+    proof_assert!(forall<p: usize, sz: u32> g == Some((p, sz)) ==> p@ % 4096 == 0);
+    let pk = mt_peek(st, key);
+    proof_assert!(forall<p: usize, sz: u32> pk == Some((p, sz)) ==> p@ % 4096 == 0);
+    r
 }
 
 /// **MT-INSERT-ERR-POOL-FULL** (error-case, 1 attachment)
@@ -2607,8 +2618,8 @@ pub fn verify_mt_insert_err_pool_full__mutant(
 /// "An evicted key is also removed from the external eviction-policy component's
 /// bookkeeping, so it can no longer appear in the list of oldest keys and cannot
 /// be nominated as a victim a second time."
+/// J11 (LEVEL-2 classifier-A): Over an ARBITRARY reachable state (`mt_inv`); the set-up premise is dropped.
 #[requires(mt_inv(*st))]
-#[requires(st.initialized)]
 #[ensures(forall<k: Key> result == Some(k) ==> !tracks((^st).policy.tracked@, k))]
 #[ensures(forall<k: Key> result == Some(k) ==> !slot_at((^st).slots@, k))]
 pub fn verify_mt_evict_next_post_untracked(st: &mut StateModel) -> Option<Key> {
@@ -2623,12 +2634,21 @@ pub fn verify_mt_evict_next_post_untracked(st: &mut StateModel) -> Option<Key> {
     v
 }
 
-/// Anti-vacuity twin of `verify_mt_evict_next_post_untracked`: MUST FAIL.
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #0 negated.
 #[requires(mt_inv(*st))]
-#[requires(st.initialized)]
-#[ensures(forall<k: Key> result == Some(k) ==> tracks((^st).policy.tracked@, k))]
+#[ensures(!(forall<k: Key> result == Some(k) ==> !tracks((^st).policy.tracked@, k)))]
+#[ensures(forall<k: Key> result == Some(k) ==> !slot_at((^st).slots@, k))]
 pub fn verify_mt_evict_next_post_untracked__mutant(st: &mut StateModel) -> Option<Key> {
-    mt_evict_next(st)
+    let v = mt_evict_next(st);
+    // "... so it can no longer appear in the list of oldest keys ..."
+    let oldest = mt_oldest_keys(st, 64);
+    proof_assert!(forall<k: Key, i: Int> v == Some(k) && 0 <= i && i < oldest@.len()
+                  ==> oldest@[i] != k);
+    // "... and cannot be nominated as a victim a second time."
+    let v2 = mt_evict_next(st);
+    proof_assert!(forall<k: Key> v == Some(k) ==> v2 != Some(k));
+    v
 }
 
 /// **MT-INV-LOCK-POISONING-CASCADE** (invariant, code-only, 17 attachments)
@@ -2969,6 +2989,9 @@ pub fn verify_mt_inv_initialized_implies_usable_pool__mutant(st: &mut StateModel
 /// matter what sequence of insertions, lookups, deletions, evictions or wipes is
 /// performed, and the capacity the component reports is always the same as the
 /// size of the memory region it actually mapped."
+/// J11: NARROWED -- NOT a classifier-A driver: it reaches `mt_insert`/`mt_initialize`, which
+/// need the policy-mirror counter bound (`next_handle`/`pools` < u64::MAX, `arith_ok`); that
+/// bound is neither a declared range nor a proved invariant.
 #[requires(mt_inv(*st))]
 #[requires(!st.poisoned)]
 #[requires(st.initialized)]
@@ -2978,7 +3001,7 @@ pub fn verify_mt_inv_initialized_implies_usable_pool__mutant(st: &mut StateModel
 #[ensures((^st).pool_base == st.pool_base && (^st).pool_size == st.pool_size)]
 #[ensures(result.0 == Some((st.pool_base, st.pool_size)))]
 #[ensures(result.1 == st.pool_size)]
-pub fn verify_mt_inv_pool_base_stable(
+pub fn narrowed_verify_mt_inv_pool_base_stable(
     st: &mut StateModel,
     ops: &[(u8, Key, u32)],
     psz: usize,
@@ -2991,17 +3014,28 @@ pub fn verify_mt_inv_pool_base_stable(
     (info, cap)
 }
 
-/// Anti-vacuity twin: MUST FAIL (claims the reported capacity can differ from the mapped size).
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #0 negated.
 #[requires(mt_inv(*st))]
 #[requires(!st.poisoned)]
 #[requires(st.initialized)]
 #[requires(st.policy.next_handle@ + ops@.len() + 1 < u64::MAX@)]
 #[requires(st.policy.pools@ + ops@.len() + 1 < u64::MAX@)]
 #[requires(psz@ > 0 ==> psz@ + 4096 <= usize::MAX@)]
-#[ensures(result != st.pool_size)]
-pub fn verify_mt_inv_pool_base_stable__mutant(st: &mut StateModel, ops: &[(u8, Key, u32)], psz: usize) -> usize {
+#[ensures(!((^st).pool_base == st.pool_base && (^st).pool_size == st.pool_size))]
+#[ensures(result.0 == Some((st.pool_base, st.pool_size)))]
+#[ensures(result.1 == st.pool_size)]
+pub fn narrowed_verify_mt_inv_pool_base_stable__mutant(
+    st: &mut StateModel,
+    ops: &[(u8, Key, u32)],
+    psz: usize,
+) -> (Option<(usize, usize)>, usize) {
+    let info0 = mt_pool_info(st);
+    proof_assert!(info0 == Some((st.pool_base, st.pool_size)));
     mt_run(st, ops, psz);
-    mt_capacity(st)
+    let info = mt_pool_info(st);
+    let cap = mt_capacity(st);
+    (info, cap)
 }
 
 /// **MT-FREELIST-USED-POST** (postcondition, code-only, 7 attachments)
@@ -3733,6 +3767,9 @@ pub fn verify_mt_init_post_policy_pool__mutant(st: &mut StateModel, psz: usize, 
 /// entry's own data until that entry is explicitly deleted or evicted; until then
 /// the component never moves the entry and never re-uses its memory for a
 /// different entry."
+/// J11: NARROWED -- NOT a classifier-A driver: it reaches `mt_insert`/`mt_initialize`, which
+/// need the policy-mirror counter bound (`next_handle`/`pools` < u64::MAX, `arith_ok`); that
+/// bound is neither a declared range nor a proved invariant.
 #[requires(mt_inv(*st))]
 #[requires(!st.poisoned && st.initialized)]
 #[requires(slot_at(st.slots@, k))]
@@ -3748,7 +3785,7 @@ pub fn verify_mt_init_post_policy_pool__mutant(st: &mut StateModel, psz: usize, 
           && (^st).slots@[i].key == k && (^st).slots@[j].key != k
           ==> disj((^st).slots@[i].offset@, sl_end((^st).slots@[i]),
                    (^st).slots@[j].offset@, sl_end((^st).slots@[j])))]
-pub fn verify_mt_inv_pointer_stable_until_freed(
+pub fn narrowed_verify_mt_inv_pointer_stable_until_freed(
     st: &mut StateModel,
     k: Key,
     ops: &[(u8, Key, u32)],
@@ -3781,17 +3818,51 @@ pub fn verify_mt_inv_pointer_stable_until_freed(
     (p0, p1, still)
 }
 
-/// Anti-vacuity twin: MUST FAIL (claims a live entry's address can change).
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #1 negated.
 #[requires(mt_inv(*st))]
 #[requires(!st.poisoned && st.initialized)]
 #[requires(slot_at(st.slots@, k))]
-#[requires(st.policy.next_handle@ + 2 < u64::MAX@)]
-#[requires(st.policy.pools@ + 2 < u64::MAX@)]
-#[ensures(result.2 ==> result.1 != result.0)]
-pub fn verify_mt_inv_pointer_stable_until_freed__mutant(st: &mut StateModel, k: Key, op: u8, key: Key, size: u32)
-    -> (Option<(usize, u32)>, Option<(usize, u32)>, bool) {
+#[requires(st.policy.next_handle@ + ops@.len() + 1 < u64::MAX@)]
+#[requires(st.policy.pools@ + ops@.len() + 1 < u64::MAX@)]
+#[requires(psz@ > 0 ==> psz@ + 4096 <= usize::MAX@)]
+// as long as the entry is still there, the address (and size) handed out is unchanged ...
+#[ensures(result.2 ==> result.1 == result.0 && result.0 != None)]
+// ... the pool mapping itself has not moved ...
+#[ensures(!((^st).pool_base == st.pool_base && (^st).pool_size == st.pool_size))]
+// ... and no OTHER live entry shares any byte of its run
+#[ensures(result.2 ==> forall<i: Int, j: Int> 0 <= i && i < (^st).slots@.len() && 0 <= j && j < (^st).slots@.len()
+          && (^st).slots@[i].key == k && (^st).slots@[j].key != k
+          ==> disj((^st).slots@[i].offset@, sl_end((^st).slots@[i]),
+                   (^st).slots@[j].offset@, sl_end((^st).slots@[j])))]
+pub fn narrowed_verify_mt_inv_pointer_stable_until_freed__mutant(
+    st: &mut StateModel,
+    k: Key,
+    ops: &[(u8, Key, u32)],
+    psz: usize,
+) -> (Option<(usize, u32)>, Option<(usize, u32)>, bool) {
     let p0 = mt_peek(st, k);
-    let _ = mt_call(st, op, key, size, 0);
+    let s0 = snapshot! { st.slots@ };
+    let st0 = snapshot! { *st };
+    let n = ops.len();
+    let mut i: usize = 0;
+    // run ANY calls, stopping as soon as the entry has been deleted / evicted / wiped
+    #[invariant(i@ <= n@)]
+    #[invariant(mt_inv(*st))]
+    #[invariant(!st.poisoned && st.initialized)]
+    #[invariant(st.pool_base == st0.pool_base && st.pool_size == st0.pool_size)]
+    #[invariant(st.policy.next_handle@ <= st0.policy.next_handle@ + i@)]
+    #[invariant(st.policy.pools@ <= st0.policy.pools@ + i@)]
+    #[invariant(forall<a: Int, b: Int> 0 <= a && a < s0.len() && 0 <= b && b < st.slots@.len()
+                && s0[a].key == k && st.slots@[b].key == k ==> s0[a] == st.slots@[b])]
+    while i < n && slots_contains(&st.slots, k) {
+        let (op, key, size) = ops[i];
+        let before = snapshot! { st.slots@ };
+        proof_assert!(slot_at(*before, k));
+        let _ = mt_call(st, op, key, size, psz);
+        proof_assert!(slot_stable(*before, st.slots@));
+        i += 1;
+    }
     let still = mt_contains(st, k);
     let p1 = mt_peek(st, k);
     (p0, p1, still)
@@ -4672,17 +4743,19 @@ pub fn verify_mt_inv_entry_size_narrow_field__mutant(st: &mut StateModel, key: K
 /// component; the memory tier itself stores no ordering, rotation or
 /// region-selection information, so its eviction behaviour is fully determined by
 /// that policy's state."
-///
-/// Two set-up memory tiers whose bound policies hold the SAME order make the same
-/// eviction choice and report the same oldest keys, whatever else differs (their
-/// entries' offsets, sizes, free lists, pool bases ...).
+/// J11 (LEVEL-2 classifier-A): Two ARBITRARY reachable states (`mt_inv`) whose ONLY stated common part is the policy order (`tracked`); the set-up premise is dropped.
 #[requires(mt_inv(*a) && mt_inv(*b))]
-#[requires(a.initialized && b.initialized)]
 #[requires(a.policy.tracked@ == b.policy.tracked@)]
 #[ensures(result.0 == result.1)]
 #[ensures(result.2@ == result.3@)]
 pub fn verify_mt_inv_no_internal_victim_selection_state(a: &mut StateModel, b: &mut StateModel, n: usize)
     -> (Option<Key>, Option<Key>, Vec<Key>, Vec<Key>) {
+    proof_assert!(a.slots@.len() > 0 ==> slot_at(a.slots@, a.slots@[0].key));
+    proof_assert!(b.slots@.len() > 0 ==> slot_at(b.slots@, b.slots@[0].key));
+    proof_assert!(a.slots@.len() > 0 ==> tracks(a.policy.tracked@, a.slots@[0].key));
+    proof_assert!(b.slots@.len() > 0 ==> tracks(b.policy.tracked@, b.slots@[0].key));
+    proof_assert!(a.policy.tracked@.len() == 0 ==> a.slots@.len() == 0 && b.slots@.len() == 0);
+    proof_assert!(!a.initialized || !b.initialized ==> a.policy.tracked@.len() == 0);
     let oa = mt_oldest_keys(a, n);
     let ob = mt_oldest_keys(b, n);
     proof_assert!(oa@.len() == ob@.len());
@@ -4697,18 +4770,32 @@ pub fn verify_mt_inv_no_internal_victim_selection_state(a: &mut StateModel, b: &
     (ra, rb, oa, ob)
 }
 
-/// Anti-vacuity twin: MUST FAIL (claims the memory tier's OWN state -- identical
-/// entries -- determines the victim, with the policy order left free).
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #0 negated.
 #[requires(mt_inv(*a) && mt_inv(*b))]
-#[requires(a.initialized && b.initialized)]
-#[requires(a.slots@ == b.slots@)]
-#[ensures(a.slots@ == b.slots@)]
-#[ensures(result.0 == result.1)]
-pub fn verify_mt_inv_no_internal_victim_selection_state__mutant(a: &mut StateModel, b: &mut StateModel)
-    -> (Option<Key>, Option<Key>) {
+#[requires(a.policy.tracked@ == b.policy.tracked@)]
+#[ensures(!(result.0 == result.1))]
+#[ensures(result.2@ == result.3@)]
+pub fn verify_mt_inv_no_internal_victim_selection_state__mutant(a: &mut StateModel, b: &mut StateModel, n: usize)
+    -> (Option<Key>, Option<Key>, Vec<Key>, Vec<Key>) {
+    proof_assert!(a.slots@.len() > 0 ==> slot_at(a.slots@, a.slots@[0].key));
+    proof_assert!(b.slots@.len() > 0 ==> slot_at(b.slots@, b.slots@[0].key));
+    proof_assert!(a.slots@.len() > 0 ==> tracks(a.policy.tracked@, a.slots@[0].key));
+    proof_assert!(b.slots@.len() > 0 ==> tracks(b.policy.tracked@, b.slots@[0].key));
+    proof_assert!(a.policy.tracked@.len() == 0 ==> a.slots@.len() == 0 && b.slots@.len() == 0);
+    proof_assert!(!a.initialized || !b.initialized ==> a.policy.tracked@.len() == 0);
+    let oa = mt_oldest_keys(a, n);
+    let ob = mt_oldest_keys(b, n);
+    proof_assert!(oa@.len() == ob@.len());
+    proof_assert!(forall<i: Int> 0 <= i && i < oa@.len() ==> oa@[i] == ob@[i]);
+    proof_assert!(a.policy.tracked@ == b.policy.tracked@);
+    proof_assert!(a.policy.tracked@.len() > 0 ==> tracks(a.policy.tracked@, (a.policy.tracked@[0]).0));
+    proof_assert!(a.policy.tracked@.len() > 0 ==> slot_at(a.slots@, (a.policy.tracked@[0]).0)
+                  && slot_at(b.slots@, (b.policy.tracked@[0]).0));
+    proof_assert!(a.policy.tracked@.len() > 0 ==> a.slots@.len() > 0 && b.slots@.len() > 0);
     let ra = mt_evict_next(a);
     let rb = mt_evict_next(b);
-    (ra, rb)
+    (ra, rb, oa, ob)
 }
 
 /// **MT-INV-NEVER-NOT-EVICTABLE** (invariant, 6 attachments)
@@ -5115,11 +5202,8 @@ pub fn verify_mt_inv_unaligned_capacity_tail__mutant(st: &mut StateModel, psz: u
 /// cache is wiped and the bytes-in-use figure all agree about which entries exist:
 /// a key reported as present is exactly a key whose lookups succeed and whose space
 /// is counted in the bytes in use."
+/// J11 (LEVEL-2 classifier-A): Over an ARBITRARY reachable state (`mt_inv`, preserved by every operation) -- no call chain, no counter premises.
 #[requires(mt_inv(*st))]
-#[requires(!st.poisoned)]
-#[requires(st.policy.next_handle@ + ops@.len() + 1 < u64::MAX@)]
-#[requires(st.policy.pools@ + ops@.len() + 1 < u64::MAX@)]
-#[requires(psz@ > 0 ==> psz@ + 4096 <= usize::MAX@)]
 // presence check == peek succeeds == get succeeds
 #[ensures(result.0 == (result.1 != None))]
 #[ensures(result.0 == (result.2 != None))]
@@ -5132,9 +5216,8 @@ pub fn verify_mt_inv_unaligned_capacity_tail__mutant(st: &mut StateModel, psz: u
 // the wipe count is the number of present keys (one slot per key)
 #[ensures(match result.4 { Ok(cnt) => cnt@ == result.5.len() && slot_keys_unique(*result.5),
                            Err(_) => result.5.len() == 0 })]
-pub fn verify_mt_inv_observer_consistency(st: &mut StateModel, ops: &[(u8, Key, u32)], psz: usize, k: Key)
+pub fn verify_mt_inv_observer_consistency(st: &mut StateModel, k: Key)
     -> (bool, Option<(usize, u32)>, Option<(usize, u32)>, usize, Result<usize, MtError>, Snapshot<Seq<SlotModel>>) {
-    mt_run(st, ops, psz);
     let c = mt_contains(st, k);
     let p = mt_peek(st, k);
     let u = mt_used(st);
@@ -5147,13 +5230,33 @@ pub fn verify_mt_inv_observer_consistency(st: &mut StateModel, ops: &[(u8, Key, 
     (c, p, g, u, cl, mid)
 }
 
-/// Anti-vacuity twin: MUST FAIL (claims presence check and peek DISAGREE).
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #0 negated.
 #[requires(mt_inv(*st))]
-#[ensures(result.0 == (result.1 == None))]
-pub fn verify_mt_inv_observer_consistency__mutant(st: &mut StateModel, k: Key) -> (bool, Option<(usize, u32)>) {
+// presence check == peek succeeds == get succeeds
+#[ensures(!(result.0 == (result.1 != None)))]
+#[ensures(result.0 == (result.2 != None))]
+// a present key's (rounded) space is counted in bytes-in-use, and in-use is
+// exactly the space of the present keys (`result.5` = the entries at observation time)
+#[ensures(result.0 ==> exists<i: Int> 0 <= i && i < result.5.len() && result.5[i].key == k
+          && align_up_l(result.5[i].size@) <= result.3@)]
+#[ensures(result.3@ == slot_sum(*result.5))]
+#[ensures(result.0 == slot_at(*result.5, k))]
+// the wipe count is the number of present keys (one slot per key)
+#[ensures(match result.4 { Ok(cnt) => cnt@ == result.5.len() && slot_keys_unique(*result.5),
+                           Err(_) => result.5.len() == 0 })]
+pub fn verify_mt_inv_observer_consistency__mutant(st: &mut StateModel, k: Key)
+    -> (bool, Option<(usize, u32)>, Option<(usize, u32)>, usize, Result<usize, MtError>, Snapshot<Seq<SlotModel>>) {
     let c = mt_contains(st, k);
     let p = mt_peek(st, k);
-    (c, p)
+    let u = mt_used(st);
+    let g = mt_get(st, k);
+    proof_assert!(!st.initialized ==> st.slots@.len() == 0 && slot_sum(st.slots@) == 0);
+    proof_assert!(forall<j: Int> 0 <= j && j < st.slots@.len() ==> st.slots@[j].size@ > 0);
+    snapshot! { lem_ss_bound(st.slots@) };
+    let mid = snapshot! { st.slots@ };
+    let cl = mt_clear(st);
+    (c, p, g, u, cl, mid)
 }
 
 /// GHOST trace of the eviction-order refresh calls memory-tier issues
@@ -5263,36 +5366,33 @@ pub fn verify_mt_inv_handle_can_outlive_entry__mutant(st: &mut StateModel, key: 
 /// whole multiples of four kibibytes, which is what makes the addresses handed out
 /// four-kibibyte aligned and keeps the bytes-in-use total a whole number of
 /// four-kibibyte units."
+/// J11 (LEVEL-2 classifier-A): Over an ARBITRARY reachable state (`mt_inv`, which every operation preserves): offsets, reserved lengths, addresses and `used` are 4 KiB multiples (`lem_ss_aligned`).
 #[requires(mt_inv(*st))]
-#[requires(!st.poisoned)]
-#[requires(st.policy.next_handle@ + ops@.len() + 1 < u64::MAX@)]
-#[requires(st.policy.pools@ + ops@.len() + 1 < u64::MAX@)]
-#[requires(psz@ > 0 ==> psz@ + 4096 <= usize::MAX@)]
-#[ensures(forall<i: Int> 0 <= i && i < (^st).slots@.len()
-          ==> (^st).slots@[i].offset@ % 4096 == 0 && align_up_l((^st).slots@[i].size@) % 4096 == 0)]
-#[ensures((^st).initialized ==> forall<i: Int> 0 <= i && i < (^st).slots@.len()
-          ==> ((^st).pool_base@ + (^st).slots@[i].offset@) % 4096 == 0)]
-#[ensures((^st).allocator.used@ % 4096 == 0)]
+#[ensures(forall<i: Int> 0 <= i && i < st.slots@.len()
+          ==> st.slots@[i].offset@ % 4096 == 0 && align_up_l(st.slots@[i].size@) % 4096 == 0)]
+#[ensures(st.initialized ==> forall<i: Int> 0 <= i && i < st.slots@.len()
+          ==> (st.pool_base@ + st.slots@[i].offset@) % 4096 == 0)]
+#[ensures(st.allocator.used@ % 4096 == 0)]
 #[ensures(forall<a: usize, s: u32> result == Some((a, s)) ==> a@ % 4096 == 0)]
-pub fn verify_mt_inv_four_kib_alignment(st: &mut StateModel, ops: &[(u8, Key, u32)], psz: usize, k: Key)
-    -> Option<(usize, u32)> {
-    mt_run(st, ops, psz);
+pub fn verify_mt_inv_four_kib_alignment(st: &StateModel, k: Key) -> Option<(usize, u32)> {
     snapshot! { lem_ss_aligned(st.slots@) };
     proof_assert!(st.allocator.used@ == slot_sum(st.slots@));
     mt_peek(st, k)
 }
 
-/// Anti-vacuity twin: MUST FAIL (claims the REQUESTED size is a 4 KiB multiple too;
-/// only the reserved length is).
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #0 negated.
 #[requires(mt_inv(*st))]
-#[requires(!st.poisoned)]
-#[requires(st.policy.next_handle@ + ops@.len() + 1 < u64::MAX@)]
-#[requires(st.policy.pools@ + ops@.len() + 1 < u64::MAX@)]
-#[requires(psz@ > 0 ==> psz@ + 4096 <= usize::MAX@)]
-#[ensures(forall<i: Int> 0 <= i && i < (^st).slots@.len() ==> (^st).slots@[i].offset@ % 4096 == 0)]
-#[ensures(forall<i: Int> 0 <= i && i < (^st).slots@.len() ==> (^st).slots@[i].size@ % 4096 == 0)]
-pub fn verify_mt_inv_four_kib_alignment__mutant(st: &mut StateModel, ops: &[(u8, Key, u32)], psz: usize) {
-    mt_run(st, ops, psz);
+#[ensures(!(forall<i: Int> 0 <= i && i < st.slots@.len()
+          ==> st.slots@[i].offset@ % 4096 == 0 && align_up_l(st.slots@[i].size@) % 4096 == 0))]
+#[ensures(st.initialized ==> forall<i: Int> 0 <= i && i < st.slots@.len()
+          ==> (st.pool_base@ + st.slots@[i].offset@) % 4096 == 0)]
+#[ensures(st.allocator.used@ % 4096 == 0)]
+#[ensures(forall<a: usize, s: u32> result == Some((a, s)) ==> a@ % 4096 == 0)]
+pub fn verify_mt_inv_four_kib_alignment__mutant(st: &StateModel, k: Key) -> Option<(usize, u32)> {
+    snapshot! { lem_ss_aligned(st.slots@) };
+    proof_assert!(st.allocator.used@ == slot_sum(st.slots@));
+    mt_peek(st, k)
 }
 
 /// **MT-INV-SIZE-ACCOUNTING** -- REFUTATION of the wording (divergent, 5 attachments)
@@ -5375,6 +5475,9 @@ pub fn witness_mt_inv_size_accounting_nonstrict(st: &mut StateModel, ops: &[(u8,
 /// "Adding a cache entry leaves every other entry untouched: their addresses, their
 /// sizes and the bytes they hold are unchanged, none of them is removed, and the
 /// pool's total capacity stays the same."
+/// J11: NARROWED -- NOT a classifier-A driver: it reaches `mt_insert`/`mt_initialize`, which
+/// need the policy-mirror counter bound (`next_handle`/`pools` < u64::MAX, `arith_ok`); that
+/// bound is neither a declared range nor a proved invariant.
 #[requires(mt_inv(*st))]
 #[requires(st.policy.next_handle@ + 1 < u64::MAX@)]
 #[requires(k2 != key)]
@@ -5383,7 +5486,7 @@ pub fn witness_mt_inv_size_accounting_nonstrict(st: &mut StateModel, ops: &[(u8,
 #[ensures(forall<x: Key> x != key ==> slot_at((^st).slots@, x) == slot_at(st.slots@, x))]
 #[ensures(slot_stable(st.slots@, (^st).slots@))]
 #[ensures((^st).pool_base == st.pool_base)]
-pub fn verify_mt_insert_frame_other_entries(st: &mut StateModel, key: Key, size: u32, k2: Key)
+pub fn narrowed_verify_mt_insert_frame_other_entries(st: &mut StateModel, key: Key, size: u32, k2: Key)
     -> (Result<usize, MtError>, Option<(usize, u32)>, Option<(usize, u32)>, usize, usize) {
     let p0 = mt_peek(st, k2);
     let c0 = mt_capacity(st);
@@ -5393,12 +5496,17 @@ pub fn verify_mt_insert_frame_other_entries(st: &mut StateModel, key: Key, size:
     (r, p0, p1, c0, c1)
 }
 
-/// Anti-vacuity twin: MUST FAIL (drops `k2 != key`: the inserted key's own lookup changes).
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #2 negated.
 #[requires(mt_inv(*st))]
 #[requires(st.policy.next_handle@ + 1 < u64::MAX@)]
-#[ensures(result.3 == result.4)]
+#[requires(k2 != key)]
 #[ensures(result.1 == result.2)]
-pub fn verify_mt_insert_frame_other_entries__mutant(st: &mut StateModel, key: Key, size: u32, k2: Key)
+#[ensures(result.3 == result.4)]
+#[ensures(!(forall<x: Key> x != key ==> slot_at((^st).slots@, x) == slot_at(st.slots@, x)))]
+#[ensures(slot_stable(st.slots@, (^st).slots@))]
+#[ensures((^st).pool_base == st.pool_base)]
+pub fn narrowed_verify_mt_insert_frame_other_entries__mutant(st: &mut StateModel, key: Key, size: u32, k2: Key)
     -> (Result<usize, MtError>, Option<(usize, u32)>, Option<(usize, u32)>, usize, usize) {
     let p0 = mt_peek(st, k2);
     let c0 = mt_capacity(st);
@@ -5680,15 +5788,15 @@ pub fn verify_mt_batch_touch_post_all_present__mutant(a: &mut StateModel, keys: 
 /// capacity, the pool's base address and whether the memory is directly usable by
 /// storage hardware are all unchanged, and the component remains set up and ready
 /// for further use."
+/// J11 (LEVEL-2 classifier-A): Over an ARBITRARY reachable state (`mt_inv`); the set-up premise is dropped (an un-set-up clear also keeps capacity/base/DMA flag).
 #[requires(mt_inv(*st))]
-#[requires(st.initialized)]
 #[ensures(result.0 == result.1)]
 #[ensures(result.2 == result.3)]
 #[ensures(result.4 == result.5)]
-#[ensures((^st).initialized && (^st).pool_base == st.pool_base && (^st).pool_size == st.pool_size)]
-#[ensures(match result.6 { Ok(_) => true, Err(_) => false })]
+#[ensures((^st).initialized == st.initialized && (^st).pool_base == st.pool_base && (^st).pool_size == st.pool_size)]
+#[ensures(st.initialized ==> match result.6 { Ok(_) => true, Err(_) => false })]
 // the divergence: the rebuilt capacity comes from `pool_size`, which equals the old capacity
-#[ensures(result.1@ == st.pool_size@ && st.allocator.capacity@ == st.pool_size@)]
+#[ensures(st.initialized ==> result.1@ == st.pool_size@ && st.allocator.capacity@ == st.pool_size@)]
 #[ensures(mt_inv(^st))]
 pub fn verify_mt_clear_frame_pool_memory(st: &mut StateModel)
     -> (usize, usize, Option<(usize, usize)>, Option<(usize, usize)>, bool, bool, Result<usize, MtError>) {
@@ -5702,13 +5810,27 @@ pub fn verify_mt_clear_frame_pool_memory(st: &mut StateModel)
     (c0, c1, pi0, pi1, d0, d1, r)
 }
 
-/// Anti-vacuity twin: MUST FAIL (claims the wipe leaves bytes-in-use unchanged too).
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #0 negated.
 #[requires(mt_inv(*st))]
-#[requires(st.initialized)]
-#[ensures((^st).allocator.capacity == st.allocator.capacity)]
-#[ensures((^st).allocator.used == st.allocator.used)]
-pub fn verify_mt_clear_frame_pool_memory__mutant(st: &mut StateModel) -> Result<usize, MtError> {
-    mt_clear(st)
+#[ensures(!(result.0 == result.1))]
+#[ensures(result.2 == result.3)]
+#[ensures(result.4 == result.5)]
+#[ensures((^st).initialized == st.initialized && (^st).pool_base == st.pool_base && (^st).pool_size == st.pool_size)]
+#[ensures(st.initialized ==> match result.6 { Ok(_) => true, Err(_) => false })]
+// the divergence: the rebuilt capacity comes from `pool_size`, which equals the old capacity
+#[ensures(st.initialized ==> result.1@ == st.pool_size@ && st.allocator.capacity@ == st.pool_size@)]
+#[ensures(mt_inv(^st))]
+pub fn verify_mt_clear_frame_pool_memory__mutant(st: &mut StateModel)
+    -> (usize, usize, Option<(usize, usize)>, Option<(usize, usize)>, bool, bool, Result<usize, MtError>) {
+    let c0 = mt_capacity(st);
+    let pi0 = mt_pool_info(st);
+    let d0 = mt_is_dma_capable(st);
+    let r = mt_clear(st);
+    let c1 = mt_capacity(st);
+    let pi1 = mt_pool_info(st);
+    let d1 = mt_is_dma_capable(st);
+    (c0, c1, pi0, pi1, d0, d1, r)
 }
 
 /// **MT-INV-FREE-LIST-COALESCING** (invariant, 5 attachments)
@@ -6351,16 +6473,23 @@ pub fn verify_mt_peek_frame_pool_state(st: &StateModel, k: Key, k2: Key)
     (u0, c0, q0, u1, c1, q1, b0, b1)
 }
 
-/// Anti-vacuity twin: MUST FAIL (the same observations around an INSERT instead of a peek).
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #0 negated.
 #[requires(mt_inv(*st))]
-#[requires(st.policy.next_handle@ < u64::MAX@)]
-#[ensures(result.0 == result.0)]
-#[ensures(result.0 == result.1)]
-pub fn verify_mt_peek_frame_pool_state__mutant(st: &mut StateModel, k: Key, sz: u32) -> (usize, usize) {
+#[ensures(!(result.0 == result.3 && result.1 == result.4 && result.2 == result.5))]
+#[ensures(result.6 == result.7)]
+pub fn verify_mt_peek_frame_pool_state__mutant(st: &StateModel, k: Key, k2: Key)
+    -> (usize, usize, Option<(usize, u32)>, usize, usize, Option<(usize, u32)>, bool, bool) {
     let u0 = mt_used(st);
-    let _p = mt_insert(st, k, sz);
+    let c0 = mt_capacity(st);
+    let q0 = mt_peek(st, k2);
+    let b0 = mt_contains(st, k2);
+    let _p = mt_peek(st, k);
     let u1 = mt_used(st);
-    (u0, u1)
+    let c1 = mt_capacity(st);
+    let q1 = mt_peek(st, k2);
+    let b1 = mt_contains(st, k2);
+    (u0, c0, q0, u1, c1, q1, b0, b1)
 }
 
 /// **MT-REMOVE-INVALIDATES-POINTER-SILENTLY** (postcondition, code-only) -- HAZARD
@@ -6764,14 +6893,17 @@ pub fn verify_mt_free_capacity_post(st: &StateModel) -> (usize, usize, usize) {
     (f, c, u)
 }
 
-/// Anti-vacuity twin: MUST FAIL (claims free space is the whole capacity, ignoring use).
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #2 negated.
 #[requires(mt_inv(*st))]
 #[ensures(!st.initialized ==> result.0@ == 0)]
-#[ensures(result.0@ == result.1@)]
-pub fn verify_mt_free_capacity_post__mutant(st: &StateModel) -> (usize, usize) {
+#[ensures(result.0@ == result.1@ - result.2@)]
+#[ensures(!(st.initialized ==> result.0@ == st.allocator.capacity@ - st.allocator.used@ && result.0@ >= 0))]
+pub fn verify_mt_free_capacity_post__mutant(st: &StateModel) -> (usize, usize, usize) {
     let f = mt_free_capacity(st);
     let c = mt_capacity(st);
-    (f, c)
+    let u = mt_used(st);
+    (f, c, u)
 }
 
 /// **MT-INSERT-FRAME-ON-ERROR** (frame, 3 attachments)
@@ -7247,11 +7379,14 @@ pub fn mt_initialize_mmap(
 /// otherwise the mmap path. DISCLOSED: on the SPDK branch the `spdk_allocated = true` store is
 /// mirrored AFTER the flag store (lib.rs:321 is before :322); sequential properties only.
 #[requires(mt_inv(*st))]
-#[requires(st.policy.pools@ < u64::MAX@)]
-#[requires(pool_size@ > 0 ==> pool_size@ + 4096 <= usize::MAX@)]
-#[requires(mmap_ok(r_huge, pool_size) && mmap_ok(r_plain, pool_size) && zmalloc_ok(r_spdk, pool_size))]
-#[requires(ml.huge_calls@ < u64::MAX@ && ml.plain_calls@ < u64::MAX@)]
-#[requires(zl.calls@ < u64::MAX@)]
+// J11: the allocation premises are needed only once the call REACHES the allocation
+// (past the `pool_size == 0` and `initialized` guards, lib.rs:262-275)
+#[requires(pool_size@ > 0 && !st.initialized ==>
+           st.policy.pools@ < u64::MAX@
+           && pool_size@ + 4096 <= usize::MAX@
+           && mmap_ok(r_huge, pool_size) && mmap_ok(r_plain, pool_size) && zmalloc_ok(r_spdk, pool_size)
+           && ml.huge_calls@ < u64::MAX@ && ml.plain_calls@ < u64::MAX@
+           && zl.calls@ < u64::MAX@)]
 #[ensures(mt_inv(^st))]
 #[ensures(match result { Ok(_) => true, Err(_) => ^st == *st })]
 #[ensures(env_active ==> ^ml == *ml)]
@@ -7550,12 +7685,20 @@ pub fn verify_mt_evict_next_err_no_victim(a: &mut StateModel, b: &mut StateModel
     (ra, rb)
 }
 
-/// Anti-vacuity twin: MUST FAIL (claims a set-up pool with a nominee also answers `None`).
-#[requires(mt_inv(*a))]
-#[ensures(!a.initialized ==> result == None)]
-#[ensures(a.initialized ==> result == None)]
-pub fn verify_mt_evict_next_err_no_victim__mutant(a: &mut StateModel) -> Option<Key> {
-    mt_evict_next(a)
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #0 negated.
+#[requires(mt_inv(*a) && mt_inv(*b))]
+#[ensures(!(!a.initialized ==> result.0 == None && ^a == *a))]
+#[ensures(!b.initialized ==> result.1 == None && ^b == *b)]
+#[ensures(a.initialized && a.policy.tracked@.len() == 0 ==> result.0 == None)]
+#[ensures(b.initialized && b.policy.tracked@.len() == 0 ==> result.1 == None)]
+#[ensures(result.0 == None ==> same_obs(*a, ^a))]
+#[ensures(result.1 == None ==> same_obs(*b, ^b))]
+pub fn verify_mt_evict_next_err_no_victim__mutant(a: &mut StateModel, b: &mut StateModel, k: Key)
+    -> (Option<Key>, Option<Key>) {
+    let ra = mt_evict_next(a);
+    let rb = mt_evict_next_for_key(b, k);
+    (ra, rb)
 }
 
 /// UNSCORED WITNESS for the divergence of MT-EVICT-NEXT-ERR-NO-VICTIM: the `None` answer does
@@ -7598,14 +7741,14 @@ pub fn verify_mt_evict_next_frame_no_rotation_state(
     (ra, rb)
 }
 
-/// Anti-vacuity twin: MUST FAIL (claims different histories give different victims).
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #1 negated.
 #[requires(mt_inv(*a) && mt_inv(*b))]
-#[requires(a.initialized && b.initialized)]
-#[requires(a.slots@ == b.slots@ && a.policy.tracked@ == b.policy.tracked@)]
-#[requires(a.policy.tracked@.len() > 0)]
-#[requires(ta.evictions@ != tb.evictions@)]
-#[ensures(result.0 != None)]
-#[ensures(result.0 != result.1)]
+#[requires(a.initialized == b.initialized)]
+#[requires(a.slots@ == b.slots@)]
+#[requires(a.policy.tracked@ == b.policy.tracked@)]
+#[ensures(result.0 == result.1)]
+#[ensures(!(result.0 == if a.initialized && a.policy.tracked@.len() > 0 { Some((a.policy.tracked@[0]).0) } else { None }))]
 pub fn verify_mt_evict_next_frame_no_rotation_state__mutant(
     a: &mut StateModel, b: &mut StateModel, ta: &mut TelemetryModel, tb: &mut TelemetryModel,
 ) -> (Option<Key>, Option<Key>) {
@@ -7704,6 +7847,9 @@ pub fn verify_mt_evict_for_key_post_alias__mutant(a: &mut StateModel, b: &mut St
 /// an insertion of the key that was named, because the pool is one undivided region of memory."
 /// Evict on behalf of `named`; then insert an UNRELATED key `k2` (any key absent before,
 /// `k2 != named` allowed) of any size that fits the victim's rounded run: it succeeds.
+/// J11: NARROWED -- NOT a classifier-A driver: it reaches `mt_insert`/`mt_initialize`, which
+/// need the policy-mirror counter bound (`next_handle`/`pools` < u64::MAX, `arith_ok`); that
+/// bound is neither a declared range nor a proved invariant.
 #[requires(mt_inv(*st))]
 #[requires(st.initialized && st.policy.tracked@.len() > 0)]
 #[requires(st.policy.next_handle@ + 1 < u64::MAX@)]
@@ -7713,7 +7859,7 @@ pub fn verify_mt_evict_for_key_post_alias__mutant(a: &mut StateModel, b: &mut St
            ==> align_up_l(sz@) <= align_up_l(st.slots@[i].size@))]
 #[ensures(result.0 == Some((st.policy.tracked@[0]).0))]
 #[ensures(match result.1 { Ok(_) => true, Err(_) => false })]
-pub fn verify_mt_evict_for_key_post_space_global(st: &mut StateModel, named: Key, k2: Key, sz: u32)
+pub fn narrowed_verify_mt_evict_for_key_post_space_global(st: &mut StateModel, named: Key, k2: Key, sz: u32)
     -> (Option<Key>, Result<usize, MtError>) {
     proof_assert!(tracks(st.policy.tracked@, (st.policy.tracked@[0]).0));
     proof_assert!(st.slots@.len() > 0);
@@ -7727,21 +7873,27 @@ pub fn verify_mt_evict_for_key_post_space_global(st: &mut StateModel, named: Key
     (v, r)
 }
 
-/// Anti-vacuity twin: MUST FAIL (claims the freed run serves only the named key).
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #1 negated.
 #[requires(mt_inv(*st))]
 #[requires(st.initialized && st.policy.tracked@.len() > 0)]
 #[requires(st.policy.next_handle@ + 1 < u64::MAX@)]
-#[requires(!slot_at(st.slots@, k2) && k2 != named)]
+#[requires(!slot_at(st.slots@, k2))]
 #[requires(sz@ > 0)]
 #[requires(forall<i: Int> 0 <= i && i < st.slots@.len() && st.slots@[i].key == (st.policy.tracked@[0]).0
            ==> align_up_l(sz@) <= align_up_l(st.slots@[i].size@))]
 #[ensures(result.0 == Some((st.policy.tracked@[0]).0))]
-#[ensures(match result.1 { Ok(_) => false, Err(_) => true })]
-pub fn verify_mt_evict_for_key_post_space_global__mutant(st: &mut StateModel, named: Key, k2: Key, sz: u32)
+#[ensures(!(match result.1 { Ok(_) => true, Err(_) => false }))]
+pub fn narrowed_verify_mt_evict_for_key_post_space_global__mutant(st: &mut StateModel, named: Key, k2: Key, sz: u32)
     -> (Option<Key>, Result<usize, MtError>) {
     proof_assert!(tracks(st.policy.tracked@, (st.policy.tracked@[0]).0));
     proof_assert!(st.slots@.len() > 0);
+    let s0 = snapshot! { st.slots@ };
     let v = mt_evict_next_for_key(st, named);
+    proof_assert!(!slot_at(st.slots@, k2));
+    proof_assert!(forall<i: Int, j: Int> 0 <= i && i < s0.len() && 0 <= j && j < s0.len()
+                  && s0[i].key == s0[j].key ==> i == j);
+    proof_assert!(some_region_fits(st.allocator.regions@, align_up_l(sz@)));
     let r = mt_insert(st, k2, sz);
     (v, r)
 }
@@ -7754,6 +7906,9 @@ pub fn verify_mt_evict_for_key_post_space_global__mutant(st: &mut StateModel, na
 /// From the `Default` state: capacity 0 (not 256 MiB); a zero request is refused (no fallback
 /// to the constant); after a successful set-up with `psz` and ANY later calls, capacity and
 /// pool size are exactly `psz` -- 256 MiB only if the caller asked for 256 MiB.
+/// J11: NARROWED -- NOT a classifier-A driver: it reaches `mt_insert`/`mt_initialize`, which
+/// need the policy-mirror counter bound (`next_handle`/`pools` < u64::MAX, `arith_ok`); that
+/// bound is neither a declared range nor a proved invariant.
 #[requires(p.tracked@.len() == 0)]
 #[requires(p.next_handle@ + ops@.len() + 2 < u64::MAX@)]
 #[requires(p.pools@ + ops@.len() + 2 < u64::MAX@)]
@@ -7762,7 +7917,7 @@ pub fn verify_mt_evict_for_key_post_space_global__mutant(st: &mut StateModel, na
 #[ensures(psz@ == 0 ==> result.1 == Err(MtError::InvalidSize) && result.2@ == 0)]
 #[ensures(match result.1 { Ok(_) => result.2@ == psz@ && result.3@ == psz@, Err(_) => true })]
 #[ensures(match result.1 { Ok(_) => (result.2@ == DEFAULT_POOL_SIZE@) == (psz@ == DEFAULT_POOL_SIZE@), Err(_) => true })]
-pub fn verify_mt_inv_default_pool_size_never_applied(p: PolicyModel, psz: usize, ops: &[(u8, Key, u32)])
+pub fn narrowed_verify_mt_inv_default_pool_size_never_applied(p: PolicyModel, psz: usize, ops: &[(u8, Key, u32)])
     -> (usize, Result<(), MtError>, usize, usize) {
     let mut st = mt_default(p);
     let c0 = mt_capacity(&st);
@@ -7780,19 +7935,32 @@ pub fn verify_mt_inv_default_pool_size_never_applied(p: PolicyModel, psz: usize,
     (c0, r, c, st.pool_size)
 }
 
-/// Anti-vacuity twin: MUST FAIL (claims the published default is what gets applied).
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #2 negated.
 #[requires(p.tracked@.len() == 0)]
-#[requires(p.pools@ + 2 < u64::MAX@)]
-#[requires(psz@ > 0 && psz@ + 4096 <= usize::MAX@)]
-#[ensures(result.0@ == 0)]
-#[ensures(match result.1 { Ok(_) => result.2@ == DEFAULT_POOL_SIZE@, Err(_) => true })]
-pub fn verify_mt_inv_default_pool_size_never_applied__mutant(p: PolicyModel, psz: usize)
-    -> (usize, Result<(), MtError>, usize) {
+#[requires(p.next_handle@ + ops@.len() + 2 < u64::MAX@)]
+#[requires(p.pools@ + ops@.len() + 2 < u64::MAX@)]
+#[requires(psz@ + 4096 <= usize::MAX@)]
+#[ensures(result.0@ == 0 && result.0@ != DEFAULT_POOL_SIZE@)]
+#[ensures(psz@ == 0 ==> result.1 == Err(MtError::InvalidSize) && result.2@ == 0)]
+#[ensures(!(match result.1 { Ok(_) => result.2@ == psz@ && result.3@ == psz@, Err(_) => true }))]
+#[ensures(match result.1 { Ok(_) => (result.2@ == DEFAULT_POOL_SIZE@) == (psz@ == DEFAULT_POOL_SIZE@), Err(_) => true })]
+pub fn narrowed_verify_mt_inv_default_pool_size_never_applied__mutant(p: PolicyModel, psz: usize, ops: &[(u8, Key, u32)])
+    -> (usize, Result<(), MtError>, usize, usize) {
     let mut st = mt_default(p);
     let c0 = mt_capacity(&st);
     let r = mt_initialize(&mut st, psz);
+    let c_init = mt_capacity(&st);
+    if psz == 0 {
+        return (c0, r, c_init, st.pool_size);
+    }
+    let ok = match r { Ok(_) => true, Err(_) => false };
+    proof_assert!(ok ==> st.initialized && st.allocator.capacity@ == psz@ && st.pool_size@ == psz@);
+    mt_run(&mut st, ops, psz);
+    proof_assert!(ok ==> st.initialized && st.allocator.capacity@ == psz@ && st.pool_size@ == psz@);
     let c = mt_capacity(&st);
-    (c0, r, c)
+    proof_assert!(ok ==> c@ == psz@);
+    (c0, r, c, st.pool_size)
 }
 
 /// **MT-INIT-POST-HUGEPAGE-FALLBACK** (postcondition)
@@ -7949,6 +8117,62 @@ pub fn verify_mt_pool_info_post__mutant(st: &StateModel) -> (Option<(usize, usiz
     (pi, c)
 }
 
+/// **MT-RESET-TELEMETRY-POST** (postcondition)
+///
+/// "After the telemetry counters are explicitly reset, a fresh snapshot reports zero for every
+/// one of the three counters, while the cache contents, the capacity and the bytes in use are
+/// all left untouched; this is the only way any counter ever decreases."
+/// J11 (LEVEL-2 classifier-A): under D-RANGE-US-7-010573 (no counter at u64::MAX on entry, its
+/// exact `assume_rust`), one counted event never decreases a counter, the reset zeroes all three,
+/// and the component state is untouched (`^st == *st`).
+#[requires(mt_inv(*st))]
+#[requires(t.evictions@ < u64::MAX@ && t.write_lock_contentions@ < u64::MAX@ && t.read_lock_contentions@ < u64::MAX@)]
+// a counted event never decreases any counter (the reset is the only decrease)
+#[ensures(result.0 .0@ >= t.evictions@ && result.0 .1@ >= t.write_lock_contentions@
+          && result.0 .2@ >= t.read_lock_contentions@)]
+// after the reset a fresh snapshot is all zero
+#[ensures(result.1 .0@ == 0 && result.1 .1@ == 0 && result.1 .2@ == 0)]
+// cache contents, capacity and bytes in use untouched
+#[ensures(result.2 == result.3 && result.4 == result.5)]
+#[ensures(^st == *st)]
+pub fn verify_mt_reset_telemetry_post(st: &mut StateModel, t: &mut TelemetryModel, which: u8)
+    -> ((u64, u64, u64), (u64, u64, u64), usize, usize, usize, usize) {
+    let c0 = mt_capacity(st);
+    let u0 = mt_used(st);
+    tel_event(t, which); // any one counted event (lib.rs:348, 396, 460, ...)
+    let e = tel_snapshot(t);
+    tel_reset(t); // reset_telemetry (lib.rs:174-177)
+    let s = tel_snapshot(t);
+    let c1 = mt_capacity(st);
+    let u1 = mt_used(st);
+    (e, s, c0, c1, u0, u1)
+}
+
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #1 negated.
+#[requires(mt_inv(*st))]
+#[requires(t.evictions@ < u64::MAX@ && t.write_lock_contentions@ < u64::MAX@ && t.read_lock_contentions@ < u64::MAX@)]
+// a counted event never decreases any counter (the reset is the only decrease)
+#[ensures(result.0 .0@ >= t.evictions@ && result.0 .1@ >= t.write_lock_contentions@
+          && result.0 .2@ >= t.read_lock_contentions@)]
+// after the reset a fresh snapshot is all zero
+#[ensures(!(result.1 .0@ == 0 && result.1 .1@ == 0 && result.1 .2@ == 0))]
+// cache contents, capacity and bytes in use untouched
+#[ensures(result.2 == result.3 && result.4 == result.5)]
+#[ensures(^st == *st)]
+pub fn verify_mt_reset_telemetry_post__mutant(st: &mut StateModel, t: &mut TelemetryModel, which: u8)
+    -> ((u64, u64, u64), (u64, u64, u64), usize, usize, usize, usize) {
+    let c0 = mt_capacity(st);
+    let u0 = mt_used(st);
+    tel_event(t, which); // any one counted event (lib.rs:348, 396, 460, ...)
+    let e = tel_snapshot(t);
+    tel_reset(t); // reset_telemetry (lib.rs:174-177)
+    let s = tel_snapshot(t);
+    let c1 = mt_capacity(st);
+    let u1 = mt_used(st);
+    (e, s, c0, c1, u0, u1)
+}
+
 /// **MT-RESET-TELEMETRY-POST** -- REFUTATION (postcondition, divergent)
 ///
 /// Statement: "After the telemetry counters are explicitly reset, a fresh snapshot reports
@@ -7958,11 +8182,13 @@ pub fn verify_mt_pool_info_post__mutant(st: &StateModel) -> (Option<(usize, usiz
 /// `u64::MAX` (std: "wraps around on overflow"). The reset postcondition and its frame HOLD
 /// (`witness_mt_reset_telemetry_post`); only the trailing "only way" clause is false (same
 /// root cause as the batch-2 refutation of MT-TELEMETRY-COUNTERS-MONOTONIC).
+/// J11: renamed SUPPORT (not a driver of the id): its counter-wrap witness lies OUTSIDE
+/// the declared range D-RANGE-US-7-010573.
 #[requires(mt_inv(*st))]
 #[requires(t.evictions@ == u64::MAX@)]
 #[ensures(result.1@ < result.0@)]
 #[ensures(result.2 == result.3)]
-pub fn refute_mt_reset_telemetry_post(st: &mut StateModel, t: &mut TelemetryModel) -> (u64, u64, usize, usize) {
+pub fn support_old_refute_mt_reset_telemetry_post(st: &mut StateModel, t: &mut TelemetryModel) -> (u64, u64, usize, usize) {
     let c0 = mt_capacity(st);
     let (e0, _w0, _r0) = tel_snapshot(t);
     tel_event(t, 0); // one more eviction (lib.rs:463-464) -- reset_telemetry is never called
@@ -7971,15 +8197,16 @@ pub fn refute_mt_reset_telemetry_post(st: &mut StateModel, t: &mut TelemetryMode
     (e0, e1, c0, c1)
 }
 
-/// Anti-vacuity twin: MUST FAIL (asserts the unreset counter did not decrease).
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #0 negated.
 #[requires(mt_inv(*st))]
 #[requires(t.evictions@ == u64::MAX@)]
+#[ensures(!(result.1@ < result.0@))]
 #[ensures(result.2 == result.3)]
-#[ensures(result.1@ >= result.0@)]
-pub fn refute_mt_reset_telemetry_post__mutant(st: &mut StateModel, t: &mut TelemetryModel) -> (u64, u64, usize, usize) {
+pub fn support_old_refute_mt_reset_telemetry_post__mutant(st: &mut StateModel, t: &mut TelemetryModel) -> (u64, u64, usize, usize) {
     let c0 = mt_capacity(st);
     let (e0, _w0, _r0) = tel_snapshot(t);
-    tel_event(t, 0);
+    tel_event(t, 0); // one more eviction (lib.rs:463-464) -- reset_telemetry is never called
     let (e1, _w1, _r1) = tel_snapshot(t);
     let c1 = mt_capacity(st);
     (e0, e1, c0, c1)
@@ -8429,10 +8656,12 @@ pub fn verify_mt_batch_touch_pre(st: &mut StateModel, keys: &[Key]) {
     mt_batch_touch(st, keys);
 }
 
-/// Anti-vacuity twin: MUST FAIL (claims a batch must leave the order untouched).
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #2 negated.
 #[requires(mt_inv(*st))]
 #[ensures(mt_inv(^st))]
-#[ensures((^st).policy.tracked@ == st.policy.tracked@)]
+#[ensures(refresh_frame(*st, ^st))]
+#[ensures(!(forall<k: Key> tracks((^st).policy.tracked@, k) == tracks(st.policy.tracked@, k)))]
 pub fn verify_mt_batch_touch_pre__mutant(st: &mut StateModel, keys: &[Key]) {
     mt_batch_touch(st, keys);
 }
@@ -8491,10 +8720,11 @@ pub fn verify_mt_capacity_err_not_initialized(st: &StateModel) -> usize {
     mt_capacity(st)
 }
 
-/// Anti-vacuity twin: MUST FAIL (claims zero can also come from a set-up pool).
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #1 negated.
 #[requires(mt_inv(*st))]
 #[ensures(!st.initialized ==> result@ == 0)]
-#[ensures(st.initialized ==> result@ == 0)]
+#[ensures(!(result@ == 0 ==> !st.initialized))]
 pub fn verify_mt_capacity_err_not_initialized__mutant(st: &StateModel) -> usize {
     mt_capacity(st)
 }
@@ -8532,35 +8762,21 @@ pub fn verify_mt_capacity_frame__mutant(st: &mut StateModel) -> usize {
 ///
 /// "The total-capacity query may be called at any time, before or after the pool is set up,
 /// and always returns a number rather than failing."
-/// Before set-up (the `Default` state), right after a set-up attempt (successful or not), and
-/// after ANY later call sequence: the query returns a number (0 when not set up, the pool size
-/// otherwise); no precondition beyond the reachable-state invariant. SCOPE: unpoisoned locks.
-#[requires(p.tracked@.len() == 0)]
-#[requires(p.next_handle@ + ops@.len() + 2 < u64::MAX@)]
-#[requires(p.pools@ + ops@.len() + 2 < u64::MAX@)]
-#[requires(psz@ > 0 ==> psz@ + 4096 <= usize::MAX@)]
-#[ensures(result.0@ == 0)]
-#[ensures(match result.1 { Ok(_) => result.2@ == psz@ && result.3@ == psz@, Err(_) => result.2@ == 0 })]
-#[ensures(result.3@ == 0 || result.3@ == result.4@)]
-pub fn verify_mt_capacity_pre(p: PolicyModel, psz: usize, ops: &[(u8, Key, u32)])
-    -> (usize, Result<(), MtError>, usize, usize, usize) {
-    let mut st = mt_default(p);
-    let c0 = mt_capacity(&st); // before set-up
-    let r = mt_initialize(&mut st, psz);
-    let c1 = mt_capacity(&st); // after the set-up attempt
-    mt_run(&mut st, ops, psz);
-    let c2 = mt_capacity(&st); // at any later point
-    (c0, r, c1, c2, st.pool_size)
+/// J11 (LEVEL-2 classifier-A): Over an ARBITRARY reachable state (`mt_inv`, a proved invariant): before set-up the answer is 0, after set-up the pool size; panic-free, no error channel.
+#[requires(mt_inv(*st))]
+#[ensures(!st.initialized ==> result@ == 0)]
+#[ensures(st.initialized ==> result@ == st.allocator.capacity@ && result@ == st.pool_size@)]
+pub fn verify_mt_capacity_pre(st: &StateModel) -> usize {
+    mt_capacity(st)
 }
 
-/// Anti-vacuity twin: MUST FAIL (claims the query before set-up reports a usable size).
-#[requires(p.tracked@.len() == 0)]
-#[ensures(result.1@ == 0)]
-#[ensures(result.0@ > 0)]
-pub fn verify_mt_capacity_pre__mutant(p: PolicyModel) -> (usize, usize) {
-    let st = mt_default(p);
-    let c0 = mt_capacity(&st);
-    (c0, st.pool_size)
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #1 negated.
+#[requires(mt_inv(*st))]
+#[ensures(!st.initialized ==> result@ == 0)]
+#[ensures(!(st.initialized ==> result@ == st.allocator.capacity@ && result@ == st.pool_size@))]
+pub fn verify_mt_capacity_pre__mutant(st: &StateModel) -> usize {
+    mt_capacity(st)
 }
 
 // ===========================================================================
@@ -8573,11 +8789,14 @@ pub fn verify_mt_capacity_pre__mutant(p: PolicyModel) -> (usize, usize) {
 /// `mt_initialize_spdk`. A non-`spdk` build is the `env_active == false` instance.
 /// OS/SPDK results (`r_huge`, `r_plain`, `rc`, `r_spdk`) are arbitrary INPUTS.
 #[requires(mt_inv(*st))]
-#[requires(st.policy.pools@ < u64::MAX@)]
-#[requires(pool_size@ > 0 ==> pool_size@ + 4096 <= usize::MAX@)]
-#[requires(mmap_ok(r_huge, pool_size) && mmap_ok(r_plain, pool_size) && zmalloc_ok(r_spdk, pool_size))]
-#[requires(ml.huge_calls@ < u64::MAX@ && ml.plain_calls@ < u64::MAX@)]
-#[requires(zl.calls@ < u64::MAX@)]
+// J11: the allocation premises are needed only once the call REACHES the allocation
+// (past the size, receptacle and `initialized` guards, lib.rs:262-275)
+#[requires(pool_size@ > 0 && connected && !st.initialized ==>
+           st.policy.pools@ < u64::MAX@
+           && pool_size@ + 4096 <= usize::MAX@
+           && mmap_ok(r_huge, pool_size) && mmap_ok(r_plain, pool_size) && zmalloc_ok(r_spdk, pool_size)
+           && ml.huge_calls@ < u64::MAX@ && ml.plain_calls@ < u64::MAX@
+           && zl.calls@ < u64::MAX@)]
 #[ensures(mt_inv(^st))]
 #[ensures(match result { Ok(_) => true, Err(_) => ^st == *st })]
 #[ensures(pool_size@ == 0 ==> result == Err(MtError::InvalidSize) && ^ml == *ml && ^zl == *zl)]
@@ -8729,31 +8948,19 @@ pub fn verify_mt_contains_err_not_initialized__mutant(st: &StateModel, live: &St
 /// **MT-CONTAINS-PRE** (precondition, spec-only)
 /// "The presence check may be called with any key at any time and always answers yes or no
 /// rather than failing."
-/// Before set-up (Default), after a set-up attempt and after ANY later call sequence: a
-/// (panic-free) boolean, exactly `initialized && key present`. SCOPE: unpoisoned locks.
-#[requires(p.tracked@.len() == 0)]
-#[requires(p.next_handle@ + ops@.len() + 2 < u64::MAX@)]
-#[requires(p.pools@ + ops@.len() + 2 < u64::MAX@)]
-#[requires(psz@ > 0 ==> psz@ + 4096 <= usize::MAX@)]
-#[ensures(!result.0)]
-#[ensures(result.1 == (result.3 && result.4))]
-pub fn verify_mt_contains_pre(p: PolicyModel, psz: usize, ops: &[(u8, Key, u32)], key: Key)
-    -> (bool, bool, Result<(), MtError>, bool, bool) {
-    let mut st = mt_default(p);
-    let c0 = mt_contains(&st, key); // before set-up
-    let r = mt_initialize(&mut st, psz);
-    mt_run(&mut st, ops, psz);
-    let c1 = mt_contains(&st, key); // any later point
-    let init = st.initialized;
-    let present = slots_contains(&st.slots, key);
-    (c0, c1, r, init, present)
+/// J11 (LEVEL-2 classifier-A): Over an ARBITRARY reachable state (`mt_inv`) and ANY key: a plain yes/no, panic-free.
+#[requires(mt_inv(*st))]
+#[ensures(result == (st.initialized && slot_at(st.slots@, key)))]
+#[ensures(!st.initialized ==> !result)]
+pub fn verify_mt_contains_pre(st: &StateModel, key: Key) -> bool {
+    mt_contains(st, key)
 }
 
-/// Anti-vacuity twin: MUST FAIL (claims a set-up pool answers yes for every key).
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #0 negated.
 #[requires(mt_inv(*st))]
-#[requires(st.initialized)]
-#[ensures(result == (st.initialized && slot_at(st.slots@, key)))]
-#[ensures(result)]
+#[ensures(!(result == (st.initialized && slot_at(st.slots@, key))))]
+#[ensures(!st.initialized ==> !result)]
 pub fn verify_mt_contains_pre__mutant(st: &StateModel, key: Key) -> bool {
     mt_contains(st, key)
 }
@@ -8829,39 +9036,72 @@ pub fn verify_mt_evict_for_key_frame_key_ignored(a: &mut StateModel, b: &mut Sta
     (r1, r2)
 }
 
-/// Anti-vacuity twin: MUST FAIL (claims the named key is protected from eviction).
-#[requires(mt_inv(*a))]
-#[requires(a.initialized && a.policy.tracked@.len() > 0 && (a.policy.tracked@[0]).0 == k1)]
-#[ensures(result != None)]
-#[ensures(slot_at((^a).slots@, k1))]
-pub fn verify_mt_evict_for_key_frame_key_ignored__mutant(a: &mut StateModel, k1: Key) -> Option<Key> {
-    mt_evict_next_for_key(a, k1)
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #0 negated.
+#[requires(mt_inv(*a) && mt_inv(*b) && same_state(*a, *b))]
+#[ensures(!(result.0 == result.1))]
+#[ensures(forall<k: Key> slot_at((^a).slots@, k) == slot_at((^b).slots@, k))]
+#[ensures((^a).allocator.used == (^b).allocator.used)]
+#[ensures(forall<k: Key> tracks((^a).policy.tracked@, k) == tracks((^b).policy.tracked@, k))]
+#[ensures(a.initialized && a.policy.tracked@.len() > 0 && (a.policy.tracked@[0]).0 == k1
+          ==> result.0 == Some(k1) && !slot_at((^a).slots@, k1))]
+pub fn verify_mt_evict_for_key_frame_key_ignored__mutant(a: &mut StateModel, b: &mut StateModel, k1: Key, k2: Key)
+    -> (Option<Key>, Option<Key>) {
+    let r1 = mt_evict_next_for_key(a, k1);
+    let r2 = mt_evict_next_for_key(b, k2);
+    proof_assert!(forall<k: Key> slot_at(a.slots@, k) == tracks(a.policy.tracked@, k));
+    (r1, r2)
 }
 
 /// **MT-EVICT-FOR-KEY-PRE** (precondition, spec-only)
 /// "To free space on behalf of a particular key the pool must have been set up and the
 /// eviction policy must be connected, but the named key itself need not be present in the
 /// cache and no other condition applies."
-#[requires(mt_inv(*st) && st.initialized && st.slots@.len() > 0 && !slot_at(st.slots@, key))]
-#[requires(mt_inv(*st2) && arith_ok(*st2) && !st2.poisoned && st2.initialized)]
-#[ensures(result.0 != None)]
-#[ensures(forall<k: Key> result.0 == Some(k) ==> k != key && slot_at(st.slots@, k) && !slot_at((^st).slots@, k))]
+/// J11 (LEVEL-2 classifier-A): Over an ARBITRARY reachable state (`mt_inv`) and ANY key (present or not): the only guards are set-up and the connected policy (local mirror of the lookup order).
+#[requires(mt_inv(*st))]
 #[ensures(mt_inv(^st))]
-#[ensures(connected ==> match result.1 { RxOutcome::Returned => true, _ => false })]
-#[ensures(!connected ==> match result.1 { RxOutcome::Panicked => true, _ => false })]
-pub fn verify_mt_evict_for_key_pre(st: &mut StateModel, st2: &mut StateModel, key: Key, connected: bool)
-    -> (Option<Key>, RxOutcome) {
+#[ensures(!st.initialized ==> result.0 == None && ^st == *st
+          && match result.1 { RxOutcome::Returned => true, _ => false })]
+#[ensures(st.initialized && !connected ==> ^st == *st
+          && match result.1 { RxOutcome::Panicked => true, _ => false })]
+#[ensures(st.initialized && connected ==> match result.1 { RxOutcome::Returned => true, _ => false })]
+#[ensures(st.initialized && connected && st.slots@.len() > 0 ==> result.0 != None)]
+#[ensures(forall<k: Key> result.0 == Some(k) ==> slot_at(st.slots@, k) && !slot_at((^st).slots@, k))]
+pub fn verify_mt_evict_for_key_pre(st: &mut StateModel, key: Key, connected: bool) -> (Option<Key>, RxOutcome) {
+    // lib.rs:436-438 (via evict_next_for_key :468-470): un-set-up -> `None` before the lookup
+    if !st.initialized {
+        return (None, RxOutcome::Returned);
+    }
+    // lib.rs:440 `self.eviction_policy.get().unwrap()`
+    if !ep_get(connected) {
+        return (None, RxOutcome::Panicked);
+    }
     let r = mt_evict_next_for_key(st, key);
-    let o = rx_call(st2, 5, key, 0, connected);
-    (r, o)
+    (r, RxOutcome::Returned)
 }
 
-/// Anti-vacuity twin: MUST FAIL (claims an absent key means nothing can be evicted).
-#[requires(mt_inv(*st) && st.initialized && st.slots@.len() > 0 && !slot_at(st.slots@, key))]
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #2 negated.
+#[requires(mt_inv(*st))]
 #[ensures(mt_inv(^st))]
-#[ensures(result == None)]
-pub fn verify_mt_evict_for_key_pre__mutant(st: &mut StateModel, key: Key) -> Option<Key> {
-    mt_evict_next_for_key(st, key)
+#[ensures(!st.initialized ==> result.0 == None && ^st == *st
+          && match result.1 { RxOutcome::Returned => true, _ => false })]
+#[ensures(!(st.initialized && !connected ==> ^st == *st
+          && match result.1 { RxOutcome::Panicked => true, _ => false }))]
+#[ensures(st.initialized && connected ==> match result.1 { RxOutcome::Returned => true, _ => false })]
+#[ensures(st.initialized && connected && st.slots@.len() > 0 ==> result.0 != None)]
+#[ensures(forall<k: Key> result.0 == Some(k) ==> slot_at(st.slots@, k) && !slot_at((^st).slots@, k))]
+pub fn verify_mt_evict_for_key_pre__mutant(st: &mut StateModel, key: Key, connected: bool) -> (Option<Key>, RxOutcome) {
+    // lib.rs:436-438 (via evict_next_for_key :468-470): un-set-up -> `None` before the lookup
+    if !st.initialized {
+        return (None, RxOutcome::Returned);
+    }
+    // lib.rs:440 `self.eviction_policy.get().unwrap()`
+    if !ep_get(connected) {
+        return (None, RxOutcome::Panicked);
+    }
+    let r = mt_evict_next_for_key(st, key);
+    (r, RxOutcome::Returned)
 }
 
 /// **MT-FREE-CAPACITY-SUBTRACTION-SAFE** (invariant, code-only)
@@ -8909,11 +9149,13 @@ pub fn verify_mt_get_err_miss(st: &mut StateModel, key: Key) -> Option<(usize, u
     mt_get(st, key)
 }
 
-/// Anti-vacuity twin: MUST FAIL (claims a miss hands back an address).
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #0 negated.
 #[requires(mt_inv(*st))]
 #[requires(!st.initialized || !slot_at(st.slots@, key))]
-#[ensures(refresh_frame(*st, ^st))]
-#[ensures(result != None)]
+#[ensures(!(result == None))]
+#[ensures(refresh_frame(*st, ^st) && (^st).policy.tracked@ == st.policy.tracked@)]
+#[ensures(!st.initialized ==> ^st == *st)]
 pub fn verify_mt_get_err_miss__mutant(st: &mut StateModel, key: Key) -> Option<(usize, u32)> {
     mt_get(st, key)
 }
@@ -9009,12 +9251,8 @@ pub fn verify_mt_init_err_alloc_failed__mutant(
 /// **MT-INIT-ERR-DOUBLE-INIT** (error-case, divergent)
 /// "A second attempt to set up the memory pool on a component that is already set up fails
 /// with an error and leaves the existing pool completely untouched instead of replacing it."
-/// Full initialize (receptacle connected or not, either build, any OS/SPDK result).
+/// J11 (LEVEL-2 classifier-A): Over ANY set-up reachable state (`mt_inv && initialized`), any size/NUMA/env/allocator results: the allocation premises of `rx_initialize_spdk` are gated on reaching the allocation, so none is assumed here.
 #[requires(mt_inv(*st) && st.initialized)]
-#[requires(st.policy.pools@ < u64::MAX@)]
-#[requires(psz@ > 0 ==> psz@ + 4096 <= usize::MAX@)]
-#[requires(mmap_ok(r_huge, psz) && mmap_ok(r_plain, psz) && zmalloc_ok(r_spdk, psz))]
-#[requires(ml.huge_calls@ < u64::MAX@ && ml.plain_calls@ < u64::MAX@ && zl.calls@ < u64::MAX@)]
 #[ensures(match result { Ok(_) => false, Err(_) => true })]
 #[ensures(^st == *st)]
 #[ensures(^ml == *ml && ^zl == *zl)]
@@ -9026,32 +9264,28 @@ pub fn verify_mt_init_err_double_init(
     rx_initialize_spdk(st, psz, numa, connected, env_active, r_spdk, r_huge, r_plain, rc, ml, zl)
 }
 
-/// Anti-vacuity twin: MUST FAIL (claims a second set-up with good inputs succeeds).
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #0 negated.
 #[requires(mt_inv(*st) && st.initialized)]
-#[requires(st.policy.pools@ < u64::MAX@)]
-#[requires(psz@ > 0 && psz@ + 4096 <= usize::MAX@)]
-#[requires(mmap_ok(r_huge, psz) && mmap_ok(r_plain, psz) && zmalloc_ok(r_spdk, psz))]
-#[requires(ml.huge_calls@ < u64::MAX@ && ml.plain_calls@ < u64::MAX@ && zl.calls@ < u64::MAX@)]
-#[requires(r_huge != MAP_FAILED)]
-#[ensures(^ml == *ml)]
-#[ensures(result == Ok(()))]
+#[ensures(!(match result { Ok(_) => false, Err(_) => true }))]
+#[ensures(^st == *st)]
+#[ensures(^ml == *ml && ^zl == *zl)]
+#[ensures(connected && psz@ > 0 ==> result == Err(MtError::AllocationFailed))]
 pub fn verify_mt_init_err_double_init__mutant(
-    st: &mut StateModel, psz: usize, r_spdk: usize,
-    r_huge: usize, r_plain: usize, ml: &mut MmapLog, zl: &mut ZmLog,
+    st: &mut StateModel, psz: usize, numa: Option<i32>, connected: bool, env_active: bool, r_spdk: usize,
+    r_huge: usize, r_plain: usize, rc: i64, ml: &mut MmapLog, zl: &mut ZmLog,
 ) -> Result<(), MtError> {
-    rx_initialize_spdk(st, psz, None, true, false, r_spdk, r_huge, r_plain, 0, ml, zl)
+    rx_initialize_spdk(st, psz, numa, connected, env_active, r_spdk, r_huge, r_plain, rc, ml, zl)
 }
 
 /// **MT-INIT-ERR-NO-EVICTION-POLICY** (error-case, divergent)
 /// "If the external eviction-policy receptacle has not been connected when the pool is set
 /// up, the set-up call fails before any memory is allocated rather than producing a pool that
 /// could never choose a victim."
+/// J11 (LEVEL-2 classifier-A): Over an ARBITRARY reachable state (`mt_inv`), unconnected receptacle, any size/NUMA/env/allocator results: no mmap/zmalloc call is issued (`^ml == *ml && ^zl == *zl`).
 #[requires(mt_inv(*st))]
-#[requires(st.policy.pools@ < u64::MAX@)]
-#[requires(psz@ > 0 && psz@ + 4096 <= usize::MAX@)]
-#[requires(mmap_ok(r_huge, psz) && mmap_ok(r_plain, psz) && zmalloc_ok(r_spdk, psz))]
-#[requires(ml.huge_calls@ < u64::MAX@ && ml.plain_calls@ < u64::MAX@ && zl.calls@ < u64::MAX@)]
-#[ensures(result == Err(MtError::NotInitialized))]
+#[ensures(match result { Ok(_) => false, Err(_) => true })]
+#[ensures(psz@ > 0 ==> result == Err(MtError::NotInitialized))]
 #[ensures(^st == *st)]
 #[ensures(^ml == *ml && ^zl == *zl)]
 pub fn verify_mt_init_err_no_eviction_policy(
@@ -9061,19 +9295,18 @@ pub fn verify_mt_init_err_no_eviction_policy(
     rx_initialize_spdk(st, psz, numa, false, env_active, r_spdk, r_huge, r_plain, rc, ml, zl)
 }
 
-/// Anti-vacuity twin: MUST FAIL (claims the pool memory is requested before the check).
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #1 negated.
 #[requires(mt_inv(*st))]
-#[requires(st.policy.pools@ < u64::MAX@)]
-#[requires(psz@ > 0 && psz@ + 4096 <= usize::MAX@)]
-#[requires(mmap_ok(r_huge, psz) && mmap_ok(r_plain, psz) && zmalloc_ok(r_spdk, psz))]
-#[requires(ml.huge_calls@ < u64::MAX@ && ml.plain_calls@ < u64::MAX@ && zl.calls@ < u64::MAX@)]
+#[ensures(match result { Ok(_) => false, Err(_) => true })]
+#[ensures(!(psz@ > 0 ==> result == Err(MtError::NotInitialized)))]
 #[ensures(^st == *st)]
-#[ensures((^ml).huge_calls@ == ml.huge_calls@ + 1)]
+#[ensures(^ml == *ml && ^zl == *zl)]
 pub fn verify_mt_init_err_no_eviction_policy__mutant(
-    st: &mut StateModel, psz: usize, r_spdk: usize,
-    r_huge: usize, r_plain: usize, ml: &mut MmapLog, zl: &mut ZmLog,
+    st: &mut StateModel, psz: usize, numa: Option<i32>, env_active: bool, r_spdk: usize,
+    r_huge: usize, r_plain: usize, rc: i64, ml: &mut MmapLog, zl: &mut ZmLog,
 ) -> Result<(), MtError> {
-    rx_initialize_spdk(st, psz, None, false, false, r_spdk, r_huge, r_plain, 0, ml, zl)
+    rx_initialize_spdk(st, psz, numa, false, env_active, r_spdk, r_huge, r_plain, rc, ml, zl)
 }
 
 /// **MT-INIT-ERR-ZERO-SIZE** (error-case)
@@ -9810,39 +10043,71 @@ pub fn verify_mt_is_dma_capable_hugepage_mmap_understated__mutant(
     (ra, da)
 }
 
+/// J11: a small maintained invariant -- an un-set-up component never holds an SPDK pool.
+/// Base: `inv_dma_base` (the `Default` state). Steps: `inv_dma_step_call` (every mirrored
+/// IMemoryTier call, through the lock prologue) and `inv_dma_step_init_spdk` (the full
+/// `spdk`-build `initialize`). Proof of the call step: `mt_call` leaves `spdk_allocated`
+/// untouched whenever the result is un-set-up, and `initialized` is monotone (`st.initialized
+/// ==> (^st).initialized`), so an un-set-up result came from an un-set-up start.
+#[logic(open)]
+pub fn dma_inv(st: StateModel) -> bool {
+    pearlite! { !st.initialized ==> !st.spdk_allocated }
+}
+
+/// `dma_inv` base: `MemoryTierState::default()` (lib.rs:109 `spdk_allocated: false`).
+#[requires(p.tracked@.len() == 0)]
+#[ensures(dma_inv(result))]
+#[ensures(mt_inv(result))]
+pub fn inv_dma_base(p: PolicyModel) -> StateModel {
+    mt_default(p)
+}
+
+/// `dma_inv` step: ANY mirrored IMemoryTier call (`mt_call`'s own domain).
+#[requires(st.poisoned || (mt_inv(*st) && arith_ok(*st)
+           && (psz@ > 0 ==> psz@ + 4096 <= usize::MAX@)))]
+#[requires(dma_inv(*st))]
+#[ensures(dma_inv(^st))]
+pub fn inv_dma_step_call(st: &mut StateModel, op: u8, key: Key, size: u32, psz: usize) -> Call {
+    mt_call(st, op, key, size, psz)
+}
+
+/// `dma_inv` step: the `spdk`-build `initialize` with its receptacle lookup (the only writer
+/// of `spdk_allocated = true`, lib.rs:317/321): success sets the pool up, failure changes nothing.
+#[requires(mt_inv(*st))]
+#[requires(psz@ > 0 && connected && !st.initialized ==>
+           st.policy.pools@ < u64::MAX@
+           && psz@ + 4096 <= usize::MAX@
+           && mmap_ok(r_huge, psz) && mmap_ok(r_plain, psz) && zmalloc_ok(r_spdk, psz)
+           && ml.huge_calls@ < u64::MAX@ && ml.plain_calls@ < u64::MAX@
+           && zl.calls@ < u64::MAX@)]
+#[requires(dma_inv(*st))]
+#[ensures(dma_inv(^st))]
+pub fn inv_dma_step_init_spdk(
+    st: &mut StateModel, psz: usize, numa: Option<i32>, connected: bool, env_active: bool, r_spdk: usize,
+    r_huge: usize, r_plain: usize, rc: i64, ml: &mut MmapLog, zl: &mut ZmLog,
+) -> Result<(), MtError> {
+    rx_initialize_spdk(st, psz, numa, connected, env_active, r_spdk, r_huge, r_plain, rc, ml, zl)
+}
+
 /// **MT-IS-DMA-CAPABLE-NO-INIT-GUARD** (error-case, divergent)
 ///
 /// "Before the pool is set up the component answers no to being directly usable by storage
 /// hardware, because there is no pool memory yet."
-/// Proved over every un-set-up state REACHABLE from `Default` (lib.rs:98-114 pin) by any call
-/// sequence (failed set-up attempts included): the answer is no. DIVERGENCE CONFIRMED in the
-/// same module: the query has no set-up check (lib.rs:610-613 pin) -- it returns the stored flag
-/// for ANY state, so an un-set-up state whose flag were true would answer yes (`st2`).
-#[requires(p.tracked@.len() == 0)]
-#[requires(p.next_handle@ + ops@.len() + 2 < u64::MAX@)]
-#[requires(p.pools@ + ops@.len() + 2 < u64::MAX@)]
-#[requires(psz@ > 0 ==> psz@ + 4096 <= usize::MAX@)]
-#[ensures(!result.0)]
-#[ensures(!result.2 ==> !result.1)]
-#[ensures(result.3 == st2.spdk_allocated)]
-#[ensures(!st2.initialized && st2.spdk_allocated ==> result.3)]
-pub fn verify_mt_is_dma_capable_no_init_guard(p: PolicyModel, ops: &[(u8, Key, u32)], psz: usize, st2: &StateModel)
-    -> (bool, bool, bool, bool) {
-    let mut st = mt_default(p);
-    let d0 = mt_is_dma_capable(&st); // Default
-    mt_run(&mut st, ops, psz);
-    let d1 = mt_is_dma_capable(&st); // after any call sequence
-    let d2 = mt_is_dma_capable(st2);
-    (d0, d1, st.initialized, d2)
+/// J11 (LEVEL-2 classifier-A): Over ANY state satisfying the PROVED invariant `dma_inv` (base `inv_dma_base`, steps `inv_dma_step_call` / `inv_dma_step_init_spdk`).
+#[requires(dma_inv(*st))]
+#[ensures(!st.initialized ==> !result)]
+#[ensures(result == st.spdk_allocated)]
+pub fn verify_mt_is_dma_capable_no_init_guard(st: &StateModel) -> bool {
+    mt_is_dma_capable(st)
 }
 
-/// Anti-vacuity twin: MUST FAIL (claims the answer is guarded by the set-up flag).
-#[requires(mt_inv(*st2))]
-#[ensures(result == st2.spdk_allocated)]
-#[ensures(!st2.initialized ==> !result)]
-pub fn verify_mt_is_dma_capable_no_init_guard__mutant(st2: &StateModel) -> bool {
-    proof_assert!(init_inv(*st2));
-    mt_is_dma_capable(st2)
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #0 negated.
+#[requires(dma_inv(*st))]
+#[ensures(!(!st.initialized ==> !result))]
+#[ensures(result == st.spdk_allocated)]
+pub fn verify_mt_is_dma_capable_no_init_guard__mutant(st: &StateModel) -> bool {
+    mt_is_dma_capable(st)
 }
 
 /// **MT-IS-DMA-CAPABLE-POST-IFF-SPDK** (postcondition)
@@ -9898,35 +10163,19 @@ pub fn verify_mt_is_dma_capable_post_iff_spdk__mutant(
 ///
 /// "The question of whether the pool's memory can be used directly by storage hardware may be
 /// asked at any time and always answers yes or no rather than failing."
-/// Before set-up (`Default`), right after a set-up attempt, and after ANY later call sequence the
-/// query returns a bool with no precondition at all (no set-up check, lib.rs:610-613 pin).
-/// SCOPE: unpoisoned `state` lock (`state.read().unwrap()`).
-#[requires(p.tracked@.len() == 0)]
-#[requires(p.next_handle@ + ops@.len() + 2 < u64::MAX@)]
-#[requires(p.pools@ + ops@.len() + 2 < u64::MAX@)]
-#[requires(psz@ > 0 ==> psz@ + 4096 <= usize::MAX@)]
-#[ensures(!result.0)]
-#[ensures(match result.1 { Ok(_) => true, Err(_) => !result.2 })]
-#[ensures(result.3 == result.4)]
-pub fn verify_mt_is_dma_capable_pre(p: PolicyModel, psz: usize, ops: &[(u8, Key, u32)])
-    -> (bool, Result<(), MtError>, bool, bool, bool) {
-    let mut st = mt_default(p);
-    let d0 = mt_is_dma_capable(&st); // before set-up
-    let r = mt_initialize(&mut st, psz);
-    let d1 = mt_is_dma_capable(&st); // after the set-up attempt
-    mt_run(&mut st, ops, psz);
-    let d2 = mt_is_dma_capable(&st); // at any later point
-    (d0, r, d1, d2, st.spdk_allocated)
+/// J11 (LEVEL-2 classifier-A): Over an ARBITRARY reachable state (`mt_inv`): a plain bool, panic-free.
+#[requires(mt_inv(*st))]
+#[ensures(result == st.spdk_allocated)]
+pub fn verify_mt_is_dma_capable_pre(st: &StateModel) -> bool {
+    mt_is_dma_capable(st)
 }
 
-/// Anti-vacuity twin: MUST FAIL (claims the query answers yes before set-up).
-#[requires(p.tracked@.len() == 0)]
-#[ensures(result.1 == false)]
-#[ensures(result.0)]
-pub fn verify_mt_is_dma_capable_pre__mutant(p: PolicyModel) -> (bool, bool) {
-    let st = mt_default(p);
-    let d0 = mt_is_dma_capable(&st);
-    (d0, st.initialized)
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #0 negated.
+#[requires(mt_inv(*st))]
+#[ensures(!(result == st.spdk_allocated))]
+pub fn verify_mt_is_dma_capable_pre__mutant(st: &StateModel) -> bool {
+    mt_is_dma_capable(st)
 }
 
 /// **MT-OLDEST-KEYS-ERR-EMPTY** (error-case)
@@ -9994,36 +10243,25 @@ pub fn verify_mt_oldest_keys_post_shape__mutant(st: &mut StateModel, n: usize) -
 ///
 /// "The query for the oldest keys may be called with any requested count, including zero or a
 /// count larger than the number of entries held, and it never fails outright."
-/// Any `n` (no precondition on it), before set-up and after a set-up attempt plus ANY call
-/// sequence: a list of exactly min(n, tracked) keys when set up, empty otherwise. SCOPE:
-/// unpoisoned locks, eviction_policy receptacle connected (lib.rs:430 pin `.unwrap()`).
-#[requires(p.tracked@.len() == 0)]
-#[requires(p.next_handle@ + ops@.len() + 2 < u64::MAX@)]
-#[requires(p.pools@ + ops@.len() + 2 < u64::MAX@)]
-#[requires(psz@ > 0 ==> psz@ + 4096 <= usize::MAX@)]
-#[ensures(result.0@ == Seq::empty())]
-#[ensures(result.1@.len() <= n@ && result.1@.len() <= result.2@)]
-#[ensures(result.3 && n@ > 0 ==> result.1@.len() == if n@ < result.2@ { n@ } else { result.2@ })]
-#[ensures(!result.3 || n@ == 0 ==> result.1@ == Seq::empty())]
-pub fn verify_mt_oldest_keys_pre(p: PolicyModel, psz: usize, ops: &[(u8, Key, u32)], n: usize)
-    -> (Vec<Key>, Vec<Key>, usize, bool) {
-    let mut st = mt_default(p);
-    let a = mt_oldest_keys(&mut st, n); // before set-up
-    let _ = mt_initialize(&mut st, psz);
-    mt_run(&mut st, ops, psz);
-    let tl = st.policy.tracked.len();
-    let init = st.initialized;
-    let b = mt_oldest_keys(&mut st, n); // any later point, any n
-    (a, b, tl, init)
+/// J11 (LEVEL-2 classifier-A): Over an ARBITRARY reachable state (`mt_inv`) and ANY count `n` (0, or more than are held): a Vec in every case, panic-free.
+#[requires(mt_inv(*st))]
+#[ensures(mt_inv(^st))]
+#[ensures(result@.len() <= n@)]
+#[ensures(!st.initialized || n@ == 0 ==> result@ == Seq::empty())]
+#[ensures(st.initialized && n@ > 0 ==> result@.len() == if n@ < st.policy.tracked@.len() { n@ } else { st.policy.tracked@.len() })]
+pub fn verify_mt_oldest_keys_pre(st: &mut StateModel, n: usize) -> Vec<Key> {
+    mt_oldest_keys(st, n)
 }
 
-/// Anti-vacuity twin: MUST FAIL (claims the query before set-up hands back n keys).
-#[requires(p.tracked@.len() == 0 && n@ > 0)]
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #2 negated.
+#[requires(mt_inv(*st))]
+#[ensures(mt_inv(^st))]
 #[ensures(result@.len() <= n@)]
-#[ensures(result@.len() == n@)]
-pub fn verify_mt_oldest_keys_pre__mutant(p: PolicyModel, n: usize) -> Vec<Key> {
-    let mut st = mt_default(p);
-    mt_oldest_keys(&mut st, n)
+#[ensures(!(!st.initialized || n@ == 0 ==> result@ == Seq::empty()))]
+#[ensures(st.initialized && n@ > 0 ==> result@.len() == if n@ < st.policy.tracked@.len() { n@ } else { st.policy.tracked@.len() })]
+pub fn verify_mt_oldest_keys_pre__mutant(st: &mut StateModel, n: usize) -> Vec<Key> {
+    mt_oldest_keys(st, n)
 }
 
 /// **MT-PEEK-ERR-MISS** (error-case, divergent)
@@ -10042,11 +10280,16 @@ pub fn verify_mt_peek_err_miss(st: &StateModel, key: Key, a: &StateModel, ka: Ke
     (mt_peek(st, key), mt_peek(a, ka), mt_peek(b, kb))
 }
 
-/// Anti-vacuity twin: MUST FAIL (claims a miss hands back an address).
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #0 negated.
 #[requires(mt_inv(*st) && (!st.initialized || !slot_at(st.slots@, key)))]
-#[ensures(result != None)]
-pub fn verify_mt_peek_err_miss__mutant(st: &StateModel, key: Key) -> Option<(usize, u32)> {
-    mt_peek(st, key)
+#[requires(mt_inv(*a) && !a.initialized)]
+#[requires(mt_inv(*b) && b.initialized && !slot_at(b.slots@, kb))]
+#[ensures(!(result.0 == None))]
+#[ensures(result.1 == result.2)]
+pub fn verify_mt_peek_err_miss__mutant(st: &StateModel, key: Key, a: &StateModel, ka: Key, b: &StateModel, kb: Key)
+    -> (Option<(usize, u32)>, Option<(usize, u32)>, Option<(usize, u32)>) {
+    (mt_peek(st, key), mt_peek(a, ka), mt_peek(b, kb))
 }
 
 /// **MT-PEEK-PRE** (precondition, spec-only)
@@ -10054,30 +10297,21 @@ pub fn verify_mt_peek_err_miss__mutant(st: &StateModel, key: Key) -> Option<(usi
 /// "The non-recency-updating lookup may be called with any key at any time, including before the
 /// pool has been set up, and never fails outright; a missing entry is reported through the
 /// return value." Any key; before set-up -> None; after a set-up attempt and ANY call sequence
-/// -> Some exactly when the pool is set up and holds the key. SCOPE: unpoisoned locks.
-#[requires(p.tracked@.len() == 0)]
-#[requires(p.next_handle@ + ops@.len() + 2 < u64::MAX@)]
-#[requires(p.pools@ + ops@.len() + 2 < u64::MAX@)]
-#[requires(psz@ > 0 ==> psz@ + 4096 <= usize::MAX@)]
-#[ensures(result.0 == None)]
-#[ensures((result.1 != None) == *result.2)]
-pub fn verify_mt_peek_pre(p: PolicyModel, psz: usize, ops: &[(u8, Key, u32)], key: Key)
-    -> (Option<(usize, u32)>, Option<(usize, u32)>, Snapshot<bool>) {
-    let mut st = mt_default(p);
-    let a = mt_peek(&st, key);
-    let _ = mt_initialize(&mut st, psz);
-    mt_run(&mut st, ops, psz);
-    let b = mt_peek(&st, key);
-    let hit = snapshot! { st.initialized && slot_at(st.slots@, key) };
-    (a, b, hit)
+/// J11 (LEVEL-2 classifier-A): Over an ARBITRARY reachable state (`mt_inv`) and ANY key: a miss is the `None` return value, panic-free.
+#[requires(mt_inv(*st))]
+#[ensures(!st.initialized ==> result == None)]
+#[ensures((result != None) == (st.initialized && slot_at(st.slots@, key)))]
+pub fn verify_mt_peek_pre(st: &StateModel, key: Key) -> Option<(usize, u32)> {
+    mt_peek(st, key)
 }
 
-/// Anti-vacuity twin: MUST FAIL (claims the un-set-up lookup finds something).
-#[requires(p.tracked@.len() == 0)]
-#[ensures(result != None)]
-pub fn verify_mt_peek_pre__mutant(p: PolicyModel, key: Key) -> Option<(usize, u32)> {
-    let st = mt_default(p);
-    mt_peek(&st, key)
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #1 negated.
+#[requires(mt_inv(*st))]
+#[ensures(!st.initialized ==> result == None)]
+#[ensures(!((result != None) == (st.initialized && slot_at(st.slots@, key))))]
+pub fn verify_mt_peek_pre__mutant(st: &StateModel, key: Key) -> Option<(usize, u32)> {
+    mt_peek(st, key)
 }
 
 /// **MT-POOL-INFO-ERR-NOT-INITIALIZED** (error-case)
@@ -10143,39 +10377,21 @@ pub fn verify_mt_pool_info_frame__mutant(st: &mut StateModel, ops: &[(u8, Key, u
 ///
 /// "The query for the pool's base address and size may be called at any time and reports the
 /// absence of a pool through its return value instead of failing." Before set-up -> None; after
-/// a set-up attempt and ANY call sequence -> Some((base, size)) exactly when set up.
-/// SCOPE: unpoisoned `state` lock.
-#[requires(p.tracked@.len() == 0)]
-#[requires(p.next_handle@ + ops@.len() + 2 < u64::MAX@)]
-#[requires(p.pools@ + ops@.len() + 2 < u64::MAX@)]
-#[requires(psz@ > 0 ==> psz@ + 4096 <= usize::MAX@)]
-#[ensures(result.0 == None)]
-#[ensures(match result.1 { Ok(_) => result.2 == Some((*result.4, psz)) && *result.5 == *result.4,
-          Err(_) => result.2 == None })]
-#[ensures(*result.6 ==> result.3 == Some((*result.5, *result.7)))]
-#[ensures(!*result.6 ==> result.3 == None)]
-pub fn verify_mt_pool_info_pre(p: PolicyModel, psz: usize, ops: &[(u8, Key, u32)])
-    -> (Option<(usize, usize)>, Result<(), MtError>, Option<(usize, usize)>, Option<(usize, usize)>,
-        Snapshot<usize>, Snapshot<usize>, Snapshot<bool>, Snapshot<usize>) {
-    let mut st = mt_default(p);
-    let a = mt_pool_info(&st);
-    let r = mt_initialize(&mut st, psz);
-    let b = mt_pool_info(&st);
-    let base1 = snapshot! { st.pool_base };
-    mt_run(&mut st, ops, psz);
-    let c = mt_pool_info(&st);
-    let base2 = snapshot! { st.pool_base };
-    let init2 = snapshot! { st.initialized };
-    let size2 = snapshot! { st.pool_size };
-    (a, r, b, c, base1, base2, init2, size2)
+/// J11 (LEVEL-2 classifier-A): Over an ARBITRARY reachable state (`mt_inv`): no pool is reported as `None`, panic-free.
+#[requires(mt_inv(*st))]
+#[ensures(!st.initialized ==> result == None)]
+#[ensures(st.initialized ==> result == Some((st.pool_base, st.pool_size)))]
+pub fn verify_mt_pool_info_pre(st: &StateModel) -> Option<(usize, usize)> {
+    mt_pool_info(st)
 }
 
-/// Anti-vacuity twin: MUST FAIL (claims the un-set-up query reports an address).
-#[requires(p.tracked@.len() == 0)]
-#[ensures(result != None)]
-pub fn verify_mt_pool_info_pre__mutant(p: PolicyModel) -> Option<(usize, usize)> {
-    let st = mt_default(p);
-    mt_pool_info(&st)
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #1 negated.
+#[requires(mt_inv(*st))]
+#[ensures(!st.initialized ==> result == None)]
+#[ensures(!(st.initialized ==> result == Some((st.pool_base, st.pool_size))))]
+pub fn verify_mt_pool_info_pre__mutant(st: &StateModel) -> Option<(usize, usize)> {
+    mt_pool_info(st)
 }
 
 /// **MT-REMOVE-ERR-KEY-NOT-FOUND** (error-case)
@@ -10277,14 +10493,25 @@ pub fn verify_mt_telemetry_no_contention_when_uncontended(l: &mut PoolLockModel,
     mt_telemetry_snapshot_m(t, true)
 }
 
-/// Anti-vacuity twin: MUST FAIL -- the same claim with ONE guard live at a call boundary (a
-/// second thread holding the pool read lock): an insert's try_write fails and is counted.
-#[requires(l.readers@ == 1 && !l.writer && !l.poisoned)]
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #1 negated.
+#[requires(lk_free(*l))]
 #[requires(t.write_lock_contentions@ == 0 && t.read_lock_contentions@ == 0)]
-#[ensures((^t).read_lock_contentions@ == 0)]
-#[ensures((^t).write_lock_contentions@ == 0)]
-pub fn verify_mt_telemetry_no_contention_when_uncontended__mutant(l: &mut PoolLockModel, t: &mut TelemetryModel) {
-    tel_pool_site(l, t, 0);
+#[ensures((^t).write_lock_contentions@ == 0 && (^t).read_lock_contentions@ == 0)]
+#[ensures(!(result.1@ == 0 && result.2@ == 0))]
+#[ensures(lk_free(^l))]
+pub fn verify_mt_telemetry_no_contention_when_uncontended__mutant(l: &mut PoolLockModel, t: &mut TelemetryModel, ops: &[u8])
+    -> (u64, u64, u64) {
+    let n = ops.len();
+    let mut i: usize = 0;
+    #[invariant(i@ <= n@)]
+    #[invariant(lk_free(*l))]
+    #[invariant(t.write_lock_contentions@ == 0 && t.read_lock_contentions@ == 0)]
+    while i < n {
+        tel_pool_site(l, t, ops[i]);
+        i += 1;
+    }
+    mt_telemetry_snapshot_m(t, true)
 }
 
 /// UNSCORED witness: a POISONED pool lock (after a panic inside a pool guard, e.g. the
@@ -10371,72 +10598,46 @@ pub fn verify_mt_telemetry_snapshot_post__mutant(st: &mut StateModel, t: &mut Te
 /// "The telemetry snapshot may be requested at any time, including before the pool has been set
 /// up and regardless of whether the optional counter-tracking build option was enabled, and it
 /// always returns a set of numbers rather than failing."
-/// No precondition at all, either build: before set-up (`Default`) and after a set-up attempt
-/// the call returns a triple (the counters, or zeros). SCOPE: unpoisoned `state` lock (feature
-/// build; the feature-less build takes no lock).
-#[requires(p.tracked@.len() == 0)]
-#[requires(p.pools@ + 1 < u64::MAX@)]
-#[requires(psz@ > 0 ==> psz@ + 4096 <= usize::MAX@)]
-#[ensures(feature ==> result.0 == trip(*t) && result.2 == trip(*t))]
-#[ensures(!feature ==> result.0 == (0u64, 0u64, 0u64) && result.2 == (0u64, 0u64, 0u64))]
-#[ensures(!result.3)]
-pub fn verify_mt_telemetry_snapshot_pre(p: PolicyModel, t: &TelemetryModel, feature: bool, psz: usize)
-    -> ((u64, u64, u64), Result<(), MtError>, (u64, u64, u64), bool) {
-    let mut st = mt_default(p);
-    let init0 = st.initialized;
-    let a = mt_telemetry_snapshot_m(t, feature); // before set-up
-    let r = mt_initialize(&mut st, psz);
-    let b = mt_telemetry_snapshot_m(t, feature); // after the set-up attempt
-    (a, r, b, init0)
+/// J11 (LEVEL-2 classifier-A): NO precondition: any state (set up or not), any counters, the feature on or off -- three numbers, panic-free.
+#[ensures(feature ==> result == trip(*t))]
+#[ensures(!feature ==> result == (0u64, 0u64, 0u64))]
+pub fn verify_mt_telemetry_snapshot_pre(st: &StateModel, t: &TelemetryModel, feature: bool) -> (u64, u64, u64) {
+    let _ = mt_telemetry_snapshot(st);
+    mt_telemetry_snapshot_m(t, feature)
 }
 
-/// Anti-vacuity twin: MUST FAIL (claims the feature-less reading echoes live counters).
-#[requires(p.tracked@.len() == 0 && t.write_lock_contentions@ > 0)]
-#[ensures(!result.1)]
-#[ensures(result.0 == trip(*t))]
-pub fn verify_mt_telemetry_snapshot_pre__mutant(p: PolicyModel, t: &TelemetryModel) -> ((u64, u64, u64), bool) {
-    let st = mt_default(p);
-    let a = mt_telemetry_snapshot_m(t, false);
-    (a, st.initialized)
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #0 negated.
+#[ensures(!(feature ==> result == trip(*t)))]
+#[ensures(!feature ==> result == (0u64, 0u64, 0u64))]
+pub fn verify_mt_telemetry_snapshot_pre__mutant(st: &StateModel, t: &TelemetryModel, feature: bool) -> (u64, u64, u64) {
+    let _ = mt_telemetry_snapshot(st);
+    mt_telemetry_snapshot_m(t, feature)
 }
 
 /// **MT-TOUCH-PRE** (precondition, spec-only)
 ///
 /// "Refreshing an entry's recency may be requested for any key at any time; it returns nothing
 /// and reports no error, so the caller needs no prior check that the key exists."
-/// Any key, no precondition beyond the reachable-state invariant: before set-up the call leaves
-/// the `Default` state untouched; after a set-up attempt and ANY call sequence it returns
-/// (unit) and the invariant still holds. SCOPE: unpoisoned locks, receptacle connected
-/// (lib.rs:511 pin `.unwrap()`).
-#[requires(p.tracked@.len() == 0)]
-#[requires(p.next_handle@ + ops@.len() + 2 < u64::MAX@)]
-#[requires(p.pools@ + ops@.len() + 2 < u64::MAX@)]
-#[requires(psz@ > 0 ==> psz@ + 4096 <= usize::MAX@)]
-#[ensures(*result.0 == *result.1)]
-#[ensures(mt_inv(*result.2))]
-pub fn verify_mt_touch_pre(p: PolicyModel, psz: usize, ops: &[(u8, Key, u32)], key: Key)
-    -> (Snapshot<StateModel>, Snapshot<StateModel>, Snapshot<StateModel>) {
-    let mut st = mt_default(p);
-    let s0 = snapshot! { st };
-    mt_touch(&mut st, key); // before set-up
-    let s1 = snapshot! { st };
-    let _ = mt_initialize(&mut st, psz);
-    mt_run(&mut st, ops, psz);
-    mt_touch(&mut st, key); // any later point, any key
-    let s2 = snapshot! { st };
-    (s0, s1, s2)
+/// J11 (LEVEL-2 classifier-A): Over an ARBITRARY reachable state (`mt_inv`) and ANY key: returns `()`, panic-free; no prior existence check is needed.
+#[requires(mt_inv(*st))]
+#[ensures(mt_inv(^st))]
+#[ensures(refresh_frame(*st, ^st))]
+#[ensures(!st.initialized ==> ^st == *st)]
+#[ensures(!slot_at(st.slots@, key) ==> ^st == *st)]
+pub fn verify_mt_touch_pre(st: &mut StateModel, key: Key) {
+    mt_touch(st, key)
 }
 
-/// Anti-vacuity twin: MUST FAIL (claims the un-set-up refresh changed something).
-#[requires(p.tracked@.len() == 0)]
-#[ensures(result.0.initialized == result.1.initialized)]
-#[ensures(*result.0 != *result.1)]
-pub fn verify_mt_touch_pre__mutant(p: PolicyModel, key: Key) -> (Snapshot<StateModel>, Snapshot<StateModel>) {
-    let mut st = mt_default(p);
-    let s0 = snapshot! { st };
-    mt_touch(&mut st, key);
-    let s1 = snapshot! { st };
-    (s0, s1)
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #3 negated.
+#[requires(mt_inv(*st))]
+#[ensures(mt_inv(^st))]
+#[ensures(refresh_frame(*st, ^st))]
+#[ensures(!st.initialized ==> ^st == *st)]
+#[ensures(!(!slot_at(st.slots@, key) ==> ^st == *st))]
+pub fn verify_mt_touch_pre__mutant(st: &mut StateModel, key: Key) {
+    mt_touch(st, key)
 }
 
 /// **MT-TOUCH-SILENT-NOOP** (error-case, divergent)
@@ -10459,12 +10660,19 @@ pub fn verify_mt_touch_silent_noop(st: &mut StateModel, key: Key) -> ((), Vec<Lk
     (u, t)
 }
 
-/// Anti-vacuity twin: MUST FAIL (claims the dropped refresh reordered the policy).
-#[requires(mt_inv(*st) && st.initialized && !slot_at(st.slots@, key) && st.policy.tracked@.len() > 1)]
-#[ensures((^st).slots@ == st.slots@)]
-#[ensures((^st).policy.tracked@ != st.policy.tracked@)]
-pub fn verify_mt_touch_silent_noop__mutant(st: &mut StateModel, key: Key) {
-    mt_touch(st, key)
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #0 negated.
+#[requires(mt_inv(*st) && (!st.initialized || !slot_at(st.slots@, key)))]
+#[ensures(!(^st == *st))]
+#[ensures(forall<i: Int> 0 <= i && i < result.1@.len()
+          ==> result.1@[i] != LkEv::PolicyRefresh && result.1@[i] != LkEv::PolicyOther)]
+#[ensures(result.0 == ())]
+pub fn verify_mt_touch_silent_noop__mutant(st: &mut StateModel, key: Key) -> ((), Vec<LkEv>) {
+    let init = st.initialized;
+    let present = slots_contains(&st.slots, key);
+    let u = mt_touch(st, key);
+    let t = lk_touch(init, present);
+    (u, t)
 }
 
 /// **MT-USED-ERR-NOT-INITIALIZED** (error-case)
@@ -10516,31 +10724,19 @@ pub fn verify_mt_used_frame__mutant(st: &mut StateModel) -> usize {
 ///
 /// "The bytes-in-use query may be called at any time and always returns a number rather than
 /// failing." Before set-up (0), right after a set-up attempt (0 either way: a fresh pool holds
-/// nothing), and after ANY later call sequence (the allocator's used bytes, <= capacity).
-/// SCOPE: unpoisoned locks.
-#[requires(p.tracked@.len() == 0)]
-#[requires(p.next_handle@ + ops@.len() + 2 < u64::MAX@)]
-#[requires(p.pools@ + ops@.len() + 2 < u64::MAX@)]
-#[requires(psz@ > 0 ==> psz@ + 4096 <= usize::MAX@)]
-#[ensures(result.0@ == 0 && result.1@ == 0)]
-#[ensures(result.3 ==> result.2 == result.4)]
-#[ensures(!result.3 ==> result.2@ == 0)]
-pub fn verify_mt_used_pre(p: PolicyModel, psz: usize, ops: &[(u8, Key, u32)]) -> (usize, usize, usize, bool, usize) {
-    let mut st = mt_default(p);
-    let u0 = mt_used(&st);
-    let _ = mt_initialize(&mut st, psz);
-    let u1 = mt_used(&st);
-    mt_run(&mut st, ops, psz);
-    let u2 = mt_used(&st);
-    (u0, u1, u2, st.initialized, st.allocator.used)
+/// J11 (LEVEL-2 classifier-A): Over an ARBITRARY reachable state (`mt_inv`): a number in every case, panic-free.
+#[requires(mt_inv(*st))]
+#[ensures(!st.initialized ==> result@ == 0)]
+#[ensures(st.initialized ==> result@ == st.allocator.used@)]
+pub fn verify_mt_used_pre(st: &StateModel) -> usize {
+    mt_used(st)
 }
 
-/// Anti-vacuity twin: MUST FAIL (claims the un-set-up query reports a non-zero number).
-#[requires(p.tracked@.len() == 0)]
-#[ensures(result.1 == false)]
-#[ensures(result.0@ > 0)]
-pub fn verify_mt_used_pre__mutant(p: PolicyModel) -> (usize, bool) {
-    let st = mt_default(p);
-    let u0 = mt_used(&st);
-    (u0, st.initialized)
+/// Anti-vacuity twin: MUST FAIL -- an exact copy of the driver above (same requires, same
+/// body) with ensures #1 negated.
+#[requires(mt_inv(*st))]
+#[ensures(!st.initialized ==> result@ == 0)]
+#[ensures(!(st.initialized ==> result@ == st.allocator.used@))]
+pub fn verify_mt_used_pre__mutant(st: &StateModel) -> usize {
+    mt_used(st)
 }

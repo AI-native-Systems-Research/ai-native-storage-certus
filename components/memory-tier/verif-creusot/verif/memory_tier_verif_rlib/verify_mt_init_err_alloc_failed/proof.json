@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_mt_initialize_spdk": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_mt_initialize_spdk": { "prover": "alt-ergo", "time": 0.03 },
       "vc_verify_mt_init_err_alloc_failed": {
         "prover": "alt-ergo",
-        "time": 0.119
+        "time": 0.074
       }
     }
   }

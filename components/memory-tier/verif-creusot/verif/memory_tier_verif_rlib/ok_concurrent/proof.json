@@ -2,9 +2,9 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_new_u64": { "prover": "alt-ergo", "time": 0.023 },
-      "vc_ok_concurrent": { "prover": "alt-ergo", "time": 0.051 },
-      "vc_policy_candidates": { "prover": "alt-ergo", "time": 0.024 }
+      "vc_new_u64": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_ok_concurrent": { "prover": "alt-ergo", "time": 0.052 },
+      "vc_policy_candidates": { "prover": "alt-ergo", "time": 0.022 }
     }
   }
 }

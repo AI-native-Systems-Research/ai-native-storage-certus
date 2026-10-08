@@ -2,14 +2,14 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_mt_used": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_mt_used": { "prover": "alt-ergo", "time": 0.024 },
       "vc_verify_mt_used_err_not_initialized__mutant": {
         "tactic": "split_vc",
         "children": [
-          { "prover": "alt-ergo", "time": 0.022 },
+          { "prover": "alt-ergo", "time": 0.026 },
           {
             "tactic": "split_vc",
-            "children": [ { "prover": "alt-ergo", "time": 0.025 }, null ]
+            "children": [ { "prover": "alt-ergo", "time": 0.026 }, null ]
           }
         ]
       }

@@ -1,6 +1,6 @@
 {
   "profile": [],
   "proofs": {
-    "Coma": { "vc_clone_SlotModel": { "prover": "alt-ergo", "time": 0.021 } }
+    "Coma": { "vc_clone_SlotModel": { "prover": "alt-ergo", "time": 0.02 } }
   }
 }

@@ -1,0 +1,27 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_mt_get": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_mt_insert": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_mt_peek": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_narrowed_verify_mt_insert_post_alignment__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.033 },
+              { "prover": "alt-ergo", "time": 0.022 },
+              { "prover": "alt-ergo", "time": 0.03 },
+              { "prover": "alt-ergo", "time": 0.061 },
+              { "prover": "alt-ergo", "time": 0.05 },
+              { "prover": "alt-ergo", "time": 0.07 },
+              null
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

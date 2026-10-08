@@ -10,15 +10,15 @@
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.037 },
-              { "prover": "alt-ergo", "time": 0.042 },
-              { "prover": "alt-ergo", "time": 0.168 },
-              { "prover": "alt-ergo", "time": 0.045 },
-              { "prover": "z3", "time": 0.052 },
-              { "prover": "z3", "time": 0.035 },
-              { "prover": "cvc4", "time": 0.364 },
-              { "prover": "alt-ergo", "time": 0.063 },
-              { "prover": "z3", "time": 0.034 }
+              { "prover": "alt-ergo", "time": 0.032 },
+              { "prover": "alt-ergo", "time": 0.025 },
+              { "prover": "alt-ergo", "time": 0.198 },
+              { "prover": "alt-ergo", "time": 0.055 },
+              { "prover": "z3", "time": 0.043 },
+              { "prover": "z3", "time": 0.047 },
+              { "prover": "cvc4", "time": 0.294 },
+              { "prover": "alt-ergo", "time": 0.069 },
+              { "prover": "z3", "time": 0.05 }
             ]
           }
         ]

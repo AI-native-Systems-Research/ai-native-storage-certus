@@ -2,11 +2,11 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_alloc_mmap_m": { "prover": "alt-ergo", "time": 0.034 },
-      "vc_mt_initialize_mmap": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_alloc_mmap_m": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_mt_initialize_mmap": { "prover": "alt-ergo", "time": 0.031 },
       "vc_verify_mt_init_numa_negative_ignored": {
         "prover": "z3",
-        "time": 0.057
+        "time": 0.045
       }
     }
   }

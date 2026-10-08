@@ -4,9 +4,9 @@
     "Coma": {
       "vc_refute_mt_init_numa_only_on_mmap_path": {
         "prover": "alt-ergo",
-        "time": 0.136
+        "time": 0.148
       },
-      "vc_rx_initialize_spdk": { "prover": "alt-ergo", "time": 0.032 }
+      "vc_rx_initialize_spdk": { "prover": "alt-ergo", "time": 0.015 }
     }
   }
 }

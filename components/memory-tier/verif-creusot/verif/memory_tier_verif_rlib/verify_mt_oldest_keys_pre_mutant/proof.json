@@ -2,19 +2,22 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_mt_default": { "prover": "alt-ergo", "time": 0.017 },
-      "vc_mt_oldest_keys": { "prover": "alt-ergo", "time": 0.012 },
+      "vc_mt_oldest_keys": { "prover": "alt-ergo", "time": 0.025 },
       "vc_verify_mt_oldest_keys_pre__mutant": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.021 },
-              { "prover": "alt-ergo", "time": 0.02 },
+              { "prover": "alt-ergo", "time": 0.025 },
               {
                 "tactic": "split_vc",
-                "children": [ { "prover": "alt-ergo", "time": 0.031 }, null ]
+                "children": [
+                  { "prover": "alt-ergo", "time": 0.031 },
+                  { "prover": "alt-ergo", "time": 0.023 },
+                  null,
+                  { "prover": "alt-ergo", "time": 0.031 }
+                ]
               }
             ]
           }

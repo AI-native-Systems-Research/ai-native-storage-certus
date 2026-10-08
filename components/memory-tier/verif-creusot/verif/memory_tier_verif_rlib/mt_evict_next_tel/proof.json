@@ -3,9 +3,9 @@
   "proofs": {
     "Coma": {
       "vc_elim_Some": { "prover": "alt-ergo", "time": 0.029 },
-      "vc_ev_commit": { "prover": "alt-ergo", "time": 0.032 },
-      "vc_ev_identify": { "prover": "alt-ergo", "time": 0.035 },
-      "vc_mt_evict_next_tel": { "prover": "z3", "time": 0.034 }
+      "vc_ev_commit": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_ev_identify": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_mt_evict_next_tel": { "prover": "z3", "time": 0.046 }
     }
   }
 }

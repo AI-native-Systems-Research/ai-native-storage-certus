@@ -2,8 +2,8 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_mt_evict_next": { "prover": "alt-ergo", "time": 0.026 },
-      "vc_mt_evict_next_for_key": { "prover": "cvc4", "time": 0.165 }
+      "vc_mt_evict_next": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_mt_evict_next_for_key": { "prover": "cvc4", "time": 0.141 }
     }
   }
 }

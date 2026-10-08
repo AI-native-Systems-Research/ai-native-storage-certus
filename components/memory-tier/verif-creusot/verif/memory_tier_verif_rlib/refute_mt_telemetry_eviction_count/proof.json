@@ -2,15 +2,15 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.021 },
-      "vc_ev_commit": { "prover": "alt-ergo", "time": 0.021 },
-      "vc_ev_identify": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_ev_commit": { "prover": "alt-ergo", "time": 0.035 },
+      "vc_ev_identify": { "prover": "alt-ergo", "time": 0.019 },
       "vc_refute_mt_telemetry_eviction_count": {
         "prover": "cvc4",
-        "time": 0.39
+        "time": 0.268
       },
-      "vc_rm_concurrent": { "prover": "alt-ergo", "time": 0.02 },
-      "vc_tel_reset": { "prover": "alt-ergo", "time": 0.017 }
+      "vc_rm_concurrent": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_tel_reset": { "prover": "alt-ergo", "time": 0.023 }
     }
   }
 }

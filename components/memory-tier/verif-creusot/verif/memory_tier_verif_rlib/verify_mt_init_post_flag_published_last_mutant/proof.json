@@ -2,11 +2,11 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_fl_new": { "prover": "alt-ergo", "time": 0.018 },
-      "vc_new_SlotModel": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_fl_new": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_new_SlotModel": { "prover": "alt-ergo", "time": 0.025 },
       "vc_verify_mt_init_post_flag_published_last__mutant": {
         "tactic": "split_vc",
-        "children": [ { "prover": "alt-ergo", "time": 0.017 }, null ]
+        "children": [ { "prover": "alt-ergo", "time": 0.015 }, null ]
       }
     }
   }
