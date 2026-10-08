@@ -15,7 +15,7 @@ Same engine and HTML report as ``sweep_dram_ssd.py``; here DRAM is held fixed
 
 Examples
 --------
-    ./sweep_turns_ssd.py                              # writes turns-sweep-report.html
+    ./sweep_turns_ssd.py                              # writes reports/turns-sweep-report.html
     DRAM_GB=128 CONCURRENT=64 ./sweep_turns_ssd.py -o turns-c64.html
     ./sweep_turns_ssd.py --turn-counts 4,16,64,256,1024
 """

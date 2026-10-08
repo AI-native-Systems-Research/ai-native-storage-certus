@@ -168,7 +168,7 @@ PREFIX_TOKENS=0 SSD_GB=inf ./run-cc131k-example.sh  # no sharing, unbounded SSD
 
 `sweep_dram_ssd.py` runs `run-burstgpt-example.sh` once per DRAM size (default
 8, 16, 32, 64, 128, 256 GiB) plus once per size with SSD disabled, and writes a
-self-contained HTML report (`dram-sweep-report.html`): workload summary, the
+self-contained HTML report (`reports/dram-sweep-report.html`): workload summary, the
 interval and turn distributions, % of lookups served by HBM / DRAM / SSD vs DRAM
 size, and SSD hits vs the no-SSD recompute share.
 
@@ -181,7 +181,7 @@ HBM_GB=20 CONCURRENT=64 ./sweep_dram_ssd.py -o c64.html
 `sweep_turns_ssd.py` is the same sweep along the other axis: turns per
 conversation (default 8, 16, 32, 64, 128, 256; `--turn-counts` / env
 `TURN_COUNTS`) with DRAM held fixed (`--dram-gb` / env `DRAM_GB`, default 32),
-writing `turns-sweep-report.html`. Deeper conversations grow a larger context, so
+writing `reports/turns-sweep-report.html`. Deeper conversations grow a larger context, so
 the working set outgrows HBM + DRAM and spills to SSD.
 
 ```bash
@@ -191,7 +191,7 @@ DRAM_GB=128 CONCURRENT=64 ./sweep_turns_ssd.py -o turns-c64.html
 
 `sweep_concurrency_ssd.py` sweeps concurrent sessions (default 1, 2, 4, 8, 16,
 32, 64, 128; `--concurrency` / env `CONCURRENCY_LEVELS`) with DRAM (32 GiB) and
-turns (100) held fixed, writing `concurrency-sweep-report.html`. `SESSIONS`
+turns (100) held fixed, writing `reports/concurrency-sweep-report.html`. `SESSIONS`
 defaults to 512 here: the first concurrency wave is warmup, so the total must
 exceed the largest level (the script refuses otherwise).
 
@@ -203,6 +203,19 @@ DRAM_GB=256 ./sweep_concurrency_ssd.py -o conc-dram256.html
 Decode emulation runs through any of the sweeps via `DECODE=1` (with
 `DECODE_STEP_S`, `DECODE_BATCH`); the report then adds a *decode-stage reads*
 chart. For example `DECODE=1 DECODE_BATCH=16 ./sweep_concurrency_ssd.py`.
+
+Reports go to `reports/` by default (`-o` overrides). Generated reports are
+git-ignored; the bundled ones below were force-added:
+
+| Report | Sweep | Settings (beyond the defaults) |
+|--------|-------|--------------------------------|
+| `dram-sweep-report.html` | DRAM 8–256 GiB | HBM 10G, 100 turns, 100 sessions |
+| `dram-sweep-report-dram256.html` | DRAM 8–256 GiB | `DRAM_GB=256` (ignored: DRAM is swept; same as above) |
+| `turns-sweep-report.html`, `-dram32` | turns 8–256 | DRAM 32G |
+| `turns-sweep-report-dram256.html` | turns 8–256 | DRAM 256G |
+| `concurrency-sweep-report.html` | concurrency 1–128 | DRAM 32G, 512 sessions |
+| `*-tok1.html` | all three | 1 token added per turn (working set fits HBM) |
+| `*-decode.html` | all three | `DECODE=1 DECODE_BATCH=16` |
 
 For the DRAM sweep, `HBM_GB`, `NUM_TURNS`, `SESSIONS`, `TURN_DIST`, `DIST` and `DRAM_SIZES` are
 overridable by env or flag; any other `run-cc131k-example.sh` variable passes

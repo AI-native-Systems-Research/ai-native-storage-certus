@@ -17,7 +17,7 @@ the largest level. Any other ``run-cc131k-example.sh`` variable (``SSD_GB``,
 
 Examples
 --------
-    ./sweep_concurrency_ssd.py                        # writes concurrency-sweep-report.html
+    ./sweep_concurrency_ssd.py                        # writes reports/concurrency-sweep-report.html
     DRAM_GB=256 ./sweep_concurrency_ssd.py -o conc-dram256.html
     ./sweep_concurrency_ssd.py --concurrency 1,4,16,64,256 --sessions 1024
 """

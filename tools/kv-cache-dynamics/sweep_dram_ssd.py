@@ -23,7 +23,7 @@ environment untouched.
 
 Examples
 --------
-    ./sweep_dram_ssd.py                                  # writes dram-sweep-report.html
+    ./sweep_dram_ssd.py                                  # writes reports/dram-sweep-report.html
     HBM_GB=20 CONCURRENT=64 ./sweep_dram_ssd.py -o c64.html
     ./sweep_dram_ssd.py --turn-dist cc-trace-weka-062126-turns.yaml
     ./sweep_dram_ssd.py --dram-sizes 0,8,32,128,512
@@ -46,6 +46,7 @@ import yaml
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 RUNNER = os.path.join(SCRIPT_DIR, "run-burstgpt-example.sh")
 DEFAULT_DIST = os.path.join(SCRIPT_DIR, "burstgpt-3-intervals.yaml")
+REPORT_DIR = os.path.join(SCRIPT_DIR, "reports")
 
 TIERS = ("HBM", "DRAM", "SSD")
 
@@ -600,8 +601,9 @@ def main(axis_key="dram", doc=None):
                     help="interval YAML (env DIST; default: burstgpt-3-intervals.yaml)")
     ap.add_argument("--no-baseline", action="store_true",
                     help="skip the SSD-disabled comparison runs")
-    ap.add_argument("-o", "--output", default=axis["output"],
-                    help=f"HTML report path (default: {axis['output']})")
+    ap.add_argument("-o", "--output", default=os.path.join(REPORT_DIR, axis["output"]),
+                    help=f"HTML report path (default: reports/{axis['output']} next "
+                         f"to this script)")
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 4,
                     help="parallel simulator runs (default: CPU count)")
     args = ap.parse_args()
@@ -675,6 +677,7 @@ def main(axis_key="dram", doc=None):
         with open(turn_dist) as f:
             turn_doc = yaml.safe_load(f)
 
+    os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
     with open(args.output, "w") as f:
         f.write(build_report(rows, base, last, dist_doc, turn_doc, args, axis))
 
