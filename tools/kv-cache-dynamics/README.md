@@ -103,6 +103,8 @@ Bundled, extracted from the cc-weka 062126 trace, so the tool runs out of the bo
 | `example-intervals.yaml` / `cc-trace-weka-062126-intervals.yaml` | inter-arrival intervals | median 16.9 s, p90 147 s, p99 3098 s |
 | `cc-trace-weka-062126-turns.yaml` | turns per conversation | median 67, mean 149, max 3052 |
 | `burstgpt-3-intervals.yaml` | inter-arrival intervals, BurstGPT v2.0 `BurstGPT_without_fails_3.csv` (55K chat sessions, 110 days) | median 131 s, p90 2342 s, p99 78825 s |
+| `wildchat-intervals.yaml` | inter-arrival intervals, `allenai/WildChat-1M` (838K real human↔ChatGPT conversations) | median 128 s, p90 1253 s, p99 27511 s (~7.6 h), max ~48 days |
+| `wildchat-turns.yaml` | turns per conversation, `allenai/WildChat-1M` | median 1, mean 2.3, p90 5, p99 14, max 249 |
 
 BurstGPT has many sessions and long think times but short, shallow chats, so it
 is used as a **mixed source**: its intervals with the cc-weka turn counts and
@@ -111,6 +113,24 @@ per-turn token sizes (`./run-burstgpt-example.sh`, a wrapper that runs `run-cc13
 Only the v2.0 `*_3.csv` files carry `Session ID`; regenerate with
 `./extract_interval_distribution.py BurstGPT_without_fails_3.csv -o burstgpt-3-intervals.yaml`
 (`.csv` input is detected as BurstGPT; `--format` overrides).
+
+WildChat-1M is the only large, public, *human*, timestamped multi-turn chat trace,
+so it supplies a **real human inter-turn think-time** tail (median 128 s sits
+between cc-weka's 16.9 s and BurstGPT's 131 s, with a long p99 of ~7.6 h). In
+WildChat only assistant turns carry a timestamp, so an interval is the gap
+between consecutive assistant receipts (think-time + the next turn's generation),
+and its chats are shallow (median 1 turn) — the consumer-chat contrast to
+cc-weka's median 67. Like BurstGPT it works well as a mixed source: WildChat
+intervals with cc-weka turn counts and per-turn token sizes. Regenerate (no HF
+token needed) with:
+
+```bash
+cd ../../benchmarks/synthetic-gen-by-llm
+hf download allenai/WildChat-1M --repo-type dataset --local-dir wc --include 'data/*.parquet'
+./wildchat_to_ccweka.py 'wc/data/*.parquet' -o wildchat.jsonl
+./extract_interval_distribution.py wildchat.jsonl -o wildchat-intervals.yaml
+./extract_turn_distribution.py     wildchat.jsonl -o wildchat-turns.yaml
+```
 
 ## Usage
 
