@@ -306,15 +306,15 @@ properties:
   - 'spec: MT-INITIALIZE-ERR-DOUBLE-INIT'
   - 'code: MT-INITIALIZE-ERR-ALREADY-INITIALIZED'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_mt_init_err_double_init
       result: Proved
-      wall_clock_s: 0.65
-      peak_rss_mb: 54
+      wall_clock_s: 14.4
+      peak_rss_mb: 506
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -440,15 +440,15 @@ properties:
   - 'spec: MT-INITIALIZE-ERR-NO-EVICTION-POLICY'
   - 'code: MT-INITIALIZE-ERR-POLICY-MISSING'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_mt_init_err_no_eviction_policy
       result: Proved
-      wall_clock_s: 0.65
+      wall_clock_s: 0.66
       peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -980,15 +980,15 @@ properties:
   source:
   - 'spec: MT-INSERT-POST-ALIGNMENT'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_mt_insert_post_alignment
       result: Proved
-      wall_clock_s: 0.97
-      peak_rss_mb: 56
+      wall_clock_s: 13.36
+      peak_rss_mb: 506
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -1269,15 +1269,15 @@ properties:
   source:
   - 'spec: MT-INSERT-FRAME-OTHER-ENTRIES'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_mt_insert_frame_other_entries
       result: Proved
-      wall_clock_s: 0.95
+      wall_clock_s: 0.82
       peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -1587,15 +1587,15 @@ properties:
   - 'spec: MT-GET-ERR-MISS,MT-GET-ERR-NOT-INITIALIZED'
   - 'code: MT-GET-ERR-MISS'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_mt_get_err_miss
       result: Proved
-      wall_clock_s: 0.85
+      wall_clock_s: 0.79
       peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -1675,15 +1675,15 @@ properties:
   source:
   - 'spec: MT-PEEK-PRE'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_mt_peek_pre
       result: Proved
-      wall_clock_s: 0.66
-      peak_rss_mb: 55
+      wall_clock_s: 0.77
+      peak_rss_mb: 52
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -1810,15 +1810,15 @@ properties:
   - 'spec: MT-PEEK-ERR-MISS,MT-PEEK-ERR-NOT-INITIALIZED'
   - 'code: MT-PEEK-ERR-MISS'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_mt_peek_err_miss
       result: Proved
-      wall_clock_s: 0.66
+      wall_clock_s: 0.67
       peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -1852,15 +1852,15 @@ properties:
   source:
   - 'spec: MT-PEEK-FRAME-POOL-STATE'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_mt_peek_frame_pool_state
       result: Proved
-      wall_clock_s: 0.63
-      peak_rss_mb: 53
+      wall_clock_s: 0.82
+      peak_rss_mb: 54
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -2406,15 +2406,15 @@ properties:
   - 'spec: MT-EVICT-NEXT-POST-UNTRACKED'
   - 'code: MT-EVICT-NEXT-DOES-NOT-UNTRACK'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: trusted-boundary
     evidence:
       modules:
       - verify_mt_evict_next_post_untracked
       result: Proved
-      wall_clock_s: 0.65
+      wall_clock_s: 1.01
       peak_rss_mb: 55
       lever: null
-    fidelity: trusted-boundary
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -2509,15 +2509,15 @@ properties:
   - 'spec: MT-EVICT-NEXT-ERR-EMPTY-POOL,MT-EVICT-NEXT-ERR-NOT-INITIALIZED'
   - 'code: MT-EVICT-NEXT-ERR-NO-VICTIM'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_mt_evict_next_err_no_victim
       result: Proved
-      wall_clock_s: 0.81
+      wall_clock_s: 0.95
       peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -2647,15 +2647,15 @@ properties:
   source:
   - 'spec: MT-EVICT-NEXT-FRAME-NO-ROTATION-STATE'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_mt_evict_next_frame_no_rotation_state
       result: Proved
-      wall_clock_s: 0.77
-      peak_rss_mb: 54
+      wall_clock_s: 0.78
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -2686,15 +2686,15 @@ properties:
   source:
   - 'spec: MT-EVICT-FOR-KEY-PRE'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_mt_evict_for_key_pre
       result: Proved
-      wall_clock_s: 0.77
-      peak_rss_mb: 54
+      wall_clock_s: 0.65
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -2771,15 +2771,15 @@ properties:
   source:
   - 'spec: MT-EVICT-FOR-KEY-POST-SPACE-GLOBAL'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_mt_evict_for_key_post_space_global
       result: Proved
-      wall_clock_s: 0.83
-      peak_rss_mb: 57
+      wall_clock_s: 0.89
+      peak_rss_mb: 56
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -2813,15 +2813,15 @@ properties:
   - 'spec: MT-EVICT-FOR-KEY-FRAME-KEY-IGNORED'
   - 'code: MT-EVICT-NEXT-FOR-KEY-MAY-EVICT-ARGUMENT'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_mt_evict_for_key_frame_key_ignored
       result: Proved
-      wall_clock_s: 0.83
+      wall_clock_s: 0.86
       peak_rss_mb: 57
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -2893,15 +2893,15 @@ properties:
   source:
   - 'spec: MT-OLDEST-KEYS-PRE'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_mt_oldest_keys_pre
       result: Proved
-      wall_clock_s: 0.81
-      peak_rss_mb: 56
+      wall_clock_s: 0.78
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -3124,15 +3124,15 @@ properties:
   source:
   - 'spec: MT-TOUCH-PRE'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_mt_touch_pre
       result: Proved
-      wall_clock_s: 0.7
-      peak_rss_mb: 57
+      wall_clock_s: 0.79
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -3223,15 +3223,15 @@ properties:
   - 'spec: MT-TOUCH-ERR-ABSENT-KEY-NOOP,MT-TOUCH-ERR-NOT-INITIALIZED'
   - 'code: MT-TOUCH-SILENT-NOOP'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_mt_touch_silent_noop
       result: Proved
-      wall_clock_s: 0.96
-      peak_rss_mb: 55
+      wall_clock_s: 0.81
+      peak_rss_mb: 54
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -3310,15 +3310,15 @@ properties:
   source:
   - 'spec: MT-BATCH-TOUCH-PRE'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_mt_batch_touch_pre
       result: Proved
-      wall_clock_s: 0.65
-      peak_rss_mb: 54
+      wall_clock_s: 0.68
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -3539,15 +3539,15 @@ properties:
   source:
   - 'spec: MT-CONTAINS-PRE'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_mt_contains_pre
       result: Proved
-      wall_clock_s: 0.68
-      peak_rss_mb: 56
+      wall_clock_s: 0.65
+      peak_rss_mb: 52
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -3708,15 +3708,15 @@ properties:
   source:
   - 'spec: MT-CAPACITY-PRE'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_mt_capacity_pre
       result: Proved
-      wall_clock_s: 0.88
-      peak_rss_mb: 57
+      wall_clock_s: 0.77
+      peak_rss_mb: 52
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -3796,15 +3796,15 @@ properties:
   - 'spec: MT-CAPACITY-ERR-NOT-INITIALIZED'
   - 'code: MT-CAPACITY-UNINITIALIZED'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_mt_capacity_err_not_initialized
       result: Proved
-      wall_clock_s: 0.76
-      peak_rss_mb: 53
+      wall_clock_s: 0.78
+      peak_rss_mb: 52
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -3877,15 +3877,15 @@ properties:
   source:
   - 'spec: MT-USED-PRE'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_mt_used_pre
       result: Proved
-      wall_clock_s: 0.83
-      peak_rss_mb: 57
+      wall_clock_s: 0.64
+      peak_rss_mb: 52
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -4046,15 +4046,15 @@ properties:
   source:
   - 'spec: MT-POOL-INFO-PRE'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_mt_pool_info_pre
       result: Proved
-      wall_clock_s: 0.85
-      peak_rss_mb: 57
+      wall_clock_s: 0.64
+      peak_rss_mb: 52
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -4213,15 +4213,15 @@ properties:
   source:
   - 'spec: MT-IS-DMA-CAPABLE-PRE'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_mt_is_dma_capable_pre
       result: Proved
-      wall_clock_s: 0.81
-      peak_rss_mb: 56
+      wall_clock_s: 0.66
+      peak_rss_mb: 52
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -4306,15 +4306,15 @@ properties:
   - 'spec: MT-IS-DMA-CAPABLE-ERR-NOT-INITIALIZED'
   - 'code: MT-IS-DMA-CAPABLE-NO-INIT-GUARD'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_mt_is_dma_capable_no_init_guard
       result: Proved
-      wall_clock_s: 0.66
-      peak_rss_mb: 54
+      wall_clock_s: 0.59
+      peak_rss_mb: 47
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -4678,15 +4678,15 @@ properties:
   - 'spec: MT-CLEAR-FRAME-POOL-MEMORY'
   - 'code: MT-CLEAR-CAPACITY-SOURCE'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_mt_clear_frame_pool_memory
       result: Proved
-      wall_clock_s: 0.64
-      peak_rss_mb: 54
+      wall_clock_s: 0.68
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -4762,15 +4762,15 @@ properties:
   source:
   - 'spec: MT-TELEMETRY-SNAPSHOT-PRE'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_mt_telemetry_snapshot_pre
       result: Proved
-      wall_clock_s: 0.82
-      peak_rss_mb: 54
+      wall_clock_s: 0.68
+      peak_rss_mb: 47
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -4897,15 +4897,15 @@ properties:
   source:
   - 'spec: MT-TELEMETRY-SNAPSHOT-POST-NO-CONTENTION-WHEN-UNCONTENDED'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_mt_telemetry_no_contention_when_uncontended
       result: Proved
-      wall_clock_s: 0.65
-      peak_rss_mb: 54
+      wall_clock_s: 0.78
+      peak_rss_mb: 53
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -5037,15 +5037,15 @@ properties:
   - 'spec: MT-FREE-CAPACITY-POST'
   - 'code: MT-FREE-CAPACITY-POST'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_mt_free_capacity_post
       result: Proved
-      wall_clock_s: 0.63
-      peak_rss_mb: 53
+      wall_clock_s: 0.68
+      peak_rss_mb: 52
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -5125,15 +5125,16 @@ properties:
   - 'spec: MT-RESET-TELEMETRY-POST'
   - 'code: MT-RESET-TELEMETRY-POST'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
     fidelity: ghost-mirror
-    note: 'REFUTED — the negation ''refute_mt_reset_telemetry_post'' is machine-proved, so the code violates
-      this obligation. This is a finding, not a gap: see the spec and code locations on the property record.'
-    status: refuted
     evidence:
-      refutation: refute_mt_reset_telemetry_post
-      result: Proved (negation)
-      wall_clock_s: 0.66
+      modules:
+      - verify_mt_reset_telemetry_post
+      result: Proved
+      wall_clock_s: 0.81
       peak_rss_mb: 53
+      lever: null
+    status: proved
     _scored_by: scorer_creusot
   kani:
     evidence: null
@@ -6311,15 +6312,15 @@ properties:
   - 'spec: MT-INV-FOUR-KIB-ALIGNMENT'
   - 'code: MT-INV-USED-IS-ALIGNED'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: trusted-boundary
     evidence:
       modules:
       - verify_mt_inv_four_kib_alignment
       result: Proved
-      wall_clock_s: 0.66
-      peak_rss_mb: 55
+      wall_clock_s: 0.67
+      peak_rss_mb: 52
       lever: null
-    fidelity: trusted-boundary
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -6462,15 +6463,15 @@ properties:
   source:
   - 'spec: MT-INV-OBSERVER-CONSISTENCY'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_mt_inv_observer_consistency
       result: Proved
-      wall_clock_s: 0.82
-      peak_rss_mb: 56
+      wall_clock_s: 0.7
+      peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -6583,15 +6584,15 @@ properties:
   - 'spec: MT-INV-POOL-BASE-STABLE'
   - 'code: MT-INV-CAPACITY-EQUALS-POOL-SIZE'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_mt_inv_pool_base_stable
       result: Proved
-      wall_clock_s: 0.78
-      peak_rss_mb: 54
+      wall_clock_s: 0.83
+      peak_rss_mb: 55
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -6644,15 +6645,15 @@ properties:
   - 'spec: MT-INV-POINTER-STABLE-UNTIL-FREED'
   - 'code: MT-INV-OFFSET-IS-THE-ONLY-IDENTITY,MT-CLEAR-INVALIDATES-ALL-POINTERS'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: trusted-boundary
     evidence:
       modules:
       - verify_mt_inv_pointer_stable_until_freed
       result: Proved
-      wall_clock_s: 0.89
+      wall_clock_s: 0.92
       peak_rss_mb: 59
       lever: null
-    fidelity: trusted-boundary
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -6869,15 +6870,15 @@ properties:
   source:
   - 'spec: MT-INV-DEFAULT-POOL-SIZE-NEVER-APPLIED'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_mt_inv_default_pool_size_never_applied
       result: Proved
       wall_clock_s: 0.83
-      peak_rss_mb: 57
+      peak_rss_mb: 56
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -6917,15 +6918,15 @@ properties:
   source:
   - 'spec: MT-INV-NO-INTERNAL-VICTIM-SELECTION-STATE'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_mt_inv_no_internal_victim_selection_state
       result: Proved
-      wall_clock_s: 0.84
-      peak_rss_mb: 59
+      wall_clock_s: 0.87
+      peak_rss_mb: 58
       lever: null
-    fidelity: ghost-mirror
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -7862,8 +7863,8 @@ properties:
     be required; the monotonic growth of each counter is recorded as a property instead.
   traces: []
 run:
-  gate_commit: unknown — gate dir is not a git checkout
-  gate_branch: unstable
+  gate_commit: affb821a
+  gate_branch: HEAD
   kani:
     scored_by: scorer_kani
     command: scorer_kani.py components/memory-tier/verif --component-dir components/memory-tier --only
@@ -7878,9 +7879,9 @@ run:
   creusot:
     scored_by: scorer_creusot
     command: scorer_creusot.py components/memory-tier/verif --crate-dir components/memory-tier/verif-creusot
-      --resume
-    started: '2026-10-07T23:27:32-07:00'
-    finished: '2026-10-07T23:27:54-07:00'
+      --cap-seconds 60 --cap-max 300 --resume --only MT-EVICT-FOR-KEY-POST-SPACE-GLOBAL,MT-INSERT-FRAME-OTHER-ENTRIES,MT-INSERT-POST-ALIGNMENT,MT-INV-POOL-BASE-STABLE,MT-INV-POINTER-STABLE-UNTIL-FREED,MT-INV-DEFAULT-POOL-SIZE-NEVER-APPLIED
+    started: '2026-10-08T16:49:54-07:00'
+    finished: '2026-10-08T16:50:22-07:00'
     creusot: v0.11.0-169-g9cf662ce6
     why3: Why3 platform, version 1.8.2+git
     provers:
@@ -8588,64 +8589,730 @@ domain_discordances:
   assume: no telemetry counter is at u64::MAX on entry (no wrap during the call)
   assume_rust: state.telemetry.evictions.load(Ordering::Relaxed) < u64::MAX && state.telemetry.write_lock_contentions.load(Ordering::Relaxed)
     < u64::MAX && state.telemetry.read_lock_contentions.load(Ordering::Relaxed) < u64::MAX
+- spec_says: the specification sets no limit on how many handles or pools are created
+  code_does: 'the counters are 64-bit and are incremented without an overflow check (eviction-policy model:
+    track increments next_handle, create_pool increments the pool count; verif-creusot policy_track /
+    policy_create_pool)'
+  spec_pointers:
+  - FR-004
+  - IEvictionPolicy::track
+  - IEvictionPolicy::create_pool
+  code_pointers:
+  - verif-creusot policy_track (next_handle + 1)
+  - verif-creusot policy_create_pool (pools + 1)
+  - eviction-policy-lru/src/lib.rs:43
+  methods:
+  - insert
+  - initialize
+  assume: fewer than 2^64 handles and pools are ever created
+  assume_rust: policy.next_handle < u64::MAX && policy.pools < u64::MAX  // at every policy track / create_pool
+    call
+  note: 'J11b, green''s ruling 2026-10-08: an implementation assumption the spec does not state - a finding
+    stated openly, not a defect. NOTE: the shipped LRU builds pool ids as `pools.len() as u32` (eviction-policy-lru/src/lib.rs:43),
+    so for that implementation the effective limit is 2^32 pools.'
 level1_sync_check:
   by: orchestrator-applied ~/FV/synccheck/memory-tier/synccheck.yaml (node7 reading agent, 2026-10-05),
     applied 2026-10-07
   reclassified: 9
   domain_discordances: 5
+classification:
+  MT-BATCH-TOUCH-EMPTY-NOOP:
+    class: B
+    reason: null
+    checked_by: test
+    evidence:
+    - lib.rs:521-523
+    - lib.rs:524-527
+    - components/memory-tier/src/lib.rs:521-523
+    - components/memory-tier/src/lib.rs:524-527
+    why: An empty list returns before any lock, but the uninitialized case returns only after taking the
+      component state read lock, contradicting "without taking any lock" for that case.
+  MT-BATCH-TOUCH-PRE:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:520-555
+    - components/memory-tier/src/lib.rs:520-555
+    why: batch_touch returns unit, returns early on empty input, uninitialized state or missing policy,
+      skips absent keys, and ignores the policy Result.
+  MT-CAPACITY-ERR-NOT-INITIALIZED:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:569-571
+    - lib.rs:262-264
+    - lib.rs:314
+    - components/memory-tier/src/lib.rs:569-571
+    - components/memory-tier/src/lib.rs:262-264
+    - components/memory-tier/src/lib.rs:314
+    why: Uninitialized returns 0, and initialize rejects pool_size==0 so an initialized pool's capacity
+      is always >0, making 0 mean no pool.
+  MT-CAPACITY-PRE:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:567-574
+    - components/memory-tier/src/lib.rs:567-574
+    why: capacity returns 0 when uninitialized and allocator.capacity() otherwise; no error path.
+  MT-CLEAR-FRAME-POOL-MEMORY:
+    class: A
+    reason: null
+    checked_by: creusot
+    evidence:
+    - lib.rs:602-607
+    - lib.rs:311
+    - lib.rs:314
+    - components/memory-tier/src/lib.rs:594-608
+    - components/memory-tier/src/lib.rs:314
+    why: clear only empties slots, rebuilds the FreeList with the same state.pool_size used at initialize
+      (so capacity is equal), and leaves pool_ptr, pool_size, spdk_allocated and initialized untouched.
+  MT-CONTAINS-PRE:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:557-565
+    - components/memory-tier/src/lib.rs:557-565
+    why: contains returns false when uninitialized and slots.contains_key otherwise; no error path.
+  MT-EVICT-FOR-KEY-ERR-NO-VICTIM:
+    class: '?'
+    needs_human: true
+    run1:
+      class: B
+      reason: null
+      evidence:
+      - lib.rs:436-438
+      - lib.rs:441
+      - lib.rs:456-462
+      why: The not-set-up case returns None, but "cache empty" is never checked against slots; the result
+        is None only if the policy also tracks nothing, otherwise a policy-named key is returned (and
+        counted) even with no entries.
+    run2:
+      class: A
+      reason: null
+      evidence:
+      - components/memory-tier/src/lib.rs:468-470
+      - components/memory-tier/src/lib.rs:436-438
+      - components/memory-tier/src/lib.rs:441
+      - components/memory-tier/src/lib.rs:463-465
+      - components/memory-tier/src/lib.rs:365-368
+      - components/memory-tier/src/lib.rs:500
+      - components/memory-tier/src/lib.rs:606
+      why: It returns None when uninitialized; when the cache is empty, the policy pool is also empty
+        because track, remove and clear_pool happen together with slot changes under the pool write lock,
+        so identify_next_to_evict returns None and nothing changes.
+  MT-EVICT-FOR-KEY-FRAME-KEY-IGNORED:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:468-470
+    - components/memory-tier/src/lib.rs:468-470
+    why: The `_key` argument is unused and the call is exactly evict_next(), so the named key gets no
+      protection and can itself be returned.
+  MT-EVICT-FOR-KEY-POST-SPACE-GLOBAL:
+    class: A
+    reason: null
+    checked_by: creusot
+    evidence:
+    - lib.rs:76-79
+    - lib.rs:457
+    - lib.rs:360-363
+    - components/memory-tier/src/lib.rs:457
+    - components/memory-tier/src/lib.rs:360-363
+    - components/memory-tier/src/lib.rs:76-79
+    why: There is one FreeList for the whole pool; eviction deallocates into it and every insert allocates
+      from it regardless of key.
+  MT-EVICT-FOR-KEY-PRE:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:468-470
+    - lib.rs:436-441
+    - components/memory-tier/src/lib.rs:468-470
+    - components/memory-tier/src/lib.rs:436-440
+    why: evict_next_for_key discards its key and calls evict_next, which only requires initialization
+      (returns None otherwise) and the connected policy; key presence is never checked.
+  MT-EVICT-NEXT-ERR-NO-VICTIM:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:436-438
+    - lib.rs:441
+    - lib.rs:463-465
+    - components/memory-tier/src/lib.rs:436-438
+    - components/memory-tier/src/lib.rs:441
+    - components/memory-tier/src/lib.rs:463-465
+    why: Not initialized returns None before any lock-mutation, and when identify_next_to_evict yields
+      None the else branch returns None without taking the pool write lock or touching telemetry.
+  MT-EVICT-NEXT-FRAME-NO-ROTATION-STATE:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:70-90
+    - lib.rs:434-466
+    - components/memory-tier/src/lib.rs:70-90
+    - components/memory-tier/src/lib.rs:434-466
+    why: Slot/Pool/MemoryTierState hold no cursor or rotation counter and evict_next's victim is exactly
+      identify_next_to_evict(pool_id), so the choice is a function of policy state only.
+  MT-EVICT-NEXT-POST-ENTRY-GONE-AND-SPACE-FREED:
+    class: B
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:441
+    - lib.rs:456-462
+    - components/memory-tier/src/lib.rs:441
+    - components/memory-tier/src/lib.rs:456-462
+    why: Space is freed only if the policy-named key is in slots; otherwise nothing is removed or deallocated
+      yet Some(key) is still returned, so the post-condition depends on a policy/pool sync the code never
+      checks.
+  MT-EVICT-NEXT-POST-LRU-ORDER:
+    class: C
+    reason: external
+    checked_by: test
+    evidence:
+    - components/memory-tier/src/lib.rs:441
+    - components/eviction-policy-lru/src/lib.rs:133-137
+    why: The victim ordering is computed entirely inside the bound eviction-policy-lru component; the
+      memory tier only forwards touches and asks for a victim.
+  MT-EVICT-NEXT-POST-UNTRACKED:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:441
+    - ../interfaces/src/ieviction_policy.rs:101-104
+    - components/memory-tier/src/lib.rs:441
+    - components/interfaces/src/ieviction_policy.rs:101-104
+    - components/eviction-policy-lru/src/lib.rs:133-137
+    why: The victim is obtained via identify_next_to_evict, whose interface contract is to "remove it
+      from tracking and return it", so the key leaves the policy's bookkeeping as part of selection (no
+      separate untrack call is needed).
+  MT-FREE-CAPACITY-POST:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:180-187
+    - components/memory-tier/src/lib.rs:180-187
+    why: free_capacity returns 0 when uninitialized and allocator.capacity() - allocator.used() otherwise.
+  MT-GET-ERR-MISS:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:383-385
+    - lib.rs:403
+    - components/memory-tier/src/lib.rs:383-385
+    - components/memory-tier/src/lib.rs:403
+    why: get returns None when not initialized and None (via `?`) when the key has no slot, never a pointer.
+  MT-GET-POST-TOUCH:
+    class: '?'
+    needs_human: true
+    run1:
+      class: B
+      reason: null
+      evidence:
+      - lib.rs:406-408
+      - ../interfaces/src/ieviction_policy.rs:89-92
+      why: The touch is correctly issued after drop(pool), but get only forwards ep.touch(handle) and
+        discards its Result; MRU/eviction-after semantics are promised by the IEvictionPolicy contract
+        only for a recency policy, so the MRU part is not delivered by this code.
+    run2:
+      class: C
+      reason: external
+      evidence:
+      - components/memory-tier/src/lib.rs:403-408
+      - components/interfaces/src/ieviction_policy.rs:89-92
+      why: Get forwards the slot's handle to ep.touch after dropping the pool lock; the most-recently-used
+        ordering itself belongs to the bound eviction policy, which only promises a policy-defined ranking
+        update.
+  MT-INIT-ERR-DOUBLE-INIT:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:270-275
+    - lib.rs:310-318
+    - components/memory-tier/src/lib.rs:270-275
+    - components/memory-tier/src/lib.rs:310-318
+    why: Under the state write lock, an already-initialized component returns Err before any field (pool_ptr,
+      pool_size, pool, pool_id) is overwritten, so the existing pool is untouched.
+  MT-INIT-ERR-NO-EVICTION-POLICY:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:266-268
+    - lib.rs:278-306
+    - components/memory-tier/src/lib.rs:266-268
+    - components/memory-tier/src/lib.rs:306
+    why: The receptacle lookup fails with Err via `?` at 266-268, before any mmap/spdk_zmalloc call at
+      278-306, so no memory is allocated.
+  MT-INIT-FRAME-ON-FAILURE:
+    class: B
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:271-274
+    - lib.rs:291-295
+    - lib.rs:302
+    - components/memory-tier/src/lib.rs:271-275
+    - components/memory-tier/src/lib.rs:262-268
+    - components/memory-tier/src/lib.rs:291-295
+    why: Failures leave state unmodified, but the double-init failure path is taken on an already-initialized
+      component that keeps reporting set-up, capacity, used bytes and entries, contradicting "still reports
+      not set up / no capacity".
+  MT-INIT-POST-HUGEPAGE-FALLBACK:
+    class: B
+    reason: null
+    checked_by: test
+    evidence:
+    - lib.rs:195-223
+    - lib.rs:291-295
+    - components/memory-tier/src/lib.rs:282-295
+    - components/memory-tier/src/lib.rs:195-223
+    why: The MAP_HUGETLB to plain-mmap retry exists only in alloc_mmap; the SPDK branch fails initialize
+      with AllocationFailed when hugepages are unavailable instead of retrying with regular pages.
+  MT-INIT-POST-NUMA-FALLBACK:
+    class: B
+    reason: null
+    checked_by: test
+    evidence:
+    - lib.rs:225-252
+    - lib.rs:278-295
+    - components/memory-tier/src/lib.rs:278-295
+    - components/memory-tier/src/lib.rs:225-253
+    why: Only the mmap path tolerates an mbind failure (logs a warning, keeps the pool); with the SPDK
+      env active the node is passed to spdk_zmalloc and a NULL result returns AllocationFailed with no
+      fallback.
+  MT-INSERT-ERR-NOT-INITIALIZED:
+    class: B
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:329-331
+    - lib.rs:334-338
+    - components/memory-tier/src/lib.rs:329-331
+    - components/memory-tier/src/lib.rs:334-338
+    why: The size==0 check runs before the initialized check, so insert(key, 0) on an uninitialized component
+      returns InvalidSize rather than NotInitialized.
+  MT-INSERT-FRAME-OTHER-ENTRIES:
+    class: A
+    reason: null
+    checked_by: creusot
+    evidence:
+    - lib.rs:356-375
+    - allocator.rs:38-55
+    - components/memory-tier/src/lib.rs:356-375
+    - components/memory-tier/src/allocator.rs:44-54
+    why: Insert only adds a new slot for an absent key (duplicate returns early) and allocate carves the
+      new range from a free region, never touching existing slots' offset/size or the allocator capacity.
+  MT-INSERT-POST-ALIGNMENT:
+    class: A
+    reason: null
+    checked_by: creusot
+    evidence:
+    - lib.rs:377
+    - allocator.rs:42
+    - allocator.rs:44-51
+    - allocator.rs:63-82
+    - lib.rs:285
+    - lib.rs:196-203
+    - components/memory-tier/src/lib.rs:195-204
+    - components/memory-tier/src/lib.rs:283-289
+    - components/memory-tier/src/allocator.rs:19
+    - components/memory-tier/src/allocator.rs:42-50
+    - components/memory-tier/src/allocator.rs:63-82
+    - components/memory-tier/src/lib.rs:377
+    why: The pool base is page-aligned (mmap) or 4096-aligned (spdk_zmalloc align arg), and every allocator
+      offset is 0 or a sum of 4096-rounded sizes (free-region starts are only ever offset+aligned_size
+      or coalesced aligned starts), so pool_ptr+offset is 4 KiB aligned.
+  MT-INV-CONCURRENT-STRUCTURAL-INTEGRITY:
+    class: '?'
+    needs_human: true
+    run1:
+      class: C
+      reason: interleaving
+      evidence: []
+      why: The obligation is about structural rules holding under concurrent multi-thread interleavings
+        and lock ordering.
+    run2:
+      class: B
+      reason: null
+      evidence:
+      - components/memory-tier/src/lib.rs:365-367
+      - components/memory-tier/src/lib.rs:500
+      - components/memory-tier/src/lib.rs:606
+      - components/memory-tier/src/lib.rs:441-456
+      why: 'The concurrent outcome is a loom question, but the stated mechanism is false in the code:
+        insert (track), remove (ep.remove) and clear (clear_pool) all call the eviction policy while holding
+        the pool write lock, and evict_next calls it before taking the lock, which opens the stale/phantom-key
+        window.'
+  MT-INV-DEFAULT-POOL-SIZE-NEVER-APPLIED:
+    class: A
+    reason: null
+    checked_by: review
+    evidence:
+    - lib.rs:34
+    - lib.rs:261
+    - lib.rs:311
+    - lib.rs:314
+    - components/memory-tier/src/lib.rs:34
+    - components/memory-tier/src/lib.rs:261-264
+    - components/memory-tier/src/lib.rs:311-314
+    why: DEFAULT_POOL_SIZE is declared but referenced nowhere in src; initialize always uses its explicit
+      pool_size argument for state and allocator.
+  MT-INV-FOUR-KIB-ALIGNMENT:
+    class: A
+    reason: null
+    checked_by: creusot
+    evidence:
+    - allocator.rs:42
+    - allocator.rs:44-53
+    - allocator.rs:60-82
+    - components/memory-tier/src/allocator.rs:17-19
+    - components/memory-tier/src/allocator.rs:42-54
+    - components/memory-tier/src/allocator.rs:60-82
+    why: Reserved lengths are size.next_multiple_of(4096) and every free-region start (hence every returned
+      offset) is 0, offset+aligned_size, or a coalesced aligned start, so offsets, lengths and used are
+      all multiples of 4096.
+  MT-INV-NO-INTERNAL-VICTIM-SELECTION-STATE:
+    class: A
+    reason: null
+    checked_by: review
+    evidence:
+    - lib.rs:70-90
+    - lib.rs:431
+    - lib.rs:441
+    - components/memory-tier/src/lib.rs:70-90
+    - components/memory-tier/src/lib.rs:431
+    - components/memory-tier/src/lib.rs:441
+    why: The component's state holds only slots, allocator and pool handles; victims and candidate order
+      come solely from identify_next_to_evict/get_eviction_candidates.
+  MT-INV-NO-LEAKED-OR-DOUBLE-BOOKED-SPACE:
+    class: B
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:360-367
+    - components/memory-tier/src/lib.rs:360-367
+    - components/memory-tier/src/allocator.rs:59-61
+    why: allocate reserves space before ep.track(...).unwrap(); if track fails the insert panics with
+      the bytes counted in used but owned by no slot, so the invariant is not unconditional.
+  MT-INV-OBSERVER-CONSISTENCY:
+    class: A
+    reason: null
+    checked_by: creusot
+    evidence:
+    - lib.rs:564
+    - lib.rs:403
+    - lib.rs:419
+    - lib.rs:603-605
+    - lib.rs:360-375
+    - lib.rs:496-501
+    - components/memory-tier/src/lib.rs:403
+    - components/memory-tier/src/lib.rs:419
+    - components/memory-tier/src/lib.rs:564
+    - components/memory-tier/src/lib.rs:603
+    - components/memory-tier/src/lib.rs:360-375
+    - components/memory-tier/src/lib.rs:456-457
+    - components/memory-tier/src/lib.rs:496-501
+    why: contains/get/peek/clear all read the same slots map, and every slot insertion/removal is paired
+      with an allocate/deallocate of its rounded size under the same write lock, so used tracks exactly
+      the present keys.
+  MT-INV-POINTER-STABLE-UNTIL-FREED:
+    class: A
+    reason: null
+    checked_by: creusot
+    evidence:
+    - lib.rs:70-74
+    - lib.rs:377
+    - lib.rs:404
+    - allocator.rs:44-51
+    - allocator.rs:59-82
+    - components/memory-tier/src/allocator.rs:44-54
+    - components/memory-tier/src/lib.rs:457
+    - components/memory-tier/src/lib.rs:501
+    - components/memory-tier/src/lib.rs:604-605
+    why: An entry's offset is fixed in its Slot (no compaction), and its range is returned to the free
+      list only by remove/evict/clear deallocation, so it is never moved or reused while the entry is
+      present.
+  MT-INV-POOL-BASE-STABLE:
+    class: A
+    reason: null
+    checked_by: creusot
+    evidence:
+    - lib.rs:310-314
+    - lib.rs:198
+    - lib.rs:284
+    - lib.rs:605
+    - lib.rs:573
+    - components/memory-tier/src/lib.rs:310-314
+    - components/memory-tier/src/lib.rs:605
+    - components/memory-tier/src/lib.rs:196-199
+    - components/memory-tier/src/lib.rs:283-284
+    - components/memory-tier/src/allocator.rs:28-30
+    why: pool_ptr and pool_size are written only in a successful initialize, the mapping is of exactly
+      pool_size bytes, and the allocator capacity is always FreeList::new(pool_size).
+  MT-INV-SIZE-ACCOUNTING:
+    class: B
+    reason: null
+    checked_by: creusot
+    evidence:
+    - lib.rs:372
+    - lib.rs:405
+    - lib.rs:421
+    - allocator.rs:42
+    - allocator.rs:53
+    - components/memory-tier/src/lib.rs:372
+    - components/memory-tier/src/lib.rs:405
+    - components/memory-tier/src/allocator.rs:42
+    - components/memory-tier/src/allocator.rs:53
+    why: Lookups return the requested size and the pool is charged the rounded size, so sum(sizes) <=
+      used, but it is equal (not smaller) whenever every size is a multiple of 4096 or the cache is empty.
+  MT-IS-DMA-CAPABLE-NO-INIT-GUARD:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:109
+    - lib.rs:317
+    - lib.rs:610-613
+    - components/memory-tier/src/lib.rs:109
+    - components/memory-tier/src/lib.rs:317
+    - components/memory-tier/src/lib.rs:610-613
+    why: spdk_allocated defaults to false and is set only on a successful initialize, so before set-up
+      (or after a failed one) the answer is false.
+  MT-IS-DMA-CAPABLE-PRE:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:610-613
+    - components/memory-tier/src/lib.rs:610-613
+    why: is_dma_capable returns the stored bool; no error path.
+  MT-OLDEST-KEYS-POST-LIVE-MEMBERSHIP:
+    class: B
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:431
+    - components/memory-tier/src/lib.rs:430-431
+    - components/memory-tier/src/lib.rs:496-500
+    - components/memory-tier/src/lib.rs:365-375
+    why: The policy's list is passed through without filtering against pool.slots, so liveness of each
+      returned key depends on the policy's tracked set matching the slots, which the memory tier does
+      not check.
+  MT-OLDEST-KEYS-POST-SHAPE:
+    class: '?'
+    needs_human: true
+    run1:
+      class: B
+      reason: null
+      evidence:
+      - lib.rs:430-431
+      - ../interfaces/src/ieviction_policy.rs:106-108
+      why: The single get_eviction_candidates request is returned verbatim, whose contract is policy-defined
+        eviction order; "progressively newer entries after it" holds only for an LRU policy and is not
+        enforced here.
+    run2:
+      class: C
+      reason: external
+      evidence:
+      - components/memory-tier/src/lib.rs:430-431
+      - components/interfaces/src/ieviction_policy.rs:106-108
+      why: The code makes one get_eviction_candidates call and returns its result unchanged; the bound
+        by n and by the tracked count, and the oldest-first ordering, are the eviction policy's contract.
+  MT-OLDEST-KEYS-PRE:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:424-432
+    - components/memory-tier/src/lib.rs:424-432
+    why: 'Returns a Vec in every case: empty for uninitialized or n==0, else the policy''s candidate list;
+      no error path.'
+  MT-PEEK-ERR-MISS:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:414-416
+    - lib.rs:419
+    - components/memory-tier/src/lib.rs:414-416
+    - components/memory-tier/src/lib.rs:419
+    why: peek returns None when uninitialized and None when the key is absent.
+  MT-PEEK-FRAME-POOL-STATE:
+    class: A
+    reason: null
+    checked_by: creusot
+    evidence:
+    - lib.rs:418-421
+    - components/memory-tier/src/lib.rs:418-421
+    why: peek takes only a shared pool read lock and reads one slot; it calls no policy method and mutates
+      neither slots nor allocator.
+  MT-PEEK-PRE:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:412-422
+    - components/memory-tier/src/lib.rs:412-422
+    why: peek has an Option return with no error path; uninitialized and missing-key cases both return
+      None.
+  MT-POOL-INFO-PRE:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:585-592
+    - components/memory-tier/src/lib.rs:585-592
+    why: pool_info returns None unless initialized with a non-null base, else Some((ptr,size)); no error
+      path.
+  MT-RESET-TELEMETRY-POST:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:174-177
+    - lib.rs:55-59
+    - components/memory-tier/src/lib.rs:174-177
+    - components/memory-tier/src/lib.rs:55-59
+    why: reset stores 0 into all three counters and touches nothing else; it is the only non-increment
+      write to them.
+  MT-TELEMETRY-COUNTERS-MONOTONIC:
+    class: '?'
+    needs_human: true
+    run1:
+      class: A
+      reason: null
+      evidence:
+      - lib.rs:348
+      - lib.rs:396
+      - lib.rs:460
+      - lib.rs:55-59
+      why: Every counter change is fetch_add(1) and the only store is the reset to zero; u64 wrap would
+        need 2^64 increments and is not a practical deviation.
+    run2:
+      class: B
+      reason: null
+      evidence:
+      - components/memory-tier/src/lib.rs:349
+      - components/memory-tier/src/lib.rs:396
+      - components/memory-tier/src/lib.rs:460
+      - components/memory-tier/src/lib.rs:55-59
+      why: Counters only change through fetch_add(1) or the explicit reset, but AtomicU64::fetch_add wraps
+        silently at u64::MAX, so the code guarantees growth only up to the wrap point, not unconditionally.
+  MT-TELEMETRY-EVICTION-COUNT:
+    class: B
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:456-460
+    - components/memory-tier/src/lib.rs:441
+    - components/memory-tier/src/lib.rs:456-460
+    why: The counter is incremented whenever the policy names a victim, even when no slot was removed,
+      so it can exceed the number of entries actually evicted.
+  MT-TELEMETRY-NO-CONTENTION-WHEN-UNCONTENDED:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:343-351
+    - lib.rs:390-398
+    - lib.rs:443-451
+    - lib.rs:483-491
+    - lib.rs:534-542
+    - components/memory-tier/src/lib.rs:343-352
+    - components/memory-tier/src/lib.rs:390-399
+    - components/memory-tier/src/lib.rs:443-452
+    - components/memory-tier/src/lib.rs:483-492
+    - components/memory-tier/src/lib.rs:534-543
+    why: Contention counters are incremented only in the Err arm of try_write/try_read, which a single
+      thread cannot hit since no operation nests pool locks (the only other Err is lock poisoning after
+      a prior panic).
+  MT-TELEMETRY-SNAPSHOT-PRE:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:615-635
+    - components/memory-tier/src/lib.rs:615-635
+    why: telemetry_snapshot returns loaded counters with the feature and a zeroed Default without it,
+      with no initialized check or error path.
+  MT-TOUCH-POST-ORDER-REFRESH:
+    class: '?'
+    needs_human: true
+    run1:
+      class: B
+      reason: null
+      evidence:
+      - lib.rs:513-516
+      - ../interfaces/src/ieviction_policy.rs:89-92
+      why: The handle is looked up, the pool lock dropped and ep.touch called with its Result ignored;
+        MRU semantics are not implemented here and are promised by the policy contract only for recency
+        policies.
+    run2:
+      class: C
+      reason: external
+      evidence:
+      - components/memory-tier/src/lib.rs:513-516
+      - components/interfaces/src/ieviction_policy.rs:89-92
+      why: touch passes the handle to ep.touch after dropping the pool lock; making the key most recently
+        used is the bound policy's behaviour, not the memory tier's.
+  MT-TOUCH-PRE:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:505-518
+    - components/memory-tier/src/lib.rs:505-518
+    why: touch returns unit, silently returns when uninitialized or key absent, and discards the policy
+      Result.
+  MT-TOUCH-SILENT-NOOP:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:507-509
+    - lib.rs:513-517
+    - components/memory-tier/src/lib.rs:507-509
+    - components/memory-tier/src/lib.rs:513-517
+    why: Uninitialized returns immediately and an absent key falls through the `if let` with no policy
+      call and no result.
+  MT-USED-PRE:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - lib.rs:576-583
+    - components/memory-tier/src/lib.rs:576-583
+    why: used returns 0 when uninitialized and allocator.used() otherwise; no error path.
 level2_excluded:
 - MT-INIT-POST-NUMA-FALLBACK
 - MT-INIT-POST-HUGEPAGE-FALLBACK
-- MT-INIT-ERR-DOUBLE-INIT
-- MT-INIT-ERR-NO-EVICTION-POLICY
 - MT-INIT-FRAME-ON-FAILURE
-- MT-INSERT-POST-ALIGNMENT
 - MT-INSERT-ERR-NOT-INITIALIZED
-- MT-INSERT-FRAME-OTHER-ENTRIES
 - MT-GET-POST-TOUCH
-- MT-GET-ERR-MISS
-- MT-PEEK-PRE
-- MT-PEEK-ERR-MISS
-- MT-PEEK-FRAME-POOL-STATE
 - MT-EVICT-NEXT-POST-ENTRY-GONE-AND-SPACE-FREED
-- MT-EVICT-NEXT-POST-UNTRACKED
 - MT-EVICT-NEXT-POST-LRU-ORDER
-- MT-EVICT-NEXT-ERR-NO-VICTIM
-- MT-EVICT-NEXT-FRAME-NO-ROTATION-STATE
-- MT-EVICT-FOR-KEY-PRE
-- MT-EVICT-FOR-KEY-POST-SPACE-GLOBAL
-- MT-EVICT-FOR-KEY-FRAME-KEY-IGNORED
 - MT-EVICT-FOR-KEY-ERR-NO-VICTIM
-- MT-OLDEST-KEYS-PRE
 - MT-OLDEST-KEYS-POST-SHAPE
 - MT-OLDEST-KEYS-POST-LIVE-MEMBERSHIP
-- MT-TOUCH-PRE
 - MT-TOUCH-POST-ORDER-REFRESH
-- MT-TOUCH-SILENT-NOOP
-- MT-BATCH-TOUCH-PRE
 - MT-BATCH-TOUCH-EMPTY-NOOP
-- MT-CONTAINS-PRE
-- MT-CAPACITY-PRE
-- MT-CAPACITY-ERR-NOT-INITIALIZED
-- MT-USED-PRE
-- MT-POOL-INFO-PRE
-- MT-IS-DMA-CAPABLE-PRE
-- MT-IS-DMA-CAPABLE-NO-INIT-GUARD
-- MT-CLEAR-FRAME-POOL-MEMORY
-- MT-TELEMETRY-SNAPSHOT-PRE
 - MT-TELEMETRY-EVICTION-COUNT
-- MT-TELEMETRY-NO-CONTENTION-WHEN-UNCONTENDED
 - MT-TELEMETRY-COUNTERS-MONOTONIC
-- MT-FREE-CAPACITY-POST
-- MT-RESET-TELEMETRY-POST
-- MT-INV-FOUR-KIB-ALIGNMENT
 - MT-INV-SIZE-ACCOUNTING
-- MT-INV-OBSERVER-CONSISTENCY
-- MT-INV-POOL-BASE-STABLE
-- MT-INV-POINTER-STABLE-UNTIL-FREED
 - MT-INV-NO-LEAKED-OR-DOUBLE-BOOKED-SPACE
-- MT-INV-DEFAULT-POOL-SIZE-NEVER-APPLIED
-- MT-INV-NO-INTERNAL-VICTIM-SELECTION-STATE
 - MT-INV-CONCURRENT-STRUCTURAL-INTEGRITY
 level2_assumptions:
 - id: D-RANGE-US-3-ec579e
@@ -8690,3 +9357,10 @@ level2_assumptions:
   - remove
   - batch_touch
   - telemetry_snapshot
+- id: D-RANGE-FR-004-4d8626
+  assume: fewer than 2^64 handles and pools are ever created
+  assume_rust: policy.next_handle < u64::MAX && policy.pools < u64::MAX  // at every policy track / create_pool
+    call
+  methods:
+  - insert
+  - initialize
