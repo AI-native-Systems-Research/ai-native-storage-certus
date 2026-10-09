@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_max_usize": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_tr_halve": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_tr_len": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_tr_sketch_increment": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_tr_track_age": { "prover": "alt-ergo", "time": 0.069 }
+    }
+  }
+}

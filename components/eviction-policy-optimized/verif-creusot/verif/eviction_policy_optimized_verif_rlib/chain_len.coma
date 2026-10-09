@@ -1,8 +1,8 @@
-(* #"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2877 0 2877 70 *)
+(* #"/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2827 0 2827 70 *)
 
-let%span slib = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2875 10 2875 14
-let%span slib'0 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2876 11 2876 20
-let%span swell_founded = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+let%span slib = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2825 10 2825 14
+let%span slib'0 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2826 11 2826 20
+let%span swell_founded = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
 
 use creusot.int.UInt64
 use creusot.int.UInt32
@@ -28,7 +28,7 @@ constant cur : t_Option_u32
 
 constant fuel : int
 
-function chain_len [#"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2877 0 2877 70] (nodes: Seq.seq t_Node) (cur: t_Option_u32) (fuel: int) : int
+function chain_len [#"/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2827 0 2827 70] (nodes: Seq.seq t_Node) (cur: t_Option_u32) (fuel: int) : int
 
 goal vc_chain_len: ([%#slib'0] fuel >= 0)
   -> (if fuel <= 0 then

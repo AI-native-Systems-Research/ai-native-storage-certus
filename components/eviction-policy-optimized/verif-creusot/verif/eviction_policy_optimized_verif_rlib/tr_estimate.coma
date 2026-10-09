@@ -1,0 +1,165 @@
+(* #"/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4258 0 4258 46 *)
+
+let%span slib = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4259 18 4259 25
+let%span slib'0 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4260 41 4260 43
+let%span slib'1 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4260 29 4260 44
+let%span slib'2 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4260 28 4260 45
+let%span slib'3 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4260 10 4260 46
+let%span slib'4 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4261 48 4261 50
+let%span slib'5 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4261 36 4261 51
+let%span slib'6 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4261 29 4261 33
+let%span slib'7 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4261 29 4261 51
+let%span slib'8 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4261 28 4261 52
+let%span slib'9 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4261 10 4261 53
+let%span slib'10 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4262 48 4262 50
+let%span slib'11 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4262 36 4262 51
+let%span slib'12 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4262 29 4262 33
+let%span slib'13 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4262 29 4262 51
+let%span slib'14 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4262 28 4262 52
+let%span slib'15 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4262 10 4262 53
+let%span slib'16 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4263 48 4263 50
+let%span slib'17 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4263 36 4263 51
+let%span slib'18 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4263 29 4263 33
+let%span slib'19 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4263 29 4263 51
+let%span slib'20 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4263 28 4263 52
+let%span slib'21 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4263 10 4263 53
+let%span slib'22 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4257 11 4257 36
+let%span slib'23 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 75 0 75 17
+let%span slib'24 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4220 10 4220 38
+let%span slib'25 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4221 10 4221 24
+let%span slib'26 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 76 0 76 17
+let%span slib'27 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 77 0 77 17
+let%span slib'28 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 78 0 78 17
+let%span slib'29 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4214 16 4214 50
+let%span svec = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/creusot/creusot-std/src/std/vec.rs" 193 19 193 38
+let%span svec'0 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/creusot/creusot-std/src/std/vec.rs" 194 18 194 46
+let%span svec'1 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sslice = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/creusot/creusot-std/src/std/slice.rs" 148 20 148 37
+let%span sslice'0 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/creusot/creusot-std/src/std/slice.rs" 153 20 153 37
+let%span snum = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/creusot/creusot-std/src/std/num.rs" 25 28 25 33
+let%span scmp = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/creusot/creusot-std/src/std/cmp.rs" 87 26 87 66
+let%span scmp'0 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/creusot/creusot-std/src/std/cmp.rs" 88 26 88 63
+let%span scmp'1 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/creusot/creusot-std/src/std/cmp.rs" 89 26 89 55
+let%span scmp'2 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/creusot/creusot-std/src/std/cmp.rs" 90 26 90 79
+let%span scmp'3 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/creusot/creusot-std/src/std/cmp.rs" 91 26 91 77
+
+use creusot.int.UInt8
+use creusot.int.UInt64
+use int.ComputerDivision
+use seq.Seq
+use creusot.prelude.Any
+use int.Int
+
+constant const_MAX: UInt8.t = (255: UInt8.t)
+
+constant const_P0: UInt64.t = [%#slib'23] (11400714819323198485: UInt64.t)
+
+function col_l [#"/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4213 0 4213 41] (key: UInt64.t) (prime: UInt64.t) : int
+ = [%#slib'29] ComputerDivision.div (UInt64.t'int (UInt64.mul key prime)) 18014398509481984
+
+let tr_col (key: UInt64.t) (prime: UInt64.t) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:tr_col ensures] ([@stop_split] [@expl:tr_col ensures #0] [%#slib'24] UInt64.t'int result
+      = col_l key prime)
+    /\ ([@stop_split] [@expl:tr_col ensures #1] [%#slib'25] UInt64.t'int result < 1024)}
+    (! return {result}) ]
+
+type t_Vec_u8_Global
+
+type t_Sketch = { counters: t_Vec_u8_Global }
+
+predicate in_bounds_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq UInt8.t) =
+  [%#sslice] UInt64.t'int self < Seq.length seq
+
+meta "rewrite_def" predicate in_bounds_usize
+
+constant const_MAX'0: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_u8_Global (self: t_Vec_u8_Global) : Seq.seq UInt8.t
+
+axiom view_Vec_u8_Global_spec:
+  forall self: t_Vec_u8_Global [view_Vec_u8_Global self]. [%#svec'1] Seq.length (view_Vec_u8_Global self)
+    <= UInt64.t'int const_MAX'0
+
+predicate has_value_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq UInt8.t) (out: UInt8.t) =
+  [%#sslice'0] Seq.get seq (UInt64.t'int self) = out
+
+meta "rewrite_def" predicate has_value_usize
+
+let index_Vec_u8_Global (self_: t_Vec_u8_Global) (ix: UInt64.t) (return (x: UInt8.t)) =
+{[@stop_split] [@expl:index requires] [%#svec] in_bounds_usize ix (view_Vec_u8_Global self_)}
+  any
+  [ return (result: UInt8.t) ->
+  {[@stop_split] [@expl:index ensures] [%#svec'0] has_value_usize ix (view_Vec_u8_Global self_) result}
+    (! return {result}) ]
+
+function deep_model_u8 [@inline:trivial] (self: UInt8.t) : int = [%#snum] UInt8.t'int self
+
+meta "rewrite_def" function deep_model_u8
+
+let min_u8 (self_: UInt8.t) (o: UInt8.t) (return (x: UInt8.t)) = any
+  [ return (result: UInt8.t) ->
+  {[@stop_split] [@expl:min_u8 ensures] ([@stop_split] [@expl:min ensures #0] [%#scmp] deep_model_u8 result
+      <= deep_model_u8 self_)
+    /\ ([@stop_split] [@expl:min ensures #1] [%#scmp'0] deep_model_u8 result <= deep_model_u8 o)
+    /\ ([@stop_split] [@expl:min ensures #2] [%#scmp'1] result = self_ \/ result = o)
+    /\ ([@stop_split] [@expl:min ensures #3] [%#scmp'2] deep_model_u8 self_ < deep_model_u8 o -> result = self_)
+    /\ ([@stop_split] [@expl:min ensures #4] [%#scmp'3] deep_model_u8 o <= deep_model_u8 self_ -> result = o)}
+    (! return {result}) ]
+
+constant const_P1: UInt64.t = [%#slib'26] (5871781006564002453: UInt64.t)
+
+constant const_P2: UInt64.t = [%#slib'27] (7809847782465536323: UInt64.t)
+
+constant const_P3: UInt64.t = [%#slib'28] (15302401860877482369: UInt64.t)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let tr_estimate [#"/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4258 0 4258 46]
+  (s: t_Sketch) (key: UInt64.t) (return (x: UInt8.t)) =
+{[@stop_split] [@expl:tr_estimate requires] [%#slib'22] Seq.length (view_Vec_u8_Global s.counters) = 4096}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &min <- [%#slib] const_MAX ] s1
+    | s1 = tr_col [%#slib'1] {key} {[%#slib'0] const_P0} (fun (_x: UInt64.t) -> [ &_11 <- _x ] s2)
+    | s2 = index_Vec_u8_Global [%#slib'2] {s.counters} {_11} (fun (_x: UInt8.t) -> [ &_9 <- _x ] s3)
+    | s3 = min_u8 [%#slib'3] {min} {_9} (fun (_x: UInt8.t) -> [ &_6 <- _x ] s4)
+    | s4 = [ &min <- _6 ] s5
+    | s5 = tr_col [%#slib'5] {key} {[%#slib'4] const_P1} (fun (_x: UInt64.t) -> [ &_19 <- _x ] s6)
+    | s6 = UInt64.add [%#slib'7] {[%#slib'6] (1024: UInt64.t)} {_19} (fun (_x: UInt64.t) -> [ &_18 <- _x ] s7)
+    | s7 = index_Vec_u8_Global [%#slib'8] {s.counters} {_18} (fun (_x: UInt8.t) -> [ &_16 <- _x ] s8)
+    | s8 = min_u8 [%#slib'9] {min} {_16} (fun (_x: UInt8.t) -> [ &_13 <- _x ] s9)
+    | s9 = [ &min <- _13 ] s10
+    | s10 = tr_col [%#slib'11] {key} {[%#slib'10] const_P2} (fun (_x: UInt64.t) -> [ &_27 <- _x ] s11)
+    | s11 = UInt64.add [%#slib'13] {[%#slib'12] (2048: UInt64.t)} {_27} (fun (_x: UInt64.t) -> [ &_26 <- _x ] s12)
+    | s12 = index_Vec_u8_Global [%#slib'14] {s.counters} {_26} (fun (_x: UInt8.t) -> [ &_24 <- _x ] s13)
+    | s13 = min_u8 [%#slib'15] {min} {_24} (fun (_x: UInt8.t) -> [ &_21 <- _x ] s14)
+    | s14 = [ &min <- _21 ] s15
+    | s15 = tr_col [%#slib'17] {key} {[%#slib'16] const_P3} (fun (_x: UInt64.t) -> [ &_35 <- _x ] s16)
+    | s16 = UInt64.add [%#slib'19] {[%#slib'18] (3072: UInt64.t)} {_35} (fun (_x: UInt64.t) -> [ &_34 <- _x ] s17)
+    | s17 = index_Vec_u8_Global [%#slib'20] {s.counters} {_34} (fun (_x: UInt8.t) -> [ &_32 <- _x ] s18)
+    | s18 = min_u8 [%#slib'21] {min} {_32} (fun (_x: UInt8.t) -> [ &_29 <- _x ] s19)
+    | s19 = [ &min <- _29 ] s20
+    | s20 = [ &_ret <- min ] s21
+    | s21 = return {_ret} ] ]
+  [ & _ret: UInt8.t = Any.any_l ()
+  | & s: t_Sketch = s
+  | & key: UInt64.t = key
+  | & min: UInt8.t = Any.any_l ()
+  | & _6: UInt8.t = Any.any_l ()
+  | & _9: UInt8.t = Any.any_l ()
+  | & _11: UInt64.t = Any.any_l ()
+  | & _13: UInt8.t = Any.any_l ()
+  | & _16: UInt8.t = Any.any_l ()
+  | & _18: UInt64.t = Any.any_l ()
+  | & _19: UInt64.t = Any.any_l ()
+  | & _21: UInt8.t = Any.any_l ()
+  | & _24: UInt8.t = Any.any_l ()
+  | & _26: UInt64.t = Any.any_l ()
+  | & _27: UInt64.t = Any.any_l ()
+  | & _29: UInt8.t = Any.any_l ()
+  | & _32: UInt8.t = Any.any_l ()
+  | & _34: UInt64.t = Any.any_l ()
+  | & _35: UInt64.t = Any.any_l () ]) [ return (result: UInt8.t) -> (! return {result}) ]

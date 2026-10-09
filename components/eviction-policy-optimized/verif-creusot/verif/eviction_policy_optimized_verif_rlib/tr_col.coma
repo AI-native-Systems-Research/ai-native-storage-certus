@@ -1,0 +1,45 @@
+(* #"/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4222 0 4222 44 *)
+
+let%span slib = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4223 5 4223 28
+let%span slib'0 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4223 32 4223 34
+let%span slib'1 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4223 4 4223 35
+let%span slib'2 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4220 10 4220 38
+let%span slib'3 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4221 10 4221 24
+let%span slib'4 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4214 16 4214 50
+let%span snum = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/creusot/creusot-std/src/std/num.rs" 316 26 316 48
+
+use creusot.int.UInt64BW
+use creusot.int.Int32BW
+use creusot.prelude.Any
+use int.ComputerDivision
+use int.Int
+
+let wrapping_mul (self_: UInt64BW.t) (rhs: UInt64BW.t) (return (x: UInt64BW.t)) = any
+  [ return (result: UInt64BW.t) -> {[@stop_split] [@expl:wrapping_mul ensures] [%#snum] result = UInt64BW.mul self_ rhs}
+    (! return {result}) ]
+
+function col_l [#"/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4213 0 4213 41] (key: UInt64BW.t) (prime: UInt64BW.t) : int
+ = [%#slib'4] ComputerDivision.div (UInt64BW.t'int (UInt64BW.mul key prime)) 18014398509481984
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let tr_col [#"/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4222 0 4222 44]
+  (key: UInt64BW.t) (prime: UInt64BW.t) (return (x: UInt64BW.t)) = (! bb0
+  [ bb0 = s0
+    [ s0 = wrapping_mul [%#slib] {key} {prime} (fun (_x: UInt64BW.t) -> [ &_8 <- _x ] s1)
+    | s1 = UInt64BW.shr [%#slib'1] {_8} {Int32BW.to_BV256 ([%#slib'0] (54: Int32BW.t))}
+        (fun (_x: UInt64BW.t) -> [ &_7 <- _x ] s2)
+    | s2 = [ &_ret <- UInt64BW.of_BV256 (UInt64BW.to_BV256 _7) ] s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: UInt64BW.t = Any.any_l ()
+  | & key: UInt64BW.t = key
+  | & prime: UInt64BW.t = prime
+  | & _7: UInt64BW.t = Any.any_l ()
+  | & _8: UInt64BW.t = Any.any_l () ])
+  [ return (result: UInt64BW.t) ->
+  {[@stop_split] [@expl:tr_col ensures] ([@stop_split] [@expl:tr_col ensures #0] [%#slib'2] UInt64BW.t'int result
+      = col_l key prime)
+    /\ ([@stop_split] [@expl:tr_col ensures #1] [%#slib'3] UInt64BW.t'int result < 1024)}
+    (! return {result}) ]

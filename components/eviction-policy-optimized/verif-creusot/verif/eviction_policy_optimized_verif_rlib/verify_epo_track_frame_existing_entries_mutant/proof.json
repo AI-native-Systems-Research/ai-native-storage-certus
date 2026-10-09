@@ -1,0 +1,17 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_tr_track_admit": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_verify_epo_track_frame_existing_entries__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [ { "prover": "alt-ergo", "time": 0.023 }, null ]
+          }
+        ]
+      }
+    }
+  }
+}

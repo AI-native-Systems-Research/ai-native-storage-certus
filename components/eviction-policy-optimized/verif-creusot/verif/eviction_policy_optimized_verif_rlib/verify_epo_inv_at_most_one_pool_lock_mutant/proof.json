@@ -13,10 +13,10 @@
               { "prover": "alt-ergo", "time": 0.027 },
               { "prover": "alt-ergo", "time": 0.03 },
               { "prover": "alt-ergo", "time": 0.031 },
-              { "prover": "alt-ergo", "time": 0.04 },
+              { "prover": "alt-ergo", "time": 0.02 },
               {
                 "tactic": "split_vc",
-                "children": [ { "prover": "alt-ergo", "time": 0.032 }, null ]
+                "children": [ { "prover": "alt-ergo", "time": 0.015 }, null ]
               }
             ]
           }

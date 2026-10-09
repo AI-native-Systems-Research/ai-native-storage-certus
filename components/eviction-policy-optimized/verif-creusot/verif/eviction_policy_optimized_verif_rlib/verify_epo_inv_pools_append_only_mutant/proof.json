@@ -9,7 +9,7 @@
         "children": [
           {
             "tactic": "split_vc",
-            "children": [ { "prover": "alt-ergo", "time": 0.056 }, null ]
+            "children": [ { "prover": "alt-ergo", "time": 0.026 }, null ]
           }
         ]
       }

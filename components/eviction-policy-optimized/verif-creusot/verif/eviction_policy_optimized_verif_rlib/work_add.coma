@@ -1,8 +1,8 @@
-(* #"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 627 0 627 39 *)
+(* #"/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 627 0 627 39 *)
 
-let%span slib = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 628 4 628 19
-let%span slib'0 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 625 11 625 43
-let%span slib'1 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 626 10 626 47
+let%span slib = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 628 4 628 19
+let%span slib'0 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 625 11 625 43
+let%span slib'1 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 626 10 626 47
 
 use creusot.int.UInt64
 use creusot.prelude.MutBorrow
@@ -19,7 +19,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let work_add [#"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 627 0 627 39]
+let work_add [#"/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 627 0 627 39]
   (w: MutBorrow.t t_Work) (k: UInt64.t) (return (x: ())) =
 {[@stop_split] [@expl:work_add requires] [%#slib'0] UInt64.t'int w.current.accesses < 4294967295 - UInt64.t'int k}
   (! bb0

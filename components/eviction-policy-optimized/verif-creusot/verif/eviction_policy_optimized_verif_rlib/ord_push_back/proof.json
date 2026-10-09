@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_ord_push_back": { "prover": "z3", "time": 0.173 },
+      "vc_tr_push_back": { "prover": "alt-ergo", "time": 0.015 }
+    }
+  }
+}

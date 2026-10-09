@@ -1,8 +1,8 @@
-(* #"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 536 0 536 53 *)
+(* #"/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 536 0 536 53 *)
 
-let%span slib = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 537 22 537 27
-let%span slib'0 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 534 10 534 78
-let%span slib'1 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 535 10 535 70
+let%span slib = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 537 22 537 27
+let%span slib'0 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 534 10 534 78
+let%span slib'1 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 535 10 535 70
 
 use creusot.int.UInt8
 use creusot.prelude.Any
@@ -12,7 +12,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let cms_min4 [#"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 536 0 536 53]
+let cms_min4 [#"/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 536 0 536 53]
   (c0: UInt8.t) (c1: UInt8.t) (c2: UInt8.t) (c3: UInt8.t) (return (x: UInt8.t)) = (! bb0
   [ bb0 = s0
     [ s0 = [ &min <- [%#slib] (255: UInt8.t) ] s1

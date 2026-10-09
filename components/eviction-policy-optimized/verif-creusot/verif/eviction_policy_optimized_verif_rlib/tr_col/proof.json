@@ -1,0 +1,21 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_tr_col": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "z3", "time": 0.003 },
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "z3", "time": 0.494 },
+              { "prover": "z3", "time": 0.005 }
+            ]
+          }
+        ]
+      },
+      "vc_wrapping_mul": { "prover": "alt-ergo", "time": 0.019 }
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_tr_track": { "prover": "cvc5", "time": 0.039 },
+      "vc_tr_track_admit": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_tr_track_age": { "prover": "alt-ergo", "time": 0.016 }
+    }
+  }
+}

@@ -1,0 +1,86 @@
+(* #"/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4229 0 4229 32 *)
+
+let%span slib = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4230 32 4230 42
+let%span slib'0 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4231 23 4231 24
+let%span slib'1 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4233 14 4233 23
+let%span slib'2 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4234 14 4234 18
+let%span slib'3 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4232 16 4232 51
+let%span slib'4 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4235 22 4235 25
+let%span slib'5 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4235 8 4235 26
+let%span slib'6 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4236 13 4236 14
+let%span slib'7 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4236 8 4236 14
+let%span slib'8 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4228 10 4228 40
+let%span svec = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/creusot/creusot-std/src/std/vec.rs" 102 18 102 36
+let%span svec'0 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span svec'1 = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/creusot/creusot-std/src/std/vec.rs" 116 18 116 48
+let%span swell_founded = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+
+use seq.Seq
+use creusot.int.UInt8
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_u8_Global
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_u8_Global (self: t_Vec_u8_Global) : Seq.seq UInt8.t
+
+axiom view_Vec_u8_Global_spec:
+  forall self: t_Vec_u8_Global [view_Vec_u8_Global self]. [%#svec'0] Seq.length (view_Vec_u8_Global self)
+    <= UInt64.t'int const_MAX
+
+let new_u8 (return (x: t_Vec_u8_Global)) = any
+  [ return (result: t_Vec_u8_Global) ->
+  {[@stop_split] [@expl:new ensures] [%#svec] Seq.length (view_Vec_u8_Global result) = 0}
+    (! return {result}) ]
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+let push_u8 (self_: MutBorrow.t t_Vec_u8_Global) (v: UInt8.t) (return (x: ())) = any
+  [ return (result: ()) -> {[@stop_split] [@expl:push ensures] [%#svec'1] view_Vec_u8_Global self_.final
+    = Seq.snoc (view_Vec_u8_Global self_.current) v}
+    (! return {result}) ]
+
+type t_Sketch = { counters: t_Vec_u8_Global }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let tr_sketch_new [#"/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4229 0 4229 32]
+  (return (x: t_Sketch)) = (! bb0
+  [ bb0 = s0
+    [ s0 = new_u8 [%#slib] (fun (_x: t_Vec_u8_Global) -> [ &counters'0 <- _x ] s1)
+    | s1 = [ &i <- [%#slib'0] (0: UInt64.t) ] s2
+    | s2 = bb2 ]
+  | bb2 = bb2invariant
+    [ bb2 = {[@expl:loop variant] well_founded_relation_Int variant_old_bb2 ([%#slib'1] 4096 - UInt64.t'int i)}
+      bb2invariant
+    | bb2invariant = {[@expl:loop invariant] [%#slib'3] Seq.length (view_Vec_u8_Global counters'0) = UInt64.t'int i
+      /\ UInt64.t'int i <= 4096}
+      (! [ &variant_old_bb2 <- [%#slib'1] 4096 - UInt64.t'int i ] s0)
+      [ s0 = [ &_12 <- UInt64.lt i ([%#slib'2] (4096: UInt64.t)) ] s1
+      | s1 = any [ br0 -> {_12 = false} (! bb6) | br1 -> {_12} (! bb4) ] ]
+      [ bb4 = s0
+        [ s0 = MutBorrow.borrow_mut <t_Vec_u8_Global> {counters'0}
+            (fun (_bor: MutBorrow.t t_Vec_u8_Global) -> [ &_15 <- _bor ] [ &counters'0 <- _bor.final ] s1)
+        | s1 = push_u8 [%#slib'5] {_15} {[%#slib'4] (0: UInt8.t)} (fun (_x: ()) -> [ &_14 <- _x ] s2)
+        | s2 = UInt64.add [%#slib'7] {i} {[%#slib'6] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &i <- _x ] s3)
+        | s3 = bb2 ] ] ]
+  | bb6 = s0 [ s0 = [ &_ret <- { counters = counters'0 } ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Sketch = Any.any_l ()
+  | & counters'0: t_Vec_u8_Global = Any.any_l ()
+  | & i: UInt64.t = Any.any_l ()
+  | & _12: bool = Any.any_l ()
+  | & _14: () = Any.any_l ()
+  | & _15: MutBorrow.t t_Vec_u8_Global = Any.any_l ()
+  | & variant_old_bb2: int = Any.any_l () ])
+  [ return (result: t_Sketch) ->
+  {[@stop_split] [@expl:tr_sketch_new ensures] [%#slib'8] Seq.length (view_Vec_u8_Global result.counters) = 4096}
+    (! return {result}) ]

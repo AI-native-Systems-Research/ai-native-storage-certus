@@ -1,0 +1,30 @@
+(* #"/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4294 0 4294 35 *)
+
+let%span slib = "/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4293 10 4293 25
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_Vec_Node_Global
+
+type t_Option_u32 = None | Some UInt32.t
+
+type t_Vec_u32_Global
+
+type t_LruList = {
+  nodes: t_Vec_Node_Global;
+  head: t_Option_u32;
+  tail: t_Option_u32;
+  free: t_Vec_u32_Global;
+  len: UInt64.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let tr_len [#"/home/cornel/epo-creusot-correction/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4294 0 4294 35]
+  (l: t_LruList) (return (x: UInt64.t)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- l.len ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l () | & l: t_LruList = l ])
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:tr_len ensures] [%#slib] result = l.len} (! return {result}) ]

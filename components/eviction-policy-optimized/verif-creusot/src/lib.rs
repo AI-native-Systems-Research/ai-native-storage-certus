@@ -1234,19 +1234,7 @@ pub fn verify_epo_track_post_admit_not_more_frequent(l: &mut Pool, key: u64, e_n
     }
 }
 
-// ---- EPO-TRACK-POST-NON-IDEMPOTENT-REREGISTRATION ----------------------—
-// track keeps no key index at all, so re-tracking a key already in the pool adds a SECOND entry:
-// the size grows by one even when the pool already holds entries, and the new slot is not one of
-// the slots that were live before.
-#[requires(pool_ready(p))]
-#[requires((*p).lru.nodes@.len() < 4294967295)]
-#[requires((*p).lru.len@ >= 1)]
-#[ensures((^p).lru.len@ == (*p).lru.len@ + 1)]
-#[ensures(forall<i: Int> 0 <= i && i < (*p).lru.nodes@.len() && ((*p).lru.nodes@[i]).active
-             ==> i != result@)]
-pub fn verify_epo_track_post_non_idempotent_reregistration(p: &mut Pool, key: u64) -> u32 {
-    pool_track(p, key)
-}
+// [verify_epo_track_post_non_idempotent_reregistration removed 2026-10-07: replaced by the fresh section at the end of this file]
 
 // ---- EPO-TRACK-FRAME-SEMANTICS-IGNORED ---------------------------------—
 // The per-block hint is bound as `_semantics` (lib.rs:108) and never read, so every observable
@@ -1261,18 +1249,7 @@ pub fn verify_epo_track_frame_semantics_ignored(p: &mut Pool, key: u64, _semanti
     pool_track(p, key)
 }
 
-// ---- EPO-TRACK-FRAME-EXISTING-ENTRIES ----------------------------------—
-// track only inserts: no entry the pool already held is dropped, and every previously live slot
-// keeps its key and stays live.
-#[requires(pool_ready(p))]
-#[requires((*p).lru.nodes@.len() < 4294967295)]
-#[ensures(forall<i: Int> 0 <= i && i < (*p).lru.nodes@.len() && i != result@ ==>
-             ((^p).lru.nodes@[i]).active == ((*p).lru.nodes@[i]).active
-          && ((^p).lru.nodes@[i]).key == ((*p).lru.nodes@[i]).key)]
-#[ensures((^p).lru.nodes@.len() >= (*p).lru.nodes@.len())]
-pub fn verify_epo_track_frame_existing_entries(p: &mut Pool, key: u64) -> u32 {
-    pool_track(p, key)
-}
+// [verify_epo_track_frame_existing_entries removed 2026-10-07: replaced by the fresh section at the end of this file]
 
 // ---- EPO-TRACK-FRAME-OTHER-POOLS --------------------------------------—
 #[requires(pool@ < (*self_).pools@.len() ==> pool_ready(&(*self_).pools@[pool@]))]
@@ -1322,19 +1299,7 @@ pub fn verify_epo_touch_post_move_to_mru(l: &mut Pool, idx: u32) {
     arena_move_to_back(&mut l.lru, idx);
 }
 
-// ---- EPO-TOUCH-POST-NOT-NEXT-VICTIM ----------------------------------—
-// A touched entry is no longer the front, so the next eviction does not return it. The
-// no-self-loop clause is the acyclicity fragment this needs (see EPO-INV-LIST-ACYCLIC-AND-LENGTH).
-#[requires(inv(&(*l).lru))]
-#[requires(idx@ < (*l).lru.nodes@.len())]
-#[requires((*l).lru.nodes@[idx@].active && (*l).lru.tail != Some(idx))]
-#[requires(match (*l).lru.nodes@[idx@].next { Some(nx) => nx@ != idx@, None => true })]
-#[requires((*l).lru.head == Some(idx) ==> (*l).lru.nodes@[idx@].prev == None)]
-#[ensures((^l).lru.head != Some(idx))]
-#[ensures((^l).lru.tail == Some(idx))]
-pub fn verify_epo_touch_post_not_next_victim(l: &mut Pool, idx: u32) {
-    arena_move_to_back(&mut l.lru, idx);
-}
+// [verify_epo_touch_post_not_next_victim removed 2026-10-07: replaced by the fresh section at the end of this file]
 
 // ---- EPO-TOUCH-POST-ALREADY-AT-BACK-NOOP -----------------------------—
 #[requires(inv(&(*l).lru))]
@@ -2240,22 +2205,7 @@ pub fn verify_epo_inv_sketch_halve_non_increasing(s: &mut Sketch) {
     sketch_halve(s)
 }
 
-// ---- EPO-INV-SKETCH-ROW-HASHES-DISTINCT -----------------—
-// The four rows use four DIFFERENT odd multipliers, so they are genuinely independent views of a
-// key rather than four copies of one counter.
-#[ensures(result)]
-pub fn verify_epo_inv_sketch_row_hashes_distinct() -> bool {
-    P0 != P1
-        && P0 != P2
-        && P0 != P3
-        && P1 != P2
-        && P1 != P3
-        && P2 != P3
-        && P0 % 2 == 1
-        && P1 % 2 == 1
-        && P2 % 2 == 1
-        && P3 % 2 == 1
-}
+// [verify_epo_inv_sketch_row_hashes_distinct removed 2026-10-07: replaced by the fresh section at the end of this file]
 
 // ---- EPO-INV-SKETCH-OPS-BOUNDED-BY-FIXED-SIZE ----------—
 // Raising a key's count and reading its estimate each touch exactly CMS_ROWS = 4 counters, and
@@ -3710,13 +3660,7 @@ pub fn verify_epo_track_post_sketch_increment__mutant(s: &mut Sketch, key: u64)
     sketch_increment4(s, key)
 }
 
-#[requires(pool_ready(p))]
-#[requires((*p).lru.nodes@.len() < 4294967295)]
-#[requires((*p).lru.len@ >= 1)]
-#[ensures((^p).lru.len@ == (*p).lru.len@)] // FALSE: re-tracking a known key is NOT idempotent here
-pub fn verify_epo_track_post_non_idempotent_reregistration__mutant(p: &mut Pool, key: u64) -> u32 {
-    pool_track(p, key)
-}
+// [verify_epo_track_post_non_idempotent_reregistration__mutant removed 2026-10-07: replaced by the fresh section at the end of this file]
 
 #[requires(inv(&(*l).lru))]
 #[requires((*l).lru.nodes@.len() < 4294967295)]
@@ -3771,15 +3715,7 @@ pub fn verify_epo_touch_post_removed_handle_is_silent_noop__mutant(l: &mut Pool,
     arena_move_to_back(&mut l.lru, idx);
 }
 
-#[requires(inv(&(*l).lru))]
-#[requires(idx@ < (*l).lru.nodes@.len())]
-#[requires((*l).lru.nodes@[idx@].active && (*l).lru.tail != Some(idx))]
-#[requires(match (*l).lru.nodes@[idx@].next { Some(nx) => nx@ != idx@, None => true })]
-#[requires((*l).lru.head == Some(idx) ==> (*l).lru.nodes@[idx@].prev == None)]
-#[ensures((^l).lru.head == Some(idx))] // FALSE: a touched entry is NOT the next victim
-pub fn verify_epo_touch_post_not_next_victim__mutant(l: &mut Pool, idx: u32) {
-    arena_move_to_back(&mut l.lru, idx);
-}
+// [verify_epo_touch_post_not_next_victim__mutant removed 2026-10-07: replaced by the fresh section at the end of this file]
 
 #[requires(inv(&(*l).lru))]
 #[requires(idx@ < (*l).lru.nodes@.len())]
@@ -4125,10 +4061,7 @@ pub fn verify_epo_inv_sketch_halve_non_increasing__mutant(s: &mut Sketch) {
     sketch_halve(s)
 }
 
-#[ensures(!result)] // FALSE: the four multipliers ARE pairwise distinct and odd
-pub fn verify_epo_inv_sketch_row_hashes_distinct__mutant() -> bool {
-    P0 != P1 && P0 != P2 && P0 != P3 && P1 != P2 && P1 != P3 && P2 != P3
-}
+// [verify_epo_inv_sketch_row_hashes_distinct__mutant removed 2026-10-07: replaced by the fresh section at the end of this file]
 
 #[requires((*w).accesses@ == 0)]
 #[ensures((^w).accesses@ == n_entries@)] // FALSE: the work is a constant, independent of pool size
@@ -4209,4 +4142,672 @@ pub fn verify_epo_inv_len_matches_active_slots__mutant(l: &mut LruList, key: u64
     let i = wf_push_back(l, key);
     l.nodes[i as usize].active = false;
     i
+}
+
+// ===========================================================================
+// FRESH SECTION (2026-10-07, v2) — EPO-INV-SKETCH-ROW-HASHES-DISTINCT, EPO-TOUCH-POST-NOT-NEXT-VICTIM,
+// EPO-TRACK-FRAME-EXISTING-ENTRIES, EPO-TRACK-POST-NON-IDEMPOTENT-REREGISTRATION.
+//
+// No September premise is reused. The `tr_*` functions are a second copy of the shipped code: each
+// one copies the cited src lines statement for statement and carries only the preconditions the
+// code needs not to panic. Each has a PRECISE per-field effect contract.
+//
+// Premises the drivers may use:
+//   (a) the obligation's own words;
+//   (b) the declared level-1 assumption D-RANGE-FR-002-7fbb2b: "a pool never allocates more than
+//       2^32 - 1 entry slots over its lifetime", assume_rust `self.nodes.len() < u32::MAX as usize`,
+//       written here as `nodes@.len() < 4294967295` on the pool's list;
+//   (c) `ord(l, s, pos)` — the list IS the sequence `s` of live slots, front to back. Its
+//       establishment (ord_new) and its preservation by EVERY LruList mutator (ord_push_front,
+//       ord_push_back, ord_move_to_back, ord_remove, ord_pop_front, ord_clear) are proved below.
+//       Only push_front/push_back use D-RANGE: under it the `as u32` cast is exact.
+// The refutations that hold WITHOUT D-RANGE live outside this crate:
+//   SEPT_2026/FV_NOTEBOOK/evidence/epo_trial_20261007/u32_handle_refutations.rs
+// ===========================================================================
+
+/// Every link, both ends and every free-list slot name an allocated slot (what indexing needs).
+#[logic]
+pub fn lb(l: &LruList) -> bool {
+    pearlite! {
+        (match l.head { Some(h) => h@ < l.nodes@.len(), None => true })
+        && (match l.tail { Some(t) => t@ < l.nodes@.len(), None => true })
+        && (forall<i: Int> 0 <= i && i < l.nodes@.len() ==>
+                match (l.nodes@[i]).next { Some(n) => n@ < l.nodes@.len(), None => true })
+        && (forall<i: Int> 0 <= i && i < l.nodes@.len() ==>
+                match (l.nodes@[i]).prev { Some(p) => p@ < l.nodes@.len(), None => true })
+        && (forall<k: Int> 0 <= k && k < l.free@.len() ==> (l.free@[k])@ < l.nodes@.len())
+    }
+}
+
+/// THE ORDER INVARIANT. `s` lists the live slots front (head) to back (tail), each exactly once
+/// (`pos` is its inverse). Consecutive entries are linked both ways, the ends are `None`-linked,
+/// not-live slots are unlinked, the free list holds distinct not-live slots, and
+/// `nodes.len() == len + free.len()`.
+#[logic]
+pub fn ord(l: &LruList, s: Seq<u32>, pos: Seq<Int>) -> bool {
+    pearlite! {
+        lb(l)
+        && s.len() == l.len@
+        && pos.len() == l.nodes@.len()
+        && l.nodes@.len() == l.len@ + l.free@.len()
+        && (forall<k: Int> 0 <= k && k < s.len() ==>
+               (s[k])@ < l.nodes@.len() && (l.nodes@[(s[k])@]).active && pos[(s[k])@] == k)
+        && (forall<i: Int> 0 <= i && i < l.nodes@.len() && (l.nodes@[i]).active ==>
+               0 <= pos[i] && pos[i] < s.len() && (s[pos[i]])@ == i)
+        && (forall<i: Int> 0 <= i && i < l.nodes@.len() && !(l.nodes@[i]).active ==>
+               (l.nodes@[i]).prev == None && (l.nodes@[i]).next == None)
+        && (forall<k: Int> 0 <= k && k < s.len() ==>
+               (l.nodes@[(s[k])@]).prev == (if k == 0 { None } else { Some(s[k - 1]) })
+               && (l.nodes@[(s[k])@]).next == (if k == s.len() - 1 { None } else { Some(s[k + 1]) }))
+        && l.head == (if s.len() == 0 { None } else { Some(s[0]) })
+        && l.tail == (if s.len() == 0 { None } else { Some(s[s.len() - 1]) })
+        && (forall<k: Int> 0 <= k && k < l.free@.len() ==> !(l.nodes@[(l.free@[k])@]).active)
+        && (forall<j: Int, k: Int> 0 <= j && j < k && k < l.free@.len() ==> l.free@[j] != l.free@[k])
+    }
+}
+
+// ---------------------------------------------------------------- sketch copies
+
+/// Row r's column for a key, as logic (src/lib.rs:40 and :48).
+#[logic]
+pub fn col_l(key: u64, prime: u64) -> Int {
+    pearlite! { (key * prime)@ / 18014398509481984 }
+}
+
+/// `(key.wrapping_mul(prime) >> 54) as usize` — copied from src/lib.rs:40 (identical at :48).
+#[bitwise_proof]
+#[check(terminates)]
+#[ensures(result@ == col_l(key, prime))]
+#[ensures(result@ < 1024)]
+pub fn tr_col(key: u64, prime: u64) -> usize {
+    (key.wrapping_mul(prime) >> 54) as usize
+}
+
+/// `CountMinSketch::new` (src/lib.rs:32-36), `[[0u8; 1024]; 4]` flattened row-major.
+#[check(terminates)]
+#[ensures(result.counters@.len() == 4096)]
+pub fn tr_sketch_new() -> Sketch {
+    let mut counters: Vec<u8> = Vec::new();
+    let mut i: usize = 0;
+    #[invariant(counters@.len() == i@ && i@ <= 4096)]
+    #[variant(4096 - i@)]
+    while i < 4096 {
+        counters.push(0u8);
+        i += 1;
+    }
+    Sketch { counters }
+}
+
+/// `CountMinSketch::increment` (src/lib.rs:38-43), the CMS_PRIMES loop unrolled (row r uses P<r>).
+#[check(terminates)]
+#[requires(s.counters@.len() == 4096)]
+#[ensures((^s).counters@.len() == 4096)]
+pub fn tr_sketch_increment(s: &mut Sketch, key: u64) {
+    let col = tr_col(key, P0);
+    s.counters[col] = s.counters[col].saturating_add(1);
+    let col = 1024 + tr_col(key, P1);
+    s.counters[col] = s.counters[col].saturating_add(1);
+    let col = 2048 + tr_col(key, P2);
+    s.counters[col] = s.counters[col].saturating_add(1);
+    let col = 3072 + tr_col(key, P3);
+    s.counters[col] = s.counters[col].saturating_add(1);
+}
+
+/// `CountMinSketch::estimate` (src/lib.rs:45-52), the four-row loop unrolled.
+#[requires(s.counters@.len() == 4096)]
+pub fn tr_estimate(s: &Sketch, key: u64) -> u8 {
+    let mut min = u8::MAX;
+    min = min.min(s.counters[tr_col(key, P0)]);
+    min = min.min(s.counters[1024 + tr_col(key, P1)]);
+    min = min.min(s.counters[2048 + tr_col(key, P2)]);
+    min = min.min(s.counters[3072 + tr_col(key, P3)]);
+    min
+}
+
+/// `CountMinSketch::halve` (src/lib.rs:54-60), nested loops flattened over 4096 counters.
+#[check(terminates)]
+#[requires(s.counters@.len() == 4096)]
+#[ensures((^s).counters@.len() == 4096)]
+pub fn tr_halve(s: &mut Sketch) {
+    let mut i: usize = 0;
+    #[invariant(s.counters@.len() == 4096 && i@ <= 4096)]
+    #[variant(4096 - i@)]
+    while i < 4096 {
+        s.counters[i] >>= 1;
+        i += 1;
+    }
+}
+
+// ---------------------------------------------------------------- list copies + effects
+
+/// `LruList::new` (src/lru_list.rs:26-34).
+#[check(terminates)]
+#[ensures(result.nodes@.len() == 0 && result.free@.len() == 0 && result.len@ == 0)]
+#[ensures(result.head == None && result.tail == None)]
+pub fn tr_list_new() -> LruList {
+    LruList { nodes: Vec::new(), head: None, tail: None, free: Vec::new(), len: 0 }
+}
+
+/// `LruList::len` (src/lru_list.rs:195-197).
+#[check(terminates)]
+#[ensures(result == l.len)]
+pub fn tr_len(l: &LruList) -> usize {
+    l.len
+}
+
+/// `LruList::peek_front_key` (src/lru_list.rs:70-72); `.map(|idx| ..)` written as a match.
+#[check(terminates)]
+#[requires(lb(l))]
+#[ensures(match l.head { Some(h) => result == Some((l.nodes@[h@]).key), None => result == None })]
+pub fn tr_peek_front_key(l: &LruList) -> Option<u64> {
+    match l.head {
+        Some(idx) => Some(l.nodes[idx as usize].key),
+        None => None,
+    }
+}
+
+/// Where the inserted node lands and what the free list becomes (shared by both pushes).
+#[logic]
+pub fn push_slot(a: &LruList, b: &LruList, r: u32) -> bool {
+    pearlite! {
+        (a.free@.len() > 0 ==> r == a.free@[a.free@.len() - 1]
+            && b.free@ == a.free@.subsequence(0, a.free@.len() - 1)
+            && b.nodes@.len() == a.nodes@.len())
+        && (a.free@.len() == 0 ==> b.free@ == a.free@ && b.nodes@.len() == a.nodes@.len() + 1
+            && (a.nodes@.len() <= 4294967295 ==> r@ == a.nodes@.len()))
+        && b.len@ == a.len@ + 1
+        && r@ < b.nodes@.len()
+    }
+}
+
+/// Field-by-field effect of `push_front` (writes in code order: node r, then old head's prev).
+#[logic]
+pub fn pf_eff(a: &LruList, b: &LruList, key: u64, r: u32) -> bool {
+    pearlite! {
+        push_slot(a, b, r)
+        && b.head == Some(r)
+        && b.tail == (if a.tail == None { Some(r) } else { a.tail })
+        && (forall<j: Int> 0 <= j && j < b.nodes@.len() ==>
+            (j == r@ ==> (b.nodes@[j]).key == key && (b.nodes@[j]).active
+                && (b.nodes@[j]).next == a.head
+                && (b.nodes@[j]).prev == (if a.head == Some(r) { Some(r) } else { None }))
+            && (j != r@ ==> (b.nodes@[j]).key == (a.nodes@[j]).key
+                && (b.nodes@[j]).active == (a.nodes@[j]).active
+                && (b.nodes@[j]).next == (a.nodes@[j]).next
+                && (b.nodes@[j]).prev == (match a.head { Some(h) => if h@ == j { Some(r) } else { (a.nodes@[j]).prev },
+                                                          None => (a.nodes@[j]).prev })))
+    }
+}
+
+/// Field-by-field effect of `push_back` (writes in code order: node r, then old tail's next).
+#[logic]
+pub fn pb_eff(a: &LruList, b: &LruList, key: u64, r: u32) -> bool {
+    pearlite! {
+        push_slot(a, b, r)
+        && b.tail == Some(r)
+        && b.head == (if a.head == None { Some(r) } else { a.head })
+        && (forall<j: Int> 0 <= j && j < b.nodes@.len() ==>
+            (j == r@ ==> (b.nodes@[j]).key == key && (b.nodes@[j]).active
+                && (b.nodes@[j]).prev == a.tail
+                && (b.nodes@[j]).next == (if a.tail == Some(r) { Some(r) } else { None }))
+            && (j != r@ ==> (b.nodes@[j]).key == (a.nodes@[j]).key
+                && (b.nodes@[j]).active == (a.nodes@[j]).active
+                && (b.nodes@[j]).prev == (a.nodes@[j]).prev
+                && (b.nodes@[j]).next == (match a.tail { Some(t) => if t@ == j { Some(r) } else { (a.nodes@[j]).next },
+                                                          None => (a.nodes@[j]).next })))
+    }
+}
+
+/// `LruList::push_front` — copied from src/lru_list.rs:37-67.
+#[check(terminates)]
+#[requires(lb(self_))]
+#[requires((*self_).len@ < 18446744073709551615)]
+#[ensures(lb(&^self_))]
+#[ensures((*self_).nodes@.len() <= 4294967295 ==> pf_eff(&*self_, &^self_, key, result))] // exact `as u32` only
+pub fn tr_push_front(self_: &mut LruList, key: u64) -> u32 {
+    let idx = if let Some(free_idx) = self_.free.pop() {
+        self_.nodes[free_idx as usize] = Node { key, prev: None, next: self_.head, active: true };
+        free_idx
+    } else {
+        let idx = self_.nodes.len() as u32;
+        self_.nodes.push(Node { key, prev: None, next: self_.head, active: true });
+        idx
+    };
+    if let Some(old_head) = self_.head {
+        self_.nodes[old_head as usize].prev = Some(idx);
+    }
+    self_.head = Some(idx);
+    if self_.tail.is_none() {
+        self_.tail = Some(idx);
+    }
+    self_.len += 1;
+    idx
+}
+
+/// `LruList::push_back` — copied from src/lru_list.rs:75-105.
+#[check(terminates)]
+#[requires(lb(self_))]
+#[requires((*self_).len@ < 18446744073709551615)]
+#[ensures(lb(&^self_))]
+#[ensures((*self_).nodes@.len() <= 4294967295 ==> pb_eff(&*self_, &^self_, key, result))] // exact `as u32` only
+pub fn tr_push_back(self_: &mut LruList, key: u64) -> u32 {
+    let idx = if let Some(free_idx) = self_.free.pop() {
+        self_.nodes[free_idx as usize] = Node { key, prev: self_.tail, next: None, active: true };
+        free_idx
+    } else {
+        let idx = self_.nodes.len() as u32;
+        self_.nodes.push(Node { key, prev: self_.tail, next: None, active: true });
+        idx
+    };
+    if let Some(old_tail) = self_.tail {
+        self_.nodes[old_tail as usize].next = Some(idx);
+    }
+    self_.tail = Some(idx);
+    if self_.head.is_none() {
+        self_.head = Some(idx);
+    }
+    self_.len += 1;
+    idx
+}
+
+/// Helper: is the Option<u32> `o` exactly slot `j`?
+#[logic]
+pub fn is_slot(o: Option<u32>, j: Int) -> bool {
+    pearlite! { match o { Some(x) => x@ == j, None => false } }
+}
+
+/// Field-by-field effect of `move_to_back` on a live, non-tail node `idx` (code order: prev's
+/// next, next's prev, idx's prev, idx's next, old tail's next).
+#[logic]
+pub fn mv_eff2(a: &LruList, b: &LruList, idx: u32) -> bool {
+    pearlite! {
+        b.nodes@.len() == a.nodes@.len() && b.len == a.len && b.free == a.free
+        && b.tail == Some(idx)
+        && b.head == (if (a.nodes@[idx@]).prev == None { (a.nodes@[idx@]).next } else { a.head })
+        && (forall<j: Int> 0 <= j && j < a.nodes@.len() ==>
+               (b.nodes@[j]).key == (a.nodes@[j]).key && (b.nodes@[j]).active == (a.nodes@[j]).active
+            && (b.nodes@[j]).next == (if is_slot(a.tail, j) { Some(idx) }
+                                      else if j == idx@ { None }
+                                      else if is_slot((a.nodes@[idx@]).prev, j) { (a.nodes@[idx@]).next }
+                                      else { (a.nodes@[j]).next })
+            && (b.nodes@[j]).prev == (if j == idx@ { a.tail }
+                                      else if is_slot((a.nodes@[idx@]).next, j) { (a.nodes@[idx@]).prev }
+                                      else { (a.nodes@[j]).prev }))
+    }
+}
+
+/// `LruList::move_to_back` — copied from src/lru_list.rs:108-134 (what `touch` runs, src/lib.rs:154).
+#[requires(lb(self_))]
+#[requires(idx@ < (*self_).nodes@.len())]
+#[ensures(lb(&^self_))]
+#[ensures(!((*self_).nodes@[idx@]).active || (*self_).tail == Some(idx) ==> ^self_ == *self_)]
+#[ensures(((*self_).nodes@[idx@]).active && (*self_).tail != Some(idx) ==> mv_eff2(&*self_, &^self_, idx))]
+pub fn tr_move_to_back(self_: &mut LruList, idx: u32) {
+    if !self_.nodes[idx as usize].active {
+        return;
+    }
+    if self_.tail == Some(idx) {
+        return;
+    }
+
+    let prev = self_.nodes[idx as usize].prev;
+    let next = self_.nodes[idx as usize].next;
+
+    if let Some(p) = prev {
+        self_.nodes[p as usize].next = next;
+    } else {
+        self_.head = next;
+    }
+    if let Some(n) = next {
+        self_.nodes[n as usize].prev = prev;
+    }
+
+    self_.nodes[idx as usize].prev = self_.tail;
+    self_.nodes[idx as usize].next = None;
+    if let Some(old_tail) = self_.tail {
+        self_.nodes[old_tail as usize].next = Some(idx);
+    }
+    self_.tail = Some(idx);
+}
+
+/// Field-by-field effect of `remove` on a live node `idx`.
+#[logic]
+pub fn rm_eff(a: &LruList, b: &LruList, idx: u32) -> bool {
+    pearlite! {
+        b.nodes@.len() == a.nodes@.len() && b.len@ == a.len@ - 1
+        && b.free@ == a.free@.push_back(idx)
+        && b.head == (if (a.nodes@[idx@]).prev == None { (a.nodes@[idx@]).next } else { a.head })
+        && b.tail == (if (a.nodes@[idx@]).next == None { (a.nodes@[idx@]).prev } else { a.tail })
+        && (forall<j: Int> 0 <= j && j < a.nodes@.len() ==>
+               (b.nodes@[j]).key == (a.nodes@[j]).key
+            && (b.nodes@[j]).active == (if j == idx@ { false } else { (a.nodes@[j]).active })
+            && (b.nodes@[j]).next == (if j == idx@ { None }
+                                      else if is_slot((a.nodes@[idx@]).prev, j) { (a.nodes@[idx@]).next }
+                                      else { (a.nodes@[j]).next })
+            && (b.nodes@[j]).prev == (if j == idx@ { None }
+                                      else if is_slot((a.nodes@[idx@]).next, j) { (a.nodes@[idx@]).prev }
+                                      else { (a.nodes@[j]).prev }))
+    }
+}
+
+/// `LruList::remove` — copied from src/lru_list.rs:159-183.
+#[check(terminates)]
+#[requires(lb(self_))]
+#[requires(idx@ < (*self_).nodes@.len())]
+#[requires(((*self_).nodes@[idx@]).active ==> (*self_).len@ >= 1)]
+#[ensures(lb(&^self_))]
+#[ensures(!((*self_).nodes@[idx@]).active ==> ^self_ == *self_)]
+#[ensures(((*self_).nodes@[idx@]).active ==> rm_eff(&*self_, &^self_, idx))]
+pub fn tr_remove(self_: &mut LruList, idx: u32) {
+    if !self_.nodes[idx as usize].active {
+        return;
+    }
+
+    let prev = self_.nodes[idx as usize].prev;
+    let next = self_.nodes[idx as usize].next;
+
+    if let Some(p) = prev {
+        self_.nodes[p as usize].next = next;
+    } else {
+        self_.head = next;
+    }
+    if let Some(n) = next {
+        self_.nodes[n as usize].prev = prev;
+    } else {
+        self_.tail = prev;
+    }
+
+    self_.nodes[idx as usize].active = false;
+    self_.nodes[idx as usize].prev = None;
+    self_.nodes[idx as usize].next = None;
+    self_.free.push(idx);
+    self_.len -= 1;
+}
+
+/// `LruList::pop_front` — src/lru_list.rs:137-142 (`self.head?` written as a match). This is what
+/// `identify_next_to_evict` runs (src/lib.rs:206).
+#[check(terminates)]
+#[requires(lb(self_))]
+#[requires(match (*self_).head { Some(h) => ((*self_).nodes@[h@]).active ==> (*self_).len@ >= 1, None => true })]
+#[ensures(lb(&^self_))]
+#[ensures((*self_).head == None ==> result == None && ^self_ == *self_)]
+#[ensures(match (*self_).head {
+              Some(h) => result == Some(((*self_).nodes@[h@]).key)
+                  && (((*self_).nodes@[h@]).active ==> rm_eff(&*self_, &^self_, h))
+                  && (!((*self_).nodes@[h@]).active ==> ^self_ == *self_),
+              None => true })]
+pub fn tr_pop_front(self_: &mut LruList) -> Option<u64> {
+    let head_idx = match self_.head {
+        Some(h) => h,
+        None => return None,
+    };
+    let key = self_.nodes[head_idx as usize].key;
+    tr_remove(self_, head_idx);
+    Some(key)
+}
+
+/// `LruList::clear` — copied from src/lru_list.rs:186-192.
+#[check(terminates)]
+#[ensures((^self_).nodes@.len() == 0 && (^self_).free@.len() == 0 && (^self_).len@ == 0)]
+#[ensures((^self_).head == None && (^self_).tail == None)]
+pub fn tr_clear(self_: &mut LruList) {
+    self_.nodes.clear();
+    self_.head = None;
+    self_.tail = None;
+    self_.free.clear();
+    self_.len = 0;
+}
+
+// ---------------------------------------------------------------- track copy (split, same order)
+
+/// src/lib.rs:121-127 — sketch bump and ageing. It never touches the list.
+#[requires((*p).sketch.counters@.len() == 4096)]
+#[requires((*p).access_count@ < 18446744073709551615)]
+#[requires((*p).max_len@ <= 1844674407370955161 && (*p).lru.len@ <= 1844674407370955161)]
+#[ensures((^p).lru == (*p).lru && (^p).sketch.counters@.len() == 4096)]
+pub fn tr_track_age(p: &mut Pool, key: u64) {
+    tr_sketch_increment(&mut p.sketch, key);
+    p.max_len = p.max_len.max(tr_len(&p.lru));
+    p.access_count += 1;
+    if p.max_len > 0 && p.access_count % (p.max_len as u64 * 10) == 0 {
+        tr_halve(&mut p.sketch);
+    }
+}
+
+/// src/lib.rs:129-137 — admission. The returned `index` is the handle's slot (:139).
+#[requires((*p).sketch.counters@.len() == 4096 && lb(&(*p).lru))]
+#[requires((*p).lru.len@ < 18446744073709551615)]
+#[ensures(lb(&(^p).lru) && (^p).sketch == (*p).sketch)]
+#[ensures((*p).lru.nodes@.len() <= 4294967295 ==>
+          pf_eff(&(*p).lru, &(^p).lru, key, result) || pb_eff(&(*p).lru, &(^p).lru, key, result))]
+pub fn tr_track_admit(p: &mut Pool, key: u64) -> u32 {
+    let index = if let Some(head_key) = tr_peek_front_key(&p.lru) {
+        if tr_estimate(&p.sketch, key) <= tr_estimate(&p.sketch, head_key) {
+            tr_push_front(&mut p.lru, key)
+        } else {
+            tr_push_back(&mut p.lru, key)
+        }
+    } else {
+        tr_push_back(&mut p.lru, key)
+    };
+
+    index
+}
+
+/// `track`'s pool-local body, src/lib.rs:121-139 = the two halves above in order.
+#[requires((*p).sketch.counters@.len() == 4096 && lb(&(*p).lru))]
+#[requires((*p).access_count@ < 18446744073709551615)]
+#[requires((*p).max_len@ <= 1844674407370955161 && (*p).lru.len@ <= 1844674407370955161)]
+#[ensures((*p).lru.nodes@.len() <= 4294967295 ==>
+          pf_eff(&(*p).lru, &(^p).lru, key, result) || pb_eff(&(*p).lru, &(^p).lru, key, result))]
+pub fn tr_track(p: &mut Pool, key: u64) -> u32 {
+    tr_track_age(p, key);
+    tr_track_admit(p, key)
+}
+
+// ---------------------------------------------------------------- (c): ord is inductive
+
+/// Base case: `LruList::new()` satisfies ord with the empty order.
+#[ensures(ord(&result.0, *result.1, *result.2))]
+pub fn ord_new() -> (LruList, Snapshot<Seq<u32>>, Snapshot<Seq<Int>>) {
+    (tr_list_new(), snapshot! { Seq::empty() }, snapshot! { Seq::empty() })
+}
+
+/// push_front preserves ord: the new order is r followed by the old one.
+#[requires(ord(l, *s, *pos))]
+#[requires((*l).nodes@.len() < 4294967295)] // D-RANGE-FR-002-7fbb2b
+#[ensures(ord(&^l, *result.1, *result.2))]
+#[ensures(result.1.len() == s.len() + 1 && result.1[0] == result.0
+          && forall<k: Int> 0 <= k && k < s.len() ==> result.1[k + 1] == s[k])]
+#[ensures(forall<k: Int> 0 <= k && k < s.len() ==> s[k] != result.0)]
+pub fn ord_push_front(l: &mut LruList, key: u64, s: Snapshot<Seq<u32>>, pos: Snapshot<Seq<Int>>)
+    -> (u32, Snapshot<Seq<u32>>, Snapshot<Seq<Int>>) {
+    let r = tr_push_front(l, key);
+    let s2 = snapshot! { s.push_front(r) };
+    let pos2 = snapshot! { Seq::create(l.nodes@.len(), |i: Int| if i == r@ { 0 } else { pos[i] + 1 }) };
+    (r, s2, pos2)
+}
+
+/// push_back preserves ord: the new order is the old one followed by r.
+#[requires(ord(l, *s, *pos))]
+#[requires((*l).nodes@.len() < 4294967295)] // D-RANGE-FR-002-7fbb2b
+#[ensures(ord(&^l, *result.1, *result.2))]
+#[ensures(result.1.len() == s.len() + 1 && result.1[s.len()] == result.0
+          && forall<k: Int> 0 <= k && k < s.len() ==> result.1[k] == s[k])]
+#[ensures(forall<k: Int> 0 <= k && k < s.len() ==> s[k] != result.0)]
+pub fn ord_push_back(l: &mut LruList, key: u64, s: Snapshot<Seq<u32>>, pos: Snapshot<Seq<Int>>)
+    -> (u32, Snapshot<Seq<u32>>, Snapshot<Seq<Int>>) {
+    let r = tr_push_back(l, key);
+    let s2 = snapshot! { s.push_back(r) };
+    let pos2 = snapshot! { Seq::create(l.nodes@.len(), |i: Int| if i == r@ { s.len() } else { pos[i] }) };
+    (r, s2, pos2)
+}
+
+/// move_to_back preserves ord: idx leaves its place and goes last; others keep their order.
+#[requires(ord(l, *s, *pos))]
+#[requires(idx@ < (*l).nodes@.len())]
+#[ensures(ord(&^l, *result.0, *result.1))]
+#[ensures(((*l).nodes@[idx@]).active ==> (^l).tail == Some(idx))]
+#[ensures((^l).len == (*l).len && (^l).nodes@.len() == (*l).nodes@.len())]
+#[ensures(forall<j: Int> 0 <= j && j < (*l).nodes@.len() ==> ((^l).nodes@[j]).active == ((*l).nodes@[j]).active)]
+pub fn ord_move_to_back(l: &mut LruList, idx: u32, s: Snapshot<Seq<u32>>, pos: Snapshot<Seq<Int>>)
+    -> (Snapshot<Seq<u32>>, Snapshot<Seq<Int>>) {
+    let k = snapshot! { pos[idx@] };
+    let act = snapshot! { ((*l).nodes@[idx@]).active && (*l).tail != Some(idx) };
+    tr_move_to_back(l, idx);
+    let s2 = snapshot! { if *act { Seq::create(s.len(), |j: Int| if j < *k { s[j] } else if j < s.len() - 1 { s[j + 1] } else { idx }) } else { *s } };
+    let pos2 = snapshot! { if *act { Seq::create(pos.len(), |i: Int| if i == idx@ { s.len() - 1 } else if pos[i] > *k { pos[i] - 1 } else { pos[i] }) } else { *pos } };
+    (s2, pos2)
+}
+
+/// remove preserves ord: idx leaves the order; others keep their order.
+#[requires(ord(l, *s, *pos))]
+#[requires(idx@ < (*l).nodes@.len())]
+#[ensures(ord(&^l, *result.0, *result.1))]
+pub fn ord_remove(l: &mut LruList, idx: u32, s: Snapshot<Seq<u32>>, pos: Snapshot<Seq<Int>>)
+    -> (Snapshot<Seq<u32>>, Snapshot<Seq<Int>>) {
+    let k = snapshot! { pos[idx@] };
+    let act = snapshot! { ((*l).nodes@[idx@]).active };
+    tr_remove(l, idx);
+    let s2 = snapshot! { if *act { Seq::create(s.len() - 1, |j: Int| if j < *k { s[j] } else { s[j + 1] }) } else { *s } };
+    let pos2 = snapshot! { if *act { Seq::create(pos.len(), |i: Int| if pos[i] > *k { pos[i] - 1 } else { pos[i] }) } else { *pos } };
+    (s2, pos2)
+}
+
+/// pop_front preserves ord: the front leaves the order.
+#[requires(ord(l, *s, *pos))]
+#[ensures(ord(&^l, *result.0, *result.1))]
+pub fn ord_pop_front(l: &mut LruList, s: Snapshot<Seq<u32>>, pos: Snapshot<Seq<Int>>)
+    -> (Snapshot<Seq<u32>>, Snapshot<Seq<Int>>) {
+    let ne = snapshot! { s.len() > 0 };
+    let _ = tr_pop_front(l);
+    let s2 = snapshot! { if *ne { Seq::create(s.len() - 1, |j: Int| s[j + 1]) } else { *s } };
+    let pos2 = snapshot! { if *ne { Seq::create(pos.len(), |i: Int| pos[i] - 1) } else { *pos } };
+    (s2, pos2)
+}
+
+/// clear re-establishes ord with the empty order.
+#[ensures(ord(&^l, *result.0, *result.1))]
+pub fn ord_clear(l: &mut LruList) -> (Snapshot<Seq<u32>>, Snapshot<Seq<Int>>) {
+    tr_clear(l);
+    (snapshot! { Seq::empty() }, snapshot! { Seq::empty() })
+}
+
+// ---------------------------------------------------------------- the four drivers
+
+// ---- EPO-INV-SKETCH-ROW-HASHES-DISTINCT ---------------------------------------
+// Row r picks its column with tr_col(key, CMS_PRIMES[r]) (copied src/lib.rs:40/:48). P0..P3
+// (verbatim src/lib.rs:21-24) are pairwise distinct and odd, and key 1 already lands in four
+// different columns, so the rows are not copies of one counter. No premises.
+#[check(terminates)]
+#[ensures(P0 != P1 && P0 != P2 && P0 != P3 && P1 != P2 && P1 != P3 && P2 != P3)]
+#[ensures(P0@ % 2 == 1 && P1@ % 2 == 1 && P2@ % 2 == 1 && P3@ % 2 == 1)]
+#[ensures(result.0 != result.1 && result.0 != result.2 && result.0 != result.3
+       && result.1 != result.2 && result.1 != result.3 && result.2 != result.3)]
+pub fn verify_epo_inv_sketch_row_hashes_distinct() -> (usize, usize, usize, usize) {
+    (tr_col(1, P0), tr_col(1, P1), tr_col(1, P2), tr_col(1, P3))
+}
+
+#[check(terminates)]
+#[ensures(result.0 == result.1)] // FALSE: rows 0 and 1 put key 1 in different columns
+pub fn verify_epo_inv_sketch_row_hashes_distinct__mutant() -> (usize, usize, usize, usize) {
+    (tr_col(1, P0), tr_col(1, P1), tr_col(1, P2), tr_col(1, P3))
+}
+
+// ---- EPO-TOUCH-POST-NOT-NEXT-VICTIM -------------------------------------------
+// Premises: (c) ord; (a) "an entry is touched" = idx names a live slot; (a) "the pool holds at
+// least one other entry" = len >= 2. Covers EVERY position of idx, including already-at-back.
+// touch = move_to_back (src/lib.rs:154); the next victim = pop_front's head (src/lib.rs:206).
+// Shown: the front after the touch is a live entry other than idx, and evicting it leaves idx live.
+#[requires(ord(&(*l).lru, *s, *pos))]
+#[requires(idx@ < (*l).lru.nodes@.len() && ((*l).lru.nodes@[idx@]).active)]
+#[requires((*l).lru.len@ >= 2)]
+#[ensures(result.0 != None && result.0 != Some(idx))]
+#[ensures(result.1 != None)]
+#[ensures(((^l).lru.nodes@[idx@]).active)]
+pub fn verify_epo_touch_post_not_next_victim(l: &mut Pool, idx: u32, s: Snapshot<Seq<u32>>,
+                                             pos: Snapshot<Seq<Int>>) -> (Option<u32>, Option<u64>) {
+    let (s2, pos2) = ord_move_to_back(&mut l.lru, idx, s, pos);
+    let front = l.lru.head;
+    let _ = (s2, pos2);
+    let victim = tr_pop_front(&mut l.lru);
+    (front, victim)
+}
+
+#[requires(ord(&(*l).lru, *s, *pos))]
+#[requires(idx@ < (*l).lru.nodes@.len() && ((*l).lru.nodes@[idx@]).active)]
+#[requires((*l).lru.len@ >= 2)]
+#[ensures(result.0 == Some(idx))] // FALSE: the touched entry is not the next victim
+pub fn verify_epo_touch_post_not_next_victim__mutant(l: &mut Pool, idx: u32, s: Snapshot<Seq<u32>>,
+                                                     pos: Snapshot<Seq<Int>>) -> (Option<u32>, Option<u64>) {
+    let (s2, pos2) = ord_move_to_back(&mut l.lru, idx, s, pos);
+    let front = l.lru.head;
+    let _ = (s2, pos2);
+    let victim = tr_pop_front(&mut l.lru);
+    (front, victim)
+}
+
+// ---- EPO-TRACK-FRAME-EXISTING-ENTRIES ------------------------------------------
+// Premises: (c) ord; (b) D-RANGE-FR-002-7fbb2b; the sketch is the 4x1024 table. The driver runs
+// the admission half of track (src/lib.rs:129-137) for EVERY sketch state; the other half
+// (:121-127) never touches the list (tr_track_age proves `lru` unchanged). Shown: the order after
+// is the old order with ONE new entry r (not one of the old ones) at the front or at the back.
+#[requires(ord(&(*p).lru, *s, *pos))]
+#[requires((*p).lru.nodes@.len() < 4294967295)] // D-RANGE-FR-002-7fbb2b
+#[requires((*p).sketch.counters@.len() == 4096)]
+#[ensures(ord(&(^p).lru, *result.1, *result.2))]
+#[ensures(forall<k: Int> 0 <= k && k < s.len() ==> s[k] != result.0)]
+#[ensures(result.1.len() == s.len() + 1)]
+#[ensures((result.1[0] == result.0 && forall<k: Int> 0 <= k && k < s.len() ==> result.1[k + 1] == s[k])
+       || (result.1[s.len()] == result.0 && forall<k: Int> 0 <= k && k < s.len() ==> result.1[k] == s[k]))]
+pub fn verify_epo_track_frame_existing_entries(p: &mut Pool, key: u64, s: Snapshot<Seq<u32>>,
+        pos: Snapshot<Seq<Int>>) -> (u32, Snapshot<Seq<u32>>, Snapshot<Seq<Int>>) {
+    let r = tr_track_admit(p, key);
+    let front = snapshot! { p.lru.head == Some(r) };
+    let s2 = snapshot! { if *front { s.push_front(r) } else { s.push_back(r) } };
+    let pos2 = snapshot! { if *front { Seq::create(p.lru.nodes@.len(), |i: Int| if i == r@ { 0 } else { pos[i] + 1 }) }
+                           else { Seq::create(p.lru.nodes@.len(), |i: Int| if i == r@ { s.len() } else { pos[i] }) } };
+    (r, s2, pos2)
+}
+
+#[requires(ord(&(*p).lru, *s, *pos))]
+#[requires((*p).lru.nodes@.len() < 4294967295)] // D-RANGE-FR-002-7fbb2b
+#[requires((*p).sketch.counters@.len() == 4096)]
+#[requires(s.len() >= 2)]
+#[ensures(forall<k: Int> 0 <= k && k < s.len() ==> result.1[k] == s[s.len() - 1 - k])] // FALSE: order reversed
+pub fn verify_epo_track_frame_existing_entries__mutant(p: &mut Pool, key: u64, s: Snapshot<Seq<u32>>,
+        pos: Snapshot<Seq<Int>>) -> (u32, Snapshot<Seq<u32>>, Snapshot<Seq<Int>>) {
+    let r = tr_track_admit(p, key);
+    let front = snapshot! { p.lru.head == Some(r) };
+    let s2 = snapshot! { if *front { s.push_front(r) } else { s.push_back(r) } };
+    let pos2 = snapshot! { if *front { Seq::create(p.lru.nodes@.len(), |i: Int| if i == r@ { 0 } else { pos[i] + 1 }) }
+                           else { Seq::create(p.lru.nodes@.len(), |i: Int| if i == r@ { s.len() } else { pos[i] }) } };
+    (r, s2, pos2)
+}
+
+// ---- EPO-TRACK-POST-NON-IDEMPOTENT-REREGISTRATION ------------------------------
+// Premises: (c) ord; (b) D-RANGE-FR-002-7fbb2b; (a) "a key that is already being tracked" = h0,
+// the handle the first track returned, names a live entry holding `key`. Same driver shape as FRAME.
+// Shown: a new handle r != h0; both entries now live with `key`; size grows by one.
+#[requires(ord(&(*p).lru, *s, *pos))]
+#[requires((*p).lru.nodes@.len() < 4294967295)] // D-RANGE-FR-002-7fbb2b
+#[requires((*p).sketch.counters@.len() == 4096)]
+#[requires(h0@ < (*p).lru.nodes@.len() && ((*p).lru.nodes@[h0@]).active && ((*p).lru.nodes@[h0@]).key == key)]
+#[ensures(result != h0)]
+#[ensures(((^p).lru.nodes@[h0@]).active && ((^p).lru.nodes@[h0@]).key == key)]
+#[ensures(result@ < (^p).lru.nodes@.len() && ((^p).lru.nodes@[result@]).active && ((^p).lru.nodes@[result@]).key == key)]
+#[ensures((^p).lru.len@ == (*p).lru.len@ + 1)]
+pub fn verify_epo_track_post_non_idempotent_reregistration(p: &mut Pool, key: u64, h0: u32,
+        s: Snapshot<Seq<u32>>, pos: Snapshot<Seq<Int>>) -> u32 {
+    tr_track_admit(p, key)
+}
+
+#[requires(ord(&(*p).lru, *s, *pos))]
+#[requires((*p).lru.nodes@.len() < 4294967295)] // D-RANGE-FR-002-7fbb2b
+#[requires((*p).sketch.counters@.len() == 4096)]
+#[requires(h0@ < (*p).lru.nodes@.len() && ((*p).lru.nodes@[h0@]).active && ((*p).lru.nodes@[h0@]).key == key)]
+#[ensures(result == h0)] // FALSE: re-tracking returns a NEW handle
+pub fn verify_epo_track_post_non_idempotent_reregistration__mutant(p: &mut Pool, key: u64, h0: u32,
+        s: Snapshot<Seq<u32>>, pos: Snapshot<Seq<Int>>) -> u32 {
+    tr_track_admit(p, key)
 }

@@ -4,11 +4,13 @@ level: 1
 what: 'spec<->code discordances found while reconciling the specification with the code. Each is EXCLUDED from formal
   verification (level 2). status: candidate until a test confirms it (confirmed) or shows it was a misreading (withdrawn).'
 counts:
-  discordances: 14
-  spec_and_code_differ: 4
-  spec_not_found_in_code: 10
-  input_range_mismatch: 0
-  properties_excluded_from_level2: 14
+  discordances: 7
+  spec_and_code_differ: 3
+  spec_not_found_in_code: 3
+  input_range_mismatch: 1
+  properties_excluded_from_level2: 10
+  routed_to_other_tools: 4
+  reader_missed_sent_to_level2: 4
   confirmed: 1
   withdrawn: 0
 discordances:
@@ -36,6 +38,12 @@ discordances:
     - EPO-TRACK-POST-MAXLEN-HIGHWATER
     code:
     - EPO-TRACK-POST-MAXLEN
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - lib.rs:122
+  - lib.rs:129-137
+  - lru_list.rs:65
+  - lru_list.rs:103
 - id: D-FR-013-lib.rs:124-972fc2
   name: Track aging period no overflow
   kind: spec-not-found-in-code
@@ -43,7 +51,8 @@ discordances:
   - track
   spec_says: Working out the ageing period by multiplying the pool's largest-ever size by ten must never overflow
     into a wrong or crashing result, no matter how large the pool has grown.
-  code_does: Nothing found.
+  code_does: The pool's largest-ever size is multiplied by ten (lib.rs:124) with no overflow check and no bound
+    on the size, so for a large enough size the product overflows; the spec says it never does.
   spec_pointers:
   - FR-013
   code_pointers:
@@ -55,75 +64,15 @@ discordances:
     spec:
     - EPO-TRACK-POST-AGING-PERIOD-NO-OVERFLOW
     code: []
-- id: D-FR-002-lib.rs:129139-a799ec
-  name: Track non idempotent reregistration
-  kind: spec-and-code-differ
-  methods:
-  - track
-  spec_says: 'Tracking a key that is already being tracked in the same pool does not refresh the existing entry:
-    it deliberately creates a second, separate entry for that key and returns a new handle that differs from the
-    one returned the first time, so the pool then holds two entries for the same key.'
-  code_does: Every successful registration increases the number of tracked entries in that pool by exactly one,
-    without exception. In particular, registering a key that the pool is already tracking creates a second, independent
-    entry for the same key rather than reusing the existing one. This contradicts the interface documentation, which
-    promises that re-registering an already-tracked key is idempotent and returns the existing handle; the implementation
-    has no lookup from key to entry at all, so it cannot detect a repeat.
-  spec_pointers:
-  - FR-002
-  code_pointers:
-  - lib.rs:129-139
-  - ieviction_policy.rs:85-87
-  status: candidate
-  excluded_properties:
-  - EPO-TRACK-POST-NON-IDEMPOTENT-REREGISTRATION
-  extraction_sides:
-    spec:
-    - EPO-TRACK-POST-NON-IDEMPOTENT-REREGISTRATION
-    code:
-    - EPO-TRACK-POST-LEN
-- id: D-FR-002-lru_list.rs:3767-f2eebe
-  name: Track existing entries
-  kind: spec-not-found-in-code
-  methods:
-  - track
-  spec_says: A successful track only inserts; it never drops an entry the pool already held, and the entries that
-    were already there keep their order relative to one another, whichever end the new key was inserted at.
-  code_does: Nothing found.
-  spec_pointers:
-  - FR-002
-  - FR-011
-  code_pointers:
-  - lru_list.rs:37-67
-  - lru_list.rs:75-105
-  status: candidate
-  excluded_properties:
-  - EPO-TRACK-FRAME-EXISTING-ENTRIES
-  extraction_sides:
-    spec:
-    - EPO-TRACK-FRAME-EXISTING-ENTRIES
-    code: []
-- id: D-US1-AS2-lru_list.rs:108134-4d42d0
-  name: Touch not next victim
-  kind: spec-not-found-in-code
-  methods:
-  - touch
-  spec_says: After an entry is touched, asking the pool for the next entry to evict does not return that touched
-    entry, as long as the pool holds at least one other entry.
-  code_does: Nothing found.
-  spec_pointers:
-  - US1-AS2
-  - FR-003
-  - FR-006
-  code_pointers:
-  - lru_list.rs:108-134
-  - lru_list.rs:137-142
-  status: candidate
-  excluded_properties:
-  - EPO-TOUCH-POST-NOT-NEXT-VICTIM
-  extraction_sides:
-    spec:
-    - EPO-TOUCH-POST-NOT-NEXT-VICTIM
-    code: []
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - lib.rs:122
+  - lib.rs:124
+  - lru_list.rs:47-48
+  - lru_list.rs:85-86
+  - lru_list.rs:6-11
+  - lru_list.rs:48
+  - lru_list.rs:86
 - id: D-FR-012-lib.rs:169182-b45332
   name: Batch touch removed handles skipped
   kind: spec-not-found-in-code
@@ -131,7 +80,9 @@ discordances:
   - batch_touch
   spec_says: 'A batch that contains handles for entries already removed or evicted still succeeds: the stale handles
     are skipped without crashing, and the remaining live handles are still moved to the protected end.'
-  code_does: Nothing found.
+  code_does: A stale handle is skipped only while its old slot is still empty; once a later track reuses that slot
+    the stale handle moves an unrelated key to the protected end, and after the pool is cleared the stale handle
+    indexes past the slot array and crashes.
   spec_pointers:
   - FR-012
   - FR-004
@@ -145,6 +96,15 @@ discordances:
     spec:
     - EPO-BATCH-TOUCH-POST-IDEMPOTENT-REMOVED-HANDLES
     code: []
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - lib.rs:169
+  - lib.rs:181
+  - lru_list.rs:109-111
+  - lru_list.rs:38-45
+  - lru_list.rs:76-83
+  - lru_list.rs:186-191
+  - lru_list.rs:186-192
 - id: D-US1-lib.rs:129137-55e21f
   name: Evict order first time keys
   kind: spec-not-found-in-code
@@ -154,7 +114,7 @@ discordances:
   spec_says: If several keys the policy has never seen before are tracked one after another into a fresh pool, then
     repeatedly asking for the next victim gives them back in reverse order of tracking, most recently tracked first,
     because every one of them looks exactly as cold as the entry already at the front.
-  code_does: Nothing found.
+  code_does: No matching guarantee stated by the code reader.
   spec_pointers:
   - US1
   - US1-AS1
@@ -169,6 +129,7 @@ discordances:
     spec:
     - EPO-EVICT-POST-ORDER-FIRST-TIME-KEYS
     code: []
+  classified: classifiers disagree - needs a person
 - id: D-FR-012-lru_list.rs:109-ca1808
   name: Stale handle never crashes
   kind: spec-and-code-differ
@@ -211,6 +172,15 @@ discordances:
     - EPO-TOUCH-ERR-OOB-PANIC
     - EPO-REMOVE-ERR-OOB-PANIC
     - EPO-CLEAR-POOL-ERR-STALE-HANDLES
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - lib.rs:154
+  - lib.rs:198
+  - lru_list.rs:109
+  - lru_list.rs:160
+  - lru_list.rs:186-192
+  - lru_list.rs:38-45
+  - lru_list.rs:76-83
   status_evidence: The repair agent's test repair_test_stale_handle.rs failed on the code before the fix and passes
     after it (evaluation run 2026-10-05).
   status_fix: 'PR #505 (bounds check in lru_list.rs)'
@@ -242,51 +212,50 @@ discordances:
     - EPO-INV-MAXLEN-MONOTONE-UPPER-BOUND
     code:
     - EPO-INV-LEN-LE-MAXLEN-PLUS-1
-- id: D-NOSPEC-lib.rs:2025-041526
-  name: Sketch row hashes distinct
-  kind: spec-not-found-in-code
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - lib.rs:122
+  - lib.rs:129-137
+  - lib.rs:235
+  - lru_list.rs:65
+  - lru_list.rs:103
+  - lib.rs:231-236
+- id: D-RANGE-FR-002-7fbb2b
+  name: 'Input range: a pool never allocates more than 2^32 - 1 entry slots over its lifetime'
+  kind: input-range-mismatch
   methods:
   - track
-  spec_says: The four rows of the frequency estimator each use a different odd multiplier to pick their counter
-    position, so the rows are genuinely independent views of a key rather than four identical copies of the same
-    counter.
-  code_does: Nothing found.
-  spec_pointers: []
-  code_pointers:
-  - lib.rs:20-25
-  - lib.rs:40
-  - lib.rs:48
-  status: candidate
-  excluded_properties:
-  - EPO-INV-SKETCH-ROW-HASHES-DISTINCT
-  extraction_sides:
-    spec:
-    - EPO-INV-SKETCH-ROW-HASHES-DISTINCT
-    code: []
-- id: D-NFR-001-lib.rs:3860-0e8e40
-  name: Sketch ops bounded by fixed size
-  kind: spec-not-found-in-code
-  methods:
-  - track
-  spec_says: Raising a key's count and reading its estimate each touch exactly four counters, and ageing touches
-    the whole fixed table once, so the amount of work never depends on how many keys are tracked or how large the
-    pool has grown.
-  code_does: Nothing found.
+  - touch
+  - batch_touch
+  - remove
+  - identify_next_to_evict
+  spec_says: Tracking puts no limit on how many entries a pool may hold over its lifetime.
+  code_does: Handles are 32-bit slot numbers (nodes.len() as u32). Once a pool has allocated 2^32 slots the number
+    wraps around, so a new entry receives the same handle as a live one.
   spec_pointers:
-  - NFR-001
-  - NFR-004
+  - FR-002
+  - FR-011
   code_pointers:
-  - lib.rs:38-60
+  - lru_list.rs:47
+  - lru_list.rs:85
   status: candidate
-  excluded_properties:
-  - EPO-INV-SKETCH-OPS-BOUNDED-BY-FIXED-SIZE
-  extraction_sides:
-    spec:
-    - EPO-INV-SKETCH-OPS-BOUNDED-BY-FIXED-SIZE
-    code: []
-- id: D-NFR-002-lib.rs:7173-c9c615
+  assume_in_level2: a pool never allocates more than 2^32 - 1 entry slots over its lifetime
+  assume_rust: self.nodes.len() < u32::MAX as usize
+  excluded_properties: []
+routed_to_other_tools:
+- property: EPO-INV-SKETCH-OPS-BOUNDED-BY-FIXED-SIZE
+  name: Sketch ops bounded by fixed size
+  methods:
+  - track
+  statement: Raising a key's count and reading its estimate each touch exactly four counters, and ageing touches
+    the whole fixed table once, so the amount of work the frequency estimator does never depends on how many keys
+    are tracked or how large the pool has grown.
+  reason: performance
+  checked_by: test
+  why: This is a claim about how much work an operation costs regardless of pool size, which is a performance bound
+    that Creusot and Kani do not express.
+- property: EPO-INV-NO-DATA-CORRUPTION-UNDER-CONCURRENCY
   name: No data corruption under concurrency
-  kind: spec-not-found-in-code
   methods:
   - create_pool
   - track
@@ -297,63 +266,30 @@ discordances:
   - get_eviction_candidates
   - len
   - clear_pool
-  spec_says: 'When several threads track, touch, remove, and evict at the same time, every one of the policy''s
-    structural guarantees still holds afterwards: the eviction chain stays unbroken, the reported size matches the
-    real contents, slots are never double-used, and no operation reads a half-updated state.'
-  code_does: Nothing found.
-  spec_pointers:
-  - NFR-002
-  - US4
-  - US4-AS1
-  code_pointers:
-  - lib.rs:71-73
-  - lib.rs:83
-  - lib.rs:90
-  - lib.rs:110
-  - lib.rs:119
-  status: candidate
-  excluded_properties:
-  - EPO-INV-NO-DATA-CORRUPTION-UNDER-CONCURRENCY
-  extraction_sides:
-    spec:
-    - EPO-INV-NO-DATA-CORRUPTION-UNDER-CONCURRENCY
-    code: []
-- id: D-US4-AS1-lib.rs:119137-a8757a
+  statement: 'When several threads track, touch, remove, and evict at the same time, every one of the policy''s
+    structural guarantees still holds afterwards: the eviction order stays an unbroken chain, the reported size
+    matches the real contents, slots are never double-used, and no operation reads a half-updated state.'
+  reason: interleaving
+  checked_by: loom
+  why: Whether the structure survives several threads acting at once depends on how the threads interleave, which
+    needs a thread-interleaving checker.
+- property: EPO-INV-CONCURRENT-TRACK-TOTAL-COUNT
   name: Concurrent track total count
-  kind: spec-not-found-in-code
   methods:
   - track
   - len
-  spec_says: 'If several threads together perform a known total number of successful tracks into the same pool,
+  statement: 'If several threads together perform a known total number of successful tracks into the same pool,
     the pool afterwards holds exactly that many entries: no track is lost and none is counted twice.'
-  code_does: Nothing found.
-  spec_pointers:
-  - US4-AS1
-  - SC-002
-  - NFR-002
-  code_pointers:
-  - lib.rs:119-137
-  status: candidate
-  excluded_properties:
-  - EPO-INV-CONCURRENT-TRACK-TOTAL-COUNT
-  extraction_sides:
-    spec:
-    - EPO-INV-CONCURRENT-TRACK-TOTAL-COUNT
-    code: []
-- id: D-NOSPEC-lib.rs:7586-c97857
+  reason: interleaving
+  checked_by: loom
+  why: Whether no track is lost when several threads track at once depends on thread interleaving, which Creusot
+    and Kani do not model.
+- property: EPO-INV-NO-STARTUP-BANNER
   name: No startup banner
-  kind: spec-not-found-in-code
   methods: []
-  spec_says: Starting this component up produces no banner or announcement log message, unlike components that print
+  statement: Starting this component up produces no banner or announcement log message, unlike components that print
     a line about themselves when they initialise.
-  code_does: Nothing found.
-  spec_pointers: []
-  code_pointers:
-  - lib.rs:75-86
-  status: candidate
-  excluded_properties:
-  - EPO-INV-NO-STARTUP-BANNER
-  extraction_sides:
-    spec:
-    - EPO-INV-NO-STARTUP-BANNER
-    code: []
+  reason: logging-io
+  checked_by: test
+  why: This is about what log output appears at startup, which is an input/output side effect checked by a test
+    rather than a prover.
