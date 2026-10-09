@@ -178,9 +178,11 @@ component_macros::define_interface! {
         /// success. After this returns Ok, no new reader can obtain the
         /// memory-tier pointer, so the caller may safely free the DRAM slot.
         ///
-        /// Returns `Err(KeyNotFound)` if the key doesn't exist, or
-        /// `Err(InvalidState)` if the entry is not evictable (refs held,
-        /// no ssd_offset, or not in MemoryTier state).
+        /// Returns `Err(KeyNotFound)` if the key doesn't exist,
+        /// `Err(ActiveReferences)` if a read or write reference is held, or
+        /// `Err(InvalidState)` if the entry is otherwise not evictable (no
+        /// ssd_offset, or not in MemoryTier state). The pin case has its own
+        /// variant because callers count the two causes separately.
         fn try_evict_to_block(&self, key: CacheKey) -> Result<(), DispatchMapError>;
 
         /// Insert a recovered extent as a BlockDevice entry.
