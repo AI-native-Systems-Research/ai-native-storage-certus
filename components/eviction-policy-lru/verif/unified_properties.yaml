@@ -51,12 +51,12 @@ properties:
   kani:
     fidelity: bounded-routing
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_lru_createpool_seq
       result: SUCCESS
-      wall_clock_s: 2.64
-      peak_rss_mb: 70
+      wall_clock_s: 3.1
+      peak_rss_mb: 207
+    status: proved
     _scored_by: scorer_kani
 - id: LRU-TRACK-OK-INC
   subject: track
@@ -98,12 +98,12 @@ properties:
   kani:
     fidelity: bounded-arena
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_lru_track_ok_inc
       result: SUCCESS
-      wall_clock_s: 2.37
-      peak_rss_mb: 61
+      wall_clock_s: 2.87
+      peak_rss_mb: 212
+    status: proved
     _scored_by: scorer_kani
 - id: LRU-TRACK-HANDLE-POOL
   subject: track
@@ -141,12 +141,12 @@ properties:
   kani:
     fidelity: bounded-routing
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_lru_track_handle_pool
       result: SUCCESS
-      wall_clock_s: 0.57
-      peak_rss_mb: 61
+      wall_clock_s: 0.85
+      peak_rss_mb: 159
+    status: proved
     _scored_by: scorer_kani
 - id: LRU-TRACK-NONIDEMPOTENT
   subject: track
@@ -186,12 +186,12 @@ properties:
   kani:
     fidelity: bounded-arena
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_lru_track_nonidempotent
       result: SUCCESS
-      wall_clock_s: 2.56
-      peak_rss_mb: 62
+      wall_clock_s: 3.03
+      peak_rss_mb: 211
+    status: proved
     _scored_by: scorer_kani
 - id: LRU-TRACK-INVALIDPOOL
   subject: track
@@ -229,12 +229,12 @@ properties:
   kani:
     fidelity: bounded-routing
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_lru_track_invalidpool
       result: SUCCESS
-      wall_clock_s: 2.88
-      peak_rss_mb: 61
+      wall_clock_s: 3.34
+      peak_rss_mb: 210
+    status: proved
     _scored_by: scorer_kani
 - id: LRU-TOUCH-MRU
   subject: touch
@@ -277,12 +277,12 @@ properties:
   kani:
     fidelity: bounded-arena
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_lru_touch_mru
       result: SUCCESS
-      wall_clock_s: 8.2
-      peak_rss_mb: 275
+      wall_clock_s: 8.62
+      peak_rss_mb: 273
+    status: proved
     _scored_by: scorer_kani
 - id: LRU-TOUCH-INVALIDPOOL
   subject: touch
@@ -320,12 +320,12 @@ properties:
   kani:
     fidelity: bounded-routing
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_lru_touch_invalidpool
       result: SUCCESS
-      wall_clock_s: 2.72
-      peak_rss_mb: 62
+      wall_clock_s: 3.18
+      peak_rss_mb: 212
+    status: proved
     _scored_by: scorer_kani
 - id: LRU-TOUCH-STALE-IDEMPOTENT
   subject: touch
@@ -363,12 +363,12 @@ properties:
   kani:
     fidelity: bounded-arena
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_lru_touch_stale_idempotent
       result: SUCCESS
-      wall_clock_s: 6.68
-      peak_rss_mb: 212
+      wall_clock_s: 7.2
+      peak_rss_mb: 220
+    status: proved
     _scored_by: scorer_kani
 - id: LRU-REMOVE-OK-DEC
   subject: remove
@@ -409,12 +409,12 @@ properties:
   kani:
     fidelity: bounded-arena
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_lru_remove_ok_dec
       result: SUCCESS
-      wall_clock_s: 3.87
-      peak_rss_mb: 66
+      wall_clock_s: 4.38
+      peak_rss_mb: 216
+    status: proved
     _scored_by: scorer_kani
 - id: LRU-REMOVE-NEVER-EVICTED
   subject: remove
@@ -453,12 +453,12 @@ properties:
   kani:
     fidelity: bounded-arena
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_lru_remove_never_evicted
       result: SUCCESS
-      wall_clock_s: 9.56
-      peak_rss_mb: 307
+      wall_clock_s: 10.05
+      peak_rss_mb: 308
+    status: proved
     _scored_by: scorer_kani
 - id: LRU-REMOVE-INVALIDPOOL
   subject: remove
@@ -496,12 +496,12 @@ properties:
   kani:
     fidelity: bounded-routing
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_lru_remove_invalidpool
       result: SUCCESS
-      wall_clock_s: 2.72
-      peak_rss_mb: 61
+      wall_clock_s: 3.18
+      peak_rss_mb: 212
+    status: proved
     _scored_by: scorer_kani
 - id: LRU-REMOVE-STALE-IDEMPOTENT
   subject: remove
@@ -540,12 +540,12 @@ properties:
   kani:
     fidelity: bounded-arena
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_lru_remove_stale_idempotent
       result: SUCCESS
-      wall_clock_s: 6.38
-      peak_rss_mb: 180
+      wall_clock_s: 6.83
+      peak_rss_mb: 217
+    status: proved
     _scored_by: scorer_kani
 - id: LRU-EVICT-FIFO
   subject: identify_next_to_evict
@@ -589,12 +589,12 @@ properties:
   kani:
     fidelity: bounded-arena
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_lru_evict_fifo
       result: SUCCESS
-      wall_clock_s: 8.67
+      wall_clock_s: 9.06
       peak_rss_mb: 309
+    status: proved
     _scored_by: scorer_kani
 - id: LRU-EVICT-EMPTY-NONE
   subject: identify_next_to_evict
@@ -634,12 +634,12 @@ properties:
   kani:
     fidelity: bounded-arena
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_lru_evict_empty_none
       result: SUCCESS
-      wall_clock_s: 1.88
-      peak_rss_mb: 62
+      wall_clock_s: 2.36
+      peak_rss_mb: 212
+    status: proved
     _scored_by: scorer_kani
 - id: LRU-CANDIDATES-NONDESTRUCTIVE
   subject: get_eviction_candidates
@@ -679,12 +679,12 @@ properties:
   kani:
     fidelity: bounded-arena
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_lru_candidates_nondestructive
       result: SUCCESS
-      wall_clock_s: 3.84
-      peak_rss_mb: 66
+      wall_clock_s: 4.37
+      peak_rss_mb: 222
+    status: proved
     _scored_by: scorer_kani
 - id: LRU-CANDIDATES-COUNT-ORDER
   subject: get_eviction_candidates
@@ -722,12 +722,12 @@ properties:
   kani:
     fidelity: bounded-arena
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_lru_candidates_count_order
       result: SUCCESS
-      wall_clock_s: 5.89
-      peak_rss_mb: 157
+      wall_clock_s: 6.42
+      peak_rss_mb: 223
+    status: proved
     _scored_by: scorer_kani
 - id: LRU-CANDIDATES-DEGRADE
   subject: get_eviction_candidates
@@ -765,12 +765,12 @@ properties:
   kani:
     fidelity: bounded-routing
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_lru_candidates_degrade
       result: SUCCESS
-      wall_clock_s: 18.46
-      peak_rss_mb: 1231
+      wall_clock_s: 18.95
+      peak_rss_mb: 1232
+    status: proved
     _scored_by: scorer_kani
 - id: LRU-LEN-COUNT
   subject: len
@@ -808,12 +808,12 @@ properties:
   kani:
     fidelity: bounded-arena
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_lru_len_count
       result: SUCCESS
-      wall_clock_s: 4.06
-      peak_rss_mb: 69
+      wall_clock_s: 4.56
+      peak_rss_mb: 216
+    status: proved
     _scored_by: scorer_kani
 - id: LRU-LEN-DEGRADE
   subject: len
@@ -851,12 +851,12 @@ properties:
   kani:
     fidelity: bounded-routing
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_lru_len_degrade
       result: SUCCESS
-      wall_clock_s: 2.64
-      peak_rss_mb: 62
+      wall_clock_s: 3.12
+      peak_rss_mb: 210
+    status: proved
     _scored_by: scorer_kani
 - id: LRU-CLEAR-EMPTY
   subject: clear_pool
@@ -897,12 +897,12 @@ properties:
   kani:
     fidelity: bounded-arena
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_lru_clear_empty
       result: SUCCESS
-      wall_clock_s: 2.9
-      peak_rss_mb: 62
+      wall_clock_s: 3.4
+      peak_rss_mb: 219
+    status: proved
     _scored_by: scorer_kani
 - id: LRU-CLEAR-DEGRADE
   subject: clear_pool
@@ -940,12 +940,12 @@ properties:
   kani:
     fidelity: bounded-routing
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_lru_clear_degrade
       result: SUCCESS
-      wall_clock_s: 6.25
-      peak_rss_mb: 241
+      wall_clock_s: 6.66
+      peak_rss_mb: 243
+    status: proved
     _scored_by: scorer_kani
 - id: LRU-BATCH-EMPTY-OK
   subject: batch_touch
@@ -983,12 +983,12 @@ properties:
   kani:
     fidelity: bounded-routing
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_lru_batch_empty_ok
       result: SUCCESS
-      wall_clock_s: 5.12
-      peak_rss_mb: 130
+      wall_clock_s: 5.59
+      peak_rss_mb: 219
+    status: proved
     _scored_by: scorer_kani
 - id: LRU-BATCH-MRU
   subject: batch_touch
@@ -1027,12 +1027,12 @@ properties:
   kani:
     fidelity: bounded-arena
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_lru_batch_mru
       result: SUCCESS
-      wall_clock_s: 8.58
-      peak_rss_mb: 285
+      wall_clock_s: 9.34
+      peak_rss_mb: 287
+    status: proved
     _scored_by: scorer_kani
 - id: LRU-BATCH-INVALIDPOOL
   subject: batch_touch
@@ -1070,12 +1070,12 @@ properties:
   kani:
     fidelity: bounded-routing
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_lru_batch_invalidpool
       result: SUCCESS
-      wall_clock_s: 2.65
-      peak_rss_mb: 62
+      wall_clock_s: 3.11
+      peak_rss_mb: 212
+    status: proved
     _scored_by: scorer_kani
 - id: LRU-FREELIST-RECYCLE
   subject: track
@@ -1116,12 +1116,12 @@ properties:
   kani:
     fidelity: bounded-arena
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_lru_freelist_recycle
       result: SUCCESS
-      wall_clock_s: 4.33
-      peak_rss_mb: 73
+      wall_clock_s: 4.85
+      peak_rss_mb: 218
+    status: proved
     _scored_by: scorer_kani
 - id: LRU-INV-LINK
   subject: lru-list-invariant
@@ -1165,12 +1165,12 @@ properties:
   kani:
     fidelity: bounded-arena
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_lru_inv_link
       result: SUCCESS
-      wall_clock_s: 9.06
-      peak_rss_mb: 211
+      wall_clock_s: 9.6
+      peak_rss_mb: 220
+    status: proved
     _scored_by: scorer_kani
 - id: LRU-POOL-ISOLATION
   subject: pool-isolation
@@ -1219,12 +1219,12 @@ properties:
   kani:
     fidelity: bounded-arena
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_lru_pool_isolation
       result: SUCCESS
-      wall_clock_s: 2.79
-      peak_rss_mb: 62
+      wall_clock_s: 3.27
+      peak_rss_mb: 218
+    status: proved
     _scored_by: scorer_kani
 - id: LRU-CONCURRENT-INTEGRITY
   subject: concurrent-integrity
@@ -1272,10 +1272,10 @@ properties:
   kani:
     fidelity: trusted-boundary
     note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    evidence: null
     delegate_to: 'loom (concurrency model checker): interleaved track/touch/remove/evict across RwLock<Vec<Mutex<Pool>>>
       preserve per-pool integrity and the final count equals the total tracked'
     status: delegated
-    evidence: {}
     _scored_by: scorer_kani
 - id: NV-1
   scope: O(1) time complexity of single-entry operations
@@ -1483,8 +1483,8 @@ reconciliation:
     - LRU-POOL-ISOLATION
     - LRU-CONCURRENT-INTEGRITY
 run:
-  gate_commit: c4f19575
-  gate_branch: skills/verify-methodology-to-unstable
+  gate_commit: 93939bc
+  gate_branch: main
   creusot:
     scored_by: scorer_creusot
     command: scorer_creusot.py /home/cornel/rescore-overnight-20260926/eviction-policy-lru/verif --crate-dir
@@ -1505,14 +1505,13 @@ run:
     mem_max_mb: 16384
   kani:
     scored_by: scorer_kani
-    command: scorer_kani.py /home/cornel/rescore-overnight-20260926/eviction-policy-lru/verif --component-dir
-      /home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru --cap-seconds 120
-      --cap-max 300
-    started: '2026-09-27T04:30:32-07:00'
-    finished: '2026-09-27T04:33:49-07:00'
+    command: scorer_kani.py /home/cornel/pagefix-verif-kani-eviction-policy-lru/components/eviction-policy-lru/verif
+      --component-dir /home/cornel/pagefix-verif-kani-eviction-policy-lru/components/eviction-policy-lru
+      --cap-seconds 120 --cap-max 300 --resume
+    started: '2026-10-09T10:43:30-07:00'
+    finished: '2026-10-09T10:43:30-07:00'
     kani_version: cargo-kani 0.67.0
     cap_seconds: 120
     cap_max: 300
     mem_max_mb: 16384
-# LEVEL 1 (level1.py): properties derived from a spec<->code discordance; see discordances.yaml. Never sent to the provers.
 level2_excluded: []

@@ -335,3 +335,6 @@ mod tests {
         assert_eq!(ep.len(pool), 400);
     }
 }
+
+#[cfg(kani)]
+mod verification;
