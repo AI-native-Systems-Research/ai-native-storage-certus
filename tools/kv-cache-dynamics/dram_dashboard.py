@@ -39,6 +39,7 @@ DISTS = {
     "burstgpt": "burstgpt-3-intervals.yaml",
     "ccweka": "cc-trace-weka-062126-intervals.yaml",
     "wildchat": "wildchat-intervals.yaml",
+    "syfi": "syfi-coding-intervals.yaml",
 }
 ADMISSIONS = {"interval", "random", "round-robin"}
 TIER_NAMES = ("HBM", "DRAM", "SSD")
