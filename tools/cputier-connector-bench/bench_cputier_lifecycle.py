@@ -110,8 +110,10 @@ except ImportError as _e:
     )
 
 # CPUOffloadingSpec.create_worker() calls a gloo barrier across worker ranks
-# before unlinking its shared mmap. This process is the only rank, so the
-# barrier is a no-op here (TieringOffloadingSpec does not use it).
+# before unlinking its shared mmap. With one rank the barrier is a no-op; under
+# real TP (--gpus) every rank process installs a shared multiprocessing barrier
+# instead, so no rank unlinks the file before the others have mapped it
+# (TieringOffloadingSpec does not use it).
 _cpu_spec_mod._all_workers_barrier = lambda: None
 
 # Default block size: 2 MiB (Llama-3-8B: 16 tokens × 32 layers × 4096 bytes),
@@ -286,6 +288,218 @@ def _rec(phases: dict | None, name: str, t0: float):
         phases.setdefault(name, PhaseTiming(name)).record(time.perf_counter() - t0)
 
 
+# ── offloading config (shared by the scheduler side and every TP rank) ──────
+
+def build_offloading_config(args, block_bytes: int, fs_root: str | None, engine_id: str,
+                            *, rank: int, world_size: int):
+    """The OffloadingConfig vLLM would build for this run.
+
+    ``block_bytes`` is one worker's KV bytes per block (``worker_kv_bytes_per_block``).
+    Under TP every rank gets the same config except ``parallel.rank``; the CPU
+    tier holds all ranks' shards of a chunk side by side in one shared mmap
+    named after ``engine_id``.
+    """
+    extra: dict = {
+        "cpu_bytes_to_use": args.cpu_bytes,
+        "eviction_policy": args.eviction_policy,
+    }
+    if args.spec == "tiering":
+        extra["spec_name"] = "TieringOffloadingSpec"
+        extra["secondary_tiers"] = []
+        if fs_root is not None:
+            extra["secondary_tiers"].append({
+                "type": "fs",
+                "root_dir": fs_root,
+                "n_read_threads": args.fs_read_threads,
+                "n_write_threads": args.fs_write_threads,
+                "enable_kv_events": args.kv_events,
+            })
+    else:
+        extra["spec_name"] = "CPUOffloadingSpec"
+
+    layer_names = tuple(f"model.layers.{i}.self_attn.attn" for i in range(args.layers))
+    return _mk(
+        OffloadingConfig,
+        groups=(_mk(OffloadingGroupConfig, tokens_per_block=args.tokens_per_block,
+                    layer_names=layer_names, group_id=0),),
+        worker_kv_bytes_per_block=block_bytes,
+        enable_kv_cache_events=args.kv_events,
+        extra_config=extra,
+        engine_id=engine_id,
+        model=_mk(OffloadingModelConfig, name=args.model_name, dtype="float16"),
+        cache=_mk(OffloadingCacheConfig, tokens_per_hash=args.tokens_per_block,
+                  blocks_per_chunk=args.blocks_per_chunk),
+        parallel=_mk(OffloadingParallelConfig, rank=rank, world_size=world_size,
+                     tp_size=world_size, pp_size=1, pcp_size=1, dcp_size=1,
+                     data_parallel_index=0, data_parallel_size=1,
+                     data_parallel_rank_local=None, is_parallelism_agnostic=True),
+    )
+
+
+# ── real tensor parallelism (--gpus) ────────────────────────────────────────
+#
+# vLLM under TP=W runs one scheduler-side manager and W CPUOffloadingWorkers,
+# one per GPU, all joining the same /dev/shm region (each rank owns its slot of
+# every chunk; vLLM derives the slot from the CUDA device index). The scheduler
+# hands every worker the same transfer spec and a job is finished once every
+# rank reports it. _CputierTPWorkerGroup reproduces that: rank 0 runs in this
+# process, ranks 1..W-1 in spawned processes, behind the single-worker
+# submit_store / submit_load / get_finished / shutdown surface.
+
+
+def _gpu_spec_for(n: int) -> GPULoadStoreSpec:
+    return GPULoadStoreSpec(list(range(n)), group_sizes=(n,), block_indices=(0,))
+
+
+def _cputier_rank_main(conn, barrier, args, block_bytes, num_gpu_blocks, fs_root,
+                       engine_id, rank, world_size, gpu):
+    """Entry point of one non-zero TP rank (spawned process)."""
+    torch.cuda.set_device(gpu)
+    _cpu_spec_mod._all_workers_barrier = barrier.wait
+    try:
+        config = build_offloading_config(args, block_bytes, fs_root, engine_id,
+                                         rank=rank, world_size=world_size)
+        spec_cls = TieringOffloadingSpec if args.spec == "tiering" else CPUOffloadingSpec
+        spec = spec_cls(config)
+        kv_caches, _tensors = make_kv_caches(
+            gpu, args.layers, block_bytes, num_gpu_blocks * args.blocks_per_chunk,
+        )
+        worker = spec.get_worker(kv_caches)
+    except Exception as e:  # report instead of leaving the parent waiting
+        conn.send(("error", f"{type(e).__name__}: {e}"))
+        raise
+    conn.send(("ready", rank))
+    inflight = 0
+    try:
+        while True:
+            if conn.poll(POLL_S if inflight else 0.05):
+                msg = conn.recv()
+                if msg[0] == "stop":
+                    break
+                op, job_id, n, cpu_spec = msg
+                if op == "store":
+                    ok = worker.submit_store(job_id, _gpu_spec_for(n), cpu_spec)
+                else:
+                    ok = worker.submit_load(job_id, cpu_spec, _gpu_spec_for(n))
+                if ok:
+                    inflight += 1
+                else:
+                    conn.send((job_id, False))
+            for res in worker.get_finished():
+                conn.send((res.job_id, bool(res.success)))
+                inflight -= 1
+    finally:
+        worker.shutdown()
+
+
+class _CputierTPWorkerGroup:
+    """W CPUOffloadingWorkers, one per GPU, behind the single-worker interface."""
+
+    _READY_TIMEOUT_S = 120.0
+
+    def __init__(self, args, block_bytes, num_gpu_blocks, fs_root, engine_id, gpus, spec):
+        world_size = len(gpus)
+        self._world_size = world_size
+        self._pending: dict[int, list] = {}  # job_id -> [remaining, ok]
+        self._done: collections.deque = collections.deque()
+        ctx = __import__("multiprocessing").get_context("spawn")
+        # Bounded so a rank that dies before reaching it fails the run instead
+        # of hanging rank 0's get_worker() forever.
+        barrier = ctx.Barrier(world_size, timeout=self._READY_TIMEOUT_S)
+        _cpu_spec_mod._all_workers_barrier = barrier.wait
+        self._conns, self._procs = [], []
+        # Start the other ranks first: under CPUOffloadingSpec every rank's
+        # get_worker() waits on the barrier, which rank 0 reaches below.
+        for rank in range(1, world_size):
+            parent, child = ctx.Pipe()
+            proc = ctx.Process(
+                target=_cputier_rank_main,
+                args=(child, barrier, args, block_bytes, num_gpu_blocks, fs_root,
+                      engine_id, rank, world_size, gpus[rank]),
+                daemon=True,
+            )
+            proc.start()
+            self._conns.append(parent)
+            self._procs.append(proc)
+        try:
+            self.kv_caches, self.gpu_tensors = make_kv_caches(
+                gpus[0], args.layers, block_bytes,
+                num_gpu_blocks * args.blocks_per_chunk,
+            )
+            self._rank0 = spec.get_worker(self.kv_caches)
+            for rank, conn in enumerate(self._conns, start=1):
+                if not conn.poll(self._READY_TIMEOUT_S):
+                    raise RuntimeError(f"TP rank {rank} did not start "
+                                       f"(exitcode={self._procs[rank - 1].exitcode})")
+                kind, detail = conn.recv()
+                if kind != "ready":
+                    raise RuntimeError(f"TP rank {rank} failed to start: {detail}")
+        except Exception:
+            self._stop_children()
+            raise
+
+    def _submit(self, op, job_id, gpu_spec, cpu_spec):
+        n = len(gpu_spec.block_ids)
+        self._pending[job_id] = [self._world_size, True]
+        for conn in self._conns:
+            conn.send((op, job_id, n, cpu_spec))
+        if op == "store":
+            ok = self._rank0.submit_store(job_id, gpu_spec, cpu_spec)
+        else:
+            ok = self._rank0.submit_load(job_id, cpu_spec, gpu_spec)
+        if not ok:
+            self._rank_done(job_id, False)
+        return True
+
+    def submit_store(self, job_id, src_spec, dst_spec):
+        return self._submit("store", job_id, src_spec, dst_spec)
+
+    def submit_load(self, job_id, src_spec, dst_spec):
+        return self._submit("load", job_id, dst_spec, src_spec)
+
+    def _rank_done(self, job_id, success):
+        entry = self._pending[job_id]
+        entry[0] -= 1
+        entry[1] = entry[1] and success
+        if entry[0] == 0:
+            del self._pending[job_id]
+            self._done.append((job_id, entry[1]))
+
+    def get_finished(self):
+        for res in self._rank0.get_finished():
+            self._rank_done(res.job_id, bool(res.success))
+        for conn in self._conns:
+            while conn.poll():
+                job_id, success = conn.recv()
+                self._rank_done(job_id, success)
+        out = [_GroupResult(job_id, ok) for job_id, ok in self._done]
+        self._done.clear()
+        return out
+
+    def _stop_children(self):
+        for conn in self._conns:
+            try:
+                conn.send(("stop",))
+            except (BrokenPipeError, OSError):
+                pass
+        for proc in self._procs:
+            proc.join(timeout=30)
+            if proc.is_alive():
+                proc.terminate()
+        self._conns, self._procs = [], []
+
+    def shutdown(self):
+        self._stop_children()
+        self._rank0.shutdown()
+
+
+@dataclass
+class _GroupResult:
+    """What CputierStack.poll() reads from a finished job."""
+    job_id: int
+    success: bool
+
+
 # ── the cputier stack + scheduler emulation ─────────────────────────────────
 
 class CputierStack:
@@ -300,48 +514,19 @@ class CputierStack:
 
     _instances = itertools.count()
 
-    def __init__(self, args, block_bytes: int, num_gpu_blocks: int, fs_root: str | None):
+    def __init__(self, args, block_bytes: int, num_gpu_blocks: int, fs_root: str | None,
+                 gpus: list[int] | None = None):
+        gpus = gpus or [args.gpu]
+        world_size = len(gpus)
         self.block_bytes = block_bytes
         self.bpc = args.blocks_per_chunk
-        self.chunk_bytes = block_bytes * self.bpc
+        # Throughput counts every rank's shard: each rank moves block_bytes.
+        self.chunk_bytes = block_bytes * self.bpc * world_size
         self.has_secondary = args.spec == "tiering" and fs_root is not None
         self.engine_id = f"cputier-bench-{os.getpid()}-{next(self._instances)}"
 
-        extra: dict = {
-            "cpu_bytes_to_use": args.cpu_bytes,
-            "eviction_policy": args.eviction_policy,
-        }
-        if args.spec == "tiering":
-            extra["spec_name"] = "TieringOffloadingSpec"
-            extra["secondary_tiers"] = []
-            if fs_root is not None:
-                extra["secondary_tiers"].append({
-                    "type": "fs",
-                    "root_dir": fs_root,
-                    "n_read_threads": args.fs_read_threads,
-                    "n_write_threads": args.fs_write_threads,
-                    "enable_kv_events": args.kv_events,
-                })
-        else:
-            extra["spec_name"] = "CPUOffloadingSpec"
-
-        layer_names = tuple(f"model.layers.{i}.self_attn.attn" for i in range(args.layers))
-        config = _mk(
-            OffloadingConfig,
-            groups=(_mk(OffloadingGroupConfig, tokens_per_block=args.tokens_per_block,
-                        layer_names=layer_names, group_id=0),),
-            worker_kv_bytes_per_block=block_bytes,
-            enable_kv_cache_events=args.kv_events,
-            extra_config=extra,
-            engine_id=self.engine_id,
-            model=_mk(OffloadingModelConfig, name=args.model_name, dtype="float16"),
-            cache=_mk(OffloadingCacheConfig, tokens_per_hash=args.tokens_per_block,
-                      blocks_per_chunk=self.bpc),
-            parallel=_mk(OffloadingParallelConfig, rank=0, world_size=1, tp_size=1,
-                         pp_size=1, pcp_size=1, dcp_size=1, data_parallel_index=0,
-                         data_parallel_size=1, data_parallel_rank_local=None,
-                         is_parallelism_agnostic=True),
-        )
+        config = build_offloading_config(args, block_bytes, fs_root, self.engine_id,
+                                         rank=0, world_size=world_size)
         spec_cls = TieringOffloadingSpec if args.spec == "tiering" else CPUOffloadingSpec
         self.spec = spec_cls(config)
         if self.spec.num_chunks <= 0:
@@ -352,12 +537,20 @@ class CputierStack:
         atexit.register(self._unlink_mmap)
 
         # Scheduler side first: TieringOffloadingSpec.get_manager() creates the
-        # /dev/shm region that the worker then joins.
+        # /dev/shm region that the workers then join.
         self.manager = self.spec.get_manager()
-        self.kv_caches, self.gpu_tensors = make_kv_caches(
-            args.gpu, args.layers, block_bytes, num_gpu_blocks * self.bpc,
-        )
-        self.worker = self.spec.get_worker(self.kv_caches)
+        if world_size > 1:
+            self.worker = _CputierTPWorkerGroup(
+                args, block_bytes, num_gpu_blocks, fs_root, self.engine_id,
+                gpus, self.spec,
+            )
+            self.kv_caches = self.worker.kv_caches
+            self.gpu_tensors = self.worker.gpu_tensors
+        else:
+            self.kv_caches, self.gpu_tensors = make_kv_caches(
+                args.gpu, args.layers, block_bytes, num_gpu_blocks * self.bpc,
+            )
+            self.worker = self.spec.get_worker(self.kv_caches)
 
         self.lock = threading.RLock()
         self._job_ids = itertools.count(1)
@@ -1544,6 +1737,14 @@ def main():
                         help=f"Per-block size in bytes (default: {DEFAULT_BLOCK_BYTES})")
     parser.add_argument("--gpu", type=int, default=0,
                         help="CUDA device index")
+    parser.add_argument("--tp", type=int, default=1,
+                        help="Tensor-parallel world size: one CPUOffloadingWorker per GPU "
+                             "(rank i on device --gpu+i) sharing one CPU-tier region, one "
+                             "scheduler-side manager, as vLLM's --tensor-parallel-size. "
+                             "--block-bytes is each rank's shard size.")
+    parser.add_argument("--gpus", type=str, default=None,
+                        help="Comma-separated CUDA devices for the TP ranks instead of "
+                             "--gpu..--gpu+tp-1; implies --tp = the device count.")
     parser.add_argument("--min-duration", type=float, default=5.0,
                         help="Minimum seconds per benchmark phase")
     parser.add_argument("--warmup", type=int, default=4,
@@ -1575,6 +1776,29 @@ def main():
     parser.add_argument("--num-sessions", type=int, default=32,
                         help="(scheduler-step) Distinct conversations in the pool")
     args = parser.parse_args()
+
+    if args.gpus:
+        gpus = [int(g) for g in args.gpus.split(",")]
+        if args.tp not in (1, len(gpus)):
+            parser.error(f"--tp {args.tp} conflicts with --gpus {args.gpus}")
+    else:
+        if args.tp < 1:
+            parser.error(f"--tp must be >= 1, got {args.tp}")
+        gpus = list(range(args.gpu, args.gpu + args.tp))
+    if len(set(gpus)) != len(gpus):
+        parser.error(f"--gpus lists a device twice: {args.gpus}")
+    if max(gpus) >= torch.cuda.device_count():
+        parser.error(f"TP needs CUDA devices {gpus}, but only "
+                     f"{torch.cuda.device_count()} are visible")
+    args.tp = len(gpus)
+    if len(gpus) > 1:
+        # vLLM derives a worker's CPU-tier slot from current_device_index() %
+        # world_size, so rank i must sit on a device whose index maps to slot i.
+        bad = [g for i, g in enumerate(gpus) if g % len(gpus) != i]
+        if bad:
+            parser.error(f"TP devices {gpus}: rank i needs a device with index % "
+                         f"{len(gpus)} == i (vLLM picks the CPU-tier slot that way)")
+        args.gpu = gpus[0]
 
     torch.cuda.set_device(args.gpu)
 
@@ -1619,7 +1843,7 @@ def main():
     import vllm
     print(f"cputier Connector Lifecycle Benchmark (vLLM {vllm.__version__})")
     print(f"  spec={args.spec}  cpu_bytes={args.cpu_bytes}  "
-          f"fs_root={fs_root or '(none)'}  gpu={args.gpu}")
+          f"fs_root={fs_root or '(none)'}  gpus={gpus}  tp={len(gpus)}")
     print(f"  num_blocks={args.num_blocks}  bs={args.bs}  block_bytes={block_bytes}  "
           f"layers={args.layers}  blocks_per_chunk={args.blocks_per_chunk}")
     print(f"  min_duration={args.min_duration}s  "
@@ -1629,7 +1853,7 @@ def main():
     max_blocks = max(args.num_blocks, args.working_set, args.bs)
     if mode == "pattern":
         max_blocks = max(max_blocks, *(ks["cardinality"] for ks in pattern.keyspaces.values()))
-    stack = CputierStack(args, block_bytes, max_blocks, fs_root)
+    stack = CputierStack(args, block_bytes, max_blocks, fs_root, gpus)
     print(f"  CPU tier: {stack.num_chunks} chunks × {stack.spec.kv_bytes_per_chunk} bytes")
 
     try:
@@ -1647,6 +1871,8 @@ def main():
             "cpu_bytes": args.cpu_bytes,
             "fs_tier": int(fs_root is not None),
             "gpu": args.gpu,
+            "gpus": ",".join(map(str, gpus)),
+            "tp": len(gpus),
             "bs": args.bs,
             "num_blocks": args.num_blocks,
             "block_bytes": block_bytes,
