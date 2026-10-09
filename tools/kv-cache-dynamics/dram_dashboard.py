@@ -39,11 +39,13 @@ DISTS = {
     "burstgpt": "burstgpt-3-intervals.yaml",
     "ccweka": "cc-trace-weka-062126-intervals.yaml",
     "wildchat": "wildchat-intervals.yaml",
+    "syfi": "syfi-coding-intervals.yaml",
     "swebench": "exgentic-swebench-intervals.yaml",
 }
 # Turn-count distributions selectable instead of a fixed --num-turns.
 TURN_DISTS = {
     "ccweka": "cc-trace-weka-062126-turns.yaml",
+    "syfi": "syfi-coding-turns.yaml",
     "swebench": "exgentic-swebench-turns.yaml",
 }
 ADMISSIONS = {"interval", "random", "round-robin"}

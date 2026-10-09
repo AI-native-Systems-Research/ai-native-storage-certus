@@ -105,6 +105,8 @@ Bundled, extracted from the cc-weka 062126 trace, so the tool runs out of the bo
 | `burstgpt-3-intervals.yaml` | inter-arrival intervals, BurstGPT v2.0 `BurstGPT_without_fails_3.csv` (55K chat sessions, 110 days) | median 131 s, p90 2342 s, p99 78825 s |
 | `wildchat-intervals.yaml` | inter-arrival intervals, `allenai/WildChat-1M` (838K real human↔ChatGPT conversations) | median 128 s, p90 1253 s, p99 27511 s (~7.6 h), max ~48 days |
 | `wildchat-turns.yaml` | turns per conversation, `allenai/WildChat-1M` | median 1, mean 2.3, p90 5, p99 14, max 249 |
+| `syfi-coding-intervals.yaml` | inter-arrival intervals, `uw-syfi/TraceLab` v0.0.2 `syfi_coding_trace` (8058 real coding-agent sessions, 52 users) | median 10 s, p90 84 s, p99 1493 s (~25 min), max ~31.8 days |
+| `syfi-coding-turns.yaml` | turns per conversation, `uw-syfi/TraceLab` v0.0.2 `syfi_coding_trace` | median 16, mean 83, p90 145, p99 1130, max 21351 |
 
 BurstGPT has many sessions and long think times but short, shallow chats, so it
 is used as a **mixed source**: its intervals with the cc-weka turn counts and
@@ -130,6 +132,24 @@ hf download allenai/WildChat-1M --repo-type dataset --local-dir wc --include 'da
 ./wildchat_to_ccweka.py 'wc/data/*.parquet' -o wildchat.jsonl
 ./extract_interval_distribution.py wildchat.jsonl -o wildchat-intervals.yaml
 ./extract_turn_distribution.py     wildchat.jsonl -o wildchat-turns.yaml
+```
+
+`syfi_coding_trace` (`uw-syfi/TraceLab` v0.0.2) is the **agentic-coding** analog to
+WildChat's consumer chat: 665K agent steps across 8058 real coding-agent sessions
+(Claude/Codex) from 52 users. Each agent step (a `round`) is one request keyed by
+`session_id`, ordered by its earliest `timing_events` timestamp. Its conversations
+are **deep** (median 16 rounds, p99 1130, max 21351 — the opposite extreme to
+WildChat's median 1), and its intervals are **short** (median 10 s: rapid tool-call
+loops) with a long human-gap tail (p99 ~25 min, max ~31.8 days). The tail of giant
+sessions makes it the realistic stress case for intra-conversation KV reuse.
+Regenerate from the public release (no auth needed; sha256
+`11ce51ec…d4b4fb65`) with:
+
+```bash
+curl -L -o syfi_coding_trace.jsonl.gz \
+  https://github.com/uw-syfi/TraceLab/releases/download/v0.0.2/syfi_coding_trace.jsonl.gz
+./syfi_coding_dist.py syfi_coding_trace.jsonl.gz \
+  --turns-out syfi-coding-turns.yaml --intervals-out syfi-coding-intervals.yaml
 ```
 
 ## Usage
