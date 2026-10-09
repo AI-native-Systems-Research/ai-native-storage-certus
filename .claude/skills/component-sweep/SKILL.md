@@ -4,6 +4,9 @@ description: Fast breadth-first TRIAGE across many Certus components — propert
 argument-hint: "<component>[,<component>...] | --all-unverified [--jobs N]"
 ---
 
+> **Frozen 2026-10-09.** This skill moved to [ai-native-storage-workbench](https://github.com/AI-native-Systems-Research/ai-native-storage-workbench) (`fv/skills/`). Edit it there; this copy is not updated. Install the current version with `fv/install.sh <this-repo>`.
+
+
 ## Why this exists, and what it deliberately is NOT
 
 Verifying one component properly costs days, dominated by Kani. Measured on
