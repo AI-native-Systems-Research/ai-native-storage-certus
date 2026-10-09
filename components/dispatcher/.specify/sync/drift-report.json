@@ -1,35 +1,48 @@
 {
-  "generated": "2026-10-05",
+  "generated": "2026-10-08",
   "project": "dispatcher",
   "spec": "001-dispatcher-cache-interface",
-  "branch": "fix/poller-cpu-placement-logging",
-  "baseline": "origin/unstable (stamped 2c86a131; stamp re-verified against `git archive origin/unstable`)",
-  "method": "Delta analysis on a certified baseline: this component's existing clean stamp was re-verified to equal the spec-sync hash of `git archive origin/unstable`, so the only new inputs are this branch's src/specs/interfaces changes. Every FR/SC touching CPU placement, NUMA pinning, threads or SPDK init was located by grep over specs/** and re-checked against the changed code.",
+  "branch": "opt/evolve-latency/s20261004-001925_PR507",
+  "baseline": "origin/unstable 7e53d5b5 (stamped d3209328; stamp re-verified equal to the spec-sync hash of the unstable worktree, and components/interfaces is unchanged on this branch)",
+  "method": "Delta analysis on a certified baseline: the only new inputs are this branch's dispatcher src/specs changes (ada87967 batch_lookup warm-sync deferral, 8825678d scatter-gather periodic-sync removal). Every FR/SC/scenario touching warm-stream sync, warm pins, batch_lookup ordering or the scatter-gather sync was located by grep over specs/** and re-checked against src/lib.rs and src/pipeline.rs.",
   "summary": {
     "specs_analyzed": 1,
-    "findings": 1,
-    "resolved": 1,
+    "findings": 2,
+    "resolved": 2,
     "open": 0
   },
   "aligned": [
-    "FR-011 (poller_base_cpu=Some(base): drive i -> base+i, src/lib.rs:1530-1536)"
+    "FR-019 (scatter-gather: no periodic sync, one final dual sync; src/pipeline.rs:1124-1125)",
+    "FR-061 (poll loop MUST NOT host-sync pipe streams mid-batch)",
+    "Pipelined Reader entity",
+    "Q&A: How does the pipelined reader work?"
   ],
   "drifted": [
     {
-      "requirement": "FR-011",
+      "requirement": "FR-039 step (2)",
       "direction": "BACKFILL",
       "severity": "moderate",
-      "spec_text": "`poller_base_cpu` ... Defaults to `None` (OS scheduler decides).",
-      "actual": "`None` selects NUMA-local automatic placement: round-robin over each drive's NUMA-node cores excluding the node's first two (this branch; previously global CPUs 0/1 were excluded); unresolvable node or node with <=2 cores -> no CPU passed, block device chooses; topology discovery failure -> warning, unpinned.",
-      "location": "components/dispatcher/src/lib.rs:550-600, 1530-1539",
-      "note": "Pre-existing drift (the None path was already automatic on unstable), surfaced because this branch modifies that path.",
-      "resolution": "FR-011 rewritten for the None case; Last Synced header added."
+      "spec_text": "(2) for MemoryTier hits, issues per-region memcpy_h2d_async H2D copies on the device's warm stream and performs a single deferred stream_synchronize after all hot-path copies are issued",
+      "actual": "warm copies only queued; single warm stream_synchronize deferred until after the cold block (steps 4-5); warm read pins released only after it; then remote lookup (FR-045)",
+      "location": "src/lib.rs:2742-2756",
+      "commit": "ada87967",
+      "resolved": true
+    },
+    {
+      "requirement": "US-11 scenario 2",
+      "direction": "BACKFILL",
+      "severity": "minor",
+      "spec_text": "hot entries are served inline without waiting for cold promotions to complete",
+      "actual": "hot H2D copies queued before cold prep, not waited on during cold promotion; one warm-stream sync after the cold block confirms them; new scenario 6 for the ordering",
+      "location": "src/lib.rs:6064 (test mixed_batch_defers_warm_sync_past_cold_block)",
+      "commit": "ada87967",
+      "resolved": true
     }
   ],
   "unspecced": [],
   "conflicts": [],
   "drift_status": "clean",
-  "inputs_sha256": "d3209328eea6bf26b5c8e2c1c56ec8422f2a5cbe44985f1f084fc3f01ccaaaf4",
-  "git_commit": "d102a00b",
-  "synced_at": "2026-10-06T00:17:04Z"
+  "inputs_sha256": "c82a161a74dc787aa453df828ded7fca9d99e3769ad6f6951262ab7a50d11876",
+  "git_commit": "f88aed53",
+  "synced_at": "2026-10-08T23:52:37Z"
 }

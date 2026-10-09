@@ -1,14 +1,35 @@
 {
-  "applied": "2026-10-05",
+  "applied": "2026-10-08",
   "project": "dispatcher",
   "spec": "001-dispatcher-cache-interface",
-  "branch": "fix/poller-cpu-placement-logging",
-  "backup": ".specify/sync/backups/20261005T185807Z/spec.md",
+  "branch": "opt/evolve-latency/s20261004-001925_PR507",
+  "backup": ".specify/sync/backups/20261008T235109Z/spec.md",
   "edits": [
     {
-      "requirement": "FR-011",
+      "requirement": "FR-039 step (2)",
       "direction": "BACKFILL",
-      "result": "FR-011 rewritten for the None case; Last Synced header added."
+      "result": "Rewritten for the deferred warm sync and pin release."
+    },
+    {
+      "requirement": "US-11 scenario 2",
+      "direction": "BACKFILL",
+      "result": "Reworded."
+    },
+    {
+      "requirement": "US-11 scenario 6",
+      "direction": "BACKFILL",
+      "result": "Added (ordering, mirrors test)."
+    },
+    {
+      "requirement": "Last Synced header",
+      "direction": "-",
+      "result": "2026-10-08 entry added."
+    }
+  ],
+  "not_applied": [
+    {
+      "proposal": 3,
+      "reason": "Skipped by user"
     }
   ],
   "source_files_modified": [],

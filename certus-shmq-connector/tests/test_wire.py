@@ -20,6 +20,7 @@ import struct
 
 import pytest
 
+import certus_shmq_connector.ring as ring
 from certus_shmq_connector.ring import (
     CHECK_MISS,
     CHECK_PENDING,
@@ -30,12 +31,14 @@ from certus_shmq_connector.ring import (
     OP_GET_IO_STATS,
     OP_POPULATE,
     OP_REMOVE,
+    OP_TOUCH_CHECK,
     decode_io_stats,
     decode_ok_flags,
     decode_states,
     decode_u64,
     encode_handle_batch,
     encode_keys,
+    encode_promote_keys,
 )
 
 
@@ -44,9 +47,9 @@ from certus_shmq_connector.ring import (
 
 def test_new_opcodes_have_the_wire_values():
     # wire.rs: POPULATE=11, REMOVE=12, CLEAR_MEMORY_TIER=13, FLUSH_TO_SSD=14,
-    # GET_IO_STATS=15.
+    # GET_IO_STATS=15, TOUCH_CHECK=16.
     assert (OP_POPULATE, OP_REMOVE, OP_CLEAR_MEMORY_TIER, OP_FLUSH_TO_SSD,
-            OP_GET_IO_STATS) == (11, 12, 13, 14, 15)
+            OP_GET_IO_STATS, OP_TOUCH_CHECK) == (11, 12, 13, 14, 15, 16)
 
 
 # ── Check: req is a key list; resp is `[state:u8]*n` (0=miss/1=resident/2=pend)─
@@ -187,3 +190,183 @@ def test_populate_handle_must_be_64_bytes():
 
     with pytest.raises(RingError):
         encode_handle_batch([(1, [(b"\x00" * 32, 0, 0, 4096)])])
+
+
+# ── bulk key codec: byte-identical to the old per-key encoders/decoder ───────
+
+# Reference copies of the pre-bulk per-key implementations. The bulk helpers in
+# ring.py must reproduce these bytes/lists exactly for every input.
+
+
+def _old_encode_keys(keys):
+    out = bytearray(struct.pack("<I", len(keys)))
+    for k in keys:
+        out += struct.pack("<Q", k & 0xFFFFFFFFFFFFFFFF)
+    return bytes(out)
+
+
+def _old_encode_promote_keys(promote, keys):
+    return struct.pack("<B", 1 if promote else 0) + _old_encode_keys(keys)
+
+
+def _old_decode_states(payload, n):
+    return [payload[i] if i < len(payload) else CHECK_MISS for i in range(n)]
+
+
+_CODEC_SIZES = [0, 1, 2, 63, 64, 65, 4096]
+
+
+def _key_lists():
+    import random
+
+    rnd = random.Random(20261003)
+    for n in _CODEC_SIZES:
+        yield [rnd.getrandbits(64) for _ in range(n)]
+        if n:
+            # Edge values at both ends of u64, placed at the ends of the list.
+            keys = [rnd.getrandbits(64) for _ in range(n)]
+            keys[0] = 0
+            keys[-1] = 2**64 - 1
+            yield keys
+
+
+@pytest.mark.parametrize("promote", [False, True])
+def test_bulk_encoders_match_per_key_reference(promote):
+    for keys in _key_lists():
+        assert encode_keys(keys) == _old_encode_keys(keys)
+        assert encode_promote_keys(promote, keys) == _old_encode_promote_keys(promote, keys)
+
+
+@pytest.mark.parametrize("promote", [False, True])
+def test_bulk_encoders_mask_out_of_range_ints_like_reference(promote):
+    # Negative and >= 2**64 ints take the masked retry; bytes must match the
+    # old per-key `k & mask` exactly.
+    for n in _CODEC_SIZES[1:]:
+        keys = [7] * n
+        keys[0] = -1
+        keys[-1] = 2**64 + 5
+        keys[n // 2] = -(2**70) + 3
+        assert encode_keys(keys) == _old_encode_keys(keys)
+        assert encode_promote_keys(promote, keys) == _old_encode_promote_keys(promote, keys)
+
+
+def test_bulk_encoders_reject_float_key_with_type_error():
+    with pytest.raises(TypeError):
+        _old_encode_keys([1, 2.0])
+    with pytest.raises(TypeError):
+        encode_keys([1, 2.0])
+    with pytest.raises(TypeError):
+        encode_promote_keys(False, [1, 2.0])
+
+
+def test_bulk_decode_states_matches_per_key_reference():
+    import random
+
+    rnd = random.Random(7)
+    for n in _CODEC_SIZES:
+        for plen in sorted({0, max(0, n - 1), n // 2, n, n + 1, n + 64}):
+            payload = bytes(rnd.choice((CHECK_MISS, CHECK_RESIDENT, CHECK_PENDING)) for _ in range(plen))
+            got = decode_states(payload, n)
+            assert got == _old_decode_states(payload, n)
+            assert len(got) == n
+            assert all(type(s) is int for s in got)
+
+
+# ── presence: the bulk codec is what ring.py actually runs ───────────────────
+
+
+def test_presence_bulk_encoders_make_one_pack_call(monkeypatch):
+    import certus_shmq_connector.ring as ring
+
+    assert ring._U64_MASK == 2**64 - 1
+
+    class _CountingStruct:
+        error = struct.error
+
+        def __init__(self):
+            self.calls = 0
+
+        def pack(self, *args):
+            self.calls += 1
+            return struct.pack(*args)
+
+    counter = _CountingStruct()
+    monkeypatch.setattr(ring, "struct", counter)
+    keys = list(range(1, 65))
+    for encode in (encode_keys, lambda ks: encode_promote_keys(True, ks)):
+        counter.calls = 0
+        encode(keys)
+        assert counter.calls == 1
+        bad = list(keys)
+        bad[10] = 2**64 + 1
+        counter.calls = 0
+        encode(bad)
+        assert counter.calls == 2  # masked retry
+
+
+def test_presence_bulk_decode_states_slices_only():
+    class _SliceOnly:
+        def __init__(self, data):
+            self._data = data
+
+        def __getitem__(self, idx):
+            if isinstance(idx, slice):
+                return self._data[idx]
+            raise AssertionError("decode_states must not index per byte")
+
+        def __len__(self):
+            raise AssertionError("decode_states must not call len(payload)")
+
+    data = bytes([CHECK_RESIDENT, CHECK_PENDING, CHECK_MISS] * 22)  # 66 bytes
+    for n in (len(data) + 5, len(data), len(data) - 7):
+        assert decode_states(_SliceOnly(data), n) == decode_states(data, n)
+
+
+# ── TouchCheck fallback for servers that predate opcode 16 ──────────────────
+
+
+class _ScriptedRing(ring.Ring):
+    """A Ring with no shared memory: `request` replays scripted replies and
+    records the opcodes it was asked to send."""
+
+    def __init__(self, replies):
+        self._replies = list(replies)
+        self.sent = []
+
+    def request(self, opcode, data):
+        self.sent.append(opcode)
+        return self._replies.pop(0)
+
+
+_STATUS_ERROR = 1
+
+
+def test_touch_states_uses_fused_op_on_a_current_server():
+    r = _ScriptedRing([(ring.STATUS_OK, bytes([CHECK_RESIDENT, CHECK_MISS]))])
+    assert r.touch_states([7, 8]) == [CHECK_RESIDENT, CHECK_MISS]
+    assert r.sent == [OP_TOUCH_CHECK]
+
+
+def test_touch_states_falls_back_to_touch_then_check_on_an_old_server():
+    unknown = (_STATUS_ERROR, f"unknown opcode {OP_TOUCH_CHECK}".encode())
+    # Keys: resident+touched, resident but touch failed, pending with touch
+    # failed, miss — the fused op's mapping gives RESIDENT, MISS, PENDING, MISS.
+    touch = (ring.STATUS_OK, bytes([1, 0, 0, 1]))
+    check = (ring.STATUS_OK, bytes([CHECK_RESIDENT, CHECK_RESIDENT, CHECK_PENDING, CHECK_MISS]))
+    r = _ScriptedRing([unknown, touch, check, touch, check])
+
+    expected = [CHECK_RESIDENT, CHECK_MISS, CHECK_PENDING, CHECK_MISS]
+    assert r.touch_states([1, 2, 3, 4]) == expected
+    assert r.sent == [OP_TOUCH_CHECK, ring.OP_TOUCH, ring.OP_CHECK]
+
+    # The rejection is remembered: the next call skips the fused op entirely.
+    r.sent.clear()
+    assert r.touch_states([1, 2, 3, 4]) == expected
+    assert r.sent == [ring.OP_TOUCH, ring.OP_CHECK]
+
+
+def test_touch_states_raises_other_server_errors():
+    r = _ScriptedRing([(_STATUS_ERROR, b"duplicate key 5")])
+    with pytest.raises(ring.RingError, match="duplicate key 5"):
+        r.touch_states([5, 5])
+    assert r._touch_check_supported

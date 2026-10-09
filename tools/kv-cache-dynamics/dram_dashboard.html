@@ -135,6 +135,7 @@
               <option value="ccweka">cc-weka 062126 (median 17s)</option>
               <option value="wildchat">WildChat-1M (median 2.1m)</option>
               <option value="syfi">syfi coding (median 10s)</option>
+              <option value="swebench">SWE-bench agentic (median 5.5s)</option>
             </select>
           </div>
           <div class="field">
@@ -147,8 +148,22 @@
             <div class="field"><label for="sessions">Sessions</label>
               <input id="sessions" type="number" min="1" step="1" value="100"></div>
           </div>
-          <div class="field"><label for="turns">Turns / conversation</label>
+          <div class="field"><label for="turnMode">Turns / conversation</label>
+            <select id="turnMode">
+              <option value="fixed" selected>fixed count</option>
+              <option value="ccweka">sample: cc-weka (med 67)</option>
+              <option value="swebench">sample: SWE-bench (med 38)</option>
+              <option value="file">distribution file…</option>
+            </select></div>
+          <div class="field" id="turnsField"><label for="turns">Fixed turn count</label>
             <input id="turns" type="number" min="1" step="1" value="100"></div>
+          <div class="field" id="turnFileField" hidden>
+            <label for="turnFile">Turn-distribution file</label>
+            <input id="turnFile" value="cc-trace-weka-062126-turns.yaml" inputmode="text"
+              placeholder="path to a turns YAML">
+            <span class="hint">Absolute, or relative to the kv-cache-dynamics directory. Produce one
+              with <code style="font-family:var(--mono)">extract_turn_distribution.py</code>.</span>
+          </div>
         </fieldset>
 
         <fieldset>
@@ -262,7 +277,7 @@
 <script>
 "use strict";
 const TIERS=["HBM","DRAM","SSD"], GiB=1024**3;
-const DIST_META={burstgpt:{label:"BurstGPT",median:"2.2m"},ccweka:{label:"cc-weka",median:"17s"},wildchat:{label:"WildChat-1M",median:"2.1m"},syfi:{label:"syfi coding",median:"10s"}};
+const DIST_META={burstgpt:{label:"BurstGPT",median:"2.2m"},ccweka:{label:"cc-weka",median:"17s"},wildchat:{label:"WildChat-1M",median:"2.1m"},syfi:{label:"syfi coding",median:"10s"},swebench:{label:"SWE-bench",median:"5.5s"}};
 
 /* ---- charts ---- */
 const W=760,H=320,PL=52,PR=118,PT=14,PB=42;
@@ -311,6 +326,7 @@ function render(cfg,data){
     workingGb?tile("Working set",workingGb.toFixed(0)+" GB",meta.oversub.toFixed(1)+"× HBM"):"",
     tile("Tokens / turn",meta.turnTokens.toLocaleString(),meta.promptTok+" prompt + "+meta.genTok+" gen"),
     tile("Context window",meta.maxModelLen?meta.maxModelLen.toLocaleString():"unbounded",windowGb?windowGb.toFixed(1)+" GB cap":""),
+    tile("Turns/conv",meta.turnDist?"sampled":meta.numTurns,meta.turnDist?meta.turnDist.replace(/\.ya?ml$/,""):"fixed"),
     tile("SSD @ "+dramLabel(rows[0].dram),rows[0].with.SSD.toFixed(1)+"<small>%</small>","of lookups"),
   ].join("");
 
@@ -348,15 +364,18 @@ function render(cfg,data){
     html+="<tr>"+cells.map(c=>`<td>${c}</td>`).join("")+"</tr>";}
   document.getElementById("table").innerHTML=html+"</tbody>";
 
+  const turnDesc = meta.turnDist
+    ? `turns sampled from ${meta.turnDist}`
+    : `${meta.numTurns} turns each`;
   document.getElementById("footnote").innerHTML=
-    `Measured ${rows[0].measuredConvs} of ${cfg.sessions} conversations `+
+    `Measured ${rows[0].measuredConvs} of ${cfg.sessions} conversations, ${turnDesc} `+
     `(a warmup wave of ${cfg.concurrent} is excluded). Each point is a real run of `+
     `<code>kv_cache_dynamics.py</code>; tiers model capacity and placement only (no bandwidth or latency).`+
     (rows[0].decode?" Decode reads are per generated token and reported separately from prefill.":"");
 }
 
 /* ---- run (fetch from the local simulator-backed server) ---- */
-const IDS=["dist","dram","concurrent","sessions","turns","hbm","ssd","mml","prefix",
+const IDS=["dist","dram","concurrent","sessions","turnMode","turns","turnFile","hbm","ssd","mml","prefix",
   "prompt","gen","shared","admission","block","seed","layers","kvheads","headdim","bpe"];
 function formCfg(){const c={};for(const id of IDS)c[id]=document.getElementById(id).value;
   c.decode=document.getElementById("decode").checked?"1":"0";return c;}
@@ -392,16 +411,22 @@ document.addEventListener("mousemove",e=>{
 
 /* ---- wiring ---- */
 const DEFAULTS={dist:"burstgpt",dram:"8,16,32,64,128,256",concurrent:"8",sessions:"100",
-  turns:"100",hbm:"10",ssd:"20000",mml:"131072",prefix:"20000",prompt:"364",gen:"1398",
+  turnMode:"fixed",turns:"100",turnFile:"cc-trace-weka-062126-turns.yaml",hbm:"10",ssd:"20000",mml:"131072",prefix:"20000",prompt:"364",gen:"1398",
   shared:"0",admission:"interval",block:"64",seed:"1",layers:"48",kvheads:"8",headdim:"128",bpe:"2"};
 function setShared(){const v=+document.getElementById("shared").value;
   document.getElementById("sharedVal").textContent=(v*100).toFixed(0)+"%";}
+function setTurnMode(){ const mode=document.getElementById("turnMode").value;
+  const fixed=mode==="fixed";
+  document.getElementById("turnsField").hidden=!fixed;
+  document.getElementById("turnFileField").hidden=mode!=="file"; }
+document.getElementById("turnMode").addEventListener("change",setTurnMode);
 document.getElementById("shared").addEventListener("input",setShared);
 document.getElementById("controls").addEventListener("submit",e=>{e.preventDefault();run();});
 document.getElementById("resetBtn").addEventListener("click",()=>{
   for(const [k,v] of Object.entries(DEFAULTS))document.getElementById(k).value=v;
-  document.getElementById("decode").checked=false;setShared();run();});
+  document.getElementById("decode").checked=false;setShared();setTurnMode();run();});
 setShared();
+setTurnMode();
 run();
 </script>
 </body>
