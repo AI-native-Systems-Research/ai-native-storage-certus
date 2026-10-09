@@ -4,13 +4,13 @@ level: 1
 what: 'spec<->code discordances found while reconciling the specification with the code. Each is EXCLUDED from formal
   verification (level 2). status: candidate until a test confirms it (confirmed) or shows it was a misreading (withdrawn).'
 counts:
-  discordances: 45
-  spec_and_code_differ: 27
-  spec_not_found_in_code: 5
+  discordances: 35
+  spec_and_code_differ: 19
+  spec_not_found_in_code: 3
   input_range_mismatch: 13
-  properties_excluded_from_level2: 32
+  properties_excluded_from_level2: 22
   routed_to_other_tools: 0
-  reader_missed_sent_to_level2: 0
+  reader_missed_sent_to_level2: 10
   confirmed: 0
   withdrawn: 0
 discordances:
@@ -45,75 +45,7 @@ discordances:
     code:
     - DPM-READ-ERR-HEADERCRC
     - DPM-READ-ERR-ENTRYCRC
-- id: D-FR-003-gpt.rs:7990-06856a
-  name: Init backup fallback
-  kind: spec-and-code-differ
-  methods:
-  - initialize
-  - initialize_or_format
-  spec_says: If the main copy of the partition table fails its integrity check, the backup copy stored at the last
-    sector of the drive is tried instead, and if that copy is intact the read succeeds and returns the partitions
-    it describes. If the main copy of the partition table is damaged in the specific way that its identifying marker
-    at the start of the header is wrong or has been wiped to zeros, that also counts as corruption and the backup
-    copy at the end of the drive is tried, and the read succeeds when the backup is intact.
-  code_does: The spare copy is consulted for exactly two reasons - the first copy failed its checksum, or the first
-    copy did not carry the expected signature - while any other failure such as an input/output error on the first
-    copy is reported immediately without touching the spare copy.
-  spec_pointers:
-  - FR-003
-  - AS-US2-2
-  - SC-002
-  - AS-US2-4
-  code_pointers:
-  - gpt.rs:79-90
-  - gpt.rs:79
-  - gpt.rs:83
-  status: candidate
-  excluded_properties:
-  - DPM-INIT-POST-BACKUP-FALLBACK
-  extraction_sides:
-    spec:
-    - DPM-INIT-POST-BACKUP-ON-CRC
-    - DPM-INIT-POST-BACKUP-ON-SIGNATURE
-    code:
-    - DPM-READ-FALLBACK-TRIGGER
-- id: D-FR-003-gpt.rs:9092-ca0c39
-  name: Init error no table
-  kind: spec-and-code-differ
-  methods:
-  - initialize
-  - initialize_or_format
-  spec_says: Reading the existing partition table can only succeed if the drive already carries at least one intact
-    copy of the table, either the main copy at the front or the backup copy at the end. If neither the main copy
-    nor the backup copy of the partition table can be accepted as intact, the read fails with an error saying no
-    partition table was found, which is also the answer given for a completely blank drive.
-  code_does: If neither the partition table at the start of the disk nor the spare copy at the end of the disk can
-    be validated, reading fails with a "no partition table" error stating that neither the primary nor the backup
-    header is valid. SURPRISE - an empty table counts as a successful read. A header that declares zero entry slots
-    leads to reading zero bytes of entries, whose checksum is the checksum of nothing, so if the header happens
-    to record that same value the read succeeds and reports a partition table with no partitions at all rather than
-    reporting that no usable table was found.
-  spec_pointers:
-  - FR-003
-  - AS-US2-1
-  - AS-US2-3
-  code_pointers:
-  - gpt.rs:90-92
-  - gpt.rs:90
-  - gpt.rs:92
-  - gpt.rs:118
-  - gpt.rs:123
-  - gpt.rs:452
-  status: candidate
-  excluded_properties:
-  - DPM-INIT-ERR-NO-TABLE
-  extraction_sides:
-    spec:
-    - DPM-INIT-PRE-GPT-PRESENT
-    - DPM-INIT-ERR-NO-TABLE
-    code:
-    - DPM-INIT-ERR-NOGPT
-    - DPM-READ-ZEROCOUNT-ACCEPTED
+  classified: classifiers disagree - needs a person
 - id: D-NOSPEC-gpt.rs:464487-be2449
   name: Init error io
   kind: spec-and-code-differ
@@ -157,6 +89,18 @@ discordances:
     - DPM-IO-READ-ERR-DEVICE
     - DPM-IO-READ-ERR-UNEXPECTED
     - DPM-IO-READ-ERR-CHANNEL
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - src/gpt.rs:83
+  - src/gpt.rs:90-95
+  - src/gpt.rs:468
+  - src/gpt.rs:472
+  - src/gpt.rs:478-490
+  - gpt.rs:90-95
+  - gpt.rs:468
+  - gpt.rs:472
+  - gpt.rs:478-489
+  - lib.rs:57-60
 - id: D-NOSPEC-gpt.rs:118120-4d9cf0
   name: Init io count bounded
   kind: spec-and-code-differ
@@ -184,6 +128,13 @@ discordances:
     - DPM-INIT-POST-IO-COUNT
     code:
     - DPM-READ-COUNT-UNVALIDATED
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - src/gpt.rs:118-120
+  - src/gpt.rs:451-455
+  - gpt.rs:118-120
+  - gpt.rs:452-455
+  - gpt.rs:87-90
 - id: D-FR-011-gpt.rs:326-582fc3
   name: Format precondition sector size
   kind: spec-and-code-differ
@@ -213,42 +164,16 @@ discordances:
     - DPM-FORMAT-PRE-SECTOR-SIZE
     code:
     - DPM-FORMAT-PRE-SECTORSIZE
-- id: D-AS-US1-2-gpt.rs:160161-267b4d
-  name: Format no write on reject
-  kind: spec-and-code-differ
-  methods:
-  - format
-  - initialize_or_format
-  spec_says: When a format request is rejected because the requested layout is impossible, nothing at all is written
-    to the drive, so a bad request cannot leave the drive in a half-formatted state.
-  code_does: If the device does not leave at least one sector of usable space between the partition table structures
-    at the two ends of the disk, writing a new table fails with a layout error saying the device is too small, and
-    nothing is written. SURPRISE - partial change left behind on the failure path. Writing a new partition table
-    performs five separate disk writes one after another and gives up at the first one that fails, with no attempt
-    to undo the writes that already landed, so a failure part-way through leaves the disk in a mixed state - for
-    example the protective first sector and the primary header replaced while the backup header still describes
-    the old layout - and the caller is told only that a write failed.
-  spec_pointers:
-  - AS-US1-2
-  - AS-US1-3
-  - FR-005
-  - FR-006
-  code_pointers:
-  - gpt.rs:160-161
-  - gpt.rs:160
-  - gpt.rs:161
-  - gpt.rs:204
-  - gpt.rs:207
-  - gpt.rs:216
-  status: candidate
-  excluded_properties:
-  - DPM-FORMAT-FRAME-NO-WRITE-ON-REJECT
-  extraction_sides:
-    spec:
-    - DPM-FORMAT-FRAME-NO-WRITE-ON-LAYOUT-ERROR
-    code:
-    - DPM-FORMAT-ERR-LAYOUT-TOOSMALL
-    - DPM-FORMAT-NO-ROLLBACK
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - src/lib.rs:91
+  - src/gpt.rs:326
+  - src/gpt.rs:330-333
+  - src/gpt.rs:351-352
+  - lib.rs:91
+  - gpt.rs:324-327
+  - gpt.rs:330-352
+  - ipartition_table.rs:39
 - id: D-NOSPEC-gpt.rs:158160-15a0f2
   name: Format precondition geometry min
   kind: spec-and-code-differ
@@ -277,6 +202,7 @@ discordances:
     spec: []
     code:
     - DPM-FORMAT-PRE-GEOMETRY
+  classified: classifiers disagree - needs a person
 - id: D-FR-001-gpt.rs:310-90710b
   name: Format precondition max 128
   kind: spec-and-code-differ
@@ -304,31 +230,18 @@ discordances:
     - DPM-NUMPART-INV-MAX-128
     code:
     - DPM-FORMAT-PRE-MAXPARTS
-- id: D-NOSPEC-gpt.rs:263268-5fd2d4
-  name: Format sum overflow
-  kind: spec-and-code-differ
-  methods:
-  - format
-  - initialize_or_format
-  spec_says: The total sector demand of the explicitly sized partitions is accumulated by plain addition with no
-    overflow check, so a request combining very large byte sizes with a very small sector size can make the running
-    total wrap round and pass the capacity check it should have failed.
-  code_does: SURPRISE - unguarded counter arithmetic. The total sector demand of the explicitly sized partitions
-    is accumulated by plain addition with no overflow check, so a request combining very large byte sizes with a
-    very small sector size - a combination the component never rejects - can make that running total wrap around
-    or crash before the "does it fit" comparison is ever reached.
-  spec_pointers: []
-  code_pointers:
-  - gpt.rs:263-268
-  - gpt.rs:263
-  - gpt.rs:268
-  status: candidate
-  excluded_properties:
-  - DPM-FORMAT-SUM-OVERFLOW
-  extraction_sides:
-    spec: []
-    code:
-    - DPM-FORMAT-SUM-OVERFLOW
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - src/gpt.rs:279-307
+  - src/gpt.rs:310
+  - src/gpt.rs:433-437
+  - src/gpt.rs:118-120
+  - src/gpt.rs:131
+  - gpt.rs:279-307
+  - gpt.rs:310
+  - gpt.rs:432-437
+  - gpt.rs:118-119
+  - gpt.rs:131-144
 - id: D-AS-US1-1-gpt.rs:222-405648
   name: Format table
   kind: spec-and-code-differ
@@ -360,6 +273,14 @@ discordances:
     - DPM-NUMPART-POST-MATCHES-CONFIG
     code:
     - DPM-FORMAT-ZEROGUID-DROPPED
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - src/gpt.rs:219-231
+  - src/gpt.rs:222
+  - src/lib.rs:118
+  - gpt.rs:219-231
+  - gpt.rs:222
+  - gpt.rs:297
 - id: D-FR-008-gpt.rs:564568-1fda36
   name: Format guid fresh
   kind: spec-and-code-differ
@@ -387,53 +308,15 @@ discordances:
     - DPM-FORMAT-POST-GUID-V4
     code:
     - DPM-FORMAT-GUID-DEGRADED
-- id: D-AS-US1-1-gpt.rs:298-24db0d
-  name: Format type guid echo
-  kind: spec-not-found-in-code
-  methods:
-  - format
-  - initialize_or_format
-  spec_says: The partition type identifier recorded for each finished partition is exactly the type identifier the
-    caller asked for, unchanged and not reordered.
-  code_does: No matching guarantee stated by the code reader.
-  spec_pointers:
-  - AS-US1-1
-  code_pointers:
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - src/gpt.rs:564-574
+  - src/gpt.rs:566-568
+  - src/gpt.rs:174
+  - src/gpt.rs:298
+  - gpt.rs:564-573
+  - gpt.rs:295
   - gpt.rs:298
-  status: candidate
-  excluded_properties:
-  - DPM-FORMAT-POST-TYPE-GUID-ECHO
-  extraction_sides:
-    spec:
-    - DPM-FORMAT-POST-TYPE-GUID-ECHO
-    code: []
-- id: D-NOSPEC-lib.rs:91-3f11fb
-  name: Format ignores device geometry
-  kind: spec-and-code-differ
-  methods:
-  - format
-  - initialize_or_format
-  spec_says: Writing a new partition table takes the sector size, the total sector count and the namespace number
-    from the caller’s request and never compares them with what the connected device actually reports, even though
-    the read path does ask the device for exactly those two numbers, so a caller who overstates the drive size has
-    a table written that describes sectors the device does not have.
-  code_does: SURPRISE - caller-supplied geometry is trusted without checking. Writing a new partition table takes
-    the sector size, total sector count and namespace number from the caller's request and never compares them with
-    what the connected device actually reports, even though the read path does ask the device for exactly those
-    two numbers; a caller who overstates the disk size has a table written that describes sectors the device does
-    not have.
-  spec_pointers: []
-  code_pointers:
-  - lib.rs:91
-  - lib.rs:73
-  - lib.rs:76
-  status: candidate
-  excluded_properties:
-  - DPM-FORMAT-IGNORES-DEVICE-GEOMETRY
-  extraction_sides:
-    spec: []
-    code:
-    - DPM-FORMAT-IGNORES-DEVICE
 - id: D-NOSPEC-lib.rs:104-b23f41
   name: Pinfo index echo
   kind: spec-and-code-differ
@@ -458,6 +341,14 @@ discordances:
     - DPM-PINFO-POST-INDEX-ECHO
     code:
     - DPM-PINFO-INDEX-MISMATCH
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - src/lib.rs:104
+  - src/gpt.rs:134-137
+  - src/gpt.rs:221-223
+  - lib.rs:102-110
+  - gpt.rs:132-137
+  - gpt.rs:219-224
 - id: D-FR-005-lib.rs:3859-b8dfcd
   name: Iof precondition config valid
   kind: spec-not-found-in-code
@@ -478,35 +369,7 @@ discordances:
     spec:
     - DPM-IOF-PRE-CONFIG-VALID
     code: []
-- id: D-AS-US3-2-lib.rs:5759-81652d
-  name: Iof missing formatted
-  kind: spec-and-code-differ
-  methods:
-  - initialize_or_format
-  spec_says: When the caller has not demanded a fresh start but the drive carries no usable partition table, a new
-    table is written and the accompanying flag reports that formatting did take place.
-  code_does: When reading the existing table reports either that there is no table or that the table is corrupt,
-    the convenience entry point writes a new table using the supplied layout and reports that a new table was created.
-    SURPRISE - the documentation understates what the code does. The comment above the convenience entry point says
-    a new table is created when a fresh start is demanded or when no valid table exists, but the code also creates
-    one when the table is present and merely reports itself as corrupt, which is a destructive action the comment
-    does not mention.
-  spec_pointers:
-  - AS-US3-2
-  code_pointers:
-  - lib.rs:57-59
-  - lib.rs:57
-  - lib.rs:59
-  - lib.rs:38
-  status: candidate
-  excluded_properties:
-  - DPM-IOF-POST-MISSING-FORMATTED
-  extraction_sides:
-    spec:
-    - DPM-IOF-POST-MISSING-FORMATTED
-    code:
-    - DPM-IOF-POST-FALLBACK
-    - DPM-IOF-DOC-CLAIM
+  classified: classifiers disagree - needs a person
 - id: D-FR-005-lib.rs:62-5ebbf3
   name: Iof error propagate
   kind: spec-and-code-differ
@@ -530,6 +393,16 @@ discordances:
     - DPM-IOF-ERR-LAYOUT-PROPAGATE
     code:
     - DPM-IOF-ERR-PROPAGATE
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - src/gpt.rs:90-95
+  - src/lib.rs:57-62
+  - src/lib.rs:51
+  - src/lib.rs:59
+  - lib.rs:55-63
+  - gpt.rs:83
+  - gpt.rs:90-95
+  - lib.rs:69-71
 - id: D-AS-US2-4-lib.rs:5759-323f41
   name: Iof no reformat on damaged primary
   kind: spec-and-code-differ
@@ -558,59 +431,7 @@ discordances:
     - DPM-IOF-FRAME-NO-REFORMAT-ON-DAMAGED-PRIMARY
     code:
     - DPM-IOF-DESTRUCTIVE-FALLBACK
-- id: D-NOSPEC-gpt.rs:8789-ed5169
-  name: Read backup location underflow
-  kind: spec-and-code-differ
-  methods:
-  - initialize
-  - initialize_or_format
-  spec_says: The location of the backup copy is computed by subtracting one, and then the size of the entry list,
-    from the device’s sector count with nothing checking that the device is large enough, so on a very small device
-    that subtraction goes below zero and crashes or wraps round to a nonsensical sector instead of reporting an
-    error.
-  code_does: SURPRISE - subtraction below zero with no guard at all. The location of the spare copy is computed
-    by subtracting one, and then the size of the entry table, from the device's sector count, with nothing checking
-    that the device is big enough; on a device reporting zero sectors, or fewer sectors than the entry table needs,
-    this arithmetic crashes or wraps to an absurd sector number that is then read from.
-  spec_pointers: []
-  code_pointers:
-  - gpt.rs:87-89
-  - gpt.rs:87
-  - gpt.rs:89
-  status: candidate
-  excluded_properties:
-  - DPM-READ-BACKUP-LOCATION-UNDERFLOW
-  extraction_sides:
-    spec: []
-    code:
-    - DPM-READ-BACKUP-UNDERFLOW
-- id: D-NOSPEC-gpt.rs:390391-d83761
-  name: Read stride mismatch
-  kind: spec-and-code-differ
-  methods:
-  - initialize
-  - initialize_or_format
-  spec_says: The number of bytes to read for the entry list is computed from the entry size declared in the header,
-    but the code that splits those bytes into entries always steps forward by a fixed 128 bytes and stops early
-    when it runs out of data, so a header declaring any other entry size has its entries cut at the wrong boundaries
-    and the partitions reported are nonsense rather than an error.
-  code_does: SURPRISE - two different entry sizes used in one operation. The number of bytes to read is computed
-    from the entry size declared in the header, but the code that splits those bytes into entries always steps forward
-    by a fixed 128 bytes and stops early when it runs out of data; if a header declares any other entry size, the
-    entries are cut at the wrong boundaries and the partitions reported are nonsense rather than an error.
-  spec_pointers: []
-  code_pointers:
-  - gpt.rs:390-391
-  - gpt.rs:390
-  - gpt.rs:391
-  - gpt.rs:119
-  status: candidate
-  excluded_properties:
-  - DPM-READ-STRIDE-MISMATCH
-  extraction_sides:
-    spec: []
-    code:
-    - DPM-READ-STRIDE-MISMATCH
+  classified: classifiers disagree - needs a person
 - id: D-FR-009-gpt.rs:578-a38286
   name: Name length limit
   kind: spec-and-code-differ
@@ -638,6 +459,13 @@ discordances:
     - DPM-FORMAT-PRE-NAME-LENGTH
     code:
     - DPM-FORMAT-NAME-TRUNCATED
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - src/gpt.rs:576-587
+  - src/gpt.rs:578
+  - gpt.rs:576-587
+  - gpt.rs:294
+  - ipartition_table.rs:32
 - id: D-SC-003-gpt.rs:578-a5018e
   name: Name roundtrip
   kind: spec-and-code-differ
@@ -667,6 +495,12 @@ discordances:
     - DPM-INV-NAME-ROUNDTRIP-ASCII
     code:
     - DPM-INV-NAME-ROUNDTRIP
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - src/gpt.rs:578
+  - src/gpt.rs:589-595
+  - gpt.rs:578
+  - gpt.rs:589-595
 - id: D-AS-US1-1-gpt.rs:293305-2d22cf
   name: No overlap
   kind: spec-and-code-differ
@@ -704,6 +538,14 @@ discordances:
     code:
     - DPM-INV-PARTITIONS-DISJOINT
     - DPM-READ-NO-OVERLAP-CHECK
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - src/gpt.rs:293
+  - src/gpt.rs:305
+  - src/gpt.rs:131-144
+  - gpt.rs:293
+  - gpt.rs:305
+  - gpt.rs:131-144
 - id: D-FR-001-gpt.rs:1112-c7cd72
   name: Entry array shape
   kind: spec-and-code-differ
@@ -734,6 +576,18 @@ discordances:
     - DPM-INV-ENTRY-ARRAY-SHAPE
     code:
     - DPM-INV-SLOTS-128
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - src/gpt.rs:186-187
+  - src/gpt.rs:310
+  - src/gpt.rs:433
+  - src/gpt.rs:118-120
+  - src/gpt.rs:131
+  - gpt.rs:186-187
+  - gpt.rs:310-319
+  - gpt.rs:433
+  - gpt.rs:118-120
+  - gpt.rs:131
 - id: D-FR-001-gpt.rs:363373-d0dc35
   name: Signature revision
   kind: spec-and-code-differ
@@ -772,6 +626,7 @@ discordances:
     code:
     - DPM-READ-ERR-SIGNATURE
     - DPM-READ-REVISION-UNCHECKED
+  classified: classifiers disagree - needs a person
 - id: D-FR-008-gpt.rs:564-56fdef
   name: Guid distinct
   kind: spec-not-found-in-code
@@ -780,7 +635,8 @@ discordances:
   - initialize_or_format
   spec_says: Within a single formatted drive, no two partitions are given the same unique identifier, and no partition
     shares the drive's own identifier.
-  code_does: No matching guarantee stated by the code reader.
+  code_does: Unique and disk GUIDs are independent random draws with no distinctness check, and if /dev/urandom
+    cannot be opened or read every GUID is the same constant, so distinctness is not guaranteed.
   spec_pointers:
   - FR-008
   code_pointers:
@@ -792,6 +648,14 @@ discordances:
     spec:
     - DPM-INV-GUID-DISTINCT
     code: []
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - src/gpt.rs:564-574
+  - src/gpt.rs:174
+  - src/gpt.rs:298
+  - gpt.rs:564-573
+  - gpt.rs:295
+  - gpt.rs:298
 - id: D-FR-011-gpt.rs:58-e127fc
   name: Sector size domain
   kind: spec-not-found-in-code
@@ -803,7 +667,8 @@ discordances:
   - initialize_or_format
   spec_says: The sector size the component works with, and the sector size it reports back in a partition table,
     is always either 512 bytes or 4096 bytes, the two sizes the component promises to support.
-  code_does: No matching guarantee stated by the code reader.
+  code_does: Neither the device-reported sector size (initialize) nor config.sector_size (format) is checked against
+    {512, 4096}; whatever value arrives is used and reported back in the table.
   spec_pointers:
   - FR-011
   code_pointers:
@@ -815,26 +680,17 @@ discordances:
     spec:
     - DPM-INV-SECTOR-SIZE-DOMAIN
     code: []
-- id: D-NOSPEC-ipartition_table.rs-b35063
-  name: Type guid constants
-  kind: spec-not-found-in-code
-  methods:
-  - format
-  - initialize_or_format
-  spec_says: The three partition kinds this system defines — the metadata region, the data region and the extended-metadata
-    region — each have one fixed published identifier value that never changes, so a drive formatted by one version
-    of the software is recognised by another.
-  code_does: No matching guarantee stated by the code reader.
-  spec_pointers: []
-  code_pointers:
-  - ipartition_table.rs
-  status: candidate
-  excluded_properties:
-  - DPM-INV-TYPE-GUID-CONSTANTS
-  extraction_sides:
-    spec:
-    - DPM-INV-TYPE-GUID-CONSTANTS
-    code: []
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - src/lib.rs:73-75
+  - src/lib.rs:91
+  - src/gpt.rs:148
+  - src/gpt.rs:235
+  - lib.rs:73-75
+  - lib.rs:91
+  - gpt.rs:49-63
+  - gpt.rs:148
+  - gpt.rs:235
 - id: D-NOSPEC-gpt.rs:137-2c196c
   name: Partition index sequential
   kind: spec-and-code-differ
@@ -862,6 +718,12 @@ discordances:
     - DPM-INV-PARTITION-INDEX-SEQUENTIAL
     code:
     - DPM-READ-INDEX-CAST
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - src/gpt.rs:132-137
+  - src/gpt.rs:220-223
+  - gpt.rs:132-137
+  - gpt.rs:219-224
 - id: D-FR-004-gpt.rs:293-9d5bb1
   name: Num sectors positive
   kind: spec-and-code-differ
@@ -897,6 +759,18 @@ discordances:
     code:
     - DPM-FORMAT-ZEROREST-UNDERFLOW
     - DPM-READ-ENDING-UNDERFLOW
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - src/gpt.rs:277
+  - src/gpt.rs:280-293
+  - src/gpt.rs:226
+  - src/gpt.rs:139
+  - gpt.rs:277
+  - gpt.rs:280-281
+  - gpt.rs:286
+  - gpt.rs:293
+  - gpt.rs:226
+  - gpt.rs:139
 - id: D-FR-010-lib.rs:72-0b7634
   name: Nsid consistent
   kind: spec-and-code-differ
@@ -929,6 +803,19 @@ discordances:
     - DPM-INV-NSID-CONSISTENT
     code:
     - DPM-FORMAT-NSID-DIVERGENCE
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - src/lib.rs:34-36
+  - src/lib.rs:72
+  - src/lib.rs:91
+  - src/gpt.rs:464
+  - src/gpt.rs:526
+  - lib.rs:30-36
+  - lib.rs:72
+  - lib.rs:80
+  - lib.rs:91
+  - gpt.rs:464
+  - gpt.rs:526
 - id: D-RANGE-FR-011-46880c
   name: 'Input range: the sector size (config.sector_size for format, the device-reported size for initialize) is
     512 or 4096'
