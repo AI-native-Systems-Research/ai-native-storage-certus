@@ -24,14 +24,11 @@ Usage (certus-server must be running):
     python bench_connector_lifecycle.py --pattern cold_prefill_store
     python bench_connector_lifecycle.py --pattern warm_prefill_load_and_suffix_store
 
-    # Real TP=2: one worker process per GPU (rank i on the i-th device), one
-    # scheduler-side manager. --block-bytes is each rank's shard size.
-    python bench_connector_lifecycle.py --gpus 0,1
-
-    # Simulated TP=2 (namespaced keys, 2× server entries per logical block, but
-    # only rank 0 moves data — the other ranks' shards are reserved, committed
-    # and pinned without ever being written or loaded)
+    # TP=2: one worker process per GPU (rank i on device --gpu+i, or the i-th
+    # entry of --gpus), one scheduler-side manager, as vLLM runs
+    # --tensor-parallel-size 2. --block-bytes is each rank's shard size.
     python bench_connector_lifecycle.py --tp 2
+    python bench_connector_lifecycle.py --gpus 2,3
 
     # CSV output for automated collection
     python bench_connector_lifecycle.py --csv results.csv
@@ -1838,16 +1835,14 @@ def main():
     parser.add_argument("--gpu", type=int, default=0,
                         help="CUDA device index")
     parser.add_argument("--tp", type=int, default=1,
-                        help="Simulated tensor-parallel world size: one GPU and "
-                             "one rank-0 worker, so the other ranks' shards are "
-                             "reserved/committed but never written or loaded. "
-                             "Use --gpus for real TP.")
+                        help="Tensor-parallel world size: one worker per GPU "
+                             "(rank i on device --gpu+i) and one scheduler-side "
+                             "manager, as vLLM's --tensor-parallel-size. "
+                             "--block-bytes is each rank's shard size.")
     parser.add_argument("--gpus", type=str, default=None,
-                        help="Comma-separated CUDA devices for REAL tensor "
-                             "parallelism (e.g. 0,1): one worker per GPU, rank i "
-                             "on the i-th device, one scheduler-side manager. "
-                             "Sets --tp to the device count; --block-bytes is "
-                             "each rank's shard size.")
+                        help="Comma-separated CUDA devices for the TP ranks "
+                             "(e.g. 2,3) instead of --gpu..--gpu+tp-1; implies "
+                             "--tp = the device count.")
     parser.add_argument("--min-duration", type=float, default=5.0,
                         help="Minimum seconds per benchmark phase")
     parser.add_argument("--warmup", type=int, default=4,
@@ -1882,29 +1877,33 @@ def main():
                         help="(scheduler-step) Distinct conversations in the pool")
     args = parser.parse_args()
 
-    gpus = [int(g) for g in args.gpus.split(",")] if args.gpus else [args.gpu]
-    real_tp = len(gpus) > 1
-    if real_tp:
-        if len(set(gpus)) != len(gpus):
-            parser.error(f"--gpus lists a device twice: {args.gpus}")
+    if args.gpus:
+        gpus = [int(g) for g in args.gpus.split(",")]
         if args.tp not in (1, len(gpus)):
             parser.error(f"--tp {args.tp} conflicts with --gpus {args.gpus}")
-        if args.pattern:
-            parser.error("--pattern does not support --gpus")
-        args.tp = len(gpus)
-        args.gpu = gpus[0]
+    else:
+        if args.tp < 1:
+            parser.error(f"--tp must be >= 1, got {args.tp}")
+        gpus = list(range(args.gpu, args.gpu + args.tp))
+    if len(set(gpus)) != len(gpus):
+        parser.error(f"--gpus lists a device twice: {args.gpus}")
+    if max(gpus) >= torch.cuda.device_count():
+        parser.error(f"TP needs CUDA devices {gpus}, but only "
+                     f"{torch.cuda.device_count()} are visible")
+    real_tp = len(gpus) > 1
+    if real_tp and args.pattern:
+        parser.error("--pattern does not support tensor parallelism")
+    args.tp = len(gpus)
+    args.gpu = gpus[0]
     # Throughput accounting counts every rank's shard (each moves block_bytes).
     acct_block_bytes = args.block_bytes * args.tp if real_tp else args.block_bytes
 
     torch.cuda.set_device(args.gpu)
 
-    tp_mode = "real" if real_tp else ("simulated" if args.tp > 1 else "none")
     print(f"Connector Lifecycle Benchmark")
-    print(f"  shm_path={args.shm_path}  gpus={gpus}  tp={args.tp} ({tp_mode})")
+    print(f"  shm_path={args.shm_path}  gpus={gpus}  tp={args.tp}")
     print(f"  num_blocks={args.num_blocks}  bs={args.bs}  block_bytes={args.block_bytes}"
           + (f" per rank ({acct_block_bytes} per logical block)" if real_tp else ""))
-    if tp_mode == "simulated":
-        print("  NOTE: simulated TP — only rank 0 moves data; use --gpus for real TP")
     print(f"  min_duration={args.min_duration}s  workers={args.workers}")
 
     # ── set up ring + connector objects ──
@@ -1936,7 +1935,7 @@ def main():
         pools = 2 if args.mode in ("contention", "all") else 1
         need = 1 + pools * args.workers
         if per_slot < need:
-            sys.exit(f"error: --gpus {args.gpus} with --workers {args.workers} needs "
+            sys.exit(f"error: --tp {args.tp} with --workers {args.workers} needs "
                      f"{need} shmq channels per rank but the server has "
                      f"{ring._num_channels} ({per_slot} per rank); start "
                      f"certus-server with --channels {need * args.tp} or more")
@@ -2137,7 +2136,6 @@ def main():
             "gpu": args.gpu,
             "gpus": ",".join(map(str, gpus)),
             "tp": args.tp,
-            "tp_mode": tp_mode,
             "bs": args.bs,
             "num_blocks": args.num_blocks,
             "block_bytes": args.block_bytes,

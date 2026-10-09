@@ -1737,11 +1737,14 @@ def main():
                         help=f"Per-block size in bytes (default: {DEFAULT_BLOCK_BYTES})")
     parser.add_argument("--gpu", type=int, default=0,
                         help="CUDA device index")
+    parser.add_argument("--tp", type=int, default=1,
+                        help="Tensor-parallel world size: one CPUOffloadingWorker per GPU "
+                             "(rank i on device --gpu+i) sharing one CPU-tier region, one "
+                             "scheduler-side manager, as vLLM's --tensor-parallel-size. "
+                             "--block-bytes is each rank's shard size.")
     parser.add_argument("--gpus", type=str, default=None,
-                        help="Comma-separated CUDA devices for REAL tensor parallelism "
-                             "(e.g. 0,1): one CPUOffloadingWorker per GPU sharing one "
-                             "CPU-tier region, one scheduler-side manager. Rank i runs "
-                             "on the i-th device; --block-bytes is each rank's shard.")
+                        help="Comma-separated CUDA devices for the TP ranks instead of "
+                             "--gpu..--gpu+tp-1; implies --tp = the device count.")
     parser.add_argument("--min-duration", type=float, default=5.0,
                         help="Minimum seconds per benchmark phase")
     parser.add_argument("--warmup", type=int, default=4,
@@ -1774,15 +1777,26 @@ def main():
                         help="(scheduler-step) Distinct conversations in the pool")
     args = parser.parse_args()
 
-    gpus = [int(g) for g in args.gpus.split(",")] if args.gpus else [args.gpu]
+    if args.gpus:
+        gpus = [int(g) for g in args.gpus.split(",")]
+        if args.tp not in (1, len(gpus)):
+            parser.error(f"--tp {args.tp} conflicts with --gpus {args.gpus}")
+    else:
+        if args.tp < 1:
+            parser.error(f"--tp must be >= 1, got {args.tp}")
+        gpus = list(range(args.gpu, args.gpu + args.tp))
+    if len(set(gpus)) != len(gpus):
+        parser.error(f"--gpus lists a device twice: {args.gpus}")
+    if max(gpus) >= torch.cuda.device_count():
+        parser.error(f"TP needs CUDA devices {gpus}, but only "
+                     f"{torch.cuda.device_count()} are visible")
+    args.tp = len(gpus)
     if len(gpus) > 1:
-        if len(set(gpus)) != len(gpus):
-            parser.error(f"--gpus lists a device twice: {args.gpus}")
         # vLLM derives a worker's CPU-tier slot from current_device_index() %
         # world_size, so rank i must sit on a device whose index maps to slot i.
         bad = [g for i, g in enumerate(gpus) if g % len(gpus) != i]
         if bad:
-            parser.error(f"--gpus {args.gpus}: rank i needs a device with index % "
+            parser.error(f"TP devices {gpus}: rank i needs a device with index % "
                          f"{len(gpus)} == i (vLLM picks the CPU-tier slot that way)")
         args.gpu = gpus[0]
 

@@ -19,7 +19,7 @@
 #   GPU            CDI GPU index passed to --device nvidia.com/gpu=<GPU>, or a
 #                  comma list (GPU=0,1) to expose several GPUs for real TP. Inside
 #                  the container they are renumbered 0..N-1, so pair it with
-#                  --gpus 0,1 (etc.), e.g. GPU=0,1 ./run-in-container.sh --gpus 0,1
+#                  --tp 2 (ranks on devices 0..N-1), e.g. GPU=0,1 ./run-in-container.sh --tp 2
 #   FS_TIER_HOST   host directory backing the fs disk tier, mounted at /fs-tier.
 #                  The benchmark writes into a per-run subdirectory and removes
 #                  it at exit (pass --keep-fs to keep it). Must NOT be on the
