@@ -1,25 +1,43 @@
 {
-  "generated": "2026-10-05",
+  "generated": "2026-10-08",
   "project": "dispatcher",
   "spec": "001-dispatcher-cache-interface",
-  "branch": "fix/poller-cpu-placement-logging",
+  "branch": "opt/evolve-latency/s20261004-001925_PR507",
   "mode": "interactive",
   "summary": {
-    "proposals": 1,
-    "approved": 1
+    "proposals": 3,
+    "approved": 2,
+    "skipped": 1
   },
   "proposals": [
     {
       "id": 1,
-      "requirement": "FR-011",
+      "requirement": "FR-039 step (2)",
       "direction": "BACKFILL",
-      "current_spec": "`poller_base_cpu` ... Defaults to `None` (OS scheduler decides).",
-      "current_code": "`None` selects NUMA-local automatic placement: round-robin over each drive's NUMA-node cores excluding the node's first two (this branch; previously global CPUs 0/1 were excluded); unresolvable node or node with <=2 cores -> no CPU passed, block device chooses; topology discovery failure -> warning, unpinned.",
-      "location": "components/dispatcher/src/lib.rs:550-600, 1530-1539",
-      "proposed": "FR-011 rewritten for the None case; Last Synced header added.",
+      "current_spec": "(2) for MemoryTier hits, issues per-region memcpy_h2d_async H2D copies on the device's warm stream and performs a single deferred stream_synchronize after all hot-path copies are issued",
+      "current_code": "warm copies only queued; single warm stream_synchronize deferred until after the cold block (steps 4-5); warm read pins released only after it; then remote lookup (FR-045)",
+      "rationale": "Intentional, tested optimization (ada87967): overlapping the warm H2D drain with the cold NVMe reads; pin lifetime extended to keep it safe.",
       "confidence": "HIGH",
-      "approved": true,
-      "approved_by": "user (interactive, 2026-10-05)"
+      "approved": true
+    },
+    {
+      "id": 2,
+      "requirement": "US-11 scenario 2 (+ new scenario 6)",
+      "direction": "BACKFILL",
+      "current_spec": "hot entries are served inline without waiting for cold promotions to complete",
+      "current_code": "hot H2D copies queued before cold prep, not waited on during cold promotion; one warm-stream sync after the cold block confirms them; new scenario 6 for the ordering",
+      "rationale": "Scenario wording predates the deferral; new scenario mirrors the existing ordering test.",
+      "confidence": "HIGH",
+      "approved": true
+    },
+    {
+      "id": 3,
+      "requirement": "TouchCheck opcode / bulk codec (lib/shmq-dispatcher, certus-shmq-connector)",
+      "direction": "NEW_SPEC",
+      "rationale": "No specs/ tree in those components; outside this component's hash inputs.",
+      "confidence": "LOW",
+      "approved": false,
+      "decision": "skipped by user"
     }
   ]
 }
