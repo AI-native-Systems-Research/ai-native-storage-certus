@@ -134,6 +134,7 @@
               <option value="burstgpt" selected>BurstGPT (median 2.2m)</option>
               <option value="ccweka">cc-weka 062126 (median 17s)</option>
               <option value="wildchat">WildChat-1M (median 2.1m)</option>
+              <option value="syfi">syfi coding (median 10s)</option>
               <option value="swebench">SWE-bench agentic (median 5.5s)</option>
             </select>
           </div>
@@ -276,7 +277,7 @@
 <script>
 "use strict";
 const TIERS=["HBM","DRAM","SSD"], GiB=1024**3;
-const DIST_META={burstgpt:{label:"BurstGPT",median:"2.2m"},ccweka:{label:"cc-weka",median:"17s"},wildchat:{label:"WildChat-1M",median:"2.1m"},swebench:{label:"SWE-bench",median:"5.5s"}};
+const DIST_META={burstgpt:{label:"BurstGPT",median:"2.2m"},ccweka:{label:"cc-weka",median:"17s"},wildchat:{label:"WildChat-1M",median:"2.1m"},syfi:{label:"syfi coding",median:"10s"},swebench:{label:"SWE-bench",median:"5.5s"}};
 
 /* ---- charts ---- */
 const W=760,H=320,PL=52,PR=118,PT=14,PB=42;
