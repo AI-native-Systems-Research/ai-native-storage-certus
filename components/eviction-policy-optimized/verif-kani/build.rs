@@ -40,6 +40,68 @@ fn main() {
     assert_code_identical(&original, &derived, &src);
 
     std::fs::write(&out, derived).expect("cannot write derived source into OUT_DIR");
+
+    // ---- the REAL count-min sketch (added 2026-10-07; consumed by src/sketch_real.rs) ----
+    let lib = manifest.join("../src/lib.rs");
+    println!("cargo:rerun-if-changed={}", lib.display());
+    let lib_src = std::fs::read_to_string(&lib)
+        .unwrap_or_else(|e| panic!("cannot read production source {}: {e}", lib.display()));
+    let region = sketch_region(&lib_src, &lib);
+    let sketch_out = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("sketch_real.rs");
+    std::fs::write(&sketch_out, region).expect("cannot write sketch region into OUT_DIR");
+}
+
+/// The production text of `src/lib.rs` from the line `const CMS_ROWS` through the closing
+/// brace of `impl CountMinSketch { .. }` — the constants, the struct and its four methods,
+/// verbatim. Nothing is rewritten. The build FAILS if the region is not found or if it
+/// contains anything beyond the sketch (so a reshuffle of lib.rs cannot silently pull in, or
+/// drop, code).
+fn sketch_region(lib_src: &str, path: &Path) -> String {
+    let start = lib_src
+        .find("\nconst CMS_ROWS")
+        .map(|i| i + 1)
+        .unwrap_or_else(|| panic!("{}: `const CMS_ROWS` not found", path.display()));
+    let impl_rel = lib_src[start..]
+        .find("\nimpl CountMinSketch {")
+        .unwrap_or_else(|| panic!("{}: `impl CountMinSketch {{` not found", path.display()));
+    let open = start + impl_rel + "\nimpl CountMinSketch ".len();
+    let bytes = lib_src.as_bytes();
+    assert_eq!(bytes[open], b'{');
+    let mut depth = 0i32;
+    let mut end = open;
+    loop {
+        match bytes[end] {
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            _ => {}
+        }
+        end += 1;
+    }
+    let region = &lib_src[start..=end];
+    for must in [
+        "const CMS_ROWS",
+        "const CMS_COLS",
+        "const CMS_PRIMES",
+        "struct CountMinSketch",
+        "fn increment",
+        "fn estimate",
+        "fn halve",
+    ] {
+        assert!(region.contains(must), "{}: sketch region lacks `{must}`", path.display());
+    }
+    for must_not in ["define_component", "impl IEvictionPolicy", "struct Pool", "use "] {
+        assert!(
+            !region.contains(must_not),
+            "{}: sketch region unexpectedly contains `{must_not}`",
+            path.display()
+        );
+    }
+    region.to_string() + "\n"
 }
 
 /// `//!` at the start of a line (after optional whitespace) becomes `//`.

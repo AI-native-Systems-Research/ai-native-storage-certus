@@ -500,36 +500,11 @@ fn verify_epo_track_post_admit_not_more_frequent() {
     assert!(c.identify_next_to_evict(p) == Some(C));
 }
 
-/// EPO-TRACK-POST-NON-IDEMPOTENT-REREGISTRATION — tracking a key already tracked in the
-/// same pool creates a SECOND entry and returns a different handle.
-///
-/// This is the DIVERGENT property adjudicated against the shared interface's own
-/// documentation, which promises idempotency. The harness asserts the implemented
-/// behaviour: two entries for one key, a size one larger, and two distinct handles.
-#[kani::proof]
-#[kani::stub(std::collections::hash_map::RandomState::new, crate::api::concrete_state)]
-#[kani::unwind(4)]
-#[kani::solver(minisat)]
-fn verify_epo_track_post_non_idempotent_reregistration() {
-    let c = component();
-    let p = c.create_pool();
+// EPO-TRACK-POST-NON-IDEMPOTENT-REREGISTRATION: re-proved 2026-10-07 in proofs_reach.rs on
+// the real list code over every reachable list (the single concrete trace that stood here
+// was removed; see that harness for why the real component cannot be reached).
 
-    let h1 = track_ok(&c, p, A);
-    assert!(c.len(p) == 1);
 
-    let h2 = track_ok(&c, p, A); // the SAME key again
-
-    assert!(c.len(p) == 2); // a second entry, not a refresh
-    assert!(h1 != h2);
-    assert!(h1.index() != h2.index());
-    assert!(h1.pool_id() == h2.pool_id());
-    // Both entries are really there, and both are the same key.
-    assert!(keys_eq(&c.get_eviction_candidates(p, 4), &[A, A]));
-    assert!(c.identify_next_to_evict(p) == Some(A));
-    assert!(c.len(p) == 1);
-    assert!(c.identify_next_to_evict(p) == Some(A));
-    assert!(c.len(p) == 0);
-}
 
 /// EPO-TRACK-FRAME-SEMANTICS-IGNORED — the per-block hint has no effect at all: two tracks
 /// differing only in the hint leave the pool in the same state and return equivalent
@@ -560,44 +535,10 @@ fn verify_epo_track_frame_semantics_ignored() {
     assert!(keys_eq(&c.get_eviction_candidates(p, 4), &[B, A]));
 }
 
-/// EPO-TRACK-FRAME-EXISTING-ENTRIES — a successful track only inserts: it never drops an
-/// entry, and the entries already present keep their order relative to one another,
-/// whichever end the new key went in at.
-///
-/// "Whichever end" is the reason there are two scenarios. The first insert lands at the
-/// eviction end (the tie case) and the second at the protected end (the
-/// strictly-more-frequent case, set up the same way as
-/// `verify_epo_track_post_admit_more_frequent`); in both, the relative order of the
-/// previously present keys is asserted to be unchanged.
-#[kani::proof]
-#[kani::stub(std::collections::hash_map::RandomState::new, crate::api::concrete_state)]
-#[kani::unwind(4)]
-#[kani::solver(minisat)]
-fn verify_epo_track_frame_existing_entries() {
-    let c = component();
-    let p = c.create_pool();
+// EPO-TRACK-FRAME-EXISTING-ENTRIES: re-proved 2026-10-07 in proofs_reach.rs, over every
+// reachable list, symbolic key and BOTH insertion ends (the single concrete trace that stood
+// here was removed).
 
-    let _h_a = track_ok(&c, p, A);
-    let h_b = track_ok(&c, p, B);
-    assert!(keys_eq(&c.get_eviction_candidates(p, 4), &[B, A]));
-
-    // Insert at the EVICTION end (tie): B before A, still, and nothing dropped.
-    let _h_c = track_ok(&c, p, C);
-    let after_front = c.get_eviction_candidates(p, 4);
-    assert!(keys_eq(&after_front, &[C, B, A]));
-    assert!(c.len(p) == 3);
-
-    // Now arrange an insert at the PROTECTED end. Removing B drops its entry but NOT its
-    // estimate, which stays at 1; re-tracking B then raises it to 2, which strictly beats
-    // head C's 1, so the insert takes the push_back branch.
-    remove_ok(&c, h_b);
-    assert!(keys_eq(&c.get_eviction_candidates(p, 4), &[C, A]));
-    let _h_b2 = track_ok(&c, p, B); // estimate(B) = 2 > estimate(C) = 1 -> push_back
-    let after_back = c.get_eviction_candidates(p, 4);
-    assert!(keys_eq(&after_back, &[C, A, B]));
-    // C before A, exactly as before the insert: relative order preserved at the other end.
-    assert!(c.len(p) == 3);
-}
 
 /// EPO-TRACK-FRAME-OTHER-POOLS — tracking in one pool leaves every other pool untouched.
 #[kani::proof]

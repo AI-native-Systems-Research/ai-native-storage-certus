@@ -618,34 +618,10 @@ fn verify_epo_touch_post_move_to_mru__mutant() {
     assert!(inspect::tail(&l) != Some(i));
 }
 
-/// EPO-TOUCH-POST-NOT-NEXT-VICTIM — after an entry is touched, the next victim is not that
-/// entry, provided the pool holds at least one other entry.
-#[kani::proof]
-#[kani::unwind(8)]
-fn verify_epo_touch_post_not_next_victim() {
-    let mut l = inspect::valid_list(NS, CAP);
-    kani::assume(inspect::nodes_len(&l) > 0);
-    let i = inspect::any_idx(inspect::nodes_len(&l));
-    kani::assume(inspect::node_active(&l, i));
-    kani::assume(l.len() >= 2);
+// EPO-TOUCH-POST-NOT-NEXT-VICTIM: re-proved 2026-10-07 in proofs_reach.rs over REACHABLE
+// lists (no assumed invariant); the valid_list-based harness that stood here was removed.
 
-    l.move_to_back(i);
 
-    assert!(inspect::head(&l).is_some());
-    assert!(inspect::head(&l) != Some(i));
-}
-
-#[kani::proof]
-#[kani::unwind(8)]
-fn verify_epo_touch_post_not_next_victim__mutant() {
-    let mut l = inspect::valid_list(NS, CAP);
-    kani::assume(inspect::nodes_len(&l) > 0);
-    let i = inspect::any_idx(inspect::nodes_len(&l));
-    kani::assume(inspect::node_active(&l, i));
-    kani::assume(l.len() >= 2);
-    l.move_to_back(i);
-    assert!(inspect::head(&l) == Some(i));
-}
 
 /// EPO-TOUCH-POST-ALREADY-AT-BACK-NOOP — touching the entry already last in the queue
 /// changes nothing at all: order, count and every internal link stay as they were.

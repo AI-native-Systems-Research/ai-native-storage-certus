@@ -19,6 +19,13 @@
 // is why the harnesses below carry small unwind bounds.
 
 use crate::sketch_core::{col_of, CountMinSketch, CMS_COLS, CMS_PRIMES, CMS_ROWS};
+use crate::sketch_real::real::inspect as rs;
+
+/// Witness key for EPO-INV-SKETCH-ROW-HASHES-DISTINCT. Any key works whose four columns are
+/// pairwise different; for key 1 the real columns are the top ten bits of each multiplier
+/// (632, 325, 433, 849). The harness does not rely on these numbers: it reads the positions
+/// off the real table after the real `increment`.
+const ROW_WITNESS_KEY: u64 = 1;
 
 
 /// A concrete representative key.
@@ -77,42 +84,64 @@ fn verify_epo_inv_sketch_bucket_in_range__mutant() {
     assert!(col_of(key, CMS_PRIMES[row]) >= CMS_COLS);
 }
 
-/// EPO-INV-SKETCH-ROW-HASHES-DISTINCT — the four rows each use a different odd multiplier,
-/// so the rows are genuinely independent views of a key rather than four copies of one
-/// counter.
+/// EPO-INV-SKETCH-ROW-HASHES-DISTINCT — the four rows each use a different odd multiplier
+/// to pick their counter position, so the rows are genuinely independent views of a key
+/// rather than four identical copies of the same counter. (Re-proved 2026-10-07.)
 ///
-/// Both halves are checked: pairwise distinctness of the four constants, and oddness (an
-/// even multiplier would throw away low bits of the key and collapse distinct keys
-/// together).
+/// Against the REAL sketch (`sketch_real.rs`: the production `CMS_PRIMES` and the production
+/// `increment`, cut out of src/lib.rs by build.rs — no transcription, no re-typed column
+/// expression). No `kani::assume`: the two rows and the column are symbolic and are brought
+/// into range by `%`, so every pair of distinct rows and every column is covered.
+///   (1) the multipliers: for EVERY pair of different rows (i, j), `CMS_PRIMES[i]` is odd and
+///       differs from `CMS_PRIMES[j]`;
+///   (2) "to pick their counter position": after the real `increment` of `ROW_WITNESS_KEY`
+///       on a fresh table, at EVERY column where row i holds that key's count, row j holds
+///       nothing — so the two rows put the key at different positions, i.e. they are not
+///       copies of one another. Real `estimate` is also 1, so every row did record the key.
+/// What is NOT claimed, because it is false: that the rows pick different positions for
+/// EVERY key. Key 0 maps to column 0 in all four rows (0 * p >> 54 = 0). The statement's
+/// "not four identical copies" is an existential over keys per pair of rows, which (2)
+/// witnesses for all six pairs at once.
 #[kani::proof]
 #[kani::unwind(6)]
 fn verify_epo_inv_sketch_row_hashes_distinct() {
-    let mut i = 0usize;
-    while i < CMS_ROWS {
-        assert!(CMS_PRIMES[i] % 2 == 1);
-        let mut j = i + 1;
-        while j < CMS_ROWS {
-            assert!(CMS_PRIMES[i] != CMS_PRIMES[j]);
-            j += 1;
-        }
-        i += 1;
+    let p = rs::primes();
+    let i = kani::any::<usize>() % rs::ROWS;
+    let j = (i + 1 + kani::any::<usize>() % (rs::ROWS - 1)) % rs::ROWS; // any row != i
+    assert!(i != j);
+    assert!(p[i] % 2 == 1);
+    assert!(p[i] != p[j]);
+
+    let mut s = rs::fresh();
+    rs::increment(&mut s, ROW_WITNESS_KEY);
+    assert!(rs::estimate(&s, ROW_WITNESS_KEY) == 1);
+    let col = kani::any::<usize>() % rs::COLS;
+    if rs::counter(&s, i, col) == 1 {
+        assert!(rs::counter(&s, j, col) == 0);
     }
-    // Distinct multipliers only matter if they really can send one key to different
-    // columns; exhibit such a key rather than assuming it exists.
-    let key: u64 = kani::any();
-    kani::assume(col_of(key, CMS_PRIMES[0]) != col_of(key, CMS_PRIMES[1]));
-    assert!(CMS_PRIMES[0] != CMS_PRIMES[1]);
 }
 
+/// Anti-vacuity twin: claim row j holds the key's count at row i's position too (the rows
+/// are copies). Must FAIL — which also shows the `if` branch is reachable.
 #[kani::proof]
 #[kani::unwind(6)]
 fn verify_epo_inv_sketch_row_hashes_distinct__mutant() {
-    // Claim two of the four multipliers coincide.
-    assert!(CMS_PRIMES[0] == CMS_PRIMES[1]
-        || CMS_PRIMES[0] == CMS_PRIMES[2]
-        || CMS_PRIMES[0] == CMS_PRIMES[3]
-        || CMS_PRIMES[1] == CMS_PRIMES[2]);
+    let p = rs::primes();
+    let i = kani::any::<usize>() % rs::ROWS;
+    let j = (i + 1 + kani::any::<usize>() % (rs::ROWS - 1)) % rs::ROWS;
+    assert!(i != j);
+    assert!(p[i] % 2 == 1);
+    assert!(p[i] != p[j]);
+
+    let mut s = rs::fresh();
+    rs::increment(&mut s, ROW_WITNESS_KEY);
+    assert!(rs::estimate(&s, ROW_WITNESS_KEY) == 1);
+    let col = kani::any::<usize>() % rs::COLS;
+    if rs::counter(&s, i, col) == 1 {
+        assert!(!(rs::counter(&s, j, col) == 0)); // MUTANT: negated
+    }
 }
+
 
 /// EPO-INV-SKETCH-COUNTERS-SATURATE — every counter stays between zero and 255, and a
 /// counter already at 255 stays there when incremented rather than wrapping round to zero
