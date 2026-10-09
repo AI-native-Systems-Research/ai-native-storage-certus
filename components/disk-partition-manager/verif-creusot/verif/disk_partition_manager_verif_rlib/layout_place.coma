@@ -1,118 +1,118 @@
-(* #"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 460 0 466 35 *)
+(* #"/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 460 0 466 35 *)
 
-let%span slib = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 467 28 467 40
-let%span slib'0 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 467 43 467 44
-let%span slib'1 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 467 28 467 44
-let%span slib'2 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 468 35 468 45
-let%span slib'3 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 471 23 471 24
-let%span slib'4 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 487 14 487 25
-let%span slib'5 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 486 16 486 77
-let%span slib'6 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 485 16 485 80
-let%span slib'7 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 483 16 484 88
-let%span slib'8 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 482 16 482 75
-let%span slib'9 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 481 16 481 92
-let%span slib'10 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 479 16 480 80
-let%span slib'11 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 477 16 478 74
-let%span slib'12 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 476 16 476 72
-let%span slib'13 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 475 16 475 65
-let%span slib'14 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 474 16 474 36
-let%span slib'15 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 473 16 473 34
-let%span slib'16 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 489 31 489 34
-let%span slib'17 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 489 49 489 50
-let%span slib'18 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 492 24 492 27
-let%span slib'19 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 492 12 492 50
-let%span slib'20 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 497 12 497 64
-let%span slib'21 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 504 12 504 94
-let%span slib'22 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 507 12 508 79
-let%span slib'23 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 511 12 512 79
-let%span slib'24 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 514 24 514 83
-let%span slib'25 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 516 12 516 71
-let%span slib'26 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 523 21 523 30
-let%span slib'27 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 523 33 523 34
-let%span slib'28 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 523 21 523 34
-let%span slib'29 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 524 44 524 47
-let%span slib'30 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 524 89 524 90
-let%span slib'31 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 524 8 524 93
-let%span slib'32 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 525 23 525 24
-let%span slib'33 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 525 8 525 24
-let%span slib'34 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 526 8 526 18
-let%span slib'35 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 527 13 527 14
-let%span slib'36 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 527 8 527 14
-let%span slib'37 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 549 10 549 23
-let%span slib'38 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 549 26 549 29
-let%span slib'39 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 548 16 548 60
-let%span slib'40 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 547 16 547 70
-let%span slib'41 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 546 16 546 46
-let%span slib'42 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 543 16 545 38
-let%span slib'43 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 542 16 542 87
-let%span slib'44 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 541 16 541 90
-let%span slib'45 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 539 16 540 88
-let%span slib'46 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 538 16 538 85
-let%span slib'47 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 536 16 537 52
-let%span slib'48 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 534 16 535 80
-let%span slib'49 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 532 16 533 74
-let%span slib'50 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 531 16 531 36
-let%span slib'51 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 550 39 550 43
-let%span slib'52 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 550 52 550 53
-let%span slib'53 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 550 60 550 61
-let%span slib'54 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 550 70 550 71
-let%span slib'55 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 550 8 550 74
-let%span slib'56 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 428 11 428 36
-let%span slib'57 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 429 11 429 41
-let%span slib'58 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 430 11 430 40
-let%span slib'59 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 431 11 431 79
-let%span slib'60 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 432 11 432 71
-let%span slib'61 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 433 11 433 50
-let%span slib'62 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 435 10 435 53
-let%span slib'63 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 436 10 437 92
-let%span slib'64 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 438 10 440 81
-let%span slib'65 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 441 10 443 87
-let%span slib'66 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 444 10 446 89
-let%span slib'67 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 447 10 448 94
-let%span slib'68 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 449 10 450 91
-let%span slib'69 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 451 10 453 59
-let%span slib'70 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 454 10 455 89
-let%span slib'71 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 456 10 459 15
-let%span slib'72 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 240 16 240 81
-let%span slib'73 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 247 10 247 11
-let%span slib'74 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 246 11 246 33
-let%span slib'75 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 250 8 250 92
-let%span slib'76 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 70 11 70 17
-let%span slib'77 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 71 10 71 33
-let%span slib'78 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 266 10 266 11
-let%span slib'79 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 264 11 264 33
-let%span slib'80 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 265 10 265 87
-let%span slib'81 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 268 16 268 67
-let%span slib'82 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 304 10 304 11
-let%span slib'83 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 301 11 301 33
-let%span slib'84 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 302 10 302 33
-let%span slib'85 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 303 10 303 33
-let%span slib'86 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 306 16 306 62
-let%span slib'87 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 226 10 226 11
-let%span slib'88 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 225 11 225 33
-let%span slib'89 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 229 8 233 9
-let%span slib'90 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 213 10 213 11
-let%span slib'91 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 212 11 212 33
-let%span slib'92 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 216 8 217 87
-let%span slib'93 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 337 10 337 15
-let%span slib'94 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 334 11 334 43
-let%span slib'95 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 335 11 335 30
-let%span slib'96 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 336 10 336 62
-let%span slib'97 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 340 8 343 9
-let%span slib'98 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 58 16 58 74
-let%span slib'99 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 256 11 256 26
-let%span slib'100 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 257 10 257 25
-let%span slib'101 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 258 10 258 29
-let%span slib'102 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 259 10 259 35
-let%span slib'103 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 260 41 260 43
-let%span svec = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 102 18 102 36
-let%span svec'0 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 112 18 112 40
-let%span svec'1 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
-let%span svec'2 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 193 19 193 38
-let%span svec'3 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 194 18 194 46
-let%span svec'4 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 116 18 116 48
-let%span sslice = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/creusot/creusot-std/src/std/slice.rs" 148 20 148 37
-let%span sslice'0 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/creusot/creusot-std/src/std/slice.rs" 153 20 153 37
+let%span slib = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 467 28 467 40
+let%span slib'0 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 467 43 467 44
+let%span slib'1 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 467 28 467 44
+let%span slib'2 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 468 35 468 45
+let%span slib'3 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 471 23 471 24
+let%span slib'4 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 487 14 487 25
+let%span slib'5 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 486 16 486 77
+let%span slib'6 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 485 16 485 80
+let%span slib'7 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 483 16 484 88
+let%span slib'8 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 482 16 482 75
+let%span slib'9 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 481 16 481 92
+let%span slib'10 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 479 16 480 80
+let%span slib'11 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 477 16 478 74
+let%span slib'12 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 476 16 476 72
+let%span slib'13 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 475 16 475 65
+let%span slib'14 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 474 16 474 36
+let%span slib'15 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 473 16 473 34
+let%span slib'16 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 489 31 489 34
+let%span slib'17 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 489 49 489 50
+let%span slib'18 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 492 24 492 27
+let%span slib'19 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 492 12 492 50
+let%span slib'20 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 497 12 497 64
+let%span slib'21 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 504 12 504 94
+let%span slib'22 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 507 12 508 79
+let%span slib'23 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 511 12 512 79
+let%span slib'24 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 514 24 514 83
+let%span slib'25 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 516 12 516 71
+let%span slib'26 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 523 21 523 30
+let%span slib'27 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 523 33 523 34
+let%span slib'28 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 523 21 523 34
+let%span slib'29 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 524 44 524 47
+let%span slib'30 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 524 89 524 90
+let%span slib'31 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 524 8 524 93
+let%span slib'32 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 525 23 525 24
+let%span slib'33 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 525 8 525 24
+let%span slib'34 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 526 8 526 18
+let%span slib'35 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 527 13 527 14
+let%span slib'36 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 527 8 527 14
+let%span slib'37 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 549 10 549 23
+let%span slib'38 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 549 26 549 29
+let%span slib'39 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 548 16 548 60
+let%span slib'40 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 547 16 547 70
+let%span slib'41 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 546 16 546 46
+let%span slib'42 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 543 16 545 38
+let%span slib'43 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 542 16 542 87
+let%span slib'44 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 541 16 541 90
+let%span slib'45 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 539 16 540 88
+let%span slib'46 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 538 16 538 85
+let%span slib'47 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 536 16 537 52
+let%span slib'48 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 534 16 535 80
+let%span slib'49 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 532 16 533 74
+let%span slib'50 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 531 16 531 36
+let%span slib'51 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 550 39 550 43
+let%span slib'52 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 550 52 550 53
+let%span slib'53 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 550 60 550 61
+let%span slib'54 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 550 70 550 71
+let%span slib'55 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 550 8 550 74
+let%span slib'56 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 428 11 428 36
+let%span slib'57 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 429 11 429 41
+let%span slib'58 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 430 11 430 40
+let%span slib'59 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 431 11 431 79
+let%span slib'60 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 432 11 432 71
+let%span slib'61 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 433 11 433 50
+let%span slib'62 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 435 10 435 53
+let%span slib'63 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 436 10 437 92
+let%span slib'64 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 438 10 440 81
+let%span slib'65 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 441 10 443 87
+let%span slib'66 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 444 10 446 89
+let%span slib'67 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 447 10 448 94
+let%span slib'68 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 449 10 450 91
+let%span slib'69 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 451 10 453 59
+let%span slib'70 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 454 10 455 89
+let%span slib'71 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 456 10 459 15
+let%span slib'72 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 240 16 240 81
+let%span slib'73 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 247 10 247 11
+let%span slib'74 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 246 11 246 33
+let%span slib'75 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 250 8 250 92
+let%span slib'76 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 70 11 70 17
+let%span slib'77 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 71 10 71 33
+let%span slib'78 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 266 10 266 11
+let%span slib'79 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 264 11 264 33
+let%span slib'80 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 265 10 265 87
+let%span slib'81 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 268 16 268 67
+let%span slib'82 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 304 10 304 11
+let%span slib'83 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 301 11 301 33
+let%span slib'84 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 302 10 302 33
+let%span slib'85 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 303 10 303 33
+let%span slib'86 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 306 16 306 62
+let%span slib'87 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 226 10 226 11
+let%span slib'88 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 225 11 225 33
+let%span slib'89 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 229 8 233 9
+let%span slib'90 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 213 10 213 11
+let%span slib'91 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 212 11 212 33
+let%span slib'92 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 216 8 217 87
+let%span slib'93 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 337 10 337 15
+let%span slib'94 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 334 11 334 43
+let%span slib'95 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 335 11 335 30
+let%span slib'96 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 336 10 336 62
+let%span slib'97 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 340 8 343 9
+let%span slib'98 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 58 16 58 74
+let%span slib'99 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 256 11 256 26
+let%span slib'100 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 257 10 257 25
+let%span slib'101 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 258 10 258 29
+let%span slib'102 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 259 10 259 35
+let%span slib'103 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 260 41 260 43
+let%span svec = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 102 18 102 36
+let%span svec'0 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 112 18 112 40
+let%span svec'1 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span svec'2 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 193 19 193 38
+let%span svec'3 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 194 18 194 46
+let%span svec'4 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 116 18 116 48
+let%span sslice = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/creusot/creusot-std/src/std/slice.rs" 148 20 148 37
+let%span sslice'0 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/creusot/creusot-std/src/std/slice.rs" 153 20 153 37
 
 use creusot.int.UInt64
 use seq.Seq
@@ -154,13 +154,13 @@ let len_SpecM (self_: t_Vec_SpecM_Global) (return (x: UInt64.t)) = any
     = Seq.length (view_Vec_SpecM_Global self_)}
     (! return {result}) ]
 
-function cdiv [#"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 57 0 57 34] (n: int) (d: int) : int
+function cdiv [#"/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 57 0 57 34] (n: int) (d: int) : int
  = [%#slib'98] EuclideanDivision.div n d + (if EuclideanDivision.mod n d = 0 then 0 else 1)
 
-function demand_l [#"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 239 0 239 53] (sp: t_SpecM) (ss: int) (rest: int) : int
+function demand_l [#"/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 239 0 239 53] (sp: t_SpecM) (ss: int) (rest: int) : int
  = [%#slib'72] if UInt64.t'int sp.size_bytes'0 = 0 then rest else cdiv (UInt64.t'int sp.size_bytes'0) ss
 
-function placed_l [#"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 248 0 248 65] (s: Seq.seq t_SpecM) (n: int) (ss: int) (rest: int) : int
+function placed_l [#"/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 248 0 248 65] (s: Seq.seq t_SpecM) (n: int) (ss: int) (rest: int) : int
 
 axiom placed_l_def: forall s: Seq.seq t_SpecM, n: int, ss: int, rest: int [placed_l s n ss rest]. ([%#slib'74] 0 <= n
       /\ n <= Seq.length s)
@@ -191,7 +191,7 @@ let cdiv64 (n: UInt64.t) (d: UInt64.t) (return (x: UInt64.t)) =
     = cdiv (UInt64.t'int n) (UInt64.t'int d)}
     (! return {result}) ]
 
-function fixed_sum_l [#"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 227 0 227 57] (s: Seq.seq t_SpecM) (n: int) (ss: int) : int
+function fixed_sum_l [#"/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 227 0 227 57] (s: Seq.seq t_SpecM) (n: int) (ss: int) : int
 
 axiom fixed_sum_l_def: forall s: Seq.seq t_SpecM, n: int, ss: int [fixed_sum_l s n ss]. ([%#slib'88] 0 <= n
       /\ n <= Seq.length s)
@@ -207,7 +207,7 @@ axiom fixed_sum_l_def: forall s: Seq.seq t_SpecM, n: int, ss: int [fixed_sum_l s
       )
     )
 
-function rest_count_l [#"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 214 0 214 49] (s: Seq.seq t_SpecM) (n: int) : int
+function rest_count_l [#"/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 214 0 214 49] (s: Seq.seq t_SpecM) (n: int) : int
 
 axiom rest_count_l_def: forall s: Seq.seq t_SpecM, n: int [rest_count_l s n]. ([%#slib'91] 0 <= n /\ n <= Seq.length s)
     -> rest_count_l s n
@@ -217,7 +217,7 @@ axiom rest_count_l_def: forall s: Seq.seq t_SpecM, n: int [rest_count_l s n]. ([
       rest_count_l s (n - 1) + (if UInt64.t'int (Seq.get s (n - 1)).size_bytes'0 = 0 then 1 else 0)
     )
 
-function lemma_placed_split [#"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 267 0 267 68] (s: Seq.seq t_SpecM) (n: int) (ss: int) (rest: int) : ()
+function lemma_placed_split [#"/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 267 0 267 68] (s: Seq.seq t_SpecM) (n: int) (ss: int) (rest: int) : ()
 
 axiom lemma_placed_split_def:
   forall s: Seq.seq t_SpecM, n: int, ss: int, rest: int [lemma_placed_split s n ss rest]. ([%#slib'79] 0 <= n
@@ -227,7 +227,7 @@ axiom lemma_placed_split_def:
 axiom lemma_placed_split_spec: forall s: Seq.seq t_SpecM, n: int, ss: int, rest: int. ([%#slib'79] 0 <= n
       /\ n <= Seq.length s) -> ([%#slib'80] placed_l s n ss rest = fixed_sum_l s n ss + rest * rest_count_l s n)
 
-function lemma_rest_count_nonneg [#"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 305 0 305 53] (s: Seq.seq t_SpecM) (n: int) : ()
+function lemma_rest_count_nonneg [#"/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 305 0 305 53] (s: Seq.seq t_SpecM) (n: int) : ()
 
 axiom lemma_rest_count_nonneg_def: forall s: Seq.seq t_SpecM, n: int [lemma_rest_count_nonneg s n]. ([%#slib'83] 0 <= n
       /\ n <= Seq.length s)
@@ -239,7 +239,7 @@ axiom lemma_rest_count_nonneg_spec: forall s: Seq.seq t_SpecM, n: int. ([%#slib'
 axiom lemma_rest_count_nonneg_spec'0: forall s: Seq.seq t_SpecM, n: int. ([%#slib'83] 0 <= n /\ n <= Seq.length s)
     -> ([%#slib'85] rest_count_l s n <= n)
 
-function lemma_cdiv_nonneg [#"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 260 0 260 40] (n: int) (d: int) : ()
+function lemma_cdiv_nonneg [#"/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 260 0 260 40] (n: int) (d: int) : ()
  = [%#slib'103] ()
 
 axiom lemma_cdiv_nonneg_spec: forall n: int, d: int. ([%#slib'99] n >= 0 /\ d > 0) -> ([%#slib'100] cdiv n d >= 0)
@@ -249,7 +249,7 @@ axiom lemma_cdiv_nonneg_spec'0: forall n: int, d: int. ([%#slib'99] n >= 0 /\ d 
 axiom lemma_cdiv_nonneg_spec'1: forall n: int, d: int. ([%#slib'99] n >= 0 /\ d > 0)
     -> ([%#slib'102] n > 0 -> cdiv n d >= 1)
 
-function lemma_placed_mono [#"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 338 0 338 75] (s: Seq.seq t_SpecM) (j: int) (k: int) (ss: int) (rest: int) : ()
+function lemma_placed_mono [#"/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 338 0 338 75] (s: Seq.seq t_SpecM) (j: int) (k: int) (ss: int) (rest: int) : ()
 
 axiom lemma_placed_mono_def:
   forall s: Seq.seq t_SpecM, j: int, k: int, ss: int, rest: int [lemma_placed_mono s j k ss rest]. ([%#slib'94] 0 <= j
@@ -285,7 +285,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let layout_place [#"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 460 0 466 35]
+let layout_place [#"/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 460 0 466 35]
   (specs: t_Vec_SpecM_Global) (ss: UInt32.t) (first: UInt64.t) (last: UInt64.t) (rest: UInt64.t)
   (return (x: t_Result_Vec_EntryM_Global_LayoutErr)) =
 {[@stop_split] [@expl:layout_place requires] ([@stop_split] [@expl:layout_place requires #0] [%#slib'56] UInt32.t'int ss

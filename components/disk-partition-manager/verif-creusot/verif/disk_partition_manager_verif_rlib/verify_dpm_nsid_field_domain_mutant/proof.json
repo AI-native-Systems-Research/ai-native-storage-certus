@@ -2,14 +2,14 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_get_ns_id_m": { "prover": "alt-ergo", "time": 0.013 },
-      "vc_set_ns_id_m": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_get_ns_id_m": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_set_ns_id_m": { "prover": "alt-ergo", "time": 0.014 },
       "vc_verify_dpm_nsid_field_domain__mutant": {
         "tactic": "split_vc",
         "children": [
           {
             "tactic": "split_vc",
-            "children": [ null, { "prover": "alt-ergo", "time": 0.024 } ]
+            "children": [ null, { "prover": "alt-ergo", "time": 0.016 } ]
           }
         ]
       }

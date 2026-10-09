@@ -2,16 +2,22 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_entry_sectors": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_entry_sectors": { "prover": "alt-ergo", "time": 0.025 },
       "vc_verify_dpm_read_backup_location_underflow__mutant": {
         "tactic": "split_vc",
         "children": [
-          { "prover": "alt-ergo", "time": 0.021 },
-          { "prover": "alt-ergo", "time": 0.025 },
-          null
+          { "prover": "alt-ergo", "time": 0.015 },
+          {
+            "tactic": "split_vc",
+            "children": [
+              null,
+              { "prover": "alt-ergo", "time": 0.028 },
+              { "prover": "alt-ergo", "time": 0.039 }
+            ]
+          }
         ]
       },
-      "vc_wrapping_sub": { "prover": "alt-ergo", "time": 0.022 }
+      "vc_wrapping_sub": { "prover": "alt-ergo", "time": 0.02 }
     }
   }
 }

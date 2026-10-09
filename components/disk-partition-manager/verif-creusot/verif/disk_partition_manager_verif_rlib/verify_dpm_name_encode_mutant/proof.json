@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_encode_units": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_encode_units": { "prover": "alt-ergo", "time": 0.027 },
       "vc_verify_dpm_name_encode__mutant": {
         "tactic": "compute_specified",
         "children": [

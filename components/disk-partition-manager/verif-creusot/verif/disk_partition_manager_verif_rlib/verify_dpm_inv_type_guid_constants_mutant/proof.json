@@ -2,8 +2,8 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_set_CERTUS_DATA": { "prover": "alt-ergo", "time": 0.015 },
-      "vc_set_CERTUS_EXTERNAL_META": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_set_CERTUS_DATA": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_set_CERTUS_EXTERNAL_META": { "prover": "alt-ergo", "time": 0.023 },
       "vc_set_CERTUS_METADATA": { "prover": "alt-ergo", "time": 0.021 },
       "vc_verify_dpm_inv_type_guid_constants__mutant": {
         "tactic": "compute_specified",
@@ -13,7 +13,17 @@
             "children": [
               {
                 "tactic": "split_vc",
-                "children": [ { "prover": "alt-ergo", "time": 0.041 }, null ]
+                "children": [
+                  { "prover": "alt-ergo", "time": 0.023 },
+                  null,
+                  { "prover": "alt-ergo", "time": 0.022 },
+                  { "prover": "alt-ergo", "time": 0.024 },
+                  { "prover": "alt-ergo", "time": 0.033 },
+                  { "prover": "alt-ergo", "time": 0.02 },
+                  { "prover": "alt-ergo", "time": 0.022 },
+                  { "prover": "alt-ergo", "time": 0.018 },
+                  { "prover": "alt-ergo", "time": 0.019 }
+                ]
               }
             ]
           }

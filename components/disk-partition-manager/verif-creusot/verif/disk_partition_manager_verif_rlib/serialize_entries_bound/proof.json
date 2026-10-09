@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_serialize_entries_bound": { "prover": "alt-ergo", "time": 0.02 }
+      "vc_serialize_entries_bound": { "prover": "alt-ergo", "time": 0.018 }
     }
   }
 }

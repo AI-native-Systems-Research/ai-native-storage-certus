@@ -333,15 +333,15 @@ properties:
   - 'spec: DPM-INIT-POST-BACKUP-ON-CRC,DPM-INIT-POST-BACKUP-ON-SIGNATURE'
   - 'code: DPM-READ-FALLBACK-TRIGGER'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_dpm_init_post_backup_fallback
       result: Proved
-      wall_clock_s: 0.5
-      peak_rss_mb: 51
+      wall_clock_s: 5.12
+      peak_rss_mb: 261
       lever: null
-    fidelity: null
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -392,15 +392,15 @@ properties:
   - 'spec: DPM-INIT-PRE-GPT-PRESENT,DPM-INIT-ERR-NO-TABLE'
   - 'code: DPM-INIT-ERR-NOGPT,DPM-READ-ZEROCOUNT-ACCEPTED'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_dpm_init_err_no_table
       result: Proved
-      wall_clock_s: 0.49
-      peak_rss_mb: 51
+      wall_clock_s: 0.58
+      peak_rss_mb: 48
       lever: null
-    fidelity: null
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -1102,15 +1102,15 @@ properties:
   - 'spec: DPM-FORMAT-FRAME-NO-WRITE-ON-LAYOUT-ERROR'
   - 'code: DPM-FORMAT-ERR-LAYOUT-TOOSMALL,DPM-FORMAT-NO-ROLLBACK'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_dpm_format_frame_no_write_on_reject
       result: Proved
-      wall_clock_s: 0.48
-      peak_rss_mb: 50
+      wall_clock_s: 0.66
+      peak_rss_mb: 52
       lever: null
-    fidelity: null
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -1279,15 +1279,15 @@ properties:
   source:
   - 'code: DPM-FORMAT-SUM-OVERFLOW'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_dpm_format_sum_overflow
       result: Proved
-      wall_clock_s: 0.52
-      peak_rss_mb: 51
+      wall_clock_s: 0.65
+      peak_rss_mb: 47
       lever: null
-    fidelity: null
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -1795,15 +1795,15 @@ properties:
   source:
   - 'spec: DPM-FORMAT-POST-TYPE-GUID-ECHO'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_dpm_format_post_type_guid_echo
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 54
+      wall_clock_s: 0.79
+      peak_rss_mb: 53
       lever: null
-    fidelity: null
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -1880,15 +1880,15 @@ properties:
   source:
   - 'code: DPM-FORMAT-IGNORES-DEVICE'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_dpm_format_ignores_device_geometry
       result: Proved
-      wall_clock_s: 0.48
-      peak_rss_mb: 51
+      wall_clock_s: 0.78
+      peak_rss_mb: 52
       lever: null
-    fidelity: null
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -2748,15 +2748,15 @@ properties:
   - 'spec: DPM-IOF-POST-MISSING-FORMATTED'
   - 'code: DPM-IOF-POST-FALLBACK,DPM-IOF-DOC-CLAIM'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_dpm_iof_post_missing_formatted
       result: Proved
-      wall_clock_s: 0.48
-      peak_rss_mb: 51
+      wall_clock_s: 0.73
+      peak_rss_mb: 47
       lever: null
-    fidelity: null
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -3135,15 +3135,15 @@ properties:
   source:
   - 'code: DPM-READ-BACKUP-UNDERFLOW'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_dpm_read_backup_location_underflow
       result: Proved
-      wall_clock_s: 0.49
-      peak_rss_mb: 51
+      wall_clock_s: 0.57
+      peak_rss_mb: 47
       lever: null
-    fidelity: null
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -3259,15 +3259,15 @@ properties:
   source:
   - 'code: DPM-READ-STRIDE-MISMATCH'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_dpm_read_stride_mismatch
       result: Proved
-      wall_clock_s: 0.49
-      peak_rss_mb: 51
+      wall_clock_s: 0.8
+      peak_rss_mb: 53
       lever: null
-    fidelity: null
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -4296,15 +4296,15 @@ properties:
   source:
   - 'spec: DPM-INV-TYPE-GUID-CONSTANTS'
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_dpm_inv_type_guid_constants
       result: Proved
-      wall_clock_s: 0.52
-      peak_rss_mb: 54
+      wall_clock_s: 0.65
+      peak_rss_mb: 53
       lever: null
-    fidelity: null
-    note: scorer re-ran `cargo creusot` from source -> Proved
     status: proved
     _scored_by: scorer_creusot
   kani:
@@ -4855,14 +4855,14 @@ inventory_provenance:
     pin.
   extracted_by: component-sweep on node7, 2026-09-29
 run:
-  gate_commit: 7acfc58d
+  gate_commit: affb821a
   gate_branch: HEAD
   creusot:
     scored_by: scorer_creusot
     command: scorer_creusot.py components/disk-partition-manager/verif --crate-dir components/disk-partition-manager/verif-creusot
-      --cap-seconds 60 --cap-max 300 --resume
-    started: '2026-10-08T01:28:59-07:00'
-    finished: '2026-10-08T01:33:01-07:00'
+      --cap-seconds 60 --cap-max 300 --resume --only DPM-FORMAT-FRAME-NO-WRITE-ON-REJECT,DPM-FORMAT-IGNORES-DEVICE-GEOMETRY,DPM-FORMAT-POST-TYPE-GUID-ECHO,DPM-FORMAT-SUM-OVERFLOW,DPM-INIT-ERR-NO-TABLE,DPM-INIT-POST-BACKUP-FALLBACK,DPM-INV-TYPE-GUID-CONSTANTS,DPM-IOF-POST-MISSING-FORMATTED,DPM-READ-BACKUP-LOCATION-UNDERFLOW,DPM-READ-STRIDE-MISMATCH
+    started: '2026-10-08T19:34:51-07:00'
+    finished: '2026-10-08T19:37:16-07:00'
     creusot: v0.11.0-169-g9cf662ce6
     why3: Why3 platform, version 1.8.2+git
     provers:
@@ -5199,28 +5199,536 @@ level1_sync_check:
     2026-10-05), applied 2026-10-07
   reclassified: 10
   domain_discordances: 13
+classification:
+  DPM-FORMAT-FRAME-NO-WRITE-ON-REJECT:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - src/gpt.rs:160-164
+    - src/gpt.rs:167
+    - src/gpt.rs:256-260
+    - src/gpt.rs:270-275
+    - src/gpt.rs:286-291
+    - src/gpt.rs:204
+    - gpt.rs:156-164
+    - gpt.rs:167
+    - gpt.rs:256-260
+    - gpt.rs:270-275
+    - gpt.rs:286-291
+    - gpt.rs:204
+    why: Every LayoutError return (device too small, >1 rest partition, fixed sum too big, per-partition
+      overflow) happens before the first write at gpt.rs:204; read as layout rejections only (mid-write
+      I/O failure is not a layout rejection).
+  DPM-FORMAT-IGNORES-DEVICE-GEOMETRY:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - src/lib.rs:86-92
+    - src/lib.rs:73-78
+    - lib.rs:86-92
+    - lib.rs:72-78
+    why: format builds GptManager from config.ns_id/sector_size/total_sectors and never queries bd.sector_size/num_sectors,
+      whereas initialize does, matching the boundary statement.
+  DPM-FORMAT-POST-GUID-FRESH:
+    class: B
+    reason: null
+    checked_by: kani
+    evidence:
+    - src/gpt.rs:564-574
+    - src/gpt.rs:566-568
+    - src/gpt.rs:174
+    - src/gpt.rs:298
+    - gpt.rs:564-573
+    - gpt.rs:295
+    - gpt.rs:298
+    why: GUIDs come from /dev/urandom but open/read failures are silently ignored, leaving a constant
+      (zero plus version bits) GUID with no error, so freshness is not guaranteed.
+  DPM-FORMAT-POST-TABLE:
+    class: B
+    reason: null
+    checked_by: kani
+    evidence:
+    - src/gpt.rs:219-231
+    - src/gpt.rs:222
+    - src/lib.rs:118
+    - gpt.rs:219-231
+    - gpt.rs:222
+    - gpt.rs:297
+    why: The returned table filters out entries whose type GUID is all zeros, so a requested partition
+      with a zero type GUID is missing and the count is short.
+  DPM-FORMAT-POST-TYPE-GUID-ECHO:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - src/gpt.rs:279-297
+    - src/gpt.rs:437
+    - src/gpt.rs:219-227
+    - gpt.rs:279
+    - gpt.rs:297
+    - gpt.rs:437
+    - gpt.rs:227
+    why: Each entry is built in config order with type_guid = spec.type_guid, serialized verbatim, and
+      the returned PartitionInfo copies e.type_guid in the same order (zero-GUID entries are dropped from
+      the result, but no surviving entry's type GUID is altered or reordered).
+  DPM-FORMAT-PRE-GEOMETRY-MIN:
+    class: '?'
+    needs_human: true
+    run1:
+      class: A
+      reason: null
+      evidence:
+      - src/gpt.rs:158
+      - src/gpt.rs:160
+      why: last_usable_lba = num_sectors - 1 - entry_sectors - 1 is computed with unchecked subtraction
+        before the too-small check, so a small total panics (debug) or wraps to a huge value that passes
+        the first_usable >= last_usable check (release), exactly as the boundary statement describes.
+    run2:
+      class: B
+      reason: null
+      evidence:
+      - gpt.rs:157-164
+      - gpt.rs:324-327
+      why: 'The code does not check the stated precondition before line 158: it subtracts only ONE entry
+        list plus 2 (num_sectors - 1 - E - 1), so the subtraction underflows only below E+2 sectors, while
+        totals between E+2 and about 2E+4 are rejected cleanly by gpt.rs:160; the statement''s threshold
+        and its ''goes below zero'' claim do not match the code exactly.'
+  DPM-FORMAT-PRE-MAX-128:
+    class: B
+    reason: null
+    checked_by: kani
+    evidence:
+    - src/gpt.rs:279-307
+    - src/gpt.rs:310
+    - src/gpt.rs:433-437
+    - src/gpt.rs:118-120
+    - src/gpt.rs:131
+    - gpt.rs:279-307
+    - gpt.rs:310
+    - gpt.rs:432-437
+    - gpt.rs:118-119
+    - gpt.rs:131-144
+    why: Format does not cap or reject >128 partitions (it panics indexing the 16 KiB buffer in serialize_entries),
+      and the read path reports as many partitions as the on-disk header's entry count allows, so more
+      than 128 can be reported.
+  DPM-FORMAT-PRE-SECTOR-SIZE:
+    class: B
+    reason: null
+    checked_by: kani
+    evidence:
+    - src/lib.rs:91
+    - src/gpt.rs:326
+    - src/gpt.rs:330-333
+    - src/gpt.rs:351-352
+    - lib.rs:91
+    - gpt.rs:324-327
+    - gpt.rs:330-352
+    - ipartition_table.rs:39
+    why: config.sector_size is never checked against {512, 4096}; zero divides by zero in entry_sectors
+      and sizes below 512 index past the MBR buffer (panic) instead of a rejection.
+  DPM-FORMAT-SUM-OVERFLOW:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - src/gpt.rs:263-268
+    - src/gpt.rs:270
+    - gpt.rs:263-268
+    - gpt.rs:270
+    why: fixed_sectors is a plain Iterator::sum of div_ceil values with no checked add, so in release
+      builds it can wrap and pass the fixed_sectors > total_usable check (debug builds panic instead),
+      as the boundary statement says.
+  DPM-INIT-ERR-IO:
+    class: B
+    reason: null
+    checked_by: kani
+    evidence:
+    - src/gpt.rs:83
+    - src/gpt.rs:90-95
+    - src/gpt.rs:468
+    - src/gpt.rs:472
+    - src/gpt.rs:478-490
+    - gpt.rs:90-95
+    - gpt.rs:468
+    - gpt.rs:472
+    - gpt.rs:478-489
+    - lib.rs:57-60
+    why: I/O failures on the primary read propagate as IoError, but any I/O failure while reading the
+      backup copy is mapped to NoPartitionTable at gpt.rs:91, i.e. reported as a missing table.
+  DPM-INIT-ERR-NO-TABLE:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - src/gpt.rs:79-80
+    - src/gpt.rs:90-95
+    - src/gpt.rs:363-367
+    - gpt.rs:79-82
+    - gpt.rs:90-95
+    - gpt.rs:363-367
+    why: When the primary fails with CRC/signature and the backup read fails for any reason, read_gpt
+      returns NoPartitionTable, and an all-zero drive fails the signature check on both copies; read with
+      "intact" meaning signature+CRCs valid (a zero-entry header with matching CRCs counts as intact in
+      the code).
+  DPM-INIT-IO-COUNT-BOUNDED:
+    class: B
+    reason: null
+    checked_by: kani
+    evidence:
+    - src/gpt.rs:118-120
+    - src/gpt.rs:451-455
+    - gpt.rs:118-120
+    - gpt.rs:452-455
+    - gpt.rs:87-90
+    why: The number of entry bytes (and hence sectors) read is num_partition_entries * partition_entry_size
+      taken unvalidated from the on-disk header, so the read count is not fixed.
+  DPM-INIT-POST-BACKUP-FALLBACK:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - src/gpt.rs:68-84
+    - src/gpt.rs:87-90
+    - src/gpt.rs:110-114
+    - src/gpt.rs:124-128
+    - src/gpt.rs:363-367
+    - gpt.rs:68-84
+    - gpt.rs:87-90
+    - gpt.rs:363-367
+    - gpt.rs:110-115
+    - gpt.rs:124-129
+    why: read_gpt falls through to the backup at num_sectors-1 exactly when the primary returns CorruptTable
+      (CRC mismatch) or NoPartitionTable (bad/zeroed signature) and returns any other error (I/O) immediately,
+      matching the statement's exclusive two triggers as worded (the spec-side worry about I/O on the
+      primary is not in the statement).
+  DPM-INIT-POST-CRC-VALIDATION:
+    class: '?'
+    needs_human: true
+    run1:
+      class: B
+      reason: null
+      evidence:
+      - src/gpt.rs:107-115
+      - src/gpt.rs:123-129
+      - src/gpt.rs:79-80
+      - src/gpt.rs:91
+      why: Both CRCs are recomputed and checked before a copy is accepted, but the header CRC is always
+        over a fixed 92 bytes (not the header's declared size) and the corrupt-table error with stored/recomputed
+        values never reaches initialize/initialize_or_format (primary failure falls back, backup failure
+        is rewritten as NoPartitionTable at gpt.rs:91), so the reporting part is missing at the public
+        methods.
+    run2:
+      class: A
+      reason: null
+      evidence:
+      - gpt.rs:107-115
+      - gpt.rs:123-129
+      - gpt.rs:79-80
+      why: 'Per-copy reading: try_read_gpt_at recomputes the header CRC (crc field zeroed, gpt.rs:107-110)
+        and the entry-array CRC (gpt.rs:123-124) and returns CorruptTable carrying both stored and computed
+        values on either mismatch (gpt.rs:111-114, 125-128); that error is per-copy and is masked at the
+        public level (gpt.rs:91), and the header CRC is over a fixed 92 bytes rather than header_size,
+        which the statement does not specify.'
+  DPM-INV-ENTRY-ARRAY-SHAPE:
+    class: B
+    reason: null
+    checked_by: kani
+    evidence:
+    - src/gpt.rs:186-187
+    - src/gpt.rs:310
+    - src/gpt.rs:433
+    - src/gpt.rs:118-120
+    - src/gpt.rs:131
+    - gpt.rs:186-187
+    - gpt.rs:310-319
+    - gpt.rs:433
+    - gpt.rs:118-120
+    - gpt.rs:131
+    why: Written tables are always 128 x 128 bytes, but the read path accepts whatever entry count and
+      entry size the on-disk header declares.
+  DPM-INV-GUID-DISTINCT:
+    class: B
+    reason: null
+    checked_by: kani
+    evidence:
+    - src/gpt.rs:564-574
+    - src/gpt.rs:174
+    - src/gpt.rs:298
+    - gpt.rs:564-573
+    - gpt.rs:295
+    - gpt.rs:298
+    why: Unique and disk GUIDs are independent random draws with no distinctness check, and if /dev/urandom
+      cannot be opened or read every GUID is the same constant, so distinctness is not guaranteed.
+  DPM-INV-NO-OVERLAP:
+    class: B
+    reason: null
+    checked_by: kani
+    evidence:
+    - src/gpt.rs:293
+    - src/gpt.rs:305
+    - src/gpt.rs:131-144
+    - gpt.rs:293
+    - gpt.rs:305
+    - gpt.rs:131-144
+    why: Created partitions are laid out contiguously and disjoint, but tables read back are accepted
+      with no overlap/range validation, so a CRC-valid on-disk table with overlapping entries is returned.
+  DPM-INV-NSID-CONSISTENT:
+    class: B
+    reason: null
+    checked_by: kani
+    evidence:
+    - src/lib.rs:34-36
+    - src/lib.rs:72
+    - src/lib.rs:91
+    - src/gpt.rs:464
+    - src/gpt.rs:526
+    - lib.rs:30-36
+    - lib.rs:72
+    - lib.rs:80
+    - lib.rs:91
+    - gpt.rs:464
+    - gpt.rs:526
+    why: Reads use the component's configured ns_id (default 1) while format writes to config.ns_id from
+      the request, so the two can address different namespaces.
+  DPM-INV-NUM-SECTORS-POSITIVE:
+    class: B
+    reason: null
+    checked_by: kani
+    evidence:
+    - src/gpt.rs:277
+    - src/gpt.rs:280-293
+    - src/gpt.rs:226
+    - src/gpt.rs:139
+    - gpt.rs:277
+    - gpt.rs:280-281
+    - gpt.rs:286
+    - gpt.rs:293
+    - gpt.rs:226
+    - gpt.rs:139
+    why: When fixed partitions consume all usable space the rest-of-disk partition gets 0 sectors (ending_lba
+      = start - 1), and the later ending - starting + 1 underflows (panic) rather than rejecting; the
+      read path has the same unguarded subtraction.
+  DPM-INV-PARTITION-INDEX-SEQUENTIAL:
+    class: B
+    reason: null
+    checked_by: kani
+    evidence:
+    - src/gpt.rs:132-137
+    - src/gpt.rs:220-223
+    - gpt.rs:132-137
+    - gpt.rs:219-224
+    why: index is the enumerate position taken before filtering out zero-type slots (and cast usize->u32
+      unchecked), so returned numbering has gaps whenever an empty slot precedes an occupied one.
+  DPM-INV-SECTOR-SIZE-DOMAIN:
+    class: B
+    reason: null
+    checked_by: kani
+    evidence:
+    - src/lib.rs:73-75
+    - src/lib.rs:91
+    - src/gpt.rs:148
+    - src/gpt.rs:235
+    - lib.rs:73-75
+    - lib.rs:91
+    - gpt.rs:49-63
+    - gpt.rs:148
+    - gpt.rs:235
+    why: Neither the device-reported sector size (initialize) nor config.sector_size (format) is checked
+      against {512, 4096}; whatever value arrives is used and reported back in the table.
+  DPM-INV-SIGNATURE-REVISION:
+    class: '?'
+    needs_human: true
+    run1:
+      class: B
+      reason: null
+      evidence:
+      - src/gpt.rs:176-178
+      - src/gpt.rs:362-367
+      - src/gpt.rs:79-80
+      - src/gpt.rs:91
+      why: Written headers carry "EFI PART" and revision 1.0 and a bad marker on read is rejected with
+        a message naming the found value, but that message never reaches initialize (primary failure falls
+        back, backup failure is replaced by a fixed NoPartitionTable message at gpt.rs:91), so the reporting
+        part is missing at the public methods.
+    run2:
+      class: A
+      reason: null
+      evidence:
+      - gpt.rs:8-10
+      - gpt.rs:176-178
+      - gpt.rs:409-411
+      - gpt.rs:362-367
+      - gpt.rs:79-80
+      why: Written headers carry GPT_SIGNATURE ('EFI PART') and GPT_REVISION_1_0 (gpt.rs:176-177, 409-410).
+        On read, a wrong signature returns an error carrying the value found (gpt.rs:363-367), and read_gpt
+        treats that like damage by falling back to the backup (gpt.rs:79-80). The statement does not require
+        a revision check on read, which the code also lacks.
+  DPM-INV-TYPE-GUID-CONSTANTS:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - ../interfaces/src/ipartition_table.rs:91-112
+    - ipartition_table.rs:91-111
+    why: CERTUS_METADATA, CERTUS_DATA and CERTUS_EXTERNAL_META are fixed `pub const` 16-byte arrays matching
+      their documented UUIDs.
+  DPM-IOF-ERR-PROPAGATE:
+    class: B
+    reason: null
+    checked_by: kani
+    evidence:
+    - src/gpt.rs:90-95
+    - src/lib.rs:57-62
+    - src/lib.rs:51
+    - src/lib.rs:59
+    - lib.rs:55-63
+    - gpt.rs:83
+    - gpt.rs:90-95
+    - lib.rs:69-71
+    why: Layout errors from format do propagate, and primary-read I/O errors propagate, but an I/O failure
+      on the backup read is rewritten as NoPartitionTable and initialize_or_format then formats the drive
+      instead of returning the error.
+  DPM-IOF-NO-REFORMAT-ON-DAMAGED-PRIMARY:
+    class: '?'
+    needs_human: true
+    run1:
+      class: A
+      reason: null
+      evidence:
+      - src/gpt.rs:68-84
+      - src/gpt.rs:87-90
+      - src/lib.rs:55-56
+      - src/lib.rs:62
+      why: A primary that fails CRC or signature falls back to the backup, and an intact backup returns
+        Ok so initialize_or_format returns (table, false) without formatting; a primary I/O error returns
+        the error (not a reformat); read with "damaged" meaning CRC/signature failure (an unreadable primary
+        sector is not recovered from the backup but is also not reformatted).
+    run2:
+      class: B
+      reason: null
+      evidence:
+      - gpt.rs:79-84
+      - gpt.rs:103
+      - gpt.rs:118-120
+      - gpt.rs:90-95
+      - lib.rs:57-60
+      why: A primary damaged by a CRC or signature fault is recovered from an intact backup. A primary
+        whose damage surfaces as an I/O error (an unreadable header sector, or a corrupt entry count that
+        drives the read off the device, gpt.rs:103, 118-120) returns at gpt.rs:83 without trying the intact
+        backup, and a transient backup read failure is turned into NoPartitionTable and the drive is reformatted
+        (gpt.rs:91, lib.rs:57-60).
+  DPM-IOF-POST-MISSING-FORMATTED:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - src/lib.rs:55-61
+    - src/gpt.rs:90-95
+    - lib.rs:50-53
+    - lib.rs:55-61
+    - gpt.rs:90-95
+    why: When force_format is false and initialize returns NoPartitionTable (also CorruptTable), format(config)
+      is called and Ok((table, true)) returned; the extra CorruptTable branch does not contradict the
+      statement.
+  DPM-IOF-PRE-CONFIG-VALID:
+    class: '?'
+    needs_human: true
+    run1:
+      class: A
+      reason: null
+      evidence:
+      - src/lib.rs:50-52
+      - src/lib.rs:57-61
+      why: Caller-side precondition; initialize_or_format passes the config unchanged to format (with
+        ?) on both format branches, so the config is subject to exactly format's acceptance and is otherwise
+        unused — read as a precondition the code relies on, not one it must check eagerly.
+    run2:
+      class: B
+      reason: null
+      evidence:
+      - lib.rs:50-63
+      - lib.rs:59
+      - lib.rs:86-95
+      why: 'initialize_or_format does not validate config up front. When a valid table exists it returns
+        success with an invalid config (lib.rs:55-56), and the config is only checked, by format, on the
+        fallback branch (lib.rs:59). I was unsure here: this may simply be a caller obligation the code
+        is consistent with.'
+  DPM-NAME-LENGTH-LIMIT:
+    class: B
+    reason: null
+    checked_by: kani
+    evidence:
+    - src/gpt.rs:576-587
+    - src/gpt.rs:578
+    - gpt.rs:576-587
+    - gpt.rs:294
+    - ipartition_table.rs:32
+    why: Names longer than 36 UTF-16 units are not rejected; encode_utf16le_name silently keeps the first
+      36 units (possibly splitting a surrogate pair).
+  DPM-NAME-ROUNDTRIP:
+    class: B
+    reason: null
+    checked_by: kani
+    evidence:
+    - src/gpt.rs:578
+    - src/gpt.rs:589-595
+    - gpt.rs:578
+    - gpt.rs:589-595
+    why: Only ASCII names of at most 36 characters round-trip; an ASCII name of 37+ characters is truncated
+      to 36 on encode, and the statement has no length qualifier.
+  DPM-PINFO-POST-INDEX-ECHO:
+    class: B
+    reason: null
+    checked_by: kani
+    evidence:
+    - src/lib.rs:104
+    - src/gpt.rs:134-137
+    - src/gpt.rs:221-223
+    - lib.rs:102-110
+    - gpt.rs:132-137
+    - gpt.rs:219-224
+    why: partition_info indexes the filtered (non-empty) list while each returned PartitionInfo.index
+      is the pre-filter slot number, so after an empty slot the returned index differs from the requested
+      one.
+  DPM-READ-BACKUP-LOCATION-UNDERFLOW:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - src/gpt.rs:87
+    - src/gpt.rs:89
+    - gpt.rs:87-89
+    - lib.rs:76-80
+    why: backup_lba = num_sectors - 1 and backup_entry_lba = backup_lba - entry_sectors are unchecked
+      subtractions with no minimum-size check, so they underflow (panic/wrap) on a tiny device as stated.
+  DPM-READ-STRIDE-MISMATCH:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - src/gpt.rs:118-120
+    - src/gpt.rs:387-394
+    - src/gpt.rs:131
+    - gpt.rs:118-120
+    - gpt.rs:387-394
+    - gpt.rs:131
+    why: The byte count uses header.partition_entry_size but parse_entries always strides GPT_ENTRY_SIZE
+      (128) and breaks when data runs out, exactly the boundary behaviour stated.
 level2_excluded:
 - DPM-INIT-POST-CRC-VALIDATION
-- DPM-INIT-POST-BACKUP-FALLBACK
-- DPM-INIT-ERR-NO-TABLE
 - DPM-INIT-ERR-IO
 - DPM-INIT-IO-COUNT-BOUNDED
 - DPM-FORMAT-PRE-SECTOR-SIZE
-- DPM-FORMAT-FRAME-NO-WRITE-ON-REJECT
 - DPM-FORMAT-PRE-GEOMETRY-MIN
 - DPM-FORMAT-PRE-MAX-128
-- DPM-FORMAT-SUM-OVERFLOW
 - DPM-FORMAT-POST-TABLE
 - DPM-FORMAT-POST-GUID-FRESH
-- DPM-FORMAT-POST-TYPE-GUID-ECHO
-- DPM-FORMAT-IGNORES-DEVICE-GEOMETRY
 - DPM-PINFO-POST-INDEX-ECHO
 - DPM-IOF-PRE-CONFIG-VALID
-- DPM-IOF-POST-MISSING-FORMATTED
 - DPM-IOF-ERR-PROPAGATE
 - DPM-IOF-NO-REFORMAT-ON-DAMAGED-PRIMARY
-- DPM-READ-BACKUP-LOCATION-UNDERFLOW
-- DPM-READ-STRIDE-MISMATCH
 - DPM-NAME-LENGTH-LIMIT
 - DPM-NAME-ROUNDTRIP
 - DPM-INV-NO-OVERLAP
@@ -5228,7 +5736,6 @@ level2_excluded:
 - DPM-INV-SIGNATURE-REVISION
 - DPM-INV-GUID-DISTINCT
 - DPM-INV-SECTOR-SIZE-DOMAIN
-- DPM-INV-TYPE-GUID-CONSTANTS
 - DPM-INV-PARTITION-INDEX-SEQUENTIAL
 - DPM-INV-NUM-SECTORS-POSITIVE
 - DPM-INV-NSID-CONSISTENT

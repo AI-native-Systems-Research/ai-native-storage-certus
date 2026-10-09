@@ -4,9 +4,9 @@
     "Coma": {
       "vc_verify_dpm_io_write_sector_trust": {
         "prover": "alt-ergo",
-        "time": 0.043
+        "time": 0.044
       },
-      "vc_write_bytes_acc": { "prover": "alt-ergo", "time": 0.016 }
+      "vc_write_bytes_acc": { "prover": "alt-ergo", "time": 0.026 }
     }
   }
 }

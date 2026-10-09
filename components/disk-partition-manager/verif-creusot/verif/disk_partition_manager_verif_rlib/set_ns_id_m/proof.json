@@ -1,6 +1,6 @@
 {
   "profile": [],
   "proofs": {
-    "Coma": { "vc_set_ns_id_m": { "prover": "alt-ergo", "time": 0.014 } }
+    "Coma": { "vc_set_ns_id_m": { "prover": "alt-ergo", "time": 0.017 } }
   }
 }

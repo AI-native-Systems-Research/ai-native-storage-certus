@@ -108,3 +108,17 @@ config==device / config-ns==read-ns) are gone. Model-layer changes are weakening
 `parse_entries_m` (gpt.rs:387-405). Every changed driver's `__mutant` is now the driver
 verbatim with its first ensures negated. Forced whole-crate run: 91 unproved == the 91
 `__mutant` twins; 0 `#[trusted]`. Advisory: `verif/.run/j4_advisory.yaml`.
+
+## J13 (level-2 classifier-A fresh re-proof, 2026-10-08)
+The 10 ids of `verif/.run/j13_A_ids.txt` re-audited and re-proved; all 10 credited. New mirrors
+(additions only, no existing contract changed): `write_gpt_m` (gpt.rs:152-216 incl. the
+too-small check and the post-layout write trace), `place_type_guids` (the `type_guid` slice of
+gpt.rs:279-319), `parse_entry_offsets` (gpt.rs:387-405 offsets), `lemma_u32_product`.
+Removed premises: the six `layout_place` success premises (TYPE-GUID-ECHO), `ns >= 1`
+(BACKUP-LOCATION-UNDERFLOW), `entries*size <= u64::MAX` (STRIDE-MISMATCH). Free-boolean /
+identity drivers replaced by computed mirrors (FRAME-NO-WRITE-ON-REJECT,
+IGNORES-DEVICE-GEOMETRY); STRIDE-MISMATCH's old `bytes/128` count was wrong (ignored the
+`0..count` bound) and is replaced. Widened: INIT-ERR-NO-TABLE (blank drive), IOF-POST-MISSING-
+FORMATTED (CorruptTable too), INIT-POST-BACKUP-FALLBACK (header-too-short excluded via SS).
+All 10 mutants = driver verbatim, first ensures negated. Forced whole-crate run: 91 unproved ==
+the 91 `__mutant` twins; 0 `#[trusted]`. Advisory: `verif/.run/j13_advisory.yaml`.

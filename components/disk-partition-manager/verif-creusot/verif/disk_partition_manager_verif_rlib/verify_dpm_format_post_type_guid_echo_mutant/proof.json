@@ -2,24 +2,30 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_entry_type_guid": { "prover": "alt-ergo", "time": 0.017 },
-      "vc_layout_place": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_place_type_guids": { "prover": "alt-ergo", "time": 0.025 },
       "vc_verify_dpm_format_post_type_guid_echo__mutant": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.036 },
-              { "prover": "alt-ergo", "time": 0.023 },
+              { "prover": "alt-ergo", "time": 0.033 },
+              { "prover": "alt-ergo", "time": 0.016 },
               {
                 "tactic": "split_vc",
-                "children": [ { "prover": "alt-ergo", "time": 0.024 }, null ]
+                "children": [
+                  { "prover": "alt-ergo", "time": 0.037 },
+                  null,
+                  { "prover": "alt-ergo", "time": 0.024 },
+                  { "prover": "alt-ergo", "time": 0.062 },
+                  { "prover": "alt-ergo", "time": 0.051 }
+                ]
               }
             ]
           }
         ]
-      }
+      },
+      "vc_write_gpt_m": { "prover": "alt-ergo", "time": 0.022 }
     }
   }
 }

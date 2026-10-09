@@ -2,11 +2,11 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_decode_units": { "prover": "alt-ergo", "time": 0.029 },
-      "vc_encode_units": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_decode_units": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_encode_units": { "prover": "alt-ergo", "time": 0.027 },
       "vc_verify_dpm_name_length_limit": {
         "prover": "alt-ergo",
-        "time": 0.042
+        "time": 0.029
       }
     }
   }

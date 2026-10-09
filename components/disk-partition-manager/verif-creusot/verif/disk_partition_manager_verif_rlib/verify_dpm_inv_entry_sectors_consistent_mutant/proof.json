@@ -2,27 +2,27 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_entry_sectors": { "prover": "alt-ergo", "time": 0.015 },
-      "vc_usable_window": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_entry_sectors": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_usable_window": { "prover": "alt-ergo", "time": 0.02 },
       "vc_verify_dpm_inv_entry_sectors_consistent__mutant": {
         "tactic": "split_vc",
         "children": [
-          { "prover": "alt-ergo", "time": 0.016 },
-          { "prover": "alt-ergo", "time": 0.026 },
-          { "prover": "alt-ergo", "time": 0.037 },
+          { "prover": "alt-ergo", "time": 0.021 },
+          { "prover": "alt-ergo", "time": 0.033 },
+          { "prover": "alt-ergo", "time": 0.019 },
           { "prover": "alt-ergo", "time": 0.02 },
-          { "prover": "alt-ergo", "time": 0.035 },
+          { "prover": "alt-ergo", "time": 0.019 },
           { "prover": "alt-ergo", "time": 0.034 },
           {
             "tactic": "split_vc",
             "children": [
               null,
-              { "prover": "alt-ergo", "time": 0.037 },
-              { "prover": "alt-ergo", "time": 0.03 },
-              { "prover": "alt-ergo", "time": 0.028 },
               { "prover": "alt-ergo", "time": 0.032 },
-              { "prover": "alt-ergo", "time": 0.042 },
-              { "prover": "alt-ergo", "time": 0.035 }
+              { "prover": "alt-ergo", "time": 0.024 },
+              { "prover": "alt-ergo", "time": 0.025 },
+              { "prover": "alt-ergo", "time": 0.019 },
+              { "prover": "alt-ergo", "time": 0.03 },
+              { "prover": "alt-ergo", "time": 0.024 }
             ]
           }
         ]

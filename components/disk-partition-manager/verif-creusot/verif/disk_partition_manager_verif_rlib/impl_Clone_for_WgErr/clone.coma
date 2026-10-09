@@ -1,0 +1,18 @@
+(* #"/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1957 9 1957 29 *)
+
+(* <WgErr as std::clone::Clone> *)
+
+use creusot.prelude.Any
+
+type t_LayoutErr = MultiRest | Capacity | PerPartition
+
+type t_WgErr = TooSmall | Layout t_LayoutErr
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_WgErr [#"/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1957 9 1957 29]
+  (self: t_WgErr) (return (x: t_WgErr)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_WgErr = Any.any_l () | & self: t_WgErr = self ]) [ return (result: t_WgErr) -> (! return {result}) ]

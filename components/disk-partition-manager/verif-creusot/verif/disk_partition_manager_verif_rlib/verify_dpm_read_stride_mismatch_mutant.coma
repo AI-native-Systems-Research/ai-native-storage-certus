@@ -1,51 +1,99 @@
-(* #"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 3477 0 3479 15 *)
+(* #"/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 3791 0 3791 106 *)
 
-let%span slib = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 3480 16 3480 60
-let%span slib'0 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 3481 26 3481 40
-let%span slib'1 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 3481 17 3481 48
-let%span slib'2 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 3475 11 3475 67
-let%span slib'3 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 3476 10 3476 36
-let%span slib'4 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 41 0 41 29
+let%span slib = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 3792 20 3792 70
+let%span slib'0 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 3793 16 3793 60
+let%span slib'1 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 3794 15 3794 55
+let%span slib'2 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 3784 10 3784 58
+let%span slib'3 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 3785 10 3785 83
+let%span slib'4 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 3786 10 3787 45
+let%span slib'5 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 3788 10 3788 85
+let%span slib'6 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 3789 10 3789 84
+let%span slib'7 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 3790 10 3790 82
+let%span slib'8 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 3757 11 3757 65
+let%span slib'9 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 3758 10 3758 39
+let%span slib'10 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 3759 41 3759 43
+let%span slib'11 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 3733 10 3733 33
+let%span slib'12 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 3734 10 3734 37
+let%span slib'13 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 3735 10 3735 69
+let%span slib'14 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 3736 10 3736 79
+let%span svec = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
 
 use creusot.int.UInt32
 use creusot.int.UInt64
+use seq.Seq
 use creusot.prelude.Any
 use int.Int
 
-constant const_GPT_ENTRY_SIZE: UInt32.t = [%#slib'4] (128: UInt32.t)
+function lemma_u32_product [#"/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 3759 0 3759 40] (a: int) (b: int) : ()
+ = [%#slib'10] ()
 
-type tup2_u64_u64 = { f0: UInt64.t; f1: UInt64.t }
+axiom lemma_u32_product_spec: forall a: int, b: int. ([%#slib'8] 0 <= a /\ a <= 4294967295 /\ 0 <= b /\ b <= 4294967295)
+    -> ([%#slib'9] a * b <= 18446744065119617025)
+
+type t_Vec_u64_Global
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_u64_Global (self: t_Vec_u64_Global) : Seq.seq UInt64.t
+
+axiom view_Vec_u64_Global_spec:
+  forall self: t_Vec_u64_Global [view_Vec_u64_Global self]. [%#svec] Seq.length (view_Vec_u64_Global self)
+    <= UInt64.t'int const_MAX
+
+let parse_entry_offsets (len: UInt64.t) (count: UInt32.t) (return (x: t_Vec_u64_Global)) = any
+  [ return (result: t_Vec_u64_Global) ->
+  {[@stop_split] [@expl:parse_entry_offsets ensures] ([@stop_split] [@expl:parse_entry_offsets ensures #0] [%#slib'11] Seq.length (view_Vec_u64_Global result)
+      <= UInt32.t'int count)
+    /\ ([@stop_split] [@expl:parse_entry_offsets ensures #1] [%#slib'12] Seq.length (view_Vec_u64_Global result) * 128
+      <= UInt64.t'int len)
+    /\ ([@stop_split] [@expl:parse_entry_offsets ensures #2] [%#slib'13] Seq.length (view_Vec_u64_Global result)
+        < UInt32.t'int count -> UInt64.t'int len < Seq.length (view_Vec_u64_Global result) * 128 + 128)
+    /\ ([@stop_split] [@expl:parse_entry_offsets ensures #3] [%#slib'14] forall j: int. 0 <= j
+        /\ j < Seq.length (view_Vec_u64_Global result)
+      -> UInt64.t'int (Seq.get (view_Vec_u64_Global result) j) = 128 * j)}
+    (! return {result}) ]
+
+type tup2_u64_Vec_u64_Global = { f0: UInt64.t; f1: t_Vec_u64_Global }
 
 meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let verify_dpm_read_stride_mismatch__mutant [#"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 3477 0 3479 15]
-  (decl_entries: UInt32.t) (decl_entry_size: UInt32.t) (return (x: tup2_u64_u64)) =
-{[@stop_split] [@expl:verify_dpm_read_stride_mismatch__mutant requires] [%#slib'2] UInt32.t'int decl_entries
-    * UInt32.t'int decl_entry_size
-  <= 18446744073709551615}
-  (! bb0
+let verify_dpm_read_stride_mismatch__mutant [#"/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 3791 0 3791 106]
+  (decl_entries: UInt32.t) (decl_entry_size: UInt32.t) (return (x: tup2_u64_Vec_u64_Global)) = (! bb0
   [ bb0 = s0
-    [ s0 = [ &_9 <- UInt64.of_int (UInt32.t'int decl_entries) ] s1
-    | s1 = [ &_11 <- UInt64.of_int (UInt32.t'int decl_entry_size) ] s2
-    | s2 = UInt64.mul [%#slib] {_9} {_11} (fun (_x: UInt64.t) -> [ &bytes <- _x ] s3)
-    | s3 = [ &_15 <- UInt64.of_int (UInt32.t'int ([%#slib'0] const_GPT_ENTRY_SIZE)) ] s4
-    | s4 = [ &_16 <- _15 = ([%#slib'1] (0: UInt64.t)) ] s5
-    | s5 = {[@expl:division by zero] [%#slib'1] not _16} s6
-    | s6 = UInt64.div [%#slib'1] {bytes} {_15} (fun (_x: UInt64.t) -> [ &parsed <- _x ] s7)
-    | s7 = [ &_ret <- { f0 = bytes; f1 = parsed } ] s8
-    | s8 = return {_ret} ] ]
-  [ & _ret: tup2_u64_u64 = Any.any_l ()
+    [ s0 =
+      {[@expl:assertion] [%#slib] let _ = lemma_u32_product (UInt32.t'int decl_entries) (UInt32.t'int decl_entry_size) in true}
+      s1
+    | s1 = [ &_22 <- UInt64.of_int (UInt32.t'int decl_entries) ] s2
+    | s2 = [ &_24 <- UInt64.of_int (UInt32.t'int decl_entry_size) ] s3
+    | s3 = UInt64.mul [%#slib'0] {_22} {_24} (fun (_x: UInt64.t) -> [ &bytes <- _x ] s4)
+    | s4 = parse_entry_offsets [%#slib'1] {bytes} {decl_entries} (fun (_x: t_Vec_u64_Global) -> [ &offs <- _x ] s5)
+    | s5 = [ &_ret <- { f0 = bytes; f1 = offs } ] s6
+    | s6 = return {_ret} ] ]
+  [ & _ret: tup2_u64_Vec_u64_Global = Any.any_l ()
   | & decl_entries: UInt32.t = decl_entries
   | & decl_entry_size: UInt32.t = decl_entry_size
   | & bytes: UInt64.t = Any.any_l ()
-  | & _9: UInt64.t = Any.any_l ()
-  | & _11: UInt64.t = Any.any_l ()
-  | & parsed: UInt64.t = Any.any_l ()
-  | & _15: UInt64.t = Any.any_l ()
-  | & _16: bool = Any.any_l () ])
-  [ return (result: tup2_u64_u64) ->
-  {[@stop_split] [@expl:verify_dpm_read_stride_mismatch__mutant ensures] [%#slib'3] UInt64.t'int result.f1
-    = UInt32.t'int decl_entries}
+  | & _22: UInt64.t = Any.any_l ()
+  | & _24: UInt64.t = Any.any_l ()
+  | & offs: t_Vec_u64_Global = Any.any_l () ])
+  [ return (result: tup2_u64_Vec_u64_Global) ->
+  {[@stop_split] [@expl:verify_dpm_read_stride_mismatch__mutant ensures] ([@stop_split] [@expl:verify_dpm_read_stride_mismatch__mutant ensures #0] [%#slib'2] not UInt64.t'int result.f0
+      = UInt32.t'int decl_entries * UInt32.t'int decl_entry_size)
+    /\ ([@stop_split] [@expl:verify_dpm_read_stride_mismatch__mutant ensures #1] [%#slib'3] forall j: int. 0 <= j
+          /\ j < Seq.length (view_Vec_u64_Global result.f1)
+        -> UInt64.t'int (Seq.get (view_Vec_u64_Global result.f1) j) = 128 * j)
+    /\ ([@stop_split] [@expl:verify_dpm_read_stride_mismatch__mutant ensures #2] [%#slib'4] UInt32.t'int decl_entry_size
+        <> 128
+      -> (forall j: int. 1 <= j /\ j < Seq.length (view_Vec_u64_Global result.f1)
+        -> UInt64.t'int (Seq.get (view_Vec_u64_Global result.f1) j) <> j * UInt32.t'int decl_entry_size))
+    /\ ([@stop_split] [@expl:verify_dpm_read_stride_mismatch__mutant ensures #3] [%#slib'5] Seq.length (view_Vec_u64_Global result.f1)
+        < UInt32.t'int decl_entries -> UInt64.t'int result.f0 < Seq.length (view_Vec_u64_Global result.f1) * 128 + 128)
+    /\ ([@stop_split] [@expl:verify_dpm_read_stride_mismatch__mutant ensures #4] [%#slib'6] UInt32.t'int decl_entry_size
+          = 256
+        /\ UInt32.t'int decl_entries = 128 -> Seq.length (view_Vec_u64_Global result.f1) = 128)
+    /\ ([@stop_split] [@expl:verify_dpm_read_stride_mismatch__mutant ensures #5] [%#slib'7] UInt32.t'int decl_entry_size
+        = 64
+      /\ UInt32.t'int decl_entries = 128 -> Seq.length (view_Vec_u64_Global result.f1) = 64)}
     (! return {result}) ]

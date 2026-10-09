@@ -1,55 +1,54 @@
-(* #"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 2381 0 2383 47 *)
+(* #"/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2602 0 2604 60 *)
 
-let%span slib = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 2384 5 2384 47
-let%span slib'0 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 2384 49 2384 68
-let%span slib'1 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 2382 67 2382 69
-let%span slib'2 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 2370 11 2370 36
-let%span slib'3 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 2371 11 2371 41
-let%span slib'4 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 2372 11 2372 40
-let%span slib'5 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 2373 11 2373 79
-let%span slib'6 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 2374 11 2374 71
-let%span slib'7 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 2375 11 2375 50
-let%span slib'8 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 2383 5 2383 47
-let%span slib'9 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 2377 10 2377 66
-let%span slib'10 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 2379 10 2380 55
-let%span slib'11 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 428 11 428 36
-let%span slib'12 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 429 11 429 41
-let%span slib'13 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 430 11 430 40
-let%span slib'14 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 431 11 431 79
-let%span slib'15 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 432 11 432 71
-let%span slib'16 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 433 11 433 50
-let%span slib'17 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 435 10 435 53
-let%span slib'18 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 436 10 437 92
-let%span slib'19 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 438 10 440 81
-let%span slib'20 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 441 10 443 87
-let%span slib'21 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 444 10 446 89
-let%span slib'22 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 447 10 448 94
-let%span slib'23 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 449 10 450 91
-let%span slib'24 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 451 10 453 59
-let%span slib'25 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 454 10 455 89
-let%span slib'26 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 456 10 459 15
-let%span slib'27 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 2365 23 2365 25
-let%span slib'28 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 2365 40 2365 48
-let%span slib'29 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 2364 10 2364 64
-let%span slib'30 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 226 10 226 11
-let%span slib'31 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 225 11 225 33
-let%span slib'32 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 229 8 233 9
-let%span slib'33 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 213 10 213 11
-let%span slib'34 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 212 11 212 33
-let%span slib'35 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 216 8 217 87
-let%span slib'36 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 247 10 247 11
-let%span slib'37 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 246 11 246 33
-let%span slib'38 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 250 8 250 92
-let%span slib'39 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 240 16 240 81
-let%span slib'40 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 58 16 58 74
-let%span sarray = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/creusot/creusot-std/src/std/array.rs" 56 20 56 29
-let%span sarray'0 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/creusot/creusot-std/src/std/array.rs" 9 20 9 51
-let%span svec = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span slib = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2605 5 2605 37
+let%span slib'0 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2605 39 2605 60
+let%span slib'1 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2603 53 2603 56
+let%span slib'2 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2588 11 2588 36
+let%span slib'3 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2589 11 2589 42
+let%span slib'4 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2590 11 2590 73
+let%span slib'5 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2604 5 2604 60
+let%span slib'6 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2592 10 2592 77
+let%span slib'7 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2594 10 2595 29
+let%span slib'8 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2598 10 2599 55
+let%span slib'9 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2600 10 2601 15
+let%span slib'10 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1972 11 1972 36
+let%span slib'11 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1973 11 1973 50
+let%span slib'12 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1974 11 1974 73
+let%span slib'13 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1975 10 1975 70
+let%span slib'14 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1976 10 1977 67
+let%span slib'15 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1978 10 1981 50
+let%span slib'16 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1982 10 1983 69
+let%span slib'17 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1984 10 1986 53
+let%span slib'18 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1987 10 1990 52
+let%span slib'19 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1991 10 1997 42
+let%span slib'20 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1998 10 2001 15
+let%span slib'21 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2037 24 2037 27
+let%span slib'22 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2037 48 2037 61
+let%span slib'23 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2033 10 2033 77
+let%span slib'24 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2034 10 2034 75
+let%span slib'25 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2035 10 2036 27
+let%span slib'26 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 58 16 58 74
+let%span slib'27 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 226 10 226 11
+let%span slib'28 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 225 11 225 33
+let%span slib'29 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 229 8 233 9
+let%span slib'30 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 85 16 85 31
+let%span slib'31 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 213 10 213 11
+let%span slib'32 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 212 11 212 33
+let%span slib'33 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 216 8 217 87
+let%span slib'34 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 694 16 694 41
+let%span slib'35 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 132 16 132 70
+let%span slib'36 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 688 16 688 48
+let%span sarray = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/creusot/creusot-std/src/std/array.rs" 56 20 56 29
+let%span sarray'0 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/creusot/creusot-std/src/std/array.rs" 9 20 9 51
+let%span svec = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span svec'0 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 87 20 87 30
+let%span sinvariant = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/creusot/creusot-std/src/invariant.rs" 85 8 85 18
+let%span sseq = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/creusot/creusot-std/src/logic/seq.rs" 938 20 938 91
 
 use creusot.int.UInt32
 use creusot.int.UInt64
-use seq.Seq
 use int.EuclideanDivision
+use seq.Seq
 use creusot.slice.Slice64
 use creusot.int.UInt8
 use creusot.prelude.Any
@@ -61,19 +60,28 @@ type t_Vec_EntryM_Global
 
 type t_LayoutErr = MultiRest | Capacity | PerPartition
 
-type t_Result_Vec_EntryM_Global_LayoutErr = Ok t_Vec_EntryM_Global | Err t_LayoutErr
+type t_WgErr = TooSmall | Layout t_LayoutErr
+
+type t_Result_Vec_EntryM_Global_WgErr = Ok t_Vec_EntryM_Global | Err t_WgErr
+
+type t_Vec_Acc_Global
+
+type tup2_Result_Vec_EntryM_Global_WgErr_Vec_Acc_Global = { f0: t_Result_Vec_EntryM_Global_WgErr; f1: t_Vec_Acc_Global }
+
+function cdiv [#"/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 57 0 57 34] (n: int) (d: int) : int
+ = [%#slib'26] EuclideanDivision.div n d + (if EuclideanDivision.mod n d = 0 then 0 else 1)
+
+function entry_sectors_l [#"/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 84 0 84 38] (ss: int) : int
+ = [%#slib'30] cdiv 16384 ss
 
 type t_SpecM = { size_bytes: UInt64.t; tg_zero: bool }
 
-function cdiv [#"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 57 0 57 34] (n: int) (d: int) : int
- = [%#slib'40] EuclideanDivision.div n d + (if EuclideanDivision.mod n d = 0 then 0 else 1)
+function fixed_sum_l [#"/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 227 0 227 57] (s: Seq.seq t_SpecM) (n: int) (ss: int) : int
 
-function fixed_sum_l [#"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 227 0 227 57] (s: Seq.seq t_SpecM) (n: int) (ss: int) : int
-
-axiom fixed_sum_l_def: forall s: Seq.seq t_SpecM, n: int, ss: int [fixed_sum_l s n ss]. ([%#slib'31] 0 <= n
+axiom fixed_sum_l_def: forall s: Seq.seq t_SpecM, n: int, ss: int [fixed_sum_l s n ss]. ([%#slib'28] 0 <= n
       /\ n <= Seq.length s)
     -> fixed_sum_l s n ss
-    = ([%#slib'32] if n = 0 then
+    = ([%#slib'29] if n = 0 then
       0
     else
       fixed_sum_l s (n - 1) ss
@@ -92,15 +100,32 @@ axiom view_Vec_SpecM_Global_spec:
   forall self: t_Vec_SpecM_Global [view_Vec_SpecM_Global self]. [%#svec] Seq.length (view_Vec_SpecM_Global self)
     <= UInt64.t'int const_MAX
 
-function rest_count_l [#"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 214 0 214 49] (s: Seq.seq t_SpecM) (n: int) : int
+type t_Acc = { is_write: bool; ns: UInt32.t; lba: UInt64.t; sectors: UInt64.t }
 
-axiom rest_count_l_def: forall s: Seq.seq t_SpecM, n: int [rest_count_l s n]. ([%#slib'34] 0 <= n /\ n <= Seq.length s)
+function view_Vec_Acc_Global (self: t_Vec_Acc_Global) : Seq.seq t_Acc
+
+axiom view_Vec_Acc_Global_spec:
+  forall self: t_Vec_Acc_Global [view_Vec_Acc_Global self]. [%#svec] Seq.length (view_Vec_Acc_Global self)
+    <= UInt64.t'int const_MAX
+
+function rest_count_l [#"/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 214 0 214 49] (s: Seq.seq t_SpecM) (n: int) : int
+
+axiom rest_count_l_def: forall s: Seq.seq t_SpecM, n: int [rest_count_l s n]. ([%#slib'32] 0 <= n /\ n <= Seq.length s)
     -> rest_count_l s n
-    = ([%#slib'35] if n = 0 then
+    = ([%#slib'33] if n = 0 then
       0
     else
       rest_count_l s (n - 1) + (if UInt64.t'int (Seq.get s (n - 1)).size_bytes = 0 then 1 else 0)
     )
+
+function last_usable_l [#"/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 687 0 687 45] (ss: int) (ns'0: int) : int
+ = [%#slib'36] ns'0 - 1 - entry_sectors_l ss - 1
+
+function backup_entry_lba_write_l [#"/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 693 0 693 56] (ss: int) (ns'0: int) : int
+ = [%#slib'34] last_usable_l ss ns'0 + 1
+
+predicate all_ns [#"/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 131 0 131 39] (t: Seq.seq t_Acc) (n: int) =
+  [%#slib'35] forall i: int. 0 <= i /\ i < Seq.length t -> UInt32.t'int (Seq.get t i).ns = n
 
 type t_EntryM = { tg_zero'0: bool; start'0: UInt64.t; end''0: UInt64.t; attrs'0: UInt64.t }
 
@@ -110,91 +135,81 @@ axiom view_Vec_EntryM_Global_spec:
   forall self: t_Vec_EntryM_Global [view_Vec_EntryM_Global self]. [%#svec] Seq.length (view_Vec_EntryM_Global self)
     <= UInt64.t'int const_MAX
 
-function demand_l [#"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 239 0 239 53] (sp: t_SpecM) (ss: int) (rest: int) : int
- = [%#slib'39] if UInt64.t'int sp.size_bytes = 0 then rest else cdiv (UInt64.t'int sp.size_bytes) ss
-
-function placed_l [#"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 248 0 248 65] (s: Seq.seq t_SpecM) (n: int) (ss: int) (rest: int) : int
-
-axiom placed_l_def: forall s: Seq.seq t_SpecM, n: int, ss: int, rest: int [placed_l s n ss rest]. ([%#slib'37] 0 <= n
-      /\ n <= Seq.length s)
-    -> placed_l s n ss rest
-    = ([%#slib'38] if n = 0 then 0 else placed_l s (n - 1) ss rest + demand_l (Seq.get s (n - 1)) ss rest)
-
-let layout_place (specs: t_Vec_SpecM_Global) (ss: UInt32.t) (first: UInt64.t) (last: UInt64.t) (rest: UInt64.t)
-  (return (x: t_Result_Vec_EntryM_Global_LayoutErr)) =
-{[@stop_split] [@expl:layout_place requires] ([@stop_split] [@expl:layout_place requires #0] [%#slib'11] UInt32.t'int ss
+let write_gpt_m (ns'0: UInt32.t) (ss: UInt32.t) (ns_sectors: UInt64.t) (specs: t_Vec_SpecM_Global)
+  (return (x: tup2_Result_Vec_EntryM_Global_WgErr_Vec_Acc_Global)) =
+{[@stop_split] [@expl:write_gpt_m requires] ([@stop_split] [@expl:write_gpt_m requires #0] [%#slib'10] UInt32.t'int ss
       = 512
     \/ UInt32.t'int ss = 4096)
-  /\ ([@stop_split] [@expl:layout_place requires #1] [%#slib'12] UInt64.t'int first >= 3
-    /\ UInt64.t'int first <= UInt64.t'int last)
-  /\ ([@stop_split] [@expl:layout_place requires #2] [%#slib'13] UInt64.t'int last <= 18446744073709551614)
-  /\ ([@stop_split] [@expl:layout_place requires #3] [%#slib'14] UInt64.t'int rest
-    = UInt64.t'int last - UInt64.t'int first + 1
-    - fixed_sum_l (view_Vec_SpecM_Global specs) (Seq.length (view_Vec_SpecM_Global specs)) (UInt32.t'int ss))
-  /\ ([@stop_split] [@expl:layout_place requires #4] [%#slib'15] fixed_sum_l (view_Vec_SpecM_Global specs) (Seq.length (view_Vec_SpecM_Global specs)) (UInt32.t'int ss)
-    <= UInt64.t'int last - UInt64.t'int first + 1)
-  /\ ([@stop_split] [@expl:layout_place requires #5] [%#slib'16] rest_count_l (view_Vec_SpecM_Global specs) (Seq.length (view_Vec_SpecM_Global specs))
-  <= 1)}
+  /\ ([@stop_split] [@expl:write_gpt_m requires #1] [%#slib'11] UInt64.t'int ns_sectors
+    >= entry_sectors_l (UInt32.t'int ss) + 2)
+  /\ ([@stop_split] [@expl:write_gpt_m requires #2] [%#slib'12] fixed_sum_l (view_Vec_SpecM_Global specs) (Seq.length (view_Vec_SpecM_Global specs)) (UInt32.t'int ss)
+  <= 18446744073709551615)}
   any
-  [ return (result: t_Result_Vec_EntryM_Global_LayoutErr) ->
-  {[@stop_split] [@expl:layout_place ensures] ([@stop_split] [@expl:layout_place ensures #0] [%#slib'17] match result with
-        | Err _ -> false
+  [ return (result: tup2_Result_Vec_EntryM_Global_WgErr_Vec_Acc_Global) ->
+  {[@stop_split] [@expl:write_gpt_m ensures] ([@stop_split] [@expl:write_gpt_m ensures #0] [%#slib'13] match result.f0 with
+        | Err _ -> Seq.length (view_Vec_Acc_Global result.f1) = 0
         | _ -> true
         end)
-    /\ ([@stop_split] [@expl:layout_place ensures #1] [%#slib'18] match result with
-        | Ok v -> Seq.length (view_Vec_EntryM_Global v)
+    /\ ([@stop_split] [@expl:write_gpt_m ensures #1] [%#slib'14] UInt64.t'int ns_sectors
+        >= 2 * entry_sectors_l (UInt32.t'int ss) + 5
+      -> match result.f0 with
+        | Err (TooSmall) -> false
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:write_gpt_m ensures #2] [%#slib'15] match result.f0 with
+        | Err (Layout (MultiRest)) -> rest_count_l (view_Vec_SpecM_Global specs) (Seq.length (view_Vec_SpecM_Global specs))
+        > 1
+        | Err (TooSmall) -> true
+        | _ -> rest_count_l (view_Vec_SpecM_Global specs) (Seq.length (view_Vec_SpecM_Global specs)) <= 1
+        end)
+    /\ ([@stop_split] [@expl:write_gpt_m ensures #3] [%#slib'16] match result.f0 with
+        | Err (Layout (PerPartition)) -> false
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:write_gpt_m ensures #4] [%#slib'17] UInt64.t'int ns_sectors
+          >= 2 * entry_sectors_l (UInt32.t'int ss) + 5
+        /\ fixed_sum_l (view_Vec_SpecM_Global specs) (Seq.length (view_Vec_SpecM_Global specs)) (UInt32.t'int ss)
+        > UInt64.t'int ns_sectors - 2 * entry_sectors_l (UInt32.t'int ss) - 3
+      -> match result.f0 with
+        | Err _ -> true
+        | _ -> false
+        end)
+    /\ ([@stop_split] [@expl:write_gpt_m ensures #5] [%#slib'18] UInt64.t'int ns_sectors
+          >= 2 * entry_sectors_l (UInt32.t'int ss) + 5
+        /\ rest_count_l (view_Vec_SpecM_Global specs) (Seq.length (view_Vec_SpecM_Global specs)) <= 1
+        /\ fixed_sum_l (view_Vec_SpecM_Global specs) (Seq.length (view_Vec_SpecM_Global specs)) (UInt32.t'int ss)
+        <= UInt64.t'int ns_sectors - 2 * entry_sectors_l (UInt32.t'int ss) - 3
+      -> match result.f0 with
+        | Ok _ -> true
+        | _ -> false
+        end)
+    /\ ([@stop_split] [@expl:write_gpt_m ensures #6] [%#slib'19] match result.f0 with
+        | Ok _ -> Seq.length (view_Vec_Acc_Global result.f1) = 5
+        /\ (Seq.get (view_Vec_Acc_Global result.f1) 0).is_write
+        /\ UInt64.t'int (Seq.get (view_Vec_Acc_Global result.f1) 0).lba = 0
+        /\ (Seq.get (view_Vec_Acc_Global result.f1) 1).is_write
+        /\ UInt64.t'int (Seq.get (view_Vec_Acc_Global result.f1) 1).lba = 1
+        /\ (Seq.get (view_Vec_Acc_Global result.f1) 2).is_write
+        /\ UInt64.t'int (Seq.get (view_Vec_Acc_Global result.f1) 2).lba = 2
+        /\ (Seq.get (view_Vec_Acc_Global result.f1) 3).is_write
+        /\ UInt64.t'int (Seq.get (view_Vec_Acc_Global result.f1) 3).lba
+          = backup_entry_lba_write_l (UInt32.t'int ss) (UInt64.t'int ns_sectors)
+        /\ (Seq.get (view_Vec_Acc_Global result.f1) 4).is_write
+        /\ UInt64.t'int (Seq.get (view_Vec_Acc_Global result.f1) 4).lba = UInt64.t'int ns_sectors - 1
+        /\ UInt64.t'int (Seq.get (view_Vec_Acc_Global result.f1) 4).sectors = 1
+        /\ all_ns (view_Vec_Acc_Global result.f1) (UInt32.t'int ns'0)
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:write_gpt_m ensures #7] [%#slib'20] match result.f0 with
+      | Ok v -> Seq.length (view_Vec_EntryM_Global v)
         = (if Seq.length (view_Vec_SpecM_Global specs) >= 128 then Seq.length (view_Vec_SpecM_Global specs) else 128)
-        | _ -> true
-        end)
-    /\ ([@stop_split] [@expl:layout_place ensures #2] [%#slib'19] match result with
-        | Ok v -> forall j: int. 0 <= j /\ j < Seq.length (view_Vec_SpecM_Global specs)
-          -> UInt64.t'int (Seq.get (view_Vec_EntryM_Global v) j).start'0
-          = UInt64.t'int first + placed_l (view_Vec_SpecM_Global specs) j (UInt32.t'int ss) (UInt64.t'int rest)
-        | _ -> true
-        end)
-    /\ ([@stop_split] [@expl:layout_place ensures #3] [%#slib'20] match result with
-        | Ok v -> forall j: int. 0 <= j /\ j < Seq.length (view_Vec_SpecM_Global specs)
-          -> UInt64.t'int (Seq.get (view_Vec_EntryM_Global v) j).end''0 + 1
-          = UInt64.t'int first + placed_l (view_Vec_SpecM_Global specs) (j + 1) (UInt32.t'int ss) (UInt64.t'int rest)
-        | _ -> true
-        end)
-    /\ ([@stop_split] [@expl:layout_place ensures #4] [%#slib'21] match result with
-        | Ok v -> forall j: int. 0 <= j /\ j < Seq.length (view_Vec_SpecM_Global specs)
-          -> UInt64.t'int (Seq.get (view_Vec_EntryM_Global v) j).end''0 + 1
-          = UInt64.t'int (Seq.get (view_Vec_EntryM_Global v) j).start'0
-          + demand_l (Seq.get (view_Vec_SpecM_Global specs) j) (UInt32.t'int ss) (UInt64.t'int rest)
-        | _ -> true
-        end)
-    /\ ([@stop_split] [@expl:layout_place ensures #5] [%#slib'22] match result with
-        | Ok v -> forall j: int. 0 <= j /\ j < Seq.length (view_Vec_SpecM_Global specs)
-          -> UInt64.t'int (Seq.get (view_Vec_EntryM_Global v) j).start'0 >= UInt64.t'int first
-        | _ -> true
-        end)
-    /\ ([@stop_split] [@expl:layout_place ensures #6] [%#slib'23] match result with
-        | Ok v -> forall j: int. 0 <= j /\ j < Seq.length (view_Vec_SpecM_Global specs)
-          -> UInt64.t'int (Seq.get (view_Vec_EntryM_Global v) j).end''0 <= UInt64.t'int last
-        | _ -> true
-        end)
-    /\ ([@stop_split] [@expl:layout_place ensures #7] [%#slib'24] match result with
-        | Ok v -> forall j: int. 0 <= j /\ j < Seq.length (view_Vec_SpecM_Global specs)
-          -> (Seq.get (view_Vec_EntryM_Global v) j).tg_zero'0 = (Seq.get (view_Vec_SpecM_Global specs) j).tg_zero
-        | _ -> true
-        end)
-    /\ ([@stop_split] [@expl:layout_place ensures #8] [%#slib'25] match result with
-        | Ok v -> forall j: int. 0 <= j /\ j < Seq.length (view_Vec_SpecM_Global specs)
-          -> UInt64.t'int (Seq.get (view_Vec_EntryM_Global v) j).attrs'0 = 0
-        | _ -> true
-        end)
-    /\ ([@stop_split] [@expl:layout_place ensures #9] [%#slib'26] match result with
-      | Ok v -> forall j: int. Seq.length (view_Vec_SpecM_Global specs) <= j
-          /\ j < Seq.length (view_Vec_EntryM_Global v)
-        -> (Seq.get (view_Vec_EntryM_Global v) j).tg_zero'0
-        /\ UInt64.t'int (Seq.get (view_Vec_EntryM_Global v) j).start'0 = 0
-        /\ UInt64.t'int (Seq.get (view_Vec_EntryM_Global v) j).end''0 = 0
-        /\ UInt64.t'int (Seq.get (view_Vec_EntryM_Global v) j).attrs'0 = 0
+      /\ (forall j: int. 0 <= j /\ j < Seq.length (view_Vec_SpecM_Global specs)
+        -> (Seq.get (view_Vec_EntryM_Global v) j).tg_zero'0 = (Seq.get (view_Vec_SpecM_Global specs) j).tg_zero)
       | _ -> true
       end)}
     (! return {result}) ]
+
+type t_Vec_array_u8_16_Global
 
 predicate inv_Seq_u8 [@inline:trivial] (_1: Seq.seq UInt8.t) = true
 
@@ -207,73 +222,128 @@ predicate inv_array_u8_16 [@inline:trivial] (_1: Slice64.array UInt8.t) = invari
 
 meta "rewrite_def" predicate inv_array_u8_16
 
+predicate invariant_ref_array_u8_16 [@inline:trivial] (self: Slice64.array UInt8.t) =
+  [%#sinvariant] inv_array_u8_16 self
+
+meta "rewrite_def" predicate invariant_ref_array_u8_16
+
+predicate inv_ref_array_u8_16 [@inline:trivial] (_1: Slice64.array UInt8.t) = invariant_ref_array_u8_16 _1
+
+meta "rewrite_def" predicate inv_ref_array_u8_16
+
+predicate invariant_Seq_array_u8_16 [@inline:trivial] (self: Seq.seq (Slice64.array UInt8.t)) =
+  [%#sseq] forall i: int. 0 <= i /\ i < Seq.length self -> inv_ref_array_u8_16 (Seq.get self i)
+
+meta "rewrite_def" predicate invariant_Seq_array_u8_16
+
+predicate inv_Seq_array_u8_16 [@inline:trivial] (_1: Seq.seq (Slice64.array UInt8.t)) = invariant_Seq_array_u8_16 _1
+
+meta "rewrite_def" predicate inv_Seq_array_u8_16
+
+function view_Vec_array_u8_16_Global (self: t_Vec_array_u8_16_Global) : Seq.seq (Slice64.array UInt8.t)
+
+axiom view_Vec_array_u8_16_Global_spec:
+  forall self: t_Vec_array_u8_16_Global [view_Vec_array_u8_16_Global self]. [%#svec] Seq.length (view_Vec_array_u8_16_Global self)
+    <= UInt64.t'int const_MAX
+
+predicate invariant_Vec_array_u8_16_Global (self: t_Vec_array_u8_16_Global) =
+  [%#svec'0] inv_Seq_array_u8_16 (view_Vec_array_u8_16_Global self)
+
+predicate inv_Vec_array_u8_16_Global (_1: t_Vec_array_u8_16_Global)
+
+axiom inv_axiom: forall x: t_Vec_array_u8_16_Global [inv_Vec_array_u8_16_Global x]. inv_Vec_array_u8_16_Global x
+    -> invariant_Vec_array_u8_16_Global x
+
+predicate invariant_ref_Vec_array_u8_16_Global [@inline:trivial] (self: t_Vec_array_u8_16_Global) =
+  [%#sinvariant] inv_Vec_array_u8_16_Global self
+
+meta "rewrite_def" predicate invariant_ref_Vec_array_u8_16_Global
+
+predicate inv_ref_Vec_array_u8_16_Global [@inline:trivial] (_1: t_Vec_array_u8_16_Global) =
+  invariant_ref_Vec_array_u8_16_Global _1
+
+meta "rewrite_def" predicate inv_ref_Vec_array_u8_16_Global
+
 function index_array_u8_16 [@inline:trivial] (self: Slice64.array UInt8.t) (ix: int) : UInt8.t =
   [%#sarray] Seq.get (Slice64.view self) ix
 
 meta "rewrite_def" function index_array_u8_16
 
-let entry_type_guid (tg: Slice64.array UInt8.t) (return (x: Slice64.array UInt8.t)) =
-{[@stop_split] [@expl:entry_type_guid 'tg' type invariant] [%#slib'27] inv_array_u8_16 tg}
+let place_type_guids (tgs: t_Vec_array_u8_16_Global) (return (x: t_Vec_array_u8_16_Global)) =
+{[@stop_split] [@expl:place_type_guids 'tgs' type invariant] [%#slib'21] inv_ref_Vec_array_u8_16_Global tgs}
   any
-  [ return (result: Slice64.array UInt8.t) ->
-  {[@stop_split] [@expl:entry_type_guid ensures] ([@stop_split] [@expl:entry_type_guid result type invariant] [%#slib'28] inv_array_u8_16 result)
-    /\ ([@stop_split] [@expl:entry_type_guid ensures] [%#slib'29] forall k: int. 0 <= k /\ k < 16
-      -> index_array_u8_16 result k = index_array_u8_16 tg k)}
+  [ return (result: t_Vec_array_u8_16_Global) ->
+  {[@stop_split] [@expl:place_type_guids ensures] ([@stop_split] [@expl:place_type_guids result type invariant] [%#slib'22] inv_Vec_array_u8_16_Global result)
+    /\ ([@stop_split] [@expl:place_type_guids ensures #0] [%#slib'23] Seq.length (view_Vec_array_u8_16_Global result)
+      = (if Seq.length (view_Vec_array_u8_16_Global tgs) >= 128 then
+        Seq.length (view_Vec_array_u8_16_Global tgs)
+      else
+        128
+      ))
+    /\ ([@stop_split] [@expl:place_type_guids ensures #1] [%#slib'24] forall j: int. 0 <= j
+          /\ j < Seq.length (view_Vec_array_u8_16_Global tgs)
+        -> Seq.get (view_Vec_array_u8_16_Global result) j = Seq.get (view_Vec_array_u8_16_Global tgs) j)
+    /\ ([@stop_split] [@expl:place_type_guids ensures #2] [%#slib'25] forall j: int, k: int. Seq.length (view_Vec_array_u8_16_Global tgs)
+          <= j
+        /\ j < Seq.length (view_Vec_array_u8_16_Global result) /\ 0 <= k /\ k < 16
+      -> UInt8.t'int (index_array_u8_16 (Seq.get (view_Vec_array_u8_16_Global result) j) k) = 0)}
     (! return {result}) ]
 
-type tup2_Result_Vec_EntryM_Global_LayoutErr_array_u8_16 = {
-  f0: t_Result_Vec_EntryM_Global_LayoutErr;
-  f1: Slice64.array UInt8.t }
+type tup2_tup2_Result_Vec_EntryM_Global_WgErr_Vec_Acc_Global_Vec_array_u8_16_Global = {
+  f0'0: tup2_Result_Vec_EntryM_Global_WgErr_Vec_Acc_Global;
+  f1'0: t_Vec_array_u8_16_Global }
 
-predicate inv_tup2_Result_Vec_EntryM_Global_LayoutErr_array_u8_16 [@inline:trivial] (_1: tup2_Result_Vec_EntryM_Global_LayoutErr_array_u8_16) =
-  inv_array_u8_16 _1.f1
+predicate inv_tup2_tup2_Result_Vec_EntryM_Global_WgErr_Vec_Acc_Global_Vec_array_u8_16_Global [@inline:trivial] (_1: tup2_tup2_Result_Vec_EntryM_Global_WgErr_Vec_Acc_Global_Vec_array_u8_16_Global) =
+  inv_Vec_array_u8_16_Global _1.f1'0
 
-meta "rewrite_def" predicate inv_tup2_Result_Vec_EntryM_Global_LayoutErr_array_u8_16
+meta "rewrite_def" predicate inv_tup2_tup2_Result_Vec_EntryM_Global_WgErr_Vec_Acc_Global_Vec_array_u8_16_Global
 
 meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let verify_dpm_format_post_type_guid_echo [#"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 2381 0 2383 47]
-  (specs: t_Vec_SpecM_Global) (ss: UInt32.t) (first: UInt64.t) (last: UInt64.t) (rest: UInt64.t)
-  (tg: Slice64.array UInt8.t) (return (x: tup2_Result_Vec_EntryM_Global_LayoutErr_array_u8_16)) =
-{[@stop_split] [@expl:verify_dpm_format_post_type_guid_echo requires] ([@stop_split] [@expl:verify_dpm_format_post_type_guid_echo 'tg' type invariant] [%#slib'1] inv_array_u8_16 tg)
+let verify_dpm_format_post_type_guid_echo [#"/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2602 0 2604 60]
+  (nsid: UInt32.t) (ss: UInt32.t) (ns'0: UInt64.t) (specs: t_Vec_SpecM_Global) (tgs: t_Vec_array_u8_16_Global)
+  (return (x: tup2_tup2_Result_Vec_EntryM_Global_WgErr_Vec_Acc_Global_Vec_array_u8_16_Global)) =
+{[@stop_split] [@expl:verify_dpm_format_post_type_guid_echo requires] ([@stop_split] [@expl:verify_dpm_format_post_type_guid_echo 'tgs' type invariant] [%#slib'1] inv_ref_Vec_array_u8_16_Global tgs)
   /\ ([@stop_split] [@expl:verify_dpm_format_post_type_guid_echo requires #0] [%#slib'2] UInt32.t'int ss = 512
     \/ UInt32.t'int ss = 4096)
-  /\ ([@stop_split] [@expl:verify_dpm_format_post_type_guid_echo requires #1] [%#slib'3] UInt64.t'int first >= 3
-    /\ UInt64.t'int first <= UInt64.t'int last)
-  /\ ([@stop_split] [@expl:verify_dpm_format_post_type_guid_echo requires #2] [%#slib'4] UInt64.t'int last
-    <= 18446744073709551614)
-  /\ ([@stop_split] [@expl:verify_dpm_format_post_type_guid_echo requires #3] [%#slib'5] UInt64.t'int rest
-    = UInt64.t'int last - UInt64.t'int first + 1
-    - fixed_sum_l (view_Vec_SpecM_Global specs) (Seq.length (view_Vec_SpecM_Global specs)) (UInt32.t'int ss))
-  /\ ([@stop_split] [@expl:verify_dpm_format_post_type_guid_echo requires #4] [%#slib'6] fixed_sum_l (view_Vec_SpecM_Global specs) (Seq.length (view_Vec_SpecM_Global specs)) (UInt32.t'int ss)
-    <= UInt64.t'int last - UInt64.t'int first + 1)
-  /\ ([@stop_split] [@expl:verify_dpm_format_post_type_guid_echo requires #5] [%#slib'7] rest_count_l (view_Vec_SpecM_Global specs) (Seq.length (view_Vec_SpecM_Global specs))
-  <= 1)}
+  /\ ([@stop_split] [@expl:verify_dpm_format_post_type_guid_echo requires #1] [%#slib'3] UInt64.t'int ns'0
+    >= 2 * cdiv 16384 (UInt32.t'int ss) + 5)
+  /\ ([@stop_split] [@expl:verify_dpm_format_post_type_guid_echo requires #2] [%#slib'4] fixed_sum_l (view_Vec_SpecM_Global specs) (Seq.length (view_Vec_SpecM_Global specs)) (UInt32.t'int ss)
+  <= 18446744073709551615)}
   (! bb0
   [ bb0 = s0
-    [ s0 = layout_place [%#slib] {specs} {ss} {first} {last} {rest}
-        (fun (_x: t_Result_Vec_EntryM_Global_LayoutErr) -> [ &_31 <- _x ] s1)
-    | s1 = entry_type_guid [%#slib'0] {tg} (fun (_x: Slice64.array UInt8.t) -> [ &_37 <- _x ] s2)
-    | s2 = [ &_ret <- { f0 = _31; f1 = _37 } ] s3
+    [ s0 = write_gpt_m [%#slib] {nsid} {ss} {ns'0} {specs}
+        (fun (_x: tup2_Result_Vec_EntryM_Global_WgErr_Vec_Acc_Global) -> [ &_23 <- _x ] s1)
+    | s1 = place_type_guids [%#slib'0] {tgs} (fun (_x: t_Vec_array_u8_16_Global) -> [ &_28 <- _x ] s2)
+    | s2 = [ &_ret <- { f0'0 = _23; f1'0 = _28 } ] s3
     | s3 = return {_ret} ] ]
-  [ & _ret: tup2_Result_Vec_EntryM_Global_LayoutErr_array_u8_16 = Any.any_l ()
-  | & specs: t_Vec_SpecM_Global = specs
+  [ & _ret: tup2_tup2_Result_Vec_EntryM_Global_WgErr_Vec_Acc_Global_Vec_array_u8_16_Global = Any.any_l ()
+  | & nsid: UInt32.t = nsid
   | & ss: UInt32.t = ss
-  | & first: UInt64.t = first
-  | & last: UInt64.t = last
-  | & rest: UInt64.t = rest
-  | & tg: Slice64.array UInt8.t = tg
-  | & _31: t_Result_Vec_EntryM_Global_LayoutErr = Any.any_l ()
-  | & _37: Slice64.array UInt8.t = Any.any_l () ])
-  [ return (result: tup2_Result_Vec_EntryM_Global_LayoutErr_array_u8_16) ->
-  {[@stop_split] [@expl:verify_dpm_format_post_type_guid_echo ensures] ([@stop_split] [@expl:verify_dpm_format_post_type_guid_echo result type invariant] [%#slib'8] inv_tup2_Result_Vec_EntryM_Global_LayoutErr_array_u8_16 result)
-    /\ ([@stop_split] [@expl:verify_dpm_format_post_type_guid_echo ensures #0] [%#slib'9] forall k: int. 0 <= k
-          /\ k < 16 -> index_array_u8_16 result.f1 k = index_array_u8_16 tg k)
-    /\ ([@stop_split] [@expl:verify_dpm_format_post_type_guid_echo ensures #1] [%#slib'10] match result.f0 with
-      | Ok v -> forall j: int. 0 <= j /\ j < Seq.length (view_Vec_SpecM_Global specs)
-        -> (Seq.get (view_Vec_EntryM_Global v) j).tg_zero'0 = (Seq.get (view_Vec_SpecM_Global specs) j).tg_zero
+  | & ns'0: UInt64.t = ns'0
+  | & specs: t_Vec_SpecM_Global = specs
+  | & tgs: t_Vec_array_u8_16_Global = tgs
+  | & _23: tup2_Result_Vec_EntryM_Global_WgErr_Vec_Acc_Global = Any.any_l ()
+  | & _28: t_Vec_array_u8_16_Global = Any.any_l () ])
+  [ return (result: tup2_tup2_Result_Vec_EntryM_Global_WgErr_Vec_Acc_Global_Vec_array_u8_16_Global) ->
+  {[@stop_split] [@expl:verify_dpm_format_post_type_guid_echo ensures] ([@stop_split] [@expl:verify_dpm_format_post_type_guid_echo result type invariant] [%#slib'5] inv_tup2_tup2_Result_Vec_EntryM_Global_WgErr_Vec_Acc_Global_Vec_array_u8_16_Global result)
+    /\ ([@stop_split] [@expl:verify_dpm_format_post_type_guid_echo ensures #0] [%#slib'6] forall j: int. 0 <= j
+          /\ j < Seq.length (view_Vec_array_u8_16_Global tgs)
+        -> Seq.get (view_Vec_array_u8_16_Global result.f1'0) j = Seq.get (view_Vec_array_u8_16_Global tgs) j)
+    /\ ([@stop_split] [@expl:verify_dpm_format_post_type_guid_echo ensures #1] [%#slib'7] forall j: int, k: int. Seq.length (view_Vec_array_u8_16_Global tgs)
+            <= j
+          /\ j < Seq.length (view_Vec_array_u8_16_Global result.f1'0) /\ 0 <= k /\ k < 16
+        -> UInt8.t'int (index_array_u8_16 (Seq.get (view_Vec_array_u8_16_Global result.f1'0) j) k) = 0)
+    /\ ([@stop_split] [@expl:verify_dpm_format_post_type_guid_echo ensures #2] [%#slib'8] match result.f0'0.f0 with
+        | Ok v -> forall j: int. 0 <= j /\ j < Seq.length (view_Vec_SpecM_Global specs)
+          -> (Seq.get (view_Vec_EntryM_Global v) j).tg_zero'0 = (Seq.get (view_Vec_SpecM_Global specs) j).tg_zero
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:verify_dpm_format_post_type_guid_echo ensures #3] [%#slib'9] match result.f0'0.f0 with
+      | Ok v -> Seq.length (view_Vec_EntryM_Global v) = Seq.length (view_Vec_array_u8_16_Global result.f1'0)
+      \/ Seq.length (view_Vec_SpecM_Global specs) <> Seq.length (view_Vec_array_u8_16_Global tgs)
       | _ -> true
       end)}
     (! return {result}) ]

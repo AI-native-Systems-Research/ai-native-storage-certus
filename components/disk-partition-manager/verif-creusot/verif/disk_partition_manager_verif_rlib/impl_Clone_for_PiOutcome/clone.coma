@@ -1,4 +1,4 @@
-(* #"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 1200 9 1200 29 *)
+(* #"/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1200 9 1200 29 *)
 
 (* <PiOutcome as std::clone::Clone> *)
 
@@ -16,7 +16,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let clone_PiOutcome [#"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 1200 9 1200 29]
+let clone_PiOutcome [#"/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1200 9 1200 29]
   (self: t_PiOutcome) (return (x: t_PiOutcome)) = (! bb0
   [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
   [ & _ret: t_PiOutcome = Any.any_l () | & self: t_PiOutcome = self ])

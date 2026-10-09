@@ -1,0 +1,255 @@
+(* #"/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2037 0 2037 61 *)
+
+let%span slib = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2038 33 2038 43
+let%span slib'0 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2039 23 2039 24
+let%span slib'1 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2043 14 2043 23
+let%span slib'2 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2042 16 2042 70
+let%span slib'3 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2041 16 2041 32
+let%span slib'4 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2040 16 2040 32
+let%span slib'5 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2044 20 2044 23
+let%span slib'6 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2044 8 2044 24
+let%span slib'7 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2045 13 2045 14
+let%span slib'8 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2045 8 2045 14
+let%span slib'9 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2053 10 2053 19
+let%span slib'10 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2053 22 2053 25
+let%span slib'11 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2052 16 2052 54
+let%span slib'12 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2051 16 2051 62
+let%span slib'13 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2049 16 2050 28
+let%span slib'14 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2048 16 2048 78
+let%span slib'15 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2047 16 2047 40
+let%span slib'16 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2054 17 2054 26
+let%span slib'17 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2054 18 2054 21
+let%span slib'18 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2054 8 2054 27
+let%span slib'19 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2037 24 2037 27
+let%span slib'20 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2037 48 2037 61
+let%span slib'21 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2033 10 2033 77
+let%span slib'22 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2034 10 2034 75
+let%span slib'23 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2035 10 2036 27
+let%span sarray = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/creusot/creusot-std/src/std/array.rs" 56 20 56 29
+let%span sarray'0 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/creusot/creusot-std/src/std/array.rs" 9 20 9 51
+let%span svec = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 102 18 102 36
+let%span svec'0 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 113 16 113 20
+let%span svec'1 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 112 18 112 40
+let%span svec'2 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span svec'3 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 195 18 195 22
+let%span svec'4 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 193 19 193 38
+let%span svec'5 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 194 18 194 46
+let%span svec'6 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 117 21 117 25
+let%span svec'7 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 117 27 117 28
+let%span svec'8 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 116 18 116 48
+let%span svec'9 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/creusot/creusot-std/src/std/vec.rs" 87 20 87 30
+let%span sslice = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/creusot/creusot-std/src/std/slice.rs" 148 20 148 37
+let%span sslice'0 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/creusot/creusot-std/src/std/slice.rs" 153 20 153 37
+let%span sinvariant = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/creusot/creusot-std/src/invariant.rs" 85 8 85 18
+let%span sinvariant'0 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/creusot/creusot-std/src/invariant.rs" 93 20 93 44
+let%span sseq = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/creusot/creusot-std/src/logic/seq.rs" 938 20 938 91
+
+use creusot.slice.Slice64
+use creusot.int.UInt8
+use seq.Seq
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use creusot.slice.Slice64Ops
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_array_u8_16_Global
+
+predicate inv_Seq_u8 [@inline:trivial] (_1: Seq.seq UInt8.t) = true
+
+meta "rewrite_def" predicate inv_Seq_u8
+
+predicate invariant_array_u8_16 (self: Slice64.array UInt8.t) =
+  [%#sarray'0] inv_Seq_u8 (Slice64.view self) /\ Seq.length (Slice64.view self) = UInt64.t'int (16: UInt64.t)
+
+predicate inv_array_u8_16 [@inline:trivial] (_1: Slice64.array UInt8.t) = invariant_array_u8_16 _1
+
+meta "rewrite_def" predicate inv_array_u8_16
+
+predicate invariant_ref_array_u8_16 [@inline:trivial] (self: Slice64.array UInt8.t) =
+  [%#sinvariant] inv_array_u8_16 self
+
+meta "rewrite_def" predicate invariant_ref_array_u8_16
+
+predicate inv_ref_array_u8_16 [@inline:trivial] (_1: Slice64.array UInt8.t) = invariant_ref_array_u8_16 _1
+
+meta "rewrite_def" predicate inv_ref_array_u8_16
+
+predicate invariant_Seq_array_u8_16 [@inline:trivial] (self: Seq.seq (Slice64.array UInt8.t)) =
+  [%#sseq] forall i: int. 0 <= i /\ i < Seq.length self -> inv_ref_array_u8_16 (Seq.get self i)
+
+meta "rewrite_def" predicate invariant_Seq_array_u8_16
+
+predicate inv_Seq_array_u8_16 [@inline:trivial] (_1: Seq.seq (Slice64.array UInt8.t)) = invariant_Seq_array_u8_16 _1
+
+meta "rewrite_def" predicate inv_Seq_array_u8_16
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_array_u8_16_Global (self: t_Vec_array_u8_16_Global) : Seq.seq (Slice64.array UInt8.t)
+
+axiom view_Vec_array_u8_16_Global_spec:
+  forall self: t_Vec_array_u8_16_Global [view_Vec_array_u8_16_Global self]. [%#svec'2] Seq.length (view_Vec_array_u8_16_Global self)
+    <= UInt64.t'int const_MAX
+
+predicate invariant_Vec_array_u8_16_Global (self: t_Vec_array_u8_16_Global) =
+  [%#svec'9] inv_Seq_array_u8_16 (view_Vec_array_u8_16_Global self)
+
+predicate inv_Vec_array_u8_16_Global (_1: t_Vec_array_u8_16_Global)
+
+axiom inv_axiom: forall x: t_Vec_array_u8_16_Global [inv_Vec_array_u8_16_Global x]. inv_Vec_array_u8_16_Global x
+    -> invariant_Vec_array_u8_16_Global x
+
+let new_array_u8_16 (return (x: t_Vec_array_u8_16_Global)) = any
+  [ return (result: t_Vec_array_u8_16_Global) ->
+  {[@stop_split] [@expl:new_array_u8_16 ensures] ([@stop_split] [@expl:new result type invariant] inv_Vec_array_u8_16_Global result)
+    /\ ([@stop_split] [@expl:new ensures] [%#svec] Seq.length (view_Vec_array_u8_16_Global result) = 0)}
+    (! return {result}) ]
+
+predicate invariant_ref_Vec_array_u8_16_Global [@inline:trivial] (self: t_Vec_array_u8_16_Global) =
+  [%#sinvariant] inv_Vec_array_u8_16_Global self
+
+meta "rewrite_def" predicate invariant_ref_Vec_array_u8_16_Global
+
+predicate inv_ref_Vec_array_u8_16_Global [@inline:trivial] (_1: t_Vec_array_u8_16_Global) =
+  invariant_ref_Vec_array_u8_16_Global _1
+
+meta "rewrite_def" predicate inv_ref_Vec_array_u8_16_Global
+
+let len_array_u8_16 (self_: t_Vec_array_u8_16_Global) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:len 'self_' type invariant] [%#svec'0] inv_ref_Vec_array_u8_16_Global self_}
+  any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:len ensures] [%#svec'1] UInt64.t'int result
+    = Seq.length (view_Vec_array_u8_16_Global self_)}
+    (! return {result}) ]
+
+predicate in_bounds_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq (Slice64.array UInt8.t)) =
+  [%#sslice] UInt64.t'int self < Seq.length seq
+
+meta "rewrite_def" predicate in_bounds_usize
+
+predicate has_value_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq (Slice64.array UInt8.t)) (out: Slice64.array UInt8.t) =
+  [%#sslice'0] Seq.get seq (UInt64.t'int self) = out
+
+meta "rewrite_def" predicate has_value_usize
+
+let index_Vec_array_u8_16_Global (self_: t_Vec_array_u8_16_Global) (ix: UInt64.t) (return (x: Slice64.array UInt8.t)) =
+{[@stop_split] [@expl:index_Vec_array_u8_16_Global requires] ([@stop_split] [@expl:index 'self_' type invariant] [%#svec'3] inv_ref_Vec_array_u8_16_Global self_)
+  /\ ([@stop_split] [@expl:index requires] [%#svec'4] in_bounds_usize ix (view_Vec_array_u8_16_Global self_))}
+  any
+  [ return (result: Slice64.array UInt8.t) ->
+  {[@stop_split] [@expl:index_Vec_array_u8_16_Global ensures] ([@stop_split] [@expl:index result type invariant] inv_ref_array_u8_16 result)
+    /\ ([@stop_split] [@expl:index ensures] [%#svec'5] has_value_usize ix (view_Vec_array_u8_16_Global self_) result)}
+    (! return {result}) ]
+
+predicate invariant_refmut_Vec_array_u8_16_Global [@inline:trivial] (self: MutBorrow.t t_Vec_array_u8_16_Global) =
+  [%#sinvariant'0] inv_Vec_array_u8_16_Global self.current /\ inv_Vec_array_u8_16_Global self.final
+
+meta "rewrite_def" predicate invariant_refmut_Vec_array_u8_16_Global
+
+predicate inv_refmut_Vec_array_u8_16_Global [@inline:trivial] (_1: MutBorrow.t t_Vec_array_u8_16_Global) =
+  invariant_refmut_Vec_array_u8_16_Global _1
+
+meta "rewrite_def" predicate inv_refmut_Vec_array_u8_16_Global
+
+let push_array_u8_16 (self_: MutBorrow.t t_Vec_array_u8_16_Global) (v: Slice64.array UInt8.t) (return (x: ())) =
+{[@stop_split] [@expl:push_array_u8_16 requires] ([@stop_split] [@expl:push 'self_' type invariant] [%#svec'6] inv_refmut_Vec_array_u8_16_Global self_)
+  /\ ([@stop_split] [@expl:push 'v' type invariant] [%#svec'7] inv_array_u8_16 v)}
+  any
+  [ return (result: ()) -> {[@stop_split] [@expl:push ensures] [%#svec'8] view_Vec_array_u8_16_Global self_.final
+    = Seq.snoc (view_Vec_array_u8_16_Global self_.current) v}
+    (! return {result}) ]
+
+function index_array_u8_16 [@inline:trivial] (self: Slice64.array UInt8.t) (ix: int) : UInt8.t =
+  [%#sarray] Seq.get (Slice64.view self) ix
+
+meta "rewrite_def" function index_array_u8_16
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let place_type_guids [#"/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 2037 0 2037 61]
+  (tgs: t_Vec_array_u8_16_Global) (return (x: t_Vec_array_u8_16_Global)) =
+{[@stop_split] [@expl:place_type_guids 'tgs' type invariant] [%#slib'19] inv_ref_Vec_array_u8_16_Global tgs}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = new_array_u8_16 [%#slib] (fun (_x: t_Vec_array_u8_16_Global) -> [ &out <- _x ] s1)
+    | s1 = [ &i <- [%#slib'0] (0: UInt64.t) ] s2
+    | s2 = bb2 ]
+  | bb2 = bb2
+    [ bb2 = {[@expl:inferred invariant: type invariant] inv_Vec_array_u8_16_Global out}
+      {[@expl:loop invariant #0] [%#slib'4] UInt64.t'int i <= Seq.length (view_Vec_array_u8_16_Global tgs)}
+      {[@expl:loop invariant #1] [%#slib'3] Seq.length (view_Vec_array_u8_16_Global out) = UInt64.t'int i}
+      {[@expl:loop invariant #2] [%#slib'2] forall j: int. 0 <= j /\ j < UInt64.t'int i
+        -> Seq.get (view_Vec_array_u8_16_Global out) j = Seq.get (view_Vec_array_u8_16_Global tgs) j}
+      (! s0)
+      [ s0 = len_array_u8_16 [%#slib'1] {tgs} (fun (_x: UInt64.t) -> [ &_25 <- _x ] s1)
+      | s1 = [ &_23 <- UInt64.lt i _25 ] s2
+      | s2 = any [ br0 -> {_23 = false} (! bb9) | br1 -> {_23} (! bb5) ] ]
+      [ bb5 = s0
+        [ s0 = index_Vec_array_u8_16_Global [%#slib'5] {tgs} {i} (fun (_x: Slice64.array UInt8.t) -> [ &_30 <- _x ] s1)
+        | s1 = MutBorrow.borrow_mut <t_Vec_array_u8_16_Global> {out}
+            (fun (_bor: MutBorrow.t t_Vec_array_u8_16_Global) ->
+              [ &_28 <- _bor ] -{inv_Vec_array_u8_16_Global _bor.final}-
+              [ &out <- _bor.final ] s2) [ _ck -> (! {[@expl:type invariant] inv_Vec_array_u8_16_Global out} any) ]
+        | s2 = push_array_u8_16 [%#slib'6] {_28} {_30} (fun (_x: ()) -> [ &_27 <- _x ] s3)
+        | s3 = UInt64.add [%#slib'8] {i} {[%#slib'7] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &i <- _x ] s4)
+        | s4 = bb2 ] ] ]
+  | bb9 = bb9
+    [ bb9 = {[@expl:inferred invariant: type invariant] inv_Vec_array_u8_16_Global out}
+      {[@expl:loop invariant #0] [%#slib'15] Seq.length (view_Vec_array_u8_16_Global out)
+      >= Seq.length (view_Vec_array_u8_16_Global tgs)}
+      {[@expl:loop invariant #1] [%#slib'14] forall j: int. 0 <= j /\ j < Seq.length (view_Vec_array_u8_16_Global tgs)
+        -> Seq.get (view_Vec_array_u8_16_Global out) j = Seq.get (view_Vec_array_u8_16_Global tgs) j}
+      {[@expl:loop invariant #2] [%#slib'13] forall j: int, k: int. Seq.length (view_Vec_array_u8_16_Global tgs) <= j
+          /\ j < Seq.length (view_Vec_array_u8_16_Global out) /\ 0 <= k /\ k < 16
+        -> UInt8.t'int (index_array_u8_16 (Seq.get (view_Vec_array_u8_16_Global out) j) k) = 0}
+      {[@expl:loop invariant #3] [%#slib'12] Seq.length (view_Vec_array_u8_16_Global tgs) >= 128
+      -> Seq.length (view_Vec_array_u8_16_Global out) = Seq.length (view_Vec_array_u8_16_Global tgs)}
+      {[@expl:loop invariant #4] [%#slib'11] Seq.length (view_Vec_array_u8_16_Global tgs) < 128
+      -> Seq.length (view_Vec_array_u8_16_Global out) <= 128}
+      (! s0)
+      [ s0 = len_array_u8_16 [%#slib'9] {out} (fun (_x: UInt64.t) -> [ &_52 <- _x ] s1)
+      | s1 = [ &_51 <- UInt64.lt _52 ([%#slib'10] (128: UInt64.t)) ] s2
+      | s2 = any [ br0 -> {_51 = false} (! bb14) | br1 -> {_51} (! bb12) ] ]
+      [ bb12 = s0
+        [ s0 = Slice64Ops.create [%#slib'16] <UInt8.t> {[%#slib'16] (16: UInt64.t)}
+            {fun (_: int) -> [%#slib'17] (0: UInt8.t)} (fun (_res: Slice64.array UInt8.t) -> [ &_56 <- _res ] s1)
+        | s1 = MutBorrow.borrow_mut <t_Vec_array_u8_16_Global> {out}
+            (fun (_bor: MutBorrow.t t_Vec_array_u8_16_Global) ->
+              [ &_55 <- _bor ] -{inv_Vec_array_u8_16_Global _bor.final}-
+              [ &out <- _bor.final ] s2) [ _ck -> (! {[@expl:type invariant] inv_Vec_array_u8_16_Global out} any) ]
+        | s2 = push_array_u8_16 [%#slib'18] {_55} {_56} (fun (_x: ()) -> [ &_54 <- _x ] s3)
+        | s3 = bb9 ] ] ]
+  | bb14 = s0 [ s0 = [ &_ret <- out ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Vec_array_u8_16_Global = Any.any_l ()
+  | & tgs: t_Vec_array_u8_16_Global = tgs
+  | & out: t_Vec_array_u8_16_Global = Any.any_l ()
+  | & i: UInt64.t = Any.any_l ()
+  | & _23: bool = Any.any_l ()
+  | & _25: UInt64.t = Any.any_l ()
+  | & _27: () = Any.any_l ()
+  | & _28: MutBorrow.t t_Vec_array_u8_16_Global = Any.any_l ()
+  | & _30: Slice64.array UInt8.t = Any.any_l ()
+  | & _51: bool = Any.any_l ()
+  | & _52: UInt64.t = Any.any_l ()
+  | & _54: () = Any.any_l ()
+  | & _55: MutBorrow.t t_Vec_array_u8_16_Global = Any.any_l ()
+  | & _56: Slice64.array UInt8.t = Any.any_l () ])
+  [ return (result: t_Vec_array_u8_16_Global) ->
+  {[@stop_split] [@expl:place_type_guids ensures] ([@stop_split] [@expl:place_type_guids result type invariant] [%#slib'20] inv_Vec_array_u8_16_Global result)
+    /\ ([@stop_split] [@expl:place_type_guids ensures #0] [%#slib'21] Seq.length (view_Vec_array_u8_16_Global result)
+      = (if Seq.length (view_Vec_array_u8_16_Global tgs) >= 128 then
+        Seq.length (view_Vec_array_u8_16_Global tgs)
+      else
+        128
+      ))
+    /\ ([@stop_split] [@expl:place_type_guids ensures #1] [%#slib'22] forall j: int. 0 <= j
+          /\ j < Seq.length (view_Vec_array_u8_16_Global tgs)
+        -> Seq.get (view_Vec_array_u8_16_Global result) j = Seq.get (view_Vec_array_u8_16_Global tgs) j)
+    /\ ([@stop_split] [@expl:place_type_guids ensures #2] [%#slib'23] forall j: int, k: int. Seq.length (view_Vec_array_u8_16_Global tgs)
+          <= j
+        /\ j < Seq.length (view_Vec_array_u8_16_Global result) /\ 0 <= k /\ k < 16
+      -> UInt8.t'int (index_array_u8_16 (Seq.get (view_Vec_array_u8_16_Global result) j) k) = 0)}
+    (! return {result}) ]

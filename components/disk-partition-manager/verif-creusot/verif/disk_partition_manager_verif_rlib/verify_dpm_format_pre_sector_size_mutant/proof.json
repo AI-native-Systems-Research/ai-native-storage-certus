@@ -2,13 +2,13 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_entry_sectors": { "prover": "alt-ergo", "time": 0.028 },
-      "vc_len_u8": { "prover": "alt-ergo", "time": 0.024 },
-      "vc_protective_mbr": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_entry_sectors": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_len_u8": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_protective_mbr": { "prover": "alt-ergo", "time": 0.017 },
       "vc_verify_dpm_format_pre_sector_size__mutant": {
         "tactic": "split_vc",
         "children": [
-          { "prover": "alt-ergo", "time": 0.026 },
+          { "prover": "alt-ergo", "time": 0.03 },
           { "prover": "alt-ergo", "time": 0.028 },
           null
         ]

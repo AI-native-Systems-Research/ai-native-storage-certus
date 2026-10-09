@@ -2,11 +2,12 @@
   "profile": [],
   "proofs": {
     "Coma": {
+      "vc_cdiv64": { "prover": "alt-ergo", "time": 0.022 },
       "vc_verify_dpm_format_sum_overflow": {
         "prover": "alt-ergo",
-        "time": 0.043
+        "time": 0.084
       },
-      "vc_wrapping_add": { "prover": "alt-ergo", "time": 0.023 }
+      "vc_wrapping_add": { "prover": "alt-ergo", "time": 0.022 }
     }
   }
 }

@@ -1,0 +1,19 @@
+(* #"/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 3759 0 3759 40 *)
+
+let%span slib = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 3757 11 3757 65
+let%span slib'0 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 3758 10 3758 39
+
+use int.Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant a : int
+
+constant b : int
+
+function lemma_u32_product [#"/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 3759 0 3759 40] (a: int) (b: int) : ()
+
+goal vc_lemma_u32_product: ([%#slib] 0 <= a /\ a <= 4294967295 /\ 0 <= b /\ b <= 4294967295)
+  -> ([@stop_split] [@expl:lemma_u32_product ensures] [%#slib'0] a * b <= 18446744065119617025)

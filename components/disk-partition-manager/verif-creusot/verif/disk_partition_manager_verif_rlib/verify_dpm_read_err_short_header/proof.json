@@ -2,11 +2,11 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_parse_header_guard": { "prover": "alt-ergo", "time": 0.01 },
-      "vc_try_read_gpt_at_m": { "prover": "alt-ergo", "time": 0.009 },
+      "vc_parse_header_guard": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_try_read_gpt_at_m": { "prover": "alt-ergo", "time": 0.024 },
       "vc_verify_dpm_read_err_short_header": {
         "prover": "alt-ergo",
-        "time": 0.031
+        "time": 0.029
       }
     }
   }

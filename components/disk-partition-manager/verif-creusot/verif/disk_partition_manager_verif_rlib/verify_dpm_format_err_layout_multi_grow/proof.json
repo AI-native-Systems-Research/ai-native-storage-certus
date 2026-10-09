@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_layout_classify": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_layout_classify": { "prover": "alt-ergo", "time": 0.019 },
       "vc_verify_dpm_format_err_layout_multi_grow": {
         "prover": "alt-ergo",
         "time": 0.048

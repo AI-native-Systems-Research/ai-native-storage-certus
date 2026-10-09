@@ -1,6 +1,6 @@
 {
   "profile": [],
   "proofs": {
-    "Coma": { "vc_generate_guid": { "prover": "z3", "time": 0.035 } }
+    "Coma": { "vc_generate_guid": { "prover": "z3", "time": 0.019 } }
   }
 }

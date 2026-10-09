@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_lemma_fixed_sum_mono": { "prover": "alt-ergo", "time": 0.019 }
+      "vc_lemma_fixed_sum_mono": { "prover": "alt-ergo", "time": 0.025 }
     }
   }
 }

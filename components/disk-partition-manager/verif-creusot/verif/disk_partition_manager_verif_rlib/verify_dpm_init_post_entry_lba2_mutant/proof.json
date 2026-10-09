@@ -6,14 +6,14 @@
       "vc_verify_dpm_init_post_entry_lba2__mutant": {
         "tactic": "split_vc",
         "children": [
-          { "prover": "alt-ergo", "time": 0.023 },
-          { "prover": "alt-ergo", "time": 0.03 },
+          { "prover": "alt-ergo", "time": 0.022 },
+          { "prover": "alt-ergo", "time": 0.022 },
           {
             "tactic": "split_vc",
             "children": [
               null,
-              { "prover": "alt-ergo", "time": 0.027 },
-              { "prover": "alt-ergo", "time": 0.028 }
+              { "prover": "alt-ergo", "time": 0.017 },
+              { "prover": "alt-ergo", "time": 0.022 }
             ]
           }
         ]

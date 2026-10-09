@@ -2,8 +2,24 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_read_gpt_m": { "prover": "alt-ergo", "time": 0.014 },
-      "vc_verify_dpm_init_post_backup_fallback__mutant": null
+      "vc_read_gpt_m": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_try_read_gpt_at_m": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_verify_dpm_init_post_backup_fallback__mutant": {
+        "tactic": "split_vc",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              null,
+              { "prover": "alt-ergo", "time": 0.036 },
+              { "prover": "alt-ergo", "time": 0.036 },
+              { "prover": "alt-ergo", "time": 0.039 },
+              { "prover": "alt-ergo", "time": 0.027 },
+              { "prover": "alt-ergo", "time": 0.033 }
+            ]
+          }
+        ]
+      }
     }
   }
 }

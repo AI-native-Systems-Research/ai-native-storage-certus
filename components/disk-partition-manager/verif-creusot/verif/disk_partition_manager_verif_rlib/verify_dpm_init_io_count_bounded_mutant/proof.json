@@ -6,8 +6,8 @@
       "vc_verify_dpm_init_io_count_bounded__mutant": {
         "tactic": "split_vc",
         "children": [
-          { "prover": "alt-ergo", "time": 0.025 },
-          { "prover": "alt-ergo", "time": 0.022 },
+          { "prover": "alt-ergo", "time": 0.026 },
+          { "prover": "alt-ergo", "time": 0.027 },
           null
         ]
       }

@@ -2,16 +2,31 @@
   "profile": [],
   "proofs": {
     "Coma": {
+      "vc_cdiv64": { "prover": "alt-ergo", "time": 0.022 },
       "vc_verify_dpm_format_sum_overflow__mutant": {
         "tactic": "split_vc",
         "children": [
-          { "prover": "alt-ergo", "time": 0.02 },
-          null,
           { "prover": "alt-ergo", "time": 0.021 },
-          { "prover": "alt-ergo", "time": 0.024 }
+          { "prover": "alt-ergo", "time": 0.033 },
+          { "prover": "alt-ergo", "time": 0.02 },
+          { "prover": "alt-ergo", "time": 0.021 },
+          { "prover": "alt-ergo", "time": 0.023 },
+          {
+            "tactic": "split_vc",
+            "children": [
+              null,
+              { "prover": "alt-ergo", "time": 0.021 },
+              { "prover": "alt-ergo", "time": 0.027 },
+              { "prover": "alt-ergo", "time": 0.024 }
+            ]
+          },
+          { "prover": "alt-ergo", "time": 0.021 },
+          { "prover": "alt-ergo", "time": 0.031 },
+          { "prover": "alt-ergo", "time": 0.031 },
+          { "prover": "alt-ergo", "time": 0.03 }
         ]
       },
-      "vc_wrapping_add": { "prover": "alt-ergo", "time": 0.015 }
+      "vc_wrapping_add": { "prover": "alt-ergo", "time": 0.022 }
     }
   }
 }

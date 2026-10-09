@@ -1,45 +1,129 @@
-(* #"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 1544 0 1544 97 *)
+(* #"/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1579 0 1582 12 *)
 
-let%span slib = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 1545 4 1545 31
-let%span slib'0 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 1542 10 1543 73
-let%span slib'1 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 1090 10 1090 81
-let%span slib'2 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 1091 10 1091 92
-let%span slib'3 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 1092 10 1094 72
-let%span slib'4 = "/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 1095 10 1097 72
+let%span slib = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1584 34 1584 49
+let%span slib'0 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1585 18 1585 89
+let%span slib'1 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1586 4 1586 31
+let%span slib'2 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1563 11 1563 36
+let%span slib'3 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1564 10 1566 74
+let%span slib'4 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1567 10 1570 29
+let%span slib'5 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1571 10 1573 73
+let%span slib'6 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1574 10 1575 64
+let%span slib'7 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1576 10 1576 90
+let%span slib'8 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1577 10 1578 74
+let%span slib'9 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 40 0 40 30
+let%span slib'10 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1036 10 1036 76
+let%span slib'11 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1037 10 1038 61
+let%span slib'12 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1039 10 1040 71
+let%span slib'13 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1041 10 1042 88
+let%span slib'14 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1043 10 1045 47
+let%span slib'15 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1046 10 1048 29
+let%span slib'16 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1050 10 1051 75
+let%span slib'17 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1052 10 1053 93
+let%span slib'18 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1090 10 1090 81
+let%span slib'19 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1091 10 1091 92
+let%span slib'20 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1092 10 1094 72
+let%span slib'21 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1095 10 1097 72
+let%span slib'22 = "/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1016 8 1029 9
 
-use creusot.int.UInt64
 use creusot.int.UInt32
+use creusot.int.UInt64
 use creusot.prelude.Any
+
+constant const_GPT_HEADER_SIZE: UInt32.t = [%#slib'9] (92: UInt32.t)
+
+type t_IoRes = Ok | Fail
 
 type t_TabM = { tag: UInt64.t; count: UInt32.t; sector_size: UInt32.t }
 
-type t_Attempt = Ok t_TabM | Corrupt | NoTable | Io
+type t_Attempt = Ok'0 t_TabM | Corrupt'0 | NoTable'0 | Io'0
 
-type t_PtErr = NoPartitionTable | CorruptTable | InvalidPartition | IoError | LayoutError | NotInitialized
+function try_read_gpt_at [#"/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1011 0 1014 12] (hdr_read: t_IoRes) (hdr_len_ok: bool) (sig_ok: bool) (hdr_crc_match: bool) (entry_read: t_IoRes) (entry_crc_match: bool) (tab: t_TabM) : t_Attempt
+ = [%#slib'22] match hdr_read with
+    | Fail -> Io'0
+    | Ok -> if not hdr_len_ok then
+      Corrupt'0
+    else
+      if not sig_ok then
+        NoTable'0
+      else
+        if not hdr_crc_match then
+          Corrupt'0
+        else
+          match entry_read with
+            | Fail -> Io'0
+            | Ok -> if not entry_crc_match then Corrupt'0 else Ok'0 tab
+            end
+      
+    
+    
+    end
 
-type t_ReadRes = Ok'0 t_TabM | Err'0 t_PtErr
-
-let read_gpt_m (primary: t_Attempt) (backup: t_Attempt) (return (x: t_ReadRes)) = any
-  [ return (result: t_ReadRes) ->
-  {[@stop_split] [@expl:read_gpt_m ensures] ([@stop_split] [@expl:read_gpt_m ensures #0] [%#slib'1] match primary with
-        | Ok t -> result = Ok'0 t
+let try_read_gpt_at_m (hdr_read: t_IoRes) (hdr_len_ok: bool) (sig_ok: bool) (hdr_crc_match: bool) (entry_read: t_IoRes)
+  (entry_crc_match: bool) (tab: t_TabM) (return (x: t_Attempt)) = any
+  [ return (result: t_Attempt) ->
+  {[@stop_split] [@expl:try_read_gpt_at_m ensures] ([@stop_split] [@expl:try_read_gpt_at_m ensures #0] [%#slib'10] match hdr_read with
+        | Fail -> result = Io'0
         | _ -> true
         end)
-    /\ ([@stop_split] [@expl:read_gpt_m ensures #1] [%#slib'2] match primary with
-        | Io -> result = Err'0 (IoError)
+    /\ ([@stop_split] [@expl:try_read_gpt_at_m ensures #1] [%#slib'11] match hdr_read with
+        | Ok -> not hdr_len_ok -> result = Corrupt'0
         | _ -> true
         end)
-    /\ ([@stop_split] [@expl:read_gpt_m ensures #2] [%#slib'3] match primary with
-        | Corrupt -> match backup with
-          | Ok t -> result = Ok'0 t
-          | _ -> result = Err'0 (NoPartitionTable)
+    /\ ([@stop_split] [@expl:try_read_gpt_at_m ensures #2] [%#slib'12] match hdr_read with
+        | Ok -> hdr_len_ok /\ not sig_ok -> result = NoTable'0
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:try_read_gpt_at_m ensures #3] [%#slib'13] match hdr_read with
+        | Ok -> hdr_len_ok /\ sig_ok /\ not hdr_crc_match -> result = Corrupt'0
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:try_read_gpt_at_m ensures #4] [%#slib'14] match entry_read with
+        | Fail -> match hdr_read with
+          | Ok -> hdr_len_ok /\ sig_ok /\ hdr_crc_match -> result = Io'0
+          | _ -> true
           end
         | _ -> true
         end)
-    /\ ([@stop_split] [@expl:read_gpt_m ensures #3] [%#slib'4] match primary with
-      | NoTable -> match backup with
-        | Ok t -> result = Ok'0 t
-        | _ -> result = Err'0 (NoPartitionTable)
+    /\ ([@stop_split] [@expl:try_read_gpt_at_m ensures #5] [%#slib'15] match hdr_read with
+        | Ok -> match entry_read with
+          | Ok -> hdr_len_ok /\ sig_ok /\ hdr_crc_match /\ not entry_crc_match -> result = Corrupt'0
+          | _ -> true
+          end
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:try_read_gpt_at_m ensures #6] [%#slib'16] result
+      = try_read_gpt_at hdr_read hdr_len_ok sig_ok hdr_crc_match entry_read entry_crc_match tab)
+    /\ ([@stop_split] [@expl:try_read_gpt_at_m ensures #7] [%#slib'17] match result with
+      | Ok'0 t -> hdr_len_ok /\ sig_ok /\ hdr_crc_match /\ entry_crc_match /\ t.tag = tab.tag
+      | _ -> true
+      end)}
+    (! return {result}) ]
+
+type t_PtErr = NoPartitionTable | CorruptTable | InvalidPartition | IoError | LayoutError | NotInitialized
+
+type t_ReadRes = Ok'1 t_TabM | Err'1 t_PtErr
+
+let read_gpt_m (primary: t_Attempt) (backup: t_Attempt) (return (x: t_ReadRes)) = any
+  [ return (result: t_ReadRes) ->
+  {[@stop_split] [@expl:read_gpt_m ensures] ([@stop_split] [@expl:read_gpt_m ensures #0] [%#slib'18] match primary with
+        | Ok'0 t -> result = Ok'1 t
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:read_gpt_m ensures #1] [%#slib'19] match primary with
+        | Io'0 -> result = Err'1 (IoError)
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:read_gpt_m ensures #2] [%#slib'20] match primary with
+        | Corrupt'0 -> match backup with
+          | Ok'0 t -> result = Ok'1 t
+          | _ -> result = Err'1 (NoPartitionTable)
+          end
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:read_gpt_m ensures #3] [%#slib'21] match primary with
+      | NoTable'0 -> match backup with
+        | Ok'0 t -> result = Ok'1 t
+        | _ -> result = Err'1 (NoPartitionTable)
         end
       | _ -> true
       end)}
@@ -49,17 +133,77 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let verify_dpm_init_post_backup_fallback__mutant [#"/home/cornel/fv-runs/apply-disk-partition-manager-20261007/components/disk-partition-manager/verif-creusot/src/lib.rs" 1544 0 1544 97]
-  (primary: t_Attempt) (backup: t_Attempt) (return (x: t_ReadRes)) = (! bb0
+let verify_dpm_init_post_backup_fallback__mutant [#"/home/cornel/fv-runs/j13-dpm/components/disk-partition-manager/verif-creusot/src/lib.rs" 1579 0 1582 12]
+  (ss: UInt32.t) (p_hdr: t_IoRes) (p_sig: bool) (p_hcrc: bool) (p_ent: t_IoRes) (p_ecrc: bool) (p_tab: t_TabM)
+  (backup: t_Attempt) (return (x: t_ReadRes)) =
+{[@stop_split] [@expl:verify_dpm_init_post_backup_fallback__mutant requires] [%#slib'2] UInt32.t'int ss = 512
+  \/ UInt32.t'int ss = 4096}
+  (! bb0
   [ bb0 = s0
-    [ s0 = read_gpt_m [%#slib] {primary} {backup} (fun (_x: t_ReadRes) -> [ &_ret <- _x ] s1) | s1 = return {_ret} ] ]
-  [ & _ret: t_ReadRes = Any.any_l () | & primary: t_Attempt = primary | & backup: t_Attempt = backup ])
+    [ s0 = [ &_42 <- UInt64.of_int (UInt32.t'int ss) ] s1
+    | s1 = [ &_44 <- UInt64.of_int (UInt32.t'int ([%#slib] const_GPT_HEADER_SIZE)) ] s2
+    | s2 = [ &p_len_ok <- UInt64.ge _42 _44 ] s3
+    | s3 = try_read_gpt_at_m [%#slib'0] {p_hdr} {p_len_ok} {p_sig} {p_hcrc} {p_ent} {p_ecrc} {p_tab}
+        (fun (_x: t_Attempt) -> [ &primary <- _x ] s4)
+    | s4 = read_gpt_m [%#slib'1] {primary} {backup} (fun (_x: t_ReadRes) -> [ &_ret <- _x ] s5)
+    | s5 = return {_ret} ] ]
+  [ & _ret: t_ReadRes = Any.any_l ()
+  | & ss: UInt32.t = ss
+  | & p_hdr: t_IoRes = p_hdr
+  | & p_sig: bool = p_sig
+  | & p_hcrc: bool = p_hcrc
+  | & p_ent: t_IoRes = p_ent
+  | & p_ecrc: bool = p_ecrc
+  | & p_tab: t_TabM = p_tab
+  | & backup: t_Attempt = backup
+  | & p_len_ok: bool = Any.any_l ()
+  | & _42: UInt64.t = Any.any_l ()
+  | & _44: UInt64.t = Any.any_l ()
+  | & primary: t_Attempt = Any.any_l () ])
   [ return (result: t_ReadRes) ->
-  {[@stop_split] [@expl:verify_dpm_init_post_backup_fallback__mutant ensures] [%#slib'0] match primary with
-      | Io -> match backup with
-        | Ok t -> result = Ok'0 t
+  {[@stop_split] [@expl:verify_dpm_init_post_backup_fallback__mutant ensures] ([@stop_split] [@expl:verify_dpm_init_post_backup_fallback__mutant ensures #0] [%#slib'3] not match p_hdr with
+        | Ok -> p_sig /\ not p_hcrc
+        -> match backup with
+          | Ok'0 t -> result = Ok'1 t
+          | _ -> result = Err'1 (NoPartitionTable)
+          end
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:verify_dpm_init_post_backup_fallback__mutant ensures #1] [%#slib'4] match p_hdr with
+        | Ok -> match p_ent with
+          | Ok -> p_sig /\ p_hcrc /\ not p_ecrc
+          -> match backup with
+            | Ok'0 t -> result = Ok'1 t
+            | _ -> result = Err'1 (NoPartitionTable)
+            end
+          | _ -> true
+          end
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:verify_dpm_init_post_backup_fallback__mutant ensures #2] [%#slib'5] match p_hdr with
+        | Ok -> not p_sig
+        -> match backup with
+          | Ok'0 t -> result = Ok'1 t
+          | _ -> result = Err'1 (NoPartitionTable)
+          end
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:verify_dpm_init_post_backup_fallback__mutant ensures #3] [%#slib'6] match p_hdr with
+        | Ok -> match p_ent with
+          | Ok -> p_sig /\ p_hcrc /\ p_ecrc -> result = Ok'1 p_tab
+          | _ -> true
+          end
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:verify_dpm_init_post_backup_fallback__mutant ensures #4] [%#slib'7] match p_hdr with
+        | Fail -> result = Err'1 (IoError)
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:verify_dpm_init_post_backup_fallback__mutant ensures #5] [%#slib'8] match p_hdr with
+      | Ok -> match p_ent with
+        | Fail -> p_sig /\ p_hcrc -> result = Err'1 (IoError)
         | _ -> true
         end
       | _ -> true
-      end}
+      end)}
     (! return {result}) ]

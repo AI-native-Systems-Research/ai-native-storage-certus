@@ -2,10 +2,8 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_verify_dpm_read_stride_mismatch": {
-        "prover": "alt-ergo",
-        "time": 0.109
-      }
+      "vc_parse_entry_offsets": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_verify_dpm_read_stride_mismatch": { "prover": "z3", "time": 0.02 }
     }
   }
 }

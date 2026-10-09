@@ -2,11 +2,11 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_init_reads_sectors": { "prover": "alt-ergo", "time": 0.016 },
-      "vc_initialize_m": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_init_reads_sectors": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_initialize_m": { "prover": "alt-ergo", "time": 0.015 },
       "vc_verify_dpm_init_pre_device_bound": {
         "prover": "alt-ergo",
-        "time": 0.029
+        "time": 0.027
       }
     }
   }

@@ -2,8 +2,8 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_decode_units": { "prover": "alt-ergo", "time": 0.011 },
-      "vc_verify_dpm_name_decode": { "prover": "alt-ergo", "time": 0.035 }
+      "vc_decode_units": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_verify_dpm_name_decode": { "prover": "alt-ergo", "time": 0.028 }
     }
   }
 }

@@ -2,22 +2,22 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_entry_array_bytes": { "prover": "alt-ergo", "time": 0.025 },
-      "vc_serialize_padding_slot": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_entry_array_bytes": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_serialize_padding_slot": { "prover": "alt-ergo", "time": 0.013 },
       "vc_verify_dpm_format_post_entry_array__mutant": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.043 },
-              { "prover": "alt-ergo", "time": 0.052 },
+              { "prover": "alt-ergo", "time": 0.014 },
+              { "prover": "alt-ergo", "time": 0.079 },
               null
             ]
           }
         ]
       },
-      "vc_write_gpt_trace": { "prover": "alt-ergo", "time": 0.018 }
+      "vc_write_gpt_trace": { "prover": "alt-ergo", "time": 0.026 }
     }
   }
 }

@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_partition_info_m": { "prover": "alt-ergo", "time": 0.011 },
+      "vc_partition_info_m": { "prover": "alt-ergo", "time": 0.018 },
       "vc_verify_dpm_pinfo_err_not_initialized__mutant": null
     }
   }

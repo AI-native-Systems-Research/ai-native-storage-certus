@@ -1,6 +1,22 @@
 {
   "profile": [],
   "proofs": {
-    "Coma": { "vc_verify_dpm_format_ignores_device_geometry__mutant": null }
+    "Coma": {
+      "vc_verify_dpm_format_ignores_device_geometry__mutant": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.027 },
+          {
+            "tactic": "split_vc",
+            "children": [
+              null,
+              { "prover": "alt-ergo", "time": 0.046 },
+              { "prover": "alt-ergo", "time": 0.04 }
+            ]
+          }
+        ]
+      },
+      "vc_write_gpt_m": { "prover": "alt-ergo", "time": 0.028 }
+    }
   }
 }

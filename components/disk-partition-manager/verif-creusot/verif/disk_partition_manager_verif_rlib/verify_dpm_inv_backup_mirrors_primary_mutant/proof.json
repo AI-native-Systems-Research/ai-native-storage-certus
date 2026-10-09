@@ -2,30 +2,30 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_header_pair": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_header_pair": { "prover": "alt-ergo", "time": 0.011 },
       "vc_verify_dpm_inv_backup_mirrors_primary__mutant": {
         "tactic": "split_vc",
         "children": [
-          { "prover": "alt-ergo", "time": 0.028 },
-          { "prover": "alt-ergo", "time": 0.035 },
+          { "prover": "alt-ergo", "time": 0.015 },
+          { "prover": "alt-ergo", "time": 0.02 },
           {
             "tactic": "split_vc",
             "children": [
               null,
+              { "prover": "alt-ergo", "time": 0.025 },
+              { "prover": "alt-ergo", "time": 0.03 },
               { "prover": "alt-ergo", "time": 0.035 },
-              { "prover": "alt-ergo", "time": 0.033 },
-              { "prover": "alt-ergo", "time": 0.035 },
-              { "prover": "alt-ergo", "time": 0.031 },
+              { "prover": "alt-ergo", "time": 0.043 },
               { "prover": "alt-ergo", "time": 0.027 },
-              { "prover": "alt-ergo", "time": 0.035 },
+              { "prover": "alt-ergo", "time": 0.026 },
+              { "prover": "alt-ergo", "time": 0.04 },
               { "prover": "alt-ergo", "time": 0.031 },
-              { "prover": "alt-ergo", "time": 0.031 },
-              { "prover": "alt-ergo", "time": 0.047 }
+              { "prover": "alt-ergo", "time": 0.046 }
             ]
           }
         ]
       },
-      "vc_write_gpt_trace": { "prover": "alt-ergo", "time": 0.012 }
+      "vc_write_gpt_trace": { "prover": "alt-ergo", "time": 0.015 }
     }
   }
 }

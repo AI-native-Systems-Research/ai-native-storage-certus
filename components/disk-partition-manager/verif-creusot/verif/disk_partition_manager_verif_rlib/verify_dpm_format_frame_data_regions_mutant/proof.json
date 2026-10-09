@@ -5,22 +5,22 @@
       "vc_verify_dpm_format_frame_data_regions__mutant": {
         "tactic": "split_vc",
         "children": [
-          { "prover": "alt-ergo", "time": 0.016 },
-          { "prover": "alt-ergo", "time": 0.042 },
-          { "prover": "alt-ergo", "time": 0.04 },
-          { "prover": "alt-ergo", "time": 0.036 },
-          { "prover": "alt-ergo", "time": 0.038 },
+          { "prover": "alt-ergo", "time": 0.029 },
+          { "prover": "alt-ergo", "time": 0.045 },
+          { "prover": "alt-ergo", "time": 0.041 },
+          { "prover": "alt-ergo", "time": 0.045 },
+          { "prover": "alt-ergo", "time": 0.027 },
           {
             "tactic": "split_vc",
             "children": [
               null,
-              { "prover": "alt-ergo", "time": 0.028 },
-              { "prover": "alt-ergo", "time": 0.062 }
+              { "prover": "alt-ergo", "time": 0.032 },
+              { "prover": "alt-ergo", "time": 0.079 }
             ]
           }
         ]
       },
-      "vc_write_gpt_trace": { "prover": "alt-ergo", "time": 0.013 }
+      "vc_write_gpt_trace": { "prover": "alt-ergo", "time": 0.021 }
     }
   }
 }

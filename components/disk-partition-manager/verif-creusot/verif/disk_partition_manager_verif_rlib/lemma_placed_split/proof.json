@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_lemma_placed_split": { "prover": "alt-ergo", "time": 0.032 }
+      "vc_lemma_placed_split": { "prover": "alt-ergo", "time": 0.065 }
     }
   }
 }

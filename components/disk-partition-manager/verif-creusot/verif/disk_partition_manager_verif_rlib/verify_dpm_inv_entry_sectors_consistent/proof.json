@@ -2,11 +2,11 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_entry_sectors": { "prover": "alt-ergo", "time": 0.015 },
-      "vc_usable_window": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_entry_sectors": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_usable_window": { "prover": "alt-ergo", "time": 0.02 },
       "vc_verify_dpm_inv_entry_sectors_consistent": {
         "prover": "alt-ergo",
-        "time": 0.128
+        "time": 0.112
       }
     }
   }
