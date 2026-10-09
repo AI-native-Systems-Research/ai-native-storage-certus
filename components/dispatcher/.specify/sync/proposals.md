@@ -1,17 +1,25 @@
 # Drift Resolution Proposals — dispatcher
 
-Generated: 2026-10-05  
-Branch: `fix/poller-cpu-placement-logging`  
-Based on: drift-report 2026-10-05
+Generated: 2026-10-08 · Branch: `opt/evolve-latency/s20261004-001925_PR507` · Mode: interactive
 
-| # | Requirement | Direction | Severity | Location |
-|---|---|---|---|---|
-| 1 | FR-011 | BACKFILL | moderate | `components/dispatcher/src/lib.rs:550-600, 1530-1539` |
+| # | Requirement | Direction | Decision |
+|---|---|---|---|
+| 1 | FR-039 step (2) | BACKFILL | Approved |
+| 2 | US-11 scenario 2 (+ scenario 6) | BACKFILL | Approved |
+| 3 | TouchCheck / bulk codec (shmq-dispatcher, connector) | NEW_SPEC | Skipped (no specs/ tree; out of scope) |
 
-### 1. FR-011 — BACKFILL
+## 1. FR-039 step (2)
 
-- **Spec said:** `poller_base_cpu` ... Defaults to `None` (OS scheduler decides).
-- **Code does:** `None` selects NUMA-local automatic placement: round-robin over each drive's NUMA-node cores excluding the node's first two (this branch; previously global CPUs 0/1 were excluded); unresolvable node or node with <=2 cores -> no CPU passed, block device chooses; topology discovery failure -> warning, unpinned.
-- **Note:** Pre-existing drift (the None path was already automatic on unstable), surfaced because this branch modifies that path.
-- **Proposed / applied:** FR-011 rewritten for the None case; Last Synced header added.
-- **Confidence:** HIGH — **Approved** (interactive, 2026-10-05)
+- Spec said: (2) for MemoryTier hits, issues per-region memcpy_h2d_async H2D copies on the device's warm stream and performs a single deferred stream_synchronize after all hot-path copies are issued.
+- Code does: warm copies only queued; single warm stream_synchronize deferred until after the cold block (steps 4-5); warm read pins released only after it; then remote lookup (FR-045).
+- Rationale: Intentional, tested optimization (ada87967): overlapping the warm H2D drain with the cold NVMe reads; pin lifetime extended to keep it safe.
+
+## 2. User Story 11 scenario 2
+
+- Spec said: hot entries are served inline without waiting for cold promotions to complete.
+- Code does: hot H2D copies queued before cold prep, not waited on during cold promotion; one warm-stream sync after the cold block confirms them; new scenario 6 for the ordering.
+- Rationale: Scenario wording predates the deferral; new scenario mirrors the existing ordering test.
+
+## 3. TouchCheck opcode and bulk codec
+
+- No specs/ tree in those components; outside this component's hash inputs. Skipped by user.

@@ -1,18 +1,20 @@
-# Spec Sync Apply Report — dispatcher
+# Sync Apply Report — dispatcher
 
-Applied: 2026-10-05  
-Branch: `fix/poller-cpu-placement-logging`  
-Spec: 001-dispatcher-cache-interface  
-Backup: `.specify/sync/backups/20261005T185807Z/spec.md`
+Applied: 2026-10-08 · Branch: `opt/evolve-latency/s20261004-001925_PR507` · Backup: `.specify/sync/backups/20261008T235109Z/spec.md`
 
-## Applied
+## Specs Updated
 
-| # | Requirement | Direction | Result |
-|---|---|---|---|
-| 1 | FR-011 | BACKFILL | ✅ FR-011 rewritten for the None case; Last Synced header added. |
+| Spec | Requirement | Change |
+|---|---|---|
+| 001 | FR-039 step (2) | Modified (BACKFILL) |
+| 001 | US-11 scenario 2 | Modified (BACKFILL) |
+| 001 | US-11 scenario 6 | Added (BACKFILL) |
+| 001 | Last Synced header | Added |
 
-## Verification
+## Not Applied
 
-- Every `file:line` anchor in the edited spec text was re-read against the code after `cargo fmt`.
-- `cargo test` passed for block-device-spdk-nvme (46), interfaces (78), spdk-env (57), dispatcher (100), dispatcher-p2p (73); `cargo clippy --no-deps -D warnings` clean on block-device-spdk-nvme, interfaces, spdk-env.
-- No align tasks left open by this sync.
+| Proposal | Reason |
+|---|---|
+| 3 (TouchCheck / bulk codec) | Skipped by user |
+
+No source files modified. No align tasks generated. Drift status: clean.

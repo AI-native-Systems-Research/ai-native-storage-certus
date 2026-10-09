@@ -1,11 +1,19 @@
 ---
 spec_sync_component: dispatcher
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-06T00:17:04Z
-spec_sync_git_commit: bd1598f5
-spec_sync_inputs_sha256: d3209328eea6bf26b5c8e2c1c56ec8422f2a5cbe44985f1f084fc3f01ccaaaf4
+spec_sync_synced_at: 2026-10-08T23:52:37Z
+spec_sync_git_commit: f88aed53
+spec_sync_inputs_sha256: c82a161a74dc787aa453df828ded7fca9d99e3769ad6f6951262ab7a50d11876
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-10-08 (branch `opt/evolve-latency/s20261004-001925_PR507`).** Delta analysis on a certified baseline: the existing clean stamp (`d3209328`) equals the spec-sync hash of unstable `7e53d5b5`, and `components/interfaces` is unchanged on this branch, so the only new inputs are this branch's dispatcher `src/` and `specs/` changes. Spec 001 in scope.
+>
+> - **FR-039 step (2) — DRIFTED (moderate).** Spec said the single warm `stream_synchronize` runs "after all hot-path copies are issued"; since `ada87967` it runs after the cold scatter-gather (`src/lib.rs:2742-2748`), the warm read pins are released only after it (`src/lib.rs:2754`), and the remote lookup follows (`src/lib.rs:2756`). **Resolution**: code authoritative; step (2) rewritten with the pin-lifetime reason and the benign multi-region warm-stream sync noted.
+> - **User Story 11 scenario 2 — DRIFTED (minor).** "Hot entries are served inline without waiting for cold promotions" no longer describes when hot copies are confirmed. **Resolution**: reworded; scenario 6 added matching test `mixed_batch_defers_warm_sync_past_cold_block` (`src/lib.rs:6064`).
+> - **FR-019 / FR-061 / Pipelined Reader entity / pipelined-reader Q&A — ALIGNED, verified not assumed.** Updated on this branch for `8825678d`; the scatter-gather poll loop has no periodic sync and makes one final dual pipe-stream sync (`src/pipeline.rs:1124-1125`). The single-drive `pipelined_multi_object_zero_copy` periodic sync is unchanged, as the spec states.
+> - **Out of scope (not analyzed here):** the TouchCheck opcode (`a7e0ffbf`) and the touch()/lookup() bulk codec (`2fae06c8`) live in `lib/shmq-dispatcher` and `certus-shmq-connector`, which have no `specs/` tree; they are not inputs to this component's hash.
+>
+> No actionable drift remains for this component after apply.
 > **Sync 2026-10-05 (branch `fix/store-declines-root-cause`).** Delta analysis on a certified baseline (see the interfaces report for the baseline argument). Both specs in scope.
 >
 > - **FR-058 `TierEventStats` cardinality — DRIFTED (major).** The spec fixed the struct at "**ten** `u64` fields" and enumerated them; the shipped struct has **sixteen** (the base had exactly ten, so the count was correct until this branch). The clause "each monotonic since process start" was also falsified: `oldest_sampled` and `oldest_persisted` are *assigned* the latest sample, not accumulated, and the server publishes them as Prometheus gauges. **Resolution**: code authoritative. Count corrected to sixteen, the monotonicity claim qualified to exclude the two gauges, and all six new fields enumerated with a cross-reference to the spec that specifies each — so this inventory stays the complete list without duplicating normative text.

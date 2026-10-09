@@ -355,6 +355,7 @@ impl Translator {
             op::CLEAR_MEMORY_TIER => self.op_clear_memory_tier(&mut r),
             op::FLUSH_TO_SSD => self.op_flush_to_ssd(&mut r),
             op::GET_IO_STATS => self.op_get_io_stats(&mut r),
+            op::TOUCH_CHECK => self.op_touch_check(&mut r),
             other => Err(OpError::Msg(format!("unknown opcode {other}"))),
         }
     }
@@ -405,6 +406,19 @@ impl Translator {
         Ok(keys)
     }
 
+    /// Snapshot which of `keys` are reserved-but-uncommitted (one lock, not one
+    /// per key). Shared by Check and TouchCheck.
+    fn pending_snapshot(&self, keys: &[u64]) -> HashSet<u64> {
+        let map = self
+            .pending_stores
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        keys.iter()
+            .copied()
+            .filter(|k| map.contains_key(k))
+            .collect()
+    }
+
     fn op_check(&self, r: &mut Reader) -> Result<Vec<u8>, OpError> {
         use wire::check_state::{MISS, PENDING, RESIDENT};
         let keys = Self::read_keys(r)?;
@@ -424,16 +438,7 @@ impl Translator {
         // Abort and the stale-reservation reaper both drop the pending record (and
         // release the slot), so a dropped store re-checks as MISS, never a
         // permanent PENDING.
-        let pending: HashSet<u64> = {
-            let map = self
-                .pending_stores
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
-            keys.iter()
-                .copied()
-                .filter(|k| map.contains_key(k))
-                .collect()
-        };
+        let pending = self.pending_snapshot(&keys);
 
         let mut w = Writer::with_capacity(keys.len());
         for &key in &keys {
@@ -456,6 +461,36 @@ impl Translator {
         let mut w = Writer::with_capacity(keys.len());
         for &key in &keys {
             w.u8(self.dispatcher.touch(key).is_ok() as u8);
+        }
+        if promote {
+            self.dispatcher.promote_to_memory_tier(&keys);
+        }
+        Ok(w.into_bytes())
+    }
+
+    /// Touch + Check fused in one pass: touch each key, then answer the same
+    /// tri-state as `op_check`. PENDING comes from the `pending_stores` snapshot
+    /// before `dispatcher.check()` is consulted (see `op_check` for why); a key
+    /// whose touch failed reads as MISS.
+    fn op_touch_check(&self, r: &mut Reader) -> Result<Vec<u8>, OpError> {
+        use wire::check_state::{MISS, PENDING, RESIDENT};
+        let promote = r.u8()? != 0;
+        let keys = Self::read_keys(r)?;
+        check_duplicate_keys(&keys)?;
+
+        let pending = self.pending_snapshot(&keys);
+
+        let mut w = Writer::with_capacity(keys.len());
+        for &key in &keys {
+            let touched = self.dispatcher.touch(key).is_ok();
+            let state = if pending.contains(&key) {
+                PENDING
+            } else if touched && self.dispatcher.check(key).unwrap_or_default() {
+                RESIDENT
+            } else {
+                MISS
+            };
+            w.u8(state);
         }
         if promote {
             self.dispatcher.promote_to_memory_tier(&keys);
@@ -912,6 +947,8 @@ mod tests {
         reserve_fail: Mutex<HashSet<u64>>,
         reserve_deadlines: Mutex<Vec<Option<std::time::Instant>>>,
         block_until_deadline: Mutex<bool>,
+        touch_fail: Mutex<HashSet<u64>>,
+        promoted: Mutex<Vec<u64>>,
     }
 
     impl IDispatcher for MockDispatcher {
@@ -1014,10 +1051,16 @@ mod tests {
         fn unpin(&self, _key: CacheKey) -> Result<(), DispatcherError> {
             Ok(())
         }
-        fn touch(&self, _key: CacheKey) -> Result<(), DispatcherError> {
-            Ok(())
+        fn touch(&self, key: CacheKey) -> Result<(), DispatcherError> {
+            if self.touch_fail.lock().unwrap().contains(&key) {
+                Err(DispatcherError::KeyNotFound(key))
+            } else {
+                Ok(())
+            }
         }
-        fn promote_to_memory_tier(&self, _keys: &[CacheKey]) {}
+        fn promote_to_memory_tier(&self, keys: &[CacheKey]) {
+            self.promoted.lock().unwrap().extend_from_slice(keys);
+        }
         fn clear_memory_tier(&self) -> Result<usize, DispatcherError> {
             Ok(0)
         }
@@ -1274,6 +1317,93 @@ mod tests {
         // never a permanent PENDING.
         assert_eq!(tr.reap_stale_reservations(Duration::from_secs(0)), 1);
         assert_eq!(tr.dispatch(op::CHECK, &enc_keys(&[5])).unwrap(), vec![MISS]);
+    }
+
+    fn enc_promote_keys(promote: bool, keys: &[u64]) -> Vec<u8> {
+        let mut w = Writer::default();
+        w.u8(promote as u8);
+        w.u32(keys.len() as u32);
+        for &k in keys {
+            w.u64(k);
+        }
+        w.into_bytes()
+    }
+
+    #[test]
+    fn op_touch_check_resident_key_is_resident() {
+        use wire::check_state::RESIDENT;
+        let disp = Arc::new(MockDispatcher::default());
+        let tr = translator(disp.clone());
+
+        disp.resident.lock().unwrap().insert(4);
+        assert_eq!(
+            tr.dispatch(op::TOUCH_CHECK, &enc_promote_keys(false, &[4]))
+                .unwrap(),
+            vec![RESIDENT]
+        );
+    }
+
+    #[test]
+    fn op_touch_check_absent_key_is_miss() {
+        use wire::check_state::MISS;
+        let disp = Arc::new(MockDispatcher::default());
+        let tr = translator(disp);
+
+        assert_eq!(
+            tr.dispatch(op::TOUCH_CHECK, &enc_promote_keys(false, &[8]))
+                .unwrap(),
+            vec![MISS]
+        );
+    }
+
+    #[test]
+    fn op_touch_check_reserved_key_is_pending() {
+        use wire::check_state::PENDING;
+        let disp = Arc::new(MockDispatcher::default());
+        let tr = translator(disp);
+
+        tr.dispatch(op::RESERVE, &enc_reserve(&[(6, 4096, 0)]))
+            .unwrap();
+        assert_eq!(
+            tr.dispatch(op::TOUCH_CHECK, &enc_promote_keys(false, &[6]))
+                .unwrap(),
+            vec![PENDING]
+        );
+    }
+
+    #[test]
+    fn op_touch_check_mixed_batch_in_order() {
+        use wire::check_state::{MISS, PENDING, RESIDENT};
+        let disp = Arc::new(MockDispatcher::default());
+        let tr = translator(disp.clone());
+
+        // key 1 resident, key 2 pending, key 3 absent, key 4 resident but its
+        // touch fails (reads as MISS).
+        disp.resident.lock().unwrap().extend([1, 4]);
+        disp.touch_fail.lock().unwrap().insert(4);
+        tr.dispatch(op::RESERVE, &enc_reserve(&[(2, 4096, 0)]))
+            .unwrap();
+
+        assert_eq!(
+            tr.dispatch(op::TOUCH_CHECK, &enc_promote_keys(true, &[3, 1, 4, 2]))
+                .unwrap(),
+            vec![MISS, RESIDENT, MISS, PENDING]
+        );
+        assert_eq!(*disp.promoted.lock().unwrap(), vec![3, 1, 4, 2]);
+    }
+
+    #[test]
+    fn op_touch_check_rejects_duplicate_keys() {
+        let disp = Arc::new(MockDispatcher::default());
+        let tr = translator(disp.clone());
+
+        assert!(tr
+            .dispatch(op::TOUCH_CHECK, &enc_promote_keys(true, &[5, 5]))
+            .is_err());
+        assert!(tr
+            .dispatch(op::TOUCH, &enc_promote_keys(true, &[5, 5]))
+            .is_err());
+        assert!(disp.promoted.lock().unwrap().is_empty());
     }
 
     #[test]

@@ -48,6 +48,10 @@
 //! GetIoStats (15): req  { }  (empty)
 //!                  resp { read_ops:u64, read_bytes:u64, read_latency_ns_sum:u64,
 //!                         write_ops:u64, write_bytes:u64, write_latency_ns_sum:u64 }
+//! TouchCheck (16): req  { promote:u8, n:u32, [key:u64]*n }
+//!                  resp { [state:u8]*n }   // same 0=miss/1=resident/2=pending as Check
+//!                  (Touch + Check fused in one server pass: each key is touched,
+//!                   then classified; a failed touch reads as miss.)
 //! ```
 //!
 //! ## HandleBatch (CopyToStore / Lookup / Populate)
@@ -93,6 +97,7 @@ pub mod op {
     pub const CLEAR_MEMORY_TIER: u32 = 13;
     pub const FLUSH_TO_SSD: u32 = 14;
     pub const GET_IO_STATS: u32 = 15;
+    pub const TOUCH_CHECK: u32 = 16;
 }
 
 /// Per-key states returned by the Check response byte. Widened from a plain
@@ -312,6 +317,7 @@ mod tests {
         assert_eq!(op::CLEAR_MEMORY_TIER, 13);
         assert_eq!(op::FLUSH_TO_SSD, 14);
         assert_eq!(op::GET_IO_STATS, 15);
+        assert_eq!(op::TOUCH_CHECK, 16);
     }
 
     /// The Check response byte is a tri-state wire contract shared with the
