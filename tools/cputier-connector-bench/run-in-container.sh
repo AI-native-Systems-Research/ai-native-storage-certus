@@ -16,7 +16,10 @@
 # Environment:
 #   IMAGE          vLLM image (>= 0.30; the 0.26 certus-offload-fix026 image has
 #                  an older kv_offload API and is not supported)
-#   GPU            CDI GPU index passed to --device nvidia.com/gpu=<GPU>
+#   GPU            CDI GPU index passed to --device nvidia.com/gpu=<GPU>, or a
+#                  comma list (GPU=0,1) to expose several GPUs for real TP. Inside
+#                  the container they are renumbered 0..N-1, so pair it with
+#                  --gpus 0,1 (etc.), e.g. GPU=0,1 ./run-in-container.sh --gpus 0,1
 #   FS_TIER_HOST   host directory backing the fs disk tier, mounted at /fs-tier.
 #                  The benchmark writes into a per-run subdirectory and removes
 #                  it at exit (pass --keep-fs to keep it). Must NOT be on the
@@ -60,6 +63,10 @@ for a in "${ARGS[@]}"; do
 done
 (( has_fs_root )) || ARGS+=(--fs-root /fs-tier)
 
+DEVICES=()
+IFS=',' read -ra _gpus <<< "$GPU"
+for g in "${_gpus[@]}"; do DEVICES+=(--device "nvidia.com/gpu=${g}"); done
+
 echo "[cputier-bench] ${IMAGE}  gpu=${GPU}  shm-size=${SHM_SIZE}  fs-tier=${FS_TIER_HOST} -> /fs-tier"
 
 # label=disable: the repo and fs-tier dirs are bind-mounted without relabeling
@@ -67,7 +74,7 @@ echo "[cputier-bench] ${IMAGE}  gpu=${GPU}  shm-size=${SHM_SIZE}  fs-tier=${FS_T
 exec command podman run --rm --pull=never \
   --security-opt label=disable \
   --shm-size "${SHM_SIZE}" \
-  --device "nvidia.com/gpu=${GPU}" \
+  "${DEVICES[@]}" \
   -v "${REPO_ROOT}:/certus" \
   -v "${FS_TIER_HOST}:/fs-tier" \
   -w /certus \
