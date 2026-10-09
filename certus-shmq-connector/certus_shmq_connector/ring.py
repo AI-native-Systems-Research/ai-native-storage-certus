@@ -692,16 +692,37 @@ class Ring:
             self._dispatch(OP_TOUCH, encode_promote_keys(promote, keys)), len(keys)
         )
 
+    # Cleared the first time a server rejects TouchCheck as an unknown opcode, so
+    # every later touch_states() on this ring goes straight to the fallback.
+    _touch_check_supported = True
+
     def touch_states(self, keys: Sequence[int], promote: bool = False) -> list[int]:
         """Fused Touch + tri-state Check in one round trip: touches every key and
-        returns its ``CHECK_*`` state (a failed touch reads as ``CHECK_MISS``)."""
+        returns its ``CHECK_*`` state (a failed touch reads as ``CHECK_MISS``).
+
+        A server that predates TouchCheck answers it with ``unknown opcode``;
+        this then falls back to separate Touch and Check round trips with the
+        same per-key result, and stays on the fallback for this ring."""
         keys = list(keys)
         if not keys:
             return []
-        return decode_states(
-            self._dispatch(OP_TOUCH_CHECK, encode_promote_keys(promote, keys)),
-            len(keys),
-        )
+        data = encode_promote_keys(promote, keys)
+        if self._touch_check_supported:
+            status, payload = self.request(OP_TOUCH_CHECK, data)
+            if status == STATUS_OK:
+                return decode_states(payload, len(keys))
+            msg = payload.decode("utf-8", "replace")
+            if not msg.startswith(f"unknown opcode {OP_TOUCH_CHECK}"):
+                raise RingError(f"server error (op={OP_TOUCH_CHECK}): {msg}")
+            self._touch_check_supported = False
+        touched = decode_ok_flags(self._dispatch(OP_TOUCH, data), len(keys))
+        states = self.check_states(keys)
+        # Same mapping as the server's fused op: PENDING wins, RESIDENT needs a
+        # successful touch, anything else is a miss.
+        return [
+            s if s == CHECK_PENDING or (t and s == CHECK_RESIDENT) else CHECK_MISS
+            for t, s in zip(touched, states)
+        ]
 
     def reserve(self, entries: Sequence[tuple[int, int, int]]) -> list[bool]:
         entries = list(entries)

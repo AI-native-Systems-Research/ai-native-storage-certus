@@ -20,6 +20,7 @@ import struct
 
 import pytest
 
+import certus_shmq_connector.ring as ring
 from certus_shmq_connector.ring import (
     CHECK_MISS,
     CHECK_PENDING,
@@ -319,3 +320,53 @@ def test_presence_bulk_decode_states_slices_only():
     data = bytes([CHECK_RESIDENT, CHECK_PENDING, CHECK_MISS] * 22)  # 66 bytes
     for n in (len(data) + 5, len(data), len(data) - 7):
         assert decode_states(_SliceOnly(data), n) == decode_states(data, n)
+
+
+# ── TouchCheck fallback for servers that predate opcode 16 ──────────────────
+
+
+class _ScriptedRing(ring.Ring):
+    """A Ring with no shared memory: `request` replays scripted replies and
+    records the opcodes it was asked to send."""
+
+    def __init__(self, replies):
+        self._replies = list(replies)
+        self.sent = []
+
+    def request(self, opcode, data):
+        self.sent.append(opcode)
+        return self._replies.pop(0)
+
+
+_STATUS_ERROR = 1
+
+
+def test_touch_states_uses_fused_op_on_a_current_server():
+    r = _ScriptedRing([(ring.STATUS_OK, bytes([CHECK_RESIDENT, CHECK_MISS]))])
+    assert r.touch_states([7, 8]) == [CHECK_RESIDENT, CHECK_MISS]
+    assert r.sent == [OP_TOUCH_CHECK]
+
+
+def test_touch_states_falls_back_to_touch_then_check_on_an_old_server():
+    unknown = (_STATUS_ERROR, f"unknown opcode {OP_TOUCH_CHECK}".encode())
+    # Keys: resident+touched, resident but touch failed, pending with touch
+    # failed, miss — the fused op's mapping gives RESIDENT, MISS, PENDING, MISS.
+    touch = (ring.STATUS_OK, bytes([1, 0, 0, 1]))
+    check = (ring.STATUS_OK, bytes([CHECK_RESIDENT, CHECK_RESIDENT, CHECK_PENDING, CHECK_MISS]))
+    r = _ScriptedRing([unknown, touch, check, touch, check])
+
+    expected = [CHECK_RESIDENT, CHECK_MISS, CHECK_PENDING, CHECK_MISS]
+    assert r.touch_states([1, 2, 3, 4]) == expected
+    assert r.sent == [OP_TOUCH_CHECK, ring.OP_TOUCH, ring.OP_CHECK]
+
+    # The rejection is remembered: the next call skips the fused op entirely.
+    r.sent.clear()
+    assert r.touch_states([1, 2, 3, 4]) == expected
+    assert r.sent == [ring.OP_TOUCH, ring.OP_CHECK]
+
+
+def test_touch_states_raises_other_server_errors():
+    r = _ScriptedRing([(_STATUS_ERROR, b"duplicate key 5")])
+    with pytest.raises(ring.RingError, match="duplicate key 5"):
+        r.touch_states([5, 5])
+    assert r._touch_check_supported
