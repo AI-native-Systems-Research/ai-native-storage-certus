@@ -4,6 +4,9 @@ description: Render the ONE combined per-component scoring page (`<component>_sc
 argument-hint: "[component-name]"
 ---
 
+> **Frozen 2026-10-09.** This skill moved to [ai-native-storage-workbench](https://github.com/AI-native-Systems-Research/ai-native-storage-workbench) (`fv/skills/`). Edit it there; this copy is not updated. Install the current version with `fv/install.sh <this-repo>`.
+
+
 ## Purpose
 
 Given a component whose verifiable properties are extracted, agreed (Role 1), and proved/attempted
