@@ -4,45 +4,16 @@ level: 1
 what: 'spec<->code discordances found while reconciling the specification with the code. Each is EXCLUDED from formal
   verification (level 2). status: candidate until a test confirms it (confirmed) or shows it was a misreading (withdrawn).'
 counts:
-  discordances: 31
-  spec_and_code_differ: 17
-  spec_not_found_in_code: 7
+  discordances: 19
+  spec_and_code_differ: 12
+  spec_not_found_in_code: 0
   input_range_mismatch: 7
-  properties_excluded_from_level2: 24
+  properties_excluded_from_level2: 12
   routed_to_other_tools: 0
-  reader_missed_sent_to_level2: 0
+  reader_missed_sent_to_level2: 12
   confirmed: 0
   withdrawn: 0
 discordances:
-- id: D-FR-001-lib.rs:139-a7ef93
-  name: Track returns usable handle
-  kind: spec-and-code-differ
-  methods:
-  - track
-  - touch
-  - batch_touch
-  - remove
-  spec_says: When the caller successfully registers a cache block, the policy hands back a handle that identifies
-    exactly that block, and using that handle afterwards to refresh the block's recency or to stop tracking it succeeds
-    and acts on that same block and no other.
-  code_does: The handle returned when a block is tracked carries the pool number the caller asked for together with
-    the storage slot the block occupies, and those are exactly what the later refresh and stop-tracking operations
-    use to find the block again.
-  spec_pointers:
-  - FR-001
-  - CONTRACT-1
-  code_pointers:
-  - lib.rs:139
-  - lib.rs:140
-  - ieviction_policy.rs:15
-  status: candidate
-  excluded_properties:
-  - EPSL-TRACK-RETURNS-USABLE-HANDLE
-  extraction_sides:
-    spec:
-    - EPSL-TRACK-RETURNS-USABLE-HANDLE
-    code:
-    - EPSL-TRACK-RETURNS-A-HANDLE-NAMING-POOL-AND-SLOT
 - id: D-FR-003-session_list.rs:91-184f6d
   name: Track session comes from caller
   kind: spec-and-code-differ
@@ -72,6 +43,11 @@ discordances:
     - EPSL-TRACK-SESSION-COMES-FROM-CALLER
     code:
     - EPSL-TRACK-RETRACK-IGNORES-THE-SUPPLIED-SESSION
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - src/session_list.rs:90-94
+  - src/session_list.rs:97
+  - src/session_list.rs:100
 - id: D-FR-004-session_list.rs:62-aab037
   name: Track sets initial recency
   kind: spec-and-code-differ
@@ -101,6 +77,12 @@ discordances:
     - EPSL-TRACK-SETS-INITIAL-RECENCY
     code:
     - EPSL-TRACK-ASSIGNS-THE-NEWEST-STAMP
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - src/session_list.rs:62-65
+  - src/session_list.rs:96
+  - src/session_list.rs:92
+  - src/session_list.rs:226
 - id: D-FR-015-session_list.rs:80-02886a
   name: Touch invalid handle is an error
   kind: spec-and-code-differ
@@ -130,6 +112,15 @@ discordances:
     - EPSL-TOUCH-INVALID-HANDLE-IS-AN-ERROR
     code:
     - EPSL-TOUCH-REJECTS-AN-UNOCCUPIED-SLOT
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - src/session_list.rs:80-82
+  - src/session_list.rs:123-126
+  - src/session_list.rs:69-71
+  - src/session_list.rs:182
+  - src/session_list.rs:79-82
+  - src/session_list.rs:68-71
+  - src/lib.rs:150-153
 - id: D-FR-015-lib.rs:145-92187d
   name: Handle operations reject unknown domain
   kind: spec-and-code-differ
@@ -155,53 +146,12 @@ discordances:
     - EPSL-HANDLE-OPERATIONS-REJECT-UNKNOWN-DOMAIN
     code:
     - EPSL-TOUCH-REJECTS-UNKNOWN-POOL
-- id: D-FR-005-nocode-0efff1
-  name: Batch touch refreshes every block
-  kind: spec-not-found-in-code
-  methods:
-  - batch_touch
-  - identify_next_to_evict
-  spec_says: When the caller reports a group of accessed blocks in one operation, every block in that group has
-    its most-recent-access time refreshed - not just the first or the last one - so all of them count as recently
-    used afterwards.
-  code_does: No matching guarantee stated by the code reader.
-  spec_pointers:
-  - FR-005
-  - US-3.2
-  code_pointers: []
-  status: candidate
-  excluded_properties:
-  - EPSL-BATCH-TOUCH-REFRESHES-EVERY-BLOCK
-  extraction_sides:
-    spec:
-    - EPSL-BATCH-TOUCH-REFRESHES-EVERY-BLOCK
-    code: []
-- id: D-FR-005-lib.rs:169-fe5381
-  name: Batch touch matches one at a time
-  kind: spec-and-code-differ
-  methods:
-  - batch_touch
-  - touch
-  spec_says: Reporting a group of accesses in a single operation leaves the policy in the same condition as reporting
-    those same accesses one at a time, in the order they appear in the group; batching is a performance convenience
-    and never changes the outcome.
-  code_does: When refreshing a list of blocks succeeds, the resulting state is exactly what you would get by refreshing
-    each block one at a time in the order given. In particular, if the same block appears twice in the list, the
-    later position wins and the block ends up with the newer access number.
-  spec_pointers:
-  - FR-005
-  code_pointers:
-  - lib.rs:169
-  - lib.rs:179
-  - lib.rs:183
-  status: candidate
-  excluded_properties:
-  - EPSL-BATCH-TOUCH-MATCHES-ONE-AT-A-TIME
-  extraction_sides:
-    spec:
-    - EPSL-BATCH-TOUCH-MATCHES-ONE-AT-A-TIME
-    code:
-    - EPSL-BATCH-TOUCH-MATCHES-SEQUENTIAL-TOUCHES
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - src/lib.rs:145-148
+  - src/lib.rs:188-191
+  - src/lib.rs:169-181
+  - src/lib.rs:169-180
 - id: D-FR-015-lib.rs:179-ec74a9
   name: Batch touch invalid handle is an error
   kind: spec-and-code-differ
@@ -226,25 +176,15 @@ discordances:
     - EPSL-BATCH-TOUCH-INVALID-HANDLE-IS-AN-ERROR
     code:
     - EPSL-BATCH-TOUCH-REJECTS-AN-UNOCCUPIED-SLOT
-- id: D-FR-005-nocode-46dd4a
-  name: Batch touch touches nothing else
-  kind: spec-not-found-in-code
-  methods:
-  - batch_touch
-  spec_says: Reporting a group of accesses changes only the most-recent-access times of the blocks named in that
-    group. A block not named in the group keeps its most-recent-access time, no parent/child link anywhere changes,
-    and the number of tracked blocks is unchanged.
-  code_does: No matching guarantee stated by the code reader.
-  spec_pointers:
-  - FR-005
-  code_pointers: []
-  status: candidate
-  excluded_properties:
-  - EPSL-BATCH-TOUCH-TOUCHES-NOTHING-ELSE
-  extraction_sides:
-    spec:
-    - EPSL-BATCH-TOUCH-TOUCHES-NOTHING-ELSE
-    code: []
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - src/lib.rs:179-181
+  - src/session_list.rs:80-82
+  - src/session_list.rs:69-71
+  - src/session_list.rs:182
+  - src/session_list.rs:79-82
+  - src/session_list.rs:123-126
+  - src/session_list.rs:68-71
 - id: D-FR-015-lib.rs:169-133402
   name: Failed operations change nothing
   kind: spec-and-code-differ
@@ -278,37 +218,9 @@ discordances:
     - EPSL-INV-FAILED-OPERATIONS-CHANGE-NOTHING
     code:
     - EPSL-BATCH-TOUCH-IS-NOT-ROLLED-BACK-ON-FAILURE
-- id: D-FR-011-session_list.rs:141-ea322d
-  name: Remove relinks the chain
-  kind: spec-and-code-differ
-  methods:
-  - remove
-  - identify_next_to_evict
-  spec_says: When the block being removed sits in the middle of a session's chain, the policy joins the two ends
-    back together - the removed block's child is given the removed block's parent as its new parent - so the chain
-    stays in one piece and no block is left with a parent that is no longer tracked. If the removed block was the
-    start of the chain, its child becomes the new start and has no parent.
-  code_does: Removing a block from the middle of a session's chain joins its ancestor and its descendant directly
-    to each other, so the session is still one unbroken chain with no gap and no block left dangling. The descendant's
-    recorded ancestor becomes the removed block's ancestor, and that ancestor's recorded descendant becomes the
-    removed block's descendant.
-  spec_pointers:
-  - FR-011
-  - EC-interior-removal
-  code_pointers:
-  - session_list.rs:141
-  - session_list.rs:154
-  - session_list.rs:155
-  - session_list.rs:157
-  - session_list.rs:158
-  status: candidate
-  excluded_properties:
-  - EPSL-REMOVE-RELINKS-THE-CHAIN
-  extraction_sides:
-    spec:
-    - EPSL-REMOVE-RELINKS-THE-CHAIN
-    code:
-    - EPSL-REMOVE-RELINKS-THE-CHAIN
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - src/lib.rs:169-182
 - id: D-FR-015-session_list.rs:206-12b3fa
   name: Remove invalid handle is an error
   kind: spec-and-code-differ
@@ -337,6 +249,15 @@ discordances:
     - EPSL-REMOVE-INVALID-HANDLE-IS-AN-ERROR
     code:
     - EPSL-REMOVE-REJECTS-AN-UNOCCUPIED-SLOT
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - src/session_list.rs:206-209
+  - src/session_list.rs:80-82
+  - src/session_list.rs:69-71
+  - src/session_list.rs:182
+  - src/session_list.rs:79-82
+  - src/session_list.rs:68-71
+  - src/lib.rs:193-196
 - id: D-FR-006-session_list.rs:188-470482
   name: Evict does not refresh the victim
   kind: spec-and-code-differ
@@ -363,79 +284,12 @@ discordances:
     - EPSL-EVICT-DOES-NOT-REFRESH-THE-VICTIM
     code:
     - EPSL-EVICT-DOES-NOT-REFRESH-RECENCY
-- id: D-FR-007-nocode-ef6e13
-  name: Evict nonempty domain always yields a victim
-  kind: spec-not-found-in-code
-  methods:
-  - identify_next_to_evict
-  - len
-  spec_says: Whenever an eviction domain tracks at least one block, a request for a victim always returns one; the
-    policy can never get into a state where it tracks blocks but reports that none of them may be evicted. This
-    follows from every non-empty session having exactly one end-of-chain block, which is always eligible.
-  code_does: No matching guarantee stated by the code reader.
-  spec_pointers:
-  - FR-007
-  - FR-008
-  - FR-018
-  - CLAR-1
-  code_pointers: []
-  status: candidate
-  excluded_properties:
-  - EPSL-EVICT-NONEMPTY-DOMAIN-ALWAYS-YIELDS-A-VICTIM
-  extraction_sides:
-    spec:
-    - EPSL-EVICT-NONEMPTY-DOMAIN-ALWAYS-YIELDS-A-VICTIM
-    code: []
-- id: D-FR-008-nocode-02eea7
-  name: Evict disturbs only victim and parent
-  kind: spec-not-found-in-code
-  methods:
-  - identify_next_to_evict
-  spec_says: Evicting a block changes only that block's own record and its parent's end-of-chain status. No surviving
-    block's most-recent-access time changes, no other block stops being tracked, and no other session's or other
-    domain's chains are touched.
-  code_does: No matching guarantee stated by the code reader.
-  spec_pointers:
-  - FR-008
-  - FR-009
-  - FR-003
-  code_pointers: []
-  status: candidate
-  excluded_properties:
-  - EPSL-EVICT-DISTURBS-ONLY-VICTIM-AND-PARENT
-  extraction_sides:
-    spec:
-    - EPSL-EVICT-DISTURBS-ONLY-VICTIM-AND-PARENT
-    code: []
-- id: D-FR-015-lib.rs:200-8436e2
-  name: Readonly queries degrade safely on unknown domain
-  kind: spec-and-code-differ
-  methods:
-  - identify_next_to_evict
-  - get_eviction_candidates
-  - len
-  - clear_pool
-  spec_says: 'The four operations that have no way to report an error - asking for a victim, asking for candidates,
-    asking for a size, and clearing - behave harmlessly when asked about a domain that does not exist: they respectively
-    report nothing to evict, return an empty list, report zero, and do nothing at all. None of them crashes and
-    none of them disturbs any domain that does exist.'
-  code_does: Asking an unknown pool number for a block to evict reports that there is nothing to evict, rather than
-    reporting an error. The caller cannot tell an unknown pool apart from a pool that is simply empty, even though
-    the interface has an invalid-pool error and the tracking operation does use it.
-  spec_pointers:
-  - FR-015
-  code_pointers:
-  - lib.rs:200
-  - lib.rs:202
-  - lib.rs:130
-  status: candidate
-  excluded_properties:
-  - EPSL-READONLY-QUERIES-DEGRADE-SAFELY-ON-UNKNOWN-DOMAIN
-  extraction_sides:
-    spec:
-    - EPSL-READONLY-QUERIES-DEGRADE-SAFELY-ON-UNKNOWN-DOMAIN
-    code:
-    - EPSL-EVICT-UNKNOWN-POOL-RETURNS-NOTHING
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - src/session_list.rs:190-193
+  - src/session_list.rs:161-168
+  - src/session_list.rs:144-185
+  - src/session_list.rs:164-168
 - id: D-FR-010-ieviction_policy.rs:106-bfcdca
   name: Candidates listed in eviction order
   kind: spec-and-code-differ
@@ -470,55 +324,11 @@ discordances:
     - EPSL-CANDIDATES-LISTED-IN-EVICTION-ORDER
     code:
     - EPSL-CANDIDATES-AFTER-THE-FIRST-ARE-NOT-THE-EVICTION-SEQUENCE
-- id: D-EC-EMPTY-DOMAIN-nocode-bfa9b0
-  name: Candidates empty domain returns empty list
-  kind: spec-not-found-in-code
-  methods:
-  - get_eviction_candidates
-  spec_says: When an eviction domain currently tracks no blocks, a request for candidates returns an empty list
-    rather than failing or inventing entries.
-  code_does: No matching guarantee stated by the code reader.
-  spec_pointers:
-  - EC-empty-domain
-  - US-1.4
-  code_pointers: []
-  status: candidate
-  excluded_properties:
-  - EPSL-CANDIDATES-EMPTY-DOMAIN-RETURNS-EMPTY-LIST
-  extraction_sides:
-    spec:
-    - EPSL-CANDIDATES-EMPTY-DOMAIN-RETURNS-EMPTY-LIST
-    code: []
-- id: D-FR-014-session_list.rs:219-d273f4
-  name: Clear returns domain to empty
-  kind: spec-and-code-differ
-  methods:
-  - clear_pool
-  - len
-  - identify_next_to_evict
-  - get_eviction_candidates
-  spec_says: 'Clearing an eviction domain removes every block it was tracking: afterwards its reported size is zero,
-    every session in it is empty, a victim request reports nothing to evict, and a candidate request returns an
-    empty list.'
-  code_does: Clearing a pool discards every block it tracked, every session it knew about and every eviction candidate,
-    reports a size of zero afterwards, offers no eviction candidate, and also resets the pool's running access counter
-    back to its starting value so that the next block tracked gets the lowest possible access number again.
-  spec_pointers:
-  - FR-014
-  code_pointers:
-  - session_list.rs:219
-  - session_list.rs:220
-  - session_list.rs:221
-  - session_list.rs:226
-  - session_list.rs:227
-  status: candidate
-  excluded_properties:
-  - EPSL-CLEAR-RETURNS-DOMAIN-TO-EMPTY
-  extraction_sides:
-    spec:
-    - EPSL-CLEAR-RETURNS-DOMAIN-TO-EMPTY
-    code:
-    - EPSL-CLEAR-POOL-EMPTIES-EVERYTHING-AND-RESETS-THE-CLOCK
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - src/session_list.rs:196-202
+  - src/session_list.rs:161-168
+  - src/session_list.rs:164-168
 - id: D-FR-014-session_list.rs:221-dec7f1
   name: Clear invalidates existing handles
   kind: spec-and-code-differ
@@ -553,29 +363,14 @@ discordances:
     - EPSL-CLEAR-INVALIDATES-EXISTING-HANDLES
     code:
     - EPSL-CLEAR-POOL-SILENTLY-INVALIDATES-OUTSTANDING-HANDLES
-- id: D-FR-003-nocode-ac726b
-  name: Block belongs to exactly one session
-  kind: spec-not-found-in-code
-  methods:
-  - track
-  - touch
-  - batch_touch
-  - remove
-  - identify_next_to_evict
-  spec_says: Every tracked block belongs to exactly one session - never to none and never to two - and the session
-    it belongs to is the one named when it was registered and never changes for as long as the block is tracked.
-  code_does: No matching guarantee stated by the code reader.
-  spec_pointers:
-  - FR-003
-  - ASSUMPTION-caller-supplies-session
-  code_pointers: []
-  status: candidate
-  excluded_properties:
-  - EPSL-INV-BLOCK-BELONGS-TO-EXACTLY-ONE-SESSION
-  extraction_sides:
-    spec:
-    - EPSL-INV-BLOCK-BELONGS-TO-EXACTLY-ONE-SESSION
-    code: []
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - src/session_list.rs:220-228
+  - src/session_list.rs:72-75
+  - src/session_list.rs:80-82
+  - src/session_list.rs:221-222
+  - src/session_list.rs:79-82
+  - src/lib.rs:140
 - id: D-FR-004-session_list.rs:52-8ff4db
   name: Recency strictly advances
   kind: spec-and-code-differ
@@ -609,6 +404,11 @@ discordances:
     - EPSL-INV-RECENCY-STRICTLY-ADVANCES
     code:
     - EPSL-INV-CLOCK-DOMINATES-EVERY-STAMP
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - src/session_list.rs:62-65
+  - src/session_list.rs:226
+  - src/session_list.rs:130
 - id: D-FR-001-session_list.rs:69-d8c95a
   name: Handles keep naming their block
   kind: spec-and-code-differ
@@ -644,34 +444,15 @@ discordances:
     - EPSL-INV-HANDLES-KEEP-NAMING-THEIR-BLOCK
     code:
     - EPSL-STALE-HANDLE-ALIASES-A-RECYCLED-SLOT
-- id: D-FR-015-nocode-408ab6
-  name: No input can make an operation panic
-  kind: spec-not-found-in-code
-  methods:
-  - create_pool
-  - track
-  - touch
-  - batch_touch
-  - remove
-  - identify_next_to_evict
-  - get_eviction_candidates
-  - len
-  - clear_pool
-  spec_says: 'There is no precondition the caller must satisfy beyond supplying correctly-typed arguments: any domain
-    identifier, any handle, any cache key, any session identifier, any requested candidate count and any group of
-    handles - including ones that are unknown, stale, empty or extreme - may be passed to any operation without
-    the policy crashing, aborting, or overflowing. Bad inputs are reported as errors or handled harmlessly instead.'
-  code_does: No matching guarantee stated by the code reader.
-  spec_pointers:
-  - FR-015
-  code_pointers: []
-  status: candidate
-  excluded_properties:
-  - EPSL-NO-INPUT-CAN-MAKE-AN-OPERATION-PANIC
-  extraction_sides:
-    spec:
-    - EPSL-NO-INPUT-CAN-MAKE-AN-OPERATION-PANIC
-    code: []
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - src/lib.rs:140
+  - src/session_list.rs:69-71
+  - src/session_list.rs:182
+  - src/session_list.rs:220-222
+  - src/session_list.rs:68-71
+  - src/session_list.rs:179-182
+  - src/session_list.rs:221-222
 - id: D-RANGE-FR-015-e29de5
   name: 'Input range: every handle passed in was returned by track on the same pool and its block has not since
     been evicted, removed or cleared (i.e. the slot still holds the key it was issued for)'
