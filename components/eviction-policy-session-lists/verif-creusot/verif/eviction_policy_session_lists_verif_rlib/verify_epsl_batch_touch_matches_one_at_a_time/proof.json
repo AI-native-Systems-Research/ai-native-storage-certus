@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_pool_touch": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_pool_batch_touch": { "prover": "alt-ergo", "time": 0.026 },
       "vc_verify_epsl_batch_touch_matches_one_at_a_time": {
         "prover": "alt-ergo",
-        "time": 0.169
+        "time": 0.349
       }
     }
   }

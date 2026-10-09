@@ -3,9 +3,9 @@
   "proofs": {
     "Coma": {
       "vc_new_Node": { "prover": "alt-ergo", "time": 0.022 },
-      "vc_new_tup2_u64_u32": { "prover": "alt-ergo", "time": 0.023 },
-      "vc_new_u32": { "prover": "alt-ergo", "time": 0.022 },
-      "vc_pool_fresh": { "prover": "alt-ergo", "time": 0.094 }
+      "vc_new_tup2_u64_u32": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_new_u32": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_pool_fresh": { "prover": "alt-ergo", "time": 0.101 }
     }
   }
 }

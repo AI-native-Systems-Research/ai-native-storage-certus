@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_pool_remove": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_pool_remove": { "prover": "alt-ergo", "time": 0.023 },
       "vc_verify_epsl_inv_parent_becomes_eligible_when_its_child_goes": {
         "prover": "alt-ergo",
-        "time": 0.092
+        "time": 0.095
       }
     }
   }

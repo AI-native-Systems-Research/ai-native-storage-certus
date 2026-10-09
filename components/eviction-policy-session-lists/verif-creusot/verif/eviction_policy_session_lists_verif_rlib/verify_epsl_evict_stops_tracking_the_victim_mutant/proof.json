@@ -2,13 +2,13 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_pool_evict_oldest": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_pool_evict_oldest": { "prover": "alt-ergo", "time": 0.023 },
       "vc_verify_epsl_evict_stops_tracking_the_victim__mutant": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
-            "children": [ { "prover": "alt-ergo", "time": 0.027 }, null ]
+            "children": [ { "prover": "alt-ergo", "time": 0.026 }, null ]
           }
         ]
       }

@@ -2,9 +2,9 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_pool_is_active": { "prover": "alt-ergo", "time": 0.022 },
-      "vc_pool_remove": { "prover": "alt-ergo", "time": 0.401 },
-      "vc_pool_unlink": { "prover": "alt-ergo", "time": 0.023 }
+      "vc_pool_is_active": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_pool_remove": { "prover": "alt-ergo", "time": 0.4 },
+      "vc_pool_unlink": { "prover": "alt-ergo", "time": 0.025 }
     }
   }
 }

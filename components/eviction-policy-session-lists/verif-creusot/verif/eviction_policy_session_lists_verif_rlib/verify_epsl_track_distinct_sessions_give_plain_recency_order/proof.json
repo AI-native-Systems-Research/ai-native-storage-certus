@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_pool_register": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_pool_register": { "prover": "alt-ergo", "time": 0.023 },
       "vc_verify_epsl_track_distinct_sessions_give_plain_recency_order": {
         "prover": "z3",
-        "time": 0.091
+        "time": 0.119
       }
     }
   }

@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_pool_is_active": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_pool_is_active": { "prover": "alt-ergo", "time": 0.02 },
       "vc_verify_epsl_handle_validation_is_occupancy_only__mutant": null
     }
   }

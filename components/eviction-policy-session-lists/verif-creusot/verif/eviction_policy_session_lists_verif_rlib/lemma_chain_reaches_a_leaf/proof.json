@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lemma_chain_reaches_a_leaf": { "prover": "z3", "time": 0.027 }
+    }
+  }
+}

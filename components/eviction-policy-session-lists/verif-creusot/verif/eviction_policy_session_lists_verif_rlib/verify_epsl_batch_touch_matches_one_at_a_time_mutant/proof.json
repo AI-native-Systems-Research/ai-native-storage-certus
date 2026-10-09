@@ -2,16 +2,26 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_pool_touch": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_pool_batch_touch": { "prover": "alt-ergo", "time": 0.026 },
       "vc_verify_epsl_batch_touch_matches_one_at_a_time__mutant": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.025 },
-              { "prover": "alt-ergo", "time": 0.045 },
-              null
+              { "prover": "alt-ergo", "time": 0.033 },
+              {
+                "tactic": "split_vc",
+                "children": [
+                  { "prover": "alt-ergo", "time": 0.043 },
+                  null,
+                  { "prover": "alt-ergo", "time": 0.041 },
+                  { "prover": "alt-ergo", "time": 0.087 },
+                  { "prover": "alt-ergo", "time": 0.044 },
+                  { "prover": "alt-ergo", "time": 0.038 },
+                  { "prover": "alt-ergo", "time": 0.047 }
+                ]
+              }
             ]
           }
         ]

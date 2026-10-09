@@ -3,15 +3,15 @@
   "proofs": {
     "Coma": {
       "vc_state_remove": { "prover": "alt-ergo", "time": 0.023 },
-      "vc_state_touch": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_state_touch": { "prover": "alt-ergo", "time": 0.023 },
       "vc_verify_epsl_handle_operations_reject_unknown_domain__mutant": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.026 },
-              { "prover": "alt-ergo", "time": 0.039 },
+              { "prover": "alt-ergo", "time": 0.029 },
+              { "prover": "alt-ergo", "time": 0.036 },
               null
             ]
           }

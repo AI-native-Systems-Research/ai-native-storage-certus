@@ -3,17 +3,17 @@
   "proofs": {
     "Coma": {
       "vc_index_Vec_Node_Global": { "prover": "alt-ergo", "time": 0.025 },
-      "vc_pool_clear": { "prover": "alt-ergo", "time": 0.023 },
-      "vc_pool_register": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_pool_clear": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_pool_register": { "prover": "alt-ergo", "time": 0.023 },
       "vc_verify_epsl_inv_recency_strictly_advances": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.028 },
-              { "prover": "alt-ergo", "time": 0.076 },
-              { "prover": "alt-ergo", "time": 0.052 },
+              { "prover": "alt-ergo", "time": 0.03 },
+              { "prover": "alt-ergo", "time": 0.081 },
+              { "prover": "alt-ergo", "time": 0.048 },
               null
             ]
           }

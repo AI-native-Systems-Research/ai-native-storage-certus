@@ -2,14 +2,14 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_elim_Err": { "prover": "alt-ergo", "time": 0.018 },
-      "vc_elim_Ok": { "prover": "alt-ergo", "time": 0.022 },
-      "vc_state_remove": { "prover": "alt-ergo", "time": 0.02 },
-      "vc_state_touch": { "prover": "alt-ergo", "time": 0.02 },
-      "vc_state_track": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_elim_Err": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_elim_Ok": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_state_remove": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_state_touch": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_state_track": { "prover": "alt-ergo", "time": 0.013 },
       "vc_verify_epsl_track_returns_usable_handle": {
         "prover": "z3",
-        "time": 0.422
+        "time": 0.164
       }
     }
   }

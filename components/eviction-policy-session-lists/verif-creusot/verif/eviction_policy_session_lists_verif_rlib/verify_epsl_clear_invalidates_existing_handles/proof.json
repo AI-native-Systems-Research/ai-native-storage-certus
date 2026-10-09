@@ -2,9 +2,9 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_pool_clear": { "prover": "alt-ergo", "time": 0.022 },
-      "vc_pool_register": { "prover": "alt-ergo", "time": 0.024 },
-      "vc_pool_touch": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_pool_clear": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_pool_register": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_pool_touch": { "prover": "alt-ergo", "time": 0.026 },
       "vc_verify_epsl_clear_invalidates_existing_handles": {
         "tactic": "compute_specified",
         "children": [
@@ -12,7 +12,7 @@
             "tactic": "split_vc",
             "children": [
               { "prover": "alt-ergo", "time": 0.03 },
-              { "prover": "alt-ergo", "time": 0.049 },
+              { "prover": "alt-ergo", "time": 0.053 },
               null
             ]
           }

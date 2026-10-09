@@ -2,14 +2,14 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_state_create_pool": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_state_create_pool": { "prover": "alt-ergo", "time": 0.018 },
       "vc_verify_epsl_create_pool_issues_a_fresh_sequential_identifier__mutant": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.03 },
+              { "prover": "alt-ergo", "time": 0.029 },
               { "prover": "alt-ergo", "time": 0.045 },
               null
             ]

@@ -2,16 +2,13 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_index_mut_Vec_Pool_Global": { "prover": "alt-ergo", "time": 0.022 },
-      "vc_len_Pool": { "prover": "alt-ergo", "time": 0.021 },
-      "vc_lock_acquire": { "prover": "alt-ergo", "time": 0.02 },
-      "vc_lock_release": { "prover": "alt-ergo", "time": 0.024 },
-      "vc_pool_touch": { "prover": "alt-ergo", "time": 0.027 },
-      "vc_state_batch_touch2": {
-        "tactic": "compute_specified",
-        "children": [ { "prover": "alt-ergo", "time": 17.4 } ]
-      },
-      "vc_state_read_lock": { "prover": "alt-ergo", "time": 0.025 }
+      "vc_index_mut_Vec_Pool_Global": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_len_Pool": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_lock_acquire": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_lock_release": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_pool_touch": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_state_batch_touch2": { "prover": "z3", "time": 16.1 },
+      "vc_state_read_lock": { "prover": "alt-ergo", "time": 0.026 }
     }
   }
 }

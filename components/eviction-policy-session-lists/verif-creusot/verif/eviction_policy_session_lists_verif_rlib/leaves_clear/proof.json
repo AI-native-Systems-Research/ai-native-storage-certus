@@ -3,7 +3,7 @@
   "proofs": {
     "Coma": {
       "vc_clear_tup2_u64_u32": { "prover": "alt-ergo", "time": 0.021 },
-      "vc_leaves_clear": { "prover": "alt-ergo", "time": 0.033 }
+      "vc_leaves_clear": { "prover": "alt-ergo", "time": 0.032 }
     }
   }
 }

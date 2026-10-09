@@ -2,14 +2,14 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_state_batch_touch2": { "prover": "alt-ergo", "time": 0.02 },
-      "vc_state_candidates": { "prover": "alt-ergo", "time": 0.02 },
-      "vc_state_clear_pool": { "prover": "alt-ergo", "time": 0.02 },
-      "vc_state_evict": { "prover": "alt-ergo", "time": 0.021 },
-      "vc_state_len": { "prover": "alt-ergo", "time": 0.02 },
-      "vc_state_remove": { "prover": "alt-ergo", "time": 0.02 },
-      "vc_state_touch": { "prover": "alt-ergo", "time": 0.02 },
-      "vc_state_track": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_state_batch_touch2": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_state_candidates": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_state_clear_pool": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_state_evict": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_state_len": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_state_remove": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_state_touch": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_state_track": { "prover": "alt-ergo", "time": 0.024 },
       "vc_verify_epsl_only_pool_creation_takes_the_exclusive_lock__mutant": {
         "tactic": "compute_specified",
         "children": [
@@ -17,13 +17,13 @@
             "tactic": "split_vc",
             "children": [
               { "prover": "alt-ergo", "time": 0.062 },
-              { "prover": "alt-ergo", "time": 0.088 },
-              { "prover": "alt-ergo", "time": 0.04 },
-              { "prover": "z3", "time": 0.07 },
-              { "prover": "alt-ergo", "time": 0.046 },
-              { "prover": "alt-ergo", "time": 0.06 },
-              { "prover": "alt-ergo", "time": 0.064 },
-              { "prover": "alt-ergo", "time": 0.066 },
+              { "prover": "alt-ergo", "time": 0.081 },
+              { "prover": "alt-ergo", "time": 0.043 },
+              { "prover": "z3", "time": 0.137 },
+              { "prover": "alt-ergo", "time": 0.045 },
+              { "prover": "alt-ergo", "time": 0.055 },
+              { "prover": "alt-ergo", "time": 0.065 },
+              { "prover": "alt-ergo", "time": 0.067 },
               null
             ]
           }

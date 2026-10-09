@@ -2,16 +2,16 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_state_create_pool": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_state_create_pool": { "prover": "alt-ergo", "time": 0.018 },
       "vc_verify_epsl_create_pool_announces_at_most_once__mutant": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.032 },
-              { "prover": "alt-ergo", "time": 0.045 },
-              { "prover": "alt-ergo", "time": 0.067 },
+              { "prover": "alt-ergo", "time": 0.034 },
+              { "prover": "alt-ergo", "time": 0.051 },
+              { "prover": "alt-ergo", "time": 0.058 },
               null
             ]
           }

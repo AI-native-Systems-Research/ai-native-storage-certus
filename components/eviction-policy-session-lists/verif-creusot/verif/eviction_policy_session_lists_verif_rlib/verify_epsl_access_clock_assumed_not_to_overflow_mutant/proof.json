@@ -2,13 +2,13 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_pool_tick": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_pool_tick": { "prover": "alt-ergo", "time": 0.017 },
       "vc_verify_epsl_access_clock_assumed_not_to_overflow__mutant": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
-            "children": [ { "prover": "alt-ergo", "time": 0.026 }, null ]
+            "children": [ { "prover": "alt-ergo", "time": 0.025 }, null ]
           }
         ]
       }

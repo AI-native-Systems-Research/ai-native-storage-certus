@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_pool_register": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_pool_register": { "prover": "alt-ergo", "time": 0.023 },
       "vc_verify_epsl_track_demotes_the_previous_leaf": {
         "prover": "z3",
-        "time": 0.036
+        "time": 0.042
       }
     }
   }

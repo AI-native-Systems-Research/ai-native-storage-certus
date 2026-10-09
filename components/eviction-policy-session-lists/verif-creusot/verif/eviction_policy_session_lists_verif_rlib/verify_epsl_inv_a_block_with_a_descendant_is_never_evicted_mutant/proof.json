@@ -2,16 +2,16 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_pool_candidates": { "prover": "alt-ergo", "time": 0.022 },
-      "vc_pool_evict_oldest": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_pool_candidates": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_pool_evict_oldest": { "prover": "alt-ergo", "time": 0.017 },
       "vc_verify_epsl_inv_a_block_with_a_descendant_is_never_evicted__mutant": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
             "children": [
+              { "prover": "alt-ergo", "time": 0.03 },
               { "prover": "alt-ergo", "time": 0.029 },
-              { "prover": "alt-ergo", "time": 0.027 },
               null
             ]
           }

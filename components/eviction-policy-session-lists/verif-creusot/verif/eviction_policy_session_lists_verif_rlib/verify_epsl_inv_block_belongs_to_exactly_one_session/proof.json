@@ -2,11 +2,11 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_pool_register": { "prover": "alt-ergo", "time": 0.016 },
-      "vc_pool_touch": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_pool_register": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_pool_touch": { "prover": "alt-ergo", "time": 0.023 },
       "vc_verify_epsl_inv_block_belongs_to_exactly_one_session": {
         "prover": "alt-ergo",
-        "time": 0.671
+        "time": 0.775
       }
     }
   }

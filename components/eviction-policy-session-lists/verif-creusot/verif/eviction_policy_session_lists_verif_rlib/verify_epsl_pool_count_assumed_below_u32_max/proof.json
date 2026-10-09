@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_state_create_pool": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_state_create_pool": { "prover": "alt-ergo", "time": 0.018 },
       "vc_verify_epsl_pool_count_assumed_below_u32_max": {
         "prover": "alt-ergo",
-        "time": 0.041
+        "time": 0.039
       }
     }
   }

@@ -1695,7 +1695,9 @@ pub fn state_track(
 
 /// `touch` (src/lib.rs:143-155).
 #[requires(pools_inv(s))]
-#[requires(pools_have_room(s))]
+// J12: was `pools_have_room(s)` (a clock AND arena bound on EVERY pool). Now exactly D6
+// (D-RANGE-FR-004-7a18db) `pool.clock < u64::MAX` on the one pool the call operates on.
+#[requires(h.pool@ < (*s).pools@.len() ==> ((*s).pools@[h.pool@]).clock@ < 18446744073709551615)]
 #[requires(t.reads@ < 4294967294)]
 #[ensures(h.pool@ >= (*s).pools@.len() ==>
              result == Err(PolicyError::InvalidPool(h.pool)) && (^s).pools@ == (*s).pools@)]
@@ -1812,9 +1814,17 @@ pub fn state_remove(s: &mut Pools, h: Handle, t: &mut LockTrace) -> Result<(), P
 // time when both handles name one pool (that case needs `clock + 1 < u64::MAX`, i.e. MORE than
 // D6's per-call `clock < u64::MAX`; this is a callee requirement, not a driver premise).
 #[requires(h0.pool@ < (*s).pools@.len() ==> ((*s).pools@[h0.pool@]).clock@ < 18446744073709551615)]
-#[requires(h1.pool@ < (*s).pools@.len() && h1.pool != h0.pool ==>
+// J12: the two second-call clauses are guarded by "h0 was accepted" -- the second `Pool::touch`
+// call is reached only then -- so the three clauses are exactly D6 at each `touch` call.
+#[requires(h0.pool@ < (*s).pools@.len()
+             && h0.index@ < ((*s).pools@[h0.pool@]).nodes@.len()
+             && (((*s).pools@[h0.pool@]).nodes@[h0.index@]).active
+             && h1.pool@ < (*s).pools@.len() && h1.pool != h0.pool ==>
              ((*s).pools@[h1.pool@]).clock@ < 18446744073709551615)]
-#[requires(h1.pool@ < (*s).pools@.len() && h1.pool == h0.pool ==>
+#[requires(h0.pool@ < (*s).pools@.len()
+             && h0.index@ < ((*s).pools@[h0.pool@]).nodes@.len()
+             && (((*s).pools@[h0.pool@]).nodes@[h0.index@]).active
+             && h1.pool == h0.pool ==>
              ((*s).pools@[h1.pool@]).clock@ + 1 < 18446744073709551615)]
 #[requires(t.reads@ < 4294967294)]
 #[requires(t.held@ == 0 && t.peak@ == 0)]
@@ -2022,8 +2032,15 @@ pub fn state_clear_pool(s: &mut Pools, pool: u32, t: &mut LockTrace) {
 /// block really is refreshed, not just the first or the last, and that a failure part-way through
 /// leaves the earlier refreshes applied.
 #[requires(pool_inv(p))]
-#[requires(p.nodes@.len() < 4294967280)]
-#[requires(p.clock@ + idxs@.len() < 18446744073709551000)]
+// J12: exactly D6 (D-RANGE-FR-004-7a18db) `pool.clock < u64::MAX`, stated at EVERY `Pool::touch`
+// call the walk makes (the tick, session_list.rs:62-65, lives in `touch`). The k-th call is reached
+// iff handles 0..k were all accepted (live in the pre-state; `touch` never changes liveness), and
+// each accepted handle ticked the clock exactly once, so at the k-th call the clock is `clock + k`.
+// Was `nodes.len() < 4294967280 && clock + idxs.len() < 18446744073709551000` (constant slack).
+#[requires(forall<k: Int> 0 <= k && k < idxs@.len()
+              && (forall<j: Int> 0 <= j && j < k ==>
+                     (idxs@[j])@ < p.nodes@.len() && ((p.nodes@[(idxs@[j])@]).active)) ==>
+                 p.clock@ + k < 18446744073709551615)]
 #[ensures(idx_ok(&^p))]
 #[ensures(size_exact(&^p))]
 #[ensures(free_all_inactive(&^p))]
@@ -2078,18 +2095,52 @@ pub fn state_clear_pool(s: &mut Pools, pool: u32, t: &mut LockTrace) {
 #[ensures(forall<j: Int> 0 <= j && j < (*p).nodes@.len()
              && (forall<k: Int> 0 <= k && k < idxs@.len() ==> (idxs@[k])@ != j) ==>
                 (^p).nodes@[j] == (*p).nodes@[j])]
+// J12: a group whose every handle names a live slot is accepted in full
+#[ensures((forall<k: Int> 0 <= k && k < idxs@.len() ==>
+              (idxs@[k])@ < (*p).nodes@.len() && (((*p).nodes@[(idxs@[k])@]).active)) ==>
+             result == Ok(()))]
+// J12: the walk changes nothing but stamps, the clock and the leaf set, on EITHER outcome
+#[ensures(forall<j: Int> 0 <= j && j < (*p).nodes@.len() ==>
+             ((^p).nodes@[j]).key == ((*p).nodes@[j]).key
+             && ((^p).nodes@[j]).session == ((*p).nodes@[j]).session
+             && ((^p).nodes@[j]).parent == ((*p).nodes@[j]).parent
+             && ((^p).nodes@[j]).child == ((*p).nodes@[j]).child
+             && ((^p).nodes@[j]).active == ((*p).nodes@[j]).active
+             && ((^p).nodes@[j]).birth == ((*p).nodes@[j]).birth)]
+#[ensures((^p).sessions.e@ == (*p).sessions.e@ && (^p).free@ == (*p).free@)]
+// J12: on success, the LAST mention of each slot (position j) carries recency `clock + j + 1` --
+// exactly the value the (j+1)-th of the one-at-a-time `touch` calls gives it.
+#[ensures(result == Ok(()) ==>
+             forall<j: Int> 0 <= j && j < idxs@.len()
+                && (forall<k: Int> j < k && k < idxs@.len() ==> idxs@[k] != idxs@[j]) ==>
+                   ((^p).nodes@[(idxs@[j])@]).stamp@ == (*p).clock@ + j + 1)]
 pub fn pool_batch_touch(p: &mut Pool, idxs: &Vec<u32>) -> Result<(), PolicyError> {
     let start = snapshot! { p.clock@ };
     let nodes0 = snapshot! { p.nodes@ };
     let len0 = snapshot! { p.len };
     let bykey0 = snapshot! { p.by_key.e@ };
+    let sess0 = snapshot! { p.sessions.e@ };
+    let free0 = snapshot! { p.free@ };
     let n = idxs.len();
     let mut i: usize = 0;
     #[invariant(i@ <= n@)]
     #[invariant(pool_inv(p))]
     #[invariant(p.clock@ == *start + i@)]
-    #[invariant(p.clock@ + (n@ - i@) < 18446744073709551000)]
+    #[invariant(forall<k: Int> i@ <= k && k < n@
+                   && (forall<j: Int> 0 <= j && j < k ==>
+                          (idxs@[j])@ < (*nodes0).len() && (((*nodes0)[(idxs@[j])@]).active)) ==>
+                      *start + k < 18446744073709551615)]
     #[invariant(p.nodes@.len() == (*nodes0).len())]
+    #[invariant(forall<j: Int> 0 <= j && j < p.nodes@.len() ==>
+                   (p.nodes@[j]).key == ((*nodes0)[j]).key
+                   && (p.nodes@[j]).session == ((*nodes0)[j]).session
+                   && (p.nodes@[j]).parent == ((*nodes0)[j]).parent
+                   && (p.nodes@[j]).child == ((*nodes0)[j]).child
+                   && (p.nodes@[j]).birth == ((*nodes0)[j]).birth)]
+    #[invariant(p.sessions.e@ == *sess0 && p.free@ == *free0)]
+    #[invariant(forall<j: Int> 0 <= j && j < i@
+                   && (forall<k: Int> j < k && k < i@ ==> idxs@[k] != idxs@[j]) ==>
+                      (p.nodes@[(idxs@[j])@]).stamp@ == *start + j + 1)]
     #[invariant(p.len == *len0)]
     #[invariant(p.by_key.e@ == *bykey0)]
     #[invariant(forall<j: Int> 0 <= j && j < i@ ==>
@@ -2402,40 +2453,55 @@ pub fn verify_epsl_pool_count_assumed_below_u32_max__mutant(
 // ---- EPSL-TRACK-RETURNS-USABLE-HANDLE -----------------------------------—
 // The handle carries the domain the caller named plus the slot the block occupies, and those two
 // pieces are exactly what a later refresh / stop-tracking finds the block by.
-#[requires(ready(s, t))]
-#[requires(log_room(log))]
-#[requires(pool@ < (*s).pools@.len())]
-#[ensures(match result.0 { Ok(h) => h.pool == pool, Err(_) => false })]
-#[ensures(result.1 == Ok(()))]
-#[ensures(result.2 == Ok(()))]
+// J12: was `ready(s,t)` + `log_room` + `pool < len`. "Successfully registers" is now the `Ok` arm of
+// the ensures (an unknown domain is the only failure). Premises: `pools_inv` + D5
+// (D-RANGE-SC-002-d0657c) exactly at the track call + D6 (D-RANGE-FR-004-7a18db) exactly at each of
+// the two calls containing a tick, on the one pool they touch: `clock < u64::MAX` at track and
+// `clock' < u64::MAX` at touch; track ticks exactly once (fresh: tick; re-registration: touch), so
+// clock' = clock + 1 and the two together are exactly `clock + 1 < u64::MAX`. remove does not tick.
+// J12: the `Log` / `LockTrace` observation counters are mirror-only instruments (no production
+// state). They are created FRESH (all zero) inside the driver instead of being taken as inputs, so
+// the driver carries no premise on them at all (was `ready(s, t)` / `log_room(log)`).
+#[requires(pools_inv(s))]
+#[requires(pool@ < (*s).pools@.len() ==>
+             ((*s).pools@[pool@]).clock@ + 1 < 18446744073709551615
+             && ((*s).pools@[pool@]).nodes@.len() <= 4294967295)]
+#[ensures(match result.0 {
+             Ok(h) => h.pool == pool && result.1 == Ok(()) && result.2 == Ok(()),
+             Err(_) => pool@ >= (*s).pools@.len() })]
 pub fn verify_epsl_track_returns_usable_handle(
-    s: &mut Pools, pool: u32, key: u64, session: u64, log: &mut Log, connected: bool,
-    t: &mut LockTrace,
+    s: &mut Pools, pool: u32, key: u64, session: u64, connected: bool,
 ) -> (Result<Handle, PolicyError>, Result<(), PolicyError>, Result<(), PolicyError>) {
-    let h = state_track(s, pool, key, session, log, connected, t);
+    let mut t = LockTrace { held: 0, peak: 0, acquires: 0, writes: 0, reads: 0 };
+    let mut log = Log { info: 0, debug: 0, warn: 0 };
+    let h = state_track(s, pool, key, session, &mut log, connected, &mut t);
     match h {
         Ok(hh) => {
-            let a = state_touch(s, Handle { pool: hh.pool, index: hh.index }, t);
-            let b = state_remove(s, Handle { pool: hh.pool, index: hh.index }, t);
+            let a = state_touch(s, Handle { pool: hh.pool, index: hh.index }, &mut t);
+            let b = state_remove(s, Handle { pool: hh.pool, index: hh.index }, &mut t);
             (Ok(hh), a, b)
         }
         Err(e) => (Err(e), Err(PolicyError::InvalidHandle), Err(PolicyError::InvalidHandle)),
     }
 }
 
-#[requires(ready(s, t))]
-#[requires(log_room(log))]
-#[requires(pool@ < (*s).pools@.len())]
-#[ensures(result.1 != Ok(()))] // FALSE: the handle track just issued does refresh successfully
+#[requires(pools_inv(s))]
+#[requires(pool@ < (*s).pools@.len() ==>
+             ((*s).pools@[pool@]).clock@ + 1 < 18446744073709551615
+             && ((*s).pools@[pool@]).nodes@.len() <= 4294967295)]
+#[ensures(!(match result.0 {
+             Ok(h) => h.pool == pool && result.1 == Ok(()) && result.2 == Ok(()),
+             Err(_) => pool@ >= (*s).pools@.len() }))] // FLIPPED: must fail
 pub fn verify_epsl_track_returns_usable_handle__mutant(
-    s: &mut Pools, pool: u32, key: u64, session: u64, log: &mut Log, connected: bool,
-    t: &mut LockTrace,
+    s: &mut Pools, pool: u32, key: u64, session: u64, connected: bool,
 ) -> (Result<Handle, PolicyError>, Result<(), PolicyError>, Result<(), PolicyError>) {
-    let h = state_track(s, pool, key, session, log, connected, t);
+    let mut t = LockTrace { held: 0, peak: 0, acquires: 0, writes: 0, reads: 0 };
+    let mut log = Log { info: 0, debug: 0, warn: 0 };
+    let h = state_track(s, pool, key, session, &mut log, connected, &mut t);
     match h {
         Ok(hh) => {
-            let a = state_touch(s, Handle { pool: hh.pool, index: hh.index }, t);
-            let b = state_remove(s, Handle { pool: hh.pool, index: hh.index }, t);
+            let a = state_touch(s, Handle { pool: hh.pool, index: hh.index }, &mut t);
+            let b = state_remove(s, Handle { pool: hh.pool, index: hh.index }, &mut t);
             (Ok(hh), a, b)
         }
         Err(e) => (Err(e), Err(PolicyError::InvalidHandle), Err(PolicyError::InvalidHandle)),
@@ -2968,10 +3034,21 @@ pub fn verify_epsl_touch_of_an_interior_block_keeps_the_candidate_set__mutant(
 // ======================= batch_touch =======================================
 
 // ---- EPSL-BATCH-TOUCH-REFRESHES-EVERY-BLOCK ---------------------------—
+// J12: the statement is NOT conditioned on success, so neither is the ensures. "A group of accessed
+// blocks" is a group whose every handle names a tracked block: that is D2 (D-RANGE-FR-005-e924ec)
+// exactly, at pool level (the pool exists; each handle's slot is occupied). Under it the walk is
+// accepted in full and every named block is refreshed.
+// J12 premises: `pool_inv` (proved invariant) and D6 (D-RANGE-FR-004-7a18db) `pool.clock < u64::MAX`
+// EXACTLY, at every `Pool::touch` call the walk makes: the k-th call is reached iff handles 0..k were
+// accepted, each accepted handle ticks once (session_list.rs:62-65), so the clock there is clock + k.
 #[requires(pool_inv(p))]
-#[requires(p.nodes@.len() < 4294967280)]
-#[requires(p.clock@ + idxs@.len() < 18446744073709551000)]
-#[ensures(result == Ok(()) ==>
+#[requires(forall<k: Int> 0 <= k && k < idxs@.len() ==>
+              (idxs@[k])@ < p.nodes@.len() && ((p.nodes@[(idxs@[k])@]).active))]
+#[requires(forall<k: Int> 0 <= k && k < idxs@.len()
+              && (forall<j: Int> 0 <= j && j < k ==>
+                     (idxs@[j])@ < p.nodes@.len() && ((p.nodes@[(idxs@[j])@]).active)) ==>
+                 p.clock@ + k < 18446744073709551615)]
+#[ensures(result == Ok(()) &&
              forall<j: Int> 0 <= j && j < idxs@.len() ==>
                 ((idxs@[j])@ < (^p).nodes@.len()
                  && ((^p).nodes@[(idxs@[j])@]).stamp@ > (*p).clock@))]
@@ -2982,10 +3059,16 @@ pub fn verify_epsl_batch_touch_refreshes_every_block(
 }
 
 #[requires(pool_inv(p))]
-#[requires(p.nodes@.len() < 4294967280)]
-#[requires(p.clock@ + idxs@.len() < 18446744073709551000)]
-#[ensures(result == Ok(()) ==> (^p).clock == (*p).clock)]
-// FALSE: every refreshed block consumes a recency value
+#[requires(forall<k: Int> 0 <= k && k < idxs@.len() ==>
+              (idxs@[k])@ < p.nodes@.len() && ((p.nodes@[(idxs@[k])@]).active))]
+#[requires(forall<k: Int> 0 <= k && k < idxs@.len()
+              && (forall<j: Int> 0 <= j && j < k ==>
+                     (idxs@[j])@ < p.nodes@.len() && ((p.nodes@[(idxs@[j])@]).active)) ==>
+                 p.clock@ + k < 18446744073709551615)]
+#[ensures(!(result == Ok(()) &&
+             forall<j: Int> 0 <= j && j < idxs@.len() ==>
+                ((idxs@[j])@ < (^p).nodes@.len()
+                 && ((^p).nodes@[(idxs@[j])@]).stamp@ > (*p).clock@)))] // FLIPPED: must fail
 pub fn verify_epsl_batch_touch_refreshes_every_block__mutant(
     p: &mut Pool, idxs: &Vec<u32>,
 ) -> Result<(), PolicyError> {
@@ -2993,35 +3076,71 @@ pub fn verify_epsl_batch_touch_refreshes_every_block__mutant(
 }
 
 // ---- EPSL-BATCH-TOUCH-MATCHES-ONE-AT-A-TIME ---------------------------—
-// A two-handle group leaves exactly the state that refreshing those two handles one at a time, in
-// order, would leave: the first gets clock+1, the second clock+2, and a handle named twice keeps
-// only the later value.
-#[requires(pready(p))]
-#[requires(i0@ < p.nodes@.len() && (p.nodes@[i0@]).active)]
-#[requires(i1@ < p.nodes@.len() && (p.nodes@[i1@]).active)]
-#[ensures(result.0 && result.1)]
-#[ensures(i0 != i1 ==> ((^p).nodes@[i0@]).stamp@ == (*p).clock@ + 1)]
-#[ensures(((^p).nodes@[i1@]).stamp@ == (*p).clock@ + 2)]
-#[ensures(i0 == i1 ==> ((^p).nodes@[i0@]).stamp@ == (*p).clock@ + 2)]
+// J12 (fresh): over an ARBITRARY group (was: two bare `pool_touch` calls, which never ran the batch).
+// One-at-a-time reporting of idxs[0..n] makes the (j+1)-th `touch` give slot idxs[j] recency
+// clock + j + 1 and advances the clock by one per call, changing nothing but stamps and the leaf set
+// (`pool_touch`'s contract). On success the batch leaves exactly that: the clock is clock + n, the
+// LAST mention j of each slot carries clock + j + 1 (so a slot named twice keeps its last mention),
+// every unnamed slot is untouched, no key/session/link/liveness changes, the size, key index, session
+// index and spare list are unchanged, and the invariant holds -- which fixes the leaf set too, since
+// `leaf_set_exact` + `leaves_sorted` make it a function of the arena.
+// J12 premises: `pool_inv` (proved invariant) and D6 (D-RANGE-FR-004-7a18db) `pool.clock < u64::MAX`
+// EXACTLY, at every `Pool::touch` call the walk makes: the k-th call is reached iff handles 0..k were
+// accepted, each accepted handle ticks once (session_list.rs:62-65), so the clock there is clock + k.
+#[requires(pool_inv(p))]
+#[requires(forall<k: Int> 0 <= k && k < idxs@.len()
+              && (forall<j: Int> 0 <= j && j < k ==>
+                     (idxs@[j])@ < p.nodes@.len() && ((p.nodes@[(idxs@[j])@]).active)) ==>
+                 p.clock@ + k < 18446744073709551615)]
+#[ensures(result == Ok(()) ==> (^p).clock@ == (*p).clock@ + idxs@.len())]
+#[ensures(result == Ok(()) ==>
+             forall<j: Int> 0 <= j && j < idxs@.len()
+                && (forall<k: Int> j < k && k < idxs@.len() ==> idxs@[k] != idxs@[j]) ==>
+                   ((^p).nodes@[(idxs@[j])@]).stamp@ == (*p).clock@ + j + 1)]
+#[ensures(forall<j: Int> 0 <= j && j < (*p).nodes@.len()
+             && (forall<k: Int> 0 <= k && k < idxs@.len() ==> (idxs@[k])@ != j) ==>
+                (^p).nodes@[j] == (*p).nodes@[j])]
+#[ensures(forall<j: Int> 0 <= j && j < (*p).nodes@.len() ==>
+             ((^p).nodes@[j]).key == ((*p).nodes@[j]).key
+             && ((^p).nodes@[j]).session == ((*p).nodes@[j]).session
+             && ((^p).nodes@[j]).parent == ((*p).nodes@[j]).parent
+             && ((^p).nodes@[j]).child == ((*p).nodes@[j]).child
+             && ((^p).nodes@[j]).active == ((*p).nodes@[j]).active)]
+#[ensures((^p).nodes@.len() == (*p).nodes@.len() && (^p).len == (*p).len)]
+#[ensures((^p).by_key.e@ == (*p).by_key.e@ && (^p).sessions.e@ == (*p).sessions.e@ && (^p).free@ == (*p).free@)]
+#[ensures(pool_inv(&^p))]
 pub fn verify_epsl_batch_touch_matches_one_at_a_time(
-    p: &mut Pool, i0: u32, i1: u32,
-) -> (bool, bool) {
-    let a = pool_touch(p, i0);
-    let b = pool_touch(p, i1);
-    (a, b)
+    p: &mut Pool, idxs: &Vec<u32>,
+) -> Result<(), PolicyError> {
+    pool_batch_touch(p, idxs)
 }
 
-#[requires(pready(p))]
-#[requires(i0@ < p.nodes@.len() && (p.nodes@[i0@]).active)]
-#[requires(i1@ < p.nodes@.len() && (p.nodes@[i1@]).active)]
-#[ensures(((^p).nodes@[i1@]).stamp@ == (*p).clock@ + 1)]
-// FALSE: the second refresh consumes the second recency value, not the first
+#[requires(pool_inv(p))]
+#[requires(forall<k: Int> 0 <= k && k < idxs@.len()
+              && (forall<j: Int> 0 <= j && j < k ==>
+                     (idxs@[j])@ < p.nodes@.len() && ((p.nodes@[(idxs@[j])@]).active)) ==>
+                 p.clock@ + k < 18446744073709551615)]
+#[ensures(result == Ok(()) ==> (^p).clock@ == (*p).clock@ + idxs@.len())]
+#[ensures(!(result == Ok(()) ==>
+             forall<j: Int> 0 <= j && j < idxs@.len()
+                && (forall<k: Int> j < k && k < idxs@.len() ==> idxs@[k] != idxs@[j]) ==>
+                   ((^p).nodes@[(idxs@[j])@]).stamp@ == (*p).clock@ + j + 1))] // FLIPPED: must fail
+#[ensures(forall<j: Int> 0 <= j && j < (*p).nodes@.len()
+             && (forall<k: Int> 0 <= k && k < idxs@.len() ==> (idxs@[k])@ != j) ==>
+                (^p).nodes@[j] == (*p).nodes@[j])]
+#[ensures(forall<j: Int> 0 <= j && j < (*p).nodes@.len() ==>
+             ((^p).nodes@[j]).key == ((*p).nodes@[j]).key
+             && ((^p).nodes@[j]).session == ((*p).nodes@[j]).session
+             && ((^p).nodes@[j]).parent == ((*p).nodes@[j]).parent
+             && ((^p).nodes@[j]).child == ((*p).nodes@[j]).child
+             && ((^p).nodes@[j]).active == ((*p).nodes@[j]).active)]
+#[ensures((^p).nodes@.len() == (*p).nodes@.len() && (^p).len == (*p).len)]
+#[ensures((^p).by_key.e@ == (*p).by_key.e@ && (^p).sessions.e@ == (*p).sessions.e@ && (^p).free@ == (*p).free@)]
+#[ensures(pool_inv(&^p))]
 pub fn verify_epsl_batch_touch_matches_one_at_a_time__mutant(
-    p: &mut Pool, i0: u32, i1: u32,
-) -> (bool, bool) {
-    let a = pool_touch(p, i0);
-    let b = pool_touch(p, i1);
-    (a, b)
+    p: &mut Pool, idxs: &Vec<u32>,
+) -> Result<(), PolicyError> {
+    pool_batch_touch(p, idxs)
 }
 
 // ---- EPSL-BATCH-TOUCH-INVALID-HANDLE-IS-AN-ERROR (divergent) ----------—
@@ -3044,14 +3163,25 @@ pub fn verify_epsl_batch_touch_invalid_handle_is_an_error(
 }
 
 // ---- EPSL-BATCH-TOUCH-TOUCHES-NOTHING-ELSE ----------------------------—
+// J12: on EITHER outcome (the statement does not condition on success). `j` = a block not named.
+// J12 premises: `pool_inv` (proved invariant) and D6 (D-RANGE-FR-004-7a18db) `pool.clock < u64::MAX`
+// EXACTLY, at every `Pool::touch` call the walk makes: the k-th call is reached iff handles 0..k were
+// accepted, each accepted handle ticks once (session_list.rs:62-65), so the clock there is clock + k.
 #[requires(pool_inv(p))]
-#[requires(p.nodes@.len() < 4294967280)]
-#[requires(p.clock@ + idxs@.len() < 18446744073709551000)]
+#[requires(forall<k: Int> 0 <= k && k < idxs@.len()
+              && (forall<j: Int> 0 <= j && j < k ==>
+                     (idxs@[j])@ < p.nodes@.len() && ((p.nodes@[(idxs@[j])@]).active)) ==>
+                 p.clock@ + k < 18446744073709551615)]
 #[requires(forall<k: Int> 0 <= k && k < idxs@.len() ==> (idxs@[k])@ != j@)]
 #[requires(j@ < p.nodes@.len())]
-#[ensures(((^p).nodes@[j@]).stamp == ((*p).nodes@[j@]).stamp)]
-#[ensures(((^p).nodes@[j@]).parent == ((*p).nodes@[j@]).parent)]
-#[ensures(((^p).nodes@[j@]).child == ((*p).nodes@[j@]).child)]
+#[ensures((^p).nodes@[j@] == (*p).nodes@[j@])]
+#[ensures(forall<j: Int> 0 <= j && j < (*p).nodes@.len() ==>
+             ((^p).nodes@[j]).key == ((*p).nodes@[j]).key
+             && ((^p).nodes@[j]).session == ((*p).nodes@[j]).session
+             && ((^p).nodes@[j]).parent == ((*p).nodes@[j]).parent
+             && ((^p).nodes@[j]).child == ((*p).nodes@[j]).child
+             && ((^p).nodes@[j]).active == ((*p).nodes@[j]).active)]
+#[ensures((^p).nodes@.len() == (*p).nodes@.len())]
 #[ensures((^p).len == (*p).len)]
 #[ensures((^p).by_key.e@ == (*p).by_key.e@)]
 pub fn verify_epsl_batch_touch_touches_nothing_else(
@@ -3061,11 +3191,22 @@ pub fn verify_epsl_batch_touch_touches_nothing_else(
 }
 
 #[requires(pool_inv(p))]
-#[requires(p.nodes@.len() < 4294967280)]
-#[requires(p.clock@ + idxs@.len() < 18446744073709551000)]
+#[requires(forall<k: Int> 0 <= k && k < idxs@.len()
+              && (forall<j: Int> 0 <= j && j < k ==>
+                     (idxs@[j])@ < p.nodes@.len() && ((p.nodes@[(idxs@[j])@]).active)) ==>
+                 p.clock@ + k < 18446744073709551615)]
 #[requires(forall<k: Int> 0 <= k && k < idxs@.len() ==> (idxs@[k])@ != j@)]
 #[requires(j@ < p.nodes@.len())]
-#[ensures((^p).len@ == (*p).len@ + 1)] // FALSE: a group refresh adds and removes nothing
+#[ensures((^p).nodes@[j@] == (*p).nodes@[j@])]
+#[ensures(forall<j: Int> 0 <= j && j < (*p).nodes@.len() ==>
+             ((^p).nodes@[j]).key == ((*p).nodes@[j]).key
+             && ((^p).nodes@[j]).session == ((*p).nodes@[j]).session
+             && ((^p).nodes@[j]).parent == ((*p).nodes@[j]).parent
+             && ((^p).nodes@[j]).child == ((*p).nodes@[j]).child
+             && ((^p).nodes@[j]).active == ((*p).nodes@[j]).active)]
+#[ensures((^p).nodes@.len() == (*p).nodes@.len())]
+#[ensures(!((^p).len == (*p).len))] // FLIPPED: must fail
+#[ensures((^p).by_key.e@ == (*p).by_key.e@)]
 pub fn verify_epsl_batch_touch_touches_nothing_else__mutant(
     p: &mut Pool, idxs: &Vec<u32>, j: u32,
 ) -> Result<(), PolicyError> {
@@ -3182,32 +3323,55 @@ pub fn verify_epsl_batch_touch_spans_pools_one_lock_at_a_time__mutant(
 }
 
 // ---- EPSL-BATCH-TOUCH-RELOCKS-WHEN-THE-POOL-CHANGES -------------------—
-// J3: NOT CREDITED (narrowed obligation). Renamed `narrowed_verify_…` so the gate cannot credit
-// it. The same-pool case refreshes ONE pool twice, i.e. ticks its clock twice in one batch_touch
-// call; under exactly D6 (`pool.clock < u64::MAX` at the call) the second tick overflows when
-// clock == u64::MAX - 1, so the property is not provable under the declared range. It keeps its
-// old `ready(s, t)` premise (constant clock margin), which is why it is not credited.
-#[requires(ready(s, t))]
-#[requires(h0.pool@ < (*s).pools@.len() && h1.pool@ < (*s).pools@.len())]
-#[requires(h0.index@ < ((*s).pools@[h0.pool@]).nodes@.len())]
-#[requires((((*s).pools@[h0.pool@]).nodes@[h0.index@]).active)]
-#[ensures(h0.pool == h1.pool ==> (^t).acquires@ == (*t).acquires@ + 1)]
-#[ensures(h0.pool != h1.pool ==> (^t).acquires@ == (*t).acquires@ + 2)]
-pub fn narrowed_verify_epsl_batch_touch_relocks_when_the_pool_changes(
-    s: &mut Pools, h0: Handle, h1: Handle, t: &mut LockTrace,
-) -> Result<(), PolicyError> {
-    state_batch_touch2(s, h0, h1, t)
+// J12: CREDITED (was `narrowed_verify_…` under the constant-margin `ready(s,t)`).
+// Premises: `pools_inv` (proved) + D2 (D-RANGE-FR-005-e924ec) exactly, for both handles of the
+// group (each names an existing pool and an occupied slot of it) + D6 (D-RANGE-FR-004-7a18db)
+// `pool.clock < u64::MAX` exactly at EACH `Pool::touch` call (the tick, session_list.rs:62-65).
+// TICK COUNT, under D2 (both handles accepted, `touch` never changes liveness): the walk makes
+// exactly 2 `touch` calls, one tick each. Different pools: 1 tick in each, both at the entry clock,
+// so D6 at the two calls is `clock[h0.pool] < MAX && clock[h1.pool] < MAX`. Same pool: 2 ticks in
+// that pool, the first at `clock`, the second at `clock + 1` (ticks_in_that_pool - 1 = 1), so D6
+// at the two calls is `clock < MAX && clock + 1 < MAX`, i.e. exactly `clock + 1 < MAX`.
+// The lock count is returned from a FRESH trace (acquires starts at 0).
+// J12: the `Log` / `LockTrace` observation counters are mirror-only instruments (no production
+// state). They are created FRESH (all zero) inside the driver instead of being taken as inputs, so
+// the driver carries no premise on them at all (was `ready(s, t)` / `log_room(log)`).
+#[requires(pools_inv(s))]
+#[requires(h0.pool@ < (*s).pools@.len()
+              && h0.index@ < ((*s).pools@[h0.pool@]).nodes@.len()
+              && (((*s).pools@[h0.pool@]).nodes@[h0.index@]).active)]
+#[requires(h1.pool@ < (*s).pools@.len()
+              && h1.index@ < ((*s).pools@[h1.pool@]).nodes@.len()
+              && (((*s).pools@[h1.pool@]).nodes@[h1.index@]).active)]
+#[requires(h0.pool != h1.pool ==> ((*s).pools@[h0.pool@]).clock@ < 18446744073709551615 && ((*s).pools@[h1.pool@]).clock@ < 18446744073709551615)]
+#[requires(h0.pool == h1.pool ==> ((*s).pools@[h0.pool@]).clock@ + 1 < 18446744073709551615)]
+#[ensures(h0.pool == h1.pool ==> result.1@ == 1)]
+#[ensures(h0.pool != h1.pool ==> result.1@ == 2)]
+pub fn verify_epsl_batch_touch_relocks_when_the_pool_changes(
+    s: &mut Pools, h0: Handle, h1: Handle,
+) -> (Result<(), PolicyError>, usize) {
+    let mut t = LockTrace { held: 0, peak: 0, acquires: 0, writes: 0, reads: 0 };
+    let r = state_batch_touch2(s, h0, h1, &mut t);
+    (r, t.acquires)
 }
 
-#[requires(ready(s, t))]
-#[requires(h0.pool@ < (*s).pools@.len() && h1.pool@ < (*s).pools@.len())]
-#[requires(h0.index@ < ((*s).pools@[h0.pool@]).nodes@.len())]
-#[requires((((*s).pools@[h0.pool@]).nodes@[h0.index@]).active)]
-#[ensures((^t).acquires@ == (*t).acquires@ + 2)] // FALSE: same domain twice takes ONE lock
-pub fn narrowed_verify_epsl_batch_touch_relocks_when_the_pool_changes__mutant(
-    s: &mut Pools, h0: Handle, h1: Handle, t: &mut LockTrace,
-) -> Result<(), PolicyError> {
-    state_batch_touch2(s, h0, h1, t)
+#[requires(pools_inv(s))]
+#[requires(h0.pool@ < (*s).pools@.len()
+              && h0.index@ < ((*s).pools@[h0.pool@]).nodes@.len()
+              && (((*s).pools@[h0.pool@]).nodes@[h0.index@]).active)]
+#[requires(h1.pool@ < (*s).pools@.len()
+              && h1.index@ < ((*s).pools@[h1.pool@]).nodes@.len()
+              && (((*s).pools@[h1.pool@]).nodes@[h1.index@]).active)]
+#[requires(h0.pool != h1.pool ==> ((*s).pools@[h0.pool@]).clock@ < 18446744073709551615 && ((*s).pools@[h1.pool@]).clock@ < 18446744073709551615)]
+#[requires(h0.pool == h1.pool ==> ((*s).pools@[h0.pool@]).clock@ + 1 < 18446744073709551615)]
+#[ensures(!(h0.pool == h1.pool ==> result.1@ == 1))] // FLIPPED: must fail
+#[ensures(h0.pool != h1.pool ==> result.1@ == 2)]
+pub fn verify_epsl_batch_touch_relocks_when_the_pool_changes__mutant(
+    s: &mut Pools, h0: Handle, h1: Handle,
+) -> (Result<(), PolicyError>, usize) {
+    let mut t = LockTrace { held: 0, peak: 0, acquires: 0, writes: 0, reads: 0 };
+    let r = state_batch_touch2(s, h0, h1, &mut t);
+    (r, t.acquires)
 }
 
 // ======================= remove ============================================
@@ -3233,25 +3397,30 @@ pub fn verify_epsl_remove_stops_tracking_the_block__mutant(p: &mut Pool, index: 
 }
 
 // ---- EPSL-REMOVE-RELINKS-THE-CHAIN ------------------------------------—
-#[requires(pready(p))]
+// J12: was `pready(p)`. Premises: the proved invariant + the obligation's words (a tracked block
+// that sits in the middle of a chain: it has a parent q and a child c). `remove` has no declared
+// range but D1 (never used) and D7. `links_agree` after = "one unbroken chain, no dangling block".
+#[requires(pool_inv(p))]
 #[requires(index@ < p.nodes@.len() && (p.nodes@[index@]).active)]
 #[requires((p.nodes@[index@]).child == Some(c))]
 #[requires((p.nodes@[index@]).parent == Some(q))]
 #[ensures(((^p).nodes@[c@]).parent == Some(q))]
 #[ensures(((^p).nodes@[q@]).child == Some(c))]
 #[ensures(((^p).nodes@[c@]).session == ((^p).nodes@[q@]).session)]
+#[ensures(links_agree(&^p))]
 pub fn verify_epsl_remove_relinks_the_chain(p: &mut Pool, index: u32, q: u32, c: u32) -> bool {
     pool_remove(p, index)
 }
 
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
 #[requires(index@ < p.nodes@.len() && (p.nodes@[index@]).active)]
 #[requires((p.nodes@[index@]).child == Some(c))]
 #[requires((p.nodes@[index@]).parent == Some(q))]
-#[ensures(((^p).nodes@[c@]).parent == Some(index))] // FALSE: the child is reparented to the parent
-pub fn verify_epsl_remove_relinks_the_chain__mutant(
-    p: &mut Pool, index: u32, q: u32, c: u32,
-) -> bool {
+#[ensures(!(((^p).nodes@[c@]).parent == Some(q)))] // FLIPPED: must fail
+#[ensures(((^p).nodes@[q@]).child == Some(c))]
+#[ensures(((^p).nodes@[c@]).session == ((^p).nodes@[q@]).session)]
+#[ensures(links_agree(&^p))]
+pub fn verify_epsl_remove_relinks_the_chain__mutant(p: &mut Pool, index: u32, q: u32, c: u32) -> bool {
     pool_remove(p, index)
 }
 
@@ -3524,23 +3693,34 @@ pub fn verify_epsl_evict_does_not_refresh_the_victim__mutant(p: &mut Pool) -> Op
     pool_evict_oldest(p)
 }
 
-// ---- EPSL-EVICT-DISTURBS-ONLY-VICTIM-AND-PARENT -----------------------—
-#[requires(pready(p))]
-#[requires(p.leaves.e@.len() > 0)]
-#[ensures(forall<j: Int> 0 <= j && j < (*p).nodes@.len()
+// ---- EPSL-EVICT-DISTURBS-ONLY-VICTIM-AND-PARENT ----------------------—
+// J12: was `pready(p)` + `leaves.len() > 0`. Now only the proved invariant; "evicting a block" is
+// the `leaves.len() > 0` case (a victim exists iff the leaf set is non-empty), moved into the ensures.
+// Exactly one block stops being tracked (len drops by one and the victim's slot is freed).
+#[requires(pool_inv(p))]
+#[ensures((*p).leaves.e@.len() > 0 ==>
+             forall<j: Int> 0 <= j && j < (*p).nodes@.len()
              && j != (((*p).leaves.e@[0]).1)@
              && !opt_is(((*p).nodes@[(((*p).leaves.e@[0]).1)@]).parent, j) ==>
                 (^p).nodes@[j] == (*p).nodes@[j])]
 #[ensures(forall<j: Int> 0 <= j && j < (*p).nodes@.len() ==>
              ((^p).nodes@[j]).stamp == ((*p).nodes@[j]).stamp)]
+#[ensures((*p).leaves.e@.len() > 0 ==> (^p).len@ == (*p).len@ - 1)]
+#[ensures((*p).leaves.e@.len() == 0 ==> ^p == *p)]
 pub fn verify_epsl_evict_disturbs_only_victim_and_parent(p: &mut Pool) -> Option<u64> {
     pool_evict_oldest(p)
 }
 
-#[requires(pready(p))]
-#[requires(p.leaves.e@.len() > 0)]
-#[ensures(forall<j: Int> 0 <= j && j < (*p).nodes@.len() ==> (^p).nodes@[j] == (*p).nodes@[j])]
-// FALSE: the victim's own slot changes
+#[requires(pool_inv(p))]
+#[ensures(!((*p).leaves.e@.len() > 0 ==>
+             forall<j: Int> 0 <= j && j < (*p).nodes@.len()
+             && j != (((*p).leaves.e@[0]).1)@
+             && !opt_is(((*p).nodes@[(((*p).leaves.e@[0]).1)@]).parent, j) ==>
+                (^p).nodes@[j] == (*p).nodes@[j]))] // FLIPPED: must fail
+#[ensures(forall<j: Int> 0 <= j && j < (*p).nodes@.len() ==>
+             ((^p).nodes@[j]).stamp == ((*p).nodes@[j]).stamp)]
+#[ensures((*p).leaves.e@.len() > 0 ==> (^p).len@ == (*p).len@ - 1)]
+#[ensures((*p).leaves.e@.len() == 0 ==> ^p == *p)]
 pub fn verify_epsl_evict_disturbs_only_victim_and_parent__mutant(p: &mut Pool) -> Option<u64> {
     pool_evict_oldest(p)
 }
@@ -3548,7 +3728,11 @@ pub fn verify_epsl_evict_disturbs_only_victim_and_parent__mutant(p: &mut Pool) -
 // ======================= queries, clear ====================================
 
 // ---- EPSL-READONLY-QUERIES-DEGRADE-SAFELY-ON-UNKNOWN-DOMAIN -----------—
-#[requires(ready(s, t))]
+// J12: was `ready(s, t)`. Premises: the proved invariant + the obligation's words (unknown domain).
+// J12: the `Log` / `LockTrace` observation counters are mirror-only instruments (no production
+// state). They are created FRESH (all zero) inside the driver instead of being taken as inputs, so
+// the driver carries no premise on them at all (was `ready(s, t)` / `log_room(log)`).
+#[requires(pools_inv(s))]
 #[requires(pool@ >= (*s).pools@.len())]
 #[ensures(result.0 == None)]
 #[ensures(result.1@.len() == 0)]
@@ -3556,25 +3740,31 @@ pub fn verify_epsl_evict_disturbs_only_victim_and_parent__mutant(p: &mut Pool) -
 #[ensures((^s).pools@ == (*s).pools@)]
 #[ensures((^s).announced == (*s).announced)]
 pub fn verify_epsl_readonly_queries_degrade_safely_on_unknown_domain(
-    s: &mut Pools, pool: u32, n: usize, t: &mut LockTrace,
+    s: &mut Pools, pool: u32, n: usize,
 ) -> (Option<u64>, Vec<u64>, usize) {
-    let v = state_evict(s, pool, t);
-    state_clear_pool(s, pool, t);
-    let c = state_candidates(s, pool, n, t);
-    let l = state_len(s, pool, t);
+    let mut t = LockTrace { held: 0, peak: 0, acquires: 0, writes: 0, reads: 0 };
+    let v = state_evict(s, pool, &mut t);
+    state_clear_pool(s, pool, &mut t);
+    let c = state_candidates(s, pool, n, &mut t);
+    let l = state_len(s, pool, &mut t);
     (v, c, l)
 }
 
-#[requires(ready(s, t))]
+#[requires(pools_inv(s))]
 #[requires(pool@ >= (*s).pools@.len())]
-#[ensures(result.2@ == 1)] // FALSE: an unknown domain reports zero
+#[ensures(result.0 == None)]
+#[ensures(result.1@.len() == 0)]
+#[ensures(!(result.2@ == 0))] // FLIPPED: must fail
+#[ensures((^s).pools@ == (*s).pools@)]
+#[ensures((^s).announced == (*s).announced)]
 pub fn verify_epsl_readonly_queries_degrade_safely_on_unknown_domain__mutant(
-    s: &mut Pools, pool: u32, n: usize, t: &mut LockTrace,
+    s: &mut Pools, pool: u32, n: usize,
 ) -> (Option<u64>, Vec<u64>, usize) {
-    let v = state_evict(s, pool, t);
-    state_clear_pool(s, pool, t);
-    let c = state_candidates(s, pool, n, t);
-    let l = state_len(s, pool, t);
+    let mut t = LockTrace { held: 0, peak: 0, acquires: 0, writes: 0, reads: 0 };
+    let v = state_evict(s, pool, &mut t);
+    state_clear_pool(s, pool, &mut t);
+    let c = state_candidates(s, pool, n, &mut t);
+    let l = state_len(s, pool, &mut t);
     (v, c, l)
 }
 
@@ -3693,20 +3883,18 @@ pub fn verify_epsl_candidates_are_distinct__mutant(p: &Pool, n: usize) -> Vec<u6
 }
 
 // ---- EPSL-CANDIDATES-EMPTY-DOMAIN-RETURNS-EMPTY-LIST ------------------—
-#[requires(pready(p))]
+// J12: was `pready(p)` (clock/arena slack). `get_eviction_candidates` has no declared range but D7.
+#[requires(pool_inv(p))]
 #[requires(p.len@ == 0)]
 #[ensures(result@.len() == 0)]
 pub fn verify_epsl_candidates_empty_domain_returns_empty_list(p: &Pool, n: usize) -> Vec<u64> {
     pool_candidates(p, n)
 }
 
-#[requires(pready(p))]
+#[requires(pool_inv(p))]
 #[requires(p.len@ == 0)]
-#[requires(n@ > 0)]
-#[ensures(result@.len() == n@)] // FALSE: an empty domain invents no entries
-pub fn verify_epsl_candidates_empty_domain_returns_empty_list__mutant(
-    p: &Pool, n: usize,
-) -> Vec<u64> {
+#[ensures(!(result@.len() == 0))] // FLIPPED: must fail
+pub fn verify_epsl_candidates_empty_domain_returns_empty_list__mutant(p: &Pool, n: usize) -> Vec<u64> {
     pool_candidates(p, n)
 }
 
@@ -3895,7 +4083,7 @@ pub fn verify_epsl_len_unknown_pool_returns_zero__mutant(
 // ======================= clear_pool ========================================
 
 // ---- EPSL-CLEAR-RETURNS-DOMAIN-TO-EMPTY -------------------------------—
-#[requires(pready(p))]
+// J12: NO premise (was `pready(p)`): `Pool::clear` is total and establishes `pool_inv` itself.
 #[ensures(pool_empty(&^p))]
 #[ensures(result.0@ == 0)]
 #[ensures(result.1 == None)]
@@ -3912,8 +4100,12 @@ pub fn verify_epsl_clear_returns_domain_to_empty(
     (l, v, c)
 }
 
-#[requires(pready(p))]
-#[ensures(result.0@ > 0)] // FALSE: a cleared domain tracks nothing
+#[ensures(pool_empty(&^p))]
+#[ensures(!(result.0@ == 0))] // FLIPPED: must fail
+#[ensures(result.1 == None)]
+#[ensures(result.2@.len() == 0)]
+#[ensures((^p).clock@ == 0)]
+#[ensures((^p).nodes@.len() == 0)]
 pub fn verify_epsl_clear_returns_domain_to_empty__mutant(
     p: &mut Pool, n: usize,
 ) -> (usize, Option<u64>, Vec<u64>) {
@@ -4372,13 +4564,17 @@ pub fn verify_epsl_inv_lineage_never_crosses_sessions__mutant(
 
 // ---- EPSL-INV-BLOCK-BELONGS-TO-EXACTLY-ONE-SESSION ---------------—
 // `Node::session` is written once, in the struct literal at session_list.rs:100, and never
-// rewritten; every other mutator leaves it alone.
-#[requires(pready(p))]
-// SHARPENED (fourth pass): `Node::session` is written ONCE, at birth, and never rewritten. The
-// previous unconditional `session == session` was false on the re-registration path, where no
-// block is born and the stored session is kept — that is the separately recorded
-// `EPSL-TRACK-SESSION-COMES-FROM-CALLER` divergence. Splitting the clause states the property the
-// code actually has ("written at birth AND never rewritten") instead of a stronger one it lacks.
+// rewritten. The split on `map_mem` states "written at birth AND never rewritten"; the
+// re-registration-with-another-session case is the separate divergent row
+// EPSL-TRACK-SESSION-COMES-FROM-CALLER.
+// J12: was `pready(p)`. Premises: `pool_inv` + D5 (D-RANGE-SC-002-d0657c) exactly at the register
+// call, and D6 (D-RANGE-FR-004-7a18db) exactly at EACH of the two calls that contain a tick:
+// `clock < u64::MAX` at register and `clock' < u64::MAX` at touch, where register ticks exactly once
+// (fresh path: tick; re-registration path: `touch` of the existing block, one tick), so clock' =
+// clock + 1 and the two D6 instances are together exactly `clock + 1 < u64::MAX`.
+#[requires(pool_inv(p))]
+#[requires(p.clock@ + 1 < 18446744073709551615)]
+#[requires(p.nodes@.len() <= 4294967295)]
 #[ensures(!map_mem((*p).by_key.e@, key) ==> ((^p).nodes@[result@]).session == session)]
 #[ensures(map_mem((*p).by_key.e@, key) ==>
              ((^p).nodes@[result@]).session == ((*p).nodes@[result@]).session)]
@@ -4393,10 +4589,15 @@ pub fn verify_epsl_inv_block_belongs_to_exactly_one_session(
     r
 }
 
-#[requires(pready(p))]
-#[requires(!map_mem(p.by_key.e@, key))]
-#[ensures(((^p).nodes@[result@]).session != session)]
-// FALSE: a fresh block's session is the one the caller named
+#[requires(pool_inv(p))]
+#[requires(p.clock@ + 1 < 18446744073709551615)]
+#[requires(p.nodes@.len() <= 4294967295)]
+#[ensures(!(!map_mem((*p).by_key.e@, key) ==> ((^p).nodes@[result@]).session == session))] // FLIPPED: must fail
+#[ensures(map_mem((*p).by_key.e@, key) ==>
+             ((^p).nodes@[result@]).session == ((*p).nodes@[result@]).session)]
+#[ensures(forall<j: Int> 0 <= j && j < (*p).nodes@.len() && ((*p).nodes@[j]).active
+             && j != result@ ==>
+                ((^p).nodes@[j]).session == ((*p).nodes@[j]).session)]
 pub fn verify_epsl_inv_block_belongs_to_exactly_one_session__mutant(
     p: &mut Pool, key: u64, session: u64, ti: u32,
 ) -> u32 {
@@ -4488,50 +4689,116 @@ pub fn verify_epsl_inv_handles_keep_naming_their_block(
 
 // ---- EPSL-NO-INPUT-CAN-MAKE-AN-OPERATION-PANIC -------------------—
 // Totality: Creusot discharges every implicit panic obligation (index bounds, arithmetic overflow,
-// `unwrap`) as part of proving a function, so a green proof over ARBITRARY inputs IS the
-// no-panic claim. This driver feeds every operation unconstrained arguments — any domain id, any
-// handle, any key, any session, any requested count — and returns.
-#[requires(ready(s, t))]
-#[requires(log_room(log))]
-#[ensures((^s).pools@.len() == (*s).pools@.len())]
+// `unwrap`) as part of proving a function, so a green proof over ARBITRARY inputs IS the no-panic
+// claim. Every one of the nine operations is fed unconstrained arguments -- any domain id, any
+// handle, any group, any key, any session, any requested count.
+// J12 (fresh): was ONE state threaded through every operation under `ready(s,t)` (a constant margin
+// on every pool's clock/arena/count) and without `create_pool`. Now each operation that can tick or
+// allocate gets its OWN arbitrary state satisfying the proved `pools_inv` and EXACTLY the declared
+// ranges of that operation at that call, so no premise accumulates across calls:
+//   track  (st): D6 + D5 on the pool it names;   touch (su): D6 on the pool it names;
+//   batch_touch (sb, group [h0, h1]): D6 at each `Pool::touch` call the walk makes (the 2nd call is
+//     reached only if h0 was accepted; in the same pool its clock is then clock + 1);
+//   remove / identify_next_to_evict / len / get_eviction_candidates / clear_pool (sr): no range;
+//   create_pool (sc): D4 (D-RANGE-IFACE-CREATE_POOL-4eb401) `state.pools.len() <= u32::MAX`.
+// D7 (D-RANGE-FR-015-e06e85, locks never poisoned) is the lock model itself: `state_read_lock`,
+// `state_write_lock` and `lock_acquire` are total (every `.unwrap()` on a lock succeeds), which is
+// exactly the assumption that no lock is poisoned at entry. D1 is not used.
+// J12: the `Log` / `LockTrace` observation counters are mirror-only instruments (no production
+// state). They are created FRESH (all zero) inside the driver instead of being taken as inputs, so
+// the driver carries no premise on them at all (was `ready(s, t)` / `log_room(log)`).
+#[requires(pools_inv(st))]
+#[requires(pool@ < (*st).pools@.len() ==>
+             ((*st).pools@[pool@]).clock@ < 18446744073709551615 && ((*st).pools@[pool@]).nodes@.len() <= 4294967295)]
+#[requires(pools_inv(su))]
+#[requires(h.pool@ < (*su).pools@.len() ==> ((*su).pools@[h.pool@]).clock@ < 18446744073709551615)]
+#[requires(pools_inv(sb))]
+#[requires(h0.pool@ < (*sb).pools@.len() ==> ((*sb).pools@[h0.pool@]).clock@ < 18446744073709551615)]
+#[requires(h0.pool@ < (*sb).pools@.len()
+              && h0.index@ < ((*sb).pools@[h0.pool@]).nodes@.len()
+              && (((*sb).pools@[h0.pool@]).nodes@[h0.index@]).active
+              && h1.pool@ < (*sb).pools@.len() && h1.pool != h0.pool ==>
+             ((*sb).pools@[h1.pool@]).clock@ < 18446744073709551615)]
+#[requires(h0.pool@ < (*sb).pools@.len()
+              && h0.index@ < ((*sb).pools@[h0.pool@]).nodes@.len()
+              && (((*sb).pools@[h0.pool@]).nodes@[h0.index@]).active
+              && h1.pool == h0.pool ==>
+             ((*sb).pools@[h0.pool@]).clock@ + 1 < 18446744073709551615)]
+#[requires(pools_inv(sr))]
+#[requires(pools_inv(sc))]
+#[requires((*sc).pools@.len() <= 4294967295)]
+#[ensures((^sr).pools@.len() == (*sr).pools@.len())]
+#[ensures((^sc).pools@.len() == (*sc).pools@.len() + 1)]
 pub fn verify_epsl_no_input_can_make_an_operation_panic(
-    s: &mut Pools, pool: u32, key: u64, session: u64, h: Handle, n: usize,
-    log: &mut Log, connected: bool, t: &mut LockTrace,
-) -> (Result<Handle, PolicyError>, Option<u64>, usize, Vec<u64>) {
-    let a = state_track(s, pool, key, session, log, connected, t);
-    let b = state_touch(s, Handle { pool: h.pool, index: h.index }, t);
-    let c = state_remove(s, Handle { pool: h.pool, index: h.index }, t);
-    let d = state_batch_touch2(s, Handle { pool: h.pool, index: h.index }, h, t);
-    let v = state_evict(s, pool, t);
-    let l = state_len(s, pool, t);
-    let e = state_candidates(s, pool, n, t);
-    state_clear_pool(s, pool, t);
-    let _ = b;
-    let _ = c;
-    let _ = d;
-    (a, v, l, e)
+    st: &mut Pools, su: &mut Pools, sb: &mut Pools, sr: &mut Pools, sc: &mut Pools,
+    pool: u32, key: u64, session: u64, h: Handle, h0: Handle, h1: Handle, n: usize,
+    connected: bool,
+) -> (Result<Handle, PolicyError>, Option<u64>, usize, Vec<u64>, u32) {
+    let mut t = LockTrace { held: 0, peak: 0, acquires: 0, writes: 0, reads: 0 };
+    let mut log = Log { info: 0, debug: 0, warn: 0 };
+    let a = state_track(st, pool, key, session, &mut log, connected, &mut t);
+    let mut t = LockTrace { held: 0, peak: 0, acquires: 0, writes: 0, reads: 0 };
+    let b = state_touch(su, h, &mut t);
+    let mut t = LockTrace { held: 0, peak: 0, acquires: 0, writes: 0, reads: 0 };
+    let d = state_batch_touch2(sb, h0, h1, &mut t);
+    let mut t = LockTrace { held: 0, peak: 0, acquires: 0, writes: 0, reads: 0 };
+    let c = state_remove(sr, h, &mut t);
+    let v = state_evict(sr, pool, &mut t);
+    let l = state_len(sr, pool, &mut t);
+    let e = state_candidates(sr, pool, n, &mut t);
+    state_clear_pool(sr, pool, &mut t);
+    let mut t = LockTrace { held: 0, peak: 0, acquires: 0, writes: 0, reads: 0 };
+    let mut log = Log { info: 0, debug: 0, warn: 0 };
+    let id = state_create_pool(sc, &mut log, connected, &mut t);
+    let _ = (b, c, d);
+    (a, v, l, e, id)
 }
 
-#[requires(ready(s, t))]
-#[requires(log_room(log))]
-#[ensures((^s).pools@.len() == (*s).pools@.len() + 1)]
-// FALSE: none of these operations creates a domain
+#[requires(pools_inv(st))]
+#[requires(pool@ < (*st).pools@.len() ==>
+             ((*st).pools@[pool@]).clock@ < 18446744073709551615 && ((*st).pools@[pool@]).nodes@.len() <= 4294967295)]
+#[requires(pools_inv(su))]
+#[requires(h.pool@ < (*su).pools@.len() ==> ((*su).pools@[h.pool@]).clock@ < 18446744073709551615)]
+#[requires(pools_inv(sb))]
+#[requires(h0.pool@ < (*sb).pools@.len() ==> ((*sb).pools@[h0.pool@]).clock@ < 18446744073709551615)]
+#[requires(h0.pool@ < (*sb).pools@.len()
+              && h0.index@ < ((*sb).pools@[h0.pool@]).nodes@.len()
+              && (((*sb).pools@[h0.pool@]).nodes@[h0.index@]).active
+              && h1.pool@ < (*sb).pools@.len() && h1.pool != h0.pool ==>
+             ((*sb).pools@[h1.pool@]).clock@ < 18446744073709551615)]
+#[requires(h0.pool@ < (*sb).pools@.len()
+              && h0.index@ < ((*sb).pools@[h0.pool@]).nodes@.len()
+              && (((*sb).pools@[h0.pool@]).nodes@[h0.index@]).active
+              && h1.pool == h0.pool ==>
+             ((*sb).pools@[h0.pool@]).clock@ + 1 < 18446744073709551615)]
+#[requires(pools_inv(sr))]
+#[requires(pools_inv(sc))]
+#[requires((*sc).pools@.len() <= 4294967295)]
+#[ensures((^sr).pools@.len() == (*sr).pools@.len())]
+#[ensures(!((^sc).pools@.len() == (*sc).pools@.len() + 1))] // FLIPPED: must fail
 pub fn verify_epsl_no_input_can_make_an_operation_panic__mutant(
-    s: &mut Pools, pool: u32, key: u64, session: u64, h: Handle, n: usize,
-    log: &mut Log, connected: bool, t: &mut LockTrace,
-) -> (Result<Handle, PolicyError>, Option<u64>, usize, Vec<u64>) {
-    let a = state_track(s, pool, key, session, log, connected, t);
-    let b = state_touch(s, Handle { pool: h.pool, index: h.index }, t);
-    let c = state_remove(s, Handle { pool: h.pool, index: h.index }, t);
-    let d = state_batch_touch2(s, Handle { pool: h.pool, index: h.index }, h, t);
-    let v = state_evict(s, pool, t);
-    let l = state_len(s, pool, t);
-    let e = state_candidates(s, pool, n, t);
-    state_clear_pool(s, pool, t);
-    let _ = b;
-    let _ = c;
-    let _ = d;
-    (a, v, l, e)
+    st: &mut Pools, su: &mut Pools, sb: &mut Pools, sr: &mut Pools, sc: &mut Pools,
+    pool: u32, key: u64, session: u64, h: Handle, h0: Handle, h1: Handle, n: usize,
+    connected: bool,
+) -> (Result<Handle, PolicyError>, Option<u64>, usize, Vec<u64>, u32) {
+    let mut t = LockTrace { held: 0, peak: 0, acquires: 0, writes: 0, reads: 0 };
+    let mut log = Log { info: 0, debug: 0, warn: 0 };
+    let a = state_track(st, pool, key, session, &mut log, connected, &mut t);
+    let mut t = LockTrace { held: 0, peak: 0, acquires: 0, writes: 0, reads: 0 };
+    let b = state_touch(su, h, &mut t);
+    let mut t = LockTrace { held: 0, peak: 0, acquires: 0, writes: 0, reads: 0 };
+    let d = state_batch_touch2(sb, h0, h1, &mut t);
+    let mut t = LockTrace { held: 0, peak: 0, acquires: 0, writes: 0, reads: 0 };
+    let c = state_remove(sr, h, &mut t);
+    let v = state_evict(sr, pool, &mut t);
+    let l = state_len(sr, pool, &mut t);
+    let e = state_candidates(sr, pool, n, &mut t);
+    state_clear_pool(sr, pool, &mut t);
+    let mut t = LockTrace { held: 0, peak: 0, acquires: 0, writes: 0, reads: 0 };
+    let mut log = Log { info: 0, debug: 0, warn: 0 };
+    let id = state_create_pool(sc, &mut log, connected, &mut t);
+    let _ = (b, c, d);
+    (a, v, l, e, id)
 }
 
 // ---- EPSL-HANDLE-VALIDATION-IS-OCCUPANCY-ONLY -------------------—
@@ -4874,27 +5141,61 @@ pub fn verify_epsl_only_pool_creation_takes_the_exclusive_lock__mutant(
 }
 
 // ---- EPSL-EVICT-NONEMPTY-DOMAIN-ALWAYS-YIELDS-A-VICTIM ----------—
-// "A domain that tracks blocks always yields a victim" reduces to "a non-empty chain always has a
-// childless block", i.e. the EXISTENCE of the maximal element of the parent order. The strictly
-// decreasing `birth` measure rules out cycles, so such a block exists — but exhibiting it is a
-// maximum-of-a-finite-set argument, not a first-order one. What is proved here is the equivalent
-// first-order statement the data structure actually maintains: the candidate set and the session
-// index have the same size, so the domain yields a victim exactly when it knows a session, and a
-// non-empty candidate set always yields one.
-#[requires(pready(p))]
+/// J12: every live block's chain reaches a live CHILDLESS block. By induction along `child`:
+/// a child is live with `parent == Some(i)` (`child_links_agree`), so its registration stamp
+/// `birth` is strictly larger (`chain_birth_decreases`) and bounded by the clock -- the measure
+/// `clock - birth` strictly decreases and stays >= 0. Uses only the proved invariant `pool_inv`.
+#[logic]
+#[requires(pool_inv(p))]
+#[variant(p.clock@ - (p.nodes@[i]).birth@)]
+#[ensures(0 <= i && i < p.nodes@.len() && (p.nodes@[i]).active ==>
+             exists<j: Int> 0 <= j && j < p.nodes@.len() && (p.nodes@[j]).active
+                 && (p.nodes@[j]).child == None)]
+pub fn lemma_chain_reaches_a_leaf(p: &Pool, i: Int) {
+    pearlite! {
+        if 0 <= i && i < p.nodes@.len() && (p.nodes@[i]).active {
+            match (p.nodes@[i]).child {
+                Some(c) => lemma_chain_reaches_a_leaf(p, c@),
+                None => (),
+            }
+        } else {
+            ()
+        }
+    }
+}
+
+// J12 (fresh): was `pready(p)` and proved only "non-empty LEAF SET => victim". The statement is about
+// a domain that TRACKS at least one block (`len > 0`): now proved directly. len > 0 gives a live
+// block (the key index has len entries, each naming a live slot); the lemma walks its chain to a
+// live childless block; `leaf_in_set` puts that in the candidate set; a non-empty set yields a
+// victim. Premise: only the proved invariant.
+#[requires(pool_inv(p))]
+#[ensures((*p).len@ > 0 ==> result != None)]
 #[ensures((*p).leaves.e@.len() > 0 ==> result != None)]
-#[ensures((*p).sessions.e@.len() > 0 ==> result != None)]
 #[ensures((*p).leaves.e@.len() == (*p).sessions.e@.len())]
 pub fn verify_epsl_evict_nonempty_domain_always_yields_a_victim(p: &mut Pool) -> Option<u64> {
+    proof_assert! { p.len@ > 0 ==> p.by_key.e@.len() > 0 };
+    proof_assert! { p.len@ > 0 ==>
+        ((p.by_key.e@[0]).1)@ < p.nodes@.len() && (p.nodes@[((p.by_key.e@[0]).1)@]).active };
+    proof_assert! { lemma_chain_reaches_a_leaf(&*p, ((p.by_key.e@[0]).1)@);
+        p.len@ > 0 ==> exists<j: Int> 0 <= j && j < p.nodes@.len() && (p.nodes@[j]).active
+                           && (p.nodes@[j]).child == None };
+    proof_assert! { p.len@ > 0 ==> p.leaves.e@.len() > 0 };
     pool_evict_oldest(p)
 }
 
-#[requires(pready(p))]
-#[requires(p.leaves.e@.len() > 0)]
-#[ensures(result == None)] // FALSE: a non-empty candidate set always yields a victim
-pub fn verify_epsl_evict_nonempty_domain_always_yields_a_victim__mutant(
-    p: &mut Pool,
-) -> Option<u64> {
+#[requires(pool_inv(p))]
+#[ensures(!((*p).len@ > 0 ==> result != None))] // FLIPPED: must fail
+#[ensures((*p).leaves.e@.len() > 0 ==> result != None)]
+#[ensures((*p).leaves.e@.len() == (*p).sessions.e@.len())]
+pub fn verify_epsl_evict_nonempty_domain_always_yields_a_victim__mutant(p: &mut Pool) -> Option<u64> {
+    proof_assert! { p.len@ > 0 ==> p.by_key.e@.len() > 0 };
+    proof_assert! { p.len@ > 0 ==>
+        ((p.by_key.e@[0]).1)@ < p.nodes@.len() && (p.nodes@[((p.by_key.e@[0]).1)@]).active };
+    proof_assert! { lemma_chain_reaches_a_leaf(&*p, ((p.by_key.e@[0]).1)@);
+        p.len@ > 0 ==> exists<j: Int> 0 <= j && j < p.nodes@.len() && (p.nodes@[j]).active
+                           && (p.nodes@[j]).child == None };
+    proof_assert! { p.len@ > 0 ==> p.leaves.e@.len() > 0 };
     pool_evict_oldest(p)
 }
 

@@ -2,11 +2,11 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_state_evict": { "prover": "alt-ergo", "time": 0.024 },
-      "vc_state_track": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_state_evict": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_state_track": { "prover": "alt-ergo", "time": 0.024 },
       "vc_verify_epsl_locks_assumed_never_poisoned": {
         "prover": "alt-ergo",
-        "time": 0.06
+        "time": 0.053
       }
     }
   }

@@ -2,12 +2,12 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_len_Pool": { "prover": "alt-ergo", "time": 0.024 },
-      "vc_log_site": { "prover": "alt-ergo", "time": 0.024 },
-      "vc_pool_fresh": { "prover": "alt-ergo", "time": 0.024 },
-      "vc_push_Pool": { "prover": "alt-ergo", "time": 0.024 },
-      "vc_state_create_pool": { "prover": "alt-ergo", "time": 0.578 },
-      "vc_state_write_lock": { "prover": "alt-ergo", "time": 0.024 }
+      "vc_len_Pool": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_log_site": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_pool_fresh": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_push_Pool": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_state_create_pool": { "prover": "alt-ergo", "time": 0.584 },
+      "vc_state_write_lock": { "prover": "alt-ergo", "time": 0.014 }
     }
   }
 }

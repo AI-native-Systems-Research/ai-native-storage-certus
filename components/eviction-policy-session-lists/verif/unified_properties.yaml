@@ -283,14 +283,14 @@ properties:
     position the block occupies, and those two pieces are exactly what a later recency refresh or stop-tracking
     request uses to find the block again.'
   creusot:
-    fidelity: ghost-mirror
     note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_epsl_track_returns_usable_handle
       result: Proved
-      wall_clock_s: 0.53
-      peak_rss_mb: 56
+      wall_clock_s: 11.4
+      peak_rss_mb: 359
       lever: null
     status: proved
     _scored_by: scorer_creusot
@@ -1126,13 +1126,13 @@ properties:
     group has its recency refreshed, not just the first or the last one, so all of them count as recently
     used afterwards.
   creusot:
-    fidelity: ghost-mirror
     note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_epsl_batch_touch_refreshes_every_block
       result: Proved
-      wall_clock_s: 0.51
+      wall_clock_s: 0.68
       peak_rss_mb: 54
       lever: null
     status: proved
@@ -1165,14 +1165,14 @@ properties:
     Batching is a performance convenience only, and in particular a block named twice in the group ends
     up with the recency of its last mention.
   creusot:
-    fidelity: ghost-mirror
     note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_epsl_batch_touch_matches_one_at_a_time
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 55
+      wall_clock_s: 0.72
+      peak_rss_mb: 53
       lever: null
     status: proved
     _scored_by: scorer_creusot
@@ -1244,14 +1244,14 @@ properties:
     A block not named in the group keeps its recency, no parent or child link anywhere changes, no block
     is added or removed, and no domain's reported size changes.
   creusot:
-    fidelity: ghost-mirror
     note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_epsl_batch_touch_touches_nothing_else
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 54
+      wall_clock_s: 0.69
+      peak_rss_mb: 53
       lever: null
     status: proved
     _scored_by: scorer_creusot
@@ -1435,14 +1435,17 @@ properties:
     in its own domain. The component switches domains only when consecutive handles in the group name
     different domains, so a group that alternates between two domains changes domains on every step.
   creusot:
+    note: scorer re-ran `cargo creusot` from source -> Proved
     fidelity: trusted-boundary
-    note: 'LEVEL-2 NOT CREDITED (narrowed obligation): the same-pool case refreshes one pool twice in
-      one batch_touch call, ticking its clock twice; under exactly D6 (pool.clock < u64::MAX at the call)
-      the second tick overflows at clock == u64::MAX - 1, so the property is not provable under the declared
-      range (D6 is too weak for batch_touch: it would need clock + handles-in-that-pool <= u64::MAX).
-      Driver and twin renamed narrowed_verify_epsl_batch_touch_relocks_when_the_pool_changes[__mutant]
-      and keep the old ready(s,t) constant-margin premise, so the gate cannot credit them. D2 (D-RANGE-FR-005-e924ec)
-      does not help: it requires occupancy, not clock room.'
+    evidence:
+      modules:
+      - verify_epsl_batch_touch_relocks_when_the_pool_changes
+      result: Proved
+      wall_clock_s: 0.77
+      peak_rss_mb: 53
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-REMOVE-STOPS-TRACKING-THE-BLOCK
   subject: remove
@@ -1520,14 +1523,14 @@ properties:
     new parent, and that parent is given the child as its new child, so the session is still one unbroken
     chain with no gap and no dangling block.'
   creusot:
-    fidelity: ghost-mirror
     note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_epsl_remove_relinks_the_chain
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 54
+      wall_clock_s: 0.64
+      peak_rss_mb: 53
       lever: null
     status: proved
     _scored_by: scorer_creusot
@@ -2078,13 +2081,13 @@ properties:
     one. The policy can never reach a state in which it tracks blocks but reports that none of them may
     be evicted.
   creusot:
-    fidelity: ghost-mirror
     note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_epsl_evict_nonempty_domain_always_yields_a_victim
       result: Proved
-      wall_clock_s: 0.51
+      wall_clock_s: 0.77
       peak_rss_mb: 54
       lever: null
     status: proved
@@ -2111,14 +2114,14 @@ properties:
     No surviving block's recency changes, no other block stops being tracked, and no other session's chain
     is altered.
   creusot:
-    fidelity: ghost-mirror
     note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_epsl_evict_disturbs_only_victim_and_parent
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 54
+      wall_clock_s: 0.69
+      peak_rss_mb: 53
       lever: null
     status: proved
     _scored_by: scorer_creusot
@@ -2153,14 +2156,14 @@ properties:
     in the component changes. A consequence is that the caller cannot tell an unknown domain apart from
     one that is simply empty.'
   creusot:
-    fidelity: ghost-mirror
     note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_epsl_readonly_queries_degrade_safely_on_unknown_domain
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 55
+      wall_clock_s: 0.79
+      peak_rss_mb: 54
       lever: null
     status: proved
     _scored_by: scorer_creusot
@@ -2404,14 +2407,14 @@ properties:
   statement: When an eviction domain currently tracks no blocks, a request for candidates returns an empty
     list rather than failing or inventing entries.
   creusot:
-    fidelity: ghost-mirror
     note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_epsl_candidates_empty_domain_returns_empty_list
       result: Proved
-      wall_clock_s: 0.52
-      peak_rss_mb: 54
+      wall_clock_s: 0.76
+      peak_rss_mb: 53
       lever: null
     status: proved
     _scored_by: scorer_creusot
@@ -2695,14 +2698,14 @@ properties:
     nothing to evict, and a candidate request returns an empty list. The implementation also resets the
     domain''s recency counter back to its starting value and discards its whole storage area.'
   creusot:
-    fidelity: ghost-mirror
     note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_epsl_clear_returns_domain_to_empty
       result: Proved
-      wall_clock_s: 0.51
-      peak_rss_mb: 55
+      wall_clock_s: 0.69
+      peak_rss_mb: 54
       lever: null
     status: proved
     _scored_by: scorer_creusot
@@ -3317,14 +3320,14 @@ properties:
     session it belongs to is the one named when it was registered and never changes for as long as the
     block remains tracked.
   creusot:
-    fidelity: ghost-mirror
     note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_epsl_inv_block_belongs_to_exactly_one_session
       result: Proved
-      wall_clock_s: 0.52
-      peak_rss_mb: 55
+      wall_clock_s: 0.85
+      peak_rss_mb: 54
       lever: null
     status: proved
     _scored_by: scorer_creusot
@@ -3518,14 +3521,14 @@ properties:
     any domain identifier, any handle, any cache key, any session identifier and any requested candidate
     count is accepted, and the operation either succeeds or reports an error, never aborting the process.'
   creusot:
-    fidelity: ghost-mirror
     note: scorer re-ran `cargo creusot` from source -> Proved
+    fidelity: ghost-mirror
     evidence:
       modules:
       - verify_epsl_no_input_can_make_an_operation_panic
       result: Proved
-      wall_clock_s: 0.56
-      peak_rss_mb: 60
+      wall_clock_s: 0.78
+      peak_rss_mb: 63
       lever: null
     status: proved
     _scored_by: scorer_creusot
@@ -4206,14 +4209,14 @@ properties:
     spec: null
     code: NV-12
 run:
-  gate_commit: 7acfc58d
+  gate_commit: affb821a
   gate_branch: HEAD
   creusot:
     scored_by: scorer_creusot
     command: scorer_creusot.py components/eviction-policy-session-lists/verif --crate-dir components/eviction-policy-session-lists/verif-creusot
-      --cap-seconds 60 --cap-max 300 --resume
-    started: '2026-10-08T00:36:09-07:00'
-    finished: '2026-10-08T00:40:49-07:00'
+      --cap-seconds 60 --cap-max 300 --resume --only EPSL-BATCH-TOUCH-MATCHES-ONE-AT-A-TIME,EPSL-BATCH-TOUCH-REFRESHES-EVERY-BLOCK,EPSL-BATCH-TOUCH-TOUCHES-NOTHING-ELSE,EPSL-CANDIDATES-EMPTY-DOMAIN-RETURNS-EMPTY-LIST,EPSL-CLEAR-RETURNS-DOMAIN-TO-EMPTY,EPSL-EVICT-DISTURBS-ONLY-VICTIM-AND-PARENT,EPSL-EVICT-NONEMPTY-DOMAIN-ALWAYS-YIELDS-A-VICTIM,EPSL-INV-BLOCK-BELONGS-TO-EXACTLY-ONE-SESSION,EPSL-NO-INPUT-CAN-MAKE-AN-OPERATION-PANIC,EPSL-READONLY-QUERIES-DEGRADE-SAFELY-ON-UNKNOWN-DOMAIN,EPSL-REMOVE-RELINKS-THE-CHAIN,EPSL-TRACK-RETURNS-USABLE-HANDLE,EPSL-BATCH-TOUCH-RELOCKS-WHEN-THE-POOL-CHANGES
+    started: '2026-10-08T18:21:13-07:00'
+    finished: '2026-10-08T18:24:51-07:00'
     creusot: v0.11.0-169-g9cf662ce6
     why3: Why3 platform, version 1.8.2+git
     provers:
@@ -4441,31 +4444,327 @@ level1_sync_check:
     agent, 2026-10-05), applied 2026-10-07
   reclassified: 8
   domain_discordances: 7
+classification:
+  EPSL-BATCH-TOUCH-INVALID-HANDLE-IS-AN-ERROR:
+    class: B
+    reason: null
+    checked_by: kani
+    evidence:
+    - src/lib.rs:179-181
+    - src/session_list.rs:80-82
+    - src/session_list.rs:69-71
+    - src/session_list.rs:182
+    - src/session_list.rs:79-82
+    - src/session_list.rs:123-126
+    - src/session_list.rs:68-71
+    why: batch_touch errors only on an out-of-range or inactive slot; a stale handle whose slot was recycled
+      passes is_active and silently refreshes the unrelated block now in that slot.
+  EPSL-BATCH-TOUCH-MATCHES-ONE-AT-A-TIME:
+    class: A
+    reason: null
+    checked_by: creusot
+    evidence:
+    - src/lib.rs:169-183
+    - src/lib.rs:143-155
+    - src/session_list.rs:123-137
+    - src/session_list.rs:123-136
+    why: on success batch_touch performs exactly the same Pool::touch calls in slice order as individual
+      touch() calls would (same per-pool clock ticks), so the end state is identical and a duplicated
+      handle keeps the stamp of its last mention.
+  EPSL-BATCH-TOUCH-REFRESHES-EVERY-BLOCK:
+    class: A
+    reason: null
+    checked_by: creusot
+    evidence:
+    - src/lib.rs:169-183
+    - src/session_list.rs:123-137
+    - src/session_list.rs:123-136
+    why: batch_touch iterates every handle and calls Pool::touch on each, giving each a fresh tick stamp
+      and re-keying it in the leaf set, so every named block (in a valid group) is refreshed.
+  EPSL-BATCH-TOUCH-TOUCHES-NOTHING-ELSE:
+    class: A
+    reason: null
+    checked_by: creusot
+    evidence:
+    - src/lib.rs:169-183
+    - src/session_list.rs:123-137
+    - src/session_list.rs:123-136
+    why: Pool::touch writes only the named node's stamp, its own leaf-set entry and the pool clock; it
+      never alters parent/child links, by_key, sessions, the free list or len, and batch_touch does nothing
+      beyond calling it.
+  EPSL-CANDIDATES-EMPTY-DOMAIN-RETURNS-EMPTY-LIST:
+    class: A
+    reason: null
+    checked_by: creusot
+    evidence:
+    - src/session_list.rs:196-202
+    - src/session_list.rs:161-175
+    - src/session_list.rs:220-228
+    - src/session_list.rs:161-162
+    - src/session_list.rs:220-227
+    - src/lib.rs:207-213
+    why: candidates maps over the leaves set, which only holds active nodes and is empty whenever no block
+      is tracked, so the result is an empty Vec.
+  EPSL-CANDIDATES-LISTED-IN-EVICTION-ORDER:
+    class: B
+    reason: null
+    checked_by: creusot
+    evidence:
+    - src/session_list.rs:196-202
+    - src/session_list.rs:161-168
+    - src/session_list.rs:164-168
+    why: candidates lists only current leaves oldest-first, but evicting the first one promotes its parent
+      (possibly older) into the leaf set, so only the first entry is guaranteed to match the next victim,
+      not the whole sequence.
+  EPSL-CLEAR-INVALIDATES-EXISTING-HANDLES:
+    class: B
+    reason: null
+    checked_by: kani
+    evidence:
+    - src/session_list.rs:220-228
+    - src/session_list.rs:72-75
+    - src/session_list.rs:80-82
+    - src/session_list.rs:221-222
+    - src/session_list.rs:79-82
+    - src/lib.rs:140
+    why: clear() discards the arena so slot numbering restarts at 0; after enough new registrations a
+      pre-clear handle indexes a live unrelated node and touch/remove succeed on it instead of erroring.
+  EPSL-CLEAR-RETURNS-DOMAIN-TO-EMPTY:
+    class: A
+    reason: null
+    checked_by: creusot
+    evidence:
+    - src/session_list.rs:220-228
+    - src/lib.rs:223-227
+    - src/lib.rs:223-228
+    why: clear() empties nodes, free list, by_key, sessions and leaves and sets clock=0 and len=0, so
+      len is 0, evict_oldest returns None and candidates is empty, exactly including the stated clock
+      reset and arena discard.
+  EPSL-EVICT-DISTURBS-ONLY-VICTIM-AND-PARENT:
+    class: A
+    reason: null
+    checked_by: creusot
+    evidence:
+    - src/session_list.rs:144-185
+    - src/session_list.rs:190-193
+    why: for a leaf victim unlink only clears parent.child, re-adds the parent to leaves at its unchanged
+      stamp, updates that one session's leaf entry and retires the victim's own slot/by_key entry; no
+      other stamp, node or session is written.
+  EPSL-EVICT-DOES-NOT-REFRESH-THE-VICTIM:
+    class: B
+    reason: null
+    checked_by: creusot
+    evidence:
+    - src/session_list.rs:190-193
+    - src/session_list.rs:161-168
+    - src/session_list.rs:144-185
+    - src/session_list.rs:164-168
+    why: eviction never ticks the clock or changes stamps (that part holds), but unlink re-inserts the
+      victim's parent into the leaf set at its own possibly older stamp, so successive victims do not
+      walk "steadily from oldest to newest".
+  EPSL-EVICT-NONEMPTY-DOMAIN-ALWAYS-YIELDS-A-VICTIM:
+    class: A
+    reason: null
+    checked_by: creusot
+    evidence:
+    - src/session_list.rs:107-115
+    - src/session_list.rs:132-135
+    - src/session_list.rs:161-175
+    - src/session_list.rs:190-193
+    - src/lib.rs:200-205
+    - src/session_list.rs:114-115
+    - src/session_list.rs:107-111
+    why: register/touch/unlink maintain that every non-empty session's current leaf is in the leaves set,
+      so a pool with len > 0 has a non-empty leaf set and evict_oldest returns Some.
+  EPSL-HANDLE-OPERATIONS-REJECT-UNKNOWN-DOMAIN:
+    class: B
+    reason: null
+    checked_by: kani
+    evidence:
+    - src/lib.rs:145-148
+    - src/lib.rs:188-191
+    - src/lib.rs:169-181
+    - src/lib.rs:169-180
+    why: touch and remove return InvalidPool(id) with no mutation, but batch_touch first refreshes every
+      earlier handle in the slice and only then returns InvalidPool for a later unknown-pool handle, so
+      "changes nothing" fails for batch_touch.
+  EPSL-INV-BLOCK-BELONGS-TO-EXACTLY-ONE-SESSION:
+    class: A
+    reason: null
+    checked_by: creusot
+    evidence:
+    - src/session_list.rs:27-28
+    - src/session_list.rs:97-105
+    - src/session_list.rs:144-185
+    - src/session_list.rs:28
+    - src/session_list.rs:97-101
+    - src/session_list.rs:90-94
+    why: each Node has a single session field set once at allocation from the caller's session and never
+      written again while active, and the parent link is taken from that same session's leaf; the re-registration-with-a-different-session
+      case is the separate B row EPSL-TRACK-SESSION-COMES-FROM-CALLER.
+  EPSL-INV-FAILED-OPERATIONS-CHANGE-NOTHING:
+    class: B
+    reason: null
+    checked_by: creusot
+    evidence:
+    - src/lib.rs:169-182
+    why: batch_touch returns InvalidHandle/InvalidPool after already refreshing every preceding handle,
+      so a failed group refresh leaves partially applied recency changes; other ops validate before mutating.
+  EPSL-INV-HANDLES-KEEP-NAMING-THEIR-BLOCK:
+    class: B
+    reason: null
+    checked_by: kani
+    evidence:
+    - src/lib.rs:140
+    - src/session_list.rs:69-71
+    - src/session_list.rs:182
+    - src/session_list.rs:220-222
+    - src/session_list.rs:68-71
+    - src/session_list.rs:179-182
+    - src/session_list.rs:221-222
+    why: while a block is live its slot is stable, but the handle is just (pool, slot) with no generation,
+      and freed or cleared slots are reused, so a handle does start naming a different block - violating
+      "never starts identifying a different block".
+  EPSL-INV-RECENCY-STRICTLY-ADVANCES:
+    class: B
+    reason: null
+    checked_by: creusot
+    evidence:
+    - src/session_list.rs:62-65
+    - src/session_list.rs:226
+    - src/session_list.rs:130
+    why: tick() is strictly increasing within an epoch, but clear() resets clock to 0 so stamps issued
+      after a clear repeat earlier values, contradicting "strictly later than every value handed out before
+      in that domain".
+  EPSL-NO-INPUT-CAN-MAKE-AN-OPERATION-PANIC:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - src/lib.rs:130-137
+    - src/lib.rs:145-148
+    - src/lib.rs:158-166
+    - src/lib.rs:202
+    - src/lib.rs:209-211
+    - src/session_list.rs:80-82
+    - src/session_list.rs:123-126
+    - src/session_list.rs:196-202
+    - src/session_list.rs:206-209
+    - src/lib.rs:209-212
+    - src/session_list.rs:79-82
+    why: every caller-supplied pool id and handle index is bounds-checked via Vec::get / is_active before
+      indexing, empty batches are handled, candidates uses take(n) for any n, and keys/sessions are only
+      hash-map keys; the remaining unwraps are on locks that are only poisoned by a prior panic.
+  EPSL-READONLY-QUERIES-DEGRADE-SAFELY-ON-UNKNOWN-DOMAIN:
+    class: A
+    reason: null
+    checked_by: kani
+    evidence:
+    - src/lib.rs:200-202
+    - src/lib.rs:207-212
+    - src/lib.rs:215-220
+    - src/lib.rs:223-227
+    - src/lib.rs:200-205
+    - src/lib.rs:207-213
+    - src/lib.rs:215-221
+    - src/lib.rs:223-228
+    why: each of the four ops looks the pool up with Vec::get and on None returns None / empty Vec / 0
+      / does nothing, mutating no state, so an unknown domain is indistinguishable from an empty one.
+  EPSL-REMOVE-INVALID-HANDLE-IS-AN-ERROR:
+    class: B
+    reason: null
+    checked_by: kani
+    evidence:
+    - src/session_list.rs:206-209
+    - src/session_list.rs:80-82
+    - src/session_list.rs:69-71
+    - src/session_list.rs:182
+    - src/session_list.rs:79-82
+    - src/session_list.rs:68-71
+    - src/lib.rs:193-196
+    why: remove only checks slot range and occupancy, so once a removed block's slot is recycled a stale
+      handle passes and removes the different block now in that slot instead of erroring.
+  EPSL-REMOVE-RELINKS-THE-CHAIN:
+    class: A
+    reason: null
+    checked_by: creusot
+    evidence:
+    - src/session_list.rs:154-159
+    - src/session_list.rs:176
+    - src/session_list.rs:206-211
+    why: unlink sets child.parent = parent and parent.child = child for the removed node, splicing the
+      chain closed, and leaves the session's downstream leaf unchanged for an interior removal.
+  EPSL-TOUCH-INVALID-HANDLE-IS-AN-ERROR:
+    class: B
+    reason: null
+    checked_by: kani
+    evidence:
+    - src/session_list.rs:80-82
+    - src/session_list.rs:123-126
+    - src/session_list.rs:69-71
+    - src/session_list.rs:182
+    - src/session_list.rs:79-82
+    - src/session_list.rs:68-71
+    - src/lib.rs:150-153
+    why: touch only checks that the slot is in range and active; a freed slot is recycled by alloc(),
+      so a handle to a removed/evicted block succeeds and refreshes the new occupant once its slot is
+      reused (FV-BUG-002).
+  EPSL-TRACK-RETURNS-USABLE-HANDLE:
+    class: A
+    reason: null
+    checked_by: creusot
+    evidence:
+    - src/lib.rs:139-140
+    - src/lib.rs:145-150
+    - src/lib.rs:187-193
+    - src/session_list.rs:80-82
+    - components/interfaces/src/ieviction_policy.rs:14-25
+    - src/lib.rs:139
+    - src/lib.rs:140
+    - src/lib.rs:150
+    - src/lib.rs:193
+    - src/session_list.rs:68-76
+    - src/session_list.rs:79-82
+    why: track returns EvictionHandle::new(pool, index) for the slot register() placed the block in, and
+      touch/remove resolve exactly that (pool_id, index) pair; the slot is not reused while the block
+      is active, so the statement as written (representational) holds - the post-removal aliasing gap
+      is covered by the invalid-handle/handle-stability rows.
+  EPSL-TRACK-SESSION-COMES-FROM-CALLER:
+    class: B
+    reason: null
+    checked_by: creusot
+    evidence:
+    - src/session_list.rs:90-94
+    - src/session_list.rs:97
+    - src/session_list.rs:100
+    why: for an already-tracked key, register() takes the by_key early return (touch + return) without
+      reading the session argument, so re-registering under a different session leaves the block in its
+      original session instead of the one the caller named.
+  EPSL-TRACK-SETS-INITIAL-RECENCY:
+    class: B
+    reason: null
+    checked_by: creusot
+    evidence:
+    - src/session_list.rs:62-65
+    - src/session_list.rs:96
+    - src/session_list.rs:92
+    - src/session_list.rs:226
+    why: stamps come from a per-pool counter that clear() resets to 0, so stamps issued after clear_pool
+      repeat earlier ones and are not strictly newer than every value handed out before in that domain
+      (within an epoch the claim holds).
 level2_excluded:
-- EPSL-TRACK-RETURNS-USABLE-HANDLE
 - EPSL-TRACK-SESSION-COMES-FROM-CALLER
 - EPSL-TRACK-SETS-INITIAL-RECENCY
 - EPSL-TOUCH-INVALID-HANDLE-IS-AN-ERROR
 - EPSL-HANDLE-OPERATIONS-REJECT-UNKNOWN-DOMAIN
-- EPSL-BATCH-TOUCH-REFRESHES-EVERY-BLOCK
-- EPSL-BATCH-TOUCH-MATCHES-ONE-AT-A-TIME
 - EPSL-BATCH-TOUCH-INVALID-HANDLE-IS-AN-ERROR
-- EPSL-BATCH-TOUCH-TOUCHES-NOTHING-ELSE
 - EPSL-INV-FAILED-OPERATIONS-CHANGE-NOTHING
-- EPSL-REMOVE-RELINKS-THE-CHAIN
 - EPSL-REMOVE-INVALID-HANDLE-IS-AN-ERROR
 - EPSL-EVICT-DOES-NOT-REFRESH-THE-VICTIM
-- EPSL-EVICT-NONEMPTY-DOMAIN-ALWAYS-YIELDS-A-VICTIM
-- EPSL-EVICT-DISTURBS-ONLY-VICTIM-AND-PARENT
-- EPSL-READONLY-QUERIES-DEGRADE-SAFELY-ON-UNKNOWN-DOMAIN
 - EPSL-CANDIDATES-LISTED-IN-EVICTION-ORDER
-- EPSL-CANDIDATES-EMPTY-DOMAIN-RETURNS-EMPTY-LIST
-- EPSL-CLEAR-RETURNS-DOMAIN-TO-EMPTY
 - EPSL-CLEAR-INVALIDATES-EXISTING-HANDLES
-- EPSL-INV-BLOCK-BELONGS-TO-EXACTLY-ONE-SESSION
 - EPSL-INV-RECENCY-STRICTLY-ADVANCES
 - EPSL-INV-HANDLES-KEEP-NAMING-THEIR-BLOCK
-- EPSL-NO-INPUT-CAN-MAKE-AN-OPERATION-PANIC
 level2_assumptions:
 - id: D-RANGE-FR-015-e29de5
   assume: every handle passed in was returned by track on the same pool and its block has not since been
