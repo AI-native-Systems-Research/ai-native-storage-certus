@@ -52,9 +52,9 @@ properties:
   kani:
     fidelity: kani-tool-boundary
     note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    evidence: null
     delegate_to: 'Creusot FMap: after put(k,v), get(k) == Some(v)'
     status: delegated
-    evidence: {}
     _scored_by: scorer_kani
 - id: PUT-SIZE-LIMIT
   statement: put returns Err(ValueTooLarge) and performs no insertion and no dirty-count increment whenever
@@ -88,13 +88,22 @@ properties:
     _scored_by: scorer_creusot
   kani:
     fidelity: bounded-shallow
-    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
     evidence:
       harness: verify_put_size_limit
       result: SUCCESS
-      wall_clock_s: 13.38
-      peak_rss_mb: 557
+      unwind: 4
+      unwinding_checks: false
+      wall_clock_s: 14.09
+      peak_rss_mb: 588
+      lever: nounwindcheck
+      known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
+      vacuity_checked_under_lever: true
+    status: proved
     _scored_by: scorer_kani
 - id: PUT-OVERWRITE
   statement: A second put on an existing key replaces the value; a following get returns the most recently
@@ -130,9 +139,9 @@ properties:
   kani:
     fidelity: kani-tool-boundary
     note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    evidence: null
     delegate_to: 'Creusot FMap: second insert on same key replaces value, cardinality stays 1'
     status: delegated
-    evidence: {}
     _scored_by: scorer_kani
 - id: GET-NOTFOUND
   statement: get on a key that is not present returns Err(NotFound).
@@ -166,12 +175,12 @@ properties:
   kani:
     fidelity: real
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_get_notfound
       result: SUCCESS
-      wall_clock_s: 5.79
-      peak_rss_mb: 68
+      wall_clock_s: 7.08
+      peak_rss_mb: 402
+    status: proved
     _scored_by: scorer_kani
 - id: DELETE-REMOVES
   statement: 'After delete(key) the key is absent: get(key) returns NotFound and the pair is excluded
@@ -208,9 +217,9 @@ properties:
   kani:
     fidelity: kani-tool-boundary
     note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    evidence: null
     delegate_to: 'Creusot FMap: after remove(k), get(k)==None and !contains(k)'
     status: delegated
-    evidence: {}
     _scored_by: scorer_kani
 - id: DELETE-IDEMPOTENT
   statement: Deleting a key that is not present returns Ok(()) and leaves membership unchanged (idempotent).
@@ -242,11 +251,23 @@ properties:
       lever: null
     _scored_by: scorer_creusot
   kani:
-    fidelity: kani-tool-boundary
-    note: delegated to a named referent (scorer did not re-derive; refuter audits)
-    delegate_to: 'Creusot FMap: remove of an absent key is Ok and leaves the map unchanged'
-    status: delegated
-    evidence: {}
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    evidence:
+      harness: verify_delete_idempotent
+      result: SUCCESS
+      unwind: 4
+      unwinding_checks: false
+      wall_clock_s: 15.1
+      peak_rss_mb: 295
+      lever: nounwindcheck
+      known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
+      vacuity_checked_under_lever: true
+    status: proved
     _scored_by: scorer_kani
 - id: ITERATE-REFLECTS
   statement: 'iterate_all() returns exactly the current set of (key,value) pairs: every present key appears
@@ -281,9 +302,9 @@ properties:
   kani:
     fidelity: kani-tool-boundary
     note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    evidence: null
     delegate_to: 'Creusot FMap: iterate yields exactly the live entries and excludes deleted keys'
     status: delegated
-    evidence: {}
     _scored_by: scorer_kani
 - id: DIRTY-COUNT-INCREMENT
   statement: Each successful put and each delete increases the dirty count by exactly one; a put rejected
@@ -319,9 +340,9 @@ properties:
   kani:
     fidelity: kani-tool-boundary
     note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    evidence: null
     delegate_to: 'Creusot FMap + counter: dirty counter increments by 1 on each put and each delete'
     status: delegated
-    evidence: {}
     _scored_by: scorer_kani
 - id: FORCE-FLUSH-NOOP
   statement: In pure in-memory mode (flush_trigger is None) force_flush() returns Ok(()) as a no-op.
@@ -354,12 +375,12 @@ properties:
   kani:
     fidelity: real
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_force_flush_noop
       result: SUCCESS
-      wall_clock_s: 0.94
-      peak_rss_mb: 62
+      wall_clock_s: 1.36
+      peak_rss_mb: 186
+    status: proved
     _scored_by: scorer_kani
 - id: PAD-SECTOR-ALIGN
   statement: pad_to_sector(size, ss) returns 0 for size 0, else a multiple of ss with size <= result <
@@ -393,12 +414,12 @@ properties:
   kani:
     fidelity: real
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_pad_sector_align
       result: SUCCESS
-      wall_clock_s: 0.63
-      peak_rss_mb: 62
+      wall_clock_s: 0.98
+      peak_rss_mb: 173
+    status: proved
     _scored_by: scorer_kani
 - id: BYTES-TO-SECTORS
   statement: bytes_to_sectors(b, ss) == pad_to_sector(b, ss)/ss == ceil(b/ss) (0 when b==0).
@@ -431,12 +452,12 @@ properties:
   kani:
     fidelity: real
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_bytes_to_sectors
       result: SUCCESS
-      wall_clock_s: 0.66
-      peak_rss_mb: 62
+      wall_clock_s: 1.03
+      peak_rss_mb: 173
+    status: proved
     _scored_by: scorer_kani
 - id: ENTRY-SIZE-ALIGNED
   statement: EntryRecord::serialized_size == pad_to_sector(12 + key.len() + value.len(), ss) and is a
@@ -470,12 +491,12 @@ properties:
   kani:
     fidelity: real
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_entry_size_aligned
       result: SUCCESS
-      wall_clock_s: 10.48
-      peak_rss_mb: 150
+      wall_clock_s: 11.6
+      peak_rss_mb: 359
+    status: proved
     _scored_by: scorer_kani
 - id: SB-GEOMETRY
   statement: Superblock::new(ss, ps) with ps > 1 yields region_a_offset=1, region_a_size=region_b_size=(ps-1)/2,
@@ -510,12 +531,12 @@ properties:
   kani:
     fidelity: real
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_sb_geometry
       result: SUCCESS
-      wall_clock_s: 0.68
-      peak_rss_mb: 62
+      wall_clock_s: 1.04
+      peak_rss_mb: 173
+    status: proved
     _scored_by: scorer_kani
 - id: REGION-OFFSET-SWAP
   statement: active_region_offset() and inactive_region_offset() select opposite region offsets by active_region
@@ -549,12 +570,12 @@ properties:
   kani:
     fidelity: real
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_region_offset_swap
       result: SUCCESS
-      wall_clock_s: 0.64
-      peak_rss_mb: 62
+      wall_clock_s: 1.0
+      peak_rss_mb: 173
+    status: proved
     _scored_by: scorer_kani
 - id: REGION-CAPACITY-BYTES
   statement: Superblock::region_capacity_bytes() == region_a_size * (sector_size as u64).
@@ -587,12 +608,12 @@ properties:
   kani:
     fidelity: real
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_region_capacity_bytes
       result: SUCCESS
-      wall_clock_s: 0.58
-      peak_rss_mb: 61
+      wall_clock_s: 0.94
+      peak_rss_mb: 172
+    status: proved
     _scored_by: scorer_kani
 - id: LE-BYTEORDER
   statement: 'The little-endian integer helpers round-trip: read_u64(write_u64(buf,x)) == x (and u32/u16),
@@ -626,12 +647,12 @@ properties:
   kani:
     fidelity: real
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_le_byteorder
       result: SUCCESS
-      wall_clock_s: 3.52
-      peak_rss_mb: 62
+      wall_clock_s: 4.46
+      peak_rss_mb: 323
+    status: proved
     _scored_by: scorer_kani
 - id: CRC32-DETERMINISTIC
   statement: crc32_of is a deterministic pure function of its input bytes (equal inputs give equal CRCs);
@@ -668,12 +689,12 @@ properties:
   kani:
     fidelity: real
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_crc32_deterministic
       result: SUCCESS
-      wall_clock_s: 8.49
-      peak_rss_mb: 241
+      wall_clock_s: 8.84
+      peak_rss_mb: 240
+    status: proved
     _scored_by: scorer_kani
 - id: SB-ROUNDTRIP
   statement: Superblock::serialize then deserialize reproduces every integer field and recomputes a matching
@@ -708,12 +729,12 @@ properties:
   kani:
     fidelity: bounded-shallow
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_sb_roundtrip
       result: SUCCESS
-      wall_clock_s: 35.1
-      peak_rss_mb: 701
+      wall_clock_s: 36.21
+      peak_rss_mb: 704
+    status: proved
     _scored_by: scorer_kani
 - id: SB-CRC-REJECT
   statement: 'A serialized superblock whose CRC-covered prefix is altered (recomputed CRC != stored CRC)
@@ -747,12 +768,12 @@ properties:
   kani:
     fidelity: real
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_sb_crc_reject
       result: SUCCESS
-      wall_clock_s: 29.88
-      peak_rss_mb: 358
+      wall_clock_s: 31.18
+      peak_rss_mb: 359
+    status: proved
     _scored_by: scorer_kani
 - id: SB-MAGIC-REJECT
   statement: Superblock::deserialize returns None when the leading magic != SUPERBLOCK_MAGIC, the version
@@ -786,12 +807,12 @@ properties:
   kani:
     fidelity: real
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_sb_magic_reject
       result: SUCCESS
-      wall_clock_s: 17.06
-      peak_rss_mb: 264
+      wall_clock_s: 18.18
+      peak_rss_mb: 349
+    status: proved
     _scored_by: scorer_kani
 - id: REGIONHEADER-ROUNDTRIP
   statement: RegionHeader::serialize then deserialize reproduces flush_seq, entry_count, and total_data_bytes
@@ -825,12 +846,12 @@ properties:
   kani:
     fidelity: bounded-shallow
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_regionheader_roundtrip
       result: SUCCESS
-      wall_clock_s: 10.11
-      peak_rss_mb: 172
+      wall_clock_s: 11.29
+      peak_rss_mb: 346
+    status: proved
     _scored_by: scorer_kani
 - id: ENTRY-ROUNDTRIP
   statement: EntryRecord::serialize then deserialize reproduces the exact key String, value bytes, and
@@ -870,12 +891,12 @@ properties:
   kani:
     fidelity: bounded-shallow
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_entry_roundtrip
       result: SUCCESS
-      wall_clock_s: 312.83000000000004
+      wall_clock_s: 307.86
       peak_rss_mb: 1219
+    status: proved
     _scored_by: scorer_kani
 - id: ENTRY-CRC-REJECT
   statement: Altering a byte within the CRC-covered portion of a serialized EntryRecord (recomputed CRC
@@ -912,12 +933,12 @@ properties:
   kani:
     fidelity: real
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_entry_crc_reject
       result: SUCCESS
-      wall_clock_s: 99.4
-      peak_rss_mb: 1209
+      wall_clock_s: 100.85
+      peak_rss_mb: 1210
+    status: proved
     _scored_by: scorer_kani
 - id: REGION-ROUNDTRIP
   statement: serialize_region(entries, seq, ss) then deserialize_region reproduces the header (flush_seq==seq,
@@ -957,12 +978,12 @@ properties:
   kani:
     fidelity: bounded-shallow
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_region_roundtrip
       result: SUCCESS
-      wall_clock_s: 362.63
-      peak_rss_mb: 1717
+      wall_clock_s: 362.65
+      peak_rss_mb: 1716
+    status: proved
     _scored_by: scorer_kani
 - id: FLUSH-SEQ-MONOTONE
   statement: A flush computes new_seq = flush_seq + 1 (strictly greater than the previous flush_seq) and
@@ -997,12 +1018,12 @@ properties:
   kani:
     fidelity: real
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_flush_seq_monotone
       result: SUCCESS
-      wall_clock_s: 0.56
-      peak_rss_mb: 62
+      wall_clock_s: 0.91
+      peak_rss_mb: 172
+    status: proved
     _scored_by: scorer_kani
 - id: FLUSH-PINGPONG-ATOMIC
   statement: Flush writes the serialized state to the inactive region and only then flips active_region
@@ -1035,10 +1056,10 @@ properties:
   kani:
     fidelity: null
     note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    evidence: null
     delegate_to: 'block-device write-ordering: FlushManager::do_flush commit-point ordering over MockBlockDevice
       (src/flush.rs)'
     status: delegated
-    evidence: {}
     _scored_by: scorer_kani
 - id: FLUSH-CAPACITY-CHECK
   statement: flush_to_disk returns Err before writing when the serialized region requires more sectors
@@ -1074,12 +1095,12 @@ properties:
   kani:
     fidelity: real
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_flush_capacity_check
       result: SUCCESS
-      wall_clock_s: 0.56
-      peak_rss_mb: 62
+      wall_clock_s: 0.91
+      peak_rss_mb: 170
+    status: proved
     _scored_by: scorer_kani
 - id: CRASH-CONSISTENCY
   statement: A crash at any point during a flush leaves either the previously-committed state or the new
@@ -1111,9 +1132,9 @@ properties:
   kani:
     fidelity: null
     note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    evidence: null
     delegate_to: 'crash-injection: MockBlockDevice fault injection + recovery::recover_from_disk (src/recovery.rs)'
     status: delegated
-    evidence: {}
     _scored_by: scorer_kani
 - id: RECOVER-ACTIVE
   statement: Recovery reads the superblock, selects the active region, and deserializes its entries back
@@ -1144,9 +1165,9 @@ properties:
   kani:
     fidelity: null
     note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    evidence: null
     delegate_to: 'block-device I/O: recovery::recover_from_disk active-region read (src/recovery.rs)'
     status: delegated
-    evidence: {}
     _scored_by: scorer_kani
 - id: RECOVER-FALLBACK
   statement: If the active region is corrupt or its flush_seq mismatches, recovery falls back to the inactive
@@ -1177,9 +1198,9 @@ properties:
   kani:
     fidelity: null
     note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    evidence: null
     delegate_to: 'block-device I/O: recovery::recover_from_disk inactive-region fallback (src/recovery.rs)'
     status: delegated
-    evidence: {}
     _scored_by: scorer_kani
 - id: RECOVER-FRESH
   statement: A partition with no valid superblock (bad magic/CRC / all zeros), or with both regions corrupt,
@@ -1210,9 +1231,9 @@ properties:
   kani:
     fidelity: null
     note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    evidence: null
     delegate_to: 'block-device I/O: recovery::recover_from_disk fresh-format path (src/recovery.rs)'
     status: delegated
-    evidence: {}
     _scored_by: scorer_kani
 - id: CONCURRENT-READERS
   statement: Multiple concurrent get()/iterate_all() calls acquire a shared read lock and proceed without
@@ -1247,9 +1268,9 @@ properties:
   kani:
     fidelity: null
     note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    evidence: null
     delegate_to: 'Loom: RwLock<HashMap> concurrent read vs exclusive write interleavings (src/lib.rs)'
     status: delegated
-    evidence: {}
     _scored_by: scorer_kani
 - id: ITERATE-CONCURRENT-SAFE
   statement: Concurrent writers do not corrupt the result of an in-progress iterate_all(); the returned
@@ -1280,9 +1301,9 @@ properties:
   kani:
     fidelity: null
     note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    evidence: null
     delegate_to: 'Loom: iterate_all read-lock vs put/delete write-lock interleavings (src/lib.rs)'
     status: delegated
-    evidence: {}
     _scored_by: scorer_kani
 - id: FLUSH-COALESCE
   statement: Multiple concurrent force_flush()/trigger_flush() calls coalesce into a single in-flight
@@ -1314,9 +1335,9 @@ properties:
   kani:
     fidelity: null
     note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    evidence: null
     delegate_to: 'Loom: FlushManager Condvar wait_while flush coalescing (src/flush.rs)'
     status: delegated
-    evidence: {}
     _scored_by: scorer_kani
 - id: FLUSH-BG-TRIGGERS
   statement: The background FlushManager flushes on a configurable timer interval and when the dirty count
@@ -1349,10 +1370,10 @@ properties:
   kani:
     fidelity: null
     note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    evidence: null
     delegate_to: 'background timer/thread model: FlushManager worker timer interval + dirty-count threshold
       (src/flush.rs)'
     status: delegated
-    evidence: {}
     _scored_by: scorer_kani
 - id: FLUSH-FINAL-ON-DROP
   statement: Dropping a FlushManager sets shutdown, wakes the worker, and joins it after one final flush
@@ -1383,9 +1404,9 @@ properties:
   kani:
     fidelity: null
     note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    evidence: null
     delegate_to: 'thread-join/drop: FlushManager::drop final do_flush on shutdown (src/flush.rs)'
     status: delegated
-    evidence: {}
     _scored_by: scorer_kani
 - id: FORCE-FLUSH-DURABLE
   statement: When a durable-flush trigger is installed, force_flush() invokes it, blocks until it returns,
@@ -1418,10 +1439,10 @@ properties:
   kani:
     fidelity: null
     note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    evidence: null
     delegate_to: 'block-device durability: FlushTrigger closure -> FlushManager::trigger_flush (src/lib.rs,
       src/flush.rs)'
     status: delegated
-    evidence: {}
     _scored_by: scorer_kani
 - id: BLOCK-IO-CLIENT
   statement: BlockDeviceClient issues ReadSync/WriteSync commands over IBlockDevice channels with DMA-allocated
@@ -1452,10 +1473,10 @@ properties:
   kani:
     fidelity: null
     note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    evidence: null
     delegate_to: 'block-device/DMA: BlockDeviceClient ReadSync/WriteSync + DmaAllocFn over IBlockDevice
       (src/block_io.rs)'
     status: delegated
-    evidence: {}
     _scored_by: scorer_kani
 - id: COMPONENT-MACRO-WIRING
   statement: define_component! correctly wires the component to provide IExtendedMetadataStore with an
@@ -1491,10 +1512,10 @@ properties:
   kani:
     fidelity: null
     note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    evidence: null
     delegate_to: 'component-framework: define_component!/query_interface! wiring of IExtendedMetadataStore
       (src/lib.rs)'
     status: delegated
-    evidence: {}
     _scored_by: scorer_kani
 - id: NV-LOGGING
   statement: Each interface method emits a logger.debug(...) side effect when the ILogger receptacle is
@@ -1612,8 +1633,8 @@ properties:
     - SC-7
     code: []
 run:
-  gate_commit: c4f19575
-  gate_branch: skills/verify-methodology-to-unstable
+  gate_commit: 93939bc
+  gate_branch: main
   creusot:
     scored_by: scorer_creusot
     command: scorer_creusot.py /home/cornel/rescore-overnight-20260926/extended-metadata-store/verif --crate-dir
@@ -1634,14 +1655,13 @@ run:
     mem_max_mb: 16384
   kani:
     scored_by: scorer_kani
-    command: scorer_kani.py /home/cornel/rescore-overnight-20260926/extended-metadata-store/verif --component-dir
-      /home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store --cap-seconds
-      120 --cap-max 300
-    started: '2026-09-27T04:34:39-07:00'
-    finished: '2026-09-27T04:54:22-07:00'
+    command: scorer_kani.py /home/cornel/pagefix-verif-kani-extended-metadata-store/components/extended-metadata-store/verif
+      --component-dir /home/cornel/pagefix-verif-kani-extended-metadata-store/components/extended-metadata-store
+      --cap-seconds 120 --cap-max 300 --resume
+    started: '2026-10-09T10:43:31-07:00'
+    finished: '2026-10-09T10:58:08-07:00'
     kani_version: cargo-kani 0.67.0
     cap_seconds: 120
     cap_max: 300
     mem_max_mb: 16384
-# LEVEL 1 (level1.py): properties derived from a spec<->code discordance; see discordances.yaml. Never sent to the provers.
 level2_excluded: []

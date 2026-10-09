@@ -409,6 +409,36 @@ fn read_u16(data: &[u8], pos: &mut usize) -> u16 {
     val
 }
 
+// Re-export module-private byte helpers and the CRC routine for Kani harnesses
+// ONLY. Compiled exclusively under `cfg(kani)`, so the normal, `testing`, and
+// `spdk` builds are entirely unaffected (no visibility change ships).
+#[cfg(kani)]
+pub mod kani_exports {
+    // Thin pass-throughs to the module-private helpers so Kani harnesses can
+    // exercise the REAL byte-order and CRC routines (each is a single call).
+    pub fn crc32_of(data: &[u8]) -> u32 {
+        super::crc32_of(data)
+    }
+    pub fn write_u64(buf: &mut [u8], pos: &mut usize, val: u64) {
+        super::write_u64(buf, pos, val)
+    }
+    pub fn write_u32(buf: &mut [u8], pos: &mut usize, val: u32) {
+        super::write_u32(buf, pos, val)
+    }
+    pub fn write_u16(buf: &mut [u8], pos: &mut usize, val: u16) {
+        super::write_u16(buf, pos, val)
+    }
+    pub fn read_u64(data: &[u8], pos: &mut usize) -> u64 {
+        super::read_u64(data, pos)
+    }
+    pub fn read_u32(data: &[u8], pos: &mut usize) -> u32 {
+        super::read_u32(data, pos)
+    }
+    pub fn read_u16(data: &[u8], pos: &mut usize) -> u16 {
+        super::read_u16(data, pos)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

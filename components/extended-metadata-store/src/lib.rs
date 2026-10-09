@@ -25,6 +25,11 @@ use std::sync::RwLock;
 
 pub mod on_disk;
 
+// Formal-verification harnesses (Kani). Compiled only under `cfg(kani)` so the
+// normal/default and testing/spdk builds are completely unaffected.
+#[cfg(kani)]
+mod verification;
+
 #[cfg(feature = "testing")]
 pub mod block_io;
 
