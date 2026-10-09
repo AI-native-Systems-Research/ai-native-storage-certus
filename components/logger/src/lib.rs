@@ -425,3 +425,6 @@ mod tests {
         assert!(result.is_err());
     }
 }
+
+#[cfg(kani)]
+mod verification;

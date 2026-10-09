@@ -54,12 +54,12 @@ properties:
   kani:
     fidelity: representative
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_log_error_level_tag
       result: SUCCESS
-      wall_clock_s: 2.11
-      peak_rss_mb: 62
+      wall_clock_s: 2.72
+      peak_rss_mb: 285
+    status: proved
     _scored_by: scorer_kani
 - id: LOG-WARN-LEVEL-TAG
   subject: warn
@@ -102,12 +102,12 @@ properties:
   kani:
     fidelity: representative
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_log_warn_level_tag
       result: SUCCESS
-      wall_clock_s: 2.09
-      peak_rss_mb: 62
+      wall_clock_s: 2.7
+      peak_rss_mb: 285
+    status: proved
     _scored_by: scorer_kani
 - id: LOG-INFO-LEVEL-TAG
   subject: info
@@ -148,12 +148,12 @@ properties:
   kani:
     fidelity: representative
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_log_info_level_tag
       result: SUCCESS
-      wall_clock_s: 2.11
-      peak_rss_mb: 62
+      wall_clock_s: 2.7
+      peak_rss_mb: 285
+    status: proved
     _scored_by: scorer_kani
 - id: LOG-DEBUG-LEVEL-TAG
   subject: debug
@@ -194,12 +194,12 @@ properties:
   kani:
     fidelity: representative
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_log_debug_level_tag
       result: SUCCESS
-      wall_clock_s: 2.1
-      peak_rss_mb: 62
+      wall_clock_s: 2.7
+      peak_rss_mb: 285
+    status: proved
     _scored_by: scorer_kani
 - id: LOG-LINE-FORMAT
   subject: log-line
@@ -247,12 +247,12 @@ properties:
   kani:
     fidelity: representative
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_log_line_format
       result: SUCCESS
-      wall_clock_s: 2.75
-      peak_rss_mb: 62
+      wall_clock_s: 3.38
+      peak_rss_mb: 289
+    status: proved
     _scored_by: scorer_kani
 - id: LOG-TIMESTAMP-ISO8601
   subject: log-line
@@ -298,12 +298,12 @@ properties:
   kani:
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_log_timestamp_iso8601
       result: SUCCESS
-      wall_clock_s: 27.69
+      wall_clock_s: 28.37
       peak_rss_mb: 508
+    status: proved
     _scored_by: scorer_kani
 - id: LOG-NEWLINE-TERMINATED
   subject: log-line
@@ -349,12 +349,12 @@ properties:
   kani:
     fidelity: representative
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_log_newline_terminated
       result: SUCCESS
-      wall_clock_s: 2.33
-      peak_rss_mb: 64
+      wall_clock_s: 2.56
+      peak_rss_mb: 174
+    status: proved
     _scored_by: scorer_kani
 - id: LOG-LEVEL-DISPLAY-STRING
   subject: log-line
@@ -401,12 +401,12 @@ properties:
   kani:
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_log_level_display_string
       result: SUCCESS
-      wall_clock_s: 0.77
-      peak_rss_mb: 61
+      wall_clock_s: 1.02
+      peak_rss_mb: 173
+    status: proved
     _scored_by: scorer_kani
 - id: LOG-FILTER-SUPPRESS
   subject: log-filter
@@ -452,12 +452,12 @@ properties:
   kani:
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_log_filter_suppress
       result: SUCCESS
-      wall_clock_s: 0.82
-      peak_rss_mb: 62
+      wall_clock_s: 1.05
+      peak_rss_mb: 172
+    status: proved
     _scored_by: scorer_kani
 - id: LOG-FILTER-EMIT
   subject: log-filter
@@ -502,12 +502,12 @@ properties:
   kani:
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_log_filter_emit
       result: SUCCESS
-      wall_clock_s: 0.82
-      peak_rss_mb: 62
+      wall_clock_s: 1.05
+      peak_rss_mb: 171
+    status: proved
     _scored_by: scorer_kani
 - id: LOG-DEFAULT-LEVEL-INFO
   subject: log-filter
@@ -550,12 +550,12 @@ properties:
   kani:
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_log_default_level_info
       result: SUCCESS
-      wall_clock_s: 1.57
-      peak_rss_mb: 62
+      wall_clock_s: 1.93
+      peak_rss_mb: 209
+    status: proved
     _scored_by: scorer_kani
 - id: LOG-CONSOLE-COLOR-CODES
   subject: color
@@ -607,12 +607,12 @@ properties:
   kani:
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_log_console_color_codes
       result: SUCCESS
-      wall_clock_s: 2.6
-      peak_rss_mb: 61
+      wall_clock_s: 3.21
+      peak_rss_mb: 291
+    status: proved
     _scored_by: scorer_kani
 - id: LOG-FILE-NO-ANSI
   subject: color
@@ -660,12 +660,12 @@ properties:
   kani:
     fidelity: representative
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_log_file_no_ansi
       result: SUCCESS
-      wall_clock_s: 2.0
-      peak_rss_mb: 62
+      wall_clock_s: 2.24
+      peak_rss_mb: 172
+    status: proved
     _scored_by: scorer_kani
 - id: LOG-FILE-COLOR-DISABLED
   subject: color
@@ -707,12 +707,12 @@ properties:
   kani:
     fidelity: representative
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_log_file_color_disabled
       result: SUCCESS
-      wall_clock_s: 2.08
-      peak_rss_mb: 62
+      wall_clock_s: 2.33
+      peak_rss_mb: 176
+    status: proved
     _scored_by: scorer_kani
 - id: LOG-CONSOLE-COLOR-AUTODETECT
   subject: color
@@ -755,11 +755,11 @@ properties:
     _scored_by: scorer_creusot
   kani:
     fidelity: null
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    evidence: null
     delegate_to: libc::isatty(STDERR_FILENO) FFI (terminal detection is a foreign function / OS-hardware
       boundary CBMC models as an unsupported foreign call)
-    note: delegated to a named referent (scorer did not re-derive; refuter audits)
     status: delegated
-    evidence: {}
     _scored_by: scorer_kani
 - id: LOG-CONSOLE-DEFAULT-STDERR
   subject: destination
@@ -800,11 +800,11 @@ properties:
     _scored_by: scorer_creusot
   kani:
     fidelity: null
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    evidence: null
     delegate_to: std::io::stderr() stream identity (which OS file descriptor the default writer targets
       is an I/O boundary, not a CBMC-expressible value)
-    note: delegated to a named referent (scorer did not re-derive; refuter audits)
     status: delegated
-    evidence: {}
     _scored_by: scorer_kani
 - id: LOG-FILE-OUTPUT-MODE
   subject: destination
@@ -846,11 +846,11 @@ properties:
     _scored_by: scorer_creusot
   kani:
     fidelity: null
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    evidence: null
     delegate_to: std::fs filesystem I/O (real File writer via OpenOptions; foreign filesystem calls, intractable/foreign
       under CBMC)
-    note: delegated to a named referent (scorer did not re-derive; refuter audits)
     status: delegated
-    evidence: {}
     _scored_by: scorer_kani
 - id: LOG-FILE-CREATE
   subject: destination
@@ -892,11 +892,11 @@ properties:
     _scored_by: scorer_creusot
   kani:
     fidelity: null
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    evidence: null
     delegate_to: std::fs::OpenOptions create(true).append(true) filesystem semantics (foreign filesystem
       call outside CBMC)
-    note: delegated to a named referent (scorer did not re-derive; refuter audits)
     status: delegated
-    evidence: {}
     _scored_by: scorer_kani
 - id: LOG-FILE-OPEN-ERROR
   subject: destination
@@ -938,11 +938,11 @@ properties:
     _scored_by: scorer_creusot
   kani:
     fidelity: null
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    evidence: null
     delegate_to: std::fs::OpenOptions::open error path (? propagation of a real io::Error; foreign filesystem
       call outside CBMC)
-    note: delegated to a named referent (scorer did not re-derive; refuter audits)
     status: delegated
-    evidence: {}
     _scored_by: scorer_kani
 - id: LOG-LEVEL-ORDER
   subject: LogLevel-order
@@ -984,12 +984,12 @@ properties:
   kani:
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_log_level_order
       result: SUCCESS
-      wall_clock_s: 0.66
-      peak_rss_mb: 62
+      wall_clock_s: 0.89
+      peak_rss_mb: 171
+    status: proved
     _scored_by: scorer_kani
 - id: LOG-LEVEL-PARSE-MAPPING
   subject: from_env_str
@@ -1036,12 +1036,12 @@ properties:
   kani:
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_log_level_parse_mapping
       result: SUCCESS
-      wall_clock_s: 3.3
-      peak_rss_mb: 90
+      wall_clock_s: 3.69
+      peak_rss_mb: 209
+    status: proved
     _scored_by: scorer_kani
 - id: LOG-LEVEL-PARSE-CASE-INSENSITIVE
   subject: from_env_str
@@ -1087,12 +1087,12 @@ properties:
   kani:
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_log_level_parse_case_insensitive
       result: SUCCESS
-      wall_clock_s: 3.79
-      peak_rss_mb: 104
+      wall_clock_s: 4.05
+      peak_rss_mb: 209
+    status: proved
     _scored_by: scorer_kani
 - id: LOG-LEVEL-PARSE-TRACE-DEBUG
   subject: from_env_str
@@ -1138,12 +1138,12 @@ properties:
   kani:
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_log_level_parse_trace_debug
       result: SUCCESS
-      wall_clock_s: 2.9
-      peak_rss_mb: 81
+      wall_clock_s: 3.22
+      peak_rss_mb: 208
+    status: proved
     _scored_by: scorer_kani
 - id: LOG-LEVEL-PARSE-INVALID-DEFAULT
   subject: from_env_str
@@ -1188,12 +1188,12 @@ properties:
   kani:
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_log_level_parse_invalid_default
       result: SUCCESS
-      wall_clock_s: 2.99
-      peak_rss_mb: 83
+      wall_clock_s: 3.34
+      peak_rss_mb: 208
+    status: proved
     _scored_by: scorer_kani
 - id: LOG-THREAD-SAFE-NO-INTERLEAVE
   subject: thread-safety
@@ -1234,11 +1234,11 @@ properties:
     _scored_by: scorer_creusot
   kani:
     fidelity: null
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    evidence: null
     delegate_to: Loom concurrency model (Kani/CBMC treats atomics/locks as sequential and does not explore
       thread interleavings; non-interleaved writes under the held writer lock is a concurrency property)
-    note: delegated to a named referent (scorer did not re-derive; refuter audits)
     status: delegated
-    evidence: {}
     _scored_by: scorer_kani
 - id: LOG-INTERFACE-DISCOVERY
   subject: integration
@@ -1276,12 +1276,10 @@ properties:
     _scored_by: scorer_creusot
   kani:
     fidelity: null
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    evidence: null
     delegate_to: component_framework crate (define_component!/query_interface / IUnknown vtable machinery,
       outside logger src)
-    note: delegated to a named referent (scorer did not re-derive; refuter audits)
-    status: delegated
-    evidence: {}
-    _scored_by: scorer_kani
 - id: LOG-RECEPTACLE-BIND
   subject: integration
   methods:
@@ -1319,11 +1317,9 @@ properties:
     _scored_by: scorer_creusot
   kani:
     fidelity: null
-    delegate_to: 'component_framework crate (receptacle binding: connect_receptacle_raw -> get())'
     note: delegated to a named referent (scorer did not re-derive; refuter audits)
-    status: delegated
-    evidence: {}
-    _scored_by: scorer_kani
+    evidence: null
+    delegate_to: 'component_framework crate (receptacle binding: connect_receptacle_raw -> get())'
 - id: LOG-WRITE-ERROR-IGNORED
   subject: log
   methods:
@@ -1362,12 +1358,12 @@ properties:
   kani:
     fidelity: representative
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_log_write_error_ignored
       result: SUCCESS
-      wall_clock_s: 0.56
-      peak_rss_mb: 62
+      wall_clock_s: 0.8
+      peak_rss_mb: 169
+    status: proved
     _scored_by: scorer_kani
 - id: LOG-FLUSH-EACH-LINE
   subject: log
@@ -1407,12 +1403,12 @@ properties:
   kani:
     fidelity: representative
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
-    status: proved
     evidence:
       harness: verify_log_flush_each_line
       result: SUCCESS
-      wall_clock_s: 2.28
-      peak_rss_mb: 62
+      wall_clock_s: 2.94
+      peak_rss_mb: 306
+    status: proved
     _scored_by: scorer_kani
 - id: NV-1
   scope: 'FR-001/FR-002: LoggerComponent named and ILogger declared via the framework macros'
@@ -1782,8 +1778,8 @@ coverage:
     Utc::now (lib.rs:203): NV-7
     LoggerState fields (lib.rs:104-108): NV-2
 run:
-  gate_commit: c4f19575
-  gate_branch: skills/verify-methodology-to-unstable
+  gate_commit: 93939bc
+  gate_branch: main
   creusot:
     scored_by: scorer_creusot
     command: scorer_creusot.py /home/cornel/logger-verify-20260921/components/logger/verif --crate-dir
@@ -1803,15 +1799,14 @@ run:
     mem_max_mb: 16384
   kani:
     scored_by: scorer_kani
-    command: scorer_kani.py /home/cornel/logger-verify-20260921/components/logger/verif --component-dir
-      /home/cornel/logger-verify-20260921/components/logger --cap-seconds 120 --cap-max 300
-    started: '2026-09-27T14:16:34-07:00'
-    finished: '2026-09-27T14:18:11-07:00'
+    command: scorer_kani.py /home/cornel/pagefix-verif-kani-logger/components/logger/verif --component-dir
+      /home/cornel/pagefix-verif-kani-logger/components/logger --cap-seconds 120 --cap-max 300 --resume
+    started: '2026-10-09T10:43:28-07:00'
+    finished: '2026-10-09T10:43:29-07:00'
     kani_version: cargo-kani 0.67.0
     cap_seconds: 120
     cap_max: 300
     mem_max_mb: 16384
-# LEVEL 1 (level1.py): properties derived from a spec<->code discordance; see discordances.yaml. Never sent to the provers.
 level2_excluded:
 - LOG-INTERFACE-DISCOVERY
 - LOG-RECEPTACLE-BIND
