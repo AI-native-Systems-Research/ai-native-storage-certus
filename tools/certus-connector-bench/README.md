@@ -160,12 +160,41 @@ python tools/certus-connector-bench/bench_connector_lifecycle.py --mode all --mi
 --num-blocks N         Total blocks per iteration (default: 128)
 --block-bytes N        Per-block size in bytes (default: 2097152 = 2 MiB)
 --gpu N                CUDA device index (default: 0)
+--gpus LIST            Real tensor parallelism, e.g. 0,1 (see below)
 --tp N                 Simulated tensor-parallel world size (default: 1)
 --min-duration SECS    Minimum seconds per phase (default: 5.0)
 --workers N            ThreadPoolExecutor worker count (default: 4)
 --working-set N        Blocks for eviction/contention pressure (default: 512)
 --csv PATH             Append results to CSV file
 --tag TEXT             Tag column for CSV (e.g. branch name)
+```
+
+#### Tensor parallelism: `--gpus` (real) vs `--tp` (simulated)
+
+`--gpus 0,1` runs the vLLM TP=2 pattern for real: one scheduler-side manager and
+one `CertusShmqWorker` per GPU (rank 0 in the benchmark process, ranks 1..W-1 in
+spawned processes on their own devices). Every rank receives the same transfer
+spec, moves its own shard, and a job counts as finished only once all ranks
+report it. `--block-bytes` is each rank's shard size, so to model a fixed model
+under TP pass the single-GPU block size divided by W. Throughput counts all
+shards (`block_bytes × W` per logical block).
+
+Each process claims shmq channels from its own slice, as the production
+connector does, so the server needs `--channels` of at least
+`W × (1 + workers)`, or `W × (1 + 2 × workers)` for `--mode contention` / `all`.
+The benchmark checks this up front and names the value to use.
+
+`--tp N` without `--gpus` keeps the older single-GPU simulation: the manager
+reserves, commits and pins all N shard keys per block, but only the rank-0
+worker writes or loads data, so the other ranks' shards occupy tier space
+without ever being written. It exercises the scheduler-side key expansion, not
+the TP data path.
+
+```bash
+sudo target/release/certus-server --drive-count 4 --channels 32 \
+    --memory-tier-size 4G --memory-tier-eviction-threshold 0.8 --format
+python tools/certus-connector-bench/bench_connector_lifecycle.py \
+    --gpus 0,1 --mode scheduler-step --block-bytes 1048576
 ```
 
 #### Per-mode options

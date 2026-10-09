@@ -24,7 +24,13 @@ Usage (certus-server must be running):
     python bench_connector_lifecycle.py --pattern cold_prefill_store
     python bench_connector_lifecycle.py --pattern warm_prefill_load_and_suffix_store
 
-    # Simulate TP=2 (namespaced keys, 2× server entries per logical block)
+    # Real TP=2: one worker process per GPU (rank i on the i-th device), one
+    # scheduler-side manager. --block-bytes is each rank's shard size.
+    python bench_connector_lifecycle.py --gpus 0,1
+
+    # Simulated TP=2 (namespaced keys, 2× server entries per logical block, but
+    # only rank 0 moves data — the other ranks' shards are reserved, committed
+    # and pinned without ever being written or loaded)
     python bench_connector_lifecycle.py --tp 2
 
     # CSV output for automated collection
@@ -146,9 +152,12 @@ if not _has_vllm():
 
 from certus_shmq_connector.ring import Ring  # noqa: E402
 from certus_shmq_connector.manager import ShmqCertusOffloadingManager  # noqa: E402
-from certus_shmq_connector.handler import _regions_for_block, worker_class  # noqa: E402
+from certus_shmq_connector import handler as _handler_mod  # noqa: E402
+from certus_shmq_connector.handler import (  # noqa: E402
+    _LOAD_TYPE, _STORE_TYPE, _regions_for_block, worker_class,
+)
 from certus_shmq_connector.gpu import KvCacheIpc  # noqa: E402
-from certus_shmq_connector.mediums import CertusLoadStoreSpec  # noqa: E402
+from certus_shmq_connector.mediums import BlockLocation, CertusLoadStoreSpec  # noqa: E402
 
 # handler.py imports make_transfer_result from compat at module level; if we
 # patched compat, propagate the stub into the already-imported handler module.
@@ -1605,6 +1614,152 @@ class _FakeGPUSpec:
         self.block_ids = block_ids
 
 
+# ── real tensor parallelism (--gpus) ────────────────────────────────────────
+#
+# vLLM under TP=W runs one scheduler-side manager and W workers, one per GPU.
+# The scheduler hands every worker the SAME transfer spec (logical keys + GPU
+# block ids); each worker folds its own rank into the keys and moves its own
+# shard, and a job is finished only once every rank reports it. _TPWorkerGroup
+# reproduces that: rank 0 runs in this process, ranks 1..W-1 in spawned
+# processes on their own GPUs, behind the same submit_store / submit_load /
+# get_finished surface the benchmarks already drive.
+
+
+def _tp_rank_main(conn, rank, world_size, gpu, shm_path, block_bytes,
+                  max_blocks, workers):
+    """Entry point of one non-zero TP rank (spawned process)."""
+    torch.cuda.set_device(gpu)
+    # Each process claims channels only from its own slot, as the production
+    # connector does: claims are not atomic across processes.
+    ring = Ring(shm_path, ready_timeout=10.0, log=lambda msg: None,
+                claim_slot=rank, claim_slots=world_size)
+    # This thread only relays messages; the pool threads do the ring I/O.
+    ring.release_channel()
+    region, _tensor = make_kv_region(gpu, block_bytes, max_blocks)
+    executor = ThreadPoolExecutor(max_workers=workers,
+                                  thread_name_prefix=f"bench-shmq-r{rank}")
+    worker = worker_class()(ring, [region], block_bytes, executor,
+                            rank=rank, world_size=world_size)
+    conn.send(("ready", rank))
+    inflight = 0
+    try:
+        while True:
+            # Poll briefly while jobs are in flight, otherwise park on the pipe.
+            if conn.poll(0.0001 if inflight else 0.05):
+                msg = conn.recv()
+                if msg[0] == "stop":
+                    break
+                op, job_id, block_ids, keys = msg
+                spec = CertusLoadStoreSpec([BlockLocation(key=k) for k in keys])
+                if op == "store":
+                    worker.submit_store(job_id, _FakeGPUSpec(block_ids), spec)
+                else:
+                    worker.submit_load(job_id, spec, _FakeGPUSpec(block_ids))
+                inflight += 1
+            for res in worker.get_finished():
+                conn.send((res.job_id, bool(res.success)))
+                inflight -= 1
+    finally:
+        executor.shutdown(wait=True)
+        ring.close()
+
+
+class _TPWorkerGroup:
+    """W CertusShmqWorkers, one per GPU, behind the single-worker interface.
+
+    ``submit_*`` fans the job out to every rank; ``get_finished`` reports a job
+    once all ranks have finished it, successful only if every rank succeeded,
+    with ``transfer_size`` counting all W shards."""
+
+    _READY_TIMEOUT_S = 60.0
+
+    def __init__(self, ring, region, block_bytes, executor, *, gpus,
+                 shm_path, max_blocks, workers):
+        self._world_size = len(gpus)
+        self._block_bytes = block_bytes
+        self._rank0 = worker_class()(ring, [region], block_bytes, executor,
+                                     rank=0, world_size=self._world_size)
+        self._pending: dict[int, list] = {}  # job_id -> [remaining, ok, t0, n, type]
+        self._done: collections.deque = collections.deque()
+        self._conns = []
+        self._procs = []
+        ctx = __import__("multiprocessing").get_context("spawn")
+        for rank in range(1, self._world_size):
+            parent, child = ctx.Pipe()
+            proc = ctx.Process(
+                target=_tp_rank_main,
+                args=(child, rank, self._world_size, gpus[rank], shm_path,
+                      block_bytes, max_blocks, workers),
+                daemon=True,
+            )
+            proc.start()
+            self._conns.append(parent)
+            self._procs.append(proc)
+        for rank, (conn, proc) in enumerate(zip(self._conns, self._procs), start=1):
+            if not conn.poll(self._READY_TIMEOUT_S):
+                self.close()
+                raise RuntimeError(f"TP rank {rank} did not start "
+                                   f"(exitcode={proc.exitcode})")
+            conn.recv()
+
+    def _submit(self, op, job_id, gpu_spec, certus_spec):
+        block_ids = list(gpu_spec.block_ids)
+        keys = list(certus_spec.keys)
+        self._pending[job_id] = [
+            self._world_size, True, time.monotonic(), len(block_ids),
+            _STORE_TYPE if op == "store" else _LOAD_TYPE,
+        ]
+        for conn in self._conns:
+            conn.send((op, job_id, block_ids, keys))
+        if op == "store":
+            return self._rank0.submit_store(job_id, gpu_spec, certus_spec)
+        return self._rank0.submit_load(job_id, certus_spec, gpu_spec)
+
+    def submit_store(self, job_id, src_spec, dst_spec):
+        return self._submit("store", job_id, src_spec, dst_spec)
+
+    def submit_load(self, job_id, src_spec, dst_spec):
+        return self._submit("load", job_id, dst_spec, src_spec)
+
+    def _rank_done(self, job_id, success):
+        entry = self._pending[job_id]
+        entry[0] -= 1
+        entry[1] = entry[1] and success
+        if entry[0] == 0:
+            del self._pending[job_id]
+            _, ok, t0, n, ttype = entry
+            # Resolved per call: the no-vLLM shim patches it in after import.
+            self._done.append(_handler_mod.make_transfer_result(
+                job_id=job_id, success=ok,
+                transfer_size=n * self._block_bytes * self._world_size,
+                transfer_time=time.monotonic() - t0, transfer_type=ttype,
+            ))
+
+    def get_finished(self):
+        for res in self._rank0.get_finished():
+            self._rank_done(res.job_id, bool(res.success))
+        for conn in self._conns:
+            while conn.poll():
+                job_id, success = conn.recv()
+                self._rank_done(job_id, success)
+        out = list(self._done)
+        self._done.clear()
+        return out
+
+    def close(self):
+        for conn in self._conns:
+            try:
+                conn.send(("stop",))
+            except (BrokenPipeError, OSError):
+                pass
+        for proc in self._procs:
+            proc.join(timeout=10)
+            if proc.is_alive():
+                proc.terminate()
+        self._conns.clear()
+        self._procs.clear()
+
+
 def _remove_keys(ring: Ring, keys: list[bytes], world_size: int):
     """Remove all server entries for these keys (all TP ranks)."""
     from certus_shmq_connector.manager import _key_to_u64
@@ -1683,7 +1838,16 @@ def main():
     parser.add_argument("--gpu", type=int, default=0,
                         help="CUDA device index")
     parser.add_argument("--tp", type=int, default=1,
-                        help="Simulated tensor-parallel world size")
+                        help="Simulated tensor-parallel world size: one GPU and "
+                             "one rank-0 worker, so the other ranks' shards are "
+                             "reserved/committed but never written or loaded. "
+                             "Use --gpus for real TP.")
+    parser.add_argument("--gpus", type=str, default=None,
+                        help="Comma-separated CUDA devices for REAL tensor "
+                             "parallelism (e.g. 0,1): one worker per GPU, rank i "
+                             "on the i-th device, one scheduler-side manager. "
+                             "Sets --tp to the device count; --block-bytes is "
+                             "each rank's shard size.")
     parser.add_argument("--min-duration", type=float, default=5.0,
                         help="Minimum seconds per benchmark phase")
     parser.add_argument("--warmup", type=int, default=4,
@@ -1718,15 +1882,35 @@ def main():
                         help="(scheduler-step) Distinct conversations in the pool")
     args = parser.parse_args()
 
+    gpus = [int(g) for g in args.gpus.split(",")] if args.gpus else [args.gpu]
+    real_tp = len(gpus) > 1
+    if real_tp:
+        if len(set(gpus)) != len(gpus):
+            parser.error(f"--gpus lists a device twice: {args.gpus}")
+        if args.tp not in (1, len(gpus)):
+            parser.error(f"--tp {args.tp} conflicts with --gpus {args.gpus}")
+        if args.pattern:
+            parser.error("--pattern does not support --gpus")
+        args.tp = len(gpus)
+        args.gpu = gpus[0]
+    # Throughput accounting counts every rank's shard (each moves block_bytes).
+    acct_block_bytes = args.block_bytes * args.tp if real_tp else args.block_bytes
+
     torch.cuda.set_device(args.gpu)
 
+    tp_mode = "real" if real_tp else ("simulated" if args.tp > 1 else "none")
     print(f"Connector Lifecycle Benchmark")
-    print(f"  shm_path={args.shm_path}  gpu={args.gpu}  tp={args.tp}")
-    print(f"  num_blocks={args.num_blocks}  bs={args.bs}  block_bytes={args.block_bytes}")
+    print(f"  shm_path={args.shm_path}  gpus={gpus}  tp={args.tp} ({tp_mode})")
+    print(f"  num_blocks={args.num_blocks}  bs={args.bs}  block_bytes={args.block_bytes}"
+          + (f" per rank ({acct_block_bytes} per logical block)" if real_tp else ""))
+    if tp_mode == "simulated":
+        print("  NOTE: simulated TP — only rank 0 moves data; use --gpus for real TP")
     print(f"  min_duration={args.min_duration}s  workers={args.workers}")
 
     # ── set up ring + connector objects ──
-    ring = Ring(args.shm_path, ready_timeout=10.0, log=lambda msg: None)
+    # Under real TP each process claims from its own channel slot (rank 0 here).
+    ring = Ring(args.shm_path, ready_timeout=10.0, log=lambda msg: None,
+                claim_slot=0, claim_slots=args.tp if real_tp else 1)
 
     # Clear leaked channel owner words from crashed/exited benchmark processes.
     # The server never touches owner words, so a non-zero owner from a dead
@@ -1745,6 +1929,18 @@ def main():
     # but we just zeroed the owner word above).
     ring._tls.channel = None  # force re-claim on next use
 
+    if real_tp:
+        # Main thread + store pool (+ a load pool in contention mode) must fit
+        # this process's slot; each other rank needs one pool per worker group.
+        per_slot = ring._num_channels // args.tp
+        pools = 2 if args.mode in ("contention", "all") else 1
+        need = 1 + pools * args.workers
+        if per_slot < need:
+            sys.exit(f"error: --gpus {args.gpus} with --workers {args.workers} needs "
+                     f"{need} shmq channels per rank but the server has "
+                     f"{ring._num_channels} ({per_slot} per rank); start "
+                     f"certus-server with --channels {need * args.tp} or more")
+
     manager = ShmqCertusOffloadingManager(
         ring, block_size_bytes=args.block_bytes, world_size=args.tp,
     )
@@ -1756,11 +1952,18 @@ def main():
     load_region, load_tensor = make_kv_region(args.gpu, args.block_bytes, max_blocks)
 
     executor = ThreadPoolExecutor(max_workers=args.workers, thread_name_prefix="bench-shmq")
-    Worker = worker_class()
-    worker = Worker(
-        ring, [store_region], args.block_bytes, executor,
-        rank=0, world_size=args.tp,
-    )
+
+    def make_worker(region, pool):
+        if real_tp:
+            return _TPWorkerGroup(
+                ring, region, args.block_bytes, pool, gpus=gpus,
+                shm_path=args.shm_path, max_blocks=max_blocks,
+                workers=args.workers,
+            )
+        return worker_class()(ring, [region], args.block_bytes, pool,
+                              rank=0, world_size=args.tp)
+
+    worker = make_worker(store_region, executor)
 
     keys = make_content_keys(args.num_blocks)
 
@@ -1802,7 +2005,7 @@ def main():
             if args.direction in ("store", "both"):
                 r = bench_pipelined(
                     manager, worker, [store_region], keys,
-                    args.bs, args.block_bytes, args.min_duration,
+                    args.bs, acct_block_bytes, args.min_duration,
                     pipeline_depth=args.pipeline_depth, direction="store",
                 )
                 r.print_report()
@@ -1811,7 +2014,7 @@ def main():
                 _remove_keys(ring, keys, args.tp)
                 r = bench_pipelined(
                     manager, worker, [store_region], keys,
-                    args.bs, args.block_bytes, args.min_duration,
+                    args.bs, acct_block_bytes, args.min_duration,
                     pipeline_depth=args.pipeline_depth, direction="load",
                 )
                 r.print_report()
@@ -1821,7 +2024,7 @@ def main():
             print(f"\n  Mode: prefix-miss (hit_ratio={args.hit_ratio})")
             r = bench_prefix_miss(
                 manager, worker, [store_region],
-                args.bs, args.block_bytes, args.min_duration,
+                args.bs, acct_block_bytes, args.min_duration,
                 hit_ratio=args.hit_ratio,
                 num_blocks=args.num_blocks,
             )
@@ -1835,17 +2038,15 @@ def main():
             executor_load = ThreadPoolExecutor(
                 max_workers=args.workers, thread_name_prefix="bench-load",
             )
-            Worker_cls = worker_class()
-            w_load = Worker_cls(
-                ring, [load_region], args.block_bytes, executor_load,
-                rank=0, world_size=args.tp,
-            )
+            w_load = make_worker(load_region, executor_load)
             results = bench_contention(
                 manager, manager_load, worker, w_load,
                 [store_region], ring,
-                args.bs, args.block_bytes, args.min_duration,
+                args.bs, acct_block_bytes, args.min_duration,
                 working_set=args.working_set,
             )
+            if real_tp:
+                w_load.close()
             executor_load.shutdown(wait=False)
 
         elif mode == "scheduler-step":
@@ -1853,7 +2054,7 @@ def main():
                   f"sessions={args.num_sessions})")
             r = bench_scheduler_step(
                 manager, worker, [store_region], ring,
-                args.bs, args.block_bytes, args.min_duration,
+                args.bs, acct_block_bytes, args.min_duration,
                 requests_per_step=args.requests_per_step,
                 pipeline_depth=args.pipeline_depth,
                 num_sessions=args.num_sessions,
@@ -1864,7 +2065,7 @@ def main():
         else:  # default
             store_result = bench_store_lifecycle(
                 manager, worker, [store_region], keys,
-                args.bs, args.block_bytes, args.min_duration,
+                args.bs, acct_block_bytes, args.min_duration,
             )
             store_result.print_report()
 
@@ -1873,7 +2074,7 @@ def main():
 
             warm_result = bench_load_lifecycle(
                 manager, worker, [load_region], keys,
-                args.bs, args.block_bytes, args.min_duration,
+                args.bs, acct_block_bytes, args.min_duration,
                 cold=False,
             )
             warm_result.print_report()
@@ -1882,7 +2083,7 @@ def main():
             if not args.no_cold:
                 cold_result = bench_load_lifecycle(
                     manager, worker, [load_region], keys,
-                    args.bs, args.block_bytes, args.min_duration,
+                    args.bs, acct_block_bytes, args.min_duration,
                     cold=True,
                 )
                 cold_result.print_report()
@@ -1893,7 +2094,7 @@ def main():
                 ring.clear_memory_tier()
                 eviction_result = bench_mixed_eviction(
                     manager, worker, [store_region],
-                    args.bs, args.block_bytes, args.min_duration,
+                    args.bs, acct_block_bytes, args.min_duration,
                     working_set=args.working_set,
                     load_fraction=0.5,
                 )
@@ -1934,7 +2135,9 @@ def main():
             "mode": mode,
             "shm_path": args.shm_path,
             "gpu": args.gpu,
+            "gpus": ",".join(map(str, gpus)),
             "tp": args.tp,
+            "tp_mode": tp_mode,
             "bs": args.bs,
             "num_blocks": args.num_blocks,
             "block_bytes": args.block_bytes,
@@ -1970,6 +2173,8 @@ def main():
     # ── cleanup ──
     if mode not in ("pattern", "contention"):
         _remove_keys(ring, keys, args.tp)
+    if real_tp:
+        worker.close()
     executor.shutdown(wait=False)
     ring.close()
 
