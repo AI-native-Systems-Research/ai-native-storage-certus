@@ -1,11 +1,13 @@
 ---
 spec_sync_component: eviction-policy-optimized
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-06T23:46:10Z
-spec_sync_git_commit: 64184293
-spec_sync_inputs_sha256: 7635e51de06bf35575f1b1dab6b7ceb6176e7ffe7ae0158cd1b4bbe004f96b5c
+spec_sync_synced_at: 2026-10-09T21:53:37Z
+spec_sync_git_commit: 83bcd4ff
+spec_sync_inputs_sha256: 912c40d5d1fb77170b9ab7f977ba46ae535b0be0a9ca200da117defd3d6640af
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-09 (transitive: `components/interfaces` changed, branch `fix/evict-blocked-by-pin`).** The only change to this component's hashed inputs is a doc-comment correction on `IDispatchMap::try_evict_to_block` in `components/interfaces/src/idispatch_map.rs` (no signature, type, or behaviour change). This component's own `src/**` and `specs/**` are unchanged, and its previous stamp was re-verified to match `origin/unstable` before re-stamping. **No re-analysis was performed for this component**; this stamp asserts only what was checked.
+
 
 > **Re-stamp 2026-10-06:** inputs changed only through other components' interfaces (`interfaces/src/idispatcher.rs`, `interfaces/src/iremote_lookup.rs`, and the interfaces drift report), none of which eviction-policy-optimized uses; its own `src/`, `specs/` and `ieviction_policy.rs` are unchanged since the previous sync, so that analysis stands.
 > **Sync 2026-10-05 (PR #505, FR-012 stale-handle fix).** Scope: the only `src/` change since the

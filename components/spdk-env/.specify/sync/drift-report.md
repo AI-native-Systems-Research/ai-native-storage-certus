@@ -1,11 +1,13 @@
 ---
 spec_sync_component: spdk-env
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-06T00:17:04Z
-spec_sync_git_commit: bd1598f5
-spec_sync_inputs_sha256: 434551d211795bfc98ca9376af37cbc7f71849d4e1e4e3906ff2f8fee3fe5bb2
+spec_sync_synced_at: 2026-10-09T21:53:37Z
+spec_sync_git_commit: 83bcd4ff
+spec_sync_inputs_sha256: 52e191b9cd1c0f2ef17ec8a98a254587d624d1b2978f8dc0aac231bca649a9e5
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-09 (transitive: `components/interfaces` changed, branch `fix/evict-blocked-by-pin`).** The only change to this component's hashed inputs is a doc-comment correction on `IDispatchMap::try_evict_to_block` in `components/interfaces/src/idispatch_map.rs` (no signature, type, or behaviour change). This component's own `src/**` and `specs/**` are unchanged, and its previous stamp was re-verified to match `origin/unstable` before re-stamping. **No re-analysis was performed for this component**; this stamp asserts only what was checked.
+
 > **Sync 2026-10-05 (branch `fix/poller-cpu-placement-logging`).** Delta analysis on a certified baseline: this component's existing clean stamp was re-verified to equal the spec-sync hash of `git archive origin/unstable`, so the only new inputs are this branch's src/specs/interfaces changes. Every FR/SC touching CPU placement, NUMA pinning, threads or SPDK init was located by grep over specs/** and re-checked against the changed code.
 >
 > - **FR-022 (new) — BACKFILL (moderate).** init_spdk_env saves the caller's affinity (sched_getaffinity) before spdk_env_init and restores it (sched_setaffinity) after, undoing DPDK EAL's main-lcore pin so later-spawned threads do not inherit CPU 0. Best-effort. `components/spdk-env/src/env.rs:91-102, 115-139`. *New behaviour on this branch.* Resolution: FR-022 added; Last Synced header added.
