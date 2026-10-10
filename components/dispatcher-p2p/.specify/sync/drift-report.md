@@ -1,11 +1,13 @@
 ---
 spec_sync_component: dispatcher-p2p
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-10T02:17:10Z
-spec_sync_git_commit: 547107f3
-spec_sync_inputs_sha256: eb5eda6022fef19d3af48be7ed337b3853a55971db866b45df26a8a35ce55b39
+spec_sync_synced_at: 2026-10-10T03:34:28Z
+spec_sync_git_commit: eeac3fac
+spec_sync_inputs_sha256: 413386c97116feeb8fa57aae3f11ae8eda43579c6c239bba81a3af34c993685a
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-09 (test-only dead code removed, same branch).** Removed from `src/lib.rs`'s `#[cfg(test)]` module: the unused helpers `dma_free` and `alloc_dma_buffer`, and the never-constructed `BlockDevice` variant of the test dispatch map's `MockEntryLocation` (the test dispatch map models a demoted entry as `MemoryTier` with a null pointer and an `ssd_offset`, which `lookup` reports as `BlockDevice`). No production code changed and no FR/SC describes these test helpers, so the specs are unaffected.
+
 > **Sync 2026-10-09 (merge of `fix/evict-blocked-by-pin` into `fix/dispatcher-p2p-clean-eviction`).** dispatch-map now returns `ActiveReferences` for a held reference in `try_evict_to_block` (dispatch-map FR-026). Updated here to match:
 >
 > - **FR-029 — DRIFTED (minor) → BACKFILL, applied.** It said a held reference is recognised from `ActiveReferences` *and* from `InvalidState("entry has active references")`; it is now `ActiveReferences` alone. Spec backup: `.specify/sync/backups/20261010T021710Z/spec.md`.

@@ -2965,24 +2965,6 @@ mod tests {
     // Test infrastructure
     // -----------------------------------------------------------------------
 
-    unsafe extern "C" fn dma_free(ptr: *mut std::ffi::c_void) {
-        // SAFETY: ptr was allocated with libc::aligned_alloc in alloc_dma_buffer.
-        unsafe { libc::free(ptr) };
-    }
-
-    fn alloc_dma_buffer(size: usize) -> Arc<DmaBuffer> {
-        let sz = size.max(4096);
-        let aligned_sz = sz.next_multiple_of(4096);
-        let ptr = unsafe { libc::aligned_alloc(4096, aligned_sz) };
-        assert!(
-            !ptr.is_null(),
-            "aligned_alloc failed for {aligned_sz} bytes"
-        );
-        unsafe { std::ptr::write_bytes(ptr as *mut u8, 0, aligned_sz) };
-        let buf = unsafe { DmaBuffer::from_raw(ptr, aligned_sz, dma_free, -1) }.unwrap();
-        Arc::new(buf)
-    }
-
     // --- MockMemoryTier ---
 
     struct MockMtSlot {
@@ -3137,14 +3119,13 @@ mod tests {
 
     // --- MockDispatchMap ---
 
+    /// A demoted entry stays `MemoryTier` with a null `pointer` and its
+    /// `ssd_offset` set; `lookup` reports that as `BlockDevice`.
     enum MockEntryLocation {
         MemoryTier {
             pointer: *mut u8,
             size: u32,
             ssd_offset: Option<u64>,
-        },
-        BlockDevice {
-            offset: u64,
         },
     }
 
@@ -3235,9 +3216,6 @@ mod tests {
                             size: *size,
                         },
                     },
-                    MockEntryLocation::BlockDevice { offset } => {
-                        LookupResult::BlockDevice { offset: *offset }
-                    }
                 },
             };
             // The real dispatch map increments read_ref *before* it inspects the
@@ -3264,7 +3242,6 @@ mod tests {
                         MockEntryLocation::MemoryTier { ssd_offset, .. } => {
                             *ssd_offset = Some(offset);
                         }
-                        MockEntryLocation::BlockDevice { .. } => {}
                     }
                     // The real map consumes the read ref that `downgrade_reference`
                     // installed at populate time, pairing the two.
