@@ -1,11 +1,24 @@
 ---
 spec_sync_component: dispatcher-p2p
-spec_sync_drift_status: drift
-spec_sync_synced_at: 2026-10-10T01:13:03Z
-spec_sync_git_commit: 2775224b
-spec_sync_inputs_sha256: 5df2820b0a2274b75f1398831bc9c28e1ec8cfa67a7c1adee07a31a1d184e6d8
+spec_sync_drift_status: clean
+spec_sync_synced_at: 2026-10-10T01:54:30Z
+spec_sync_git_commit: 9c307fd8
+spec_sync_inputs_sha256: 96202d3c9d0a856bcadd6ead245dbd091476d1760d07e2843669cbe8e557efcc
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-10-10, closing (same branch; spec-only, approved by the user).** The open items of
+> the 2026-10-09 sync are resolved: **D4** → new FR-030 (clean-eviction invariant, #220,
+> `src/lib.rs:606-655, 657-706, 719-753`); **D5** → new FR-031 (`reserve_memory` bounded store
+> backpressure, `src/lib.rs:2444-2522`); **D7** → FR-027 / FR-028 anchors refreshed
+> (`320-371, 977-986`; `2870`). Also found and fixed in this pass: two dated measurement
+> write-ups said the component backfills DRAM, which is no longer the default (FR-014); both are
+> annotated. Every `src/lib.rs` anchor in the requirements was re-read against the code.
+> The anchors `src/lib.rs:1802` and `p2p_ring.rs:58` in the dated "ROOT CAUSE FOUND 2026-09-30"
+> section are left as historical (they cite the code as it was when those defects were found,
+> unchanged since the certified baseline).
+>
+> No actionable drift remains for this component.
+
 > **Sync 2026-10-10 (same branch; spec-only).** FR-009 downgraded from MUST to MAY (backfill
 > runs only when `backfill_delay_ms > 0`, verified at `src/lib.rs:1425`); FR-014 records that
 > `certus-server-yaml` now defaults it to 0 (commit 2775224b) with the measurement behind it;

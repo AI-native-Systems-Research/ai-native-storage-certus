@@ -6,8 +6,8 @@
  "mode": "interactive",
  "summary": {
   "total": 8,
-  "approved": 5,
-  "not_approved": 3
+  "approved": 8,
+  "not_approved": 0
  },
  "proposals": [
   {
@@ -44,9 +44,9 @@
    "id": 4,
    "requirement": "FR-030 (new) clean eviction",
    "direction": "BACKFILL",
-   "approved": false,
-   "approved_by": null,
-   "rejected_by": "not selected (interactive, 2026-10-09)",
+   "approved": true,
+   "approved_by": "user (2026-10-10)",
+   "rejected_by": null,
    "proposed": "Specify the #220 invariant.",
    "location": "src/lib.rs:606-743"
   },
@@ -54,9 +54,9 @@
    "id": 5,
    "requirement": "FR-031 (new) store backpressure",
    "direction": "BACKFILL",
-   "approved": false,
-   "approved_by": null,
-   "rejected_by": "not selected (interactive, 2026-10-09)",
+   "approved": true,
+   "approved_by": "user (2026-10-10)",
+   "rejected_by": null,
    "proposed": "Specify reserve_memory bounded retry and config-driven limits.",
    "location": "src/lib.rs:721-743, 2442-2530"
   },
@@ -64,9 +64,9 @@
    "id": 6,
    "requirement": "FR-027/FR-028 anchors",
    "direction": "BACKFILL",
-   "approved": false,
-   "approved_by": null,
-   "rejected_by": "not selected (interactive, 2026-10-09)",
+   "approved": true,
+   "approved_by": "user (2026-10-10)",
+   "rejected_by": null,
    "proposed": "Refresh line anchors.",
    "location": "spec.md"
   },

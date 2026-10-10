@@ -105,20 +105,20 @@
    "description": "dispatcher spec 002 FR-035 states dispatcher-p2p does not report FR-033/FR-034; after this change it does for the foreground paths. FR-035 lives in components/dispatcher, whose code is unchanged."
   }
  ],
- "drift_status": "drift",
- "synced_at": "2026-10-09T23:49:23Z",
- "git_commit": "906339ee",
- "inputs_sha256": "3cb947c2ed529d00c750b4cf0f3c130e83172f1ece94ab2386328d7eb3873eee",
- "open": [
-  "D4",
-  "D5",
-  "D7"
- ],
+ "drift_status": "clean",
+ "synced_at": "2026-10-10T01:54:30Z",
+ "git_commit": "9c307fd8",
+ "inputs_sha256": "96202d3c9d0a856bcadd6ead245dbd091476d1760d07e2843669cbe8e557efcc",
+ "open": [],
  "resolved": [
   "D1",
   "D2",
   "D3",
+  "D4",
+  "D5",
   "D6",
-  "C1"
+  "D7",
+  "C1",
+  "D8 backfill narrative"
  ]
 }

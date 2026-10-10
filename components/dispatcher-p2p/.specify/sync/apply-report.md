@@ -28,4 +28,4 @@ Backups: `.specify/sync/backups/20261009T234923Z/spec.md`, `components/dispatche
 - Every `file:line` anchor in the edited spec text was re-read against the code after `cargo fmt`.
 - `cargo test -p dispatcher-p2p --lib`: 77 passed. `cargo clippy -p dispatcher-p2p --no-deps --all-targets`: no new warnings vs `3c001478`.
 - ALIGN #7 was applied in code at the user's direction (the skill's default is to emit a task instead).
-- Drift status `drift`: #4-#6 remain open.
+- 2026-10-10: #4-#6 approved and applied (FR-030, FR-031, anchors); backfill narrative annotated. Drift status `clean`.
