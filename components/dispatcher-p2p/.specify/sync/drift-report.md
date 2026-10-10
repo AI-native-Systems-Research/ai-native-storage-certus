@@ -1,11 +1,18 @@
 ---
 spec_sync_component: dispatcher-p2p
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-10T01:54:30Z
-spec_sync_git_commit: 9c307fd8
-spec_sync_inputs_sha256: 96202d3c9d0a856bcadd6ead245dbd091476d1760d07e2843669cbe8e557efcc
+spec_sync_synced_at: 2026-10-10T02:17:10Z
+spec_sync_git_commit: 547107f3
+spec_sync_inputs_sha256: eb5eda6022fef19d3af48be7ed337b3853a55971db866b45df26a8a35ce55b39
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-10-09 (merge of `fix/evict-blocked-by-pin` into `fix/dispatcher-p2p-clean-eviction`).** dispatch-map now returns `ActiveReferences` for a held reference in `try_evict_to_block` (dispatch-map FR-026). Updated here to match:
+>
+> - **FR-029 — DRIFTED (minor) → BACKFILL, applied.** It said a held reference is recognised from `ActiveReferences` *and* from `InvalidState("entry has active references")`; it is now `ActiveReferences` alone. Spec backup: `.specify/sync/backups/20261010T021710Z/spec.md`.
+> - **Code.** `is_pin_refusal` (`src/lib.rs`, near the top) matches `ActiveReferences` only; the message-text fallback, now unreachable against the real dispatch map, is removed so a reworded message cannot change the counters. The test dispatch map returns `ActiveReferences` for a referenced entry, as the real one does; the pin-counter test still passes.
+>
+> No actionable drift remains for this component.
+
 > **Sync 2026-10-10, closing (same branch; spec-only, approved by the user).** The open items of
 > the 2026-10-09 sync are resolved: **D4** → new FR-030 (clean-eviction invariant, #220,
 > `src/lib.rs:606-655, 657-706, 719-753`); **D5** → new FR-031 (`reserve_memory` bounded store

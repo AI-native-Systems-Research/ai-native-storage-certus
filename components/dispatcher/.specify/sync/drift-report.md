@@ -1,11 +1,13 @@
 ---
 spec_sync_component: dispatcher
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-09T23:49:23Z
-spec_sync_git_commit: 906339ee
-spec_sync_inputs_sha256: df8d1c8c484313132c9c6f2e8d3fb94f6e12e15bcaf946ae48983a8197c19dab
+spec_sync_synced_at: 2026-10-10T02:17:10Z
+spec_sync_git_commit: 547107f3
+spec_sync_inputs_sha256: d46a3c952444048fd502ec4c54dd8aa01ff09cdc6de4d248dbe5312f76973290
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-09 (merge of `fix/evict-blocked-by-pin` into `fix/dispatcher-p2p-clean-eviction`).** Both branches stamped this report; the merged inputs are the FR-035 narrowing in spec 002 (p2p branch) plus the `IDispatchMap::try_evict_to_block` doc-comment change in `components/interfaces` (fix branch). This component's `src/**` is unchanged by either. Both notes below remain accurate.
+
 > **Re-stamp 2026-10-09 (doc-only: FR-035 narrowed, branch `fix/dispatcher-p2p-clean-eviction`).**
 > The previous clean stamp was re-verified to equal the spec-sync hash of `git archive 3c001478`.
 > The only new input is spec 002 FR-035, whose claim that `dispatcher-p2p` reports none of

@@ -105,15 +105,11 @@ struct EvictCtx<'a> {
 
 /// Whether a `try_evict_to_block` refusal was caused by a held reference.
 ///
-/// dispatch-map reports a pinned entry as `InvalidState("entry has active
-/// references")`; `ActiveReferences` is accepted too so the pin/unpersisted split
-/// stays right if it moves to the dedicated variant.
+/// dispatch-map reports a held read or write reference as `ActiveReferences`;
+/// every other refusal (no `ssd_offset`, not in the memory tier) is
+/// `InvalidState`. Matched on the variant alone, never on message text.
 fn is_pin_refusal(e: &DispatchMapError) -> bool {
-    match e {
-        DispatchMapError::ActiveReferences(_) => true,
-        DispatchMapError::InvalidState(msg) => msg.contains("active references"),
-        _ => false,
-    }
+    matches!(e, DispatchMapError::ActiveReferences(_))
 }
 
 use component_framework::define_component;
@@ -3469,9 +3465,7 @@ mod tests {
                     .ok_or(DispatchMapError::KeyNotFound(key))?;
                 if entry.read_refs > 0 || entry.write_ref {
                     // The refusal the real dispatch-map gives a referenced entry.
-                    return Err(DispatchMapError::InvalidState(
-                        "entry has active references".into(),
-                    ));
+                    return Err(DispatchMapError::ActiveReferences(key));
                 }
             }
             if !self.is_evictable(key) {
