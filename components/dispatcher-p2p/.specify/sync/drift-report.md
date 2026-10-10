@@ -1,11 +1,19 @@
 ---
 spec_sync_component: dispatcher-p2p
 spec_sync_drift_status: drift
-spec_sync_synced_at: 2026-10-09T23:49:23Z
-spec_sync_git_commit: 906339ee
-spec_sync_inputs_sha256: 3cb947c2ed529d00c750b4cf0f3c130e83172f1ece94ab2386328d7eb3873eee
+spec_sync_synced_at: 2026-10-10T01:13:03Z
+spec_sync_git_commit: 2775224b
+spec_sync_inputs_sha256: 5df2820b0a2274b75f1398831bc9c28e1ec8cfa67a7c1adee07a31a1d184e6d8
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-10-10 (same branch; spec-only).** FR-009 downgraded from MUST to MAY (backfill
+> runs only when `backfill_delay_ms > 0`, verified at `src/lib.rs:1425`); FR-014 records that
+> `certus-server-yaml` now defaults it to 0 (commit 2775224b) with the measurement behind it;
+> FR-032 (frequency-gated promotion) and FR-033 (GPU→SSD write-around when the tier is full)
+> added as explicitly FUTURE, not-implemented requirements, so they are not drift. Approved by
+> the user. **Still `drift`:** D4 (clean-eviction invariant), D5 (store backpressure) and D7
+> (FR-027/FR-028 anchors) remain open from the 2026-10-09 sync.
+
 > **Sync 2026-10-09 (branch `fix/dispatcher-p2p-clean-eviction`).** Delta analysis on a certified
 > baseline: the previous clean stamp was re-verified to equal the spec-sync hash of
 > `git archive 3c001478`, so the only new input is this branch's `src/lib.rs` (the #220
