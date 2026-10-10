@@ -17,6 +17,8 @@ pub struct StackConfig {
     /// memory tier before surfacing AllocationFailed. 0 disables (fail fast).
     pub store_backpressure_ms: u64,
     pub memory_tier_eviction_threshold: f64,
+    /// dispatcher-p2p DRAM backfill delay (`DispatcherConfig::backfill_delay_ms`).
+    pub backfill_delay_ms: u64,
     /// Explicit zyre group (cluster name) for remote-lookup, from CLI
     /// `--rl-group` or the `CERTUS_RL_GROUP` env var. `None` => the remote-lookup
     /// init hook generates a unique random group so the node is its own
