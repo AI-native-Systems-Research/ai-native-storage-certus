@@ -1,17 +1,16 @@
 {
-  "applied": "2026-10-05",
-  "project": "dispatcher-p2p",
-  "spec": "001-gpudirect-cold-path",
-  "branch": "fix/poller-cpu-placement-logging",
-  "backup": ".specify/sync/backups/20261005T185807Z/spec.md",
-  "edits": [
-    {
-      "requirement": "FR-027 (new)",
-      "direction": "BACKFILL",
-      "result": "FR-027 added, cross-referencing dispatcher FR-011."
-    }
-  ],
-  "source_files_modified": [],
-  "align_tasks_generated": 0,
-  "drift_status": "clean"
+ "applied": "2026-10-09T23:49:23Z",
+ "branch": "fix/dispatcher-p2p-clean-eviction",
+ "applied_ids": [
+  1,
+  2,
+  3,
+  7,
+  8
+ ],
+ "not_applied": [
+  4,
+  5,
+  6
+ ]
 }

@@ -586,15 +586,12 @@ assert identical attribution for identical residency, except where FR-014 specif
   becomes a declined store — `reserve_memory` retries it against the `--store-backpressure-ms`
   budget and drops the store when the budget elapses — so it MUST be recorded whichever cause
   blocked the scan.
-- **FR-035** *(New 2026-10-02; narrowed 2026-10-09)*: `dispatcher-p2p` reports FR-033/FR-034
-  for its **foreground** eviction paths, with the semantics above (since branch
-  `fix/dispatcher-p2p-clean-eviction`, which threaded a counter handle into those free functions;
-  see `dispatcher-p2p` spec `001-gpudirect-cold-path` FR-029). Its **background**
-  `MemoryTierEvictor` is still not counted, so p2p values for these fields are to be read as a
-  lower bound for that evictor's share, not as complete. The remaining gap MUST stay declared in
-  both that component's code and its spec, and here, for as long as it exists.
-  - *Previously (2026-10-02 to 2026-10-09):* p2p reported none of FR-033/FR-034, because those
-    eviction paths were free functions holding no counter handle.
+- **FR-035** *(New 2026-10-02)*: `dispatcher-p2p` does **not** report FR-033/FR-034 and its
+  values for them are to be read as *unmeasured*, not as zero. That component has eviction paths
+  which can be refused by a held pin, but they are free functions holding no counter handle, so
+  reporting them is a threading change to a component this work cannot exercise (p2p needs its own
+  profile and a loaded `gdrdrv`). The gap MUST stay declared in both the component's code and this
+  spec for as long as it exists.
   - This is distinguished deliberately from the route-counter defect recorded in SC-008: reporting
     hits with `lookup_hits_dram == 0` was **self-contradictory** and therefore a defect, whereas an
     unmeasured counter is a gap — acceptable only while declared. Adding fields to `TierEventStats`

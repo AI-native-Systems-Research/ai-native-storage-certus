@@ -44,7 +44,7 @@ mod pins;
 pub mod pipeline;
 
 use parking_lot::RwLock;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -80,12 +80,44 @@ pub(crate) fn publish_eviction(
     }
 }
 
+/// Foreground memory-tier eviction and store-backpressure counters, reported by
+/// `tier_event_stats`. Held in an `Arc` because the eviction paths are associated
+/// functions that also run on the cold-promotion and DRAM-backfill threads.
+#[derive(Debug, Default)]
+pub(crate) struct P2pTierCounters {
+    evictions_from_memory: AtomicU64,
+    evictions_blocked_by_pin: AtomicU64,
+    evictions_blocked_unpersisted: AtomicU64,
+    eviction_scans_exhausted: AtomicU64,
+    store_backpressure_events: AtomicU64,
+}
+
+/// What a foreground eviction needs besides the two maps.
+#[derive(Clone, Copy)]
+struct EvictCtx<'a> {
+    max_attempts: usize,
+    counters: &'a P2pTierCounters,
+    /// Event sink. `dropped: None` means neither publish nor count (FR-017
+    /// applies only to the emit paths).
+    eviction_tx: Option<&'a crossbeam_channel::Sender<EvictionEvent>>,
+    dropped: Option<&'a AtomicU64>,
+}
+
+/// Whether a `try_evict_to_block` refusal was caused by a held reference.
+///
+/// dispatch-map reports a held read or write reference as `ActiveReferences`;
+/// every other refusal (no `ssd_offset`, not in the memory tier) is
+/// `InvalidState`. Matched on the variant alone, never on message text.
+fn is_pin_refusal(e: &DispatchMapError) -> bool {
+    matches!(e, DispatchMapError::ActiveReferences(_))
+}
+
 use component_framework::define_component;
 use interfaces::{
-    CacheKey, ClientChannels, Command, Completion, DispatcherConfig, DispatcherError, DmaAllocFn,
-    DmaBuffer, FormatParams, GpuStream, IBlockDevice, IBlockDeviceAdmin, IDispatchMap, IDispatcher,
-    IExtentManager, IGpuServices, ILogger, IMemoryTier, IRemoteLookup, IpcHandle, LookupOutcome,
-    LookupResult, PciAddress, ServedBy,
+    CacheKey, ClientChannels, Command, Completion, DispatchMapError, DispatcherConfig,
+    DispatcherError, DmaAllocFn, DmaBuffer, FormatParams, GpuStream, IBlockDevice,
+    IBlockDeviceAdmin, IDispatchMap, IDispatcher, IExtentManager, IGpuServices, ILogger,
+    IMemoryTier, IRemoteLookup, IpcHandle, LookupOutcome, LookupResult, PciAddress, ServedBy,
 };
 
 use component_core::binding::bind;
@@ -104,6 +136,15 @@ use crate::p2p_ring::P2pRing;
 /// sufficient but adds thread coordination overhead.
 /// Set to 1 to maximize per-thread queue depth and minimize ring fragmentation.
 const MAX_QUEUES_PER_DRIVE: usize = 1;
+
+/// Eviction candidates scanned per foreground eviction step, multiplied by the
+/// step number so the scan reaches past pinned / unpersisted entries as pressure
+/// persists.
+const EVICT_SCAN_STEP: usize = 4;
+
+/// Deepest foreground eviction scan; also the depth of the last-chance scan taken
+/// before reporting the memory tier full.
+const EVICT_SCAN_MAX: usize = 1024;
 
 /// Holds one (block-device, extent-manager) pair for a data drive.
 #[allow(dead_code)]
@@ -192,6 +233,9 @@ define_component! {
             extent_manager_factory: Mutex<Option<ExtentManagerFactory>>,
             eviction_tx: Arc<Mutex<Option<crossbeam_channel::Sender<EvictionEvent>>>>,
             eviction_dropped: Arc<AtomicU64>,
+            tier_counters: Arc<P2pTierCounters>,
+            max_eviction_attempts: AtomicUsize,
+            store_backpressure_ms: AtomicU64,
             // The route partition: served keys by how they were served. Recorded where
             // `batch_lookup` derives its per-key `ServedBy`, so the aggregate and the
             // per-key attribution for one batch cannot disagree.
@@ -542,60 +586,91 @@ impl DispatcherP2pComponent {
         Ok(())
     }
 
-    /// Evict entries from the memory-tier until enough space is available.
+    /// The [`EvictCtx`] for this component's emitting eviction paths.
+    fn evict_ctx<'a>(
+        &'a self,
+        eviction_tx: Option<&'a crossbeam_channel::Sender<EvictionEvent>>,
+    ) -> EvictCtx<'a> {
+        EvictCtx {
+            max_attempts: self.max_eviction_attempts.load(Ordering::Relaxed),
+            counters: &self.tier_counters,
+            eviction_tx,
+            dropped: Some(self.eviction_dropped.as_ref()),
+        }
+    }
+
+    /// Free one memory-tier slot without losing data or reclaiming a pinned slot.
     ///
-    /// Each evicted entry transitions from MemoryTier to BlockDevice in the
-    /// dispatch-map. If write-through hasn't completed (no ssd_offset), the
-    /// dispatch-map entry is removed entirely so lookups get NotExist rather
-    /// than a dangling memory-tier pointer.
+    /// Demotes the first of the `scan` oldest entries that `try_evict_to_block`
+    /// accepts (written through and unpinned). The dispatch-map moves to
+    /// BlockDevice *before* the DRAM slot is freed, so the key stays resolvable from
+    /// SSD and no concurrent lookup can obtain the freed pointer.
+    ///
+    /// Refused candidates are skipped, never removed. Removing one that is not yet
+    /// written through loses a store the client was told succeeded (#220); freeing
+    /// one that is pinned, or reserved but not yet registered in the dispatch-map,
+    /// reclaims DRAM an in-flight load, copy or write-through still uses.
+    ///
+    /// Returns `false` when no scanned candidate could be demoted.
+    fn evict_one_clean(
+        dm: &Arc<dyn IDispatchMap + Send + Sync>,
+        mt: &Arc<dyn IMemoryTier + Send + Sync>,
+        scan: usize,
+        ctx: EvictCtx<'_>,
+    ) -> bool {
+        for cand in mt.oldest_keys(scan) {
+            match dm.try_evict_to_block(cand) {
+                Ok(()) => {
+                    let _ = mt.remove(cand);
+                    publish_eviction(ctx.eviction_tx, ctx.dropped, cand, EvictionReason::Demoted);
+                    ctx.counters
+                        .evictions_from_memory
+                        .fetch_add(1, Ordering::Relaxed);
+                    return true;
+                }
+                Err(e) if is_pin_refusal(&e) => {
+                    ctx.counters
+                        .evictions_blocked_by_pin
+                        .fetch_add(1, Ordering::Relaxed);
+                }
+                Err(_) => {
+                    // No ssd_offset yet, or no dispatch-map entry yet (reserved,
+                    // copy in flight): either way not persisted.
+                    ctx.counters
+                        .evictions_blocked_unpersisted
+                        .fetch_add(1, Ordering::Relaxed);
+                }
+            }
+        }
+        // Counted per scan that frees nothing, whether or not the caller then gives
+        // up (dispatcher spec 002 FR-034), as in `dispatcher`.
+        ctx.counters
+            .eviction_scans_exhausted
+            .fetch_add(1, Ordering::Relaxed);
+        false
+    }
+
+    /// Evict entries from the memory-tier until `needed` bytes are free.
+    ///
+    /// Each step frees one victim via [`Self::evict_one_clean`], scanning deeper as
+    /// pressure persists; when the regular scan finds nothing it retries once at
+    /// the full depth before giving up. If nothing in reach is both persisted and
+    /// unpinned this returns `AllocationFailed` and frees nothing, so the caller
+    /// leaves the block uncached (or backpressures, in `reserve_memory`).
     // NOTE: This only handles global capacity pressure. If keys are heavily skewed
     // to one shard (e.g., all keys ≡ 0 mod 16), the target shard can fill while
     // global used() < capacity(). In that case insert() will return PoolFull after
-    // this function succeeds. Acceptable for now — real workloads distribute evenly.
+    // this function succeeds. `evict_and_insert` handles that for reserve_memory.
     fn evict_for_space(
         dm: &Arc<dyn IDispatchMap + Send + Sync>,
         mt: &Arc<dyn IMemoryTier + Send + Sync>,
         needed: u32,
-        target_key: CacheKey,
+        ctx: EvictCtx<'_>,
     ) -> Result<(), DispatcherError> {
-        // Internal, non-emitting path: `dropped = None` means neither publish
-        // nor count (FR-017 applies only to the emit paths below).
-        Self::evict_for_space_inner(dm, mt, needed, target_key, None, None)
-    }
-
-    fn evict_for_space_emit(
-        &self,
-        dm: &Arc<dyn IDispatchMap + Send + Sync>,
-        mt: &Arc<dyn IMemoryTier + Send + Sync>,
-        needed: u32,
-        target_key: CacheKey,
-    ) -> Result<(), DispatcherError> {
-        let guard = self.eviction_tx.lock().unwrap();
-        Self::evict_for_space_inner(
-            dm,
-            mt,
-            needed,
-            target_key,
-            guard.as_ref(),
-            Some(self.eviction_dropped.as_ref()),
-        )
-    }
-
-    fn evict_for_space_inner(
-        dm: &Arc<dyn IDispatchMap + Send + Sync>,
-        mt: &Arc<dyn IMemoryTier + Send + Sync>,
-        needed: u32,
-        target_key: CacheKey,
-        eviction_tx: Option<&crossbeam_channel::Sender<EvictionEvent>>,
-        dropped: Option<&AtomicU64>,
-    ) -> Result<(), DispatcherError> {
-        const MAX_SCAN: usize = 4;
-        const MAX_ATTEMPTS: usize = 512;
-
         let mut attempts = 0usize;
         while mt.used() + needed as usize > mt.capacity() {
             attempts += 1;
-            if attempts > MAX_ATTEMPTS {
+            if attempts > ctx.max_attempts {
                 static WARNED: std::sync::atomic::AtomicBool =
                     std::sync::atomic::AtomicBool::new(false);
                 if !WARNED.swap(true, Ordering::Relaxed) {
@@ -613,60 +688,64 @@ impl DispatcherP2pComponent {
                 ));
             }
 
-            let evict_key = if attempts % 8 == 0 {
-                let candidates = mt.oldest_keys(MAX_SCAN);
-                candidates.iter().find(|&&k| dm.is_evictable(k)).copied()
-            } else {
-                None
-            };
-
-            match evict_key {
-                Some(key) => {
-                    // Transition dispatch-map BEFORE freeing DRAM to prevent
-                    // concurrent lookups from obtaining the now-freed pointer.
-                    if dm.try_evict_to_block(key).is_ok() {
-                        let _ = mt.remove(key);
-                        publish_eviction(eviction_tx, dropped, key, EvictionReason::Demoted);
-                    }
-                }
-                None => {
-                    // Pick oldest candidate, transition dispatch-map first,
-                    // then free DRAM.
-                    let candidates = mt.oldest_keys(MAX_SCAN);
-                    let mut evicted = false;
-                    for &cand in &candidates {
-                        if dm.try_evict_to_block(cand).is_ok() {
-                            let _ = mt.remove(cand);
-                            publish_eviction(eviction_tx, dropped, cand, EvictionReason::Demoted);
-                            evicted = true;
-                            break;
-                        }
-                    }
-                    if !evicted {
-                        // No candidates evictable — fall back to blind eviction.
-                        if let Some(evicted_key) = mt.evict_next_for_key(target_key) {
-                            if dm.try_evict_to_block(evicted_key).is_err() {
-                                let _ = dm.remove(evicted_key);
-                                publish_eviction(
-                                    eviction_tx,
-                                    dropped,
-                                    evicted_key,
-                                    EvictionReason::Removed,
-                                );
-                            } else {
-                                publish_eviction(
-                                    eviction_tx,
-                                    dropped,
-                                    evicted_key,
-                                    EvictionReason::Demoted,
-                                );
-                            }
-                        }
-                    }
-                }
+            let scan = (EVICT_SCAN_STEP * attempts).min(EVICT_SCAN_MAX);
+            let freed = Self::evict_one_clean(dm, mt, scan, ctx)
+                || (scan < EVICT_SCAN_MAX && Self::evict_one_clean(dm, mt, EVICT_SCAN_MAX, ctx));
+            if !freed {
+                return Err(DispatcherError::AllocationFailed(
+                    "memory-tier full: no eviction candidate is both written through and unpinned"
+                        .into(),
+                ));
             }
         }
         Ok(())
+    }
+
+    fn evict_for_space_emit(
+        &self,
+        dm: &Arc<dyn IDispatchMap + Send + Sync>,
+        mt: &Arc<dyn IMemoryTier + Send + Sync>,
+        needed: u32,
+        _target_key: CacheKey,
+    ) -> Result<(), DispatcherError> {
+        let guard = self.eviction_tx.lock().unwrap();
+        Self::evict_for_space(dm, mt, needed, self.evict_ctx(guard.as_ref()))
+    }
+
+    /// Evict, then allocate the memory-tier slot for `key`.
+    ///
+    /// `evict_for_space` only guarantees global capacity; a sharded pool can still
+    /// refuse with `PoolFull`, so evict one more clean victim and retry.
+    fn evict_and_insert(
+        &self,
+        dm: &Arc<dyn IDispatchMap + Send + Sync>,
+        mt: &Arc<dyn IMemoryTier + Send + Sync>,
+        key: CacheKey,
+        size: u32,
+    ) -> Result<*mut u8, DispatcherError> {
+        let guard = self.eviction_tx.lock().unwrap();
+        let ctx = self.evict_ctx(guard.as_ref());
+        let mut attempts = 0usize;
+        loop {
+            Self::evict_for_space(dm, mt, size, ctx)?;
+            match mt.insert(key, size) {
+                Ok(ptr) => return Ok(ptr),
+                Err(interfaces::MemoryTierError::PoolFull) => {
+                    attempts += 1;
+                    if attempts >= ctx.max_attempts
+                        || !Self::evict_one_clean(dm, mt, EVICT_SCAN_MAX, ctx)
+                    {
+                        return Err(DispatcherError::AllocationFailed(
+                            "memory-tier pool full (fragmentation after eviction)".into(),
+                        ));
+                    }
+                }
+                Err(interfaces::MemoryTierError::AlreadyExists(k)) => {
+                    return Err(DispatcherError::AlreadyExists(k))
+                }
+                Err(other) => return Err(DispatcherError::AllocationFailed(other.to_string())),
+            }
+        }
     }
 
     fn process_write_job(
@@ -1153,6 +1232,11 @@ impl IDispatcher for DispatcherP2pComponent {
             ));
         }
 
+        self.max_eviction_attempts
+            .store(config.max_eviction_attempts, Ordering::Relaxed);
+        self.store_backpressure_ms
+            .store(config.store_backpressure_ms, Ordering::Relaxed);
+
         // Create N block devices and N extent managers from config.
         // Skip drive creation only in memory-tier-only mode (no spdk_env AND no factory).
         let has_bd_factory = self.block_device_factory.lock().unwrap().is_some();
@@ -1350,9 +1434,13 @@ impl IDispatcher for DispatcherP2pComponent {
                 ring_guard.as_ref().map_or(131072, |r| r.chunk_size)
             };
 
+            let backfill_counters = Arc::clone(&self.tier_counters);
+            let backfill_max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
+
             let backfill = DramBackfillWorker::start(num_backfill_drives, |drive_idx| {
                 let dm = Arc::clone(&dm_for_backfill);
                 let mt = Arc::clone(&mt_for_backfill);
+                let counters = Arc::clone(&backfill_counters);
                 let drive = Arc::clone(&backfill_drives[drive_idx]);
                 let channels = drive.connect_client().expect("backfill connect_client");
                 let block_size = drive.block_size() as u64;
@@ -1379,7 +1467,14 @@ impl IDispatcher for DispatcherP2pComponent {
                         Err(_) => return,
                     };
 
-                    if Self::evict_for_space(&dm, &mt, size, job.key).is_err() {
+                    // Non-emitting: a backfill eviction is internal housekeeping.
+                    let ctx = EvictCtx {
+                        max_attempts: backfill_max_attempts,
+                        counters: &counters,
+                        eviction_tx: None,
+                        dropped: None,
+                    };
+                    if Self::evict_for_space(&dm, &mt, size, ctx).is_err() {
                         return;
                     }
 
@@ -2347,10 +2442,7 @@ impl IDispatcher for DispatcherP2pComponent {
         key: CacheKey,
         size: u32,
         session_id: u64,
-        // dispatcher-p2p allocates straight-through (no store-backpressure retry
-        // loop), so it neither backpressures nor consults a batch deadline; the
-        // parameter exists only to satisfy the IDispatcher signature.
-        _deadline: Option<std::time::Instant>,
+        deadline: Option<std::time::Instant>,
     ) -> Result<*mut u8, DispatcherError> {
         self.ensure_initialized()?;
 
@@ -2385,17 +2477,44 @@ impl IDispatcher for DispatcherP2pComponent {
             .get()
             .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
 
-        self.evict_for_space_emit(&dm, &mt, size, key)?;
+        // Bounded store backpressure, as in `dispatcher`. Eviction never drops an
+        // entry that is not yet written through, so under a store burst the oldest
+        // entries can all be momentarily undemotable. Their write-throughs land
+        // shortly, so retry for a bounded budget instead of failing the store.
+        //
+        // `deadline` is the reserve batch's shared deadline when the caller (shmq
+        // `op_reserve`) supplies one; otherwise this call's own
+        // `store_backpressure_ms` budget. A deadline already past, or a zero
+        // budget, means a single attempt.
+        let deadline = deadline.unwrap_or_else(|| {
+            std::time::Instant::now()
+                + std::time::Duration::from_millis(
+                    self.store_backpressure_ms.load(Ordering::Relaxed),
+                )
+        });
 
-        let mem_ptr = mt.insert(key, size).map_err(|e| match e {
-            interfaces::MemoryTierError::AlreadyExists(k) => DispatcherError::AlreadyExists(k),
-            interfaces::MemoryTierError::PoolFull => {
-                DispatcherError::AllocationFailed("memory-tier pool full after eviction".into())
+        const POLL: std::time::Duration = std::time::Duration::from_millis(20);
+        loop {
+            match self.evict_and_insert(&dm, &mt, key, size) {
+                Ok(mem_ptr) => return Ok(mem_ptr),
+                Err(DispatcherError::AllocationFailed(_))
+                    if std::time::Instant::now() < deadline =>
+                {
+                    if self
+                        .tier_counters
+                        .store_backpressure_events
+                        .fetch_add(1, Ordering::Relaxed)
+                        == 0
+                    {
+                        self.log_info(
+                            "store backpressure engaged: memory tier full, retrying reserve",
+                        );
+                    }
+                    std::thread::sleep(POLL);
+                }
+                Err(e) => return Err(e),
             }
-            other => DispatcherError::AllocationFailed(other.to_string()),
-        })?;
-
-        Ok(mem_ptr)
+        }
     }
 
     fn copy_gpu_to_memory_async(
@@ -2643,8 +2762,7 @@ impl IDispatcher for DispatcherP2pComponent {
         }
 
         let eviction_tx_guard = self.eviction_tx.lock().unwrap();
-        let eviction_tx_ref = eviction_tx_guard.as_ref();
-        let eviction_dropped_ref = self.eviction_dropped.as_ref();
+        let evict_ctx = self.evict_ctx(eviction_tx_guard.as_ref());
 
         std::thread::scope(|s| {
             for (drive_idx, entry_indices) in per_drive.iter().enumerate() {
@@ -2662,8 +2780,6 @@ impl IDispatcher for DispatcherP2pComponent {
                 let mt = &mt;
                 let cold = &cold_entries;
                 let logger = &logger;
-                let etx = eviction_tx_ref;
-                let edrop = eviction_dropped_ref;
 
                 s.spawn(move || {
                     for &ci in entry_indices {
@@ -2671,16 +2787,7 @@ impl IDispatcher for DispatcherP2pComponent {
                         let block_size = block_dev.block_size() as u64;
                         let start_lba = entry.offset / block_size;
 
-                        if Self::evict_for_space_inner(
-                            dm,
-                            mt,
-                            entry.size,
-                            entry.key,
-                            etx,
-                            Some(edrop),
-                        )
-                        .is_err()
-                        {
+                        if Self::evict_for_space(dm, mt, entry.size, evict_ctx).is_err() {
                             continue;
                         }
 
@@ -2806,35 +2913,34 @@ impl IDispatcher for DispatcherP2pComponent {
     }
 
     fn tier_event_stats(&self) -> interfaces::TierEventStats {
-        // This component still tracks no tier-MOVEMENT counters (promotions, evictions,
-        // store backpressure) -- those belong to paths it does not have. It does report
-        // the route partition, because it derives exactly the same per-key `ServedBy` the
-        // other dispatcher does, and an endpoint showing hits with no routes would imply
-        // every hit was unattributed.
+        // Reported: the route partition (derived exactly as in `dispatcher`, at the
+        // point `batch_lookup` assigns each key's `ServedBy`), and the foreground
+        // memory-tier eviction and store-backpressure counters.
         //
-        // Reported here rather than left defaulted because leaving it defaulted is what
-        // happened, and a hardware run caught it: 5 526 hits against dram 0 / ssd 0 on a
-        // p2p server. Adding fields to `TierEventStats` is NOT compiler-enforced -- this
-        // `..default()` kept compiling -- which the dispatcher's spec 002 records as a
-        // caveat and which this was a live instance of.
-        // DELIBERATELY NOT REPORTED HERE: `evictions_blocked_by_pin` and
-        // `eviction_scans_exhausted`. This component does have eviction paths that can
-        // be refused by a held pin (`background.rs` and the allocation retry loop in
-        // this file), so zero is NOT a statement that it is never blocked -- it means
-        // unmeasured. They are left out because those paths are free functions holding
-        // no handle to these counters, so reporting them is a threading change to a
-        // component this instrumentation cannot exercise: p2p needs its own profile and
-        // a loaded `gdrdrv`.
+        // Route partition history: leaving it defaulted is what happened once, and a
+        // hardware run caught it: 5 526 hits against dram 0 / ssd 0 on a p2p server.
+        // Adding fields to `TierEventStats` is NOT compiler-enforced -- the
+        // `..default()` below keeps compiling -- which the dispatcher's spec 002
+        // records as a caveat.
         //
-        // The distinction against the route-counter bug above is deliberate. Reporting
-        // hits with dram 0 / ssd 0 was self-CONTRADICTORY and therefore a defect. An
-        // unmeasured counter is a gap, which is only acceptable while it is declared --
-        // hence this comment and the matching note in the dispatcher's spec. Anyone
-        // reading a p2p endpoint must not conclude "no pin blocks occurred".
+        // NOT MEASURED, so zero here is not a statement that nothing happened:
+        //   * the background `MemoryTierEvictor` (`background.rs`): its demotions are
+        //     not in `evictions_from_memory` and its pin refusals are not in
+        //     `evictions_blocked_by_pin`; the foreground counters cover only
+        //     `evict_for_space` / `evict_and_insert`.
+        //   * promotions_to_memory / _to_gpu, evictions_from_ssd, remote_lookup_misses,
+        //     store_drops_on_full, store_already_resident, oldest_sampled /
+        //     oldest_persisted: not counted by this component (spec 001 FR-029).
+        let c = &self.tier_counters;
         interfaces::TierEventStats {
             lookup_hits_dram: self.route_dram.load(Ordering::Relaxed),
             lookup_hits_ssd: self.route_ssd.load(Ordering::Relaxed),
             remote_lookup_hits: self.route_remote.load(Ordering::Relaxed),
+            evictions_from_memory: c.evictions_from_memory.load(Ordering::Relaxed),
+            evictions_blocked_by_pin: c.evictions_blocked_by_pin.load(Ordering::Relaxed),
+            evictions_blocked_unpersisted: c.evictions_blocked_unpersisted.load(Ordering::Relaxed),
+            eviction_scans_exhausted: c.eviction_scans_exhausted.load(Ordering::Relaxed),
+            store_backpressure_events: c.store_backpressure_events.load(Ordering::Relaxed),
             ..Default::default()
         }
     }
@@ -2858,24 +2964,6 @@ mod tests {
     // -----------------------------------------------------------------------
     // Test infrastructure
     // -----------------------------------------------------------------------
-
-    unsafe extern "C" fn dma_free(ptr: *mut std::ffi::c_void) {
-        // SAFETY: ptr was allocated with libc::aligned_alloc in alloc_dma_buffer.
-        unsafe { libc::free(ptr) };
-    }
-
-    fn alloc_dma_buffer(size: usize) -> Arc<DmaBuffer> {
-        let sz = size.max(4096);
-        let aligned_sz = sz.next_multiple_of(4096);
-        let ptr = unsafe { libc::aligned_alloc(4096, aligned_sz) };
-        assert!(
-            !ptr.is_null(),
-            "aligned_alloc failed for {aligned_sz} bytes"
-        );
-        unsafe { std::ptr::write_bytes(ptr as *mut u8, 0, aligned_sz) };
-        let buf = unsafe { DmaBuffer::from_raw(ptr, aligned_sz, dma_free, -1) }.unwrap();
-        Arc::new(buf)
-    }
 
     // --- MockMemoryTier ---
 
@@ -3031,14 +3119,13 @@ mod tests {
 
     // --- MockDispatchMap ---
 
+    /// A demoted entry stays `MemoryTier` with a null `pointer` and its
+    /// `ssd_offset` set; `lookup` reports that as `BlockDevice`.
     enum MockEntryLocation {
         MemoryTier {
             pointer: *mut u8,
             size: u32,
             ssd_offset: Option<u64>,
-        },
-        BlockDevice {
-            offset: u64,
         },
     }
 
@@ -3129,9 +3216,6 @@ mod tests {
                             size: *size,
                         },
                     },
-                    MockEntryLocation::BlockDevice { offset } => {
-                        LookupResult::BlockDevice { offset: *offset }
-                    }
                 },
             };
             // The real dispatch map increments read_ref *before* it inspects the
@@ -3158,7 +3242,6 @@ mod tests {
                         MockEntryLocation::MemoryTier { ssd_offset, .. } => {
                             *ssd_offset = Some(offset);
                         }
-                        MockEntryLocation::BlockDevice { .. } => {}
                     }
                     // The real map consumes the read ref that `downgrade_reference`
                     // installed at populate time, pairing the two.
@@ -3351,6 +3434,17 @@ mod tests {
         }
 
         fn try_evict_to_block(&self, key: CacheKey) -> Result<(), DispatchMapError> {
+            {
+                let inner = self.inner.lock().unwrap();
+                let entry = inner
+                    .entries
+                    .get(&key)
+                    .ok_or(DispatchMapError::KeyNotFound(key))?;
+                if entry.read_refs > 0 || entry.write_ref {
+                    // The refusal the real dispatch-map gives a referenced entry.
+                    return Err(DispatchMapError::ActiveReferences(key));
+                }
+            }
             if !self.is_evictable(key) {
                 return Err(DispatchMapError::InvalidState("not evictable".into()));
             }
@@ -3640,6 +3734,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            Arc::new(P2pTierCounters::default()),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
@@ -3780,6 +3877,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            Arc::new(P2pTierCounters::default()),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
@@ -3842,6 +3942,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            Arc::new(P2pTierCounters::default()),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
@@ -3865,6 +3968,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            Arc::new(P2pTierCounters::default()),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
@@ -3890,6 +3996,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            Arc::new(P2pTierCounters::default()),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
@@ -3920,6 +4029,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            Arc::new(P2pTierCounters::default()),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
@@ -3951,6 +4063,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            Arc::new(P2pTierCounters::default()),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
@@ -3982,6 +4097,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            Arc::new(P2pTierCounters::default()),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
@@ -4008,6 +4126,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            Arc::new(P2pTierCounters::default()),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
@@ -4034,6 +4155,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            Arc::new(P2pTierCounters::default()),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
@@ -4065,6 +4189,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            Arc::new(P2pTierCounters::default()),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
@@ -4099,6 +4226,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            Arc::new(P2pTierCounters::default()),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
@@ -4124,6 +4254,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            Arc::new(P2pTierCounters::default()),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
@@ -4150,6 +4283,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            Arc::new(P2pTierCounters::default()),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
@@ -4207,6 +4343,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            Arc::new(P2pTierCounters::default()),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
@@ -4243,6 +4382,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            Arc::new(P2pTierCounters::default()),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
@@ -4323,6 +4465,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            Arc::new(P2pTierCounters::default()),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
@@ -4335,6 +4480,9 @@ mod tests {
         let d = query_interface!(c, IDispatcher).unwrap();
         d.initialize(DispatcherConfig {
             data_pci_addrs: vec!["0000:02:00.0".to_string()],
+            // Fail fast: a tier that refuses every insert would otherwise
+            // backpressure for the full default budget first.
+            store_backpressure_ms: 0,
             ..Default::default()
         })
         .unwrap();
@@ -4857,8 +5005,125 @@ mod tests {
     // Eviction tests (memory-tier pool pressure)
     // -----------------------------------------------------------------------
 
+    /// Non-emitting eviction context for tests that call the eviction fns directly.
+    fn test_ctx(counters: &P2pTierCounters) -> EvictCtx<'_> {
+        EvictCtx {
+            max_attempts: 2048,
+            counters,
+            eviction_tx: None,
+            dropped: None,
+        }
+    }
+
+    /// Register `key` as a 4 KiB memory-tier entry. `persisted` sets its ssd_offset
+    /// (write-through landed); otherwise it is acknowledged but not yet on SSD.
+    fn put_entry(
+        dm: &Arc<dyn IDispatchMap + Send + Sync>,
+        mt: &Arc<dyn IMemoryTier + Send + Sync>,
+        key: CacheKey,
+        persisted: bool,
+    ) {
+        mt.insert(key, 4096).unwrap();
+        dm.create_memory_tier_entry(key, std::ptr::null_mut(), 4096)
+            .unwrap();
+        dm.release_write(key).unwrap();
+        if persisted {
+            dm.convert_to_storage(key, key * 4096).unwrap();
+        }
+    }
+
+    /// #220: with every resident entry acknowledged but not yet written through,
+    /// eviction must fail rather than drop one. Previously the blind fallback freed
+    /// the DRAM and `dm.remove`d the key, so a store the client was told succeeded
+    /// was gone.
+    #[test]
+    fn evict_for_space_never_drops_unpersisted_entries() {
+        let counters = P2pTierCounters::default();
+        let dm: Arc<dyn IDispatchMap + Send + Sync> = Arc::new(MockDispatchMap::new());
+        let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(16384));
+        for key in 0..4u64 {
+            put_entry(&dm, &mt, key, false);
+        }
+
+        let res = DispatcherP2pComponent::evict_for_space(&dm, &mt, 4096, test_ctx(&counters));
+
+        assert!(matches!(res, Err(DispatcherError::AllocationFailed(_))));
+        for key in 0..4u64 {
+            assert!(mt.contains(key), "key {key} lost from memory-tier");
+            assert!(
+                matches!(dm.lookup(key), Ok(LookupResult::MemoryTier { .. })),
+                "key {key} lost from dispatch-map"
+            );
+            let _ = dm.release_read(key);
+        }
+        assert_eq!(counters.evictions_from_memory.load(Ordering::Relaxed), 0);
+        // The step-1 scan and the last-chance full-depth scan both freed nothing.
+        assert_eq!(counters.eviction_scans_exhausted.load(Ordering::Relaxed), 2);
+        assert!(
+            counters
+                .evictions_blocked_unpersisted
+                .load(Ordering::Relaxed)
+                >= 4
+        );
+    }
+
+    /// A pinned entry's DRAM must never be reclaimed, even when it is the only
+    /// candidate; the persisted, unpinned entry is demoted instead.
+    #[test]
+    fn evict_for_space_skips_pinned_entry() {
+        let counters = P2pTierCounters::default();
+        let dm_mock = Arc::new(MockDispatchMap::new());
+        let dm: Arc<dyn IDispatchMap + Send + Sync> = Arc::clone(&dm_mock) as _;
+        let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(8192));
+        put_entry(&dm, &mt, 1, true);
+        put_entry(&dm, &mt, 2, true);
+        dm.take_read(1).unwrap(); // an in-flight load holds key 1
+
+        DispatcherP2pComponent::evict_for_space(&dm, &mt, 4096, test_ctx(&counters)).unwrap();
+
+        assert!(mt.contains(1), "pinned slot was freed");
+        assert!(
+            !mt.contains(2),
+            "unpinned persisted entry should be demoted"
+        );
+        assert!(matches!(dm.lookup(2), Ok(LookupResult::BlockDevice { .. })));
+        dm.release_read(2).unwrap();
+        assert_eq!(counters.evictions_from_memory.load(Ordering::Relaxed), 1);
+
+        // With key 2 gone, the pinned key is the only candidate: fail, don't free it.
+        let res = DispatcherP2pComponent::evict_for_space(&dm, &mt, 8192, test_ctx(&counters));
+        assert!(matches!(res, Err(DispatcherError::AllocationFailed(_))));
+        assert!(mt.contains(1), "pinned slot was freed");
+        assert!(counters.evictions_blocked_by_pin.load(Ordering::Relaxed) >= 1);
+        assert_eq!(dm_mock.total_read_refs(), 1);
+    }
+
+    /// The last-chance deep scan reaches a demotable entry behind more unpersisted
+    /// ones than the first scan step covers.
+    #[test]
+    fn evict_for_space_scans_past_unpersisted_entries() {
+        let counters = P2pTierCounters::default();
+        let dm: Arc<dyn IDispatchMap + Send + Sync> = Arc::new(MockDispatchMap::new());
+        let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(9 * 4096));
+        for key in 0..8u64 {
+            put_entry(&dm, &mt, key, false);
+        }
+        put_entry(&dm, &mt, 100, true);
+
+        DispatcherP2pComponent::evict_for_space(&dm, &mt, 4096, test_ctx(&counters)).unwrap();
+
+        assert!(
+            !mt.contains(100),
+            "the only persisted entry should be demoted"
+        );
+        for key in 0..8u64 {
+            assert!(mt.contains(key), "unpersisted key {key} was evicted");
+        }
+    }
+
     #[test]
     fn evict_for_space_evicts_when_pool_full() {
+        let counters = P2pTierCounters::default();
         let dm: Arc<dyn IDispatchMap + Send + Sync> = Arc::new(MockDispatchMap::new());
         // Small pool: 16 KiB total (can hold 4 × 4 KiB entries).
         let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(16384));
@@ -4874,7 +5139,7 @@ mod tests {
         }
 
         // Pool is now full (16384 used). Trying to add 4096 more should evict.
-        DispatcherP2pComponent::evict_for_space(&dm, &mt, 4096, 100).unwrap();
+        DispatcherP2pComponent::evict_for_space(&dm, &mt, 4096, test_ctx(&counters)).unwrap();
 
         // At least one entry was evicted from memory-tier.
         assert!(mt.used() + 4096 <= mt.capacity());
@@ -4882,6 +5147,7 @@ mod tests {
 
     #[test]
     fn evict_for_space_noop_when_space_available() {
+        let counters = P2pTierCounters::default();
         let dm: Arc<dyn IDispatchMap + Send + Sync> = Arc::new(MockDispatchMap::new());
         let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(1024 * 1024));
 
@@ -4892,7 +5158,7 @@ mod tests {
         dm.release_write(0).unwrap();
 
         // Plenty of space, no eviction needed.
-        DispatcherP2pComponent::evict_for_space(&dm, &mt, 4096, 100).unwrap();
+        DispatcherP2pComponent::evict_for_space(&dm, &mt, 4096, test_ctx(&counters)).unwrap();
 
         assert!(mt.contains(0), "entry should not be evicted");
     }
@@ -4945,6 +5211,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            Arc::new(P2pTierCounters::default()),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
@@ -4978,6 +5247,96 @@ mod tests {
         );
     }
 
+    /// `reserve_memory` on a tier full of acknowledged-but-unpersisted entries:
+    /// with its deadline already past it fails at once and drops nothing; given a
+    /// window, it backpressures until a write-through lands and then succeeds by
+    /// demoting that entry.
+    #[test]
+    fn reserve_memory_backpressures_until_write_through_lands() {
+        let dm = Arc::new(MockDispatchMap::new());
+        let logger: Arc<dyn ILogger + Send + Sync> = Arc::new(MockLogger);
+        let gpu: Arc<dyn IGpuServices + Send + Sync> = Arc::new(MockGpuServices::default());
+        // Pool can hold exactly 2 × 4 KiB entries.
+        let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(8192));
+        let mt_probe = Arc::clone(&mt);
+        let c = DispatcherP2pComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            RwLock::new(None),
+            RwLock::new(None),
+            AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(P2pTierCounters::default()),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+        );
+        c.dispatch_map
+            .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
+            .unwrap();
+        c.logger.connect(logger).unwrap();
+        c.gpu_services.connect(gpu).unwrap();
+        c.memory_tier.connect(mt).unwrap();
+
+        let d = query_interface!(c, IDispatcher).unwrap();
+        d.initialize(DispatcherConfig {
+            data_pci_addrs: vec!["0000:02:00.0".to_string()],
+            ..Default::default()
+        })
+        .unwrap();
+
+        // Registered directly rather than populated: populate would enqueue a
+        // write-through, and with no drives that marks the entries persisted
+        // asynchronously, which is exactly what this test needs to control.
+        let dm_iface: Arc<dyn IDispatchMap + Send + Sync> = Arc::clone(&dm) as _;
+        put_entry(&dm_iface, &mt_probe, 1, false);
+        put_entry(&dm_iface, &mt_probe, 2, false);
+
+        let past = std::time::Instant::now();
+        let res = d.reserve_memory(3, 4096, 0, Some(past));
+        assert!(matches!(res, Err(DispatcherError::AllocationFailed(_))));
+        assert_eq!(dm.entry_count(), 2, "an unpersisted entry was dropped");
+        assert!(mt_probe.contains(1) && mt_probe.contains(2));
+
+        let dm_wt = Arc::clone(&dm);
+        let landed = thread::spawn(move || {
+            thread::sleep(std::time::Duration::from_millis(100));
+            dm_wt.convert_to_storage(1, 0x1000).unwrap();
+        });
+        let start = std::time::Instant::now();
+        d.reserve_memory(3, 4096, 0, Some(start + std::time::Duration::from_secs(5)))
+            .unwrap();
+        assert!(start.elapsed() >= std::time::Duration::from_millis(100));
+        landed.join().unwrap();
+
+        assert!(
+            !mt_probe.contains(1),
+            "the written-through entry should be demoted"
+        );
+        assert!(mt_probe.contains(2), "the unpersisted entry must stay");
+        let stats = d.tier_event_stats();
+        assert!(stats.store_backpressure_events >= 1);
+        assert_eq!(stats.evictions_from_memory, 1);
+        // Every failed attempt (the past-deadline one plus one per backpressure retry)
+        // runs two scans that free nothing: the step-1 scan and the full-depth one.
+        assert_eq!(
+            stats.eviction_scans_exhausted,
+            2 * (stats.store_backpressure_events + 1)
+        );
+
+        d.shutdown().unwrap();
+    }
+
     #[test]
     fn populate_triggers_eviction_on_full_pool() {
         let dm = Arc::new(MockDispatchMap::new());
@@ -5000,6 +5359,9 @@ mod tests {
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
+            Arc::new(P2pTierCounters::default()),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
             AtomicU64::new(0),
@@ -5024,12 +5386,19 @@ mod tests {
         let mut buf2 = vec![0u8; 4096];
         d.populate(2, make_handle(&mut buf2)).unwrap();
 
+        // Complete the write-through now so the two entries are demotable. With no
+        // drives the background writer marks them persisted asynchronously, and
+        // eviction never drops an unpersisted entry (#220), so without this the
+        // third populate races that writer.
+        dm.convert_to_storage(1, 0x1000).unwrap();
+        dm.convert_to_storage(2, 0x2000).unwrap();
+
         // Third populate should trigger eviction of one entry and succeed.
         let mut buf3 = vec![0u8; 4096];
         d.populate(3, make_handle(&mut buf3)).unwrap();
 
-        // Total entries in dispatch-map: at most 3 (one may have been converted to block).
-        assert!(dm.entry_count() <= 3);
+        // Total entries in dispatch-map: 3 (one demoted to block, not removed).
+        assert_eq!(dm.entry_count(), 3);
 
         d.shutdown().unwrap();
     }

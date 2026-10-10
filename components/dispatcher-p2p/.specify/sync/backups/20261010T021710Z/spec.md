@@ -215,9 +215,8 @@ The system keeps both DRAM and SSD tiers within configured utilization bounds wi
   (`evict_one_clean`, reached from `evict_for_space` / `evict_and_insert` on the store, lookup,
   cold-promotion and DRAM-backfill paths), with the same semantics as `dispatcher`:
   - `evictions_blocked_by_pin` and `evictions_blocked_unpersisted`, per candidate examined, by
-    matching the refusal. A held reference is recognised from `ActiveReferences` alone, which
-    dispatch-map returns for it (dispatch-map FR-026; it returned
-    `InvalidState("entry has active references")` until branch `fix/evict-blocked-by-pin`);
+    matching the refusal. A held reference is recognised from `ActiveReferences` and from the
+    `InvalidState("entry has active references")` that dispatch-map currently returns for it;
     any other refusal (no `ssd_offset`, or no dispatch-map entry yet) counts as unpersisted.
   - `eviction_scans_exhausted`, once per clean-eviction scan that frees nothing, whether or not
     the caller then gives up. `evict_for_space` takes a last-chance full-depth scan after a

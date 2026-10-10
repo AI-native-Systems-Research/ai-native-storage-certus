@@ -249,6 +249,7 @@ pub fn init_dispatcher(
             max_eviction_attempts: config.max_eviction_attempts,
             store_backpressure_ms: config.store_backpressure_ms,
             memory_tier_eviction_threshold: config.memory_tier_eviction_threshold,
+            backfill_delay_ms: config.backfill_delay_ms,
             ..Default::default()
         })
         .map_err(|e| format!("Dispatcher init failed: {e}"))

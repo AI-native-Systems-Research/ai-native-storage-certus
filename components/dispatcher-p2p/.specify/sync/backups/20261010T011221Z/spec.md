@@ -12,8 +12,6 @@
 
 **Last-Synced**: 2026-10-09 (Spec-Sync on branch `fix/dispatcher-p2p-clean-eviction` — FR-017, FR-025a, FR-029 BACKFILL: foreground eviction no longer removes, and the tier-movement / eviction-refusal counters are now reported.)
 
-**Last-Synced**: 2026-10-10 (Spec-Sync on branch `fix/dispatcher-p2p-clean-eviction` — FR-009 downgraded to MAY / off by default, FR-014 records the deployed default 0; FR-032, FR-033 added as future work. Then FR-030 clean eviction and FR-031 store backpressure BACKFILL, FR-027/FR-028 anchors refreshed, backfill narrative annotated.)
-
 **Input**: User description: "GPUDirect Storage cold-read path for dispatcher-p2p. NVMe DMA reads directly into GPU BAR1 staging buffers, then D2D copies to client GPU destination, eliminating host DRAM bounce."
 
 ## User Scenarios & Testing *(mandatory)*
@@ -116,12 +114,12 @@ The system keeps both DRAM and SSD tiers within configured utilization bounds wi
 - **FR-006**: The `batch_lookup` path MUST panic if the P2P ring was not initialized (GDRCopy unavailable, GPU memory insufficient). Initialization logs a diagnostic warning but does not fail, allowing hot-only testing without P2P hardware. The single-key `lookup()` path does NOT panic — it silently falls back to the DRAM path when the P2P ring is unavailable (for test/staging environments). Use the `full.yaml` profile (standard dispatcher) for production DRAM-only deployments.
 - **FR-007**: The P2P ring is allocated once at initialization and is immutable for the component's lifetime. In production (full-p2p profile via `batch_lookup`), the P2P path is always used for cold reads and panics if unavailable. The single-key `lookup()` DRAM fallback path exists for test/staging environments where GDRCopy is unavailable.
 - **FR-008**: System MUST implement the same interface as the standard dispatcher, serving as a drop-in replacement. This includes the `IRemoteLookup` fallback for entries missed locally: the dispatcher calls `IRemoteLookup::batch_lookup` with `(key, size)` pairs (not `IpcHandle` — remote-lookup works only in DRAM), and on a successful remote fetch (the value becomes resident in the local memory tier) performs the DRAM→GPU delivery itself using the memory-tier→device copy.
-- **FR-009**: System MAY asynchronously promote cold entries to DRAM via a throttled background worker (`DramBackfillWorker`) after serving the client via P2P, and MUST NOT do so unless `backfill_delay_ms > 0`. *(Sync 2026-10-10 — downgraded from MUST: off by default in `certus-server-yaml`, see FR-014.)* The worker re-reads data from SSD into the memory-tier slot, then registers the key as MemoryTier in the dispatch-map. During the backfill window, repeat lookups of the same key use the P2P cold path (correct data, no stale DRAM). The backfill delay is controlled by `backfill_delay_ms` in `DispatcherConfig`.
+- **FR-009**: System MUST asynchronously promote cold entries to DRAM via a throttled background worker (`DramBackfillWorker`) after serving the client via P2P. The worker re-reads data from SSD into the memory-tier slot, then registers the key as MemoryTier in the dispatch-map. During the backfill window, repeat lookups of the same key use the P2P cold path (correct data, no stale DRAM). The backfill delay is controlled by `backfill_delay_ms` in `DispatcherConfig`.
 - **FR-010**: System MUST release all staging resources on shutdown with no leaks.
 - **FR-011**: System MUST handle read failures gracefully without corrupting ring state or affecting other in-flight operations.
 - **FR-012**: Performance measurement is handled by external benchmarking tools (e.g., `certus-api-bench_v2.py`) rather than built-in hooks, to avoid instrumentation overhead in the production path.
 - **FR-013**: System MUST implement `promote_to_memory_tier(keys)` to asynchronously read cold entries from NVMe into the memory-tier without GPU involvement, enabling future lookups to take the hot DRAM→GPU path. This uses the `pipelined_ssd_to_dram_only` pipeline function (one thread per drive, no P2P ring involvement).
-- **FR-014**: System MUST support configurable DRAM backfill throttling via `backfill_delay_ms` in `DispatcherConfig`. Component default (`DispatcherConfig::default()`): 10ms. *(Sync 2026-10-10.)* The deployed default is **0 (off)**: `certus-server-yaml --backfill-delay-ms` defaults to 0 (`apps/certus-server-yaml/src/main.rs`). Rationale: backfilling every cold block competes with stores for memory-tier slots and SSD bandwidth; on `full-p2p` (4 NVMe, A30, 4 GiB tier, certus-connector-bench scheduler-step) it ran 26.9 steps/s with ~1,200 store-backpressure retries per run against 92.6 steps/s and zero retries with backfill off, and helped only repeat cold reads of the same keys (~10%). When set to 0, no background DRAM backfill occurs and cold-promoted keys remain as BlockDevice indefinitely (repeat lookups always use P2P). When > 0, the `DramBackfillWorker` sleeps for that duration between jobs to avoid contending with active P2P cold reads for NVMe bandwidth.
+- **FR-014**: System MUST support configurable DRAM backfill throttling via `backfill_delay_ms` in `DispatcherConfig`. Default: 10ms. When set to 0, no background DRAM backfill occurs and cold-promoted keys remain as BlockDevice indefinitely (repeat lookups always use P2P). When > 0, the `DramBackfillWorker` sleeps for that duration between jobs to avoid contending with active P2P cold reads for NVMe bandwidth.
 - **FR-015**: The component's `IGpuServices` receptacle MUST expose multi-GPU device selection — `set_device(device)` to bind the active CUDA device and `device_of_ptr(ptr)` to resolve the GPU a device pointer resides on — so that cold-path staging-ring D2D copies and CUDA streams can be directed to the client destination's GPU in multi-GPU deployments. NOTE (as of 2026-07-21): this is an interface keep-up — the receptacle exposes these methods to satisfy the expanded `IGpuServices` trait (currently implemented only by the component's test mock), and the production cold path does NOT yet route transfers by device. The capability is present in the receptacle/mock; per-device routing (`device_of_ptr` → `set_device` before staging-ring copies/streams) is not yet wired into `pipelined_ssd_to_gpu_p2p`.
 - **FR-016**: System MUST maintain a persistent per-drive cold-path worker pool (`P2pColdReadPool`) that, at initialization (after the P2P ring is available), pre-allocates one long-lived OS thread plus a pre-connected `ClientChannels` for each (drive, queue-slot) pair (`MAX_QUEUES_PER_DRIVE` slots per drive), eliminating the per-batch `connect_client()` + scoped-thread setup previously required for every cold `batch_lookup`. Cold-read jobs are dispatched to the worker for the target drive over a bounded (depth-1) channel, and the worker executes the P2P pipeline (`pipelined_multi_object_p2p`) and returns per-job results. If pool creation fails at initialization (e.g., `connect_client()` error), the system MUST log a non-fatal diagnostic and fall back, for the remaining lifetime of the component, to the pre-existing inline per-batch path (connect + run the pipeline on the calling thread for each drive/chunk). The pool MUST be signaled to stop and its worker threads released as part of component shutdown, before the P2P ring itself is destroyed.
 - **FR-017**: System MUST provide an eviction-event notification channel for observability of memory-tier evictions. `create_eviction_channel(capacity)` registers a bounded `crossbeam_channel::Receiver<EvictionEvent>` for the component (single active subscriber). Every memory-tier eviction performed while serving a lookup or write (`evict_for_space_emit`, `evict_and_insert`, and the cold-promotion threads) attempts to publish an `EvictionEvent { key, reason }` to the registered channel using a non-blocking `try_send`. *(Sync 2026-10-09 — code authoritative.)* That foreground path has one outcome only, `EvictionReason::Demoted`: it never removes an entry (#220), so `EvictionReason::Removed` is published only by the SSD `BackgroundEvictor` (FR-019). The DRAM-backfill worker's evictions are internal and publish nothing. Eviction event delivery MUST NOT block, delay, or fail the eviction operation: if the channel is full or no subscriber has been registered, the event MUST be silently dropped and counted, and the running drop count MUST be readable and reset via `eviction_dropped_count()`.
@@ -192,7 +190,7 @@ The system keeps both DRAM and SSD tiers within configured utilization bounds wi
   over the node's cores **excluding its first two**. A drive with an unresolvable node, or on a
   node with two or fewer cores, is passed no CPU and the block device chooses a NUMA-local core
   itself. If NUMA topology discovery fails, a warning is logged and pollers are left unpinned.
-  (`src/lib.rs:320-371`, `977-986`.) The two dispatchers share this policy so that switching
+  (`src/lib.rs:272-323`, `894-903`.) The two dispatchers share this policy so that switching
   the build profile does not move pollers.
 - **FR-028** *(New 2026-10-05.)* This component MUST implement
   `IDispatcher::schedule_write_through` as a **real** enqueue onto its own
@@ -208,16 +206,15 @@ The system keeps both DRAM and SSD tiers within configured utilization bounds wi
     exactly the reasons set out in interfaces `001-interfaces` FR-031a. The defect would be
     identical in this dispatcher; only the profile differs.
   - Contract: interfaces `001-interfaces` FR-031a. Caller: remote-lookup
-    `002-remote-lookup-rdma` FR-039. (`src/lib.rs:2870`.)
+    `002-remote-lookup-rdma` FR-039. (`src/lib.rs:2759`.)
 - **FR-029** *(New 2026-10-05; rewritten 2026-10-09 — BACKFILL.)* This component MUST report,
   through `IDispatcher::tier_event_stats()`, the eviction counters of `dispatcher` spec
   `002-served-by-tier-attribution` FR-033/FR-034 for its **foreground** eviction paths
   (`evict_one_clean`, reached from `evict_for_space` / `evict_and_insert` on the store, lookup,
   cold-promotion and DRAM-backfill paths), with the same semantics as `dispatcher`:
   - `evictions_blocked_by_pin` and `evictions_blocked_unpersisted`, per candidate examined, by
-    matching the refusal. A held reference is recognised from `ActiveReferences` alone, which
-    dispatch-map returns for it (dispatch-map FR-026; it returned
-    `InvalidState("entry has active references")` until branch `fix/evict-blocked-by-pin`);
+    matching the refusal. A held reference is recognised from `ActiveReferences` and from the
+    `InvalidState("entry has active references")` that dispatch-map currently returns for it;
     any other refusal (no `ssd_offset`, or no dispatch-map entry yet) counts as unpersisted.
   - `eviction_scans_exhausted`, once per clean-eviction scan that frees nothing, whether or not
     the caller then gives up. `evict_for_space` takes a last-chance full-depth scan after a
@@ -242,47 +239,6 @@ The system keeps both DRAM and SSD tiers within configured utilization bounds wi
   defect. An unmeasured counter contradicts nothing and is acceptable **only while declared**.
   Adding fields to `TierEventStats` is not compiler-enforced, so neither case is caught by a
   build.
-
-- **FR-030** *(New 2026-10-10 — BACKFILL, #220.)* Foreground memory-tier eviction MUST NOT lose
-  data and MUST NOT free memory still in use. A victim is freed only after
-  `IDispatchMap::try_evict_to_block` has moved it to BlockDevice, so the dispatch-map transition
-  always precedes the DRAM free and the key stays resolvable from SSD. A candidate the
-  dispatch-map refuses — not yet written through (`ssd_offset == None`), referenced (read or
-  write pin), or reserved but not yet registered — MUST be skipped, never removed: removing an
-  unpersisted entry loses a store the client was told succeeded, and freeing a referenced or
-  reserved one reclaims DRAM that an in-flight load, copy or write-through still uses.
-  - `evict_for_space` frees one victim per step, scanning the `4 × step` oldest candidates
-    (capped at 1 024) and, when that scan frees nothing, once more at full depth; if that also
-    fails it MUST return `AllocationFailed` and free nothing. The step limit is
-    `DispatcherConfig::max_eviction_attempts`.
-  - `evict_and_insert` MUST answer a sharded-pool `PoolFull` after a successful
-    `evict_for_space` by evicting one more clean victim and retrying, under the same limit.
-  - *Replaces* the blind fallback that freed a slot with `IMemoryTier::evict_next_for_key` and
-    then `dm.remove`d the key when demotion failed (#220).
-  - Tests: `evict_for_space_never_drops_unpersisted_entries`, `evict_for_space_skips_pinned_entry`,
-    `evict_for_space_scans_past_unpersisted_entries`.
-    (`src/lib.rs:606-655`, `657-706`, `719-753`.)
-- **FR-031** *(New 2026-10-10 — BACKFILL.)* `reserve_memory` MUST backpressure, not fail, while
-  the memory tier is momentarily full of entries that cannot yet be evicted under FR-030: it
-  retries the eviction and allocation every 20 ms until a deadline, then returns the last
-  `AllocationFailed`. The deadline is the reserve batch's shared deadline when the caller (shmq
-  `op_reserve`) supplies one, otherwise now + `DispatcherConfig::store_backpressure_ms`; a
-  deadline already past, or a budget of 0, means a single attempt. Each retry increments
-  `store_backpressure_events` (FR-029). Nothing already stored is dropped on either outcome; a
-  store that runs out of budget is simply not cached. The retry loop mirrors `dispatcher`'s
-  `reserve_memory` (p2p does not count `store_already_resident`; see FR-029). Test: `reserve_memory_backpressures_until_write_through_lands`.
-  (`src/lib.rs:2444-2522`.)
-- **FR-032** *(New 2026-10-10 — FUTURE, not implemented; MUST NOT be counted as drift.)* If
-  repeat cold reads of the same keys matter, cold-to-DRAM promotion SHOULD be **frequency-gated**
-  (e.g. promote a key on its second cold hit) instead of FR-009's promote-every-cold-read, as
-  Mooncake promotes only "frequently accessed" SSD-resident blocks. Gate: show a workload where
-  repeat cold reads dominate before implementing.
-- **FR-033** *(New 2026-10-10 — FUTURE, not implemented; MUST NOT be counted as drift.)* When the
-  memory tier has no evictable slot, a store SHOULD be written **GPU → SSD directly** (P2P
-  write-around) instead of backpressuring in `reserve_memory`. Motivation: in connector-bench
-  contention mode stores still take ~640 backpressure retries per run with backfill off. Needs
-  its own spec (staging, extent allocation, acknowledgement point, crash consistency) before
-  implementation.
 
 ## ROOT CAUSE FOUND 2026-09-30: the cold path panics when the P2P ring is absent
 
@@ -373,8 +329,7 @@ read is what kills the server.
   reports far less, and the mechanism is one the prediction ignored: **this component does not
   stage cold reads through the memory tier at all.** `dispatcher` promotes every cold read
   into DRAM as part of serving it, consuming memory-tier slots and forcing evictions; p2p
-  stages in GPU BAR1 and backfills DRAM asynchronously (as measured then; backfill is off by
-  default since 2026-10-10, FR-014), so it puts far less pressure on the
+  stages in GPU BAR1 and backfills DRAM asynchronously, so it puts far less pressure on the
   tier. A less-pressured tier retains more, so fewer later reads are cold at all — 48 089 more
   DRAM hits on an identical workload. The `Ssd` share fell because there were fewer cold
   reads, not because cold reads were attributed differently.
@@ -396,9 +351,8 @@ read is what kills the server.
 
   **Stated as an aggregate share rather than as "a repeat read reports `Ssd` twice", and the
   correction matters.** The obvious per-key formulation is wrong, because this component *does*
-  backfill DRAM — asynchronously, when `backfill_delay_ms > 0` (off by default since
-  2026-10-10, FR-014; with it off, repeat cold reads stay `Ssd`). A key read cold is therefore
-  `Ssd` on that read and may legitimately be `Dram` on a later one, once the backfill has landed. "Twice `Ssd`" holds only
+  backfill DRAM — asynchronously. A key read cold is therefore `Ssd` on that read and may
+  legitimately be `Dram` on a later one, once the backfill has landed. "Twice `Ssd`" holds only
   within a window shorter than the backfill, which no black-box client can observe or control,
   so a test asserting it would be measuring the scheduler's timing rather than this
   requirement. What FR-014 actually claims is that the promotion is not on the serving path,

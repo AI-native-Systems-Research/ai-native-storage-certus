@@ -1,33 +1,124 @@
 {
-  "generated": "2026-10-05",
-  "project": "dispatcher-p2p",
-  "spec": "001-gpudirect-cold-path",
-  "branch": "fix/poller-cpu-placement-logging",
-  "baseline": "origin/unstable (stamped 2c86a131; stamp re-verified against `git archive origin/unstable`)",
-  "method": "Delta analysis on a certified baseline: this component's existing clean stamp was re-verified to equal the spec-sync hash of `git archive origin/unstable`, so the only new inputs are this branch's src/specs/interfaces changes. Every FR/SC touching CPU placement, NUMA pinning, threads or SPDK init was located by grep over specs/** and re-checked against the changed code.",
-  "summary": {
-    "specs_analyzed": 1,
-    "findings": 1,
-    "resolved": 1,
-    "open": 0
-  },
-  "aligned": [],
-  "drifted": [
-    {
-      "requirement": "FR-027 (new)",
-      "direction": "BACKFILL",
-      "severity": "minor",
-      "spec_text": "(unspecced)",
-      "actual": "Same poller placement policy as dispatcher FR-011, including this branch's skip-first-two-cores-per-node change.",
-      "location": "components/dispatcher-p2p/src/lib.rs:272-323, 894-903",
-      "note": "Unspecced behaviour, modified by this branch.",
-      "resolution": "FR-027 added, cross-referencing dispatcher FR-011."
-    }
-  ],
-  "unspecced": [],
-  "conflicts": [],
-  "drift_status": "clean",
+ "generated": "2026-10-09T23:49:23Z",
+ "project": "dispatcher-p2p",
+ "spec": "001-gpudirect-cold-path",
+ "branch": "fix/dispatcher-p2p-clean-eviction",
+ "baseline": {
+  "commit": "3c001478",
   "inputs_sha256": "637f54a21fabcd202cb6902d4f744ff1ebff3339517725f9eee4c34578fbdee0",
-  "git_commit": "d102a00b",
-  "synced_at": "2026-10-06T00:17:04Z"
+  "verified": "stamp equals scripts/spec-sync-hash.sh over git archive 3c001478"
+ },
+ "method": "delta: only new input is components/dispatcher-p2p/src/lib.rs (906339ee); every FR/SC and cross-spec contract mentioning eviction, backpressure, reserve_memory, tier_event_stats or the FR-033/034 counters located by grep over specs/** and dispatcher 002, then re-checked against the changed code",
+ "summary": {
+  "specs_analyzed": 1,
+  "findings": 7,
+  "drifted": 5,
+  "unspecced": 2,
+  "conflicts": 1
+ },
+ "aligned": [
+  "FR-001",
+  "FR-002",
+  "FR-016",
+  "FR-018",
+  "FR-019",
+  "FR-020",
+  "FR-021",
+  "FR-023",
+  "FR-024",
+  "FR-025",
+  "FR-026",
+  "FR-028 (behaviour; anchor stale, see D7)"
+ ],
+ "drifted": [
+  {
+   "id": "D1",
+   "requirement": "FR-017",
+   "kind": "drifted",
+   "severity": "moderate",
+   "spec_text": "Every memory-tier eviction performed while serving a lookup or write (evict_for_space_emit, covering both the 'demote to block device' and 'remove' outcomes) attempts to publish an EvictionEvent",
+   "actual": "The foreground path no longer has a 'remove' outcome: evict_one_clean only demotes (EvictionReason::Demoted). Removed is now published only by the SSD BackgroundEvictor (FR-019).",
+   "location": "components/dispatcher-p2p/src/lib.rs:619-661"
+  },
+  {
+   "id": "D2",
+   "requirement": "FR-025a",
+   "kind": "drifted",
+   "severity": "moderate",
+   "spec_text": "It still reports no tier-movement counters (promotions, evictions, store backpressure) ... those fields remain zero, and that is intentional",
+   "actual": "tier_event_stats() now also reports evictions_from_memory and store_backpressure_events (plus the FR-029 counters).",
+   "location": "components/dispatcher-p2p/src/lib.rs:2917-2950"
+  },
+  {
+   "id": "D3",
+   "requirement": "FR-029",
+   "kind": "drifted",
+   "severity": "major",
+   "spec_text": "This component does not report evictions_blocked_by_pin, evictions_blocked_unpersisted or eviction_scans_exhausted ... Those paths are free functions holding no handle to the counters",
+   "actual": "All three are reported for the foreground eviction paths (counters threaded via EvictCtx into the associated fns, incl. cold-promotion and DRAM-backfill threads). Still unmeasured: the background MemoryTierEvictor (background.rs), promotions, store_drops_on_full, remote_lookup_misses, evictions_from_ssd.",
+   "location": "components/dispatcher-p2p/src/lib.rs:84-121, 619-718, 2917-2950"
+  },
+  {
+   "id": "D6",
+   "requirement": "dispatcher 002 FR-034 (eviction_scans_exhausted semantics)",
+   "kind": "drifted",
+   "severity": "minor",
+   "spec_text": "counting clean-eviction scans that examined every candidate and freed none ... MUST be recorded whichever cause blocked the scan",
+   "actual": "p2p counts once per evict_for_space that gives up (after the last-chance full-depth scan). A shallow scan that frees nothing followed by a successful deep scan is not counted; the main dispatcher counts every failed scan.",
+   "location": "components/dispatcher-p2p/src/lib.rs:699-711"
+  },
+  {
+   "id": "D7",
+   "requirement": "FR-027 / FR-028 / FR-029 anchors",
+   "kind": "drifted",
+   "severity": "minor",
+   "spec_text": "src/lib.rs:272-323, 894-903 / src/lib.rs:2759 / src/lib.rs:2817-2832",
+   "actual": "Now src/lib.rs:320-371, 975-984 / src/lib.rs:2868 / src/lib.rs:2917-2950",
+   "location": "components/dispatcher-p2p/specs/001-gpudirect-cold-path/spec.md"
+  }
+ ],
+ "unspecced": [
+  {
+   "id": "D4",
+   "requirement": "(unspecced) clean eviction / #220",
+   "kind": "unspecced",
+   "severity": "major",
+   "actual": "evict_one_clean/evict_for_space never remove an unpersisted entry and never free a pinned or unregistered slot; dispatch-map transition precedes DRAM free; widening scan + one full-depth scan, then AllocationFailed. Attempt cap from DispatcherConfig.max_eviction_attempts. Regression tests evict_for_space_never_drops_unpersisted_entries, _skips_pinned_entry, _scans_past_unpersisted_entries.",
+   "location": "components/dispatcher-p2p/src/lib.rs:619-743"
+  },
+  {
+   "id": "D5",
+   "requirement": "(unspecced) store backpressure",
+   "kind": "unspecced",
+   "severity": "moderate",
+   "actual": "reserve_memory retries AllocationFailed every 20 ms until the shmq batch deadline or now+store_backpressure_ms (0 = single attempt); evict_and_insert retries PoolFull by evicting one more clean victim. Test reserve_memory_backpressures_until_write_through_lands.",
+   "location": "components/dispatcher-p2p/src/lib.rs:721-743, 2442-2530"
+  }
+ ],
+ "conflicts": [
+  {
+   "id": "C1",
+   "between": [
+    "dispatcher-p2p 001 FR-029",
+    "dispatcher 002 FR-035"
+   ],
+   "description": "dispatcher spec 002 FR-035 states dispatcher-p2p does not report FR-033/FR-034; after this change it does for the foreground paths. FR-035 lives in components/dispatcher, whose code is unchanged."
+  }
+ ],
+ "drift_status": "clean",
+ "synced_at": "2026-10-10T01:54:30Z",
+ "git_commit": "9c307fd8",
+ "inputs_sha256": "96202d3c9d0a856bcadd6ead245dbd091476d1760d07e2843669cbe8e557efcc",
+ "open": [],
+ "resolved": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5",
+  "D6",
+  "D7",
+  "C1",
+  "D8 backfill narrative"
+ ]
 }
