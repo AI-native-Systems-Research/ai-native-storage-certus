@@ -4,6 +4,9 @@ description: Extract verifiable correctness properties from ONE component artifa
 argument-hint: "<artifact files> <output file>"
 ---
 
+> **Frozen 2026-10-09.** This skill moved to [ai-native-storage-workbench](https://github.com/AI-native-Systems-Research/ai-native-storage-workbench) (`fv/skills/`). Edit it there; this copy is not updated. Install the current version with `fv/install.sh <this-repo>`.
+
+
 ## Purpose
 From **one** artifact (a spec, OR the code, OR a harness/verif) produce the list of **verifiable
 properties** it implies, at a **fixed granularity** so lists from different artifacts compare

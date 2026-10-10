@@ -4,6 +4,9 @@ description: Create Kani harnesses for a Certus component from BOTH its spec and
 argument-hint: "[component-path] [interface-path]"
 ---
 
+> **Frozen 2026-10-09.** This skill moved to [ai-native-storage-workbench](https://github.com/AI-native-Systems-Research/ai-native-storage-workbench) (`fv/skills/`). Edit it there; this copy is not updated. Install the current version with `fv/install.sh <this-repo>`.
+
+
 
 > **Scope (2026-10-04): prove only LEVEL-2 properties.** Skip every id listed in the bundle's
 > `level2_excluded:` (written by `gate/level1.py`): those are spec<->code discordances, reported in

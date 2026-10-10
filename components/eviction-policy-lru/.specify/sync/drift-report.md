@@ -1,11 +1,13 @@
 ---
 spec_sync_component: eviction-policy-lru
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-06T00:17:04Z
-spec_sync_git_commit: bd1598f5
-spec_sync_inputs_sha256: acadca684479c8738537a3fb1e835f90bacbc39fa88a5dd72f6a9d74ed45c2bd
+spec_sync_synced_at: 2026-10-09T21:53:37Z
+spec_sync_git_commit: 83bcd4ff
+spec_sync_inputs_sha256: ea898b020120bba2817e9a8bec803c513a850fc8265dfb75bfa4c0ea567c67e0
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-09 (transitive: `components/interfaces` changed, branch `fix/evict-blocked-by-pin`).** The only change to this component's hashed inputs is a doc-comment correction on `IDispatchMap::try_evict_to_block` in `components/interfaces/src/idispatch_map.rs` (no signature, type, or behaviour change). This component's own `src/**` and `specs/**` are unchanged, and its previous stamp was re-verified to match `origin/unstable` before re-stamping. **No re-analysis was performed for this component**; this stamp asserts only what was checked.
+
 > **Re-stamp 2026-10-05 (transitive: `components/interfaces` changed, branch `fix/poller-cpu-placement-logging`).** The only change to this component's hashed inputs is a doc-comment correction on `DispatcherConfig::poller_base_cpu` in `components/interfaces/src/idispatcher.rs` (no signature, type, or behaviour change). This component's own `src/**` and `specs/**` are unchanged, and it does not reference `poller_base_cpu` (verified by grep over its src/ and specs/). Its previous stamp was re-verified to match `git archive origin/unstable` before re-stamping. **No re-analysis was performed for this component**; this stamp asserts only what was checked.
 
 > **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest

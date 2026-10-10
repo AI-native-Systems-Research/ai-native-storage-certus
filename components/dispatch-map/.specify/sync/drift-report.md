@@ -1,11 +1,19 @@
 ---
 spec_sync_component: dispatch-map
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-06T00:17:04Z
-spec_sync_git_commit: bd1598f5
-spec_sync_inputs_sha256: ec0279d94417185764a4f70dc79435719f911127c4ea83cc193ff7850ef94209
+spec_sync_synced_at: 2026-10-09T21:53:37Z
+spec_sync_git_commit: 83bcd4ff
+spec_sync_inputs_sha256: 4ace5695270367ea73774f3d0cc4e6393e0230dfd4fb98cb36c1ddea62f9e27a
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-10-09 (branch `fix/evict-blocked-by-pin`).** Delta analysis on a certified baseline: every stamp on `origin/unstable` was re-verified to equal its recomputed spec-sync hash, so the only new inputs are this branch's changes.
+>
+> - **FR-026 / `try_evict_to_block` scenario 2 — CODE + SPEC.** A held read or write reference now returns `ActiveReferences(key)` (`src/lib.rs`, the refs check in `try_evict_to_block`), as `remove` (FR-011) already did; it was `InvalidState`. Spec text updated to match. The consumer's contract required this: dispatcher spec 002 FR-033 counts `evictions_blocked_by_pin` on `ActiveReferences`, so with `InvalidState` every pinned candidate was counted as unpersisted.
+> - **Tests.** Six new unit tests against the real component cover every `try_evict_to_block` outcome (demote, read pin, write ref, no ssd_offset, already BlockDevice, missing key); there were none.
+> - Other `try_evict_to_block` callers only test `is_ok()` / `is_err()` and are unaffected.
+>
+> No actionable drift remains for this component after apply.
+
 > **Re-stamp 2026-10-05 (transitive: `components/interfaces` changed, branch `fix/poller-cpu-placement-logging`).** The only change to this component's hashed inputs is a doc-comment correction on `DispatcherConfig::poller_base_cpu` in `components/interfaces/src/idispatcher.rs` (no signature, type, or behaviour change). This component's own `src/**` and `specs/**` are unchanged, and it does not reference `poller_base_cpu` (verified by grep over its src/ and specs/). Its previous stamp was re-verified to match `git archive origin/unstable` before re-stamping. **No re-analysis was performed for this component**; this stamp asserts only what was checked.
 
 > **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest
