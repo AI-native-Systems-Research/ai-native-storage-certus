@@ -1,11 +1,40 @@
 ---
 spec_sync_component: dispatcher-p2p
-spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-06T00:17:04Z
-spec_sync_git_commit: bd1598f5
-spec_sync_inputs_sha256: 637f54a21fabcd202cb6902d4f744ff1ebff3339517725f9eee4c34578fbdee0
+spec_sync_drift_status: drift
+spec_sync_synced_at: 2026-10-09T23:49:23Z
+spec_sync_git_commit: 906339ee
+spec_sync_inputs_sha256: 3cb947c2ed529d00c750b4cf0f3c130e83172f1ece94ab2386328d7eb3873eee
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-10-09 (branch `fix/dispatcher-p2p-clean-eviction`).** Delta analysis on a certified
+> baseline: the previous clean stamp was re-verified to equal the spec-sync hash of
+> `git archive 3c001478`, so the only new input is this branch's `src/lib.rs` (the #220
+> clean-eviction fix). Every FR/SC and cross-spec contract touching eviction, backpressure,
+> `reserve_memory`, `tier_event_stats` or the FR-033/FR-034 counters was located by grep over
+> `specs/**` and `dispatcher` spec 002, then re-checked against the changed code.
+>
+> - **D1 FR-017 — DRIFTED (moderate) → BACKFILL, applied.** Foreground eviction no longer has a
+>   "remove" outcome; `Removed` now comes only from the SSD evictor. `src/lib.rs:606-655`.
+> - **D2 FR-025a — DRIFTED (moderate) → BACKFILL, applied.** "No tier-movement counters" was
+>   false: `evictions_from_memory` and `store_backpressure_events` are reported.
+> - **D3 FR-029 — DRIFTED (major) → BACKFILL, applied.** Rewritten: the FR-033/FR-034 counters are
+>   reported for the foreground paths; the declared gap is narrowed to the background
+>   `MemoryTierEvictor` and the fields listed there. `src/lib.rs:83-117, 606-655, 2919-2950`.
+> - **D6 `eviction_scans_exhausted` semantics vs dispatcher FR-034 — DRIFTED (minor) → ALIGN,
+>   applied in code.** Was counted once per giving-up eviction; now once per scan that frees
+>   nothing, as FR-034 and `dispatcher` do. Two test assertions updated; 77/77 pass.
+> - **C1 conflict with dispatcher spec 002 FR-035 — resolved** by narrowing FR-035 (dispatcher
+>   re-stamped, doc-only).
+> - **D4 clean-eviction invariant (#220) — UNSPECCED (major), NOT APPLIED** (not approved this
+>   sync). `src/lib.rs:606-743`.
+> - **D5 store backpressure in `reserve_memory` — UNSPECCED (moderate), NOT APPLIED** (not
+>   approved). `src/lib.rs:721-743, 2442-2530`.
+> - **D7 stale anchors in FR-027 / FR-028 — DRIFTED (minor), NOT APPLIED** (not approved): now
+>   `src/lib.rs:320-371, 975-984` and `src/lib.rs:2868`.
+>
+> **Stamped `drift`:** D4, D5 and D7 remain open by decision, not by oversight. Approving the
+> proposed FR-030 / FR-031 and the anchor refresh would clear it.
+
 > **Sync 2026-10-05 (branch `fix/store-declines-root-cause`).** Delta analysis on a certified baseline (see the interfaces report).
 >
 > - **Spec not updated while code moved — DRIFTED (moderate), two requirements' worth.** This component's `src/lib.rs` gained 37 lines and its own spec was untouched, which `dispatcher` spec 002 **FR-030** names as a MUST for exactly this component and spec. Two distinct gaps: a full `IDispatcher::schedule_write_through` implementation (a real `WriteJob` enqueue, not a no-op), and a declaration that the FR-033/FR-034 eviction counters are unreported here. FR-035 requires that second one be declared "in both the component's code and this spec" — the code comment existed, and the dispatcher's spec carried the note, but **this** component's spec said nothing. **Resolution**: new **FR-028** (the real enqueue, same `drive_index` placement hash as the FR-018 store path, non-blocking, best-effort, with why a no-op would be wrong under the `full-p2p` profile specifically) and new **FR-029** (the unmeasured-counter declaration, and why it is a declared gap rather than a defect — contrasted against FR-025a's self-contradictory zeroed route counters).

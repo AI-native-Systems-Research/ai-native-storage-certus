@@ -10,8 +10,6 @@
 
 **Last-Synced**: 2026-10-05 (Spec-Sync on branch `fix/poller-cpu-placement-logging` — FR-027 BACKFILL: NVMe poller placement, shared with `dispatcher` FR-011.)
 
-**Last-Synced**: 2026-10-09 (Spec-Sync on branch `fix/dispatcher-p2p-clean-eviction` — FR-017, FR-025a, FR-029 BACKFILL: foreground eviction no longer removes, and the tier-movement / eviction-refusal counters are now reported.)
-
 **Input**: User description: "GPUDirect Storage cold-read path for dispatcher-p2p. NVMe DMA reads directly into GPU BAR1 staging buffers, then D2D copies to client GPU destination, eliminating host DRAM bounce."
 
 ## User Scenarios & Testing *(mandatory)*
@@ -122,7 +120,7 @@ The system keeps both DRAM and SSD tiers within configured utilization bounds wi
 - **FR-014**: System MUST support configurable DRAM backfill throttling via `backfill_delay_ms` in `DispatcherConfig`. Default: 10ms. When set to 0, no background DRAM backfill occurs and cold-promoted keys remain as BlockDevice indefinitely (repeat lookups always use P2P). When > 0, the `DramBackfillWorker` sleeps for that duration between jobs to avoid contending with active P2P cold reads for NVMe bandwidth.
 - **FR-015**: The component's `IGpuServices` receptacle MUST expose multi-GPU device selection — `set_device(device)` to bind the active CUDA device and `device_of_ptr(ptr)` to resolve the GPU a device pointer resides on — so that cold-path staging-ring D2D copies and CUDA streams can be directed to the client destination's GPU in multi-GPU deployments. NOTE (as of 2026-07-21): this is an interface keep-up — the receptacle exposes these methods to satisfy the expanded `IGpuServices` trait (currently implemented only by the component's test mock), and the production cold path does NOT yet route transfers by device. The capability is present in the receptacle/mock; per-device routing (`device_of_ptr` → `set_device` before staging-ring copies/streams) is not yet wired into `pipelined_ssd_to_gpu_p2p`.
 - **FR-016**: System MUST maintain a persistent per-drive cold-path worker pool (`P2pColdReadPool`) that, at initialization (after the P2P ring is available), pre-allocates one long-lived OS thread plus a pre-connected `ClientChannels` for each (drive, queue-slot) pair (`MAX_QUEUES_PER_DRIVE` slots per drive), eliminating the per-batch `connect_client()` + scoped-thread setup previously required for every cold `batch_lookup`. Cold-read jobs are dispatched to the worker for the target drive over a bounded (depth-1) channel, and the worker executes the P2P pipeline (`pipelined_multi_object_p2p`) and returns per-job results. If pool creation fails at initialization (e.g., `connect_client()` error), the system MUST log a non-fatal diagnostic and fall back, for the remaining lifetime of the component, to the pre-existing inline per-batch path (connect + run the pipeline on the calling thread for each drive/chunk). The pool MUST be signaled to stop and its worker threads released as part of component shutdown, before the P2P ring itself is destroyed.
-- **FR-017**: System MUST provide an eviction-event notification channel for observability of memory-tier evictions. `create_eviction_channel(capacity)` registers a bounded `crossbeam_channel::Receiver<EvictionEvent>` for the component (single active subscriber). Every memory-tier eviction performed while serving a lookup or write (`evict_for_space_emit`, `evict_and_insert`, and the cold-promotion threads) attempts to publish an `EvictionEvent { key, reason }` to the registered channel using a non-blocking `try_send`. *(Sync 2026-10-09 — code authoritative.)* That foreground path has one outcome only, `EvictionReason::Demoted`: it never removes an entry (#220), so `EvictionReason::Removed` is published only by the SSD `BackgroundEvictor` (FR-019). The DRAM-backfill worker's evictions are internal and publish nothing. Eviction event delivery MUST NOT block, delay, or fail the eviction operation: if the channel is full or no subscriber has been registered, the event MUST be silently dropped and counted, and the running drop count MUST be readable and reset via `eviction_dropped_count()`.
+- **FR-017**: System MUST provide an eviction-event notification channel for observability of memory-tier evictions. `create_eviction_channel(capacity)` registers a bounded `crossbeam_channel::Receiver<EvictionEvent>` for the component (single active subscriber). Every memory-tier eviction performed while serving a lookup or write (`evict_for_space_emit`, covering both the "demote to block device" and "remove" outcomes) attempts to publish an `EvictionEvent { key, reason }` (`EvictionReason::Demoted` or `EvictionReason::Removed`) to the registered channel using a non-blocking `try_send`. Eviction event delivery MUST NOT block, delay, or fail the eviction operation: if the channel is full or no subscriber has been registered, the event MUST be silently dropped and counted, and the running drop count MUST be readable and reset via `eviction_dropped_count()`.
 - **FR-018**: System MUST provide a parallel write-through persistence path from the memory tier to SSD using one dedicated writer thread per drive (`ParallelBackgroundWriter`). Each `WriteJob` is routed to the writer owning its target drive (`device_index % num_drives`) and processed asynchronously so that write-through across multiple NVMe devices proceeds concurrently. The writer pool MUST expose in-flight accounting, a `flush()` that blocks until all per-drive queues are drained, and a `shutdown()` that drains remaining jobs and joins all threads (also invoked on drop).
 - **FR-019**: System MUST reclaim SSD capacity via a background evictor thread (`BackgroundEvictor`) when configured (`ssd_eviction_threshold > 0.0`). On each `ssd_eviction_interval_secs` cycle it computes aggregate extent-manager utilization; when utilization exceeds `ssd_eviction_threshold` it evicts oldest keys in batches of `ssd_eviction_batch_size`, removing each from the memory tier and dispatch-map and freeing the backing extent on the extent manager selected by the same `drive_index(key, num_drives)` splitmix64 placement hash used by the write-through path (FR-018 enqueues each `WriteJob` with `device_index = drive_index(key, num_drives)`), publishing an `EvictionEvent { reason: Removed }` per eviction, and stops once utilization drops below `ssd_eviction_low_watermark`. *(Sync 2026-09-25 — code authoritative: the evictor previously selected the extent manager with a raw `key % num_drives`, which mismatched the splitmix64 placement hash and could free an extent on the wrong drive; it now uses `drive_index`.)* The evictor MUST honor a shutdown signal promptly (also invoked on drop).
 - **FR-020**: System MUST proactively demote LRU entries from DRAM to SSD via a background evictor thread (`MemoryTierEvictor`) when configured (`memory_tier_eviction_threshold > 0.0`, disabled by default at 0.0). On each `memory_tier_eviction_interval_secs` cycle it compares memory-tier utilization against the threshold and, when exceeded, demotes oldest evictable keys (via `try_evict_to_block` + memory-tier `remove`), publishing an `EvictionEvent { reason: Demoted }` per demotion, until utilization drops below `memory_tier_eviction_low_watermark`. Batch aggressiveness scales with pressure (up to 8× `memory_tier_eviction_batch_size` as utilization approaches full); when a sweep demotes nothing (candidates held by in-flight write-through) it backs off and widens the scan window on subsequent dry runs. The evictor MUST honor a shutdown signal promptly (also invoked on drop).
@@ -165,9 +163,9 @@ The system keeps both DRAM and SSD tiers within configured utilization bounds wi
   keys over any interval. It MUST NOT return `TierEventStats::default()` for these, which is
   what it did until 2026-09-30.
 
-  *(Sync 2026-10-09 — superseded in part.)* It now also reports the foreground tier-movement
-  counters `evictions_from_memory` and `store_backpressure_events`, and the eviction-refusal
-  counters of FR-029. Which fields are still unmeasured, and why, is stated in FR-029.
+  It still reports **no tier-movement counters** (promotions, evictions, store backpressure) —
+  those belong to paths this component does not have — so those fields remain zero, and that is
+  intentional rather than an omission.
 
   **Why this needed stating.** Returning zeros compiled and passed every test: adding fields to
   `TierEventStats` is not compiler-enforced, because the other implementors build it with
@@ -207,38 +205,22 @@ The system keeps both DRAM and SSD tiers within configured utilization bounds wi
     identical in this dispatcher; only the profile differs.
   - Contract: interfaces `001-interfaces` FR-031a. Caller: remote-lookup
     `002-remote-lookup-rdma` FR-039. (`src/lib.rs:2759`.)
-- **FR-029** *(New 2026-10-05; rewritten 2026-10-09 — BACKFILL.)* This component MUST report,
-  through `IDispatcher::tier_event_stats()`, the eviction counters of `dispatcher` spec
-  `002-served-by-tier-attribution` FR-033/FR-034 for its **foreground** eviction paths
-  (`evict_one_clean`, reached from `evict_for_space` / `evict_and_insert` on the store, lookup,
-  cold-promotion and DRAM-backfill paths), with the same semantics as `dispatcher`:
-  - `evictions_blocked_by_pin` and `evictions_blocked_unpersisted`, per candidate examined, by
-    matching the refusal. A held reference is recognised from `ActiveReferences` and from the
-    `InvalidState("entry has active references")` that dispatch-map currently returns for it;
-    any other refusal (no `ssd_offset`, or no dispatch-map entry yet) counts as unpersisted.
-  - `eviction_scans_exhausted`, once per clean-eviction scan that frees nothing, whether or not
-    the caller then gives up. `evict_for_space` takes a last-chance full-depth scan after a
-    failed step scan, so one eviction that gives up records two.
-  - `evictions_from_memory` per foreground demotion, and `store_backpressure_events` per
-    `reserve_memory` retry.
-
-  The counters live in an `Arc<P2pTierCounters>` handed to the associated eviction functions
-  through `EvictCtx`, which is what removed the "free functions hold no counter handle" reason
-  this requirement previously gave for not reporting them.
-  (`src/lib.rs:83-117`, `606-655`, `2919-2950`.)
-
-  These fields remain **unmeasured, not zero**, and MUST stay declared here and at the
-  `tier_event_stats` construction site for as long as that holds:
-  - the background `MemoryTierEvictor` (`background.rs`, FR-020): its demotions are not in
-    `evictions_from_memory` and its pin refusals are not in `evictions_blocked_by_pin`;
-  - `promotions_to_memory`, `promotions_to_gpu`, `evictions_from_ssd`, `remote_lookup_misses`,
-    `store_drops_on_full`, `store_already_resident`, `oldest_sampled`, `oldest_persisted`.
-
-  **This is a gap, not a defect, and the distinction is the point.** FR-025a's zeroed route
-  counters were *self-contradictory* — hits reported with every route at zero — and so were a
-  defect. An unmeasured counter contradicts nothing and is acceptable **only while declared**.
-  Adding fields to `TierEventStats` is not compiler-enforced, so neither case is caught by a
-  build.
+- **FR-029** *(New 2026-10-05.)* This component does **not** report
+  `evictions_blocked_by_pin`, `evictions_blocked_unpersisted` or `eviction_scans_exhausted`
+  (`dispatcher` spec `002-served-by-tier-attribution` FR-033/FR-034), and its zeroes for them
+  MUST be read as **unmeasured, not as "never blocked"**. The gap MUST stay declared both here
+  and at the construction site in code for as long as it exists.
+  - This component *does* have eviction paths that a held pin can refuse (`background.rs` and
+    this file's allocation retry loop), so a reader of a p2p `/metrics` endpoint must not
+    conclude that no pin block occurred. Those paths are free functions holding no handle to
+    the counters, so reporting them is a threading change to a component the instrumentation
+    behind FR-033 cannot exercise — p2p needs its own profile and a loaded `gdrdrv`.
+  - **This is a gap, not a defect, and the distinction is the point.** FR-025a's zeroed route
+    counters were *self-contradictory* — hits reported with every route at zero — and so were a
+    defect. An unmeasured counter contradicts nothing and is acceptable **only while
+    declared**, which is what this requirement and the matching code comment do. Adding fields
+    to `TierEventStats` is not compiler-enforced, so neither case is caught by a build.
+    (`src/lib.rs:2817-2832`.)
 
 ## ROOT CAUSE FOUND 2026-09-30: the cold path panics when the P2P ring is absent
 

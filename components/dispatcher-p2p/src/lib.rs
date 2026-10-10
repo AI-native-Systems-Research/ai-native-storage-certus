@@ -646,6 +646,11 @@ impl DispatcherP2pComponent {
                 }
             }
         }
+        // Counted per scan that frees nothing, whether or not the caller then gives
+        // up (dispatcher spec 002 FR-034), as in `dispatcher`.
+        ctx.counters
+            .eviction_scans_exhausted
+            .fetch_add(1, Ordering::Relaxed);
         false
     }
 
@@ -691,9 +696,6 @@ impl DispatcherP2pComponent {
             let freed = Self::evict_one_clean(dm, mt, scan, ctx)
                 || (scan < EVICT_SCAN_MAX && Self::evict_one_clean(dm, mt, EVICT_SCAN_MAX, ctx));
             if !freed {
-                ctx.counters
-                    .eviction_scans_exhausted
-                    .fetch_add(1, Ordering::Relaxed);
                 return Err(DispatcherError::AllocationFailed(
                     "memory-tier full: no eviction candidate is both written through and unpinned"
                         .into(),
@@ -2930,8 +2932,9 @@ impl IDispatcher for DispatcherP2pComponent {
         //     not in `evictions_from_memory` and its pin refusals are not in
         //     `evictions_blocked_by_pin`; the foreground counters cover only
         //     `evict_for_space` / `evict_and_insert`.
-        //   * promotions, SSD evictions, remote misses, store drops: paths this
-        //     component does not count.
+        //   * promotions_to_memory / _to_gpu, evictions_from_ssd, remote_lookup_misses,
+        //     store_drops_on_full, store_already_resident, oldest_sampled /
+        //     oldest_persisted: not counted by this component (spec 001 FR-029).
         let c = &self.tier_counters;
         interfaces::TierEventStats {
             lookup_hits_dram: self.route_dram.load(Ordering::Relaxed),
@@ -5083,7 +5086,8 @@ mod tests {
             let _ = dm.release_read(key);
         }
         assert_eq!(counters.evictions_from_memory.load(Ordering::Relaxed), 0);
-        assert_eq!(counters.eviction_scans_exhausted.load(Ordering::Relaxed), 1);
+        // The step-1 scan and the last-chance full-depth scan both freed nothing.
+        assert_eq!(counters.eviction_scans_exhausted.load(Ordering::Relaxed), 2);
         assert!(
             counters
                 .evictions_blocked_unpersisted
@@ -5352,9 +5356,11 @@ mod tests {
         let stats = d.tier_event_stats();
         assert!(stats.store_backpressure_events >= 1);
         assert_eq!(stats.evictions_from_memory, 1);
+        // Every failed attempt (the past-deadline one plus one per backpressure retry)
+        // runs two scans that free nothing: the step-1 scan and the full-depth one.
         assert_eq!(
             stats.eviction_scans_exhausted,
-            stats.store_backpressure_events + 1
+            2 * (stats.store_backpressure_events + 1)
         );
 
         d.shutdown().unwrap();

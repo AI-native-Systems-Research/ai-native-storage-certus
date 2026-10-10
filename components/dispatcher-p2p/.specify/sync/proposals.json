@@ -1,25 +1,94 @@
 {
-  "generated": "2026-10-05",
-  "project": "dispatcher-p2p",
-  "spec": "001-gpudirect-cold-path",
-  "branch": "fix/poller-cpu-placement-logging",
-  "mode": "interactive",
-  "summary": {
-    "proposals": 1,
-    "approved": 1
+ "generated": "2026-10-09T23:49:23Z",
+ "project": "dispatcher-p2p",
+ "spec": "001-gpudirect-cold-path",
+ "branch": "fix/dispatcher-p2p-clean-eviction",
+ "mode": "interactive",
+ "summary": {
+  "total": 8,
+  "approved": 5,
+  "not_approved": 3
+ },
+ "proposals": [
+  {
+   "id": 1,
+   "requirement": "FR-017",
+   "direction": "BACKFILL",
+   "approved": true,
+   "approved_by": "user (interactive, 2026-10-09)",
+   "rejected_by": null,
+   "proposed": "Foreground eviction only demotes; Removed comes from the SSD evictor only.",
+   "location": "src/lib.rs:606-655"
   },
-  "proposals": [
-    {
-      "id": 1,
-      "requirement": "FR-027 (new)",
-      "direction": "BACKFILL",
-      "current_spec": "(unspecced)",
-      "current_code": "Same poller placement policy as dispatcher FR-011, including this branch's skip-first-two-cores-per-node change.",
-      "location": "components/dispatcher-p2p/src/lib.rs:272-323, 894-903",
-      "proposed": "FR-027 added, cross-referencing dispatcher FR-011.",
-      "confidence": "HIGH",
-      "approved": true,
-      "approved_by": "user (interactive, 2026-10-05)"
-    }
-  ]
+  {
+   "id": 2,
+   "requirement": "FR-025a",
+   "direction": "BACKFILL",
+   "approved": true,
+   "approved_by": "user (interactive, 2026-10-09)",
+   "rejected_by": null,
+   "proposed": "Drop 'no tier-movement counters'; point to FR-029.",
+   "location": "src/lib.rs:2919-2950"
+  },
+  {
+   "id": 3,
+   "requirement": "FR-029",
+   "direction": "BACKFILL",
+   "approved": true,
+   "approved_by": "user (interactive, 2026-10-09)",
+   "rejected_by": null,
+   "proposed": "Rewrite: foreground FR-033/034 counters reported; gap narrowed to MemoryTierEvictor + listed fields.",
+   "location": "src/lib.rs:83-117, 606-655, 2919-2950"
+  },
+  {
+   "id": 4,
+   "requirement": "FR-030 (new) clean eviction",
+   "direction": "BACKFILL",
+   "approved": false,
+   "approved_by": null,
+   "rejected_by": "not selected (interactive, 2026-10-09)",
+   "proposed": "Specify the #220 invariant.",
+   "location": "src/lib.rs:606-743"
+  },
+  {
+   "id": 5,
+   "requirement": "FR-031 (new) store backpressure",
+   "direction": "BACKFILL",
+   "approved": false,
+   "approved_by": null,
+   "rejected_by": "not selected (interactive, 2026-10-09)",
+   "proposed": "Specify reserve_memory bounded retry and config-driven limits.",
+   "location": "src/lib.rs:721-743, 2442-2530"
+  },
+  {
+   "id": 6,
+   "requirement": "FR-027/FR-028 anchors",
+   "direction": "BACKFILL",
+   "approved": false,
+   "approved_by": null,
+   "rejected_by": "not selected (interactive, 2026-10-09)",
+   "proposed": "Refresh line anchors.",
+   "location": "spec.md"
+  },
+  {
+   "id": 7,
+   "requirement": "eviction_scans_exhausted (dispatcher 002 FR-034)",
+   "direction": "ALIGN",
+   "approved": true,
+   "approved_by": "user (interactive, 2026-10-09)",
+   "rejected_by": null,
+   "proposed": "Count per scan that frees nothing.",
+   "location": "src/lib.rs:606-655"
+  },
+  {
+   "id": 8,
+   "requirement": "dispatcher 002 FR-035",
+   "direction": "BACKFILL (other component)",
+   "approved": true,
+   "approved_by": "user (interactive, 2026-10-09)",
+   "rejected_by": null,
+   "proposed": "Narrow FR-035 to the background evictor gap.",
+   "location": "components/dispatcher/specs/002-served-by-tier-attribution/spec.md"
+  }
+ ]
 }
