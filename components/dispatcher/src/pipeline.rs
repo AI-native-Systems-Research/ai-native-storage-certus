@@ -778,6 +778,395 @@ pub struct DriveWork<'a> {
     pub jobs: &'a [StripeReadJob],
 }
 
+/// Segments per sub-object H2D group (512 KiB at the 128 KiB chunk).
+pub(crate) const H2D_GROUP_SEGMENTS: usize = 4;
+/// Estimated H2D copy-engine rate (22.5 GB/s) for the backlog estimate.
+const H2D_EST_BYTES_PER_NS: f64 = 22.5;
+/// Estimated fixed cost per H2D copy for the backlog estimate.
+const H2D_EST_PER_COPY_NS: u64 = 2_000;
+/// Estimated H2D backlog below which ready sub-object groups are copied.
+const H2D_LOW_WATER_NS: u64 = 25_000;
+/// Per-drive in-flight read cap of the `batch_lookup` scatter.
+pub(crate) const BATCH_SCATTER_PER_DRIVE_QD_CAP: usize = 24;
+
+/// Sub-object H2D launch policy of the scatter-gather pipeline.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct H2dPolicy {
+    /// Ready groups are copied only while the estimated H2D backlog is below
+    /// this; 0 never copies groups, `u64::MAX` copies every group once ready.
+    pub(crate) low_water_ns: u64,
+}
+
+impl H2dPolicy {
+    /// One coalesced whole-object copy per object.
+    pub(crate) const NEVER_FINE: Self = Self { low_water_ns: 0 };
+    /// Ready groups copied early while the backlog is below 25 µs.
+    pub(crate) const BACKLOG_AWARE: Self = Self {
+        low_water_ns: H2D_LOW_WATER_NS,
+    };
+    #[cfg(test)]
+    pub(crate) const ALWAYS_FINE: Self = Self {
+        low_water_ns: u64::MAX,
+    };
+}
+
+/// H2D launch policy and per-drive window of the scatter-gather pipeline.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ScatterPolicy {
+    pub(crate) h2d: H2dPolicy,
+    /// Upper bound on in-flight reads per drive; `None` keeps the
+    /// proportional share of `max_queue_depth`.
+    pub(crate) per_drive_qd_cap: Option<usize>,
+}
+
+/// The public [`scatter_gather_multi_drive_zero_copy`] behaviour: one
+/// whole-object H2D per object, proportional queue depth, no cap.
+pub(crate) const LEGACY_POLICY: ScatterPolicy = ScatterPolicy {
+    h2d: H2dPolicy::NEVER_FINE,
+    per_drive_qd_cap: None,
+};
+
+/// `batch_lookup`'s multi-object scatter: backlog-aware group copies and at
+/// most [`BATCH_SCATTER_PER_DRIVE_QD_CAP`] reads in flight per drive.
+pub(crate) const BATCH_SCATTER_POLICY: ScatterPolicy = ScatterPolicy {
+    h2d: H2dPolicy::BACKLOG_AWARE,
+    per_drive_qd_cap: Some(BATCH_SCATTER_PER_DRIVE_QD_CAP),
+};
+
+/// Per-drive in-flight read budget: `max_queue_depth` split proportionally to
+/// each drive's segment count (at least 1, at most its segment count), then
+/// trimmed back to the total budget from the last drive, then capped at
+/// `per_drive_cap`.
+pub(crate) fn split_queue_depth(
+    max_queue_depth: usize,
+    drive_segments: impl Iterator<Item = usize> + Clone,
+    per_drive_cap: Option<usize>,
+) -> Vec<usize> {
+    let grand_total_segments: usize = drive_segments.clone().sum::<usize>().max(1);
+    // Distribute queue depth proportionally to each drive's segment count.
+    let mut per_drive_qd: Vec<usize> = drive_segments
+        .map(|segs| {
+            let share =
+                (max_queue_depth as u64 * segs as u64 / grand_total_segments as u64) as usize;
+            share.max(1).min(segs)
+        })
+        .collect();
+    // Ensure we don't exceed total budget.
+    let total_budget: usize = per_drive_qd.iter().sum();
+    if total_budget > max_queue_depth {
+        let excess = total_budget - max_queue_depth;
+        let mut remaining = excess;
+        for qd in per_drive_qd.iter_mut().rev() {
+            if remaining == 0 {
+                break;
+            }
+            let reduce = remaining.min(qd.saturating_sub(1));
+            *qd -= reduce;
+            remaining -= reduce;
+        }
+    }
+    if let Some(cap) = per_drive_cap {
+        for qd in per_drive_qd.iter_mut() {
+            *qd = (*qd).min(cap.max(1));
+        }
+    }
+    per_drive_qd
+}
+
+/// `H2D_GROUP_SEGMENTS` consecutive segments of one stripe, as an in-object
+/// byte range clamped to the object's `total_bytes`.
+struct H2dGroup {
+    obj: usize,
+    off: usize,
+    len: usize,
+    remaining: usize,
+    launched: bool,
+}
+
+/// Decides when the scatter-gather pipeline copies which bytes of an object
+/// to the GPU.
+///
+/// An object that completes with none of its groups copied gets ONE
+/// whole-object copy. While the caller-side estimate of the H2D backlog is
+/// below the policy's low-water mark, ready groups (every segment reaped)
+/// are copied early, in object order, as maximal contiguous runs; an object
+/// that completes after some groups were copied gets the rest as runs.
+/// Nothing is copied for a failed object. With a low-water mark of 0 no
+/// groups are built at all.
+pub(crate) struct H2dPlanner {
+    low_water_ns: u64,
+    busy_until_ns: u64,
+    groups: Vec<H2dGroup>,
+    /// Group indices sorted by (object, offset); object `o` owns
+    /// `order[obj_start[o]..obj_start[o + 1]]`.
+    order: Vec<usize>,
+    obj_start: Vec<usize>,
+    obj_total: Vec<usize>,
+    obj_has_dst: Vec<bool>,
+    /// Stripe outside its slot: whole-object copy only.
+    obj_coarse: Vec<bool>,
+    obj_any_launched: Vec<bool>,
+    /// Ready, not yet launched groups per object.
+    obj_ready: Vec<usize>,
+    /// Bit `o` set iff `obj_ready[o] > 0`.
+    ready_mask: Vec<u64>,
+    ready_total: usize,
+}
+
+impl H2dPlanner {
+    /// `objects` yields `(total_bytes, has_gpu_dst)` per object.
+    pub(crate) fn new(
+        policy: H2dPolicy,
+        objects: impl ExactSizeIterator<Item = (usize, bool)>,
+    ) -> Self {
+        let n = objects.len();
+        let mut obj_total = Vec::with_capacity(n);
+        let mut obj_has_dst = Vec::with_capacity(n);
+        for (total, has_dst) in objects {
+            obj_total.push(total);
+            obj_has_dst.push(has_dst);
+        }
+        Self {
+            low_water_ns: policy.low_water_ns,
+            busy_until_ns: 0,
+            groups: Vec::new(),
+            order: Vec::new(),
+            obj_start: Vec::new(),
+            obj_total,
+            obj_has_dst,
+            obj_coarse: vec![false; n],
+            obj_any_launched: vec![false; n],
+            obj_ready: vec![0; n],
+            ready_mask: vec![0; n.div_ceil(64)],
+            ready_total: 0,
+        }
+    }
+
+    /// Cut one stripe's segments into groups. `stripe_off` is the stripe's
+    /// offset inside object `obj`. Returns the index of the stripe's first
+    /// group (segment `s` maps to group `base + s / H2D_GROUP_SEGMENTS`), or
+    /// `None` if the object has no GPU destination or groups are never
+    /// copied.
+    pub(crate) fn add_job_groups(
+        &mut self,
+        obj: usize,
+        stripe_off: usize,
+        segments: &[io_segmenter::IoSegment],
+    ) -> Option<usize> {
+        if !self.obj_has_dst[obj] || self.low_water_ns == 0 {
+            return None;
+        }
+        let total = self.obj_total[obj];
+        let base = self.groups.len();
+        for chunk in segments.chunks(H2D_GROUP_SEGMENTS) {
+            let first = &chunk[0];
+            let last = &chunk[chunk.len() - 1];
+            let start = (stripe_off + first.buffer_offset).min(total);
+            let end = (stripe_off + last.buffer_offset + last.length).min(total);
+            self.groups.push(H2dGroup {
+                obj,
+                off: start,
+                len: end - start,
+                remaining: chunk.len(),
+                // Nothing to copy: count it as launched.
+                launched: end == start,
+            });
+        }
+        Some(base)
+    }
+
+    /// Restrict object `obj` to the whole-object copy.
+    pub(crate) fn make_coarse(&mut self, obj: usize) {
+        self.obj_coarse[obj] = true;
+    }
+
+    /// Build the per-object offset order once every stripe is added.
+    pub(crate) fn finish(&mut self) {
+        let n = self.obj_total.len();
+        self.obj_start = vec![0; n + 1];
+        for g in &self.groups {
+            self.obj_start[g.obj + 1] += 1;
+        }
+        for o in 0..n {
+            self.obj_start[o + 1] += self.obj_start[o];
+        }
+        let mut fill = self.obj_start.clone();
+        self.order = vec![0; self.groups.len()];
+        for (gi, g) in self.groups.iter().enumerate() {
+            self.order[fill[g.obj]] = gi;
+            fill[g.obj] += 1;
+        }
+        for o in 0..n {
+            let groups = &self.groups;
+            self.order[self.obj_start[o]..self.obj_start[o + 1]]
+                .sort_unstable_by_key(|&gi| groups[gi].off);
+        }
+    }
+
+    /// Account one reaped `Ok` segment of group `gid`.
+    pub(crate) fn seg_done(&mut self, gid: usize) {
+        let g = &mut self.groups[gid];
+        if g.remaining == 0 {
+            return;
+        }
+        g.remaining -= 1;
+        if g.remaining == 0 && !g.launched {
+            let obj = g.obj;
+            if self.obj_ready[obj] == 0 {
+                self.ready_mask[obj / 64] |= 1 << (obj % 64);
+            }
+            self.obj_ready[obj] += 1;
+            self.ready_total += 1;
+        }
+    }
+
+    /// Launch whatever is due after a reap (and its resubmit). `completed` is
+    /// the object whose last segment this reap was. `emit(obj, off, len)`
+    /// issues one copy and returns `false` if it failed, which marks the
+    /// object failed.
+    pub(crate) fn after_reap(
+        &mut self,
+        completed: Option<usize>,
+        clock: impl Fn() -> u64,
+        failed: &mut [bool],
+        emit: &mut impl FnMut(usize, usize, usize) -> bool,
+    ) {
+        if let Some(obj) = completed {
+            if !failed[obj] && self.obj_has_dst[obj] {
+                let now = clock();
+                if self.obj_any_launched[obj] {
+                    self.launch_runs(obj, now, false, failed, emit);
+                } else {
+                    for i in self.obj_start[obj]..self.obj_start[obj + 1] {
+                        self.groups[self.order[i]].launched = true;
+                    }
+                    self.drop_ready(obj);
+                    self.obj_any_launched[obj] = true;
+                    self.charge(now, self.obj_total[obj]);
+                    if !emit(obj, 0, self.obj_total[obj]) {
+                        failed[obj] = true;
+                    }
+                }
+                return;
+            }
+        }
+        if self.ready_total == 0 {
+            return;
+        }
+        let now = clock();
+        if self.backlog(now) >= self.low_water_ns {
+            return;
+        }
+        let mut from = 0;
+        while self.ready_total > 0 {
+            let Some(obj) = self.next_ready(from) else {
+                break;
+            };
+            if failed[obj] || self.obj_coarse[obj] {
+                self.drop_ready(obj);
+            } else if self.launch_runs(obj, now, true, failed, emit) {
+                return;
+            }
+            from = obj + 1;
+        }
+    }
+
+    /// Launch the ready, unlaunched groups of `obj` as maximal contiguous
+    /// runs. With `stop_at_low_water`, returns `true` once the backlog
+    /// estimate reaches the low-water mark.
+    fn launch_runs(
+        &mut self,
+        obj: usize,
+        now: u64,
+        stop_at_low_water: bool,
+        failed: &mut [bool],
+        emit: &mut impl FnMut(usize, usize, usize) -> bool,
+    ) -> bool {
+        let end = self.obj_start[obj + 1];
+        let mut i = self.obj_start[obj];
+        while i < end {
+            if !self.is_ready(self.order[i]) {
+                i += 1;
+                continue;
+            }
+            let off = self.groups[self.order[i]].off;
+            let mut run_end = off + self.groups[self.order[i]].len;
+            let mut j = i + 1;
+            while j < end
+                && self.is_ready(self.order[j])
+                && self.groups[self.order[j]].off == run_end
+            {
+                run_end += self.groups[self.order[j]].len;
+                j += 1;
+            }
+            for k in i..j {
+                self.groups[self.order[k]].launched = true;
+            }
+            self.take_ready(obj, j - i);
+            self.obj_any_launched[obj] = true;
+            self.charge(now, run_end - off);
+            if !emit(obj, off, run_end - off) {
+                failed[obj] = true;
+                self.drop_ready(obj);
+                return false;
+            }
+            if stop_at_low_water && self.backlog(now) >= self.low_water_ns {
+                return true;
+            }
+            i = j;
+        }
+        false
+    }
+
+    fn is_ready(&self, gid: usize) -> bool {
+        let g = &self.groups[gid];
+        g.remaining == 0 && !g.launched
+    }
+
+    /// First object at or after `from` with ready groups.
+    fn next_ready(&self, from: usize) -> Option<usize> {
+        let mut w = from / 64;
+        if w >= self.ready_mask.len() {
+            return None;
+        }
+        let mut bits = self.ready_mask[w] & (u64::MAX << (from % 64));
+        loop {
+            if bits != 0 {
+                return Some(w * 64 + bits.trailing_zeros() as usize);
+            }
+            w += 1;
+            if w >= self.ready_mask.len() {
+                return None;
+            }
+            bits = self.ready_mask[w];
+        }
+    }
+
+    /// Count `k` of `obj`'s ready groups as launched.
+    fn take_ready(&mut self, obj: usize, k: usize) {
+        self.obj_ready[obj] -= k;
+        self.ready_total -= k;
+        if self.obj_ready[obj] == 0 {
+            self.ready_mask[obj / 64] &= !(1 << (obj % 64));
+        }
+    }
+
+    /// Forget `obj`'s ready groups; they are never launched by the sweep.
+    fn drop_ready(&mut self, obj: usize) {
+        self.take_ready(obj, self.obj_ready[obj]);
+    }
+
+    fn charge(&mut self, now: u64, bytes: usize) {
+        self.busy_until_ns = self.busy_until_ns.max(now)
+            + (bytes as f64 / H2D_EST_BYTES_PER_NS) as u64
+            + H2D_EST_PER_COPY_NS;
+    }
+
+    fn backlog(&self, now: u64) -> u64 {
+        self.busy_until_ns.saturating_sub(now)
+    }
+}
+
 /// Multi-drive scatter-gather SSD→GPU zero-copy transfer.
 ///
 /// Fans out NVMe reads to all drives simultaneously and fans in completions
@@ -785,7 +1174,13 @@ pub struct DriveWork<'a> {
 /// across several drives: its remaining segment count is tracked across all
 /// drives, and when its last NVMe segment completes (on whichever drive) the
 /// fused H2D DMA for the whole object is issued immediately — preserving the
-/// NVMe/H2D overlap that is load-bearing.
+/// NVMe/H2D overlap that is load-bearing. `max_queue_depth` is split across
+/// the drives by segment count, with no per-drive cap.
+///
+/// This public entry point always uses this whole-object rule. The
+/// crate-private `batch_lookup` scatter (`scatter_gather_multi_drive_with_policy`
+/// with `BATCH_SCATTER_POLICY`) instead copies ready 512 KiB groups early
+/// while the H2D backlog is low and caps in-flight reads at 24 per drive.
 ///
 /// Completions are reaped continuously: H2Ds queue on the pipe streams
 /// without any intermediate host sync, and one final dual sync covers the
@@ -812,6 +1207,54 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
     max_queue_depth: usize,
     metrics: Option<&dyn crate::metrics::PipelineMetrics>,
 ) -> Vec<Result<(), DispatcherError>> {
+    // SAFETY: forwarded caller contract.
+    unsafe {
+        scatter_gather_multi_drive_with_policy(
+            gpu,
+            streams,
+            objects,
+            drive_works,
+            chunk_size,
+            max_queue_depth,
+            metrics,
+            LEGACY_POLICY,
+        )
+    }
+}
+
+/// [`scatter_gather_multi_drive_zero_copy`] with an explicit H2D launch
+/// policy and per-drive window.
+///
+/// Under [`LEGACY_POLICY`] this is exactly the public function. Under a
+/// policy with a non-zero low-water mark the H2D launch is backlog-aware: the
+/// caller keeps an estimate of the copy engine's backlog
+/// (`busy_until += bytes / 22.5 GB/s + 2 µs` per copy), and while it is below
+/// the mark the 512 KiB groups (4 segments of one stripe) whose reads have
+/// all landed `Ok` are copied early, in object order, as maximal contiguous
+/// runs, stopping once the estimate is back at the mark. An object that
+/// completes after some of its groups were copied gets its remaining bytes
+/// as contiguous runs; one with nothing copied early still gets ONE
+/// whole-object copy. Every byte of a successful object is copied exactly
+/// once, and every launch follows the reaped drive's resubmit. With
+/// `per_drive_qd_cap`, at most that many reads are in flight per drive.
+///
+/// Nothing more is copied for an object once it has failed; groups copied
+/// before the failure stay copied, so a failed object returns `Err` but its
+/// GPU destination may hold partial bytes.
+///
+/// # Safety
+/// Same contract as [`scatter_gather_multi_drive_zero_copy`].
+#[allow(clippy::too_many_arguments)]
+pub(crate) unsafe fn scatter_gather_multi_drive_with_policy(
+    gpu: &dyn IGpuServices,
+    streams: &[GpuStream; 2],
+    objects: &[ColdObject],
+    drive_works: &[DriveWork<'_>],
+    chunk_size: usize,
+    max_queue_depth: usize,
+    metrics: Option<&dyn crate::metrics::PipelineMetrics>,
+    policy: ScatterPolicy,
+) -> Vec<Result<(), DispatcherError>> {
     let num_drives = drive_works.len();
     let num_objects = objects.len();
     let mut results: Vec<Result<(), DispatcherError>> = vec![Ok(()); num_objects];
@@ -830,6 +1273,8 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
     struct ObjSegs {
         segments: Vec<crate::io_segmenter::IoSegment>,
         chunk_bufs: Vec<Arc<Mutex<DmaBuffer>>>,
+        /// First H2D group of this stripe (`None`: no groups).
+        h2d_group_base: Option<usize>,
     }
 
     let mut per_drive: Vec<DriveSegments> = Vec::with_capacity(num_drives);
@@ -837,6 +1282,12 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
     // Remaining segments per object, counted across all drives.
     let mut obj_remaining: Vec<usize> = vec![0; num_objects];
     let mut obj_failed: Vec<bool> = vec![false; num_objects];
+    let mut h2d = H2dPlanner::new(
+        policy.h2d,
+        objects
+            .iter()
+            .map(|o| (o.total_bytes, !o.gpu_dst.is_null())),
+    );
 
     for dw in drive_works {
         let block_size = dw.drive.block_size() as usize;
@@ -870,9 +1321,26 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
             if let Some(r) = obj_remaining.get_mut(job.obj_idx) {
                 *r += segments.len();
             }
+            let h2d_group_base = objects.get(job.obj_idx).and_then(|obj| {
+                // The stripe's offset inside its object's slot, checked in
+                // release builds too; a stripe outside the slot falls back
+                // to the whole-object copy.
+                let aligned_obj = obj.total_bytes.next_multiple_of(block_size);
+                let stripe_off = (job.mem_ptr as usize)
+                    .checked_sub(obj.mem_ptr as usize)
+                    .filter(|off| off.saturating_add(aligned_bytes) <= aligned_obj);
+                match stripe_off {
+                    Some(off) => h2d.add_job_groups(job.obj_idx, off, &segments),
+                    None => {
+                        h2d.make_coarse(job.obj_idx);
+                        None
+                    }
+                }
+            });
             objs.push(ObjSegs {
                 segments,
                 chunk_bufs,
+                h2d_group_base,
             });
         }
 
@@ -889,6 +1357,7 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
     if grand_total_segments == 0 {
         return results;
     }
+    h2d.finish();
 
     // Fail every object that has a stripe on drive `d` (drive-wide failure).
     fn fail_drive_objects(
@@ -907,29 +1376,13 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
         }
     }
 
-    // Distribute queue depth proportionally to each drive's segment count.
-    let mut per_drive_qd: Vec<usize> = per_drive
-        .iter()
-        .map(|ds| {
-            let share = (max_queue_depth as u64 * ds.total_segments as u64
-                / grand_total_segments as u64) as usize;
-            share.max(1).min(ds.work.len())
-        })
-        .collect();
-    // Ensure we don't exceed total budget.
-    let total_budget: usize = per_drive_qd.iter().sum();
-    if total_budget > max_queue_depth {
-        let excess = total_budget - max_queue_depth;
-        let mut remaining = excess;
-        for qd in per_drive_qd.iter_mut().rev() {
-            if remaining == 0 {
-                break;
-            }
-            let reduce = remaining.min(qd.saturating_sub(1));
-            *qd -= reduce;
-            remaining -= reduce;
-        }
-    }
+    // Proportional split of the shared budget, then the policy's per-drive
+    // cap: fan-out and the 1-for-1 resubmit keep at most this many in flight.
+    let per_drive_qd: Vec<usize> = split_queue_depth(
+        max_queue_depth,
+        per_drive.iter().map(|ds| ds.total_segments),
+        policy.per_drive_qd_cap,
+    );
 
     // Per-drive submission/completion state.
     let mut submitted: Vec<usize> = vec![0; num_drives];
@@ -981,6 +1434,9 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
     let mut t_gpu_ns: u64 = 0;
     // Covers only the final dual sync; the poll loop never blocks on the GPU.
     let mut t_sync_ns: u64 = 0;
+    // Monotonic clock of the H2D backlog estimate.
+    let h2d_epoch = std::time::Instant::now();
+    let h2d_clock = || h2d_epoch.elapsed().as_nanos() as u64;
 
     // Multiplexed completion loop: poll all drives' completion_rx channels.
     let mut poll_idx: usize = 0;
@@ -1038,6 +1494,8 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
                             )));
                         }
                         obj_failed[obj_idx] = true;
+                    } else if let Some(base) = ds.objs[job_idx].h2d_group_base {
+                        h2d.seg_done(base + seg_idx / H2D_GROUP_SEGMENTS);
                     }
                     obj_remaining[obj_idx] = obj_remaining[obj_idx].saturating_sub(1);
                     done_obj = Some(obj_idx);
@@ -1065,35 +1523,56 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
                         total_submitted += 1;
                     } else {
                         stop_submitting[d] = true;
+                        // Objects with unsubmitted segments on this drive can
+                        // no longer complete: copy none of their groups.
+                        for &(job_idx, _) in ds.work.iter().skip(submitted[d]) {
+                            if let Some(f) = obj_failed.get_mut(dw.jobs[job_idx].obj_idx) {
+                                *f = true;
+                            }
+                        }
                     }
                 }
 
-                // Object fully read on every drive: issue ONE coalesced H2D
-                // for the entire slot.
+                // Object fully read on every drive: copy the whole slot (or
+                // its not yet copied runs); otherwise, if the policy allows
+                // and the H2D backlog is low, copy ready groups early.
                 if let Some(obj_idx) = done_obj {
-                    if obj_remaining[obj_idx] == 0
-                        && !obj_failed[obj_idx]
-                        && !objects[obj_idx].gpu_dst.is_null()
-                    {
-                        let tg = std::time::Instant::now();
-                        let obj = &objects[obj_idx];
-                        let current_stream = streams[stream_idx % 2];
+                    let completed = (obj_remaining[obj_idx] == 0).then_some(obj_idx);
+                    h2d.after_reap(
+                        completed,
+                        h2d_clock,
+                        &mut obj_failed,
+                        &mut |o: usize, off: usize, len: usize| {
+                            let tg = std::time::Instant::now();
+                            let obj = &objects[o];
+                            let current_stream = streams[stream_idx % 2];
 
-                        let dma_result = gpu.memcpy_h2d_async(
-                            obj.mem_ptr as *const std::ffi::c_void,
-                            obj.gpu_dst,
-                            obj.total_bytes,
-                            current_stream,
-                        );
-                        if let Err(e) = dma_result {
-                            results[obj_idx] = Err(DispatcherError::IoError(format!(
-                                "GPU H2D obj={obj_idx}: {e}"
-                            )));
-                        }
-                        t_gpu_ns += tg.elapsed().as_nanos() as u64;
+                            // SAFETY: the planner's ranges lie within
+                            // [0, total_bytes), which both the slot and the
+                            // GPU destination cover.
+                            let dma_result = unsafe {
+                                gpu.memcpy_h2d_async(
+                                    obj.mem_ptr.add(off) as *const std::ffi::c_void,
+                                    (obj.gpu_dst as *mut u8).add(off) as *mut std::ffi::c_void,
+                                    len,
+                                    current_stream,
+                                )
+                            };
+                            let ok = match dma_result {
+                                Ok(()) => true,
+                                Err(e) => {
+                                    results[o] = Err(DispatcherError::IoError(format!(
+                                        "GPU H2D obj={o} off={off}: {e}"
+                                    )));
+                                    false
+                                }
+                            };
+                            t_gpu_ns += tg.elapsed().as_nanos() as u64;
 
-                        stream_idx += 1;
-                    }
+                            stream_idx += 1;
+                            ok
+                        },
+                    );
                 }
             }
             Ok(Completion::Timeout { handle }) => {

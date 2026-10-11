@@ -960,7 +960,8 @@ impl DispatcherComponent {
     /// Read one object striped across all `drives` into `mem_ptr` through the
     /// scatter-gather pipeline, checking out one channel per drive holding a
     /// stripe. The object's single coalesced H2D to `gpu_dst` (null = DRAM
-    /// only) is issued once its last stripe lands on any drive.
+    /// only) is issued once its last stripe lands on any drive (the public
+    /// scatter-gather's legacy whole-object policy, uncapped depth).
     ///
     /// # Safety
     /// `mem_ptr` must be valid for the block-aligned `total_bytes`, and a
@@ -2957,7 +2958,7 @@ impl IDispatcher for DispatcherComponent {
                                     .collect();
 
                                 let scatter_results = unsafe {
-                                    pipeline::scatter_gather_multi_drive_zero_copy(
+                                    pipeline::scatter_gather_multi_drive_with_policy(
                                         &*gpu,
                                         &pipe_streams,
                                         &objects,
@@ -2965,6 +2966,7 @@ impl IDispatcher for DispatcherComponent {
                                         chunk_size,
                                         queue_depth,
                                         pm_arc.as_deref(),
+                                        pipeline::BATCH_SCATTER_POLICY,
                                     )
                                 };
 
@@ -7712,60 +7714,82 @@ mod tests {
             assert_pattern(&dst, size, k as u64 + 1);
         }
 
-        // (a) the cold batch scatter-gather over all objects at once.
-        let slots: Vec<HostBuf> = STRIPE_SIZES.iter().map(|&s| HostBuf::zeroed(s)).collect();
-        let dsts: Vec<HostBuf> = STRIPE_SIZES.iter().map(|&s| HostBuf::zeroed(s)).collect();
-        let objects: Vec<pipeline::ColdObject> = STRIPE_SIZES
-            .iter()
-            .enumerate()
-            .map(|(k, &size)| pipeline::ColdObject {
-                mem_ptr: slots[k].ptr,
-                gpu_dst: dsts[k].ptr as *mut std::ffi::c_void,
-                total_bytes: size,
-            })
-            .collect();
-        let jobs: Vec<Vec<pipeline::StripeReadJob>> = (0..n)
-            .map(|d| {
-                STRIPE_SIZES
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(k, &size)| {
-                        let (start, len) = stripe_range(size, n, STRIPE_BS, d);
-                        (len > 0).then(|| pipeline::StripeReadJob {
-                            obj_idx: k,
-                            // SAFETY: start + len <= aligned slot size.
-                            mem_ptr: unsafe { slots[k].ptr.add(start) },
-                            start_lba: offsets[k] / STRIPE_BS as u64,
-                            len,
+        // (a) the cold batch scatter-gather over all objects at once: one
+        // coalesced copy per object, every group copied early, and the
+        // batch_lookup policy (backlog-aware groups, 24 per drive).
+        for policy in [
+            pipeline::LEGACY_POLICY,
+            ALWAYS_FINE_SCATTER,
+            pipeline::BATCH_SCATTER_POLICY,
+        ] {
+            let slots: Vec<HostBuf> = STRIPE_SIZES.iter().map(|&s| HostBuf::zeroed(s)).collect();
+            // One block past the object, to catch a copy past total_bytes.
+            let dsts: Vec<HostBuf> = STRIPE_SIZES
+                .iter()
+                .map(|&s| HostBuf::zeroed(s + STRIPE_BS))
+                .collect();
+            let objects: Vec<pipeline::ColdObject> = STRIPE_SIZES
+                .iter()
+                .enumerate()
+                .map(|(k, &size)| pipeline::ColdObject {
+                    mem_ptr: slots[k].ptr,
+                    gpu_dst: dsts[k].ptr as *mut std::ffi::c_void,
+                    total_bytes: size,
+                })
+                .collect();
+            let jobs: Vec<Vec<pipeline::StripeReadJob>> = (0..n)
+                .map(|d| {
+                    STRIPE_SIZES
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(k, &size)| {
+                            let (start, len) = stripe_range(size, n, STRIPE_BS, d);
+                            (len > 0).then(|| pipeline::StripeReadJob {
+                                obj_idx: k,
+                                // SAFETY: start + len <= aligned slot size.
+                                mem_ptr: unsafe { slots[k].ptr.add(start) },
+                                start_lba: offsets[k] / STRIPE_BS as u64,
+                                len,
+                            })
                         })
-                    })
-                    .collect()
-            })
-            .collect();
-        let leases: Vec<ChannelLease<'_>> = drives
-            .iter()
-            .map(|d| d.channel_pool.checkout().unwrap())
-            .collect();
-        let works: Vec<pipeline::DriveWork<'_>> = (0..n)
-            .map(|d| pipeline::DriveWork {
-                channels: leases[d].channels(),
-                drive: &*drives[d].block_dev_iface,
-                jobs: &jobs[d],
-            })
-            .collect();
-        // SAFETY: slots and dsts cover their objects.
-        let results = unsafe {
-            pipeline::scatter_gather_multi_drive_zero_copy(
-                &gpu, &streams, &objects, &works, chunk, 128, None,
-            )
-        };
-        drop(works);
-        drop(leases);
-        assert_eq!(results.len(), STRIPE_SIZES.len());
-        for (k, &size) in STRIPE_SIZES.iter().enumerate() {
-            assert!(results[k].is_ok(), "object {k}: {:?}", results[k]);
-            assert_pattern(&slots[k], size, k as u64 + 1);
-            assert_pattern(&dsts[k], size, k as u64 + 1);
+                        .collect()
+                })
+                .collect();
+            let leases: Vec<ChannelLease<'_>> = drives
+                .iter()
+                .map(|d| d.channel_pool.checkout().unwrap())
+                .collect();
+            let works: Vec<pipeline::DriveWork<'_>> = (0..n)
+                .map(|d| pipeline::DriveWork {
+                    channels: leases[d].channels(),
+                    drive: &*drives[d].block_dev_iface,
+                    jobs: &jobs[d],
+                })
+                .collect();
+            // SAFETY: slots and dsts cover their objects.
+            let results = unsafe {
+                pipeline::scatter_gather_multi_drive_with_policy(
+                    &gpu, &streams, &objects, &works, chunk, 128, None, policy,
+                )
+            };
+            drop(works);
+            drop(leases);
+            assert_eq!(results.len(), STRIPE_SIZES.len());
+            for (k, &size) in STRIPE_SIZES.iter().enumerate() {
+                assert!(
+                    results[k].is_ok(),
+                    "{policy:?} object {k}: {:?}",
+                    results[k]
+                );
+                assert_pattern(&slots[k], size, k as u64 + 1);
+                assert_pattern(&dsts[k], size, k as u64 + 1);
+                assert!(
+                    dsts[k].bytes(size + STRIPE_BS)[size..]
+                        .iter()
+                        .all(|&b| b == 0),
+                    "{policy:?} object {k}: copied past total_bytes"
+                );
+            }
         }
 
         // (d) promote_to_memory_tier's per-drive DRAM-only stripe reads.
@@ -7810,28 +7834,30 @@ mod tests {
         stripe_round_trip(3);
     }
 
-    /// T3: one drive fails one object's stripe; that object fails and gets no
-    /// H2D, the other objects are read and delivered intact.
-    #[test]
-    fn stripe_scatter_failed_stripe_fails_only_its_object() {
-        let n = 4;
-        // Drive 2 is too small for the second object's offset.
-        let sd = stripe_drives(&[2048, 2048, 512, 2048]);
-        let drives = &sd.drives;
-        let dm = Arc::new(MockDispatchMap::new());
-        let probe = Arc::new(PinProbe::new(Arc::clone(&dm)));
-        let gpu = MockGpuServices::with_probe(Arc::clone(&probe));
-        let streams = [GpuStream(std::ptr::null_mut()); 2];
-        let size = 4 << 20;
-        let offsets = [0u64, 4 << 20, 1 << 20];
-        let srcs: Vec<HostBuf> = (0..3).map(|k| HostBuf::pattern(size, k + 10)).collect();
-        for k in [0, 2] {
-            write_striped(drives, &srcs[k], offsets[k], size);
-        }
+    /// Every ready group copied as soon as it lands, uncapped depth.
+    const ALWAYS_FINE_SCATTER: pipeline::ScatterPolicy = pipeline::ScatterPolicy {
+        h2d: pipeline::H2dPolicy::ALWAYS_FINE,
+        per_drive_qd_cap: None,
+    };
 
-        let slots: Vec<HostBuf> = (0..3).map(|_| HostBuf::zeroed(size)).collect();
-        let dsts: Vec<HostBuf> = (0..3).map(|_| HostBuf::zeroed(size)).collect();
-        let objects: Vec<pipeline::ColdObject> = (0..3)
+    /// Scatter `slots.len()` objects of `size` bytes, object k striped at
+    /// `offsets[k]` across all `drives`, through the public wrapper (`None`)
+    /// or the given policy.
+    ///
+    /// # Safety
+    /// Every slot and dst covers `size` bytes.
+    unsafe fn scatter_striped_objects(
+        drives: &[DataDrive],
+        gpu: &dyn IGpuServices,
+        slots: &[HostBuf],
+        dsts: &[HostBuf],
+        size: usize,
+        offsets: &[u64],
+        policy: Option<pipeline::ScatterPolicy>,
+    ) -> Vec<Result<(), DispatcherError>> {
+        let n = drives.len();
+        let streams = [GpuStream(std::ptr::null_mut()); 2];
+        let objects: Vec<pipeline::ColdObject> = (0..slots.len())
             .map(|k| pipeline::ColdObject {
                 mem_ptr: slots[k].ptr,
                 gpu_dst: dsts[k].ptr as *mut std::ffi::c_void,
@@ -7840,16 +7866,16 @@ mod tests {
             .collect();
         let jobs: Vec<Vec<pipeline::StripeReadJob>> = (0..n)
             .map(|d| {
-                (0..3)
-                    .map(|k| {
+                (0..slots.len())
+                    .filter_map(|k| {
                         let (start, len) = stripe_range(size, n, STRIPE_BS, d);
-                        pipeline::StripeReadJob {
+                        (len > 0).then(|| pipeline::StripeReadJob {
                             obj_idx: k,
                             // SAFETY: start + len <= aligned slot size.
                             mem_ptr: unsafe { slots[k].ptr.add(start) },
                             start_lba: offsets[k] / STRIPE_BS as u64,
                             len,
-                        }
+                        })
                     })
                     .collect()
             })
@@ -7865,32 +7891,294 @@ mod tests {
                 jobs: &jobs[d],
             })
             .collect();
-        // SAFETY: slots and dsts cover their objects.
-        let results = unsafe {
-            pipeline::scatter_gather_multi_drive_zero_copy(
-                &gpu,
-                &streams,
-                &objects,
-                &works,
-                128 * 1024,
-                128,
-                None,
-            )
-        };
-        drop(works);
-        drop(leases);
+        let chunk = 128 * 1024;
+        // SAFETY: forwarded caller contract on slots / dsts.
+        unsafe {
+            match policy {
+                None => pipeline::scatter_gather_multi_drive_zero_copy(
+                    gpu, &streams, &objects, &works, chunk, 128, None,
+                ),
+                Some(p) => pipeline::scatter_gather_multi_drive_with_policy(
+                    gpu, &streams, &objects, &works, chunk, 128, None, p,
+                ),
+            }
+        }
+    }
 
-        assert!(results[0].is_ok(), "{:?}", results[0]);
+    /// T3: one drive fails one object's stripe; that object fails, the other
+    /// objects are read and delivered intact. With one coalesced copy per
+    /// object (the public wrapper and the legacy policy) the failed object
+    /// gets no H2D; with early group copies none of the failed stripe's
+    /// bytes are copied.
+    #[test]
+    fn stripe_scatter_failed_stripe_fails_only_its_object() {
+        // Drive 2 is too small for the second object's offset.
+        let sd = stripe_drives(&[2048, 2048, 512, 2048]);
+        let drives = &sd.drives;
+        let size = 4 << 20;
+        let offsets = [0u64, 4 << 20, 1 << 20];
+        let srcs: Vec<HostBuf> = (0..3).map(|k| HostBuf::pattern(size, k + 10)).collect();
+        for k in [0, 2] {
+            write_striped(drives, &srcs[k], offsets[k], size);
+        }
+        for policy in [
+            None,
+            Some(pipeline::LEGACY_POLICY),
+            Some(ALWAYS_FINE_SCATTER),
+            Some(pipeline::BATCH_SCATTER_POLICY),
+        ] {
+            stripe_scatter_failed_stripe_case(drives, size, &offsets, policy);
+        }
+    }
+
+    fn stripe_scatter_failed_stripe_case(
+        drives: &[DataDrive],
+        size: usize,
+        offsets: &[u64; 3],
+        policy: Option<pipeline::ScatterPolicy>,
+    ) {
+        let n = drives.len();
+        let dm = Arc::new(MockDispatchMap::new());
+        let probe = Arc::new(PinProbe::new(Arc::clone(&dm)));
+        let gpu = MockGpuServices::with_probe(Arc::clone(&probe));
+
+        let slots: Vec<HostBuf> = (0..3).map(|_| HostBuf::zeroed(size)).collect();
+        let dsts: Vec<HostBuf> = (0..3).map(|_| HostBuf::zeroed(size)).collect();
+        // SAFETY: slots and dsts cover their objects.
+        let results =
+            unsafe { scatter_striped_objects(drives, &gpu, &slots, &dsts, size, offsets, policy) };
+
+        assert!(results[0].is_ok(), "{policy:?} {:?}", results[0]);
         assert!(
             results[1].is_err(),
-            "object with the failed stripe must fail"
+            "{policy:?}: object with the failed stripe must fail"
         );
-        assert!(results[2].is_ok(), "{:?}", results[2]);
-        // One H2D per successful object; none for the failed one.
-        assert_eq!(probe.count(GpuEvent::SubmitH2d), 2);
-        assert!(dsts[1].bytes(size).iter().all(|&b| b == 0));
+        assert!(results[2].is_ok(), "{policy:?} {:?}", results[2]);
         for k in [0, 2] {
             assert_pattern(&dsts[k], size, k as u64 + 10);
+        }
+        let low_water_ns = policy.map_or(0, |p| p.h2d.low_water_ns);
+        if low_water_ns == 0 {
+            // One H2D per successful object; none for the failed one.
+            assert_eq!(probe.count(GpuEvent::SubmitH2d), 2, "{policy:?}");
+            assert!(dsts[1].bytes(size).iter().all(|&b| b == 0), "{policy:?}");
+        } else {
+            if low_water_ns == u64::MAX {
+                assert!(probe.count(GpuEvent::SubmitH2d) > 2, "no early copies");
+            }
+            // Other stripes of the failed object may have been copied, but
+            // never a byte of the failed stripe.
+            let (start, len) = stripe_range(size, n, STRIPE_BS, 2);
+            assert!(
+                dsts[1].bytes(size)[start..start + len]
+                    .iter()
+                    .all(|&b| b == 0),
+                "{policy:?}: failed stripe was copied"
+            );
+        }
+    }
+
+    /// The public wrapper keeps one whole-object H2D per object, and a
+    /// failed object's destination stays untouched.
+    #[test]
+    fn stripe_scatter_public_wrapper_copies_whole_objects() {
+        let sd = stripe_drives(&[2048, 2048, 512, 2048]);
+        let drives = &sd.drives;
+        let size = (4 << 20) + 12345;
+        let src = HostBuf::pattern(size, 21);
+        write_striped(drives, &src, 0, size);
+
+        for (offset, ok) in [(0u64, true), (4 << 20, false)] {
+            let dm = Arc::new(MockDispatchMap::new());
+            let probe = Arc::new(PinProbe::new(Arc::clone(&dm)));
+            let gpu = MockGpuServices::with_probe(Arc::clone(&probe));
+            let slots = [HostBuf::zeroed(size)];
+            let dsts = [HostBuf::zeroed(size)];
+            // SAFETY: slots and dsts cover the object.
+            let results = unsafe {
+                scatter_striped_objects(drives, &gpu, &slots, &dsts, size, &[offset], None)
+            };
+            assert_eq!(results.len(), 1);
+            if ok {
+                assert!(results[0].is_ok(), "{:?}", results[0]);
+                assert_eq!(probe.count(GpuEvent::SubmitH2d), 1);
+                assert_pattern(&dsts[0], size, 21);
+            } else {
+                assert!(results[0].is_err(), "object past drive 2 must fail");
+                assert_eq!(probe.count(GpuEvent::SubmitH2d), 0);
+                assert!(dsts[0].bytes(size).iter().all(|&b| b == 0));
+            }
+        }
+    }
+
+    /// Per-drive window: proportional split, then the cap.
+    #[test]
+    fn scatter_queue_depth_split_and_cap() {
+        let split =
+            |segs: &[usize], cap| pipeline::split_queue_depth(128, segs.iter().copied(), cap);
+        // 16 x 4 MiB objects on 4 drives: 128 segments per drive.
+        assert_eq!(
+            split(&[128; 4], Some(pipeline::BATCH_SCATTER_PER_DRIVE_QD_CAP)),
+            [24; 4]
+        );
+        assert_eq!(split(&[128; 4], None), [32; 4]);
+        // N=3: the cap, not the budget, sets the window.
+        assert_eq!(
+            split(
+                &[171, 171, 170],
+                Some(pipeline::BATCH_SCATTER_PER_DRIVE_QD_CAP)
+            ),
+            [24; 3]
+        );
+        // Small batches (fewer than 24 segments per drive) are unchanged.
+        for segs in [&[10usize, 10, 10, 10][..], &[20, 20, 20, 20], &[1, 23, 5]] {
+            assert_eq!(
+                split(segs, Some(pipeline::BATCH_SCATTER_PER_DRIVE_QD_CAP)),
+                split(segs, None),
+                "{segs:?}"
+            );
+            assert_eq!(split(segs, None), segs, "{segs:?}");
+        }
+    }
+
+    /// Planner coverage: for in-order and shuffled reap orders, each
+    /// successful object's copied ranges partition `[0, total_bytes)`; a
+    /// threshold of 0 copies each object once, whole; nothing is copied for a
+    /// failed object after it failed, nor for a group before all of its
+    /// segments were reaped.
+    #[test]
+    fn h2d_planner_partitions_objects() {
+        use std::cell::Cell;
+        let chunk = 128 * 1024;
+        // A fourth object with no GPU destination never gets a copy.
+        let sizes: Vec<(usize, bool)> = STRIPE_SIZES
+            .iter()
+            .map(|&s| (s, true))
+            .chain([(1 << 20, false)])
+            .collect();
+        for n in [4, 3] {
+            for shuffle in [false, true] {
+                for low_water_ns in [0, 25_000, u64::MAX] {
+                    for fail_obj in [None, Some(1)] {
+                        h2d_planner_case(&sizes, n, chunk, shuffle, low_water_ns, fail_obj);
+                    }
+                }
+            }
+        }
+
+        fn h2d_planner_case(
+            sizes: &[(usize, bool)],
+            n: usize,
+            chunk: usize,
+            shuffle: bool,
+            low_water_ns: u64,
+            fail_obj: Option<usize>,
+        ) {
+            let ctx = format!("n={n} shuffle={shuffle} low_water={low_water_ns} fail={fail_obj:?}");
+            let mut planner = pipeline::H2dPlanner::new(
+                pipeline::H2dPolicy { low_water_ns },
+                sizes.iter().copied(),
+            );
+            // Every segment as (obj, group, in-object start, in-object end).
+            let mut segs: Vec<(usize, Option<usize>, usize, usize)> = Vec::new();
+            for d in 0..n {
+                for (k, &(size, _)) in sizes.iter().enumerate() {
+                    let (start, len) = stripe_range(size, n, STRIPE_BS, d);
+                    if len == 0 {
+                        continue;
+                    }
+                    let s = io_segmenter::segment_io(0, len, chunk as u32, STRIPE_BS as u32);
+                    let base = planner.add_job_groups(k, start, &s);
+                    for (i, seg) in s.iter().enumerate() {
+                        segs.push((
+                            k,
+                            base.map(|b| b + i / pipeline::H2D_GROUP_SEGMENTS),
+                            start + seg.buffer_offset,
+                            start + seg.buffer_offset + seg.length,
+                        ));
+                    }
+                }
+            }
+            planner.finish();
+            if shuffle {
+                let mut x: u64 = 0x9E37_79B9_7F4A_7C15;
+                for i in (1..segs.len()).rev() {
+                    x ^= x << 13;
+                    x ^= x >> 7;
+                    x ^= x << 17;
+                    segs.swap(i, (x % (i as u64 + 1)) as usize);
+                }
+            }
+
+            let mut remaining = vec![0usize; sizes.len()];
+            for s in &segs {
+                remaining[s.0] += 1;
+            }
+            let mut failed = vec![false; sizes.len()];
+            // Reaped STRIPE_BS blocks per object.
+            let mut reaped: Vec<Vec<bool>> = sizes
+                .iter()
+                .map(|&(s, _)| vec![false; s.div_ceil(STRIPE_BS)])
+                .collect();
+            let mut launched: Vec<Vec<(usize, usize)>> = vec![Vec::new(); sizes.len()];
+            let clock_ns = Cell::new(0u64);
+            let fail_at = segs.len() / 2;
+
+            for (r, &(obj, group, start, end)) in segs.iter().enumerate() {
+                clock_ns.set(clock_ns.get() + 3_000);
+                if r == fail_at {
+                    if let Some(f) = fail_obj {
+                        failed[f] = true;
+                    }
+                }
+                let size = sizes[obj].0;
+                let hi = end.min(size).div_ceil(STRIPE_BS);
+                reaped[obj][(start / STRIPE_BS).min(hi)..hi].fill(true);
+                if let Some(g) = group {
+                    planner.seg_done(g);
+                }
+                remaining[obj] -= 1;
+                let completed = (remaining[obj] == 0).then_some(obj);
+                let was_failed = failed.clone();
+                planner.after_reap(
+                    completed,
+                    || clock_ns.get(),
+                    &mut failed,
+                    &mut |o: usize, off: usize, len: usize| {
+                        assert!(!was_failed[o], "{ctx}: copy for failed object {o}");
+                        assert!(len > 0 && off + len <= sizes[o].0, "{ctx}: bad range");
+                        assert!(
+                            reaped[o][off / STRIPE_BS..(off + len).div_ceil(STRIPE_BS)]
+                                .iter()
+                                .all(|&r| r),
+                            "{ctx}: obj {o} range {off}+{len} copied before it was read"
+                        );
+                        launched[o].push((off, len));
+                        true
+                    },
+                );
+            }
+
+            for (k, &(size, has_dst)) in sizes.iter().enumerate() {
+                let mut ranges = launched[k].clone();
+                if !has_dst {
+                    assert!(ranges.is_empty(), "{ctx}: copy for DRAM-only object");
+                    continue;
+                }
+                if fail_obj == Some(k) {
+                    continue;
+                }
+                if low_water_ns == 0 {
+                    assert_eq!(ranges, vec![(0, size)], "{ctx}: object {k}");
+                }
+                ranges.sort_unstable();
+                let mut at = 0;
+                for (off, len) in ranges {
+                    assert_eq!(off, at, "{ctx}: object {k} gap or overlap");
+                    at += len;
+                }
+                assert_eq!(at, size, "{ctx}: object {k} not fully covered");
+            }
         }
     }
 }
