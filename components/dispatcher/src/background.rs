@@ -1,12 +1,14 @@
 //! Background write worker for memory-tier-to-SSD persistence and SSD eviction.
 
 use crossbeam_channel::{Receiver, Sender};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use interfaces::{CacheKey, IDispatchMap, IExtentManager, ILogger, IMemoryTier, LookupResult};
+use interfaces::{
+    CacheKey, IDispatchMap, IExtentManager, ILogger, IMemoryTier, LookupResult, WriteHandle,
+};
 
 use crate::{EvictionEvent, EvictionReason, TierEventCounters};
 
@@ -17,8 +19,87 @@ pub struct WriteJob {
     pub key: u64,
     /// Size of the data in bytes.
     pub size: u32,
-    /// Index of the data block device to write to.
+    /// Index of the data block device to write to (single-drive layout only;
+    /// a striped object's slices are routed by `StripeSlice::drive`).
     pub device_index: usize,
+    /// The one stripe slice this job writes when the object is striped across
+    /// several drives; `None` writes the whole object as one job.
+    pub stripe: Option<StripeSlice>,
+}
+
+/// One drive's slice of a striped write-through. Slice `drive` is written
+/// only by writer `drive`, so per-drive write concurrency is unchanged.
+#[derive(Debug)]
+pub struct StripeSlice {
+    /// Drive (and writer) this slice belongs to.
+    pub drive: usize,
+    /// State shared by every slice of the object.
+    pub state: Arc<StripeWrite>,
+}
+
+/// Extent reservation shared by the slices of one striped object.
+#[derive(Debug)]
+pub enum StripeReservation {
+    /// No slice has run yet.
+    Pending,
+    /// The first slice to run peeked the slot and reserved `offset` on the
+    /// stripe allocator; every slice writes its stripe at that offset.
+    Reserved {
+        handle: WriteHandle,
+        offset: u64,
+        mem_ptr: *mut u8,
+    },
+    /// The slot was gone or the reservation failed.
+    Failed,
+}
+
+// SAFETY: `mem_ptr` is the object's memory-tier slot, kept pinned by the
+// write-through read ref until the last slice finishes; it is only read from
+// the writer threads, and access to the reservation is serialized by the
+// `StripeWrite` mutex.
+unsafe impl Send for StripeReservation {}
+
+/// Shared state of one striped write-through: the reservation, the number of
+/// slices still to finish and whether any slice failed.
+#[derive(Debug)]
+pub struct StripeWrite {
+    pub reservation: Mutex<StripeReservation>,
+    remaining: AtomicUsize,
+    failed: AtomicBool,
+}
+
+impl StripeWrite {
+    fn new(slices: usize) -> Self {
+        Self {
+            reservation: Mutex::new(StripeReservation::Pending),
+            remaining: AtomicUsize::new(slices),
+            failed: AtomicBool::new(false),
+        }
+    }
+
+    /// Record that a slice failed; the object will be aborted.
+    pub fn mark_failed(&self) {
+        self.failed.store(true, Ordering::Release);
+    }
+
+    /// Whether any slice has failed so far.
+    pub fn has_failed(&self) -> bool {
+        self.failed.load(Ordering::Acquire)
+    }
+
+    /// Count one slice as finished. For the last slice only, returns the
+    /// reservation together with whether every slice succeeded; the caller
+    /// then publishes it or drops it (abort), exactly once per object.
+    pub fn finish_slice(&self) -> Option<(StripeReservation, bool)> {
+        if self.remaining.fetch_sub(1, Ordering::AcqRel) != 1 {
+            return None;
+        }
+        let reservation = std::mem::replace(
+            &mut *self.reservation.lock().unwrap_or_else(|e| e.into_inner()),
+            StripeReservation::Failed,
+        );
+        Some((reservation, !self.has_failed()))
+    }
 }
 
 /// Handle to the background writer thread.
@@ -157,19 +238,27 @@ impl Drop for BackgroundWriter {
 
 /// A pool of per-drive `BackgroundWriter` threads.
 ///
-/// Routes each `WriteJob` to the writer responsible for its target drive,
-/// enabling concurrent write-through across multiple NVMe devices.
+/// With one drive, routes each `WriteJob` to that drive's writer. With
+/// several, every object is striped across all drives: each job is fanned out
+/// into one slice job per drive, and slice `d` goes to writer `d`, enabling
+/// concurrent write-through across multiple NVMe devices.
 pub struct ParallelBackgroundWriter {
     writers: Vec<BackgroundWriter>,
     num_drives: usize,
+    block_size: usize,
 }
 
 impl ParallelBackgroundWriter {
     /// Start one writer thread per drive.
     ///
-    /// `make_processor(drive_idx)` is called once per drive to produce the
-    /// job-processing closure for that drive's dedicated thread.
-    pub fn start<F>(num_drives: usize, make_processor: impl Fn(usize) -> F) -> Self
+    /// `block_size` is the (common) data-drive block size the stripe layout is
+    /// computed with. `make_processor(drive_idx)` is called once per drive to
+    /// produce the job-processing closure for that drive's dedicated thread.
+    pub fn start<F>(
+        num_drives: usize,
+        block_size: usize,
+        make_processor: impl Fn(usize) -> F,
+    ) -> Self
     where
         F: FnMut(WriteJob) + Send + 'static,
     {
@@ -180,13 +269,58 @@ impl ParallelBackgroundWriter {
         Self {
             writers,
             num_drives,
+            block_size: block_size.max(1),
         }
     }
 
-    /// Enqueue a write job, routing to the writer for its target drive.
+    /// Enqueue a write job.
+    ///
+    /// With one drive the job is routed whole to that drive's writer. With
+    /// several, it is fanned out into one slice job per drive holding a
+    /// non-empty stripe, slice `d` on writer `d`; all slices are enqueued
+    /// before this returns, so `flush()` never observes idle writers while
+    /// slices are pending. A slice refused by a writer (shutdown) counts as
+    /// failed. `Err` is returned only when no writer will finish the object,
+    /// in which case the caller owns its write-through read ref.
     pub fn enqueue(&self, job: WriteJob) -> Result<(), WriteJob> {
-        let idx = job.device_index % self.num_drives;
-        self.writers[idx].enqueue(job)
+        let n = self.num_drives;
+        let total_bytes = job.size as usize;
+        let slices: Vec<usize> = if n > 1 {
+            (0..n)
+                .filter(|&d| crate::stripe_range(total_bytes, n, self.block_size, d).1 > 0)
+                .collect()
+        } else {
+            Vec::new()
+        };
+        if slices.is_empty() {
+            let idx = job.device_index % n;
+            return self.writers[idx].enqueue(job);
+        }
+
+        let state = Arc::new(StripeWrite::new(slices.len()));
+        let mut unowned: Option<WriteJob> = None;
+        for d in slices {
+            let slice_job = WriteJob {
+                key: job.key,
+                size: job.size,
+                device_index: d,
+                stripe: Some(StripeSlice {
+                    drive: d,
+                    state: Arc::clone(&state),
+                }),
+            };
+            if let Err(rejected) = self.writers[d].enqueue(slice_job) {
+                state.mark_failed();
+                if let Some((reservation, _)) = state.finish_slice() {
+                    drop(reservation); // abort any reserved extent
+                    unowned = Some(rejected);
+                }
+            }
+        }
+        match unowned {
+            Some(rejected) => Err(rejected),
+            None => Ok(()),
+        }
     }
 
     /// Total number of jobs in-flight across all drive writers.
@@ -339,9 +473,10 @@ impl BackgroundEvictor {
                     });
                 }
 
-                // Free extent on the appropriate drive. Must use the same
-                // splitmix64 placement hash as the write path, or we free an
-                // extent on the wrong extent manager.
+                // Free the extent on the stripe allocator. Objects are striped
+                // across all drives at one offset reserved on drive 0's extent
+                // manager, which is the only one this evictor is given, so
+                // drive_index(key, 1) always selects it.
                 let drive_idx =
                     crate::DispatcherComponent::drive_index(key, extent_mgrs.len().max(1));
                 if let Some(em) = extent_mgrs.get(drive_idx) {
@@ -607,6 +742,7 @@ mod tests {
                 key: 1,
                 size: 4096,
                 device_index: 0,
+                stripe: None,
             })
             .unwrap();
         writer
@@ -614,6 +750,7 @@ mod tests {
                 key: 2,
                 size: 8192,
                 device_index: 1,
+                stripe: None,
             })
             .unwrap();
 
@@ -639,6 +776,7 @@ mod tests {
                     key: i,
                     size: 4096,
                     device_index: 0,
+                    stripe: None,
                 })
                 .unwrap();
         }
@@ -666,6 +804,7 @@ mod tests {
                             key: t * 100 + i,
                             size: 4096,
                             device_index: 0,
+                            stripe: None,
                         })
                         .unwrap();
                     }
@@ -699,6 +838,7 @@ mod tests {
                     key: i,
                     size: 4096,
                     device_index: 0,
+                    stripe: None,
                 })
                 .unwrap();
         }
@@ -721,6 +861,7 @@ mod tests {
                     key: 1,
                     size: 4096,
                     device_index: 0,
+                    stripe: None,
                 })
                 .unwrap();
         } // drop here

@@ -742,48 +742,82 @@ pub unsafe fn pipelined_multi_object_zero_copy(
     results
 }
 
+/// One object of a scatter-gather batch: the whole memory-tier slot and the
+/// GPU destination of its coalesced H2D.
+pub struct ColdObject {
+    pub mem_ptr: *mut u8,
+    /// GPU destination for the whole object; null means "fill the DRAM slot
+    /// only" (the caller scatters a multi-region object afterwards).
+    pub gpu_dst: *mut std::ffi::c_void,
+    pub total_bytes: usize,
+}
+
+// SAFETY: pointers are valid for the duration of the pipeline call.
+unsafe impl Send for ColdObject {}
+
+/// One drive's stripe of an object for the scatter-gather pipeline.
+pub struct StripeReadJob {
+    /// Index of the owning object in the `objects` table.
+    pub obj_idx: usize,
+    /// Destination of this stripe inside the object's memory-tier slot.
+    pub mem_ptr: *mut u8,
+    pub start_lba: u64,
+    /// Stripe length in bytes (block-aligned).
+    pub len: usize,
+}
+
+// SAFETY: pointers are valid for the duration of the pipeline call.
+unsafe impl Send for StripeReadJob {}
+
 /// Per-drive work descriptor for the scatter-gather pipeline.
 pub struct DriveWork<'a> {
     pub channels: &'a ClientChannels,
     pub drive: &'a dyn IBlockDevice,
-    pub jobs: &'a [ColdReadJob],
+    /// Stripes this drive reads, object-major in the same object order on
+    /// every drive so objects complete progressively.
+    pub jobs: &'a [StripeReadJob],
 }
 
 /// Multi-drive scatter-gather SSD→GPU zero-copy transfer.
 ///
 /// Fans out NVMe reads to all drives simultaneously and fans in completions
-/// via a multiplexed poll loop on the caller thread. When an object's last
-/// NVMe segment completes, the fused H2D DMA is issued immediately —
-/// preserving the NVMe/H2D overlap that is load-bearing.
+/// via a multiplexed poll loop on the caller thread. An object may be striped
+/// across several drives: its remaining segment count is tracked across all
+/// drives, and when its last NVMe segment completes (on whichever drive) the
+/// fused H2D DMA for the whole object is issued immediately — preserving the
+/// NVMe/H2D overlap that is load-bearing.
 ///
 /// Completions are reaped continuously: H2Ds queue on the pipe streams
 /// without any intermediate host sync, and one final dual sync covers the
 /// whole batch before returning. This is safe because each object's H2D
 /// source is its own memory-tier slot, so there is no buffer reuse to guard.
 ///
-/// Returns `Vec<Vec<Result<(), DispatcherError>>>` indexed by drive, then
-/// by job index within that drive.
+/// A failed stripe read fails only its object. A drive-wide failure (timeout,
+/// unexpected completion, invalid tag or disconnect) fails every object with
+/// a stripe on that drive. A failed object never gets an H2D.
+///
+/// Returns one `Result` per entry of `objects`.
 ///
 /// # Safety
-/// All `mem_ptr` and `gpu_dst` pointers in the jobs must be valid for their
-/// respective `total_bytes`.
+/// All `mem_ptr` and `gpu_dst` pointers in `objects` must be valid for their
+/// respective `total_bytes`, and every stripe `mem_ptr` must be valid for its
+/// `len` bytes.
 #[allow(clippy::too_many_arguments)]
 pub unsafe fn scatter_gather_multi_drive_zero_copy(
     gpu: &dyn IGpuServices,
     streams: &[GpuStream; 2],
+    objects: &[ColdObject],
     drive_works: &[DriveWork<'_>],
     chunk_size: usize,
     max_queue_depth: usize,
     metrics: Option<&dyn crate::metrics::PipelineMetrics>,
-) -> Vec<Vec<Result<(), DispatcherError>>> {
+) -> Vec<Result<(), DispatcherError>> {
     let num_drives = drive_works.len();
-    let mut all_results: Vec<Vec<Result<(), DispatcherError>>> = drive_works
-        .iter()
-        .map(|dw| vec![Ok(()); dw.jobs.len()])
-        .collect();
+    let num_objects = objects.len();
+    let mut results: Vec<Result<(), DispatcherError>> = vec![Ok(()); num_objects];
 
-    if num_drives == 0 {
-        return all_results;
+    if num_drives == 0 || num_objects == 0 {
+        return results;
     }
 
     struct DriveSegments {
@@ -800,6 +834,9 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
 
     let mut per_drive: Vec<DriveSegments> = Vec::with_capacity(num_drives);
     let mut grand_total_segments: usize = 0;
+    // Remaining segments per object, counted across all drives.
+    let mut obj_remaining: Vec<usize> = vec![0; num_objects];
+    let mut obj_failed: Vec<bool> = vec![false; num_objects];
 
     for dw in drive_works {
         let block_size = dw.drive.block_size() as usize;
@@ -807,8 +844,8 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
         let mut total_segments = 0usize;
         let mut work: Vec<(usize, usize)> = Vec::new();
 
-        for (obj_idx, job) in dw.jobs.iter().enumerate() {
-            let aligned_bytes = job.total_bytes.next_multiple_of(block_size);
+        for (job_idx, job) in dw.jobs.iter().enumerate() {
+            let aligned_bytes = job.len.next_multiple_of(block_size);
             let segments = io_segmenter::segment_io(
                 job.start_lba,
                 aligned_bytes,
@@ -827,9 +864,12 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
                 })
                 .collect();
             for seg_idx in 0..segments.len() {
-                work.push((obj_idx, seg_idx));
+                work.push((job_idx, seg_idx));
             }
             total_segments += segments.len();
+            if let Some(r) = obj_remaining.get_mut(job.obj_idx) {
+                *r += segments.len();
+            }
             objs.push(ObjSegs {
                 segments,
                 chunk_bufs,
@@ -847,7 +887,24 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
     }
 
     if grand_total_segments == 0 {
-        return all_results;
+        return results;
+    }
+
+    // Fail every object that has a stripe on drive `d` (drive-wide failure).
+    fn fail_drive_objects(
+        dw: &DriveWork<'_>,
+        results: &mut [Result<(), DispatcherError>],
+        obj_failed: &mut [bool],
+        err: impl Fn() -> DispatcherError,
+    ) {
+        for job in dw.jobs {
+            if let Some(r) = results.get_mut(job.obj_idx) {
+                if r.is_ok() {
+                    *r = Err(err());
+                }
+                obj_failed[job.obj_idx] = true;
+            }
+        }
     }
 
     // Distribute queue depth proportionally to each drive's segment count.
@@ -868,7 +925,7 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
             if remaining == 0 {
                 break;
             }
-            let reduce = remaining.min(*qd - 1);
+            let reduce = remaining.min(qd.saturating_sub(1));
             *qd -= reduce;
             remaining -= reduce;
         }
@@ -881,22 +938,10 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
     let mut total_completed: usize = 0;
     let mut stop_submitting: Vec<bool> = vec![false; num_drives];
 
-    // Per-drive, per-object remaining segment count and failure state.
-    let mut obj_remaining: Vec<Vec<usize>> = per_drive
-        .iter()
-        .map(|ds| ds.objs.iter().map(|o| o.segments.len()).collect())
-        .collect();
-    let mut obj_failed: Vec<Vec<bool>> = drive_works
-        .iter()
-        .map(|dw| vec![false; dw.jobs.len()])
-        .collect();
-
     let mut stream_idx: usize = 0;
 
-    // Tag encoding: (drive_idx << 32) | (obj_idx * max_segs + seg_idx)
-    // Since we use per-drive channels, we only need the intra-drive part of
-    // the tag (the drive is implicit from which channel completed). But we
-    // use the same per-drive tag encoding as pipelined_multi_object_zero_copy.
+    // Tag encoding (per drive): job_idx * max_segs + seg_idx. The drive is
+    // implicit from which channel completed; the object comes from the job.
 
     // Fan-out: submit initial segments for each drive.
     for d in 0..num_drives {
@@ -905,9 +950,9 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
         let limit = per_drive_qd[d].min(ds.work.len());
 
         while submitted[d] < limit {
-            let (obj_idx, seg_idx) = ds.work[submitted[d]];
-            let obj = &ds.objs[obj_idx];
-            let tag = (obj_idx * ds.max_segments_per_obj + seg_idx) as u64;
+            let (job_idx, seg_idx) = ds.work[submitted[d]];
+            let obj = &ds.objs[job_idx];
+            let tag = (job_idx * ds.max_segments_per_obj + seg_idx) as u64;
 
             if dw
                 .channels
@@ -921,9 +966,9 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
                 })
                 .is_err()
             {
-                for r in all_results[d].iter_mut() {
-                    *r = Err(DispatcherError::IoError("channel send failed".into()));
-                }
+                fail_drive_objects(dw, &mut results, &mut obj_failed, || {
+                    DispatcherError::IoError("channel send failed".into())
+                });
                 stop_submitting[d] = true;
                 break;
             }
@@ -972,35 +1017,37 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
                 completed[d] += 1;
                 total_completed += 1;
 
-                let obj_idx = (tag as usize) / ds.max_segments_per_obj;
+                let job_idx = (tag as usize) / ds.max_segments_per_obj;
                 let seg_idx = (tag as usize) % ds.max_segments_per_obj;
 
-                if obj_idx >= dw.jobs.len()
-                    || seg_idx >= ds.objs.get(obj_idx).map_or(0, |o| o.segments.len())
+                let mut done_obj: Option<usize> = None;
+                if job_idx >= dw.jobs.len()
+                    || seg_idx >= ds.objs.get(job_idx).map_or(0, |o| o.segments.len())
+                    || dw.jobs[job_idx].obj_idx >= num_objects
                 {
-                    for r in all_results[d].iter_mut() {
-                        if r.is_ok() {
-                            *r = Err(DispatcherError::IoError("invalid completion tag".into()));
-                        }
-                    }
-                    obj_failed[d].fill(true);
+                    fail_drive_objects(dw, &mut results, &mut obj_failed, || {
+                        DispatcherError::IoError("invalid completion tag".into())
+                    });
                     stop_submitting[d] = true;
-                } else if let Err(e) = result {
-                    all_results[d][obj_idx] = Err(DispatcherError::IoError(format!(
-                        "SSD read drive={d} obj={obj_idx} seg={seg_idx}: {e}"
-                    )));
-                    obj_failed[d][obj_idx] = true;
-                    obj_remaining[d][obj_idx] = obj_remaining[d][obj_idx].saturating_sub(1);
                 } else {
-                    obj_remaining[d][obj_idx] -= 1;
+                    let obj_idx = dw.jobs[job_idx].obj_idx;
+                    if let Err(e) = result {
+                        if results[obj_idx].is_ok() {
+                            results[obj_idx] = Err(DispatcherError::IoError(format!(
+                                "SSD read drive={d} obj={obj_idx} seg={seg_idx}: {e}"
+                            )));
+                        }
+                        obj_failed[obj_idx] = true;
+                    }
+                    obj_remaining[obj_idx] = obj_remaining[obj_idx].saturating_sub(1);
+                    done_obj = Some(obj_idx);
                 }
 
                 // Resubmit next segment for this drive BEFORE H2D (preserve overlap).
                 if !stop_submitting[d] && submitted[d] < ds.work.len() {
-                    let (next_obj, next_seg) = ds.work[submitted[d]];
-                    let next_obj_data = &ds.objs[next_obj];
-                    let next_tag =
-                        (next_obj * ds.max_segments_per_obj + next_seg) as u64;
+                    let (next_job, next_seg) = ds.work[submitted[d]];
+                    let next_obj_data = &ds.objs[next_job];
+                    let next_tag = (next_job * ds.max_segments_per_obj + next_seg) as u64;
 
                     if dw
                         .channels
@@ -1021,58 +1068,52 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
                     }
                 }
 
-                // Object fully read: issue ONE coalesced H2D for the entire slot.
-                if obj_idx < dw.jobs.len()
-                    && obj_remaining[d][obj_idx] == 0
-                    && !obj_failed[d][obj_idx]
-                    && !dw.jobs[obj_idx].gpu_dst.is_null()
-                {
-                    let tg = std::time::Instant::now();
-                    let job = &dw.jobs[obj_idx];
-                    let current_stream = streams[stream_idx % 2];
+                // Object fully read on every drive: issue ONE coalesced H2D
+                // for the entire slot.
+                if let Some(obj_idx) = done_obj {
+                    if obj_remaining[obj_idx] == 0
+                        && !obj_failed[obj_idx]
+                        && !objects[obj_idx].gpu_dst.is_null()
+                    {
+                        let tg = std::time::Instant::now();
+                        let obj = &objects[obj_idx];
+                        let current_stream = streams[stream_idx % 2];
 
-                    let dma_result = gpu.memcpy_h2d_async(
-                        job.mem_ptr as *const std::ffi::c_void,
-                        job.gpu_dst,
-                        job.total_bytes,
-                        current_stream,
-                    );
-                    if let Err(e) = dma_result {
-                        all_results[d][obj_idx] = Err(DispatcherError::IoError(format!(
-                            "GPU H2D drive={d} obj={obj_idx}: {e}"
-                        )));
+                        let dma_result = gpu.memcpy_h2d_async(
+                            obj.mem_ptr as *const std::ffi::c_void,
+                            obj.gpu_dst,
+                            obj.total_bytes,
+                            current_stream,
+                        );
+                        if let Err(e) = dma_result {
+                            results[obj_idx] = Err(DispatcherError::IoError(format!(
+                                "GPU H2D obj={obj_idx}: {e}"
+                            )));
+                        }
+                        t_gpu_ns += tg.elapsed().as_nanos() as u64;
+
+                        stream_idx += 1;
                     }
-                    t_gpu_ns += tg.elapsed().as_nanos() as u64;
-
-                    stream_idx += 1;
                 }
             }
             Ok(Completion::Timeout { handle }) => {
                 idle_spins = 0;
                 completed[d] += 1;
                 total_completed += 1;
-                for r in all_results[d].iter_mut() {
-                    if r.is_ok() {
-                        *r = Err(DispatcherError::IoError(format!(
-                            "NVMe read timeout drive={d} (handle {handle:?})"
-                        )));
-                    }
-                }
-                obj_failed[d].fill(true);
+                fail_drive_objects(dw, &mut results, &mut obj_failed, || {
+                    DispatcherError::IoError(format!(
+                        "NVMe read timeout drive={d} (handle {handle:?})"
+                    ))
+                });
                 stop_submitting[d] = true;
             }
             Ok(_) => {
                 idle_spins = 0;
                 completed[d] += 1;
                 total_completed += 1;
-                for r in all_results[d].iter_mut() {
-                    if r.is_ok() {
-                        *r = Err(DispatcherError::IoError(
-                            "unexpected completion on cold-read channel".into(),
-                        ));
-                    }
-                }
-                obj_failed[d].fill(true);
+                fail_drive_objects(dw, &mut results, &mut obj_failed, || {
+                    DispatcherError::IoError("unexpected completion on cold-read channel".into())
+                });
                 stop_submitting[d] = true;
             }
             Err(component_core::channel::ChannelError::Empty) => {
@@ -1090,14 +1131,9 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
             }
             Err(_) => {
                 // Channel closed — drive actor gone.
-                for r in all_results[d].iter_mut() {
-                    if r.is_ok() {
-                        *r = Err(DispatcherError::IoError(
-                            "block-device channel disconnected".into(),
-                        ));
-                    }
-                }
-                obj_failed[d].fill(true);
+                fail_drive_objects(dw, &mut results, &mut obj_failed, || {
+                    DispatcherError::IoError("block-device channel disconnected".into())
+                });
                 stop_submitting[d] = true;
                 // Mark all remaining as completed so we don't spin.
                 let delta = submitted[d] - completed[d];
@@ -1107,14 +1143,18 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
         }
     }
 
-    // Mark unsubmitted work as failed.
+    // Mark objects with unsubmitted stripe segments as failed.
     for d in 0..num_drives {
         let ds = &per_drive[d];
-        for &(obj_idx, _) in ds.work.iter().skip(submitted[d]) {
-            if all_results[d][obj_idx].is_ok() {
-                all_results[d][obj_idx] = Err(DispatcherError::IoError(
-                    "cold read aborted before segment was submitted".into(),
-                ));
+        let dw = &drive_works[d];
+        for &(job_idx, _) in ds.work.iter().skip(submitted[d]) {
+            let obj_idx = dw.jobs[job_idx].obj_idx;
+            if let Some(r) = results.get_mut(obj_idx) {
+                if r.is_ok() {
+                    *r = Err(DispatcherError::IoError(
+                        "cold read aborted before segment was submitted".into(),
+                    ));
+                }
             }
         }
     }
@@ -1141,7 +1181,7 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
         }
     }
 
-    all_results
+    results
 }
 
 /// Describes a single object to be promoted from SSD into the memory-tier (no GPU).

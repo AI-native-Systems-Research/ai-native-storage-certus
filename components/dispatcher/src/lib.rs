@@ -87,7 +87,7 @@ use spdk_env::ISPDKEnv;
 
 use crate::background::{
     BackgroundEvictor, EvictorConfig, MemoryTierEvictor, MemoryTierEvictorConfig,
-    ParallelBackgroundWriter, WriteJob,
+    ParallelBackgroundWriter, StripeReservation, StripeSlice, WriteJob,
 };
 pub use crate::metrics::PipelineMetrics;
 
@@ -350,6 +350,38 @@ impl Drop for ChannelLease<'_> {
                 .push(ch);
         }
     }
+}
+
+/// Stripe unit of an object striped RAID-0 style across `num_drives` drives.
+///
+/// The block-aligned object is cut into `num_drives` contiguous units of
+/// `ceil(aligned / num_drives)` bytes, rounded up to `block_size`. Drive `d`
+/// holds object bytes `[d * unit, min((d + 1) * unit, aligned))` at the same
+/// byte offset on every drive, so one extent of `unit` bytes on the stripe
+/// allocator (drive 0's extent manager) addresses the whole object. With one
+/// drive the unit is the aligned object size, i.e. the unstriped layout.
+pub(crate) fn stripe_unit(total_bytes: usize, num_drives: usize, block_size: usize) -> usize {
+    let aligned = total_bytes.next_multiple_of(block_size);
+    aligned
+        .div_ceil(num_drives.max(1))
+        .next_multiple_of(block_size)
+}
+
+/// Byte range `(start, len)` of the object held by drive `drive` under the
+/// stripe layout of [`stripe_unit`]. `start` is the offset within the object
+/// (and its memory-tier slot); `len` is block-aligned and may be zero when the
+/// object is smaller than `num_drives` stripe units.
+pub(crate) fn stripe_range(
+    total_bytes: usize,
+    num_drives: usize,
+    block_size: usize,
+    drive: usize,
+) -> (usize, usize) {
+    let aligned = total_bytes.next_multiple_of(block_size);
+    let unit = stripe_unit(total_bytes, num_drives, block_size);
+    let start = (drive * unit).min(aligned);
+    let end = ((drive + 1) * unit).min(aligned);
+    (start, end - start)
 }
 
 fn format_bytes(bytes: usize) -> String {
@@ -818,17 +850,6 @@ impl DispatcherComponent {
             });
         }
 
-        let idx = Self::drive_index(key, drives.len());
-        let drive = &drives[idx];
-        let block_size = drive.block_dev_iface.block_size();
-        let start_lba = offset / block_size as u64;
-        let block_dev = Arc::clone(&drive.block_dev_iface);
-
-        // Check out an exclusive channel for this read. A single shared SPSC
-        // channel across concurrent readers lets one thread dequeue another's
-        // completions (completion theft → permanent hang); see ChannelPool.
-        let lease = drive.channel_pool.checkout()?;
-
         // Zero-copy pipelined reader: NVMe → memory-tier slot → GPU (no intermediate ring copy).
         // SAFETY: mem_ptr is a valid, CUDA-pinned, SPDK-registered memory-tier slot.
         // ipc_handle.address is a valid GPU destination pointer.
@@ -855,15 +876,44 @@ impl DispatcherComponent {
                 ring_ref.streams
             }
         };
-        // Use pipelined_multi_object_zero_copy with a single job — this is the
-        // same pipeline the cold-pool worker uses, with coalesced H2D (one
-        // memcpy_h2d_async per object after all NVMe reads complete) and no
-        // per-segment DmaBuffer mutex overhead. Empirically matches the cold
-        // pool path's p50 performance.
-        {
+        let gpu_dst = ipc_handle.address as *mut std::ffi::c_void;
+        if drives.len() > 1 {
+            // Striped object: read every drive's stripe through the
+            // scatter-gather pipeline; its coalesced H2D is issued once the
+            // last stripe lands.
+            // SAFETY: as above — mem_ptr covers the aligned object.
+            unsafe {
+                Self::read_striped_object(
+                    &drives,
+                    &**gpu,
+                    &streams,
+                    mem_ptr,
+                    gpu_dst,
+                    offset,
+                    total_bytes,
+                    chunk_size,
+                    128,
+                )
+            }?;
+        } else {
+            let drive = &drives[0];
+            let block_size = drive.block_dev_iface.block_size();
+            let start_lba = offset / block_size as u64;
+            let block_dev = Arc::clone(&drive.block_dev_iface);
+
+            // Check out an exclusive channel for this read. A single shared SPSC
+            // channel across concurrent readers lets one thread dequeue another's
+            // completions (completion theft → permanent hang); see ChannelPool.
+            let lease = drive.channel_pool.checkout()?;
+
+            // Use pipelined_multi_object_zero_copy with a single job — this is the
+            // same pipeline the cold-pool worker uses, with coalesced H2D (one
+            // memcpy_h2d_async per object after all NVMe reads complete) and no
+            // per-segment DmaBuffer mutex overhead. Empirically matches the cold
+            // pool path's p50 performance.
             let job = pipeline::ColdReadJob {
                 mem_ptr,
-                gpu_dst: ipc_handle.address as *mut std::ffi::c_void,
+                gpu_dst,
                 start_lba,
                 total_bytes,
             };
@@ -882,8 +932,8 @@ impl DispatcherComponent {
             if let Some(Err(e)) = results.into_iter().next() {
                 return Err(e);
             }
+            drop(lease);
         }
-        drop(lease);
         drop(drives);
 
         // Staged (uncached) serve: the DMA is done and the data was delivered to
@@ -907,6 +957,82 @@ impl DispatcherComponent {
         Ok(())
     }
 
+    /// Read one object striped across all `drives` into `mem_ptr` through the
+    /// scatter-gather pipeline, checking out one channel per drive holding a
+    /// stripe. The object's single coalesced H2D to `gpu_dst` (null = DRAM
+    /// only) is issued once its last stripe lands on any drive.
+    ///
+    /// # Safety
+    /// `mem_ptr` must be valid for the block-aligned `total_bytes`, and a
+    /// non-null `gpu_dst` must be a valid GPU destination for `total_bytes`.
+    unsafe fn read_striped_object(
+        drives: &[DataDrive],
+        gpu: &dyn IGpuServices,
+        streams: &[GpuStream; 2],
+        mem_ptr: *mut u8,
+        gpu_dst: *mut std::ffi::c_void,
+        offset: u64,
+        total_bytes: usize,
+        chunk_size: usize,
+        max_queue_depth: usize,
+    ) -> Result<(), DispatcherError> {
+        let num_drives = drives.len();
+        let block_size = drives[0].block_dev_iface.block_size() as usize;
+        let start_lba = offset / block_size as u64;
+
+        let mut stripes: Vec<(usize, [pipeline::StripeReadJob; 1])> = Vec::new();
+        for d in 0..num_drives {
+            let (start, len) = stripe_range(total_bytes, num_drives, block_size, d);
+            if len > 0 {
+                stripes.push((
+                    d,
+                    [pipeline::StripeReadJob {
+                        obj_idx: 0,
+                        // SAFETY: start + len <= aligned object size (caller contract).
+                        mem_ptr: unsafe { mem_ptr.add(start) },
+                        start_lba,
+                        len,
+                    }],
+                ));
+            }
+        }
+
+        let mut leases: Vec<ChannelLease<'_>> = Vec::with_capacity(stripes.len());
+        for (d, _) in &stripes {
+            leases.push(drives[*d].channel_pool.checkout()?);
+        }
+        let drive_works: Vec<pipeline::DriveWork<'_>> = stripes
+            .iter()
+            .zip(&leases)
+            .map(|((d, jobs), lease)| pipeline::DriveWork {
+                channels: lease.channels(),
+                drive: &*drives[*d].block_dev_iface,
+                jobs,
+            })
+            .collect();
+        let object = [pipeline::ColdObject {
+            mem_ptr,
+            gpu_dst,
+            total_bytes,
+        }];
+
+        // SAFETY: forwarded caller contract on mem_ptr / gpu_dst.
+        unsafe {
+            pipeline::scatter_gather_multi_drive_zero_copy(
+                gpu,
+                streams,
+                &object,
+                &drive_works,
+                chunk_size,
+                max_queue_depth,
+                None,
+            )
+        }
+        .into_iter()
+        .next()
+        .unwrap_or(Ok(()))
+    }
+
     /// Serve one cold key through a transient staging buffer (no caching).
     ///
     /// Used when the memory tier is saturated and `evict_and_insert` can't get a
@@ -919,7 +1045,7 @@ impl DispatcherComponent {
     fn serve_cold_staged(
         &self,
         gpu: &Arc<dyn IGpuServices + Send + Sync>,
-        key: CacheKey,
+        _key: CacheKey,
         offset: u64,
         regions: &[IpcHandle],
         total_size: u32,
@@ -947,15 +1073,6 @@ impl DispatcherComponent {
                 "staged cold read requires a data drive".into(),
             ));
         }
-        let idx = Self::drive_index(key, drives.len());
-        let drive = &drives[idx];
-        let block_size = drive.block_dev_iface.block_size();
-        let start_lba = offset / block_size as u64;
-        let block_dev = Arc::clone(&drive.block_dev_iface);
-        // Exclusive channel for this read (see ChannelPool: sharing one SPSC
-        // channel across concurrent readers causes completion theft).
-        let chan_lease = drive.channel_pool.checkout()?;
-
         // Device-correct streams (multi-GPU), falling back to the ring's streams.
         let chunk_size = {
             let ring_guard = self.pipeline_ring.read();
@@ -990,21 +1107,47 @@ impl DispatcherComponent {
         // `total_bytes`; gpu_dst is the GPU destination (null for the scatter
         // case). The lease keeps the buffer alive until after the read completes
         // below (and, for N>1, until the scatter completes).
-        let res = unsafe {
-            pipeline::pipelined_ssd_to_gpu_zero_copy(
-                &*block_dev,
-                &**gpu,
-                &streams,
-                chan_lease.channels(),
-                lease.ptr(),
-                gpu_dst,
-                start_lba,
-                total_bytes,
-                chunk_size,
-                16,
-            )
+        let res = if drives.len() > 1 {
+            // Striped object: read every drive's stripe into the staging
+            // buffer; the single-region H2D is issued once the last stripe lands.
+            unsafe {
+                Self::read_striped_object(
+                    &drives,
+                    &**gpu,
+                    &streams,
+                    lease.ptr(),
+                    gpu_dst,
+                    offset,
+                    total_bytes,
+                    chunk_size,
+                    16,
+                )
+            }
+        } else {
+            let drive = &drives[0];
+            let block_size = drive.block_dev_iface.block_size();
+            let start_lba = offset / block_size as u64;
+            let block_dev = Arc::clone(&drive.block_dev_iface);
+            // Exclusive channel for this read (see ChannelPool: sharing one SPSC
+            // channel across concurrent readers causes completion theft).
+            let chan_lease = drive.channel_pool.checkout()?;
+            let res = unsafe {
+                pipeline::pipelined_ssd_to_gpu_zero_copy(
+                    &*block_dev,
+                    &**gpu,
+                    &streams,
+                    chan_lease.channels(),
+                    lease.ptr(),
+                    gpu_dst,
+                    start_lba,
+                    total_bytes,
+                    chunk_size,
+                    16,
+                )
+            };
+            drop(chan_lease); // return the channel to the pool
+            res
         };
-        drop(chan_lease); // return the channel to the pool
         drop(drives);
 
         // Multi-region: the read only filled the staging buffer; scatter it to
@@ -1392,8 +1535,13 @@ impl DispatcherComponent {
         mt: &Arc<dyn IMemoryTier + Send + Sync>,
         drives: &[Arc<dyn IBlockDevice + Send + Sync>],
         extent_mgrs: &[Arc<dyn IExtentManager + Send + Sync>],
-        job: WriteJob,
+        mut job: WriteJob,
     ) {
+        if let Some(slice) = job.stripe.take() {
+            Self::process_stripe_slice(dm, mt, drives, extent_mgrs, job.key, job.size, slice);
+            return;
+        }
+
         // Get the memory-tier pointer without refreshing its eviction-order position —
         // the write-through must not prevent this entry from being evicted under memory pressure.
         let (mem_ptr, _size) = match mt.peek(job.key) {
@@ -1463,6 +1611,111 @@ impl DispatcherComponent {
         let _ = write_handle.publish();
         let _ = dm.convert_to_storage(job.key, block_offset);
     }
+
+    /// Write one drive's stripe of a striped object (runs on writer `d`, so
+    /// drive `d` is written only by its own writer thread).
+    ///
+    /// The first slice to run peeks the memory-tier slot and reserves the
+    /// object's stripe unit on the stripe allocator (`extent_mgrs[0]`); every
+    /// slice writes its stripe at that same offset on its own drive. The slice
+    /// that finishes last publishes the extent and converts the entry to
+    /// storage if every slice succeeded, or aborts the reservation and releases
+    /// the read ref otherwise — exactly once per object, so the slot stays
+    /// pinned until the last slice is done.
+    fn process_stripe_slice(
+        dm: &Arc<dyn IDispatchMap + Send + Sync>,
+        mt: &Arc<dyn IMemoryTier + Send + Sync>,
+        drives: &[Arc<dyn IBlockDevice + Send + Sync>],
+        extent_mgrs: &[Arc<dyn IExtentManager + Send + Sync>],
+        key: CacheKey,
+        size: u32,
+        slice: StripeSlice,
+    ) {
+        let state = &slice.state;
+        let num_drives = drives.len();
+        let ok = match (drives.get(slice.drive), extent_mgrs.first()) {
+            (Some(drive), Some(stripe_alloc)) if !state.has_failed() => {
+                let block_size = drive.block_size() as usize;
+                let total_bytes = size as usize;
+                let (start, len) = stripe_range(total_bytes, num_drives, block_size, slice.drive);
+
+                let target = {
+                    let mut res = state.reservation.lock().unwrap_or_else(|e| e.into_inner());
+                    if matches!(*res, StripeReservation::Pending) {
+                        *res = match mt.peek(key) {
+                            Some((mem_ptr, _)) => {
+                                let unit = stripe_unit(total_bytes, num_drives, block_size);
+                                match stripe_alloc.reserve_extent(key, unit as u32) {
+                                    Ok(handle) => StripeReservation::Reserved {
+                                        offset: handle.extent_offset(),
+                                        handle,
+                                        mem_ptr,
+                                    },
+                                    Err(_) => StripeReservation::Failed,
+                                }
+                            }
+                            None => StripeReservation::Failed,
+                        };
+                    }
+                    match *res {
+                        StripeReservation::Reserved {
+                            offset, mem_ptr, ..
+                        } => Some((offset, mem_ptr)),
+                        _ => None,
+                    }
+                };
+
+                target.is_some_and(|(offset, mem_ptr)| {
+                    // SAFETY: the slot is pinned until the last slice finishes
+                    // and covers the aligned object; [start, start + len) lies
+                    // within it.
+                    let buf = unsafe {
+                        DmaBuffer::from_raw(
+                            mem_ptr.add(start) as *mut std::ffi::c_void,
+                            len,
+                            noop_free,
+                            -1,
+                        )
+                    };
+                    match buf {
+                        Ok(buf) => {
+                            // Bytes of the object (not padding) in this stripe.
+                            let valid = len.min(total_bytes.saturating_sub(start));
+                            let written = Self::write_buffer_to_ssd(
+                                &**drive,
+                                &buf,
+                                offset / block_size as u64,
+                                valid,
+                                mt.is_dma_capable(),
+                            )
+                            .is_ok();
+                            std::mem::forget(buf);
+                            written
+                        }
+                        Err(_) => false,
+                    }
+                })
+            }
+            _ => false,
+        };
+        if !ok {
+            state.mark_failed();
+        }
+
+        if let Some((reservation, all_ok)) = state.finish_slice() {
+            match reservation {
+                StripeReservation::Reserved { handle, offset, .. } if all_ok => {
+                    // convert_to_storage also decrements the read reference.
+                    let _ = handle.publish();
+                    let _ = dm.convert_to_storage(key, offset);
+                }
+                other => {
+                    drop(other); // a reserved extent aborts on drop
+                    let _ = dm.release_read(key);
+                }
+            }
+        }
+    }
 }
 
 impl DispatcherComponent {
@@ -1498,6 +1751,94 @@ impl DispatcherComponent {
             dev,
             func,
         })
+    }
+
+    /// Start the per-drive background write-through workers over the current
+    /// data drives (one writer thread per drive; a single writer when there
+    /// are none).
+    fn start_background_writer(&self) -> Result<(), DispatcherError> {
+        let dm_for_writer = self
+            .dispatch_map
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
+
+        let mt_for_writer = self
+            .memory_tier
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
+
+        // Collect block device interfaces and extent managers for the background writer.
+        let bg_drives: Vec<Arc<dyn IBlockDevice + Send + Sync>> = {
+            let dd = self.data_drives.read();
+            dd.iter().map(|d| Arc::clone(&d.block_dev_iface)).collect()
+        };
+        let bg_extent_mgrs: Vec<Arc<dyn IExtentManager + Send + Sync>> = {
+            let dd = self.data_drives.read();
+            dd.iter().map(|d| Arc::clone(&d.extent_mgr)).collect()
+        };
+
+        let num_writer_drives = bg_drives.len().max(1);
+        // All data drives share one block size (checked in create_data_drives).
+        let block_size = bg_drives.first().map_or(4096, |d| d.block_size() as usize);
+        let writer = ParallelBackgroundWriter::start(num_writer_drives, block_size, |drive_idx| {
+            let dm = Arc::clone(&dm_for_writer);
+            let mt = Arc::clone(&mt_for_writer);
+            let drives = bg_drives.clone();
+            let extent_mgrs = bg_extent_mgrs.clone();
+            let _ = drive_idx;
+            move |job: WriteJob| {
+                Self::process_write_job(&dm, &mt, &drives, &extent_mgrs, job);
+            }
+        });
+
+        *self.bg_writer.lock().unwrap() = Some(writer);
+        Ok(())
+    }
+
+    /// Start the background SSD evictor if drives exist and the threshold is
+    /// configured.
+    fn start_ssd_evictor(&self, config: &DispatcherConfig) -> Result<(), DispatcherError> {
+        if config.ssd_eviction_threshold > 0.0 {
+            let dm_for_evictor = self
+                .dispatch_map
+                .get()
+                .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
+            let mt_for_evictor = self
+                .memory_tier
+                .get()
+                .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
+            // Only the stripe allocator (drive 0's extent manager) holds data
+            // extents; its utilization is every drive's, and it is the one an
+            // evicted object's extent is freed on.
+            let evictor_extent_mgrs: Vec<Arc<dyn IExtentManager + Send + Sync>> = {
+                let dd = self.data_drives.read();
+                dd.first()
+                    .map(|d| Arc::clone(&d.extent_mgr))
+                    .into_iter()
+                    .collect()
+            };
+            let evictor_logger = self.logger.get().ok();
+
+            if !evictor_extent_mgrs.is_empty() {
+                let evictor_eviction_tx = self.eviction_tx.lock().unwrap().clone();
+                let evictor = BackgroundEvictor::start(
+                    dm_for_evictor,
+                    mt_for_evictor,
+                    evictor_extent_mgrs,
+                    EvictorConfig {
+                        threshold: config.ssd_eviction_threshold,
+                        low_watermark: config.ssd_eviction_low_watermark,
+                        batch_size: config.ssd_eviction_batch_size,
+                        interval: std::time::Duration::from_secs(config.ssd_eviction_interval_secs),
+                    },
+                    evictor_logger,
+                    evictor_eviction_tx,
+                    Arc::clone(&self.tier_counters),
+                );
+                *self.bg_evictor.lock().unwrap() = Some(evictor);
+            }
+        }
+        Ok(())
     }
 
     #[allow(clippy::type_complexity, unused_variables)]
@@ -1621,6 +1962,8 @@ impl DispatcherComponent {
         };
 
         let mut drives = Vec::with_capacity(config.data_pci_addrs.len());
+        // (block size, data partition bytes) of drive 0, the stripe allocator.
+        let mut stripe_geometry: Option<(u32, u64)> = None;
 
         for (i, addr_str) in config.data_pci_addrs.iter().enumerate() {
             let pci_addr = Self::parse_pci_addr(addr_str)?;
@@ -1810,6 +2153,28 @@ impl DispatcherComponent {
             }
 
             let data_disk_size = table.partitions[2].num_sectors * sector_size as u64;
+            // Objects are striped across all drives at one offset reserved on
+            // drive 0's extent manager, so every drive must share drive 0's
+            // block size and address at least drive 0's data partition.
+            match stripe_geometry {
+                None => stripe_geometry = Some((sector_size, data_disk_size)),
+                Some((bs0, _)) if sector_size != bs0 => {
+                    return Err(DispatcherError::InvalidParameter(format!(
+                        "data drive {i} at {addr_str} has block size {sector_size}, but \
+                         drive 0 has {bs0}: striped placement requires one block size \
+                         across all data drives"
+                    )));
+                }
+                Some((_, size0)) if data_disk_size < size0 => {
+                    return Err(DispatcherError::InvalidParameter(format!(
+                        "data drive {i} at {addr_str} has a {data_disk_size}-byte data \
+                         partition, smaller than drive 0's {size0} bytes: striped \
+                         placement requires every data partition to be at least as \
+                         large as drive 0's"
+                    )));
+                }
+                Some(_) => {}
+            }
             let defaults = FormatParams::default();
             let region_size = data_disk_size / defaults.region_count as u64;
             // Slab must fit within a buddy-allocated region. Use 1/16 of region
@@ -1918,9 +2283,17 @@ impl IDispatcher for DispatcherComponent {
                 })?;
                 let mut recovered: u64 = 0;
                 let drives_guard = self.data_drives.read();
-                for drive in drives_guard.iter() {
-                    drive.extent_mgr.for_each_extent(&mut |extent| {
-                        let _ = dm.recover_extent(extent.key, extent.offset, extent.size);
+                // Only the stripe allocator (drive 0) holds extents: each one is
+                // a stripe unit of an object striped across all N drives, so the
+                // object occupies N * extent.size bytes.
+                let num_drives = drives_guard.len() as u32;
+                if let Some(stripe_alloc) = drives_guard.first() {
+                    stripe_alloc.extent_mgr.for_each_extent(&mut |extent| {
+                        let _ = dm.recover_extent(
+                            extent.key,
+                            extent.offset,
+                            extent.size.saturating_mul(num_drives),
+                        );
                         recovered += 1;
                     });
                 }
@@ -2000,75 +2373,10 @@ impl IDispatcher for DispatcherComponent {
             }
         }
 
-        let dm_for_writer = self
-            .dispatch_map
-            .get()
-            .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
-
-        let mt_for_writer = self
-            .memory_tier
-            .get()
-            .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
-
-        // Collect block device interfaces and extent managers for the background writer.
-        let bg_drives: Vec<Arc<dyn IBlockDevice + Send + Sync>> = {
-            let dd = self.data_drives.read();
-            dd.iter().map(|d| Arc::clone(&d.block_dev_iface)).collect()
-        };
-        let bg_extent_mgrs: Vec<Arc<dyn IExtentManager + Send + Sync>> = {
-            let dd = self.data_drives.read();
-            dd.iter().map(|d| Arc::clone(&d.extent_mgr)).collect()
-        };
-
-        let num_writer_drives = bg_drives.len().max(1);
-        let writer = ParallelBackgroundWriter::start(num_writer_drives, |drive_idx| {
-            let dm = Arc::clone(&dm_for_writer);
-            let mt = Arc::clone(&mt_for_writer);
-            let drives = bg_drives.clone();
-            let extent_mgrs = bg_extent_mgrs.clone();
-            let _ = drive_idx;
-            move |job: WriteJob| {
-                Self::process_write_job(&dm, &mt, &drives, &extent_mgrs, job);
-            }
-        });
-
-        *self.bg_writer.lock().unwrap() = Some(writer);
+        self.start_background_writer()?;
 
         // Start background SSD evictor if drives exist and threshold is configured.
-        if config.ssd_eviction_threshold > 0.0 {
-            let dm_for_evictor = self
-                .dispatch_map
-                .get()
-                .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
-            let mt_for_evictor = self
-                .memory_tier
-                .get()
-                .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
-            let evictor_extent_mgrs: Vec<Arc<dyn IExtentManager + Send + Sync>> = {
-                let dd = self.data_drives.read();
-                dd.iter().map(|d| Arc::clone(&d.extent_mgr)).collect()
-            };
-            let evictor_logger = self.logger.get().ok();
-
-            if !evictor_extent_mgrs.is_empty() {
-                let evictor_eviction_tx = self.eviction_tx.lock().unwrap().clone();
-                let evictor = BackgroundEvictor::start(
-                    dm_for_evictor,
-                    mt_for_evictor,
-                    evictor_extent_mgrs,
-                    EvictorConfig {
-                        threshold: config.ssd_eviction_threshold,
-                        low_watermark: config.ssd_eviction_low_watermark,
-                        batch_size: config.ssd_eviction_batch_size,
-                        interval: std::time::Duration::from_secs(config.ssd_eviction_interval_secs),
-                    },
-                    evictor_logger,
-                    evictor_eviction_tx,
-                    Arc::clone(&self.tier_counters),
-                );
-                *self.bg_evictor.lock().unwrap() = Some(evictor);
-            }
-        }
+        self.start_ssd_evictor(&config)?;
 
         // Start background memory-tier evictor (DRAM → SSD demotion) if configured.
         if config.memory_tier_eviction_threshold > 0.0 {
@@ -2507,13 +2815,11 @@ impl IDispatcher for DispatcherComponent {
                     results[entry.idx] = Some(res);
                 }
             } else {
-                // Group cold entries by target drive.
-                let mut per_drive: Vec<Vec<usize>> = vec![Vec::new(); num_drives];
-                for (ci, entry) in cold_entries.iter().enumerate() {
-                    let drive_idx = Self::drive_index(entry.key, num_drives);
-                    per_drive[drive_idx].push(ci);
-                }
-
+                // Every object is striped across all data drives (see
+                // `stripe_range`), so each drive reads 1/N of every cold object
+                // and the batch no longer waits on whichever drive the key hash
+                // overloaded.
+                let block_size = drives[0].block_dev_iface.block_size() as usize;
                 let queue_depth = 128;
                 let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
                 let pm = self.pipeline_metrics.read();
@@ -2527,68 +2833,36 @@ impl IDispatcher for DispatcherComponent {
                     .is_some_and(|r| r.staging.is_some());
                 let mut staged: Vec<usize> = Vec::new();
 
-                // Per-drive cold_prep: evict_and_insert per entry, build ColdReadJobs.
-                struct DriveJobSet {
-                    drive_idx: usize,
-                    jobs: Vec<pipeline::ColdReadJob>,
-                    job_ci: Vec<usize>,
-                    mem_ptrs: Vec<*mut u8>,
-                }
-                let mut drive_job_sets: Vec<DriveJobSet> = Vec::new();
+                // Cold prep: evict_and_insert per entry, one ColdObject per slot.
+                let mut objects: Vec<pipeline::ColdObject> = Vec::new();
+                let mut obj_ci: Vec<usize> = Vec::new();
                 let mut prep_failures: Vec<(usize, Result<(), DispatcherError>)> = Vec::new();
 
-                for (drive_idx, entry_indices) in per_drive.iter().enumerate() {
-                    if entry_indices.is_empty() {
-                        continue;
-                    }
+                for (ci, entry) in cold_entries.iter().enumerate() {
+                    let ipc_size = entry.total_size;
 
-                    let drive = &drives[drive_idx];
-                    let block_size = drive.block_dev_iface.block_size();
+                    let prep = self.evict_and_insert(&dm, &mt, entry.key, ipc_size, max_attempts);
 
-                    let mut jobs: Vec<pipeline::ColdReadJob> =
-                        Vec::with_capacity(entry_indices.len());
-                    let mut job_ci: Vec<usize> = Vec::with_capacity(entry_indices.len());
-                    let mut mem_ptrs: Vec<*mut u8> = Vec::with_capacity(entry_indices.len());
-
-                    for &ci in entry_indices {
-                        let entry = &cold_entries[ci];
-                        let ipc_size = entry.total_size;
-
-                        let prep =
-                            self.evict_and_insert(&dm, &mt, entry.key, ipc_size, max_attempts);
-
-                        match prep {
-                            Ok(mem_ptr) => {
-                                let gpu_dst = if entry.regions.len() == 1 {
-                                    entry.regions[0].address as *mut std::ffi::c_void
-                                } else {
-                                    std::ptr::null_mut()
-                                };
-                                jobs.push(pipeline::ColdReadJob {
-                                    mem_ptr,
-                                    gpu_dst,
-                                    start_lba: entry.offset / block_size as u64,
-                                    total_bytes: ipc_size as usize,
-                                });
-                                job_ci.push(ci);
-                                mem_ptrs.push(mem_ptr);
-                            }
-                            Err(DispatcherError::AllocationFailed(_)) if staging_available => {
-                                staged.push(ci);
-                            }
-                            Err(e) => {
-                                prep_failures.push((ci, Err(e)));
-                            }
+                    match prep {
+                        Ok(mem_ptr) => {
+                            let gpu_dst = if entry.regions.len() == 1 {
+                                entry.regions[0].address as *mut std::ffi::c_void
+                            } else {
+                                std::ptr::null_mut()
+                            };
+                            objects.push(pipeline::ColdObject {
+                                mem_ptr,
+                                gpu_dst,
+                                total_bytes: ipc_size as usize,
+                            });
+                            obj_ci.push(ci);
                         }
-                    }
-
-                    if !jobs.is_empty() {
-                        drive_job_sets.push(DriveJobSet {
-                            drive_idx,
-                            jobs,
-                            job_ci,
-                            mem_ptrs,
-                        });
+                        Err(DispatcherError::AllocationFailed(_)) if staging_available => {
+                            staged.push(ci);
+                        }
+                        Err(e) => {
+                            prep_failures.push((ci, Err(e)));
+                        }
                     }
                 }
 
@@ -2597,91 +2871,113 @@ impl IDispatcher for DispatcherComponent {
                     results[cold_entries[ci].idx] = Some(res);
                 }
 
-                // Scatter-gather: check out one channel per active drive,
-                // run all drives' NVMe I/O in a single multiplexed loop.
-                if !drive_job_sets.is_empty() {
-                    let pipe_streams: [GpuStream; 2] = match &dev_streams {
-                        Some(s) => [
+                // Per-drive stripe jobs, object-major and in the same object
+                // order on every drive so objects complete progressively.
+                let mut drive_jobs: Vec<Vec<pipeline::StripeReadJob>> =
+                    (0..num_drives).map(|_| Vec::new()).collect();
+                for (oi, obj) in objects.iter().enumerate() {
+                    let start_lba = cold_entries[obj_ci[oi]].offset / block_size as u64;
+                    for (d, jobs) in drive_jobs.iter_mut().enumerate() {
+                        let (start, len) = stripe_range(obj.total_bytes, num_drives, block_size, d);
+                        if len > 0 {
+                            jobs.push(pipeline::StripeReadJob {
+                                obj_idx: oi,
+                                // SAFETY: start + len <= aligned object size, which
+                                // the memory-tier slot covers.
+                                mem_ptr: unsafe { obj.mem_ptr.add(start) },
+                                start_lba,
+                                len,
+                            });
+                        }
+                    }
+                }
+
+                // Scatter-gather: check out one channel per drive with stripe
+                // work, run all drives' NVMe I/O in a single multiplexed loop.
+                if !objects.is_empty() {
+                    let fail_all = |results: &mut Vec<Option<Result<(), DispatcherError>>>,
+                                    e: DispatcherError| {
+                        for &ci in &obj_ci {
+                            results[cold_entries[ci].idx] = Some(Err(e.clone()));
+                        }
+                    };
+                    let pipe_streams: Option<[GpuStream; 2]> = match &dev_streams {
+                        Some(s) => Some([
                             GpuStream(s.pipe[0] as *mut std::ffi::c_void),
                             GpuStream(s.pipe[1] as *mut std::ffi::c_void),
-                        ],
+                        ]),
                         None => {
                             // Fallback: create temporary streams.
                             let a = gpu.create_stream();
-                            let b = a
-                                .as_ref()
+                            a.as_ref()
                                 .ok()
-                                .and_then(|&sa| gpu.create_stream().map(|sb| [sa, sb]).ok());
-                            match b {
-                                Some(st) => st,
-                                None => {
-                                    // Cannot get streams — fail all jobs.
-                                    for djs in &drive_job_sets {
-                                        for &ci in &djs.job_ci {
-                                            results[cold_entries[ci].idx] =
-                                                Some(Err(DispatcherError::IoError(
-                                                    "create_stream failed for scatter-gather"
-                                                        .into(),
-                                                )));
-                                        }
-                                    }
-                                    drive_job_sets.clear();
-                                    [GpuStream(std::ptr::null_mut()); 2]
-                                }
-                            }
+                                .and_then(|&sa| gpu.create_stream().map(|sb| [sa, sb]).ok())
                         }
                     };
 
-                    if !drive_job_sets.is_empty() {
-                        let mut channel_leases: Vec<ChannelLease<'_>> = Vec::new();
-                        let mut drive_works: Vec<pipeline::DriveWork<'_>> = Vec::new();
-                        let mut checkout_ok = true;
-
-                        for djs in &drive_job_sets {
-                            match drives[djs.drive_idx].channel_pool.checkout() {
-                                Ok(lease) => {
-                                    channel_leases.push(lease);
-                                }
-                                Err(e) => {
-                                    for &ci in &djs.job_ci {
-                                        results[cold_entries[ci].idx] = Some(Err(e.clone()));
-                                    }
-                                    checkout_ok = false;
-                                    break;
-                                }
-                            }
+                    match pipe_streams {
+                        None => {
+                            // Cannot get streams — fail all jobs.
+                            fail_all(
+                                &mut results,
+                                DispatcherError::IoError(
+                                    "create_stream failed for scatter-gather".into(),
+                                ),
+                            );
                         }
+                        Some(pipe_streams) => {
+                            let mut channel_leases: Vec<(usize, ChannelLease<'_>)> = Vec::new();
+                            let mut checkout_err: Option<DispatcherError> = None;
 
-                        if checkout_ok {
-                            for (i, djs) in drive_job_sets.iter().enumerate() {
-                                drive_works.push(pipeline::DriveWork {
-                                    channels: channel_leases[i].channels(),
-                                    drive: &*drives[djs.drive_idx].block_dev_iface,
-                                    jobs: &djs.jobs,
-                                });
+                            for (d, jobs) in drive_jobs.iter().enumerate() {
+                                if jobs.is_empty() {
+                                    continue;
+                                }
+                                match drives[d].channel_pool.checkout() {
+                                    Ok(lease) => channel_leases.push((d, lease)),
+                                    Err(e) => {
+                                        checkout_err = Some(e);
+                                        break;
+                                    }
+                                }
                             }
 
-                            let scatter_results = unsafe {
-                                pipeline::scatter_gather_multi_drive_zero_copy(
-                                    &*gpu,
-                                    &pipe_streams,
-                                    &drive_works,
-                                    chunk_size,
-                                    queue_depth,
-                                    pm_arc.as_deref(),
-                                )
-                            };
+                            if let Some(e) = checkout_err {
+                                // Every object has a stripe on the failed drive's
+                                // peers too; none can be read whole.
+                                fail_all(&mut results, e);
+                            } else {
+                                let drive_works: Vec<pipeline::DriveWork<'_>> = channel_leases
+                                    .iter()
+                                    .map(|(d, lease)| pipeline::DriveWork {
+                                        channels: lease.channels(),
+                                        drive: &*drives[*d].block_dev_iface,
+                                        jobs: &drive_jobs[*d],
+                                    })
+                                    .collect();
 
-                            // Process results: promote and scatter.
-                            for (di, djs) in drive_job_sets.iter().enumerate() {
-                                for (job_idx, result) in scatter_results[di].iter().enumerate() {
-                                    let ci = djs.job_ci[job_idx];
+                                let scatter_results = unsafe {
+                                    pipeline::scatter_gather_multi_drive_zero_copy(
+                                        &*gpu,
+                                        &pipe_streams,
+                                        &objects,
+                                        &drive_works,
+                                        chunk_size,
+                                        queue_depth,
+                                        pm_arc.as_deref(),
+                                    )
+                                };
+
+                                // Process results: promote and scatter.
+                                for (oi, result) in scatter_results.iter().enumerate() {
+                                    let ci = obj_ci[oi];
                                     let entry = &cold_entries[ci];
+                                    let mem_ptr = objects[oi].mem_ptr;
                                     let res = match result {
                                         Ok(()) => dm
                                             .promote_block_to_memory_tier(
                                                 entry.key,
-                                                djs.mem_ptrs[job_idx],
+                                                mem_ptr,
                                                 entry.total_size,
                                             )
                                             .map_err(|e| {
@@ -2697,7 +2993,7 @@ impl IDispatcher for DispatcherComponent {
                                                 if entry.regions.len() > 1 {
                                                     self.serve_memory_tier_to_gpu(
                                                         &gpu,
-                                                        djs.mem_ptrs[job_idx],
+                                                        mem_ptr,
                                                         entry.total_size,
                                                         &entry.regions,
                                                         warm_raw,
@@ -2709,14 +3005,13 @@ impl IDispatcher for DispatcherComponent {
                                             }),
                                         Err(e) => Err(e.clone()),
                                     };
-                                    results[cold_entries[ci].idx] = Some(res);
+                                    results[entry.idx] = Some(res);
                                 }
                             }
+                            // channel_leases drop here, returning channels to pools.
                         }
-                        // channel_leases drop here, returning channels to pools.
                     }
                 }
-
                 // Staging post-pass (channel leases released): serve tier-saturated
                 // cold entries one buffer at a time. Each serve checks out a
                 // single staging buffer, does SSD→staging→GPU, and releases it —
@@ -3125,9 +3420,9 @@ impl IDispatcher for DispatcherComponent {
         }
 
         if let Some(offset) = block_offset {
+            // The object's extent lives on the stripe allocator (drive 0).
             let drives = self.data_drives.read();
-            let idx = Self::drive_index(key, drives.len().max(1));
-            if let Some(drive) = drives.get(idx) {
+            if let Some(drive) = drives.first() {
                 let _ = drive.extent_mgr.remove_extent(offset);
             }
         }
@@ -3556,13 +3851,22 @@ impl IDispatcher for DispatcherComponent {
             let dd = self.data_drives.read();
             dd.len().max(1)
         };
+        // With several drives the writer stripes the object across all of
+        // them (one slice per drive, slice d on writer d); device_index only
+        // routes the single-drive job and no longer decides placement.
         let guard = self.bg_writer.lock().unwrap();
         if let Some(ref writer) = *guard {
-            let _ = writer.enqueue(WriteJob {
+            if let Err(job) = writer.enqueue(WriteJob {
                 key,
                 size,
                 device_index: Self::drive_index(key, num_drives),
-            });
+                stripe: None,
+            }) {
+                // No writer will finish this striped object: drop its read ref.
+                if job.stripe.is_some() {
+                    let _ = dm.release_read(key);
+                }
+            }
         }
 
         Ok(())
@@ -3705,90 +4009,115 @@ impl IDispatcher for DispatcherComponent {
             ring_guard.as_ref().map_or(131072, |r| r.chunk_size)
         };
 
-        // Group cold entries by target drive.
-        let mut per_drive: Vec<Vec<usize>> = vec![Vec::new(); num_drives];
-        for (i, entry) in cold_entries.iter().enumerate() {
-            let drive_idx = Self::drive_index(entry.key, num_drives);
-            per_drive[drive_idx].push(i);
-        }
-
         let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
 
-        std::thread::scope(|s| {
-            for (drive_idx, entry_indices) in per_drive.iter().enumerate() {
-                if entry_indices.is_empty() {
-                    continue;
-                }
+        // Insert every slot first, then read each drive's stripes of every
+        // object on one scoped thread per drive. Objects are striped across all
+        // drives, so an entry is promoted only once all its stripes landed.
+        struct SlotPtr(*mut u8);
+        // SAFETY: the slot was just inserted for this promotion and is not
+        // freed until the reads below have joined.
+        unsafe impl Sync for SlotPtr {}
 
-                let drive = &drives[drive_idx];
+        let mut prepared: Vec<(usize, SlotPtr)> = Vec::new();
+        for (ci, entry) in cold_entries.iter().enumerate() {
+            if self
+                .evict_for_space(&dm, &mt, entry.size, entry.key, max_attempts)
+                .is_err()
+            {
+                continue;
+            }
+            if let Ok(ptr) = mt.insert(entry.key, entry.size) {
+                prepared.push((ci, SlotPtr(ptr)));
+            }
+        }
+        if prepared.is_empty() {
+            return;
+        }
+
+        let failed: Vec<AtomicBool> = prepared.iter().map(|_| AtomicBool::new(false)).collect();
+        let block_size = drives[0].block_dev_iface.block_size() as usize;
+
+        std::thread::scope(|s| {
+            for (drive_idx, drive) in drives.iter().enumerate() {
                 let channel_pool = &drive.channel_pool;
                 let block_dev = Arc::clone(&drive.block_dev_iface);
-                let dm = &dm;
-                let mt = &mt;
                 let cold = &cold_entries;
+                let prepared = &prepared;
+                let failed = &failed;
                 let logger = &logger;
 
                 s.spawn(move || {
-                    // Exclusive channel for this prefetch thread. This runs
-                    // concurrently with batch_lookup on the same drive, so it
-                    // must not share one SPSC channel (see ChannelPool).
-                    let chan_lease = match channel_pool.checkout() {
-                        Ok(l) => l,
-                        Err(_) => return,
-                    };
-                    let channels = chan_lease.channels();
-                    for &ci in entry_indices {
-                        let entry = &cold[ci];
-                        let block_size = block_dev.block_size() as u64;
-                        let start_lba = entry.offset / block_size;
-
-                        if self
-                            .evict_for_space(dm, mt, entry.size, entry.key, max_attempts)
-                            .is_err()
-                        {
+                    let mut chan_lease = None;
+                    for (pi, (ci, slot)) in prepared.iter().enumerate() {
+                        let entry = &cold[*ci];
+                        let (start, len) =
+                            stripe_range(entry.size as usize, num_drives, block_size, drive_idx);
+                        if len == 0 || failed[pi].load(Ordering::Acquire) {
                             continue;
                         }
-
-                        let mem_ptr = match mt.insert(entry.key, entry.size) {
-                            Ok(ptr) => ptr,
-                            Err(_) => continue,
+                        // Exclusive channel for this prefetch thread. This runs
+                        // concurrently with batch_lookup on the same drive, so
+                        // it must not share one SPSC channel (see ChannelPool).
+                        if chan_lease.is_none() {
+                            match channel_pool.checkout() {
+                                Ok(l) => chan_lease = Some(l),
+                                Err(_) => {
+                                    failed[pi].store(true, Ordering::Release);
+                                    continue;
+                                }
+                            }
+                        }
+                        let Some(lease) = chan_lease.as_ref() else {
+                            continue;
                         };
+                        let start_lba = entry.offset / block_size as u64;
 
-                        // SAFETY: mem_ptr is a valid SPDK-registered memory-tier slot.
+                        // SAFETY: the slot is a valid SPDK-registered memory-tier
+                        // slot covering the aligned object; [start, start + len)
+                        // lies within it.
                         let result = unsafe {
                             pipeline::pipelined_ssd_to_dram_only(
                                 &*block_dev,
-                                channels,
-                                mem_ptr,
+                                lease.channels(),
+                                slot.0.add(start),
                                 start_lba,
-                                entry.size as usize,
+                                len,
                                 chunk_size,
                                 16,
                             )
                         };
 
                         if let Err(e) = result {
-                            let _ = mt.remove(entry.key);
+                            failed[pi].store(true, Ordering::Release);
                             if let Some(ref log) = logger {
                                 log.debug(&format!(
-                                    "promote_to_memory_tier: SSD read failed for key {}: {e}",
+                                    "promote_to_memory_tier: SSD read failed for key {} \
+                                     (drive {drive_idx}): {e}",
                                     entry.key
                                 ));
                             }
-                            continue;
-                        }
-
-                        // In-place, pin-safe promote (no remove/recreate).
-                        if dm
-                            .promote_block_to_memory_tier(entry.key, mem_ptr, entry.size)
-                            .is_ok()
-                        {
-                            self.tier_counters.record_promotion_to_memory();
                         }
                     }
                 });
             }
         });
+
+        for (pi, (ci, slot)) in prepared.iter().enumerate() {
+            let entry = &cold_entries[*ci];
+            let mem_ptr = slot.0;
+            if failed[pi].load(Ordering::Acquire) {
+                let _ = mt.remove(entry.key);
+                continue;
+            }
+            // In-place, pin-safe promote (no remove/recreate).
+            if dm
+                .promote_block_to_memory_tier(entry.key, mem_ptr, entry.size)
+                .is_ok()
+            {
+                self.tier_counters.record_promotion_to_memory();
+            }
+        }
     }
 
     fn clear_memory_tier(&self) -> Result<usize, DispatcherError> {
@@ -3850,15 +4179,24 @@ impl IDispatcher for DispatcherComponent {
             let dd = self.data_drives.read();
             dd.len().max(1)
         };
-        // Same drive mapping the store path uses, so a key's data and its write job
-        // always land on the same device.
+        // Same job the store path enqueues: with several drives the writer
+        // stripes the object across all of them, so device_index only routes
+        // the single-drive job and no longer decides placement.
         let guard = self.bg_writer.lock().unwrap();
         if let Some(ref writer) = *guard {
-            let _ = writer.enqueue(WriteJob {
+            if let Err(job) = writer.enqueue(WriteJob {
                 key,
                 size,
                 device_index: Self::drive_index(key, num_drives),
-            });
+                stripe: None,
+            }) {
+                // No writer will finish this striped object: drop its read ref.
+                if job.stripe.is_some() {
+                    if let Ok(dm) = self.dispatch_map.get() {
+                        let _ = dm.release_read(key);
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -7110,5 +7448,449 @@ mod tests {
         let _ = dm.release_read(2);
 
         d.shutdown().unwrap();
+    }
+
+    // -----------------------------------------------------------------------
+    // Striped placement guard tests (file-backed drives, no NVMe / CUDA)
+    // -----------------------------------------------------------------------
+
+    const STRIPE_BS: usize = 4096;
+
+    /// Check that the stripe ranges of `size` over `n` drives tile the aligned
+    /// object contiguously, block-aligned, each within one stripe unit.
+    fn assert_stripe_cover(size: usize, n: usize) {
+        let aligned = size.next_multiple_of(STRIPE_BS);
+        let unit = stripe_unit(size, n, STRIPE_BS);
+        assert_eq!(unit % STRIPE_BS, 0);
+        let mut next = 0;
+        for d in 0..n {
+            let (start, len) = stripe_range(size, n, STRIPE_BS, d);
+            assert_eq!(start, next, "size={size} n={n} d={d}");
+            assert_eq!(len % STRIPE_BS, 0);
+            assert!(len <= unit);
+            assert!(start + len <= aligned);
+            next = start + len;
+        }
+        assert_eq!(next, aligned, "size={size} n={n}");
+    }
+
+    #[test]
+    fn stripe_range_single_drive_is_identity() {
+        for size in [1, STRIPE_BS, STRIPE_BS + 1, 4 << 20] {
+            let aligned = size.next_multiple_of(STRIPE_BS);
+            assert_eq!(stripe_unit(size, 1, STRIPE_BS), aligned);
+            assert_eq!(stripe_range(size, 1, STRIPE_BS, 0), (0, aligned));
+        }
+    }
+
+    #[test]
+    fn stripe_range_four_drives_4mib() {
+        let size = 4 << 20;
+        assert_eq!(stripe_unit(size, 4, STRIPE_BS), 1 << 20);
+        for d in 0..4 {
+            assert_eq!(stripe_range(size, 4, STRIPE_BS, d), (d << 20, 1 << 20));
+        }
+        assert_stripe_cover(size, 4);
+    }
+
+    #[test]
+    fn stripe_range_three_drives() {
+        let size = 4 << 20;
+        // ceil(4 MiB / 3) rounded up to 4 KiB = 342 blocks.
+        let unit = 342 * STRIPE_BS;
+        assert_eq!(stripe_unit(size, 3, STRIPE_BS), unit);
+        assert_eq!(stripe_range(size, 3, STRIPE_BS, 0), (0, unit));
+        assert_eq!(stripe_range(size, 3, STRIPE_BS, 1), (unit, unit));
+        assert_eq!(
+            stripe_range(size, 3, STRIPE_BS, 2),
+            (2 * unit, size - 2 * unit)
+        );
+        assert_stripe_cover(size, 3);
+        assert_stripe_cover(size + 12345, 3);
+        assert_stripe_cover(size + 12345, 4);
+    }
+
+    #[test]
+    fn stripe_range_object_smaller_than_n_blocks() {
+        // Two blocks over four drives: drives 2 and 3 hold nothing.
+        let size = 2 * STRIPE_BS;
+        assert_eq!(stripe_unit(size, 4, STRIPE_BS), STRIPE_BS);
+        assert_eq!(stripe_range(size, 4, STRIPE_BS, 0), (0, STRIPE_BS));
+        assert_eq!(stripe_range(size, 4, STRIPE_BS, 1), (STRIPE_BS, STRIPE_BS));
+        assert_eq!(stripe_range(size, 4, STRIPE_BS, 2), (size, 0));
+        assert_eq!(stripe_range(size, 4, STRIPE_BS, 3), (size, 0));
+        // One byte: only drive 0 holds a (padded) block.
+        assert_eq!(stripe_range(1, 4, STRIPE_BS, 0), (0, STRIPE_BS));
+        for d in 1..4 {
+            assert_eq!(stripe_range(1, 4, STRIPE_BS, d).1, 0);
+        }
+        assert_stripe_cover(size, 4);
+        assert_stripe_cover(1, 4);
+        assert_stripe_cover(3 * STRIPE_BS, 3);
+    }
+
+    /// Page-aligned host buffer standing in for a memory-tier slot or GPU memory.
+    struct HostBuf {
+        ptr: *mut u8,
+        layout: std::alloc::Layout,
+    }
+
+    impl HostBuf {
+        fn zeroed(size: usize) -> Self {
+            let layout =
+                std::alloc::Layout::from_size_align(size.next_multiple_of(STRIPE_BS), STRIPE_BS)
+                    .unwrap();
+            // SAFETY: layout has a non-zero size.
+            let ptr = unsafe { std::alloc::alloc_zeroed(layout) };
+            assert!(!ptr.is_null());
+            Self { ptr, layout }
+        }
+
+        fn pattern(size: usize, key: u64) -> Self {
+            let b = Self::zeroed(size);
+            for i in 0..size {
+                // SAFETY: i < size <= layout size.
+                unsafe { *b.ptr.add(i) = stripe_pattern_byte(key, i) };
+            }
+            b
+        }
+
+        fn bytes(&self, len: usize) -> &[u8] {
+            // SAFETY: len <= layout size; the buffer is initialized (zeroed).
+            unsafe { std::slice::from_raw_parts(self.ptr, len) }
+        }
+    }
+
+    impl Drop for HostBuf {
+        fn drop(&mut self) {
+            // SAFETY: ptr was allocated with this layout.
+            unsafe { std::alloc::dealloc(self.ptr, self.layout) };
+        }
+    }
+
+    fn stripe_pattern_byte(key: u64, i: usize) -> u8 {
+        (key.wrapping_mul(131) as usize ^ i.wrapping_mul(7) ^ (i >> 12)) as u8
+    }
+
+    fn assert_pattern(buf: &HostBuf, size: usize, key: u64) {
+        let got = buf.bytes(size);
+        for (i, &b) in got.iter().enumerate() {
+            assert_eq!(b, stripe_pattern_byte(key, i), "key {key} byte {i}");
+        }
+    }
+
+    /// N file-backed data drives (backing files removed on drop).
+    struct StripeDrives {
+        drives: Vec<DataDrive>,
+        paths: Vec<std::path::PathBuf>,
+    }
+
+    impl Drop for StripeDrives {
+        fn drop(&mut self) {
+            for d in &self.drives {
+                if let Some(admin) = &d.block_dev_admin {
+                    let _ = admin.shutdown();
+                }
+            }
+            for p in &self.paths {
+                let _ = std::fs::remove_file(p);
+            }
+        }
+    }
+
+    /// `blocks[d]` is the size of drive d in 4 KiB blocks.
+    fn stripe_drives(blocks: &[u64]) -> StripeDrives {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let mut drives = Vec::new();
+        let mut paths = Vec::new();
+        for (d, &num_blocks) in blocks.iter().enumerate() {
+            let path = std::env::temp_dir().join(format!(
+                "dispatcher-stripe-{}-{}-{d}.img",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            let comp = block_device_filesys::BlockDeviceFilesysComponent::create(
+                path.to_str().unwrap(),
+                STRIPE_BS as u32,
+                num_blocks,
+            );
+            comp.initialize().expect("file-backed drive init");
+            paths.push(path);
+            let ibd: Arc<dyn IBlockDevice + Send + Sync> = comp.clone();
+            let admin: Arc<dyn IBlockDeviceAdmin + Send + Sync> = comp.clone();
+            let em = extent_manager::ExtentManager::new_inner();
+            drives.push(DataDrive {
+                _block_dev: comp as Arc<dyn component_core::IUnknown + Send + Sync>,
+                block_dev_admin: Some(admin),
+                block_dev_iface: Arc::clone(&ibd),
+                _extent_mgr_component: em.clone()
+                    as Arc<dyn component_core::IUnknown + Send + Sync>,
+                extent_mgr: em as Arc<dyn IExtentManager + Send + Sync>,
+                channel_pool: ChannelPool::new(ibd),
+            });
+        }
+        StripeDrives { drives, paths }
+    }
+
+    /// Write `src` (an object of `size` bytes) at stripe offset `offset` the
+    /// way the per-drive write-through slices do: drive d writes stripe d.
+    fn write_striped(drives: &[DataDrive], src: &HostBuf, offset: u64, size: usize) {
+        let n = drives.len();
+        for (d, drive) in drives.iter().enumerate() {
+            let (start, len) = stripe_range(size, n, STRIPE_BS, d);
+            if len == 0 {
+                continue;
+            }
+            // SAFETY: [start, start + len) lies within the aligned source.
+            let buf = unsafe {
+                DmaBuffer::from_raw(
+                    src.ptr.add(start) as *mut std::ffi::c_void,
+                    len,
+                    noop_free,
+                    -1,
+                )
+            }
+            .unwrap();
+            let valid = len.min(size.saturating_sub(start));
+            DispatcherComponent::write_buffer_to_ssd(
+                &*drive.block_dev_iface,
+                &buf,
+                offset / STRIPE_BS as u64,
+                valid,
+                true,
+            )
+            .expect("stripe write");
+            std::mem::forget(buf);
+        }
+    }
+
+    const STRIPE_SIZES: [usize; 3] = [4 << 20, (4 << 20) + 12345, 3 * STRIPE_BS];
+
+    /// T1: every striped read path returns the bytes the striped write stored,
+    /// at N=4 and N=3, including an object not a multiple of N * 4 KiB.
+    fn stripe_round_trip(n: usize) {
+        let sd = stripe_drives(&vec![4096; n]);
+        let drives = &sd.drives;
+        let gpu = MockGpuServices::default();
+        let streams = [GpuStream(std::ptr::null_mut()); 2];
+        let chunk = 128 * 1024;
+
+        // Stripe offsets as the single allocator would hand them out.
+        let offsets: Vec<u64> = (0..STRIPE_SIZES.len() as u64)
+            .map(|i| i * (2 << 20))
+            .collect();
+        let srcs: Vec<HostBuf> = STRIPE_SIZES
+            .iter()
+            .enumerate()
+            .map(|(k, &size)| HostBuf::pattern(size, k as u64 + 1))
+            .collect();
+        for (k, &size) in STRIPE_SIZES.iter().enumerate() {
+            write_striped(drives, &srcs[k], offsets[k], size);
+        }
+
+        // (b)/(c) one object through read_striped_object, into a slot (or a
+        // staging buffer) and on to the GPU destination.
+        for (k, &size) in STRIPE_SIZES.iter().enumerate() {
+            let slot = HostBuf::zeroed(size);
+            let dst = HostBuf::zeroed(size);
+            // SAFETY: slot covers the aligned object, dst covers size bytes.
+            unsafe {
+                DispatcherComponent::read_striped_object(
+                    drives,
+                    &gpu,
+                    &streams,
+                    slot.ptr,
+                    dst.ptr as *mut std::ffi::c_void,
+                    offsets[k],
+                    size,
+                    chunk,
+                    16,
+                )
+            }
+            .expect("striped single-object read");
+            assert_pattern(&slot, size, k as u64 + 1);
+            assert_pattern(&dst, size, k as u64 + 1);
+        }
+
+        // (a) the cold batch scatter-gather over all objects at once.
+        let slots: Vec<HostBuf> = STRIPE_SIZES.iter().map(|&s| HostBuf::zeroed(s)).collect();
+        let dsts: Vec<HostBuf> = STRIPE_SIZES.iter().map(|&s| HostBuf::zeroed(s)).collect();
+        let objects: Vec<pipeline::ColdObject> = STRIPE_SIZES
+            .iter()
+            .enumerate()
+            .map(|(k, &size)| pipeline::ColdObject {
+                mem_ptr: slots[k].ptr,
+                gpu_dst: dsts[k].ptr as *mut std::ffi::c_void,
+                total_bytes: size,
+            })
+            .collect();
+        let jobs: Vec<Vec<pipeline::StripeReadJob>> = (0..n)
+            .map(|d| {
+                STRIPE_SIZES
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(k, &size)| {
+                        let (start, len) = stripe_range(size, n, STRIPE_BS, d);
+                        (len > 0).then(|| pipeline::StripeReadJob {
+                            obj_idx: k,
+                            // SAFETY: start + len <= aligned slot size.
+                            mem_ptr: unsafe { slots[k].ptr.add(start) },
+                            start_lba: offsets[k] / STRIPE_BS as u64,
+                            len,
+                        })
+                    })
+                    .collect()
+            })
+            .collect();
+        let leases: Vec<ChannelLease<'_>> = drives
+            .iter()
+            .map(|d| d.channel_pool.checkout().unwrap())
+            .collect();
+        let works: Vec<pipeline::DriveWork<'_>> = (0..n)
+            .map(|d| pipeline::DriveWork {
+                channels: leases[d].channels(),
+                drive: &*drives[d].block_dev_iface,
+                jobs: &jobs[d],
+            })
+            .collect();
+        // SAFETY: slots and dsts cover their objects.
+        let results = unsafe {
+            pipeline::scatter_gather_multi_drive_zero_copy(
+                &gpu, &streams, &objects, &works, chunk, 128, None,
+            )
+        };
+        drop(works);
+        drop(leases);
+        assert_eq!(results.len(), STRIPE_SIZES.len());
+        for (k, &size) in STRIPE_SIZES.iter().enumerate() {
+            assert!(results[k].is_ok(), "object {k}: {:?}", results[k]);
+            assert_pattern(&slots[k], size, k as u64 + 1);
+            assert_pattern(&dsts[k], size, k as u64 + 1);
+        }
+
+        // (d) promote_to_memory_tier's per-drive DRAM-only stripe reads.
+        for (k, &size) in STRIPE_SIZES.iter().enumerate() {
+            let slot = HostBuf::zeroed(size);
+            for (d, drive) in drives.iter().enumerate() {
+                let (start, len) = stripe_range(size, n, STRIPE_BS, d);
+                if len == 0 {
+                    continue;
+                }
+                let lease = drive.channel_pool.checkout().unwrap();
+                // SAFETY: [start, start + len) lies within the aligned slot.
+                unsafe {
+                    pipeline::pipelined_ssd_to_dram_only(
+                        &*drive.block_dev_iface,
+                        lease.channels(),
+                        slot.ptr.add(start),
+                        offsets[k] / STRIPE_BS as u64,
+                        len,
+                        chunk,
+                        16,
+                    )
+                }
+                .expect("stripe DRAM read");
+            }
+            assert_pattern(&slot, size, k as u64 + 1);
+        }
+
+        // Only the stripe allocator would hold extents; the others stay empty.
+        for d in drives.iter().skip(1) {
+            assert!(d.extent_mgr.get_extents().is_empty());
+        }
+    }
+
+    #[test]
+    fn stripe_round_trip_four_drives() {
+        stripe_round_trip(4);
+    }
+
+    #[test]
+    fn stripe_round_trip_three_drives() {
+        stripe_round_trip(3);
+    }
+
+    /// T3: one drive fails one object's stripe; that object fails and gets no
+    /// H2D, the other objects are read and delivered intact.
+    #[test]
+    fn stripe_scatter_failed_stripe_fails_only_its_object() {
+        let n = 4;
+        // Drive 2 is too small for the second object's offset.
+        let sd = stripe_drives(&[2048, 2048, 512, 2048]);
+        let drives = &sd.drives;
+        let dm = Arc::new(MockDispatchMap::new());
+        let probe = Arc::new(PinProbe::new(Arc::clone(&dm)));
+        let gpu = MockGpuServices::with_probe(Arc::clone(&probe));
+        let streams = [GpuStream(std::ptr::null_mut()); 2];
+        let size = 4 << 20;
+        let offsets = [0u64, 4 << 20, 1 << 20];
+        let srcs: Vec<HostBuf> = (0..3).map(|k| HostBuf::pattern(size, k + 10)).collect();
+        for k in [0, 2] {
+            write_striped(drives, &srcs[k], offsets[k], size);
+        }
+
+        let slots: Vec<HostBuf> = (0..3).map(|_| HostBuf::zeroed(size)).collect();
+        let dsts: Vec<HostBuf> = (0..3).map(|_| HostBuf::zeroed(size)).collect();
+        let objects: Vec<pipeline::ColdObject> = (0..3)
+            .map(|k| pipeline::ColdObject {
+                mem_ptr: slots[k].ptr,
+                gpu_dst: dsts[k].ptr as *mut std::ffi::c_void,
+                total_bytes: size,
+            })
+            .collect();
+        let jobs: Vec<Vec<pipeline::StripeReadJob>> = (0..n)
+            .map(|d| {
+                (0..3)
+                    .map(|k| {
+                        let (start, len) = stripe_range(size, n, STRIPE_BS, d);
+                        pipeline::StripeReadJob {
+                            obj_idx: k,
+                            // SAFETY: start + len <= aligned slot size.
+                            mem_ptr: unsafe { slots[k].ptr.add(start) },
+                            start_lba: offsets[k] / STRIPE_BS as u64,
+                            len,
+                        }
+                    })
+                    .collect()
+            })
+            .collect();
+        let leases: Vec<ChannelLease<'_>> = drives
+            .iter()
+            .map(|d| d.channel_pool.checkout().unwrap())
+            .collect();
+        let works: Vec<pipeline::DriveWork<'_>> = (0..n)
+            .map(|d| pipeline::DriveWork {
+                channels: leases[d].channels(),
+                drive: &*drives[d].block_dev_iface,
+                jobs: &jobs[d],
+            })
+            .collect();
+        // SAFETY: slots and dsts cover their objects.
+        let results = unsafe {
+            pipeline::scatter_gather_multi_drive_zero_copy(
+                &gpu,
+                &streams,
+                &objects,
+                &works,
+                128 * 1024,
+                128,
+                None,
+            )
+        };
+        drop(works);
+        drop(leases);
+
+        assert!(results[0].is_ok(), "{:?}", results[0]);
+        assert!(
+            results[1].is_err(),
+            "object with the failed stripe must fail"
+        );
+        assert!(results[2].is_ok(), "{:?}", results[2]);
+        // One H2D per successful object; none for the failed one.
+        assert_eq!(probe.count(GpuEvent::SubmitH2d), 2);
+        assert!(dsts[1].bytes(size).iter().all(|&b| b == 0));
+        for k in [0, 2] {
+            assert_pattern(&dsts[k], size, k as u64 + 10);
+        }
     }
 }

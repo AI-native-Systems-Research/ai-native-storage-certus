@@ -35,6 +35,7 @@ integrity-check = ["dep:crc32fast", "interfaces/integrity-check"]
 rw-telemetry = ["block-device-spdk-nvme?/telemetry"]
 
 [dev-dependencies]
+block-device-filesys.workspace = true
 criterion = { version = "0.5", features = ["html_reports"] }
 eviction-policy-lru.workspace = true
 logger.workspace = true
