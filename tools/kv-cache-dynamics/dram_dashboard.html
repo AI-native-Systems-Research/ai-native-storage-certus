@@ -194,6 +194,8 @@
             <label for="shared">Shared fraction <span id="sharedVal" class="hint"></span></label>
             <input id="shared" type="range" min="0" max="1" step="0.05" value="0" style="width:120px">
           </div>
+          <div class="field"><label for="groups">Share groups (distinct shared chains)</label>
+            <input id="groups" type="number" min="1" step="1" value="1"></div>
         </fieldset>
 
         <fieldset>
@@ -231,6 +233,7 @@
         <fieldset>
           <button class="run" id="runBtn" type="submit">Run sweep</button>
           <button class="ghost" id="resetBtn" type="button">Reset to cc131k defaults</button>
+          <button class="ghost" id="saveBtn" type="button">Save config (YAML)</button>
           <div class="status" id="status"></div>
           <div class="bar" id="barWrap" hidden><i></i></div>
         </fieldset>
@@ -377,7 +380,7 @@ function render(cfg,data){
 
 /* ---- run (fetch from the local simulator-backed server) ---- */
 const IDS=["dist","dram","concurrent","sessions","turnMode","turns","turnFile","hbm","ssd","mml","prefix",
-  "prompt","gen","shared","admission","block","seed","layers","kvheads","headdim","bpe"];
+  "prompt","gen","shared","groups","admission","block","seed","layers","kvheads","headdim","bpe"];
 function formCfg(){const c={};for(const id of IDS)c[id]=document.getElementById(id).value;
   c.decode=document.getElementById("decode").checked?"1":"0";return c;}
 let running=false;
@@ -413,7 +416,12 @@ document.addEventListener("mousemove",e=>{
 /* ---- wiring ---- */
 const DEFAULTS={dist:"burstgpt",dram:"8,16,32,64,128,256",concurrent:"8",sessions:"100",
   turnMode:"fixed",turns:"100",turnFile:"cc-trace-weka-062126-turns.yaml",hbm:"10",ssd:"20000",mml:"131072",prefix:"20000",prompt:"364",gen:"1398",
-  shared:"0",admission:"interval",block:"64",seed:"1",layers:"48",kvheads:"8",headdim:"128",bpe:"2"};
+  shared:"0",groups:"1",admission:"interval",block:"64",seed:"1",layers:"48",kvheads:"8",headdim:"128",bpe:"2"};
+/* --config preset injected by the server as window.__PRESET__ overrides the built-in defaults */
+const PRESET=(window.__PRESET__||{});
+const START=Object.assign({},DEFAULTS,PRESET);
+function applyCfg(c){for(const [k,v] of Object.entries(c)){const el=document.getElementById(k);if(!el)continue;
+  if(el.type==="checkbox")el.checked=(v==="1"||v===true||v==="true");else el.value=v;}}
 function setShared(){const v=+document.getElementById("shared").value;
   document.getElementById("sharedVal").textContent=(v*100).toFixed(0)+"%";}
 function setTurnMode(){ const mode=document.getElementById("turnMode").value;
@@ -424,8 +432,27 @@ document.getElementById("turnMode").addEventListener("change",setTurnMode);
 document.getElementById("shared").addEventListener("input",setShared);
 document.getElementById("controls").addEventListener("submit",e=>{e.preventDefault();run();});
 document.getElementById("resetBtn").addEventListener("click",()=>{
-  for(const [k,v] of Object.entries(DEFAULTS))document.getElementById(k).value=v;
+  applyCfg(START);
   document.getElementById("decode").checked=false;setShared();setTurnMode();run();});
+/* Save the current form config to a YAML file that --config can reload later */
+function cfgToYaml(c){
+  const order=["dist","turnMode","turns","turnFile","mml","prefix","groups","shared",
+    "prompt","gen","hbm","dram","ssd","concurrent","sessions","admission","block","seed",
+    "layers","kvheads","headdim","bpe","decode"];
+  const lines=["# dram_dashboard config — reload with: ./dram_dashboard.py --config THIS.yaml"];
+  for(const k of order){ if(!(k in c))continue; let v=String(c[k]); if(v==="")continue;
+    if(/[,:#\s]/.test(v)) v='"'+v+'"'; lines.push(k+": "+v); }
+  return lines.join("\n")+"\n";
+}
+document.getElementById("saveBtn").addEventListener("click",()=>{
+  let name=(window.prompt("Save config as:","dram-dashboard-config.yaml")||"").trim();
+  if(!name)return;
+  if(!/\.ya?ml$/i.test(name))name+=".yaml";
+  const blob=new Blob([cfgToYaml(formCfg())],{type:"application/x-yaml"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=name;
+  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
+});
+applyCfg(START);
 setShared();
 setTurnMode();
 run();
