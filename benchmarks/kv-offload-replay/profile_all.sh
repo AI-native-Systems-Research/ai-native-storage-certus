@@ -667,12 +667,34 @@ parse_log() {
     echo "${wall}|${gens}|${rounds}|${native}|${tps}"
 }
 
+# Surface the vLLM latency-histogram capture into ONE common place per run,
+# regardless of workload or path. Every backend deposits the SAME [prom] hist /
+# [prom] histjson lines into its variant log — the in-process drivers
+# (run_multiturn_*/run_fs_bench, via common.prom_histograms) and the serve-mode
+# scraper (synthetic-agentic/scrape_prom.py) alike — so this just lifts them out
+# of the per-variant log into a per-variant JSON plus a combined, human-readable
+# table in the logdir. Best-effort: a variant with no histograms (CAPTURE_METRICS=0,
+# a skip, or an early failure) contributes nothing.
+fold_histograms() {  # variant logfile
+    local variant="$1" f="$2"
+    [[ -f "$f" ]] || return 0
+    local jline
+    jline="$(grep -F '[prom] histjson ' "$f" 2>/dev/null | tail -1)"
+    [[ -n "$jline" ]] && printf '%s\n' "${jline#*histjson }" > "${LOGDIR}/${variant}.histograms.json"
+    local sline
+    while IFS= read -r sline; do
+        [[ -n "$sline" ]] && printf '%-16s %s\n' "$variant" "${sline#*\[prom\] hist }" \
+            >> "${LOGDIR}/latency_histograms.txt"
+    done < <(grep -F '[prom] hist ' "$f" 2>/dev/null)
+}
+
 finish_variant() {  # variant rc logfile
     local variant="$1" rc="$2" f="$3"
     gpu_mark end "$variant"
     local parsed wall gens rounds native tps
     parsed="$(parse_log "$f")"
     IFS='|' read -r wall gens rounds native tps <<<"$parsed"
+    fold_histograms "$variant" "$f"
     if [[ "$rc" -eq 0 && -n "$tps" ]]; then
         record "$variant" "OK" "$wall" "$rounds" "$gens" "$tps" "$native" "" "$f"
         log "$variant OK: wall=${wall}s rounds=${rounds} gens=${gens} tokens/s=${tps}"
@@ -1250,6 +1272,11 @@ run_server_bench() {  # variant
 
     env "${env_lines[@]}" bash "$SA_SERVE" stop >/dev/null 2>&1 || true
     gpu_mark end "$variant"
+
+    # Same common histogram surfacing as the in-process path (finish_variant):
+    # the scrape_prom.py sidecar's [prom] hist/histjson lines were folded into $f
+    # above, so lift them into the logdir's per-variant JSON + combined table.
+    fold_histograms "$variant" "$f"
 
     # inference-perf writes its own report to the mounted logdir (the primary,
     # richest comparable: throughput, TTFT, per-request latency). Best-effort scrape
