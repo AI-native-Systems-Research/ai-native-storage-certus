@@ -1,11 +1,13 @@
 ---
 spec_sync_component: interfaces
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-06T00:17:04Z
-spec_sync_git_commit: bd1598f5
-spec_sync_inputs_sha256: cee2412a4eb5de01d900823eff412190f4cfcbe9b4ec331fcd270342c625176b
+spec_sync_synced_at: 2026-10-09T21:53:37Z
+spec_sync_git_commit: 83bcd4ff
+spec_sync_inputs_sha256: 3ee6dd139459882a27132a6d93279cbb1079f416aeba02a68efe11ce23a691ed
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-10-09 (branch `fix/evict-blocked-by-pin`).** Doc-comment change only: `IDispatchMap::try_evict_to_block` now documents `ActiveReferences` for a held reference and `InvalidState` for the remaining non-evictable cases, matching the dispatch-map implementation and FR-026. No signature or type change. `specs/001-interfaces` describes the method without enumerating its errors (line 166), so it stays aligned; verified by reading it.
+
 > **Sync 2026-10-05 (branch `fix/store-declines-root-cause`).** Delta analysis on a certified baseline: `origin/unstable` (`08a5ae88`) changed no component `src/`or `specs/` after its `fa4adab0` re-stamp, so the only new inputs are this branch's changes. Every FR naming a counter, a `TierEventStats`/`RemoteServeStats` field, or an `IDispatcher` method was located by grep over `specs/**` and re-checked against the changed code.
 >
 > - **FR-023 `RemoteServeStats` field list — DRIFTED (major).** The spec declared a **6-field** type and named `peer_pins_taken` and `peer_pin_hold_us_total`; the shipped type has **4 fields** and neither of those exists. Both were removed deliberately in `4e185dd2` after measurement — `peer_pins_taken` read 1.000x the already-published `peer_served_keys` on all three runs, and `peer_pin_hold_us_total` accumulated per batch against per-key counts so it could not form the mean it existed for. The spec text had been added by earlier commits *on this same branch* and was not revised in place when the counters went. **Resolution**: code authoritative. Field list corrected to 4, both removed fields recorded as SUPERSEDED with the measured reason, and the two hold-time bullets reworded — with `_total` gone there is no mean, so `peer_pin_hold_us_max` is now stated as the only hold-time field and deliberately a high-water mark.

@@ -1,11 +1,13 @@
 ---
 spec_sync_component: dispatcher-p2p
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-06T00:17:04Z
-spec_sync_git_commit: bd1598f5
-spec_sync_inputs_sha256: 637f54a21fabcd202cb6902d4f744ff1ebff3339517725f9eee4c34578fbdee0
+spec_sync_synced_at: 2026-10-09T21:53:37Z
+spec_sync_git_commit: 83bcd4ff
+spec_sync_inputs_sha256: 2245d1bac2b60e3ca2d02b1ff736deb9a68dc32debe764362b5705b274efbe5c
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-09 (transitive: `components/interfaces` changed, branch `fix/evict-blocked-by-pin`).** The only change to this component's hashed inputs is a doc-comment correction on `IDispatchMap::try_evict_to_block` in `components/interfaces/src/idispatch_map.rs` (no signature, type, or behaviour change). This component's own `src/**` and `specs/**` are unchanged, and its previous stamp was re-verified to match `origin/unstable` before re-stamping. **No re-analysis was performed for this component**; this stamp asserts only what was checked.
+
 > **Sync 2026-10-05 (branch `fix/store-declines-root-cause`).** Delta analysis on a certified baseline (see the interfaces report).
 >
 > - **Spec not updated while code moved — DRIFTED (moderate), two requirements' worth.** This component's `src/lib.rs` gained 37 lines and its own spec was untouched, which `dispatcher` spec 002 **FR-030** names as a MUST for exactly this component and spec. Two distinct gaps: a full `IDispatcher::schedule_write_through` implementation (a real `WriteJob` enqueue, not a no-op), and a declaration that the FR-033/FR-034 eviction counters are unreported here. FR-035 requires that second one be declared "in both the component's code and this spec" — the code comment existed, and the dispatcher's spec carried the note, but **this** component's spec said nothing. **Resolution**: new **FR-028** (the real enqueue, same `drive_index` placement hash as the FR-018 store path, non-blocking, best-effort, with why a no-op would be wrong under the `full-p2p` profile specifically) and new **FR-029** (the unmeasured-counter declaration, and why it is a declared gap rather than a defect — contrasted against FR-025a's self-contradictory zeroed route counters).

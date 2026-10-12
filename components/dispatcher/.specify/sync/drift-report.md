@@ -1,11 +1,13 @@
 ---
 spec_sync_component: dispatcher
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-08T23:52:37Z
-spec_sync_git_commit: f88aed53
-spec_sync_inputs_sha256: c82a161a74dc787aa453df828ded7fca9d99e3769ad6f6951262ab7a50d11876
+spec_sync_synced_at: 2026-10-09T21:53:37Z
+spec_sync_git_commit: 83bcd4ff
+spec_sync_inputs_sha256: daa85503e1cdcf8c80c0993bf9213c845cd9943b310a6aeaf97213b808a5afe4
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-09 (branch `fix/evict-blocked-by-pin`; inputs changed transitively via `components/interfaces`).** This component's own `src/**` and `specs/**` are unchanged. Checked FR-033 (spec 002) against the change: it requires `evictions_blocked_by_pin` to count `ActiveReferences` from `try_evict_to_block`, and `evict_one_clean` matches that variant; the real dispatch map returned `InvalidState` for a held pin, so FR-033 was not met in production until this branch. It is now met without any change here.
+
 > **Sync 2026-10-08 (branch `opt/evolve-latency/s20261004-001925_PR507`).** Delta analysis on a certified baseline: the existing clean stamp (`d3209328`) equals the spec-sync hash of unstable `7e53d5b5`, and `components/interfaces` is unchanged on this branch, so the only new inputs are this branch's dispatcher `src/` and `specs/` changes. Spec 001 in scope.
 >
 > - **FR-039 step (2) — DRIFTED (moderate).** Spec said the single warm `stream_synchronize` runs "after all hot-path copies are issued"; since `ada87967` it runs after the cold scatter-gather (`src/lib.rs:2742-2748`), the warm read pins are released only after it (`src/lib.rs:2754`), and the remote lookup follows (`src/lib.rs:2756`). **Resolution**: code authoritative; step (2) rewritten with the pin-lifetime reason and the benign multi-region warm-stream sync noted.
