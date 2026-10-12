@@ -26,9 +26,13 @@
 # (rope_theta=1e7, base window 262144); 262K-524K is admitted but degraded (DCA is
 # what makes 262K-1M work). The synthetic conversations are ~41K tokens, far under.
 #
-# NOTE on the image: the SHMQ base defaults to the 0.28 connector; 0.29 is avoided
-# for SHMQ (its LBHNC KV layout breaks the offload store path under load). The dense
-# repack is version-agnostic (plain Qwen2), so it works on 0.28.
+# IMAGE: clamped to the vLLM 0.29 connector (certus-shmq-connector:vllm0.29.0) by
+# default, for parity with the cputier wrapper (certus-offload:vllm0.29.0). The dense
+# repack is version-agnostic (plain Qwen2), so it loads on 0.29.
+# CAVEAT: vLLM 0.29's LBHNC KV layout can exhaust the SHMQ offload channels under
+# concurrent load (RingError / EngineDeadError, external hits -> ~0). Run the host
+# certus-server with a higher channel count (--channels 32+) and watch /metrics; if
+# it still misbehaves, fall back with IMAGE=localhost/certus-shmq-connector:vllm0.28.0.
 #
 #   ./run-serve-certus-shmq-7b1m-longctx.sh                 # 7B-1M @ 524288, 16G GPU-KV cap -> SHMQ tier
 #   MAX_MODEL_LEN=262144 ./run-serve-certus-shmq-7b1m-longctx.sh   # within native (full-quality) window
@@ -46,6 +50,9 @@ DENSE_DIR_NAME="${DENSE_DIR_NAME:-qwen7b1m-dense}"   # under HF_CACHE (mounted a
 # rejected): ~599K-token pool, well below the client's PREFIX_COUNT=96 reused set.
 # KV_CACHE_BYTES= (empty) removes the cap (derive from GPU_MEM_UTIL).
 KV_CACHE_BYTES="${KV_CACHE_BYTES-16G}"
+# Clamp the connector image to vLLM 0.29 by default (base defaults to 0.28); see the
+# IMAGE caveat in the header. Override IMAGE= to pin another build.
+IMAGE="${IMAGE:-localhost/certus-shmq-connector:vllm0.29.0}"
 
 # ── Ensure the dense repack exists (build from the cached -1M snapshot) ───────────
 snap="$(find "${HF_CACHE}/hub/models--Qwen--Qwen2.5-7B-Instruct-1M/snapshots" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -1)"
@@ -88,5 +95,6 @@ exec env \
   ROPE_YARN=0 \
   KV_BYTES_PER_TOKEN=$((56 * 1024)) \
   WEIGHTS_GB=15 \
+  IMAGE="$IMAGE" \
   ${KV_CACHE_BYTES:+KV_CACHE_BYTES="$KV_CACHE_BYTES"} \
   "${SCRIPT_DIR}/run-serve-certus-shmq-longctx.sh"
