@@ -4,6 +4,9 @@ description: Build the ONE tool-independent, source-traced verifiable-property i
 argument-hint: "<component-name>"
 ---
 
+> **Frozen 2026-10-09.** This skill moved to [ai-native-storage-workbench](https://github.com/AI-native-Systems-Research/ai-native-storage-workbench) (`fv/skills/`). Edit it there; this copy is not updated. Install the current version with `fv/install.sh <this-repo>`.
+
+
 ## Purpose
 Produce the **single source of truth** for a component's verifiable properties, before any prover is
 named. Output is one inventory in which every property is (a) **traced** to spec + code, (b) given a

@@ -162,6 +162,19 @@ struct Cli {
     #[arg(long = "memory-tier-eviction-threshold", default_value_t = 0.0)]
     memory_tier_eviction_threshold: f64,
 
+    /// dispatcher-p2p only: delay between background NVMe→DRAM backfill jobs
+    /// after P2P cold reads. 0 (the default) disables backfill. Ignored by
+    /// `dispatcher`.
+    ///
+    /// Off by default here although `DispatcherConfig::default()` is 10: copying
+    /// every cold block back into DRAM competes with stores for DRAM slots and
+    /// SSD bandwidth. On full-p2p, connector-bench scheduler-step ran 92.6
+    /// steps/s with backfill off against 26.9 with it on (zero store
+    /// backpressure vs ~1,200 retries per run); it helped only repeat cold
+    /// reads of the same keys (~10%).
+    #[arg(long = "backfill-delay-ms", default_value_t = 0)]
+    backfill_delay_ms: u64,
+
     /// Prometheus metrics HTTP port. Disabled by default; set > 0 to enable.
     #[arg(long = "metrics-port", default_value_t = 0)]
     metrics_port: u16,
@@ -280,6 +293,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         max_eviction_attempts: cli.max_eviction_attempts,
         store_backpressure_ms: cli.store_backpressure_ms,
         memory_tier_eviction_threshold: cli.memory_tier_eviction_threshold,
+        backfill_delay_ms: cli.backfill_delay_ms,
         rl_group: cli.rl_group.clone(),
         resolved_pci_addrs: std::cell::RefCell::new(Vec::new()),
         resolved_numa_node: std::cell::RefCell::new(None),

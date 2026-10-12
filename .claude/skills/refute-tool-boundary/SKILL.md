@@ -4,6 +4,9 @@ description: Adversarially attack a single formal-verification tool-boundary cla
 argument-hint: "<component> --tool creusot|kani --id <PROPERTY_ID> [--cap-seconds N]"
 ---
 
+> **Frozen 2026-10-09.** This skill moved to [ai-native-storage-workbench](https://github.com/AI-native-Systems-Research/ai-native-storage-workbench) (`fv/skills/`). Edit it there; this copy is not updated. Install the current version with `fv/install.sh <this-repo>`.
+
+
 ## Purpose
 A `tool-boundary` is the single most abusable verdict in the pipeline: it is the agent saying "the tool cannot do this," which ends the work. This skill exists so that claim is never taken on trust. You are a **fresh adversary** — you did not write the artifact under review and you do not get to agree with it. Your success condition is a **reproducible proof that the wall was false.** If you cannot produce one after exhausting the arsenal, the boundary stands — but only then.
 

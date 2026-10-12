@@ -120,7 +120,7 @@ python tools/cputier-connector-bench/bench_cputier_lifecycle.py --fs-root /path/
 | Variable | Default | Description |
 |---|---|---|
 | `IMAGE` | `docker.io/vllm/vllm-openai:v0.30.0` | vLLM ≥ 0.30. The 0.26 `certus-offload-fix026` image has an older `kv_offload` API and is not supported |
-| `GPU` | `0` | CDI GPU index (`--device nvidia.com/gpu=$GPU`) |
+| `GPU` | `0` | CDI GPU index (`--device nvidia.com/gpu=$GPU`), or a comma list (`GPU=0,1`) to expose several GPUs for `--tp`. Inside the container they are renumbered `0..N-1` |
 | `FS_TIER_HOST` | `$HOME/cputier-bench-fs-tier` | Host directory for the fs tier, mounted at `/fs-tier`. Put it on the filesystem you want to measure, and not on container overlay storage (no `O_DIRECT`) |
 | `CPU_BYTES` | `4G` | Sizes the container `/dev/shm`. Pass the same value as `--cpu-bytes` |
 | `SHM_SIZE` | `CPU_BYTES + 4G` | Explicit `/dev/shm` size |
@@ -146,8 +146,31 @@ These play the role of certus-connector-bench's server flags:
 | `--blocks-per-chunk` | 1 | GPU blocks per offloaded chunk |
 | `--no-kv-events` | — | Disable KV cache events (`take_events` yields nothing) |
 | `--verify` | — | Store random GPU data, zero it, load it back (warm, and cold through the fs tier), and compare bytes |
+| `--tp` | 1 | Tensor-parallel world size, one worker per GPU (see below) |
+| `--gpus` | `--gpu..--gpu+tp-1` | Devices for the TP ranks |
 
 The workload flags (`--bs`, `--num-blocks`, `--block-bytes`, `--min-duration`, `--working-set`, `--mode`, `--pipeline-depth`, `--direction`, `--hit-ratio`, `--requests-per-step`, `--num-sessions`, `--pattern`, `--override`, `--csv`, `--tag`, `--no-cold`, `--no-eviction`) mean the same as in certus-connector-bench.
+
+### Tensor parallelism (`--tp`)
+
+`--tp 2` runs the vLLM `--tensor-parallel-size 2` pattern: one scheduler-side manager and one
+`CPUOffloadingWorker` per GPU, every rank joining the same `/dev/shm` CPU-tier
+region and owning its slot of each chunk. Rank 0 runs in the benchmark process,
+the other ranks in spawned processes. Every rank receives the same transfer
+spec, and a job counts as finished only once all ranks report it.
+`--block-bytes` is each rank's shard size (vLLM's `worker_kv_bytes_per_block`);
+throughput counts all shards. `--cpu-bytes` is the total CPU tier, shared by
+the ranks.
+
+vLLM derives a worker's slot from `current_device_index() % world_size`, so
+rank `i` must run on a device whose index maps to slot `i`; the benchmark
+rejects other orders. With the wrapper, expose the GPUs and number them from 0:
+
+```bash
+GPU=0,1 tools/cputier-connector-bench/run-in-container.sh --tp 2 --mode scheduler-step
+```
+
+`--verify` checks rank 0's data only.
 
 ## Modes
 

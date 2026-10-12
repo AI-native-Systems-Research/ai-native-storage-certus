@@ -4,6 +4,9 @@ description: One-command, repeatable formal-verification pipeline for a single C
 argument-hint: "<component> [--tools creusot,kani] [--no-push] [--dry-run]"
 ---
 
+> **Frozen 2026-10-09.** This skill moved to [ai-native-storage-workbench](https://github.com/AI-native-Systems-Research/ai-native-storage-workbench) (`fv/skills/`). Edit it there; this copy is not updated. Install the current version with `fv/install.sh <this-repo>`.
+
+
 ## Purpose
 Turn per-component formal verification from a hand-stitched sequence (five skills + manual git + hand-curated HTML + scp-to-Box) into **one orchestrated, reproducible run**. Any team member invokes this on a component name and gets: the property inventory, Creusot + Kani proofs, one combined scoring page, and two per-component verif branches that EACH hold the full metadata bundle (all three YAML + the combined HTML) plus that tool's proof artifacts — with the safety rails that stopped last week's wasted effort on unclean trees.
 

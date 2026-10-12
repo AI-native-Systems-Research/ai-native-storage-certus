@@ -160,12 +160,41 @@ python tools/certus-connector-bench/bench_connector_lifecycle.py --mode all --mi
 --num-blocks N         Total blocks per iteration (default: 128)
 --block-bytes N        Per-block size in bytes (default: 2097152 = 2 MiB)
 --gpu N                CUDA device index (default: 0)
---tp N                 Simulated tensor-parallel world size (default: 1)
+--tp N                 Tensor-parallel world size: one worker per GPU (default: 1, see below)
+--gpus LIST            Devices for the TP ranks, e.g. 2,3 (default: --gpu..--gpu+tp-1)
 --min-duration SECS    Minimum seconds per phase (default: 5.0)
 --workers N            ThreadPoolExecutor worker count (default: 4)
 --working-set N        Blocks for eviction/contention pressure (default: 512)
 --csv PATH             Append results to CSV file
 --tag TEXT             Tag column for CSV (e.g. branch name)
+```
+
+#### Tensor parallelism (`--tp`)
+
+`--tp 2` runs the vLLM `--tensor-parallel-size 2` pattern: one scheduler-side
+manager and one `CertusShmqWorker` per GPU (rank 0 in the benchmark process on
+device `--gpu`, rank i in a spawned process on device `--gpu + i`; `--gpus`
+picks other devices). Every rank receives the same transfer spec, moves its own
+shard, and a job counts as finished only once all ranks report it.
+`--block-bytes` is each rank's shard size, so to model a fixed model under TP
+pass the single-GPU block size divided by the TP size. Throughput counts all
+shards (`block_bytes × tp` per logical block).
+
+Each process claims shmq channels from its own slice, as the production
+connector does, so the server needs `--channels` of at least
+`tp × (1 + workers)`, or `tp × (1 + 2 × workers)` for `--mode contention` /
+`all`. The benchmark checks this up front and names the value to use.
+
+Results recorded with `--tp > 1` before this change came from a single-GPU
+simulation in which only rank 0 moved data while the other ranks' shards were
+reserved, committed and written through without ever being copied. They are
+not comparable with real-TP results.
+
+```bash
+sudo target/release/certus-server --drive-count 4 --channels 32 \
+    --memory-tier-size 4G --memory-tier-eviction-threshold 0.8 --format
+python tools/certus-connector-bench/bench_connector_lifecycle.py \
+    --tp 2 --mode scheduler-step --block-bytes 1048576
 ```
 
 #### Per-mode options

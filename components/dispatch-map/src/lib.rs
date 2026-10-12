@@ -537,10 +537,11 @@ impl IDispatchMap for DispatchMapComponent {
             .get_mut(&key)
             .ok_or(DispatchMapError::KeyNotFound(key))?;
 
+        // A held pin is its own variant, as in `remove`: the dispatcher's eviction
+        // scan tells "a reader holds it" apart from "write-through has not landed"
+        // by this, and the two mean opposite things.
         if entry.read_ref != 0 || entry.write_ref != 0 {
-            return Err(DispatchMapError::InvalidState(
-                "entry has active references".into(),
-            ));
+            return Err(DispatchMapError::ActiveReferences(key));
         }
 
         match &entry.location {
@@ -932,6 +933,103 @@ mod tests {
             _ => panic!("expected BlockDevice after convert_memory_tier_to_block"),
         }
         dm.release_read(1).unwrap();
+    }
+
+    // --- try_evict_to_block ---
+
+    /// A persisted memory-tier entry with no references: `try_evict_to_block`
+    /// returns `Ok` and the entry becomes `BlockDevice` at its ssd_offset.
+    fn persisted_entry(dm: &Arc<dyn IDispatchMap + Send + Sync>, key: CacheKey, buf: &mut [u8]) {
+        dm.create_memory_tier_entry(key, buf.as_mut_ptr(), 4096)
+            .unwrap();
+        dm.convert_to_storage(key, 8192).unwrap();
+        dm.release_write(key).unwrap();
+    }
+
+    #[test]
+    fn try_evict_to_block_demotes_persisted_unpinned_entry() {
+        let c = setup_component();
+        let dm = query_interface!(c, IDispatchMap).unwrap();
+        let mut buf = [0u8; 4096];
+        persisted_entry(&dm, 1, &mut buf);
+        dm.try_evict_to_block(1).unwrap();
+        match dm.lookup(1).unwrap() {
+            LookupResult::BlockDevice { offset } => assert_eq!(offset, 8192),
+            other => panic!("expected BlockDevice after eviction, got {other:?}"),
+        }
+        dm.release_read(1).unwrap();
+    }
+
+    /// A read pin must be reported as `ActiveReferences`, not `InvalidState`: the
+    /// dispatcher's eviction scan counts pin-blocked and unpersisted candidates
+    /// separately by this variant, and returning `InvalidState` here silently
+    /// filed every pinned candidate as unpersisted.
+    #[test]
+    fn try_evict_to_block_reports_read_pin_as_active_references() {
+        let c = setup_component();
+        let dm = query_interface!(c, IDispatchMap).unwrap();
+        let mut buf = [0u8; 4096];
+        persisted_entry(&dm, 1, &mut buf);
+        dm.take_read(1).unwrap();
+        assert!(matches!(
+            dm.try_evict_to_block(1),
+            Err(DispatchMapError::ActiveReferences(1))
+        ));
+        // No partial transition: still resident in the memory tier.
+        dm.release_read(1).unwrap();
+        assert!(dm.is_evictable(1));
+    }
+
+    #[test]
+    fn try_evict_to_block_reports_write_ref_as_active_references() {
+        let c = setup_component();
+        let dm = query_interface!(c, IDispatchMap).unwrap();
+        let mut buf = [0u8; 4096];
+        persisted_entry(&dm, 1, &mut buf);
+        dm.take_write(1).unwrap();
+        assert!(matches!(
+            dm.try_evict_to_block(1),
+            Err(DispatchMapError::ActiveReferences(1))
+        ));
+        dm.release_write(1).unwrap();
+        assert!(dm.is_evictable(1));
+    }
+
+    #[test]
+    fn try_evict_to_block_without_ssd_offset_is_invalid_state() {
+        let c = setup_component();
+        let dm = query_interface!(c, IDispatchMap).unwrap();
+        let mut buf = [0u8; 4096];
+        dm.create_memory_tier_entry(1, buf.as_mut_ptr(), 4096)
+            .unwrap();
+        dm.release_write(1).unwrap();
+        assert!(matches!(
+            dm.try_evict_to_block(1),
+            Err(DispatchMapError::InvalidState(_))
+        ));
+    }
+
+    #[test]
+    fn try_evict_to_block_on_block_device_is_invalid_state() {
+        let c = setup_component();
+        let dm = query_interface!(c, IDispatchMap).unwrap();
+        let mut buf = [0u8; 4096];
+        persisted_entry(&dm, 1, &mut buf);
+        dm.try_evict_to_block(1).unwrap();
+        assert!(matches!(
+            dm.try_evict_to_block(1),
+            Err(DispatchMapError::InvalidState(_))
+        ));
+    }
+
+    #[test]
+    fn try_evict_to_block_missing_key_is_key_not_found() {
+        let c = setup_component();
+        let dm = query_interface!(c, IDispatchMap).unwrap();
+        assert!(matches!(
+            dm.try_evict_to_block(99),
+            Err(DispatchMapError::KeyNotFound(99))
+        ));
     }
 
     #[test]

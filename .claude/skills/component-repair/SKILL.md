@@ -4,6 +4,9 @@ description: Repair the code behind a verification finding — a level-2 bug, or
 argument-hint: "<component> <OBLIGATION-ID> --callees <mods> --base <rev>"
 ---
 
+> **Frozen 2026-10-09.** This skill moved to [ai-native-storage-workbench](https://github.com/AI-native-Systems-Research/ai-native-storage-workbench) (`fv/skills/`). Edit it there; this copy is not updated. Install the current version with `fv/install.sh <this-repo>`.
+
+
 # component-repair
 
 Fixes the CODE behind a verification finding:
