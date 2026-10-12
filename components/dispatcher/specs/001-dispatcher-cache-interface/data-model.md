@@ -29,7 +29,7 @@
   - `extent_manager_version: ExtentManagerVersion` — which extent manager version to use (default V2)
   - `max_cache_entries: usize` — maximum entries before eviction (default 10000; 0 disables eviction)
   - `eviction_threshold: f64` — fraction of max at which eviction triggers (default 0.8)
-  - `format_on_init: bool` — whether to format extent managers on init (default true)
+  - `format_on_init: bool` — whether to format extent managers on init (default true; forced true when `data_pci_addrs.len() > 1`, spec FR-025 — *Sync 2026-10-11*)
 - **Constraints**: `data_pci_addrs` must be non-empty; each address must be unique
 - **Relationships**: N = `data_pci_addrs.len()` determines the number of data devices and extent managers
 
@@ -39,7 +39,8 @@
 - **Fields**:
   - `key: CacheKey` — cache entry to write
   - `size: u32` — data size in bytes
-  - `device_index: usize` — which data device to target
+  - `device_index: usize` — which data device to target; *(Sync 2026-10-11, commit `87468671`)* routes only the single-drive whole-object job and no longer decides placement
+  - `stripe: Option<StripeSlice>` — the one drive slice this job writes when the object is striped across N > 1 drives (spec FR-062); `None` = whole-object job
 - **Lifecycle**: Created by populate after staging copy completes; consumed by background writer; discarded on success or failure
 
 ### PendingWrite

@@ -38,3 +38,16 @@ Options: carry a reason code on the wire, or report already-resident as reserved
 changes the client contract, hence deferred. Specified in **interfaces FR-018a**;
 `store_already_resident` measures it.
 
+
+## T2 — OPEN (Low, documentation-only) — `format_on_init` interface doc comment (sync 2026-10-11, branch `perf/coldload-striping-fixes`)
+
+- **Where**: `components/interfaces/src/idispatcher.rs:31-32` — "Default: true. Set to false
+  when re-initializing to preserve on-disk data."
+- **Why stale**: since `bf52dd83` the dispatcher forces `format_on_init = true` whenever
+  `data_pci_addrs.len() > 1` (striped layout is not recoverable) and logs a warning when it
+  overrides `false` (spec 001 FR-025; `components/dispatcher/src/lib.rs:1721-1732, 2264-2272`).
+  The spec contract copy (`specs/001-dispatcher-cache-interface/contracts/idispatcher.md`) was
+  updated in this sync; the source doc comment is outside this sync's editable scope.
+- **Suggested wording**: append "Ignored (forced to true, with a warning) when more than one
+  data drive is configured: the striped layout cannot be recovered after a restart."
+- Note: editing `components/interfaces/src/**` changes every component's spec-sync hash.

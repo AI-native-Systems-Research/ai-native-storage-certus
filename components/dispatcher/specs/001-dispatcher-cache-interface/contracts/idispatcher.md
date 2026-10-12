@@ -125,6 +125,9 @@ pub struct DispatcherConfig {
     pub eviction_threshold: f64,
     /// Whether to format extent managers on initialization (default: true).
     /// Set to false when re-initializing to preserve on-disk data.
+    /// Forced to true (with a warning) when more than one data drive is
+    /// configured — the striped layout is not recoverable (spec FR-025).
+    /// *(Sync 2026-10-11, commit `bf52dd83`)*
     pub format_on_init: bool,
 }
 
