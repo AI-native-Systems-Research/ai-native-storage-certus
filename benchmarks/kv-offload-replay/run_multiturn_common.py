@@ -503,14 +503,20 @@ def prom_counters(llm, capture=True):
 # prom_histograms(), and the serve-mode HTTP scraper (synthetic-agentic/
 # scrape_prom.py) mirrors it (it cannot import this module — it runs host-side
 # against a container's /metrics). Keep the two in sync.
-#   - time_to_first_token_seconds  : prefill responsiveness (TTFT)
-#   - time_per_output_token_seconds : decode cadence / inter-token latency (TPOT)
-#   - e2e_request_latency_seconds   : whole-request wall latency
-#   - request_queue_time_seconds    : WAITING-phase queueing delay
-#   - request_decode_time_seconds   : DECODE-phase service time
+#
+# Names are the UNION across the vLLM versions this bench runs (verified against
+# 0.26 and 0.30); a name absent on a given server simply yields no data for that
+# metric (match-by-name, no error), so the union is the safe superset:
+#   - time_to_first_token_seconds           : prefill responsiveness (TTFT)
+#   - inter_token_latency_seconds           : inter-token latency (ITL; 0.26 + 0.30)
+#   - request_time_per_output_token_seconds : decode cadence (TPOT; 0.30 name)
+#   - e2e_request_latency_seconds           : whole-request wall latency
+#   - request_queue_time_seconds            : WAITING-phase queueing delay
+#   - request_decode_time_seconds           : DECODE-phase service time
 LATENCY_HISTOGRAMS = {
     "vllm:time_to_first_token_seconds",
-    "vllm:time_per_output_token_seconds",
+    "vllm:inter_token_latency_seconds",
+    "vllm:request_time_per_output_token_seconds",
     "vllm:e2e_request_latency_seconds",
     "vllm:request_queue_time_seconds",
     "vllm:request_decode_time_seconds",

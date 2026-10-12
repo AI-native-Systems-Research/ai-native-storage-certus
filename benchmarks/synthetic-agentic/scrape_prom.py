@@ -98,7 +98,8 @@ def scrape(url: str, timeout: float) -> dict:
 # container's /metrics). Keep the two sets in sync.
 LATENCY_HISTOGRAMS = {
     "vllm:time_to_first_token_seconds",
-    "vllm:time_per_output_token_seconds",
+    "vllm:inter_token_latency_seconds",
+    "vllm:request_time_per_output_token_seconds",
     "vllm:e2e_request_latency_seconds",
     "vllm:request_queue_time_seconds",
     "vllm:request_decode_time_seconds",
