@@ -1,0 +1,38 @@
+# dram_dashboard preset — Qwen2.5-7B-Instruct-1M long-context KV-offload workload.
+# Matches apps/vllm-serve/run-serve-cputier-7b1m-longctx.sh + run-guidellm-synthetic-longctx.sh.
+# Load with:  ./dram_dashboard.py --config dashboard-syfi-7b1m.yaml
+# Keys are the dashboard's form field ids (sent verbatim to /api/sweep).
+
+dist: syfi               # syfi-coding inter-arrival (think-time) distribution
+turnMode: fixed
+turns: 12                # client TURNS=12
+mml: 524288              # context window (max_model_len)
+
+# Model geometry: Qwen2.5-7B-Instruct-1M (28L, 4 KV heads GQA, head_dim 128, fp16) + vLLM block 16
+layers: 28
+kvheads: 4
+headdim: 128
+bpe: 2
+block: 16
+
+# Per-turn token sizes
+prompt: 364
+gen: 1398
+
+# Shared-prefix structure: 96 DISTINCT 20K prefixes (client PREFIX_COUNT=96).
+# Modeled as 96 share groups; shared ~ 20K of the ~41K live context => fraction 0.49.
+# (prefix=0: no single GLOBAL prefix — the breadth lives in the groups.)
+prefix: 0
+groups: 96
+shared: 0.49
+
+# Tiers: HBM = capped GPU KV (16G x TP2 = 32); DRAM swept; SSD = fs/NVMe tier.
+hbm: 32
+dram: "32,64,128,256,512"
+ssd: 20000
+
+# Load
+concurrent: 8
+sessions: 960
+admission: interval
+seed: 1

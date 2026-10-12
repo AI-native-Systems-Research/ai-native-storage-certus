@@ -35,6 +35,29 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 SIM = os.path.join(SCRIPT_DIR, "kv_cache_dynamics.py")
 HTML = os.path.join(SCRIPT_DIR, "dram_dashboard.html")
 
+# Optional preset loaded from --config; keys are dashboard form-field ids. Injected
+# into the served page as window.__PRESET__ so the form pre-populates with it.
+PRESET: dict[str, str] = {}
+
+
+def load_preset(path):
+    """Parse a flat ``key: value`` YAML into {str: str} (stdlib only; no PyYAML).
+
+    Handles ``#`` comments, blank lines, and quoted values. Values stay strings —
+    they are passed to the sweep exactly as the form would send them."""
+    cfg = {}
+    with open(path) as f:
+        for raw in f:
+            line = raw.split("#", 1)[0].strip()
+            if not line or ":" not in line:
+                continue
+            k, v = line.split(":", 1)
+            k = k.strip()
+            v = v.strip().strip('"').strip("'")
+            if k:
+                cfg[k] = v
+    return cfg
+
 DISTS = {
     "burstgpt": "burstgpt-3-intervals.yaml",
     "ccweka": "cc-trace-weka-062126-intervals.yaml",
@@ -109,6 +132,7 @@ def build_base_args(qs):
         "--avg-prompt-tokens", str(_num(qs, "prompt", 364, cast=int, lo=0)),
         "--avg-gen-tokens", str(_num(qs, "gen", 1398, cast=int, lo=0)),
         "--shared-fraction", str(_num(qs, "shared", 0.0, lo=0.0, hi=1.0)),
+        "--share-groups", str(_num(qs, "groups", 1, cast=int, lo=1)),
         "--admission", admission,
         "--block-size", str(_num(qs, "block", 64, cast=int, lo=1)),
         "--seed", str(_num(qs, "seed", 1, cast=int)),
@@ -222,6 +246,8 @@ def sweep(qs):
         "genTok": a["avg_gen_tokens"],
         "windowBlocks": first["window_blocks"],
         "prefixBlocks": first["prefix_blocks"],
+        "shareGroups": a.get("share_groups"),
+        "sharedFraction": a.get("shared_fraction"),
         "workingBlocksEst": first.get("working_blocks_est"),
         "oversub": first["oversubscription_vs_hbm"],
         "hbmGb": a["hbm_gb"],
@@ -252,10 +278,17 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path in ("/", "/index.html"):
             try:
                 with open(HTML, "rb") as f:
-                    self._send(200, f.read(), "text/html; charset=utf-8")
+                    html = f.read()
             except OSError:
                 self._send(500, "dram_dashboard.html not found next to the server",
                            "text/plain")
+                return
+            if PRESET:  # inject so the form pre-populates with the --config preset
+                tag = ("<script>window.__PRESET__=" + json.dumps(PRESET)
+                       + ";</script>").encode("utf-8")
+                html = (html.replace(b"</head>", tag + b"</head>", 1)
+                        if b"</head>" in html else tag + html)
+            self._send(200, html, "text/html; charset=utf-8")
             return
         if parsed.path == "/api/sweep":
             try:
@@ -273,11 +306,22 @@ def main():
     ap.add_argument("--port", type=int, default=8077)
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--no-browser", action="store_true")
+    ap.add_argument("--config", metavar="FILE.yaml",
+                    help="preset YAML whose keys (form field ids) pre-populate the dashboard")
     args = ap.parse_args()
 
     if not os.path.exists(SIM):
         print(f"error: {SIM} not found", file=sys.stderr)
         return 1
+
+    if args.config:
+        try:
+            global PRESET
+            PRESET = load_preset(args.config)
+        except OSError as e:
+            print(f"error: cannot read --config {args.config}: {e}", file=sys.stderr)
+            return 1
+        print(f"  preset {args.config}: {len(PRESET)} params -> {', '.join(sorted(PRESET))}")
 
     httpd = ThreadingHTTPServer((args.host, args.port), Handler)
     url = f"http://{args.host}:{args.port}/"
