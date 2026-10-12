@@ -524,9 +524,15 @@ LATENCY_HISTOGRAMS = {
 
 
 def prom_histograms(llm, names, capture=True):
-    """Sample the named vLLM latency histograms once (cumulative over the run).
-    get_metrics() exposes each as Histogram(count, sum, buckets); sum across
-    label sets into one distribution per name."""
+    """Sample the named vLLM latency histograms once (cumulative over the run) as
+    {name: {count, sum, buckets{le: cumcount}}}, summed across label sets.
+
+    Two sources, mirroring prom_counters: the V1 offline ``llm.get_metrics()``
+    snapshot (Histogram objects), AND the global prometheus REGISTRY (the
+    ``_bucket{le=}``/``_sum``/``_count`` samples). The REGISTRY pass is essential
+    under AsyncLLM (WORKLOAD_MODE=async), which has NO get_metrics() — without it
+    async runs captured no histograms at all. A name already seen via get_metrics
+    is not re-read from the REGISTRY, so the two sources never double-count."""
     out = {}
     if not capture:
         return out
@@ -542,8 +548,31 @@ def prom_histograms(llm, names, capture=True):
             agg["sum"] += float(getattr(m, "sum", 0.0))
             for le, c in (getattr(m, "buckets", {}) or {}).items():
                 agg["buckets"][le] = agg["buckets"].get(le, 0) + int(c)
-    except Exception as e:  # noqa: BLE001 - get_metrics() is V1-only
-        print(f"[prom] histogram sample failed: {e}", file=sys.stderr)
+    except Exception:  # noqa: BLE001 - get_metrics() is V1-offline-only; async lacks it
+        pass
+    # REGISTRY pass: histogram samples are name_bucket{le=…} / name_sum / name_count.
+    # Only fill names not already captured above, so offline + registry never stack.
+    try:
+        from prometheus_client import REGISTRY
+        for metric in REGISTRY.collect():
+            base = "vllm:" + metric.name if not metric.name.startswith("vllm:") else metric.name
+            if base not in names or base in out:
+                continue
+            agg = {"count": 0.0, "sum": 0.0, "buckets": {}}
+            for s in metric.samples:
+                if s.name.endswith("_bucket"):
+                    le = s.labels.get("le")
+                    if le is not None:
+                        agg["buckets"][le] = agg["buckets"].get(le, 0.0) + float(s.value)
+                elif s.name.endswith("_sum"):
+                    agg["sum"] += float(s.value)
+                elif s.name.endswith("_count"):
+                    agg["count"] += float(s.value)
+            if agg["count"] or agg["buckets"]:
+                out[base] = {"count": int(agg["count"]), "sum": agg["sum"],
+                             "buckets": {le: int(c) for le, c in agg["buckets"].items()}}
+    except Exception as e:  # noqa: BLE001
+        print(f"[prom] histogram REGISTRY sample failed: {e}", file=sys.stderr)
     return out
 
 
