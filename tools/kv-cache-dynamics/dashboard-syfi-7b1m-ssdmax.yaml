@@ -1,0 +1,50 @@
+# dram_dashboard preset — SSD-MAX variant of the 7B-1M syfi workload.
+# Pushes the maximum traffic to the bottom (SSD/NVMe) tier, to study the offload
+# read path. Load with:  ./dram_dashboard.py --config dashboard-syfi-7b1m-ssdmax.yaml
+#
+# How it maxes SSD (vs dashboard-syfi-7b1m.yaml):
+#   shared 0.95  - almost all of each request is the CROSS-SESSION shared prefix
+#                  (evictable + re-referenced); within-conversation private context
+#                  stays HBM-hot and never reaches the tiers, so this is the lever
+#                  that actually raises SSD hits (sim: SSD 7.6% -> 13.5%).
+#   groups 48    - MODERATE breadth: enough reuse that evicted prefixes reload from
+#                  SSD; more groups (192) just add first-touch COLD misses, not reads.
+#   hbm 16       - small GPU KV cache => more eviction below HBM.
+#   dram 0       - no CPU/DRAM tier => everything evicted from HBM falls to SSD.
+# Measured (sim): HBM 85.1% | SSD 14.3% | miss 0.6% — nearly all non-HBM served from SSD.
+#
+# NOTE: hbm/dram here are SIMULATOR cache sizes for exploring the tiering model; the
+# analytic sim does not enforce vLLM's "one max_model_len sequence must fit in GPU KV"
+# rule, so hbm:16 at a 524288 window is fine for the sim but is NOT a bootable
+# real-server config (there the floor is ~16 G PER WORKER = 32 G total). Real-server
+# analogs of these levers: bigger PREFIX_TOKENS, smaller CPU_BYTES.
+
+dist: syfi
+turnMode: fixed
+turns: 12
+mml: 524288
+
+# Model geometry: Qwen2.5-7B-Instruct-1M (28L, 4 KV heads GQA, head_dim 128, fp16), vLLM block 16
+layers: 28
+kvheads: 4
+headdim: 128
+bpe: 2
+block: 16
+
+prompt: 364
+gen: 1398
+
+# SSD-max shared-prefix structure
+prefix: 0
+groups: 48
+shared: 0.95
+
+# Tiers tuned to force spill to the bottom (SSD) tier
+hbm: 16
+dram: "0"
+ssd: 20000
+
+concurrent: 8
+sessions: 960
+admission: interval
+seed: 1
