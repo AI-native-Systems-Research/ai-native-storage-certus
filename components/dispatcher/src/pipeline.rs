@@ -788,6 +788,12 @@ const H2D_EST_PER_COPY_NS: u64 = 2_000;
 const H2D_LOW_WATER_NS: u64 = 25_000;
 /// Per-drive in-flight read cap of the `batch_lookup` scatter.
 pub(crate) const BATCH_SCATTER_PER_DRIVE_QD_CAP: usize = 24;
+/// Fewest drives at which a policy's per-drive cap applies. The cap trades a
+/// little NVMe rate for lower per-command latency, which pays off only when
+/// the drives together outrun H2D (measured at 4 drives). With fewer drives
+/// each drive's proportional share is the whole budget's 1/N, and capping it
+/// costs throughput: at 1 drive, 128 → 24 in flight lost 14% cold load.
+pub(crate) const PER_DRIVE_QD_CAP_MIN_DRIVES: usize = 4;
 
 /// Sub-object H2D launch policy of the scatter-gather pipeline.
 #[derive(Debug, Clone, Copy)]
@@ -815,7 +821,8 @@ impl H2dPolicy {
 pub(crate) struct ScatterPolicy {
     pub(crate) h2d: H2dPolicy,
     /// Upper bound on in-flight reads per drive; `None` keeps the
-    /// proportional share of `max_queue_depth`.
+    /// proportional share of `max_queue_depth`. Applies only with at least
+    /// [`PER_DRIVE_QD_CAP_MIN_DRIVES`] drives.
     pub(crate) per_drive_qd_cap: Option<usize>,
 }
 
@@ -826,12 +833,20 @@ pub(crate) const LEGACY_POLICY: ScatterPolicy = ScatterPolicy {
     per_drive_qd_cap: None,
 };
 
-/// `batch_lookup`'s multi-object scatter: backlog-aware group copies and at
-/// most [`BATCH_SCATTER_PER_DRIVE_QD_CAP`] reads in flight per drive.
+/// `batch_lookup`'s multi-object scatter: backlog-aware group copies and, with
+/// at least [`PER_DRIVE_QD_CAP_MIN_DRIVES`] drives, at most
+/// [`BATCH_SCATTER_PER_DRIVE_QD_CAP`] reads in flight per drive.
 pub(crate) const BATCH_SCATTER_POLICY: ScatterPolicy = ScatterPolicy {
     h2d: H2dPolicy::BACKLOG_AWARE,
     per_drive_qd_cap: Some(BATCH_SCATTER_PER_DRIVE_QD_CAP),
 };
+
+/// The per-drive cap `policy` applies with `num_drives` drives.
+pub(crate) fn effective_qd_cap(policy: ScatterPolicy, num_drives: usize) -> Option<usize> {
+    policy
+        .per_drive_qd_cap
+        .filter(|_| num_drives >= PER_DRIVE_QD_CAP_MIN_DRIVES)
+}
 
 /// Per-drive in-flight read budget: `max_queue_depth` split proportionally to
 /// each drive's segment count (at least 1, at most its segment count), then
@@ -1309,8 +1324,7 @@ pub(crate) unsafe fn scatter_gather_multi_drive_with_policy(
                     let ptr =
                         unsafe { job.mem_ptr.add(seg.buffer_offset) as *mut std::ffi::c_void };
                     let buf_size = seg.length.next_multiple_of(block_size);
-                    let buf =
-                        unsafe { DmaBuffer::from_raw(ptr, buf_size, noop_free, -1) }.unwrap();
+                    let buf = unsafe { DmaBuffer::from_raw(ptr, buf_size, noop_free, -1) }.unwrap();
                     Arc::new(Mutex::new(buf))
                 })
                 .collect();
@@ -1377,11 +1391,12 @@ pub(crate) unsafe fn scatter_gather_multi_drive_with_policy(
     }
 
     // Proportional split of the shared budget, then the policy's per-drive
-    // cap: fan-out and the 1-for-1 resubmit keep at most this many in flight.
+    // cap (only with enough drives): fan-out and the 1-for-1 resubmit keep at
+    // most this many in flight.
     let per_drive_qd: Vec<usize> = split_queue_depth(
         max_queue_depth,
         per_drive.iter().map(|ds| ds.total_segments),
-        policy.per_drive_qd_cap,
+        effective_qd_cap(policy, num_drives),
     );
 
     // Per-drive submission/completion state.

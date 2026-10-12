@@ -1720,6 +1720,17 @@ impl DispatcherComponent {
 }
 
 impl DispatcherComponent {
+    /// With more than one data drive every object is striped, and the on-disk
+    /// metadata records no stripe count, drive order or layout version, so
+    /// recovery could not rebuild objects safely. The SSD tier is a cache:
+    /// multi-drive configurations always start formatted (FR-025).
+    fn force_format_when_striped(mut config: DispatcherConfig) -> DispatcherConfig {
+        if config.data_pci_addrs.len() > 1 {
+            config.format_on_init = true;
+        }
+        config
+    }
+
     fn parse_pci_addr(s: &str) -> Result<PciAddress, DispatcherError> {
         let parts: Vec<&str> = s.split(':').collect();
         if parts.len() != 3 {
@@ -2249,6 +2260,16 @@ impl IDispatcher for DispatcherComponent {
     /// 7. Start background SSD evictor (if threshold configured)
     fn initialize(&self, config: DispatcherConfig) -> Result<(), DispatcherError> {
         self.log_info("dispatcher: initializing");
+
+        let recover_requested = !config.format_on_init;
+        let config = Self::force_format_when_striped(config);
+        if recover_requested && config.format_on_init {
+            self.log_warn(&format!(
+                "dispatcher: {} data drives use the striped layout, which is not \
+                 recoverable after a restart; formatting the data drives (FR-025)",
+                config.data_pci_addrs.len()
+            ));
+        }
 
         self.max_eviction_attempts
             .store(config.max_eviction_attempts, Ordering::Relaxed);
@@ -8039,6 +8060,46 @@ mod tests {
             );
             assert_eq!(split(segs, None), segs, "{segs:?}");
         }
+    }
+
+    /// Multi-drive (striped) configurations always format; one drive may recover.
+    #[test]
+    fn striped_config_always_formats() {
+        let cfg = |n: usize| DispatcherConfig {
+            data_pci_addrs: (0..n).map(|i| format!("0000:6{i}:00.0")).collect(),
+            format_on_init: false,
+            ..Default::default()
+        };
+        assert!(!DispatcherComponent::force_format_when_striped(cfg(1)).format_on_init);
+        for n in [2, 4] {
+            assert!(
+                DispatcherComponent::force_format_when_striped(cfg(n)).format_on_init,
+                "{n}"
+            );
+        }
+    }
+
+    /// The batch scatter's per-drive cap applies only with 4+ drives; with
+    /// fewer, each drive keeps its proportional share of the budget.
+    #[test]
+    fn scatter_qd_cap_needs_four_drives() {
+        let cap = |n| pipeline::effective_qd_cap(pipeline::BATCH_SCATTER_POLICY, n);
+        for n in 1..pipeline::PER_DRIVE_QD_CAP_MIN_DRIVES {
+            assert_eq!(cap(n), None, "{n} drives");
+        }
+        for n in [4, 5, 8] {
+            assert_eq!(
+                cap(n),
+                Some(pipeline::BATCH_SCATTER_PER_DRIVE_QD_CAP),
+                "{n} drives"
+            );
+        }
+        assert_eq!(pipeline::effective_qd_cap(pipeline::LEGACY_POLICY, 4), None);
+        // 16 x 4 MiB objects on one drive keep the whole budget.
+        assert_eq!(
+            pipeline::split_queue_depth(128, [512].into_iter(), cap(1)),
+            [128]
+        );
     }
 
     /// Planner coverage: for in-order and shuffled reap orders, each
