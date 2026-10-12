@@ -498,6 +498,25 @@ def prom_counters(llm, capture=True):
     return vals
 
 
+# Canonical set of vLLM request-latency histograms every workload captures. This
+# is the ONE place the names live: the in-process drivers pass it to
+# prom_histograms(), and the serve-mode HTTP scraper (synthetic-agentic/
+# scrape_prom.py) mirrors it (it cannot import this module — it runs host-side
+# against a container's /metrics). Keep the two in sync.
+#   - time_to_first_token_seconds  : prefill responsiveness (TTFT)
+#   - time_per_output_token_seconds : decode cadence / inter-token latency (TPOT)
+#   - e2e_request_latency_seconds   : whole-request wall latency
+#   - request_queue_time_seconds    : WAITING-phase queueing delay
+#   - request_decode_time_seconds   : DECODE-phase service time
+LATENCY_HISTOGRAMS = {
+    "vllm:time_to_first_token_seconds",
+    "vllm:time_per_output_token_seconds",
+    "vllm:e2e_request_latency_seconds",
+    "vllm:request_queue_time_seconds",
+    "vllm:request_decode_time_seconds",
+}
+
+
 def prom_histograms(llm, names, capture=True):
     """Sample the named vLLM latency histograms once (cumulative over the run).
     get_metrics() exposes each as Histogram(count, sum, buckets); sum across
