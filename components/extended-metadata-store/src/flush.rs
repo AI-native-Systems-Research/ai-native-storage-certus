@@ -9,7 +9,11 @@ use crate::on_disk::{self, Superblock};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+/// Longest sleep between dirty-count checks while waiting for the timer:
+/// `put`/`delete` do not wake the worker, so it polls for the threshold.
+const THRESHOLD_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 /// Flush the current entries to disk using the dual-region ping-pong strategy.
 ///
@@ -179,12 +183,25 @@ impl FlushManager {
     }
 
     fn worker_loop(ctx: FlushWorkerContext) {
+        // A threshold of 0 would wake the worker with nothing dirty.
+        let threshold = ctx.config.dirty_threshold.max(1);
+        // Cleared by a failed flush, so a failing device is retried on the
+        // timer rather than in a hot loop; set again by a successful flush.
+        let mut threshold_armed = true;
         loop {
-            // Wait for signal or timeout
+            // Wait for signal, timeout, or the dirty count reaching the threshold
+            // (`None`: the interval is too long to represent, the timer never fires)
+            let deadline = Instant::now().checked_add(ctx.config.interval);
             let (lock, cvar) = &*ctx.notify;
             let mut signaled = lock.lock().unwrap();
-            if !*signaled {
-                let result = cvar.wait_timeout(signaled, ctx.config.interval).unwrap();
+            while !*signaled && !(threshold_armed && (ctx.dirty_count_fn)() >= threshold) {
+                let now = Instant::now();
+                let left = deadline.map_or(Duration::MAX, |d| d.saturating_duration_since(now));
+                if left.is_zero() {
+                    break;
+                }
+                let slice = left.min(THRESHOLD_POLL_INTERVAL);
+                let result = cvar.wait_timeout(signaled, slice).unwrap();
                 signaled = result.0;
             }
             let was_signaled = *signaled;
@@ -214,11 +231,12 @@ impl FlushManager {
                 continue;
             }
 
-            Self::do_flush(&ctx, serving);
+            threshold_armed = Self::do_flush(&ctx, serving);
         }
     }
 
-    fn do_flush(ctx: &FlushWorkerContext, serving: u64) {
+    /// Returns whether the flush succeeded.
+    fn do_flush(ctx: &FlushWorkerContext, serving: u64) -> bool {
         let entries = (ctx.snapshot_fn)();
         let mut sb = ctx.superblock.lock().unwrap();
         let result = flush_to_disk(&ctx.client, &mut sb, &entries);
@@ -237,6 +255,8 @@ impl FlushManager {
             tickets.completed = tickets.completed.max(serving);
             cvar.notify_all();
         }
+
+        result.is_ok()
     }
 }
 
@@ -259,3 +279,7 @@ impl Drop for FlushManager {
 #[cfg(test)]
 #[path = "repair_test_flush_lost_dirty.rs"]
 mod repair_test_flush_lost_dirty;
+
+#[cfg(test)]
+#[path = "repair_test_flush_threshold.rs"]
+mod repair_test_flush_threshold;
