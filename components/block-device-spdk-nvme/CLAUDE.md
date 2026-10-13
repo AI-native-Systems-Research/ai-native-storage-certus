@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is the `block-device-spdk-nvme` component of the **Certus** project — a generative domain-specific filesystem for inferencing workloads. This component provides a high-performance NVMe block device driver using SPDK for direct userspace NVMe controller access.
 
+**Design constraints:** read [DESIGN-CONSTRAINTS.md](DESIGN-CONSTRAINTS.md) before you change the actor thread, DMA buffer lifetime, flush or shutdown.
+
 Certus uses a component-based architecture inspired by COM, where components are developed independently and later integrated. The parent repo is a Rust workspace rooted at `../../Cargo.toml`.
 
 ## Build and Test Commands

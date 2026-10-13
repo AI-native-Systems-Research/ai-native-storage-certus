@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Dispatcher v1 — a dispatcher component for the Certus storage system with DRAM memory-tier caching. Provides the `IDispatcher` interface for GPU-to-SSD cache operations with LRU-managed DRAM pool. Built with the component-framework using `define_component!`.
 
+**Design constraints:** read [DESIGN-CONSTRAINTS.md](DESIGN-CONSTRAINTS.md) before you change drive placement, recovery, eviction, pins or the write-through order.
+
 ## Build and Test Commands
 
 This crate requires SPDK dependencies. It is a workspace member but not a default member.

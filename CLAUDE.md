@@ -66,7 +66,7 @@ Requires kernel boot params for IOMMU and hugepages, and `memlock` set to unlimi
 - **`lib/component-framework/`** — Core framework: `component-core` (traits, actor, channels, NUMA), `component-macros` (proc macros for `define_interface!`/`define_component!`), `component-framework` (facade re-export). Has its own CLAUDE.md.
 - **`components/interfaces/`** — Shared interface trait definitions (`IBlockDevice`, `IExtentManager`, `ILogger`, `IGreeter`, `ISPDKEnv`, `IEvictionPolicy`, `IRemoteLookup`). SPDK-dependent interfaces gated behind `features = ["spdk"]`.
 - **`components/block-device-spdk-nvme/`** — NVMe block device driver via SPDK userspace. Actor-per-controller model with shared-memory client channels. Has its own CLAUDE.md.
-- **`components/extent-manager/`** — Fixed-size extent allocator with crash-consistent on-disk layout (superblock + bitmap + records, 4KiB atomic writes). Has its own CLAUDE.md.
+- **`components/extent-manager/`** — Extent allocator (region-sharded buddy + slab allocator, variable-size two-phase reserve/publish) with checkpointed metadata: a superblock and two CRC-protected checkpoint copies on the metadata device or partition. See its `DESIGN-CONSTRAINTS.md`.
 - **`lib/spdk-sys/`** — Raw FFI bindings to SPDK C libraries (bindgen-generated).
 - **`components/spdk-env/`** — Safe Rust wrapper around SPDK environment init. Has its own CLAUDE.md.
 - **`components/eviction-policy-lru/`** — LRU eviction policy with multi-pool support. Used by memory-tier and dispatch-map for cache eviction decisions.
@@ -74,7 +74,7 @@ Requires kernel boot params for IOMMU and hugepages, and `memlock` set to unlimi
 - **`components/example-helloworld/`, `components/console-logger/`** — Example components.
 - **`apps/`** — Integrated applications (`helloworld-mainline`, `iops-benchmark`, `extent-benchmark`).
 - **`deps/`** — SPDK source and build scripts.
-- **`knowledge/`** — Internal wiki (component architecture, SPDK notes).
+- **`knowledge/`** — Internal wiki (component architecture, SPDK notes). **Read `knowledge/design-constraints.md` before you change data placement, the on-disk layout, restart recovery, CPU affinity or component boundaries.** It gives the rules that each change must obey, the rejected designs, and an index of the per-component `DESIGN-CONSTRAINTS.md` files.
 
 ### Component Model
 

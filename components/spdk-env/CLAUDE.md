@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is the `spdk-env` component of the **Certus** project — a generative domain-specific filesystem for inferencing workloads. This component provides the SPDK (Storage Performance Development Kit) environment and integration for the Certus system.
 
+**Design constraints:** read [DESIGN-CONSTRAINTS.md](DESIGN-CONSTRAINTS.md) before you change SPDK init, CPU affinity, `fini()` or `DmaBuffer` freeing.
+
 Certus uses a component-based architecture inspired by COM, where components are developed independently and later integrated. The parent repo is a Rust workspace rooted at `../../Cargo.toml`.
 
 ## Repository Context

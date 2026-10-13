@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 DispatchMap v0 — a dispatch map component for the Certus storage system. Provides the `IDispatchMap` interface with receptacles for `ILogger` and `IExtentManager`. Built with the component-framework using `define_component!`.
 
+**Design constraints:** read [DESIGN-CONSTRAINTS.md](DESIGN-CONSTRAINTS.md) before you change locking, references, eviction or recovery.
+
 ## Build and Test Commands
 
 This crate requires SPDK dependencies (via `IExtentManager`). It is a workspace member but not a default member.
