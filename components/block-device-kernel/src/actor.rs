@@ -107,6 +107,10 @@ pub struct KernelHandler {
     clients: HashMap<u64, ClientSession>,
     inflight: HashMap<u64, InflightOp>,
     next_handle: u64,
+    /// Keys of timed-out ops whose `AsyncCancel` could not yet be pushed
+    /// because the submission queue was full. Retried by
+    /// [`Self::submit_pending_cancels`] each poll cycle, oldest first.
+    pending_cancels: VecDeque<u64>,
     logger: Option<Arc<dyn ILogger + Send + Sync>>,
     shutdown_requested: bool,
     #[cfg(feature = "telemetry")]
@@ -128,6 +132,7 @@ impl KernelHandler {
             clients: HashMap::new(),
             inflight: HashMap::new(),
             next_handle: 1,
+            pending_cancels: VecDeque::new(),
             logger,
             shutdown_requested: false,
         }
@@ -148,6 +153,7 @@ impl KernelHandler {
             clients: HashMap::new(),
             inflight: HashMap::new(),
             next_handle: 1,
+            pending_cancels: VecDeque::new(),
             logger,
             shutdown_requested: false,
             telemetry,
@@ -814,6 +820,7 @@ impl KernelHandler {
 
     fn check_timeouts(&mut self) {
         if self.inflight.is_empty() {
+            self.submit_pending_cancels();
             return;
         }
 
@@ -831,23 +838,40 @@ impl KernelHandler {
             })
             .collect();
 
-        let had_timeouts = !timed_out.is_empty();
-
-        for (key, handle, client_id) in &timed_out {
-            self.inflight.remove(key);
-            self.send_completion(*client_id, Completion::Timeout { handle: *handle });
+        for (key, handle, client_id) in timed_out {
+            self.inflight.remove(&key);
+            self.send_completion(client_id, Completion::Timeout { handle });
+            self.pending_cancels.push_back(key);
         }
 
-        if had_timeouts {
-            for (key, _, _) in timed_out {
-                let cancel_sqe = opcode::AsyncCancel::new(key).build().user_data(0);
+        self.submit_pending_cancels();
+    }
+
+    /// Push an `AsyncCancel` for every queued timed-out op, oldest first.
+    ///
+    /// A failed push (submission queue full) must not drop the cancel, or the
+    /// kernel op would keep running untracked: the queued SQEs are handed to
+    /// the kernel with `submit()` to free slots and the push is retried once.
+    /// Whatever still does not fit stays queued for the next poll cycle.
+    fn submit_pending_cancels(&mut self) {
+        if self.pending_cancels.is_empty() {
+            return;
+        }
+        while let Some(&key) = self.pending_cancels.front() {
+            let cancel_sqe = opcode::AsyncCancel::new(key).build().user_data(0);
+            // SAFETY: SQE is valid.
+            let mut pushed = unsafe { self.ring.submission().push(&cancel_sqe).is_ok() };
+            if !pushed {
+                let _ = self.ring.submit();
                 // SAFETY: SQE is valid.
-                unsafe {
-                    let _ = self.ring.submission().push(&cancel_sqe);
-                }
+                pushed = unsafe { self.ring.submission().push(&cancel_sqe).is_ok() };
             }
-            let _ = self.ring.submit();
+            if !pushed {
+                break;
+            }
+            self.pending_cancels.pop_front();
         }
+        let _ = self.ring.submit();
     }
 
     /// Deliver a completion to a client without blocking the actor thread.
@@ -919,10 +943,14 @@ impl ActorHandler<ControlMessage> for KernelHandler {
         self.harvest_completions();
         self.check_timeouts();
 
-        !self.clients.is_empty() || !self.inflight.is_empty()
+        !self.clients.is_empty() || !self.inflight.is_empty() || !self.pending_cancels.is_empty()
     }
 }
 
 // SAFETY: KernelHandler is only used on the actor thread.
 // OwnedFd, IoUring, and the client channels are all Send.
 unsafe impl Send for KernelHandler {}
+
+#[cfg(test)]
+#[path = "repair_test_timeout_cancel.rs"]
+mod repair_test_timeout_cancel;
