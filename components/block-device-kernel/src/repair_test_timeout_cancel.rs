@@ -26,23 +26,39 @@ fn temp_backing_file() -> (std::path::PathBuf, OwnedFd) {
     (path, OwnedFd::from(file))
 }
 
-fn handler(fd: OwnedFd, path: std::path::PathBuf) -> KernelHandler {
+/// `None` when the kernel refuses io_uring (e.g. `kernel.io_uring_disabled=2`, the RHEL default).
+fn handler(fd: OwnedFd, path: std::path::PathBuf) -> Option<KernelHandler> {
     let config = DeviceConfig::new(path, 512, 8).expect("config");
-    let ring = IoUring::new(2).expect("io_uring");
+    let ring = match IoUring::new(2) {
+        Ok(ring) => ring,
+        Err(e) => {
+            eprintln!("SKIPPED: io_uring unavailable on this machine ({e})");
+            return None;
+        }
+    };
     #[cfg(not(feature = "telemetry"))]
     {
-        KernelHandler::new(fd, config, ring, None)
+        Some(KernelHandler::new(fd, config, ring, None))
     }
     #[cfg(feature = "telemetry")]
     {
-        KernelHandler::with_telemetry(fd, config, ring, None, Arc::new(TelemetryStats::new()))
+        Some(KernelHandler::with_telemetry(
+            fd,
+            config,
+            ring,
+            None,
+            Arc::new(TelemetryStats::new()),
+        ))
     }
 }
 
 #[test]
 fn timeout_with_full_submission_queue_still_submits_async_cancel() {
     let (path, fd) = temp_backing_file();
-    let mut h = handler(fd, path.clone());
+    let Some(mut h) = handler(fd, path.clone()) else {
+        let _ = std::fs::remove_file(&path);
+        return;
+    };
 
     // An async op (handle 1) whose deadline has already passed.
     let now = Instant::now();
