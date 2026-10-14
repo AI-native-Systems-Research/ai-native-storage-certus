@@ -1,9 +1,9 @@
 ---
 spec_sync_component: zyre
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-14T18:44:30Z
-spec_sync_git_commit: 85ae2a1f
-spec_sync_inputs_sha256: bf4b08adc528ea2a9c18d0bf7ae6da8f4e91fae7fe4cb2004d7f0a41cbcd96b5
+spec_sync_synced_at: 2026-10-14T21:37:07Z
+spec_sync_git_commit: f3e2329d
+spec_sync_inputs_sha256: e5fe862e817081503a4e2923ce3bf05e364acc4c02b17daae94f7e7d586b8eb3
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Re-stamp 2026-10-14 (transitive, merge of unstable 6f5743cc into this branch).** Only `components/interfaces` changed for this component (`DispatcherConfig::cold_staging_buf_bytes` default 4 -> 16 MiB, #550); `zyre` does not use it (grep over its src/ and specs/: 0 hits). This branch's full sync below stands; no re-analysis was needed.
