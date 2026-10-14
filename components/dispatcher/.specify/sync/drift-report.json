@@ -1,48 +1,38 @@
 {
-  "generated": "2026-10-08",
+  "generated": "2026-10-14",
   "project": "dispatcher",
   "spec": "001-dispatcher-cache-interface",
-  "branch": "opt/evolve-latency/s20261004-001925_PR507",
-  "baseline": "origin/unstable 7e53d5b5 (stamped d3209328; stamp re-verified equal to the spec-sync hash of the unstable worktree, and components/interfaces is unchanged on this branch)",
-  "method": "Delta analysis on a certified baseline: the only new inputs are this branch's dispatcher src/specs changes (ada87967 batch_lookup warm-sync deferral, 8825678d scatter-gather periodic-sync removal). Every FR/SC/scenario touching warm-stream sync, warm pins, batch_lookup ordering or the scatter-gather sync was located by grep over specs/** and re-checked against src/lib.rs and src/pipeline.rs.",
+  "branch": "fix/cold-staging-buf-16mib",
+  "baseline": "547107f3 (prior clean stamp d46a3c95; the only input changed between it and HEAD 8e12e49f is components/interfaces/src/idispatcher.rs cold_staging_buf_bytes default)",
+  "method": "Delta analysis on a certified baseline: the sole new input is the cold_staging_buf_bytes default (4 MiB -> 16 MiB, commit 8e12e49f). Every FR/SC/definition constraining the staging-buffer size was located by grep over specs/** (cold_staging, 4 MiB, 256 MiB, 8 MiB, per-block transfer) and re-checked against components/interfaces/src/idispatcher.rs and components/dispatcher/src/lib.rs serve_cold_staged.",
   "summary": {
     "specs_analyzed": 1,
-    "findings": 2,
-    "resolved": 2,
+    "findings": 1,
+    "resolved": 1,
     "open": 0
   },
   "aligned": [
-    "FR-019 (scatter-gather: no periodic sync, one final dual sync; src/pipeline.rs:1124-1125)",
-    "FR-061 (poll loop MUST NOT host-sync pipe streams mid-batch)",
-    "Pipelined Reader entity",
-    "Q&A: How does the pipelined reader work?"
+    "FR-053 (StagingPool buffers of cold_staging_buf_bytes each; parameterized, no hardcoded size)",
+    "FR-011 spec 002 (cold-load staging attributed SSD; size-independent)",
+    "cold-load-staging definitions (spec 001:330, spec 002:437) carry no numeric footprint"
   ],
   "drifted": [
     {
-      "requirement": "FR-039 step (2)",
-      "direction": "BACKFILL",
+      "requirement": "FR-033",
+      "direction": "code-authoritative",
       "severity": "moderate",
-      "spec_text": "(2) for MemoryTier hits, issues per-region memcpy_h2d_async H2D copies on the device's warm stream and performs a single deferred stream_synchronize after all hot-path copies are issued",
-      "actual": "warm copies only queued; single warm stream_synchronize deferred until after the cold block (steps 4-5); warm read pins released only after it; then remote lookup (FR-045)",
-      "location": "src/lib.rs:2742-2756",
-      "commit": "ada87967",
-      "resolved": true
-    },
-    {
-      "requirement": "US-11 scenario 2",
-      "direction": "BACKFILL",
-      "severity": "minor",
-      "spec_text": "hot entries are served inline without waiting for cold promotions to complete",
-      "actual": "hot H2D copies queued before cold prep, not waited on during cold promotion; one warm-stream sync after the cold block confirms them; new scenario 6 for the ordering",
-      "location": "src/lib.rs:6064 (test mixed_batch_defers_warm_sync_past_cold_block)",
-      "commit": "ada87967",
+      "spec_text": "cold_staging_buf_bytes (usize, default 4 MiB = 4 × 1024 × 1024)",
+      "actual": "cold_staging_buf_bytes: 16 * 1024 * 1024 (default 16 MiB)",
+      "location": "components/interfaces/src/idispatcher.rs:125",
+      "guard": "serve_cold_staged serves a tier-full cold load only when total_bytes <= sp.buf_bytes() (src/lib.rs:777,934); an 8 MiB per-worker offload block never fit a 4 MiB buffer, so every tier-full cold load returned AllocationFailed -> vLLM EngineDeadError",
+      "commit": "8e12e49f",
       "resolved": true
     }
   ],
   "unspecced": [],
   "conflicts": [],
   "drift_status": "clean",
-  "inputs_sha256": "c82a161a74dc787aa453df828ded7fca9d99e3769ad6f6951262ab7a50d11876",
-  "git_commit": "f88aed53",
-  "synced_at": "2026-10-08T23:52:37Z"
+  "inputs_sha256": "470456e756d93ce3a5c2be26020707151b30872a57660fe899b23a5e0eed7bc8",
+  "git_commit": "8e12e49f",
+  "synced_at": "2026-10-14T20:19:28Z"
 }

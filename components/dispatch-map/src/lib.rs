@@ -47,16 +47,25 @@ define_component! {
 
 impl DispatchMapComponent {
     /// Get or create the eviction pool. Creates on first call (during initialize).
-    fn get_pool_id(&self) -> interfaces::PoolId {
+    /// Errors with `NotInitialized` if no pool exists yet and no eviction policy is connected.
+    fn get_pool_id(&self) -> Result<interfaces::PoolId, DispatchMapError> {
         let mut pool_id = self.state.pool_id.lock().unwrap();
         if let Some(id) = *pool_id {
-            return id;
+            return Ok(id);
         }
-        let ep = self.eviction_policy.get().unwrap();
+        let ep = self
+            .eviction_policy
+            .get()
+            .map_err(|_| no_eviction_policy())?;
         let id = ep.create_pool();
         *pool_id = Some(id);
-        id
+        Ok(id)
     }
+}
+
+/// The error returned when an operation needs the unconnected `eviction_policy` receptacle.
+fn no_eviction_policy() -> DispatchMapError {
+    DispatchMapError::NotInitialized("eviction_policy receptacle not connected".into())
 }
 
 impl IDispatchMap for DispatchMapComponent {
@@ -65,10 +74,11 @@ impl IDispatchMap for DispatchMapComponent {
     /// counts, restoring the map to a consistent view of committed storage.
     /// If no extent manager is bound, starts with an empty map.
     fn initialize(&self) -> Result<(), DispatchMapError> {
-        let pool_id = self.get_pool_id();
-        let ep = self.eviction_policy.get().map_err(|_| {
-            DispatchMapError::NotInitialized("eviction_policy receptacle not connected".into())
-        })?;
+        let pool_id = self.get_pool_id()?;
+        let ep = self
+            .eviction_policy
+            .get()
+            .map_err(|_| no_eviction_policy())?;
 
         let em = match self.extent_manager.get() {
             Ok(em) => em,
@@ -370,7 +380,9 @@ impl IDispatchMap for DispatchMapComponent {
     }
 
     fn oldest_keys(&self, n: usize) -> Vec<CacheKey> {
-        let pool_id = self.get_pool_id();
+        let Ok(pool_id) = self.get_pool_id() else {
+            return Vec::new();
+        };
         if let Ok(ep) = self.eviction_policy.get() {
             ep.get_eviction_candidates(pool_id, n)
         } else {
@@ -388,8 +400,11 @@ impl IDispatchMap for DispatchMapComponent {
             return Err(DispatchMapError::InvalidSize);
         }
 
-        let pool_id = self.get_pool_id();
-        let ep = self.eviction_policy.get().unwrap();
+        let pool_id = self.get_pool_id()?;
+        let ep = self
+            .eviction_policy
+            .get()
+            .map_err(|_| no_eviction_policy())?;
 
         let mut inner = self.state.inner.lock().unwrap();
         if inner.entries.contains_key(&key) {
@@ -570,8 +585,11 @@ impl IDispatchMap for DispatchMapComponent {
         offset: u64,
         size_blocks: u32,
     ) -> Result<(), DispatchMapError> {
-        let pool_id = self.get_pool_id();
-        let ep = self.eviction_policy.get().unwrap();
+        let pool_id = self.get_pool_id()?;
+        let ep = self
+            .eviction_policy
+            .get()
+            .map_err(|_| no_eviction_policy())?;
 
         let mut inner = self.state.inner.lock().unwrap();
         if inner.entries.contains_key(&key) {
@@ -615,6 +633,10 @@ impl IDispatchMap for DispatchMapComponent {
             .filter(|&c| c != 0)
     }
 }
+
+#[cfg(test)]
+#[path = "repair_test_get_pool_id.rs"]
+mod repair_test_get_pool_id;
 
 #[cfg(test)]
 mod tests {
