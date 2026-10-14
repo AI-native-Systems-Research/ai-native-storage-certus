@@ -1,9 +1,9 @@
 ---
 spec_sync_component: block-device-kernel
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-14T18:44:31Z
-spec_sync_git_commit: 5d123390
-spec_sync_inputs_sha256: eaef6d6ee804bf2e3f5108b7a29dac7e522bef5e5f9141a8e076c38c9c07b5b3
+spec_sync_synced_at: 2026-10-14T21:37:08Z
+spec_sync_git_commit: d1f6f8c1
+spec_sync_inputs_sha256: cdcfb6efea0894246a7c3490fa2343d9acb66b47d2951111e00a27f7bbd72036
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Re-stamp 2026-10-14 (transitive, merge of unstable 6f5743cc into this branch).** Only `components/interfaces` changed for this component (`DispatcherConfig::cold_staging_buf_bytes` default 4 -> 16 MiB, #550); `block-device-kernel` does not use it (grep over its src/ and specs/: 0 hits). This branch's full sync below stands; no re-analysis was needed.
