@@ -21,6 +21,13 @@ back RETRY / HIT_PENDING (async fs probe, secondary->CPU promotion) are retried
 across scheduler steps (``on_schedule_end``), exactly as the connector does.
 That retry wait is reported separately as the ``lookup_wait`` phase.
 
+Call order: a request's lookups come first and its touch() after them (after
+every lookup pass, including the ones deferred on RETRY), as vLLM's offloading
+scheduler does since 0.21 (vLLM PR #41228; still so in 0.30). --lookup-order
+touch-first touches once before the lookups instead (vLLM <= 0.20 and this
+benchmark's earlier behaviour). prefix-miss retries each key in place and
+touches once after the whole scan. Store-only paths touch before prepare_store.
+
 Output (report + CSV columns) matches certus-connector-bench so the two
 backends can be compared side by side.
 
@@ -123,6 +130,13 @@ DEFAULT_LAYERS = 32
 POLL_S = 0.0001
 # Stand-in for one engine step (model forward) between scheduler retries.
 STEP_BACKOFF_S = 0.001
+# Order of the lookup() and touch() calls for one request's keys (--lookup-order).
+# vLLM's offloading scheduler (get_num_new_matched_tokens) looks up first and
+# touches after since 0.21 (vLLM PR #41228, still so in 0.30, including the
+# calls it defers on RETRY); vLLM <= 0.20 touched first.
+LOOKUP_FIRST = "lookup-first"
+TOUCH_FIRST = "touch-first"
+LOOKUP_ORDERS = (LOOKUP_FIRST, TOUCH_FIRST)
 
 
 def parse_size(s: str) -> int:
@@ -523,6 +537,9 @@ class CputierStack:
         # Throughput counts every rank's shard: each rank moves block_bytes.
         self.chunk_bytes = block_bytes * self.bpc * world_size
         self.has_secondary = args.spec == "tiering" and fs_root is not None
+        # True: touch() before a request's lookups (vLLM <= 0.20); False:
+        # after every lookup pass (vLLM >= 0.21). See resolve_lookups().
+        self.touch_first = args.lookup_order == TOUCH_FIRST
         self.engine_id = f"cputier-bench-{os.getpid()}-{next(self._instances)}"
 
         config = build_offloading_config(args, block_bytes, fs_root, self.engine_id,
@@ -690,12 +707,19 @@ def resolve_lookups(
     names: dict | None = None,
     timeout: float = 60.0,
 ) -> tuple[list[bytes], int]:
-    """Per-key lookup, retried across scheduler steps until every key resolves.
+    """Per-key lookup, retried across scheduler steps until every key resolves,
+    with the request's touch(keys) in the order of ``stack.touch_first``.
 
     The first pass is the ``lookup`` phase. A primary miss consults the fs tier:
     an async probe returns RETRY until the next on_schedule_end() flushes it,
     and a disk hit queues a promotion and returns HIT_PENDING until the
     promotion lands in the CPU tier. Re-stepping until then is ``lookup_wait``.
+
+    touch: with ``stack.touch_first`` (vLLM <= 0.20) it runs once, before the
+    first pass. Otherwise (vLLM >= 0.21) it runs after every pass, as
+    get_num_new_matched_tokens calls _touch() after _lookup() even when it
+    defers the request on RETRY. Only the first touch is the ``touch`` phase;
+    later ones fall inside ``lookup_wait``.
 
     With ``prefix_stop`` it behaves like vLLM's maximal-prefix lookup: the scan
     stops at the first miss. Returns (hits, misses).
@@ -704,6 +728,10 @@ def resolve_lookups(
     status: list[bool | None] = [None] * len(keys)
     waited: set[int] = set()
     steps = 0
+    if stack.touch_first:
+        t0 = time.perf_counter()
+        stack.touch(keys, ctx)
+        _rec(phases, n.get("touch", "touch"), t0)
     t0 = time.perf_counter()
     t_wait = t0
     first = True
@@ -728,6 +756,12 @@ def resolve_lookups(
                     break
         if first:
             _rec(phases, n.get("lookup", "lookup"), t0)
+        if not stack.touch_first:
+            t_touch = time.perf_counter()
+            stack.touch(keys, ctx)
+            if first:
+                _rec(phases, n.get("touch", "touch"), t_touch)
+        if first:
             first = False
             t_wait = time.perf_counter()
         if not pending:
@@ -808,7 +842,8 @@ def load_batch(
     stack: CputierStack, keys: list[bytes],
     phases: dict | None = None, names: dict | None = None,
 ) -> tuple[int, int]:
-    """One request: touch → lookup(+wait) → prepare_load → submit → finish → complete_load.
+    """One request: lookup(+wait) with touch (see resolve_lookups) → prepare_load
+    → submit → finish → complete_load.
 
     Returns (loaded, misses).
     """
@@ -816,10 +851,6 @@ def load_batch(
     t0 = time.perf_counter()
     ctx = stack.new_request()
     _rec(phases, n.get("new_request", "new_request"), t0)
-
-    t0 = time.perf_counter()
-    stack.touch(keys, ctx)
-    _rec(phases, n.get("touch", "touch"), t0)
 
     hits, misses = resolve_lookups(stack, keys, ctx, phases=phases, names=names)
 
@@ -914,7 +945,8 @@ def bench_load_lifecycle(
     stack: CputierStack, keys: list[bytes], batch_size: int, min_duration: float,
     *, cold: bool = False, label: str | None = None,
 ) -> BenchResult:
-    """Full load lifecycle: touch → lookup → prepare_load → submit_load → get_finished → complete_load.
+    """Full load lifecycle: lookup → touch (touch → lookup with --lookup-order
+    touch-first) → prepare_load → submit_load → get_finished → complete_load.
 
     Warm: keys resident in the CPU tier (pinned host RAM → GPU).
     Cold: the CPU tier is emptied before every pass, so each block is found on
@@ -949,7 +981,8 @@ def bench_load_lifecycle(
     wall = time.perf_counter() - wall_start - excluded
     result = BenchResult(
         label=label or (f"{label_temp} Load Lifecycle "
-                         f"(touch → lookup → prepare → submit → finish → complete)"),
+                         f"({'touch → lookup' if stack.touch_first else 'lookup → touch'} "
+                         f"→ prepare → submit → finish → complete)"),
         total_blocks=total_blocks,
         total_bytes=total_blocks * stack.chunk_bytes,
         wall_seconds=wall,
@@ -1120,14 +1153,15 @@ def bench_pipelined(
             batch_keys = pass_keys[i : i + batch_size]
             t0 = time.perf_counter()
             ctx = stack.new_request()
-            stack.touch(batch_keys, ctx)
             if is_store:
+                stack.touch(batch_keys, ctx)
                 result = stack.prepare_store(batch_keys, ctx)
                 if result is None or not result.keys_to_store:
                     stack.end_request(ctx)
                     continue
                 done_keys, spec = result.keys_to_store, result.store_spec
             else:
+                # Touches in --lookup-order (see resolve_lookups).
                 done_keys, _ = resolve_lookups(stack, batch_keys, ctx)
                 if not done_keys:
                     stack.end_request(ctx)
@@ -1181,8 +1215,9 @@ def bench_prefix_miss(
 ) -> BenchResult:
     """Measure the cost of vLLM's maximal-prefix lookup at varying hit ratios.
 
-    Pre-stores ``hit_ratio`` of the keys, then repeatedly runs touch(batch) →
-    per-key lookup breaking at the first miss → load the prefix. With an fs
+    Pre-stores ``hit_ratio`` of the keys, then repeatedly runs a per-key lookup
+    breaking at the first miss → touch(batch) → load the prefix (touch(batch)
+    first with --lookup-order touch-first). With an fs
     tier, a key absent from the CPU tier is not a MISS straight away: the
     async disk probe returns RETRY for one scheduler step first, so
     ``lookup_miss`` includes that round-trip.
@@ -1204,9 +1239,10 @@ def bench_prefix_miss(
             batch = all_keys[batch_start : batch_start + batch_size]
             ctx = stack.new_request()
 
-            t0 = time.perf_counter()
-            stack.touch(batch, ctx)
-            _rec(phases, "touch", t0)
+            if stack.touch_first:
+                t0 = time.perf_counter()
+                stack.touch(batch, ctx)
+                _rec(phases, "touch", t0)
 
             # Maximal prefix scan: per-key lookup, break at first miss; a
             # RETRY/HIT_PENDING key is re-asked after a scheduler step.
@@ -1227,6 +1263,12 @@ def bench_prefix_miss(
                     _rec(phases, "lookup_miss", t_lk)
                     break
             _rec(phases, "prefix_scan", t_scan)
+
+            # vLLM >= 0.21 touches the request's keys after its lookups.
+            if not stack.touch_first:
+                t0 = time.perf_counter()
+                stack.touch(batch, ctx)
+                _rec(phases, "touch", t0)
 
             total_scans += 1
             total_prefix_hits += len(prefix_hits)
@@ -1379,9 +1421,11 @@ def bench_scheduler_step(
 
     Same call pattern as certus-connector-bench's scheduler-step mode, so the
     two backends compare directly:
-      - Per-request maximal prefix scan (break on the first miss). The hits are
-        pinned right after the request's lookup, like the connector's
-        update_state_after_alloc(), before later requests' stores can evict them.
+      - Per-request maximal prefix scan (break on the first miss), then touch()
+        of the request's keys (vLLM >= 0.21; touch first with --lookup-order
+        touch-first). The hits are pinned right after the request's lookup,
+        like the connector's update_state_after_alloc(), before later
+        requests' stores can evict them.
       - Sessions share one prefix pool and diverge at geometric points, so
         short prefixes miss more (like production prefix caching).
       - Loads and stores are deduplicated across the step's requests.
@@ -1450,7 +1494,7 @@ def bench_scheduler_step(
             req_keys = session_prefixes[s_idx] + suffix
             ctx = stack.new_request()
             t0 = time.perf_counter()
-            stack.touch(req_keys, ctx)
+            # Lookups and the request's touch, in --lookup-order (see resolve_lookups).
             prefix_hits, _ = resolve_lookups(stack, req_keys, ctx, prefix_stop=True)
             t_touch_lookup += time.perf_counter() - t0
 
@@ -1775,6 +1819,10 @@ def main():
                         help="(scheduler-step) Requests per scheduler step")
     parser.add_argument("--num-sessions", type=int, default=32,
                         help="(scheduler-step) Distinct conversations in the pool")
+    parser.add_argument("--lookup-order", choices=LOOKUP_ORDERS, default=LOOKUP_FIRST,
+                        help="Order of a request's lookup() and touch() calls, in every "
+                             "mode that does both: lookup-first (default) is vLLM >= 0.21 "
+                             "(vLLM PR #41228, still so in 0.30); touch-first is vLLM <= 0.20")
     args = parser.parse_args()
 
     if args.gpus:
@@ -1848,7 +1896,7 @@ def main():
           f"layers={args.layers}  blocks_per_chunk={args.blocks_per_chunk}")
     print(f"  min_duration={args.min_duration}s  "
           f"fs_threads=r{args.fs_read_threads}/w{args.fs_write_threads}  "
-          f"eviction_policy={args.eviction_policy}")
+          f"eviction_policy={args.eviction_policy}  lookup_order={args.lookup_order}")
 
     max_blocks = max(args.num_blocks, args.working_set, args.bs)
     if mode == "pattern":
@@ -1881,6 +1929,7 @@ def main():
             "fs_read_threads": args.fs_read_threads,
             "fs_write_threads": args.fs_write_threads,
             "working_set": args.working_set,
+            "lookup_order": args.lookup_order,
             "vllm_version": vllm.__version__,
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
         }
