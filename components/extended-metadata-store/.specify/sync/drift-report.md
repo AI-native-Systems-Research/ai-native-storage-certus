@@ -1,9 +1,9 @@
 ---
 spec_sync_component: extended-metadata-store
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-14T18:44:32Z
-spec_sync_git_commit: 2970e0a8
-spec_sync_inputs_sha256: 9ddc85a6aaab5b327ddbd582ef724f88e934c6063c70c75213086c71155cd96e
+spec_sync_synced_at: 2026-10-14T21:37:10Z
+spec_sync_git_commit: 6f781e85
+spec_sync_inputs_sha256: 43801741b23a2623a2ac240c5b16ca60a5191ca5523fde7068c5e3a09e3e226d
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Re-stamp 2026-10-14 (transitive, merge of unstable 6f5743cc into this branch).** Only `components/interfaces` changed for this component (`DispatcherConfig::cold_staging_buf_bytes` default 4 -> 16 MiB, #550); `extended-metadata-store` does not use it (grep over its src/ and specs/: 0 hits). This branch's full sync below stands; no re-analysis was needed.
