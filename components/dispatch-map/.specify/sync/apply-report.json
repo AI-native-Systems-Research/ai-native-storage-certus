@@ -1,73 +1,200 @@
 {
-  "generated": "2026-08-20",
-  "phase": "B",
-  "based_on": "components/dispatch-map/.specify/sync/drift-report.json",
-  "policy": ".specify/sync/PHASE_B_POLICY.md",
-  "backups": [
-    ".specify/sync/backups/specs/001-dispatch-map/spec.md.bak"
+  "generated": "2026-10-14",
+  "applied_at": "2026-10-14T18:11:40Z",
+  "branch": "fix/dispatch-map-get-pool-id-panic",
+  "head": "0ca07fca",
+  "mode": "batch",
+  "based_on": [
+    "components/dispatch-map/.specify/sync/proposals.json",
+    "components/dispatch-map/.specify/sync/drift-report.json"
   ],
+  "approved_by": "Cornel Constantinescu, 2026-10-14",
+  "backups": [
+    ".specify/sync/backups/20261014T181140Z/specs/001-dispatch-map/spec.md",
+    ".specify/sync/backups/20261014T181140Z/specs/001-dispatch-map/data-model.md",
+    ".specify/sync/backups/20261014T181140Z/specs/001-dispatch-map/contracts/idispatch_map.md"
+  ],
+  "code_changed": false,
   "specs_updated": [
     {
+      "proposal": "P1",
+      "type": "BACKFILL",
       "spec": "001-dispatch-map",
-      "requirement": "FR-029",
-      "change_type": "added",
-      "detail": "BACKFILL-UNSPECCED: per-entry reuse_count (AtomicU32) read-hit counter described as built (init 0; +1 relaxed on lookup/take_read/downgrade_reference; internal Debug-only, no IDispatchMap accessor)."
+      "requirement": "FR-003",
+      "file": "specs/001-dispatch-map/spec.md",
+      "line": 242,
+      "before": "- **FR-003**: System MUST provide `create_memory_tier_entry(key, pointer, size)` that creates an entry with `MemoryTier` location (accepting a `*mut u8` pointer and `u32` size in bytes), records the entry in the map with a write reference of 1, and registers it with the eviction policy. MUST return `AlreadyExists` if the key is already present.",
+      "after": "- **FR-003**: System MUST provide `create_memory_tier_entry(key, pointer, size)` that creates an entry with `MemoryTier` location (accepting a `*mut u8` pointer and `u32` size in bytes), records the entry in the map with a write reference of 1, and registers it with the eviction policy. MUST return `InvalidSize` if `size == 0`, `NotInitialized` if no `IEvictionPolicy` is connected, and `AlreadyExists` if the key is already present (checked in that order); on any error no entry is recorded.",
+      "applied_at": "2026-10-14T18:11:40Z"
     },
     {
+      "proposal": "P1",
+      "type": "BACKFILL",
       "spec": "001-dispatch-map",
-      "requirement": "Key Entities / Dispatch Entry",
-      "change_type": "modified",
-      "detail": "Added the reuse_count (AtomicU32) field to the entry layout description."
+      "requirement": "FR-003",
+      "file": "specs/001-dispatch-map/contracts/idispatch_map.md",
+      "line": 45,
+      "before": "| `create_memory_tier_entry` | `(&self, key: CacheKey, pointer: *mut u8, size: u32) -> Result<(), DispatchMapError>` | Create a `MemoryTier` entry, write_ref=1, registers with `IEvictionPolicy`. Error on `size == 0` (`InvalidSize`) or key exists (`AlreadyExists`). |",
+      "after": "| `create_memory_tier_entry` | `(&self, key: CacheKey, pointer: *mut u8, size: u32) -> Result<(), DispatchMapError>` | Create a `MemoryTier` entry, write_ref=1, registers with `IEvictionPolicy`. Error on `size == 0` (`InvalidSize`), no `IEvictionPolicy` connected (`NotInitialized`), or key exists (`AlreadyExists`). No entry is recorded on error. |",
+      "applied_at": "2026-10-14T18:11:40Z"
     },
     {
+      "proposal": "P2",
+      "type": "BACKFILL",
       "spec": "001-dispatch-map",
-      "requirement": "US2/AS6",
-      "change_type": "added",
-      "detail": "lookup success increments reuse_count (internal, Debug-observable)."
+      "requirement": "FR-024",
+      "file": "specs/001-dispatch-map/spec.md",
+      "line": 263,
+      "before": "- **FR-024**: System MUST provide `recover_extent(key, offset, size_blocks)` that directly inserts a `BlockDevice` entry with the given offset and size (in 4KiB blocks), registers it with the eviction policy, and returns success. MUST return `AlreadyExists` if the key is already present. Used for incremental recovery (inserting individual extents) as an alternative to the bulk `initialize()` walk via `IExtentManager::for_each_extent`.",
+      "after": "- **FR-024**: System MUST provide `recover_extent(key, offset, size_blocks)` that directly inserts a `BlockDevice` entry with the given offset and size (in 4KiB blocks), registers it with the eviction policy, and returns success. MUST return `NotInitialized` if no `IEvictionPolicy` is connected and `AlreadyExists` if the key is already present; on either error no entry is recorded. Used for incremental recovery (inserting individual extents) as an alternative to the bulk `initialize()` walk via `IExtentManager::for_each_extent`.",
+      "applied_at": "2026-10-14T18:11:40Z"
     },
     {
+      "proposal": "P2",
+      "type": "BACKFILL",
       "spec": "001-dispatch-map",
-      "requirement": "US4/AS9",
-      "change_type": "added",
-      "detail": "take_read/downgrade_reference increment reuse_count; take_write/release_read/release_write do not."
+      "requirement": "FR-024",
+      "file": "specs/001-dispatch-map/contracts/idispatch_map.md",
+      "line": 60,
+      "before": "| `recover_extent` | `(&self, key: CacheKey, offset: u64, size_blocks: u32) -> Result<(), DispatchMapError>` | Directly inserts a `BlockDevice` entry and registers it with `IEvictionPolicy`, for incremental recovery. Error (`AlreadyExists`) if key already present. |",
+      "after": "| `recover_extent` | `(&self, key: CacheKey, offset: u64, size_blocks: u32) -> Result<(), DispatchMapError>` | Directly inserts a `BlockDevice` entry and registers it with `IEvictionPolicy`, for incremental recovery. Error (`NotInitialized`) if no `IEvictionPolicy` is connected; error (`AlreadyExists`) if key already present. No entry is recorded on error. |",
+      "applied_at": "2026-10-14T18:11:40Z"
     },
     {
+      "proposal": "P3",
+      "type": "BACKFILL",
       "spec": "001-dispatch-map",
-      "requirement": "header/Last Synced",
-      "change_type": "modified",
-      "detail": "Updated Last Synced to 2026-08-20 (Phase B)."
+      "requirement": "FR-017",
+      "file": "specs/001-dispatch-map/spec.md",
+      "line": 256,
+      "before": "- **FR-017**: System MUST provide `oldest_keys(n)` that returns up to `n` keys ordered oldest-first by delegating to `IEvictionPolicy::get_eviction_candidates(pool, n)`. Used by the dispatcher's eviction logic to identify victim entries. MUST be thread-safe.",
+      "after": "- **FR-017**: System MUST provide `oldest_keys(n)` that returns up to `n` keys ordered oldest-first by delegating to `IEvictionPolicy::get_eviction_candidates(pool, n)`. Used by the dispatcher's eviction logic to identify victim entries. MUST be thread-safe. If no `IEvictionPolicy` is connected, it MUST return an empty list rather than panic (the signature has no error channel, so callers cannot distinguish this from an empty map).",
+      "applied_at": "2026-10-14T18:11:40Z"
+    },
+    {
+      "proposal": "P3",
+      "type": "BACKFILL",
+      "spec": "001-dispatch-map",
+      "requirement": "FR-017",
+      "file": "specs/001-dispatch-map/contracts/idispatch_map.md",
+      "line": 58,
+      "before": "| `oldest_keys` | `(&self, n: usize) -> Vec<CacheKey>` | Delegates to `IEvictionPolicy::get_eviction_candidates(pool, n)`; returns up to `n` keys oldest-first. Used by the dispatcher's eviction logic to select victims. |",
+      "after": "| `oldest_keys` | `(&self, n: usize) -> Vec<CacheKey>` | Delegates to `IEvictionPolicy::get_eviction_candidates(pool, n)`; returns up to `n` keys oldest-first. Used by the dispatcher's eviction logic to select victims. Returns an empty list if no `IEvictionPolicy` is connected. |",
+      "applied_at": "2026-10-14T18:11:40Z"
+    },
+    {
+      "proposal": "P4",
+      "type": "BACKFILL",
+      "spec": "001-dispatch-map",
+      "requirement": "FR-012 (data-model error table)",
+      "file": "specs/001-dispatch-map/data-model.md",
+      "line": 82,
+      "before": "| NotInitialized | msg: String | Reserved; not currently returned (`initialize()` errors via a missing-`IEvictionPolicy` failure instead) |",
+      "after": "| NotInitialized | msg: String | `initialize`, `create_memory_tier_entry`, or `recover_extent` called with no `IEvictionPolicy` connected |",
+      "applied_at": "2026-10-14T18:11:40Z"
+    },
+    {
+      "proposal": "P5",
+      "type": "BACKFILL",
+      "spec": "001-dispatch-map",
+      "requirement": "FR-026",
+      "file": "specs/001-dispatch-map/contracts/idispatch_map.md",
+      "line": 49,
+      "before": "| `try_evict_to_block` | `(&self, key: CacheKey) -> Result<(), DispatchMapError>` | Atomically (single lock hold) checks evictability — `MemoryTier` with `ssd_offset: Some(_)` and `read_ref == 0 && write_ref == 0` — and transitions to `BlockDevice { offset }`. Error on `KeyNotFound`, or `InvalidState` if not evictable (active refs, no `ssd_offset`, or not `MemoryTier`). No partial state change on error. |",
+      "after": "| `try_evict_to_block` | `(&self, key: CacheKey) -> Result<(), DispatchMapError>` | Atomically (single lock hold) checks evictability — `MemoryTier` with `ssd_offset: Some(_)` and `read_ref == 0 && write_ref == 0` — and transitions to `BlockDevice { offset }`. Error on `KeyNotFound`, `ActiveReferences` if a read or write reference is held, or `InvalidState` if otherwise not evictable (no `ssd_offset`, or not `MemoryTier`). No partial state change on error. |",
+      "applied_at": "2026-10-14T18:11:40Z"
+    },
+    {
+      "proposal": "P5",
+      "type": "BACKFILL",
+      "spec": "001-dispatch-map",
+      "requirement": "FR-026",
+      "file": "specs/001-dispatch-map/data-model.md",
+      "line": 78,
+      "before": "| ActiveReferences | key: CacheKey | `remove` while refs > 0 |",
+      "after": "| ActiveReferences | key: CacheKey | `remove` or `try_evict_to_block` while refs > 0 |",
+      "applied_at": "2026-10-14T18:11:40Z"
+    },
+    {
+      "proposal": "P5",
+      "type": "BACKFILL",
+      "spec": "001-dispatch-map",
+      "requirement": "FR-026",
+      "file": "specs/001-dispatch-map/data-model.md",
+      "line": 86,
+      "before": "| InvalidState | msg: String | `convert_to_storage`/`convert_memory_tier_to_block` on a non-matching entry state, or `promote_block_to_memory_tier`/`try_evict_to_block` preconditions not met |",
+      "after": "| InvalidState | msg: String | `convert_to_storage`/`convert_memory_tier_to_block` on a non-matching entry state, `promote_block_to_memory_tier` on a `MemoryTier` entry, or `try_evict_to_block` on an unreferenced entry with no `ssd_offset` or not in `MemoryTier` state |",
+      "applied_at": "2026-10-14T18:11:40Z"
+    },
+    {
+      "proposal": "P10",
+      "type": "SUPERSEDE",
+      "spec": "001-dispatch-map",
+      "requirement": "spec.md Last Synced status notes",
+      "file": "specs/001-dispatch-map/spec.md",
+      "insert_after_line": 10,
+      "before": null,
+      "after": "**Last Synced**: 2026-10-14 — branch `fix/dispatch-map-get-pool-id-panic`. CODE: the FR-012 align is resolved — with no `IEvictionPolicy` connected, `initialize`, `create_memory_tier_entry` and `recover_extent` return `NotInitialized` and `oldest_keys` returns an empty list (previously all four panicked). FR-003/FR-017/FR-024, the contract and the data-model now list these outcomes, and the contract/data-model are brought in line with the 2026-10-09 `ActiveReferences` change to `try_evict_to_block`. Remaining code-side aligns: FR-003/US1-AS3 null pointer; a stale cached pool id makes `track(...).unwrap()` panic under the map lock after `eviction_policy` is rebound; `entry_size` `u32` overflow (FR-023).",
+      "note": "Earlier dated Last Synced notes kept as history; no successor spec exists, so no superseded_by field was added.",
+      "applied_at": "2026-10-14T18:11:40Z"
     }
   ],
+  "new_specs_created": [],
   "align_tasks_generated": [
     {
-      "spec": "001-dispatch-map",
-      "requirement": "FR-012",
-      "location": "src/lib.rs:55",
-      "summary": "initialize() must return Err(NotInitialized) instead of panicking (eviction_policy.get().unwrap()) when IEvictionPolicy is unbound."
+      "proposal": "P6",
+      "requirement": "FR-003 / US1-AS3 / Edge Cases (null pointer)",
+      "location": "src/lib.rs:393-439",
+      "task": "existing task refreshed",
+      "effort": "small",
+      "approval_note": "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR"
     },
     {
-      "spec": "001-dispatch-map",
-      "requirement": "FR-003/US1-AS3",
-      "location": "src/lib.rs:381",
-      "summary": "Add a null-pointer guard to create_memory_tier_entry (new DispatchMapError::NullPointer variant); reject nulls before recording an entry."
-    }
-  ],
-  "unspecced_backfilled": [
+      "proposal": "P7",
+      "requirement": "no-panics rule / FR-002 / FR-012 (stale cached pool id)",
+      "location": "src/lib.rs:52-62,101-103,414,598",
+      "task": "new",
+      "effort": "medium",
+      "approval_note": "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR"
+    },
     {
-      "feature": "reuse_count: AtomicU32 per-entry read-hit counter",
-      "location": "src/entry.rs:37; src/lib.rs:142-143, 220-222, 313-315",
-      "resolution": "Backfilled as FR-029 + Key Entities update + US2/AS6 & US4/AS9 acceptance scenarios."
+      "proposal": "P8",
+      "requirement": "FR-012 (test coverage)",
+      "location": "src/lib.rs:76-81; src/repair_test_get_pool_id.rs",
+      "task": "new (test only)",
+      "effort": "small",
+      "approval_note": "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR"
+    },
+    {
+      "proposal": "P9",
+      "requirement": "FR-023 (entry_size u32 overflow)",
+      "location": "src/lib.rs:379",
+      "task": "new",
+      "effort": "small",
+      "approval_note": "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR"
     }
   ],
-  "resolved": [],
-  "human_decision": [],
+  "align_tasks_updated": [
+    {
+      "requirement": "FR-012",
+      "change": "status line added; criteria 1 and 3 checked (c877b74e); criterion 2 delegated to the P8 task"
+    }
+  ],
+  "open_items": [],
+  "not_applied": [],
   "counts": {
-    "backfill_applied": 0,
-    "backfill_unspecced_applied": 1,
-    "align_tasks": 2,
-    "resolved": 0,
-    "human_decision": 0,
-    "spec_md_files_edited": 1,
-    "spec_md_files_backed_up": 1
-  }
+    "proposals_total": 10,
+    "approved": 10,
+    "backfill_applied": 5,
+    "supersede_applied": 1,
+    "new_spec_created": 0,
+    "align_tasks": 4,
+    "open_unapproved_with_note": 0,
+    "text_edits": 11,
+    "spec_files_edited": 3,
+    "spec_files_backed_up": 3
+  },
+  "applied": ["P1", "P2", "P3", "P4", "P5", "P10"],
+  "tasks": ["P6", "P7", "P8", "P9"],
+  "open": []
 }

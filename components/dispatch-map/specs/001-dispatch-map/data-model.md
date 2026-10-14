@@ -75,15 +75,15 @@ Error enum for all `IDispatchMap` operations (`components/interfaces/src/idispat
 |---------|--------|------|
 | KeyNotFound | key: CacheKey | Operation on non-existent key |
 | AlreadyExists | key: CacheKey | `create_memory_tier_entry` / `recover_extent` on a key that already exists |
-| ActiveReferences | key: CacheKey | `remove` while refs > 0 |
+| ActiveReferences | key: CacheKey | `remove` or `try_evict_to_block` while refs > 0 |
 | Timeout | key: CacheKey | Blocking wait (`lookup`/`take_read`/`take_write`) exceeded the 2s deadline |
 | AllocationFailed | msg: String | Reserved; not currently returned by any method (memory-tier allocation is external to the dispatch map) |
 | InvalidSize | — | `create_memory_tier_entry` / `promote_block_to_memory_tier` with `size == 0` |
-| NotInitialized | msg: String | Reserved; not currently returned (`initialize()` errors via a missing-`IEvictionPolicy` failure instead) |
+| NotInitialized | msg: String | `initialize`, `create_memory_tier_entry`, or `recover_extent` called with no `IEvictionPolicy` connected |
 | RefCountUnderflow | key: CacheKey | `release_read`/`release_write` when the corresponding count is already 0 |
 | RefCountOverflow | key: CacheKey | Reference acquisition when the corresponding count is already at `u32::MAX` |
 | NoWriteReference | key: CacheKey | `downgrade_reference` without a write ref held |
-| InvalidState | msg: String | `convert_to_storage`/`convert_memory_tier_to_block` on a non-matching entry state, or `promote_block_to_memory_tier`/`try_evict_to_block` preconditions not met |
+| InvalidState | msg: String | `convert_to_storage`/`convert_memory_tier_to_block` on a non-matching entry state, `promote_block_to_memory_tier` on a `MemoryTier` entry, or `try_evict_to_block` on an unreferenced entry with no `ssd_offset` or not in `MemoryTier` state |
 
 Note: there is no dedicated null-pointer variant. `create_memory_tier_entry` does not currently validate its `pointer` argument — see the null-pointer gap tracked in `.specify/sync/align-tasks.md`.
 
