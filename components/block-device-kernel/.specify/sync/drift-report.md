@@ -1,11 +1,13 @@
 ---
 spec_sync_component: block-device-kernel
-spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-09T21:53:37Z
-spec_sync_git_commit: 83bcd4ff
-spec_sync_inputs_sha256: f00447482af118551d09931e78aaebd28437dcf08933573440cc402c0fea6e45
+spec_sync_drift_status: drift
+spec_sync_synced_at: 2026-10-14T00:35:03Z
+spec_sync_git_commit: a2bd2c45
+spec_sync_inputs_sha256: b4e2d9958ed4d68d6942a4f0e6a6ddfcfea101a6bba2b3563549451a13dae909
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-10-13 (branch fix/block-device-kernel-timeout-cancel, fix: a timed-out op's `AsyncCancel` is queued and retried instead of dropped when the SQ is full).** Scope: `src/actor.rs` (`check_timeouts` :821, new `submit_pending_cancels` :856, `on_idle` :946, `pending_cancels` :113) + new test `src/repair_test_timeout_cancel.rs`. Findings: the fix now satisfies the timeout edge case (`spec.md:103`) and SC-005 (`spec.md:195`); `Completion::Timeout` still sent immediately; no new error variant or return type. New undescribed behaviour: (1) `on_idle` stays `true` while `pending_cancels` is non-empty (`actor.rs:946`), beyond NFR-006's clients/inflight condition (`spec.md:149`); (2) the cancel may be deferred across poll cycles, which `spec.md:103` does not say; (3) the `KernelHandler` entity (`spec.md:156`) omits the cancel queue. Pre-existing, not introduced, outside the changed functions: `handle_abort` (`actor.rs:667`) still drops its `AsyncCancel` on a full SQ, against FR-012 (`spec.md:123`). Verdict: drift (needs a small spec backfill for NFR-006, `spec.md:103`, and Key Entities).
+
 > **Re-stamp 2026-10-09 (transitive: `components/interfaces` changed, branch `fix/evict-blocked-by-pin`).** The only change to this component's hashed inputs is a doc-comment correction on `IDispatchMap::try_evict_to_block` in `components/interfaces/src/idispatch_map.rs` (no signature, type, or behaviour change). This component's own `src/**` and `specs/**` are unchanged, and its previous stamp was re-verified to match `origin/unstable` before re-stamping. **No re-analysis was performed for this component**; this stamp asserts only what was checked.
 
 > **Re-stamp 2026-10-05 (transitive: `components/interfaces` changed, branch `fix/poller-cpu-placement-logging`).** The only change to this component's hashed inputs is a doc-comment correction on `DispatcherConfig::poller_base_cpu` in `components/interfaces/src/idispatcher.rs` (no signature, type, or behaviour change). This component's own `src/**` and `specs/**` are unchanged, and it does not reference `poller_base_cpu` (verified by grep over its src/ and specs/). Its previous stamp was re-verified to match `git archive origin/unstable` before re-stamping. **No re-analysis was performed for this component**; this stamp asserts only what was checked.
