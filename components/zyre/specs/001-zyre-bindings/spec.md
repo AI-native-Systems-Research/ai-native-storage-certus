@@ -3,6 +3,7 @@
 **Feature Branch**: `001-zyre-bindings`  
 **Created**: 2026-07-01  
 **Status**: Draft  
+**Last Modified**: 2026-10-14 (spec-sync apply P3-P9)  
 **Input**: User description: "This component provides Rust bindings for the zyre library found here: https://github.com/zeromq/zyre. Pull the C library into a sub-repo as we've done with SPDK. As much as possible, present a Rust-style API, where that style may differ from a C API style."
 
 ## User Scenarios & Testing *(mandatory)*
@@ -26,7 +27,7 @@ A Certus node operator creates a Zyre node, starts it, joins a group, and exchan
 
 ### User Story 2 - Idiomatic Rust API with Ownership and Safety (Priority: P1)
 
-A Rust developer uses the Zyre bindings through an API that follows Rust conventions: RAII resource management, Result-based error handling, iterator-based event streams, and Send+Sync safety where appropriate. The developer should not need to understand the C API or manage raw pointers.
+A Rust developer uses the Zyre bindings through an API that follows Rust conventions: RAII resource management, Result-based error handling, typed events delivered by a blocking `recv()` and a non-blocking `try_recv()`, and thread safety expressed in the type system (the node handle is `Send` but not `Sync`). The developer should not need to understand the C API or manage raw pointers.
 
 **Why this priority**: Equal priority to core functionality — a non-idiomatic Rust wrapper provides little value over raw FFI. The API must feel native to Rust developers.
 
@@ -36,7 +37,7 @@ A Rust developer uses the Zyre bindings through an API that follows Rust convent
 
 1. **Given** a Zyre node created via the Rust API, **When** the node goes out of scope, **Then** the underlying C resources are freed automatically (RAII).
 2. **Given** the Rust API, **When** any fallible operation is called, **Then** it returns a `Result<T, ZyreError>` rather than a null pointer or error code.
-3. **Given** the Rust API, **When** a developer iterates over incoming events, **Then** they can use a typed enum (`ZyreEvent`) with pattern matching rather than string comparison.
+3. **Given** the Rust API, **When** a developer receives incoming events (`recv()` / `try_recv()`), **Then** they can use a typed enum (`ZyreEvent`) with pattern matching rather than string comparison.
 4. **Given** the Rust API, **When** the developer configures node options, **Then** they populate a typed `NodeConfig` struct (public fields + `Default`) rather than calling multiple setter functions after construction.
 
 ---
@@ -93,7 +94,7 @@ A Certus node operator configures zyre nodes to use gossip-based discovery inste
 - **FR-007**: The crate MUST expose peer introspection (list peers, list groups, get peer headers/address).
 - **FR-008**: The crate MUST provide a direct `recv()` method that blocks the calling thread (wrapping `zyre_event_new`, the typed-event API, which internally receives via `zyre_recv`) and a non-blocking `try_recv()` for polling. No internal background threads are spawned. After `stop()`, `recv`/`try_recv` MUST continue to deliver any queued events followed by a single terminal `ZyreEvent::Stop` sentinel; once that sentinel is consumed, `recv` returns `ZyreError::Stopped` and `try_recv` returns `Ok(None)`.
 - **FR-009**: The build system MUST clone and compile zyre and its dependencies (libzmq, czmq) from source into `deps/zyre-build/` at the workspace root, mirroring the `deps/spdk-build/` pattern.
-- **FR-010**: The crate MUST generate FFI bindings via `bindgen` in a build script, linking against the locally-built libraries.
+- **FR-010**: The crate MUST generate FFI bindings via `bindgen` in a build script, linking against the locally-built libraries (default `deps/zyre-build/`, overridable with the `ZYRE_BUILD_DIR` environment variable) and embedding their library directories as an rpath (DT_RPATH) so the transitive `libczmq`/`libzmq` resolve at runtime without `LD_LIBRARY_PATH`.
 - **FR-011**: The crate MUST be `Send` (nodes can be moved between threads) but NOT `Sync` (the underlying C API is not thread-safe for concurrent access to a single node).
 - **FR-012**: The crate MUST provide typed errors via a `ZyreError` enum covering all failure modes (start failure, invalid configuration, network errors).
 

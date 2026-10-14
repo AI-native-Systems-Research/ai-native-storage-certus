@@ -23,11 +23,11 @@ implementation (crate-private, FFI-owning).
 API: a node may be moved between threads but not shared). `start/stop/join/leave`
 take `&mut self`; send/recv/introspection take `&self`.
 
-**Lifecycle**: Created → Configured → Started → Running → Stopped (via drop)
+**Lifecycle**: Created → Running → Draining → Done (configuration is applied during creation; `stop()` or drop leaves `Running` — see State Transitions below)
 
 **Ownership**: Exclusive. Not Clone, not Copy.
 
-**Drop behavior**: Calls `zyre_stop()` then `zyre_destroy()`.
+**Drop behavior**: Calls `stop()` (which issues `zyre_stop()` only if the node is `Running`), then `zyre_destroy()`.
 
 ---
 
@@ -69,13 +69,13 @@ lets future fields be added without breaking callers.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | name | `Option<String>` | None (auto-generated) | Human-readable node name |
-| headers | `HashMap<String, String>` | empty | Metadata shared during discovery |
+| headers | `HashMap<String, String>` | empty | Metadata shared during discovery; keys and values are announced to peers byte-for-byte |
 | port | `Option<u16>` | None (5670) | UDP beacon port |
 | interface | `Option<String>` | None (all interfaces) | Network interface for beaconing |
 | evasive_timeout_ms | `u32` | 5000 | Time before peer marked evasive |
 | expired_timeout_ms | `u32` | 30000 | Time before peer marked expired |
 | beacon_interval_ms | `u32` | 1000 | Beacon broadcast interval |
-| endpoint | `Option<String>` | None | Node's own data endpoint (required with gossip) |
+| endpoint | `Option<String>` | None | Node's own data endpoint (required with gossip; only applied in gossip mode — ignored when `gossip` is `None`) |
 | gossip | `Option<GossipConfig>` | None | If set, use gossip instead of beacon |
 
 **Validation** (`NodeConfig::validate`, invoked by `create_node`):
@@ -84,6 +84,8 @@ lets future fields be added without breaking callers.
 - `port` if Some, must be > 0
 - `name` if Some, must be non-empty
 - if `gossip` is set, `endpoint` must be set and the gossip config must have at least one of `bind`/`connect`
+
+**Verbatim strings**: header keys/values, `endpoint`, and the gossip `bind`/`connect` endpoints are passed to zyre verbatim. Several zyre setters are printf-style, so the binding always supplies a constant `"%s"` format with the string as its argument; a `%` in configuration data has no special meaning and is never interpreted as a format directive.
 
 ---
 

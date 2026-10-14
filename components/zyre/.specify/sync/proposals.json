@@ -1,137 +1,294 @@
 {
-  "generated": "2026-07-14T19:52:47Z",
-  "based_on": "2026-07-14T19:52:47Z",
+  "generated": "2026-10-14T17:38:10Z",
+  "based_on": "2026-10-14T17:38:10Z",
+  "git_commit": "85ae2a1f",
+  "branch": "fix/zyre-printf-format",
   "mode": "batch",
   "notes": [
-    "Prior P1 (drop _multi) and P3 (document ZyreEvent accessors) were genuinely applied and are now resolved.",
-    "Prior P2 (rewrite tasks.md) was recorded applied:true but only partially landed — task bodies still reference deleted files. Re-opened as P2 below.",
-    "plan.md staleness is a new item not covered by the 2026-07-09 run."
+    "Replaces the 2026-07-14 proposals: P1-P4 of that run are present in the current spec text and P5 was applied (apply-report.md); none remain open.",
+    "The branch's two fixes (1aceacbb printf format, 99cf8f79 creation lock) align code with spec; P6/P7 backfill the now-unstated guarantees.",
+    "Nothing applied. All proposals approved: false."
   ],
   "summary": {
-    "backfill": 4,
-    "align": 0,
-    "human_decision": 1,
-    "new_specs": 0,
-    "remove_from_spec": 0,
-    "follow_ups": 3
+    "total": 9,
+    "backfill": 7,
+    "align": 2,
+    "new_spec": 0,
+    "supersede": 0,
+    "human_decision": 0,
+    "remove_from_spec": 0
   },
   "proposals": [
     {
       "id": "P1",
       "spec": "001-zyre-bindings",
-      "requirement": "plan.md architecture (builder + module layout)",
-      "direction": "BACKFILL",
-      "status": "pending",
+      "requirement": "FR-012 (+ US2 AS2, contracts/izyre.md create_node errors)",
+      "type": "ALIGN",
       "confidence": "HIGH",
-      "spec_text": "plan.md:8 'builder configuration'; plan.md:34 '6 focused modules (node, event, builder, error, peer, ffi)'; plan.md:57-70 source tree lists event.rs/builder.rs/error.rs/peer.rs and only integration.rs.",
-      "actual": "No builder (public-fields NodeConfig + Default); zyre crate has lib.rs/node.rs/ffi.rs; value types + IZyre/IZyreNode traits live in interfaces/src/izyre.rs; tests are integration.rs + api_safety.rs.",
+      "approved": true,
+      "spec_text": "The crate MUST provide typed errors via a ZyreError enum covering all failure modes (start failure, invalid configuration, network errors).",
+      "spec_location": "specs/001-zyre-bindings/spec.md:98; spec.md:38; contracts/izyre.md:52-54; research.md:56",
+      "code_behavior": "CString::new(..).unwrap() panics on interior NUL in header key/value, interface, endpoint, gossip bind/connect, after zyre_new; name/group/peer already map NUL to InvalidConfig",
+      "code_location": "components/zyre/src/node.rs:93,94,103,116,124,128 (cf. node.rs:54-55,171-172,205-206; interfaces/src/izyre.rs:313-347)",
       "resolution": {
+        "code_changes": [
+          "NodeConfig::validate (interfaces/src/izyre.rs:313): reject '\\0' in header keys/values, interface, endpoint, gossip.bind, gossip.connect with InvalidConfig",
+          "apply_config (node.rs:93-128): replace .unwrap() with .map_err(|_| ZyreError::InvalidConfig(..))? (or expect with 'validated' justification)",
+          "Unit tests: validate rejects NUL per field; ZyreNode::new returns InvalidConfig without panicking"
+        ],
         "spec_changes": [
-          "plan.md:8 — drop 'builder configuration'; describe public-field config structs validated at create_node; factory returns Box<dyn IZyreNode>",
-          "plan.md:34 — rewrite module note to lib.rs/node.rs/ffi.rs + types in interfaces crate",
-          "plan.md:57-70 — replace source tree (remove event.rs/builder.rs/error.rs/peer.rs; add api_safety.rs; show interfaces/src/izyre.rs)",
-          "plan.md:82 — add Structure Decision sentence on interfaces-crate type location and crate-private ZyreNode"
+          {
+            "file": "specs/001-zyre-bindings/data-model.md",
+            "line": 86,
+            "old": "- if `gossip` is set, `endpoint` must be set and the gossip config must have at least one of `bind`/`connect`",
+            "new": "- if `gossip` is set, `endpoint` must be set and the gossip config must have at least one of `bind`/`connect`\n- no string field (`name`, header keys/values, `interface`, `endpoint`, gossip `bind`/`connect`) may contain an interior NUL byte"
+          }
         ]
       },
-      "rationale": "Documentation catch-up to shipped code and reviewed spec artifacts; no code impact. Highest value because CLAUDE.md points contributors at plan.md.",
-      "resolves": ["D-1 (plan.md)"]
+      "rationale": "Spec is explicit and consistent (typed errors, validation before FFI); a panic across IZyre on type-valid input is a bug; same file already handles the case for name/group/peer. Predates the branch.",
+      "approved_by": "Cornel Constantinescu, 2026-10-14",
+      "approval_note": "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR"
     },
     {
       "id": "P2",
       "spec": "001-zyre-bindings",
-      "requirement": "tasks.md task bodies (D-2)",
-      "direction": "BACKFILL",
-      "status": "pending",
-      "reopened_from": "2026-07-09 P2 (marked applied but body edits did not land)",
-      "confidence": "HIGH",
-      "spec_text": "Task bodies reference src/event.rs, src/builder.rs, src/error.rs, src/peer.rs and 'builder pattern' (T015:67, goal:89/91, T027:95, T028:96, T031-T033:102-104, T043:143, T046:149, notes:218/233/237).",
-      "actual": "Types + traits in interfaces/src/izyre.rs; component glue in zyre/src/{lib,node,ffi}.rs; NodeConfig is public-fields + Default, validated by create_node.",
+      "requirement": "FR-005 (config validated when a node is created)",
+      "type": "ALIGN",
+      "confidence": "MEDIUM",
+      "approved": true,
+      "spec_text": "a typed NodeConfig struct ... for node configuration (name, headers, port, interface, timeouts, discovery mode), validated when a node is created.",
+      "spec_location": "specs/001-zyre-bindings/spec.md:91; data-model.md:81-86",
+      "code_behavior": "u32 timeouts > i32::MAX pass validate and are cast `as libc::c_int` to negative values",
+      "code_location": "components/zyre/src/node.rs:107-108; components/interfaces/src/izyre.rs:279-281,319-328",
       "resolution": {
-        "spec_changes": [
-          "Replace event.rs/builder.rs/error.rs/peer.rs references with interfaces/src/izyre.rs and zyre/src/{lib,node,ffi}.rs",
-          "Replace 'builder pattern'/'builder validates config' with public-field NodeConfig + Default validated by create_node",
-          "Leave the :39-44 superseded-design note and the T050 strike as-is"
+        "code_changes": [
+          "NodeConfig::validate: InvalidConfig if evasive_timeout_ms or expired_timeout_ms > i32::MAX as u32",
+          "Optionally c_int::try_from at node.rs:107-108; add unit test"
         ],
-        "corrections": [
-          "Update prior proposals.json P2 status from applied:true to partially_applied/re-opened"
+        "spec_changes": [
+          {
+            "file": "specs/001-zyre-bindings/data-model.md",
+            "line": 82,
+            "old": "- `evasive_timeout_ms` must be > 0",
+            "new": "- `evasive_timeout_ms` must be > 0 and <= 2147483647 (`i32::MAX`, zyre takes a C `int`)"
+          },
+          {
+            "file": "specs/001-zyre-bindings/data-model.md",
+            "line": 83,
+            "old": "- `expired_timeout_ms` must be > `evasive_timeout_ms`",
+            "new": "- `expired_timeout_ms` must be > `evasive_timeout_ms` and <= 2147483647"
+          }
         ]
       },
-      "rationale": "Completes the catch-up the prior P2 claimed but did not fully apply; no code impact.",
-      "resolves": ["D-2 (tasks.md)"]
+      "rationale": "A validated config must be the applied config; silent sign flip violates FR-005. Low practical severity; MEDIUM because narrowing the field type is an alternative.",
+      "approved_by": "Cornel Constantinescu, 2026-10-14",
+      "approval_note": "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR"
     },
     {
       "id": "P3",
       "spec": "001-zyre-bindings",
-      "requirement": "FR-008 wording",
-      "direction": "BACKFILL",
-      "status": "pending",
+      "requirement": "User Story 2 narrative + AS3",
+      "type": "BACKFILL",
       "confidence": "HIGH",
-      "spec_text": "spec.md:94 — 'thin wrapper over zyre_recv'",
-      "actual": "recv() uses zyre_event_new/zyre_event_destroy (node.rs:180-191); internally receives via zyre_recv.",
+      "approved": true,
+      "spec_text": "RAII resource management, Result-based error handling, iterator-based event streams, and Send+Sync safety where appropriate.",
+      "spec_location": "specs/001-zyre-bindings/spec.md:29,39",
+      "code_behavior": "no Iterator for events; recv()/try_recv(); handle is Send but not Sync",
+      "code_location": "components/interfaces/src/izyre.rs:362,393,400; components/zyre/src/node.rs:39,219-269",
       "resolution": {
         "spec_changes": [
-          "spec.md:94 — reword parenthetical to 'wraps zyre_event_new, the typed-event API, which internally receives via zyre_recv'"
+          {
+            "file": "specs/001-zyre-bindings/spec.md",
+            "line": 29,
+            "old": "A Rust developer uses the Zyre bindings through an API that follows Rust conventions: RAII resource management, Result-based error handling, iterator-based event streams, and Send+Sync safety where appropriate. The developer should not need to understand the C API or manage raw pointers.",
+            "new": "A Rust developer uses the Zyre bindings through an API that follows Rust conventions: RAII resource management, Result-based error handling, typed events delivered by a blocking `recv()` and a non-blocking `try_recv()`, and thread safety expressed in the type system (the node handle is `Send` but not `Sync`). The developer should not need to understand the C API or manage raw pointers."
+          },
+          {
+            "file": "specs/001-zyre-bindings/spec.md",
+            "line": 39,
+            "old": "3. **Given** the Rust API, **When** a developer iterates over incoming events, **Then** they can use a typed enum (`ZyreEvent`) with pattern matching rather than string comparison.",
+            "new": "3. **Given** the Rust API, **When** a developer receives incoming events (`recv()` / `try_recv()`), **Then** they can use a typed enum (`ZyreEvent`) with pattern matching rather than string comparison."
+          }
         ]
       },
-      "rationale": "Code choice (typed parsing) is correct; only the spec wording is imprecise."
+      "rationale": "Narrative predates the reviewed direct-recv and Send-not-Sync decisions (FR-008, FR-011, spec.md:132). No code impact.",
+      "approved_by": "Cornel Constantinescu, 2026-10-14"
     },
     {
       "id": "P4",
       "spec": "001-zyre-bindings",
-      "requirement": "research.md:84 stale phrasing",
-      "direction": "BACKFILL",
-      "status": "pending",
+      "requirement": "FR-002 lifecycle as described in data-model.md",
+      "type": "BACKFILL",
       "confidence": "HIGH",
-      "spec_text": "research.md:84 — 'InvalidConfig(String) — builder validation failure'",
-      "actual": "No builder; validation is NodeConfig::validate invoked by create_node.",
+      "approved": true,
+      "spec_text": "Lifecycle: Created \u2192 Configured \u2192 Started \u2192 Running \u2192 Stopped (via drop); Drop behavior: Calls zyre_stop() then zyre_destroy().",
+      "spec_location": "specs/001-zyre-bindings/data-model.md:26,30",
+      "code_behavior": "State { Created, Running, Draining, Done }; config applied in new; zyre_stop only from Running; Drop = stop() + zyre_destroy",
+      "code_location": "components/zyre/src/node.rs:13-18,71,157-166,382-387",
       "resolution": {
         "spec_changes": [
-          "research.md:84 — 'InvalidConfig(String) — config validation failure (from NodeConfig::validate)'"
+          {
+            "file": "specs/001-zyre-bindings/data-model.md",
+            "line": 26,
+            "old": "**Lifecycle**: Created \u2192 Configured \u2192 Started \u2192 Running \u2192 Stopped (via drop)",
+            "new": "**Lifecycle**: Created \u2192 Running \u2192 Draining \u2192 Done (configuration is applied during creation; `stop()` or drop leaves `Running` \u2014 see State Transitions below)"
+          },
+          {
+            "file": "specs/001-zyre-bindings/data-model.md",
+            "line": 30,
+            "old": "**Drop behavior**: Calls `zyre_stop()` then `zyre_destroy()`.",
+            "new": "**Drop behavior**: Calls `stop()` (which issues `zyre_stop()` only if the node is `Running`), then `zyre_destroy()`."
+          }
         ]
       },
-      "rationale": "One-word correction consistent with the no-builder decision at research.md:56."
+      "rationale": "Internal inconsistency with data-model.md:19 and :126-142, which match the code. No code impact.",
+      "approved_by": "Cornel Constantinescu, 2026-10-14"
     },
     {
       "id": "P5",
       "spec": "001-zyre-bindings",
-      "requirement": "ZyreEvent::Stop reachability",
-      "direction": "HUMAN_DECISION",
-      "status": "resolved",
-      "decision": "B (make STOP observable) — implemented 2026-07-14 after tracing the zyre C source: STOP is a graceful end-of-stream sentinel the actor enqueues on stop() (zyre_node.c:337-339), not an internal-only artifact.",
-      "confidence": "MEDIUM",
-      "spec_text": "ZyreEvent::Stop documented as 'the local node has stopped'.",
-      "actual": "recv/try_recv return NotStarted once stop() flips started (node.rs:114-119 vs :180-183), so Stop is undeliverable through the public API.",
-      "options": [
-        { "id": "A", "summary": "Document STOP as internal-only (not surfaced via recv); smallest change." },
-        { "id": "B", "summary": "Make STOP observable: don't gate recv immediately / drain the pending STOP before flipping started; needs a test." }
-      ],
-      "questions": [
-        "Is any consumer expected to observe ZyreEvent::Stop via recv, or is STOP purely a C-layer artifact the binding can hide?",
-        "If hidden, should the Stop variant stay in the public enum (completeness/SC-004) or be removed?"
-      ],
-      "leaning": "A (superseded — C-source trace showed STOP is a real end-of-stream sentinel, so B is the faithful mapping)",
+      "requirement": "create_node postconditions/errors",
+      "type": "BACKFILL",
+      "confidence": "HIGH",
+      "approved": true,
+      "spec_text": "No network activity occurs until start() is called; InvalidConfig(reason) \u2014 config validation failed; an invalid config is rejected without allocating a node",
+      "spec_location": "specs/001-zyre-bindings/contracts/izyre.md:49,53; research.md:56",
+      "code_behavior": "gossip mode binds the data endpoint during create_node (zyre_set_endpoint); bind failure \u2192 InvalidConfig after zyre_new, node destroyed before returning",
+      "code_location": "components/zyre/src/node.rs:56,115-121,385",
       "resolution": {
-        "code_changes": [
-          "interfaces/src/izyre.rs — add ZyreError::Stopped + Display; document terminal Stop on ZyreEvent::Stop / IZyreNode::{stop,recv,try_recv}",
-          "zyre/src/node.rs — replace bool started with Cell<State>{Created,Running,Draining,Done}; stop() -> Draining; recv() drains then -> Done on Stop; try_recv() Ok(None) when Done; ensure_running() guard for join/leave/shout/whisper"
-        ],
         "spec_changes": [
-          "contracts/izyre.md — fixed consumer example (stop-then-drain) + receive-lifecycle paragraph",
-          "data-model.md — state field + Created/Running/Draining/Done transitions + Stop-sentinel invariant"
-        ],
-        "tests": [
-          "zyre/src/node.rs — recv_before_start_is_not_started (unit)",
-          "zyre/tests/integration.rs — stop_delivers_terminal_stop_event (drain + Stopped/Ok(None))"
+          {
+            "file": "specs/001-zyre-bindings/contracts/izyre.md",
+            "line": 49,
+            "old": "- No network activity occurs until `start()` is called",
+            "new": "- No discovery or messaging occurs until `start()` is called. Exception: in gossip mode the node's data `endpoint` is bound during `create_node`, so its listening socket exists before `start()`"
+          },
+          {
+            "file": "specs/001-zyre-bindings/contracts/izyre.md",
+            "line": 53,
+            "old": "- `ZyreError::InvalidConfig(reason)` \u2014 config validation failed",
+            "new": "- `ZyreError::InvalidConfig(reason)` \u2014 config validation failed, or (gossip mode) the node's data `endpoint` could not be bound"
+          },
+          {
+            "file": "specs/001-zyre-bindings/research.md",
+            "line": 56,
+            "old": "`NodeConfig::validate()` runs inside `IZyre::create_node`, before any FFI, so an invalid config is rejected without allocating a node.",
+            "new": "`NodeConfig::validate()` runs inside `IZyre::create_node`, before any FFI, so a config that fails validation is rejected without allocating a node. An `endpoint` that cannot be bound (gossip mode) is detected after allocation; the node is destroyed before `create_node` returns `InvalidConfig`."
+          }
         ]
       },
-      "applied": true,
-      "applied_at": "2026-07-14"
+      "rationale": "Early bind is a sound design (synchronous error for an unusable endpoint); only the contract wording is too absolute. No code impact.",
+      "approved_by": "Cornel Constantinescu, 2026-10-14"
+    },
+    {
+      "id": "P6",
+      "spec": "001-zyre-bindings",
+      "requirement": "FR-005 / NodeConfig.headers, endpoint, gossip endpoints (verbatim handling; this branch's fix)",
+      "type": "BACKFILL",
+      "confidence": "HIGH",
+      "approved": true,
+      "spec_text": "| headers | HashMap<String, String> | empty | Metadata shared during discovery |",
+      "spec_location": "specs/001-zyre-bindings/data-model.md:72 (no text on verbatim handling anywhere)",
+      "code_behavior": "constant \"%s\" format passed to printf-style zyre_set_header/zyre_set_endpoint/zyre_gossip_bind/zyre_gossip_connect; strings arrive verbatim; regression-tested",
+      "code_location": "components/zyre/src/node.rs:87-90,95,117,125,129; components/zyre/src/repair_test_header_percent.rs:8-51",
+      "resolution": {
+        "spec_changes": [
+          {
+            "file": "specs/001-zyre-bindings/data-model.md",
+            "line": 72,
+            "old": "| headers | `HashMap<String, String>` | empty | Metadata shared during discovery |",
+            "new": "| headers | `HashMap<String, String>` | empty | Metadata shared during discovery; keys and values are announced to peers byte-for-byte |"
+          },
+          {
+            "file": "specs/001-zyre-bindings/data-model.md",
+            "line": 87,
+            "old": "",
+            "new": "**Verbatim strings**: header keys/values, `endpoint`, and the gossip `bind`/`connect` endpoints are passed to zyre verbatim. Several zyre setters are printf-style, so the binding always supplies a constant `\"%s\"` format with the string as its argument; a `%` in configuration data has no special meaning and is never interpreted as a format directive.",
+            "insert_after": "- if `gossip` is set, `endpoint` must be set and the gossip config must have at least one of `bind`/`connect`"
+          }
+        ]
+      },
+      "rationale": "Code is authoritative and tested; recording the guarantee prevents regression of a bug that mangled '%' and made '%s'/'%n' undefined behaviour. No code impact.",
+      "approved_by": "Cornel Constantinescu, 2026-10-14"
+    },
+    {
+      "id": "P7",
+      "spec": "001-zyre-bindings",
+      "requirement": "create_node thread safety (this branch's fix)",
+      "type": "BACKFILL",
+      "confidence": "MEDIUM",
+      "approved": true,
+      "spec_text": "- `IZyre` is `Send + Sync`; `create_node` may be called from any thread.",
+      "spec_location": "specs/001-zyre-bindings/contracts/izyre.md:57",
+      "code_behavior": "process-wide ZYRE_NEW_LOCK held for the whole of ZyreNode::new (zyre_new + apply_config), poison-tolerant",
+      "code_location": "components/zyre/src/node.rs:50-51,52-72,137-140",
+      "resolution": {
+        "spec_changes": [
+          {
+            "file": "specs/001-zyre-bindings/contracts/izyre.md",
+            "line": 57,
+            "old": "- `IZyre` is `Send + Sync`; `create_node` may be called from any thread.",
+            "new": "- `IZyre` is `Send + Sync`; `create_node` may be called from any thread. Node creation (`zyre_new` plus applying the config) is serialised by a process-wide lock, because CZMQ initialises process-global state on first use without a lock; concurrent `create_node` calls therefore run one at a time."
+          }
+        ]
+      },
+      "rationale": "The lock is what makes the existing contract sentence true; documenting it records the CZMQ constraint and serialisation cost. MEDIUM: arguably an implementation detail. Side note: code comments (node.rs:50,137) understate the lock scope.",
+      "approved_by": "Cornel Constantinescu, 2026-10-14"
+    },
+    {
+      "id": "P8",
+      "spec": "001-zyre-bindings",
+      "requirement": "FR-006 / NodeConfig.endpoint in beacon mode",
+      "type": "BACKFILL",
+      "confidence": "MEDIUM",
+      "approved": true,
+      "spec_text": "| endpoint | Option<String> | None | Node's own data endpoint (required with gossip) |",
+      "spec_location": "specs/001-zyre-bindings/data-model.md:78; spec.md:92",
+      "code_behavior": "zyre_set_endpoint only called when gossip is Some; endpoint with gossip None is silently ignored and accepted by validate",
+      "code_location": "components/zyre/src/node.rs:111-122; components/interfaces/src/izyre.rs:334-345",
+      "resolution": {
+        "spec_changes": [
+          {
+            "file": "specs/001-zyre-bindings/data-model.md",
+            "line": 78,
+            "old": "| endpoint | `Option<String>` | None | Node's own data endpoint (required with gossip) |",
+            "new": "| endpoint | `Option<String>` | None | Node's own data endpoint (required with gossip; only applied in gossip mode \u2014 ignored when `gossip` is `None`) |"
+          }
+        ],
+        "align_alternative": "NodeConfig::validate rejects endpoint.is_some() && gossip.is_none() with InvalidConfig (behaviour change)"
+      },
+      "rationale": "Current behaviour is deliberate (node.rs:112-114) and harmless, but undocumented; reviewer may prefer the stricter ALIGN alternative.",
+      "approved_by": "Cornel Constantinescu, 2026-10-14"
+    },
+    {
+      "id": "P9",
+      "spec": "001-zyre-bindings",
+      "requirement": "FR-010 (build integration)",
+      "type": "BACKFILL",
+      "confidence": "HIGH",
+      "approved": true,
+      "spec_text": "- **FR-010**: The crate MUST generate FFI bindings via `bindgen` in a build script, linking against the locally-built libraries.",
+      "spec_location": "specs/001-zyre-bindings/spec.md:96",
+      "code_behavior": "ZYRE_BUILD_DIR env override (default <workspace>/deps/zyre-build), rerun-if-env-changed, DT_RPATH embedding for transitive libczmq/libzmq, actionable error if zyre.h missing",
+      "code_location": "components/zyre/build.rs:5-18,26-34,39,45-66",
+      "resolution": {
+        "spec_changes": [
+          {
+            "file": "specs/001-zyre-bindings/spec.md",
+            "line": 96,
+            "old": "- **FR-010**: The crate MUST generate FFI bindings via `bindgen` in a build script, linking against the locally-built libraries.",
+            "new": "- **FR-010**: The crate MUST generate FFI bindings via `bindgen` in a build script, linking against the locally-built libraries (default `deps/zyre-build/`, overridable with the `ZYRE_BUILD_DIR` environment variable) and embedding their library directories as an rpath (DT_RPATH) so the transitive `libczmq`/`libzmq` resolve at runtime without `LD_LIBRARY_PATH`."
+          }
+        ]
+      },
+      "rationale": "Working, intentional build features that CI depends on; unspecced. No code impact.",
+      "approved_by": "Cornel Constantinescu, 2026-10-14"
     }
   ],
-  "follow_ups": [
-    { "sc": "SC-001", "status": "resolved", "applied_at": "2026-07-14", "note": "added round_trip_within_two_seconds asserting A->B->A within 2s; discovery/whisper tests resend-in-loop; ZYRE_TEST_TIMEOUT_SCALE knob for valgrind" },
-    { "sc": "SC-003", "status": "resolved", "applied_at": "2026-07-14", "note": "from-scratch cargo build -p zyre incl. bindgen = 2.27s (<5min); C-deps build separate" },
-    { "sc": "SC-005", "status": "resolved", "applied_at": "2026-07-14", "note": "valgrind harness run-valgrind.sh + valgrind.supp; memcheck over lib+integration = 0 errors/0 bytes lost attributable to bindings; Miri inapplicable (FFI)" },
-    { "sc": "fire-and-forget", "status": "resolved", "applied_at": "2026-07-14", "note": "whisper_to_departed_peer_is_fire_and_forget: A discovers B, B departs, A's whisper to the departed UUID returns Ok (spec.md:81)" }
+  "not_proposed": [
+    "L1 zyre_set_interface possibly process-global (unverified against pinned source)",
+    "No tests for edge case spec.md:80 (missing interface) and US1 AS4 spec.md:23 (EXIT after drop)",
+    "tests/api_safety.rs:20-26 does not assert !Sync (test gap; FR-011 holds by construction)",
+    "src/repair_test_header_percent.rs runs network I/O without integration-tests gating or SERIAL_LOCK (test hygiene)"
   ]
 }
