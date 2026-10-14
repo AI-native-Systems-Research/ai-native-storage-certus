@@ -1,11 +1,13 @@
 ---
 spec_sync_component: extended-metadata-store
-spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-09T21:53:37Z
-spec_sync_git_commit: 83bcd4ff
-spec_sync_inputs_sha256: b61dee78c673ed72f7a607a9147621929a5e28485387540276ff5af6d85bff23
+spec_sync_drift_status: drift
+spec_sync_synced_at: 2026-10-14T00:35:03Z
+spec_sync_git_commit: 95529247
+spec_sync_inputs_sha256: 7e9a77618e2a896c18dc6160acf6bb4ff540da8c837d8958bdb87e4cd0aca63c
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-10-13 (branch fix/extended-metadata-store-flush, fix: ticketed `trigger_flush` + snapshot-scoped `mark_flushed` + real dirty-threshold trigger).** Scope: `src/flush.rs`, `src/lib.rs`, two `repair_test_*.rs`. Findings: RESOLVED — FR-11 threshold was previously ignored (only the timer fired; this report wrongly listed it aligned), now `flush.rs:186-206`; FR-14 / US6 durability no longer lose writes made mid-flush (`lib.rs:99-121`, `flush.rs:171-175,213`). OPEN — (1) `trigger_flush` returns `Ok(())` after a failed flush (`flush.rs:177`; `do_flush` completes tickets regardless of result, `:251-257`), so an attached trigger never yields `StorageError` and `force_flush` claims durability falsely, contradicting `spec.md:163` and `interfaces/src/iextended_metadata_store.rs:44` (pre-existing, unreported). (2) Unspecced: `mark_flushed` now clears only the count recorded by the last `snapshot_entries` (no-op without one), while `plan.md:101` says "reset dirty_count" and FR-17 (`spec.md:175`) is silent; threshold disarm after failure (`flush.rs:188-190,234`) undocumented; `plan.md:32`/`flush.rs:79` "share a single in-flight flush" now inexact. Verdict: drift.
+
 > **Re-stamp 2026-10-09 (transitive: `components/interfaces` changed, branch `fix/evict-blocked-by-pin`).** The only change to this component's hashed inputs is a doc-comment correction on `IDispatchMap::try_evict_to_block` in `components/interfaces/src/idispatch_map.rs` (no signature, type, or behaviour change). This component's own `src/**` and `specs/**` are unchanged, and its previous stamp was re-verified to match `origin/unstable` before re-stamping. **No re-analysis was performed for this component**; this stamp asserts only what was checked.
 
 > **Re-stamp 2026-10-05 (transitive: `components/interfaces` changed, branch `fix/poller-cpu-placement-logging`).** The only change to this component's hashed inputs is a doc-comment correction on `DispatcherConfig::poller_base_cpu` in `components/interfaces/src/idispatcher.rs` (no signature, type, or behaviour change). This component's own `src/**` and `specs/**` are unchanged, and it does not reference `poller_base_cpu` (verified by grep over its src/ and specs/). Its previous stamp was re-verified to match `git archive origin/unstable` before re-stamping. **No re-analysis was performed for this component**; this stamp asserts only what was checked.
