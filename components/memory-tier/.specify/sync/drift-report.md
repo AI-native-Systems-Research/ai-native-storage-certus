@@ -1,9 +1,9 @@
 ---
 spec_sync_component: memory-tier
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-14T17:34:53Z
-spec_sync_git_commit: 78f60ab8
-spec_sync_inputs_sha256: fafa0db176f875d9bcbb128067b8abb74885a0035a97e85aa2ef6fab8d0d4750
+spec_sync_synced_at: 2026-10-14T21:37:06Z
+spec_sync_git_commit: 95eeb955
+spec_sync_inputs_sha256: eb8ac6d01e6a3392ecedebd793d1b123d896f262ce6ffab670cba4c3ba3fd7eb
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Re-stamp 2026-10-14 (transitive, merge of unstable 6f5743cc into this branch).** Only `components/interfaces` changed for this component (`DispatcherConfig::cold_staging_buf_bytes` default 4 -> 16 MiB, #550); `memory-tier` does not use it (grep over its src/ and specs/: 0 hits). This branch's full sync below stands; no re-analysis was needed.
