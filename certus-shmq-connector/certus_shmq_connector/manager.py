@@ -6,20 +6,23 @@ changes: every ``self._stub.X(pb.Y(...))`` gRPC call becomes a ``self._ring.x``
 call over the ``/dev/shm`` mailbox (``ring.py``). The op → lifecycle mapping is
 unchanged:
 
-    lookup        -> Check
+    lookup        -> Check (unless answered from a fresh touch reply, see
+                     ``CERTUS_LOOKUP_CACHE_TTL_US``)
     prepare_store -> Check (filter) + Reserve (best-effort: store the subset
                      that fits, drop blocks the saturated tier can't reserve)
     complete_store-> CommitStore (success) / AbortStore (failure)
     prepare_load  -> Pin(promote=false)
     complete_load -> Unpin
-    touch         -> Touch
+    touch         -> TouchCheck
     take_events   -> TakeEvents(max_events=0)
 """
 
 from __future__ import annotations
 
 import hashlib
+import os
 import sys
+import time
 from collections.abc import Iterable
 
 from .compat import (
@@ -33,6 +36,24 @@ from . import compat as _compat
 
 from .mediums import BlockLocation, CertusLoadStoreSpec, denamespace_key, ns_key
 from .ring import CHECK_MISS, CHECK_RESIDENT, REASON_REMOVED
+
+# Clock for the lookup cache's age limit. Monotonic (never steps back with
+# wall-clock changes), integer nanoseconds. Module-level so tests can replace it.
+_monotonic_ns = time.monotonic_ns
+
+
+def _lookup_cache_ttl_ns() -> int:
+    """Read ``CERTUS_LOOKUP_CACHE_TTL_US`` (microseconds, default 1000) and
+    return it in nanoseconds. 0 (or a negative value) disables the cache."""
+    raw = os.environ.get("CERTUS_LOOKUP_CACHE_TTL_US", "1000")
+    try:
+        ttl_us = int(raw)
+    except ValueError:
+        raise ValueError(
+            f"CERTUS_LOOKUP_CACHE_TTL_US must be an integer number of "
+            f"microseconds, got {raw!r}"
+        ) from None
+    return max(0, ttl_us) * 1000
 
 
 def _key_to_u64(key: OffloadKey) -> int:
@@ -99,24 +120,61 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         # not produce a warning storm.
         self._store_dropped_blocks = 0
         self._store_drop_log_next = 1000
-        # Per-pass lookup cache. The scheduler calls ``touch(full_key_list)`` for
-        # every KV group and THEN runs its maximal-prefix lookup loop over a
-        # slice of those same keys — one ``lookup()`` per key, breaking at the
-        # first miss (offloading/scheduler.py::_maximal_prefix_lookup). We fire a
-        # single batched ``Check`` inside ``touch`` (which already ships the whole
-        # key list) and answer each per-key ``lookup`` from this map, collapsing
-        # up to K per-key ``Check`` round-trips into one. Scope is a single
-        # scheduling pass: a ``touch`` that follows a ``lookup`` starts a new pass
-        # and clears the map (so a positive bit can never be reused across steps,
-        # after the key may have been evicted). A cache miss falls back to the
-        # authoritative single-key ``Check`` — an unseen key is never answered
-        # wrong, only un-batched. ``_raw_lookup_cache`` holds the same answers
-        # keyed by the caller's original OffloadKey, so a touched key's
-        # ``lookup()`` skips the fold; it shares this map's pass scope and clear
-        # rule.
+        # Short-lived lookup cache, filled by touch() and read by lookup().
+        #
+        # Call order in vLLM's offloading scheduler
+        # (offloading/scheduler.py::get_num_new_matched_tokens): since vLLM 0.21
+        # (upstream PR #41228) it runs the prefix lookup FIRST — one lookup()
+        # per key, stopping at the first miss (_maximal_prefix_lookup) — and
+        # calls touch() for the request's keys AFTER it. Only vLLM <= 0.20
+        # touched first. After upstream PR #51787 (post-0.30) the scheduler no
+        # longer calls touch() at all, so this map stays empty and every lookup
+        # is a Check. So a request's own lookups never read its own touch: what
+        # touch() fills is read by the lookups of the NEXT request(s) the
+        # scheduler handles. That still saves Check round trips when requests
+        # scheduled one after another share a prefix (same system prompt,
+        # multi-turn history): the shared blocks' residency came back in the
+        # previous request's TouchCheck reply.
+        #
+        # touch() is also called from _build_store_jobs, after prepare_store, so
+        # the maps can be filled at the end of one scheduling pass and read by
+        # the first lookups of the next.
+        #
+        # Why the age limit: the next lookup can come much later — in the next
+        # scheduler step, after a store or an eviction — and a stale positive
+        # makes vLLM schedule a load whose Pin then fails. The connector cannot
+        # fail a load safely (a failed load stops vLLM), so an entry is used only
+        # while it is at most CERTUS_LOOKUP_CACHE_TTL_US old, measured from just
+        # before the TouchCheck that produced it. The default, 1000 us, covers
+        # requests handled back to back in one scheduling pass; a synchronous
+        # scheduler step (which waits for a model forward pass) normally lasts
+        # longer, so answers are not carried into the next step (the benchmark's
+        # scheduler-step mode measures this). That is not guaranteed — with
+        # async scheduling the next pass can start right away — so the TTL is
+        # the bound, not the step: an answer is at most TTL older than a fresh
+        # Check would be, on top of the Check -> Pin gap that exists anyway.
+        # Evictions this connector can know about drop the maps at once:
+        # prepare_store (its Reserve may evict to make room) and a REMOVED event
+        # from take_events. Older entries, and keys not in the map, fall back to
+        # the authoritative per-key Check — the cache only ever saves round
+        # trips, it never changes an answer's meaning (resident only, AND across
+        # TP ranks). TTL 0 disables the cache: touch() still sends its
+        # TouchCheck but fills nothing. Do not raise the TTL far beyond a
+        # scheduling pass: a long TTL brings back the stale-positive hazard.
+        #
+        # ``_lookup_cache_filled_at_ns`` is the time of the OLDEST fill still in
+        # the maps (a touch restarts it only when the maps are empty or it
+        # clears them), so checking it never under-ages an entry. A touch()
+        # clears the maps when it follows a lookup() (the previous request's
+        # answers are replaced by this one's) or finds them already expired;
+        # this also keeps them bounded. ``_raw_lookup_cache`` holds the same
+        # answers keyed by the caller's original OffloadKey, so a cached key's
+        # lookup() skips the fold; it shares the u64 map's age and clear rules.
         self._lookup_cache: dict[int, bool] = {}
         self._raw_lookup_cache: dict = {}
         self._last_op_was_lookup = False
+        self._lookup_cache_ttl_ns = _lookup_cache_ttl_ns()
+        self._lookup_cache_filled_at_ns = 0
 
     def set_block_size_bytes(self, block_size_bytes: int) -> None:
         """Update the per-block Reserve size once the true KV-cache tensor
@@ -192,19 +250,29 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         # at module level and resolved per call (``_compat.lookup_result``), so
         # a patched or reloaded compat still applies.
         self._last_op_was_lookup = True
-        # Fastest path: a key the preceding touch() saw is answered from the
-        # raw-key map without folding. Unhashable keys (bytearray) fall through.
-        try:
-            cached = self._raw_lookup_cache.get(key)
-        except TypeError:
-            cached = None
+        # The maps are used only while the TouchCheck that filled them is at
+        # most the TTL old (see __init__); TTL 0 never uses them.
+        fresh = bool(self._lookup_cache_ttl_ns) and (
+            _monotonic_ns() - self._lookup_cache_filled_at_ns
+            <= self._lookup_cache_ttl_ns
+        )
+        cached = None
+        if fresh:
+            # Fastest path: a key a recent touch() saw is answered from the
+            # raw-key map without folding. Unhashable keys (bytearray) fall
+            # through.
+            try:
+                cached = self._raw_lookup_cache.get(key)
+            except TypeError:
+                pass
         if cached is None:
             int_key = _key_to_u64(key)
-            # Fast path: answer from the bitmap the preceding touch() batched. A
-            # miss (key not in this pass's batch, e.g. the scheduler looking up a
-            # key it never touched) falls back to the authoritative single-key
-            # Check — correctness is never traded for the batch, only latency.
-            cached = self._lookup_cache.get(int_key)
+            # Fast path: answer from the map a recent touch() filled. A miss
+            # (key not in it, e.g. the first request with this prefix) or an
+            # expired map falls back to the authoritative single-key Check —
+            # correctness is never traded for the batch, only latency.
+            if fresh:
+                cached = self._lookup_cache.get(int_key)
             if cached is None:
                 # AND across all W shards — a load needs every rank's shard present.
                 cached = self._check_all_present(
@@ -212,25 +280,48 @@ class ShmqCertusOffloadingManager(OffloadingManager):
                 ).get(int_key, False)
         return _compat.lookup_result(cached)
 
+    def _drop_lookup_cache(self) -> None:
+        """Forget every kept lookup answer (both maps)."""
+        self._lookup_cache.clear()
+        self._raw_lookup_cache.clear()
+
     def touch(self, keys: Iterable[OffloadKey], req_context=None) -> None:
-        # A touch that follows a lookup opens a new scheduling pass — retire the
-        # previous pass's bitmap so a stale positive can never outlive the step
-        # in which its Check was authoritative (the key may since be evicted).
-        if self._last_op_was_lookup:
-            self._lookup_cache.clear()
-            self._raw_lookup_cache.clear()
+        # A touch that follows a lookup replaces the previous request's answers
+        # with this one's; a touch that finds the maps expired drops them. In
+        # both cases, and when the maps are empty, the fill time restarts now.
+        # Otherwise (several touches in a row, e.g. one per KV group of one
+        # request) the maps keep their OLDEST fill time, so no entry is ever
+        # treated as younger than it is.
+        ttl_ns = self._lookup_cache_ttl_ns
+        now_ns = _monotonic_ns() if ttl_ns else 0
+        if (
+            self._last_op_was_lookup
+            or now_ns - self._lookup_cache_filled_at_ns > ttl_ns
+        ):
+            self._drop_lookup_cache()
             self._last_op_was_lookup = False
+        if not self._lookup_cache:
+            self._lookup_cache_filled_at_ns = now_ns
         keys = list(keys)
         int_keys = _keys_to_u64s(keys)
         if not int_keys:
             return
-        # Residency now comes from the touch reply itself (fused TouchCheck), so
-        # the scheduler's subsequent per-key lookup loop
-        # (offloading/scheduler.py::_maximal_prefix_lookup) is served from this
-        # map without a separate Check round trip. resident_only semantics: only
-        # RESIDENT counts, a PENDING shard reads as a miss (see
-        # _check_all_present). AND-across-ranks per logical key (a block is a hit
-        # only if all shards are present); states return in expansion order.
+        if not ttl_ns:
+            # Cache disabled: the TouchCheck still advances every shard's LRU
+            # position; its residency reply is not kept.
+            if self._world_size == 1:
+                self._ring.touch_states(int_keys, promote=False)
+            else:
+                self._ring.touch_states(
+                    [nk for k in int_keys for nk in self._ns_all(k)], promote=False
+                )
+            return
+        # Residency comes from the touch reply itself (fused TouchCheck) and is
+        # kept for the lookups of the requests the scheduler handles next (see
+        # __init__). resident_only semantics: only RESIDENT counts, a PENDING
+        # shard reads as a miss (see _check_all_present). AND-across-ranks per
+        # logical key (a block is a hit only if all shards are present); states
+        # return in expansion order.
         if self._world_size == 1:
             # W==1: ns_key is identity, so skip the expansion and fill the map
             # in one bulk update (same items, same order, resident_only). The
@@ -261,7 +352,7 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         except TypeError:  # unhashable caller key (e.g. bytearray): fold path
             # update() stops at the unhashable key, which could leave an earlier
             # touch()'s raw entry for a later key stale; drop the whole map so
-            # every lookup this pass takes the fold path.
+            # every lookup takes the fold path until the maps are next cleared.
             self._raw_lookup_cache.clear()
 
     # ── store ──
@@ -272,6 +363,9 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         keys_list = list(keys)
         int_keys = _keys_to_u64s(keys_list)
         session_id = _session_id_to_u64(req_context)
+        # The Reserve below may make the server evict other blocks, which kept
+        # lookup answers could still report as resident: drop them all.
+        self._drop_lookup_cache()
 
         # Filter out keys already cached (consecutive dedup is vLLM's concern;
         # here we just avoid re-storing existing entries). "Already cached" means
@@ -471,6 +565,8 @@ class ShmqCertusOffloadingManager(OffloadingManager):
             seen.add(logical)
             removed.append(logical.to_bytes(8, "big"))
         if removed:
+            # A removed block may still be in the kept lookup answers.
+            self._drop_lookup_cache()
             yield OffloadingEvent(
                 keys=removed,
                 medium=CertusLoadStoreSpec.medium(),

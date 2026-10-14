@@ -1,11 +1,13 @@
 ---
 spec_sync_component: interfaces
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-09T21:53:37Z
-spec_sync_git_commit: 83bcd4ff
-spec_sync_inputs_sha256: 3ee6dd139459882a27132a6d93279cbb1079f416aeba02a68efe11ce23a691ed
+spec_sync_synced_at: 2026-10-14T20:46:27Z
+spec_sync_git_commit: 474ba0a6
+spec_sync_inputs_sha256: 9e67210c74c0c9afe4f2f041e932f33d3466610cfd1527326ebab7811e7ed330
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-10-14 (branch `fix/cold-staging-buf-16mib`).** The branch raised `DispatcherConfig::cold_staging_buf_bytes` from 4 MiB to 16 MiB (`src/idispatcher.rs:125`, commit `8e12e49f`). FR-027 in this component's own spec still named the old 4 MiB default — **DRIFTED (moderate), code authoritative**. Updated FR-027 to 16 MiB with the reason (an 8 MiB per-worker KV-offload block fails the `serve_cold_staged` fit guard under a 4 MiB buffer; see dispatcher FR-033). The `DispatcherConfig` field-list summary names the field without a default and is unaffected. No actionable drift remains.
+
 > **Sync 2026-10-09 (branch `fix/evict-blocked-by-pin`).** Doc-comment change only: `IDispatchMap::try_evict_to_block` now documents `ActiveReferences` for a held reference and `InvalidState` for the remaining non-evictable cases, matching the dispatch-map implementation and FR-026. No signature or type change. `specs/001-interfaces` describes the method without enumerating its errors (line 166), so it stays aligned; verified by reading it.
 
 > **Sync 2026-10-05 (branch `fix/store-declines-root-cause`).** Delta analysis on a certified baseline: `origin/unstable` (`08a5ae88`) changed no component `src/`or `specs/` after its `fa4adab0` re-stamp, so the only new inputs are this branch's changes. Every FR naming a counter, a `TierEventStats`/`RemoteServeStats` field, or an `IDispatcher` method was located by grep over `specs/**` and re-checked against the changed code.

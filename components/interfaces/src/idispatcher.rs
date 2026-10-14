@@ -95,7 +95,9 @@ pub struct DispatcherConfig {
     /// Default: 64. Set to 0 to disable staging (cold loads then fail on a full tier).
     pub cold_staging_slots: usize,
     /// Byte capacity of each cold-load staging buffer. Must be >= the largest
-    /// per-block transfer size. Default: 4 MiB.
+    /// per-block transfer size. Default: 16 MiB (covers 64-token/8 MiB-per-worker
+    /// offload blocks with headroom; a full memory tier otherwise fails those
+    /// cold loads, which crashes the vLLM connector).
     pub cold_staging_buf_bytes: usize,
 }
 
@@ -120,7 +122,7 @@ impl Default for DispatcherConfig {
             memory_tier_eviction_batch_size: 64,
             memory_tier_eviction_interval_secs: 2,
             cold_staging_slots: 64,
-            cold_staging_buf_bytes: 4 * 1024 * 1024,
+            cold_staging_buf_bytes: 16 * 1024 * 1024,
         }
     }
 }
