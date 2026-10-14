@@ -47,6 +47,8 @@ impl ZyreNode {
         config.validate()?;
 
         let name_cstr;
+        // CZMQ initialises its process-global state on the first `zyre_new`.
+        let _czmq_init = ZYRE_NEW_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let ptr = unsafe {
             if let Some(ref name) = config.name {
                 name_cstr = std::ffi::CString::new(name.as_str())
@@ -131,6 +133,11 @@ impl ZyreNode {
         Ok(())
     }
 }
+
+/// Serialises `zyre_new`. CZMQ's first call initialises process-global state
+/// (`zsys_init`) without a lock, so two threads creating their first nodes at
+/// once could interleave there and abort the process.
+static ZYRE_NEW_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 impl IZyreNode for ZyreNode {
     /// Start the node, beginning network discovery and messaging.
