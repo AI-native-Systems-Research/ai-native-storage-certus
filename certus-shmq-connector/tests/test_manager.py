@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
+import certus_shmq_connector.manager as manager
 from certus_shmq_connector.gpu import KvCacheIpc
 from certus_shmq_connector.manager import ShmqCertusOffloadingManager, _key_to_u64
 from certus_shmq_connector.mediums import BlockLocation, CertusLoadStoreSpec
@@ -121,6 +122,31 @@ def _calls_of(ring, name):
     return [args for n, args in ring.calls if n == name]
 
 
+class _FakeClock:
+    """Stands in for manager._monotonic_ns; advanced explicitly, in us."""
+
+    def __init__(self, start_ns: int = 10**12):
+        self.now_ns = start_ns
+
+    def __call__(self) -> int:
+        return self.now_ns
+
+    def advance_us(self, us: int) -> None:
+        self.now_ns += us * 1000
+
+
+@pytest.fixture(autouse=True)
+def clock(monkeypatch):
+    # Every test runs on a frozen clock with the default TTL, so a slow machine
+    # or a CERTUS_LOOKUP_CACHE_TTL_US in the environment cannot expire the
+    # lookup cache between a test's touch() and lookup(). Tests that exercise
+    # the age limit advance it explicitly.
+    c = _FakeClock()
+    monkeypatch.setattr(manager, "_monotonic_ns", c)
+    monkeypatch.delenv("CERTUS_LOOKUP_CACHE_TTL_US", raising=False)
+    return c
+
+
 # ── key mapping ──
 
 
@@ -206,9 +232,10 @@ def test_touch_maps_to_touch_no_promote():
 
 def test_touch_batches_check_for_following_per_key_lookups():
     # touch() ships the whole key list as one fused TouchCheck, whose reply
-    # carries per-key residency — so touch() issues NO separate check, and the
-    # scheduler's subsequent per-key lookup loop is served from the memoized
-    # bitmap — no per-key check RPC either.
+    # carries per-key residency — so touch() issues NO separate check, and
+    # per-key lookups that follow within the age limit (in vLLM >= 0.21: the
+    # next request's prefix lookup) are served from the kept answers — no
+    # per-key check RPC either.
     ring = FakeRing()
     ring.exists[U(1)] = True
     ring.exists[U(2)] = True
@@ -229,23 +256,23 @@ def test_touch_batches_check_for_following_per_key_lookups():
 
 
 def test_lookup_miss_falls_back_to_single_check():
-    # A lookup for a key the current pass never touched must consult the
+    # A lookup for a key no recent touch covered must consult the
     # authoritative single-key check rather than answering absent from a stale
-    # or empty bitmap.
+    # or empty map.
     ring = FakeRing()
     ring.exists[U(42)] = True
     mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
-    mgr.touch([K(1)])  # bitmap covers key 1 only
+    mgr.touch([K(1)])  # map covers key 1 only
     assert _calls_of(ring, "check_states") == []  # residency came from touch
     assert mgr.lookup(K(42)) is True
     # The fallback single-key check happened for the uncached key only.
     assert _calls_of(ring, "check_states") == [[U(42)]]
 
 
-def test_touch_after_lookup_starts_new_pass_and_clears_bitmap():
-    # A touch that follows a lookup opens a new scheduling pass: the prior pass's
-    # positive bit must not survive (the key may since have been evicted), so the
-    # next lookup re-derives from the fresh batched check.
+def test_touch_after_lookup_replaces_previous_answers():
+    # A touch that follows a lookup replaces the previous touch's answers: the
+    # old positive must not survive (the key may since have been evicted), so
+    # the next lookup reads the fresh TouchCheck reply.
     ring = FakeRing()
     ring.exists[U(5)] = True
     mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
@@ -253,7 +280,7 @@ def test_touch_after_lookup_starts_new_pass_and_clears_bitmap():
     mgr.touch([K(5)])
     assert mgr.lookup(K(5)) is True
 
-    # Key 5 evicted between passes; new pass's batched check reflects it.
+    # Key 5 evicted in between; the new TouchCheck reply reflects it.
     ring.exists[U(5)] = False
     mgr.touch([K(5)])
     assert mgr.lookup(K(5)) is False
@@ -279,8 +306,8 @@ def test_lookup_pending_reads_as_miss():
 
 
 def test_touch_caches_pending_state_for_following_lookups():
-    # The PENDING state must survive the touch()-batched lookup cache: a PENDING
-    # key looked up after touch is answered from the cached state (no extra RPC)
+    # The PENDING state must survive the touch()-filled lookup cache: a PENDING
+    # key looked up soon after touch is answered from the cached state (no RPC)
     # and still reads as a MISS, not resident -- the load-decision path never
     # treats PENDING as loadable. See test_lookup_pending_reads_as_miss.
     from certus_shmq_connector.ring import CHECK_PENDING
@@ -351,14 +378,16 @@ def test_touch_w1_bulk_fill_matches_per_key_reference_in_order():
     # W=1 skips the expansion and fills the cache with one bulk update. The
     # touch_states key list and list(_lookup_cache.items()) — order included —
     # must equal the old per-key loop, with duplicate keys (last write wins at
-    # the first-insertion position) and a pre-existing entry from this pass.
+    # the first-insertion position) and a pre-existing entry from an earlier touch.
     ring = FakeRing()
     keys = [K(n) for n in (1, 2, 3, 2, 4, 5, 1, 6)]
     int_keys = [U(n) for n in (1, 2, 3, 2, 4, 5, 1, 6)]
     _seed_mixed_states(ring, sorted(set(int_keys)))
 
     mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
-    mgr._lookup_cache[U(3)] = True  # stale-in-pass entry, overwritten in place
+    # Entries from an earlier touch moments ago (still within the age limit).
+    mgr._lookup_cache_filled_at_ns = manager._monotonic_ns()
+    mgr._lookup_cache[U(3)] = True  # earlier entry, overwritten in place
     mgr._lookup_cache[U(9)] = False  # untouched entry, kept
 
     expected = {U(3): True, U(9): False}
@@ -424,6 +453,7 @@ def test_touch_w2_calls_and_cache_unchanged():
     ring.states[ns_key(U(2), 1, w)] = CHECK_PENDING  # one pending shard -> miss
     ring.exists[ns_key(U(3), 1, w)] = True  # rank 0 absent -> miss
     mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096, world_size=w)
+    mgr._lookup_cache_filled_at_ns = manager._monotonic_ns()  # fresh earlier entry
     mgr._lookup_cache[U(4)] = False
 
     int_keys = [U(n) for n in ns]
@@ -438,17 +468,220 @@ def test_touch_w2_calls_and_cache_unchanged():
     assert mgr._lookup_cache[U(1)] is True and mgr._lookup_cache[U(4)] is True
 
 
-def test_touch_w1_lookup_then_touch_still_clears_pass():
+def test_touch_w1_lookup_then_touch_still_clears_maps():
     ring = FakeRing()
     ring.exists[U(1)] = True
     ring.exists[U(2)] = True
     mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
     mgr.touch([K(1), K(2)])
     assert mgr.lookup(K(1)) is True
-    mgr.touch([K(3)])  # new pass: prior pass's entries are retired
+    mgr.touch([K(3)])  # touch after lookup: earlier entries are retired
     assert list(mgr._lookup_cache.items()) == [(U(3), False)]
     ring.exists[U(1)] = False
     assert mgr.lookup(K(1)) is False  # authoritative fallback, not stale True
+    assert _calls_of(ring, "check_states") == [[U(1)]]
+
+
+# ── manager: lookup cache age limit and vLLM's lookup -> touch order ──
+# (the autouse ``clock`` fixture above freezes manager._monotonic_ns)
+
+
+def test_lookup_cache_ttl_env_default_custom_and_invalid(monkeypatch):
+    mgr = ShmqCertusOffloadingManager(FakeRing(), block_size_bytes=4096)
+    assert mgr._lookup_cache_ttl_ns == 1000 * 1000  # default 1000 us
+    monkeypatch.setenv("CERTUS_LOOKUP_CACHE_TTL_US", "250")
+    mgr = ShmqCertusOffloadingManager(FakeRing(), block_size_bytes=4096)
+    assert mgr._lookup_cache_ttl_ns == 250 * 1000
+    monkeypatch.setenv("CERTUS_LOOKUP_CACHE_TTL_US", "-5")
+    mgr = ShmqCertusOffloadingManager(FakeRing(), block_size_bytes=4096)
+    assert mgr._lookup_cache_ttl_ns == 0
+    monkeypatch.setenv("CERTUS_LOOKUP_CACHE_TTL_US", "1ms")
+    with pytest.raises(ValueError, match="CERTUS_LOOKUP_CACHE_TTL_US"):
+        ShmqCertusOffloadingManager(FakeRing(), block_size_bytes=4096)
+
+
+def test_lookup_cache_ttl_read_once_at_construction(monkeypatch, clock):
+    ring = FakeRing()
+    ring.exists[U(1)] = True
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    monkeypatch.setenv("CERTUS_LOOKUP_CACHE_TTL_US", "0")  # too late to matter
+    mgr.touch([K(1)])
+    assert mgr.lookup(K(1)) is True
+    assert _calls_of(ring, "check_states") == []
+
+
+@pytest.mark.parametrize("w", [1, 2])
+def test_lookup_cache_fresh_entry_used_up_to_ttl(clock, w):
+    from certus_shmq_connector.mediums import ns_key
+
+    ring = FakeRing()
+    for r in range(w):
+        ring.exists[ns_key(U(1), r, w)] = True
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096, world_size=w)
+    mgr.touch([K(1), K(2)])
+    clock.advance_us(1000)  # exactly the TTL old: still used
+    assert mgr.lookup(K(1)) is True  # raw-key path
+    assert mgr.lookup(bytearray(K(1))) is True  # fold path (unhashable key)
+    assert mgr.lookup(K(2)) is False  # cached miss, also no RPC
+    assert _calls_of(ring, "check_states") == []
+
+
+@pytest.mark.parametrize("w", [1, 2])
+def test_lookup_cache_expired_entry_not_used(clock, w):
+    # A positive older than the TTL must not be reused: the key may have been
+    # evicted since, and a stale hit makes vLLM schedule a load whose Pin fails.
+    from certus_shmq_connector.mediums import ns_key
+
+    ring = FakeRing()
+    for r in range(w):
+        ring.exists[ns_key(U(1), r, w)] = True
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096, world_size=w)
+    mgr.touch([K(1)])
+    for r in range(w):
+        ring.exists[ns_key(U(1), r, w)] = False  # evicted after the touch
+    clock.advance_us(1001)
+    assert mgr.lookup(K(1)) is False  # raw-key map skipped
+    assert mgr.lookup(bytearray(K(1))) is False  # u64 map skipped too
+    shards = [ns_key(U(1), r, w) for r in range(w)]
+    assert _calls_of(ring, "check_states") == [shards, shards]
+
+
+@pytest.mark.parametrize("w", [1, 2])
+def test_lookup_cache_ttl_zero_disables_cache(monkeypatch, clock, w):
+    from certus_shmq_connector.mediums import ns_key
+
+    monkeypatch.setenv("CERTUS_LOOKUP_CACHE_TTL_US", "0")
+    ring = FakeRing()
+    for r in range(w):
+        ring.exists[ns_key(U(1), r, w)] = True
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096, world_size=w)
+    mgr.touch([K(1), K(2)])
+    # The TouchCheck still goes out over every shard (LRU recency) ...
+    shards = [ns_key(U(k), r, w) for k in (1, 2) for r in range(w)]
+    assert _calls_of(ring, "touch") == [(shards, False)]
+    # ... but nothing is kept, and every lookup is an authoritative Check.
+    assert mgr._lookup_cache == {} and mgr._raw_lookup_cache == {}
+    assert mgr.lookup(K(1)) is True
+    assert mgr.lookup(K(2)) is False
+    assert len(_calls_of(ring, "check_states")) == 2
+
+
+def test_lookup_first_order_next_request_reads_previous_touch(clock):
+    # vLLM >= 0.21 order (scheduler.py::get_num_new_matched_tokens): each
+    # request's prefix lookup runs BEFORE its touch. Request A's lookups find
+    # nothing cached and Check; A's touch keeps the answers; request B, handled
+    # right after A and sharing A's prefix, reads them without a Check.
+    ring = FakeRing()
+    for n in (1, 2):  # shared prefix, resident
+        ring.exists[U(n)] = True
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+
+    # Request A: K1 K2 shared, K3 private (miss -> the prefix scan stops).
+    assert [mgr.lookup(K(n)) for n in (1, 2, 3)] == [True, True, False]
+    assert _calls_of(ring, "check_states") == [[U(1)], [U(2)], [U(3)]]
+    mgr.touch([K(1), K(2), K(3)])
+
+    clock.advance_us(100)
+    # Request B: K1 K2 shared (cached), K4 private (Check).
+    ring.calls.clear()
+    assert [mgr.lookup(K(n)) for n in (1, 2, 4)] == [True, True, False]
+    assert _calls_of(ring, "check_states") == [[U(4)]]
+    mgr.touch([K(1), K(2), K(4)])
+    # B's touch replaced A's answers (K3 gone, K4 in).
+    assert set(mgr._lookup_cache) == {U(1), U(2), U(4)}
+
+    # Next scheduler step, well past the TTL: nothing is reused.
+    clock.advance_us(5000)
+    ring.calls.clear()
+    assert mgr.lookup(K(1)) is True
+    assert _calls_of(ring, "check_states") == [[U(1)]]
+
+
+def test_consecutive_touches_keep_oldest_fill_time(clock):
+    # Several touches with no lookup between them (e.g. one per KV group) share
+    # one fill time: the OLDEST. An entry is never treated as younger than it
+    # is, even when that expires a newer entry early.
+    ring = FakeRing()
+    ring.exists[U(1)] = True
+    ring.exists[U(2)] = True
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    mgr.touch([K(1)])
+    clock.advance_us(600)
+    mgr.touch([K(2)])
+    clock.advance_us(500)  # K1 is 1100 us old, K2 500 us
+    ring.exists[U(1)] = False
+    assert mgr.lookup(K(1)) is False  # not the stale True
+    assert mgr.lookup(K(2)) is True
+    assert _calls_of(ring, "check_states") == [[U(1)], [U(2)]]
+
+
+def test_touch_after_expiry_restarts_fill_time(clock):
+    # A touch that finds the maps expired drops them and starts a new fill
+    # time, even with no lookup in between.
+    ring = FakeRing()
+    ring.exists[U(1)] = True
+    ring.exists[U(2)] = True
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    mgr.touch([K(1)])
+    clock.advance_us(2000)
+    mgr.touch([K(2)])
+    assert set(mgr._lookup_cache) == {U(2)}
+    assert set(mgr._raw_lookup_cache) == {K(2)}
+    clock.advance_us(900)
+    assert mgr.lookup(K(2)) is True
+    assert _calls_of(ring, "check_states") == []
+
+
+def test_touch_into_empty_maps_restarts_fill_time(clock):
+    # Maps dropped mid-window (here by prepare_store) are refilled with a new
+    # fill time, so the new entries get their full TTL.
+    ring = FakeRing()
+    ring.exists[U(1)] = True
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    mgr.touch([K(9)])
+    clock.advance_us(800)
+    mgr.prepare_store([K(9)])  # drops the maps
+    mgr.touch([K(1)])
+    clock.advance_us(900)  # 1700 us after the first touch, 900 after this one
+    ring.calls.clear()
+    assert mgr.lookup(K(1)) is True
+    assert _calls_of(ring, "check_states") == []
+
+
+@pytest.mark.parametrize("w", [1, 2])
+def test_prepare_store_drops_lookup_cache(w):
+    # prepare_store's Reserve may make the server evict blocks a fresh cache
+    # entry still calls resident; the next lookup must Check, not reuse it.
+    from certus_shmq_connector.mediums import ns_key
+
+    ring = FakeRing()
+    for r in range(w):
+        ring.exists[ns_key(U(1), r, w)] = True
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096, world_size=w)
+    mgr.touch([K(1)])
+    mgr.prepare_store([K(7)])
+    assert mgr._lookup_cache == {} and mgr._raw_lookup_cache == {}
+    for r in range(w):
+        ring.exists[ns_key(U(1), r, w)] = False  # evicted by that Reserve
+    ring.calls.clear()
+    assert mgr.lookup(K(1)) is False
+    assert _calls_of(ring, "check_states") == [[ns_key(U(1), r, w) for r in range(w)]]
+
+
+def test_take_events_removed_drops_lookup_cache():
+    ring = FakeRing()
+    ring.exists[U(1)] = True
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    mgr.touch([K(1)])
+    ring.events = [(200, REASON_DEMOTED)]  # still loadable: answers are kept
+    assert list(mgr.take_events()) == []
+    assert U(1) in mgr._lookup_cache
+    ring.events = [(U(1), REASON_REMOVED)]
+    ring.exists[U(1)] = False
+    assert len(list(mgr.take_events())) == 1
+    assert mgr._lookup_cache == {} and mgr._raw_lookup_cache == {}
+    ring.calls.clear()
+    assert mgr.lookup(K(1)) is False
     assert _calls_of(ring, "check_states") == [[U(1)]]
 
 
@@ -548,7 +781,8 @@ def test_touch_after_lookup_clears_both_maps():
     mgr.touch([K(5), K(6)])
     assert mgr.lookup(K(5)) is True
 
-    # Key 5 evicted between passes; the new pass drops every prior entry.
+    # Key 5 evicted in between; the touch after the lookup drops every prior
+    # entry.
     ring.exists[U(5)] = False
     mgr.touch([K(5)])
     assert K(6) not in mgr._raw_lookup_cache
@@ -622,7 +856,7 @@ def test_combined_w1_lookup_then_touch_clears_both_maps():
     mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
     mgr.touch([K(1), K(2)])
     assert mgr.lookup(K(1)) is True
-    mgr.touch([K(3)])  # new pass: prior pass's entries are retired
+    mgr.touch([K(3)])  # touch after lookup: earlier entries are retired
     assert list(mgr._lookup_cache.items()) == [(U(3), False)]
     assert list(mgr._raw_lookup_cache.items()) == [(K(3), False)]
     ring.exists[U(1)] = False
@@ -643,7 +877,7 @@ def test_combined_w1_touch_states_sends_int_keys_with_raw_map():
     assert set(mgr._raw_lookup_cache) == set(keys)
 
 
-def test_combined_unhashable_key_clears_stale_raw_entry_in_same_pass():
+def test_combined_unhashable_key_clears_stale_raw_entry_between_touches():
     # touch([K1]) leaves a raw K1=True. With no lookup between, K1 goes missing
     # and touch([bytearray(K2), K1]) aborts the raw update at the bytearray; the
     # old raw K1=True must not survive.

@@ -32,6 +32,16 @@ Usage (certus-server must be running):
 
     # CSV output for automated collection
     python bench_connector_lifecycle.py --csv results.csv
+
+    # vLLM <= 0.20 call order (touch before lookup) instead of the default
+    python bench_connector_lifecycle.py --mode scheduler-step --lookup-order touch-first
+
+Call order: wherever a phase both looks up and touches the same keys, it calls
+lookup() first and touch() after by default (--lookup-order lookup-first), as
+vLLM's offloading scheduler does since 0.21 (vLLM PR #41228; still so in 0.30).
+--lookup-order touch-first reproduces vLLM <= 0.20, where touch() came first and
+the connector answered that request's lookups from the touch reply (within its
+CERTUS_LOOKUP_CACHE_TTL_US).
 """
 
 from __future__ import annotations
@@ -165,6 +175,14 @@ if not _has_vllm():
 
 # Default block size: 2 MiB (Llama-3-8B: 16 tokens × 32 layers × 4096 bytes).
 DEFAULT_BLOCK_BYTES = 2 * 1024 * 1024
+
+# Order of the lookup() and touch() calls for one request's keys (--lookup-order).
+# vLLM's offloading scheduler (get_num_new_matched_tokens) looks up first and
+# touches after since 0.21 (vLLM PR #41228, still so in 0.30); vLLM <= 0.20
+# touched first.
+LOOKUP_FIRST = "lookup-first"
+TOUCH_FIRST = "touch-first"
+LOOKUP_ORDERS = (LOOKUP_FIRST, TOUCH_FIRST)
 
 
 # ── content-hashed keys (realistic vLLM pattern) ───────────────────────────
@@ -403,9 +421,13 @@ def bench_load_lifecycle(
     min_duration: float,
     *,
     cold: bool = False,
+    lookup_order: str = LOOKUP_FIRST,
 ) -> BenchResult:
-    """Full load lifecycle: touch → lookup → prepare_load → submit_load → get_finished → complete_load."""
+    """Full load lifecycle: lookup → touch (or touch → lookup with
+    ``lookup_order=TOUCH_FIRST``) → prepare_load → submit_load → get_finished
+    → complete_load."""
     label_temp = "Cold" if cold else "Warm"
+    touch_first = lookup_order == TOUCH_FIRST
     phases = {
         "touch": PhaseTiming("touch"),
         "lookup": PhaseTiming("lookup"),
@@ -431,12 +453,13 @@ def bench_load_lifecycle(
         for i in range(0, len(keys), batch_size):
             batch_keys = keys[i : i + batch_size]
 
-            # 1. touch (populates the lookup cache bitmap)
-            t0 = time.perf_counter()
-            manager.touch(batch_keys)
-            phases["touch"].record(time.perf_counter() - t0)
+            # 1. touch first (vLLM <= 0.20 only): its reply answers the lookups
+            if touch_first:
+                t0 = time.perf_counter()
+                manager.touch(batch_keys)
+                phases["touch"].record(time.perf_counter() - t0)
 
-            # 2. lookup (per-key, from cache or fallback Check)
+            # 2. lookup (per-key, from a recent touch reply or a fallback Check)
             t0 = time.perf_counter()
             hits = []
             for k in batch_keys:
@@ -444,17 +467,23 @@ def bench_load_lifecycle(
                     hits.append(k)
             phases["lookup"].record(time.perf_counter() - t0)
 
+            # 3. touch after the lookup (vLLM >= 0.21)
+            if not touch_first:
+                t0 = time.perf_counter()
+                manager.touch(batch_keys)
+                phases["touch"].record(time.perf_counter() - t0)
+
             if not hits:
                 continue
 
-            # 3. prepare_load (pin)
+            # 4. prepare_load (pin)
             t0 = time.perf_counter()
             load_spec = manager.prepare_load(hits)
             phases["prepare_load"].record(time.perf_counter() - t0)
 
             gpu_block_ids = list(range(len(hits)))
 
-            # 4. submit_load (async Certus→GPU via ThreadPoolExecutor)
+            # 5. submit_load (async Certus→GPU via ThreadPoolExecutor)
             t0 = time.perf_counter()
             job_id += 1
             worker.submit_load(
@@ -464,13 +493,13 @@ def bench_load_lifecycle(
             )
             phases["submit_load"].record(time.perf_counter() - t0)
 
-            # 5. get_finished
+            # 6. get_finished
             t0 = time.perf_counter()
             while not worker.get_finished():
                 time.sleep(0.0001)
             phases["get_finished"].record(time.perf_counter() - t0)
 
-            # 6. complete_load (unpin)
+            # 7. complete_load (unpin)
             t0 = time.perf_counter()
             manager.complete_load(hits)
             phases["complete_load"].record(time.perf_counter() - t0)
@@ -481,7 +510,11 @@ def bench_load_lifecycle(
 
     wall = time.perf_counter() - wall_start
     return BenchResult(
-        label=f"{label_temp} Load Lifecycle (touch → lookup → prepare → submit → finish → complete)",
+        label=(
+            f"{label_temp} Load Lifecycle "
+            f"({'touch → lookup' if touch_first else 'lookup → touch'} "
+            f"→ prepare → submit → finish → complete)"
+        ),
         total_blocks=total_blocks,
         total_bytes=total_blocks * block_bytes,
         wall_seconds=wall,
@@ -501,6 +534,7 @@ def bench_mixed_eviction(
     *,
     working_set: int = 512,
     load_fraction: float = 0.5,
+    lookup_order: str = LOOKUP_FIRST,
 ) -> BenchResult:
     """Interleaved store + load under memory-tier pressure.
 
@@ -512,8 +546,10 @@ def bench_mixed_eviction(
 
     ``load_fraction`` controls what share of each iteration is loads vs stores
     (0.5 = half-and-half). Keys rotate across generations so every store is a
-    new key (not a dedup hit).
+    new key (not a dedup hit). The load side calls lookup() and touch() in
+    ``lookup_order``.
     """
+    touch_first = lookup_order == TOUCH_FIRST
     phases = {
         "store_touch": PhaseTiming("store_touch"),
         "prepare_store": PhaseTiming("prepare_store"),
@@ -611,13 +647,19 @@ def bench_mixed_eviction(
         for i in range(0, len(loadable_keys), batch_size):
             batch = loadable_keys[i : i + batch_size]
 
-            t0 = time.perf_counter()
-            manager.touch(batch)
-            phases["load_touch"].record(time.perf_counter() - t0)
+            if touch_first:
+                t0 = time.perf_counter()
+                manager.touch(batch)
+                phases["load_touch"].record(time.perf_counter() - t0)
 
             t0 = time.perf_counter()
             hits = [k for k in batch if manager.lookup(k)]
             phases["lookup"].record(time.perf_counter() - t0)
+
+            if not touch_first:
+                t0 = time.perf_counter()
+                manager.touch(batch)
+                phases["load_touch"].record(time.perf_counter() - t0)
 
             if not hits:
                 load_misses += len(batch)
@@ -698,13 +740,16 @@ def bench_pipelined(
     *,
     pipeline_depth: int = 4,
     direction: str = "store",
+    lookup_order: str = LOOKUP_FIRST,
 ) -> BenchResult:
     """Submit multiple batches before reaping to saturate the ThreadPoolExecutor.
 
     Instead of submit→spin→complete per batch, submit ``pipeline_depth``
     batches, then drain all completed jobs.  This reveals whether DMA
     operations actually overlap and whether the pool is the bottleneck.
+    Loads call lookup() and touch() in ``lookup_order``.
     """
+    touch_first = lookup_order == TOUCH_FIRST
     is_store = direction == "store"
     label_dir = "Store" if is_store else "Load"
     phases = {
@@ -748,8 +793,11 @@ def bench_pipelined(
                 total_blocks += len(stored)
             else:
                 t0 = time.perf_counter()
-                manager.touch(batch_keys)
+                if touch_first:
+                    manager.touch(batch_keys)
                 hits = [k for k in batch_keys if manager.lookup(k)]
+                if not touch_first:
+                    manager.touch(batch_keys)
                 if not hits:
                     continue
                 load_spec = manager.prepare_load(hits)
@@ -827,13 +875,16 @@ def bench_prefix_miss(
     *,
     hit_ratio: float = 0.75,
     num_blocks: int = 128,
+    lookup_order: str = LOOKUP_FIRST,
 ) -> BenchResult:
     """Measure the cost of vLLM's _maximal_prefix_lookup at varying hit ratios.
 
-    Pre-stores ``hit_ratio`` fraction of keys, then repeatedly runs
-    touch(all) → per-key lookup breaking at the first miss.  Tracks
-    lookup-cache-hit vs cache-miss-fallback latency separately.
+    Pre-stores ``hit_ratio`` fraction of keys, then repeatedly runs a per-key
+    lookup breaking at the first miss, followed by touch(all) (or touch(all)
+    first with ``lookup_order=TOUCH_FIRST``).  Tracks the latency of lookups
+    answering hit and miss separately.
     """
+    touch_first = lookup_order == TOUCH_FIRST
     all_keys = make_content_keys(num_blocks)
     present_count = max(0, min(num_blocks, int(num_blocks * hit_ratio)))
     present_keys = all_keys[:present_count]
@@ -863,10 +914,12 @@ def bench_prefix_miss(
         for batch_start in range(0, num_blocks, batch_size):
             batch = all_keys[batch_start : batch_start + batch_size]
 
-            # Touch the full batch (populates lookup cache).
-            t0 = time.perf_counter()
-            manager.touch(batch)
-            phases["touch"].record(time.perf_counter() - t0)
+            # vLLM <= 0.20: touch the full batch first (its reply answers the
+            # scan's lookups).
+            if touch_first:
+                t0 = time.perf_counter()
+                manager.touch(batch)
+                phases["touch"].record(time.perf_counter() - t0)
 
             # Maximal prefix scan: per-key lookup, break at first miss.
             t_scan = time.perf_counter()
@@ -882,6 +935,12 @@ def bench_prefix_miss(
                     phases["lookup_miss"].record(elapsed)
                     break
             phases["prefix_scan"].record(time.perf_counter() - t_scan)
+
+            # vLLM >= 0.21: touch the full batch after the scan.
+            if not touch_first:
+                t0 = time.perf_counter()
+                manager.touch(batch)
+                phases["touch"].record(time.perf_counter() - t0)
 
             total_scans += 1
             total_prefix_hits += len(prefix_hits)
@@ -940,14 +999,17 @@ def bench_contention(
     min_duration: float,
     *,
     working_set: int = 1024,
+    lookup_order: str = LOOKUP_FIRST,
 ) -> list[BenchResult]:
     """Concurrent store + load streams on the same ring.
 
     Thread A stores new keys continuously.  Thread B loads keys that
-    thread A has committed, received via a shared deque.  Both threads
-    use separate manager/worker instances on the same Ring (thread-safe
-    via per-thread channel assignment).
+    thread A has committed, received via a shared deque, calling lookup()
+    and touch() in ``lookup_order``.  Both threads use separate
+    manager/worker instances on the same Ring (thread-safe via per-thread
+    channel assignment).
     """
+    touch_first = lookup_order == TOUCH_FIRST
     stop_event = threading.Event()
     committed_queue: collections.deque = collections.deque()
     barrier = threading.Barrier(2)
@@ -1031,13 +1093,19 @@ def bench_contention(
                 time.sleep(0.001)
                 continue
 
-            t0 = time.perf_counter()
-            manager_load.touch(batch_keys)
-            load_phases["touch"].record(time.perf_counter() - t0)
+            if touch_first:
+                t0 = time.perf_counter()
+                manager_load.touch(batch_keys)
+                load_phases["touch"].record(time.perf_counter() - t0)
 
             t0 = time.perf_counter()
             hits = [k for k in batch_keys if manager_load.lookup(k)]
             load_phases["lookup"].record(time.perf_counter() - t0)
+
+            if not touch_first:
+                t0 = time.perf_counter()
+                manager_load.touch(batch_keys)
+                load_phases["touch"].record(time.perf_counter() - t0)
 
             if not hits:
                 load_state["misses"] += len(batch_keys)
@@ -1123,17 +1191,29 @@ def bench_scheduler_step(
     pipeline_depth: int = 4,
     num_sessions: int = 32,
     num_blocks: int = 128,
+    lookup_order: str = LOOKUP_FIRST,
+    prefix_sharing: str = "shared",
 ) -> BenchResult:
     """Simulate continuous-batching scheduler steps matching production vLLM.
 
     Models the real vLLM offloading connector call pattern:
-      - Per-request maximal prefix scan (per-key lookup, break on miss)
+      - Per-request maximal prefix scan (per-key lookup, break on miss),
+        then touch() of the request's keys (vLLM >= 0.21), or touch() first
+        with ``lookup_order=TOUCH_FIRST`` (vLLM <= 0.20)
       - Store deferred: submitted after drain, drained at next step start
       - drain_workers measures only load completion
       - Prefix cache fills naturally (no per-step key removal)
       - Geometric session prefix distribution (varied hit ratios)
       - Backpressure: store drain at step start models has_pending_work()
+
+    ``prefix_sharing="shared"`` gives every session a slice of one shared
+    prefix pool (like a common system prompt); ``"private"`` gives each
+    session its own prefix blocks, so no prefix block is shared between
+    sessions (a session's own prefix returns every
+    num_sessions / requests_per_step steps). All prefix blocks are stored up
+    front.
     """
+    touch_first = lookup_order == TOUCH_FIRST
     keys_per_request = max(4, num_blocks // requests_per_step)
     prefix_len = keys_per_request // 2
     suffix_len = keys_per_request - prefix_len
@@ -1151,16 +1231,25 @@ def bench_scheduler_step(
     # Build a shared prefix pool, then assign each session a prefix slice.
     # Sessions share earlier blocks (like production prefix caching) and
     # diverge at session-specific points. Geometric distribution controls
-    # where each session diverges — short prefixes miss more.
+    # where each session diverges — short prefixes miss more. With private
+    # prefixes each session gets its own blocks of the same lengths instead.
     max_prefix_pool = min(prefix_len * 4, num_blocks * 2)
     shared_prefix_pool = make_content_keys(max_prefix_pool, seed=77777)
-    _populate_keys(manager, worker, shared_prefix_pool, batch_size)
 
     session_prefixes: list[list[bytes]] = []
     rng = random.Random(42)
     for s in range(num_sessions):
         geo_len = max(2, min(len(shared_prefix_pool), int(rng.expovariate(1.0 / prefix_len))))
-        session_prefixes.append(shared_prefix_pool[:geo_len])
+        if prefix_sharing == "private":
+            # Seeds far above the suffix seeds below, so no key is reused.
+            session_prefixes.append(make_content_keys(geo_len, seed=1_000_000_000 + s))
+        else:
+            session_prefixes.append(shared_prefix_pool[:geo_len])
+    prefix_keys = (
+        [k for p in session_prefixes for k in p]
+        if prefix_sharing == "private" else shared_prefix_pool
+    )
+    _populate_keys(manager, worker, prefix_keys, batch_size)
 
     total_blocks = 0
     total_steps = 0
@@ -1200,7 +1289,9 @@ def bench_scheduler_step(
             )
             req_keys = prefix + suffix
 
-            manager.touch(req_keys)
+            # vLLM <= 0.20 touched before the lookup.
+            if touch_first:
+                manager.touch(req_keys)
 
             # Maximal prefix scan (matches vLLM's _maximal_prefix_lookup).
             prefix_hits = []
@@ -1209,6 +1300,10 @@ def bench_scheduler_step(
                     prefix_hits.append(k)
                 else:
                     break
+
+            # vLLM >= 0.21 (get_num_new_matched_tokens) touches after it.
+            if not touch_first:
+                manager.touch(req_keys)
 
             suffix_misses = req_keys[len(prefix_hits):]
             all_load_keys.extend(prefix_hits)
@@ -1320,10 +1415,12 @@ def bench_scheduler_step(
     )
     result.print_report()
     print(f"  Steps={total_steps}  steps/s={total_steps/wall:.1f}  "
-          f"prefix_hits={total_prefix_hits}  suffix_stores={total_suffix_stores}")
+          f"prefix_hits={total_prefix_hits}  suffix_stores={total_suffix_stores}  "
+          f"requests={total_steps * requests_per_step}  "
+          f"lookup_order={lookup_order}  prefix_sharing={prefix_sharing}")
 
-    # Clean up shared prefix pool.
-    _remove_keys(ring, shared_prefix_pool, manager._world_size)
+    # Clean up the prefix blocks.
+    _remove_keys(ring, prefix_keys, manager._world_size)
 
     return result
 
@@ -1356,6 +1453,7 @@ def bench_pattern(
     block_bytes_override: int | None,
     min_duration: float,
     tp: int,
+    lookup_order: str = LOOKUP_FIRST,
 ) -> list[BenchResult]:
     """Run a certus_fio YAML pattern through the connector lifecycle.
 
@@ -1422,7 +1520,7 @@ def bench_pattern(
 
                 result = _bench_pattern_load(
                     manager, worker, keys, bs, object_bytes, min_duration,
-                    cold=is_cold,
+                    cold=is_cold, lookup_order=lookup_order,
                 )
                 result.label = f"[{pattern.id}] {phase_id}/{op} {'cold' if is_cold else 'warm'} (connector lifecycle)"
                 result.print_report()
@@ -1499,8 +1597,10 @@ def _bench_pattern_store(manager, worker, keys, batch_size, block_bytes, min_dur
     )
 
 
-def _bench_pattern_load(manager, worker, keys, batch_size, block_bytes, min_duration, cold=False):
-    """Load keys through the full connector lifecycle."""
+def _bench_pattern_load(manager, worker, keys, batch_size, block_bytes, min_duration, cold=False,
+                        lookup_order=LOOKUP_FIRST):
+    """Load keys through the full connector lifecycle (lookup/touch in ``lookup_order``)."""
+    touch_first = lookup_order == TOUCH_FIRST
     phases = {
         "touch": PhaseTiming("touch"),
         "lookup": PhaseTiming("lookup"),
@@ -1525,13 +1625,19 @@ def _bench_pattern_load(manager, worker, keys, batch_size, block_bytes, min_dura
         for i in range(0, len(keys), batch_size):
             batch = keys[i : i + batch_size]
 
-            t0 = time.perf_counter()
-            manager.touch(batch)
-            phases["touch"].record(time.perf_counter() - t0)
+            if touch_first:
+                t0 = time.perf_counter()
+                manager.touch(batch)
+                phases["touch"].record(time.perf_counter() - t0)
 
             t0 = time.perf_counter()
             hits = [k for k in batch if manager.lookup(k)]
             phases["lookup"].record(time.perf_counter() - t0)
+
+            if not touch_first:
+                t0 = time.perf_counter()
+                manager.touch(batch)
+                phases["touch"].record(time.perf_counter() - t0)
 
             if not hits:
                 continue
@@ -1875,6 +1981,14 @@ def main():
                         help="(scheduler-step) Requests per scheduler step")
     parser.add_argument("--num-sessions", type=int, default=32,
                         help="(scheduler-step) Distinct conversations in the pool")
+    parser.add_argument("--lookup-order", choices=LOOKUP_ORDERS, default=LOOKUP_FIRST,
+                        help="Order of lookup() and touch() for the same keys, in every "
+                             "mode that does both: lookup-first (default) is vLLM >= 0.21 "
+                             "(vLLM PR #41228, still so in 0.30); touch-first is vLLM <= 0.20")
+    parser.add_argument("--prefix-sharing", choices=("shared", "private"), default="shared",
+                        help="(scheduler-step) shared: sessions take slices of one shared "
+                             "prefix pool (default); private: each session has its own "
+                             "prefix blocks, none shared between sessions")
     args = parser.parse_args()
 
     if args.gpus:
@@ -1904,7 +2018,8 @@ def main():
     print(f"  shm_path={args.shm_path}  gpus={gpus}  tp={args.tp}")
     print(f"  num_blocks={args.num_blocks}  bs={args.bs}  block_bytes={args.block_bytes}"
           + (f" per rank ({acct_block_bytes} per logical block)" if real_tp else ""))
-    print(f"  min_duration={args.min_duration}s  workers={args.workers}")
+    print(f"  min_duration={args.min_duration}s  workers={args.workers}  "
+          f"lookup_order={args.lookup_order}")
 
     # ── set up ring + connector objects ──
     # Under real TP each process claims from its own channel slot (rank 0 here).
@@ -1996,6 +2111,7 @@ def main():
                 ring, args.bs,
                 args.block_bytes if args.block_bytes != DEFAULT_BLOCK_BYTES else None,
                 args.min_duration, args.tp,
+                lookup_order=args.lookup_order,
             )
 
         if mode == "pipelined":
@@ -2015,6 +2131,7 @@ def main():
                     manager, worker, [store_region], keys,
                     args.bs, acct_block_bytes, args.min_duration,
                     pipeline_depth=args.pipeline_depth, direction="load",
+                    lookup_order=args.lookup_order,
                 )
                 r.print_report()
                 results.append(r)
@@ -2026,6 +2143,7 @@ def main():
                 args.bs, acct_block_bytes, args.min_duration,
                 hit_ratio=args.hit_ratio,
                 num_blocks=args.num_blocks,
+                lookup_order=args.lookup_order,
             )
             results.append(r)
 
@@ -2043,6 +2161,7 @@ def main():
                 [store_region], ring,
                 args.bs, acct_block_bytes, args.min_duration,
                 working_set=args.working_set,
+                lookup_order=args.lookup_order,
             )
             if real_tp:
                 w_load.close()
@@ -2058,6 +2177,8 @@ def main():
                 pipeline_depth=args.pipeline_depth,
                 num_sessions=args.num_sessions,
                 num_blocks=args.num_blocks,
+                lookup_order=args.lookup_order,
+                prefix_sharing=args.prefix_sharing,
             )
             results.append(r)
 
@@ -2074,7 +2195,7 @@ def main():
             warm_result = bench_load_lifecycle(
                 manager, worker, [load_region], keys,
                 args.bs, acct_block_bytes, args.min_duration,
-                cold=False,
+                cold=False, lookup_order=args.lookup_order,
             )
             warm_result.print_report()
 
@@ -2083,7 +2204,7 @@ def main():
                 cold_result = bench_load_lifecycle(
                     manager, worker, [load_region], keys,
                     args.bs, acct_block_bytes, args.min_duration,
-                    cold=True,
+                    cold=True, lookup_order=args.lookup_order,
                 )
                 cold_result.print_report()
 
@@ -2096,6 +2217,7 @@ def main():
                     args.bs, acct_block_bytes, args.min_duration,
                     working_set=args.working_set,
                     load_fraction=0.5,
+                    lookup_order=args.lookup_order,
                 )
 
             results = [store_result, warm_result]
@@ -2132,6 +2254,7 @@ def main():
         extra = {
             "tag": args.tag,
             "mode": mode,
+            "lookup_order": args.lookup_order,
             "shm_path": args.shm_path,
             "gpu": args.gpu,
             "gpus": ",".join(map(str, gpus)),
@@ -2151,6 +2274,7 @@ def main():
         elif mode == "scheduler-step":
             extra["requests_per_step"] = args.requests_per_step
             extra["num_sessions"] = args.num_sessions
+            extra["prefix_sharing"] = args.prefix_sharing
         elif mode == "pattern":
             extra["pattern"] = args.pattern
 
