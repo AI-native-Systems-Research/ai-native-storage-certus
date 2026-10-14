@@ -1,11 +1,13 @@
 ---
 spec_sync_component: dispatcher-p2p
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-10T03:34:28Z
-spec_sync_git_commit: eeac3fac
-spec_sync_inputs_sha256: 413386c97116feeb8fa57aae3f11ae8eda43579c6c239bba81a3af34c993685a
+spec_sync_synced_at: 2026-10-14T20:46:27Z
+spec_sync_git_commit: 474ba0a6
+spec_sync_inputs_sha256: 6cffb3abe396610b25f467f271ba65aca637c3924bc8c2470fa84c46f2c91e1c
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-14 (transitive: `components/interfaces` changed, branch `fix/cold-staging-buf-16mib`).** The spec-sync digest folds `components/interfaces/{src,specs}` into every component's hash, so the single interface change on this branch — `DispatcherConfig::cold_staging_buf_bytes` default 4 MiB → 16 MiB (commit `8e12e49f`) and the matching correction to interfaces FR-027 — invalidates every component's stamp at once; this is the design, not a defect. **No code re-analysis was performed for this component, and none was needed:** its own `src/**` and `specs/**` are unchanged on this branch, and it does not reference `cold_staging_buf_bytes` (consumed only by the dispatcher's host-DRAM cold-staging pool). Digest refreshed to the recomputed value.
+
 > **Re-stamp 2026-10-09 (test-only dead code removed, same branch).** Removed from `src/lib.rs`'s `#[cfg(test)]` module: the unused helpers `dma_free` and `alloc_dma_buffer`, and the never-constructed `BlockDevice` variant of the test dispatch map's `MockEntryLocation` (the test dispatch map models a demoted entry as `MemoryTier` with a null pointer and an `ssd_offset`, which `lookup` reports as `BlockDevice`). No production code changed and no FR/SC describes these test helpers, so the specs are unaffected.
 
 > **Sync 2026-10-09 (merge of `fix/evict-blocked-by-pin` into `fix/dispatcher-p2p-clean-eviction`).** dispatch-map now returns `ActiveReferences` for a held reference in `try_evict_to_block` (dispatch-map FR-026). Updated here to match:
