@@ -1,11 +1,13 @@
 ---
 spec_sync_component: memory-tier
-spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-09T21:53:37Z
-spec_sync_git_commit: 83bcd4ff
-spec_sync_inputs_sha256: 007374976204ec902ddd88ab1e804d57a46663409919421ec5304bc512051e55
+spec_sync_drift_status: drift
+spec_sync_synced_at: 2026-10-14T00:35:03Z
+spec_sync_git_commit: 21dbc787
+spec_sync_inputs_sha256: a6b8355da5d2ba16cf0d20c373f8b0cccf7af72bedf73d8d68b6f2d0c8d664f9
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-10-13 (branch fix/memory-tier-insert-track-panic, fix: `insert` returns an error instead of panicking when `IEvictionPolicy::track` refuses).** Scope: `src/lib.rs` `insert`, `src/allocator.rs` `can_allocate`, new `src/repair_test_insert_track_failure.rs`; checked against spec FR-008/009/010/023 (`spec.md:157-159,172`) and the `IMemoryTier` doc (`interfaces/src/imemory_tier.rs:33-34,63-67`). Findings: FR-008/009/010 still hold and keep their order. The pre-check `lib.rs:362-364` uses the same predicate as `allocate` (`allocator.rs:37-43` vs `:47-53`), so the rollback at `lib.rs:375-378` is unreachable. **New drift:** a refused `track` now returns `NotInitialized("eviction policy refused…")` (`lib.rs:366-372`) on an initialized pool, with no space reserved and no slot recorded. Neither the spec nor the interface describes this case: `insert` names only `PoolFull` (`imemory_tier.rs:66`), and the variant's doc says "Component not initialized" (`:33`). Fix: add an FR for this case (and, if wanted, a dedicated variant), then update the `insert` doc. Verdict: drift.
+
 > **Re-stamp 2026-10-09 (transitive: `components/interfaces` changed, branch `fix/evict-blocked-by-pin`).** The only change to this component's hashed inputs is a doc-comment correction on `IDispatchMap::try_evict_to_block` in `components/interfaces/src/idispatch_map.rs` (no signature, type, or behaviour change). This component's own `src/**` and `specs/**` are unchanged, and its previous stamp was re-verified to match `origin/unstable` before re-stamping. **No re-analysis was performed for this component**; this stamp asserts only what was checked.
 
 > **Re-stamp 2026-10-05 (transitive: `components/interfaces` changed, branch `fix/poller-cpu-placement-logging`).** The only change to this component's hashed inputs is a doc-comment correction on `DispatcherConfig::poller_base_cpu` in `components/interfaces/src/idispatcher.rs` (no signature, type, or behaviour change). This component's own `src/**` and `specs/**` are unchanged, and it does not reference `poller_base_cpu` (verified by grep over its src/ and specs/). Its previous stamp was re-verified to match `git archive origin/unstable` before re-stamping. **No re-analysis was performed for this component**; this stamp asserts only what was checked.
