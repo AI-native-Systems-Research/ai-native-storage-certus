@@ -1,56 +1,66 @@
-# Sync Apply Report — Phase B
+# Sync Apply Report
 
-**Date**: 2026-08-20
-Based on: `components/dispatch-map/.specify/sync/drift-report.json`
-Policy: `.specify/sync/PHASE_B_POLICY.md`
-Backups: `.specify/sync/backups/specs/001-dispatch-map/spec.md.bak`
+Applied: 2026-10-14T18:11:40Z
+Branch: `fix/dispatch-map-get-pool-id-panic` (HEAD `0ca07fca`)
+Mode: batch
+Based on: `.specify/sync/proposals.json` (2026-10-14), `.specify/sync/drift-report.json` (2026-10-14)
+Approved by: Cornel Constantinescu, 2026-10-14
+Backups: `.specify/sync/backups/20261014T181140Z/specs/001-dispatch-map/` (`spec.md`, `data-model.md`, `contracts/idispatch_map.md`)
 
-## Specs Updated
+No source code was changed: nothing under `src/`, `tests/` or `components/interfaces/` was edited.
 
-| Spec | Requirement | Change Type |
-|------|-------------|-------------|
-| 001-dispatch-map | FR-029 | Added (BACKFILL-UNSPECCED) — per-entry `reuse_count` (`AtomicU32`) read-hit counter described as built: init 0 at creation; +1 (relaxed) on `lookup`/`take_read`/`downgrade_reference`; internal-only (Debug), no `IDispatchMap` accessor. |
-| 001-dispatch-map | Key Entities → Dispatch Entry | Modified — added the `reuse_count` (`AtomicU32`) field to the entry layout. |
-| 001-dispatch-map | User Story 2 / AS6 | Added — `lookup` success increments `reuse_count`. |
-| 001-dispatch-map | User Story 4 / AS9 | Added — `take_read`/`downgrade_reference` increment `reuse_count`; other ref ops do not. |
-| 001-dispatch-map | Header metadata | Modified — updated **Last Synced** to 2026-08-20 (Phase B). |
+## Changes Made
 
-## Align Tasks Generated
+### Specs Updated
 
-Written to `.specify/sync/align-tasks.md` (2 tasks — code changes NOT applied here):
+| Proposal | Spec | Requirement | File | Change Type |
+|----------|------|-------------|------|-------------|
+| P1 | 001-dispatch-map | FR-003 | `spec.md` (FR-003) | Modified (BACKFILL): lists `InvalidSize`, `NotInitialized`, `AlreadyExists` in check order; no entry recorded on error |
+| P1 | 001-dispatch-map | FR-003 | `contracts/idispatch_map.md` (`create_memory_tier_entry` row) | Modified (BACKFILL): adds `NotInitialized`; no entry recorded on error |
+| P2 | 001-dispatch-map | FR-024 | `spec.md` (FR-024) | Modified (BACKFILL): adds `NotInitialized`; no entry recorded on error |
+| P2 | 001-dispatch-map | FR-024 | `contracts/idispatch_map.md` (`recover_extent` row) | Modified (BACKFILL): adds `NotInitialized`; no entry recorded on error |
+| P3 | 001-dispatch-map | FR-017 | `spec.md` (FR-017) | Modified (BACKFILL): empty list (no panic) when no `IEvictionPolicy` is connected |
+| P3 | 001-dispatch-map | FR-017 | `contracts/idispatch_map.md` (`oldest_keys` row) | Modified (BACKFILL): empty list when no `IEvictionPolicy` is connected |
+| P4 | 001-dispatch-map | FR-012 | `data-model.md` (error table, `NotInitialized`) | Modified (BACKFILL): no longer "reserved"; returned by `initialize`, `create_memory_tier_entry`, `recover_extent` |
+| P5 | 001-dispatch-map | FR-026 | `contracts/idispatch_map.md` (`try_evict_to_block` row) | Modified (BACKFILL): `ActiveReferences` for held refs; `InvalidState` only for no `ssd_offset` / not `MemoryTier` |
+| P5 | 001-dispatch-map | FR-026 | `data-model.md` (error table, `ActiveReferences`) | Modified (BACKFILL): adds `try_evict_to_block` |
+| P5 | 001-dispatch-map | FR-026 | `data-model.md` (error table, `InvalidState`) | Modified (BACKFILL): narrows the `promote_block_to_memory_tier` / `try_evict_to_block` cases |
+| P10 | 001-dispatch-map | header / Last Synced | `spec.md` (new note after the 2026-10-09 note) | Added (SUPERSEDE): 2026-10-14 note that supersedes the earlier notes' "FR-012 open" statement; earlier dated notes kept as history |
 
-| Requirement | Location | Summary |
-|-------------|----------|---------|
-| FR-012 | `src/lib.rs:55` (`:68`, `:392`, `:573`) | `initialize()` must return `Err(NotInitialized)` instead of panicking (`eviction_policy.get().unwrap()`) when `IEvictionPolicy` is unbound. |
-| FR-003 · US1-AS3 | `src/lib.rs:381` | Add a null-pointer guard to `create_memory_tier_entry` (new `DispatchMapError::NullPointer` variant); reject nulls before recording an entry. |
+11 text edits in 3 files. Each `old` text from `proposals.md` matched exactly once at the line the proposal gave, and was replaced with the `new` text verbatim.
 
-## Unspecced Backfilled
+SUPERSEDE handling (P10): the spec has one feature spec and no successor spec, so there is no `superseded_by` field to add. As the proposal specified, the superseding statement is a new dated **Last Synced** note; the old notes are unchanged.
 
-| Feature | Location | Resolution |
-|---------|----------|------------|
-| `reuse_count: AtomicU32` per-entry read-hit counter | `src/entry.rs:37`; `src/lib.rs:142-143, 220-222, 313-315` | Backfilled as FR-029 + Key Entities update + US2/AS6 & US4/AS9 acceptance scenarios. |
+### New Specs Created
 
-## Resolved (already fixed on main thread)
+None.
 
-None for this component.
+### Implementation Tasks Generated
 
-## Human Decision
+4 approved ALIGN proposals recorded in `.specify/sync/align-tasks.md`. Each has the approval note "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR".
 
-None — both drift items and the unspecced feature were resolvable per policy after reading the referenced source.
+| Proposal | Requirement | Task | Effort |
+|----------|-------------|------|--------|
+| P6 | FR-003 / US1-AS3 / Edge Cases (null pointer) | Existing task refreshed (line refs at `0ca07fca`, alternative recorded) | small |
+| P7 | no-panics rule / FR-002 / FR-012 (stale pool id, `track(...).unwrap()` under the lock) | New task | medium |
+| P8 | FR-012 (test for unbound `initialize()`) | New task; closes the last open criterion of the FR-012 task | small |
+| P9 | FR-023 (`entry_size` `u32` overflow) | New task (includes the FR-023 spec follow-up) | small |
 
-## Counts
+The existing FR-012 task in `align-tasks.md` now has a 2026-10-14 status line: two of its three criteria are met by `c877b74e`, and the remaining one (the `initialize()` test) is tracked by P8.
 
-| Category | Count |
-|----------|-------|
-| BACKFILL applied (drifted requirements) | 0 |
-| BACKFILL-UNSPECCED applied | 1 |
-| ALIGN tasks | 2 |
-| RESOLVED | 0 |
-| HUMAN_DECISION | 0 |
-| spec.md files edited (all backed up) | 1 |
+### Not Applied
+
+| Proposal | Reason |
+|----------|--------|
+| — | None. All ten proposals are `approved: true`. No unapproved proposal has an `approval_note`, so `align-tasks.md` has no open items from unapproved proposals. |
+
+## Notes
+
+- `proposals.md` still says "Every proposal is `approved: false`" (it was written before approval). `proposals.json` is the approval record and was used as the input; neither file was changed by this apply.
+- The `spec_sync_*` frontmatter in `drift-report.md` was not touched.
 
 ## Next Steps
 
-1. Review the updated spec: `components/dispatch-map/specs/001-dispatch-map/spec.md` (FR-029 + Key Entities + US2/AS6, US4/AS9).
-2. Implement the 2 code-side ALIGN tasks in `.specify/sync/align-tasks.md` (e.g. via `/speckit-implement`), then re-run `/speckit-sync-analyze` to confirm the drift closes.
-3. Commit on a feature branch (never directly to `unstable`).
+1. Review the updated specs: `components/dispatch-map/specs/001-dispatch-map/{spec.md,contracts/idispatch_map.md,data-model.md}`.
+2. Commit the spec and sync changes on this branch.
+3. Implement the align tasks in `.specify/sync/align-tasks.md` (P6–P9) in a follow-up PR, then re-run `speckit-sync-analyze`.
