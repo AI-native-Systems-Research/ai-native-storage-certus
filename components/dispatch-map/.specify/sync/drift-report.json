@@ -1,63 +1,105 @@
 {
-  "generated": "2026-09-02T20:45:00Z",
-  "restamped": "2026-09-09T21:33:18Z",
-  "restamp_note": "Restamp only, no drift and no spec change. Prior stamp (2dbb7666...) went stale because (1) spec.md was already backfilled to the global-lock design in commit 6a3d801c and (2) scripts/spec-sync-hash.sh folds all of components/interfaces/ into every component hash, so the dispatcher-only idispatcher.rs store-backpressure change (39ffee9b/c400ced8) re-hashed dispatch-map. Re-verified src/state.rs still uses a single global Mutex<Inner>+Condvar (FR-002/FR-013); drift_status remains clean.",
+  "generated": "2026-10-14T00:00:00Z",
   "project": "dispatch-map",
   "spec": "specs/001-dispatch-map/spec.md",
-  "branch": "fix-dispatcher-store-backpressure",
-  "git_commit": "72c7182b",
-  "drift_status": "clean",
-  "inputs_sha256": "ec0279d94417185764a4f70dc79435719f911127c4ea83cc193ff7850ef94209",
+  "branch": "fix/dispatch-map-get-pool-id-panic",
+  "git_commit": "0ca07fca",
+  "fix_commit": "c877b74e",
+  "base": "origin/unstable (a052af01)",
+  "drift_status": "drift",
+  "analysis_mode": "static; tests not run (deps/spdk-build absent in this worktree, crate needs spdk-sys via interfaces/spdk)",
   "summary": {
     "specs_analyzed": 1,
     "requirements_checked": 33,
-    "drift_findings": 1,
-    "drifted_resolved_by_backfill": 1,
-    "preexisting_aligns_unchanged": 2,
+    "aligned": 29,
+    "drifted": 4,
     "not_implemented": 0,
-    "unspecced_features": 0
+    "unspecced_features": 1,
+    "drift_not_tied_to_an_fr": 1
   },
   "specs": [
     {
       "id": "001-dispatch-map",
       "title": "Dispatch Map Component",
+      "aligned": [
+        "FR-001", "FR-002", "FR-004", "FR-005", "FR-006", "FR-007", "FR-008", "FR-009",
+        "FR-010", "FR-011", "FR-012", "FR-013", "FR-014", "FR-015", "FR-016", "FR-017",
+        "FR-018", "FR-020", "FR-022", "FR-025", "FR-027", "FR-028", "FR-029",
+        "SC-001", "SC-002", "SC-003", "SC-004", "SC-005", "SC-006"
+      ],
+      "aligned_notes": {
+        "FR-012": "Resolved by c877b74e: get_pool_id returns Result (src/lib.rs:51-63); initialize returns NotInitialized when unbound (src/lib.rs:77, :78-81). Test gap: no test calls initialize() unbound; the only initialize() calls are in tests/integration.rs:509,540, both with a policy bound.",
+        "FR-017": "oldest_keys returns an empty Vec when unbound (src/lib.rs:383-385); the spec doesn't describe that case (proposal P3).",
+        "FR-010": "write_ref is set to 0 (src/lib.rs:318) before checked_add (:319-322), but read_ref == 0 whenever write_ref == 1, so the partial-state path can't be reached.",
+        "FR-025": "No unit test.",
+        "FR-027": "No test under the integrity-check feature.",
+        "FR-029": "No test.",
+        "SC-004": "The <= 56 bytes bound is asserted only in benches/dispatch_map_benchmark.rs:97."
+      },
       "drifted": [
         {
-          "requirement": "FR-002,FR-013,KeyEntities",
-          "spec_text": "map internally sharded into N_SHARDS=64 independent partitions, each with its own Mutex<Inner>+Condvar, routing key % N_SHARDS",
-          "actual": "sharding reverted (8f494f8d); single global Mutex<Inner> + Condvar over one HashMap; no Shard type, no shard_for, no N_SHARDS in source",
-          "location": "components/dispatch-map/src/state.rs:11-83",
-          "severity": "moderate",
-          "commit": "8f494f8d",
-          "resolution": "backfill",
-          "outcome": "fixed"
-        }
-      ],
-      "preexisting_aligns": [
-        {
-          "requirement": "FR-012",
-          "spec_text": "On initialization, the IEvictionPolicy receptacle MUST be connected (returns an error if unbound).",
-          "actual": "get_pool_id() does eviction_policy.get().unwrap(); an unbound eviction_policy panics before the graceful NotInitialized path.",
-          "location": "src/lib.rs:55",
-          "severity": "moderate",
-          "resolution": "align (deferred)",
-          "outcome": "unresolved",
-          "tracked_in": ".specify/sync/align-tasks.md"
+          "requirement": "FR-003",
+          "spec_text": "spec.md:242 'MUST return AlreadyExists if the key is already present.'; spec.md:27 US1-AS3 and spec.md:225: null pointer returns an error and no entry is recorded.",
+          "actual": "(a) No null-pointer check: only size == 0 is checked (src/lib.rs:399-401) and the entry is recorded whatever the pointer is (:415-430). (b) Now returns NotInitialized when no IEvictionPolicy is connected (:403-407); FR-003 and contract :45 don't list it, and FR-003 also leaves out InvalidSize.",
+          "location": "components/dispatch-map/src/lib.rs:399-430",
+          "severity": "moderate"
         },
         {
-          "requirement": "FR-003",
-          "spec_text": "US1/AS3 + Edge Cases: create_memory_tier_entry with a null pointer returns an error; no entry is recorded.",
-          "actual": "create_memory_tier_entry only validates size == 0; there is no null-pointer check.",
-          "location": "src/lib.rs:381",
-          "severity": "moderate",
-          "resolution": "align (deferred)",
-          "outcome": "unresolved",
-          "tracked_in": ".specify/sync/align-tasks.md"
+          "requirement": "FR-023",
+          "spec_text": "spec.md:262 'returns the stored size of an entry in block-aligned bytes (size_blocks * 4096)'",
+          "actual": "u32 multiply: size_blocks * 4096 overflows when size > 4_294_963_200 or size_blocks >= 2^20 (from create_memory_tier_entry / promote_block_to_memory_tier with a large size, or from recover_extent / initialize). It panics in debug/test builds (no [profile] override) and wraps to 0 in release.",
+          "location": "components/dispatch-map/src/lib.rs:379",
+          "severity": "minor"
+        },
+        {
+          "requirement": "FR-024",
+          "spec_text": "spec.md:263 'MUST return AlreadyExists if the key is already present.'",
+          "actual": "Also returns NotInitialized when no IEvictionPolicy is connected (src/lib.rs:588-592); FR-024 and contract :60 don't list it.",
+          "location": "components/dispatch-map/src/lib.rs:588-592",
+          "severity": "minor"
+        },
+        {
+          "requirement": "FR-026",
+          "spec_text": "contracts/idispatch_map.md:49 'Error on KeyNotFound, or InvalidState if not evictable (active refs, no ssd_offset, or not MemoryTier)'; data-model.md:78 'ActiveReferences ... remove while refs > 0'",
+          "actual": "Returns ActiveReferences for held read/write refs (src/lib.rs:558-560), as spec.md:265 and the interface doc (components/interfaces/src/idispatch_map.rs:181-185) say. Only the contract and data-model are stale (missed by the 2026-10-09 sync).",
+          "location": "components/dispatch-map/src/lib.rs:558-560",
+          "severity": "minor"
         }
       ],
-      "not_implemented": []
+      "drift_not_tied_to_an_fr": [
+        {
+          "requirement": "Clarification 2026-04-27 Q3 (spec.md:295) / contract Error Semantics (contracts/idispatch_map.md:79) / plan.md:19: no panics",
+          "spec_text": "All error conditions return Err(DispatchMapError) -- no panics, no silent no-ops.",
+          "actual": "The pool id is cached forever (src/lib.rs:52-62). If eviction_policy is reconnected to a different policy, ep.track(stale_pool,..).unwrap() at :101-103, :414 and :598 panics with InvalidPool (eviction-policy-lru src/lib.rs:60-67). It does so while state.inner is locked (:97, :409, :594), which poisons the mutex so every later call panics. If the new policy already has that pool index, the entry is silently tracked in a foreign pool.",
+          "location": "components/dispatch-map/src/lib.rs:101-103,414,598",
+          "severity": "moderate"
+        }
+      ],
+      "not_implemented": [],
+      "stale_status_notes": [
+        {
+          "location": "specs/001-dispatch-map/spec.md:6,8",
+          "text": "FR-012 (unbound IEvictionPolicy panics instead of returning NotInitialized) listed as an open code-side align",
+          "actual": "resolved by c877b74e"
+        }
+      ]
     }
   ],
-  "unspecced": [],
-  "conflicts": []
+  "unspecced": [
+    {
+      "feature": "Pool-id cache lifecycle (created lazily by the first of initialize/oldest_keys/create_memory_tier_entry/recover_extent, never invalidated on rebind)",
+      "location": "components/dispatch-map/src/lib.rs:51-63; src/state.rs:20",
+      "lines": 13,
+      "suggested_spec": "001-dispatch-map (FR-002/FR-012; see proposal P7)"
+    }
+  ],
+  "conflicts": [
+    "contracts/idispatch_map.md:49 and data-model.md:78,86 vs spec.md:265 on the error try_evict_to_block returns for held references",
+    "data-model.md:82 says NotInitialized is 'Reserved; not currently returned', which contradicts src/lib.rs:56-59,78-81,403-407,588-592"
+  ],
+  "out_of_scope_observations": [
+    "components/interfaces/src/idispatch_map.rs:52 NotInitialized doc still says 'missing DMA allocator'",
+    "components/interfaces/src/idispatch_map.rs:126 oldest_keys doc says 'lowest TSC values' (ordering is delegated to IEvictionPolicy)",
+    "components/dispatch-map/CLAUDE.md doesn't mention the eviction_policy receptacle"
+  ]
 }
