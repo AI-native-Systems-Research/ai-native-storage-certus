@@ -1,11 +1,13 @@
 ---
 spec_sync_component: dispatch-map
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-09T21:53:37Z
-spec_sync_git_commit: 83bcd4ff
-spec_sync_inputs_sha256: 4ace5695270367ea73774f3d0cc4e6393e0230dfd4fb98cb36c1ddea62f9e27a
+spec_sync_synced_at: 2026-10-14T20:46:27Z
+spec_sync_git_commit: 474ba0a6
+spec_sync_inputs_sha256: 6af11634056f1df3925d2343ddb074f3497b8c92d9b28278e1eafd3b76196604
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-14 (transitive: `components/interfaces` changed, branch `fix/cold-staging-buf-16mib`).** The spec-sync digest folds `components/interfaces/{src,specs}` into every component's hash, so the single interface change on this branch — `DispatcherConfig::cold_staging_buf_bytes` default 4 MiB → 16 MiB (commit `8e12e49f`) and the matching correction to interfaces FR-027 — invalidates every component's stamp at once; this is the design, not a defect. **No code re-analysis was performed for this component, and none was needed:** its own `src/**` and `specs/**` are unchanged on this branch, and it does not reference `cold_staging_buf_bytes` (consumed only by the dispatcher's host-DRAM cold-staging pool). Digest refreshed to the recomputed value.
+
 > **Sync 2026-10-09 (branch `fix/evict-blocked-by-pin`).** Delta analysis on a certified baseline: every stamp on `origin/unstable` was re-verified to equal its recomputed spec-sync hash, so the only new inputs are this branch's changes.
 >
 > - **FR-026 / `try_evict_to_block` scenario 2 — CODE + SPEC.** A held read or write reference now returns `ActiveReferences(key)` (`src/lib.rs`, the refs check in `try_evict_to_block`), as `remove` (FR-011) already did; it was `InvalidState`. Spec text updated to match. The consumer's contract required this: dispatcher spec 002 FR-033 counts `evictions_blocked_by_pin` on `ActiveReferences`, so with `InvalidState` every pinned candidate was counted as unpersisted.

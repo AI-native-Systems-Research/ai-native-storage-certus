@@ -1,11 +1,13 @@
 ---
 spec_sync_component: dispatcher
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-14T20:19:28Z
-spec_sync_git_commit: 8e12e49f
-spec_sync_inputs_sha256: 470456e756d93ce3a5c2be26020707151b30872a57660fe899b23a5e0eed7bc8
+spec_sync_synced_at: 2026-10-14T20:46:27Z
+spec_sync_git_commit: 474ba0a6
+spec_sync_inputs_sha256: 0cd907de408c51e5dc12c768837f69ce0255f020b8b0a6ff2ef1e66cf5d394e7
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-14 (interfaces spec corrected, branch `fix/cold-staging-buf-16mib`).** The FR-033 reconciliation below is unchanged; this re-stamp only refreshes the digest after the matching 4 MiB → 16 MiB correction to interfaces FR-027, which folds into this component's hash. No code re-analysis needed.
+
 > **Sync 2026-10-14 (branch `fix/cold-staging-buf-16mib`).** Delta analysis on a certified baseline: the prior clean stamp was for `547107f3`, and the only input that changed between it and HEAD (`8e12e49f`) is `components/interfaces/src/idispatcher.rs` — the `cold_staging_buf_bytes` default. This component's own `src/**` and `specs/**` were otherwise unchanged, so the one in-scope question is every FR/SC that constrains the staging-buffer size. Spec 001 in scope.
 >
 > - **FR-033 `cold_staging_buf_bytes` default — DRIFTED (moderate).** Spec said the default was `4 MiB = 4 × 1024 × 1024`; commit `8e12e49f` raised the shipped default to `16 * 1024 * 1024` (`components/interfaces/src/idispatcher.rs:125`). **Resolution**: code authoritative. `serve_cold_staged` only serves a tier-full cold load through a staging buffer when it fits the buffer (`total_bytes <= sp.buf_bytes()`, `src/lib.rs:777,934`); a 64-token KV-offload block is 8 MiB per worker, so a 4 MiB buffer made that guard always false, every tier-full cold load returned `AllocationFailed`, and vLLM's `OffloadingConnector` escalated it to a fatal `EngineDeadError`. FR-033 updated to 16 MiB with a dated note recording the guard, the failure it fixes, and the 64 × 16 MiB = 1 GiB pinned-host-DMA footprint (up from 256 MiB).
