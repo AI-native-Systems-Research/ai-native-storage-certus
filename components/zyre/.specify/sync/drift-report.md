@@ -1,11 +1,13 @@
 ---
 spec_sync_component: zyre
-spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-09T21:53:37Z
-spec_sync_git_commit: 83bcd4ff
-spec_sync_inputs_sha256: 72287b6f20add0e41b57c91d655df48b117700c5989fe138bc53a7c3c218fabc
+spec_sync_drift_status: drift
+spec_sync_synced_at: 2026-10-14T00:35:03Z
+spec_sync_git_commit: 99cf8f79
+spec_sync_inputs_sha256: 65a5a4f9220d0d641d12270c418871f4d6d85b316de604114d44425999653d96
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-10-13 (branch fix/zyre-printf-format, fix: pass header/endpoint/gossip strings to libzyre as a `%s` argument, never as the printf format).** Scope: `ZyreNode::apply_config` (`src/node.rs:84-131`) plus new test `src/repair_test_header_percent.rs`. Findings: the fix resolves unreported drift. Before it, a `%` in a header value, endpoint or gossip endpoint was parsed as a format directive, so peers did not see the configured headers ("metadata shared during discovery", `specs/001-zyre-bindings/data-model.md:72`; FR-005, `spec.md:91`). Values now go through verbatim (`node.rs:88,93,115,123,127`), and the test checks this end to end. The fix adds no error variant and changes no return value. Remaining drift, older than this fix but inside the changed function: `CString::new(..).unwrap()` (`node.rs:91,92,101,114,122,126`) panics when a header, interface or endpoint contains an interior NUL. The contract says `create_node` fails only with `InvalidConfig` or `CreateFailed` (`contracts/izyre.md:52-53`), and `name` already maps a NUL to `InvalidConfig` (`node.rs:52-53`). Also on this branch, after this review: `ZyreNode::new` now serialises `zyre_new` with a process-wide lock (CZMQ's first-use global init is not thread-safe, FND-24); no error, return value or spec-visible behaviour changes. Verdict: drift.
+
 > **Re-stamp 2026-10-09 (transitive: `components/interfaces` changed, branch `fix/evict-blocked-by-pin`).** The only change to this component's hashed inputs is a doc-comment correction on `IDispatchMap::try_evict_to_block` in `components/interfaces/src/idispatch_map.rs` (no signature, type, or behaviour change). This component's own `src/**` and `specs/**` are unchanged, and its previous stamp was re-verified to match `origin/unstable` before re-stamping. **No re-analysis was performed for this component**; this stamp asserts only what was checked.
 
 > **Re-stamp 2026-10-05 (transitive: `components/interfaces` changed, branch `fix/poller-cpu-placement-logging`).** The only change to this component's hashed inputs is a doc-comment correction on `DispatcherConfig::poller_base_cpu` in `components/interfaces/src/idispatcher.rs` (no signature, type, or behaviour change). This component's own `src/**` and `specs/**` are unchanged, and it does not reference `poller_base_cpu` (verified by grep over its src/ and specs/). Its previous stamp was re-verified to match `git archive origin/unstable` before re-stamping. **No re-analysis was performed for this component**; this stamp asserts only what was checked.
