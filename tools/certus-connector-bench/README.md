@@ -50,12 +50,14 @@ done
 
 End-to-end lifecycle benchmark with multiple modes. Without `--mode`, runs the default 4-phase serial benchmark. Each mode targets a different optimization surface.
 
+**Call order.** Wherever a mode both looks up and touches the same keys (warm/cold load, the load side of mixed eviction, pipelined load, prefix-miss, the contention load thread, scheduler-step, pattern loads), it calls `lookup` first and `touch` after, as vLLM's offloading scheduler does since vLLM 0.21 (vLLM PR #41228; still so in 0.30). `--lookup-order touch-first` restores the vLLM ≤ 0.20 order, where `touch` came first and the connector could answer that request's lookups from the touch reply; with the default batch sizes it reproduces the numbers this benchmark gave before the option existed (a lookup more than `CERTUS_LOOKUP_CACHE_TTL_US` after its touch is a Check even in this order, so very large batches can differ). With the default order a request's lookups can only be answered from an earlier request's touch reply (within the connector's `CERTUS_LOOKUP_CACHE_TTL_US`, default 1000 µs); all other lookups are one Check round trip each. Store-only paths touch before `prepare_store`, as before.
+
 #### Default mode (no `--mode` or `--mode default`)
 
 Four serial phases:
 
 1. **Store**: touch → prepare_store → submit → finish → complete
-2. **Warm Load**: touch → lookup → prepare → submit → finish → complete (DRAM-resident)
+2. **Warm Load**: lookup → touch → prepare → submit → finish → complete (DRAM-resident)
 3. **Cold Load**: same path but SSD→DRAM→GPU round-trip
 4. **Mixed Eviction**: interleaved store + load under memory-tier pressure, with `take_events` drain
 
@@ -86,7 +88,7 @@ Key metric: if `submit` time >> `pipeline_drain` time, the ring is the bottlenec
 
 #### Prefix-miss mode (`--mode prefix-miss`)
 
-Measures the cost curve of vLLM's `_maximal_prefix_lookup` at varying hit ratios. Pre-stores a fraction of keys, then runs touch → per-key sequential lookup breaking at the first miss.
+Measures the cost curve of vLLM's `_maximal_prefix_lookup` at varying hit ratios. Pre-stores a fraction of keys, then runs a per-key sequential lookup breaking at the first miss, followed by a touch of the batch (touch first with `--lookup-order touch-first`).
 
 ```bash
 # 75% prefix hit ratio (default)
@@ -100,7 +102,7 @@ python tools/certus-connector-bench/bench_connector_lifecycle.py \
     --mode prefix-miss --hit-ratio 1.0
 ```
 
-Reports cache-hit vs cache-miss-fallback lookup latency separately, plus average prefix length before the first miss.
+Reports the latency of lookups answering hit and miss separately (`lookup_hit`, `lookup_miss`), plus average prefix length before the first miss.
 
 #### Contention mode (`--mode contention`)
 
@@ -117,8 +119,8 @@ Reports per-thread throughput and latency. Compare against `--mode default` to s
 
 Simulates continuous-batching scheduler steps with the production vLLM call pattern:
 
-- Each step runs `--requests-per-step` requests. Each request does `touch` plus a maximal-prefix lookup (per-key `lookup`, stopping at the first miss). Hits are loaded; the rest of the request is stored.
-- Sessions share one prefix pool and diverge at geometric points (mean = half a request), so short prefixes miss more, as with production prefix caching. Keys are never removed between steps, so the cache fills and evicts naturally.
+- Each step runs `--requests-per-step` requests. Each request does a maximal-prefix lookup (per-key `lookup`, stopping at the first miss) and then a `touch` of all its keys (touch first with `--lookup-order touch-first`). Hits are loaded; the rest of the request is stored.
+- With `--prefix-sharing shared` (default), sessions share one prefix pool and diverge at geometric points (mean = half a request), so short prefixes miss more, as with production prefix caching. With `--prefix-sharing private`, each session gets its own prefix blocks of the same lengths, so no prefix block is shared between sessions; a session's own prefix comes back only every `num_sessions / requests_per_step` steps, so a touch reply practically never helps a later request's lookup. All sessions' prefix blocks are stored up front (about `num_sessions` × the mean prefix length), which can exceed the memory tier and leave some of them on SSD. Keys are never removed between steps, so the cache fills and evicts naturally.
 - Loads and stores are deduplicated across the step's requests.
 - Stores are submitted after the load drain and drained, untimed, at the start of the next step. `drain_workers` therefore measures only load completion, as vLLM never blocks a step on its stores.
 
@@ -130,9 +132,15 @@ python tools/certus-connector-bench/bench_connector_lifecycle.py \
 python tools/certus-connector-bench/bench_connector_lifecycle.py \
     --mode scheduler-step --requests-per-step 16 --num-sessions 64 \
     --min-duration 30
+
+# vLLM <= 0.20 call order, and no prefix shared between requests
+python tools/certus-connector-bench/bench_connector_lifecycle.py \
+    --mode scheduler-step --lookup-order touch-first
+python tools/certus-connector-bench/bench_connector_lifecycle.py \
+    --mode scheduler-step --prefix-sharing private
 ```
 
-Reports steps/sec, per-step phase times (touch_lookup, prepare_store, prepare_load, submit, drain_workers, complete, take_events), and prefix hit/suffix store counts. `--pipeline-depth` has no effect in this mode: each step submits one load and waits for it.
+Reports steps/sec, per-step phase times (touch_lookup = all of the step's lookups and touches, prepare_store, prepare_load, submit, drain_workers, complete, take_events), and prefix hit/suffix store counts. `--pipeline-depth` has no effect in this mode: each step submits one load and waits for it.
 
 #### Pattern mode (`--pattern`)
 
@@ -167,6 +175,7 @@ python tools/certus-connector-bench/bench_connector_lifecycle.py --mode all --mi
 --working-set N        Blocks for eviction/contention pressure (default: 512)
 --csv PATH             Append results to CSV file
 --tag TEXT             Tag column for CSV (e.g. branch name)
+--lookup-order ORDER   lookup-first (default, vLLM >= 0.21) or touch-first (vLLM <= 0.20)
 ```
 
 #### Tensor parallelism (`--tp`)
@@ -205,6 +214,7 @@ python tools/certus-connector-bench/bench_connector_lifecycle.py \
 --hit-ratio F          (prefix-miss) Fraction of keys pre-stored, 0.0-1.0 (default: 0.75)
 --requests-per-step N  (scheduler-step) Requests per scheduler step (default: 8)
 --num-sessions N       (scheduler-step) Distinct conversations sharing the prefix pool (default: 32)
+--prefix-sharing MODE  (scheduler-step) shared (default), or private: no prefix block shared between sessions
 ```
 
 ### bench_connector_path.py

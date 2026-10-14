@@ -54,7 +54,13 @@ required_interfaces:
         Returns None when blocks cannot be stored (any reason, not just capacity).
       on_new_request: "(req_context: ReqContext) -> RequestOffloadingContext"
     optional:
-      touch: "(keys: Collection[OffloadKey], req_context: ReqContext) -> None"
+      touch: |
+        (keys: Collection[OffloadKey], req_context: ReqContext) -> None
+        Marks the blocks as recently used (LRU recency). It is separate from
+        prepare_load so that recency is also set for blocks vLLM does not load,
+        such as blocks in vLLM's own GPU prefix cache (base.py docstring).
+        vLLM 0.21+ calls it AFTER the lookups of the same request, not before:
+        see calling_sequences.load.
       complete_load: "(keys: Collection[OffloadKey], req_context: ReqContext) -> None"
       complete_store: "(keys: Collection[OffloadKey], req_context: ReqContext, success: bool = True) -> None"
       on_request_finished: |
@@ -197,11 +203,28 @@ calling_sequences:
     3. worker.get_finished()  [normal polling — NOT wait()]
     4. manager.complete_store(keys, success)
   load: |
+    For each request, in one scheduling pass
+    (offloading/scheduler.py get_num_new_matched_tokens, then
+    update_state_after_alloc), vLLM 0.21 and later:
     1. manager.lookup(key) per block → HIT/MISS/HIT_PENDING/RETRY
-    2. manager.prepare_load(hit_keys) → LoadStoreSpec
-    3. worker.submit_load(job_id, src_spec, gpu_spec) → bool
-    4. worker.get_finished()  [normal polling]
-    5. manager.complete_load(keys)
+       Only blocks after the ones vLLM already holds in its GPU prefix cache
+       (num_locally_computed_tokens). Stops at the first MISS; on a deferral
+       (None on ≤0.24, RETRY/HIT_PENDING on 0.26+) it keeps scanning and asks
+       again next step.
+    2. manager.touch(keys) with all of the request's offload keys, including
+       the ones in the GPU prefix cache (sliding-window groups: only the chunks
+       still needed; 0.28 also touches the partial-tail boundary key).
+    3. manager.prepare_load(hit_keys) → LoadStoreSpec
+    4. worker.submit_load(job_id, src_spec, gpu_spec) → bool
+    5. worker.get_finished()  [normal polling]
+    6. manager.complete_load(keys)
+    The next request's lookups follow in the same pass.
+  touch_order_by_version: |
+    ≤0.20: touch(keys) BEFORE the prefix lookup in get_num_new_matched_tokens.
+    0.21–0.28 (vLLM PR #41228): lookup first, touch after (step 2 above). The
+    store path also calls touch after prepare_store (_build_store_jobs).
+    A connector must not assume touch() precedes lookup() of the same keys:
+    an answer saved by touch() can only be read by a later request's lookup.
   eviction: |
     Triggered inside prepare_store when storage cannot accommodate new blocks.
     Connector decides the eviction policy. vLLM has NO explicit evict() call.
@@ -231,3 +254,4 @@ invariants:
   - "TP>1: all ranks must agree on residency"
   - "Eviction is connector-owned — vLLM never calls evict()"
   - "get_finished() is normal polling; wait() is for fenced/preempted flush only"
+  - "0.21+: lookup() of a request runs before its touch(); touch() never precedes the lookups it could answer"
