@@ -1,11 +1,13 @@
 ---
 spec_sync_component: dispatch-map
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-14T18:44:28Z
-spec_sync_git_commit: 0ca07fca
-spec_sync_inputs_sha256: eac59fa787f0dba04602aa59f1b90499f5ce9c753c7fe4c2145f78023b36266f
+spec_sync_synced_at: 2026-10-14T21:11:26Z
+spec_sync_git_commit: c9823791
+spec_sync_inputs_sha256: 03c648f596a173ff64c9d07ae7befe67640bee0470b90afb9f01ba06b879864d
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-14 (interfaces FR-027 fold-in, branch `fix/cold-staging-buf-16mib`).** `components/interfaces/{src,specs}` folds into this component's spec-sync digest, so correcting interfaces FR-027 (`DispatcherConfig::cold_staging_buf_bytes` default 4 MiB → 16 MiB, matching commit `8e12e49f`) moves this component's hash. dispatch-map's own reconciliation is current — its `src/specs` were fully synced and stamped clean by PR #542 (merged into this branch; see the note below) — and it does not reference `cold_staging_buf_bytes` (consumed only by the dispatcher's host-DRAM cold-staging pool), so no re-analysis was needed for the interfaces change. Digest refreshed to match the committed merged tree.
+
 > **Apply 2026-10-14 (branch fix/dispatch-map-get-pool-id-panic, approved by Cornel).** All 10 proposals were `approved: true` and were applied in batch mode; no source code changed. **Applied (spec text, exact old→new from `proposals.md`)**: P1 FR-003 and P2 FR-024 (`spec.md` + contract rows now list `NotInitialized`, no entry recorded on error), P3 FR-017 (`oldest_keys` returns an empty list when no `IEvictionPolicy` is connected), P4 (`data-model.md`: `NotInitialized` is no longer "reserved"), P5 FR-026 (contract + `data-model.md` now say `ActiveReferences` for held refs on `try_evict_to_block`), P10 (new 2026-10-14 **Last Synced** note in `spec.md`; the earlier notes are kept as history). Backups are in `.specify/sync/backups/20261014T181140Z/`. **Became tasks (ALIGN, per approval note "no code change in this PR")**: P6 null pointer (FR-003/US1-AS3), P7 stale cached pool id / `track(...).unwrap()` under the map lock, P8 `initialize()`-unbound test (FR-012), P9 `entry_size` `u32` overflow (FR-023); see `.specify/sync/align-tasks.md`. **Stays open**: no unapproved proposals. The four code-side drifts above (P6–P9) stay open until they are implemented, so the drift status is unchanged. Details: `apply-report.md` / `apply-report.json`.
 >
 > **Stamp: clean.** Every drift item of this analysis is resolved (spec updates applied with Cornel's approval) or tracked in `align-tasks.md` (ALIGN tasks and open items), as in earlier `clean` stamps of this and other components (e.g. dispatcher-p2p).

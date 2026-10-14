@@ -1,11 +1,13 @@
 ---
 spec_sync_component: eviction-policy-optimized
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-09T21:53:37Z
-spec_sync_git_commit: 83bcd4ff
-spec_sync_inputs_sha256: 912c40d5d1fb77170b9ab7f977ba46ae535b0be0a9ca200da117defd3d6640af
+spec_sync_synced_at: 2026-10-14T20:46:27Z
+spec_sync_git_commit: 474ba0a6
+spec_sync_inputs_sha256: 5fd20e038bcf36204c02f3a0083303d22c3b1a07837fbd5c25e62496b9ca9eb4
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-14 (transitive: `components/interfaces` changed, branch `fix/cold-staging-buf-16mib`).** The spec-sync digest folds `components/interfaces/{src,specs}` into every component's hash, so the single interface change on this branch — `DispatcherConfig::cold_staging_buf_bytes` default 4 MiB → 16 MiB (commit `8e12e49f`) and the matching correction to interfaces FR-027 — invalidates every component's stamp at once; this is the design, not a defect. **No code re-analysis was performed for this component, and none was needed:** its own `src/**` and `specs/**` are unchanged on this branch, and it does not reference `cold_staging_buf_bytes` (consumed only by the dispatcher's host-DRAM cold-staging pool). Digest refreshed to the recomputed value.
+
 > **Re-stamp 2026-10-09 (transitive: `components/interfaces` changed, branch `fix/evict-blocked-by-pin`).** The only change to this component's hashed inputs is a doc-comment correction on `IDispatchMap::try_evict_to_block` in `components/interfaces/src/idispatch_map.rs` (no signature, type, or behaviour change). This component's own `src/**` and `specs/**` are unchanged, and its previous stamp was re-verified to match `origin/unstable` before re-stamping. **No re-analysis was performed for this component**; this stamp asserts only what was checked.
 
 
