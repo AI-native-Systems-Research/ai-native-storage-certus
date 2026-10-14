@@ -1,11 +1,19 @@
 ---
 spec_sync_component: dispatch-map
-spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-09T21:53:37Z
-spec_sync_git_commit: 83bcd4ff
-spec_sync_inputs_sha256: 4ace5695270367ea73774f3d0cc4e6393e0230dfd4fb98cb36c1ddea62f9e27a
+spec_sync_drift_status: drift
+spec_sync_synced_at: 2026-10-14T00:35:03Z
+spec_sync_git_commit: c877b74e
+spec_sync_inputs_sha256: 33bbc7222bf54b692b478dc7db32c98d014ebd344494cc00edf831901b09bf38
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-10-13 (branch fix/dispatch-map-get-pool-id-panic, fix: unbound `IEvictionPolicy` returns `NotInitialized` instead of panicking).** Scope: `src/lib.rs` (`get_pool_id`, `initialize`, `oldest_keys`, `create_memory_tier_entry`, `recover_extent`) and new `src/repair_test_get_pool_id.rs`. Findings:
+>
+> - **Resolved:** FR-012 (`spec.md:251`) and contract "no panics" (`contracts/idispatch_map.md:79`). `get_pool_id` now returns `Result` (`src/lib.rs:51-63`); `initialize` propagates it (`:77`). `oldest_keys` returns empty (`:383-385`), as FR-017 (`spec.md:256`) allows.
+> - **Minor doc gap:** `create_memory_tier_entry`/`recover_extent` can now return `NotInitialized` (`:403`, `:588`), but FR-003/FR-024 (`spec.md:242,263`) and contract rows `:45,:60` don't list it.
+> - **Still drift:** `ep.track(...).unwrap()` (`:103`, `:414`, `:598`) panics with `InvalidPool` when a different policy is connected after the pool id was cached, so the contract's "no panics" (`:79`) is still broken on these paths. There is no test that `initialize` errors when unbound (align-tasks FR-012 checklist). The FR-003 null-pointer check (US1-AS3) is still missing.
+>
+> Verdict: drift.
+
 > **Sync 2026-10-09 (branch `fix/evict-blocked-by-pin`).** Delta analysis on a certified baseline: every stamp on `origin/unstable` was re-verified to equal its recomputed spec-sync hash, so the only new inputs are this branch's changes.
 >
 > - **FR-026 / `try_evict_to_block` scenario 2 — CODE + SPEC.** A held read or write reference now returns `ActiveReferences(key)` (`src/lib.rs`, the refs check in `try_evict_to_block`), as `remove` (FR-011) already did; it was `InvalidState`. Spec text updated to match. The consumer's contract required this: dispatcher spec 002 FR-033 counts `evictions_blocked_by_pin` on `ActiveReferences`, so with `InvalidState` every pinned candidate was counted as unpersisted.
