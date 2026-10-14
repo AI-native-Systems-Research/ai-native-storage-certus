@@ -77,6 +77,13 @@ gives (see `run_compare.sh --help`): `--mode` (default `all`), `--bs`,
      that `--working-set` (default 512 × 2 MiB = 1 GiB) must exceed it for the
      mixed-eviction phase to apply pressure, and offer to scale `--working-set`
      with it (e.g. 2 × tier ÷ `--block-bytes`), passed to both arms.
+     **Cap it by GPU memory:** the certus bench allocates two GPU buffers of
+     `max(num_blocks, working_set) × block_bytes` each at startup, so
+     `2 × working_set × block_bytes` must fit in the GPU's free memory with
+     ~1 GiB to spare, or the certus arm dies with CUDA OOM before writing any
+     results (8192 × 2 MiB blocks needs 32 GiB; an A30 has 24). If no working
+     set both fits the GPU and exceeds the tier, say so and only offer tier
+     sizes that leave room for one.
 
    If the chosen fs-tier directory does not exist, create it (`mkdir -p`).
 
