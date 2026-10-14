@@ -4,7 +4,7 @@
 **Created**: 2026-07-08
 **Status**: Backfilled — aligned to implementation
 **Source**: Generated from existing implementation
-**Last-Synced**: 2026-09-03 (spec-sync: version reconciled to 0.3.0 and residual interface-doc sharding drift resolved; single-`RwLock<Pool>` reality confirmed. See "Spec-Sync Notes" at end)
+**Last-Synced**: 2026-10-14 (spec-sync apply: FR-030 added; FR-023, FR-027, NFR-005 and the US1 `peek` test-coverage line reworded to match the code. Open ALIGN tasks in `.specify/sync/align-tasks.md`. Previous: 2026-09-03, version reconciled to 0.3.0 and residual interface-doc sharding drift resolved. See "Spec-Sync Notes" at end)
 
 ## Backfill Notice
 > This spec was generated from existing code via `speckit.sync.backfill`.
@@ -38,7 +38,8 @@ Memory is allocated as a single contiguous region via `mmap` (preferring 2 MiB h
 - `insert_and_get` - verifies pointer round-trip
 - `insert_duplicate_fails` - verifies AlreadyExists error
 - `contains` - verifies presence tracking
-- `peek_does_not_update_eviction_order` - verifies peek does not update eviction order
+- `peek_does_not_update_eviction_order` - verifies peek returns the entry; it does not yet check that eviction order is unchanged (FR-012 holds by inspection: `peek` makes no eviction-policy call)
+- `insert_fails_cleanly_when_policy_refuses_to_track` - verifies that a refused `track` makes insert fail without a panic, reserved space, or a recorded slot, and that the component stays usable (FR-030)
 
 ### User Story 2 - Eviction Under Memory Pressure (Priority: P1)
 
@@ -169,13 +170,14 @@ Memory is allocated as a single contiguous region via `mmap` (preferring 2 MiB h
 | FR-020 | is_dma_capable() returns true only for SPDK-allocated pools | Implementation |
 | FR-021 | oldest_keys(n) returns up to N oldest keys via a single `IEvictionPolicy::get_eviction_candidates(pool_id, n)` call (no per-shard sampling) | Implementation |
 | FR-022 | pool_info() returns base pointer and size for CUDA host registration | Implementation |
-| FR-023 | All operations check initialized flag before proceeding | Implementation |
+| FR-023 | Every operation that reads or changes pool state checks the initialized flag first, and returns its "not initialized" result when the flag is unset (`NotInitialized` for `insert`/`remove`/`clear`; `None`, `false`, `0`, an empty `Vec`, or a no-op for the others). Exceptions: `insert` rejects `size == 0` with `InvalidSize`, and `batch_touch` returns on an empty slice, before the check; `is_dma_capable()` and `telemetry_snapshot()` do not check the flag (their results are well-defined before initialization); `initialize()` rejects an already-set flag | Implementation |
 | FR-024 | Eviction policy is an external receptacle (IEvictionPolicy) | Implementation |
 | FR-025 | Logger is an optional receptacle (ILogger) | Implementation |
 | FR-026 | Free-list allocator coalesces adjacent free regions on deallocation | Unit test |
-| FR-027 | When compiled with the optional `telemetry` feature, the component tracks eviction count, write-lock contention count, and read-lock contention count | Implementation *(backfilled)* |
+| FR-027 | When compiled with the optional `telemetry` feature, the component tracks eviction count (one per `evict_next` call for which the policy returned a victim), write-lock contention count (measured in `insert`, `remove`, `evict_next`), and read-lock contention count (measured in `get`, `batch_touch`); other lock acquisitions (`clear`, `peek`, `touch`, `contains`, `capacity`, `used`, `free_capacity`) are not measured | Implementation *(backfilled)* |
 | FR-028 | `telemetry_snapshot()` returns the current telemetry counters (all-zero if the `telemetry` feature is disabled); `telemetry()`/`reset_telemetry()` provide feature-gated inherent access and reset | Implementation *(backfilled)* |
 | FR-029 | `free_capacity()` returns `capacity() - used()` for proactive-eviction triggers | Implementation *(backfilled)* |
+| FR-030 | insert() checks for free space (FR-010, `PoolFull`) before registering the key with the eviction policy. If the policy then refuses to track the key (`IEvictionPolicy::track` returns an error), insert() returns `NotInitialized` with a message naming the key and the policy's error, reserves no pool space, records no slot, does not panic, and leaves the component usable | Unit test *(backfilled)* |
 
 ### Non-Functional Requirements
 
@@ -185,7 +187,7 @@ Memory is allocated as a single contiguous region via `mmap` (preferring 2 MiB h
 | NFR-002 | A single `RwLock<Pool>` serializes mutations while allowing concurrent readers; data-path touches are applied outside the pool lock via the eviction policy's own synchronization | Architecture |
 | NFR-003 | No system calls on the data path after initialization | Architecture |
 | NFR-004 | Memory pool is thread-safe (Send + Sync) | Compile-time |
-| NFR-005 | Allocator uses BTreeMap for O(log n) first-fit search | Implementation |
+| NFR-005 | Allocator keeps free regions in a BTreeMap keyed by offset: map updates and coalescing lookups are O(log k), and the first-fit search (`allocate`, `can_allocate`) is a linear scan, O(k), over the k free regions in offset order | Implementation |
 | NFR-006 | Pool memory is properly freed on Drop (munmap or spdk_free) | Implementation |
 | NFR-007 | Default pool size is 256 MiB | Implementation |
 | NFR-008 | Component version is 0.3.0 | Cargo.toml |
@@ -236,7 +238,7 @@ Memory is allocated as a single contiguous region via `mmap` (preferring 2 MiB h
 
 ## Implementation Notes
 
-- The component uses `RwLock<MemoryTierState>` at the top level. After initialization the immutable state fields (`pool_ptr`, `pool_size`, `pool_id`) do not change; the inner `RwLock<Pool>` guards the allocator and slot map. Data-path reads take the inner read lock; mutations take the inner write lock. When the `telemetry` feature is enabled, a failed `try_read`/`try_write` first attempt bumps the corresponding lock-contention counter before blocking.
+- The component uses `RwLock<MemoryTierState>` at the top level. After initialization the immutable state fields (`pool_ptr`, `pool_size`, `pool_id`) do not change; the inner `RwLock<Pool>` guards the allocator and slot map. Data-path reads take the inner read lock; mutations take the inner write lock. When the `telemetry` feature is enabled, the measured paths (`insert`, `remove`, `evict_next` for the write lock; `get`, `batch_touch` for the read lock) first try `try_write`/`try_read` and, if that fails, bump the corresponding lock-contention counter before blocking.
 - `unsafe impl Send/Sync` is justified because the pool pointer references mmap'd/SPDK memory accessible from any thread, and all mutable access is serialized through the `RwLock<Pool>`.
 - Global eviction (`evict_next`) delegates victim choice entirely to the bound `IEvictionPolicy`; there is no internal round-robin counter or shard-selection state.
 - When SPDK has already shut down at Drop time, the pool is intentionally leaked (same pattern as DmaBuffer) to avoid use-after-free in the SPDK allocator.

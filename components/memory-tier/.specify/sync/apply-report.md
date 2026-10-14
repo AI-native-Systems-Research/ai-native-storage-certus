@@ -1,78 +1,59 @@
-# Sync Apply Report — memory-tier (Spec-Sync Phase B)
+# Sync Apply Report — memory-tier
 
-**Component**: memory-tier · **Spec**: `001-memory-tier`
-**Mode**: BACKFILL-TO-REALITY (flagship case)
-**Applied**: 2026-08-20
-**Policy**: `.specify/sync/PHASE_B_POLICY.md`
-**Source**: `.specify/sync/drift-report.json` (8 drifted, 3 not_implemented, 0 unspecced)
+Applied: 2026-10-14T17:22:13Z
+**Component**: memory-tier · **Spec**: `001-memory-tier` · **Mode**: BATCH
+**Branch**: `fix/memory-tier-insert-track-panic` (base `78f60ab8`)
+**Source**: `.specify/sync/proposals.json` (generated 2026-10-14T16:47:49Z); approved by Cornel Constantinescu, 2026-10-14
+**Backup**: `.specify/sync/backups/20261014T172213Z/` (`specs/001-memory-tier/{spec,plan,tasks}.md`, plus the previous `align-tasks.md`, `apply-report.{md,json}` and `drift-report.md`)
 
-Decision: the single `RwLock<Pool>` implementation is the intended, working design. The 16-way
-sharded + Creusot-verified design in earlier spec revisions was never built. The spec is backfilled
-to match the code. **No `.rs` source, `Cargo.toml`, `plan.md`, `tasks.md`, or `README.md` changed.**
+No code was changed. `src/`, `components/interfaces` and `Cargo.toml` are untouched.
 
-## Summary
+## Changes Made
 
-| Direction | Count |
-|-----------|-------|
-| BACKFILL applied | 9 |
-| ALIGN tasks generated | 0 |
-| Unspecced backfilled | 0 |
-| Resolved (already fixed) | 0 |
-| HUMAN_DECISION | 1 |
+### Specs Updated
 
-## Specs Updated (BACKFILL)
+| Proposal | Spec / file | Requirement | Change Type |
+|----------|-------------|-------------|-------------|
+| P1 | `spec.md` FR table | FR-030 | Added (refused `track` in `insert` → `NotInitialized`; PoolFull is checked first; nothing reserved or recorded; no panic) |
+| P1 | `spec.md` US1 Test Coverage | `insert_fails_cleanly_when_policy_refuses_to_track` | Added |
+| P8 | `spec.md` US1 Test Coverage | `peek_does_not_update_eviction_order` (FR-012) | Modified (the claim now says what the test actually checks) |
+| P5 | `spec.md` FR table | FR-023 | Modified (initialized-flag check, with its exceptions listed) |
+| P6 | `spec.md` FR table | FR-027 | Modified (which paths are measured; eviction counting) |
+| P6 | `spec.md` Implementation Notes, 1st bullet | telemetry sentence | Modified |
+| P7 | `spec.md` NFR table | NFR-005 | Modified (first-fit is O(k) linear; map ops O(log k)) |
+| P10 | `plan.md` Spec-Sync Notes | sharding note | Superseded (marked SUPERSEDED 2026-08-20; the single `RwLock<Pool>` is authoritative) |
+| P10 | `tasks.md:16,24,37,43` | shard/Creusot tasks | Superseded (`- [ ]` → `- [~] (superseded 2026-08-20: …)`) |
+| P10 | `tasks.md:13` | test-count task | Modified (adds the regression test) |
+| (skill step 2.5) | `spec.md` header | `**Last-Synced**` | Modified (2026-10-14) |
 
-| Requirement | Change type | Notes |
-|-------------|-------------|-------|
-| FR-005 | rewrite | 16 independent shards → single `RwLock<Pool>` (no shards) |
-| FR-006 | rewrite | key-modulo-16 shard selection → reader-writer lock model; `Creusot P4,P5` removed |
-| FR-007 | rewrite | per-shard Mutex allocator/slot map → single `FreeList` + single `HashMap` |
-| FR-013 | rewrite | round-robin shard counter → eviction-policy delegation; `Creusot P10` removed |
-| FR-014 | rewrite | same-shard eviction → documented alias for `evict_next()` (`key` ignored); `Creusot P4,P5` removed |
-| FR-021 | rewrite | per-shard `(n/NUM_SHARDS).max(1)` sampling → single `get_eviction_candidates(pool_id, n)` call |
-| NFR-002 | rewrite | 16-way per-shard locking → single `RwLock<Pool>` (concurrent readers, serialized writers) |
-| SC-8 | removed | "10 formal properties verified with Creusot (21 VCs)" — no proof artifacts; never built |
-| FR Verified column (FR-006/008/009/010/013/014/015/023) | rewrite | `Creusot P#` annotations → `Unit test` / `Implementation` (IMemoryTier-doc-verified-claims) |
+Notes on how each approval was applied:
+- **P1**: approval note "spec.md parts only; keep NotInitialized (no new variant)". Only the two `spec.md` edits were made. FR-030 names `NotInitialized`. The decision point (a dedicated variant) was declined, so no interface ALIGN was generated for it.
+- **P1 + P8** both edit `spec.md:41`, so they were combined as the proposal asks: P8's rewritten line comes first, followed by P1's new line.
+- **P6**: its note says to use "that freed a slot" if P3 is applied. P3 was approved as an ALIGN task only, and the code is unchanged, so FR-027 keeps "for which the policy returned a victim", which matches the current code. The wording change is an acceptance criterion of the P3 task.
+- **P10**: the exact plan.md/tasks.md text from the proposal. That text is itself the "superseded" metadata. `spec.md` already says the sharded design was dropped (its Spec-Sync Notes, 2026-08-20), so no further cross-reference was added.
 
-Supporting prose also aligned: Status/Last-Synced metadata, Overview paragraph, User Story 2/4/5
-acceptance criteria, Key Entities table (`Shard` row replaced by `Pool` row), Implementation Notes
-(top-level lock description; `evict_counter` note removed; `oldest_keys` note), and the trailing
-Spec-Sync Notes block (replaced with a 2026-08-20 backfill-resolution note).
+### New Specs Created
+- None. (P9 NEW_SPEC was not approved.)
 
-## Align Tasks Generated
+### Implementation Tasks Generated
+- 2 ALIGN tasks in `.specify/sync/align-tasks.md`: P3 (FR-013, `evict_next` race) and P4 (SC-3, touches after dropping the pool lock race with `clear`).
+- 2 open items in the same file: P2 and P9, each quoting its approval note.
 
-None. All drift resolved by backfill except the version conflict (HUMAN_DECISION, below). The five
-previously-deferred align-tasks are superseded — see `.specify/sync/align-tasks.md`.
+### Not Applied
 
-## Unspecced Backfilled
+| Proposal | Reason |
+|----------|--------|
+| P2 (interfaces doc, `imemory_tier.rs:33,66`) | Not approved: "deferred: changes components/interfaces, which re-stamps every component; separate PR". Recorded as an open item. |
+| P9 (FR-031, disconnected receptacle) | Not approved: "open decision (A: errors instead of panics / B: document must stay connected); record in align-tasks.md". Recorded as an open item. |
+| P3, P4 | Approved as ALIGN, so no spec or code edit was made; recorded as tasks. |
 
-None (drift report lists 0 unspecced features).
+## Left as is (flagged for the next sync)
+- The closing line of `spec.md` "Spec-Sync Notes", "No open items remain.", is now out of date: P3/P4 tasks and P2/P9 are open. No approved proposal covers that line, so it was not edited.
+- `cargo test` was not run. This apply step edited only Markdown.
 
-## Resolved
+## Next Steps
 
-None (no memory-tier item was pre-fixed on the main thread).
-
-## Human Decision
-
-| Requirement | Detail |
-|-------------|--------|
-| NFR-008 | `Cargo.toml` 0.1.0 / `define_component!` 0.3.0 / spec 0.2.0 disagree; no authoritative value. Spec text left unchanged; reconciliation (requires editing `Cargo.toml` + `src/lib.rs`) recorded in `align-tasks.md` for a maintainer. |
-
-## Backup
-
-Original spec backed up before editing:
-- `.specify/sync/backups/specs/001-memory-tier/spec.md.bak`
-
-## Files Touched
-
-- `components/memory-tier/specs/001-memory-tier/spec.md` (backfilled)
-- `components/memory-tier/.specify/sync/proposals.md` · `proposals.json`
-- `components/memory-tier/.specify/sync/align-tasks.md` (regenerated: 0 ALIGN)
-- `components/memory-tier/.specify/sync/apply-report.md` (this file) · `apply-report.json`
-- `components/memory-tier/.specify/sync/backups/specs/001-memory-tier/spec.md.bak`
-
-## Not Modified (out of scope / policy)
-
-`src/lib.rs`, `Cargo.toml`, `components/interfaces/src/imemory_tier.rs` (a residual "same shard as
-key" phrase remains in its `evict_next_for_key` doc comment; the `P4/P5/P10 "Verified"` overclaiming
-was already removed there), `plan.md`, `tasks.md`, `README.md`.
+1. Review the updated `spec.md`, `plan.md` and `tasks.md` (`git diff components/memory-tier/specs/`).
+2. Commit: `git add components/memory-tier/specs/ components/memory-tier/.specify/sync/ && git commit -m "sync(memory-tier): apply approved drift resolutions"`.
+3. Restamp the `spec_sync_*` frontmatter with `scripts/spec-sync-hash.sh` (the specs changed, so the digest moved).
+4. Implement the P3/P4 tasks in `align-tasks.md`, each starting with a failing test. Decide on P9, and open the separate interfaces PR for P2.

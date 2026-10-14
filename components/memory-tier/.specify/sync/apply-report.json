@@ -1,62 +1,139 @@
 {
-  "generated": "2026-08-20",
-  "phase": "Phase B",
+  "generated": "2026-10-14T17:22:13Z",
   "component": "memory-tier",
   "spec": "001-memory-tier",
-  "mode": "BACKFILL-TO-REALITY",
-  "policy": ".specify/sync/PHASE_B_POLICY.md",
+  "branch": "fix/memory-tier-insert-track-panic",
+  "base_commit": "78f60ab8",
+  "mode": "batch",
+  "source": ".specify/sync/proposals.json (generated 2026-10-14T16:47:49Z)",
+  "approved_by": "Cornel Constantinescu, 2026-10-14",
   "summary": {
-    "backfill_applied": 9,
-    "align_tasks": 0,
-    "unspecced_backfilled": 0,
-    "resolved": 0,
-    "human_decision": 1
+    "applied": ["P1", "P5", "P6", "P7", "P8", "P10"],
+    "align_tasks": ["P3", "P4"],
+    "open": ["P2", "P9"],
+    "code_changed": false
   },
   "specs_updated": [
-    { "spec": "001-memory-tier", "requirement": "FR-005", "change_type": "rewrite", "note": "16 shards -> single RwLock<Pool>" },
-    { "spec": "001-memory-tier", "requirement": "FR-006", "change_type": "rewrite", "note": "key-modulo-16 shard selection -> reader-writer lock model; Creusot claim removed" },
-    { "spec": "001-memory-tier", "requirement": "FR-007", "change_type": "rewrite", "note": "per-shard Mutex allocator/slot map -> single FreeList + single HashMap" },
-    { "spec": "001-memory-tier", "requirement": "FR-013", "change_type": "rewrite", "note": "round-robin shard counter -> eviction-policy delegation; Creusot claim removed" },
-    { "spec": "001-memory-tier", "requirement": "FR-014", "change_type": "rewrite", "note": "same-shard eviction -> documented alias for evict_next() (key ignored); Creusot claim removed" },
-    { "spec": "001-memory-tier", "requirement": "FR-021", "change_type": "rewrite", "note": "per-shard sampling -> single get_eviction_candidates() call" },
-    { "spec": "001-memory-tier", "requirement": "NFR-002", "change_type": "rewrite", "note": "16-way per-shard locking -> single RwLock<Pool>" },
-    { "spec": "001-memory-tier", "requirement": "SC-8", "change_type": "removed", "note": "10 Creusot properties / 21 VCs — never built; success criterion removed" },
-    { "spec": "001-memory-tier", "requirement": "FR-006/008/009/010/013/014/015/023 Verified column", "change_type": "rewrite", "note": "Creusot P# annotations replaced with Unit test / Implementation (IMemoryTier-doc-verified-claims)" }
+    {
+      "proposal": "P1",
+      "file": "components/memory-tier/specs/001-memory-tier/spec.md",
+      "requirement": "FR-030",
+      "change_type": "added",
+      "before": null,
+      "after": "| FR-030 | insert() checks for free space (FR-010, `PoolFull`) before registering the key with the eviction policy. If the policy then refuses to track the key (`IEvictionPolicy::track` returns an error), insert() returns `NotInitialized` with a message naming the key and the policy's error, reserves no pool space, records no slot, does not panic, and leaves the component usable | Unit test *(backfilled)* |",
+      "approval_note": "spec.md parts only; keep NotInitialized (no new variant)",
+      "applied_at": "2026-10-14T17:22:13Z"
+    },
+    {
+      "proposal": "P1+P8",
+      "file": "components/memory-tier/specs/001-memory-tier/spec.md",
+      "requirement": "US1 Test Coverage (FR-012, FR-030)",
+      "change_type": "modified+added",
+      "before": "- `peek_does_not_update_eviction_order` - verifies peek does not update eviction order",
+      "after": "- `peek_does_not_update_eviction_order` - verifies peek returns the entry; it does not yet check that eviction order is unchanged (FR-012 holds by inspection: `peek` makes no eviction-policy call)\n- `insert_fails_cleanly_when_policy_refuses_to_track` - verifies that a refused `track` makes insert fail without a panic, reserved space, or a recorded slot, and that the component stays usable (FR-030)",
+      "applied_at": "2026-10-14T17:22:13Z"
+    },
+    {
+      "proposal": "P5",
+      "file": "components/memory-tier/specs/001-memory-tier/spec.md",
+      "requirement": "FR-023",
+      "change_type": "modified",
+      "before": "| FR-023 | All operations check initialized flag before proceeding | Implementation |",
+      "after": "| FR-023 | Every operation that reads or changes pool state checks the initialized flag first, and returns its \"not initialized\" result when the flag is unset (`NotInitialized` for `insert`/`remove`/`clear`; `None`, `false`, `0`, an empty `Vec`, or a no-op for the others). Exceptions: `insert` rejects `size == 0` with `InvalidSize`, and `batch_touch` returns on an empty slice, before the check; `is_dma_capable()` and `telemetry_snapshot()` do not check the flag (their results are well-defined before initialization); `initialize()` rejects an already-set flag | Implementation |",
+      "applied_at": "2026-10-14T17:22:13Z"
+    },
+    {
+      "proposal": "P6",
+      "file": "components/memory-tier/specs/001-memory-tier/spec.md",
+      "requirement": "FR-027",
+      "change_type": "modified",
+      "before": "| FR-027 | When compiled with the optional `telemetry` feature, the component tracks eviction count, write-lock contention count, and read-lock contention count | Implementation *(backfilled)* |",
+      "after": "| FR-027 | When compiled with the optional `telemetry` feature, the component tracks eviction count (one per `evict_next` call for which the policy returned a victim), write-lock contention count (measured in `insert`, `remove`, `evict_next`), and read-lock contention count (measured in `get`, `batch_touch`); other lock acquisitions (`clear`, `peek`, `touch`, `contains`, `capacity`, `used`, `free_capacity`) are not measured | Implementation *(backfilled)* |",
+      "note": "P3 was turned into an ALIGN task, not applied to code, so 'for which the policy returned a victim' is kept; the P3 task carries the follow-up wording change.",
+      "applied_at": "2026-10-14T17:22:13Z"
+    },
+    {
+      "proposal": "P6",
+      "file": "components/memory-tier/specs/001-memory-tier/spec.md",
+      "requirement": "Implementation Notes (telemetry sentence)",
+      "change_type": "modified",
+      "before": "When the `telemetry` feature is enabled, a failed `try_read`/`try_write` first attempt bumps the corresponding lock-contention counter before blocking.",
+      "after": "When the `telemetry` feature is enabled, the measured paths (`insert`, `remove`, `evict_next` for the write lock; `get`, `batch_touch` for the read lock) first try `try_write`/`try_read` and, if that fails, bump the corresponding lock-contention counter before blocking.",
+      "applied_at": "2026-10-14T17:22:13Z"
+    },
+    {
+      "proposal": "P7",
+      "file": "components/memory-tier/specs/001-memory-tier/spec.md",
+      "requirement": "NFR-005",
+      "change_type": "modified",
+      "before": "| NFR-005 | Allocator uses BTreeMap for O(log n) first-fit search | Implementation |",
+      "after": "| NFR-005 | Allocator keeps free regions in a BTreeMap keyed by offset: map updates and coalescing lookups are O(log k), and the first-fit search (`allocate`, `can_allocate`) is a linear scan, O(k), over the k free regions in offset order | Implementation |",
+      "applied_at": "2026-10-14T17:22:13Z"
+    },
+    {
+      "proposal": "P10",
+      "file": "components/memory-tier/specs/001-memory-tier/plan.md",
+      "requirement": "Spec-Sync Notes (sharding)",
+      "change_type": "superseded",
+      "before": "- The 16-way sharding design described throughout this plan (...) pending a decision on whether sharding is unfinished work or was intentionally dropped. (...)",
+      "after": "- **SUPERSEDED (2026-08-20, Spec-Sync Phase B).** The 16-way sharding design described throughout this plan (Memory Layout, Pointer Arithmetic, Concurrency Model, Key Design Decision #1 and #6, and the Creusot P4/P5 properties) was never built and has been dropped. The single `RwLock<Pool>` implementation is authoritative, and `spec.md` (FR-005/006/007/013/014/021, NFR-002) describes it. Treat those sections of this plan as history, not as the current design.",
+      "applied_at": "2026-10-14T17:22:13Z"
+    },
+    {
+      "proposal": "P10",
+      "file": "components/memory-tier/specs/001-memory-tier/tasks.md",
+      "requirement": "tasks.md:16,24,37,43",
+      "change_type": "superseded",
+      "before": "- [ ] <task>",
+      "after": "- [~] (superseded 2026-08-20: no shards / no Creusot artifacts) <task>",
+      "applied_at": "2026-10-14T17:22:13Z"
+    },
+    {
+      "proposal": "P10",
+      "file": "components/memory-tier/specs/001-memory-tier/tasks.md",
+      "requirement": "tasks.md:13",
+      "change_type": "modified",
+      "before": "- [ ] Confirm all 12 unit tests in lib.rs pass (`cargo test -p memory-tier`)",
+      "after": "- [ ] Confirm all 12 unit tests in lib.rs and the 1 regression test in `repair_test_insert_track_failure.rs` pass (`cargo test -p memory-tier`)",
+      "applied_at": "2026-10-14T17:22:13Z"
+    },
+    {
+      "proposal": null,
+      "file": "components/memory-tier/specs/001-memory-tier/spec.md",
+      "requirement": "Last-Synced metadata",
+      "change_type": "modified",
+      "note": "skill step 2.5 (update the spec's Status/Last Modified metadata)",
+      "applied_at": "2026-10-14T17:22:13Z"
+    }
   ],
-  "prose_updated": [
-    "Status/Last-Synced metadata line",
-    "Overview paragraph (sharded -> single RwLock<Pool>)",
-    "User Story 2 acceptance criteria + test-coverage note",
-    "User Story 4 acceptance (clear all shards -> pool)",
-    "User Story 5 acceptance (capacity across shards -> total)",
-    "Key Entities table (MemoryTierState; Shard row replaced by Pool row; PoolId description)",
-    "Implementation Notes (top-level lock; evict_counter note removed; oldest_keys note)",
-    "Spec-Sync Notes block replaced with 2026-08-20 backfill-resolution note"
+  "new_specs_created": [],
+  "align_tasks_generated": [
+    { "proposal": "P3", "requirement": "FR-013", "file": ".specify/sync/align-tasks.md", "effort": "medium" },
+    { "proposal": "P4", "requirement": "SC-3 (NFR-002 related)", "file": ".specify/sync/align-tasks.md", "effort": "medium (a) / large (b)" }
   ],
-  "align_tasks_generated": [],
-  "unspecced_backfilled": [],
-  "resolved": [],
-  "human_decision": [
-    { "requirement": "NFR-008", "detail": "Cargo.toml 0.1.0 / define_component! 0.3.0 / spec 0.2.0 — no authoritative value; spec text left unchanged; recorded in align-tasks.md for maintainer reconciliation." }
+  "not_applied": [
+    { "proposal": "P2", "reason": "not approved", "approval_note": "deferred: changes components/interfaces, which re-stamps every component; separate PR", "recorded_in": ".specify/sync/align-tasks.md" },
+    { "proposal": "P9", "reason": "not approved", "approval_note": "open decision (A: errors instead of panics / B: document must stay connected); record in align-tasks.md", "recorded_in": ".specify/sync/align-tasks.md" }
   ],
-  "backups": [
-    ".specify/sync/backups/specs/001-memory-tier/spec.md.bak"
+  "flagged": [
+    "spec.md 'Spec-Sync Notes' closing line 'No open items remain.' is now stale (P3/P4/P2/P9 open); not covered by an approved proposal, left unchanged.",
+    "cargo test not run (Markdown-only apply)."
   ],
+  "backups": ".specify/sync/backups/20261014T172213Z/",
   "files_touched": [
     "components/memory-tier/specs/001-memory-tier/spec.md",
-    "components/memory-tier/.specify/sync/proposals.md",
-    "components/memory-tier/.specify/sync/proposals.json",
+    "components/memory-tier/specs/001-memory-tier/plan.md",
+    "components/memory-tier/specs/001-memory-tier/tasks.md",
     "components/memory-tier/.specify/sync/align-tasks.md",
     "components/memory-tier/.specify/sync/apply-report.md",
     "components/memory-tier/.specify/sync/apply-report.json",
-    "components/memory-tier/.specify/sync/backups/specs/001-memory-tier/spec.md.bak"
+    "components/memory-tier/.specify/sync/drift-report.md",
+    "components/memory-tier/.specify/sync/backups/20261014T172213Z/"
   ],
   "not_modified": [
-    "src/lib.rs",
-    "Cargo.toml",
-    "components/interfaces/src/imemory_tier.rs",
-    "specs/001-memory-tier/plan.md",
-    "specs/001-memory-tier/tasks.md",
-    "README.md"
+    "components/memory-tier/src/",
+    "components/interfaces/",
+    "components/memory-tier/Cargo.toml",
+    "drift-report.md spec_sync_* frontmatter"
   ]
 }
