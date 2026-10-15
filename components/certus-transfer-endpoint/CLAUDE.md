@@ -80,6 +80,12 @@ VIII–XI, and a review that does not check them is not a review.
 - **Chunk against the *peer's* `max_entries`, not your own.** Receive-buffer sizes are
   not assumed equal; `OP_HELLO` advertises them precisely because nothing checked that
   before (FR-025).
+- **One protocol version governs the connection, not one per opcode.** Each end
+  advertises a `[min, max]` range and the connection runs at `min(a.max, b.max)`.
+  Per-kind negotiation is specifically rejected: it can represent a v2 request answered
+  by a v1 reply, and a reply's meaning is tied to its request's version. The version in
+  the fused opcode is a structural guard on the negotiated value, not the mechanism
+  (D20 and its *Revision*).
 - **Never answer an unprocessable message with silence.** Silence is
   indistinguishable from a hang, so it gets diagnosed as one — and then tears down a
   healthy connection. A stale binary on one node is the common cause.

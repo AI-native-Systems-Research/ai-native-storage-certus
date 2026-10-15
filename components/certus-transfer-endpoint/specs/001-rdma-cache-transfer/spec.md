@@ -118,13 +118,16 @@ unchanged.
   connection usable**: the peer is healthy, so the FR-023 teardown path MUST NOT run.
 - **FR-025**: Both ends of a new connection MUST exchange capabilities before either sends a
   data message, and MUST NOT send one until the peer's capabilities are known. The exchange
-  MUST report, per message kind, the highest version the sender supports, and the maximum
-  entries the sender can receive in one request. A requester MUST respect the peer's maximum
-  rather than its own, and MUST select `min(local, peer)` version per kind. If a peer cannot
-  meet the configured version floor, the **connection** MUST fail at establishment with a
-  diagnostic naming peer, kind and versions — not a request, and not a later deadline.
-  Capabilities MUST be held on the connection and discarded with it, so a rebuilt connection
-  re-learns them and an upgraded peer is picked up without separate invalidation.
+  MUST report the **protocol version range** the sender supports and the maximum entries it
+  can receive in one request. The version in force for the connection MUST be
+  `min(a.max, b.max)`, and the **connection** MUST fail at establishment if that falls below
+  `max(a.min, b.min)` — with a diagnostic naming peer and both ranges, not a failed request
+  and not a later deadline. A requester MUST respect the peer's maximum request size rather
+  than its own. One version governs the whole protocol: a reply's meaning is tied to the
+  version of the request it answers, so per-kind versions MUST NOT be negotiated
+  independently. Capabilities MUST be held on the connection and discarded with it, so a
+  rebuilt connection re-learns them and an upgraded peer is picked up without separate
+  invalidation.
 
 **Per-entry handling on the source**
 
@@ -204,7 +207,7 @@ unchanged.
 - **PeerConnection** — one queue pair plus its three credit counters, usable in both
   directions, keyed by `PeerId` and replaceable without invalidating a landing region.
 - **PeerId** — an instance-granular peer address, carrying at least host and port (FR-021).
-- **PeerCapabilities** — per-kind highest supported version plus maximum receivable entries,
+- **PeerCapabilities** — supported protocol version range plus maximum receivable entries,
   learned at connect and discarded with the connection (FR-025).
 - **ProtocolError** — the error reply of FR-024: offending opcode, reason, and the sender's
   highest supported version for that kind.
@@ -246,8 +249,8 @@ unchanged.
   a round trip rather than a deadline; the connection stays usable and the other contexts
   outstanding on it complete normally.
 - **SC-013**: A peer advertising a smaller maximum request than the local one is never sent a
-  larger one, and a peer below the version floor fails at connect with a diagnostic naming
-  peer, kind and both versions — no request is ever issued to it.
+  larger one, and a peer whose version range does not intersect the local one fails at connect
+  with a diagnostic naming peer and both ranges — no request is ever issued to it.
 
 ## Assumptions
 
