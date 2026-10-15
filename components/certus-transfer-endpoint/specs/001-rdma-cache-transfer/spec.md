@@ -66,6 +66,11 @@ unchanged.
   reclaimed, which also aborts the request's siblings on that connection; see FR-023.
 - **Duplicate or overlapping requests for the same key.** Pins are reference-counted;
   concurrent pushes of one key are safe.
+- **Peer does not understand the message.** Answered with a protocol error reply naming the
+  opcode and the sender's highest supported version for that kind, which fails the one context
+  and leaves the connection and its siblings intact (FR-024). A stale binary on one node is
+  the common cause and is the case this turns from a mystifying timeout into a precise
+  diagnostic.
 - **Key present but stored size does not match the requested region.** Treated as a miss.
 
 ## Requirements *(mandatory)*
@@ -101,6 +106,25 @@ unchanged.
   from `{ hit_memory_tier, hit_block_tier, miss }`, in request order.
 - **FR-008**: Because landing slots are not contiguous, the source MUST issue one RDMA write
   per entry rather than one per batch.
+- **FR-024**: The endpoint MUST answer a message it cannot process with an explicit **protocol
+  error reply**, never with silence. Silence is indistinguishable from a hang, so it would be
+  diagnosed by the FR-016 deadline and would then tear down a healthy connection and abort
+  that connection's other contexts (FR-023) — a loud but *wrong* diagnosis, which Principle XI
+  treats as worse than none. The error reply MUST echo the `context_id` it is answering, name
+  the offending opcode, and carry a reason drawn from protocol faults only: unknown opcode,
+  unsupported version of a known kind, malformed message, or more entries than the receiver's
+  posted buffer can hold. It MUST NOT be used for a miss (an outcome) or for resource
+  shortage (which chunks, FR-015). Receiving one MUST fail that one context and **leave the
+  connection usable**: the peer is healthy, so the FR-023 teardown path MUST NOT run.
+- **FR-025**: Both ends of a new connection MUST exchange capabilities before either sends a
+  data message, and MUST NOT send one until the peer's capabilities are known. The exchange
+  MUST report, per message kind, the highest version the sender supports, and the maximum
+  entries the sender can receive in one request. A requester MUST respect the peer's maximum
+  rather than its own, and MUST select `min(local, peer)` version per kind. If a peer cannot
+  meet the configured version floor, the **connection** MUST fail at establishment with a
+  diagnostic naming peer, kind and versions — not a request, and not a later deadline.
+  Capabilities MUST be held on the connection and discarded with it, so a rebuilt connection
+  re-learns them and an upgraded peer is picked up without separate invalidation.
 
 **Per-entry handling on the source**
 
@@ -180,6 +204,10 @@ unchanged.
 - **PeerConnection** — one queue pair plus its three credit counters, usable in both
   directions, keyed by `PeerId` and replaceable without invalidating a landing region.
 - **PeerId** — an instance-granular peer address, carrying at least host and port (FR-021).
+- **PeerCapabilities** — per-kind highest supported version plus maximum receivable entries,
+  learned at connect and discarded with the connection (FR-025).
+- **ProtocolError** — the error reply of FR-024: offending opcode, reason, and the sender's
+  highest supported version for that kind.
 - **LandingRegion** — a registered region peers may write into. Its registration outlives any
   one queue pair, so its `rkey` survives a reconnect; see research D17.
 
@@ -214,6 +242,12 @@ unchanged.
 - **SC-011**: On a request mixing memory-tier and block-tier entries, every memory-tier write
   is posted before the first device read completes, and the send queue is never idle while
   unposted entries remain.
+- **SC-012**: A message with an unknown opcode draws an error reply naming that opcode, within
+  a round trip rather than a deadline; the connection stays usable and the other contexts
+  outstanding on it complete normally.
+- **SC-013**: A peer advertising a smaller maximum request than the local one is never sent a
+  larger one, and a peer below the version floor fails at connect with a diagnostic naming
+  peer, kind and both versions — no request is ever issued to it.
 
 ## Assumptions
 

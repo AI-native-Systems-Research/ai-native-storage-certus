@@ -21,10 +21,26 @@ opcode = (version << 16) | kind
 |---|---|---|
 | `OP_FETCH` | `0x0001_0001` | kind 1, version 1 |
 | `OP_FETCH_REPLY` | `0x0001_0002` | kind 2, version 1 |
+| `OP_HELLO` | `0x0000_FFFE` | kind 0xFFFE, **unversioned** |
+| `OP_ERROR` | `0x0000_FFFF` | kind 0xFFFF, **unversioned** |
 
-Two opcodes is the whole protocol. Everything else the design needs — chunking, credits,
-tier attribution — is carried in the header flags or the body, not in additional message
-kinds.
+Two *versioned* opcodes carry the data plane; everything it needs — chunking, credits, tier
+attribution — rides in the header flags or the body rather than in more kinds.
+
+The last two are **frozen for all time** at version `0`. No real version is 0, so these
+opcodes can never collide with a versioned one, and that is deliberate: they are the messages a
+peer must be able to parse *even when it cannot parse the version in question*. Versioning
+them would mean answering an unparseable message with an unparseable error. They stay
+extensible through their **content** — an open reason-code space and a counted capability list
+— never through their layout (research D20).
+
+### The frozen header prefix
+
+Bytes 0-15 — `opcode`, `flags`, the first reserved field and `context_id` — mean the same
+thing in **every version of every kind, forever**. That is the minimum a receiver needs to
+reject a message it does not understand *and still correlate* the rejection with the request
+that caused it. Later header fields and all bodies may be redefined by a version bump; these
+may not.
 
 A receiver dispatches on the whole word and rejects any value it does not know. Fusing the
 version in is deliberate: a v2 `OP_FETCH` has a *different opcode* from a v1 `OP_FETCH`, so
@@ -89,6 +105,60 @@ before the reply is sent. The requester may therefore treat reply arrival as the
 signal for the whole message and needs no per-entry completion notification. This is what
 makes the one-sided WRITE safe without `WRITE_WITH_IMM`.
 
+### `OP_HELLO` (`0x0000_FFFE`)
+
+Sent by **both** ends immediately on connection establishment — the endpoint is symmetric, so
+neither side is the client (D5). Neither end sends a data message until the peer's `OP_HELLO`
+has arrived. `context_id` is zero and `n_entries` is the capability count.
+
+| offset | size | field | notes |
+|---|---|---|---|
+| 24 | 4 | `max_entries` | the largest `OP_FETCH` **this** sender can receive |
+| 28 | 2 | `n_kinds` | capability entries following |
+| 30 | 2 | reserved | MUST be zero |
+| 32 | 4 × `n_kinds` | capabilities | `(kind: u16, max_version: u16)` each |
+
+A requester MUST use `min(local, peer)` as the version for each kind, and MUST respect the
+peer's `max_entries` rather than its own when chunking — the two sides are not required to
+have equal receive buffers, and before this exchange existed that equality was an *unchecked
+assumption* (D20). A kind absent from the list is unsupported by that peer. If a peer cannot
+meet the configured version floor, the **connection** fails at establishment, naming peer,
+kind and both versions; no request is ever issued to it.
+
+Capabilities live on the connection and die with it, so a rebuilt connection re-learns them
+and an upgraded peer is picked up with no separate invalidation step.
+
+### `OP_ERROR` (`0x0000_FFFF`)
+
+The answer to any message that cannot be processed. `n_entries` is zero.
+
+| offset | size | field | notes |
+|---|---|---|---|
+| 24 | 4 | `offending_opcode` | the whole fused word as received |
+| 28 | 2 | `reason` | below |
+| 30 | 2 | `max_supported_version` | highest version of that *kind* the sender supports; 0 if the kind is unknown entirely |
+
+| `reason` | meaning |
+|---|---|
+| 1 | unknown opcode — the kind itself is not recognised |
+| 2 | unsupported version of a recognised kind |
+| 3 | malformed message |
+| 4 | `n_entries` exceeds the receiver's posted buffer |
+
+Reason 0 is reserved and values ≥ 5 are available; a receiver MUST treat an unknown reason as
+a generic protocol failure, never as success. `max_supported_version` exists so a requester can
+go straight to a workable version instead of probing downward.
+
+**Scope is protocol faults only.** A miss is an outcome byte, not an error, and a resource
+shortage chunks (FR-015). Using `OP_ERROR` for either would quietly become the escape hatch
+that undermines D12 and FR-015.
+
+**Blast radius.** Receiving `OP_ERROR` fails **that one context** and leaves the connection
+usable: the peer is healthy and answered promptly, so the FR-023 deadline teardown must *not*
+run and sibling contexts on the connection must be unaffected. This is the deliberate contrast
+with a deadline, where the peer's state is unknown and tearing the queue pair down is the only
+thing that makes a late write impossible. Two fail-loud paths, two blast radii.
+
 ## Receive-buffer sizing
 
 Receive buffers are posted unconditionally, whether or not the local caller uses messaging
@@ -102,7 +172,9 @@ Posted-receive memory per peer is `message_credits x 8 KiB`. At 8 credits that i
 peer — negligible, which is why FR-005 can post unconditionally rather than negotiate.
 
 `max_entries` is derived from the buffer size, not configured independently, and is what
-`RequestTooLarge { max_entries }` reports.
+`RequestTooLarge { max_entries }` reports. It is also what `OP_HELLO` advertises, so a peer
+with a different buffer size is honoured rather than overrun — the two sides are **not**
+assumed equal.
 
 ## Chunking and the `MORE` flag
 
@@ -153,8 +225,14 @@ cleanly rather than leave a hole.
 ## What is deliberately not here
 
 - **No per-entry completion notification.** Subsumed by the reply ordering guarantee above.
-- **No negotiation.** The fused opcode is matched or rejected, never negotiated. One implementation
-  talks to itself across a homogeneous cluster.
+- ~~**No negotiation.**~~ **Superseded by D20.** The original stance was that the fused opcode
+  is matched or rejected and never negotiated. It now *is* negotiated, once per connection, via
+  `OP_HELLO` — because the alternative (learning the peer's version from an error and retrying)
+  requires re-framing and re-sending a request whose landing slots are already reserved and
+  whose rkeys are already advertised, which is strictly more machinery than one exchange at
+  connect. The exchange also makes `max_entries` explicit, which nothing previously checked.
+  The fused opcode is unchanged and still does the structural work: a version bump *is* an
+  opcode change, so an unknown version cannot be misparsed as a known one.
 - **No authentication or capability check.** Single-tenant assumption (spec Assumptions);
   RDMA write access into landing slots is accepted.
 - **No peer discovery.** The peer is named by the caller, which got it from llm-d.

@@ -65,6 +65,24 @@ VIII–XI, and a review that does not check them is not a review.
 - **The mock seam implements the interface; it is not a bypass of it.** Do not
   copy the initiator's `#[cfg(not(feature = "rdma"))] -> Err(NotInitialized)`
   pattern, which makes the interface untestable without hardware.
+- **`OP_HELLO` and `OP_ERROR` can never be versioned.** They are frozen at version 0,
+  permanently, because a peer that cannot parse version N must still parse them —
+  otherwise an unparseable message is answered with an unparseable error. Extend them
+  through their *content* (the open reason-code space, the counted capability list),
+  never their layout. Bytes 0-15 of every header are frozen for the same reason
+  (D20).
+- **`Protocol` and `Deadline` are both loud, with deliberately different blast
+  radius.** A protocol error means the peer is alive and answered: fail that one
+  context, leave the queue pair alone, let siblings finish. A deadline means the
+  peer's state is unknown: force the QP to ERROR, which necessarily aborts the
+  siblings. Routing a protocol error through the deadline's cleanup would destroy a
+  healthy connection (FR-024 vs FR-023).
+- **Chunk against the *peer's* `max_entries`, not your own.** Receive-buffer sizes are
+  not assumed equal; `OP_HELLO` advertises them precisely because nothing checked that
+  before (FR-025).
+- **Never answer an unprocessable message with silence.** Silence is
+  indistinguishable from a hang, so it gets diagnosed as one — and then tears down a
+  healthy connection. A stale binary on one node is the common cause.
 - **`RemoteRegion`'s field is `length`, not `size`**, and on the wire the
   trailing two `u32`s are `size` then `rkey` — the opposite order from the
   struct. Both are `u32`, so a transposition silently swaps a length for a key.

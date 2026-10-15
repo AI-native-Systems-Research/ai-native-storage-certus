@@ -259,7 +259,10 @@ slots and the reply's per-key outcomes match the source's actual residency.
   `opcode = (version << 16) | kind`, `OP_FETCH = 0x0001_0001`,
   `OP_FETCH_REPLY = 0x0001_0002`; `flags` bit 0 = `MORE`; `context_id`; `n_entries`;
   reserved fields that MUST be zero. Little-endian. Dispatch on the **whole word** and
-  reject any unknown value — the fusing is what makes an unknown version structurally an
+  reject any unknown value. Bytes 0-15 (`opcode`, `flags`, first reserved, `context_id`) are
+  the **frozen prefix** — identical in every version of every kind, forever, because they are
+  the minimum needed to reject a message *and still correlate* the rejection (D20). Encode
+  that as a type or a constant, not a convention — the fusing is what makes an unknown version structurally an
   unknown opcode rather than a misparse
 - [ ] T028 [P] [US1] Implement the 24-byte entry codec: `(key u64, addr u64, size u32,
   rkey u32)` — exactly `(CacheKey, RemoteRegion)`. **Absolute addresses, not slot
@@ -271,6 +274,40 @@ slots and the reply's per-key outcomes match the source's actual residency.
   order (`0` Miss, `1` HitMemoryTier, `2` HitBlockTier), zero-padded to an 8-byte
   boundary. A receiver MUST treat an unknown outcome (≥ 3) as `Miss`, never as an error,
   so a future source can add a tier without breaking an old requester
+- [ ] T074 [P] [US1] Implement the frozen `OP_ERROR` codec in `src/message.rs`
+  (`0x0000_FFFF`, unversioned, D20): 24-byte header plus `offending_opcode: u32`,
+  `reason: u16`, `max_supported_version: u16`. Reason codes 1 unknown opcode, 2 unsupported
+  version of a known kind, 3 malformed message, 4 `n_entries` exceeds the posted buffer; 0
+  reserved, >= 5 treated as a generic protocol failure and **never** as success. Its layout is
+  frozen permanently — extensibility is through the reason space, not the layout — so add a
+  test asserting the encoded size and field offsets, which is the thing a future change would
+  silently break
+- [ ] T075 [US1] Answer every unprocessable inbound message with `OP_ERROR` rather than
+  dropping it (FR-024): echo the `context_id`, name the offending opcode, and report the local
+  highest supported version for that kind. On **receipt**, fail that one context with
+  `Protocol(..)` and leave the connection usable — the FR-023 teardown must not run and
+  sibling contexts must be unaffected. Count protocol faults in telemetry; an unexercised path
+  must not look like a working one (Principle XI)
+- [ ] T076 [US1] Implement the frozen `OP_HELLO` codec and exchange (`0x0000_FFFE`,
+  unversioned, FR-025, D20): `max_entries: u32`, `n_kinds: u16`, reserved, then
+  `(kind: u16, max_version: u16)` pairs. **Both** ends send it immediately on connection
+  establishment, since the endpoint is symmetric and neither side is the client (D5); no data
+  message goes out until the peer's has arrived. Store capabilities on the connection so they
+  die with it and a rebuilt connection re-learns them
+- [ ] T077 [US1] Apply the negotiated capabilities: use `min(local, peer)` per kind, and chunk
+  against the **peer's** `max_entries` rather than the local one — the two sides are not
+  assumed to have equal receive buffers, which nothing checked before this exchange existed.
+  Fail the **connection** with `IncompatiblePeer(..)` at establishment if the peer is below the
+  configured version floor, naming peer, kind and both versions; never defer that to a request
+  or a deadline. Count version downgrades (Principle XI). The floor is one version back —
+  deliberately not a compatibility matrix (D20)
+- [ ] T078 [US1] Tests for T074-T077: **SC-012** — an unknown opcode injected over the mock
+  seam draws an `OP_ERROR` within a round trip, the context fails with `Protocol(..)`, and the
+  connection's sibling contexts still complete (assert the QP was *not* forced to ERROR, the
+  contrast with T071); **SC-013** — a peer advertising a smaller `max_entries` is never sent a
+  larger request, and a peer below the floor fails at connect with no request issued; a reason
+  code >= 5 is treated as a failure, not success; and `OP_ERROR`/`OP_HELLO` round-trip at
+  their frozen offsets
 - [ ] T030 [US1] Post receive buffers **unconditionally** on every connection, whether or
   not the local caller uses messaging (FR-005). Derive `max_entries` from the buffer size
   rather than configuring it separately: `(8192 - 24) / 24` = **340** entries per
@@ -607,6 +644,8 @@ this. It is a separate change, after the engine is proven.
 | FR-021 instance-granular peer identity | T068, T012 |
 | FR-022 no phase barriers | T017, T072, T073 |
 | FR-023 deadline cleanup ordering | T070, T071, T019 |
+| FR-024 protocol error reply | T074, T075, T078 |
+| FR-025 capability exchange on connect | T076, T077, T078 |
 | SC-001 zero zyre, zero third node | T035 |
 | SC-002 legacy tests pass | T021, T055 |
 | SC-003 default build, no rdma-core/SPDK | T001, T003, T010, T041 |
@@ -618,6 +657,9 @@ this. It is a separate change, after the engine is proven.
 | SC-009 two instances per host addressed independently | T068 |
 | SC-010 no late write after deadline; rkey survives reconnect | T071 |
 | SC-011 no read/write phase barrier | T073 |
+| SC-012 unknown opcode answered, connection survives | T078 |
+| SC-013 peer max_entries respected, floor fails at connect | T078 |
+| D20 per-kind versioning, frozen messages, eager discovery | T027, T074-T078 |
 | D17 long-lived PD, registrations outlive QPs | T069, T020 |
 | Principle VIII default build | T002, T003, T010, T054–T056 |
 | Principle IX pin discipline | T013, T022–T026, T039 |
@@ -639,6 +681,15 @@ this. It is a separate change, after the engine is proven.
 - All verbs FFI is `unsafe` and requires `// SAFETY:` comments.
 - Commit after each task or logical group; stop at any checkpoint to validate a phase
   against its success criterion.
+- **Amended again 2026-10-15**: protocol versioning settled as **D20** — per message kind,
+  discovered eagerly at connect via a frozen `OP_HELLO`, with a frozen `OP_ERROR` as the
+  backstop (FR-024, FR-025, SC-012, SC-013; tasks **T074-T078**). This supersedes
+  `wire-protocol.md`'s original "no negotiation" stance, deliberately: lazy
+  fallback-on-error would have to re-frame and re-send a request whose landing slots are
+  already reserved and whose rkeys are already advertised, which is more machinery than one
+  exchange at connect — and the exchange additionally makes `max_entries` explicit, which
+  nothing previously checked. Version-*selection* beyond `min()` stays deferred until a v2
+  exists.
 - **Amended 2026-10-15 after review**, before any transfer logic was written. Four findings
   were folded in: FR-021 (instance-granular peer identity), FR-022 (no phase barriers),
   FR-023 (deadline cleanup ordering), plus D16-D19 and SC-009/010/011. New tasks are

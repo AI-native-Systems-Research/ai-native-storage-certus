@@ -381,6 +381,82 @@ makes later blocks useless for that request (they stay cached for later). Its co
 the opposite of serialising — issue a chunked prefix in block-index order, so a partial
 success truncates cleanly into a usable prefix.
 
+## D20 — Versioning is per opcode, discovered eagerly, with a frozen error reply
+
+**Decision**: three parts.
+
+1. **Versioning is per message kind**, carried in the fused opcode as it already is. A kind
+   that does not change costs nothing when another kind is revised.
+2. **Capabilities are exchanged eagerly**, once per connection, before any data message: each
+   end reports its highest supported version per kind and the largest request it can receive.
+   A requester uses `min(local, peer)` per kind and respects the peer's maximum request size.
+3. **A protocol error reply exists and is frozen forever**, as the backstop for anything the
+   exchange cannot prevent.
+
+**Why an error reply at all, independent of versioning**: "rejects any value it does not know"
+had no expression on the wire, so an unknown opcode was byte-identical to a hang. With FR-023
+in place that is actively harmful — the deadline expires, forces the queue pair to ERROR and
+aborts every sibling context, then reports "peer hung" with queue-pair state. A loud but
+*misdiagnosed* failure costs more than a silent one, because it sends you to debug the fabric;
+Principle XI is about diagnosis, not just volume. It also pays for itself immediately and
+independently of any version story: a stale binary on one node is the routine development
+failure, and it currently costs a multi-second timeout and a destroyed connection.
+
+**Why per-kind rather than whole-protocol.** Also considered:
+
+* **One protocol version, peers at different versions refuse to talk.** Rejected: it forces
+  lockstep upgrade. Mid-rolling-upgrade, half the instances cannot serve the other half, and
+  since the fallback for a cache miss is recompute, the cluster would quietly lose most of its
+  hit rate for the duration — a silent degradation, which Principle XI exists to prevent.
+* **One protocol version, with the higher side implementing every older version.** Rejected as
+  the most code of the three: the compatibility surface is versions x kinds, and a kind that
+  never changed still acquires a new version on every bump.
+* Per-kind versioning makes the surface *versions x kinds that actually changed*, which is
+  usually one.
+
+**Why eager discovery rather than lazy fallback on error.** This reverses the "No negotiation"
+posture in `contracts/wire-protocol.md`, deliberately. Lazy fallback sounds cheaper and is
+not, because its hard part is hidden: on an error the requester must re-frame and **retry a
+request whose landing slots are already reserved and whose rkeys are already on the wire**,
+without double-publishing, plus cache the learned version, invalidate it on reconnect, and
+handle a retry that also fails. Eager exchange deletes all of that — the first request is
+already correctly framed, so nothing is ever retried for version reasons, and the deferred
+work shrinks from a state machine to a `min()`.
+
+The round trip is free in context: connection setup already costs address resolution, route
+resolution and the rdma_cm handshake, each separately measured in the predecessor's telemetry.
+One exchange against that is noise, and it happens once per connection, not per request.
+
+**And it closes a hazard nothing else does.** `max_entries` is currently an *unchecked shared
+assumption* — both sides assume an 8 KiB receive buffer and therefore 340 entries. Nothing
+verifies it, so a future change on one side would let a requester overrun the peer's posted
+receive. Making it part of the exchange is what gives eager discovery a consumer **today**,
+which is the test Principle VI sets; the version-selection machinery on its own would not pass
+it, and is deferred accordingly (see below).
+
+**Frozen messages, and extensibility through data rather than layout.** The error reply and the
+capability exchange are the two messages that can never be versioned — a peer that cannot
+parse version N must still be able to parse them, or an unparseable error is answered with
+another unparseable error. So both are fixed at version `0` (no real version is 0, so the
+opcode can never collide) and their **layout** is frozen permanently. They stay extensible
+because their *content* grows: reason codes are an open numeric space, and the capability list
+is a counted array of `(kind, max_version)` pairs, so new kinds simply appear in it. Likewise a
+version-independent **header prefix** — the opcode and the `context_id` — must mean the same
+thing in every version forever, since that is the minimum needed to reject a message and still
+correlate the rejection with its request.
+
+**Floor, not a matrix.** Compatibility is bounded at one version back, with a configured floor
+below which the connection fails loudly at establishment. The premise of a single
+implementation across a homogeneous cluster means the only real skew is a rolling upgrade,
+which is N and N-1. Failing at *connect* rather than on a request is also a much better
+diagnostic, and it is only possible because discovery is eager.
+
+**Deliberately deferred**: the version-*selection* logic beyond `min()`, and any compatibility
+shim for a v2 that does not exist. Build the affordances that are expensive to retrofit — the
+frozen opcodes, the frozen prefix, the reason space, the per-kind capability list — and decline
+the mechanism until something needs it. Same posture as D19: the affordance now, the mechanism
+when it has a consumer.
+
 ## Rig facts (measured 2026-10-15, read-only, cluster left running)
 
 Recorded because several decisions above were written against assumed numbers.
