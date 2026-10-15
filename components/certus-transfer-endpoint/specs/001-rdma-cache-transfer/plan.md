@@ -60,9 +60,17 @@ chunking is mandatory rather than optional.
 
 ## Constitution Check
 
-`.specify/memory/constitution.md` is an **unfilled template** (all placeholder sections), so
-there is no ratified constitution to gate against. Checking instead against the repository's
-de facto conventions in `CLAUDE.md`:
+`.specify/memory/constitution.md` was **ratified at v1.0.0 on 2026-10-14** with 11 principles
+— I–VII inherited from `remote-lookup`, and VIII–XI written for this component:
+**VIII Hardware-Independent Default Build**, **IX Pin Discipline**, **X Bounded Resources,
+Graceful Chunking**, and **XI Loud Failure Over Silent Degradation**. Those four are the
+binding gates for this feature; IX and XI are the ones every task must respect, and Workflow
+rule 6 requires any change touching pin acquisition or release to be reviewed against IX
+explicitly.
+
+The principles restate, in gate form, what the requirements and research already fix: VIII ⇒
+SC-003 and D14, IX ⇒ FR-009…FR-011 and D6/D7, X ⇒ FR-014/FR-015 and D10, XI ⇒ FR-016 and D11.
+Checking additionally against the repository's de facto conventions in `CLAUDE.md`:
 
 | Convention | Compliance |
 |---|---|
@@ -164,14 +172,16 @@ scope** for FR-020 and not required for any P1 success criterion.
 
 ## Next Step
 
-OQ1 and OQ2 are resolved as research **D13** (receptacle set: look up through
-`IDispatchMap`, not `IMemoryTier`, because only it gives tri-state residency plus an atomic
-pin) and **D14** (feature matrix: `default` / `rdma` / `rdma,spdk`, with a no-`spdk` build
-reporting block-tier entries as `miss`). Together they fix the `Cargo.toml` and the
-`define_component!` receptacle block, so Phase 1 is unblocked. Only **OQ3** remains, and
-only Phase 4 needs it.
+All design documents are complete, and `tasks.md` is generated — 67 tasks, T001–T067, grouped
+by the Implementation Phasing above rather than by spec priority order, each tracing to the
+FR / SC / decision / principle it discharges.
 
-Write `contracts/itransfer_endpoint.md` and the request/reply wire format, then generate
-`tasks.md` via `.specify/scripts/bash/setup-tasks.sh` with
-`SPECIFY_FEATURE_DIRECTORY` set, and write `contracts/itransfer_endpoint.md` plus the wire
-format alongside.
+**Begin at T001–T002.** T002 is a prerequisite the phasing above did not anticipate:
+`IDispatchMap` and `LookupResult` are `#[cfg(feature = "spdk")]` *re-exports* in
+`components/interfaces/src/lib.rs`, although `idispatch_map.rs` references no SPDK type. D13
+requires that receptacle in the **default** build, so until the re-exports are ungated,
+enabling it forces `interfaces/spdk` → `spdk-sys` and the component cannot be a workspace
+`default-member` — which Principle VIII requires. This is the same trap the workspace root
+`Cargo.toml` already documents for `remote-lookup`, and ungating is the direction it names
+("ungate those opaque-pointer trait definitions … as was done for `IMemoryTier`"). Ungate
+first, then add to `default-members`, then build the engine.
