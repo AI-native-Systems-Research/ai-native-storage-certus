@@ -22,14 +22,14 @@ The implementation is layered:
 The component is defined using `define_component!` macro from the Certus component framework:
 - Provides: `IExtendedMetadataStore`
 - Receptacles: `ILogger` (optional)
-- Fields: `store: RwLock<HashMap<String, Vec<u8>>>`, `dirty_count: AtomicU64`, `flush_seq: AtomicU64`
+- Fields: `store: RwLock<HashMap<String, Vec<u8>>>`, `dirty_count: AtomicU64`, `snapshot_dirty: AtomicU64` (dirty count covered by the last `snapshot_entries()`), `flush_seq: AtomicU64`, `flush_trigger: RwLock<Option<FlushTrigger>>`
 
 ### Concurrency Model
 
 - `RwLock<HashMap>` allows concurrent readers with exclusive writers
 - `AtomicU64` for lock-free dirty count and flush sequence tracking
 - `FlushManager` runs a dedicated background thread with `Condvar`-based wake/sleep
-- Flush coalescing: multiple `trigger_flush()` callers share a single in-flight flush via `Condvar` wait
+- Flush coalescing: each `trigger_flush()` caller takes a ticket (`FlushTickets::requested`); a flush pass serves every ticket taken before it reads that counter and snapshots the store, then advances `FlushTickets::completed` and notifies the `Condvar`; callers registered while a pass is in flight wait for the next pass
 
 ### On-Disk Format Design Decisions
 
@@ -93,15 +93,15 @@ Application -> put(key, value)
   -> increment dirty_count (atomic)
 
 FlushManager (background) OR flush::flush_to_disk() (explicit, via the FR-17 wiring API):
-  -> snapshot_entries() [acquire read lock, clone HashMap, release]
+  -> snapshot_entries() [acquire read lock, record dirty_count, clone HashMap, release]
   -> serialize_region(entries, flush_seq, sector_size)
   -> write to inactive region via BlockDeviceClient
   -> update Superblock (flip active, bump seq, update count)
   -> write Superblock to LBA 0 (ATOMIC COMMIT POINT)
-  -> mark_flushed(new_seq) [reset dirty_count]
+  -> mark_flushed(new_seq) [subtract the dirty count recorded by that snapshot; mutations made since stay dirty]
 ```
 
-> **Note**: `IExtendedMetadataStore::force_flush()` (the public trait method) is currently *not* wired into this path in any build configuration — it is an unconditional no-op. A caller/dispatcher must instead hold a reference to the component's FR-17 inherent API and drive `FlushManager::trigger_flush()` (or call `flush::flush_to_disk()` directly) to actually invoke this data flow. See spec.md FR-05 Known Gaps and `.specify/sync/align-tasks.md` (Task ALIGN-002) for the code-fix tracking this gap.
+> **Note**: `IExtendedMetadataStore::force_flush()` reaches this data flow when the wiring layer has installed a `FlushTrigger` via `attach_flush_trigger` (typically `move || flush_manager.trigger_flush()`); with no trigger installed (pure in-memory mode) it is a no-op. Callers may also drive the FR-17 inherent API directly. See spec.md FR-05.
 
 ### Data Flow: Recovery
 
@@ -159,7 +159,7 @@ None. The component has zero external crate dependencies. CRC32 is implemented i
 
 ### Running Tests
 
-> **Note**: The commands below require `components/extended-metadata-store` to be a member of the root workspace `Cargo.toml`. It currently is **not** (see `.specify/sync/align-tasks.md` Task ALIGN-001), so `cargo test -p extended-metadata-store` presently fails with "package ID specification did not match any packages", and running `cargo test`/`clippy`/`doc` from inside the crate directory fails with "current package believes it's in a workspace when it's not."
+> **Note**: `components/extended-metadata-store` is a member of the root workspace `Cargo.toml` (`[workspace] members` and `[workspace.dependencies]`), so the commands below run from the repository root.
 
 ```bash
 # Unit tests (no features, always available)

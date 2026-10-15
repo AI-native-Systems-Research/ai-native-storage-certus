@@ -47,6 +47,10 @@ define_component! {
         fields: {
             store: RwLock<HashMap<String, Vec<u8>>>,
             dirty_count: AtomicU64,
+            // `dirty_count` as seen by the last `snapshot_entries()`; the
+            // mutations it counts are in that snapshot, so `mark_flushed`
+            // subtracts exactly these and keeps later ones dirty.
+            snapshot_dirty: AtomicU64,
             flush_seq: AtomicU64,
             // Optional durable-flush trigger installed by the wiring layer
             // (see `attach_flush_trigger`). When present, `force_flush()`
@@ -86,18 +90,34 @@ impl ExtendedMetadataStoreComponent {
             map.insert(k, v);
         }
         self.dirty_count.store(0, Ordering::Relaxed);
+        self.snapshot_dirty.store(0, Ordering::Relaxed);
     }
 
     /// Snapshot current entries (for flushing). Returns a clone under read lock.
+    ///
+    /// Also records the dirty count the snapshot covers, for [`Self::mark_flushed`].
     pub fn snapshot_entries(&self) -> Vec<(String, Vec<u8>)> {
         let map = self.store.read().unwrap();
+        // put/delete bump `dirty_count` only after releasing the write lock, so
+        // every mutation counted here is already in `map`.
+        self.snapshot_dirty
+            .store(self.dirty_count.load(Ordering::Relaxed), Ordering::Relaxed);
         map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
     }
 
-    /// Reset dirty count after a successful flush.
+    /// Update the dirty count after a successful flush of the last
+    /// [`Self::snapshot_entries`] snapshot.
+    ///
+    /// Only the mutations that snapshot covered are cleared; mutations made
+    /// after the snapshot stay dirty so a later flush persists them.
     pub fn mark_flushed(&self, seq: u64) {
         self.flush_seq.store(seq, Ordering::Relaxed);
-        self.dirty_count.store(0, Ordering::Relaxed);
+        let flushed = self.snapshot_dirty.swap(0, Ordering::Relaxed);
+        let _ = self
+            .dirty_count
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |d| {
+                Some(d.saturating_sub(flushed))
+            });
     }
 
     /// Install a durable-flush trigger used by [`IExtendedMetadataStore::force_flush`].

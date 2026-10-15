@@ -1,55 +1,68 @@
 {
-  "applied": "2026-08-20",
+  "applied_at": "2026-10-14T18:11:38Z",
   "component": "extended-metadata-store",
-  "phase": "B",
-  "source": ".specify/sync/drift-report.json",
-  "policy": ".specify/sync/PHASE_B_POLICY.md",
+  "branch": "fix/extended-metadata-store-flush",
+  "mode": "batch",
+  "source": ".specify/sync/proposals.json",
+  "based_on": "drift-report 2026-10-14 (branch fix/extended-metadata-store-flush @ 2970e0a8)",
+  "approved_by": "Cornel Constantinescu, 2026-10-14",
   "backups": [
-    ".specify/sync/backups/specs/001-extended-metadata-store/spec.md.bak",
-    ".specify/sync/backups/specs/002-ssd-integration-test/spec.md.bak"
+    ".specify/sync/backups/20261014T181138Z/spec.md",
+    ".specify/sync/backups/20261014T181138Z/plan.md",
+    ".specify/sync/backups/20261014T181138Z/tasks.md",
+    ".specify/sync/backups/20261014T181138Z/align-tasks.md",
+    ".specify/sync/backups/20261014T181138Z/drift-report.md"
   ],
   "counts": {
-    "backfill_applied": 1,
-    "unspecced_backfilled": 3,
-    "align_tasks": 2,
-    "resolved": 2,
-    "human_decision": 0,
-    "not_implemented": 0
+    "proposals_total": 14,
+    "approved": 14,
+    "backfill_applied": 7,
+    "supersede_applied": 1,
+    "new_spec_created": 0,
+    "align_tasks_new": 5,
+    "align_tasks_refreshed": 1,
+    "not_applied": 0,
+    "open_unapproved_with_note": 0
   },
+  "applied": ["P7", "P8", "P9", "P10", "P11", "P12", "P13", "P14"],
+  "tasks": ["P1", "P2", "P3", "P4", "P5", "P6"],
+  "open": [],
   "specs_updated": [
     {
       "spec": "001-extended-metadata-store",
       "changes": [
-        {"requirement": "FR-05", "change_type": "BACKFILL", "detail": "drafted -> Implemented; trigger mechanism described (src/lib.rs:201-215)"},
-        {"requirement": "FR-18", "change_type": "BACKFILL-UNSPECCED", "detail": "new FR: Superblock::region_capacity_bytes() (src/on_disk.rs:142)"},
-        {"requirement": "NFR-11", "change_type": "BACKFILL-UNSPECCED", "detail": "new NFR: create_test_component_from_state() (src/test_support.rs:272)"},
-        {"requirement": "Known Gaps FR-05", "change_type": "BACKFILL", "detail": "rewritten to RESOLVED; both verification blockers closed"},
-        {"requirement": "Known Gaps CapacityExhausted", "change_type": "BACKFILL-UNSPECCED", "detail": "defined-but-unconstructed variant documented; construction tracked by ALIGN-EMS-002"},
-        {"requirement": "US6 note / Feature-Gating note / SC note", "change_type": "BACKFILL/RESOLVED", "detail": "stale no-op / deferred / non-member language updated to current reality"}
-      ]
-    },
-    {
-      "spec": "002-ssd-integration-test",
-      "changes": [
-        {"requirement": "FR-007", "change_type": "ALIGN-note", "detail": "persistence still via internal flush; tracked by ALIGN-EMS-001; requirement stands"},
-        {"requirement": "FR-011", "change_type": "ALIGN-note", "detail": "creation/durability via inherent APIs; code-side gap tracked by ALIGN-EMS-001; no relaxation"},
-        {"requirement": "Capacity note / US5-2 / US3 notes", "change_type": "ALIGN-note", "detail": "reversed prior acceptance of flush-time-only behavior; option a target via ALIGN-EMS-002"},
-        {"requirement": "header", "change_type": "metadata", "detail": "2026-08-20 Phase B Last-Synced note"}
+        {"proposal": "P7", "file": "spec.md", "requirement": "FR-12", "change_type": "BACKFILL", "before": "Multiple `force_flush()` calls coalesce into single flush operation", "after": "ticket-based coalescing; mid-pass callers served by the next pass; no release by a flush whose snapshot predates the call"},
+        {"proposal": "P7", "file": "spec.md", "requirement": "US6 AC2", "change_type": "BACKFILL", "before": "Multiple concurrent `force_flush()` calls coalesce into a single flush operation", "after": "calls registered before a pass are released by it; mid-pass calls share the next pass"},
+        {"proposal": "P7", "file": "spec.md", "requirement": "US6 AC5", "change_type": "BACKFILL", "before": "returns immediately (no-op)", "after": "no disk I/O; one worker wake-up, no flush"},
+        {"proposal": "P8", "file": "spec.md", "requirement": "FR-11", "change_type": "BACKFILL", "before": "background flush with timer + dirty threshold", "after": "timer + threshold (max(dirty_threshold,1), 10 ms poll), threshold disarmed after a failed flush"},
+        {"proposal": "P9", "file": "spec.md", "requirement": "FR-14", "change_type": "BACKFILL", "before": "Dirty count tracks mutations since last flush", "after": "tracks mutations not yet covered by a successful flush; snapshot-scoped subtraction"},
+        {"proposal": "P9", "file": "spec.md", "requirement": "FR-17", "change_type": "BACKFILL", "before": "API list without semantics", "after": "snapshot_entries/mark_flushed semantics and single-flusher precondition"},
+        {"proposal": "P10", "file": "spec.md", "requirement": "FR-13", "change_type": "BACKFILL", "before": "performs final flush on Drop", "after": "unconditional final flush; failure not reported to the dropping thread"},
+        {"proposal": "P10", "file": "spec.md", "requirement": "Key Entities: FlushManager", "change_type": "BACKFILL", "before": "configurable timer/threshold, coalesced flush support", "after": "timer/threshold triggers, ticket-based trigger_flush(), completed_seq()"},
+        {"proposal": "P11", "file": "spec.md", "requirement": "FR-05", "change_type": "BACKFILL", "before": "evidence src/lib.rs:201-215, :111, :68", "after": "evidence src/lib.rs:221-235, :131, :72; trigger read-lock note; Open clause referencing P1"},
+        {"proposal": "P12", "file": "spec.md", "requirement": "US6 Tests", "change_type": "BACKFILL", "before": "flush_manager_dirty_threshold_triggers: threshold-based flush", "after": "caveat that the 50 ms timer masks the threshold; 5 repair tests added"},
+        {"proposal": "P13", "file": "plan.md", "requirement": "lines 25, 32, 96, 101, 104, 162", "change_type": "BACKFILL", "before": "stale fields / single in-flight flush / reset dirty_count / force_flush no-op / not a workspace member", "after": "current fields, ticket coalescing, snapshot-scoped mark_flushed, trigger wiring, workspace member"},
+        {"proposal": "P13", "file": "tasks.md", "requirement": "T056, ALIGN-001, ALIGN-002", "change_type": "BACKFILL", "before": "blocked / open", "after": "T056 unblocked; ALIGN-001 and ALIGN-002 marked RESOLVED 2026-08-20"},
+        {"proposal": "P14", "file": "spec.md", "requirement": "US6 note; Known Gaps (CapacityExhausted, Retained public API surface)", "change_type": "SUPERSEDE", "before": "references to untracked 002 spec; stale line refs", "after": "ALIGN-EMS-001/002 and proposal P1 references; refreshed line refs", "superseded_spec_note": "002-ssd-integration-test exists only in backups; no live metadata to stamp with superseded_by, so cross-references were placed in spec.md"},
+        {"proposal": "-", "file": "spec.md", "requirement": "header metadata", "change_type": "METADATA", "before": "Last Synced: 2026-09-03", "after": "Last Synced: 2026-10-14; previous line kept as Previous Sync"}
       ]
     }
   ],
   "align_tasks_generated": [
-    {"id": "ALIGN-EMS-001", "spec": "002-ssd-integration-test", "requirement": "FR-011", "severity": "moderate", "files": ["components/extended-metadata-store/tests/integration_ssd.rs"]},
-    {"id": "ALIGN-EMS-002", "spec": "002-ssd-integration-test", "requirement": "FR-007", "severity": "moderate", "files": ["components/extended-metadata-store/src/lib.rs", "components/extended-metadata-store/src/flush.rs"]}
+    {"id": "ALIGN-EMS-003", "proposal": "P1", "requirement": "FR-05 / US6 AC1", "severity": "major", "files": ["src/flush.rs", "src/repair_test_* or tests/persistence.rs"], "approval_note": "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR"},
+    {"id": "ALIGN-EMS-004", "proposal": "P2", "requirement": "FR-09", "severity": "moderate", "files": ["src/on_disk.rs", "src/recovery.rs", "tests/persistence.rs"], "approval_note": "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR"},
+    {"id": "ALIGN-EMS-005", "proposal": "P3", "requirement": "NFR-04", "severity": "moderate", "files": ["src/recovery.rs", "tests/persistence.rs"], "approval_note": "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR"},
+    {"id": "ALIGN-EMS-006", "proposal": "P4", "requirement": "FR-01", "severity": "moderate", "files": ["src/lib.rs", "components/interfaces/src/iextended_metadata_store.rs (option b)"], "decision_needed": "error variant", "approval_note": "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR"},
+    {"id": "ALIGN-EMS-007", "proposal": "P5", "requirement": "SC-7", "severity": "minor", "files": ["src/on_disk.rs", "src/block_io.rs", "src/recovery.rs", "src/lib.rs"], "approval_note": "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR"},
+    {"id": "ALIGN-EMS-002", "proposal": "P6", "requirement": "Known Gaps: CapacityExhausted", "severity": "moderate", "action": "refreshed (line refs; dependency on ALIGN-EMS-003); remains parked", "approval_note": "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR"}
   ],
-  "unspecced_backfilled": [
-    {"feature": "Superblock::region_capacity_bytes()", "location": "src/on_disk.rs:142", "backfilled_as": "001 FR-18"},
-    {"feature": "create_test_component_from_state()", "location": "src/test_support.rs:272", "backfilled_as": "001 NFR-11"},
-    {"feature": "ExtendedMetadataStoreError::CapacityExhausted never constructed", "location": "../interfaces/src/iextended_metadata_store.rs:12", "backfilled_as": "001 Known Gaps note; construction tracked by ALIGN-EMS-002"}
-  ],
-  "resolved": [
-    {"requirement": "NFR-07", "location": "src/test_support.rs:223", "verification": "read_write_stats() -> ReadWriteStats::default() present"},
-    {"requirement": "SC-1/2/3/6/7", "location": "Cargo.toml:23,105", "verification": "crate in [workspace] members and [workspace.dependencies]"}
+  "not_applied": [],
+  "open_from_unapproved": [],
+  "remaining_open": [
+    "FR-05 Open clause until ALIGN-EMS-003 lands",
+    "ALIGN-EMS-001 (open)",
+    "ALIGN-EMS-002 (parked)",
+    "ALIGN-EMS-006 error-variant decision"
   ],
   "source_modified": false,
   "cargo_run": false

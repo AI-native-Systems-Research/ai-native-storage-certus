@@ -47,6 +47,8 @@ impl ZyreNode {
         config.validate()?;
 
         let name_cstr;
+        // CZMQ initialises its process-global state on the first `zyre_new`.
+        let _czmq_init = ZYRE_NEW_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let ptr = unsafe {
             if let Some(ref name) = config.name {
                 name_cstr = std::ffi::CString::new(name.as_str())
@@ -82,11 +84,15 @@ impl ZyreNode {
     }
 
     fn apply_config(&mut self, config: &NodeConfig) -> Result<(), ZyreError> {
+        // `zyre_set_header`, `zyre_set_endpoint` and `zyre_gossip_{bind,connect}`
+        // are printf-style: pass user strings as a `%s` argument so a `%` in
+        // configuration data is never parsed as a format directive.
+        let fmt = b"%s\0".as_ptr() as *const libc::c_char;
         unsafe {
             for (key, value) in &config.headers {
                 let k = std::ffi::CString::new(key.as_str()).unwrap();
                 let v = std::ffi::CString::new(value.as_str()).unwrap();
-                ffi::zyre_set_header(self.ptr, k.as_ptr(), v.as_ptr());
+                ffi::zyre_set_header(self.ptr, k.as_ptr(), fmt, v.as_ptr());
             }
 
             if let Some(port) = config.port {
@@ -108,7 +114,7 @@ impl ZyreNode {
                 // guarantees `config.endpoint` is present here.
                 if let Some(ref endpoint) = config.endpoint {
                     let ep = std::ffi::CString::new(endpoint.as_str()).unwrap();
-                    if ffi::zyre_set_endpoint(self.ptr, ep.as_ptr()) != 0 {
+                    if ffi::zyre_set_endpoint(self.ptr, fmt, ep.as_ptr()) != 0 {
                         return Err(ZyreError::InvalidConfig(format!(
                             "failed to bind node endpoint '{endpoint}'"
                         )));
@@ -116,17 +122,22 @@ impl ZyreNode {
                 }
                 if let Some(ref bind_endpoint) = gossip.bind {
                     let ep = std::ffi::CString::new(bind_endpoint.as_str()).unwrap();
-                    ffi::zyre_gossip_bind(self.ptr, ep.as_ptr());
+                    ffi::zyre_gossip_bind(self.ptr, fmt, ep.as_ptr());
                 }
                 for connect_endpoint in &gossip.connect {
                     let ep = std::ffi::CString::new(connect_endpoint.as_str()).unwrap();
-                    ffi::zyre_gossip_connect(self.ptr, ep.as_ptr());
+                    ffi::zyre_gossip_connect(self.ptr, fmt, ep.as_ptr());
                 }
             }
         }
         Ok(())
     }
 }
+
+/// Serialises `zyre_new`. CZMQ's first call initialises process-global state
+/// (`zsys_init`) without a lock, so two threads creating their first nodes at
+/// once could interleave there and abort the process.
+static ZYRE_NEW_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 impl IZyreNode for ZyreNode {
     /// Start the node, beginning network discovery and messaging.
@@ -568,6 +579,10 @@ fn parse_headers(event_ptr: *mut ffi::zyre_event_t) -> std::collections::HashMap
     }
     headers
 }
+
+#[cfg(test)]
+#[path = "repair_test_header_percent.rs"]
+mod repair_test_header_percent;
 
 #[cfg(test)]
 mod tests {

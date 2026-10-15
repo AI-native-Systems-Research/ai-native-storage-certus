@@ -1,25 +1,157 @@
 {
-  "generated": "pending",
+  "generated": "2026-10-14T17:38:10Z",
   "project": "zyre",
+  "branch": "fix/zyre-printf-format",
+  "git_commit": "85ae2a1f",
+  "component_src_last_changed": "99cf8f79",
+  "verification": "static reading only; deps/zyre-build absent so cargo build/test -p zyre not run; SC-001/SC-003/SC-005 not re-executed; upstream zyre/czmq C sources not available",
   "summary": {
     "specs_analyzed": 1,
     "requirements_checked": 17,
-    "aligned": 17,
-    "drifted": 0,
+    "aligned": 15,
+    "drifted": 2,
     "not_implemented": 0,
-    "unspecced_features": 0
+    "unspecced_features": 4,
+    "other_drift_items": 3,
+    "resolved_by_branch": 2
   },
+  "resolved_by_branch": [
+    {
+      "id": "R1",
+      "commit": "1aceacbb",
+      "requirement": "FR-005 / SC-005",
+      "was": "header values, node endpoint and gossip endpoints were passed to printf-style zyre setters as the format string (origin/unstable node.rs:89,111,119,123): '%' mangled, '%s'/'%n' undefined behaviour",
+      "now": "constant \"%s\" format with the string as argument",
+      "location": "components/zyre/src/node.rs:87-90,95,117,125,129",
+      "test": "components/zyre/src/repair_test_header_percent.rs:8-51"
+    },
+    {
+      "id": "R2",
+      "commit": "99cf8f79",
+      "requirement": "contracts/izyre.md:57 (create_node may be called from any thread)",
+      "was": "concurrent first zyre_new could abort in CZMQ's unlocked zsys_init",
+      "now": "process-wide ZYRE_NEW_LOCK held for the whole of ZyreNode::new (zyre_new + apply_config)",
+      "location": "components/zyre/src/node.rs:50-51,137-140"
+    }
+  ],
   "specs": [
     {
       "id": "001-zyre-bindings",
-      "title": "Safe Rust Zyre Bindings",
-      "aligned": 17,
-      "drifted": [],
-      "not_implemented": []
+      "title": "Zyre Rust Bindings",
+      "aligned": ["FR-001", "FR-002", "FR-003", "FR-004", "FR-006", "FR-007", "FR-008", "FR-009", "FR-010", "FR-011", "SC-001", "SC-002", "SC-003", "SC-004", "SC-005"],
+      "aligned_evidence": {
+        "FR-001": "src/lib.rs:28-29 (private ffi), lib.rs:32, node.rs:30 (pub(crate)), tests/api_safety.rs:28-46",
+        "FR-002": "node.rs:382-387 (Drop: stop + zyre_destroy), node.rs:71,144-166",
+        "FR-003": "interfaces/src/izyre.rs:112-156, node.rs:450-516",
+        "FR-004": "node.rs:192-194,208-210 (one frame), node.rs:530-556 (first frame, borrowing accessor)",
+        "FR-006": "node.rs:111-131, izyre.rs:334-345, tests/integration.rs:172-213",
+        "FR-007": "node.rs:289-379",
+        "FR-008": "node.rs:219-269 (zyre_event_new, zpoller zero timeout, Stop->Done), tests/integration.rs:215-259",
+        "FR-009": "deps/build_zyre.sh:12,14-24,28-36,45-51",
+        "FR-010": "build.rs:35-37,68-91, src/ffi.rs:7",
+        "FR-011": "node.rs:32,39, izyre.rs:362 (note: api_safety.rs:20-26 does not actually assert !Sync)",
+        "SC-001": "tests/integration.rs:271-338 (feature integration-tests; not run here)",
+        "SC-002": "same as FR-001",
+        "SC-003": "measured 2.27 s on 2026-07-14; not re-measured",
+        "SC-004": "izyre.rs:112-156, node.rs:514",
+        "SC-005": "printf UB removed (R1); leak fixes node.rs:340-355,369-378,530-556; run-valgrind.sh present; not re-run"
+      },
+      "drifted": [
+        {
+          "requirement": "FR-012",
+          "spec_text": "The crate MUST provide typed errors via a ZyreError enum covering all failure modes (start failure, invalid configuration, network errors). [spec.md:98]; create_node Errors: InvalidConfig | CreateFailed [contracts/izyre.md:52-54]; any fallible operation returns Result [spec.md:38]",
+          "actual": "Interior NUL in header key/value, interface, endpoint, gossip bind/connect makes CString::new(..).unwrap() panic inside create_node (after zyre_new). name/group/peer already map NUL to InvalidConfig (node.rs:54-55,171-172,205-206). NodeConfig::validate does not check NULs (izyre.rs:313-347).",
+          "location": "components/zyre/src/node.rs:93,94,103,116,124,128",
+          "severity": "moderate",
+          "predates_branch": true,
+          "proposal": "P1"
+        },
+        {
+          "requirement": "FR-005",
+          "spec_text": "typed NodeConfig ... validated when a node is created [spec.md:91]; validation rules [data-model.md:81-86]",
+          "actual": "evasive_timeout_ms / expired_timeout_ms are u32 (izyre.rs:279-281); validate checks only >0 and expired>evasive (izyre.rs:319-328); apply_config casts with `as libc::c_int`, so values > i32::MAX pass validation and reach zyre as negative timeouts",
+          "location": "components/zyre/src/node.rs:107-108",
+          "severity": "minor",
+          "predates_branch": true,
+          "proposal": "P2"
+        }
+      ],
+      "other_drift": [
+        {
+          "item": "D-US2",
+          "spec_text": "RAII resource management, Result-based error handling, iterator-based event streams, and Send+Sync safety where appropriate [spec.md:29]",
+          "actual": "no Iterator/IntoIterator for events; delivery via recv()/try_recv() (izyre.rs:393,400); node is Send but not Sync (FR-011)",
+          "location": "components/interfaces/src/izyre.rs:362-425",
+          "severity": "minor",
+          "proposal": "P3"
+        },
+        {
+          "item": "D-DM",
+          "spec_text": "Lifecycle: Created → Configured → Started → Running → Stopped (via drop) [data-model.md:26]; Drop behavior: Calls zyre_stop() then zyre_destroy() [data-model.md:30]",
+          "actual": "enum State { Created, Running, Draining, Done } (node.rs:13-18); config applied in new (node.rs:71); zyre_stop only from Running (node.rs:162,384); matches data-model.md:19 and :126-142, contradicts :26",
+          "location": "components/zyre/src/node.rs:13-18,157-166,382-387",
+          "severity": "minor",
+          "proposal": "P4"
+        },
+        {
+          "item": "D-CTR",
+          "spec_text": "No network activity occurs until start() is called [contracts/izyre.md:49]; InvalidConfig(reason) — config validation failed [contracts/izyre.md:53]",
+          "actual": "gossip mode binds the data endpoint during create_node via zyre_set_endpoint; bind failure → InvalidConfig(\"failed to bind node endpoint ...\")",
+          "location": "components/zyre/src/node.rs:115-121",
+          "severity": "minor",
+          "proposal": "P5"
+        }
+      ],
+      "not_implemented": [],
+      "unverified": [
+        {
+          "item": "edge case: nonexistent beacon interface → start() error [spec.md:80]",
+          "note": "code maps zyre_start != 0 to StartFailed (node.rs:148-151); upstream return value for a missing interface not verified; no test"
+        },
+        {
+          "item": "US1 AS4: peers receive EXIT after stop+drop [spec.md:23]",
+          "note": "Drop calls zyre_stop (node.rs:384,162-163); no test waits for Exit"
+        }
+      ]
     }
   ],
-  "unspecced": [],
-  "conflicts": [],
-  "inputs_sha256": "dc0d13f6014c8e5ee79e8e25e5b4b0ce1b1e1aa6141d1d39da8fc98b93687523",
-  "git_commit": "72c7182b"
+  "unspecced": [
+    {
+      "feature": "Verbatim (non-printf) handling of configured strings",
+      "location": "components/zyre/src/node.rs:87-90,95,117,125,129; components/zyre/src/repair_test_header_percent.rs:1-51",
+      "lines": 55,
+      "suggested_spec": "001-zyre-bindings (data-model.md NodeConfig)",
+      "proposal": "P6"
+    },
+    {
+      "feature": "Process-wide serialisation of node creation (ZYRE_NEW_LOCK)",
+      "location": "components/zyre/src/node.rs:50-51,137-140",
+      "lines": 7,
+      "suggested_spec": "001-zyre-bindings (contracts/izyre.md Thread Safety)",
+      "proposal": "P7"
+    },
+    {
+      "feature": "NodeConfig.endpoint ignored in beacon mode",
+      "location": "components/zyre/src/node.rs:111-122",
+      "lines": 12,
+      "suggested_spec": "001-zyre-bindings (data-model.md:78)",
+      "proposal": "P8"
+    },
+    {
+      "feature": "ZYRE_BUILD_DIR override and DT_RPATH embedding",
+      "location": "components/zyre/build.rs:5-18,26-34,39",
+      "lines": 25,
+      "suggested_spec": "001-zyre-bindings (FR-010)",
+      "proposal": "P9"
+    }
+  ],
+  "conflicts": [
+    "data-model.md:26 (lifecycle) contradicts data-model.md:19 and :126-142",
+    "research.md:56 ('rejected without allocating a node') vs NUL panic / endpoint-bind failure after zyre_new"
+  ],
+  "unverified_leads": [
+    "L1: zyre_set_interface may forward to czmq's process-global zsys_set_interface, making NodeConfig.interface process-wide rather than per-node (data-model.md:74); verify against pinned zyre v2.0.1 zyre.c"
+  ],
+  "inputs_sha256_from_frontmatter": "65a5a4f9220d0d641d12270c418871f4d6d85b316de604114d44425999653d96",
+  "inputs_sha256_note": "copied from the drift-report.md frontmatter (stamped at 99cf8f79), not recomputed in this analysis; the re-stamp script owns this value"
 }
