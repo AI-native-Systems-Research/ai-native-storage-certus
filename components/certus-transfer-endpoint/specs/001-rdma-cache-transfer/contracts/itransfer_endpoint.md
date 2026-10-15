@@ -39,11 +39,17 @@ verification path.
 
 ```rust
 /// Where a value is to be written on the requesting node.
-/// Already exists for the legacy push path; reused verbatim.
+/// Already exists for the legacy push path; reused verbatim — this is the real
+/// definition from `interfaces/src/iremote_lookup_rdma_initiator.rs:62`. Note the
+/// field is `length`, NOT `size`, and an earlier draft of this contract had both
+/// the name and the field order wrong.
 pub struct RemoteRegion {
-    pub rkey: u32,
+    /// Remote virtual address to write into (the caller's registered buffer).
     pub addr: u64,
-    pub size: u32,
+    /// Remote key authorizing the RDMA write into that region.
+    pub rkey: u32,
+    /// Expected length in bytes; must equal the local value's size.
+    pub length: u32,
 }
 
 /// Per-entry result, in request order.
