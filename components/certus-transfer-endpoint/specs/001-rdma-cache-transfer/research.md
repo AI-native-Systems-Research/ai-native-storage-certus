@@ -381,17 +381,30 @@ makes later blocks useless for that request (they stay cached for later). Its co
 the opposite of serialising — issue a chunked prefix in block-index order, so a partial
 success truncates cleanly into a usable prefix.
 
-## D20 — Versioning is per opcode, discovered eagerly, with a frozen error reply
+## D20 — One negotiated protocol version, exchanged eagerly, with a frozen error reply
+
+**Revised 2026-10-15**, same day as first written — see *Revision* at the end of this
+decision. The first version of D20 made versioning **per message kind**; it is now a single
+protocol version. The analysis of the rejected alternatives below is unchanged and still
+load-bearing.
 
 **Decision**: three parts.
 
-1. **Versioning is per message kind**, carried in the fused opcode as it already is. A kind
-   that does not change costs nothing when another kind is revised.
-2. **Capabilities are exchanged eagerly**, once per connection, before any data message: each
-   end reports its highest supported version per kind and the largest request it can receive.
-   A requester uses `min(local, peer)` per kind and respects the peer's maximum request size.
+1. **One protocol version for the whole wire protocol**, negotiated per connection. Each end
+   advertises the range `[min, max]` it supports; the agreed version is `min(a.max, b.max)`,
+   and the connection fails if that falls below `max(a.min, b.min)`.
+2. **Capabilities are exchanged eagerly**, once per connection, before any data message: the
+   version range and the largest request the sender can receive. A requester respects the
+   peer's maximum request size rather than its own.
 3. **A protocol error reply exists and is frozen forever**, as the backstop for anything the
    exchange cannot prevent.
+
+The fused opcode is **kept**, now carrying the negotiated version, but its job has changed: it
+is no longer the versioning mechanism, it is a structural guard on it. Both ends agreed on a
+version, so every message should already be at that version; if a negotiation bug or a
+mismatched build emits something else, the receiver rejects a whole unknown word rather than
+misparsing a known one. It costs nothing — the version occupies bits of a word already on the
+wire — and it keeps `OP_ERROR`'s "unsupported version" reason meaningful.
 
 **Why an error reply at all, independent of versioning**: "rejects any value it does not know"
 had no expression on the wire, so an unknown opcode was byte-identical to a hang. With FR-023
@@ -402,7 +415,13 @@ Principle XI is about diagnosis, not just volume. It also pays for itself immedi
 independently of any version story: a stale binary on one node is the routine development
 failure, and it currently costs a multi-second timeout and a destroyed connection.
 
-**Why per-kind rather than whole-protocol.** Also considered:
+**Why one version rather than per-kind.** See *Revision* below; the short form is that
+per-kind bookkeeping buys nothing once a handshake exists, and actively permits an incoherent
+state — `OP_FETCH` at v2 answered by `OP_FETCH_REPLY` at v1, when a reply's semantics are tied
+to its request's version. One negotiated version makes that unrepresentable.
+
+**Alternatives considered for how versions are compared.** Both of these were rejected for
+reasons that still stand, and neither is what the revision adopted:
 
 * **One protocol version, peers at different versions refuse to talk.** Rejected: it forces
   lockstep upgrade. Mid-rolling-upgrade, half the instances cannot serve the other half, and
@@ -411,8 +430,9 @@ failure, and it currently costs a multi-second timeout and a destroyed connectio
 * **One protocol version, with the higher side implementing every older version.** Rejected as
   the most code of the three: the compatibility surface is versions x kinds, and a kind that
   never changed still acquires a new version on every bump.
-* Per-kind versioning makes the surface *versions x kinds that actually changed*, which is
-  usually one.
+The surviving scheme — one version, negotiated, with the higher side able to speak down to its
+declared minimum — is the second of those two with the lockstep problem removed by the
+handshake and the code cost removed by the observation in the revision below.
 
 **Why eager discovery rather than lazy fallback on error.** This reverses the "No negotiation"
 posture in `contracts/wire-protocol.md`, deliberately. Lazy fallback sounds cheaper and is
@@ -451,11 +471,41 @@ implementation across a homogeneous cluster means the only real skew is a rollin
 which is N and N-1. Failing at *connect* rather than on a request is also a much better
 diagnostic, and it is only possible because discovery is eager.
 
-**Deliberately deferred**: the version-*selection* logic beyond `min()`, and any compatibility
-shim for a v2 that does not exist. Build the affordances that are expensive to retrofit — the
-frozen opcodes, the frozen prefix, the reason space, the per-kind capability list — and decline
-the mechanism until something needs it. Same posture as D19: the affordance now, the mechanism
-when it has a consumer.
+**Deliberately deferred**: any compatibility shim for a v2 that does not exist. Build the
+affordances that are expensive to retrofit — the frozen opcodes, the frozen prefix, the reason
+space, the advertised version range — and decline the mechanism until something needs it. Same
+posture as D19: the affordance now, the mechanism when it has a consumer. With a single
+negotiated version the deferred work is a `min()` and a range check, not a state machine.
+
+### Revision (2026-10-15): per-kind versioning dropped
+
+**What changed**: `OP_HELLO` advertised a counted list of `(kind, max_version)` pairs; it now
+advertises one `[min, max]` protocol version range. Everything else stands.
+
+**Why the original was wrong**: per-kind versioning won the first comparison *because discovery
+was lazy*. An error reply can only report the version of the one opcode that failed, so per-kind
+was the only scheme that needed no handshake — that was its entire advantage. When part 2 of
+this decision switched discovery to eager, that advantage evaporated, and the per-kind
+machinery was carried over without rechecking whether its justification had survived. It had
+not. This is the same failure this project has already paid for twice and that D11 cites as the
+reason for a loud-failure posture: a rationale verified under one premise and never re-examined
+after the premise changed.
+
+**The code-volume argument was also simply wrong.** It claimed a whole-protocol bump makes the
+compatibility surface *versions x kinds*, with unchanged kinds acquiring a version on every
+bump. They do not acquire any *code*: if v2 changes only `OP_FETCH`, then `OP_FETCH_REPLY` at
+v1 and at v2 is the same function. Unchanged kinds cost nothing under either scheme, so there
+was no explosion to avoid.
+
+**And per-kind is worse than redundant.** It can represent `OP_FETCH` at v2 answered by
+`OP_FETCH_REPLY` at v1. A reply's meaning is tied to the version of the request it answers, so
+that combination is a correctness trap that one negotiated version cannot express.
+
+**Two incidental improvements** fall out. `OP_HELLO`'s body becomes **fixed size**, which is
+what a permanently frozen layout wants — the counted array was a variable-length body in a
+message whose layout can never change, an uncomfortable pairing. And the floor check becomes
+one range intersection instead of a per-kind comparison, so the failure diagnostic is a single
+pair of numbers.
 
 ## Rig facts (measured 2026-10-15, read-only, cluster left running)
 

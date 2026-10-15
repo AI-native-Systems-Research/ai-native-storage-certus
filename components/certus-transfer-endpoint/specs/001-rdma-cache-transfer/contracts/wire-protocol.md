@@ -27,6 +27,11 @@ opcode = (version << 16) | kind
 Two *versioned* opcodes carry the data plane; everything it needs — chunking, credits, tier
 attribution — rides in the header flags or the body rather than in more kinds.
 
+The version half of a data-plane opcode carries the version **negotiated at connect**
+(`OP_HELLO`), so it is a structural guard rather than the versioning mechanism itself: both
+ends have already agreed, and an opcode that disagrees means a negotiation bug or a mismatched
+build, which is rejected as a whole unknown word instead of misparsed as a known one.
+
 The last two are **frozen for all time** at version `0`. No real version is 0, so these
 opcodes can never collide with a versioned one, and that is deliberate: they are the messages a
 peer must be able to parse *even when it cannot parse the version in question*. Versioning
@@ -111,19 +116,27 @@ Sent by **both** ends immediately on connection establishment — the endpoint i
 neither side is the client (D5). Neither end sends a data message until the peer's `OP_HELLO`
 has arrived. `context_id` is zero and `n_entries` is the capability count.
 
+The body is **fixed size**, 32 bytes total, which is what a permanently frozen layout wants:
+
 | offset | size | field | notes |
 |---|---|---|---|
-| 24 | 4 | `max_entries` | the largest `OP_FETCH` **this** sender can receive |
-| 28 | 2 | `n_kinds` | capability entries following |
-| 30 | 2 | reserved | MUST be zero |
-| 32 | 4 × `n_kinds` | capabilities | `(kind: u16, max_version: u16)` each |
+| 24 | 2 | `version_min` | lowest protocol version this sender can speak |
+| 26 | 2 | `version_max` | highest protocol version this sender can speak |
+| 28 | 4 | `max_entries` | the largest `OP_FETCH` **this** sender can receive |
 
-A requester MUST use `min(local, peer)` as the version for each kind, and MUST respect the
-peer's `max_entries` rather than its own when chunking — the two sides are not required to
-have equal receive buffers, and before this exchange existed that equality was an *unchecked
-assumption* (D20). A kind absent from the list is unsupported by that peer. If a peer cannot
-meet the configured version floor, the **connection** fails at establishment, naming peer,
-kind and both versions; no request is ever issued to it.
+The version in force for the connection is `min(a.version_max, b.version_max)`. If that is
+below `max(a.version_min, b.version_min)` the ranges do not intersect and the **connection**
+fails at establishment, naming peer and both ranges; no request is ever issued to it.
+
+**One version governs the whole protocol**, not each kind. A reply's meaning is tied to the
+version of the request it answers, so independently negotiated per-kind versions could
+represent an `OP_FETCH` at v2 answered by an `OP_FETCH_REPLY` at v1 — a combination that is a
+correctness trap and that a single version cannot express. An earlier draft advertised a
+counted `(kind, max_version)` list; see D20's *Revision* for why that was dropped.
+
+A requester MUST respect the peer's `max_entries` rather than its own when chunking — the two
+sides are not required to have equal receive buffers, and before this exchange existed that
+equality was an *unchecked assumption* (D20).
 
 Capabilities live on the connection and die with it, so a rebuilt connection re-learns them
 and an upgraded peer is picked up with no separate invalidation step.
@@ -136,7 +149,7 @@ The answer to any message that cannot be processed. `n_entries` is zero.
 |---|---|---|---|
 | 24 | 4 | `offending_opcode` | the whole fused word as received |
 | 28 | 2 | `reason` | below |
-| 30 | 2 | `max_supported_version` | highest version of that *kind* the sender supports; 0 if the kind is unknown entirely |
+| 30 | 2 | `max_supported_version` | highest **protocol** version the sender supports; 0 if the opcode's kind is unknown entirely |
 
 | `reason` | meaning |
 |---|---|
@@ -147,7 +160,9 @@ The answer to any message that cannot be processed. `n_entries` is zero.
 
 Reason 0 is reserved and values ≥ 5 are available; a receiver MUST treat an unknown reason as
 a generic protocol failure, never as success. `max_supported_version` exists so a requester can
-go straight to a workable version instead of probing downward.
+go straight to a workable version instead of probing downward — needed only when negotiation
+has been bypassed or has a bug, since `OP_HELLO` normally settles the version before any data
+message.
 
 **Scope is protocol faults only.** A miss is an outcome byte, not an error, and a resource
 shortage chunks (FR-015). Using `OP_ERROR` for either would quietly become the escape hatch

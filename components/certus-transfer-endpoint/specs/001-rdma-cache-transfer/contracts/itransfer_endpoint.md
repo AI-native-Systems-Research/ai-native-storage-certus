@@ -92,9 +92,9 @@ pub enum TransferEndpointError {
     /// sibling contexts are unaffected. Carries the offending opcode, the
     /// reason, and the peer's highest supported version for that kind.
     Protocol(String),
-    /// The peer could not meet the configured version floor, so no connection
-    /// was established and no request was issued (FR-025). Names peer, kind and
-    /// both versions.
+    /// The peer's supported protocol version range does not intersect the local
+    /// one, so no connection was established and no request was issued
+    /// (FR-025). Names peer and both ranges.
     IncompatiblePeer(String),
     Transport(String),
 }
@@ -214,10 +214,11 @@ Implementations MUST uphold, and tests MUST verify:
     a deadline. It fails one context; the connection stays usable and its siblings complete
     (FR-024, SC-012). The reply is never used for a miss or a resource shortage.
 14. **Capabilities precede data.** No data message is sent on a connection before the peer's
-    capabilities are known; the version used per kind is `min(local, peer)`, and the peer's
-    maximum request size is respected rather than the local one. A peer below the floor fails
-    at connect, not on a request (FR-025, SC-013). Capabilities are per connection and are
-    re-learned when one is rebuilt.
+    capabilities are known. One protocol version governs the connection —
+    `min(a.max, b.max)`, failing if below `max(a.min, b.min)` — and the peer's maximum request
+    size is respected rather than the local one. A non-intersecting range fails at connect, not
+    on a request (FR-025, SC-013). Capabilities are per connection and re-learned when one is
+    rebuilt.
 
 ## Two fail-loud paths, deliberately different
 

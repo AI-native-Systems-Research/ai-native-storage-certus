@@ -196,9 +196,13 @@ is measured in milliseconds.
 
 ### Protocol versioning (D20)
 
-Settled after the task list was generated: versioning is **per message kind** in the fused
-opcode, capabilities are exchanged **eagerly** once per connection (`OP_HELLO`), and a frozen
-`OP_ERROR` answers anything unprocessable. Both of those messages are permanently unversioned
+Settled after the task list was generated: **one** protocol version governs the wire, each end
+advertises the range it supports, and the connection runs at `min(a.max, b.max)` — exchanged
+**eagerly** once per connection (`OP_HELLO`), with a frozen `OP_ERROR` answering anything
+unprocessable. The fused opcode is kept as a structural guard on the negotiated version rather
+than as the versioning mechanism. (A first draft versioned each kind independently; D20's
+*Revision* records why that was dropped — it only ever made sense while discovery was lazy,
+and it can represent a v2 request answered by a v1 reply.) Both of those messages are permanently unversioned
 — a peer that cannot parse version N must still parse them — and bytes 0-15 of the header are
 a frozen prefix for the same reason. This supersedes the wire contract's original "no
 negotiation" stance; the reasoning, including the two whole-protocol alternatives rejected, is
