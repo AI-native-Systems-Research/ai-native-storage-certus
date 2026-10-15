@@ -54,9 +54,16 @@ uniform entry size in the header.
 | 16 | 4 | `size` — bytes for this entry |
 | 20 | 4 | `rkey` — requester's rkey covering `addr` |
 
-This is exactly `(CacheKey, RemoteRegion)` on the wire, which is what
+This carries exactly the content of `(CacheKey, RemoteRegion)`, which is what
 [itransfer_endpoint.md](./itransfer_endpoint.md) already passes to `fetch` and
-`push_async`.
+`push_async`. It is **content equivalence, not a memory image**: the real struct is
+`{ addr: u64, rkey: u32, length: u32 }` and its last two fields sit in the opposite order
+from the wire's `size` then `rkey`. The wire's `size` *is* `RemoteRegion::length`. Since both
+trailing fields are `u32`, a transposition silently swaps a length for a key, so the codec
+must name fields explicitly and never copy the pair wholesale. (Reordering the wire to `rkey`
+then `length` to match the struct is still free — nothing implements this yet — and would
+remove the hazard entirely; left as-is for now because the layout is already a committed
+contract.)
 
 **Why addresses rather than slot indices.** An earlier draft sent
 `(key, slot_index)` with a per-message `base_addr` and uniform `entry_size`, computing the

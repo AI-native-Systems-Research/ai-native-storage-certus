@@ -7,18 +7,48 @@
 //! and no reap: exactly one peer is asked, exactly once.
 //!
 //! The endpoint is symmetric at the connection level — one queue pair per peer
-//! pair, either end able to post work requests — but **not** at the API level.
-//! A destination drives an explicit `fetch()`; a source is reactive, answering
-//! inbound requests from its own thread, which is why there is deliberately no
-//! `serve()` method.
+//! *instance* pair, either end able to post work requests — but **not** at the
+//! API level. A destination drives an explicit `fetch()`; a source is reactive,
+//! answering inbound requests from its own thread, which is why there is
+//! deliberately no `serve()` method.
 //!
-//! See `specs/001-rdma-cache-transfer/` for the specification, the research
-//! decisions D1–D15, and the task list.
+//! # Build configuration
+//!
+//! Nothing is enabled by default, and the default build is the one CI runs:
+//!
+//! | feature | adds |
+//! |---|---|
+//! | *(none)* | connection table, framing, credits and pin logic over an in-process seam |
+//! | `rdma` | the real libibverbs/librdmacm transport |
+//! | `spdk` | block-tier serving: block-device receptacle and bounce-buffer pool |
+//! | `telemetry` | metrics counters |
+//!
+//! Without `spdk` a block-tier lookup answer is reported as a miss rather than
+//! an error (research D14). Hardware-dependent tests are `#[ignore]`d, so a
+//! plain `cargo test` never needs a NIC or an NVMe device (constitution
+//! Principle VIII).
 //!
 //! # Status
 //!
-//! Scaffolding only — task T001 of `specs/001-rdma-cache-transfer/tasks.md`.
-//! The module layout lands in T004 and the interface in T006; no transfer logic
-//! exists yet.
+//! Scaffolding. Tasks T001–T005 and T068 of
+//! `specs/001-rdma-cache-transfer/tasks.md` are complete: the crate builds as a
+//! workspace default member and peer identity is implemented. No transfer logic
+//! exists yet — the interface lands in T006 and the engine in Phase 2.
 
 #![deny(missing_docs)]
+
+mod connection;
+mod message;
+mod serve;
+mod telemetry;
+
+#[cfg(feature = "rdma")]
+mod ffi;
+#[cfg(feature = "rdma")]
+mod rdma;
+
+#[cfg(feature = "spdk")]
+mod bounce;
+
+#[cfg(all(test, feature = "rdma"))]
+mod loopback_test;

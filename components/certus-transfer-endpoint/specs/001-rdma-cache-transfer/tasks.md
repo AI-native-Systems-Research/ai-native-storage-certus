@@ -64,11 +64,11 @@ that Principle VIII requires.
   without it, the `IDispatchMap` receptacle of D13 forces `interfaces/spdk`, which pulls
   `spdk-sys` and makes default membership impossible — the exact trap documented for
   `remote-lookup`
-- [ ] T004 [P] Declare the module skeleton in `src/lib.rs` per plan.md's layout:
+- [X] T004 [P] Declare the module skeleton in `src/lib.rs` per plan.md's layout:
   `mod connection; mod message; mod serve; mod telemetry;`, `#[cfg(feature = "rdma")] mod
   ffi; #[cfg(feature = "rdma")] mod rdma;`, `#[cfg(feature = "spdk")] mod bounce;`, and
   `#[cfg(test)] mod loopback_test;` gated for Phase 9
-- [ ] T005 [P] Write the component `CLAUDE.md` (plan.md Constitution Check requires one):
+- [X] T005 [P] Write the component `CLAUDE.md` (plan.md Constitution Check requires one):
   role, the symmetric-endpoint invariant, the feature matrix, and a pointer to Principles
   IX/X/XI as the review gates
 
@@ -124,7 +124,8 @@ connection table. This is plan.md Phase 1's engine.
   teardown-before-reclaim is assertable
 - [ ] T012 Implement the **symmetric** `ConnectionTable` in `src/connection.rs` (depends
   T010, T068, D5): one QP per peer **instance** pair keyed by `PeerId`, established on first
-  need and reused
+  need and reused. Remove the temporary per-item `#[allow(dead_code)]` attributes T068 left
+  on `PeerId`/`PeerIdError` once this consumes them
   (FR-002), with a connection usable regardless of whether it was inbound-accepted or
   outbound-initiated, and **either end able to post work requests** (FR-001). This is the
   thing neither existing crate can do
@@ -141,7 +142,7 @@ connection table. This is plan.md Phase 1's engine.
   identical method surface. Counters: per-outcome totals, each credit domain's current and
   peak depth, chunk count, deadline expiries. Principle XI forbids structuring these so an
   unexercised path looks like a working one — so count *attempts* alongside completions
-- [ ] T068 [P] Implement `PeerId` in `src/connection.rs`: parse and normalize a
+- [X] T068 [P] Implement `PeerId` in `src/connection.rs`: parse and normalize a
   `"ip:port"` instance address, rejecting a missing port and port 0 rather than defaulting
   either (FR-021, D16). Reuse the grammar of
   `remote-lookup-rdma-initiator/src/connection.rs:1075` `parse_endpoint` rather than
