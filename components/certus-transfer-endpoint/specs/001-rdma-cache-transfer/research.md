@@ -335,18 +335,28 @@ already give for free, and engineer nothing further for it.
 **Rationale**: the magnitudes are three orders of magnitude apart, so only one of them can
 matter.
 
-| quantity | magnitude |
-|---|---|
-| one `OP_FETCH` of 340 × 2.25 MiB on 200G RoCE | ~30 ms |
-| one 2.25 MiB entry write | ~90 us |
-| inter-message bubble (reply RTT + lookup) | ~10-50 us |
-| a device read on the block-tier path | ~100 us - ms |
+| quantity | at 50G (measured rig) | at 200G |
+|---|---|---|
+| one `OP_FETCH` of 340 × 2.25 MiB | ~130 ms | ~30 ms |
+| one 2.25 MiB entry write | ~380 us | ~90 us |
+| inter-message bubble (reply RTT + lookup) | ~10-50 us | ~10-50 us |
+| a device read on the block-tier path | ~100 us - ms | ~100 us - ms |
 
-The inter-message bubble is smaller than a single entry's write, so overlapping messages buys
-~0.1%. Message credits default to 8 and block only at zero, so that overlap already exists at
+Both columns are given because the figure matters to the argument and the two rigs differ:
+the active port on the current node is **50 Gbps** (see *Rig facts* below), while the
+precedent's comment assumes 200G RoCE. The conclusion is invariant, and is in fact *stronger*
+at the lower rate — the bubble is 0.008-0.04% of a message at 50G versus ~0.1% at 200G, and
+it stays well below the cost of a single entry's write either way. So overlapping messages
+buys essentially nothing at any link rate this design will see. Message credits default to 8 and block only at zero, so that overlap already exists at
 no cost; it just must not drive design. The same arithmetic disposes of deep send-queue
 pipelining: at 2.25 MiB per entry this path is bandwidth-bound and a window of 2-4 saturates
 the link.
+
+Note the one place the margin *narrows* at 50G: a device read (~100 us - ms) stops being much
+larger than a single entry's write (~380 us) and becomes comparable to it. That does not
+change the conclusion below — a lease-all/read-all/post-all barrier still idles the wire for
+the whole read phase, whatever one read costs — but it does mean the block-tier barrier is the
+only one whose cost stays in the same order of magnitude as the transfer itself.
 
 **What does matter** is the block-tier read barrier. A source that leases N bounce buffers,
 reads all N, posts all N writes and only then replies idles the wire for the entire read
@@ -370,6 +380,45 @@ the *consumer*: a prefix cache only benefits from a contiguous prefix, so a miss
 makes later blocks useless for that request (they stay cached for later). Its consequence is
 the opposite of serialising — issue a chunked prefix in block-index order, so a partial
 success truncates cleanly into a usable prefix.
+
+## Rig facts (measured 2026-10-15, read-only, cluster left running)
+
+Recorded because several decisions above were written against assumed numbers.
+
+| fact | value |
+|---|---|
+| rdma-core | 2510.0.11-1.el9, with `rdma-core-devel`; `libibverbs` 1.14.58.0, `librdmacm` 1.3.58.0 |
+| headers | `/usr/include/infiniband/verbs.h`, `/usr/include/rdma/rdma_cma.h` present |
+| devices | **two**: `mlx5_0` -> `ens3f0np0`, `mlx5_1` -> `ens3f1np1` (dual-port ConnectX, fw 32.38.1002) |
+| active port | `mlx5_0` only: `PORT_ACTIVE`, **50 Gbps**, MTU 4096, `link_layer: Ethernet` (RoCE) |
+| down port | `mlx5_1`: `PORT_DOWN` / `phys_state: DISABLED` |
+| RDMA data-path address | `10.0.0.102/24` on `ens3f0np0` (GUID `...45579c` matches `mlx5_0`) |
+| NUMA | host has 2 nodes (0: 0-15,32-47 / 1: 16-31,48-63); **both RDMA devices are on NUMA node 0** |
+| limits | `max_mr_size` unlimited, `max_mr` 16.8M, `max_pd` 8.4M, `max_qp` 131072, `max_qp_wr` 32768, `max_cqe` 4194303, `max_sge` 30 |
+
+Consequences for the decisions above:
+
+* **T008 is unblocked.** `pkg-config` resolves both libraries and the devel headers are
+  installed, so the `cc` shim has everything it needs.
+* **D17's per-device PD keying is load-bearing, not theoretical.** Two `ibv_context`s exist,
+  so a PD allocated against one cannot serve a connection that resolves to the other — even
+  though only one port is currently up.
+* **D17's "resource limits are not a drawback" is confirmed with numbers.** `max_mr_size` is
+  unbounded, so a multi-GB tier registers as a single MR, and at 8.4M PDs the choice between
+  one shared PD and one per connection is invisible to the device.
+* **`link_layer: Ethernet` with `transport: InfiniBand (0)` is RoCE, not a contradiction** —
+  the transport field names the verbs transport, not the fabric. Worth stating so nobody
+  "corrects" the RoCE assumption after reading `ibv_devinfo`.
+* **A caveat for D15 and for the GPU-NUMA-instance pinning assumption**: both RDMA ports sit
+  on NUMA node 0, so the NUMA-1 instance has no local NIC and its traffic crosses the
+  inter-socket link regardless. D15 allocates the bounce pool on the *serving instance's*
+  NUMA node, which is right for the device read but leaves NIC DMA remote for that instance.
+  This is a measurement caveat, not a design change — but a 50G link and a cross-socket hop
+  should both be stated when any transfer number from this rig is quoted.
+* **Phase 9 scope on this node**: single-host loopback (T054, T055) runs on `mlx5_0`. The
+  two-node test (T056) needs the peer node's equivalent. A topology with one NIC per NUMA
+  domain is *not* currently available, since the second port is down and both ports are on
+  node 0 anyway.
 
 ## Plan-phase questions, resolved
 
