@@ -267,6 +267,25 @@ def main():
             print(f"[prom] saved {_prom_path}", file=sys.stderr)
         except OSError as e:
             print(f"[prom] could not save json: {e}", file=sys.stderr)
+
+    # Latency-distribution histograms: sampled once (cumulative over the run) from
+    # the canonical set, so SharedStorage captures TTFT/TPOT/e2e like the other
+    # in-process backends. Emitted as the same [prom] hist / histjson lines.
+    if CAPTURE_METRICS:
+        hists = common.prom_histograms(llm, common.LATENCY_HISTOGRAMS, CAPTURE_METRICS)
+        for name, h in sorted(hists.items()):
+            cnt, tot = h["count"], h["sum"]
+            mean = tot / cnt if cnt else 0.0
+            fmt = lambda x: "n/a" if x is None else f"{x:.3f}s"  # noqa: E731
+            print(f"[prom] hist {name[len('vllm:'):]}: n={cnt} mean={mean:.3f}s "
+                  f"p50={fmt(common.hist_pct(h['buckets'], cnt, 0.50))} "
+                  f"p90={fmt(common.hist_pct(h['buckets'], cnt, 0.90))} "
+                  f"p99={fmt(common.hist_pct(h['buckets'], cnt, 0.99))}",
+                  file=sys.stderr, flush=True)
+        if hists:
+            print(f"[prom] histjson {json.dumps(hists, separators=(',', ':'))}",
+                  file=sys.stderr, flush=True)
+
     print(f"\n[run] done. wall={elapsed:.1f}s  generations={total_generations} rounds={rounds_done}",
           file=sys.stderr)
 

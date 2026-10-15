@@ -163,8 +163,7 @@ if __name__ == "__main__":
         # Latency-distribution histograms: sampled once (cumulative over the run,
         # not per round) — queue time (WAITING phase) and decode time (DECODE).
         if CAPTURE_METRICS:
-            hists = common.prom_histograms(llm, {"vllm:request_queue_time_seconds",
-                                             "vllm:request_decode_time_seconds"},
+            hists = common.prom_histograms(llm, common.LATENCY_HISTOGRAMS,
                                        CAPTURE_METRICS)
             for name, h in sorted(hists.items()):
                 cnt, tot = h["count"], h["sum"]
