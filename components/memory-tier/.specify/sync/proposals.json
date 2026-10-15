@@ -1,94 +1,261 @@
 {
-  "generated": "2026-08-20",
-  "phase": "Phase B",
+  "generated": "2026-10-14T16:47:49Z",
+  "based_on": "drift-report.json 2026-10-14T16:47:49Z",
   "component": "memory-tier",
   "spec": "001-memory-tier",
-  "policy": ".specify/sync/PHASE_B_POLICY.md",
-  "decision": "backfill to reality — the single RwLock<Pool> implementation is the intended, working design; the 16-way sharded + Creusot-verified design in earlier spec revisions was never built.",
+  "branch": "fix/memory-tier-insert-track-panic",
+  "git_commit": "78f60ab8",
+  "mode": "batch",
   "summary": {
-    "backfill": 9,
-    "align": 0,
-    "unspecced_backfilled": 0,
-    "resolved": 0,
-    "human_decision": 1
+    "total": 10,
+    "backfill": 6,
+    "align": 2,
+    "new_spec": 1,
+    "supersede": 1,
+    "human_decision": 0,
+    "remove_from_spec": 0
   },
   "proposals": [
     {
-      "requirement": "FR-005",
-      "direction": "BACKFILL",
-      "rationale": "Spec mandated a 16-way sharded pool; src/lib.rs:76-85,313-316 holds one FreeList + one HashMap behind a single RwLock<Pool>. No Shard struct, NUM_SHARDS, or shard_for_key exists. Code is the intended reality.",
-      "before": "Pool is divided into 16 independent shards",
-      "after": "Pool state (allocator + slot map) is held as a single, unsharded structure behind one `RwLock<Pool>` (no shards)"
+      "id": "P1",
+      "requirement": "U1 / new FR-030 (insert: eviction policy refuses track)",
+      "type": "BACKFILL",
+      "confidence": "HIGH",
+      "approved": true,
+      "spec_says": "FR-008/009/010 cover InvalidSize/AlreadyExists/PoolFull only; nothing on a refused track",
+      "spec_location": "components/memory-tier/specs/001-memory-tier/spec.md:157-159,38-41",
+      "code_does": "PoolFull checked first via can_allocate; a track error maps to NotInitialized(\"eviction policy refused to track key {key}: {e}\"); nothing reserved or recorded; unreachable rollback after track; regression test",
+      "code_location": "components/memory-tier/src/lib.rs:360-378; src/allocator.rs:36-43; src/repair_test_insert_track_failure.rs:21-52",
+      "edits": [
+        {
+          "file": "components/memory-tier/specs/001-memory-tier/spec.md",
+          "line": 178,
+          "old": "| FR-029 | `free_capacity()` returns `capacity() - used()` for proactive-eviction triggers | Implementation *(backfilled)* |",
+          "new": "| FR-029 | `free_capacity()` returns `capacity() - used()` for proactive-eviction triggers | Implementation *(backfilled)* |\n| FR-030 | insert() checks for free space (FR-010, `PoolFull`) before registering the key with the eviction policy. If the policy then refuses to track the key (`IEvictionPolicy::track` returns an error), insert() returns `NotInitialized` with a message naming the key and the policy's error, reserves no pool space, records no slot, does not panic, and leaves the component usable | Unit test *(backfilled)* |"
+        },
+        {
+          "file": "components/memory-tier/specs/001-memory-tier/spec.md",
+          "line": 41,
+          "old": "- `peek_does_not_update_eviction_order` - verifies peek does not update eviction order",
+          "new": "- `peek_does_not_update_eviction_order` - verifies peek does not update eviction order\n- `insert_fails_cleanly_when_policy_refuses_to_track` - verifies that a refused `track` makes insert fail without a panic, reserved space, or a recorded slot, and that the component stays usable (FR-030)",
+          "note": "combine with P8, which rewrites the first line"
+        }
+      ],
+      "decision_point": "Optionally replace NotInitialized with a dedicated variant (e.g. EvictionPolicyRefused(CacheKey)); that would be an ALIGN change to components/interfaces/src/imemory_tier.rs:20-35 and lib.rs:368-371, and FR-030 would name it.",
+      "approved_by": "Cornel Constantinescu, 2026-10-14",
+      "approval_note": "spec.md parts only; keep NotInitialized (no new variant)"
     },
     {
-      "requirement": "FR-006",
-      "direction": "BACKFILL",
-      "rationale": "No key-modulo-16 shard selection exists (src/lib.rs). The real concurrency mechanism is a single reader-writer lock; rewrote FR-006 to describe it instead of the non-existent shard selection.",
-      "before": "Shard selection uses key modulo 16 (Verified: Creusot P4, P5)",
-      "after": "Concurrency uses one reader-writer lock: read operations (get, peek, contains, batch_touch, capacity, used) take a shared read lock; mutations (insert, remove, evict, clear) take an exclusive write lock (Verified: Implementation)"
+      "id": "P2",
+      "requirement": "D2 \u2014 IMemoryTier::insert doc / MemoryTierError::NotInitialized doc",
+      "type": "BACKFILL",
+      "confidence": "HIGH",
+      "approved": false,
+      "spec_says": "Returns `PoolFull` if insufficient contiguous space is available. / Component not initialized.",
+      "spec_location": "components/interfaces/src/imemory_tier.rs:66,33",
+      "code_does": "insert returns InvalidSize, NotInitialized (not initialized), AlreadyExists, PoolFull, NotInitialized (policy refused track)",
+      "code_location": "components/memory-tier/src/lib.rs:329-331,334-338,356-358,362-364,366-372",
+      "edits": [
+        {
+          "file": "components/interfaces/src/imemory_tier.rs",
+          "line": 66,
+          "old": "        /// Returns `PoolFull` if insufficient contiguous space is available.",
+          "new": "        /// Errors: `InvalidSize` if `size` is zero; `NotInitialized` if the\n        /// pool is not initialized, or if the bound eviction policy refuses to\n        /// track `key` (the message says which); `AlreadyExists` if `key`\n        /// already has a slot; `PoolFull` if insufficient contiguous space is\n        /// available. On every error no space is reserved and no slot is\n        /// recorded."
+        },
+        {
+          "file": "components/interfaces/src/imemory_tier.rs",
+          "line": 33,
+          "old": "    /// Component not initialized.",
+          "new": "    /// Component not initialized, or a required dependency (the bound\n    /// eviction policy) refused the operation; the message says which."
+        }
+      ],
+      "approval_note": "deferred: changes components/interfaces, which re-stamps every component; separate PR"
     },
     {
-      "requirement": "FR-007",
-      "direction": "BACKFILL",
-      "rationale": "One allocator + slot map under a single RwLock (src/lib.rs:76-79), not per-shard Mutex-protected structures.",
-      "before": "Each shard has its own Mutex-protected allocator and slot map",
-      "after": "A single first-fit `FreeList` allocator and a single `HashMap<CacheKey, Slot>` slot map serve the whole pool"
-    },
-    {
+      "id": "P3",
       "requirement": "FR-013",
-      "direction": "BACKFILL",
-      "rationale": "evict_next delegates to ep.identify_next_to_evict(pool_id); there is no evict_counter field or round-robin shard cycling (src/lib.rs:434-466). Also removed the stale 'Creusot P10' verified claim.",
-      "before": "evict_next() cycles through shards via atomic counter (round-robin) (Verified: Creusot P10)",
-      "after": "evict_next() delegates victim selection to the eviction policy (identify_next_to_evict(pool_id)), then removes that slot and frees its allocation; there is no shard round-robin counter (Verified: Implementation)"
+      "type": "ALIGN",
+      "confidence": "MEDIUM",
+      "verdict": "PLAUSIBLE",
+      "approved": true,
+      "spec_says": "evict_next() delegates victim selection to the eviction policy (`identify_next_to_evict(pool_id)`), then removes that slot and frees its allocation; there is no shard round-robin counter",
+      "spec_location": "components/memory-tier/specs/001-memory-tier/spec.md:162",
+      "code_does": "Victim popped from the policy (lib.rs:452) before the pool write lock (:465). Returns Some(key) and bumps evictions even when no slot was freed (:467-473). Recycled LRU indices without a generation (lru_list.rs:38-46,143) let remove(K) (lib.rs:511) delete another key's node, so that key can never be evicted.",
+      "code_location": "components/memory-tier/src/lib.rs:445-477",
+      "code_change": "Take the pool write guard before identify_next_to_evict (lock order pool -> policy, as in insert/remove/clear). Return Some(key) and count an eviction only when a slot was actually removed. First add a test that reproduces the interleaving.",
+      "approved_by": "Cornel Constantinescu, 2026-10-14"
     },
     {
-      "requirement": "FR-014",
-      "direction": "BACKFILL",
-      "rationale": "src/lib.rs:468-470 binds the key parameter as _key and calls evict_next(); it is a pure alias. With a single global pool there is no shard to target, so this is correct/intended behavior. Removed stale 'Creusot P4, P5' claim.",
-      "before": "evict_next_for_key() evicts from the same shard as the target key (Verified: Creusot P4, P5)",
-      "after": "evict_next_for_key(key) is an alias for evict_next(); the `key` argument is ignored because the pool is not sharded (Verified: Implementation)"
+      "id": "P4",
+      "requirement": "SC-3 (NFR-002 related)",
+      "type": "ALIGN",
+      "confidence": "MEDIUM",
+      "verdict": "PLAUSIBLE",
+      "approved": true,
+      "spec_says": "Concurrent access from 16+ threads does not deadlock or corrupt state",
+      "spec_location": "components/memory-tier/specs/001-memory-tier/spec.md:231,185",
+      "code_does": "get/touch/batch_touch drop the pool lock, then call the policy with a copied handle. A racing clear empties the LRU node vector (lru_list.rs:147-153), so move_to_back indexes out of bounds (lru_list.rs:70-71) and panics while holding the policy's pool mutex (eviction-policy-lru/src/lib.rs:84-85), poisoning it. No multi-threaded test exists.",
+      "code_location": "components/memory-tier/src/lib.rs:417-419,525-527,561-565,613-617",
+      "code_change": "Either (a) call the policy while still holding the pool read guard (and reword NFR-002), or (b) bounds-check plus a generation-checked EvictionHandle in eviction-policy-lru/interfaces (this also fixes P3). Add the 16-thread mixed stress test from tasks.md:20.",
+      "approved_by": "Cornel Constantinescu, 2026-10-14"
     },
     {
-      "requirement": "FR-021",
-      "direction": "BACKFILL",
-      "rationale": "oldest_keys makes a single ep.get_eviction_candidates(pool_id, n) call (src/lib.rs:424-432); there is no (n/NUM_SHARDS).max(1) per-shard sampling.",
-      "before": "oldest_keys(n) peeks at N oldest keys across shards",
-      "after": "oldest_keys(n) returns up to N oldest keys via a single `IEvictionPolicy::get_eviction_candidates(pool_id, n)` call (no per-shard sampling)"
+      "id": "P5",
+      "requirement": "FR-023",
+      "type": "BACKFILL",
+      "confidence": "HIGH",
+      "approved": true,
+      "spec_says": "All operations check initialized flag before proceeding",
+      "spec_location": "components/memory-tier/specs/001-memory-tier/spec.md:172",
+      "code_does": "Checked in 14 operations; insert size==0 and batch_touch([]) return before the check; is_dma_capable and telemetry_snapshot never check it; initialize checks it inverted",
+      "code_location": "components/memory-tier/src/lib.rs:182,271,329-334,394,425,437,447,485,518,532-536,570,580,589,598,607,621-646",
+      "edits": [
+        {
+          "file": "components/memory-tier/specs/001-memory-tier/spec.md",
+          "line": 172,
+          "old": "| FR-023 | All operations check initialized flag before proceeding | Implementation |",
+          "new": "| FR-023 | Every operation that reads or changes pool state checks the initialized flag first, and returns its \"not initialized\" result when the flag is unset (`NotInitialized` for `insert`/`remove`/`clear`; `None`, `false`, `0`, an empty `Vec`, or a no-op for the others). Exceptions: `insert` rejects `size == 0` with `InvalidSize`, and `batch_touch` returns on an empty slice, before the check; `is_dma_capable()` and `telemetry_snapshot()` do not check the flag (their results are well-defined before initialization); `initialize()` rejects an already-set flag | Implementation |"
+        }
+      ],
+      "approved_by": "Cornel Constantinescu, 2026-10-14"
     },
     {
-      "requirement": "NFR-002",
-      "direction": "BACKFILL",
-      "rationale": "not_implemented in drift report ('16-way sharded allocator ... NFR-002'). Rewrote to describe the actual single-RwLock concurrency model.",
-      "before": "Per-shard locking minimizes contention (16-way parallelism)",
-      "after": "A single `RwLock<Pool>` serializes mutations while allowing concurrent readers; data-path touches are applied outside the pool lock via the eviction policy's own synchronization"
+      "id": "P6",
+      "requirement": "FR-027 (+ Implementation Notes spec.md:239)",
+      "type": "BACKFILL",
+      "confidence": "MEDIUM",
+      "approved": true,
+      "spec_says": "tracks eviction count, write-lock contention count, and read-lock contention count; a failed try_read/try_write first attempt bumps the corresponding lock-contention counter before blocking",
+      "spec_location": "components/memory-tier/specs/001-memory-tier/spec.md:176,239",
+      "code_does": "Write contention counted in insert/evict_next/remove only; read contention in get/batch_touch only; clear/peek/touch/contains/capacity/used/free_capacity not counted; evictions bumped whenever the policy returns a victim",
+      "code_location": "components/memory-tier/src/lib.rs:342-352,400-410,453-473,493-503,544-554,613",
+      "edits": [
+        {
+          "file": "components/memory-tier/specs/001-memory-tier/spec.md",
+          "line": 176,
+          "old": "| FR-027 | When compiled with the optional `telemetry` feature, the component tracks eviction count, write-lock contention count, and read-lock contention count | Implementation *(backfilled)* |",
+          "new": "| FR-027 | When compiled with the optional `telemetry` feature, the component tracks eviction count (one per `evict_next` call for which the policy returned a victim), write-lock contention count (measured in `insert`, `remove`, `evict_next`), and read-lock contention count (measured in `get`, `batch_touch`); other lock acquisitions (`clear`, `peek`, `touch`, `contains`, `capacity`, `used`, `free_capacity`) are not measured | Implementation *(backfilled)* |"
+        },
+        {
+          "file": "components/memory-tier/specs/001-memory-tier/spec.md",
+          "line": 239,
+          "old": "When the `telemetry` feature is enabled, a failed `try_read`/`try_write` first attempt bumps the corresponding lock-contention counter before blocking.",
+          "new": "When the `telemetry` feature is enabled, the measured paths (`insert`, `remove`, `evict_next` for the write lock; `get`, `batch_touch` for the read lock) first try `try_write`/`try_read` and, if that fails, bump the corresponding lock-contention counter before blocking."
+        }
+      ],
+      "note": "If P3 is applied, change 'for which the policy returned a victim' to 'that freed a slot'.",
+      "approved_by": "Cornel Constantinescu, 2026-10-14"
     },
     {
-      "requirement": "IMemoryTier-doc-verified-claims / SC-8",
-      "direction": "BACKFILL",
-      "rationale": "No proof artifacts exist under components/memory-tier/verif/ and no shards exist. Removed Success Criterion #8 ('10 formal properties verified with Creusot') and every 'Creusot P#' entry in the Verified column (FR-006/008/009/010/013/014/015/023). The interface-doc overclaiming (P4/P5/P10 'Verified') was already removed from components/interfaces/src/imemory_tier.rs; policy forbids re-adding it. A residual 'same shard as key' phrase remains in the interface's evict_next_for_key doc comment (out of this component's edit scope).",
-      "before": "SC-8: '10 formal properties verified with Creusot (21 verification conditions)'; FR Verified column entries 'Creusot P1/P2/P3/P4/P5/P8/P9/P10'",
-      "after": "SC-8 removed; Creusot annotations replaced with 'Unit test' or 'Implementation' as appropriate"
+      "id": "P7",
+      "requirement": "NFR-005",
+      "type": "BACKFILL",
+      "confidence": "HIGH",
+      "approved": true,
+      "spec_says": "Allocator uses BTreeMap for O(log n) first-fit search",
+      "spec_location": "components/memory-tier/specs/001-memory-tier/spec.md:188",
+      "code_does": "First-fit is a linear scan: iter().find in allocate, values().any in can_allocate; only map updates and coalescing lookups are O(log k)",
+      "code_location": "components/memory-tier/src/allocator.rs:42,53,55,59,76,80,86-88,91",
+      "edits": [
+        {
+          "file": "components/memory-tier/specs/001-memory-tier/spec.md",
+          "line": 188,
+          "old": "| NFR-005 | Allocator uses BTreeMap for O(log n) first-fit search | Implementation |",
+          "new": "| NFR-005 | Allocator keeps free regions in a BTreeMap keyed by offset: map updates and coalescing lookups are O(log k), and the first-fit search (`allocate`, `can_allocate`) is a linear scan, O(k), over the k free regions in offset order | Implementation |"
+        }
+      ],
+      "approved_by": "Cornel Constantinescu, 2026-10-14"
     },
     {
-      "requirement": "not_implemented: 16-way sharded allocator and slot map (FR-005/006/007, NFR-002)",
-      "direction": "BACKFILL",
-      "rationale": "Never-built design. Resolved by the FR-005/FR-006/FR-007 and NFR-002 backfills above — spec no longer mandates the unbuilt shard structure.",
-      "before": "(spec mandated a 16-way sharded allocator + per-shard slot maps)",
-      "after": "(spec now describes the single RwLock<Pool> allocator + HashMap slot map as built)"
+      "id": "P8",
+      "requirement": "D1 \u2014 US1 Test Coverage (FR-012)",
+      "type": "BACKFILL",
+      "confidence": "HIGH",
+      "approved": true,
+      "spec_says": "`peek_does_not_update_eviction_order` - verifies peek does not update eviction order",
+      "spec_location": "components/memory-tier/specs/001-memory-tier/spec.md:41",
+      "code_does": "The test only asserts peek(0).is_some()",
+      "code_location": "components/memory-tier/src/lib.rs:778-785",
+      "edits": [
+        {
+          "file": "components/memory-tier/specs/001-memory-tier/spec.md",
+          "line": 41,
+          "old": "- `peek_does_not_update_eviction_order` - verifies peek does not update eviction order",
+          "new": "- `peek_does_not_update_eviction_order` - verifies peek returns the entry; it does not yet check that eviction order is unchanged (FR-012 holds by inspection: `peek` makes no eviction-policy call)"
+        }
+      ],
+      "alternative": "ALIGN (test only): insert 0 and 1, peek(0), assert evict_next() == Some(0); keep the current wording.",
+      "approved_by": "Cornel Constantinescu, 2026-10-14"
     },
     {
-      "requirement": "not_implemented: Round-robin eviction counter (FR-013)",
-      "direction": "BACKFILL",
-      "rationale": "Never-built. Resolved by the FR-013 backfill — spec no longer mandates an evict_counter/round-robin cycling.",
-      "before": "(spec mandated an atomic round-robin shard counter for eviction)",
-      "after": "(spec now states victim selection is delegated to the eviction policy)"
+      "id": "P9",
+      "requirement": "U2 \u2014 eviction_policy receptacle disconnected after initialize (proposed FR-031)",
+      "type": "NEW_SPEC",
+      "confidence": "LOW",
+      "approved": false,
+      "spec_says": "FR-024 | Eviction policy is an external receptacle (IEvictionPolicy); Key Entities: IEvictionPolicy | Receptacle | External eviction strategy (required). Nothing about disconnection.",
+      "spec_location": "components/memory-tier/specs/001-memory-tier/spec.md:173,210",
+      "code_does": "insert/get/oldest_keys/evict_next/remove/touch/clear panic on eviction_policy.get().unwrap(); batch_touch silently returns",
+      "code_location": "components/memory-tier/src/lib.rs:340,398,441,451,491,522,539-542,612",
+      "draft_requirement": "| FR-031 | If the `eviction_policy` receptacle is not connected when an operation runs, the operation does not panic: `insert`/`remove`/`clear` return `NotInitialized(\"eviction_policy receptacle not connected\")` without changing pool state; `get`/`peek`/`evict_next`/`evict_next_for_key`/`oldest_keys`/`touch`/`batch_touch` return `None`, an empty `Vec`, or do nothing | Unit test |",
+      "options": [
+        "A (recommended): adopt FR-031, then ALIGN the code (replace 7 unwraps) and add a test",
+        "B: document that the receptacle must stay connected for the component's lifetime; disconnecting after initialize is a programming error that panics"
+      ],
+      "questions": [
+        "Is re-binding the eviction policy at runtime a supported operation?"
+      ],
+      "approval_note": "open decision (A: errors instead of panics / B: document must stay connected); record in align-tasks.md"
     },
     {
-      "requirement": "NFR-008",
-      "direction": "HUMAN_DECISION",
-      "rationale": "Three-way version conflict with no authoritative value: Cargo.toml = 0.1.0, define_component! macro = 0.3.0 (src/lib.rs:140), spec = 0.2.0. Backfilling requires choosing a single real version, which means editing Cargo.toml and src/lib.rs (out of scope) — and none of the three is obviously correct. Left spec text unchanged pending a maintainer decision to reconcile all three.",
-      "before": "Component version is 0.2.0",
-      "after": "(unchanged — pending maintainer reconciliation of Cargo.toml 0.1.0 / define_component! 0.3.0 / spec 0.2.0)"
+      "id": "P10",
+      "requirement": "plan.md / tasks.md sharded design vs spec.md",
+      "type": "SUPERSEDE",
+      "confidence": "HIGH",
+      "approved": true,
+      "spec_says": "Phase B decision: backfill this spec to match the working implementation \u2026 the sharded/formally-verified design described in earlier revisions was never built.",
+      "spec_location": "components/memory-tier/specs/001-memory-tier/spec.md:247-253",
+      "code_does": "Single RwLock<Pool>; evict_next_for_key is an alias; no verif/ directory",
+      "code_location": "components/memory-tier/src/lib.rs:76-85,479-481",
+      "edits": [
+        {
+          "file": "components/memory-tier/specs/001-memory-tier/plan.md",
+          "line": 184,
+          "old": "- The 16-way sharding design described throughout this plan (Memory Layout, Pointer Arithmetic, Concurrency Model, Key Design Decision #1 and #6) does **not** match the current single-pool implementation. This plan has been left as-is (describing the original sharded design) rather than rewritten, pending a decision on whether sharding is unfinished work or was intentionally dropped. See `.specify/sync/align-tasks.md` (\"sharding-not-implemented\") before treating this plan's architecture sections as current.",
+          "new": "- **SUPERSEDED (2026-08-20, Spec-Sync Phase B).** The 16-way sharding design described throughout this plan (Memory Layout, Pointer Arithmetic, Concurrency Model, Key Design Decision #1 and #6, and the Creusot P4/P5 properties) was never built and has been dropped. The single `RwLock<Pool>` implementation is authoritative, and `spec.md` (FR-005/006/007/013/014/021, NFR-002) describes it. Treat those sections of this plan as history, not as the current design."
+        },
+        {
+          "file": "components/memory-tier/specs/001-memory-tier/tasks.md",
+          "line": 24,
+          "old": "- [ ] Add test for evict_next_for_key targeting correct shard",
+          "new": "- [~] (superseded 2026-08-20: no shards / no Creusot artifacts) Add test for evict_next_for_key targeting correct shard"
+        },
+        {
+          "file": "components/memory-tier/specs/001-memory-tier/tasks.md",
+          "line": 16,
+          "old": "- [ ] Verify Creusot verification conditions still discharge",
+          "new": "- [~] (superseded 2026-08-20: no shards / no Creusot artifacts) Verify Creusot verification conditions still discharge"
+        },
+        {
+          "file": "components/memory-tier/specs/001-memory-tier/tasks.md",
+          "line": 37,
+          "old": "- [ ] Add architecture diagram showing shard layout and pointer arithmetic",
+          "new": "- [~] (superseded 2026-08-20: no shards / no Creusot artifacts) Add architecture diagram showing shard layout and pointer arithmetic"
+        },
+        {
+          "file": "components/memory-tier/specs/001-memory-tier/tasks.md",
+          "line": 43,
+          "old": "- [ ] Evaluate configurable shard count based on hardware thread count",
+          "new": "- [~] (superseded 2026-08-20: no shards / no Creusot artifacts) Evaluate configurable shard count based on hardware thread count"
+        },
+        {
+          "file": "components/memory-tier/specs/001-memory-tier/tasks.md",
+          "line": 13,
+          "old": "- [ ] Confirm all 12 unit tests in lib.rs pass (`cargo test -p memory-tier`)",
+          "new": "- [ ] Confirm all 12 unit tests in lib.rs and the 1 regression test in `repair_test_insert_track_failure.rs` pass (`cargo test -p memory-tier`)"
+        }
+      ],
+      "approved_by": "Cornel Constantinescu, 2026-10-14"
     }
   ]
 }

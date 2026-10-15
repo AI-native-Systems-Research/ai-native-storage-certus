@@ -357,14 +357,25 @@ impl IMemoryTier for MemoryTierComponent {
             return Err(MemoryTierError::AlreadyExists(key));
         }
 
-        let offset = pool
-            .allocator
-            .allocate(size as usize)
-            .ok_or(MemoryTierError::PoolFull)?;
+        // Check for room before changing anything, so that a refusal by the
+        // eviction policy below leaves the pool exactly as it was.
+        if !pool.allocator.can_allocate(size as usize) {
+            return Err(MemoryTierError::PoolFull);
+        }
 
         let eviction_handle = ep
             .track(state.pool_id, key, BlockSemantics::default())
-            .unwrap();
+            .map_err(|e| {
+                MemoryTierError::NotInitialized(format!(
+                    "eviction policy refused to track key {key}: {e}"
+                ))
+            })?;
+
+        // Cannot fail: `can_allocate` held under the same write lock.
+        let Some(offset) = pool.allocator.allocate(size as usize) else {
+            let _ = ep.remove(eviction_handle);
+            return Err(MemoryTierError::PoolFull);
+        };
         pool.slots.insert(
             key,
             Slot {
@@ -773,3 +784,7 @@ mod tests {
         assert!(result.is_some());
     }
 }
+
+#[cfg(test)]
+#[path = "repair_test_insert_track_failure.rs"]
+mod repair_test_insert_track_failure;
