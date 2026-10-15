@@ -203,7 +203,17 @@ forward to broadcast remote-lookup.
 Mixing them would reintroduce the O(nodes) fan-out the design exists to avoid, and make
 results uninterpretable.
 
-## Open questions for the plan phase
+## Plan-phase questions, resolved
+
+OQ1 and OQ2 are resolved below as **D13** and **D14**, and OQ3 as **D15**. **OQ4** — whether
+`PushStatus` extends to carry the tier distinction or a new outcome type appears alongside it
+— is resolved by `contracts/itransfer_endpoint.md` ("Relationship to
+`IRemoteLookupRdmaInitiator`"): `PushStatus` widens to `EntryOutcome`, and can collapse back
+to `PushStatus` at the boundary at cutover time, since the legacy caller does not use the tier
+information. FR-019 compatibility is therefore unaffected.
+
+Only **OQ5** remains open, deliberately, and only in part — see *Deferred to the next layer
+up* at the end of this document.
 
 ## D13 — Receptacle set: look up through the dispatch map, not the memory tier
 
@@ -277,11 +287,14 @@ codec for `touch()`+`lookup()` (`2fae06c8`) and a fallback for servers lacking T
 The fix keeps the cache but trusts an entry for only 1 ms. Note for this component: the
 wire op list now has 16 opcodes, and any documentation here that enumerates them should
 include TouchCheck.
-- **OQ3 — bounce pool needs two registrations**: `ibv_reg_mr` for RDMA *and* SPDK-DMA-able
-  for the device read. `gpu-services::prepare_memory_for_spdk` looks like the existing
-  primitive for the latter; confirm it applies to host hugepages, not just GPU memory.
-- **OQ4 — does `PushStatus` extend** to carry `hit_memory_tier | hit_block_tier | miss`, or
-  does a new outcome type appear alongside it? Affects FR-019 compatibility.
-- **OQ5 — message framing and receive-buffer sizing.** Deliberately deferred: design
-  bottom-up, settle the transfer mechanism first, then the framing, then the shared-memory
-  queue message into the destination.
+
+## Deferred to the next layer up
+
+- **OQ5 (in part) — the shared-memory queue message** from the connector into the destination
+  endpoint. Deliberately deferred, per the bottom-up order: settle the transfer mechanism
+  first, then the framing, then this. Tracked as task T067.
+
+The other half of OQ5 — **message framing and receive-buffer sizing** — is now **settled** in
+`contracts/wire-protocol.md`: a 24-byte header with a fused `(version << 16) | kind` opcode,
+24-byte entries of `(key, addr, size, rkey)`, and 340 entries per `OP_FETCH` in an 8 KiB
+buffer, with `max_entries` derived from the buffer size rather than configured.

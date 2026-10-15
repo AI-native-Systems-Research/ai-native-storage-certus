@@ -32,8 +32,9 @@ actual residency.
 arrives over zyre, and it invokes a push with `(key, remote-region)` pairs. It does not use
 verbs messages, context IDs, or the reply path. It sees no behaviour change.
 
-**Independently testable**: the existing `remote-lookup` test layer and the T034 hardware
-loopback test pass against the new endpoint with messaging unused.
+**Independently testable**: the existing `remote-lookup` test layer and the hardware loopback
+test `remote-lookup-rdma-initiator/src/loopback_test.rs::loopback_push_writes_into_remote_buffer`
+pass against the new endpoint with messaging unused.
 
 ### User Story 3 - The source serves an entry that has been demoted to SSD (Priority: P3)
 
@@ -157,8 +158,9 @@ unchanged.
 
 - **SC-001**: A destination fetches a requested key run from one named peer with **zero**
   zyre messages and **zero** messages to any third node.
-- **SC-002**: The existing `remote-lookup` test layer and the T034 loopback test pass
-  against this endpoint with messaging unused.
+- **SC-002**: The existing `remote-lookup` test layer and the initiator's
+  `loopback_push_writes_into_remote_buffer` hardware loopback test pass against this endpoint
+  with messaging unused.
 - **SC-003**: The crate builds and unit-tests with `--no-default-features` equivalent: no
   rdma-core, no zyre.
 - **SC-004**: Peak concurrently held read pins on a source never exceeds the configured
