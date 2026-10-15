@@ -1,0 +1,192 @@
+# Feature Specification: Explicit certus-to-certus KV cache transfer over a symmetric RDMA endpoint
+
+**Feature Branch**: `001-rdma-cache-transfer`
+
+**Created**: 2026-10-14
+
+**Status**: Draft
+
+**Input**: User description: "Symmetric RDMA endpoint with verbs messaging for explicit certus-to-certus KV cache transfer, as an alternative to broadcast remote-lookup"
+
+## User Scenarios & Testing *(mandatory)*
+
+### User Story 1 - Destination fetches a prefix from a named peer (Priority: P1)
+
+A certus instance is asked for a run of block keys it does not hold. An external
+decision-maker (llm-d, via `kv_transfer_params`) has already named a single peer believed
+to hold them. The destination reserves unpublished slots in its own memory tier, opens (or
+reuses) one RDMA connection to that peer, and sends a single request naming the keys and
+the landing slots. The source pushes the values it holds directly into those slots and
+replies with a per-key outcome. The destination publishes the slots that arrived and
+releases the rest.
+
+No broadcast, no peer polling, no reap: exactly one peer is asked, exactly once.
+
+**Independently testable**: two endpoints over RDMA loopback (or the mock seam); assert the
+requested keys land in the named slots and the reply's per-key outcomes match the source's
+actual residency.
+
+### User Story 2 - The existing broadcast remote-lookup keeps working (Priority: P2)
+
+`remote-lookup` continues to drive transfers exactly as it does today: the control plane
+arrives over zyre, and it invokes a push with `(key, remote-region)` pairs. It does not use
+verbs messages, context IDs, or the reply path. It sees no behaviour change.
+
+**Independently testable**: the existing `remote-lookup` test layer and the T034 hardware
+loopback test pass against the new endpoint with messaging unused.
+
+### User Story 3 - The source serves an entry that has been demoted to SSD (Priority: P3)
+
+A requested key is resident on the source's block device rather than in its memory tier.
+The source reads it into a buffer from an RDMA-registered pool, pushes from there, and
+reports `hit_ssd`. Its own memory tier is **not** polluted: no promotion occurs, so serving
+a peer does not evict the source's own working set.
+
+**Independently testable**: force a key to the block tier, request it, assert the value
+arrives, the reply says `hit_ssd`, and the source's memory-tier occupancy and LRU order are
+unchanged.
+
+### Edge Cases
+
+- **Source does not hold a requested key.** Reported as `miss` in the reply. The source
+  does **not** fall back to broadcast remote-lookup. The destination releases that slot and
+  lets the caller recompute.
+- **Destination cannot reserve all slots.** It requests only what it reserved; the shortfall
+  is simply not fetched.
+- **Source is short of bounce buffers, or destination short of evictable space.** The
+  transfer is split into chunks internally. Neither side fails the request for want of a
+  transient resource.
+- **Peer process dies mid-transfer.** The connection closes; each side releases its own
+  resources. The destination's slots are reclaimed only after its queue pair is torn down
+  (teardown-before-reclaim).
+- **Peer hangs or partitions with the connection open.** Detected by deadline, not by
+  connection state. In research configuration the request **fails loudly** with full
+  diagnostic state; see FR-016.
+- **Duplicate or overlapping requests for the same key.** Pins are reference-counted;
+  concurrent pushes of one key are safe.
+- **Key present but stored size does not match the requested region.** Treated as a miss.
+
+## Requirements *(mandatory)*
+
+### Functional Requirements
+
+**Endpoint and connections**
+
+- **FR-001**: The endpoint MUST be symmetric: a queue pair may be inbound-accepted or
+  outbound-initiated, and **either** may post work requests. The current split — responder
+  accepts but never posts, initiator connects and posts — MUST NOT constrain the new path.
+- **FR-002**: At most one connection per peer pair MUST be used, reused across requests, and
+  established on first need.
+- **FR-003**: The endpoint MUST build and unit-test with default features — no rdma-core
+  present — over an in-process transport seam, as both existing crates do today.
+- **FR-004**: The endpoint MUST NOT depend on zyre.
+
+**Request / reply messaging**
+
+- **FR-005**: The endpoint MUST post receive buffers unconditionally, whether or not the
+  caller uses messaging.
+- **FR-006**: A transfer request MUST carry: a context ID, the destination's rkey, base
+  address, per-entry size, and a list of `(block key, landing slot index)` pairs.
+- **FR-007**: A transfer reply MUST carry the context ID and one outcome per requested key,
+  from `{ hit_memory_tier, hit_block_tier, miss }`, in request order.
+- **FR-008**: Because landing slots are not contiguous, the source MUST issue one RDMA write
+  per entry rather than one per batch.
+
+**Per-entry handling on the source**
+
+- **FR-009**: Residency determination and pinning MUST be atomic. The source MUST obtain
+  location and pin in a single dispatch-map lookup, which returns memory-tier and
+  block-tier answers already pinned. It MUST NOT determine residency with an unpinned probe
+  and then pin.
+- **FR-010**: The source MUST NOT release a read reference for an answer that was never
+  pinned (`NotExist`, size mismatch). Doing so decrements another reader's pin.
+- **FR-011**: Pins MUST be held and released **per entry**, not per batch. A memory-tier
+  pin is released when its RDMA write completes (matched by work-request id). A block-tier
+  pin is released as soon as the device read into the bounce buffer completes — before the
+  write is posted — since the data has been copied.
+- **FR-012**: Block-tier entries MUST be served from an RDMA-registered buffer pool. The
+  source MUST NOT promote them into its memory tier to serve a peer.
+- **FR-013**: The source MAY process a request list concurrently, bounded by the credit
+  limits in FR-014.
+
+**Resource bounds** — three distinct domains, separately configured and named
+
+- **FR-014**: The endpoint MUST bound each of:
+  - **send-queue credits** — in-flight RDMA writes per connection; this transitively bounds
+    held read pins, which is the existing rationale for the bound;
+  - **message credits** — outstanding requests against the peer's posted receive buffers.
+    The destination decrements on send and increments on reply; a send MUST block at zero;
+  - **bounce-buffer occupancy** — concurrent block-tier-served entries.
+- **FR-015**: On exhaustion of any bound, the endpoint MUST chunk internally and make
+  progress, not fail.
+
+**Failure handling**
+
+- **FR-016**: A destination-side deadline MUST detect a request that is neither fulfilled
+  nor refused. Its action MUST be configurable, defaulting to **fail loudly** — log the key
+  range, peer, chunk and queue-pair state, then fail the request. A degrading action
+  (report what arrived and let the caller recompute) is deferred, not implemented.
+- **FR-017**: The destination MUST NOT reclaim or publish a landing slot until it is certain
+  no write can still land in it — queue-pair teardown MUST precede reclaim.
+- **FR-018**: A partially written entry MUST NOT be published. Landing slots follow
+  reserve → arrive → commit/abort, as local stores do.
+
+**Compatibility**
+
+- **FR-019**: The endpoint MUST expose a push entry point usable by `remote-lookup`
+  unchanged: `(endpoint, [(key, remote-region)], completion)` with one status per item in
+  order, and no messaging involved.
+- **FR-020**: `remote-lookup` MUST NOT be modified as part of delivering P1. Re-pointing it
+  at this endpoint, and retiring `remote-lookup-rdma-initiator` and
+  `remote-lookup-rdma-responder`, is a later task.
+
+### Key Entities
+
+- **TransferContext** — one in-flight request: context ID, peer, key list, landing slots,
+  outstanding-entry count, deadline.
+- **TransferRequest / TransferReply** — the two verbs messages of FR-006 / FR-007.
+- **RemoteRegion** — a landing slot: rkey, address, size. Already exists.
+- **EntryOutcome** — `hit_memory_tier | hit_block_tier | miss`.
+- **BounceBuffer** — a registered buffer leased from a fixed pool for block-tier serving.
+- **PeerConnection** — one queue pair plus its three credit counters, usable in both
+  directions.
+
+## Success Criteria *(mandatory)*
+
+### Measurable Outcomes
+
+- **SC-001**: A destination fetches a requested key run from one named peer with **zero**
+  zyre messages and **zero** messages to any third node.
+- **SC-002**: The existing `remote-lookup` test layer and the T034 loopback test pass
+  against this endpoint with messaging unused.
+- **SC-003**: The crate builds and unit-tests with `--no-default-features` equivalent: no
+  rdma-core, no zyre.
+- **SC-004**: Peak concurrently held read pins on a source never exceeds the configured
+  send-queue credit limit, however long the requested key list is.
+- **SC-005**: Serving a block-tier entry leaves the source's memory-tier occupancy and LRU
+  order unchanged.
+- **SC-006**: A request naming keys the peer does not hold returns all-`miss` and generates
+  no broadcast traffic.
+- **SC-007**: With bounce buffers or landing slots artificially scarce, a large request
+  still completes, in chunks.
+- **SC-008**: The duplicated verbs FFI layer is defined once. (Today
+  `remote-lookup-rdma-initiator/src/ffi.rs` and
+  `remote-lookup-rdma-responder/src/ffi.rs` declare 28 identical public items.)
+
+## Assumptions
+
+- **A single peer is chosen externally.** llm-d names the source; this endpoint does not
+  discover or select peers, and deliberately does not broadcast.
+- **The destination already knows the keys.** It computes block hashes locally, so the
+  request names a contiguous run following its own local prefix.
+- **Transfers are host memory to host memory.** GPU memory is not involved; the existing
+  tier→GPU load path is unchanged, so a completed transfer is indistinguishable from a
+  local tier hit.
+- **Block-tier serving is a completeness path, not a hot path.** Measured workload-generator
+  runs show single-digit-percent SSD hit rates, and a well-sized memory tier avoids them
+  altogether; the bounce-buffer pool is sized accordingly, and SSD/RDMA pipelining is out of
+  scope.
+- **Single-tenant trust.** RDMA write access into a peer's landing slots is acceptable;
+  no cross-tenant isolation is attempted.
+- **Research posture over production resilience.** Where a safety net would mask a bug and
+  still yield a plausible benchmark number, the endpoint fails loudly instead. See FR-016.
