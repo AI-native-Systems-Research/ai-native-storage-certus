@@ -33,6 +33,15 @@ impl FreeList {
         self.used
     }
 
+    /// Whether `allocate(size)` would succeed now, without changing anything.
+    pub fn can_allocate(&self, size: usize) -> bool {
+        if size == 0 {
+            return false;
+        }
+        let aligned_size = size.next_multiple_of(ALIGNMENT);
+        self.free_regions.values().any(|&s| s >= aligned_size)
+    }
+
     /// Allocate `size` bytes (rounded up to 4 KiB alignment).
     /// Returns the byte offset into the pool, or `None` if no space.
     pub fn allocate(&mut self, size: usize) -> Option<usize> {

@@ -10,10 +10,10 @@
 
 ## Validate Test Coverage
 
-- [ ] Confirm all 12 unit tests in lib.rs pass (`cargo test -p memory-tier`)
+- [ ] Confirm all 12 unit tests in lib.rs and the 1 regression test in `repair_test_insert_track_failure.rs` pass (`cargo test -p memory-tier`)
 - [ ] Confirm all 9 allocator tests pass
 - [ ] Identify and document any untested error paths
-- [ ] Verify Creusot verification conditions still discharge
+- [~] (superseded 2026-08-20: no shards / no Creusot artifacts) Verify Creusot verification conditions still discharge
 
 ## Address Test Gaps
 
@@ -21,7 +21,7 @@
 - [ ] Add stress test for allocator fragmentation (random size allocation/deallocation)
 - [ ] Add test for batch_touch with mixed present/absent keys
 - [ ] Add test for oldest_keys ordering correctness
-- [ ] Add test for evict_next_for_key targeting correct shard
+- [~] (superseded 2026-08-20: no shards / no Creusot artifacts) Add test for evict_next_for_key targeting correct shard
 
 ## Add Benchmarks
 
@@ -34,13 +34,13 @@
 ## Documentation
 
 - [ ] Verify README.md matches current source layout (lru.rs removed, eviction delegated)
-- [ ] Add architecture diagram showing shard layout and pointer arithmetic
+- [~] (superseded 2026-08-20: no shards / no Creusot artifacts) Add architecture diagram showing shard layout and pointer arithmetic
 - [ ] Document SPDK vs mmap allocation path differences
 - [ ] Document NUMA binding behavior and fallback
 
 ## Future Enhancements (Backlog)
 
-- [ ] Evaluate configurable shard count based on hardware thread count
+- [~] (superseded 2026-08-20: no shards / no Creusot artifacts) Evaluate configurable shard count based on hardware thread count
 - [ ] Design write-through pinning (NotEvictable usage)
 - [ ] Add structured metrics (hit rate, eviction rate, fragmentation)
 - [ ] Investigate buddy allocator for mixed-size workload support

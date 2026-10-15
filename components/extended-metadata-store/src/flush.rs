@@ -9,7 +9,11 @@ use crate::on_disk::{self, Superblock};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+/// Longest sleep between dirty-count checks while waiting for the timer:
+/// `put`/`delete` do not wake the worker, so it polls for the threshold.
+const THRESHOLD_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 /// Flush the current entries to disk using the dual-region ping-pong strategy.
 ///
@@ -77,8 +81,16 @@ pub struct FlushManager {
     shutdown: Arc<AtomicBool>,
     notify: Arc<(Mutex<bool>, Condvar)>,
     completed_seq: Arc<AtomicU64>,
-    flush_in_progress: Arc<(Mutex<bool>, Condvar)>,
+    flush_state: Arc<(Mutex<FlushTickets>, Condvar)>,
     worker: Option<thread::JoinHandle<()>>,
+}
+
+/// `trigger_flush` requests: each caller takes ticket `requested + 1`; the
+/// worker sets `completed` to the last ticket taken before its snapshot.
+#[derive(Debug, Default)]
+struct FlushTickets {
+    requested: u64,
+    completed: u64,
 }
 
 /// Shared state passed to the flush worker thread.
@@ -86,7 +98,7 @@ struct FlushWorkerContext {
     shutdown: Arc<AtomicBool>,
     notify: Arc<(Mutex<bool>, Condvar)>,
     completed_seq: Arc<AtomicU64>,
-    flush_in_progress: Arc<(Mutex<bool>, Condvar)>,
+    flush_state: Arc<(Mutex<FlushTickets>, Condvar)>,
     config: FlushConfig,
     // Callbacks to interact with the component
     snapshot_fn: Box<dyn Fn() -> Vec<(String, Vec<u8>)> + Send>,
@@ -109,13 +121,13 @@ impl FlushManager {
         let shutdown = Arc::new(AtomicBool::new(false));
         let notify = Arc::new((Mutex::new(false), Condvar::new()));
         let completed_seq = Arc::new(AtomicU64::new(superblock.flush_seq));
-        let flush_in_progress = Arc::new((Mutex::new(false), Condvar::new()));
+        let flush_state = Arc::new((Mutex::new(FlushTickets::default()), Condvar::new()));
 
         let ctx = FlushWorkerContext {
             shutdown: shutdown.clone(),
             notify: notify.clone(),
             completed_seq: completed_seq.clone(),
-            flush_in_progress: flush_in_progress.clone(),
+            flush_state: flush_state.clone(),
             config,
             snapshot_fn,
             dirty_count_fn,
@@ -132,7 +144,7 @@ impl FlushManager {
             shutdown,
             notify,
             completed_seq,
-            flush_in_progress,
+            flush_state,
             worker: Some(worker),
         }
     }
@@ -140,12 +152,13 @@ impl FlushManager {
     /// Trigger an immediate flush and block until it completes.
     /// Returns immediately if there are no dirty entries (already durable).
     pub fn trigger_flush(&self) -> Result<(), String> {
-        // Mark that a flush is requested (before signaling worker)
-        {
-            let (lock, _) = &*self.flush_in_progress;
-            let mut in_progress = lock.lock().unwrap();
-            *in_progress = true;
-        }
+        // Take a ticket (before signaling worker)
+        let ticket = {
+            let (lock, _) = &*self.flush_state;
+            let mut tickets = lock.lock().unwrap();
+            tickets.requested += 1;
+            tickets.requested
+        };
 
         // Signal the worker to wake and flush
         {
@@ -155,10 +168,10 @@ impl FlushManager {
             cvar.notify_one();
         }
 
-        // Wait until the worker marks the flush complete
-        let (lock, cvar) = &*self.flush_in_progress;
+        // Wait until a flush whose snapshot was taken after our ticket completes
+        let (lock, cvar) = &*self.flush_state;
         let _guard = cvar
-            .wait_while(lock.lock().unwrap(), |in_progress| *in_progress)
+            .wait_while(lock.lock().unwrap(), |tickets| tickets.completed < ticket)
             .unwrap();
 
         Ok(())
@@ -170,21 +183,38 @@ impl FlushManager {
     }
 
     fn worker_loop(ctx: FlushWorkerContext) {
+        // A threshold of 0 would wake the worker with nothing dirty.
+        let threshold = ctx.config.dirty_threshold.max(1);
+        // Cleared by a failed flush, so a failing device is retried on the
+        // timer rather than in a hot loop; set again by a successful flush.
+        let mut threshold_armed = true;
         loop {
-            // Wait for signal or timeout
+            // Wait for signal, timeout, or the dirty count reaching the threshold
+            // (`None`: the interval is too long to represent, the timer never fires)
+            let deadline = Instant::now().checked_add(ctx.config.interval);
             let (lock, cvar) = &*ctx.notify;
             let mut signaled = lock.lock().unwrap();
-            if !*signaled {
-                let result = cvar.wait_timeout(signaled, ctx.config.interval).unwrap();
+            while !*signaled && !(threshold_armed && (ctx.dirty_count_fn)() >= threshold) {
+                let now = Instant::now();
+                let left = deadline.map_or(Duration::MAX, |d| d.saturating_duration_since(now));
+                if left.is_zero() {
+                    break;
+                }
+                let slice = left.min(THRESHOLD_POLL_INTERVAL);
+                let result = cvar.wait_timeout(signaled, slice).unwrap();
                 signaled = result.0;
             }
             let was_signaled = *signaled;
             *signaled = false;
             drop(signaled);
 
+            // Tickets taken so far are served by this pass: their writes
+            // precede the dirty check and snapshot below.
+            let serving = ctx.flush_state.0.lock().unwrap().requested;
+
             if ctx.shutdown.load(Ordering::Acquire) {
                 // Final flush before exit
-                Self::do_flush(&ctx);
+                Self::do_flush(&ctx, serving);
                 return;
             }
 
@@ -193,26 +223,20 @@ impl FlushManager {
             if dirty == 0 {
                 // If explicitly signaled (force_flush) but nothing dirty, just mark done
                 if was_signaled {
-                    let (lock, cvar) = &*ctx.flush_in_progress;
-                    let mut in_progress = lock.lock().unwrap();
-                    *in_progress = false;
+                    let (lock, cvar) = &*ctx.flush_state;
+                    let mut tickets = lock.lock().unwrap();
+                    tickets.completed = tickets.completed.max(serving);
                     cvar.notify_all();
                 }
                 continue;
             }
 
-            Self::do_flush(&ctx);
+            threshold_armed = Self::do_flush(&ctx, serving);
         }
     }
 
-    fn do_flush(ctx: &FlushWorkerContext) {
-        // Mark in-progress
-        {
-            let (lock, _cvar) = &*ctx.flush_in_progress;
-            let mut in_progress = lock.lock().unwrap();
-            *in_progress = true;
-        }
-
+    /// Returns whether the flush succeeded.
+    fn do_flush(ctx: &FlushWorkerContext, serving: u64) -> bool {
         let entries = (ctx.snapshot_fn)();
         let mut sb = ctx.superblock.lock().unwrap();
         let result = flush_to_disk(&ctx.client, &mut sb, &entries);
@@ -224,13 +248,15 @@ impl FlushManager {
             ctx.completed_seq.store(new_seq, Ordering::Release);
         }
 
-        // Mark complete and notify waiters
+        // Mark the served tickets complete and notify waiters
         {
-            let (lock, cvar) = &*ctx.flush_in_progress;
-            let mut in_progress = lock.lock().unwrap();
-            *in_progress = false;
+            let (lock, cvar) = &*ctx.flush_state;
+            let mut tickets = lock.lock().unwrap();
+            tickets.completed = tickets.completed.max(serving);
             cvar.notify_all();
         }
+
+        result.is_ok()
     }
 }
 
@@ -249,3 +275,11 @@ impl Drop for FlushManager {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "repair_test_flush_lost_dirty.rs"]
+mod repair_test_flush_lost_dirty;
+
+#[cfg(test)]
+#[path = "repair_test_flush_threshold.rs"]
+mod repair_test_flush_threshold;

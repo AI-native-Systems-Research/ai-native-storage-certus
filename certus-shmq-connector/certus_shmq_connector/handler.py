@@ -203,10 +203,25 @@ def _build_worker_class():
         def get_finished(self) -> "list":
             results = []
             now = time.monotonic()
-            # Reap completed jobs in submission order (FIFO), stopping at the
-            # first still-running job so ordering guarantees are preserved.
-            while self._pending and self._pending[0].future.done():
-                job = self._pending.popleft()
+            # Reap EVERY completed job, regardless of its position in the queue —
+            # not just a leading FIFO run. The previous version stopped at the
+            # first still-running job, so one slow transfer withheld all the
+            # completed transfers queued behind it. vLLM keeps a request's GPU
+            # blocks pinned and defers the request until its transfer jobs are
+            # reported finished (OffloadingConnectorScheduler.get_num_new_matched_
+            # tokens returns None while transfer_jobs is non-empty), so withholding
+            # completions pins blocks and defers requests; under offload saturation
+            # (256+ concurrent streams) this collapses into a capacity deadlock
+            # (0 running / N waiting, GPU idle). vLLM matches completions by
+            # explicit job_id in update_connector_output, so out-of-order reaping
+            # is correct — in-order delivery was never required by the consumer.
+            if not self._pending:
+                return results
+            remaining: deque[_PendingJob] = deque()
+            for job in self._pending:
+                if not job.future.done():
+                    remaining.append(job)
+                    continue
                 try:
                     success = bool(job.future.result())
                 except Exception as e:  # noqa: BLE001 - report as a failed transfer
@@ -224,6 +239,7 @@ def _build_worker_class():
                         transfer_type=job.transfer_type,
                     )
                 )
+            self._pending = remaining
             return results
 
         def wait(self, job_ids: set) -> None:

@@ -1,5 +1,84 @@
 # Sync Apply Report
 
+## Pass: 2026-10-14 (branch `fix/zyre-printf-format`, batch)
+
+Applied: 2026-10-14T18:23:53Z
+Based on: `.specify/sync/proposals.{json,md}` generated 2026-10-14T17:38:10Z at `85ae2a1f`
+Approved by: Cornel Constantinescu, 2026-10-14 (all 9 proposals `approved: true`)
+Mode: batch (no questions)
+
+### Backup
+
+Before editing, every touched file was copied to
+`.specify/sync/backups/20261014T182353Z/`. That covers
+`specs/001-zyre-bindings/{spec.md,data-model.md,research.md,contracts/izyre.md}`, plus the previous
+`apply-report.md` and `drift-report.md`.
+
+### Changes Made
+
+#### Specs Updated
+
+| Proposal | File | Requirement | Change Type |
+|----------|------|-------------|-------------|
+| P3 | `spec.md` (US2 narrative) | US2 | Modified: "iterator-based event streams… Send+Sync" → `recv()`/`try_recv()`, handle `Send` not `Sync` |
+| P3 | `spec.md` (US2 AS3) | US2 AS3 | Modified: "iterates over incoming events" → "receives incoming events (`recv()` / `try_recv()`)" |
+| P4 | `data-model.md` (ZyreNode) | FR-002 lifecycle | Modified: lifecycle line → `Created → Running → Draining → Done` |
+| P4 | `data-model.md` (ZyreNode) | FR-002 drop | Modified: Drop = `stop()` (zyre_stop only if `Running`), then `zyre_destroy()` |
+| P5 | `contracts/izyre.md` (create_node postconditions) | create_node | Modified: no discovery/messaging before `start()`; gossip endpoint is bound at creation |
+| P5 | `contracts/izyre.md` (create_node errors) | create_node | Modified: `InvalidConfig` also covers a gossip endpoint that cannot be bound |
+| P5 | `research.md` (R5) | create_node | Modified: an unbindable endpoint is detected after allocation; the node is destroyed before the error returns |
+| P6 | `data-model.md` (NodeConfig table) | FR-005 headers | Modified: headers announced byte-for-byte |
+| P6 | `data-model.md` (after Validation) | FR-005 / SC-005 | Added: "**Verbatim strings**" paragraph (constant `"%s"` format for printf-style setters) |
+| P7 | `contracts/izyre.md` (Thread Safety) | create_node thread safety | Modified: creation serialised by a process-wide lock (CZMQ unlocked global init) |
+| P8 | `data-model.md` (NodeConfig table) | FR-006 endpoint | Modified: `endpoint` only applied in gossip mode, ignored when `gossip` is `None` |
+| P9 | `spec.md` (FR-010) | FR-010 | Modified: `ZYRE_BUILD_DIR` override, default `deps/zyre-build/`, DT_RPATH for libczmq/libzmq |
+| — | `spec.md` (header) | metadata | Added: `**Last Modified**: 2026-10-14 (spec-sync apply P3-P9)` |
+
+Every edit is the exact old→new text from `proposals.md`/`proposals.json`. Each old string matched
+exactly once. P8 was applied as the BACKFILL. Its ALIGN alternative, rejecting `endpoint` without
+`gossip`, was not chosen.
+
+#### New Specs Created
+
+None.
+
+#### Supersede
+
+None (no SUPERSEDE proposals).
+
+#### Implementation Tasks Generated
+
+There are 2 tasks in `.specify/sync/align-tasks.md`, one for P1 (FR-012, interior NUL panics) and one
+for P2 (FR-005, timeouts above `i32::MAX`). Following the approval note *"approved as an ALIGN task
+only: record in align-tasks.md, no code change in this PR"*, no code was changed. The
+accompanying `data-model.md` validation text for P1 and P2 was **not** applied. It is recorded in
+each task, to land together with the code fix, so the spec does not state a rule the code does not
+yet enforce.
+
+### Not Applied
+
+| Proposal | Reason |
+|----------|--------|
+| — | Every proposal was approved and handled (7 applied, 2 turned into tasks). No unapproved proposal had an `approval_note`, so no open items were added. |
+
+Still open, never proposed (from `proposals.json` `not_proposed`): L1 (`zyre_set_interface` may be
+process-global; unverified), missing tests for `spec.md` edge case "nonexistent interface" and US1 AS4,
+`tests/api_safety.rs` not asserting `!Sync`, and `src/repair_test_header_percent.rs` not gated by
+`integration-tests`/`SERIAL_LOCK`.
+
+No source code, interfaces crate or any file outside `components/zyre/{specs,.specify/sync}/` was
+touched. No tests were run (spec text only; `deps/zyre-build/` is absent here).
+
+### Next Steps
+
+1. Review the spec diff: `git diff -- components/zyre/specs`.
+2. Commit the spec and sync changes, and re-stamp the `spec_sync_*` frontmatter with the script.
+3. Implement the P1 and P2 tasks in `align-tasks.md` in a follow-up PR.
+
+---
+
+## Pass: 2026-07-14
+
 Applied: 2026-07-14
 Based on: proposals from 2026-07-14 (P5 only)
 

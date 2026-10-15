@@ -1,131 +1,141 @@
 {
-  "generated": "pending",
+  "generated": "2026-10-14T00:00:00Z",
   "project": "extended-metadata-store",
+  "branch": "fix/extended-metadata-store-flush",
+  "git_commit": "2970e0a8",
+  "mode": "batch, read-only, static analysis (tests not executed: cargo test needs a permission this session did not have)",
   "summary": {
-    "specs_analyzed": 2,
-    "requirements_checked": 52,
-    "aligned": 41,
-    "drifted": 5,
+    "specs_analyzed": 1,
+    "requirements_checked": 36,
+    "aligned": 24,
+    "drifted": 7,
     "not_implemented": 0,
-    "unspecced_features": 3
+    "unverified": 5,
+    "unspecced_features": 5,
+    "parked": 1,
+    "conflicts": 5
+  },
+  "branch_fix_verification": {
+    "ticket_release_after_snapshot": "verified statically: src/flush.rs:156-161, :213, :240, :252-257, :172-175",
+    "mid_flush_writes_stay_dirty": "verified statically: src/lib.rs:99-105, :185-188, :206-209, :113-121",
+    "threshold_trigger": "verified statically: src/flush.rs:14-16, :187, :197-206",
+    "failure_propagation": "NOT fixed: src/flush.rs:177, :246-257"
   },
   "specs": [
     {
       "id": "001-extended-metadata-store",
-      "title": "Extended Metadata Store",
+      "title": "Feature Specification: Extended Metadata Store",
       "aligned": [
-        "FR-01",
-        "FR-02",
-        "FR-03",
-        "FR-04",
-        "FR-06",
-        "FR-07",
-        "FR-08",
-        "FR-09",
-        "FR-10",
-        "FR-11",
-        "FR-12",
-        "FR-13",
-        "FR-14",
-        "FR-15",
-        "FR-16",
-        "FR-17",
-        "NFR-01",
-        "NFR-02",
-        "NFR-03",
-        "NFR-04",
-        "NFR-05",
-        "NFR-06",
-        "NFR-08",
-        "NFR-09",
-        "NFR-10"
+        "FR-02", "FR-03", "FR-04", "FR-06", "FR-07", "FR-08", "FR-10", "FR-11", "FR-13", "FR-14", "FR-15", "FR-16", "FR-18",
+        "NFR-01", "NFR-02", "NFR-03", "NFR-05", "NFR-06", "NFR-07", "NFR-08", "NFR-09", "NFR-10", "NFR-11",
+        "SC-1"
       ],
+      "aligned_evidence": {
+        "FR-02": "src/lib.rs:192-200",
+        "FR-03": "src/lib.rs:202-211",
+        "FR-04": "src/lib.rs:213-219",
+        "FR-06": "src/lib.rs:66-67, :179-181",
+        "FR-07": "src/flush.rs:24-57",
+        "FR-08": "src/recovery.rs:23-59; src/lib.rs:147-162",
+        "FR-10": "src/recovery.rs:27-32, :89-113; src/lib.rs:150-154",
+        "FR-11": "src/flush.rs:14-16, :59-75, :185-206, :234",
+        "FR-13": "src/flush.rs:215-219, :263-277",
+        "FR-14": "src/lib.rs:76-121, :188, :209",
+        "FR-15": "src/lib.rs:40-64",
+        "FR-16": "src/lib.rs:44-46, :182-184, :193-195, :203-205, :214-216, :222-224",
+        "FR-18": "src/on_disk.rs:147-149",
+        "NFR-01": "src/lib.rs:48, :87, :100, :185, :196, :206, :217",
+        "NFR-02": "src/on_disk.rs:78, :110-113, :170, :186-189, :248-252, :276-283, :364-377",
+        "NFR-03": "src/on_disk.rs:60, :163, :222-229, :353-358",
+        "NFR-05": "src/lib.rs:26-38; Cargo.toml:8-10",
+        "NFR-06": "src/lib.rs:230-234",
+        "NFR-07": "src/test_support.rs:19-21, :59, :133, :169, :223",
+        "NFR-08": "src/block_io.rs:5, :11; src/test_support.rs:244",
+        "NFR-09": "src/on_disk.rs:379-410",
+        "NFR-10": "src/on_disk.rs:6, :91-94",
+        "NFR-11": "src/test_support.rs:275-284",
+        "SC-1": "src/lib.rs:247-354 (9 #[test])"
+      },
       "drifted": [
         {
           "requirement": "FR-05",
-          "spec_text": "force_flush() durability fix described as 'drafted on branch sync/spec-drift-sweep-20260807'.",
-          "actual": "Trigger-based fix already present in working tree; force_flush invokes installed FlushTrigger and blocks. Spec text stale; interface durability still unverified under testing/spdk.",
-          "location": "src/lib.rs:201-215",
-          "severity": "minor"
-        },
-        {
-          "requirement": "NFR-07",
-          "spec_text": "MockBlockDevice provides deterministic fault-injection testing supporting SC-002/SC-003.",
-          "actual": "MockBlockDevice impl IBlockDevice does not implement read_write_stats (trait requires it), so the testing/spdk test build does not compile; persistence and SSD tests cannot run.",
-          "location": "src/test_support.rs:171",
+          "spec_text": "force_flush() ensures all mutations are durable on disk: it invokes a durable-flush trigger installed by the wiring layer via attach_flush_trigger and blocks until it returns, mapping trigger errors to StorageError (spec.md:163)",
+          "actual": "force_flush maps trigger errors correctly (src/lib.rs:221-235), but the documented trigger FlushManager::trigger_flush always returns Ok(()) (src/flush.rs:177), because do_flush completes the served tickets whether or not flush_to_disk succeeded (src/flush.rs:246-257). A failed flush is therefore reported as durable. Spec line references (lib.rs:201-215/:111/:68) are stale; the current lines are :221-235/:131/:72.",
+          "location": "components/extended-metadata-store/src/flush.rs:177",
           "severity": "major"
         },
         {
-          "requirement": "SC-1/2/3/6/7",
-          "spec_text": "Unit/persistence/SSD tests, clippy, and docs are exercised by cargo/CI.",
-          "actual": "Crate is absent from root Cargo.toml members/default-members; CI never builds or tests it.",
-          "location": "Cargo.toml:23",
-          "severity": "moderate"
-        }
-      ],
-      "not_implemented": []
-    },
-    {
-      "id": "002-ssd-integration-test",
-      "title": "SSD Integration Test",
-      "aligned": [
-        "FR-001",
-        "FR-002",
-        "FR-003",
-        "FR-004",
-        "FR-005",
-        "FR-006",
-        "FR-008",
-        "FR-009",
-        "FR-010",
-        "FR-012",
-        "SC-001",
-        "SC-002",
-        "SC-003",
-        "SC-004",
-        "SC-005",
-        "SC-006"
-      ],
-      "drifted": [
-        {
-          "requirement": "FR-011",
-          "spec_text": "Test MUST use the standard IExtendedMetadataStore interface, not internal APIs.",
-          "actual": "Store creation and durability use inherent/internal APIs (initialize_from_client, snapshot_entries, mark_flushed, load_entries, flush::flush_to_disk); consequence of FR-05 no-op history.",
-          "location": "tests/integration_ssd.rs",
+          "requirement": "FR-09",
+          "spec_text": "Recovery falls back to inactive region if active region is corrupt (spec.md:167); Recovery Algorithm: verify header CRC and entry CRCs; if active region corrupt, try inactive region (spec.md:299-300)",
+          "actual": "Fallback happens only when the region header is corrupt or its flush_seq does not match (src/recovery.rs:53-66). A corrupt entry is skipped one sector at a time (src/on_disk.rs:341-344) and the region is accepted as a partial result, with no warning and no fallback. A multi-sector record misaligns the parse of every later record.",
+          "location": "components/extended-metadata-store/src/on_disk.rs:341",
           "severity": "moderate"
         },
         {
-          "requirement": "FR-007",
-          "spec_text": "Capacity exhaustion surfaced to the caller; test_capacity_exhaustion expects a put()-level capacity error.",
-          "actual": "put() enforces only ValueTooLarge; capacity is a flush-time String error inside flush::flush_to_disk, never mapped to CapacityExhausted, so the test passes trivially without reaching the exhaustion branch.",
-          "location": "src/flush.rs",
+          "requirement": "NFR-04",
+          "spec_text": "Crash consistency: partial flush never corrupts previously-committed data (spec.md:193); 'Crash during step 2: old active region is still valid' (spec.md:291)",
+          "actual": "After a fallback recovery, the superblock is returned unchanged (active_region still points at the corrupt region; src/recovery.rs:68-77). The next flush writes inactive_region_offset() (src/flush.rs:45-46), which is the only valid checkpoint. A crash before the superblock write (src/flush.rs:54) leaves both regions invalid, and recovery then formats the partition fresh (src/recovery.rs:79-84), losing all data and resetting flush_seq to 0.",
+          "location": "components/extended-metadata-store/src/recovery.rs:73",
           "severity": "moderate"
+        },
+        {
+          "requirement": "FR-01",
+          "spec_text": "put(key, value) stores arbitrary binary data (0 to 128 KiB) by string key (spec.md:159)",
+          "actual": "put does not limit key length (src/lib.rs:179). EntryRecord::serialize writes key_len as `len() as u16`, which truncates silently (src/on_disk.rs:233), but copies the full key (:242). Keys longer than 65535 bytes fail the CRC on recovery and are lost silently, along with entries after them.",
+          "location": "components/extended-metadata-store/src/on_disk.rs:233",
+          "severity": "moderate"
+        },
+        {
+          "requirement": "FR-12",
+          "spec_text": "Multiple force_flush() calls coalesce into single flush operation (spec.md:170; US6 AC2 spec.md:140; plan.md:32)",
+          "actual": "Coalescing is ticket-based: calls registered before a pass reads `requested` (src/flush.rs:213) share that pass; calls registered while a pass is in flight wait for the next pass (src/flush.rs:171-175). With nothing dirty, a call still waits for one worker wake-up, although no I/O happens (src/flush.rs:223-231). Doc comments src/flush.rs:79 and :153 are out of date.",
+          "location": "components/extended-metadata-store/src/flush.rs:154-178",
+          "severity": "minor"
+        },
+        {
+          "requirement": "FR-17",
+          "spec_text": "External persistence-wiring API (... snapshot_entries, mark_flushed ...) (spec.md:175); plan.md:101 'mark_flushed(new_seq) [reset dirty_count]'",
+          "actual": "snapshot_entries records the dirty count it covers (src/lib.rs:103-104); mark_flushed subtracts exactly that count and clears it (src/lib.rs:113-121). Without a snapshot before it, mark_flushed leaves the dirty count unchanged. An interleaved second snapshot_entries overwrites the single recorded slot (src/lib.rs:53), so only one flusher may drive the pair at a time.",
+          "location": "components/extended-metadata-store/src/lib.rs:113-121",
+          "severity": "minor"
+        },
+        {
+          "requirement": "SC-7",
+          "spec_text": "All public items have doc comments; cargo doc --no-deps is warning-free (spec.md:257)",
+          "actual": "Many public items have no doc comment: src/on_disk.rs:12-23, :27, :59, :85, :131, :139, :147, :155-158, :162, :176, :206-208, :214, :222, :227, :257, :353, :360; src/block_io.rs:12, :18; src/recovery.rs:14-16. cargo doc was not run.",
+          "location": "components/extended-metadata-store/src/on_disk.rs:12",
+          "severity": "minor"
         }
       ],
-      "not_implemented": []
+      "not_implemented": [],
+      "unverified": [
+        {"requirement": "SC-2", "reason": "tests not executed; 19 tests in tests/persistence.rs + 5 in src/repair_test_*.rs"},
+        {"requirement": "SC-3", "reason": "needs NVMe hardware; test_capacity_exhaustion (tests/integration_ssd.rs:526, arm :542) proves nothing"},
+        {"requirement": "SC-4", "reason": "tests not executed; crash_mid_flush_recovers_previous_state (tests/persistence.rs:687) does not cover the NFR-04 post-fallback scenario"},
+        {"requirement": "SC-5", "reason": "tests not executed; concurrent_stress_8_threads (tests/persistence.rs:417)"},
+        {"requirement": "SC-6", "reason": "cargo clippy not executed"}
+      ],
+      "parked": [
+        {
+          "item": "ExtendedMetadataStoreError::CapacityExhausted never constructed",
+          "location": "components/interfaces/src/iextended_metadata_store.rs:12; components/extended-metadata-store/tests/integration_ssd.rs:526-547",
+          "tracking": "align-tasks.md ALIGN-EMS-002"
+        }
+      ]
     }
   ],
   "unspecced": [
-    {
-      "feature": "Superblock::region_capacity_bytes() never-called public accessor",
-      "location": "src/on_disk.rs",
-      "lines": "142",
-      "suggested_spec": "Document as public on-disk-format API or remove."
-    },
-    {
-      "feature": "create_test_component_from_state() unused public test helper (testing-gated)",
-      "location": "src/test_support.rs",
-      "lines": "268",
-      "suggested_spec": "Document as test surface or remove."
-    },
-    {
-      "feature": "ExtendedMetadataStoreError::CapacityExhausted variant never constructed",
-      "location": "../interfaces/src/iextended_metadata_store.rs",
-      "lines": "12",
-      "suggested_spec": "Surface via an interface method or drop the variant."
-    }
+    {"id": "U1", "feature": "Ticket-based trigger_flush protocol (FlushTickets)", "location": "src/flush.rs:88-94, :152-178, :211-213, :223-231, :251-257", "lines": 45, "suggested_spec": "001 FR-12"},
+    {"id": "U2", "feature": "Threshold polling (10 ms), threshold clamp >=1, threshold disarmed after a failed flush, timer measured from each wait start", "location": "src/flush.rs:14-16, :185-206, :234", "lines": 30, "suggested_spec": "001 FR-11"},
+    {"id": "U3", "feature": "snapshot_dirty pairing of snapshot_entries/mark_flushed; single-flusher precondition", "location": "src/lib.rs:50-53, :93, :96-121", "lines": 30, "suggested_spec": "001 FR-14/FR-17"},
+    {"id": "U4", "feature": "Final shutdown flush runs even when nothing is dirty and its failure is not reported; FlushManager::completed_seq()", "location": "src/flush.rs:215-219, :180-183", "lines": 10, "suggested_spec": "001 FR-13 + Key Entities"},
+    {"id": "U5", "feature": "force_flush holds the flush_trigger read lock while the trigger runs (attach_flush_trigger blocks meanwhile)", "location": "src/lib.rs:230-234, :131-133", "lines": 6, "suggested_spec": "001 FR-05"}
   ],
-  "conflicts": [],
-  "inputs_sha256": "6e356abfe5dd44827a9f4664ba6718f835fa63d1afa693d92cdc67da366073eb",
-  "git_commit": "72c7182b"
+  "conflicts": [
+    {"between": ["plan.md:104", "spec.md:163", "spec.md:308"], "issue": "plan says force_flush is an unconditional no-op; spec (and code src/lib.rs:221-235) say it invokes the trigger"},
+    {"between": ["plan.md:162", "spec.md:259"], "issue": "plan says the crate is not a workspace member; it is (Cargo.toml:23, :125)"},
+    {"between": ["tasks.md:13", "tasks.md:18", "tasks.md:19", "spec.md:180", "spec.md:259", "align-tasks.md:9-19"], "issue": "tasks.md keeps ALIGN-001/ALIGN-002/T056 open; spec.md and align-tasks.md record them RESOLVED"},
+    {"between": ["plan.md:32", "plan.md:101", "src/flush.rs", "src/lib.rs"], "issue": "plan describes the pre-fix coalescing and the dirty_count reset"},
+    {"between": ["spec.md:7", "spec.md:151", "spec.md:182"], "issue": "references to 002-ssd-integration-test FR-007/FR-011, a spec not tracked in this tree"}
+  ]
 }
