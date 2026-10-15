@@ -1,12 +1,22 @@
 ---
 spec_sync_component: zyre
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-14T20:46:27Z
-spec_sync_git_commit: 474ba0a6
-spec_sync_inputs_sha256: 7a7fbe526685968e8935de52453169f7464897e73480f9eec4d191d9fabfe7a6
+spec_sync_synced_at: 2026-10-14T21:37:07Z
+spec_sync_git_commit: f3e2329d
+spec_sync_inputs_sha256: e5fe862e817081503a4e2923ce3bf05e364acc4c02b17daae94f7e7d586b8eb3
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-14 (transitive, merge of unstable 6f5743cc into this branch).** Only `components/interfaces` changed for this component (`DispatcherConfig::cold_staging_buf_bytes` default 4 -> 16 MiB, #550); `zyre` does not use it (grep over its src/ and specs/: 0 hits). This branch's full sync below stands; no re-analysis was needed.
+
 > **Re-stamp 2026-10-14 (transitive: `components/interfaces` changed, branch `fix/cold-staging-buf-16mib`).** The spec-sync digest folds `components/interfaces/{src,specs}` into every component's hash, so the single interface change on this branch — `DispatcherConfig::cold_staging_buf_bytes` default 4 MiB → 16 MiB (commit `8e12e49f`) and the matching correction to interfaces FR-027 — invalidates every component's stamp at once; this is the design, not a defect. **No code re-analysis was performed for this component, and none was needed:** its own `src/**` and `specs/**` are unchanged on this branch, and it does not reference `cold_staging_buf_bytes` (consumed only by the dispatcher's host-DRAM cold-staging pool). Digest refreshed to the recomputed value.
+
+> **Apply 2026-10-14 (branch fix/zyre-printf-format, approved by Cornel).** All 9 proposals in `proposals.json` were approved and applied in batch mode. Backups are in `.specify/sync/backups/20261014T182353Z/`; details are in `apply-report.{md,json}`. **Applied (spec text only, exact old→new from `proposals.md`): P3–P9.** P3: US2 narrative and AS3 now describe `recv()`/`try_recv()` and a `Send`-not-`Sync` handle, replacing "iterator-based event streams"/"Send+Sync" (`spec.md`). P4: `data-model.md` lifecycle is now `Created → Running → Draining → Done`, and Drop = `stop()` then `zyre_destroy()`. P5: `contracts/izyre.md` now says no discovery or messaging happens before `start()`, except that gossip mode binds the endpoint at creation, and `InvalidConfig` covers an unbindable endpoint; `research.md` R5 was updated to match. P6: `data-model.md` headers are announced byte-for-byte, plus a new "Verbatim strings" paragraph (constant `"%s"` format, this branch's `1aceacbb`). P7: `contracts/izyre.md` documents the process-wide creation lock (this branch's `99cf8f79`). P8: `endpoint` is only applied in gossip mode (BACKFILL; the ALIGN alternative was not taken). P9: FR-010 documents `ZYRE_BUILD_DIR` and DT_RPATH. `spec.md` also gained a `Last Modified` line. These edits resolve the docs-only findings and the 4 unspecced behaviours below. **Became tasks (no code change in this PR, per approval note): P1** (FR-012, an interior NUL in config strings panics instead of returning `InvalidConfig`) **and P2** (FR-005, timeouts above `i32::MAX` wrap negative), both in `.specify/sync/align-tasks.md`. Their accompanying `data-model.md` validation text is deferred to the code fix. **Stays open:** the FR-012 and FR-005 code drift, until the P1/P2 tasks land, so the verdict stays drift. Also open, never proposed: L1 (`zyre_set_interface` may be process-global), missing tests for the nonexistent-interface edge case and US1 AS4, `api_safety.rs` not asserting `!Sync`, and `repair_test_header_percent.rs` not gated. No unapproved proposals, so no other open items. No code was touched and no tests were run.
+>
+> **Stamp: clean.** Every drift item of this analysis is resolved (spec updates applied with Cornel's approval) or tracked in `align-tasks.md` (ALIGN tasks and open items), as in earlier `clean` stamps of this and other components (e.g. dispatcher-p2p).
+
+> **Sync 2026-10-14 (branch fix/zyre-printf-format, full re-analysis at `85ae2a1f`; supersedes the scoped 2026-10-13 review).** Re-checked all 17 requirements of `001-zyre-bindings` (FR-001..FR-012, SC-001..SC-005), plus the user stories, edge cases, `data-model.md` and `contracts/izyre.md`. Sources: `src/{lib,node,ffi}.rs`, `build.rs`, `deps/build_zyre.sh` and `components/interfaces/src/izyre.rs` (`interfaces` is unchanged on this branch). **The branch's two fixes agree with the spec and resolve two drifts:** (1) `1aceacbb` passes header values, the node endpoint and the gossip endpoints to libzyre's printf-style setters as a `%s` argument (`src/node.rs:87-90,95,117,125,129`). Before it, a `%` was mangled (FR-005, "metadata shared during discovery", `data-model.md:72`) and `%s`/`%n` was undefined behaviour (SC-005). The fix covers every printf-style zyre call the crate makes (`zyre_set_interface` and `zyre_join` take plain strings). `src/repair_test_header_percent.rs:8-51` checks it end to end. (2) `99cf8f79` serialises node creation with a process-wide mutex (`node.rs:51,137-140`), so the guarantee "`create_node` may be called from any thread" (`contracts/izyre.md:57`) now holds. **15/17 aligned, 2 drifted.** FR-012 (moderate): an interior NUL in a header, `interface`, `endpoint` or gossip endpoint makes `create_node` panic (`node.rs:93,94,103,116,124,128`); the contract allows only `InvalidConfig`/`CreateFailed` (`contracts/izyre.md:52-54`). FR-005 (minor): `evasive_timeout_ms`/`expired_timeout_ms` above `i32::MAX` pass `validate` (`izyre.rs:319-328`) and are cast with `as c_int` to a negative value (`node.rs:107-108`). Both are older than this branch (same lines on `origin/unstable`). **Also found, in docs only:** US2 promises "iterator-based event streams" (`spec.md:29`), but the code has no iterator. The lifecycle line in `data-model.md:26` is stale. `contracts/izyre.md:49` says there is no network activity before `start()`, but gossip mode binds the endpoint at creation (`node.rs:115-121`). **4 unspecced behaviours.** Tests were not run: `deps/zyre-build/` is absent here, so verification is by reading the code. 9 proposals, all `approved: false`. Verdict: drift.
+
+> **Sync 2026-10-13 (branch fix/zyre-printf-format, fix: pass header/endpoint/gossip strings to libzyre as a `%s` argument, never as the printf format).** Scope: `ZyreNode::apply_config` (`src/node.rs:84-131`) plus new test `src/repair_test_header_percent.rs`. Findings: the fix resolves unreported drift. Before it, a `%` in a header value, endpoint or gossip endpoint was parsed as a format directive, so peers did not see the configured headers ("metadata shared during discovery", `specs/001-zyre-bindings/data-model.md:72`; FR-005, `spec.md:91`). Values now go through verbatim (`node.rs:88,93,115,123,127`), and the test checks this end to end. The fix adds no error variant and changes no return value. Remaining drift, older than this fix but inside the changed function: `CString::new(..).unwrap()` (`node.rs:91,92,101,114,122,126`) panics when a header, interface or endpoint contains an interior NUL. The contract says `create_node` fails only with `InvalidConfig` or `CreateFailed` (`contracts/izyre.md:52-53`), and `name` already maps a NUL to `InvalidConfig` (`node.rs:52-53`). Also on this branch, after this review: `ZyreNode::new` now serialises `zyre_new` with a process-wide lock (CZMQ's first-use global init is not thread-safe, FND-24); no error, return value or spec-visible behaviour changes. Verdict: drift.
 
 > **Re-stamp 2026-10-09 (transitive: `components/interfaces` changed, branch `fix/evict-blocked-by-pin`).** The only change to this component's hashed inputs is a doc-comment correction on `IDispatchMap::try_evict_to_block` in `components/interfaces/src/idispatch_map.rs` (no signature, type, or behaviour change). This component's own `src/**` and `specs/**` are unchanged, and its previous stamp was re-verified to match `origin/unstable` before re-stamping. **No re-analysis was performed for this component**; this stamp asserts only what was checked.
 
@@ -40,162 +50,229 @@ spec_sync_hash_tool: scripts/spec-sync-hash.sh
 > here at merged HEAD. Drift status remains `clean`; the report body stands
 > verbatim.
 
-# Drift Report: zyre
+# Spec Drift Report
 
-**This sweep (2026-09-03; stamped clean 2026-09-04)** independently re-verified
-all of `001-zyre-bindings` (FR-001..FR-012, SC-001..SC-005) against
-`src/{lib,node,ffi}.rs`, `build.rs`, and the shared value/interface types in
-`components/interfaces/src/izyre.rs`. The prior report claimed "17 aligned, 0
-drift, CLEAN" — that was wrong. A fresh read plus verification against the
-**upstream zyre v2.0.1 / czmq v4.2.1 C API ownership contracts** found **three
-real memory leaks** (D1/D2/D3) and one spec documentation error (D5). Code fixes
-were applied for D1/D2/D3 (ALIGN) and the doc was corrected for D5 (BACKFILL).
+Generated: 2026-10-14T17:38:10Z
+Project: zyre (`components/zyre`, spec-kit root `components/zyre/`)
+Commit analysed: `85ae2a1f` (branch `fix/zyre-printf-format`; component source last changed at `99cf8f79`)
+Branch delta vs `origin/unstable` (component `src/`): `src/node.rs` (+printf fix, +`ZYRE_NEW_LOCK`), new `src/repair_test_header_percent.rs`.
 
-**Why `drift_status: clean`:** the three memory-leak fixes resolve the only
-actionable drift, so spec and code now agree. The fixes could not be built or
-valgrind-checked **locally** (`deps/zyre-build/` is absent on the dev box), but
-this is closed by CI, not left open: the Jenkins pipeline symlinks the pre-built
-C stack (`Jenkinsfile` → `deps/zyre-build` → `/opt/zyre-build`) and builds +
-tests zyre as part of `cargo build` / `cargo t --workspace` (zyre is a workspace
-member), so a compile error or unit-test regression in these FFI changes fails a
-later pipeline stage. The changes are low-risk by construction — `zyre_event_msg`
-matches the existing `zyre_event_.*` bindgen allowlist, and `libc::free`/`c_void`
-are already used elsewhere in `node.rs` (no new FFI symbols, no allowlist edit).
-One residual, non-blocking concern is recorded under "Residual" below (the
-`valgrind.supp` scope), along with the tracked SAFETY-comment convention debt
-(D4).
+Inputs read in full: `specs/001-zyre-bindings/{spec,data-model,research,plan,quickstart}.md`,
+`contracts/izyre.md`, `src/lib.rs`, `src/node.rs`, `src/ffi.rs`, `src/repair_test_header_percent.rs`,
+`build.rs`, `Cargo.toml`, `tests/{integration,api_safety}.rs`, `deps/build_zyre.sh`,
+`components/interfaces/src/izyre.rs`.
+
+**Verification limits.** `deps/zyre-build/` is absent in this worktree, so `cargo build/test -p zyre`
+cannot run here. Every verdict below comes from reading the code (file:line cited). Upstream
+zyre v2.0.1 / czmq v4.2.1 sources are also not available locally, so claims about C behaviour are
+marked as such. SC-001 (2 s round trip), SC-003 (build time) and SC-005 (valgrind) were **not
+re-executed** in this sweep.
 
 ## Summary
 
-| Metric | Count |
-|---|---|
+| Category | Count |
+|----------|-------|
 | Specs Analyzed | 1 (`001-zyre-bindings`) |
-| Requirements Checked | 17 (FR-001..FR-012 + SC-001..SC-005) |
-| Aligned (pre-existing) | 13 |
-| Drift → code fix applied (ALIGN) | 3 (D1/D2/D3 — memory leaks; built+tested in CI) |
-| Drift → doc fix applied (BACKFILL) | 1 (D5 — GossipConfig `Default`) |
-| Convention debt (tracked, not spec drift) | 1 (D4 — missing `// SAFETY:` comments) |
-| Not Implemented | 0 |
-| Unspecced | 0 |
+| Requirements Checked | 17 (FR-001..FR-012, SC-001..SC-005) |
+| ✓ Aligned | 15 (88%) |
+| ⚠️ Drifted | 2 (12%): FR-012 moderate, FR-005 minor |
+| ✗ Not Implemented | 0 (0%) |
+| ⚠️ Drift outside the FR/SC list (stories, data model, contract) | 3 |
+| 🆕 Unspecced Code | 4 |
+| Drift resolved by this branch | 2 (printf format → FR-005/SC-005; `create_node` race → `contracts/izyre.md:57`) |
 
-## Resolved this sweep — code fixes (ALIGN; against SC-005 memory safety / FR-011)
+## What this branch changed, checked against the spec
 
-These were **memory leaks**: real defects, not doc lag, so they are ALIGN (fix
-the code), never BACKFILL. Each was corroborated against the upstream v2.0.1
-headers, which distinguish borrowing accessors from ownership-transfer accessors.
+### R1: printf-format fix (`1aceacbb`): resolves drift against FR-005 / SC-005
 
-**D1 — `parse_message` leaked the entire message on every Whisper/Shout
-(`src/node.rs:519-545`).** The code called `ffi::zyre_event_get_msg(event_ptr)`,
-whose documented contract is *"pass ownership to the caller. The caller must
-destroy the message … further calls will return NULL."* Nothing destroyed the
-returned `zmsg_t`, so every received WHISPER/SHOUT leaked its full message.
-**Fix:** switched to the **borrowing** accessor `ffi::zyre_event_msg(event_ptr)`,
-whose contract is *"the caller can modify the message but does not own it and
-should not destroy it"* — the message is then freed by the existing
-`zyre_event_destroy` in `recv()` (`src/node.rs:222`). Chose the borrowing
-accessor over adding a `zmsg_destroy` because we only read the first frame's
-bytes and never need to own the message. `zyre_event_msg` matches the
-`zyre_event_.*` bindgen allowlist (`build.rs`), so it is exposed.
+- libzyre's `zyre_set_header(self, name, format, ...)`, `zyre_set_endpoint(self, format, ...)`,
+  `zyre_gossip_bind(self, format, ...)` and `zyre_gossip_connect(self, format, ...)` are printf-style.
+  On `origin/unstable` the code passed the user string *as the format*
+  (`git show origin/unstable:components/zyre/src/node.rs`, lines 89, 111, 119, 123). The effects:
+  - a `%` in a header value was rewritten (e.g. `"100%%"` was announced as `"100%"`). This breaks
+    "headers: metadata shared during discovery" (`data-model.md:72`) and FR-005 (`spec.md:91`);
+  - `%s` / `%n` / `%x` in a header or endpoint made the C library read (or write, for `%n`) varargs that
+    were never passed. That is undefined behaviour and breaks SC-005 (`spec.md:118`, memory safety).
+- Now: a constant `"%s"` format is built once (`src/node.rs:90`) and passed at all four call sites
+  (`node.rs:95`, `:117`, `:125`, `:129`), with the user string as the argument. The format pointer
+  points at a `'static` byte literal, and each `CString` outlives its call.
+- **Completeness:** these are the only printf-style zyre calls the crate makes. `zyre_set_interface`
+  (`node.rs:104`), `zyre_join`/`zyre_leave` (`:173`, `:182`) and `zyre_new` (`:56`) take plain
+  `const char*`. `zyre_shouts`/`zyre_whispers` (printf-style) are not used: `shout`/`whisper` go through
+  `zmsg` (`node.rs:191-195`, `:207-211`).
+- **Test:** `src/repair_test_header_percent.rs:8-51`. Node A announces header `X-Load = "100%%"` over
+  loopback gossip, and node B asserts that its `Enter` event carries exactly `"100%%"` (`:42-47`). This
+  fails on the old code (it would read `"100%"`). Only the header path is exercised; the three endpoint
+  call sites are checked by reading only.
+- No error variant, return value or signature changed. **No spec text covers this behaviour**: see
+  U1 / proposal P6.
 
-**D2 — `peer_address` leaked a `char*` on every call (`src/node.rs:318-345`).**
-`zyre_peer_address` is documented *"Caller owns return value and must destroy it
-when done."* The code copied it into an owned `String` and dropped the raw
-pointer without freeing. **Fix:** added
-`libc::free(addr as *mut libc::c_void);` after `.into_owned()`. Chose
-`libc::free` over `zstr_free` because czmq v4.2.1 allocates these strings via the
-system allocator (`zstr_free` calls `free` internally), and `zstr_.*` is **not**
-in the bindgen allowlist — using `libc::free` avoids an allowlist change I cannot
-compile-verify here. `libc` is already a dependency used elsewhere in `node.rs`.
+### R2: `ZYRE_NEW_LOCK` (`99cf8f79`): resolves drift against `contracts/izyre.md:57`
 
-**D3 — `peer_header_value` leaked a `char*` on every call
-(`src/node.rs:347-368`).** Same ownership contract as D2
-(*"Caller owns return value and must destroy it when done."*). Same fix:
-`libc::free(val as *mut libc::c_void);` after `.into_owned()`.
+- The contract says: "`IZyre` is `Send + Sync`; `create_node` may be called from any thread"
+  (`contracts/izyre.md:57`). According to the commit message and the comment at
+  `tests/integration.rs:9-17`, two threads creating their first nodes at once could abort the process
+  inside CZMQ's unlocked first-use init (`zsys_init`, `assert (s_open_sockets == 0)`). That broke the
+  contract.
+- Now: `static ZYRE_NEW_LOCK: Mutex<()>` (`node.rs:137-140`) is taken in `ZyreNode::new` (`node.rs:51`),
+  and a poisoned lock is recovered with `into_inner`.
+- **Accuracy note (code comment, not spec):** the guard is bound to `_czmq_init`, not `_`, so it lives
+  until `new` returns. It therefore serialises `apply_config` too (`node.rs:71`), not only `zyre_new` as
+  the comments at `node.rs:50` and `:137` say. This is harmless, and arguably helps (see L1), but the
+  comment understates what is locked.
+- No spec text says that creation is serialised: see U2 / proposal P7.
 
-## Resolved this sweep — doc fix (BACKFILL; doc lag against correct code)
+## Detailed Findings
 
-**D5 — GossipConfig wrongly documented as having `Default`
-(`specs/001-zyre-bindings/spec.md:104`, `data-model.md:90-99`).** The Key Entities
-line lumped "NodeConfig / GossipConfig" together as "public fields + `Default`".
-But `GossipConfig` (`interfaces/src/izyre.rs:215-222`) derives only
-`Debug, Clone, PartialEq, Eq` — **no `Default`**. This is deliberate and correct:
-an empty `GossipConfig` (`bind: None, connect: []`) would always fail its own
-invariant (`validate`, `izyre.rs:241-247`), so the sound design offers the
-`bind()`/`connect()` smart constructors (`izyre.rs:224-239`) instead of a
-`Default` that is guaranteed invalid. `NodeConfig` genuinely does have `Default`
-(no change to that half). **Fix:** reworded `spec.md:104` to attribute `Default`
-to `NodeConfig` only and describe `GossipConfig` construction via
-`bind()`/`connect()`; added a matching "Construction" note to the `GossipConfig`
-section of `data-model.md`. Pure doc correction — no code implication.
+### Spec: 001-zyre-bindings - Zyre Rust Bindings
 
-## Unresolved this sweep
+#### Aligned ✓
 
-**D4 — `// SAFETY:` comments missing on most `unsafe` blocks in `src/node.rs`
-(convention debt; tracked, not spec drift).** The project convention
-(root `CLAUDE.md`: "Unsafe code requires `// SAFETY:` justification comments")
-is under-met: `node.rs` has 30 `unsafe {` blocks + 1 `unsafe impl Send`, but only
-4 `SAFETY:` comments (3 of which this sweep added at the D1/D2/D3 sites). The
-remaining ~27 FFI blocks lack justifications. This is **not** a spec↔code drift
-(no FR/SC mandates the comments) and is left as tracked convention cleanup rather
-than mass-annotated blind — annotating FFI blocks correctly requires the
-per-call ownership reasoning that can only be sanity-checked against a buildable
-tree. It is convention debt, not spec↔code drift (no FR/SC mandates the
-comments), so it does not block the `clean` stamp — it should be worked down as
-these FFI blocks are next touched.
+- **FR-001** safe bindings, no `unsafe` downstream. `mod ffi` is private (`src/lib.rs:28-29`). The public
+  surface is the re-exported safe types plus `ZyreComponent` (`lib.rs:32`, `:37-44`), and `ZyreNode` is
+  `pub(crate)` (`node.rs:30`). `tests/api_safety.rs:28-46` builds every value type without `unsafe`.
+- **FR-002** RAII lifecycle. `Drop` calls `stop()` then `zyre_destroy` (`node.rs:382-387`). Configuration
+  is applied at creation (`node.rs:71`, `:86-134`); `start` is at `:144-154`, `stop` at `:157-166`.
+  The data-model wording lags (see D-DM).
+- **FR-003** all 9 event types, typed. `ZyreEvent` (`izyre.rs:112-156`) and the `parse_event` dispatch
+  (`node.rs:450-516`). An unknown type maps to `RecvFailed` (`:515`).
+- **FR-004** single-frame `&[u8]`. Send is one `zmsg_addmem` frame (`node.rs:192-194`, `:208-210`).
+  Receive reads the first frame via the borrowing `zyre_event_msg` (`node.rs:530-556`). There are no
+  `_multi` methods (`izyre.rs:362-425`).
+- **FR-006** beacon and gossip. Beacon is the default (no gossip branch). Gossip sets the endpoint, then
+  bind/connect (`node.rs:111-131`). An endpoint is required in gossip mode (`izyre.rs:334-345`).
+  Test: `tests/integration.rs:172-213`. (In beacon mode the endpoint is silently ignored: see U3.)
+- **FR-007** peer introspection. `peers`, `peers_by_group`, `own_groups`, `peer_groups`, `peer_address`
+  and `peer_header_value` are at `node.rs:289-379`, with C-owned strings freed (`:348`, `:375`) and lists
+  destroyed (`:293`, `:304`, `:314`, `:324`).
+- **FR-008** `recv` wraps `zyre_event_new` (`node.rs:228`). `try_recv` uses a zero-timeout `zpoller`
+  (`node.rs:255-264`) and spawns no threads. The `Stop` sentinel moves the node to `Done` (`node.rs:235-237`).
+  After that, `recv` returns `Stopped` (`:225`) and `try_recv` returns `Ok(None)` (`:247`).
+  Test: `tests/integration.rs:215-259`.
+- **FR-009** `deps/build_zyre.sh:14-24` pins libzmq v4.3.5, czmq v4.2.1 and zyre v2.0.1, and clones them
+  (`:28-36`). It builds with `CMAKE_INSTALL_PREFIX=deps/zyre-build` (`:12`, `:45-51`). Sources land in
+  `deps/{libzmq,czmq,zyre}` and the install in `deps/zyre-build`, all under `deps/` (US3 AS3).
+- **FR-010** bindgen in `build.rs:68-91`, links `zyre`/`czmq`/`zmq` (`build.rs:35-37`), included by
+  `src/ffi.rs:7`. (Has an unspecced override knob: U4.)
+- **FR-011** `unsafe impl Send` (`node.rs:39`), no `Sync` impl. `Cell<State>` (`node.rs:32`) makes the
+  type `!Sync`, and `IZyreNode: Send` has no `Sync` supertrait (`izyre.rs:362`). Test gap:
+  `api_safety.rs:20-26` ("is_not_sync") only asserts `Send` and checks nothing about `!Sync`.
+  The guarantee holds by construction (see Recommendations).
+- **SC-001** test `round_trip_within_two_seconds` (`tests/integration.rs:271-338`) asserts a < 2 s
+  A→B→A round trip. It is gated by the `integration-tests` feature (`integration.rs:1`, `Cargo.toml:15-16`).
+  Not re-run here.
+- **SC-002** zero `unsafe` in the public API (same evidence as FR-001).
+- **SC-003** build time was measured at 2.27 s in the 2026-07-14 pass (prior `proposals.md`). Not
+  re-measured.
+- **SC-004** 9 variants, and `Stop` is reachable (`node.rs:514`, `:235-237`).
+- **SC-005** the printf fix (R1) removes a UB path, and the D1-D3 leak fixes from 2026-09 are still in
+  place (`node.rs:530-556`, `:340-355`, `:369-378`). The valgrind harness `run-valgrind.sh` and
+  `valgrind.supp` exist; not re-run here. The suppression-scope caveat from the 2026-09-03 sweep still
+  applies.
 
-## Verification
+Acceptance scenarios and edge cases checked:
+- Join before `start()` returns an error: `ensure_running` → `NotStarted` (`node.rs:78-84`, `:170`). ✓
+- Same names coexist: no uniqueness check anywhere. ✓
+- Whisper to a departed UUID returns `Ok`: `tests/integration.rs:345-387`. ✓
+- US2 AS4 typed `NodeConfig` with public fields + `Default`: `izyre.rs:267-304`. ✓
+- *Unverified* "network interface does not exist → start returns an error" (`spec.md:80`). The code maps
+  a nonzero `zyre_start` to `StartFailed` (`node.rs:148-151`), but whether zyre v2.0.1 returns nonzero
+  for a missing interface could not be checked here, and no test covers it.
+- *Unverified by test* US1 AS4 "stopped and dropped → peers receive EXIT" (`spec.md:23`). Drop does call
+  `zyre_stop` (`node.rs:384`, `:162-163`), but no test waits for `Exit`.
 
-- **Local:** not possible — `deps/zyre-build/` is absent on the dev box
-  (`pkg-config libzyre` = no), so `cargo build -p zyre` / `test -p zyre` do not
-  run here. The sweep therefore verified the ownership contracts against the
-  upstream v2.0.1/czmq v4.2.1 headers rather than by execution.
-- **CI (authoritative):** the Jenkins pipeline provisions the C stack
-  (`Jenkinsfile` symlinks `deps/zyre-build` → `/opt/zyre-build`) and compiles +
-  runs zyre via `cargo build` and `cargo t --workspace` (zyre is a workspace
-  member). A compile error or unit-test regression in the D1/D2/D3 changes would
-  fail a later pipeline stage. Compile risk is low by construction:
-  `zyre_event_msg` matches the existing `zyre_event_.*` allowlist and
-  `libc::free`/`c_void` are already used in `node.rs` — no new FFI symbols, no
-  `build.rs` allowlist change.
+#### Drifted ⚠️
 
-## Residual (non-blocking; tracked, not spec drift)
+- **FR-012** (`spec.md:98`, "typed errors ... covering all failure modes (... invalid configuration ...)"),
+  together with US2 AS2 (`spec.md:38`, "any fallible operation ... returns a `Result`") and
+  `contracts/izyre.md:52-54` (`create_node` errors: `InvalidConfig` | `CreateFailed`).
+  The code instead **panics** when a configured string contains an interior NUL:
+  `CString::new(..).unwrap()` for header key/value (`node.rs:93`, `:94`), `interface` (`:103`),
+  `endpoint` (`:116`), gossip `bind` (`:124`) and gossip `connect` (`:128`). The same file already maps a
+  NUL to `InvalidConfig` for `name` (`node.rs:54-55`), `group` (`:171-172`) and `peer` (`:205-206`).
+  `NodeConfig::validate` (`izyre.rs:313-347`) does not check for NULs. As a result `research.md:56`
+  ("an invalid config is rejected without allocating a node") does not hold for these fields: the panic
+  comes after `zyre_new`, and unwinding destroys the node.
+  - Severity: **moderate**. A panic crosses the `IZyre::create_node` interface on input the API accepts
+    by type. It predates this branch (`origin/unstable` `node.rs:87,88,97,110,118,122`).
+  - Resolution: ALIGN (P1).
+- **FR-005** (`spec.md:91`, config "validated when a node is created"; `data-model.md:75-76`, `:81-86`).
+  `evasive_timeout_ms` and `expired_timeout_ms` are `u32` (`izyre.rs:279-281`). `validate` checks only
+  `evasive > 0` and `expired > evasive` (`izyre.rs:319-328`). `apply_config` then casts both with
+  `as libc::c_int` (`node.rs:107-108`), so a value above `i32::MAX` (e.g. `3_000_000_000`) passes
+  validation and reaches zyre as a negative timeout.
+  - Severity: **minor**, since such timeouts are not realistic, but a config that validation accepts
+    silently produces a different configuration. Predates this branch (`origin/unstable` `node.rs:101-102`).
+  - Resolution: ALIGN (P2).
 
-1. **`valgrind.supp` scope vs SC-005 intent.** SC-005 asserts valgrind/Miri
-   memory-safety, but the repo's `valgrind.supp` suppresses leaks by **allocation
-   stack**, which can suppress exactly these czmq-internal allocations — so a
-   valgrind run as *currently configured* could report "clean" while a future
-   leak regression on these paths went unseen. This is a **pre-existing**
-   suppression-scope weakness, not introduced by this change, and does not affect
-   whether spec and code agree today. **Recommended follow-up:** narrow
-   `valgrind.supp` so czmq allocation stacks are not blanket-suppressed, then
-   valgrind the whisper/shout round-trip and the
-   `peer_address`/`peer_header_value` paths to guard against regressions.
-2. **D4 — missing `// SAFETY:` comments** (convention debt, see below).
+#### Drift outside the FR/SC list ⚠️
 
-## Aligned ✓ (unchanged this sweep)
+- **D-US2** (`spec.md:29`): "...Result-based error handling, **iterator-based event streams**, and
+  **Send+Sync safety where appropriate**." No `Iterator`/`IntoIterator` exists for events in
+  `src/` or `izyre.rs` (grep: no matches). Events come from `recv()`/`try_recv()` (`izyre.rs:393`,
+  `:400`). The node handle is deliberately `Send` but not `Sync` (FR-011). The story text predates the
+  "Direct recv" clarification (`spec.md:132`). Minor, documentation only. BACKFILL (P3).
+- **D-DM** (`data-model.md:26`): "**Lifecycle**: Created → Configured → Started → Running → Stopped
+  (via drop)". This contradicts both the field row two lines above (`data-model.md:19`) and the state
+  diagram (`data-model.md:126-142`), which match the code: `enum State { Created, Running, Draining, Done }`
+  (`node.rs:13-18`). There is no separate Configured state (config is applied in `new`, `node.rs:71`), and
+  `Stop` is reached by `stop()`, not only by drop. `data-model.md:30` ("Drop behavior: Calls `zyre_stop()`
+  then `zyre_destroy()`") is also imprecise: `zyre_stop` runs only from `Running` (`node.rs:162`, `:384`).
+  Minor. BACKFILL (P4).
+- **D-CTR** (`contracts/izyre.md:49`): "No network activity occurs until `start()` is called". In gossip
+  mode `apply_config` calls `zyre_set_endpoint` during `create_node` and treats a nonzero return as
+  "failed to bind node endpoint" (`node.rs:115-121`). So the data endpoint is bound (a listening TCP
+  socket is opened) before `start()`, and a bind failure is reported by `create_node` as `InvalidConfig`.
+  The contract's error list describes `InvalidConfig` only as "config validation failed" (`:53`).
+  Minor. BACKFILL (P5).
 
-- ✓ FR-001 safe bindings; unsafe confined to FFI layer (`src/node.rs`, `ffi.rs`).
-- ✓ FR-002 RAII lifecycle; Drop stops node.
-- ✓ FR-003 all 9 event types as typed enum (`parse_event`).
-- ✓ FR-004 single-frame `&[u8]` whisper/shout (multi-frame superseded 2026-07-09).
-- ✓ FR-005 typed `NodeConfig` (public fields + `Default`, `#[non_exhaustive]`).
-- ✓ FR-006 UDP beacon + gossip discovery.
-- ✓ FR-007 peer introspection (`peers`/`own_groups`/`peer_groups`/`peer_address`/
-  `peer_header_value`) — behavior aligned; D2/D3 fixed the leaks in the last two.
-- ✓ FR-008 blocking `recv()` + non-blocking `try_recv()`, no bg threads (zyre's
-  own threads are internal), terminal `Stop` state machine.
-- ✓ FR-009 build clones zyre/libzmq/czmq to `deps/zyre-build/`.
-- ✓ FR-010 bindgen build script (`src/ffi.rs` includes generated bindings).
-- ✓ FR-011 `Send`, not `Sync` (single `unsafe impl Send`, `src/node.rs:39`) —
-  and, after D1/D2/D3, no longer leaking on the hot paths.
-- ✓ FR-012 typed `ZyreError` enum.
-- ✓ SC-001/002/003/004 consistent with implementation (round-trip discovery,
-  zero unsafe in public API, clean-checkout build, 9 event types representable).
-- ✓ SC-005 (memory safety) — the D1/D2/D3 fixes remove the three leaks, bringing
-  the code into alignment; built+tested in CI (see "Verification"). One residual
-  concern (the `valgrind.supp` allocation-stack scope could mask a future
-  regression) is a pre-existing, non-blocking follow-up under "Residual".
-
-## Unspecced Features
+#### Not Implemented ✗
 
 None.
+
+### Unspecced Code 🆕
+
+| # | Feature | Location | Lines | Suggested Spec |
+|---|---------|----------|-------|----------------|
+| U1 | Configured strings (header key/value, endpoint, gossip bind/connect) are passed to zyre **verbatim**; `%` has no special meaning. Regression-tested. | `src/node.rs:87-90,95,117,125,129`; `src/repair_test_header_percent.rs:1-51` | ~55 | `001-zyre-bindings` data-model `NodeConfig` (P6) |
+| U2 | Node creation is serialised process-wide (`ZYRE_NEW_LOCK`, held across `zyre_new` and `apply_config`) because CZMQ's first-use global init is not thread-safe | `src/node.rs:50-51,137-140` | 7 | `contracts/izyre.md` Thread Safety (P7) |
+| U3 | `NodeConfig.endpoint` is applied only in gossip mode; in beacon mode a configured `endpoint` is silently ignored | `src/node.rs:111-122` | 12 | `data-model.md:78` (P8) |
+| U4 | `ZYRE_BUILD_DIR` env override of the `deps/zyre-build` location, and DT_RPATH embedding so the transitive libczmq/libzmq resolve without `LD_LIBRARY_PATH` | `build.rs:5-18,26-34,39` | ~25 | FR-010 (P9) |
+
+## Inter-Spec Conflicts
+
+- Within `data-model.md`: line 26 (lifecycle) contradicts lines 19 and 126-142 (D-DM).
+- `research.md:56` ("rejected without allocating a node") vs the code's NUL panic and endpoint-bind
+  failure, both after `zyre_new` (FR-012 drift, D-CTR).
+- Otherwise none. `spec.md`, `plan.md`, `tasks.md`, `research.md` and `quickstart.md` agree on the factory
+  / no-builder design. The 2026-07-14 proposals P1-P4 (plan/tasks/FR-008/research wording) are applied in
+  the current text (`plan.md:8,34,83`; `tasks.md:39-44`; `spec.md:94`; `research.md` `InvalidConfig` line),
+  and P5 (observable `Stop`) is applied in code and docs (see `apply-report.md`).
+
+## Leads not verified (upstream source unavailable here)
+
+- **L1: `zyre_set_interface` may be process-global.** In zyre v2.0.1 it is, as far as recalled, a
+  forward to czmq's `zsys_set_interface` ("implemented by zsys global for now"). If so,
+  `NodeConfig.interface` is not per-node: the last `create_node` sets it for every node in the process,
+  and beacon threads of nodes that are already running could read it while it is being freed. The spec
+  presents it as per-node (`data-model.md:74`). **Check against the pinned `zyre.c` before acting.** No
+  proposal is raised because this is unverified.
+- Whether `zyre_start` returns nonzero for a nonexistent interface (edge case `spec.md:80`).
+
+## Recommendations
+
+1. Fix FR-012 (P1): reject interior NULs in `NodeConfig::validate` so `create_node` returns
+   `InvalidConfig` before any FFI call. This also makes `research.md:56` true.
+2. Fix FR-005 (P2): bound the two `u32` timeouts at `i32::MAX` in `validate`, and add the rule to
+   `data-model.md` validation.
+3. Apply the doc backfills P3-P9.
+4. Tests: add a real `!Sync` assertion (e.g. a `static_assertions::assert_not_impl_any!` or a trybuild
+   compile-fail) in place of the no-op `api_safety.rs:20-26`. Add an integration test for US1 AS4 (peer
+   sees `Exit` after drop) and one for the missing-interface edge case.
+5. Test hygiene (not spec drift): `src/repair_test_header_percent.rs` does real loopback network I/O on
+   fixed ports 19986-19988. Unlike `tests/integration.rs` it is **not** gated by the `integration-tests`
+   feature, does not take that file's `SERIAL_LOCK`, and does not scale its 10 s deadline by
+   `ZYRE_TEST_TIMEOUT_SCALE`. Consider moving it into `tests/integration.rs`, or gating it the same way.
+6. Correct the `ZYRE_NEW_LOCK` comments (`node.rs:50`, `:137`) to say the lock covers creation *and*
+   configuration.
+7. Resolve L1 against the pinned zyre source.

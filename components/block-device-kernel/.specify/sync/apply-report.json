@@ -1,59 +1,162 @@
 {
-  "generated": "2026-08-20",
-  "phase": "Spec-Sync Phase B",
+  "generated": "2026-10-14T18:15:42Z",
+  "mode": "batch",
   "component": "block-device-kernel",
-  "policy": ".specify/sync/PHASE_B_POLICY.md",
-  "drift_source": ".specify/sync/drift-report.{json,md} (regenerated 2026-08-20)",
+  "branch": "fix/block-device-kernel-timeout-cancel",
+  "head": "5d123390",
+  "approved_by": "Cornel Constantinescu, 2026-10-14",
+  "proposals_source": ".specify/sync/proposals.json (generated 2026-10-14T17:31:02Z)",
   "source_modified": false,
   "cargo_run": false,
-  "spec_backups": [
-    ".specify/sync/backups/001-block-device-kernel.spec.md.20260820T171219Z.bak"
+  "backups": ".specify/sync/backups/20261014T181542Z/",
+  "backed_up_files": [
+    "specs/001-block-device-kernel/spec.md",
+    "specs/001-block-device-kernel/plan.md",
+    ".specify/sync/align-tasks.md",
+    ".specify/sync/apply-report.md",
+    ".specify/sync/apply-report.json",
+    ".specify/sync/drift-report.md"
   ],
   "specs_updated": [
     {
+      "id": "bdk-2026-10-14-01",
       "spec": "001-block-device-kernel",
-      "requirement": "FR-027 (new)",
-      "change_type": "added",
-      "direction": "BACKFILL-UNSPECCED",
-      "detail": "FlushSync validated no-op (O_DIRECT|O_DSYNC durability); ns_id!=1 -> InvalidNamespace"
-    },
-    {
-      "spec": "001-block-device-kernel",
-      "requirement": "US2 acceptance scenario 5 (new)",
-      "change_type": "added",
-      "direction": "BACKFILL-UNSPECCED",
-      "detail": "FlushSync{ns_id:1} -> FlushDone(Ok); ns_id!=1 -> InvalidNamespace"
-    },
-    {
-      "spec": "001-block-device-kernel",
-      "requirement": "Header Last-Synced note",
+      "file": "specs/001-block-device-kernel/spec.md",
+      "requirement": "NFR-006",
+      "type": "BACKFILL",
       "change_type": "modified",
-      "direction": "metadata",
-      "detail": "Corrected the 2026-08-07 'telemetry defect fully fixed' claim to 'partial: sync paths + wait_for_cqe fixed, harvest_completions still records 0 ns for async ops; FR-021/SC-006 do not hold for async IO'"
+      "before": "- **NFR-006**: The actor `on_idle()` remains active (returns `true`) while clients are connected or inflight operations exist.",
+      "after": "proposal new_text, verbatim",
+      "applied_at": "2026-10-14T18:15:42Z"
+    },
+    {
+      "id": "bdk-2026-10-14-01",
+      "spec": "001-block-device-kernel",
+      "file": "specs/001-block-device-kernel/plan.md",
+      "requirement": "Design decision 6 (plan.md:75, also_update)",
+      "type": "BACKFILL",
+      "change_type": "modified",
+      "before": "6. **Actor stays alive while clients connected**: `on_idle()` returns `true` as long as `clients` or `inflight` maps are non-empty.",
+      "after": "6. **Actor keeps polling while there is work**: same meaning as the new NFR-006, plus 'the thread ends only when `shutdown()` deactivates the actor (see spec NFR-006, FR-024)'",
+      "applied_at": "2026-10-14T18:15:42Z"
+    },
+    {
+      "id": "bdk-2026-10-14-02",
+      "spec": "001-block-device-kernel",
+      "file": "specs/001-block-device-kernel/spec.md",
+      "requirement": "FR-024",
+      "type": "BACKFILL",
+      "change_type": "modified",
+      "before": "- **FR-024**: Component MUST support graceful shutdown via `ControlMessage::Shutdown` which causes `on_idle()` to return `false`, terminating the actor loop.",
+      "after": "proposal new_text without its last sentence",
+      "dropped_text": "Async operations still in flight at shutdown receive no completion.",
+      "approval_note_applied": "apply the mechanism text but DROP the last sentence; record 'what happens to in-flight async ops at shutdown' as an open item in align-tasks.md (see tasks.md T011)",
+      "applied_at": "2026-10-14T18:15:42Z"
+    },
+    {
+      "id": "bdk-2026-10-14-03",
+      "spec": "001-block-device-kernel",
+      "file": "specs/001-block-device-kernel/spec.md",
+      "requirement": "Edge case: Async operation timeout (covers SC-005)",
+      "type": "BACKFILL",
+      "change_type": "modified",
+      "before": "- **Async operation timeout**: Timed-out operations produce `Completion::Timeout` and an `AsyncCancel` is submitted to io_uring.",
+      "after": "proposal new_text, verbatim",
+      "applied_at": "2026-10-14T18:15:42Z"
+    },
+    {
+      "id": "bdk-2026-10-14-04",
+      "spec": "001-block-device-kernel",
+      "file": "specs/001-block-device-kernel/spec.md",
+      "requirement": "Key Entity: KernelHandler",
+      "type": "BACKFILL",
+      "change_type": "modified",
+      "before": "... client sessions map, inflight operations map, and optional logger.",
+      "after": "proposal new_text, verbatim",
+      "applied_at": "2026-10-14T18:15:42Z"
+    },
+    {
+      "id": "bdk-2026-10-14-05",
+      "spec": "001-block-device-kernel",
+      "file": "specs/001-block-device-kernel/spec.md",
+      "requirement": "Implementation note: bit-63 CQEs",
+      "type": "BACKFILL",
+      "change_type": "modified",
+      "before": "- CQEs with `user_data & (1 << 63) != 0` are treated as internal fsync markers and silently ignored.",
+      "after": "proposal new_text, verbatim",
+      "applied_at": "2026-10-14T18:15:42Z"
+    },
+    {
+      "id": "bdk-2026-10-14-06",
+      "spec": "001-block-device-kernel",
+      "file": "specs/001-block-device-kernel/spec.md",
+      "requirement": "Implementation note: on_idle() return value",
+      "type": "SUPERSEDE",
+      "change_type": "replaced",
+      "superseded_by": ["bdk-2026-10-14-01", "bdk-2026-10-14-02"],
+      "before": "- The `on_idle()` actor method returns `false` only when shutdown is requested; it returns `true` while clients or inflight ops exist to keep the actor thread alive.",
+      "after": "proposal new_text, verbatim (cross-references NFR-006 and FR-024)",
+      "note": "Superseded statement is a note inside the same spec, so no superseded_by header field was added; replaced in place.",
+      "applied_at": "2026-10-14T18:15:42Z"
+    },
+    {
+      "id": null,
+      "spec": "001-block-device-kernel",
+      "file": "specs/001-block-device-kernel/spec.md",
+      "requirement": "Header Last Synced",
+      "type": "metadata",
+      "change_type": "modified",
+      "detail": "New 2026-10-14 Last Synced entry; the 2026-09-03 entry kept as 'Previous sync'",
+      "applied_at": "2026-10-14T18:15:42Z"
     }
   ],
+  "new_specs": [],
   "align_tasks_generated": [
     {
-      "requirement": "FR-021 & SC-006",
-      "severity": "moderate",
-      "location": "src/actor.rs:776",
-      "detail": "harvest_completions() records 0 ns latency for async ops despite InflightOp.start:Instant being populated; single task covers both requirements (same root cause). Suggested fix mirrors the correct site at src/actor.rs:718."
-    }
-  ],
-  "unspecced_backfilled": [
+      "id": "bdk-2026-10-14-07",
+      "requirement": "FR-012",
+      "kind": "task",
+      "detail": "handle_abort discards the AsyncCancel push result on a full SQ; route through pending_cancels",
+      "approval_note": "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR"
+    },
     {
-      "feature": "Command::FlushSync handler",
-      "location": "src/actor.rs:233-247",
-      "backfilled_as": "FR-027 + US2 acceptance scenario 5"
+      "id": "bdk-2026-10-14-08",
+      "requirement": "FR-025 (+ FR-002, edge case)",
+      "kind": "task",
+      "detail": "ControlMessage::DisconnectClient is never sent; dropped clients' sessions and backlogs are never reclaimed",
+      "approval_note": "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR"
+    },
+    {
+      "id": "bdk-2026-10-14-09",
+      "requirement": "NFR-004",
+      "kind": "task",
+      "detail": "five unsafe blocks lack // SAFETY: comments (src/config.rs:87, :179; benches)",
+      "approval_note": "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR"
+    },
+    {
+      "id": "bdk-2026-10-14-02",
+      "requirement": "FR-024",
+      "kind": "open_item",
+      "detail": "what happens to in-flight async ops at shutdown (tasks.md T011); dropped sentence not applied",
+      "approval_note": "apply the mechanism text but DROP the last sentence ('Async operations still in flight at shutdown receive no completion.'); record 'what happens to in-flight async ops at shutdown' as an open item in align-tasks.md (see tasks.md T011)"
     }
   ],
-  "resolved": [],
-  "human_decision": [],
+  "not_applied": [
+    {"id": "bdk-2026-10-14-02", "part": "last sentence", "reason": "dropped per approval note; open item"},
+    {"id": "bdk-2026-10-14-07", "part": "code change", "reason": "ALIGN task only"},
+    {"id": "bdk-2026-10-14-08", "part": "code change", "reason": "ALIGN task only"},
+    {"id": "bdk-2026-10-14-09", "part": "code change", "reason": "ALIGN task only"}
+  ],
+  "unapproved_with_note": [],
+  "still_open_not_proposals": [
+    "Buffer lifetime after Timeout/AbortAck (drift-report spec gap; needs a human decision)"
+  ],
   "counts": {
-    "backfill_drifted_applied": 0,
-    "unspecced_backfilled": 1,
-    "align_tasks": 1,
-    "resolved": 0,
-    "human_decision": 0
+    "approved": 9,
+    "backfill_applied": 5,
+    "supersede_applied": 1,
+    "align_tasks": 3,
+    "open_items": 1,
+    "unapproved": 0
   }
 }

@@ -72,7 +72,7 @@ Completion ←─ [SPSC callback_rx] ←─ [callback_tx] ←── send_complet
 3. **O_DIRECT for cache bypass**: Prevents double-buffering; DmaBuffer contents go directly to device via DMA.
 4. **Single ring, single thread**: One io_uring instance per actor avoids cross-thread synchronization on the ring.
 5. **posix_fadvise on init**: Drops stale page-cache pages from prior buffered sessions to prevent stale reads.
-6. **Actor stays alive while clients connected**: `on_idle()` returns `true` as long as `clients` or `inflight` maps are non-empty.
+6. **Actor keeps polling while there is work**: `on_idle()` returns `true` (the component-framework "did work" hint, which keeps the actor polling instead of parking) while clients are connected, inflight operations exist, or timed-out operations still have an `AsyncCancel` queued for submission (`pending_cancels`); otherwise it returns `false`. The return value is a park hint, not a liveness signal — returning `false` never terminates the actor loop; the thread ends only when `shutdown()` deactivates the actor (see spec NFR-006, FR-024).
 
 ## Dependencies
 

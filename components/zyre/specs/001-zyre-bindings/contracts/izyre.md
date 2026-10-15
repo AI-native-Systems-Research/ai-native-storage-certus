@@ -46,15 +46,15 @@ crate cycle with `zyre`. The `zyre` crate re-exports them for convenience.
 **Postconditions**:
 - Returns an un-started node ready for `start()`
 - The node has a unique UUID assigned
-- No network activity occurs until `start()` is called
+- No discovery or messaging occurs until `start()` is called. Exception: in gossip mode the node's data `endpoint` is bound during `create_node`, so its listening socket exists before `start()`
 - The returned node is independent — multiple nodes can coexist
 
 **Errors**:
-- `ZyreError::InvalidConfig(reason)` — config validation failed
+- `ZyreError::InvalidConfig(reason)` — config validation failed, or (gossip mode) the node's data `endpoint` could not be bound
 - `ZyreError::CreateFailed` — underlying `zyre_new()` returned null (resource exhaustion)
 
 **Thread Safety**:
-- `IZyre` is `Send + Sync`; `create_node` may be called from any thread.
+- `IZyre` is `Send + Sync`; `create_node` may be called from any thread. Node creation (`zyre_new` plus applying the config) is serialised by a process-wide lock, because CZMQ initialises process-global state on first use without a lock; concurrent `create_node` calls therefore run one at a time.
 - The returned `Box<dyn IZyreNode>` is `Send` but NOT `Sync` — it must be used from one thread at a time (it may be moved between threads).
 
 ## IZyreNode Handle

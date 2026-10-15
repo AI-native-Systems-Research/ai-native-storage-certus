@@ -6,6 +6,23 @@ correct and must NOT be resolved by rewriting the spec to match incorrect
 behavior. They require an actual code change (do NOT commit to `unstable`; do
 NOT edit source in this sweep — these tasks are queued for implementation).
 
+**Updated 2026-10-14** by the spec-sync apply on branch `fix/extended-metadata-store-flush`
+(proposals approved by Cornel Constantinescu, 2026-10-14). Proposals P1–P5 were approved
+**as ALIGN tasks only** (approval note: "record in align-tasks.md, no code change in this
+PR") and are recorded below as ALIGN-EMS-003..007. P6 refreshed ALIGN-EMS-002 (line
+references and a dependency on ALIGN-EMS-003); it stays parked. Source:
+`.specify/sync/proposals.{md,json}`, `.specify/sync/drift-report.md` (2026-10-14).
+
+| Task | Proposal | Requirement | Severity | Status |
+|------|----------|-------------|----------|--------|
+| ALIGN-EMS-001 | (2026-08-20) | interface-only durability in `integration_ssd.rs` | moderate | open |
+| ALIGN-EMS-002 | P6 | `CapacityExhausted` never constructed | moderate | open, parked (2026-09-03) |
+| ALIGN-EMS-003 | P1 | FR-05 / US6 AC1 — flush failure reported as `Ok` | major | open |
+| ALIGN-EMS-004 | P2 | FR-09 — corrupt entries do not cause fallback | moderate | open |
+| ALIGN-EMS-005 | P3 | NFR-04 — next flush after fallback overwrites the good region | moderate | open |
+| ALIGN-EMS-006 | P4 | FR-01 — keys > 65 535 bytes accepted but not persistable | moderate | open (sub-decision: error variant) |
+| ALIGN-EMS-007 | P5 | SC-7 — public items without doc comments | minor | open |
+
 ## Status of prior-sweep tasks (now closed)
 
 - **Workspace membership + stale mock** (prior ALIGN-001) — **RESOLVED.** The crate
@@ -69,14 +86,14 @@ its helpers change.
 
 **Spec Requirement**: 002 spec FR-007 / User Story 5 scenario 2 / Capacity note —
 capacity exhaustion must be surfaced to the caller; `test_capacity_exhaustion`
-(`tests/integration_ssd.rs:513-547`) expects an
+(`tests/integration_ssd.rs:526-547`, `CapacityExhausted` arm at `:542`) expects an
 `ExtendedMetadataStoreError::CapacityExhausted` result. The interface defines the
 variant for exactly this purpose (`../interfaces/src/iextended_metadata_store.rs:12`).
 
 **Current Code**: `put()` enforces only the 128 KiB per-value `ValueTooLarge`
-limit (`src/lib.rs:159`). Region/partition capacity is enforced solely at flush
+limit (`src/lib.rs:179`). Region/partition capacity is enforced solely at flush
 time inside `flush::flush_to_disk` as a `String` error ("exceeds region
-capacity", `src/flush.rs:32-38`) and is never mapped to
+capacity", `src/flush.rs:36-42`) and is never mapped to
 `ExtendedMetadataStoreError::CapacityExhausted` on any interface method.
 Consequently `CapacityExhausted` is never constructed and
 `test_capacity_exhaustion` loops to `max_attempts` without ever reaching the
@@ -85,11 +102,18 @@ Consequently `CapacityExhausted` is never constructed and
 **Required Change**: Surface capacity exhaustion to the caller through the
 interface as `CapacityExhausted`. Preferred approach: have `put()` (or a
 capacity-aware interface method) detect that the aggregate serialized region
-would exceed `Superblock::region_capacity_bytes()` (`src/on_disk.rs:142`) and
+would exceed `Superblock::region_capacity_bytes()` (`src/on_disk.rs:147`) and
 return `Err(ExtendedMetadataStoreError::CapacityExhausted)`; alternatively map the
 flush-time `String` capacity error to `CapacityExhausted` and propagate it out of
 `force_flush()`. Do **not** relax the spec to flush-time-only enforcement. Do
 **not** modify source in this sweep — this task is queued for implementation.
+
+**Status (refreshed 2026-10-14, proposal P6):** still open and **parked** (maintainer
+decision 2026-09-03). The variant is still never constructed. **Dependency:** the
+alternative fix (propagate the flush-time capacity error out of `force_flush()`)
+cannot work until ALIGN-EMS-003 (P1) lands, because `FlushManager::trigger_flush`
+currently discards every flush error (`src/flush.rs:177`). The preferred
+`put()`-time check does not depend on ALIGN-EMS-003.
 
 **Files to Modify**:
 - `components/extended-metadata-store/src/lib.rs` (and/or `src/flush.rs` for the
@@ -108,3 +132,188 @@ flush-time `String` capacity error to `CapacityExhausted` and propagate it out o
       intact after a capacity error (US5 scenario 2).
 - [ ] `region_capacity_bytes()` (FR-18) is used for the capacity computation, or an
       equivalent geometry-derived bound.
+
+---
+
+## Task: Align 001-extended-metadata-store/FR-05 — propagate flush failures through `trigger_flush`  [ALIGN-EMS-003]
+
+**Proposal**: P1 (approved 2026-10-14 by Cornel Constantinescu — "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR")
+**Severity**: major
+
+**Spec Requirement**: FR-05 (`spec.md` FR table) and US6 AC1 — `force_flush()` ensures all
+mutations are durable, mapping trigger errors to `StorageError`. Interface contract
+`components/interfaces/src/iextended_metadata_store.rs:44`: "Returns when all data is durable."
+
+**Current Code**: `force_flush` maps an `Err` from the trigger to `StorageError`
+correctly (`src/lib.rs:230-234`), but the documented trigger, `FlushManager::trigger_flush`,
+always ends in `Ok(())` (`src/flush.rs:177`). `do_flush` marks the served tickets
+complete whether or not `flush_to_disk` failed and discards the error (`src/flush.rs:246-259`).
+A device write failure or capacity overflow (`src/flush.rs:36-42`) therefore makes
+`force_flush()` return `Ok(())` although nothing new is on disk. No test covers this.
+
+**Required Change**:
+1. Add `ok_through: u64` and `last_error: Option<String>` to `FlushTickets` (`src/flush.rs:91-94`).
+2. In `do_flush`, under the `flush_state` lock: on success `ok_through = max(ok_through, serving)`;
+   on failure `last_error = Some(e)`; in both cases `completed = max(completed, serving)`.
+   In the `dirty == 0` branch (`:223-231`) also advance `ok_through`.
+3. In `trigger_flush`, after the wait (`:172-175`): return `Ok(())` iff `ok_through >= ticket`,
+   else `Err(last_error.clone().unwrap_or_default())`.
+4. Fix the doc comment at `src/flush.rs:152-153`.
+5. Add a `--features testing` fault-injection test.
+
+**Files to Modify**:
+- `components/extended-metadata-store/src/flush.rs`
+- a new `src/repair_test_*.rs` or `tests/persistence.rs`
+
+**Estimated Effort**: small–medium.
+
+### Acceptance Criteria
+- [ ] With `MockBlockDevice::with_fault_config(…, FaultConfig { fail_after_n_writes: Some(0) })`
+      and `attach_flush_trigger(Box::new(move || mgr.trigger_flush()))`, `put` then
+      `force_flush()` returns `Err(StorageError(_))`.
+- [ ] A control case without a fault returns `Ok` and the data is recovered after a reboot.
+- [ ] A ticket served by a failed pass but later covered by a successful pass returns `Ok`.
+- [ ] After this lands, drop the "**Open:**" clause from the FR-05 row in `spec.md`.
+
+---
+
+## Task: Align 001-extended-metadata-store/FR-09 — fall back when active-region entries are corrupt  [ALIGN-EMS-004]
+
+**Proposal**: P2 (approved 2026-10-14 by Cornel Constantinescu — "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR")
+**Severity**: moderate
+
+**Spec Requirement**: FR-09 and Recovery Algorithm steps 4–5 — "verify header CRC and entry
+CRCs"; "if active region corrupt: try inactive region".
+
+**Current Code**: Only a corrupt header or a `flush_seq` mismatch triggers fallback
+(`src/recovery.rs:53-66`). `deserialize_region` skips a bad-CRC entry by advancing one
+sector and continues (`src/on_disk.rs:341-344`), silently returning a partial region; no
+warning is emitted although `src/recovery.rs:21` says warnings cover skipped entries.
+Multi-sector records misalign the parse for every later record.
+
+**Required Change**: Have `deserialize_region` (`src/on_disk.rs:322-349`) report skipped
+records; in `try_read_region`/`recover_from_disk` (`src/recovery.rs:47-66`) treat
+`skipped > 0` or `entries.len() != header.entry_count` as corruption, push a warning and fall
+back. If the inactive region is also partially corrupt, keep best-effort partial recovery
+with a warning; do not format fresh while a region still has a valid header.
+
+**Files to Modify**:
+- `components/extended-metadata-store/src/on_disk.rs`
+- `components/extended-metadata-store/src/recovery.rs`
+- `components/extended-metadata-store/tests/persistence.rs`
+
+**Estimated Effort**: medium.
+
+### Acceptance Criteria
+- [ ] A test that flips a byte inside an entry record (not the header) of the active region
+      sees the fallback warning and recovers the previous checkpoint.
+- [ ] Skipped entries always produce a warning in `RecoveryResult::warnings`.
+
+---
+
+## Task: Align 001-extended-metadata-store/NFR-04 — do not overwrite the recovered region after a fallback  [ALIGN-EMS-005]
+
+**Proposal**: P3 (approved 2026-10-14 by Cornel Constantinescu — "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR")
+**Severity**: moderate
+
+**Spec Requirement**: NFR-04 — a partial flush never corrupts previously-committed data;
+Flush Strategy: "Crash during step 2: old active region is still valid".
+
+**Current Code**: On fallback `recover_from_disk` returns the superblock unchanged
+(`src/recovery.rs:68-77`), so `active_region` still names the corrupt region. The wiring
+layer passes it on (`src/lib.rs:155-157`), and the next flush writes
+`inactive_region_offset()` (`src/flush.rs:45-46`) — the region holding the only good
+checkpoint. A crash before the superblock write (`src/flush.rs:54`) then loses everything;
+recovery formats fresh (`src/recovery.rs:79-84`).
+
+**Required Change**: In the fallback branch return a superblock whose `active_region` is
+flipped to the region actually loaded, keeping `flush_seq` (optionally `entry_count` from the
+recovered header). No on-disk superblock rewrite needed.
+
+**Files to Modify**:
+- `components/extended-metadata-store/src/recovery.rs`
+- `components/extended-metadata-store/tests/persistence.rs`
+
+**Estimated Effort**: small.
+
+### Acceptance Criteria
+- [ ] Test: flush twice, corrupt the active region header, `initialize_from_client`, flush
+      again under `FaultConfig::fail_after_n_writes` so the region write is interrupted,
+      reboot — the previous checkpoint is still recovered.
+- [ ] The next flush after a fallback writes the corrupt region, not the recovered one.
+
+---
+
+## Task: Align 001-extended-metadata-store/FR-01 — reject keys that cannot be persisted  [ALIGN-EMS-006]
+
+**Proposal**: P4 (approved 2026-10-14 by Cornel Constantinescu — "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR")
+**Severity**: moderate
+
+**Spec Requirement**: FR-01 — `put(key, value)` stores data by string key; on-disk format
+fixes `key_len` at 2 bytes (`spec.md` Key Entities, `EntryRecord`).
+
+**Current Code**: `put` checks only `value.len()` (`src/lib.rs:179-181`). `serialize`
+writes `key_bytes.len() as u16` (`src/on_disk.rs:233`) but copies the full key (`:242`), so a
+key of ≥ 65 536 bytes is acknowledged, served by `get`, and silently lost after restart (CRC
+failure at `:276-283`). Related: unchecked `u32` casts at `src/on_disk.rs:306-307`.
+
+**Required Change**: Reject `key.len() > u16::MAX as usize` in `put` before taking the lock.
+**Open sub-decision (maintainer):** error variant — (a) reuse `ValueTooLarge` (no interface
+change) or (b) add `ExtendedMetadataStoreError::KeyTooLarge` in
+`components/interfaces/src/iextended_metadata_store.rs` (recommended). Then update FR-01 in
+`spec.md` to state the 65 535-byte key limit and the chosen variant. Optionally add
+`debug_assert!`/`try_from` on the `u32` casts in `serialize_region`.
+
+**Files to Modify**:
+- `components/extended-metadata-store/src/lib.rs`
+- `components/interfaces/src/iextended_metadata_store.rs` (option b only)
+
+**Estimated Effort**: small.
+
+### Acceptance Criteria
+- [ ] Error variant decided and recorded.
+- [ ] `put` with a 65 536-byte key returns the chosen error; a 65 535-byte key round-trips
+      through flush + reboot.
+- [ ] FR-01 updated with the key-length limit.
+
+---
+
+## Task: Align 001-extended-metadata-store/SC-7 — document every public item  [ALIGN-EMS-007]
+
+**Proposal**: P5 (approved 2026-10-14 by Cornel Constantinescu — "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR")
+**Severity**: minor
+
+**Spec Requirement**: SC-7 — all public items have doc comments; `cargo doc --no-deps` is
+warning-free. (Also `tasks.md` T056.)
+
+**Current Code**: No `///` doc comment on: `src/on_disk.rs` — `Superblock` fields `:12-23`,
+`Superblock::new` `:27`, `serialize` `:59`, `deserialize` `:85`, `inactive_region_offset`
+`:131`, `active_region_offset` `:139`, `region_capacity_bytes` `:147`; `RegionHeader` fields
+`:155-158`, `serialize` `:162`, `deserialize` `:176`; `EntryRecord` fields `:206-208`, `new`
+`:214`, `serialized_size` `:222`, `serialize` `:227`, `deserialize` `:257`; `pad_to_sector`
+`:353`, `bytes_to_sectors` `:360`. `src/block_io.rs` — `BlockDeviceClient::sector_size` `:12`,
+`BlockDeviceClient::new` `:18`. `src/recovery.rs` — `RecoveryResult` fields `:14-16`. No
+`missing_docs` lint is enabled.
+
+**Required Change**: Add doc comments to the items above and enable
+`#![warn(missing_docs)]` in `src/lib.rs` so the clippy `-D warnings` gate enforces SC-7. No
+behaviour change.
+
+**Files to Modify**:
+- `components/extended-metadata-store/src/on_disk.rs`
+- `components/extended-metadata-store/src/block_io.rs`
+- `components/extended-metadata-store/src/recovery.rs`
+- `components/extended-metadata-store/src/lib.rs`
+
+**Estimated Effort**: small.
+
+### Acceptance Criteria
+- [ ] `#![warn(missing_docs)]` enabled; `cargo clippy -p extended-metadata-store --features testing -- -D warnings` passes.
+- [ ] `cargo doc --no-deps -p extended-metadata-store --features testing` is warning-free.
+- [ ] `tasks.md` T056 checked off.
+
+---
+
+## Open items from unapproved proposals with an approval note
+
+None. All 14 proposals in `proposals.json` (2026-10-14) are `approved: true`.

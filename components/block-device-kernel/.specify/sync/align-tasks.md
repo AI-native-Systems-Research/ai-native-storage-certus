@@ -212,3 +212,138 @@ site; plus a targeted test)
       `ReadAsync`/`WriteAsync` ops under `--features telemetry`
 - [ ] `cargo clippy -p block-device-kernel --all-targets -- -D warnings` remains
       clean after the change
+
+# 2026-10-14 Apply (branch `fix/block-device-kernel-timeout-cancel`, approved by Cornel Constantinescu)
+
+Source: `.specify/sync/proposals.json` (generated 2026-10-14T17:31:02Z, HEAD
+`5d123390`). The three ALIGN proposals were approved **as tasks only**. Their
+approval note: "approved as an ALIGN task only: record in align-tasks.md, no
+code change in this PR". This apply changed no code. One more item is open
+because of the approval note on the FR-024 backfill.
+
+## Task: Align 001-block-device-kernel/FR-012: `AbortOp` drops its `AsyncCancel` on a full SQ (`bdk-2026-10-14-07`)
+
+**Spec Requirement**: FR-012: "Component MUST support `AbortOp` by submitting
+an `AsyncCancel` SQE to io_uring and sending an `AbortAck` completion."
+
+**Current Code**: `handle_abort` (`src/actor.rs:662-673`) discards the SQ push
+result (`let _ = self.ring.submission().push(&cancel_sqe);`, `:667`). It then
+removes the op from `inflight` (`:671`) and sends `AbortAck` (`:672`) anyway.
+On a full SQ no cancel is ever submitted, and the kernel op keeps running
+untracked. The branch fixed the same defect for timeouts; this one was already
+there before the branch.
+
+**Required Change**: Route the abort cancel through `pending_cancels` +
+`submit_pending_cancels()` (`src/actor.rs:856-875`) instead of the direct push.
+Decide whether to skip the cancel for handles no longer in `inflight`. Today an
+abort for an unknown or completed handle still pushes a cancel. `AbortAck` is
+sent either way.
+
+**Files to Modify**:
+- `components/block-device-kernel/src/actor.rs` (`handle_abort`)
+- New unit test next to `src/repair_test_timeout_cancel.rs`
+
+**Estimated Effort**: small
+
+### Acceptance Criteria
+- [ ] `handle_abort` no longer discards the push result; the cancel goes through `pending_cancels`
+- [ ] The decision on unknown/completed handles is recorded in FR-012 or a code comment
+- [ ] Unit test: fill the SQ, abort a tracked handle, assert a `user_data == 0` CQE eventually appears
+- [ ] `cargo clippy -p block-device-kernel --all-targets -- -D warnings` and tests pass with and without `--features telemetry`
+
+## Task: Align 001-block-device-kernel/FR-025 (+ FR-002, edge case "Client callback channel full or disconnected"): dropped clients are never reclaimed (`bdk-2026-10-14-08`)
+
+**Spec Requirement**: FR-025 and the edge case ("Client callback channel full
+or disconnected") say a full-or-disconnected client's backlog grows "until
+either the ring frees up or `ControlMessage::DisconnectClient` removes the
+session (dropping the backlog with it)". FR-002 requires client disconnect to
+be logged at debug level.
+
+**Current Code**: Nothing in the crate ever builds
+`ControlMessage::DisconnectClient`. The only mentions are the variant
+(`src/actor.rs:82`) and its handler (`:925-930`). `IBlockDevice` has no
+disconnect method (`components/interfaces/src/iblock_device.rs:557-589`). A
+client that drops its `ClientChannels` keeps its session, and its `pending`
+backlog (`src/actor.rs:55-60`) grows until component shutdown. The disconnect
+debug log (`:926-928`) is dead code.
+
+**Required Change**: In `poll_clients` (`src/actor.rs:890-913`), remove a
+session (with the FR-002 debug log) when its ingress `try_recv` or callback
+`try_send` reports `ChannelError::Closed`. First check that the
+`component_core` SPSC endpoints report `Closed` when the other side is dropped.
+If they do not, add a liveness query to the channel or a disconnect method to
+`IBlockDevice`. The second option is an interface change that affects every
+implementor.
+Fallback if the code change is rejected (BACKFILL, not approved): state in
+FR-025 and the edge case that no disconnect path exists, and that a dropped
+client's session and backlog are kept until shutdown.
+
+**Files to Modify**:
+- `components/block-device-kernel/src/actor.rs` (`poll_clients`)
+- Possibly `lib/component-framework` (SPSC `Closed` reporting) or
+  `components/interfaces/src/iblock_device.rs` (interface decision)
+
+**Estimated Effort**: medium (may need an interface decision)
+
+### Acceptance Criteria
+- [ ] Confirmed whether SPSC endpoints report `Closed` when the peer is dropped
+- [ ] A dropped client's session and backlog are removed, with the FR-002 debug log
+- [ ] Unit test drops a client's `ClientChannels` and asserts the session is removed
+- [ ] Clippy and tests clean in both feature sets
+
+## Task: Align 001-block-device-kernel/NFR-004: five `unsafe` blocks lack `// SAFETY:` (`bdk-2026-10-14-09`)
+
+**Spec Requirement**: NFR-004: "Unsafe code blocks MUST include `// SAFETY:`
+justification comments." (also in the root `CLAUDE.md`)
+
+**Current Code**: No SAFETY comment at:
+- `src/config.rs:87` (`std::mem::zeroed()` for `libc::stat`)
+- `src/config.rs:179` (`libc::close(raw_fd)` in the O_DIRECT-check error branch)
+- `benches/throughput.rs:88`, `benches/latency.rs:52`, `benches/latency.rs:76`
+  (`posix_memalign` blocks)
+
+**Required Change**: Add a `// SAFETY:` comment to each of the five blocks; no
+logic change.
+
+**Files to Modify**:
+- `components/block-device-kernel/src/config.rs`
+- `components/block-device-kernel/benches/throughput.rs`
+- `components/block-device-kernel/benches/latency.rs`
+
+**Estimated Effort**: small
+
+### Acceptance Criteria
+- [ ] All five blocks carry an accurate `// SAFETY:` comment
+- [ ] `cargo clippy -p block-device-kernel --all-targets -- -D warnings` clean
+
+## Open item: FR-024: what happens to in-flight async ops at shutdown (from `bdk-2026-10-14-02`)
+
+**Status**: OPEN. Needs a decision before either the spec or the code changes.
+
+**Origin**: the approval note on `bdk-2026-10-14-02` (FR-024 BACKFILL): "apply
+the mechanism text but DROP the last sentence ('Async operations still in
+flight at shutdown receive no completion.'); record 'what happens to in-flight
+async ops at shutdown' as an open item in align-tasks.md (see tasks.md T011)".
+The mechanism text was applied and the sentence was dropped, so FR-024 now says
+nothing about in-flight ops.
+
+**Current Code**: On `Shutdown` the actor sets `shutdown_requested`
+(`src/actor.rs:931-933`), and `on_idle` stops harvesting and timeout checking
+(`:938-940`). `shutdown()` then deactivates the actor (`src/lib.rs:186-192`).
+Async ops still in `inflight` get no completion of any kind (no `Timeout`, no
+error), and no `AsyncCancel` is submitted for them.
+
+**Decision needed**: one of:
+- (a) keep the current behaviour and add the dropped sentence back to FR-024
+  as the contract;
+- (b) ALIGN the code so that shutdown completes in-flight ops before
+  deactivating, for example by cancelling them and delivering an error or
+  `Timeout` completion, or by draining them.
+
+**Related**: `specs/001-block-device-kernel/tasks.md` T011 ("Add integration
+test for shutdown while async operations are in-flight").
+
+### Acceptance Criteria
+- [ ] Decision recorded (a or b)
+- [ ] FR-024 states the chosen behaviour
+- [ ] The T011 test asserts it

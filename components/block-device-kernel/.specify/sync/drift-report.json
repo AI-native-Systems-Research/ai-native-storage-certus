@@ -1,89 +1,129 @@
 {
-  "generated": "pending",
+  "generated": "2026-10-14T17:31:02Z",
   "project": "block-device-kernel",
+  "branch": "fix/block-device-kernel-timeout-cancel",
+  "git_commit": "5d123390",
+  "base": "origin/unstable@a052af01",
+  "mode": "batch, read-only",
+  "verification_runs": "none (cargo test needed approval in this session and was not run; test status comes from reading the code only)",
   "summary": {
     "specs_analyzed": 1,
-    "requirements_checked": 43,
-    "aligned": 41,
-    "drifted": 2,
+    "requirements_checked": 51,
+    "aligned": 45,
+    "drifted": 6,
     "not_implemented": 0,
-    "unspecced_features": 1
+    "unspecced_features": 0,
+    "drifted_non_numbered_statements": 3
   },
   "specs": [
     {
       "id": "001-block-device-kernel",
       "title": "Block Device Kernel Component",
       "aligned": [
-        "FR-001",
-        "FR-002",
-        "FR-003",
-        "FR-004",
-        "FR-005",
-        "FR-006",
-        "FR-007",
-        "FR-008",
-        "FR-009",
-        "FR-010",
-        "FR-011",
-        "FR-012",
-        "FR-013",
-        "FR-014",
-        "FR-015",
-        "FR-016",
-        "FR-017",
-        "FR-018",
-        "FR-019",
-        "FR-020",
-        "FR-022",
-        "FR-023",
-        "FR-024",
-        "FR-025",
-        "FR-026",
-        "NFR-001",
-        "NFR-002",
-        "NFR-003",
-        "NFR-004",
-        "NFR-005",
-        "NFR-006",
-        "NFR-007",
-        "NFR-008",
-        "SC-001",
-        "SC-002",
-        "SC-003",
-        "SC-004",
-        "SC-005",
-        "SC-007",
-        "SC-008",
-        "SC-009"
+        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007", "FR-008", "FR-009",
+        "FR-010", "FR-011", "FR-013", "FR-014", "FR-015", "FR-016", "FR-017", "FR-018", "FR-019",
+        "FR-020", "FR-021", "FR-022", "FR-023", "FR-026", "FR-027",
+        "NFR-001", "NFR-002", "NFR-003", "NFR-005", "NFR-007", "NFR-008",
+        "SC-001", "SC-002", "SC-003", "SC-004", "SC-005", "SC-006", "SC-007", "SC-008", "SC-009",
+        "KE-BlockDeviceKernelComponent", "KE-DeviceConfig", "KE-ClientSession", "KE-ControlMessage",
+        "KE-InflightOp", "KE-TelemetryStats"
       ],
+      "aligned_caveats": {
+        "FR-002": "The disconnect debug log (src/actor.rs:926-928) can never run, because DisconnectClient is never sent (see FR-025).",
+        "SC-005": "No test checks that Completion::Timeout is delivered; the new unit test uses an unregistered client (src/repair_test_timeout_cancel.rs:91-114).",
+        "SC-009": "The new io_uring test skips by returning early (counts as passed) when io_uring is disabled (src/repair_test_timeout_cancel.rs:30-38)."
+      },
       "drifted": [
         {
-          "requirement": "FR-021",
-          "spec_text": "Feature-gated telemetry tracks min/max/mean latency; the Last-Synced note asserts the hardcoded-0 latency defect was fixed in code (per-op start captured, elapsed ns recorded).",
-          "actual": "Fix present in sync paths and wait_for_cqe, but the primary async-completion path harvest_completions() still calls record_op(0, op.bytes) with hardcoded 0 latency, despite InflightOp carrying a populated start timestamp. Async ReadAsync/WriteAsync ops record 0ns latency, driving min_latency_ns to 0 and skewing mean.",
-          "location": "src/actor.rs:776",
-          "severity": "moderate"
+          "requirement": "NFR-006",
+          "spec_text": "The actor `on_idle()` remains active (returns `true`) while clients are connected or inflight operations exist. (spec.md:149)",
+          "actual": "Returns clients || inflight || pending_cancels (new condition). The framework treats the return value as a 'did work' park hint: false only increments idle_count and parks for 10 ms after 10M idle calls; it never ends the loop.",
+          "location": "src/actor.rs:946; lib/component-framework/crates/component-core/src/actor.rs:83-92, 661-681",
+          "severity": "moderate",
+          "introduced_by_branch": "partly (pending_cancels condition); wrong meaning was already there"
         },
         {
-          "requirement": "SC-006",
-          "spec_text": "Feature-gated telemetry produces accurate TelemetrySnapshot values when enabled.",
-          "actual": "Latency values inaccurate for async operations because harvest_completions records 0ns latency; snapshot min/mean latency wrong when async IO dominates. Same root cause as FR-021.",
-          "location": "src/actor.rs:776",
-          "severity": "moderate"
+          "requirement": "FR-024",
+          "spec_text": "Component MUST support graceful shutdown via `ControlMessage::Shutdown` which causes `on_idle()` to return `false`, terminating the actor loop. (spec.md:135)",
+          "actual": "Shutdown sets shutdown_requested; on_idle then returns false without doing work, but that does not end the loop. The loop ends when shutdown() calls ActorHandle::deactivate(), which closes the channel (ChannelError::Closed -> break) and joins the thread. In-flight ops get no completion.",
+          "location": "src/actor.rs:931-940; src/lib.rs:179-195; lib/component-framework/crates/component-core/src/actor.rs:218-226, 684-697",
+          "severity": "moderate",
+          "introduced_by_branch": false
+        },
+        {
+          "requirement": "FR-025",
+          "spec_text": "... appended to an unbounded per-client FIFO backlog ... (spec.md:136); edge case: backlog accumulates 'until either the ring frees up or `ControlMessage::DisconnectClient` removes the session (dropping the backlog with it)' (spec.md:104)",
+          "actual": "Nothing in the crate ever builds ControlMessage::DisconnectClient and IBlockDevice has no disconnect method, so a dropped client's session and backlog are never reclaimed before component shutdown. The DisconnectClient handler, including the FR-002 debug log, is dead code.",
+          "location": "src/actor.rs:82, 925-930; src/lib.rs:216-256; components/interfaces/src/iblock_device.rs:557-589",
+          "severity": "moderate",
+          "introduced_by_branch": false
+        },
+        {
+          "requirement": "FR-012",
+          "spec_text": "Component MUST support `AbortOp` by submitting an `AsyncCancel` SQE to io_uring and sending an `AbortAck` completion. (spec.md:123)",
+          "actual": "handle_abort discards the SQ push result; on a full SQ no AsyncCancel is submitted, but the op is still removed from inflight and AbortAck is still sent. Same defect class as the timeout path this branch fixed.",
+          "location": "src/actor.rs:662-673 (push discarded :667)",
+          "severity": "moderate",
+          "introduced_by_branch": false
+        },
+        {
+          "requirement": "NFR-004",
+          "spec_text": "Unsafe code blocks MUST include `// SAFETY:` justification comments. (spec.md:147)",
+          "actual": "Five unsafe blocks have no SAFETY comment.",
+          "location": "src/config.rs:87; src/config.rs:179; benches/throughput.rs:88; benches/latency.rs:52; benches/latency.rs:76",
+          "severity": "minor",
+          "introduced_by_branch": false
+        },
+        {
+          "requirement": "KE-KernelHandler",
+          "spec_text": "Owns the file descriptor (`OwnedFd`), `DeviceConfig`, `IoUring` ring, client sessions map, inflight operations map, and optional logger. (spec.md:156)",
+          "actual": "Also owns pending_cancels: VecDeque<u64> (new), next_handle, shutdown_requested, feature-gated telemetry.",
+          "location": "src/actor.rs:103-118 (pending_cancels :113)",
+          "severity": "minor",
+          "introduced_by_branch": true
+        }
+      ],
+      "drifted_non_numbered": [
+        {
+          "requirement": "EDGE-async-timeout",
+          "spec_text": "Async operation timeout: Timed-out operations produce `Completion::Timeout` and an `AsyncCancel` is submitted to io_uring. (spec.md:103)",
+          "actual": "Timeout is delivered at once. The AsyncCancel is guaranteed (never dropped) but may be deferred over poll cycles via pending_cancels when the SQ is still full after submit()+one retry.",
+          "location": "src/actor.rs:821-875",
+          "severity": "minor",
+          "introduced_by_branch": true
+        },
+        {
+          "requirement": "NOTE-fsync-markers",
+          "spec_text": "CQEs with `user_data & (1 << 63) != 0` are treated as internal fsync markers and silently ignored. (spec.md:206)",
+          "actual": "The filter exists, but nothing sets bit 63 or submits an fsync; only the new test uses the bit, to mark its filler NOPs.",
+          "location": "src/actor.rs:700, 769; src/repair_test_timeout_cancel.rs:9-10, 82",
+          "severity": "minor",
+          "introduced_by_branch": false
+        },
+        {
+          "requirement": "NOTE-on_idle",
+          "spec_text": "The `on_idle()` actor method returns `false` only when shutdown is requested; it returns `true` while clients or inflight ops exist to keep the actor thread alive. (spec.md:207)",
+          "actual": "on_idle also returns false when there are no clients, no inflight ops and no pending cancels; the value is a park hint, not something that keeps the thread alive.",
+          "location": "src/actor.rs:937-947; lib/component-framework/crates/component-core/src/actor.rs:661-681",
+          "severity": "moderate",
+          "introduced_by_branch": false
         }
       ],
       "not_implemented": []
     }
   ],
-  "unspecced": [
+  "unspecced": [],
+  "spec_gaps": [
     {
-      "feature": "Command::FlushSync handler returning FlushDone{Ok} as a validated no-op (O_DIRECT|O_DSYNC leaves no volatile write cache); ns_id!=1 -> InvalidNamespace. Kernel spec never mentions FlushSync.",
-      "location": "src/actor.rs",
-      "lines": "233-247",
-      "suggested_spec": "Backfill an FR (parallel to filesys FR-022) documenting FlushSync as a validated no-op justified by O_DSYNC durability."
+      "topic": "Buffer lifetime after Completion::Timeout / AbortAck",
+      "detail": "InflightOp does not keep the caller's DmaBuffer Arc; the kernel may still use the buffer after Timeout/AbortAck (the cancel can now be deferred, and AsyncCancel cannot stop a request already handed to the device). The spec says nothing about ownership. Needs a human decision.",
+      "location": "src/actor.rs:90-100, 453-461, 530-535, 843, 869-871, 672"
     }
   ],
-  "conflicts": [],
-  "inputs_sha256": "44506349f1ba99d230d4b9e60fee89aa83dff5df0f1f4c193ffe0443bdea031a",
-  "git_commit": "72c7182b"
+  "conflicts": [
+    "spec.md:207 contradicts itself ('false only when shutdown' vs 'true while clients or inflight', which leaves the idle no-client case returning false).",
+    "spec.md:135, :149, :207 and plan.md:75 read on_idle's bool as keeping the actor alive or ending it; the framework contract (component-core actor.rs:83-92) says it is a 'did work' park hint.",
+    "spec.md:104/:136 rely on ControlMessage::DisconnectClient, which has no caller and no interface method.",
+    "spec.md:11 'Last Synced: 2026-09-03' is out of date compared with this branch."
+  ]
 }
