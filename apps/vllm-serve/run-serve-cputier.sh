@@ -74,10 +74,15 @@ CPU_BYTES="${CPU_BYTES:-$((30 * (1 << 30)))}"   # CPU primary tier, pinned host 
 SHM_BYTES="${SHM_BYTES:-$((CPU_BYTES + 4 * (1 << 30)))}"
 # fs disk secondary tier. FS_TIER=0 drops it -> plain CPU offload (CPUOffloadingSpec).
 FS_TIER="${FS_TIER:-1}"
-FS_TIER_HOST="${FS_TIER_HOST:-/mnt/certus1/kv-fs-tier}"   # host dir backing the disk tier
+FS_TIER_HOST="${FS_TIER_HOST:-/raid0/kv-fs-tier}"        # host dir backing the disk tier
 FS_TIER_CTR="/workspace/kv-fs-tier"                       # container mount point
 FS_READ_THREADS="${FS_READ_THREADS:-16}"
 FS_WRITE_THREADS="${FS_WRITE_THREADS:-16}"
+# Offloaded block size in TOKENS (vLLM kv_connector_extra_config "block_size"). Must
+# be a multiple of the GPU block size (16 by default); GPU prefix caching keeps its
+# own block size. Unset (default) = same as the GPU block. Kept identical to
+# run-serve-certus-shmq.sh so the two backends offload at the same granularity.
+OFFLOAD_BLOCK_SIZE="${OFFLOAD_BLOCK_SIZE:-}"
 
 # ── Container / store ────────────────────────────────────────────────────────────
 # The unified offload image (vLLM + the native tiering framework) lives in the
@@ -120,18 +125,23 @@ fi
 # TieringOffloadingSpec (CPU primary + fs secondary) — the same dict the offline
 # cputier driver builds (run_otel_replay.py / run_multiturn_offloading.py). With
 # FS_TIER=0 we fall back to a single-tier CPUOffloadingSpec (host RAM only).
+OFFLOAD_BLOCK_JSON=""
+if [[ -n "$OFFLOAD_BLOCK_SIZE" ]]; then
+  OFFLOAD_BLOCK_JSON=",\"block_size\":${OFFLOAD_BLOCK_SIZE}"
+  echo "[serve] offloaded block size ${OFFLOAD_BLOCK_SIZE} tokens"
+fi
 FS_MOUNT_ARGS=()
 if [[ "$FS_TIER" != "0" ]]; then
   mkdir -p "$FS_TIER_HOST"
   FS_MOUNT_ARGS=( -v "${FS_TIER_HOST}:${FS_TIER_CTR}:z" )
   KV_CONFIG=$(cat <<JSON
-{"kv_connector":"OffloadingConnector","kv_role":"kv_both","kv_connector_extra_config":{"cpu_bytes_to_use":${CPU_BYTES},"spec_name":"TieringOffloadingSpec","eviction_policy":"lru","secondary_tiers":[{"type":"fs","root_dir":"${FS_TIER_CTR}","n_read_threads":${FS_READ_THREADS},"n_write_threads":${FS_WRITE_THREADS}}]}}
+{"kv_connector":"OffloadingConnector","kv_role":"kv_both","kv_connector_extra_config":{"cpu_bytes_to_use":${CPU_BYTES},"spec_name":"TieringOffloadingSpec","eviction_policy":"lru","secondary_tiers":[{"type":"fs","root_dir":"${FS_TIER_CTR}","n_read_threads":${FS_READ_THREADS},"n_write_threads":${FS_WRITE_THREADS}}]${OFFLOAD_BLOCK_JSON}}}
 JSON
 )
   echo "[serve] cputier: CPU primary ${CPU_BYTES}B + fs disk tier ${FS_TIER_HOST} -> ${FS_TIER_CTR} (r=${FS_READ_THREADS} w=${FS_WRITE_THREADS})"
 else
   KV_CONFIG=$(cat <<JSON
-{"kv_connector":"OffloadingConnector","kv_role":"kv_both","kv_connector_extra_config":{"cpu_bytes_to_use":${CPU_BYTES},"spec_name":"CPUOffloadingSpec","eviction_policy":"lru"}}
+{"kv_connector":"OffloadingConnector","kv_role":"kv_both","kv_connector_extra_config":{"cpu_bytes_to_use":${CPU_BYTES},"spec_name":"CPUOffloadingSpec","eviction_policy":"lru"${OFFLOAD_BLOCK_JSON}}}
 JSON
 )
   echo "[serve] cpu-only offload: CPU tier ${CPU_BYTES}B (no disk tier)"

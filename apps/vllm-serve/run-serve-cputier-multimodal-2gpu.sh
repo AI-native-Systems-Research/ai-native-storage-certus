@@ -40,7 +40,7 @@
 #   CPU_BYTES=30G         CPU primary tier (pinned host RAM), matching the shmq
 #                         server's 30G memory tier for a fair comparison.
 #   FS_TIER=1             fs disk secondary tier under ${FS_TIER_HOST}
-#                         (default /mnt/certus1/kv-fs-tier). FS_TIER=0 = CPU-only.
+#                         (default /raid0/kv-fs-tier). FS_TIER=0 = CPU-only.
 #   The base sizes the container /dev/shm to CPU_BYTES + 4G for the tier mmap.
 #
 # Multimodal: --limit-mm-per-prompt allows up to MM_IMAGES images per prompt,
