@@ -10,54 +10,74 @@ All integers little-endian. All offsets in bytes from the start of the message.
 
 ## Message framing
 
-Both messages share an 8-byte prologue so a receiver can dispatch before parsing:
+Every message begins with a 24-byte header whose first word is a **fused opcode carrying
+the version in its high half**:
+
+```
+opcode = (version << 16) | kind
+```
+
+| name | `opcode` | meaning |
+|---|---|---|
+| `OP_FETCH` | `0x0001_0001` | kind 1, version 1 |
+| `OP_FETCH_REPLY` | `0x0001_0002` | kind 2, version 1 |
+
+Two opcodes is the whole protocol. Everything else the design needs — chunking, credits,
+tier attribution — is carried in the header flags or the body, not in additional message
+kinds.
+
+A receiver dispatches on the whole word and rejects any value it does not know. Fusing the
+version in is deliberate: a v2 `OP_FETCH` has a *different opcode* from a v1 `OP_FETCH`, so
+an older peer cannot parse it as v1 and misread the body. A separate version field would make
+that safety depend on every implementer remembering to check it; here an unknown version is
+structurally an unknown opcode. It also leaves room to add message kinds later — a cancel,
+a credit update — without touching the framing.
 
 | offset | size | field | notes |
 |---|---|---|---|
-| 0 | 1 | `msg_type` | `1` = Request, `2` = Reply |
-| 1 | 1 | `version` | `1`. A receiver MUST reject a version it does not know. |
-| 2 | 2 | `flags` | bit 0 = `MORE` (another chunk of this context follows); rest reserved, MUST be zero |
-| 4 | 4 | `n_entries` | entries in *this* message |
+| 0 | 4 | `opcode` | fused kind + version, above |
+| 4 | 2 | `flags` | bit 0 = `MORE` (another chunk of this context follows); rest reserved, MUST be zero |
+| 6 | 2 | reserved | MUST be zero |
+| 8 | 8 | `context_id` | identifies the fetch; echoed in `OP_FETCH_REPLY` |
+| 16 | 4 | `n_entries` | entries in *this* message |
+| 20 | 4 | reserved | MUST be zero; keeps the entry vector 8-byte aligned |
 
-### Request (`msg_type = 1`)
+### `OP_FETCH` (`0x0001_0001`)
 
-| offset | size | field |
-|---|---|---|
-| 0 | 8 | prologue |
-| 8 | 8 | `context_id` |
-| 16 | 8 | `base_addr` — landing region base on the **requester** |
-| 24 | 4 | `rkey` — requester's rkey for that region |
-| 28 | 4 | `entry_size` — bytes per entry; uniform within a message |
-| 32 | 16 × `n_entries` | entry vector |
-
-Entry (16 bytes):
+Header, then `n_entries` × 24-byte entries. **Nothing else** — no base address, no rkey, no
+uniform entry size in the header.
 
 | offset | size | field |
 |---|---|---|
 | 0 | 8 | `key` — the 64-bit block key |
-| 8 | 4 | `slot_index` — index of the reserved landing slot |
-| 12 | 4 | reserved, MUST be zero |
+| 8 | 8 | `addr` — absolute address to write to, on the requester |
+| 16 | 4 | `size` — bytes for this entry |
+| 20 | 4 | `rkey` — requester's rkey covering `addr` |
 
-Target address for entry *i* is `base_addr + slot_index[i] * entry_size`. The source
-performs that arithmetic; the requester never sends per-entry addresses. One RDMA write is
-issued per entry because slots are not contiguous (FR-008) — `slot_index` is an index into
-the requester's slot table, **not** a byte offset, and consecutive indices carry no
-implication of adjacency.
+This is exactly `(CacheKey, RemoteRegion)` on the wire, which is what
+[itransfer_endpoint.md](./itransfer_endpoint.md) already passes to `fetch` and
+`push_async`.
 
-### Reply (`msg_type = 2`)
+**Why addresses rather than slot indices.** An earlier draft sent
+`(key, slot_index)` with a per-message `base_addr` and uniform `entry_size`, computing the
+target as `base_addr + slot_index * entry_size`. That is **unimplementable against the
+memory tier**: `IMemoryTier` is `insert(key, size) -> *mut u8` and
+`get(key) -> Option<(*mut u8, u32)>` — an allocator keyed by `CacheKey` with a per-entry
+size, with no index-addressable slot table and no uniform entry size. Indices would have
+invented a layout the tier does not have, and coupled the wire format to it. The saving
+would have been 8 bytes per entry. Addresses cost nothing in practice (see sizing) and the
+`rkey` rides in what would otherwise be padding, so per-entry regions are supported for
+free — the requester may land entries across several registered regions.
 
-| offset | size | field |
-|---|---|---|
-| 0 | 8 | prologue |
-| 8 | 8 | `context_id` — echoes the request |
-| 16 | 1 × `n_entries` | outcome vector, one byte per entry, request order |
-| … | 0–7 | zero padding to an 8-byte boundary |
+### `OP_FETCH_REPLY` (`0x0001_0002`)
 
-Outcome byte: `0` = Miss, `1` = HitMemoryTier, `2` = HitBlockTier. Values ≥ 3 reserved; a
+Header, then one outcome byte per entry in request order, zero-padded to an 8-byte boundary.
+
+Outcome byte: `0` = Miss, `1` = HitMemoryTier, `2` = HitBlockTier. Values >= 3 reserved; a
 receiver MUST treat an unknown outcome as Miss rather than erroring, so a future source can
 add a tier without breaking an old requester.
 
-**Ordering guarantee**: every RDMA write for entries reported as a hit MUST have completed
+**Ordering guarantee**: every RDMA write for an entry reported as a hit MUST have completed
 before the reply is sent. The requester may therefore treat reply arrival as the completion
 signal for the whole message and needs no per-entry completion notification. This is what
 makes the one-sided WRITE safe without `WRITE_WITH_IMM`.
@@ -67,13 +87,12 @@ makes the one-sided WRITE safe without `WRITE_WITH_IMM`.
 Receive buffers are posted unconditionally, whether or not the local caller uses messaging
 (FR-005), so the sizing applies to every connection.
 
-With an 8 KiB buffer: `(8192 − 32) / 16` = **510 entries** per request message. At 2.25 MiB
-per block that is ~1.1 GiB of KV per message — comfortably more than any single scheduler
-step will ask for, and it bounds the reply at `16 + 510` = 526 bytes.
+With an 8 KiB buffer: `(8192 - 24) / 24` = **340 entries** per `OP_FETCH`. At 2.25 MiB
+per block that is ~765 MiB of KV per message — far more than any single scheduler step will
+ask for — and it bounds `OP_FETCH_REPLY` at `24 + 340` = 364 bytes.
 
-Posted-receive memory per peer is therefore `message_credits × 8 KiB`. At 8 credits that is
-64 KiB per peer — negligible, which is why FR-005 can post unconditionally rather than
-negotiate.
+Posted-receive memory per peer is `message_credits x 8 KiB`. At 8 credits that is 64 KiB per
+peer — negligible, which is why FR-005 can post unconditionally rather than negotiate.
 
 `max_entries` is derived from the buffer size, not configured independently, and is what
 `RequestTooLarge { max_entries }` reports.
@@ -99,10 +118,9 @@ pacing that answers the incast concern (D10).
 
 - One queue pair per peer pair, either end able to post (D5). The requester connects; the
   source replies and pushes over that same connection.
-- Landing regions are registered once (`register_landing_region`), not per request. Only
-  `rkey` and `base_addr` travel, per message — the same economy vLLM's Nixl connector uses,
-  where the address space is exchanged once at handshake and only block indices travel per
-  request.
+- Landing regions are registered once (`register_landing_region`), not per request;
+  registration is what makes an `rkey` valid. The per-entry `rkey` on the wire selects
+  among the requester's registered regions — it does not imply per-request registration.
 - A closed connection aborts every context outstanding on it. Each side releases its own
   resources: the source its pins and bounce buffers, the requester its landing slots — the
   latter only after teardown completes (FR-017).
@@ -112,7 +130,7 @@ pacing that answers the incast concern (D10).
 ## What is deliberately not here
 
 - **No per-entry completion notification.** Subsumed by the reply ordering guarantee above.
-- **No negotiation.** `version` is checked and rejected, not negotiated. One implementation
+- **No negotiation.** The fused opcode is matched or rejected, never negotiated. One implementation
   talks to itself across a homogeneous cluster.
 - **No authentication or capability check.** Single-tenant assumption (spec Assumptions);
   RDMA write access into landing slots is accepted.
