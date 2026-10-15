@@ -62,7 +62,8 @@ unchanged.
   (teardown-before-reclaim).
 - **Peer hangs or partitions with the connection open.** Detected by deadline, not by
   connection state. In research configuration the request **fails loudly** with full
-  diagnostic state; see FR-016.
+  diagnostic state; see FR-016. The queue pair is then forced to ERROR before any slot is
+  reclaimed, which also aborts the request's siblings on that connection; see FR-023.
 - **Duplicate or overlapping requests for the same key.** Pins are reference-counted;
   concurrent pushes of one key are safe.
 - **Key present but stored size does not match the requested region.** Treated as a miss.
@@ -77,10 +78,18 @@ unchanged.
   outbound-initiated, and **either** may post work requests. The current split — responder
   accepts but never posts, initiator connects and posts — MUST NOT constrain the new path.
 - **FR-002**: At most one connection per peer pair MUST be used, reused across requests, and
-  established on first need.
+  established on first need. A "peer pair" means a pair of *instances*, not of hosts — see
+  FR-021.
 - **FR-003**: The endpoint MUST build and unit-test with default features — no rdma-core
   present — over an in-process transport seam, as both existing crates do today.
 - **FR-004**: The endpoint MUST NOT depend on zyre.
+- **FR-021**: A peer MUST be identified at **instance** granularity, not host granularity.
+  Several certus instances run per node — one per NUMA domain in the current rigs — so a
+  host alone is not an address. The identifier MUST carry at least host and port, MUST be
+  normalized before use as a connection-table key, and an identifier without a port MUST be
+  rejected rather than defaulted. Two instances on the same host MUST be addressable
+  independently and MUST hold separate connections, including when both are the local host
+  (which is also the single-host loopback verification path).
 
 **Request / reply messaging**
 
@@ -109,6 +118,13 @@ unchanged.
   source MUST NOT promote them into its memory tier to serve a peer.
 - **FR-013**: The source MAY process a request list concurrently, bounded by the credit
   limits in FR-014.
+- **FR-022**: The source MUST NOT introduce a phase barrier within a request. Specifically it
+  MUST NOT drain its send queue between entries, and on a request mixing tiers it MUST NOT
+  wait for device reads to finish before posting memory-tier writes: memory-tier entries are
+  posted as soon as they are resolved, and each block-tier entry is posted when its own
+  device read completes. Only the end-of-message reply (FR-007) is a synchronization point.
+  See research D19 for why this is the *only* barrier worth engineering away, and why no
+  cross-message pipelining is required.
 
 **Resource bounds** — three distinct domains, separately configured and named
 
@@ -124,13 +140,25 @@ unchanged.
 **Failure handling**
 
 - **FR-016**: A destination-side deadline MUST detect a request that is neither fulfilled
-  nor refused. Its action MUST be configurable, defaulting to **fail loudly** — log the key
-  range, peer, chunk and queue-pair state, then fail the request. A degrading action
-  (report what arrived and let the caller recompute) is deferred, not implemented.
+  nor refused. Detection MUST be by deadline, not by connection state: a peer that hangs or
+  partitions with its connection open is invisible to the transport. The action MUST be
+  configurable, defaulting to **fail loudly** — log the key range, peer, chunk and
+  queue-pair state, then fail the request. A degrading action (report what arrived and let
+  the caller recompute) is deferred, not implemented. This destination-side *reply* deadline
+  is distinct from a source-side stall cap on uncompleted writes, and the two MUST be named
+  and configured separately.
 - **FR-017**: The destination MUST NOT reclaim or publish a landing slot until it is certain
   no write can still land in it — queue-pair teardown MUST precede reclaim.
 - **FR-018**: A partially written entry MUST NOT be published. Landing slots follow
   reserve → arrive → commit/abort, as local stores do.
+- **FR-023**: On deadline expiry the endpoint MUST make further writes *impossible* before it
+  reclaims anything, in this order: transition the queue pair to ERROR, drain and discard its
+  completions, reclaim the landing slots, and only then permit a fresh connection to be
+  established on next need. Logging the queue-pair state (FR-016) is not a substitute for
+  changing it — a slow-but-live source whose write lands in a reclaimed slot corrupts an
+  unrelated entry. Because one connection serves all requests to a peer (FR-002), expiry of
+  any one request MUST abort every context outstanding on that connection; this blast radius
+  MUST be logged, and MUST NOT be narrowed by opening additional connections per request.
 
 **Compatibility**
 
@@ -150,14 +178,17 @@ unchanged.
 - **EntryOutcome** — `hit_memory_tier | hit_block_tier | miss`.
 - **BounceBuffer** — a registered buffer leased from a fixed pool for block-tier serving.
 - **PeerConnection** — one queue pair plus its three credit counters, usable in both
-  directions.
+  directions, keyed by `PeerId` and replaceable without invalidating a landing region.
+- **PeerId** — an instance-granular peer address, carrying at least host and port (FR-021).
+- **LandingRegion** — a registered region peers may write into. Its registration outlives any
+  one queue pair, so its `rkey` survives a reconnect; see research D17.
 
 ## Success Criteria *(mandatory)*
 
 ### Measurable Outcomes
 
 - **SC-001**: A destination fetches a requested key run from one named peer with **zero**
-  zyre messages and **zero** messages to any third node.
+  zyre messages and **zero** messages to any third instance.
 - **SC-002**: The existing `remote-lookup` test layer and the initiator's
   `loopback_push_writes_into_remote_buffer` hardware loopback test pass against this endpoint
   with messaging unused.
@@ -174,6 +205,15 @@ unchanged.
 - **SC-008**: The duplicated verbs FFI layer is defined once. (Today
   `remote-lookup-rdma-initiator/src/ffi.rs` and
   `remote-lookup-rdma-responder/src/ffi.rs` declare 28 identical public items.)
+- **SC-009**: Two instances on one host, differing only by port, are addressed independently
+  and hold separate connections; an identifier without a port is rejected.
+- **SC-010**: After a deadline expires, no write from that peer can land in a reclaimed
+  landing slot, and every sibling context on the connection is reported as aborted. A
+  subsequent fetch to the same peer succeeds over a fresh connection without re-registering
+  the landing region.
+- **SC-011**: On a request mixing memory-tier and block-tier entries, every memory-tier write
+  is posted before the first device read completes, and the send queue is never idle while
+  unposted entries remain.
 
 ## Assumptions
 

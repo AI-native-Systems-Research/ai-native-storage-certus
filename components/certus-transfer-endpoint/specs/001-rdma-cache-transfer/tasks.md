@@ -44,20 +44,20 @@ own `#[ignore]`d module, mirroring
 **Purpose**: crate scaffolding, the feature matrix of D14, and the one upstream unblock
 that Principle VIII requires.
 
-- [ ] T001 Create `Cargo.toml`: `[features] default = []`, `rdma = []`, `spdk = []`,
+- [X] T001 Create `Cargo.toml`: `[features] default = []`, `rdma = []`, `spdk = []`,
   `telemetry = []` (D14; `rdma` and `spdk` independently selectable per the
   constitution's Platform constraints); deps `component-framework`, `component-core`,
   `component-macros`, `interfaces`, `anyhow`; `[build-dependencies] cc`, `pkg-config`;
   `[dev-dependencies] criterion` with `html_reports`; `[[bench]]` stanzas with
   `harness = false`
-- [ ] T002 **[BLOCKER — read the note below]** Ungate `IDispatchMap` and `LookupResult`
+- [X] T002 **[BLOCKER — cleared]** Ungate `IDispatchMap` and `LookupResult`
   in `components/interfaces/src/lib.rs` (drop the two `#[cfg(feature = "spdk")]`
   attributes on their re-exports) and confirm `idispatch_map.rs` compiles without the
   `spdk` feature. The module references **no** SPDK type — the only `spdk` tokens in it
   are the gate attributes themselves — so this is the "ungate those opaque-pointer trait
   definitions (they reference no SPDK type) as was done for `IMemoryTier`" change the
   workspace root `Cargo.toml` already names as the intended direction
-- [ ] T003 [P] Add `components/certus-transfer-endpoint` to workspace `members` **and**
+- [X] T003 [P] Add `components/certus-transfer-endpoint` to workspace `members` **and**
   `default-members` in the root `Cargo.toml` (Principle VIII), with a comment explaining
   why it differs from `remote-lookup-rdma-initiator`/`-responder`, which are members but
   not default members because they link rdma-core unconditionally. Depends on T002:
@@ -105,7 +105,11 @@ connection table. This is plan.md Phase 1's engine.
 - [ ] T009 Write `src/rdma.rs` safe wrappers over T007: device/PD open, QP lifecycle
   (init → RTR → RTS → ERROR), `MemoryRegion` over caller-owned memory (the initiator's
   registration path already covers "memory owned by the caller (e.g. memory-tier pool)",
-  D15), `post_send`, `post_recv`, completion polling. Gated on `rdma`
+  D15), `post_send`, `post_recv`, completion polling. Gated on `rdma`. **The protection
+  domain is owned by the endpoint for its lifetime, not by a connection** (D17) — unlike the
+  initiator, where the PD lives in the connection (`rdma.rs:169`, `ibv_dealloc_pd` in its
+  `Drop`) and the pool is re-registered on every connect (`connection.rs:1131`). Explicit QP
+  transition to ERROR is part of this surface: it is what FR-023 relies on
 - [ ] T010 Define the **transport seam** in `src/connection.rs`: traits for a listener
   and a peer link that carry a QP and can *both* post and receive, with `CmEvent`-style
   inbound delivery. **The seam must be selected per build, with the interface working in
@@ -119,7 +123,8 @@ connection table. This is plan.md Phase 1's engine.
   write that copies into the target address, and recorded QP→ERROR ordering so
   teardown-before-reclaim is assertable
 - [ ] T012 Implement the **symmetric** `ConnectionTable` in `src/connection.rs` (depends
-  T010, D5): one QP per peer pair keyed by peer, established on first need and reused
+  T010, T068, D5): one QP per peer **instance** pair keyed by `PeerId`, established on first
+  need and reused
   (FR-002), with a connection usable regardless of whether it was inbound-accepted or
   outbound-initiated, and **either end able to post work requests** (FR-001). This is the
   thing neither existing crate can do
@@ -136,6 +141,26 @@ connection table. This is plan.md Phase 1's engine.
   identical method surface. Counters: per-outcome totals, each credit domain's current and
   peak depth, chunk count, deadline expiries. Principle XI forbids structuring these so an
   unexercised path looks like a working one — so count *attempts* alongside completions
+- [ ] T068 [P] Implement `PeerId` in `src/connection.rs`: parse and normalize a
+  `"ip:port"` instance address, rejecting a missing port and port 0 rather than defaulting
+  either (FR-021, D16). Reuse the grammar of
+  `remote-lookup-rdma-initiator/src/connection.rs:1075` `parse_endpoint` rather than
+  inventing a second one. Unit-test that two addresses differing only by port are distinct
+  keys, that a host-only address is rejected, and that both may be the local host
+- [ ] T069 Implement protection-domain ownership in `src/rdma.rs` (depends T009): **one PD
+  per device, owned by the endpoint for its lifetime**, with memory regions registered into
+  it once and outliving every queue pair, so an `rkey` already on the wire stays valid
+  across a reconnect (D17). This is a deliberate departure from the predecessor crates, and
+  carries four consequences the decision accepts explicitly: (a) pass the PD to
+  `rdma_create_qp` rather than accepting `id->pd`, allocating it lazily per `ibv_context`
+  after address resolution and keying it per device, since a PD cannot be used with an id on
+  a different device; (b) one shared PD means any connected peer can address any registered
+  region — acceptable only under the spec's single-tenant trust assumption; (c) shutdown must
+  tear down every QP and deregister every region before `ibv_dealloc_pd`, which fails
+  `EBUSY` otherwise; (d) rewrite `MemoryRegion`'s `// SAFETY:` justification — the
+  initiator's "only accessed from the thread that created it" (`rdma.rs:126`) stops being
+  true once one region is shared across per-peer connection threads, and `Sync` may be
+  needed alongside `Send` (Principle V)
 - [ ] T016 Wire `define_component!` in `src/lib.rs` (depends T006, T012): receptacles
   `logger: ILogger`, `dispatch_map: IDispatchMap` (both ungated, per D13 and T002), and a
   block-device receptacle gated on `spdk`. Endpoint owns a dedicated actor thread, as both
@@ -160,15 +185,20 @@ hardware loopback scenario, pass against this component with messaging unused.
   on_complete)` in `src/serve.rs` + `src/lib.rs`: resolve or open the connection, post one
   RDMA write **per entry** (FR-008 — landing slots are not contiguous, so there is no
   batch write to post), accumulate outcomes, fire `on_complete` once with one outcome per
-  item in request order
+  item in request order. Post continuously: refill on each completion and never drain the
+  send queue between entries while unposted entries remain (FR-022). A window of 2-4 already
+  saturates the link at 2.25 MiB per entry, so this is about avoiding idle, not depth (D19)
 - [ ] T018 [US2] Implement blocking `push` over `push_async` (contract: one outcome per
   item, in order)
-- [ ] T019 [US2] Implement `disconnect(peer)`: tear the peer's QP down and do not return
-  until no write from that peer can still land (FR-017, Principle IX's last clause). This
-  is the existing `Disconnect`/`DisconnectAck` barrier, kept
-- [ ] T020 [P] [US2] Implement `register_landing_region(base, len)` returning
+- [ ] T019 [US2] Implement `disconnect(peer)`: transition the peer's QP to ERROR, drain and
+  discard its completions, and do not return until no write from that peer can still land
+  (FR-017, Principle IX's last clause). This is the existing `Disconnect`/`DisconnectAck`
+  barrier, kept — and it is also the mechanism the deadline path reuses (FR-023, T070), so
+  it must abort every context outstanding on the connection, not just one
+- [ ] T020 [US2] Implement `register_landing_region(base, len)` returning
   `LandingRegionHandle`: register once, not per request; an `rkey` is only valid because
-  of it (wire-protocol.md "Connection and lifecycle")
+  of it (wire-protocol.md "Connection and lifecycle"). Register into the long-lived PD of
+  T069 so the handle and its `rkey`s survive a reconnect (D17); depends on T069
 - [ ] T021 [US2] Tests in-module: order-and-length invariant 1 over the mock seam
   (`items.len()` outcomes, index *i* ↔ `items[i]`); connection reuse across repeated
   pushes (FR-002); teardown-before-reclaim ordering asserted from the mock's recorded
@@ -309,6 +339,17 @@ unchanged.
   so a `BlockDevice{offset}` answer is reported as **`Miss`** — never `HitBlockTier`, never
   an error (D14, invariant 2). Release the pin that lookup took, since that answer *was*
   pinned (contrast T023)
+- [ ] T072 [US3] Remove the read/write phase barrier from the serve path (FR-022, D19):
+  resolve and post **memory-tier** writes immediately, without waiting on any device read,
+  and post each block-tier write when its *own* read completes — never "lease N buffers,
+  read all N, post all N". Keep the device queue deep by sizing bounce occupancy for it,
+  which is the one bound that should track device parallelism. This is the only barrier in
+  the design whose cost is milliseconds rather than microseconds, which is why it is the
+  only one with a requirement attached
+- [ ] T073 [US3] Test **SC-011**: on a request mixing memory-tier and block-tier entries,
+  every memory-tier write is posted before the first device read completes (hold the mock
+  block device's read completion and assert the memory-tier writes already went out), and
+  the send queue is never idle while unposted entries remain
 - [ ] T042 [US3] Tests: **SC-005** — serving a block-tier entry leaves memory-tier
   occupancy and LRU order byte-identical (invariant 6); outcome honesty — `HitBlockTier`
   only when the device was actually read (invariant 2); and the no-`spdk` degradation path
@@ -365,12 +406,27 @@ failing deadline rather than none.
 - [ ] T050 Implement the default **fail-loud** action: log the key range, peer, chunk index
   and queue-pair state, then fail the request with `Deadline(..)` carrying that diagnostic
   state (FR-016, invariant 10). Release the context's resources, and reclaim landing slots
-  only behind the T019 teardown barrier
+  only behind the T019 teardown barrier — see T070 for the ordering, which is the part that
+  is safety-critical rather than diagnostic
 - [ ] T051 [P] Add the configuration knob for the action, with the degrading alternative
   (report what arrived and let the caller recompute) **deliberately unimplemented** —
   Principle XI requires any degrading alternative to be opt-in and separately configured,
   and the spec defers this one. Selecting it must fail at configuration time with a clear
   message, not silently behave as fail-loud
+- [ ] T070 Implement the deadline **cleanup ordering** (FR-023, D18), which is where the
+  correctness lives: transition the QP to ERROR → drain and discard its completions →
+  reclaim the landing slots → allow a fresh connection only on next need. Logging
+  queue-pair state (T050) is not a substitute for changing it: a slow-but-live source whose
+  write lands in a reclaimed slot corrupts an unrelated entry. Abort every sibling context
+  on that connection and log the blast radius; do **not** narrow it by opening extra
+  connections per request. Name this destination-side *reply deadline* distinctly from any
+  source-side stall cap (the precedent's `STALL_TIMEOUT`, `connection.rs:116`)
+- [ ] T071 Tests for T070, over the mock seam: a late write from a stalled peer, injected
+  after expiry, **cannot** land in a slot that has been reclaimed (assert from the mock's
+  recorded QP→ERROR-before-reclaim ordering); sibling contexts on the connection are
+  reported aborted, not silently dropped; and a subsequent fetch to the same peer succeeds
+  over a fresh connection **without** re-registering the landing region, proving the `rkey`
+  survived (SC-010, D17)
 - [ ] T052 Tests: a stalled mock peer with the connection held open produces a
   `Deadline` error carrying all four diagnostic fields; a closed connection instead aborts
   its outstanding contexts and releases each side's own resources; and the deferred
@@ -547,6 +603,9 @@ this. It is a separate change, after the engine is proven.
 | FR-018 no partial publication | T035 |
 | FR-019 legacy push entry point | T017, T018 |
 | FR-020 `remote-lookup` untouched | Phase 11 (not started) |
+| FR-021 instance-granular peer identity | T068, T012 |
+| FR-022 no phase barriers | T017, T072, T073 |
+| FR-023 deadline cleanup ordering | T070, T071, T019 |
 | SC-001 zero zyre, zero third node | T035 |
 | SC-002 legacy tests pass | T021, T055 |
 | SC-003 default build, no rdma-core/SPDK | T001, T003, T010, T041 |
@@ -555,6 +614,10 @@ this. It is a separate change, after the engine is proven.
 | SC-006 all-miss, no broadcast | T035 |
 | SC-007 progress under scarcity | T048 |
 | SC-008 FFI defined once | T007 |
+| SC-009 two instances per host addressed independently | T068 |
+| SC-010 no late write after deadline; rkey survives reconnect | T071 |
+| SC-011 no read/write phase barrier | T073 |
+| D17 long-lived PD, registrations outlive QPs | T069, T020 |
 | Principle VIII default build | T002, T003, T010, T054–T056 |
 | Principle IX pin discipline | T013, T022–T026, T039 |
 | Principle X bounded resources | T014, T032, T043, T047 |
@@ -575,6 +638,13 @@ this. It is a separate change, after the engine is proven.
 - All verbs FFI is `unsafe` and requires `// SAFETY:` comments.
 - Commit after each task or logical group; stop at any checkpoint to validate a phase
   against its success criterion.
+- **Amended 2026-10-15 after review**, before any transfer logic was written. Four findings
+  were folded in: FR-021 (instance-granular peer identity), FR-022 (no phase barriers),
+  FR-023 (deadline cleanup ordering), plus D16-D19 and SC-009/010/011. New tasks are
+  **T068-T073**, numbered append-only and placed in their phases, so no existing task
+  renumbered and no cross-reference broke. T009, T012, T017, T019, T020 and T050 were
+  tightened in place. Note D19 is partly a decision *not* to build: cross-message
+  pipelining is worth ~0.1% and is deliberately not a task.
 - **Discrepancies found while generating this list have been fixed** (T064, marked done):
   `research.md` read as having three open questions when none were open; `plan.md` called the
   constitution an unfilled template and its "Next Step" still asked for work already finished;

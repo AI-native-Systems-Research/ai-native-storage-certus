@@ -112,20 +112,36 @@ the last sets `MORE`.
 
 Message credits are consumed per *message*, not per context, so a chunked fetch of N
 messages consumes N credits and blocks when they are exhausted — which is the credit-based
-pacing that answers the incast concern (D10).
+pacing that answers the incast concern (D10). Because credits block only at zero, several
+messages of one context are normally in flight at once; that overlap is free and is **not** a
+throughput lever worth engineering (D19 — the inter-message bubble is smaller than a single
+entry's write). The barrier that does cost is inside a message, on the block-tier path, and
+FR-022 forbids it.
+
+Chunking is routine rather than exceptional: 340 entries is ~5,440 tokens at 16 tokens per
+block, so any prefix longer than that is chunked. Issue the chunks in block-index order — a
+prefix cache only benefits from a *contiguous* prefix, so a partial success should truncate
+cleanly rather than leave a hole.
 
 ## Connection and lifecycle
 
-- One queue pair per peer pair, either end able to post (D5). The requester connects; the
-  source replies and pushes over that same connection.
+- One queue pair per peer **instance** pair, either end able to post (D5). A peer is
+  addressed as a normalized `"ip:port"`, so two instances on one host are distinct peers
+  (FR-021, D16). The requester connects; the source replies and pushes over that same
+  connection.
 - Landing regions are registered once (`register_landing_region`), not per request;
   registration is what makes an `rkey` valid. The per-entry `rkey` on the wire selects
   among the requester's registered regions — it does not imply per-request registration.
+  Registration lives in a long-lived protection domain and outlives any one queue pair, so
+  an `rkey` already sent on the wire stays valid across a reconnect (D17). A retry after a
+  forced teardown therefore needs no re-registration and no new addresses.
 - A closed connection aborts every context outstanding on it. Each side releases its own
   resources: the source its pins and bounce buffers, the requester its landing slots — the
   latter only after teardown completes (FR-017).
 - Loss of liveness **without** a close is not covered by the transport; it is the
-  destination deadline's job (FR-016).
+  destination deadline's job (FR-016). On expiry the queue pair is forced to ERROR and
+  drained *before* any landing slot is reclaimed, which necessarily aborts every context
+  outstanding on that connection, not only the one that expired (FR-023, D18).
 
 ## What is deliberately not here
 

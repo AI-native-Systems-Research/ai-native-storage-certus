@@ -6,7 +6,6 @@ use std::fmt;
 pub type CacheKey = u64;
 
 /// Result of looking up a key in the dispatch map.
-#[cfg(feature = "spdk")]
 #[derive(Debug)]
 pub enum LookupResult {
     /// Key not found in the map.
@@ -29,9 +28,7 @@ pub enum LookupResult {
 
 // SAFETY: The pointer in MemoryTier refers to memory in the memory-tier pool,
 // which is thread-safe (mmap'd region protected by dispatch-map mutex).
-#[cfg(feature = "spdk")]
 unsafe impl Send for LookupResult {}
-#[cfg(feature = "spdk")]
 unsafe impl Sync for LookupResult {}
 
 /// Errors returned by `IDispatchMap` operations.
@@ -81,7 +78,6 @@ impl fmt::Display for DispatchMapError {
 
 impl std::error::Error for DispatchMapError {}
 
-#[cfg(feature = "spdk")]
 component_macros::define_interface! {
     pub IDispatchMap {
         /// Recover committed extents from the bound `IExtentManager`.

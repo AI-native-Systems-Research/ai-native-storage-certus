@@ -203,6 +203,174 @@ forward to broadcast remote-lookup.
 Mixing them would reintroduce the O(nodes) fan-out the design exists to avoid, and make
 results uninterpretable.
 
+## D16 — Peer identity is an instance, not a host
+
+**Decision**: a peer is addressed at instance granularity by a normalized `"ip:port"`, which
+is the connection-table key. A host without a port is rejected, never defaulted.
+
+**Rationale**: several certus instances run per node — one per NUMA domain in the current
+rigs — so a host is not an address. Keyed by host, two NUMA-pinned instances on one node
+collapse into a single connection and one of them becomes unreachable. The same-host case is
+not hypothetical: a cross-NUMA transfer between two instances on one node is a legitimate
+transfer, and single-host loopback is the hardware verification path, so both ends of a
+connection may share an IP and differ only by port.
+
+**The precedent already does this**: `remote-lookup-rdma-initiator/src/connection.rs:1075`
+has `parse_endpoint(endpoint) -> (String, u16)` requiring `"ip:port"` and rejecting both a
+missing port and port 0, and the table is keyed by `format!("{addr}:{port}")`
+(`:479-480`, and the doc comment at `:446` — "a table of outbound RDMA connections keyed by
+`"ip:port"` endpoint"). Reuse `parse_endpoint` rather than inventing a second grammar.
+
+**Also considered**: an opaque instance id, resolved to a transport address separately.
+Rejected for now — it is the more honest model if an instance ever becomes reachable at more
+than one IP, but nothing in the current rigs needs it, and it would add a resolution step and
+a registry this component deliberately does not have (it does not discover peers). Revisit if
+multi-homed instances appear.
+
+**Consequence for inbound correlation**: the responder stamped its zyre `PeerId` bytes into
+each connect's `private_data` (`connection.rs:1102`) to correlate an accepted connection with
+a node. FR-004 forbids zyre here, so if inbound correlation is wanted, that field carries a
+certus instance id instead.
+
+## D17 — One long-lived protection domain; registrations outlive queue pairs
+
+**Decision**: the endpoint owns one protection domain per device for its lifetime. Landing
+regions are registered once into that PD and stay registered; queue pairs are created,
+destroyed and rebuilt beneath them. An `rkey` therefore survives a reconnect.
+
+**Rationale**: `contracts/itransfer_endpoint.md` already promises that landing regions are
+registered once, not per request, and that registration is what makes an `rkey` valid. That
+promise is only true if MR lifetime is decoupled from QP lifetime. It also makes recovery
+cheap: after a deadline forces a teardown (FR-023), a retry needs no re-registration and the
+addresses and rkeys already sent remain valid.
+
+**This differs from the precedent, deliberately.** In the initiator the PD is per-connection
+(`src/rdma.rs:169`, with `ibv_dealloc_pd` in its `Drop`) and the memory-tier pool is
+re-registered on *every* connect (`src/connection.rs:1131`; see the doc comment at `:1143`,
+"a live `rdma_cm` connection plus its registered memory-tier pool region"). There, MR
+lifetime equals connection lifetime and an rkey changes across a reconnect. That is tolerable
+for a crate that only ever pushes from its own pool, and intolerable here, where the
+destination has *already advertised* per-entry rkeys inside an in-flight request.
+
+**Also considered**: keeping the per-connection PD and re-validating `LandingRegionHandle`
+after every reconnect. Rejected: it makes every in-flight request's rkeys stale on
+reconnect, turns the handle into something callers must re-check, and contradicts the
+contract's "registered once".
+
+**Note**: an MR belongs to a PD, not to a QP, so this is the natural verbs model rather than a
+trick; the precedent's coupling is an artifact of letting `rdma_cm` own the PD per connection.
+
+**Additional benefit, independent of rkey stability**: re-registration disappears from the
+reconnect path. `ibv_reg_mr` pins pages and builds the device's translation entries, so
+registering a multi-GB memory tier is slow — and the precedent pays it on *every* connect.
+With one long-lived PD a reconnect creates a queue pair and nothing else.
+
+**Accepted drawbacks**, none of which threaten the decision:
+
+1. **The PD must be owned explicitly, and keyed per verbs context.** `rdma_cm` will create a
+   PD per `rdma_cm_id` if allowed to; using our own means passing it to `rdma_create_qp`
+   instead of accepting `id->pd`, and the PD must belong to the *same device context* as the
+   resolved id. So the PD is allocated lazily per `ibv_context` after address resolution, and
+   a node with several RDMA devices holds one PD per device — hence "one PD per device"
+   rather than one per process.
+2. **A PD is the protection boundary.** Every queue pair in it can reach every memory region
+   in it, so one shared PD means any connected peer can address any registered landing
+   region, not merely the regions intended for it. This is acceptable *only* under the
+   single-tenant trust assumption the spec already states. If cross-tenant isolation is ever
+   wanted, per-peer PDs are the mechanism, and this decision is what would have to be
+   revisited first.
+3. **Destruction ordering becomes a real constraint.** `ibv_dealloc_pd` fails with `EBUSY`
+   while any queue pair or memory region still references the PD, so shutdown must tear down
+   every connection and deregister every region before the PD goes. The precedent gets this
+   for free by construction.
+4. **`MemoryRegion`'s thread-safety justification changes.** The initiator's
+   `unsafe impl Send for MemoryRegion` is justified by "only accessed from the thread that
+   created it" (`src/rdma.rs:126`). A region registered once and used by several per-peer
+   connection threads is no longer that, so the `// SAFETY:` comment must be rewritten to
+   justify the sharing it actually does — and `Sync` may be needed alongside `Send`.
+   Principle V makes an inaccurate safety comment a defect in its own right.
+
+**Not drawbacks, though they look like candidates**: device resource limits (one PD holding N
+regions is strictly cheaper than N PDs holding N regions); PD-level error states (queue pairs
+enter ERROR, protection domains have no such state); and recovery from a device reset or
+hot-remove (fatal async events invalidate every region and queue pair either way).
+
+## D18 — Deadline cleanup: make writes impossible before reclaiming, and accept a peer-wide blast radius
+
+**Decision**: on expiry — queue pair to ERROR, drain and discard completions, reclaim landing
+slots, then reconnect lazily on next need. Expiry aborts **every** context outstanding on
+that connection, and that is logged rather than designed around.
+
+**Rationale**: FR-016 as originally written required only that queue-pair state be *logged*.
+Logging it is not changing it. Fail the request, release the slots, and a slow-but-live
+source's write lands in a slot since re-reserved for another entry — a silent corruption of
+an unrelated reader, which is exactly the class of bug Principle IX exists to prevent and
+exactly what FR-017's teardown-before-reclaim barrier already demands for the ordinary path.
+The deadline path simply was not wired to it. Transitioning to ERROR is what actually makes a
+further write impossible; nothing weaker is sufficient.
+
+**Why peer-wide**: one queue pair per peer pair (D5) means a single QP carries every request
+to that instance, so tearing it down necessarily aborts the siblings. The alternative — a QP
+per request, so expiry is isolated — multiplies queue pairs by request concurrency and was
+already rejected in D5 for a weaker reason. In a research posture an over-broad abort that is
+logged is strictly better than a narrow one that risks a silent write into live memory.
+
+**Precedent to reuse, on the source side**: `STALL_TIMEOUT = 2s`
+(`remote-lookup-rdma-initiator/src/connection.rs:116`) caps how long a posted write may go
+uncompleted before its connection is declared stuck and rebuilt, because `rdma_cm` leaves the
+hardware ACK timeout at its large default and a stale-but-warm connection would otherwise
+burn ~15s of retransmit before `RETRY_EXC`. It is measured from the batch's *first posted*
+write, not from submission, so a queued batch is not mistaken for a stuck one.
+`ensure_connected()` (`:1009`) already drops a stale or error-state connection before
+reconnecting, and there is a one-repair replay budget with tests. That is a **source-side
+stall cap**; FR-016's is a **destination-side reply deadline**. They are different mechanisms
+and must not share a name or a knob.
+
+## D19 — Scale separation: fix only the barrier that costs milliseconds
+
+**Decision**: require the source to avoid phase barriers *within* a request (FR-022). Do
+**not** build cross-message pipelining. Take the cross-message overlap that message credits
+already give for free, and engineer nothing further for it.
+
+**Rationale**: the magnitudes are three orders of magnitude apart, so only one of them can
+matter.
+
+| quantity | magnitude |
+|---|---|
+| one `OP_FETCH` of 340 × 2.25 MiB on 200G RoCE | ~30 ms |
+| one 2.25 MiB entry write | ~90 us |
+| inter-message bubble (reply RTT + lookup) | ~10-50 us |
+| a device read on the block-tier path | ~100 us - ms |
+
+The inter-message bubble is smaller than a single entry's write, so overlapping messages buys
+~0.1%. Message credits default to 8 and block only at zero, so that overlap already exists at
+no cost; it just must not drive design. The same arithmetic disposes of deep send-queue
+pipelining: at 2.25 MiB per entry this path is bandwidth-bound and a window of 2-4 saturates
+the link.
+
+**What does matter** is the block-tier read barrier. A source that leases N bounce buffers,
+reads all N, posts all N writes and only then replies idles the wire for the entire read
+phase — the one barrier whose cost is measured in milliseconds. D7's early pin release and D9's
+decoupling argument already make the pipelined form expressible ("the bounce buffer
+*decouples* the device read from the RDMA, and that decoupling is what makes early pin
+release, chunking and cheap RDMA retry expressible"); FR-022 now requires it.
+
+**Note on request length**: multi-message fetches are the normal case, not a rarity. 340
+entries is ~5,440 tokens at 16 tokens per block, so any prefix longer than that chunks; the
+24k-token example in plan.md is ~5 messages. The numbers are self-consistent — Qwen3-8B at
+2 x 36 layers x 8 KV heads x 128 head_dim x 2 bytes = 144 KiB/token, x 16 tokens = 2.25 MiB
+per block, x 1,536 blocks = 3.375 GiB. So chunking is routine; it is simply not a throughput
+problem.
+
+**And ordering is not a constraint on any of this**: outcome-vector order is index
+correspondence (contract invariant 1), not temporal order, and nothing in the design requires
+writes or replies to arrive in order — the destination cannot observe write order at all,
+which is why one-sided writes need no `WRITE_WITH_IMM`. The one real ordering concern lives in
+the *consumer*: a prefix cache only benefits from a contiguous prefix, so a miss at block *k*
+makes later blocks useless for that request (they stay cached for later). Its consequence is
+the opposite of serialising — issue a chunked prefix in block-index order, so a partial
+success truncates cleanly into a usable prefix.
+
 ## Plan-phase questions, resolved
 
 OQ1 and OQ2 are resolved below as **D13** and **D14**, and OQ3 as **D15**. **OQ4** — whether

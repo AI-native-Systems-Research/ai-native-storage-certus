@@ -5,6 +5,9 @@
 //! interface definitions without pulling in implementation crates.
 //!
 //! SPDK-dependent interfaces and types are gated behind the `spdk` Cargo feature.
+//! Interfaces that merely carry opaque pointers or plain data are *not* gated,
+//! even where their implementations need SPDK — see `IMemoryTier` and
+//! `IDispatchMap`.
 
 mod idispatch_map;
 mod idispatcher;
@@ -21,9 +24,12 @@ mod izyre;
 
 pub use idispatch_map::CacheKey;
 pub use idispatch_map::DispatchMapError;
-#[cfg(feature = "spdk")]
+// `IDispatchMap` and `LookupResult` are SPDK-orthogonal: the module references no
+// SPDK type, only raw pointers and plain data. They are ungated so a component can
+// consume tri-state residency (and the dispatch map's atomic lookup-and-pin) without
+// enabling `interfaces/spdk` and thus requiring `spdk-sys` — the same treatment
+// `IMemoryTier` already has.
 pub use idispatch_map::IDispatchMap;
-#[cfg(feature = "spdk")]
 pub use idispatch_map::LookupResult;
 pub use idispatcher::DispatcherConfig;
 pub use idispatcher::DispatcherError;
