@@ -79,8 +79,23 @@ pub enum TransferEndpointError {
     /// Message credits exhausted and the caller asked not to block.
     WouldBlock,
     /// The deadline expired with the request neither fulfilled nor refused.
-    /// Carries diagnostic state (FR-016, Principle XI).
+    /// Carries diagnostic state (FR-016, Principle XI). The queue pair has been
+    /// forced to ERROR and this connection's other contexts were aborted with
+    /// it (FR-023).
     Deadline(String),
+    /// The peer answered with a protocol error: unknown opcode, unsupported
+    /// version of a known kind, malformed message, or more entries than its
+    /// posted buffer can hold (FR-024).
+    ///
+    /// Distinct from `Deadline` in blast radius as well as cause: the peer is
+    /// healthy and answered promptly, so **the connection remains usable** and
+    /// sibling contexts are unaffected. Carries the offending opcode, the
+    /// reason, and the peer's highest supported version for that kind.
+    Protocol(String),
+    /// The peer could not meet the configured version floor, so no connection
+    /// was established and no request was issued (FR-025). Names peer, kind and
+    /// both versions.
+    IncompatiblePeer(String),
     Transport(String),
 }
 ```
@@ -149,7 +164,9 @@ define_interface! {
         /// peer, this aborts all contexts outstanding on it.
         fn disconnect(&self, peer: &str) -> Result<(), TransferEndpointError>;
 
-        /// Snapshot of the three credit domains and per-outcome counters.
+        /// Snapshot of the three credit domains and per-outcome counters, plus
+        /// protocol-fault and version-downgrade counts — an unexercised path
+        /// must not look like a working one (Principle XI).
         fn stats(&self) -> TransferStats;
     }
 }
@@ -192,6 +209,32 @@ Implementations MUST uphold, and tests MUST verify:
     synchronization point is the end-of-message reply.
 12. **Instance-granular addressing.** Two peers differing only by port are distinct, hold
     distinct connections, and an address without a port is rejected (FR-021, D16).
+13. **Unprocessable messages are answered, not dropped.** A message that cannot be processed
+    draws a protocol error reply naming the offending opcode, within a round trip rather than
+    a deadline. It fails one context; the connection stays usable and its siblings complete
+    (FR-024, SC-012). The reply is never used for a miss or a resource shortage.
+14. **Capabilities precede data.** No data message is sent on a connection before the peer's
+    capabilities are known; the version used per kind is `min(local, peer)`, and the peer's
+    maximum request size is respected rather than the local one. A peer below the floor fails
+    at connect, not on a request (FR-025, SC-013). Capabilities are per connection and are
+    re-learned when one is rebuilt.
+
+## Two fail-loud paths, deliberately different
+
+Both `Deadline` and `Protocol` are loud failures, and the distinction between them is the
+point rather than an accident:
+
+| | `Deadline` (FR-016, FR-023) | `Protocol` (FR-024) |
+|---|---|---|
+| what is known | nothing — the peer may be hung, partitioned, or about to write | the peer is alive and answered |
+| queue pair | forced to ERROR and drained | untouched |
+| other contexts | all aborted with it | unaffected |
+| latency to detect | a deadline | a round trip |
+
+Tearing the queue pair down is the only thing that makes a late write impossible, so it is
+mandatory when the peer's state is unknown and gratuitous when it is not. Routing a protocol
+error through the deadline's cleanup would destroy a healthy connection and take unrelated
+requests with it.
 
 ## Why `fetch` returns a context id
 

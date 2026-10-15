@@ -194,6 +194,17 @@ pipelining buys ~0.1% because the inter-message bubble is smaller than a single 
 write, so the only barrier worth engineering away is the block-tier read barrier, whose cost
 is measured in milliseconds.
 
+### Protocol versioning (D20)
+
+Settled after the task list was generated: versioning is **per message kind** in the fused
+opcode, capabilities are exchanged **eagerly** once per connection (`OP_HELLO`), and a frozen
+`OP_ERROR` answers anything unprocessable. Both of those messages are permanently unversioned
+— a peer that cannot parse version N must still parse them — and bytes 0-15 of the header are
+a frozen prefix for the same reason. This supersedes the wire contract's original "no
+negotiation" stance; the reasoning, including the two whole-protocol alternatives rejected, is
+in research D20. Version-selection logic beyond `min(local, peer)` is deferred until a second
+version exists.
+
 ## Next Step
 
 All design documents are complete, and `tasks.md` is generated — 67 tasks, T001–T067, grouped
