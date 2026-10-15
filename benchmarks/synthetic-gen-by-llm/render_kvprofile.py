@@ -366,6 +366,67 @@ def parse_prom_log(path: str) -> "OrderedDict[int, dict]":
     return rounds
 
 
+def _hist_pct(buckets: dict, count: float, p: float):
+    """Percentile from cumulative Prometheus buckets: the smallest ``le`` whose
+    cumulative count first reaches ``p*count``. None for an empty histogram, inf
+    when the crossing lands in the +Inf bucket."""
+    if not count:
+        return None
+    target = p * count
+
+    def _le(k):
+        return float("inf") if k in ("+Inf", "inf", "Inf") else float(k)
+
+    for le in sorted(buckets, key=_le):
+        if buckets[le] >= target:
+            return _le(le)
+    return float("inf")
+
+
+def parse_hist_log(path: str) -> dict:
+    """Return {metric: {count, sum, buckets}} from the LAST ``[prom] histjson {…}``
+    line in a variant log — emitted by both the in-process drivers
+    (run_multiturn_common.prom_histograms) and the serve-mode scraper
+    (synthetic-agentic/scrape_prom.py). Metric keys drop the ``vllm:`` prefix.
+    {} when the line is absent or unparseable."""
+    tag = "[prom] histjson "
+    last = None
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                i = line.find(tag)
+                if i != -1:
+                    last = line[i + len(tag):].strip()
+    except OSError as e:
+        print(f"warning: cannot read {path}: {e}", file=sys.stderr)
+        return {}
+    if not last:
+        return {}
+    try:
+        raw = json.loads(last)
+    except ValueError:
+        return {}
+    out = {}
+    for name, h in raw.items():
+        key = name[len("vllm:"):] if name.startswith("vllm:") else name
+        buckets = {le: float(c) for le, c in (h.get("buckets") or {}).items()}
+        out[key] = {"count": float(h.get("count", 0) or 0),
+                    "sum": float(h.get("sum", 0.0) or 0.0),
+                    "buckets": buckets}
+    return out
+
+
+# Latency-histogram panels: (candidate metric names, friendly label). The first
+# candidate present in a series is used — vLLM renamed TPOT across versions
+# (inter_token_latency_seconds in 0.26; request_time_per_output_token_seconds in
+# 0.30). Mirrors the capture set in run_multiturn_common.LATENCY_HISTOGRAMS.
+LATENCY_PANELS = [
+    (("time_to_first_token_seconds",), "TTFT"),
+    (("request_time_per_output_token_seconds", "inter_token_latency_seconds"), "TPOT"),
+    (("e2e_request_latency_seconds",), "end-to-end"),
+]
+
+
 def rounds_to_series(rounds: "OrderedDict[int, dict]") -> dict:
     """{counter_key: [per-round value]} ordered by round number (missing -> 0)."""
     if not rounds:
@@ -608,7 +669,8 @@ def load_run(run_dir: str, tag: str):
                 wall = wall_from_log(log)
             yield {"variant": name, "tag": tag, "wall": wall, "data": data,
                    "async": log_is_async(log) if log else False,
-                   "gpu": _gpu_for(name)}
+                   "gpu": _gpu_for(name),
+                   "hist": parse_hist_log(log) if log else {}}
         return
     # ── fallback: no results.json — discover *.log with [prom] rounds
     found = False
@@ -627,7 +689,8 @@ def load_run(run_dir: str, tag: str):
             data = {**data, **tier}
         yield {"variant": name, "tag": tag,
                "wall": wall_from_log(path), "data": data,
-               "async": log_is_async(path), "gpu": _gpu_for(name)}
+               "async": log_is_async(path), "gpu": _gpu_for(name),
+               "hist": parse_hist_log(path)}
     if not found:
         print(f"warning: no results.json and no [prom] logs in {run_dir}",
               file=sys.stderr)
@@ -929,9 +992,27 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
     # axes) and the upper band's x-axis tick + label (drawn below its axes). The
     # header is the exception — no x-axis, legend already near its bottom — so it
     # gets a small gap rather than opening a void before the wall bars.
+    # Latency-histogram panels (TTFT / TPOT / e2e), one per metric present in at
+    # least one variant. Each series picks the first candidate name it carries
+    # (vLLM renamed TPOT across versions). key_by_series[i] is the chosen metric
+    # name for series[i], or None if that variant has no data for the panel.
+    lat_panels = []
+    if any(s.get("hist") for s in series):
+        for cands, label in LATENCY_PANELS:
+            key_by_series = []
+            for s in series:
+                h = s.get("hist") or {}
+                key_by_series.append(
+                    next((c for c in cands if h.get(c, {}).get("count")), None))
+            if any(key_by_series):
+                lat_panels.append((label, key_by_series))
+    lat_h = (1.3 + 0.42 * len(series)) if lat_panels else 0.0
+
     GAP = 0.9
     HDR_GAP = 0.15
     left_bands = [("hdr", hdr_h), ("bar", bar_h)]
+    if lat_panels:
+        left_bands.append(("latency", lat_h))
     if has_gpu:
         left_bands.append(("gpu", gpu_h))
     if totals_h:
@@ -1010,6 +1091,48 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
         ax.spines[sp].set_visible(False)
     ax.tick_params(left=False)
     ax.grid(axis="x", color=grid, lw=0.7, zorder=0)
+
+    # ── vLLM request-latency histograms (mean bar + p90 tail) ──────────────────
+    # Source: the [prom] histjson line each variant deposits (in-process drivers
+    # via common.prom_histograms; serve-mode via scrape_prom.py). One panel per
+    # metric (TTFT / TPOT / e2e); the bar is the window mean, the p90 tail rides
+    # alongside as text (p50/p90/p99 also land in <logdir>/latency_histograms.txt).
+    if lat_panels:
+        def _fmt_lat(x):
+            if x is None:
+                return "n/a"
+            if x == float("inf"):
+                return "∞"
+            return f"{x * 1000:.0f}ms" if x < 1 else f"{x:.2f}s"
+
+        gs_lat = fig.add_gridspec(1, len(lat_panels), left=L, right=R,
+                                  top=pos["latency"][1], bottom=pos["latency"][0],
+                                  wspace=0.6)
+        lys = list(range(len(series)))[::-1]  # top-down, same order as wall band
+        for ci, (label, keys) in enumerate(lat_panels):
+            lax = fig.add_subplot(gs_lat[0, ci])
+            means = []
+            for y, s, k in zip(lys, series, keys):
+                h = (s.get("hist") or {}).get(k) if k else None
+                mean = (h["sum"] / h["count"]) if (h and h.get("count")) else 0.0
+                means.append(mean)
+                lax.barh(y, mean, color=s["color"], height=0.62, zorder=3)
+                if h and h.get("count"):
+                    p90 = _hist_pct(h["buckets"], h["count"], 0.90)
+                    lax.text(mean, y, "  " + f"{_fmt_lat(mean)}  (p90 {_fmt_lat(p90)})",
+                             va="center", ha="left", fontsize=8, color=fg)
+            lax.set_yticks(lys)
+            if ci == 0:
+                lax.set_yticklabels([s["label"] for s in series], fontsize=9, color=fg)
+            else:
+                lax.set_yticklabels([])
+            lax.set_xlim(0, (max(means) if means else 0) * 1.6 or 1)
+            lax.set_title(f"{label} — mean (lower is better)", loc="left",
+                          fontsize=10, fontweight="bold", color=fg, pad=6)
+            for sp in ("top", "right", "left"):
+                lax.spines[sp].set_visible(False)
+            lax.tick_params(left=False)
+            lax.grid(axis="x", color=grid, lw=0.7, zorder=0)
 
     # ── GPU processor utilization bars (mean busy-% per variant window) ─────────
     # Source: profile_all.sh's nvidia-smi sampler (gpu-timeline.csv) sliced per

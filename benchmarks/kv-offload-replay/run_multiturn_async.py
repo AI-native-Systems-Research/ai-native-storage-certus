@@ -22,6 +22,7 @@ Like :mod:`run_multiturn_common`, nothing here imports vllm at module load — t
 engine import happens lazily inside ``run_multiturn_common.build_engine``.
 """
 
+import json
 import os
 import sys
 import time
@@ -397,6 +398,27 @@ def run_async_driver(engine_kwargs, convs, sampling_params, *, prompt_budget,
                          f"={counter_movement[k]:.0f}"
                          for k in sorted(counter_movement))
         print(f"[prom] async counter movement: {shown}", file=sys.stderr, flush=True)
+
+    # ── Latency-distribution histograms (cumulative over the run) ──────────────
+    # The ONE place async runs (every in-process backend delegates here) capture
+    # TTFT/TPOT/e2e. AsyncLLM has no get_metrics(), so common.prom_histograms falls
+    # back to the global REGISTRY. Same [prom] hist / histjson emission the batched
+    # drivers use, so render_kvprofile / fold_histograms treat async and batched
+    # runs identically.
+    if capture_metrics:
+        hists = common.prom_histograms(engine, common.LATENCY_HISTOGRAMS, capture_metrics)
+        for name, h in sorted(hists.items()):
+            cnt = int(h["count"])
+            mean = (h["sum"] / cnt) if cnt else 0.0
+            fmt = lambda x: "n/a" if x is None else f"{x:.3f}s"  # noqa: E731
+            print(f"[prom] hist {name[len('vllm:'):]}: n={cnt} mean={mean:.3f}s "
+                  f"p50={fmt(common.hist_pct(h['buckets'], cnt, 0.50))} "
+                  f"p90={fmt(common.hist_pct(h['buckets'], cnt, 0.90))} "
+                  f"p99={fmt(common.hist_pct(h['buckets'], cnt, 0.99))}",
+                  file=sys.stderr, flush=True)
+        if hists:
+            print(f"[prom] histjson {json.dumps(hists, separators=(',', ':'))}",
+                  file=sys.stderr, flush=True)
 
     summary = dict(summary_base or {})
     summary.update({
