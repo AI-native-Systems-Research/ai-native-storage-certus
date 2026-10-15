@@ -22,6 +22,19 @@ something a caller schedules, so exposing it would invite callers to try.
 The legacy `push_*` methods are the exception: they are *source-initiated* because zyre has
 already delivered the request out of band.
 
+## Peer addressing
+
+`peer` and `endpoint` are the same thing under two names: a **normalized instance address**,
+`"ip:port"`. The legacy methods keep the name `endpoint` so their signature compatibility
+with `IRemoteLookupRdmaInitiator` stays visible (FR-019); `fetch` uses `peer` because that is
+what the spec calls it. Both are parsed by the same grammar.
+
+Identity is per **instance**, not per host (FR-021, research D16): several certus instances
+run per node, one per NUMA domain in the current rigs. An address without a port is an
+`InvalidEndpoint` error, never a default. Two instances on one host differ only by port, hold
+separate connections, and may both be the local host — which is also the single-host loopback
+verification path.
+
 ## Types
 
 ```rust
@@ -77,6 +90,12 @@ define_interface! {
         /// The region must be SPDK-DMA-able and RDMA-registrable — in practice
         /// allocated by `spdk_zmalloc` on the local NUMA node, as the memory
         /// tier already is (research D15).
+        ///
+        /// Registration is into the endpoint's long-lived protection domain and
+        /// outlives any one queue pair, so the returned handle and the `rkey`s
+        /// derived from it stay valid across a reconnect (research D17). This
+        /// differs from the predecessor crates, which re-register per
+        /// connection.
         fn register_landing_region(
             &self,
             base: *mut u8,
@@ -118,7 +137,10 @@ define_interface! {
 
         /// Tear down a peer's queue pair. MUST complete before the caller
         /// reclaims any landing slot that peer could still write into
-        /// (teardown-before-reclaim, FR-017).
+        /// (teardown-before-reclaim, FR-017). This is also the mechanism the
+        /// deadline path uses: transition to ERROR, drain completions, then
+        /// reclaim (FR-023). Because one connection carries every request to a
+        /// peer, this aborts all contexts outstanding on it.
         fn disconnect(&self, peer: &str) -> Result<(), TransferEndpointError>;
 
         /// Snapshot of the three credit domains and per-outcome counters.
@@ -137,7 +159,9 @@ Implementations MUST uphold, and tests MUST verify:
    from the block device. A build without `spdk` reports `Miss` for block-tier entries, never
    `HitBlockTier` and never an error (research D14).
 3. **No broadcast.** A `Miss` MUST NOT trigger any further peer traffic. This endpoint never
-   contacts a node the caller did not name (FR-012 / D12).
+   contacts an instance the caller did not name (D12, SC-006 — note there is deliberately no
+   FR for this; it is a property of the mechanism, asserted by SC-006. An earlier draft of
+   this invariant mis-cited FR-012, which is the bounce-buffer/no-promotion requirement).
 4. **Pin discipline.** Residency and pin come from one dispatch-map lookup. A read reference
    is released exactly once per *pinned* answer, by the completion reaper owning its
    `wr_id`, and never for an unpinned answer (Principle IX, D6, D7).
@@ -148,17 +172,26 @@ Implementations MUST uphold, and tests MUST verify:
 7. **No partial publication.** A landing slot whose write did not complete is not published.
    Slots follow reserve → arrive → commit/abort (FR-018).
 8. **Teardown before reclaim.** After `disconnect(peer)` returns, no write from that peer
-   can land (FR-017).
+   can land (FR-017). The same ordering holds on the deadline path, where the queue pair is
+   forced to ERROR and drained *before* any slot is reclaimed, and a fresh connection is
+   established only on next need (FR-023).
 9. **Progress under scarcity.** Exhaustion of send-queue credits, message credits or
    bounce buffers causes chunking, never failure (FR-015).
 10. **Deadline fails loudly.** On expiry the default action is `Deadline(..)` carrying key
     range, peer, chunk index and queue-pair state — not a silent partial success
-    (Principle XI).
+    (Principle XI). Expiry aborts every sibling context on that connection, and says so.
+11. **No phase barriers.** Within a request the source never drains its send queue between
+    entries and never waits for device reads before posting memory-tier writes; each
+    block-tier entry is posted when its own read completes (FR-022, D19). The only
+    synchronization point is the end-of-message reply.
+12. **Instance-granular addressing.** Two peers differing only by port are distinct, hold
+    distinct connections, and an address without a port is rejected (FR-021, D16).
 
 ## Why `fetch` returns a context id
 
 The caller needs it for exactly one reason: to correlate a `Deadline` error, or a log line,
-with the request it came from. It is **not** a handle for cancellation — cancelling a fetch
+with the request it came from — including distinguishing the context that actually expired
+from the siblings aborted with it when its connection was torn down (FR-023). It is **not** a handle for cancellation — cancelling a fetch
 cannot be made safe without the destination holding its landing slots anyway, and holding
 them is the whole point of FR-017. If cancellation is ever wanted, it must be a separate
 method with its own teardown story.

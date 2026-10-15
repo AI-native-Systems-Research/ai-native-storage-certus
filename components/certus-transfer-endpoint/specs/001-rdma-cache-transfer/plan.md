@@ -51,7 +51,15 @@ beats recompute, and the measurement belongs to a later benchmark task.
 **Constraints**: concurrently held read pins on a source must never exceed the configured
 send-queue credit limit, regardless of request length (SC-004). Serving a block-tier entry
 must leave the source's memory-tier occupancy and LRU order unchanged (SC-005). Default
-build must succeed with neither rdma-core nor SPDK present (SC-003).
+build must succeed with neither rdma-core nor SPDK present (SC-003). Peers are addressed at
+instance granularity, `"ip:port"`, since several instances run per node (FR-021, D16).
+Landing-region registration lives in a long-lived protection domain and outlives any queue
+pair, so an `rkey` survives a reconnect (D17) — a deliberate departure from the predecessor
+crates, which re-register per connection. A deadline must force the queue pair to ERROR and
+drain it before reclaiming any slot, which aborts that connection's other contexts too
+(FR-023, D18). Within a request the source must not phase-barrier: no draining the send
+queue between entries, and no waiting on device reads before posting memory-tier writes
+(FR-022, D19).
 
 **Scale/Scope**: one endpoint per certus instance; a handful of peers per node in the
 current rigs (2 nodes × 2 NUMA instances). Key runs up to a full model context — ~1,536
@@ -152,8 +160,10 @@ outcome. Gate: SC-005. Requires OQ3 resolved.
 **Phase 5 — bounds and chunking (FR-014, FR-015).**
 Three named credit domains; internal chunking on exhaustion of any. Gate: SC-007.
 
-**Phase 6 — fail-loud deadline (FR-016).**
-Detection plus the failing action; degrading action left unimplemented behind the flag.
+**Phase 6 — fail-loud deadline (FR-016, FR-023).**
+Detection plus the failing action; degrading action left unimplemented behind the flag. The
+cleanup ordering is part of the gate, not an afterthought: queue pair to ERROR, drain, then
+reclaim, then lazy reconnect, with the peer-wide abort logged (D18).
 
 **Phase 7 (later, separate change) — cutover.**
 Re-point `remote-lookup` at this component; delete
@@ -169,6 +179,20 @@ scope** for FR-020 and not required for any P1 success criterion.
 | Three credit domains | They bound genuinely different resources (pins, receive buffers, bounce buffers) and exhaust independently. | One combined counter — would over- or under-restrict two of the three. |
 | Bounce pool with dual registration | RDMA needs `ibv_reg_mr`; the device read needs SPDK-DMA-able memory. Both are required of the same buffer. | Promotion into the memory tier — evicts the source's own working set (D8). |
 | Internal chunking | A single request can reach ~3.4 GiB; and it doubles as credit-based pacing. | Failing the request on resource shortage — unacceptable for a cache path. |
+| Long-lived protection domain, registrations outliving queue pairs | The contract promises landing regions are registered once, and in-flight requests have already advertised per-entry rkeys; a per-connection PD makes those stale on every reconnect (D17). | The predecessor crates' per-connection PD with re-registration on each connect — fine when you only push from your own pool, wrong when a peer holds your rkeys. |
+| Peer-wide abort on deadline | One queue pair per instance pair (D5) means forcing it to ERROR is the only thing that makes a late write impossible, and it necessarily takes the siblings with it (D18). | A queue pair per request, isolating expiry — multiplies QPs by request concurrency, already rejected in D5 for a weaker reason. |
+
+## Amendments (2026-10-15, post-review)
+
+Four review findings were folded in after the task list was first generated, before any
+transfer logic was written: **FR-021** (instance-granular peer identity — a host alone is not
+an address when several instances run per node), **FR-022** (no phase barriers inside a
+request), **FR-023** (deadline cleanup ordering — ERROR, drain, reclaim, reconnect, and the
+peer-wide blast radius), a tightened **FR-016**, new criteria **SC-009/010/011**, and
+decisions **D16-D19**. D19 is as much a decision *not* to build something: cross-message
+pipelining buys ~0.1% because the inter-message bubble is smaller than a single entry's
+write, so the only barrier worth engineering away is the block-tier read barrier, whose cost
+is measured in milliseconds.
 
 ## Next Step
 
