@@ -53,7 +53,7 @@
 
 ## R5: Configuration Struct Design
 
-**Decision (revised)**: Provide `NodeConfig` as a plain `#[non_exhaustive]` struct with public fields and a `Default` impl — **no builder**. Construct via `let mut c = NodeConfig::default(); c.name = Some(...);`. `NodeConfig::validate()` runs inside `IZyre::create_node`, before any FFI, so an invalid config is rejected without allocating a node.
+**Decision (revised)**: Provide `NodeConfig` as a plain `#[non_exhaustive]` struct with public fields and a `Default` impl — **no builder**. Construct via `let mut c = NodeConfig::default(); c.name = Some(...);`. `NodeConfig::validate()` runs inside `IZyre::create_node`, before any FFI, so a config that fails validation is rejected without allocating a node. An `endpoint` that cannot be bound (gossip mode) is detected after allocation; the node is destroyed before `create_node` returns `InvalidConfig`.
 
 **Rationale**: This matches the configuration style used elsewhere in the `interfaces` crate (`DispatcherConfig`, `PartitionConfig` — public fields + documented defaults), which is where `NodeConfig` now lives (to avoid a crate cycle with `IZyre`). `#[non_exhaustive]` keeps field additions non-breaking for callers in other crates. The previous builder added ergonomics but no validation gate (validation always happened at node creation), so removing it loses no correctness. The config is `Clone`, so multiple identically-configured nodes are still easy to create.
 
