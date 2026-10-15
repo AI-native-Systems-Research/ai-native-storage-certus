@@ -72,6 +72,11 @@ KV_CACHE_BYTES="${KV_CACHE_BYTES:-}"
 # ── Certus-SHMQ connector ───────────────────────────────────────────────────────
 SHM_PATH="${SHM_PATH:-/dev/shm/certus-shmq}"   # mailbox file (shared into container)
 SLAB_SIZE_BYTES="${SLAB_SIZE_BYTES:-2097152}"  # offload block size — MUST match certus-server
+# Offloaded block size in TOKENS (vLLM kv_connector_extra_config "block_size"). Must
+# be a multiple of the GPU block size (16 by default). Larger values make each
+# certus-server object proportionally bigger (fewer, larger stores/promotions); GPU
+# prefix caching keeps its own block size. Unset (default) = same as the GPU block.
+OFFLOAD_BLOCK_SIZE="${OFFLOAD_BLOCK_SIZE:-}"
 
 # ── Container / store ────────────────────────────────────────────────────────────
 # Any shmq/otel-shmq client image works — this script only needs vLLM + the
@@ -166,8 +171,13 @@ fi
 # ── KV-transfer config: stock OffloadingConnector + CertusShmqOffloadingSpec ────
 # Same dict the offline shmq driver builds (run_otel_shmq_certus.py), passed here
 # as the `vllm serve --kv-transfer-config` JSON.
+OFFLOAD_BLOCK_JSON=""
+if [[ -n "$OFFLOAD_BLOCK_SIZE" ]]; then
+  OFFLOAD_BLOCK_JSON=",\"block_size\":${OFFLOAD_BLOCK_SIZE}"
+  echo "[serve] offloaded block size ${OFFLOAD_BLOCK_SIZE} tokens"
+fi
 KV_CONFIG=$(cat <<JSON
-{"kv_connector":"OffloadingConnector","kv_role":"kv_both","kv_connector_extra_config":{"spec_name":"CertusShmqOffloadingSpec","spec_module_path":"certus_shmq_connector.spec","shm_path":"${SHM_PATH}","slab_size_bytes":${SLAB_SIZE_BYTES}}}
+{"kv_connector":"OffloadingConnector","kv_role":"kv_both","kv_connector_extra_config":{"spec_name":"CertusShmqOffloadingSpec","spec_module_path":"certus_shmq_connector.spec","shm_path":"${SHM_PATH}","slab_size_bytes":${SLAB_SIZE_BYTES}${OFFLOAD_BLOCK_JSON}}}
 JSON
 )
 
