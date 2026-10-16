@@ -64,14 +64,17 @@ import re
 import sys
 from collections import OrderedDict
 
-# gpu_report.py (sibling of this tools/ dir) already parses the profile_all.sh GPU
-# telemetry: gpu-timeline.csv (per-tick nvidia-smi util.gpu/clock/mem/power) sliced
-# per variant by gpu-markers.csv. Reuse it so the GPU-utilization band shows the
-# exact same numbers as `gpu-summary.txt`. Optional — a failed import just drops
-# the band (older run dirs with no GPU telemetry render exactly as before).
-_BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _BENCH_DIR not in sys.path:
-    sys.path.insert(0, _BENCH_DIR)
+# gpu_report.py lives in the sibling benchmarks/kv-offload-replay/ dir and already
+# parses the profile_all.sh GPU telemetry: gpu-timeline.csv (per-tick nvidia-smi
+# util.gpu/clock/mem/power) sliced per variant by gpu-markers.csv. Reuse it so the
+# GPU-utilization band shows the exact same numbers as `gpu-summary.txt`. Optional —
+# a failed import just drops the band (older run dirs with no GPU telemetry render
+# exactly as before). NOTE: this file is benchmarks/synthetic-gen-by-llm/, so the
+# bench root is TWO dirs up; gpu_report sits under its kv-offload-replay sibling.
+_GPU_REPORT_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "kv-offload-replay")
+if _GPU_REPORT_DIR not in sys.path:
+    sys.path.insert(0, _GPU_REPORT_DIR)
 try:
     import gpu_report as _gpu_report
 except Exception:  # noqa: BLE001 - GPU band is optional
