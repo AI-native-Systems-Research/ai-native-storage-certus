@@ -20,6 +20,7 @@ mod ipartition_table;
 mod iremote_lookup;
 mod iremote_lookup_rdma_initiator;
 mod iremote_lookup_rdma_responder;
+mod itransfer_endpoint;
 mod izyre;
 
 pub use idispatch_map::CacheKey;
@@ -70,6 +71,16 @@ pub use iremote_lookup_rdma_responder::{
     ControlChannel, Endpoint, IRemoteLookupRdmaResponder, IRemoteLookupRdmaResponderAdmin,
     LocalRegion, RemoteLookupRdmaResponderError, ResponderCommand, ResponderEvent,
 };
+// Ungated: the endpoint's receptacles are ILogger and IDispatchMap, both
+// available without the `spdk` feature, so the component can be a workspace
+// default member.
+pub use itransfer_endpoint::EntryOutcome;
+pub use itransfer_endpoint::FetchCompletion;
+pub use itransfer_endpoint::ITransferEndpoint;
+pub use itransfer_endpoint::LandingRegionHandle;
+pub use itransfer_endpoint::TransferContextId;
+pub use itransfer_endpoint::TransferEndpointError;
+pub use itransfer_endpoint::TransferStats;
 pub use izyre::GossipConfig;
 pub use izyre::IZyre;
 pub use izyre::IZyreNode;
