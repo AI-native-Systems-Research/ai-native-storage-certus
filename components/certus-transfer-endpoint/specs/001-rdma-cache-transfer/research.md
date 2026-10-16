@@ -477,6 +477,13 @@ space, the advertised version range — and decline the mechanism until somethin
 posture as D19: the affordance now, the mechanism when it has a consumer. With a single
 negotiated version the deferred work is a `min()` and a range check, not a state machine.
 
+**On the stance this replaced**: "No negotiation" was never a numbered decision — it was a
+bullet in the wire contract's *What is deliberately not here*, an assertion with no premise and
+no rejected alternatives recorded. The D-numbered entries survive scrutiny because each states
+what else was considered and why it lost, so when a premise moves it is visible what to
+revisit; a bare stance has nothing to check against, rots silently, and then gets cited as a
+constraint. Anything load-bearing belongs here, with its premise explicit.
+
 ### Revision (2026-10-15): per-kind versioning dropped
 
 **What changed**: `OP_HELLO` advertised a counted list of `(kind, max_version)` pairs; it now
@@ -506,6 +513,104 @@ what a permanently frozen layout wants — the counted array was a variable-leng
 message whose layout can never change, an uncomfortable pairing. And the floor check becomes
 one range intersection instead of a per-kind comparison, so the failure diagnostic is a single
 pair of numbers.
+
+## D21 — The version is a validated header field, not part of the opcode
+
+**Decision**: the opcode names a **kind only**. The protocol version occupies its own 2-byte
+header field, inside the frozen prefix, and is **validated once** in the header parse against
+the version negotiated for the connection — never dispatched on.
+
+**Rationale**: fusing was the entire version-safety mechanism while there was no handshake, and
+a good one then. Once the version is negotiated per connection (D20) it became both redundant
+and actively cluttering. A bump mints a new opcode for *every* kind, including the ones that
+did not change, so an unchanged `OP_FETCH_REPLY` accumulates one opcode value per version —
+all dispatching to the same handler. By v4 that is four match arms for a message that never
+changed. And the natural way to write that handler is `match opcode & 0xFFFF`, masking the
+version straight back off: a mechanism whose common path discards it is not earning its place.
+Version changes are also localized in practice — add a kind, or add a field to one kind — so
+fusing makes a local change look global.
+
+**It costs nothing to move.** The header already had a reserved `u16` at offset 6, inside the
+frozen prefix, so the version field consumes no additional bytes and stays readable by a peer
+at any version. The frozen messages' opcode values are numerically unchanged, since their
+version half was already zero.
+
+**What is preserved**: the guarantee that a message is never parsed at the wrong version. One
+assertion in the single header parser gives that, and answers a mismatch with `OP_ERROR`
+reason 2. The original objection to a separate field — "safety depends on every implementer
+remembering to check it" — was fair when it implied a per-message manual check; it does not
+hold for one assertion in one function in one implementation.
+
+**Also considered**: dropping the version from the wire entirely and relying solely on
+negotiated connection state. Rejected: it leaves no structural guard, so a negotiation bug or
+a mismatched build would be *misparsed* rather than rejected — and with `addr`/`rkey` in the
+body, a misparse is an RDMA write to the wrong place. The field is two bytes of existing
+padding; the check is one comparison.
+
+## D22 — One connection per instance pair, carrying both directions
+
+**Decision**: keep exactly one queue pair per instance pair, used in both directions, as
+FR-002 and D5 already require. Do not split into per-direction connections.
+
+**Rationale**: FR-017 decides it. `disconnect` must guarantee no write from a peer can still
+land before a slot is reclaimed, and with one queue pair one teardown achieves that. With two,
+the guarantee requires tearing down both, and a partial teardown is a silent write into
+reclaimed memory — the Principle IX hazard no test reliably catches.
+
+**Correction to D5.** D5 rejected "two connections per pair," but the alternative it actually
+weighed was splitting *message from data* (dest->source for the request, source->dest for the
+payload), and its argument — "two QPs and two setups per pair, and the reply still needs a
+direction" — addresses that split. It does **not** address splitting by *role*: each end owning
+its own outbound connection for the requests it originates. That variant is genuinely
+attractive, since it removes the simultaneous-connect race entirely (each end has exactly one
+outbound, so there is no duplicate) and makes receive-buffer accounting trivially per-stream.
+It loses on FR-017, as above. D5's rejection should be read as not covering this variant rather
+than as having disposed of it.
+
+**Accepted consequences**, each now a requirement (FR-026):
+
+1. **Per-direction context-id namespaces.** The requester allocates ids, so both ends can
+   independently allocate the same value on one connection. A reply with id 7 belongs to the
+   local outbound table; a request with id 7 belongs to the inbound serving table. They are
+   distinguishable only by message kind, so the tables must be separate. The obvious
+   implementation — one map of contexts per connection — silently conflates two unrelated
+   requests, which is why this is written down rather than left to inference.
+2. **Per-direction message credits.**
+3. **Reply starvation**, the one that is not obvious and that sharing a connection creates
+   outright: posted receive buffers are consumed by *both* replies owed to this end and
+   requests originated by the peer. At 8 credits and 64 KiB posted, a peer issuing 8 requests
+   can take every buffer, leaving none for a reply this end is blocked on — an RNR stall and,
+   with two-way traffic, a credible deadlock. Nothing in FR-014 or D10 covered it, because both
+   were written as though a connection had one user.
+
+   The fix is self-consistent rather than a new tunable: each end reserves receive buffers for
+   the replies its own outstanding requests can generate — a count it already bounds via its own
+   message credits — and advertises the remainder as the peer's inbound-request quota. That
+   quota is why `OP_HELLO` carries `max_outstanding_requests`, and it had to be added **before**
+   that layout froze.
+
+## D23 — Simultaneous connect is resolved by a deterministic rule, not an arbitrator
+
+**Decision**: on detecting a duplicate, both ends keep the connection whose **initiator is the
+lower `PeerId`** and close the other. Resolution happens at accept, before `OP_HELLO` is posted.
+
+**Rationale**: FR-001 lets either end initiate, so both can initiate at once; D22 explains why
+two surviving connections break FR-017. The resolution reuses the property that makes version
+selection safe — a deterministic function of two values both ends already know, evaluated
+independently, with no proposal, no arbitration and no extra round trip. `PeerId` already
+derives a total order for exactly this kind of use.
+
+**Why at accept, and why identity in `private_data`**: evaluating the rule requires knowing
+which end initiated each queue pair, so the connection request must carry it. The predecessor
+already stamped its zyre `PeerId` into connect `private_data`; D16 replaces that with a certus
+instance id, so the field exists and this makes it load-bearing rather than vestigial.
+Resolving at accept — rather than after the capability exchange — means the losing queue pair
+dies before any context exists on it, so there is nothing to migrate and no window in which a
+context's landing slots are reachable over a doomed connection.
+
+**Also considered**: letting only the lower `PeerId` ever initiate. Rejected — it deadlocks
+whenever the higher-id instance is the one that needs data, since the lower has no reason to
+connect.
 
 ## Rig facts (measured 2026-10-15, read-only, cluster left running)
 

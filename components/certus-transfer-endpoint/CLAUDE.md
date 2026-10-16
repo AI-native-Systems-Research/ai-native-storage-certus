@@ -89,6 +89,24 @@ VIII–XI, and a review that does not check them is not a review.
 - **Never answer an unprocessable message with silence.** Silence is
   indistinguishable from a hang, so it gets diagnosed as one — and then tears down a
   healthy connection. A stale binary on one node is the common cause.
+- **One connection carries both directions, so keep separate books.** An instance is
+  destination for one context and source for another on the same queue pair. Outbound
+  and inbound context tables must be *separate* — the requester allocates ids, so the
+  same id can be live both ways — credits are per direction, and posted receive buffers
+  are partitioned so a peer at full inbound-request quota cannot starve a reply you are
+  waiting on (that one is an RNR deadlock, FR-026/D22).
+- **Both ends may connect at once; exactly one connection must survive.** Keep the one
+  whose initiator has the lower `PeerId`, resolved at accept via the connect
+  `private_data`, before `OP_HELLO`. Two live connections defeat `disconnect`: tearing
+  one down leaves the other able to write into a reclaimed slot (FR-027, D23).
+- **Nobody decides the version and there is no `OP_HELLO_REPLY`.** Both ends send
+  unsolicited and compute `min(a.max, b.max)` against floor `max(a.min, b.min)`. The
+  rule is commutative, which is *why* the two ends cannot disagree — never replace it
+  with an asymmetric rule or a reply message (D20).
+- **The version is a header field at offset 6, validated once, not fused into the
+  opcode.** Opcodes name kinds. Fusing mints a new opcode per kind per version,
+  including unchanged kinds, and the handler ends up masking the version off anyway
+  (D21).
 - **`RemoteRegion`'s field is `length`, not `size`**, and on the wire the
   trailing two `u32`s are `size` then `rkey` — the opposite order from the
   struct. Both are `u32`, so a transposition silently swaps a length for a key.
