@@ -85,7 +85,7 @@ connection table. This is plan.md Phase 1's engine.
 
 **⚠️ CRITICAL**: no story work can begin until this phase is complete.
 
-- [ ] T006 Define `ITransferEndpoint` in
+- [X] T006 Define `ITransferEndpoint` in
   `components/interfaces/src/itransfer_endpoint.rs` via `define_interface!`, **ungated**
   (Principle I, contracts/itransfer_endpoint.md): methods
   `register_landing_region`, `fetch`, `push_async`, `push`, `disconnect`, `stats`, plus

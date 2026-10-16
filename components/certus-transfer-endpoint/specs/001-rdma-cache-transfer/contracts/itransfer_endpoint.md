@@ -142,11 +142,15 @@ define_interface! {
         /// LEGACY SUBSET (FR-019). Source-initiated push with no messaging, for
         /// callers whose control plane is elsewhere (`remote-lookup` over zyre).
         /// Signature-compatible with `IRemoteLookupRdmaInitiator::push_async`.
+        /// Takes `FetchCompletion`, not the legacy `PushCompletion`: the
+        /// latter delivers `Vec<PushStatus>`, so reusing it here would be a
+        /// type error once the per-item type is `EntryOutcome`. The argument
+        /// shapes are otherwise identical, which is what FR-019 needs.
         fn push_async(
             &self,
             endpoint: &str,
             items: &[(CacheKey, RemoteRegion)],
-            on_complete: PushCompletion,
+            on_complete: FetchCompletion,
         ) -> Result<(), TransferEndpointError>;
 
         /// Blocking convenience over `push_async`. One outcome per item, in order.
