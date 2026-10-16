@@ -255,14 +255,18 @@ slots and the reply's per-key outcomes match the source's actual residency.
 
 **Gate**: **SC-001** — zero zyre messages, zero messages to any third node.
 
-- [ ] T027 [US1] Implement the 24-byte header codec in `src/message.rs`: fused
-  `opcode = (version << 16) | kind`, `OP_FETCH = 0x0001_0001`,
-  `OP_FETCH_REPLY = 0x0001_0002`; `flags` bit 0 = `MORE`; `context_id`; `n_entries`;
-  reserved fields that MUST be zero. Little-endian. Dispatch on the **whole word** and
-  reject any unknown value. Bytes 0-15 (`opcode`, `flags`, first reserved, `context_id`) are
+- [ ] T027 [US1] Implement the 24-byte header codec in `src/message.rs`: `opcode` naming a
+  **kind only** (`OP_FETCH = 1`, `OP_FETCH_REPLY = 2`, `OP_HELLO = 0xFFFE`,
+  `OP_ERROR = 0xFFFF`, high 16 bits MUST be zero), `flags` bit 0 = `MORE`, **`version` at
+  offset 6**, `context_id`, `n_entries`, reserved fields that MUST be zero. Little-endian.
+  Dispatch on `opcode` alone and **validate `version` once** against the connection's
+  negotiated version — a consistency check, not a dispatch key, answered with `OP_ERROR`
+  reason 2 on mismatch (D21). Do not reintroduce a fused opcode: a bump would mint a new
+  opcode for every kind including unchanged ones, and the handler would mask the version
+  straight back off. Bytes 0-15 (`opcode`, `flags`, first reserved, `context_id`) are
   the **frozen prefix** — identical in every version of every kind, forever, because they are
-  the minimum needed to reject a message *and still correlate* the rejection (D20). Encode
-  that as a type or a constant, not a convention — the fusing is what makes an unknown version structurally an
+  the minimum needed to reject a message, say *why*, and still correlate the rejection
+  (D20, D21). Encode that as a type or a constant, not a convention — the fusing is what makes an unknown version structurally an
   unknown opcode rather than a misparse
 - [ ] T028 [P] [US1] Implement the 24-byte entry codec: `(key u64, addr u64, size u32,
   rkey u32)` — exactly `(CacheKey, RemoteRegion)`. **Absolute addresses, not slot
@@ -289,8 +293,10 @@ slots and the reply's per-key outcomes match the source's actual residency.
   sibling contexts must be unaffected. Count protocol faults in telemetry; an unexercised path
   must not look like a working one (Principle XI)
 - [ ] T076 [US1] Implement the frozen `OP_HELLO` codec and exchange (`0x0000_FFFE`,
-  unversioned, FR-025, D20): a **fixed-size** 32-byte message — `version_min: u16`,
-  `version_max: u16`, `max_entries: u32`. **Both** ends send it immediately on connection
+  unversioned, FR-025, D20): a **fixed-size** 40-byte message — `max_entries: u32`,
+  `max_outstanding_requests: u32`, `version_min: u16`, `version_max: u16`, reserved `u32`.
+  There is deliberately **no** `OP_HELLO_REPLY`: the exchange is unsolicited in both
+  directions, so a reply would carry nothing new and would add a second decision point. **Both** ends send it immediately on connection
   establishment, since the endpoint is symmetric and neither side is the client (D5); no data
   message goes out until the peer's has arrived. Store capabilities on the connection so they
   die with it and a rebuilt connection re-learns them. Fixed size is deliberate: the layout is
@@ -303,7 +309,9 @@ slots and the reply's per-key outcomes match the source's actual residency.
   negotiated version falls below `max(a.version_min, b.version_min)`, naming peer and both
   ranges; never defer that to a request or a deadline. Count version downgrades
   (Principle XI). **One version governs the whole protocol** — do not add per-kind
-  negotiation, which would permit a v2 request answered by a v1 reply (D20 *Revision*)
+  negotiation, which would permit a v2 request answered by a v1 reply (D20 *Revision*). The
+  selection rule MUST be commutative, with no arbitrator: add a property test asserting that
+  for every pair of ranges both argument orders give the same version and verdict (SC-014)
 - [ ] T078 [US1] Tests for T074-T077: **SC-012** — an unknown opcode injected over the mock
   seam draws an `OP_ERROR` within a round trip, the context fails with `Protocol(..)`, and the
   connection's sibling contexts still complete (assert the QP was *not* forced to ERROR, the
@@ -311,6 +319,29 @@ slots and the reply's per-key outcomes match the source's actual residency.
   larger request, and a peer whose version range does not intersect the local one fails at
   connect with no request issued; a reason code >= 5 is treated as a failure, not success; and
   `OP_ERROR`/`OP_HELLO` round-trip at their frozen offsets and fixed sizes
+- [ ] T079 [US1] Make the connection's books per direction (FR-026, D22): **separate**
+  outbound-request and inbound-serving context tables, since the requester allocates ids and
+  one id can be live in both directions on a connection — a single contexts-per-connection map
+  silently conflates two unrelated requests — plus per-direction message credits
+- [ ] T080 [US1] Partition posted receive buffers (FR-026, D22): reserve enough for the replies
+  this end's own outstanding requests can generate — a count its own message credits already
+  bound — and advertise the remainder as the peer's `max_outstanding_requests`; enforce the
+  granted quota on inbound requests. Without this, a peer issuing requests up to the buffer
+  count takes every buffer and leaves none for a reply this end is blocked on: an RNR stall,
+  and with two-way traffic a deadlock
+- [ ] T081 Resolve simultaneous connect (FR-027, D23): on detecting a duplicate, both ends keep
+  the connection whose **initiator has the lower `PeerId`** and close the other — a
+  deterministic function of two known values, no arbitrator, no extra round trip. Requires the
+  initiator to identify itself in the connect `private_data` (D16 puts a certus instance id
+  there, replacing the predecessor's zyre `PeerId`). Resolve at **accept**, before `OP_HELLO`
+  is posted, so the loser dies holding no context. Do **not** tolerate two connections:
+  `disconnect` tears down *the* queue pair, so a survivor could still land a write into a
+  reclaimed slot (FR-017)
+- [ ] T082 Tests for T079-T081: **SC-014** — commutativity of version selection over a table of
+  range pairs; **SC-015** — two mock endpoints initiating simultaneously converge on one
+  connection and agree which; **SC-016** — a peer at full inbound-request quota does not stop
+  this end receiving replies, and two-way traffic at full quota makes progress rather than
+  deadlocking; plus one context id live in both directions resolving to two distinct contexts
 - [ ] T030 [US1] Post receive buffers **unconditionally** on every connection, whether or
   not the local caller uses messaging (FR-005). Derive `max_entries` from the buffer size
   rather than configuring it separately: `(8192 - 24) / 24` = **340** entries per
@@ -649,6 +680,8 @@ this. It is a separate change, after the engine is proven.
 | FR-023 deadline cleanup ordering | T070, T071, T019 |
 | FR-024 protocol error reply | T074, T075, T078 |
 | FR-025 single negotiated version + capability exchange | T076, T077, T078 |
+| FR-026 bidirectional connection: namespaces, credits, buffers | T079, T080, T082 |
+| FR-027 simultaneous-connect resolution | T081, T082 |
 | SC-001 zero zyre, zero third instance | T035 |
 | SC-002 legacy tests pass | T021, T055 |
 | SC-003 default build, no rdma-core/SPDK | T001, T003, T010, T041 |
@@ -662,6 +695,12 @@ this. It is a separate change, after the engine is proven.
 | SC-011 no read/write phase barrier | T073 |
 | SC-012 unknown opcode answered, connection survives | T078 |
 | SC-013 peer max_entries respected, floor fails at connect | T078 |
+| SC-014 version rule is commutative | T077, T082 |
+| SC-015 one connection survives a race | T081, T082 |
+| SC-016 replies not starved by inbound requests | T080, T082 |
+| D21 version is a validated header field | T027 |
+| D22 one connection, both directions | T079, T080 |
+| D23 deterministic race resolution | T081 |
 | D20 one negotiated version, frozen messages, eager discovery | T027, T074-T078 |
 | D17 long-lived PD, registrations outlive QPs | T069, T020 |
 | Principle VIII default build | T002, T003, T010, T054–T056 |

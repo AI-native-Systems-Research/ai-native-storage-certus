@@ -202,7 +202,16 @@ advertises the range it supports, and the connection runs at `min(a.max, b.max)`
 unprocessable. The fused opcode is kept as a structural guard on the negotiated version rather
 than as the versioning mechanism. (A first draft versioned each kind independently; D20's
 *Revision* records why that was dropped — it only ever made sense while discovery was lazy,
-and it can represent a v2 request answered by a v1 reply.) Both of those messages are permanently unversioned
+and it can represent a v2 request answered by a v1 reply.)
+
+The version is a **validated header field**, not part of the opcode (D21): fusing would mint a
+new opcode for every kind on each bump, including unchanged ones, and the handler would mask
+the version back off. One connection serves an instance pair in **both** directions (D22),
+which requires per-direction context namespaces and credits and a receive-buffer partition so
+inbound requests cannot starve awaited replies; simultaneous connect converges by a
+deterministic rule on `PeerId` order, resolved at accept (D23). All three reuse one property:
+a decision both ends compute identically from values they already hold, rather than an
+arbitrator. Both of those messages are permanently unversioned
 — a peer that cannot parse version N must still parse them — and bytes 0-15 of the header are
 a frozen prefix for the same reason. This supersedes the wire contract's original "no
 negotiation" stance; the reasoning, including the two whole-protocol alternatives rejected, is

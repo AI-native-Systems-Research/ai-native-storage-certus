@@ -164,9 +164,10 @@ define_interface! {
         /// peer, this aborts all contexts outstanding on it.
         fn disconnect(&self, peer: &str) -> Result<(), TransferEndpointError>;
 
-        /// Snapshot of the three credit domains and per-outcome counters, plus
-        /// protocol-fault and version-downgrade counts — an unexercised path
-        /// must not look like a working one (Principle XI).
+        /// Snapshot of the credit domains (per direction) and per-outcome
+        /// counters, plus protocol-fault, version-downgrade and
+        /// duplicate-connection-resolved counts — an unexercised path must not
+        /// look like a working one (Principle XI).
         fn stats(&self) -> TransferStats;
     }
 }
@@ -218,7 +219,19 @@ Implementations MUST uphold, and tests MUST verify:
     `min(a.max, b.max)`, failing if below `max(a.min, b.min)` — and the peer's maximum request
     size is respected rather than the local one. A non-intersecting range fails at connect, not
     on a request (FR-025, SC-013). Capabilities are per connection and re-learned when one is
-    rebuilt.
+    rebuilt. The rule is **commutative**, so both ends compute the same verdict with no
+    arbitrator and no reply message (SC-014).
+15. **One connection, two directions, separate books.** An instance may be destination for one
+    context and source for another on the same queue pair. Outbound-request and inbound-serving
+    context tables are separate — the requester allocates ids, so one id can be live in both
+    directions — message credits are per direction, and posted receive buffers are partitioned
+    so a peer at full inbound-request quota cannot starve a reply this end awaits
+    (FR-026, SC-016).
+16. **Exactly one connection survives a race.** Simultaneous initiation converges on the
+    connection whose initiator has the lower `PeerId`, resolved at accept before the capability
+    exchange, with both ends agreeing (FR-027, SC-015). Two live connections to one instance
+    would defeat `disconnect`, since tearing one down leaves the other able to land a write
+    into a reclaimed slot.
 
 ## Two fail-loud paths, deliberately different
 

@@ -125,9 +125,40 @@ unchanged.
   and not a later deadline. A requester MUST respect the peer's maximum request size rather
   than its own. One version governs the whole protocol: a reply's meaning is tied to the
   version of the request it answers, so per-kind versions MUST NOT be negotiated
-  independently. Capabilities MUST be held on the connection and discarded with it, so a
+  independently.
+
+  The exchange MUST be **unsolicited and symmetric** — both ends send, there is no reply
+  message and no initiator privilege — and the rule MUST be a **commutative function of the
+  two advertised ranges**, so both ends compute the same answer independently and no
+  arbitrator exists. A reply message or an asymmetric rule (initiator decides, higher version
+  decides) would create a second decision point and with it the possibility of the two ends
+  disagreeing. Capabilities MUST be held on the connection and discarded with it, so a
   rebuilt connection re-learns them and an upgraded peer is picked up without separate
-  invalidation.
+  invalidation. It MUST also report how many concurrent requests the peer may have
+  outstanding against it (FR-026).
+- **FR-026**: One connection carries traffic in **both directions** (FR-002, D5): an instance
+  may be destination for one context and source for another on the same queue pair. Three
+  things follow, each of which MUST hold:
+  - **Context identifiers are scoped per direction.** The requester allocates them, so both
+    ends may independently allocate the same value on one connection. Each end MUST keep its
+    outbound-request table and its inbound-serving table **separate**; a single
+    contexts-on-this-connection map would silently conflate two unrelated requests.
+  - **Message credits are per direction.** Each end's credits bound its own sends against the
+    peer's posted receives; the two counters are independent.
+  - **Awaited replies MUST NOT be starved by inbound requests.** Both consume the same posted
+    receive buffers, so a peer issuing requests up to the buffer count can leave no buffer for
+    a reply the local side is blocked on. Each end MUST reserve receive buffers for the
+    replies its own outstanding requests will need, and advertise the remainder as the peer's
+    inbound-request quota; a peer MUST NOT exceed the quota it was granted.
+- **FR-027**: Because either end may initiate (FR-001), both MAY initiate simultaneously. The
+  endpoint MUST converge on **exactly one** connection per instance pair, chosen by a
+  deterministic rule over the two `PeerId`s that both ends evaluate identically, with no
+  arbitrator and no extra round trip. Resolution MUST happen when the duplicate is detected at
+  accept — which requires the initiator to identify itself in the connection request — and
+  therefore **before** the capability exchange, so the losing queue pair carries no context and
+  nothing has to be migrated. Tolerating two connections is NOT acceptable: `disconnect`
+  tears down *the* queue pair, so a second one could still land a write into a slot already
+  reclaimed, defeating FR-017.
 
 **Per-entry handling on the source**
 
@@ -204,11 +235,14 @@ unchanged.
 - **RemoteRegion** — a landing slot: rkey, address, size. Already exists.
 - **EntryOutcome** — `hit_memory_tier | hit_block_tier | miss`.
 - **BounceBuffer** — a registered buffer leased from a fixed pool for block-tier serving.
-- **PeerConnection** — one queue pair plus its three credit counters, usable in both
-  directions, keyed by `PeerId` and replaceable without invalidating a landing region.
+- **PeerConnection** — one queue pair per instance pair, used in **both** directions, keyed by
+  `PeerId` and replaceable without invalidating a landing region. Holds per-direction credit
+  counters, separate outbound-request and inbound-serving context tables, and the negotiated
+  capabilities (FR-026).
 - **PeerId** — an instance-granular peer address, carrying at least host and port (FR-021).
-- **PeerCapabilities** — supported protocol version range plus maximum receivable entries,
-  learned at connect and discarded with the connection (FR-025).
+- **PeerCapabilities** — supported protocol version range, maximum receivable entries, and
+  granted inbound-request quota; learned at connect and discarded with the connection
+  (FR-025, FR-026).
 - **ProtocolError** — the error reply of FR-024: offending opcode, reason, and the sender's
   highest supported version for that kind.
 - **LandingRegion** — a registered region peers may write into. Its registration outlives any
@@ -251,6 +285,14 @@ unchanged.
 - **SC-013**: A peer advertising a smaller maximum request than the local one is never sent a
   larger one, and a peer whose version range does not intersect the local one fails at connect
   with a diagnostic naming peer and both ranges — no request is ever issued to it.
+- **SC-014**: For every pair of advertised version ranges, both argument orders yield the same
+  version and the same accept/refuse verdict — the rule is commutative, so the two ends cannot
+  disagree.
+- **SC-015**: Two instances initiating simultaneously end with exactly one connection, and
+  both agree which one survived.
+- **SC-016**: A peer saturating its granted inbound-request quota does not prevent the local
+  side from receiving replies to its own outstanding requests; bidirectional traffic at full
+  quota makes progress rather than deadlocking.
 
 ## Assumptions
 

@@ -10,60 +10,60 @@ All integers little-endian. All offsets in bytes from the start of the message.
 
 ## Message framing
 
-Every message begins with a 24-byte header whose first word is a **fused opcode carrying
-the version in its high half**:
+Every message begins with a 24-byte header. The first word is the **opcode, which names a
+message kind only** — the protocol version lives in its own header field and is *not* fused
+into the opcode (research D21).
 
-```
-opcode = (version << 16) | kind
-```
-
-| name | `opcode` | meaning |
+| name | `opcode` | |
 |---|---|---|
-| `OP_FETCH` | `0x0001_0001` | kind 1, version 1 |
-| `OP_FETCH_REPLY` | `0x0001_0002` | kind 2, version 1 |
+| `OP_FETCH` | `0x0000_0001` | kind 1 |
+| `OP_FETCH_REPLY` | `0x0000_0002` | kind 2 |
 | `OP_HELLO` | `0x0000_FFFE` | kind 0xFFFE, **unversioned** |
 | `OP_ERROR` | `0x0000_FFFF` | kind 0xFFFF, **unversioned** |
 
-Two *versioned* opcodes carry the data plane; everything it needs — chunking, credits, tier
-attribution — rides in the header flags or the body rather than in more kinds.
+The high 16 bits of `opcode` MUST be zero and are reserved for future kinds. Two kinds carry
+the data plane; everything it needs — chunking, credits, tier attribution — rides in the
+header flags or the body rather than in more kinds.
 
-The version half of a data-plane opcode carries the version **negotiated at connect**
-(`OP_HELLO`), so it is a structural guard rather than the versioning mechanism itself: both
-ends have already agreed, and an opcode that disagrees means a negotiation bug or a mismatched
-build, which is rejected as a whole unknown word instead of misparsed as a known one.
+`OP_HELLO` and `OP_ERROR` are **frozen for all time**: they are the messages a peer must be
+able to parse *even when it cannot parse the version in question*, since versioning them would
+mean answering an unparseable message with an unparseable error. They carry `version = 0`,
+which no real version uses, and a receiver ignores the version field for them. They stay
+extensible through their **content** — an open reason-code space — never through their layout
+(research D20).
 
-The last two are **frozen for all time** at version `0`. No real version is 0, so these
-opcodes can never collide with a versioned one, and that is deliberate: they are the messages a
-peer must be able to parse *even when it cannot parse the version in question*. Versioning
-them would mean answering an unparseable message with an unparseable error. They stay
-extensible through their **content** — an open reason-code space and a counted capability list
-— never through their layout (research D20).
+**Why the version is a field and not part of the opcode.** An earlier draft fused them as
+`(version << 16) | kind`, which was the whole version-safety mechanism while there was no
+handshake. With the version negotiated at connect (D20) fusing became redundant *and*
+cluttering: a bump would mint a new opcode for every kind including the ones that did not
+change, so an unchanged `OP_FETCH_REPLY` would accumulate one opcode value per version, all
+dispatching to the same handler — and the handler would mask the version straight back off.
+A mechanism whose common path discards it is not earning its place. See D21.
 
 ### The frozen header prefix
 
-Bytes 0-15 — `opcode`, `flags`, the first reserved field and `context_id` — mean the same
-thing in **every version of every kind, forever**. That is the minimum a receiver needs to
-reject a message it does not understand *and still correlate* the rejection with the request
-that caused it. Later header fields and all bodies may be redefined by a version bump; these
-may not.
+Bytes 0-15 — `opcode`, `flags`, `version` and `context_id` — mean the same thing in **every
+version of every kind, forever**. That is the minimum a receiver needs to reject a message it
+does not understand, say *why*, and still correlate the rejection with the request that caused
+it. Later header fields and all bodies may be redefined by a version bump; these may not.
 
-A receiver dispatches on the whole word and rejects any value it does not know. Fusing the
-version in is deliberate: a v2 `OP_FETCH` has a *different opcode* from a v1 `OP_FETCH`, so
-an older peer cannot parse it as v1 and misread the body. A separate version field would make
-that safety depend on every implementer remembering to check it; here an unknown version is
-structurally an unknown opcode. It also leaves room to add message kinds later — a cancel,
-a credit update — without touching the framing.
+A receiver dispatches on `opcode` alone and **validates `version` once**, in the header parse,
+against the version negotiated for that connection. It is a consistency check, not a dispatch
+key: both ends already agreed, so a mismatch means a negotiation bug or a mismatched build,
+and it is answered with `OP_ERROR` reason 2. Validating in one place keeps the guarantee that
+fusing used to provide — a message is never parsed at the wrong version — without a match arm
+per kind per version.
 
 | offset | size | field | notes |
 |---|---|---|---|
-| 0 | 4 | `opcode` | fused kind + version, above |
+| 0 | 4 | `opcode` | message kind; high 16 bits MUST be zero |
 | 4 | 2 | `flags` | bit 0 = `MORE` (another chunk of this context follows); rest reserved, MUST be zero |
-| 6 | 2 | reserved | MUST be zero |
+| 6 | 2 | `version` | protocol version in force; validated, not dispatched on. Zero and ignored for `OP_HELLO`/`OP_ERROR` |
 | 8 | 8 | `context_id` | identifies the fetch; echoed in `OP_FETCH_REPLY` |
 | 16 | 4 | `n_entries` | entries in *this* message |
 | 20 | 4 | reserved | MUST be zero; keeps the entry vector 8-byte aligned |
 
-### `OP_FETCH` (`0x0001_0001`)
+### `OP_FETCH` (`0x0000_0001`)
 
 Header, then `n_entries` × 24-byte entries. **Nothing else** — no base address, no rkey, no
 uniform entry size in the header.
@@ -97,7 +97,7 @@ would have been 8 bytes per entry. Addresses cost nothing in practice (see sizin
 `rkey` rides in what would otherwise be padding, so per-entry regions are supported for
 free — the requester may land entries across several registered regions.
 
-### `OP_FETCH_REPLY` (`0x0001_0002`)
+### `OP_FETCH_REPLY` (`0x0000_0002`)
 
 Header, then one outcome byte per entry in request order, zero-padded to an 8-byte boundary.
 
@@ -114,19 +114,33 @@ makes the one-sided WRITE safe without `WRITE_WITH_IMM`.
 
 Sent by **both** ends immediately on connection establishment — the endpoint is symmetric, so
 neither side is the client (D5). Neither end sends a data message until the peer's `OP_HELLO`
-has arrived. `context_id` is zero and `n_entries` is the capability count.
+has arrived. `context_id`, `version` and `n_entries` are zero.
 
-The body is **fixed size**, 32 bytes total, which is what a permanently frozen layout wants:
+**There is no `OP_HELLO_REPLY`, deliberately.** The exchange is unsolicited in both
+directions, so after one exchange each end already holds both advertisements and a reply would
+carry nothing new. It would also add a second decision point, which is the only way the two
+ends could end up disagreeing.
+
+The body is **fixed size**, 40 bytes total, which is what a permanently frozen layout wants:
 
 | offset | size | field | notes |
 |---|---|---|---|
-| 24 | 2 | `version_min` | lowest protocol version this sender can speak |
-| 26 | 2 | `version_max` | highest protocol version this sender can speak |
-| 28 | 4 | `max_entries` | the largest `OP_FETCH` **this** sender can receive |
+| 24 | 4 | `max_entries` | largest `OP_FETCH` **this** sender can receive |
+| 28 | 4 | `max_outstanding_requests` | how many concurrent requests the **peer** may have outstanding against this sender |
+| 32 | 2 | `version_min` | lowest protocol version this sender can speak |
+| 34 | 2 | `version_max` | highest protocol version this sender can speak |
+| 36 | 4 | reserved | MUST be zero |
 
-The version in force for the connection is `min(a.version_max, b.version_max)`. If that is
-below `max(a.version_min, b.version_min)` the ranges do not intersect and the **connection**
-fails at establishment, naming peer and both ranges; no request is ever issued to it.
+**Nobody decides the version; both ends compute it.** The version in force is
+`min(a.version_max, b.version_max)`, and the connection fails at establishment if that is
+below `max(a.version_min, b.version_min)` — naming peer and both ranges, with no request ever
+issued. Both `min` and `max` are commutative, so the result is a pure function of two values
+*both ends possess*, symmetric in its arguments: there is no proposer, no arbitrator, and
+structurally no way for the two ends to choose differently. Any asymmetric rule — initiator
+decides, higher version decides — would reintroduce that possibility and is forbidden.
+
+`max_outstanding_requests` is the peer's **inbound-request quota**, and it exists because one
+connection carries both directions (FR-026): see *Receive-buffer partitioning* below.
 
 **One version governs the whole protocol**, not each kind. A reply's meaning is tied to the
 version of the request it answers, so independently negotiated per-kind versions could
@@ -236,6 +250,51 @@ cleanly rather than leave a hole.
   destination deadline's job (FR-016). On expiry the queue pair is forced to ERROR and
   drained *before* any landing slot is reclaimed, which necessarily aborts every context
   outstanding on that connection, not only the one that expired (FR-023, D18).
+
+### Both directions, one connection
+
+An instance may be destination for one context and source for another **on the same queue
+pair** — that is the point of D5, and FR-002 allows only one connection per instance pair.
+Three consequences:
+
+- **Context ids are scoped per direction.** The requester allocates them, so both ends may
+  independently allocate id 7 on one connection. An `OP_FETCH_REPLY` with id 7 belongs to the
+  local outbound table; an `OP_FETCH` with id 7 belongs to the inbound serving table. They are
+  distinguishable only by kind, so the two tables MUST be separate — one
+  contexts-on-this-connection map would silently conflate two unrelated requests.
+- **Message credits are per direction**, each bounding that end's sends against the peer's
+  posted receives.
+- **Replies must not be starved by inbound requests** — below.
+
+### Receive-buffer partitioning
+
+A posted receive buffer does not know what will land in it, and on a shared connection two
+independent streams compete for the same pool: replies owed to this end, and requests
+originated by the peer. With `message_credits x 8 KiB` posted — 64 KiB at 8 credits — a peer
+issuing 8 requests can consume every buffer, leaving nowhere for a reply this end is blocked
+waiting on. That is an RNR stall and, with traffic both ways, a credible deadlock.
+
+So each end partitions its posted receives: enough reserved for the replies its own
+outstanding requests can generate — a number it knows, because its own message credits bound
+it — and the remainder advertised as the peer's `max_outstanding_requests`. A peer MUST NOT
+exceed the quota it was granted. The partition is self-consistent precisely because each end
+sizes the reply reservation from a bound it already enforces locally.
+
+### Simultaneous connect
+
+Either end may initiate (FR-001), so both can initiate at once and produce two queue pairs
+between one instance pair. That is **not** benign: `disconnect` tears down *the* queue pair,
+so a surviving second one could still land a write into a slot already reclaimed, defeating
+FR-017 and the pin discipline of Principle IX.
+
+The duplicate is resolved by the same device as the version — a deterministic function of two
+values both ends know, with no arbitrator. `PeerId` has a total order, so both ends keep the
+connection whose **initiator is the lower `PeerId`** and close the other. This requires the
+initiator to identify itself in the connection request, which is what the connect
+`private_data` carries (D16 puts a certus instance id there, replacing the predecessor's zyre
+`PeerId`). Resolution happens at **accept**, before `OP_HELLO` is posted — and since no data
+message may be sent before the exchange completes, the losing queue pair dies holding no
+context and nothing has to be migrated.
 
 ## What is deliberately not here
 
