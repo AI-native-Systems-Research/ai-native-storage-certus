@@ -1,7 +1,7 @@
 //! Background write worker for memory-tier-to-SSD persistence and SSD eviction.
 
 use crossbeam_channel::{Receiver, Sender};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -219,6 +219,28 @@ impl Drop for ParallelBackgroundWriter {
 }
 
 // ---------------------------------------------------------------------------
+// Eviction event sender
+// ---------------------------------------------------------------------------
+
+/// Sending half of the bounded eviction-event channel, paired with the
+/// dispatcher's dropped-event counter. Every eviction path sends through
+/// [`EvictionSender::emit`], so an event is either queued or counted as dropped
+/// (FR-042) — never lost silently — and the send never blocks.
+#[derive(Clone)]
+pub struct EvictionSender {
+    pub tx: Sender<EvictionEvent>,
+    pub dropped: Arc<AtomicU64>,
+}
+
+impl EvictionSender {
+    pub fn emit(&self, event: EvictionEvent) {
+        if self.tx.try_send(event).is_err() {
+            self.dropped.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Background SSD Evictor
 // ---------------------------------------------------------------------------
 
@@ -241,7 +263,7 @@ impl BackgroundEvictor {
         extent_mgrs: Vec<Arc<dyn IExtentManager + Send + Sync>>,
         config: EvictorConfig,
         logger: Option<Arc<dyn ILogger + Send + Sync>>,
-        eviction_tx: Option<Sender<EvictionEvent>>,
+        eviction_tx: Option<EvictionSender>,
         tier_counters: Arc<TierEventCounters>,
     ) -> Self {
         let shutdown = Arc::new(AtomicBool::new(false));
@@ -283,7 +305,7 @@ impl BackgroundEvictor {
         extent_mgrs: &[Arc<dyn IExtentManager + Send + Sync>],
         config: &EvictorConfig,
         logger: Option<&(dyn ILogger + Send + Sync)>,
-        eviction_tx: Option<&Sender<EvictionEvent>>,
+        eviction_tx: Option<&EvictionSender>,
         tier_counters: &TierEventCounters,
     ) {
         loop {
@@ -333,7 +355,7 @@ impl BackgroundEvictor {
                 }
 
                 if let Some(tx) = eviction_tx {
-                    let _ = tx.try_send(EvictionEvent {
+                    tx.emit(EvictionEvent {
                         key,
                         reason: EvictionReason::Removed,
                     });
@@ -434,7 +456,7 @@ impl MemoryTierEvictor {
         mt: Arc<dyn IMemoryTier + Send + Sync>,
         config: MemoryTierEvictorConfig,
         logger: Option<Arc<dyn ILogger + Send + Sync>>,
-        eviction_tx: Arc<Mutex<Option<Sender<EvictionEvent>>>>,
+        eviction_tx: Arc<Mutex<Option<EvictionSender>>>,
         tier_counters: Arc<TierEventCounters>,
     ) -> Self {
         let shutdown = Arc::new(AtomicBool::new(false));
@@ -474,7 +496,7 @@ impl MemoryTierEvictor {
         mt: &Arc<dyn IMemoryTier + Send + Sync>,
         config: &MemoryTierEvictorConfig,
         logger: Option<&(dyn ILogger + Send + Sync)>,
-        eviction_tx: &Mutex<Option<Sender<EvictionEvent>>>,
+        eviction_tx: &Mutex<Option<EvictionSender>>,
         tier_counters: &TierEventCounters,
     ) {
         let mut consecutive_dry_runs = 0u32;
@@ -537,7 +559,7 @@ impl MemoryTierEvictor {
                 }
 
                 if let Some(ref tx) = *eviction_tx.lock().unwrap() {
-                    let _ = tx.try_send(EvictionEvent {
+                    tx.emit(EvictionEvent {
                         key,
                         reason: EvictionReason::Demoted,
                     });

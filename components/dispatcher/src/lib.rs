@@ -69,6 +69,10 @@ mod pins;
 pub mod pipeline;
 mod remote_probe;
 
+#[cfg(test)]
+#[path = "repair_test_eviction_events_dropped.rs"]
+mod repair_test_eviction_events_dropped;
+
 use parking_lot::RwLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -86,7 +90,7 @@ use component_core::binding::bind;
 use spdk_env::ISPDKEnv;
 
 use crate::background::{
-    BackgroundEvictor, EvictorConfig, MemoryTierEvictor, MemoryTierEvictorConfig,
+    BackgroundEvictor, EvictionSender, EvictorConfig, MemoryTierEvictor, MemoryTierEvictorConfig,
     ParallelBackgroundWriter, WriteJob,
 };
 pub use crate::metrics::PipelineMetrics;
@@ -426,8 +430,8 @@ define_component! {
             max_eviction_attempts: AtomicUsize,
             store_backpressure_ms: AtomicU64,
             pipeline_metrics: RwLock<Option<Arc<dyn PipelineMetrics>>>,
-            eviction_tx: Arc<Mutex<Option<crossbeam_channel::Sender<EvictionEvent>>>>,
-            eviction_dropped: AtomicU64,
+            eviction_tx: Arc<Mutex<Option<EvictionSender>>>,
+            eviction_dropped: Arc<AtomicU64>,
             tier_counters: Arc<TierEventCounters>,
         },
     }
@@ -560,7 +564,10 @@ impl DispatcherComponent {
         capacity: usize,
     ) -> crossbeam_channel::Receiver<EvictionEvent> {
         let (tx, rx) = crossbeam_channel::bounded(capacity);
-        *self.eviction_tx.lock().unwrap() = Some(tx);
+        *self.eviction_tx.lock().unwrap() = Some(EvictionSender {
+            tx,
+            dropped: Arc::clone(&self.eviction_dropped),
+        });
         rx
     }
 
@@ -572,9 +579,7 @@ impl DispatcherComponent {
     fn emit_eviction(&self, key: CacheKey, reason: EvictionReason) {
         let guard = self.eviction_tx.lock().unwrap();
         if let Some(ref tx) = *guard {
-            if tx.try_send(EvictionEvent { key, reason }).is_err() {
-                self.eviction_dropped.fetch_add(1, Ordering::Relaxed);
-            }
+            tx.emit(EvictionEvent { key, reason });
         }
     }
 
@@ -4802,7 +4807,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
         c.dispatch_map
@@ -4967,7 +4972,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
         c.dispatch_map
@@ -5015,7 +5020,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
     }
@@ -5036,7 +5041,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
         let d = query_interface!(c, IDispatcher);
@@ -5059,7 +5064,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -5087,7 +5092,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -5116,7 +5121,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -5145,7 +5150,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -5169,7 +5174,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -5193,7 +5198,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -5222,7 +5227,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -5254,7 +5259,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -5277,7 +5282,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -5301,7 +5306,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         ));
 
@@ -5356,7 +5361,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
         c.dispatch_map.connect(dm).unwrap();
@@ -5390,7 +5395,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
         c.dispatch_map.connect(dm).unwrap();
@@ -5468,7 +5473,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
         c.dispatch_map.connect(dm).unwrap();
@@ -6311,7 +6316,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
 
@@ -6347,7 +6352,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
 
@@ -6418,7 +6423,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
 
@@ -6479,7 +6484,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::clone(&counters),
         );
 
@@ -6576,7 +6581,7 @@ mod tests {
                 AtomicU64::new(0),
                 RwLock::new(None),
                 Arc::new(Mutex::new(None)),
-                AtomicU64::new(0),
+                Arc::new(AtomicU64::new(0)),
                 Arc::clone(&counters),
             );
             let res = c.evict_for_space(&dm, &mt, 4096, 100, 512);
@@ -6660,7 +6665,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
 
@@ -6716,7 +6721,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
         c.dispatch_map
@@ -6785,7 +6790,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
         c.dispatch_map
