@@ -2947,6 +2947,10 @@ impl IDispatcher for DispatcherComponent {
             if matches!(results[i], Some(Err(DispatcherError::AlreadyExists(_)))) {
                 results[i] =
                     Some(self.serve_concurrently_promoted(&dm, &gpu, *key, regions, warm_raw));
+                // Rewritten with the result: classification marked the key `Ssd`, but
+                // this pass served it out of DRAM after the winner's promotion (FR-009,
+                // FR-010). On a failed recovery the result alone decides the bucket.
+                tier[i] = Some(ServedBy::Dram);
             }
         }
 
@@ -7117,3 +7121,7 @@ mod tests {
         d.shutdown().unwrap();
     }
 }
+
+#[cfg(test)]
+#[path = "repair_test_served_by.rs"]
+mod repair_test_served_by;
