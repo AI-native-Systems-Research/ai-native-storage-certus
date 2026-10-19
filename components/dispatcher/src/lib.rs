@@ -3543,7 +3543,22 @@ impl IDispatcher for DispatcherComponent {
         dm.create_memory_tier_entry(key, mem_ptr, size)
             .map_err(|e| match e {
                 interfaces::DispatchMapError::AlreadyExists(k) => {
-                    let _ = mt.remove(key);
+                    // The tier holds one slot per key, so the existing entry may
+                    // be pointing at this very slot (a repeated or racing
+                    // completion). Free it only when the entry provably lives
+                    // elsewhere; if we cannot tell, keep it — a leaked slot is
+                    // recoverable, a freed live one is not.
+                    let live = match dm.lookup(key) {
+                        Ok(LookupResult::NotExist) => false,
+                        Ok(r) => {
+                            let _ = dm.release_read(key);
+                            matches!(r, LookupResult::MemoryTier { pointer, .. } if pointer == mem_ptr)
+                        }
+                        Err(_) => true,
+                    };
+                    if !live {
+                        let _ = mt.remove(key);
+                    }
                     DispatcherError::AlreadyExists(k)
                 }
                 other => {
@@ -7155,3 +7170,5 @@ mod tests {
 #[cfg(test)]
 #[path = "repair_test_served_by.rs"]
 mod repair_test_served_by;
+#[path = "repair_test_copy_completed.rs"]
+mod repair_test_copy_completed;
