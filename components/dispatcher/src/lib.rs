@@ -3213,20 +3213,37 @@ impl IDispatcher for DispatcherComponent {
         let alloc_us = t_alloc.elapsed().as_micros() as f64;
 
         // Phase 2: Async DMA copy from GPU into the reserved slot, then sync.
+        // Until Phase 3 registers it, the slot has no dispatch-map entry, so the
+        // evictor can never reclaim it: every failure here must release it, or
+        // the DRAM leaks and a retry of this key fails with AlreadyExists.
         let t_d2h = std::time::Instant::now();
-        let gpu = self
-            .gpu_services
-            .get()
-            .map_err(|_| DispatcherError::NotInitialized("gpu_services not bound".into()))?;
+        let gpu = match self.gpu_services.get() {
+            Ok(g) => g,
+            Err(_) => {
+                let _ = self.release_memory(key);
+                return Err(DispatcherError::NotInitialized(
+                    "gpu_services not bound".into(),
+                ));
+            }
+        };
         // D2H source is on the GPU (ipc_handle.address); make that device current
         // and use its dedicated store stream so D2H doesn't serialize with H2D
         // loads on the warm stream (PCIe full-duplex).
         let device = set_batch_device(&*gpu, ipc_handle.address);
         let store_raw = device_streams_for(&*gpu, device).map_or(0, |s| s.store);
         let stream = GpuStream(store_raw as *mut std::ffi::c_void);
-        self.copy_gpu_to_memory_async(key, std::slice::from_ref(&ipc_handle), stream)?;
-        gpu.stream_synchronize(stream)
-            .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
+        if let Err(e) =
+            self.copy_gpu_to_memory_async(key, std::slice::from_ref(&ipc_handle), stream)
+        {
+            let _ = self.release_memory(key);
+            return Err(e);
+        }
+        if let Err(e) = gpu.stream_synchronize(stream) {
+            let _ = self.release_memory(key);
+            return Err(DispatcherError::IoError(format!(
+                "stream_synchronize failed: {e}"
+            )));
+        }
         let d2h_us = t_d2h.elapsed().as_micros() as f64;
 
         // Phase 3: Register in dispatch-map and enqueue SSD write-through.
@@ -7172,3 +7189,5 @@ mod tests {
 mod repair_test_served_by;
 #[path = "repair_test_copy_completed.rs"]
 mod repair_test_copy_completed;
+#[path = "repair_test_populate_slot.rs"]
+mod repair_test_populate_slot;
