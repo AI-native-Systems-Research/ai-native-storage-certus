@@ -130,7 +130,7 @@ components/certus-transfer-endpoint/
 
 **Structure Decision**: a single component rather than extending either existing crate.
 `ffi.rs` is declared **once** here, which is the point of SC-008 — the two existing crates
-currently declare 28 identical public items between them. `connection.rs` carries the
+currently declare 52 public names in common. `connection.rs` carries the
 symmetric table because the existing initiator's equivalent is already the largest and most
 developed piece (2,128 lines) and is the natural base.
 
@@ -174,7 +174,7 @@ scope** for FR-020 and not required for any P1 success criterion.
 
 | Item | Why it is justified | Alternative rejected |
 |---|---|---|
-| New component merging two existing roles | `ffi.rs` is already duplicated (28 shared public items); a third copy is worse. Symmetric endpoints need the union of both crates' verbs usage, and both already have connect+listen+accept. | Extending the initiator in place — leaves the crate name a lie and the responder's accept loop stranded. |
+| New component merging two existing roles | `ffi.rs` is already duplicated (52 shared public names); a third copy is worse. Symmetric endpoints need the union of both crates' verbs usage, and both already have connect+listen+accept. | Extending the initiator in place — leaves the crate name a lie and the responder's accept loop stranded. |
 | Symmetric QP usage | The destination connects and sends; the source must reply and push on that same connection. | Two connections per pair — doubles QPs and setups, and the reply still needs a direction. |
 | Three credit domains | They bound genuinely different resources (pins, receive buffers, bounce buffers) and exhaust independently. | One combined counter — would over- or under-restrict two of the three. |
 | Bounce pool with dual registration | RDMA needs `ibv_reg_mr`; the device read needs SPDK-DMA-able memory. Both are required of the same buffer. | Promotion into the memory tier — evicts the source's own working set (D8). |
