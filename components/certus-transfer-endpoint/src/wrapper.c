@@ -138,3 +138,14 @@ int certus_te_qp_to_error(struct ibv_qp *qp) {
     attr.qp_state = IBV_QPS_ERR;
     return ibv_modify_qp(qp, &attr, IBV_QP_STATE);
 }
+
+/* The QP's state as the device reports it (an enum ibv_qp_state), or a negative
+ * errno. qp->state is only libibverbs' cache of the last state software set,
+ * so it does not see the device forcing a QP to ERROR after a fatal completion;
+ * a health check must ask the device. */
+int certus_te_query_qp_state(struct ibv_qp *qp) {
+    struct ibv_qp_attr attr;
+    struct ibv_qp_init_attr init_attr;
+    int ret = ibv_query_qp(qp, &attr, IBV_QP_STATE, &init_attr);
+    return ret ? -ret : (int)attr.qp_state;
+}

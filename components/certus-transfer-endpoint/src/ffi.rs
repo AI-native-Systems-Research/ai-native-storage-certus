@@ -482,6 +482,11 @@ extern "C" {
     // late write impossible before a landing slot is reclaimed (FR-023).
     pub fn certus_te_qp_to_error(qp: *mut ibv_qp) -> c_int;
 
+    // The QP's state as the device reports it, via `ibv_query_qp`; negative
+    // errno on failure. `ibv_qp::state` is only libibverbs' cache of the last
+    // state *software* set, so it misses the device forcing a QP to ERROR.
+    pub fn certus_te_query_qp_state(qp: *mut ibv_qp) -> c_int;
+
     // libc byte-order and address helpers.
     pub fn htons(hostshort: u16) -> u16;
     pub fn ntohs(netshort: u16) -> u16;
