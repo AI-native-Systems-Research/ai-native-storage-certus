@@ -93,15 +93,25 @@ connection table. This is plan.md Phase 1's engine.
   `TransferEndpointError`, `FetchCompletion`, `TransferStats`. Reuse the existing
   `RemoteRegion` and `CacheKey` verbatim. **No `serve()` method** — serving is reactive
   by design, and exposing it would invite callers to schedule it
-- [ ] T007 Write `src/ffi.rs` as **the single copy** of the verbs FFI (SC-008): the 28
-  public items currently duplicated across
+- [X] T007 Write `src/ffi.rs` as **the single copy** of the verbs FFI (SC-008): the 52
+  public names currently shared by
   `remote-lookup-rdma-initiator/src/ffi.rs` and `remote-lookup-rdma-responder/src/ffi.rs`,
   plus the send/recv surface neither crate ever used — `ibv_post_recv`, the recv work
   request and SGE types, and `IBV_WR_SEND` promoted from a bare unused constant to a
-  live opcode (D3). Every `unsafe` item carries a `// SAFETY:` comment (Principle V)
-- [ ] T008 Write `build.rs` + `src/wrapper.c` for the static-inline verbs shim, compiled
+  live opcode (D3). Every `unsafe` item carries a `// SAFETY:` comment (Principle V).
+  *Done:* structs were measured against the rdma-core 2510.0.11 headers, not copied —
+  four predecessor definitions were wrong (`ibv_send_wr`'s `wr` union 24 B vs 32 B,
+  `IBV_WR_*` numbering, `ibv_port_attr` missing `active_speed_ex`, guessed padding on
+  `rdma_cm_id`/`rdma_cm_event`/`ibv_qp`). A `const` layout check pins every size and
+  every Rust-touched offset; extern declarations carry a module-level `# Safety` caller
+  contract and the `// SAFETY:` comments go at call sites in `rdma.rs`. epoll/eventfd
+  are deliberately absent until T009/T010 choose the event loop
+- [X] T008 Write `build.rs` + `src/wrapper.c` for the static-inline verbs shim, compiled
   by `cc` and located by `pkg-config`, **both gated on `rdma`** so the default build
-  invokes neither (Principle VIII). Copy the initiator's shim as the model
+  invokes neither (Principle VIII). Copy the initiator's shim as the model.
+  *Done:* thin pass-through shims (`certus_te_post_send`/`_post_recv`/`_poll_cq`/
+  `_query_port`/`_qp_to_error`), work requests built in Rust so chains and `bad_wr`
+  survive; `wrapper.c` also carries the `_Static_assert` half of T007's layout check
 - [ ] T009 Write `src/rdma.rs` safe wrappers over T007: device/PD open, QP lifecycle
   (init → RTR → RTS → ERROR), `MemoryRegion` over caller-owned memory (the initiator's
   registration path already covers "memory owned by the caller (e.g. memory-tier pool)",
