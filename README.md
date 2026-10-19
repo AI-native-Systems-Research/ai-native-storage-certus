@@ -1,8 +1,6 @@
 # Certus
 
-Certus is a generative domain-specific filesystem optimized for AI/ML inferencing workloads. It delivers data directly from NVMe storage to GPU memory via GPUDirect/RDMA, bypassing the kernel page cache and CPU-mediated copies to minimize latency on the cold path (cache miss → SSD → GPU).
-
-The system is built on a COM-inspired Rust component framework that enforces **independent extensibility** — components are developed in isolation with low coupling, communicate only through typed interfaces and receptacles, and are integrated via runtime binding. This architecture keeps each component's LLM context window small (one crate plus its bindings), enabling AI-assisted development at the per-component level.
+Certus is a generative domain-specific storage system optimized for KV-cache workloads. The system is built using AI-driven construction - not a single line of code is written by hand.  The aims of the project are (1) to develop an AI-methodology that creates, optimizes and validates generated code, (2) demonstrate the value of the methodology in the context of building a hyper-specialized solution for KV-cache.
 
 
 ## Claude and Spec-Kit
