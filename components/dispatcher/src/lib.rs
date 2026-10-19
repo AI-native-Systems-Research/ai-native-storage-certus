@@ -7187,7 +7187,11 @@ mod tests {
 #[cfg(test)]
 #[path = "repair_test_served_by.rs"]
 mod repair_test_served_by;
+
+#[cfg(test)]
 #[path = "repair_test_copy_completed.rs"]
 mod repair_test_copy_completed;
+
+#[cfg(test)]
 #[path = "repair_test_populate_slot.rs"]
 mod repair_test_populate_slot;
