@@ -112,14 +112,25 @@ connection table. This is plan.md Phase 1's engine.
   *Done:* thin pass-through shims (`certus_te_post_send`/`_post_recv`/`_poll_cq`/
   `_query_port`/`_qp_to_error`), work requests built in Rust so chains and `bad_wr`
   survive; `wrapper.c` also carries the `_Static_assert` half of T007's layout check
-- [ ] T009 Write `src/rdma.rs` safe wrappers over T007: device/PD open, QP lifecycle
-  (init → RTR → RTS → ERROR), `MemoryRegion` over caller-owned memory (the initiator's
+- [X] T009 Write `src/rdma.rs` safe wrappers over T007: a `ProtectionDomain` owning one
+  PD on one device, QP creation plus a device-reported state query and the explicit
+  transition to ERROR (rdma_cm drives INIT → RTR → RTS itself, so there is no manual
+  transition to wrap), `MemoryRegion` over caller-owned memory (the initiator's
   registration path already covers "memory owned by the caller (e.g. memory-tier pool)",
   D15), `post_send`, `post_recv`, completion polling. Gated on `rdma`. **The protection
   domain is owned by the endpoint for its lifetime, not by a connection** (D17) — unlike the
   initiator, where the PD lives in the connection (`rdma.rs:169`, `ibv_dealloc_pd` in its
   `Drop`) and the pool is re-registered on every connect (`connection.rs:1131`). Explicit QP
-  transition to ERROR is part of this surface: it is what FR-023 relies on
+  transition to ERROR is part of this surface: it is what FR-023 relies on.
+  *Done:* teardown order is enforced by `Arc` (region/CQ/QP each hold what they depend on),
+  and a release that still fails panics (Principle XI). `post_send`/`post_recv` are
+  `unsafe fn` whose only contract is buffer lifetime — bounds and `lkey` are checked by
+  `MemoryRegion::local` — and post a chained batch, reporting `accepted` from `bad_wr`.
+  Typed `RdmaError` carries the real errno. Also in scope: `EventChannel`, `CmId` (owns
+  its QP), and a `CmEvent` guard that acks exactly once; CQ sharing is left to T010/T016.
+  QP state is read with `ibv_query_qp`, not `ibv_qp::state` — the latter is libibverbs'
+  cache of what software last set and misses a device-forced ERROR (the initiator's
+  `is_qp_healthy` reads the cache). 4 `#[ignore]`d hardware tests pass on `mlx5_0`
 - [ ] T010 Define the **transport seam** in `src/connection.rs`: traits for a listener
   and a peer link that carry a QP and can *both* post and receive, with `CmEvent`-style
   inbound delivery. **The seam must be selected per build, with the interface working in
@@ -158,7 +169,9 @@ connection table. This is plan.md Phase 1's engine.
   `remote-lookup-rdma-initiator/src/connection.rs:1075` `parse_endpoint` rather than
   inventing a second one. Unit-test that two addresses differing only by port are distinct
   keys, that a host-only address is rejected, and that both may be the local host
-- [ ] T069 Implement protection-domain ownership in `src/rdma.rs` (depends T009): **one PD
+- [ ] T069 Implement protection-domain ownership in `src/rdma.rs` (depends T009): T009's
+  `ProtectionDomain` is one PD on one device; this task is the **per-device table**,
+  lazy allocation after address resolution, and shutdown ordering — **one PD
   per device, owned by the endpoint for its lifetime**, with memory regions registered into
   it once and outliving every queue pair, so an `rkey` already on the wire stays valid
   across a reconnect (D17). This is a deliberate departure from the predecessor crates, and
@@ -171,7 +184,10 @@ connection table. This is plan.md Phase 1's engine.
   `EBUSY` otherwise; (d) rewrite `MemoryRegion`'s `// SAFETY:` justification — the
   initiator's "only accessed from the thread that created it" (`rdma.rs:126`) stops being
   true once one region is shared across per-peer connection threads, and `Sync` may be
-  needed alongside `Send` (Principle V)
+  needed alongside `Send` (Principle V). *(d) was discharged by T009:* `MemoryRegion` is
+  `Send + Sync`, justified by its `ibv_mr` being immutable after registration. Key the
+  table by the `ibv_context` pointer librdmacm hands the id (`ProtectionDomain::same_device`):
+  `rdma_create_qp` rejects a PD from any other context, even one opened on the same device
 - [ ] T016 Wire `define_component!` in `src/lib.rs` (depends T006, T012): receptacles
   `logger: ILogger`, `dispatch_map: IDispatchMap` (both ungated, per D13 and T002), and a
   block-device receptacle gated on `spdk`. Endpoint owns a dedicated actor thread, as both

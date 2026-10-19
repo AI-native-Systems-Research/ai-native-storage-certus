@@ -113,6 +113,13 @@ VIII–XI, and a review that does not check them is not a review.
   both. Do not "fix" a layout by copying a predecessor crate's `ffi.rs` — four of
   its definitions were wrong (see `ffi.rs` module docs), including the `IBV_WR_*`
   numbering, under which a send is posted as an RDMA write.
+- **Ask the device for QP state, never `ibv_qp::state`.** That field is
+  libibverbs' cache of the last state software set; it stays RTS after the device
+  forces ERROR. `QueuePair::state` uses `ibv_query_qp`. The predecessors read the
+  cache.
+- **Verbs teardown order is enforced by `Arc`, not by care.** Regions, CQs and QPs
+  hold what they depend on; a release that fails anyway panics. Do not add a
+  manual `close()` that bypasses this.
 - **`RemoteRegion`'s field is `length`, not `size`**, and on the wire the
   trailing two `u32`s are `size` then `rkey` — the opposite order from the
   struct. Both are `u32`, so a transposition silently swaps a length for a key.
@@ -133,8 +140,9 @@ lookup answer is reported as a **miss**, never an error (D14).
 
 ## Current state
 
-Scaffolding. T001–T008 and T068 are done: the crate builds as a default member,
+Scaffolding. T001–T009 and T068 are done: the crate builds as a default member,
 peer identity is implemented, `ITransferEndpoint` is defined in `interfaces`, and
-the verbs FFI (`ffi.rs`) and C shim (`wrapper.c`) exist behind `rdma`. Nothing
-calls them yet; the safe wrappers are T009 and the engine is Phase 2. See `specs/001-rdma-cache-transfer/tasks.md` for the task list and its
+the verbs FFI (`ffi.rs`), C shim (`wrapper.c`) and safe wrappers (`rdma.rs`, T009)
+exist behind `rdma`. Nothing above them calls them yet; the seam is T010 and the
+engine is Phase 2. See `specs/001-rdma-cache-transfer/tasks.md` for the task list and its
 traceability matrix.
