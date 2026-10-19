@@ -2,72 +2,61 @@
 skinparam shadowing false
 skinparam defaultFontSize 11
 
-title Cache Get / Lookup Flow (full)
+title Cache Get / Lookup Flow (full) — batch_lookup
 
-participant "Client\n(Python/shmq)" as client
-participant "Shmq Mailbox\n(/dev/shm)" as shmq
+participant "Client\n(vLLM connector)" as client
+participant "shmq-dispatcher\n(/dev/shm)" as shmq
 participant "Dispatcher" as disp
 participant "MemoryTier\n(DRAM pool)" as mt
 participant "DispatchMap" as dm
-participant "PipelineRing" as pr
-participant "BlockDevice\n(NVMe SSD)" as ssd
+participant "Scatter-gather\nloop" as sg
+participant "BlockDevice\n(NVMe SSD 0..N)" as ssd
+participant "RemoteLookup\n(uninitialized)" as rl
 
-== Warm Path (MemoryTier -> GPU) ==
+client -> shmq: Lookup (HandleBatch)
+shmq -> shmq: ipc_cache_open\n-> device_ptrs
+shmq -> disp: batch_lookup(entries)
 
-client -> shmq: BatchLookupRequest\n(key, IpcHandle)
-shmq -> shmq: cudaIpcOpenMemHandle\n-> device_ptr
-shmq -> disp: lookup(key, IpcHandle)
-
-disp -> dm: lookup(key) + take_read
-dm --> disp: MemoryTier { ptr, size }
-
-disp -> disp: cudaMemcpyAsync H2D\n(mem_ptr -> GPU, warm_stream)
-note right of disp: Zero-copy from\npinned memory-tier pool
-
-disp -> dm: release_read(key)
-disp -> mt: touch(key)
-note right of mt: Refresh LRU timestamp
-
-disp --> shmq: Ok(stream_handle)
-shmq -> shmq: cudaIpcCloseMemHandle
-shmq --> client: BatchLookupResponse\n(success)
-
-== Cold Path (BlockDevice -> MemoryTier -> GPU) ==
-
-client -> shmq: BatchLookupRequest\n(key, IpcHandle)
-shmq -> disp: lookup(key, IpcHandle)
+== Classify (warm copies queued) ==
 
 disp -> dm: lookup(key) + take_read
-dm --> disp: BlockDevice { offset }
-note right of dm: read pin held for the\nwhole SSD->DRAM->GPU pipeline
+alt MemoryTier { ptr, size }
+  disp -> disp: cudaMemcpyAsync H2D\n(slot -> GPU regions, warm stream)
+  note right of disp: pin kept in warm_pins;\nno sync yet
+else BlockDevice { offset }
+  disp -> disp: collect cold entry\n(read pin held)
+else NotExist
+  disp -> disp: collect for remote forward
+end
+disp -> mt: batch_touch(warm keys)
 
-disp -> mt: evict_lru() if pool full\n(try_evict_to_block)
-disp -> mt: insert(key, size)\n-> new_ptr
+== Cold: slot prep + multi-drive scatter-gather ==
 
-disp -> pr: ColdReadPool: pipelined_read(offset, size)
-note right of pr: StagingPool: CUDA-pinned SPDK-registered\nbuffers + per-device pipe streams
-pr -> ssd: NVMe read (chunked at MDTS)
-ssd --> pr: data chunks
-pr -> mt: copy chunks to new_ptr
-pr -> disp: cudaMemcpyAsync H2D\n(overlapped with I/O)
-
+disp -> mt: evict_and_insert(key, size)\n-> new_ptr (AllocationFailed -> staged)
+disp -> sg: scatter_gather_multi_drive_zero_copy\n(one channel per drive, QD 128 split)
+sg -> ssd: ReadAsync segments\n(NVMe DMA into slot)
+ssd --> sg: completions (any drive)
+sg -> sg: last segment of object ->\nfused H2D on pipe stream
+sg -> sg: final dual stream sync
 disp -> dm: promote_block_to_memory_tier\n(key, new_ptr, size)
-note right of dm: In-place BlockDevice -> MemoryTier\nssd_offset preserved
+note right of dm: In-place, ssd_offset kept;\nServedBy::Ssd
 
-disp -> dm: release_read(key)
+opt tier saturated (staged)
+  disp -> disp: serve_cold_staged\nSSD -> staging buf -> GPU (uncached)
+end
 
-disp --> shmq: Ok(stream_handle)
-shmq --> client: BatchLookupResponse\n(success)
+== Deferred warm sync ==
 
-== Cache Miss ==
+disp -> disp: stream_synchronize(warm)
+disp -> dm: release_read (warm_pins, cold pins)
 
-client -> shmq: BatchLookupRequest\n(key, IpcHandle)
-shmq -> disp: lookup(key, IpcHandle)
+== Local misses ==
 
-disp -> dm: lookup(key)
-dm --> disp: NotExist
+disp -> rl: batch_lookup(not_found)
+rl --> disp: NotFound (no actor)
+note right of disp: ServedBy::Miss
 
-disp --> shmq: KeyNotFound
-shmq --> client: BatchLookupResponse\n(key_not_found)
+disp --> shmq: Vec<LookupOutcome>
+shmq --> client: [tier byte]*n\n(0 miss/err, 1 DRAM, 2 SSD, 3 remote)
 
 @enduml
