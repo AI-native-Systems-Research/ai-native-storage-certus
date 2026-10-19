@@ -2,6 +2,8 @@
 
 Certus is a generative domain-specific storage system optimized for KV-cache workloads. The system is built using AI-driven construction - not a single line of code is written by hand.  The aims of the project are (1) to develop an AI-methodology that creates, optimizes and validates generated code, (2) demonstrate the value of the methodology in the context of building a hyper-specialized solution for KV-cache.
 
+Blogs on the work can be found at https://ai-native-systems-research.github.io/ai-native-systems-research/blog/
+
 
 ## Claude and Spec-Kit
 
