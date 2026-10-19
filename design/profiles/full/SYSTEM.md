@@ -53,9 +53,10 @@ The system sits between GPU inference engines (e.g., vLLM) and NVMe storage, pro
 ### Lookup (GET) Path — Cold
 
 1. Dispatch-map lookup returns BlockDevice offset
-2. Pipelined NVMe reads into memory-tier slot (8-deep ring buffer)
-3. Simultaneously streams chunks to GPU via async CUDA DMA
-4. Entry promoted back to memory-tier for future warm access
+2. Memory-tier slot allocated (inline eviction); NVMe reads DMA straight into the slot (zero-copy)
+3. Batched cold keys fan out across all drives in one multiplexed scatter-gather loop; each object's H2D DMA is issued as soon as its last segment lands
+4. Entry promoted back to memory-tier in place for future warm access
+5. If the tier is saturated, the block is served uncached through a staging buffer (SSD → staging → GPU)
 
 ## 3. Component Framework
 
@@ -93,16 +94,17 @@ define_component! {
             bg_writer: Mutex<Option<ParallelBackgroundWriter>>,
             bg_evictor: Mutex<Option<BackgroundEvictor>>,
             bg_mt_evictor: Mutex<Option<MemoryTierEvictor>>,  // DRAM -> SSD demotion
-            cold_pool: Mutex<Option<ColdReadPool>>,           // per-drive cold-read workers
             data_drives: RwLock<Vec<DataDrive>>,
-            pending_writes: Mutex<HashMap<CacheKey, PendingWrite>>,
-            pipeline_ring: RwLock<Option<PipelineRing>>,      // owns the cold-load StagingPool
+            pipeline_ring: RwLock<Option<pipeline::PipelineRing>>, // owns the cold-load StagingPool
             warm_stream: AtomicU64,
-            tier_counters: Arc<TierEventCounters>,
-            eviction_tx: Sender<EvictionJob>,
             block_device_factory: Mutex<Option<BlockDeviceFactory>>,
             extent_manager_factory: Mutex<Option<ExtentManagerFactory>>,
-            // ...
+            max_eviction_attempts: AtomicUsize,
+            store_backpressure_ms: AtomicU64,
+            pipeline_metrics: RwLock<Option<Arc<dyn PipelineMetrics>>>,
+            eviction_tx: Arc<Mutex<Option<EvictionSender>>>,  // best-effort EvictionEvent channel
+            eviction_dropped: Arc<AtomicU64>,                 // events the channel could not take
+            tier_counters: Arc<TierEventCounters>,
         },
     }
 }
@@ -120,12 +122,12 @@ define_component! {
 ### Workspace Layout
 
 ```
+lib/
+├── component-framework/     # Core framework (component-core, component-macros, facade)
+├── shm-queue/               # /dev/shm mailbox transport
+├── shmq-dispatcher/         # shmq ops -> IDispatcher translation + serve loop
+└── spdk-sys/                # Raw FFI bindings to SPDK
 components/
-├── component-framework/     # Core framework (3 crates)
-│   └── crates/
-│       ├── component-core/  # Traits, actor, channels, NUMA
-│       ├── component-macros/# Proc macros (define_interface!, define_component!)
-│       └── component-framework/ # Facade re-export
 ├── interfaces/              # All interface trait definitions
 ├── dispatcher/              # Central orchestrator (IDispatcher)
 ├── dispatcher-p2p/          # P2P variant with GPUDirect cold path (IDispatcher)
@@ -136,12 +138,15 @@ components/
 ├── block-device-kernel/     # Kernel block device (IBlockDevice)
 ├── extent-manager/          # Disk space allocator (IExtentManager)
 ├── eviction-policy-lru/     # LRU eviction policy (IEvictionPolicy)
+├── eviction-policy-optimized/     # LRU + TinyLFU admission (IEvictionPolicy)
+├── eviction-policy-session-lists/ # Session-list eviction policy (IEvictionPolicy)
+├── disk-partition-manager/  # GPT partitioning of each data drive
+├── extended-metadata-store/ # Extended-metadata partition store
 ├── remote-lookup/           # Remote-cache orchestrator (IRemoteLookup)
 ├── remote-lookup-rdma-initiator/  # Outbound RDMA push / data-holder side (IRemoteLookupRdmaInitiator)
 ├── remote-lookup-rdma-responder/  # Passive RDMA accept side / requester (IRemoteLookupRdmaResponder[Admin])
 ├── zyre/                    # Gossip/beacon peer discovery (IZyre)
 ├── spdk-env/                # SPDK environment wrapper (ISPDKEnv)
-├── spdk-sys/                # Raw FFI bindings to SPDK
 ├── gpu-services/            # CUDA operations (IGpuServices)
 ├── logger/                  # Logging component (ILogger)
 ├── example-helloworld/      # Example component
@@ -155,8 +160,9 @@ apps/
 ├── gpu-handle-test-server/  # GPU IPC handle test server
 ├── gpu-show/                # GPU device info tool
 ├── nvme-ns-manager/         # NVMe namespace management CLI
+├── workload-generator/      # Multi-node workload generator (workload-* crates)
 └── helloworld-mainline/     # Framework example app
-certus-connector/            # PyO3 module for vLLM integration
+certus-shmq-connector/       # Python vLLM offloading connector (shmq client)
 ```
 
 ## 4. Interface Definitions
@@ -173,13 +179,13 @@ The top-level orchestrator interface. Coordinates all cache operations.
 | `shutdown()` | Drains background writes, shuts down all drives |
 | `populate(key, ipc_handle)` | GPU→DRAM DMA, registers entry, enqueues write-through |
 | `batch_populate(entries)` | Populate multiple `(key, IpcHandle)` pairs in one call |
-| `reserve_memory(key, size, session_id)` | Reserve a DRAM slot without DMA (returns raw pointer); `session_id` is an opaque per-request id (0 = unset) for observability only |
+| `reserve_memory(key, size, session_id, deadline)` | Reserve a DRAM slot without DMA (returns raw pointer). Backpressures on a full tier until `deadline` (`None` = this call's own `store_backpressure_ms` budget). `session_id` is an opaque per-request id (0 = unset) for observability only |
 | `copy_gpu_to_memory_async(key, regions, stream)` | Async D2H copy of GPU region(s) into a previously reserved slot on the given CUDA stream |
 | `copy_gpu_to_memory_completed(key, size)` | Finalize a reserved slot after the async copy: register in dispatch-map + enqueue write-through |
 | `release_memory(key)` | Cancel a reserved slot without populating |
 | `lookup(key, ipc_handle)` | Serves from DRAM (warm) or promotes from SSD (cold) |
 | `lookup_async(key, ipc_handle)` | Non-blocking lookup, returns CUDA stream |
-| `batch_lookup(entries)` | Batch lookup over `&[(CacheKey, Vec<IpcHandle>)]` with parallel SSD promotion |
+| `batch_lookup(entries)` | Batch lookup over `&[(CacheKey, Vec<IpcHandle>)]` with parallel SSD promotion; returns one `LookupOutcome { served_by, result }` per entry |
 | `check(key)` | Existence check without data transfer |
 | `remove(key)` | Removes entry from all tiers |
 | `touch(key)` | Refreshes eviction timestamp |
@@ -187,8 +193,13 @@ The top-level orchestrator interface. Coordinates all cache operations.
 | `promote_to_memory_tier(keys)` | Pre-promote cold entries to DRAM for future warm access |
 | `clear_memory_tier()` | Evicts all DRAM entries |
 | `flush_to_ssd()` | Force all pending write-through jobs to complete |
+| `schedule_write_through(key, size)` | Non-blocking: enqueue write-through for a key that entered DRAM by a non-store path (e.g. a remote fetch) so it becomes demotable |
 | `read_write_stats()` | Aggregate read/write byte and op counters |
-| `tier_event_stats()` | Tier-transition counters (promotions, demotions, evictions) |
+| `tier_event_stats()` | Tier-transition counters (promotions, demotions, evictions), per-route hit counts, store backpressure/drop counts, and eviction-blocked diagnostics |
+
+**Lookup attribution.** `ServedBy` (`Dram`, `Ssd`, `Remote`, `Miss`, `SizeMismatch`, `Error`) names the **route** a key was served by, not its residency afterwards: a cold hit that is promoted into DRAM while being served is still `Ssd`. `is_hit()` holds exactly when `result.is_ok()`. The shmq Lookup response carries it as a per-key byte (0 = not served, 1 = DRAM, 2 = SSD, 3 = remote).
+
+**`DispatcherConfig`** additions relevant to this profile: `store_backpressure_ms` (default 5000), `cold_staging_slots` (default 64), `cold_staging_buf_bytes` (default 16 MiB), `metadata_partition_size` / `extended_metadata_partition_size` (128 MiB each), and the `memory_tier_eviction_*` knobs (threshold default 0.0 = MemoryTierEvictor disabled).
 
 ### IDispatchMap
 
@@ -202,7 +213,7 @@ The key→location index with reader/writer reference counting.
 | `convert_to_storage(key, offset)` | Records the SSD `ssd_offset`; the entry **stays MemoryTier** (now durable/evictable) |
 | `convert_memory_tier_to_block(key)` | Demotes DRAM entry to SSD-only |
 | `promote_block_to_memory_tier(key, ptr, size)` | In-place BlockDevice→MemoryTier (retains `ssd_offset`); works on pinned entries |
-| `try_evict_to_block(key)` | MemoryTier→BlockDevice, only if `ssd_offset` is set and the entry is unreferenced |
+| `try_evict_to_block(key)` | MemoryTier→BlockDevice, only if `ssd_offset` is set and the entry is unreferenced. Returns `ActiveReferences` for a held pin, `InvalidState` otherwise (counted separately) |
 | `take_read/release_read` | Reference counting for concurrent access |
 | `take_write/release_write` | Exclusive writer semantics |
 | `downgrade_reference(key)` | Atomically downgrade write ref to read ref |
@@ -212,6 +223,7 @@ The key→location index with reader/writer reference counting.
 | `oldest_keys(n)` | Returns N oldest keys for eviction |
 | `is_evictable(key)` | Checks if safe to evict (write-through complete, no refs) |
 | `recover_extent(key, offset, size)` | Rebuilds from persisted extents on startup |
+| `set_checksum / get_checksum` | CRC-32 attached to an entry (used with the `integrity-check` feature) |
 
 ### IMemoryTier
 
@@ -307,10 +319,14 @@ The `full` profile uses **DispatcherComponent**, which owns:
 - **ParallelBackgroundWriter**: Multi-threaded write-through (drains jobs from a channel)
 - **BackgroundEvictor**: Monitors SSD utilization and reclaims space
 - **MemoryTierEvictor**: Background thread that demotes cold DRAM entries to SSD (DRAM→SSD), evicting only entries with `ssd_offset` set and no active references
-- **ColdReadPool**: Persistent per-drive worker pool, each worker holding a pre-connected NVMe channel and CUDA stream for cold SSD→DRAM→GPU reads without per-request setup
-- **PipelineRing**: Owns the cold-load StagingPool — a pre-allocated ring of CUDA-pinned, SPDK-registered DMA buffers plus per-device CUDA streams (warm H2D, store D2H, and pipe[2] for cold loads)
+- **ChannelPool (per drive)**: Pre-connected NVMe client channels; a cold batch checks out one lease per active drive
+- **Scatter-gather cold path**: `batch_lookup` runs one multiplexed `scatter_gather_multi_drive_zero_copy` poll loop on the caller thread, fanning NVMe reads across every drive (queue depth 128, split across drives by segment count) — no per-drive worker threads
+- **PipelineRing**: Holds the chunk size (drive MDTS) and the cold-load **StagingPool** — `cold_staging_slots` CUDA-pinned, SPDK-registered buffers of `cold_staging_buf_bytes` each, used to serve a cold block uncached when the memory tier is saturated
+- **DeviceStreams (per GPU device)**: warm (H2D), store (D2H) and pipe[2] (cold) CUDA streams, created lazily per device so tensor-parallel GPUs each get device-correct streams
 - **Warm stream**: Dedicated CUDA stream for async memory-tier→GPU copies (lock-free access via AtomicU64)
 - **BlockDeviceFactory / ExtentManagerFactory**: Factory closures for creating DataDrive components during initialization
+- **DiskPartitionManager (per drive)**: Lays out a GPT with three partitions — metadata, extended metadata (reserved), data — and points the drive's ExtentManager at the metadata and data base LBAs
+- **EvictionSender**: Bounded, non-blocking `EvictionEvent { key, reason: Demoted | Removed }` channel drained by the shmq `TakeEvents` op; an event that cannot be queued is counted in `eviction_dropped`, never lost silently
 
 The P2P variant additionally owns:
 - **P2pRing**: GPUDirect Storage ring for direct SSD→GPU transfers
@@ -319,7 +335,8 @@ The P2P variant additionally owns:
 Receptacles: `dispatch_map`, `memory_tier`, `gpu_services`, `spdk_env`, `logger`, `remote_lookup`.
 
 Key design decisions:
-- Drive selection is `key % num_drives` (deterministic sharding)
+- Drive selection is a splitmix64 hash of the key mod `num_drives` (deterministic sharding; the write path and the SSD evictor use the same function)
+- Store backpressure: `reserve_memory` retries eviction every 20 ms for up to `store_backpressure_ms` instead of failing on a momentarily full tier; if the budget elapses, `populate` drops the store best-effort (reports success, counted in `store_drops_on_full`) so a full cache is never fatal to the vLLM connector
 - Memory-tier pool is registered with both CUDA (`cudaHostRegister`) and SPDK (`spdk_mem_register`) for zero-copy transfers in both directions
 - Write-through uses a read reference (not write) so lookups can proceed concurrently
 
@@ -328,10 +345,15 @@ Key design decisions:
 DRAM cache pool using:
 - **mmap'd contiguous allocation** for the pool
 - **First-fit free-list allocator** with 4 KiB alignment (`allocator.rs`)
-- **Delegated eviction ordering** via a bound `IEvictionPolicy` component (currently `eviction-policy-lru`)
+- **Delegated eviction ordering** via a bound `IEvictionPolicy` component (`eviction-policy-lru` in this profile)
 - **HashMap<CacheKey, Slot>** for O(1) key lookup
+- **Refusal-safe insert**: free space is checked before the eviction policy is asked to track the key, so a policy refusal leaves the pool unchanged and surfaces as an error rather than a panic
 
-Default pool size: 256 MiB. The pool is CUDA-pinned at server startup for zero-copy GPU DMA.
+Component default pool size: 256 MiB; `certus-server-yaml` defaults `--memory-tier-size` to 2 GiB. The pool is CUDA-pinned and SPDK-registered at server startup for zero-copy DMA in both directions.
+
+### 5.2a Eviction Policy (`components/eviction-policy-lru/`)
+
+`EvictionPolicyLruComponent` provides an O(1) index-linked LRU. One instance is shared by memory-tier and dispatch-map, each creating its own pool. New keys are tracked at the MRU end; `touch` moves a key to the MRU end; victims are taken from the LRU end. The `full-optimized` profile swaps this for `eviction-policy-optimized` (same interface, TinyLFU admission).
 
 ### 5.3 Dispatch Map (`components/dispatch-map/`)
 
@@ -346,7 +368,7 @@ enum LookupResult {
 }
 ```
 
-Provides reader/writer reference counting with blocking semantics (writers block readers and vice versa, with 100ms timeout). Supports recovery by rebuilding from extent manager metadata.
+Provides reader/writer reference counting with blocking semantics (writers block readers and vice versa, with a 2 s timeout). On startup the dispatcher iterates each data drive's extent manager and calls `recover_extent` to rebuild the map. If no eviction policy is connected, operations that need one return `NotInitialized` rather than panicking.
 
 ### 5.4 Block Device (`components/block-device-spdk-nvme/`)
 
@@ -395,13 +417,20 @@ A shared-memory-queue (shmq) server exposing the `IDispatcher` interface over a
 reach the server by sharing the host IPC namespace and `/dev/shm` (podman
 `--ipc=host` or k8s `hostIPC: true`).
 
-**CLI options:**
-- `--device-pci` — NVMe PCI addresses (repeatable)
-- `--device-path` — Filesystem device path (alternative to PCI, e.g., `/dev/null` for testing)
+**CLI options (`certus-server-yaml`):**
+- `--device-pci` — NVMe PCI addresses (repeatable); or `--drive-count N` to use the first N discovered drives
 - `--shm-path` — Shared-memory mailbox file path (default: `/dev/shm/certus-shmq`)
-- `--channels` — Number of mailbox channels (= max in-flight requests = worker threads; e.g. `32`)
-- `--memory-tier-size` — Pool size (e.g., `256M`, `1G`, `4G`)
+- `--channels` — Number of mailbox channels (= max in-flight requests = worker threads; default 8)
+- `--cap-req` / `--cap-resp` — Per-channel request/response capacity (default 1M / 128K)
+- `--reserve-timeout-secs` — Reclaim Reserve-without-Commit leaks after this long (default 30)
+- `--shmq-poller-cpu`, `--shmq-poller-stats` — Pin the shmq poller; log its fairness/backlog stats
+- `--memory-tier-size` — Pool size (e.g., `256M`, `1G`, `4G`; default 2G)
 - `--format` — Format SSD extents on startup (start fresh)
+- `--poller-base-cpu` — Pin NVMe poller threads from this core (otherwise NUMA-local auto-pinning)
+- `--max-eviction-attempts` (default 2048), `--store-backpressure-ms` (default 5000)
+- `--memory-tier-eviction-threshold` — Enable the background MemoryTierEvictor (default 0.0 = off)
+- `--metrics-port`, `--otel-endpoint`, `--otel-service-name` — Prometheus / OTLP export
+- `--backfill-delay-ms`, `--rl-group` — accepted but inert in `full` (p2p-only / remote-lookup not initialized)
 
 **Startup sequence:**
 1. SPDK environment initialization
@@ -409,7 +438,8 @@ reach the server by sharing the host IPC namespace and `/dev/shm` (podman
 3. Dispatch map creation
 4. Memory-tier allocation + CUDA host registration
 5. Dispatcher initialization (creates block devices + extent managers)
-6. shmq mailbox creation + poller/worker start
+6. Thread CPU bindings logged (`log_cpu_bindings`, read back from `/proc/self/task`)
+7. shmq mailbox creation + poller/worker/reaper start
 
 **shmq ops** (opcode-framed binary wire: `lib/shmq-dispatcher/src/wire.rs`):
 - `Populate` — Batch insert from GPU memory
@@ -417,6 +447,7 @@ reach the server by sharing the host IPC namespace and `/dev/shm` (podman
 - `Check` — Batch existence check
 - `Remove` — Batch delete
 - `Touch` — Batch LRU refresh
+- `TouchCheck` — Touch + Check fused in one server pass
 - `ClearMemoryTier` — Evict all DRAM entries
 - `FlushToSsd` / `GetIoStats` — flush write-through / read I/O counters
 
@@ -424,14 +455,17 @@ The full `IDispatcher` surface (Reserve, CopyToStore, CommitStore, AbortStore,
 Pin, Unpin, TakeEvents, …) is carried as additional opcodes. All operations
 accept batches and use CUDA IPC handles (64-byte `cudaIpcMemHandle_t`) for
 cross-process GPU memory sharing (the shared IPC namespace lets the server open
-the client's handles).
+the client's handles). Opened IPC mappings are cached and closed after a grace
+period; the `shmq-reaper` thread closes expired mappings and stale reservations
+on a timer, so an idle or vanished client does not pin them for the server's
+lifetime.
 
-### certus-connector (`certus-connector/`)
+### certus-shmq-connector (`certus-shmq-connector/`)
 
-A PyO3 native module (`certus_native`) for direct Python integration with vLLM:
-- Embeds the full Certus component stack in-process
-- Exposes `CertusEngine` Python class
-- Operations: `batch_check`, `touch`, `prepare_store`, `complete_store`, `prepare_load`, `complete_load`, `store_async`, `load_async`, `poll_completions`
+A pure-Python vLLM KV-offloading connector that talks to certus-server over the
+shmq mailbox (`ring.py` mirrors `wire.rs` byte-for-byte). Stores use
+Reserve → CopyToStore → CommitStore (AbortStore on failure); loads use Lookup
+with one IPC handle per layer tensor.
 
 ## 7. Concurrency Model
 
@@ -450,35 +484,37 @@ The dispatch-map uses reader/writer references to coordinate concurrent access:
 |--------|---------|
 | `dispatcher-bg-writer` | Parallel write-through: memory-tier → SSD |
 | `dispatcher-bg-evictor` | Monitors SSD utilization, reclaims extents |
-| `dispatcher-bg-mt-evictor` | Demotes cold DRAM entries to SSD (DRAM→SSD) when the memory tier is under pressure |
-| Cold-read pool workers | Per-drive persistent workers (pre-connected NVMe channel + CUDA stream) for cold SSD→DRAM→GPU reads |
+| `dispatcher-bg-mt-evictor` | Demotes cold DRAM entries to SSD (DRAM→SSD) when the memory tier is under pressure (only started if `--memory-tier-eviction-threshold` > 0) |
+| `shmq-reaper` | Reclaims stale reservations and expired CUDA-IPC mappings |
+| shmq poller + workers | One poller over the mailbox channels, one worker per channel |
 | `extent-mgr-checkpoint` | Periodic checkpoint of allocation metadata |
 | Block device actor threads | One per NVMe controller, NUMA-pinned |
 
-### Pipeline Ring (Cold-Path Optimization)
+### Cold-Path Pipeline (`components/dispatcher/src/pipeline.rs`)
 
-For SSD→GPU transfers, the system uses a pre-allocated ring of 8 DMA buffers with 2 CUDA streams:
+Cold reads are zero-copy: the memory-tier pool is SPDK- and CUDA-registered, so NVMe DMAs straight into the promoted slot and the GPU DMAs straight out of it.
 
-1. Prime ring with async NVMe reads
-2. On each completion: copy chunk to memory-tier, queue async H2D transfer
-3. Overlap: while stream[0] copies to GPU, stream[1] receives next chunk
-4. Result: NVMe I/O and GPU DMA run in parallel
+- **`batch_lookup`** — `scatter_gather_multi_drive_zero_copy`: one `DriveWork` per active drive (a checked-out channel + its `ColdReadJob`s); a single sliding-window poll loop on the caller thread keeps NVMe queues full across all drives and issues each object's fused H2D on the per-device pipe streams as soon as its last segment completes. One final dual stream sync covers the batch.
+- **`lookup` / `lookup_async`** — `promote_and_serve` → `pipelined_multi_object_zero_copy` for the single key.
+- **Staging fallback** — `serve_cold_staged` checks out one StagingPool buffer and serves SSD → staging → GPU without caching.
+- **Warm overlap** — in a mixed batch the warm H2D copies are queued first and their stream sync is deferred until after the cold scatter-gather, so the warm drain overlaps the NVMe reads. Warm read pins are held until that sync.
 
 ## 8. Eviction Policies
 
 ### DRAM Eviction
 
-- **Trigger**: Memory-tier pool full during populate
-- **Policy**: LRU (oldest entries evicted first)
+- **Trigger**: Memory-tier slot allocation fails (populate / reserve / cold promotion)
+- **Policy**: LRU via `eviction-policy-lru` (oldest entries evicted first); the scan widens past ineligible candidates
 - **Eligibility**: Write-through must be complete (ssd_offset set) and no active references
 - **Outcome**: Dispatch-map entry transitions MemoryTier → BlockDevice
-- **Fallback**: Under extreme pressure, blind LRU eviction (potential data loss, acceptable for cache)
+- **No blind eviction**: unpersisted or pinned entries are skipped, never removed — removing a just-Checked key would turn a later load into a fatal miss. If nothing is evictable, the store path backpressures (then drops the store) and the load path falls back to the staging buffer
+- **Diagnostics**: `evictions_blocked_by_pin`, `evictions_blocked_unpersisted`, `eviction_scans_exhausted`, and the `oldest_sampled` / `oldest_persisted` gauges in `tier_event_stats()`
 
 ### SSD Eviction (Background Evictor)
 
 - **Trigger**: SSD utilization exceeds threshold (default: 90%)
 - **Target**: Low-watermark (default: 80%)
-- **Policy**: Oldest keys from dispatch-map
+- **Policy**: Oldest keys from dispatch-map (removed from the dispatch-map first, which refuses pinned entries, then the DRAM slot is freed)
 - **Batch size**: Configurable (default: 64 extents per sweep)
 - **Interval**: Configurable (default: 5 seconds between checks)
 - **Outcome**: Extent freed, entry removed from dispatch-map entirely
@@ -517,6 +553,10 @@ cargo build -p certus-server
 | `gpu` | gpu-services | Enables real CUDA FFI (vs. stub) |
 | `telemetry` | block-device-spdk-nvme | Enables I/O latency/throughput collection |
 | `hardware-test` | dispatcher | Enables integration tests requiring real NVMe |
+| `integrity-check` | dispatcher | CRC-32 each block on store, verify before the load H2D |
+| `pipeline-telemetry` | dispatcher | Per-batch cold-pipeline timing logs |
+| `rw-telemetry` | dispatcher, certus-server-yaml | Enables `read_write_stats()` counters |
+| `otel` | certus-server-yaml | OTLP metrics export |
 | `testing` | extent-manager | Exposes test utilities and superblock internals |
 
 ### SPDK Dependencies
@@ -544,6 +584,10 @@ SPDK must be pre-built at `deps/spdk-build/`. Requires:
 
 4. **Component isolation**: Each component has its own CLAUDE.md, tests, and benchmarks. LLM context stays small by scoping to one component + its interface bindings.
 
-5. **Deterministic sharding**: `key % num_drives` selects the target SSD. Simple, no coordination needed for single-process deployment.
+5. **Deterministic sharding**: a splitmix64 hash of the key mod `num_drives` selects the target SSD. Simple, no coordination needed for single-process deployment.
 
 6. **Zero-copy pipeline**: Memory-tier pool is simultaneously CUDA-pinned and SPDK-registered, enabling direct NVMe reads into GPU-accessible memory without intermediate copies.
+
+7. **A full cache is never fatal**: stores backpressure then drop; cold loads fall back to staging. Both exist because a failed transfer kills the vLLM engine (`assert transfer_result.success`).
+
+8. **Remote lookup is wired but inert in `full`**: `RemoteLookupComponent` is bound to the dispatcher but has no `init_hook`, so it never starts its actor and every forwarded local miss returns `NotFound` immediately. The `full-remote` profile initializes it.

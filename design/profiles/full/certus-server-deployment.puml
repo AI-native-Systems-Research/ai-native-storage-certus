@@ -1,60 +1,41 @@
 @startuml
 skinparam defaultTextAlignment center
-skinparam padding 4
-skinparam nodesep 60
-skinparam ranksep 50
-skinparam rectangle {
-    RoundCorner 15
-}
-skinparam agent {
-    RoundCorner 10
-}
+skinparam padding 3
+skinparam nodesep 25
+skinparam ranksep 25
 hide stereotype
 
 title Certus Server — full Profile
 
-' ============================================================
-' CLIENT
-' ============================================================
-rectangle "**Client Host**" as client_box #F5F5F5 {
-    agent "GPU Client\n(vLLM / PyTorch)" as pyclient
-    agent "GPU Memory" as client_gpu #LightGreen
+node "Client Host" as client_host {
+    component "vLLM + certus-shmq-connector" as pyclient
+    database "GPU Memory\n(client)" as client_gpu #LightGreen
 }
 
-' ============================================================
-' SERVER
-' ============================================================
-rectangle "**Server Host**" as server_box #FAFAFA {
+node "Server Host" as server_host {
+    node "certus-server-yaml (CERTUS_PROFILE=full)" as server_proc {
 
-    rectangle "certus-server" as server_proc #White {
+        component "shmq-dispatcher\nPopulate | Lookup | Check | TouchCheck\nReserve | CopyToStore | CommitStore | AbortStore\nPin | Unpin | TakeEvents | Remove | Flush\npoller + workers | shmq-reaper" as shmq #F0F0F0
 
-        agent "Shmq Mailbox\nPopulate | Lookup | Check\nRemove | Touch | Flush" as shmq #F0F0F0
-
-        rectangle "**Dispatcher** <<IDispatcher>>" as dispatcher #DBEAFE {
-            rectangle "DataDrive [0..N]" as data_drive #FEF3C7 {
-                agent "BlockDeviceSpdkNvme\n<<IBlockDevice>>" as blkdev
-                agent "ExtentManager\n<<IExtentManager>>" as extmgr
-            }
-            agent "ParallelBackgroundWriter\nBackgroundEvictor | MemoryTierEvictor\nColdReadPool\nPipelineRing (StagingPool)" as disp_bg #FEF9C3
+        component "DispatcherComponent <<IDispatcher>>" as dispatcher #DBEAFE {
+            component "DataDrive 0..N\nBlockDeviceSpdkNvme <<IBlockDevice>>\nDiskPartitionManager (GPT)\nExtentManager <<IExtentManager>>\nChannelPool" as data_drive #FEF3C7
+            component "ParallelBackgroundWriter | BackgroundEvictor\nMemoryTierEvictor (threshold > 0)\nScatter-gather cold loop\nPipelineRing (StagingPool) | DeviceStreams\nEvictionSender | TierEventCounters" as disp_bg #FEF9C3
         }
 
-        agent "DispatchMap\n<<IDispatchMap>>" as dispatch_map #DBEAFE
-        agent "MemoryTier\n<<IMemoryTier>>" as memory_tier #DBEAFE
-        agent "EvictionPolicy\n<<IEvictionPolicy>>" as eviction #E5E7EB
-        agent "GpuServices\n<<IGpuServices>>" as gpu_svc #BBF7D0
-        agent "SPDKEnv\n<<ISPDKEnv>>" as spdk_env #E5E7EB
-        agent "RemoteLookup\n<<IRemoteLookup>>" as remote_lookup #E5E7EB
+        component "DispatchMapComponent\n<<IDispatchMap>>" as dispatch_map #DBEAFE
+        component "MemoryTierComponent\n<<IMemoryTier>>" as memory_tier #DBEAFE
+        component "EvictionPolicyLruComponent\n<<IEvictionPolicy>>\nO(1) index-linked LRU" as eviction #E5E7EB
+        component "GpuServicesComponent\n<<IGpuServices>>" as gpu_svc #BBF7D0
+        component "SPDKEnvComponent\n<<ISPDKEnv>>" as spdk_env #E5E7EB
+        component "RemoteLookupComponent\n<<IRemoteLookup>>\n(not initialized: NotFound)" as remote_lookup #LightCoral
+        component "LoggerComponent\n<<ILogger>>" as logger #E5E7EB
     }
 
-    agent "GPU Memory\n(server)" as server_gpu #LightGreen
-    database "NVMe SSD [0..N]" as nvme_data
+    database "GPU Memory\n(server)" as server_gpu #LightGreen
+    database "NVMe SSD 0..N\n[metadata | ext-meta | data]" as nvme_data
 }
 
-' ============================================================
-' CONNECTIONS
-' ============================================================
-
-pyclient -down-> shmq : shmq
+pyclient -down-> shmq : shmq (/dev/shm)
 client_gpu .down.> server_gpu : CUDA IPC
 
 shmq -down-> dispatcher
@@ -62,18 +43,17 @@ shmq -down-> dispatcher
 dispatcher -down-> dispatch_map
 dispatcher -down-> memory_tier
 dispatcher -down-> gpu_svc
-dispatcher --> remote_lookup
+dispatcher -down-> spdk_env
+dispatcher -right-> remote_lookup : local misses
 
 dispatch_map -down-> eviction
 memory_tier -down-> eviction
 
-disp_bg --> blkdev
-blkdev -down-> spdk_env
-extmgr --> blkdev : metadata
+disp_bg --> data_drive
+data_drive -down-> spdk_env
 
-gpu_svc -right-> server_gpu : DMA
+gpu_svc -down-> server_gpu : DMA
+data_drive .down.> nvme_data : NVMe I/O (VFIO)
 
-spdk_env -down-> nvme_data : VFIO
-blkdev .down.> nvme_data : NVMe I/O
-
+logger -[hidden]- eviction
 @enduml
