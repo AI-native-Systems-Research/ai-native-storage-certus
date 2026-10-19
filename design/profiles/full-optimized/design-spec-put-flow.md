@@ -63,7 +63,7 @@ When step 3 inserts the slot, memory-tier calls `IEvictionPolicy::track`; when s
 
 The count tracks how often the key has been *stored* (after a `remove`, a re-store increments it again); lookups and `touch` move the entry to the MRU end but do not change the count. The sketch is halved every `10 × max_len` tracks so stale popularity decays.
 
-Placement at the front does not make an entry evictable early: until its write-through lands (step 8) it has no `ssd_offset`, and `evict_one_clean` skips it. Under sustained store bursts this means fresh, low-frequency entries cluster at the front of the eviction window unpersisted; the `oldest_sampled` / `oldest_persisted` gauges show that directly.
+Placement at the front does not make an entry evictable early: until its write-through lands (step 8) it has no `ssd_offset`, and `evict_one_clean` skips it. Under sustained store bursts fresh, low-frequency entries therefore cluster unpersisted at the front of the eviction window (the `oldest_sampled` / `oldest_persisted` gauges show this). `evict_for_space` handles it by retrying a scan that frees nothing once at full depth (`EVICT_SCAN_MAX` = 1024 candidates), which reaches the persisted entries behind that front.
 
 ## Duplicate Key Handling
 

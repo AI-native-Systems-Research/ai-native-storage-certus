@@ -525,7 +525,7 @@ Cold reads are zero-copy: the memory-tier pool is SPDK- and CUDA-registered, so 
 ### DRAM Eviction
 
 - **Trigger**: Memory-tier slot allocation fails (populate / reserve / cold promotion)
-- **Policy**: LRU + TinyLFU admission via `eviction-policy-optimized` — victims come from the LRU front, where newly stored keys that are no more popular than the current victim are also placed; the scan widens past ineligible candidates
+- **Policy**: LRU + TinyLFU admission via `eviction-policy-optimized` — victims come from the LRU front, where newly stored keys that are no more popular than the current victim are also placed; the scan widens past ineligible candidates, with one last-chance full-depth (1024) scan before reporting the tier full
 - **Eligibility**: Write-through must be complete (ssd_offset set) and no active references
 - **Outcome**: Dispatch-map entry transitions MemoryTier → BlockDevice
 - **No blind eviction**: unpersisted or pinned entries are skipped, never removed — removing a just-Checked key would turn a later load into a fatal miss. If nothing is evictable, the store path backpressures (then drops the store) and the load path falls back to the staging buffer
