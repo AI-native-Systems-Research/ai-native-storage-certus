@@ -1,38 +1,48 @@
 {
-  "applied": "2026-10-08",
+  "applied": "2026-10-19T07:04:14Z",
+  "sync_date": "2026-10-14",
   "project": "dispatcher",
-  "spec": "001-dispatcher-cache-interface",
-  "branch": "opt/evolve-latency/s20261004-001925_PR507",
-  "backup": ".specify/sync/backups/20261008T235109Z/spec.md",
-  "edits": [
-    {
-      "requirement": "FR-039 step (2)",
-      "direction": "BACKFILL",
-      "result": "Rewritten for the deferred warm sync and pin release."
-    },
-    {
-      "requirement": "US-11 scenario 2",
-      "direction": "BACKFILL",
-      "result": "Reworded."
-    },
-    {
-      "requirement": "US-11 scenario 6",
-      "direction": "BACKFILL",
-      "result": "Added (ordering, mirrors test)."
-    },
-    {
-      "requirement": "Last Synced header",
-      "direction": "-",
-      "result": "2026-10-08 entry added."
-    }
+  "branch": "fix/bundle-dispatcher-ems",
+  "head": "4f8b5554b",
+  "mode": "batch",
+  "approved_by": "Cornel Constantinescu, 2026-10-18 (PR approval page, groups A-D)",
+  "backup": ".specify/sync/backups/20261019T070414Z/",
+  "backed_up_files": [
+    "specs/001-dispatcher-cache-interface/spec.md",
+    "specs/002-served-by-tier-attribution/spec.md"
   ],
-  "not_applied": [
-    {
-      "proposal": 3,
-      "reason": "Skipped by user"
-    }
+  "applied_proposals": [
+    {"id": "B-01", "type": "BACKFILL", "spec": "001", "requirement": "FR-036 + FR-051", "edits": 2},
+    {"id": "B-02", "type": "BACKFILL", "spec": "001", "requirement": "FR-032 + edge case (SSD evictor)", "edits": 2},
+    {"id": "B-03", "type": "BACKFILL", "spec": "001", "requirement": "FR-003 + FR-059", "edits": 2},
+    {"id": "B-04", "type": "BACKFILL", "spec": "001", "requirement": "FR-056 copy_gpu_to_memory_completed", "edits": 1},
+    {"id": "B-05", "type": "BACKFILL", "spec": "001", "requirement": "FR-042 + FR-050", "edits": 2},
+    {"id": "B-06", "type": "BACKFILL", "spec": "001", "requirement": "FR-019, US-9 AS1, Q&A, Key Entities", "edits": 5},
+    {"id": "B-07", "type": "BACKFILL", "spec": "001", "requirement": "FR-037", "edits": 1},
+    {"id": "B-08", "type": "BACKFILL", "spec": "001", "requirement": "edge case: remove order", "edits": 1},
+    {"id": "B-09", "type": "BACKFILL", "spec": "001", "requirement": "FR-003 + Assumptions", "edits": 2},
+    {"id": "B-10", "type": "BACKFILL", "spec": "002", "requirement": "FR-008", "edits": 1},
+    {"id": "B-11", "type": "BACKFILL", "spec": "001", "requirement": "User Story 11 AS4", "edits": 1},
+    {"id": "N-02", "type": "NEW_SPEC", "spec": "001", "requirement": "FR-045 diagnostics note", "edits": 1},
+    {"id": "N-03", "type": "NEW_SPEC", "spec": "001", "requirement": "FR-056 reserve_memory diagnostics note", "edits": 1}
   ],
+  "metadata_edits": [
+    {"spec": "001", "change": "Last Synced 2026-10-14 header added"},
+    {"spec": "002", "change": "Last Synced 2026-10-14 header added"}
+  ],
+  "align_tasks": {
+    "file": ".specify/sync/align-tasks.md",
+    "ids": ["A-01", "A-02", "A-03", "A-04", "A-05", "A-06", "A-08"],
+    "approval_note": "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR"
+  },
+  "open_items": [
+    {"id": "A-07", "reason": "not approved", "approval_note": "waits for Cornel's decision (ALIGN as a task, or BACKFILL); record in align-tasks.md as an open decision"},
+    {"id": "N-01", "reason": "not approved", "approval_note": "MEDIUM confidence new requirement: record as an open item in align-tasks.md (Cornel's rule)"},
+    {"id": "N-04", "reason": "not approved", "approval_note": "MEDIUM confidence: record as an open item; it belongs to the remove-no-wait PR"}
+  ],
+  "new_specs_created": [],
+  "supersede_applied": [],
   "source_files_modified": [],
-  "align_tasks_generated": 0,
-  "drift_status": "clean"
+  "frontmatter_touched": false,
+  "drift_status_after_apply": "open (7 ALIGN tasks + 3 open decisions)"
 }
