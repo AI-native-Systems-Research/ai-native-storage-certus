@@ -1,13 +1,15 @@
 {
-  "generated": "2026-10-14T00:00:00Z",
-  "based_on": "drift-report 2026-10-14 (branch fix/extended-metadata-store-flush @ 2970e0a8)",
+  "generated": "2026-10-18T00:00:00Z",
+  "sync_note_date": "2026-10-14",
+  "based_on": "drift-report 2026-10-14 (branch fix/bundle-dispatcher-ems @ 4f8b5554; component source 4a8fe3e7)",
   "project": "extended-metadata-store",
   "mode": "batch",
   "path_prefix": "components/extended-metadata-store/ (spec.md/plan.md/tasks.md = specs/001-extended-metadata-store/*)",
+  "note": "Supersedes the 2026-10-14 proposals of branch fix/extended-metadata-store-flush (all applied). IDs P1-P15 are reused with new meanings.",
   "summary": {
-    "total": 14,
+    "total": 15,
     "backfill": 7,
-    "align": 6,
+    "align": 7,
     "human_decision": 0,
     "new_spec": 0,
     "supersede": 1,
@@ -17,474 +19,400 @@
     {
       "id": "P1",
       "spec": "001-extended-metadata-store",
-      "requirement": "FR-05 (+ US6 AC1)",
-      "type": "ALIGN",
-      "severity": "major",
+      "requirement": "FR-05",
+      "type": "BACKFILL",
+      "severity": "minor",
       "confidence": "HIGH",
       "approved": true,
       "spec_says": {
-        "text": "force_flush() ensures all mutations are durable on disk: it invokes a durable-flush trigger ... and blocks until it returns, mapping trigger errors to StorageError",
-        "location": "specs/001-extended-metadata-store/spec.md:163; spec.md:139; components/interfaces/src/iextended_metadata_store.rs:44"
+        "text": "Implemented in the component (src/lib.rs:221-235; ...). **Open:** with the documented FlushManager::trigger_flush() trigger, flush failures are not propagated (src/flush.rs:177) \u2014 see drift-report 2026-10-14 / proposal P1",
+        "location": "spec.md:166"
       },
       "code_does": {
-        "text": "FlushManager::trigger_flush always returns Ok(()); do_flush completes the served tickets and drops the flush error even when the flush failed, so force_flush reports durability it did not achieve",
-        "location": "src/flush.rs:177; src/flush.rs:246-259; src/lib.rs:230-234"
+        "text": "trigger_flush returns Err(last_error) unless durable >= ticket; force_flush maps it to StorageError; tested",
+        "location": "src/flush.rs:181-185; src/flush.rs:260-270; src/lib.rs:232; src/repair_test_force_flush_error.rs:42-61"
       },
-      "resolution": "Track ok_through/last_error in FlushTickets; trigger_flush returns Err unless a successful (or nothing-dirty) pass served its ticket; fix the doc at flush.rs:152-153; add a fault-injection test that attaches the trigger and asserts force_flush() == Err(StorageError(_))",
-      "files": [
-        "src/flush.rs",
-        "src/repair_test_* or tests/persistence.rs"
+      "edits": [
+        {
+          "file": "spec.md",
+          "line": 166,
+          "old": "Implemented in the component (`src/lib.rs:221-235`; trigger install `attach_flush_trigger` at `src/lib.rs:131`, `FlushTrigger` alias at `src/lib.rs:72`). **Open:** with the documented `FlushManager::trigger_flush()` trigger, flush failures are not propagated (`src/flush.rs:177`) \u2014 see drift-report 2026-10-14 / proposal P1",
+          "new": "Implemented (`src/lib.rs:221-235`; trigger install `attach_flush_trigger` at `src/lib.rs:131`, `FlushTrigger` alias at `src/lib.rs:72`). With the documented `FlushManager::trigger_flush()` trigger, a failed flush is reported: `trigger_flush()` returns the error of the pass that released the call (`src/flush.rs:181-185`, recorded by `do_flush` at `src/flush.rs:260-270`), which `force_flush()` returns as `StorageError`; test `force_flush_reports_failed_disk_write` (`src/repair_test_force_flush_error.rs`). See FR-13 for the ownership caveat of this wiring"
+        }
       ],
-      "approved_by": "Cornel Constantinescu, 2026-10-14",
-      "approval_note": "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR"
+      "approved_by": "Cornel Constantinescu, 2026-10-18 (PR approval page, groups A-D)"
     },
     {
       "id": "P2",
+      "spec": "001-extended-metadata-store",
+      "requirement": "US6 (AC1 tests + note)",
+      "type": "BACKFILL",
+      "severity": "minor",
+      "confidence": "HIGH",
+      "approved": true,
+      "spec_says": {
+        "text": "a follow-up test that installs a trigger and asserts durability (and error propagation) through force_flush() is tracked by ALIGN-EMS-001 ... and by proposal P1",
+        "location": "spec.md:154; test list spec.md:146-152"
+      },
+      "code_does": {
+        "text": "repair_test_force_flush_error.rs attaches the FlushManager trigger and asserts StorageError on a failing device and Ok on a healthy one",
+        "location": "src/repair_test_force_flush_error.rs:19-38, :42-61, :63-72"
+      },
+      "edits": [
+        {
+          "file": "spec.md",
+          "line": "insert after 152",
+          "old": "",
+          "new": "- `force_flush_reports_failed_disk_write`, `force_flush_ok_on_healthy_device` (unit, `src/repair_test_force_flush_error.rs`, `--features testing`): with the documented `FlushManager::trigger_flush()` trigger attached via `attach_flush_trigger`, `force_flush()` returns `StorageError` when the device write fails (and the write stays dirty), and `Ok` on a healthy device (FR-05)"
+        },
+        {
+          "file": "spec.md",
+          "line": 154,
+          "old": "The `flush_manager_*` tests listed below still drive `FlushManager::trigger_flush()` directly; a follow-up test that installs a trigger and asserts durability (and error propagation) through `force_flush()` is tracked by ALIGN-EMS-001 in `.specify/sync/align-tasks.md` and by proposal P1 in `.specify/sync/proposals.md`.",
+          "new": "The `flush_manager_*` tests listed above drive `FlushManager::trigger_flush()` directly; `src/repair_test_force_flush_error.rs` drives `force_flush()` through an attached trigger and checks error propagation (mock device). The SSD integration test still obtains durability through the FR-17 API rather than `force_flush()` (ALIGN-EMS-001 in `.specify/sync/align-tasks.md`)."
+        }
+      ],
+      "approved_by": "Cornel Constantinescu, 2026-10-18 (PR approval page, groups A-D)"
+    },
+    {
+      "id": "P3",
+      "spec": "001-extended-metadata-store",
+      "requirement": "Known Gaps / FR-05 entry",
+      "type": "BACKFILL",
+      "severity": "minor",
+      "confidence": "HIGH",
+      "approved": true,
+      "spec_says": {
+        "text": "(src/lib.rs:201-215) ... FlushTrigger ... src/lib.rs:68 ... attach_flush_trigger (src/lib.rs:111 ...)",
+        "location": "spec.md:183"
+      },
+      "code_does": {
+        "text": "force_flush at lib.rs:221-235, FlushTrigger at :72, attach_flush_trigger at :131; failure propagation flush.rs:181-185",
+        "location": "src/lib.rs:72, :131, :221-235; src/flush.rs:181-185"
+      },
+      "edits": [
+        {
+          "file": "spec.md",
+          "line": 183,
+          "old": "is now **present and merged** in the working tree (`src/lib.rs:201-215`). The component carries an optional type-erased `FlushTrigger` (`pub type FlushTrigger = Box<dyn Fn() -> Result<(), String> + Send + Sync>`, `src/lib.rs:68`), installed by the wiring layer through `attach_flush_trigger` (`src/lib.rs:111`, typically `move || flush_manager.trigger_flush()`). `force_flush()` invokes the trigger and blocks until it returns, mapping any error to `ExtendedMetadataStoreError::StorageError`;",
+          "new": "is now **present and merged** in the working tree (`src/lib.rs:221-235`). The component carries an optional type-erased `FlushTrigger` (`pub type FlushTrigger = Box<dyn Fn() -> Result<(), String> + Send + Sync>`, `src/lib.rs:72`), installed by the wiring layer through `attach_flush_trigger` (`src/lib.rs:131`, typically `move || flush_manager.trigger_flush()`). `force_flush()` invokes the trigger and blocks until it returns, mapping any error to `ExtendedMetadataStoreError::StorageError`; since `4a8fe3e7` `FlushManager::trigger_flush()` returns an error when the flush pass serving the call failed (`src/flush.rs:181-185`), so a device or capacity failure reaches the caller (2026-10-14 ALIGN-EMS-003, resolved);"
+        }
+      ],
+      "approved_by": "Cornel Constantinescu, 2026-10-18 (PR approval page, groups A-D)"
+    },
+    {
+      "id": "P4",
+      "spec": "001-extended-metadata-store",
+      "requirement": "FR-12",
+      "type": "BACKFILL",
+      "severity": "minor",
+      "confidence": "HIGH",
+      "approved": true,
+      "spec_says": {
+        "text": "No call is ever released by a flush whose snapshot predates the call | Implemented (src/flush.rs:88-94, :152-178, :211-213, :251-257)",
+        "location": "spec.md:173"
+      },
+      "code_does": {
+        "text": "A released call returns Ok iff durable >= ticket, else the most recent flush error",
+        "location": "src/flush.rs:88-97, :155-186, :219-221, :233-238, :260-270"
+      },
+      "edits": [
+        {
+          "file": "spec.md",
+          "line": 173,
+          "old": "No call is ever released by a flush whose snapshot predates the call | Implemented (`src/flush.rs:88-94`, `:152-178`, `:211-213`, `:251-257`)",
+          "new": "No call is ever released by a flush whose snapshot predates the call. A released call returns `Ok(())` only if a pass that served its ticket succeeded (or found nothing dirty), so its writes are on disk; otherwise it returns the error of the failed pass, its writes stay dirty, and a later pass (timer or another `trigger_flush()`) retries them | Implemented (`src/flush.rs:88-97`, `:155-186`, `:219-221`, `:233-238`, `:260-270`)"
+        }
+      ],
+      "approved_by": "Cornel Constantinescu, 2026-10-18 (PR approval page, groups A-D)"
+    },
+    {
+      "id": "P5",
+      "spec": "001-extended-metadata-store",
+      "requirement": "FR-11, FR-13 (line references)",
+      "type": "BACKFILL",
+      "severity": "minor",
+      "confidence": "HIGH",
+      "approved": true,
+      "spec_says": {
+        "text": "FR-11: Implemented (src/flush.rs:14-16, :59-75, :185-206, :234); FR-13: Implemented (src/flush.rs:215-219, :263-277)",
+        "location": "spec.md:172; spec.md:174"
+      },
+      "code_does": {
+        "text": "Same behaviour; lines moved by 4a8fe3e7",
+        "location": "src/flush.rs:193-214, :243, :223-227, :276-290"
+      },
+      "edits": [
+        {
+          "file": "spec.md",
+          "line": 172,
+          "old": "Implemented (`src/flush.rs:14-16`, `:59-75`, `:185-206`, `:234`)",
+          "new": "Implemented (`src/flush.rs:14-16`, `:59-75`, `:193-214`, `:243`)"
+        },
+        {
+          "file": "spec.md",
+          "line": 174,
+          "old": "Implemented (`src/flush.rs:215-219`, `:263-277`)",
+          "new": "Implemented (`src/flush.rs:223-227`, `:276-290`); see P6 for the reachability of Drop under the recommended trigger wiring"
+        }
+      ],
+      "approved_by": "Cornel Constantinescu, 2026-10-18 (PR approval page, groups A-D)"
+    },
+    {
+      "id": "P6",
+      "spec": "001-extended-metadata-store",
+      "requirement": "FR-13 (+ FR-05 wiring)",
+      "type": "ALIGN",
+      "severity": "moderate",
+      "confidence": "HIGH (defect) / MEDIUM (fix choice)",
+      "approved": true,
+      "new_finding": true,
+      "spec_says": {
+        "text": "FlushManager performs a final flush on Drop (graceful shutdown); recommended trigger move || flush_manager.trigger_flush()",
+        "location": "spec.md:174; spec.md:311; src/lib.rs:127"
+      },
+      "code_does": {
+        "text": "component -> flush_trigger -> FlushManager -> worker thread -> callbacks holding Arc<component>: reference cycle; Drop never runs, no final flush, worker thread leaks; no detach API",
+        "location": "src/lib.rs:61, :131-133; src/flush.rs:85, :107-109, :142-144, :223-227, :276-290; src/repair_test_force_flush_error.rs:24, :33-37"
+      },
+      "resolution": "Recommended: add ExtendedMetadataStoreComponent::detach_flush_trigger() -> Option<FlushTrigger>; wiring layer MUST detach before shutdown so Drop runs while the component is alive; update repair test; add test attach/put/detach+drop/reboot/get. Alternative (Weak callbacks) needs a no-component sentinel in do_flush to avoid writing an empty region on the final pass.",
+      "files": [
+        "src/lib.rs",
+        "src/repair_test_force_flush_error.rs",
+        "tests/persistence.rs",
+        "spec.md FR-05/FR-13 (backfill after fix)"
+      ],
+      "approved_by": "Cornel Constantinescu, 2026-10-18 (PR approval page, groups A-D)",
+      "approval_note": "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR"
+    },
+    {
+      "id": "P7",
+      "spec": "001-extended-metadata-store",
+      "requirement": "FR-05 (ALIGN-EMS-003 AC2/AC3)",
+      "type": "ALIGN",
+      "severity": "minor",
+      "confidence": "HIGH",
+      "approved": true,
+      "spec_says": {
+        "text": "AC2: control case returns Ok and the data is recovered after a reboot. AC3: a ticket served by a failed pass but later covered by a successful pass returns Ok",
+        "location": ".specify/sync/align-tasks.md:174-175"
+      },
+      "code_does": {
+        "text": "Control test checks Ok + dirty_count()==0 but no reboot; AC3 is not deterministic: the failed pass's notify_all wakes the waiter, which returns Err before a retry",
+        "location": "src/repair_test_force_flush_error.rs:63-72; src/flush.rs:181-185, :269"
+      },
+      "resolution": "Add reboot+recover assertion to the healthy test; restate AC3 as 'after a failed force_flush(), a later force_flush() on a healthy device returns Ok and persists the write left dirty'; test with a fail-first-N-then-succeed mock",
+      "files": [
+        "src/repair_test_force_flush_error.rs or tests/persistence.rs",
+        "src/test_support.rs (optional FaultConfig extension)",
+        ".specify/sync/align-tasks.md"
+      ],
+      "approved_by": "Cornel Constantinescu, 2026-10-18 (PR approval page, groups A-D)",
+      "approval_note": "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR"
+    },
+    {
+      "id": "P8",
       "spec": "001-extended-metadata-store",
       "requirement": "FR-09",
       "type": "ALIGN",
       "severity": "moderate",
       "confidence": "HIGH",
       "approved": true,
+      "carried_over": "ALIGN-EMS-004",
       "spec_says": {
-        "text": "Recovery falls back to inactive region if active region is corrupt; verify header CRC and entry CRCs; if active region corrupt: try inactive region",
-        "location": "spec.md:167; spec.md:299-300"
+        "text": "Recovery falls back to inactive region if active region is corrupt; verify header CRC and entry CRCs",
+        "location": "spec.md:170; spec.md:302-303"
       },
       "code_does": {
-        "text": "Only a corrupt header or a flush_seq mismatch causes fallback; corrupt entries are skipped one sector at a time, silently and with no warning, and the partial region is accepted",
+        "text": "Only header failure / flush_seq mismatch causes fallback; corrupt entries skipped one sector, silently",
         "location": "src/recovery.rs:53-66; src/on_disk.rs:341-344; src/recovery.rs:21"
       },
-      "resolution": "deserialize_region reports skipped records; recovery treats skipped>0 or entries.len()!=header.entry_count as corruption, warns and falls back; add an entry-corruption test",
-      "files": [
-        "src/on_disk.rs",
-        "src/recovery.rs",
-        "tests/persistence.rs"
-      ],
-      "approved_by": "Cornel Constantinescu, 2026-10-14",
+      "resolution": "Keep ALIGN-EMS-004 unchanged; no new task",
+      "approved_by": "Cornel Constantinescu, 2026-10-18 (PR approval page, groups A-D)",
       "approval_note": "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR"
     },
     {
-      "id": "P3",
+      "id": "P9",
       "spec": "001-extended-metadata-store",
       "requirement": "NFR-04",
       "type": "ALIGN",
       "severity": "moderate",
       "confidence": "HIGH",
       "approved": true,
+      "carried_over": "ALIGN-EMS-005",
       "spec_says": {
         "text": "Crash consistency: partial flush never corrupts previously-committed data; Crash during step 2: old active region is still valid",
-        "location": "spec.md:193; spec.md:290-291"
+        "location": "spec.md:196; spec.md:294"
       },
       "code_does": {
-        "text": "Fallback returns the superblock unchanged (active_region = the corrupt region), so the next flush overwrites the only valid region; a crash mid-write then loses everything and recovery formats fresh",
+        "text": "After fallback the superblock is unchanged; next flush overwrites the recovered region",
         "location": "src/recovery.rs:68-77; src/lib.rs:155-157; src/flush.rs:45-46, :54; src/recovery.rs:79-84"
       },
-      "resolution": "On fallback, return a superblock with active_region flipped to the region actually loaded (keep flush_seq); add a corrupt-then-crash test",
-      "files": [
-        "src/recovery.rs",
-        "tests/persistence.rs"
-      ],
-      "approved_by": "Cornel Constantinescu, 2026-10-14",
+      "resolution": "Keep ALIGN-EMS-005 unchanged; no new task",
+      "approved_by": "Cornel Constantinescu, 2026-10-18 (PR approval page, groups A-D)",
       "approval_note": "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR"
     },
     {
-      "id": "P4",
+      "id": "P10",
       "spec": "001-extended-metadata-store",
       "requirement": "FR-01",
       "type": "ALIGN",
       "severity": "moderate",
-      "confidence": "HIGH (defect) / MEDIUM (error variant)",
+      "confidence": "HIGH",
       "approved": true,
+      "carried_over": "ALIGN-EMS-006",
       "spec_says": {
-        "text": "put(key, value) stores arbitrary binary data (0 to 128 KiB) by string key",
-        "location": "spec.md:159; tasks.md:7; spec.md:210 (key_len 2B)"
+        "text": "put(key, value) stores arbitrary binary data (0 to 128 KiB) by string key; key_len(2B)",
+        "location": "spec.md:162; spec.md:213"
       },
       "code_does": {
-        "text": "No key-length check; key_len is truncated to u16 on serialize, so keys longer than 65535 bytes fail the CRC on recovery and are lost silently",
-        "location": "src/lib.rs:179-181; src/on_disk.rs:233, :242, :276-283"
+        "text": "Only value length checked; key_len truncated with as u16; entry lost after restart",
+        "location": "src/lib.rs:179; src/on_disk.rs:233, :242, :276-283"
       },
-      "resolution": "Reject key.len() > u16::MAX in put (decision: reuse ValueTooLarge, or add a KeyTooLarge interface variant, which is recommended); then add the limit to FR-01",
-      "decision_needed": "error variant",
-      "files": [
-        "src/lib.rs",
-        "components/interfaces/src/iextended_metadata_store.rs (option b)"
-      ],
-      "approved_by": "Cornel Constantinescu, 2026-10-14",
+      "resolution": "Keep ALIGN-EMS-006 and its open error-variant sub-decision (KeyTooLarge recommended); no new task",
+      "approved_by": "Cornel Constantinescu, 2026-10-18 (PR approval page, groups A-D)",
       "approval_note": "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR"
     },
     {
-      "id": "P5",
+      "id": "P11",
       "spec": "001-extended-metadata-store",
       "requirement": "SC-7",
       "type": "ALIGN",
       "severity": "minor",
       "confidence": "HIGH",
       "approved": true,
+      "carried_over": "ALIGN-EMS-007",
       "spec_says": {
         "text": "All public items have doc comments; cargo doc --no-deps is warning-free",
-        "location": "spec.md:257"
+        "location": "spec.md:260"
       },
       "code_does": {
-        "text": "Many public items have no doc comment",
-        "location": "src/on_disk.rs:12-23, :27, :59, :85, :131, :139, :147, :155-158, :162, :176, :206-208, :214, :222, :227, :257, :353, :360; src/block_io.rs:12, :18; src/recovery.rs:14-16"
+        "text": "Public items in on_disk.rs, block_io.rs, recovery.rs lack doc comments; no missing_docs lint",
+        "location": "src/on_disk.rs:12-23..:360; src/block_io.rs:12, :18; src/recovery.rs:14-16"
       },
-      "resolution": "Add doc comments; enable #![warn(missing_docs)] in src/lib.rs",
-      "files": [
-        "src/on_disk.rs",
-        "src/block_io.rs",
-        "src/recovery.rs",
-        "src/lib.rs"
-      ],
-      "approved_by": "Cornel Constantinescu, 2026-10-14",
+      "resolution": "Keep ALIGN-EMS-007 unchanged; no new task",
+      "approved_by": "Cornel Constantinescu, 2026-10-18 (PR approval page, groups A-D)",
       "approval_note": "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR"
-    },
-    {
-      "id": "P6",
-      "spec": "001-extended-metadata-store",
-      "requirement": "Known Gaps: CapacityExhausted (ALIGN-EMS-002, parked)",
-      "type": "ALIGN",
-      "severity": "moderate",
-      "confidence": "HIGH",
-      "approved": true,
-      "spec_says": {
-        "text": "The interface defines ExtendedMetadataStoreError::CapacityExhausted ... but no code path constructs it ... tracked in .specify/sync/align-tasks.md (Task ALIGN-EMS-002 ...)",
-        "location": "spec.md:182; align-tasks.md:66-110"
-      },
-      "code_does": {
-        "text": "Still never constructed; capacity is a flush-time String error; test_capacity_exhaustion proves nothing; the force_flush-propagation alternative is blocked by P1",
-        "location": "components/interfaces/src/iextended_metadata_store.rs:12; src/flush.rs:36-42; tests/integration_ssd.rs:526-547 (arm :542); src/flush.rs:177"
-      },
-      "resolution": "Keep parked; refresh the ALIGN-EMS-002 line refs; note its dependency on P1",
-      "files": [],
-      "approved_by": "Cornel Constantinescu, 2026-10-14",
-      "approval_note": "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR"
-    },
-    {
-      "id": "P7",
-      "spec": "001-extended-metadata-store",
-      "requirement": "FR-12 (+ US6 AC2, AC5)",
-      "type": "BACKFILL",
-      "severity": "minor",
-      "confidence": "HIGH",
-      "approved": true,
-      "covers_unspecced": "U1",
-      "spec_says": {
-        "text": "Multiple force_flush() calls coalesce into single flush operation",
-        "location": "spec.md:170; spec.md:140; spec.md:143"
-      },
-      "code_does": {
-        "text": "Ticket-based: calls registered before a pass reads `requested` share that pass; calls registered mid-pass wait for the next; with nothing dirty there is no I/O but one worker wake-up",
-        "location": "src/flush.rs:88-94, :152-178, :211-213, :222-231, :251-257"
-      },
-      "edits": [
-        {
-          "file": "spec.md",
-          "line": 170,
-          "old": "| FR-12 | Multiple `force_flush()` calls coalesce into single flush operation | Implemented |",
-          "new": "| FR-12 | Concurrent `force_flush()` / `FlushManager::trigger_flush()` calls coalesce: each call registers a request (ticket) before waking the worker; a flush pass serves every request registered before it reads the request counter and snapshots the store, so all of them are released by that one pass. A call registered while a pass is already in flight is not released by that pass (its writes may postdate the snapshot); it is served, together with every other call registered meanwhile, by the next pass. No call is ever released by a flush whose snapshot predates the call | Implemented (`src/flush.rs:88-94`, `:152-178`, `:211-213`, `:251-257`) |"
-        },
-        {
-          "file": "spec.md",
-          "line": 140,
-          "old": "- Multiple concurrent `force_flush()` calls coalesce into a single flush operation",
-          "new": "- Concurrent `force_flush()` calls coalesce: all calls registered before a flush pass begins are released by that pass; calls registered while a pass is in flight wait for, and share, the next pass, whose snapshot includes their writes"
-        },
-        {
-          "file": "spec.md",
-          "line": 143,
-          "old": "- When no entries are dirty, `force_flush()` returns immediately (no-op)",
-          "new": "- When no entries are dirty, `force_flush()` performs no disk I/O: the flush worker observes a zero dirty count and releases the caller without flushing (one worker wake-up, no flush)"
-        }
-      ],
-      "approved_by": "Cornel Constantinescu, 2026-10-14"
-    },
-    {
-      "id": "P8",
-      "spec": "001-extended-metadata-store",
-      "requirement": "FR-11",
-      "type": "BACKFILL",
-      "severity": "minor",
-      "confidence": "HIGH",
-      "approved": true,
-      "covers_unspecced": "U2",
-      "spec_says": {
-        "text": "FlushManager provides background flush with timer + dirty threshold",
-        "location": "spec.md:169"
-      },
-      "code_does": {
-        "text": "Timer deadline recomputed each wait (None disables it); threshold = max(dirty_threshold,1), polled every 10 ms; threshold disarmed after a failed flush until a later pass succeeds",
-        "location": "src/flush.rs:14-16, :59-75, :185-206, :234"
-      },
-      "edits": [
-        {
-          "file": "spec.md",
-          "line": 169,
-          "old": "| FR-11 | `FlushManager` provides background flush with timer + dirty threshold | Implemented |",
-          "new": "| FR-11 | `FlushManager` provides background flush with two triggers. (a) Timer: a pass runs once `FlushConfig::interval` (default 5 s) has elapsed since the worker last began waiting; an interval too large to add to the current `Instant` disables the timer. (b) Dirty threshold: a pass runs as soon as `dirty_count() >= max(dirty_threshold, 1)` (default 100), detected within at most 10 ms (`THRESHOLD_POLL_INTERVAL`) because `put`/`delete` do not wake the worker. A failed flush disarms the threshold trigger until a later pass succeeds, so a failing device is retried on the timer or by an explicit `trigger_flush()` rather than in a hot loop. A timer pass with nothing dirty does no I/O | Implemented (`src/flush.rs:14-16`, `:59-75`, `:185-206`, `:234`) |"
-        }
-      ],
-      "approved_by": "Cornel Constantinescu, 2026-10-14"
-    },
-    {
-      "id": "P9",
-      "spec": "001-extended-metadata-store",
-      "requirement": "FR-14, FR-17",
-      "type": "BACKFILL",
-      "severity": "minor",
-      "confidence": "HIGH",
-      "approved": true,
-      "covers_unspecced": "U3",
-      "spec_says": {
-        "text": "Dirty count tracks mutations since last flush; FR-17 lists snapshot_entries/mark_flushed without semantics; plan.md:101 'reset dirty_count'",
-        "location": "spec.md:172; spec.md:175; plan.md:101"
-      },
-      "code_does": {
-        "text": "snapshot_entries records the dirty count it covers; mark_flushed subtracts exactly that count and clears it (no-op without a snapshot); a single recorded slot implies a single-flusher precondition",
-        "location": "src/lib.rs:50-53, :92-93, :96-121; src/flush.rs:246-249"
-      },
-      "edits": [
-        {
-          "file": "spec.md",
-          "line": 172,
-          "old": "| FR-14 | Dirty count tracks mutations since last flush | Implemented |",
-          "new": "| FR-14 | Dirty count tracks mutations not yet covered by a successful flush: `put` and `delete` each increment it after releasing the store write lock; a successful flush subtracts only the count recorded with the snapshot it wrote, so mutations made after that snapshot (including during the flush) stay dirty and are persisted by a later flush; a failed flush subtracts nothing; `load_entries` resets it to 0 | Implemented (`src/lib.rs:86-121`, `:188`, `:209`) |"
-        },
-        {
-          "file": "spec.md",
-          "line": 175,
-          "old": "| FR-17 | External persistence-wiring API (`initialize_from_client`, `snapshot_entries`, `mark_flushed`, `load_entries`, `dirty_count()`, `flush_seq()` on `ExtendedMetadataStoreComponent`) provides the startup-recovery and flush-on-demand mechanism for persistent-mode deployments; a caller/dispatcher wires a `BlockDeviceClient` and drives these methods (directly or via `FlushManager`) to obtain durability | Implemented |",
-          "new": "| FR-17 | External persistence-wiring API (`initialize_from_client`, `snapshot_entries`, `mark_flushed`, `load_entries`, `dirty_count()`, `flush_seq()` on `ExtendedMetadataStoreComponent`) provides the startup-recovery and flush-on-demand mechanism for persistent-mode deployments; a caller/dispatcher wires a `BlockDeviceClient` and drives these methods (directly or via `FlushManager`) to obtain durability. `snapshot_entries()` records the dirty count its snapshot covers; `mark_flushed(seq)` sets `flush_seq` to `seq` and subtracts exactly that recorded count, then clears it. Callers MUST therefore call `mark_flushed` only after successfully persisting the entries returned by the immediately preceding `snapshot_entries()`, and only one flusher (one `FlushManager`, or one manual caller) may drive the snapshot/mark pair at a time: an interleaved second `snapshot_entries()` overwrites the recorded count. `mark_flushed` with no preceding snapshot leaves the dirty count unchanged | Implemented (`src/lib.rs:50-53`, `:96-121`) |"
-        }
-      ],
-      "approved_by": "Cornel Constantinescu, 2026-10-14"
-    },
-    {
-      "id": "P10",
-      "spec": "001-extended-metadata-store",
-      "requirement": "FR-13 + Key Entities FlushManager",
-      "type": "BACKFILL",
-      "severity": "minor",
-      "confidence": "HIGH",
-      "approved": true,
-      "covers_unspecced": "U4",
-      "spec_says": {
-        "text": "FlushManager performs final flush on Drop (graceful shutdown); FlushManager: Background flush thread with configurable timer/threshold, coalesced flush support",
-        "location": "spec.md:171; spec.md:218"
-      },
-      "code_does": {
-        "text": "The final pass flushes unconditionally (even when clean) and its result is ignored; public completed_seq() accessor",
-        "location": "src/flush.rs:215-219, :263-277, :180-183, :123"
-      },
-      "edits": [
-        {
-          "file": "spec.md",
-          "line": 171,
-          "old": "| FR-13 | `FlushManager` performs final flush on Drop (graceful shutdown) | Implemented |",
-          "new": "| FR-13 | `FlushManager` performs a final flush on Drop (graceful shutdown): Drop sets the shutdown flag, wakes the worker and joins it; the worker runs one last flush pass unconditionally (even with a zero dirty count, which writes a fresh region and advances `flush_seq`) and exits. A failure of this final flush is not reported to the dropping thread | Implemented (`src/flush.rs:215-219`, `:263-277`) |"
-        },
-        {
-          "file": "spec.md",
-          "line": 218,
-          "old": "| `FlushManager` | Background flush thread with configurable timer/threshold, coalesced flush support | `src/flush.rs` |",
-          "new": "| `FlushManager` | Background flush thread with configurable timer/threshold triggers, ticket-based coalesced `trigger_flush()`, and `completed_seq()` (sequence number of the last successful flush, initialised from the starting superblock's `flush_seq`) | `src/flush.rs` |"
-        }
-      ],
-      "approved_by": "Cornel Constantinescu, 2026-10-14"
-    },
-    {
-      "id": "P11",
-      "spec": "001-extended-metadata-store",
-      "requirement": "FR-05 (row text/evidence)",
-      "type": "BACKFILL",
-      "severity": "minor",
-      "confidence": "HIGH",
-      "approved": true,
-      "covers_unspecced": "U5",
-      "spec_says": {
-        "text": "Implemented (src/lib.rs:201-215; attach_flush_trigger at src/lib.rs:111, FlushTrigger alias at src/lib.rs:68)",
-        "location": "spec.md:163"
-      },
-      "code_does": {
-        "text": "force_flush at :221-235 holds the trigger read lock while the trigger runs; attach_flush_trigger :131-133; FlushTrigger :72",
-        "location": "src/lib.rs:72, :131-133, :221-235"
-      },
-      "edits": [
-        {
-          "file": "spec.md",
-          "line": 163,
-          "old": "| FR-05 | `force_flush()` ensures all mutations are durable on disk: it invokes a durable-flush trigger installed by the wiring layer via `attach_flush_trigger` and blocks until it returns, mapping trigger errors to `StorageError`; in pure in-memory mode (no trigger installed) it is a correct no-op | Implemented (`src/lib.rs:201-215`; trigger install `attach_flush_trigger` at `src/lib.rs:111`, `FlushTrigger` alias at `src/lib.rs:68`) |",
-          "new": "| FR-05 | `force_flush()` ensures all mutations are durable on disk: it invokes a durable-flush trigger installed by the wiring layer via `attach_flush_trigger` and blocks until it returns, mapping trigger errors to `StorageError`; in pure in-memory mode (no trigger installed) it is a correct no-op. The trigger runs under the trigger slot's read lock, so `attach_flush_trigger` (which replaces the trigger) blocks until any in-progress `force_flush()` returns | Implemented in the component (`src/lib.rs:221-235`; trigger install `attach_flush_trigger` at `src/lib.rs:131`, `FlushTrigger` alias at `src/lib.rs:72`). **Open:** with the documented `FlushManager::trigger_flush()` trigger, flush failures are not propagated (`src/flush.rs:177`) \u2014 see drift-report 2026-10-14 / proposal P1 |"
-        }
-      ],
-      "approved_by": "Cornel Constantinescu, 2026-10-14"
     },
     {
       "id": "P12",
       "spec": "001-extended-metadata-store",
-      "requirement": "US6 Tests list (FR-11/12/14 evidence)",
+      "requirement": "FR-05 tracking (tasks.md / align-tasks.md)",
       "type": "BACKFILL",
       "severity": "minor",
       "confidence": "HIGH",
       "approved": true,
       "spec_says": {
-        "text": "- `flush_manager_dirty_threshold_triggers` (persistence): threshold-based flush",
-        "location": "spec.md:147 (list spec.md:145-149)"
+        "text": "tasks.md:19 'Follow-up: flush-failure propagation ... (proposal P1, 2026-10-14)'; align-tasks.md:20 ALIGN-EMS-003 'open'; align-tasks.md:147-152 'always ends in Ok(()) (src/flush.rs:177)'; align-tasks.md:111-116 dependency note",
+        "location": "tasks.md:19; .specify/sync/align-tasks.md:20, :111-116, :147-152"
       },
       "code_does": {
-        "text": "T048 uses a 50 ms timer and a 200 ms wait, so it cannot isolate the threshold; 5 new repair tests exist and are not listed",
-        "location": "tests/persistence.rs:548-592 (:563, :585); src/repair_test_flush_threshold.rs:62, :75, :91; src/repair_test_flush_lost_dirty.rs:30, :90"
+        "text": "Failure propagated since 4a8fe3e7",
+        "location": "src/flush.rs:181-185, :260-270"
       },
       "edits": [
         {
-          "file": "spec.md",
-          "line": 147,
-          "old": "- `flush_manager_dirty_threshold_triggers` (persistence): threshold-based flush",
-          "new": "- `flush_manager_dirty_threshold_triggers` (persistence): flush after exceeding the threshold. Its 50 ms timer also fires within the 200 ms wait, so it passes without a working threshold trigger; the threshold path is isolated by the `repair_test_flush_threshold` tests below"
+          "file": "tasks.md",
+          "line": 19,
+          "old": "Follow-up: flush-failure propagation through `FlushManager::trigger_flush()` (proposal P1, 2026-10-14).",
+          "new": "Follow-up flush-failure propagation through `FlushManager::trigger_flush()` (ALIGN-EMS-003) \u2014 RESOLVED by `4a8fe3e7` (`src/flush.rs:181-185`; test `src/repair_test_force_flush_error.rs`)."
         },
         {
-          "file": "spec.md",
-          "insert_after_line": 149,
+          "file": ".specify/sync/align-tasks.md",
+          "line": 20,
+          "old": "open",
+          "new": "resolved (4a8fe3e7); AC2/AC3 tests \u2192 P7 (2026-10-14 bundle sync)"
+        },
+        {
+          "file": ".specify/sync/align-tasks.md",
+          "line": "insert after 152",
           "old": "",
-          "new": "- `threshold_reached_before_start_flushes_without_timer`, `threshold_reached_while_worker_sleeps_flushes_without_timer`, `below_threshold_does_not_flush_before_timer` (unit, `src/repair_test_flush_threshold.rs`, `--features testing`): the dirty-threshold trigger with a 1 h timer (FR-11)\n- `write_during_flush_is_durable_when_its_trigger_flush_returns`, `write_during_flush_stays_dirty` (unit, `src/repair_test_flush_lost_dirty.rs`, `--features testing`): a `trigger_flush()` caller is never released by a flush whose snapshot predates its write, and a write made mid-flush stays dirty until a later flush persists it (FR-12, FR-14)"
+          "new": "**Status (2026-10-14, branch `fix/bundle-dispatcher-ems`):** RESOLVED by `4a8fe3e7`. `FlushTickets` gained `durable`/`last_error` (`src/flush.rs:88-97`); `trigger_flush` returns `Err(last_error)` unless `durable >= ticket` (`:181-185`). AC1 met (`src/repair_test_force_flush_error.rs:42-61`); AC2/AC3 tracked by proposal P7; AC4 by proposal P1."
+        },
+        {
+          "file": ".specify/sync/align-tasks.md",
+          "line": "111-116",
+          "old": "**Dependency:** the alternative fix (propagate the flush-time capacity error out of `force_flush()`) cannot work until ALIGN-EMS-003 (P1) lands, because `FlushManager::trigger_flush` currently discards every flush error (`src/flush.rs:177`).",
+          "new": "**Dependency:** ALIGN-EMS-003 has landed (`4a8fe3e7`): the flush-time capacity error now reaches `force_flush()` callers as `StorageError(\"\u2026 exceeds region capacity \u2026\")`. The alternative fix only needs to map it to `CapacityExhausted`."
         }
       ],
-      "approved_by": "Cornel Constantinescu, 2026-10-14"
+      "approved_by": "Cornel Constantinescu, 2026-10-18 (PR approval page, groups A-D)"
     },
     {
       "id": "P13",
       "spec": "001-extended-metadata-store",
-      "requirement": "plan.md / tasks.md consistency (conflicts 1-4)",
+      "requirement": "FR-12 / US6 AC5 / FR-14 (code doc comments)",
+      "type": "ALIGN",
+      "severity": "minor",
+      "confidence": "HIGH",
+      "approved": true,
+      "spec_says": {
+        "text": "FR-12 ticket coalescing; US6 AC5 one worker wake-up, no flush; FR-14 mutations not yet covered by a successful flush",
+        "location": "spec.md:173; spec.md:144; spec.md:175"
+      },
+      "code_does": {
+        "text": "Doc comments: 'share a single in-flight flush', 'Returns immediately if there are no dirty entries', 'mutations since last flush'",
+        "location": "src/flush.rs:79; src/flush.rs:156; src/lib.rs:75"
+      },
+      "resolution": "Comment-only changes: flush.rs:79, flush.rs:156, lib.rs:75 reworded to match the spec",
+      "files": [
+        "src/flush.rs",
+        "src/lib.rs"
+      ],
+      "approved_by": "Cornel Constantinescu, 2026-10-18 (PR approval page, groups A-D)",
+      "approval_note": "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR"
+    },
+    {
+      "id": "P14",
+      "spec": "001-extended-metadata-store",
+      "requirement": "Known Gaps / CapacityExhausted (ALIGN-EMS-002)",
       "type": "BACKFILL",
       "severity": "minor",
       "confidence": "HIGH",
       "approved": true,
       "spec_says": {
-        "text": "plan.md:104 'force_flush ... unconditional no-op'; plan.md:162 'not a workspace member'; plan.md:32 'share a single in-flight flush'; plan.md:101 'reset dirty_count'; tasks.md:13/18/19 open items already resolved",
-        "location": "plan.md:25, :32, :96, :101, :104, :162; tasks.md:13, :18, :19"
+        "text": "region/partition capacity is enforced at flush time inside flush::flush_to_disk as a String error (\"exceeds region capacity\", src/flush.rs:36-42). Consequently",
+        "location": "spec.md:185"
       },
       "code_does": {
-        "text": "force_flush wired; crate is a workspace member; ticket coalescing; snapshot-scoped mark_flushed",
-        "location": "src/lib.rs:47-62, :99-121, :221-235; src/flush.rs:152-178; Cargo.toml:23, :125; align-tasks.md:9-17"
+        "text": "That String error now reaches force_flush() callers as StorageError; CapacityExhausted still never constructed",
+        "location": "src/flush.rs:36-42, :181-185; src/lib.rs:232"
       },
       "edits": [
         {
-          "file": "plan.md",
-          "line": 25,
-          "old": "- Fields: `store: RwLock<HashMap<String, Vec<u8>>>`, `dirty_count: AtomicU64`, `flush_seq: AtomicU64`",
-          "new": "- Fields: `store: RwLock<HashMap<String, Vec<u8>>>`, `dirty_count: AtomicU64`, `snapshot_dirty: AtomicU64` (dirty count covered by the last `snapshot_entries()`), `flush_seq: AtomicU64`, `flush_trigger: RwLock<Option<FlushTrigger>>`"
-        },
-        {
-          "file": "plan.md",
-          "line": 32,
-          "old": "- Flush coalescing: multiple `trigger_flush()` callers share a single in-flight flush via `Condvar` wait",
-          "new": "- Flush coalescing: each `trigger_flush()` caller takes a ticket (`FlushTickets::requested`); a flush pass serves every ticket taken before it reads that counter and snapshots the store, then advances `FlushTickets::completed` and notifies the `Condvar`; callers registered while a pass is in flight wait for the next pass"
-        },
-        {
-          "file": "plan.md",
-          "line": 96,
-          "old": "  -> snapshot_entries() [acquire read lock, clone HashMap, release]",
-          "new": "  -> snapshot_entries() [acquire read lock, record dirty_count, clone HashMap, release]"
-        },
-        {
-          "file": "plan.md",
-          "line": 101,
-          "old": "  -> mark_flushed(new_seq) [reset dirty_count]",
-          "new": "  -> mark_flushed(new_seq) [subtract the dirty count recorded by that snapshot; mutations made since stay dirty]"
-        },
-        {
-          "file": "plan.md",
-          "line": 104,
-          "old": "> **Note**: `IExtendedMetadataStore::force_flush()` (the public trait method) is currently *not* wired into this path in any build configuration \u2014 it is an unconditional no-op. A caller/dispatcher must instead hold a reference to the component's FR-17 inherent API and drive `FlushManager::trigger_flush()` (or call `flush::flush_to_disk()` directly) to actually invoke this data flow. See spec.md FR-05 Known Gaps and `.specify/sync/align-tasks.md` (Task ALIGN-002) for the code-fix tracking this gap.",
-          "new": "> **Note**: `IExtendedMetadataStore::force_flush()` reaches this data flow when the wiring layer has installed a `FlushTrigger` via `attach_flush_trigger` (typically `move || flush_manager.trigger_flush()`); with no trigger installed (pure in-memory mode) it is a no-op. Callers may also drive the FR-17 inherent API directly. See spec.md FR-05."
-        },
-        {
-          "file": "plan.md",
-          "line": 162,
-          "old": "> **Note**: The commands below require `components/extended-metadata-store` to be a member of the root workspace `Cargo.toml`. It currently is **not** (see `.specify/sync/align-tasks.md` Task ALIGN-001), so `cargo test -p extended-metadata-store` presently fails with \"package ID specification did not match any packages\", and running `cargo test`/`clippy`/`doc` from inside the crate directory fails with \"current package believes it's in a workspace when it's not.\"",
-          "new": "> **Note**: `components/extended-metadata-store` is a member of the root workspace `Cargo.toml` (`[workspace] members` and `[workspace.dependencies]`), so the commands below run from the repository root."
-        },
-        {
-          "file": "tasks.md",
-          "line": 13,
-          "old": "- [ ] T056 Run `cargo doc --no-deps` and ensure all public items have doc comments without warnings \u2014 blocked on Task ALIGN-001 (crate not in workspace) in `.specify/sync/align-tasks.md`",
-          "new": "- [ ] T056 Run `cargo doc --no-deps` and ensure all public items have doc comments without warnings \u2014 no longer blocked (ALIGN-001 resolved); undocumented public items are listed in `.specify/sync/drift-report.md` (SC-7) and proposal P5"
-        },
-        {
-          "file": "tasks.md",
-          "line": 18,
-          "old": "- [ ] ALIGN-001 (MAJOR): `components/extended-metadata-store` is missing from the root `Cargo.toml` `[workspace] members` array \u2014 crate is not built or tested by `cargo build`/`cargo test --all`/CI.",
-          "new": "- [x] ALIGN-001 (MAJOR, RESOLVED 2026-08-20): `components/extended-metadata-store` is now a member of the root `Cargo.toml` `[workspace] members` array and is built and tested by CI."
-        },
-        {
-          "file": "tasks.md",
-          "line": 19,
-          "old": "- [ ] ALIGN-002 (MAJOR): `IExtendedMetadataStore::force_flush()` is an unconditional no-op in all build configurations, contradicting FR-05.",
-          "new": "- [x] ALIGN-002 (MAJOR, RESOLVED 2026-08-20): `IExtendedMetadataStore::force_flush()` invokes the `FlushTrigger` installed via `attach_flush_trigger` (FR-05). Follow-up: flush-failure propagation through `FlushManager::trigger_flush()` (proposal P1, 2026-10-14)."
+          "file": "spec.md",
+          "line": 185,
+          "old": "while region/partition capacity is enforced at flush time inside `flush::flush_to_disk` as a `String` error (\"exceeds region capacity\", `src/flush.rs:36-42`). Consequently",
+          "new": "while region/partition capacity is enforced at flush time inside `flush::flush_to_disk` as a `String` error (\"exceeds region capacity\", `src/flush.rs:36-42`); with a `FlushManager` trigger attached, `force_flush()` returns that error as `StorageError` (not `CapacityExhausted`). Consequently"
         }
       ],
-      "approved_by": "Cornel Constantinescu, 2026-10-14"
+      "approved_by": "Cornel Constantinescu, 2026-10-18 (PR approval page, groups A-D)"
     },
     {
-      "id": "P14",
+      "id": "P15",
       "spec": "001-extended-metadata-store",
-      "requirement": "US6 note + Known Gaps (references to the untracked 002 spec; stale line refs)",
+      "requirement": "Header history (spec.md:8)",
       "type": "SUPERSEDE",
       "severity": "minor",
       "confidence": "MEDIUM",
       "approved": true,
       "spec_says": {
-        "text": "'noted under 002-FR-007's ALIGN task'; 'the 002 SSD test test_capacity_exhaustion'; '(Task ALIGN-EMS-002 for 002-FR-007)'; src/lib.rs:159, src/flush.rs:32-38, src/on_disk.rs:142, src/test_support.rs:272",
-        "location": "spec.md:151; spec.md:182; spec.md:184"
+        "text": "Interface-only test usage (002-FR-011) and surfacing capacity to the caller (002-FR-007) remain code-side gaps tracked as ALIGN tasks in .specify/sync/align-tasks.md.",
+        "location": "spec.md:8"
       },
       "code_does": {
-        "text": "Only specs/001 is tracked (002 exists only in .specify/sync/backups); the current lines are src/lib.rs:179, src/flush.rs:36-42, src/on_disk.rs:147, src/test_support.rs:275, tests/integration_ssd.rs:526-547 (:542)",
-        "location": "specs/; .specify/sync/backups/"
+        "text": "Only specs/001-extended-metadata-store/ is tracked; 002 spec absent",
+        "location": "specs/"
       },
       "edits": [
         {
           "file": "spec.md",
-          "line": 151,
-          "old": "a follow-up test that installs a trigger and asserts durability through `force_flush()` is noted under 002-FR-007's ALIGN task.",
-          "new": "a follow-up test that installs a trigger and asserts durability (and error propagation) through `force_flush()` is tracked by ALIGN-EMS-001 in `.specify/sync/align-tasks.md` and by proposal P1 in `.specify/sync/proposals.md`."
-        },
-        {
-          "file": "spec.md",
-          "line": 182,
-          "old": "(`src/lib.rs:159`)",
-          "new": "(`src/lib.rs:179`)"
-        },
-        {
-          "file": "spec.md",
-          "line": 182,
-          "old": "`src/flush.rs:32-38`",
-          "new": "`src/flush.rs:36-42`"
-        },
-        {
-          "file": "spec.md",
-          "line": 182,
-          "old": "Consequently the 002 SSD test `test_capacity_exhaustion` never reaches the `CapacityExhausted` branch.",
-          "new": "Consequently the SSD integration test `test_capacity_exhaustion` (`tests/integration_ssd.rs:526-547`) never reaches its `CapacityExhausted` arm (`:542`)."
-        },
-        {
-          "file": "spec.md",
-          "line": 182,
-          "old": "(Task ALIGN-EMS-002 for 002-FR-007)",
-          "new": "(Task ALIGN-EMS-002)"
-        },
-        {
-          "file": "spec.md",
-          "line": 184,
-          "old": "`src/on_disk.rs:142`",
-          "new": "`src/on_disk.rs:147`"
-        },
-        {
-          "file": "spec.md",
-          "line": 184,
-          "old": "`src/test_support.rs:272`",
-          "new": "`src/test_support.rs:275`"
+          "line": 8,
+          "old": "remain code-side gaps tracked as ALIGN tasks in `.specify/sync/align-tasks.md`.",
+          "new": "remain code-side gaps tracked as ALIGN tasks in `.specify/sync/align-tasks.md` (now ALIGN-EMS-001 and ALIGN-EMS-002; the 002 spec is not tracked in this tree)."
         }
       ],
-      "approved_by": "Cornel Constantinescu, 2026-10-14"
+      "approved_by": "Cornel Constantinescu, 2026-10-18 (PR approval page, groups A-D)"
     }
   ]
 }

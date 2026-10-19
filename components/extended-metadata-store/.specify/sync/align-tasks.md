@@ -17,11 +17,22 @@ references and a dependency on ALIGN-EMS-003); it stays parked. Source:
 |------|----------|-------------|----------|--------|
 | ALIGN-EMS-001 | (2026-08-20) | interface-only durability in `integration_ssd.rs` | moderate | open |
 | ALIGN-EMS-002 | P6 | `CapacityExhausted` never constructed | moderate | open, parked (2026-09-03) |
-| ALIGN-EMS-003 | P1 | FR-05 / US6 AC1 — flush failure reported as `Ok` | major | open |
-| ALIGN-EMS-004 | P2 | FR-09 — corrupt entries do not cause fallback | moderate | open |
-| ALIGN-EMS-005 | P3 | NFR-04 — next flush after fallback overwrites the good region | moderate | open |
-| ALIGN-EMS-006 | P4 | FR-01 — keys > 65 535 bytes accepted but not persistable | moderate | open (sub-decision: error variant) |
-| ALIGN-EMS-007 | P5 | SC-7 — public items without doc comments | minor | open |
+| ALIGN-EMS-003 | P1 | FR-05 / US6 AC1 — flush failure reported as `Ok` | major | resolved (4a8fe3e7); AC2/AC3 tests → P7 (2026-10-14 bundle sync) |
+| ALIGN-EMS-004 | P2 (re-confirmed by P8, bundle sync) | FR-09 — corrupt entries do not cause fallback | moderate | open |
+| ALIGN-EMS-005 | P3 (re-confirmed by P9, bundle sync) | NFR-04 — next flush after fallback overwrites the good region | moderate | open |
+| ALIGN-EMS-006 | P4 (re-confirmed by P10, bundle sync) | FR-01 — keys > 65 535 bytes accepted but not persistable | moderate | open (sub-decision: error variant) |
+| ALIGN-EMS-007 | P5 (re-confirmed by P11, bundle sync) | SC-7 — public items without doc comments | minor | open |
+| ALIGN-EMS-008 | P6 (bundle sync) | FR-13 / FR-05 wiring — trigger ↔ `FlushManager` ↔ component reference cycle prevents the final flush | moderate | open |
+| ALIGN-EMS-009 | P7 (bundle sync) | FR-05 — ALIGN-EMS-003 AC2/AC3 tests (reboot check; restated AC3) | minor | open |
+| ALIGN-EMS-010 | P13 (bundle sync) | FR-12 / US6 AC5 / FR-14 — code doc comments contradict the spec | minor | open |
+
+**Updated 2026-10-19** by the spec-sync apply on branch `fix/bundle-dispatcher-ems` (proposals
+dated 2026-10-14/18, approved by Cornel Constantinescu on 2026-10-18, PR approval page, groups A–D).
+In "bundle sync" the IDs P1–P15 are reused with new meanings (see `.specify/sync/proposals.md`).
+P6, P7, P8, P9, P10, P11 and P13 were approved **as ALIGN tasks only** (approval note: "approved as
+an ALIGN task only: record in align-tasks.md, no code change in this PR"). P6, P7 and P13 are new
+tasks ALIGN-EMS-008..010. P8–P11 re-confirm ALIGN-EMS-004..007 without changing them. P12 marks
+ALIGN-EMS-003 resolved and refreshes the ALIGN-EMS-002 dependency note.
 
 ## Status of prior-sweep tasks (now closed)
 
@@ -109,10 +120,7 @@ flush-time `String` capacity error to `CapacityExhausted` and propagate it out o
 **not** modify source in this sweep — this task is queued for implementation.
 
 **Status (refreshed 2026-10-14, proposal P6):** still open and **parked** (maintainer
-decision 2026-09-03). The variant is still never constructed. **Dependency:** the
-alternative fix (propagate the flush-time capacity error out of `force_flush()`)
-cannot work until ALIGN-EMS-003 (P1) lands, because `FlushManager::trigger_flush`
-currently discards every flush error (`src/flush.rs:177`). The preferred
+decision 2026-09-03). The variant is still never constructed. **Dependency:** ALIGN-EMS-003 has landed (`4a8fe3e7`): the flush-time capacity error now reaches `force_flush()` callers as `StorageError("… exceeds region capacity …")`. The alternative fix only needs to map it to `CapacityExhausted`. The preferred
 `put()`-time check does not depend on ALIGN-EMS-003.
 
 **Files to Modify**:
@@ -150,6 +158,8 @@ always ends in `Ok(())` (`src/flush.rs:177`). `do_flush` marks the served ticket
 complete whether or not `flush_to_disk` failed and discards the error (`src/flush.rs:246-259`).
 A device write failure or capacity overflow (`src/flush.rs:36-42`) therefore makes
 `force_flush()` return `Ok(())` although nothing new is on disk. No test covers this.
+
+**Status (2026-10-14, branch `fix/bundle-dispatcher-ems`):** RESOLVED by `4a8fe3e7`. `FlushTickets` gained `durable`/`last_error` (`src/flush.rs:88-97`); `trigger_flush` returns `Err(last_error)` unless `durable >= ticket` (`:181-185`). AC1 met (`src/repair_test_force_flush_error.rs:42-61`); AC2/AC3 tracked by proposal P7; AC4 by proposal P1.
 
 **Required Change**:
 1. Add `ok_through: u64` and `last_error: Option<String>` to `FlushTickets` (`src/flush.rs:91-94`).
@@ -209,6 +219,8 @@ with a warning; do not format fresh while a region still has a valid header.
       sees the fallback warning and recovers the previous checkpoint.
 - [ ] Skipped entries always produce a warning in `RecoveryResult::warnings`.
 
+**Re-confirmed 2026-10-14 (bundle sync, proposal P8, approved 2026-10-18 — "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR"):** unchanged. `fix/bundle-dispatcher-ems` touched neither `on_disk.rs` nor `recovery.rs`; evidence `src/recovery.rs:53-66`, `src/on_disk.rs:341-344`, `src/recovery.rs:21`. No new task.
+
 ---
 
 ## Task: Align 001-extended-metadata-store/NFR-04 — do not overwrite the recovered region after a fallback  [ALIGN-EMS-005]
@@ -241,6 +253,8 @@ recovered header). No on-disk superblock rewrite needed.
       again under `FaultConfig::fail_after_n_writes` so the region write is interrupted,
       reboot — the previous checkpoint is still recovered.
 - [ ] The next flush after a fallback writes the corrupt region, not the recovered one.
+
+**Re-confirmed 2026-10-14 (bundle sync, proposal P9, approved 2026-10-18 — "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR"):** unchanged (`src/recovery.rs:68-77`, `src/lib.rs:155-157`, `src/flush.rs:45-46`, `:54`, `src/recovery.rs:79-84`). Since `4a8fe3e7` a write failure during that flush is reported to the `force_flush()` caller, but the on-disk damage is the same. No new task.
 
 ---
 
@@ -275,6 +289,8 @@ change) or (b) add `ExtendedMetadataStoreError::KeyTooLarge` in
 - [ ] `put` with a 65 536-byte key returns the chosen error; a 65 535-byte key round-trips
       through flush + reboot.
 - [ ] FR-01 updated with the key-length limit.
+
+**Re-confirmed 2026-10-14 (bundle sync, proposal P10, approved 2026-10-18 — "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR"):** unchanged (`src/lib.rs:179`; `src/on_disk.rs:233`, `:242`, `:276-283`). The error-variant sub-decision is still open (`KeyTooLarge` recommended). No new task.
 
 ---
 
@@ -312,8 +328,123 @@ behaviour change.
 - [ ] `cargo doc --no-deps -p extended-metadata-store --features testing` is warning-free.
 - [ ] `tasks.md` T056 checked off.
 
+**Re-confirmed 2026-10-14 (bundle sync, proposal P11, approved 2026-10-18 — "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR"):** unchanged. The branch's new items (`FlushTickets` fields) are private, so nothing was added to the list above. No new task.
+
+---
+
+## Task: Align 001-extended-metadata-store/FR-13 — break the trigger ↔ `FlushManager` reference cycle so the final flush runs  [ALIGN-EMS-008]
+
+**Proposal**: P6 (bundle sync; approved 2026-10-18 by Cornel Constantinescu — "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR")
+**Severity**: moderate (new finding)
+
+**Spec Requirement**: FR-13 — "`FlushManager` performs a final flush on Drop (graceful shutdown) …"
+(`spec.md` FR table). The recommended trigger is `move || flush_manager.trigger_flush()`
+(`spec.md` Feature Gating; `src/lib.rs:127`).
+
+**Current Code**: The trigger owns the `FlushManager` (`src/lib.rs:131-133`; field `:61`). The
+manager's worker thread owns the callbacks (`src/flush.rs:107-109`, `:142-144`). In every wiring
+in the tree, those callbacks capture `Arc<ExtendedMetadataStoreComponent>`
+(`src/repair_test_force_flush_error.rs:24`, `:33-37`). The worker exits only after `Drop` sets
+`shutdown` (`src/flush.rs:223-227`, `:276-290`). `Drop` runs only when the component's last `Arc`
+goes away, and the running worker holds that `Arc`. The result is a reference cycle: no final flush
+runs, the worker thread leaks (it polls every 10 ms, `:205`, `:211`), and so does the mock device or
+client. No API exists to detach the trigger.
+
+**Required Change** (option 2 is recommended):
+1. *Weak callbacks, no API change.* The callbacks capture `Weak<ExtendedMetadataStoreComponent>`.
+   `do_flush` must then skip the shutdown pass when the snapshot callback cannot reach the
+   component. That needs an `Option<Vec<…>>` sentinel, which is a signature change to
+   `FlushManager::start`. Without it, the final pass writes an empty region and loses data.
+2. *Explicit detach (recommended).* Add
+   `pub fn detach_flush_trigger(&self) -> Option<FlushTrigger>` to
+   `ExtendedMetadataStoreComponent`. The wiring layer MUST call it before shutdown and drop the
+   result, so `Drop` runs while the component is alive. Update
+   `repair_test_force_flush_error.rs` to detach at the end of each test.
+- Add a test: attach, `put`, detach + drop, reboot the mock, and assert the entry was recovered.
+- After the fix, backfill FR-05/FR-13 in `spec.md` with the detach requirement, and drop the
+  "see P6" clause from the FR-13 status cell.
+
+**Files to Modify**:
+- `components/extended-metadata-store/src/lib.rs`
+- `components/extended-metadata-store/src/repair_test_force_flush_error.rs`
+- `components/extended-metadata-store/tests/persistence.rs` (or a new `src/repair_test_*.rs`)
+- `specs/001-extended-metadata-store/spec.md` FR-05/FR-13 (backfill after the fix)
+
+**Estimated Effort**: small–medium.
+
+### Acceptance Criteria
+- [ ] With a `FlushManager` trigger attached, dropping the component (after detach, if option 2)
+      runs the final flush, and the worker thread exits.
+- [ ] Test: attach → `put` → shutdown → reboot → `get` returns the value, with no explicit `force_flush()`.
+- [ ] The repair tests no longer leak the worker thread.
+- [ ] FR-05/FR-13 document the wiring-layer shutdown obligation.
+
+---
+
+## Task: Align 001-extended-metadata-store/FR-05 — finish ALIGN-EMS-003's acceptance tests  [ALIGN-EMS-009]
+
+**Proposal**: P7 (bundle sync; approved 2026-10-18 by Cornel Constantinescu — "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR")
+**Severity**: minor
+
+**Spec Requirement**: FR-05, and the ALIGN-EMS-003 acceptance criteria 2 and 3 above.
+
+**Current Code**: The control test `force_flush_ok_on_healthy_device`
+(`src/repair_test_force_flush_error.rs:63-72`) asserts `Ok` and `dirty_count() == 0`, but it
+never reboots or recovers. AC3 as written is not deterministic. The failed pass's `notify_all`
+(`src/flush.rs:269`) wakes the waiter, which returns `Err` at `:181-185` before any retry.
+
+**Required Change**:
+- Extend the healthy test, or add a new one: `put` → `force_flush()` → `MockBlockDevice::reboot_from`
+  → `initialize_from_client` → `get` returns the value (AC2).
+- **Restated AC3:** "After a failed `force_flush()`, a later `force_flush()` on a healthy device
+  returns `Ok` and persists the write that the failed call left dirty." Test it with a mock that
+  fails the first N writes and then succeeds. That needs a small `FaultConfig` extension
+  (`fail_after_n_writes` is a one-way threshold), or a fresh mock on reboot.
+
+**Files to Modify**:
+- `components/extended-metadata-store/src/repair_test_force_flush_error.rs` (or `tests/persistence.rs`)
+- `components/extended-metadata-store/src/test_support.rs` (optional `FaultConfig` extension)
+
+**Estimated Effort**: small.
+
+### Acceptance Criteria
+- [ ] The healthy-device case recovers the value after a reboot (ALIGN-EMS-003 AC2).
+- [ ] A test covers the restated AC3: fail, then a later `force_flush()` succeeds and persists the
+      write that stayed dirty.
+
+---
+
+## Task: Align code doc comments with FR-12 / US6 AC5 / FR-14  [ALIGN-EMS-010]
+
+**Proposal**: P13 (bundle sync; approved 2026-10-18 by Cornel Constantinescu — "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR")
+**Severity**: minor (comment-only code change)
+
+**Spec Requirement**: FR-12 (ticket coalescing), US6 AC5 ("one worker wake-up, no flush"), and
+FR-14 ("mutations not yet covered by a successful flush").
+
+**Current Code**:
+- `src/flush.rs:79` says "share a single in-flight flush". That is inexact.
+- `src/flush.rs:156` says "Returns immediately if there are no dirty entries". In fact the call waits for one worker wake-up (`:233-238`).
+- `src/lib.rs:75` says "mutations since last flush". That is inexact after a failed flush or a mid-flush write.
+
+**Required Change** (comments only):
+- `src/flush.rs:79` → "Concurrent `trigger_flush` calls are coalesced by ticket: one pass serves every call registered before it snapshots; calls registered during a pass are served by the next one."
+- `src/flush.rs:156` → "If nothing is dirty, returns `Ok` after one worker wake-up without disk I/O."
+- `src/lib.rs:75` → "Get the current dirty count (mutations not yet covered by a successful flush)."
+
+**Files to Modify**:
+- `components/extended-metadata-store/src/flush.rs`
+- `components/extended-metadata-store/src/lib.rs`
+
+**Estimated Effort**: small.
+
+### Acceptance Criteria
+- [ ] All three doc comments reworded; no behaviour change.
+- [ ] `cargo doc --no-deps -p extended-metadata-store --features testing` stays warning-free.
+
 ---
 
 ## Open items from unapproved proposals with an approval note
 
-None. All 14 proposals in `proposals.json` (2026-10-14) are `approved: true`.
+None. All 15 proposals in `proposals.json` (bundle sync, 2026-10-18) are `approved: true`. The
+seven proposals that carry an `approval_note` (P6–P11, P13) are recorded above as ALIGN tasks.

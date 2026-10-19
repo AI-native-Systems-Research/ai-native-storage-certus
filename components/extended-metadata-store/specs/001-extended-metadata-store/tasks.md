@@ -16,7 +16,7 @@
 ## Known Code Defects (tracked in `.specify/sync/align-tasks.md`)
 
 - [x] ALIGN-001 (MAJOR, RESOLVED 2026-08-20): `components/extended-metadata-store` is now a member of the root `Cargo.toml` `[workspace] members` array and is built and tested by CI.
-- [x] ALIGN-002 (MAJOR, RESOLVED 2026-08-20): `IExtendedMetadataStore::force_flush()` invokes the `FlushTrigger` installed via `attach_flush_trigger` (FR-05). Follow-up: flush-failure propagation through `FlushManager::trigger_flush()` (proposal P1, 2026-10-14).
+- [x] ALIGN-002 (MAJOR, RESOLVED 2026-08-20): `IExtendedMetadataStore::force_flush()` invokes the `FlushTrigger` installed via `attach_flush_trigger` (FR-05). Follow-up flush-failure propagation through `FlushManager::trigger_flush()` (ALIGN-EMS-003) — RESOLVED by `4a8fe3e7` (`src/flush.rs:181-185`; test `src/repair_test_force_flush_error.rs`).
 
 ## Capacity Management Improvements
 

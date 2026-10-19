@@ -86,11 +86,14 @@ pub struct FlushManager {
 }
 
 /// `trigger_flush` requests: each caller takes ticket `requested + 1`; the
-/// worker sets `completed` to the last ticket taken before its snapshot.
+/// worker sets `completed` to the last ticket taken before its snapshot, and
+/// `durable` to the same if that pass left everything on disk.
 #[derive(Debug, Default)]
 struct FlushTickets {
     requested: u64,
     completed: u64,
+    durable: u64,
+    last_error: Option<String>,
 }
 
 /// Shared state passed to the flush worker thread.
@@ -151,6 +154,7 @@ impl FlushManager {
 
     /// Trigger an immediate flush and block until it completes.
     /// Returns immediately if there are no dirty entries (already durable).
+    /// Returns `Err` if the flush serving this call failed (data not durable).
     pub fn trigger_flush(&self) -> Result<(), String> {
         // Take a ticket (before signaling worker)
         let ticket = {
@@ -170,11 +174,15 @@ impl FlushManager {
 
         // Wait until a flush whose snapshot was taken after our ticket completes
         let (lock, cvar) = &*self.flush_state;
-        let _guard = cvar
+        let tickets = cvar
             .wait_while(lock.lock().unwrap(), |tickets| tickets.completed < ticket)
             .unwrap();
 
-        Ok(())
+        if tickets.durable >= ticket {
+            Ok(())
+        } else {
+            Err(tickets.last_error.clone().unwrap_or_default())
+        }
     }
 
     /// Get the last completed flush sequence number.
@@ -226,6 +234,7 @@ impl FlushManager {
                     let (lock, cvar) = &*ctx.flush_state;
                     let mut tickets = lock.lock().unwrap();
                     tickets.completed = tickets.completed.max(serving);
+                    tickets.durable = tickets.durable.max(serving);
                     cvar.notify_all();
                 }
                 continue;
@@ -253,6 +262,10 @@ impl FlushManager {
             let (lock, cvar) = &*ctx.flush_state;
             let mut tickets = lock.lock().unwrap();
             tickets.completed = tickets.completed.max(serving);
+            match &result {
+                Ok(()) => tickets.durable = tickets.durable.max(serving),
+                Err(e) => tickets.last_error = Some(e.clone()),
+            }
             cvar.notify_all();
         }
 
@@ -283,3 +296,7 @@ mod repair_test_flush_lost_dirty;
 #[cfg(test)]
 #[path = "repair_test_flush_threshold.rs"]
 mod repair_test_flush_threshold;
+
+#[cfg(test)]
+#[path = "repair_test_force_flush_error.rs"]
+mod repair_test_force_flush_error;

@@ -1,11 +1,50 @@
 ---
 spec_sync_component: extended-metadata-store
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-14T21:37:10Z
-spec_sync_git_commit: 6f781e85
-spec_sync_inputs_sha256: 43801741b23a2623a2ac240c5b16ca60a5191ca5523fde7068c5e3a09e3e226d
+spec_sync_synced_at: 2026-10-19T07:08:58Z
+spec_sync_git_commit: 4f8b5554b
+spec_sync_inputs_sha256: 883b012ddcbbca5fd34dd320dddf4ce0e2a7506ce1826cfd7be68056793a5acf
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Apply 2026-10-14 (branch fix/bundle-dispatcher-ems, approved by Cornel).** All 15 proposals in `proposals.json` were approved by Cornel Constantinescu on 2026-10-18 (PR approval page, groups A–D) and applied on 2026-10-19 in batch mode. Backups are in `.specify/sync/backups/20261019T070424Z/`; details are in `apply-report.{md,json}`. **Applied to the spec (no code change):**
+> - P1: FR-05, the "**Open:**" clause is replaced by the error-propagation evidence of `4a8fe3e7`.
+> - P2: US6, the `repair_test_force_flush_error.rs` tests are listed and the note is corrected.
+> - P3: Known Gaps FR-05, line refs refreshed and the resolved propagation recorded.
+> - P4: FR-12, the result of a released call is specified.
+> - P5: FR-11/FR-13 line refs refreshed, and FR-13 points to P6.
+> - P12: `tasks.md:19` and `align-tasks.md` mark ALIGN-EMS-003 resolved; the ALIGN-EMS-002 dependency note is rewritten.
+> - P14: Known Gaps `CapacityExhausted`, the capacity error now reaches `force_flush()` as `StorageError`.
+> - P15 (SUPERSEDE): the history line maps the untracked 002 spec references to ALIGN-EMS-001/002.
+>
+> **Became ALIGN tasks** (approval note: "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR"):
+> - P6 → ALIGN-EMS-008: FR-13 trigger/`FlushManager` reference cycle, so no final flush runs (moderate, new).
+> - P7 → ALIGN-EMS-009: ALIGN-EMS-003 AC2 reboot check and restated AC3.
+> - P13 → ALIGN-EMS-010: doc comments at `flush.rs:79`, `:156` and `lib.rs:75`.
+> - P8–P11 re-confirm ALIGN-EMS-004..007 (FR-09, NFR-04, FR-01, SC-7) unchanged.
+>
+> **Still open:** no unapproved proposals remain. The code-side drift for FR-13, FR-09, NFR-04, FR-01 and SC-7 stays until ALIGN-EMS-004..010 are implemented. Also open: ALIGN-EMS-001, the parked ALIGN-EMS-002, and the ALIGN-EMS-006 error-variant decision. No `src/`, test or interface file was changed, and the `spec_sync_*` frontmatter was not touched.
+>
+> **Stamp: clean.** Every drift item of this analysis is resolved (specification updates applied with Cornel's approval) or tracked in `align-tasks.md` (ALIGN tasks and open items, including the decision A-07 where it applies).
+
+> **Sync 2026-10-14 (branch fix/bundle-dispatcher-ems) — full re-analysis at `4f8b5554` (component source last changed in `4a8fe3e7`); batch mode, read-only.** Scope: the branch's only change to this component is the formal-verification fix `4a8fe3e7` (`src/flush.rs` +23/−3, new `src/repair_test_force_flush_error.rs`). I re-checked all 36 requirements (FR-01..18, NFR-01..11, SC-1..7) and the US1–US6 acceptance criteria against the current `src/` with file:line evidence; nothing was taken from earlier reports. I could not run any tests (`cargo test` needed a permission this session did not have), so SC-2..6 stay *unverified*. **The fix is correct as far as reading the code can show:**
+> - `FlushTickets` gains a `durable` watermark and `last_error` (`flush.rs:88-97`).
+> - `durable` advances only after a successful pass (`:265-268`) or a signalled pass that found nothing dirty (`:237`).
+> - `trigger_flush` returns `Ok` iff `durable >= ticket`, otherwise the last recorded error (`:181-185`).
+> - With the documented trigger, `force_flush()` now returns `StorageError` when the flush fails (`lib.rs:232`), and a fault-injection test covers this (`repair_test_force_flush_error.rs:42-61`).
+>
+> This closes the major FR-05 / ALIGN-EMS-003 drift on the code side.
+>
+> **Result:** 25 aligned, 6 drifted, 5 unverified, 2 unspecced behaviours, 4 inter-spec conflicts.
+>
+> **Drift:**
+> - FR-05: the spec row still says failures are "not propagated (`src/flush.rs:177`)", which is now false (spec-side, BACKFILL).
+> - **FR-13 (new, moderate):** the documented wiring `attach_flush_trigger(move || flush_manager.trigger_flush())`, combined with `FlushManager` callbacks that hold `Arc`s of the component, is a reference cycle through the worker thread. In that wiring the `FlushManager` is never dropped, so the final flush never runs and the worker thread leaks. The new repair test wires it exactly this way (`repair_test_force_flush_error.rs:24-37`).
+> - FR-09, NFR-04, FR-01 and SC-7 are unchanged and still open (ALIGN-EMS-004..007).
+>
+> **Stale and missing items:** line references in FR-11/12/13, the FR-05 Known Gaps entry and the US6 note are stale after the fix, and so is the status in tasks.md:19 and align-tasks.md. Two of ALIGN-EMS-003's acceptance tests are still missing.
+>
+> **Verdict: drift.** 15 proposals in `proposals.md` (backfill 7, align 7, supersede 1), all `approved: false`. The `spec_sync_*` frontmatter was left unchanged.
+
 > **Re-stamp 2026-10-14 (transitive, merge of unstable 6f5743cc into this branch).** Only `components/interfaces` changed for this component (`DispatcherConfig::cold_staging_buf_bytes` default 4 -> 16 MiB, #550); `extended-metadata-store` does not use it (grep over its src/ and specs/: 0 hits). This branch's full sync below stands; no re-analysis was needed.
 
 > **Re-stamp 2026-10-14 (transitive: `components/interfaces` changed, branch `fix/cold-staging-buf-16mib`).** The spec-sync digest folds `components/interfaces/{src,specs}` into every component's hash, so the single interface change on this branch — `DispatcherConfig::cold_staging_buf_bytes` default 4 MiB → 16 MiB (commit `8e12e49f`) and the matching correction to interfaces FR-027 — invalidates every component's stamp at once; this is the design, not a defect. **No code re-analysis was performed for this component, and none was needed:** its own `src/**` and `specs/**` are unchanged on this branch, and it does not reference `cold_staging_buf_bytes` (consumed only by the dispatcher's host-DRAM cold-staging pool). Digest refreshed to the recomputed value, computed over the **committed** `specs/**` tree (as the CI gate's clean checkout sees it): this working tree carries uncommitted, untracked spec files under `specs/001-*` and `specs/002-*` that are a separate local work-in-progress, out of scope for this branch, and deliberately excluded so the stamp matches what CI recomputes.
@@ -77,21 +116,21 @@ spec_sync_hash_tool: scripts/spec-sync-hash.sh
 
 # Spec Drift Report
 
-Generated: 2026-10-14
+Generated: 2026-10-18 (analysis note dated 2026-10-14 as requested)
 Project: extended-metadata-store (`components/extended-metadata-store/`)
-Branch / commit analysed: `fix/extended-metadata-store-flush` @ `2970e0a8` (source last changed in `95529247`)
+Branch / commit analysed: `fix/bundle-dispatcher-ems` @ `4f8b5554` (component source last changed in `4a8fe3e7`)
 Mode: batch, read-only. The only files written are under `.specify/sync/`.
 
-**Method.** Each FR, NFR, SC and US acceptance criterion in
-`specs/001-extended-metadata-store/spec.md` was checked against the shipped code by reading it.
-Line numbers refer to the tree at `2970e0a8`. I also reviewed the branch diff
-(`git diff origin/unstable.. -- src`) on its own. **No tests were executed**: `cargo test`
-needs a permission this session did not have. Anything that can only be shown by running
-tests is marked *unverified*, not aligned.
+**Method.** I checked each FR, NFR, SC and US acceptance criterion in
+`specs/001-extended-metadata-store/spec.md` by reading the shipped code. Line numbers refer to
+the tree at `4f8b5554`. I also reviewed the branch diff (`git diff origin/unstable.. -- src`)
+on its own. **No tests were executed**: `cargo test` needed a permission this session did not
+have. Anything that can only be shown by running tests is marked *unverified*, not aligned.
 
-**Body replaced.** The previous body (dated 2026-09-03, stamped `clean`) is superseded. It
-listed FR-11 as aligned while the threshold trigger was unimplemented. It also missed the
-FR-09, NFR-04, FR-01 and SC-7 findings below, which are all present on `origin/unstable` too.
+**Body replaced.** This body supersedes the 2026-10-14 body from branch
+`fix/extended-metadata-store-flush` @ `2970e0a8`. That analysis predates the fix `4a8fe3e7`,
+and the spec was changed by the 2026-10-14 apply, so all spec line numbers below are re-derived
+from the current `spec.md`.
 
 ## Summary
 
@@ -99,54 +138,70 @@ FR-09, NFR-04, FR-01 and SC-7 findings below, which are all present on `origin/u
 |----------|-------|
 | Specs Analyzed | 1 (`001-extended-metadata-store`; spec.md + plan.md + tasks.md) |
 | Requirements Checked | 36 (18 FR + 11 NFR + 7 SC), plus US1–US6 acceptance criteria |
-| ✓ Aligned | 24 (67%) |
-| ⚠️ Drifted | 7 (19%) — FR-01, FR-05, FR-09, FR-12, FR-17, NFR-04, SC-7 |
+| ✓ Aligned | 25 (69%) |
+| ⚠️ Drifted | 6 (17%): FR-01, FR-05 (spec side only), FR-09, FR-13 (new), NFR-04, SC-7 |
 | ✗ Not Implemented | 0 (0%) |
-| ❔ Unverified (need test execution) | 5 (14%) — SC-2, SC-3, SC-4, SC-5, SC-6 |
-| 🆕 Unspecced Code | 5 |
-| Parked (open ALIGN carried over) | 1 — `CapacityExhausted` never constructed |
-| Inter-spec conflicts | 5 |
+| ❔ Unverified (need test execution) | 5 (14%): SC-2, SC-3, SC-4, SC-5, SC-6 |
+| 🆕 Unspecced Code | 2 |
+| Parked (open ALIGN carried over) | 1: `CapacityExhausted` never constructed (ALIGN-EMS-002) |
+| Inter-spec conflicts | 4 |
 
-## Branch fix — independent verification
+**Change since the previous body:**
+- FR-05 is now correct in code (the major item ALIGN-EMS-003 is fixed by `4a8fe3e7`); only the spec text is stale.
+- FR-12 and FR-17 are aligned: the 2026-10-14 apply backfilled them.
+- FR-13 is newly drifted.
+- The earlier unspecced items U1–U5 were backfilled by the apply.
+- Conflicts 1, 2, 4 and most of 5 were resolved by the apply. The 4 conflicts listed here are new or remaining.
 
-The fix (`a7c10168`, `95529247`) touches `src/flush.rs`, `src/lib.rs` and two new test modules.
-I re-derived its correctness from the code rather than from the commit messages:
+## Branch fix — independent verification (`4a8fe3e7`, "force_flush returns the device error when the flush failed")
 
-1. **A `trigger_flush` caller is never released by a flush that predates its write.**
-   - The caller's write happens before it takes ticket `requested+1` under `flush_state`
-     (`flush.rs:156-161`).
-   - The worker reads `serving = requested` under the same mutex (`flush.rs:213`), and only
-     then checks the dirty count (`:222`) and snapshots (`:240`).
-   - Tickets ≤ `serving` are marked complete only after that pass (`:252-257`), or on the
-     `dirty == 0` path (`:223-231`).
-   - A ticket taken after `:213` waits for a later pass (`:172-175`).
-   - No wakeup is lost: the caller sets `signaled` after taking its ticket (`:164-169`). If
-     that lands after the worker clears it (`:208`), the next loop iteration sees it.
-2. **Writes made during a flush stay dirty.**
-   - `snapshot_entries` records `dirty_count` while holding the read lock (`lib.rs:99-105`).
-   - `put`/`delete` increment the count only after dropping the write lock
-     (`lib.rs:185-188`, `:206-209`).
-   - So any increment the recorded count includes belongs to a mutation that is in the
-     snapshot. This follows from RwLock mutual exclusion plus read–write coherence, and
-     holds even with `Relaxed` ordering.
-   - `mark_flushed` subtracts exactly the recorded count with `fetch_update` and
-     `saturating_sub` (`lib.rs:113-121`), so increments that land at the same time are kept.
-   - The recorded count can be too small (a put has inserted but not yet incremented). That
-     is safe: the mutation stays counted and costs one spare flush.
-3. **The threshold trigger is real.**
-   - The worker's wait loop exits on `signaled`, on the deadline, or when
-     `threshold_armed && dirty_count() >= max(threshold, 1)` (`flush.rs:187`, `:197-206`).
-   - It polls every `THRESHOLD_POLL_INTERVAL = 10 ms` (`:14-16`), because writes do not
-     notify the condvar.
-4. **What the fix does not cover:** a failed flush still completes the tickets, and
-   `trigger_flush` returns `Ok(())` anyway (`flush.rs:177`, `:246-257`). See FR-05 below.
+The diff touches only `src/flush.rs` (+23/−3) and adds `src/repair_test_force_flush_error.rs`
+(72 lines). I re-derived its correctness from the code, not from the commit message.
 
-Test coverage added by the branch:
-- `repair_test_flush_lost_dirty.rs:30,90` — tests for points 1 and 2.
-- `repair_test_flush_threshold.rs:62,75,91` — tests for point 3.
-
-Both modules are `#[cfg(test)]` inside `flush.rs`, which only compiles with `--features testing`
-(`lib.rs:31-32`). None of the five tests is listed in spec.md.
+1. **New state.** `FlushTickets` gains `durable: u64` and `last_error: Option<String>`
+   (`flush.rs:88-97`), guarded by the same `flush_state` mutex as `requested`/`completed`.
+2. **`durable` advances only when the data is on disk.**
+   - A pass that found nothing dirty and was signalled advances `completed` and `durable`
+     together (`flush.rs:233-238`). That is correct: nothing is pending, so the caller's
+     earlier writes are already covered by the last successful flush.
+   - `do_flush` advances `completed` always, and `durable` only on `Ok`. On `Err` it stores
+     the error in `last_error` (`flush.rs:260-270`). It does this after `mark_flushed`, which
+     runs only on success (`:255-258`).
+   - The shutdown pass uses the same `do_flush` (`:223-227`).
+3. **`trigger_flush` reports the result of the pass that released it.**
+   - The caller waits until `completed >= ticket` (`flush.rs:176-179`), then returns `Ok` iff
+     `durable >= ticket`, else `Err(last_error)` (`:181-185`).
+   - `completed` and `durable` only grow (`max`). `durable` is advanced only by a pass whose
+     `serving` covers the ticket, and that pass's snapshot was taken after the ticket's write
+     (`:219-221`, unchanged ticket argument from the previous report). So `Ok` implies a
+     successful flush whose snapshot contains the caller's write.
+   - `durable < ticket` after `completed >= ticket` implies that the latest pass covering the
+     ticket failed. That pass set `last_error` under the same lock first, so `unwrap_or_default()`
+     (`:184`) never yields an empty string on a real failure.
+   - A waiter that wakes only after a later successful pass also covered its ticket gets `Ok`.
+     That is correct, because the later snapshot contains its write. Normally, though, the waiter
+     is woken by the failed pass's `notify_all` (`:269`) and returns `Err` before any retry. So
+     ALIGN-EMS-003's acceptance criterion 3 ("a ticket served by a failed pass but later covered
+     by a successful pass returns `Ok`") holds only if the waiter runs late; it is not a
+     deterministic property (see P7).
+4. **The component maps the error.** `force_flush` maps the trigger's `Err` to `StorageError`
+   (`lib.rs:230-234`, unchanged). With the documented trigger, `force_flush()` therefore now
+   returns `StorageError` when the flush fails.
+5. **Tests.** Both tests are `#[cfg(test)]` inside `flush.rs` (`:300-302`) and compile only with
+   `--features testing`.
+   - `force_flush_reports_failed_disk_write` (`repair_test_force_flush_error.rs:42-61`) uses
+     `FaultConfig { fail_after_n_writes: Some(0) }`. Every write fails at `test_support.rs:133-141`
+     and the error surfaces through `block_io.rs:109-110`. The test asserts `StorageError` and that
+     the write stays dirty.
+   - `force_flush_ok_on_healthy_device` (`:63-72`) is the healthy control case.
+   - This is the first caller of `attach_flush_trigger` in the workspace (grep:
+     `repair_test_force_flush_error.rs:37` is the only one). It also closes the
+     "follow-up test through `force_flush()`" asked for at `spec.md:154`.
+6. **What the fix does not cover:**
+   - ALIGN-EMS-003's acceptance criteria 2 and 3 are not tested. The control case checks
+     `dirty_count() == 0` but does not reboot and recover. No test covers "a ticket served by a
+     failed pass, then covered by a successful pass, returns `Ok`".
+   - The wiring used by the test creates an ownership cycle (see FR-13 below).
 
 ## Detailed Findings
 
@@ -157,78 +212,74 @@ Both modules are `#[cfg(test)]` inside `flush.rs`, which only compiles with `--f
 | Req | What was checked | Evidence |
 |-----|------------------|----------|
 | FR-02 | `get` returns a clone, or `NotFound` | `src/lib.rs:192-200`; test `get_not_found` `lib.rs:258` |
-| FR-03 | `delete` removes the key, returns `Ok` for a missing key, increments dirty count | `src/lib.rs:202-211`; tests `lib.rs:270,281` |
-| FR-04 | `iterate_all` clones the whole map under one read lock (consistent snapshot) | `src/lib.rs:213-219` |
+| FR-03 | `delete` removes the key, returns `Ok` for a missing key, increments dirty count | `src/lib.rs:202-211`; tests `lib.rs:270`, `:281` |
+| FR-04 | `iterate_all` clones the whole map under one read lock | `src/lib.rs:213-219` |
 | FR-06 | `MAX_VALUE_SIZE = 128*1024`; `put` returns `ValueTooLarge` before any mutation | `src/lib.rs:66-67`, `:179-181`; test `lib.rs:329` |
-| FR-07 | Serialise → write the inactive region → flip `active_region` and bump `flush_seq` → write the superblock last | `src/flush.rs:24-57` (inactive write `:45-46`, commit point `:54`) |
-| FR-08 | Recovery reads the superblock and the active region (checking that the header `flush_seq` matches the superblock), then loads the entries | `src/recovery.rs:23-59`; `src/lib.rs:147-162` |
-| FR-10 | No valid superblock → `format_fresh` returns `partition_sectors == 0` → `initialize_from_client` calls `format_partition` | `src/recovery.rs:27-32`, `:89-113`; `src/lib.rs:150-154`; test `recovery_fresh_partition_formats_empty` `tests/persistence.rs:765` |
-| FR-11 | Both triggers work: the timer (`deadline` `flush.rs:194`, `:199-202`) and the dirty threshold (`:187`, `:197`). Defaults are 5 s and 100 (`:68-74`). See the unspecced items U2 for details the spec does not mention | `src/flush.rs:14-16`, `:59-75`, `:185-206`, `:234` |
-| FR-13 | `Drop` sets `shutdown`, signals the worker and joins it; the worker runs a final `do_flush` | `src/flush.rs:263-277`, `:215-219` (see U4: this final flush runs even when nothing is dirty) |
-| FR-14 | `put`/`delete` increment the count (`lib.rs:188`, `:209`). A successful flush subtracts only the count recorded with its snapshot (`:113-121`); `load_entries` resets to 0 (`:92-93`). "Mutations since last flush" holds in the sense of "not yet covered by a successful flush"; the more precise wording is proposed in P9 | `src/lib.rs:76-121`; tests `lib.rs:342`, `repair_test_flush_lost_dirty.rs:90` |
+| FR-07 | Serialise → write the inactive region → flip `active_region` and bump `flush_seq` → superblock last | `src/flush.rs:24-57` (inactive write `:45-46`, commit point `:54`) |
+| FR-08 | Recovery reads the superblock and the active region, checks the header `flush_seq` against the superblock, loads the entries | `src/recovery.rs:23-59`; `src/lib.rs:147-162` |
+| FR-10 | No valid superblock → `format_fresh` returns `partition_sectors == 0` → `initialize_from_client` calls `format_partition` | `src/recovery.rs:27-32`, `:89-113`; `src/lib.rs:150-154`; test `tests/persistence.rs:765` |
+| FR-11 | Timer (`deadline` `flush.rs:202`, `:207-209`; `None` disables it), threshold `max(dirty_threshold,1)` (`:195`, `:205`), 10 ms poll (`:14-16`, `:211`), disarm on failure (`:198`, `:243`), timer pass with nothing dirty does no I/O (`:230-241`). Behaviour matches the spec text; **the spec's line references are stale** (cites `:185-206`, `:234`), see P5 | `src/flush.rs:14-16`, `:59-75`, `:193-244` |
+| FR-12 | Tickets: `requested+1` under `flush_state` (`flush.rs:160-165`), worker reads `serving = requested` before the dirty check/snapshot (`:221`, `:230`, `:249`), completion `max(serving)` (`:236`, `:264`). Matches the spec text. The spec does not say that a call released by a failed pass returns `Err` (new behaviour, U1), and its line references are stale (cites `:88-94`, `:152-178`, `:211-213`, `:251-257`); see P4 | `src/flush.rs:88-97`, `:155-186`, `:219-241`, `:260-270` |
+| FR-14 | `put`/`delete` increment after dropping the write lock (`lib.rs:187-188`, `:208-209`); a successful flush subtracts the snapshot's recorded count (`:113-121`), and a failed one subtracts nothing (`flush.rs:255-258`); `load_entries` resets to 0 (`lib.rs:92-93`). The new test confirms the failed case (`repair_test_force_flush_error.rs:57-60`) | `src/lib.rs:86-121`, `:188`, `:209` |
 | FR-15 | `define_component!` provides `IExtendedMetadataStore` | `src/lib.rs:40-64` |
-| FR-16 | Optional `logger: ILogger` receptacle; each operation logs at `debug` if a logger is bound | `src/lib.rs:44-46`, `:182-184`, `:193-195`, `:203-205`, `:214-216`, `:222-224`, `:167-171`. One gap: a `put` rejected with `ValueTooLarge` returns before logging (`:179-184`), which makes US1 AC6 "all operations are logged" slightly inexact |
-| FR-18 | `Superblock::region_capacity_bytes()` returns `region_a_size * sector_size` | `src/on_disk.rs:147-149` (spec cites `:142`, which is stale) |
-| NFR-01 | `RwLock<HashMap>`: `get`/`iterate_all`/`snapshot_entries` take the read lock, `put`/`delete`/`load_entries` take the write lock | `src/lib.rs:48`, `:87`, `:100`, `:185`, `:196`, `:206`, `:217` |
-| NFR-02 | CRC32 (poly `0xEDB88320`) on the superblock, region header and each entry record | `src/on_disk.rs:78`, `:110-113`, `:170`, `:186-189`, `:248-252`, `:276-283`, `:364-377` |
-| NFR-03 | Superblock and header are each one sector buffer; records are padded to the sector size | `src/on_disk.rs:60`, `:163`, `:222-229`, `:353-358` |
-| NFR-05 | `on_disk` is always compiled; `block_io`/`flush`/`recovery`/`test_support` need `feature = "testing"`; `testing = ["interfaces/spdk"]`, `spdk = ["testing", …]` | `src/lib.rs:26-38`; `Cargo.toml:8-10` |
-| NFR-06 | The default build has no SPDK dependency: `force_flush` with no trigger returns `Ok` | `src/lib.rs:230-234`; test `lib.rs:319` |
-| NFR-07 | `MockBlockDevice` with `FaultConfig::fail_after_n_writes` | `src/test_support.rs:19-21`, `:59`, `:133`, `:169`, `:223` |
-| NFR-08 | `BlockDeviceClient` takes a `DmaAllocFn`; tests use the heap-backed `heap_dma_alloc` | `src/block_io.rs:5`, `:11`; `src/test_support.rs:244` |
-| NFR-09 | All integer fields are written and read with `to_le_bytes`/`from_le_bytes` | `src/on_disk.rs:379-410` |
-| NFR-10 | Magic number `0x4345_5254_4D45_5441` is checked on read | `src/on_disk.rs:6`, `:91-94` |
-| NFR-11 | `create_test_component_from_state` → `MockBlockDevice::reboot_from` | `src/test_support.rs:275-284` (spec cites `:272`, which is stale) |
-| SC-1 | Exactly 9 `#[test]` in `src/lib.rs` (`:247-354`) with no features; another 6 in `on_disk.rs` (`:416-479`) | static count |
+| FR-16 | Optional `logger: ILogger` receptacle; every op logs at `debug` if bound. Minor gap: a `put` rejected with `ValueTooLarge` returns before logging (`:179-184`) | `src/lib.rs:44-46`, `:182-184`, `:193-195`, `:203-205`, `:214-216`, `:222-224`, `:167-171` |
+| FR-17 | `snapshot_entries` records `snapshot_dirty` under the read lock (`lib.rs:99-106`); `mark_flushed` sets `flush_seq`, swaps the recorded count to 0 and subtracts it (`:113-121`); with no prior snapshot `swap` yields 0, so the count is left unchanged. Matches the backfilled text | `src/lib.rs:50-53`, `:96-121` |
+| FR-18 | `region_capacity_bytes()` = `region_a_size * sector_size` | `src/on_disk.rs:147-149` |
+| NFR-01 | `RwLock<HashMap>`: read lock for get/iterate/snapshot, write lock for put/delete/load | `src/lib.rs:48`, `:87`, `:100`, `:185`, `:196`, `:206`, `:217` |
+| NFR-02 | CRC32 (poly `0xEDB88320`) on superblock, region header, entry record | `src/on_disk.rs:78`, `:110-113`, `:170`, `:186-189`, `:248-252`, `:276-283`, `:364-377` |
+| NFR-03 | Superblock/header are one sector each; records padded to the sector size | `src/on_disk.rs:60`, `:163`, `:222-229`, `:353-358` |
+| NFR-05 | `on_disk` always compiled; `block_io`/`flush`/`recovery`/`test_support` behind `feature = "testing"` | `src/lib.rs:26-38` |
+| NFR-06 | Default build: `force_flush` with no trigger returns `Ok` | `src/lib.rs:230-234`; test `lib.rs:319` |
+| NFR-07 | `MockBlockDevice` + `FaultConfig::fail_after_n_writes` | `src/test_support.rs:21`, `:59`, `:133-141`, `:223` |
+| NFR-08 | `BlockDeviceClient` takes a `DmaAllocFn`; tests use `heap_dma_alloc` | `src/block_io.rs:18`, `:83`; `src/test_support.rs:244` |
+| NFR-09 | Integer fields use `to_le_bytes`/`from_le_bytes` | `src/on_disk.rs:379-410` |
+| NFR-10 | Magic `0x4345_5254_4D45_5441` checked on read | `src/on_disk.rs:6`, `:91-94` |
+| NFR-11 | `create_test_component_from_state` → `MockBlockDevice::reboot_from` | `src/test_support.rs:275`, `:65` |
+| SC-1 | Exactly 9 `#[test]` in `src/lib.rs` (`:247-354`), no features needed | static count |
 
 #### Drifted ⚠️
 
-- **FR-05 — `force_flush()` durability on the attached `FlushManager` path.** (Severity: **major**)
-  - Spec says (`spec.md:163`): "`force_flush()` ensures all mutations are durable on disk: it invokes a durable-flush trigger … and blocks until it returns, mapping trigger errors to `StorageError`". `spec.md:308` and the interface doc (`interfaces/src/iextended_metadata_store.rs:44`, "Returns when all data is durable") say the same.
-  - The component side is correct: `force_flush` calls the trigger and maps `Err` to `StorageError` (`src/lib.rs:221-235`).
-  - The problem is the trigger itself. The documented trigger is `move || flush_manager.trigger_flush()` (`lib.rs:127`, `spec.md:180`), and `FlushManager::trigger_flush` **always** returns `Ok(())` (`src/flush.rs:177`). `do_flush` marks the served tickets complete whether or not `flush_to_disk` succeeded (`:246-257`).
-  - Consequence: if the device fails or the region capacity is exceeded (`flush.rs:36-42`), `force_flush()` returns `Ok`, the data is not durable, and `StorageError` is never produced on this path. No test covers it: `attach_flush_trigger` is not called by any test or caller in the workspace (grep).
-  - The spec's line references are also stale: it cites `lib.rs:201-215`, `:111`, `:68`; the current lines are `221-235`, `131`, `72`.
-  - Location: `src/flush.rs:152-178`, `:239-260`.
-- **FR-09 — corrupt *entries* do not trigger the fallback to the inactive region.** (Severity: **moderate**)
-  - Spec says (`spec.md:167`): "Recovery falls back to inactive region if active region is corrupt". The Recovery Algorithm (`spec.md:299-300`) says "Read active region, verify header CRC and entry CRCs … If active region corrupt: try inactive region".
-  - What the code does: fallback happens only when the region **header** fails to parse or its `flush_seq` does not match (`recovery.rs:53-66`).
-  - When an entry's CRC fails, `deserialize_region` skips one sector and carries on (`on_disk.rs:341-344`) and still returns `Some`. Recovery therefore accepts a partial entry set from the active region, with no warning (although `recovery.rs:21` says warnings include "skipped corrupt entries") and no fallback.
-  - It gets worse for large values. A multi-sector record (for example a 128 KiB value, 33 sectors) is skipped by only one sector. The following sectors are then parsed as records, so later valid entries in the region can also be lost.
-  - The only test, `recovery_fallback_to_inactive_region`, corrupts the header (`tests/persistence.rs:268-277`), so this path is never exercised.
-- **NFR-04 — after a fallback recovery, a crash during the next flush destroys the only good copy.** (Severity: **moderate**)
-  - Spec says (`spec.md:193`): "partial flush never corrupts previously-committed data". It also says (`spec.md:290-292`): "Crash during step 2: old active region is still valid".
-  - What the code does: on fallback, `recover_from_disk` returns the superblock **unchanged** (`recovery.rs:68-77`). `active_region` still points at the corrupt region, and the entries were loaded from the *inactive* one.
-  - That superblock is returned by `initialize_from_client` (`lib.rs:155-157`, `:173`) and fed to `flush_to_disk`/`FlushManager::start`.
-  - The next flush writes `inactive_region_offset()` (`flush.rs:45-46`), which is the region that holds the only valid checkpoint.
-  - A crash between `flush.rs:46` and `:54` leaves both regions invalid. The next recovery then formats the partition fresh (`recovery.rs:79-84`), losing all data.
-  - That fresh format also resets `flush_seq` to 0 (`recovery.rs:106-112`), contrary to US2 AC6 "Flush sequence numbers are monotonically increasing".
-- **FR-01 — keys longer than 65 535 bytes are accepted but cannot be persisted.** (Severity: **moderate**)
-  - Spec says (`spec.md:159`): "`put(key, value)` stores arbitrary binary data (0 to 128 KiB) by string key". It sets no key limit, and `tasks.md:7` lists "key size limits" as a missing requirement.
-  - What the code does: `put` checks only the value length (`lib.rs:179`).
-  - `EntryRecord::serialize` writes `key_len` as `key_bytes.len() as u16` (`on_disk.rs:233`), which silently truncates, but copies the full key (`:242`).
-  - On recovery the CRC therefore fails (`:276-283`) and the entry is skipped (see FR-09). Through the skip-one-sector behaviour, the entries after it can be lost too.
-  - The key is held in memory and acknowledged, and is silently lost on restart.
-- **FR-12 / US6 AC2 — coalescing wording is out of date after the fix.** (Severity: minor)
-  - Spec says (`spec.md:170`): "Multiple `force_flush()` calls coalesce into single flush operation". `spec.md:140` and `plan.md:32` ("share a single in-flight flush") say the same.
-  - What the code does: coalescing works by ticket. All calls registered before a pass reads `requested` (`flush.rs:213`) are released by that pass. A call registered while a pass is in flight is deliberately **not** released by it and waits for the next pass (`:171-175`).
-  - So concurrent calls can take two passes, not one. The doc comment `flush.rs:79` still says "share a single in-flight flush".
-  - US6 AC5 "returns immediately (no-op)" is also inexact. With nothing dirty the call still waits for one worker wake-up (`flush.rs:223-231`), although no I/O happens. `flush.rs:153` says "Returns immediately" too.
-- **FR-17 — the `mark_flushed` contract changed and the change is not specified.** (Severity: minor)
-  - Spec says (`spec.md:175`): the wiring API is listed with no stated semantics. `plan.md:101` says `mark_flushed(new_seq) [reset dirty_count]`.
-  - What the code does: `snapshot_entries` now records the dirty count it covers (`lib.rs:103-104`). `mark_flushed` subtracts exactly that recorded count and clears it (`lib.rs:113-121`).
-  - Undocumented consequences:
-    - (a) `mark_flushed` with no snapshot before it no longer resets the dirty count; it leaves it unchanged.
-    - (b) A second `snapshot_entries()` between a flusher's snapshot and its `mark_flushed` overwrites the single recorded slot (`lib.rs:53`). That can clear mutations that were never persisted, so only one flusher may drive the pair at a time.
-    - (c) A failed flush leaves the recorded count stale until the next snapshot. This is harmless, because it is overwritten.
-  - The existing manual callers already follow the snapshot → flush → `mark_flushed` order (`tests/integration_ssd.rs:206-209`).
-- **SC-7 — "All public items have doc comments" is false.** (Severity: minor)
-  - Spec says (`spec.md:257`): "All public items have doc comments; `cargo doc --no-deps` is warning-free".
+- **FR-05: the spec text is out of date after the fix.** (Severity: minor; spec side, BACKFILL)
+  - Spec says (`spec.md:166`, status column): "**Open:** with the documented `FlushManager::trigger_flush()` trigger, flush failures are not propagated (`src/flush.rs:177`) — see drift-report 2026-10-14 / proposal P1".
+  - What the code does now: `trigger_flush` returns `Err(last_error)` when the pass that released it failed (`src/flush.rs:181-185`, `:260-270`), and `force_flush` maps that error to `StorageError` (`src/lib.rs:232`). Test: `repair_test_force_flush_error.rs:42-61`.
+  - The FR-05 requirement text itself is now **met in code**. Only the "Open" clause and the stale citation `flush.rs:177` (now a `wait_while` line) are wrong.
+  - Related stale text that refers to the same pre-fix state: the US6 note (`spec.md:154`), the Known Gaps FR-05 entry (`spec.md:183`: `lib.rs:201-215`, `:68`, `:111`; the current lines are `:221-235`, `:72`, `:131`), `tasks.md:19` ("Follow-up: flush-failure propagation …"), and `align-tasks.md` ALIGN-EMS-003 (status "open", citing `flush.rs:177`).
+- **FR-13: the documented trigger wiring makes the final flush on Drop unreachable.** (Severity: **moderate**; new)
+  - Spec says (`spec.md:174`): "`FlushManager` performs a final flush on Drop (graceful shutdown) …". `spec.md:311` and the doc comment at `lib.rs:127` recommend the trigger `move || flush_manager.trigger_flush()`.
+  - What the code does:
+    - The trigger closure owns the `FlushManager` and is stored in the component's `flush_trigger` field (`lib.rs:61`, `:131-133`).
+    - The `FlushManager` owns the worker thread (`flush.rs:85`, `:142-144`). The worker owns `snapshot_fn`/`dirty_count_fn`/`reset_dirty_fn` (`:107-109`).
+    - In every wiring in the tree, those callbacks capture an `Arc` of the same component (`repair_test_force_flush_error.rs:24`, `:33-35`; also `tests/persistence.rs:514-523`).
+  - Result: component → trigger → `FlushManager` → worker thread → callbacks → component.
+    - The component's strong count never reaches zero, so the `FlushManager` is never dropped, `Drop` (`flush.rs:276-290`) never runs, and the final flush (`:223-227`) never happens.
+    - The worker thread keeps running for the life of the process, waking every 10 ms (`:205`, `:211`).
+    - There is no `detach_flush_trigger`. The only way to drop the manager is to replace the trigger with `attach_flush_trigger`, which drops the old manager while holding the trigger write lock. That join does not deadlock, because the worker never takes `flush_trigger`.
+  - Who is affected: today only the new repair test (each of its 2 tests leaks one worker thread). It also affects any production wiring that follows the spec's recommendation.
+  - The cycle existed in principle since `attach_flush_trigger` was introduced, but no caller wired it until this branch.
+  - Not covered by any test: no test drops a component with an attached trigger and checks that the final flush ran.
+- **FR-09: corrupt *entries* do not trigger the fallback to the inactive region.** (Severity: moderate; unchanged, ALIGN-EMS-004 open)
+  - Spec says (`spec.md:170`): "Recovery falls back to inactive region if active region is corrupt". Recovery Algorithm (`spec.md:302-303`): "verify header CRC and entry CRCs … If active region corrupt: try inactive region".
+  - What the code does: fallback happens only on a header parse failure or a `flush_seq` mismatch (`recovery.rs:53-66`).
+  - `deserialize_region` skips a bad-CRC entry by one sector and still returns `Some` (`on_disk.rs:341-344`). There is no warning, although the doc at `recovery.rs:21` says skipped entries produce warnings.
+  - A multi-sector record skipped by one sector misparses every later record.
+  - The only test corrupts the header (`tests/persistence.rs:245`).
+- **NFR-04: after a fallback recovery, the next flush overwrites the only good region.** (Severity: moderate; unchanged, ALIGN-EMS-005 open)
+  - Spec says (`spec.md:196`): "partial flush never corrupts previously-committed data". Flush Strategy (`spec.md:294`): "Crash during step 2: old active region is still valid".
+  - What the code does: the fallback returns the superblock unchanged (`recovery.rs:68-77`), so `active_region` still names the corrupt region. `initialize_from_client` passes it on (`lib.rs:155-157`, `:173`).
+  - The next flush writes `inactive_region_offset()` (`flush.rs:45-46`), which is the region that was just recovered.
+  - A crash between `flush.rs:46` and `:54` leaves both regions invalid, and recovery then formats fresh (`recovery.rs:79-84`). That also resets `flush_seq`, contrary to US2 AC6 (`spec.md:68`).
+- **FR-01: keys longer than 65 535 bytes are accepted but cannot be persisted.** (Severity: moderate; unchanged, ALIGN-EMS-006 open)
+  - Spec says (`spec.md:162`): "`put(key, value)` stores arbitrary binary data (0 to 128 KiB) by string key". `spec.md:213` defines `key_len(2B)`.
+  - What the code does: only the value length is checked (`lib.rs:179`). `serialize` writes `key_bytes.len() as u16` (`on_disk.rs:233`) but copies the full key (`:242`).
+  - On recovery the CRC fails (`:276-283`) and the entry is skipped (see FR-09), so the key is silently lost on restart.
+  - With the fix, an over-long key also makes the region larger. That can now surface as a capacity `StorageError` from `force_flush()`, which is better than the old silent `Ok`, but the key-length truncation itself is unchanged.
+- **SC-7: "All public items have doc comments" is false.** (Severity: minor; unchanged, ALIGN-EMS-007 open)
+  - Spec says (`spec.md:260`): "All public items have doc comments; `cargo doc --no-deps` is warning-free".
   - Undocumented public items:
-    - `on_disk.rs`: all `Superblock` fields (`:12-23`), `Superblock::new`/`serialize`/`deserialize`/`inactive_region_offset`/`active_region_offset`/`region_capacity_bytes` (`:27`, `:59`, `:85`, `:131`, `:139`, `:147`), `RegionHeader` fields and methods (`:155-158`, `:162`, `:176`), `EntryRecord` fields and `new`/`serialized_size`/`serialize`/`deserialize` (`:206-208`, `:214`, `:222`, `:227`, `:257`), `pad_to_sector`, `bytes_to_sectors` (`:353`, `:360`).
-    - `block_io.rs`: `BlockDeviceClient::sector_size` and `BlockDeviceClient::new` (`:12`, `:18`).
-    - `recovery.rs`: `RecoveryResult` fields (`:14-16`).
-  - The workspace has no `missing_docs` lint, so `cargo doc` can be warning-free while SC-7's first clause fails. The second clause was not run this sweep.
+    - `on_disk.rs`: `Superblock` fields `:12-23`; `Superblock::new`/`serialize`/`deserialize`/`inactive_region_offset`/`active_region_offset`/`region_capacity_bytes` `:27`, `:59`, `:85`, `:131`, `:139`, `:147`; `RegionHeader` fields `:155-158`, methods `:162`, `:176`; `EntryRecord` fields `:206-208`, methods `:214`, `:222`, `:227`, `:257`; `pad_to_sector` `:353`; `bytes_to_sectors` `:360`.
+    - `block_io.rs`: `BlockDeviceClient::sector_size` `:12`, `BlockDeviceClient::new` `:18`.
+    - `recovery.rs`: `RecoveryResult` fields `:14-16`.
+  - No `missing_docs` lint is set (`lib.rs:1-25`). The `cargo doc` clause was not run.
 
 #### Not Implemented ✗
 
@@ -238,61 +289,38 @@ None.
 
 | SC | Static evidence | Note |
 |----|-----------------|------|
-| SC-2 | 19 `#[test]` in `tests/persistence.rs`, plus 5 new `#[cfg(test)]` tests in `src/repair_test_*.rs` (`--features testing`) | the pass/fail state is unknown |
-| SC-3 | 14 tests in `tests/integration_ssd.rs` | needs NVMe hardware. `test_capacity_exhaustion` (`:526`) cannot reach its `CapacityExhausted` arm (`:542`), so it proves nothing (parked item) |
-| SC-4 | `crash_mid_flush_recovers_previous_state` (`tests/persistence.rs:687`) | covers a crash with a healthy inactive region only. The NFR-04 scenario above has no test |
-| SC-5 | `concurrent_stress_8_threads` (`tests/persistence.rs:417`) | — |
-| SC-6 | — | `cargo clippy -- -D warnings` was not run |
+| SC-2 | 19 `#[test]` in `tests/persistence.rs`, plus 7 `#[cfg(test)]` repair tests in `src/repair_test_*.rs` (`--features testing`): 2 + 3 + 2 | pass/fail unknown. The commit message of `4a8fe3e7` claims "tests 5/5" for its acceptance run; I did not reproduce it |
+| SC-3 | 14 tests in `tests/integration_ssd.rs` | needs NVMe hardware. `test_capacity_exhaustion` cannot reach its `CapacityExhausted` arm (`:542`) |
+| SC-4 | `crash_mid_flush_recovers_previous_state` (`tests/persistence.rs:687`) | the NFR-04 scenario has no test |
+| SC-5 | `concurrent_stress_8_threads` (`tests/persistence.rs:417`) | none |
+| SC-6 | none | `cargo clippy -- -D warnings` was not run |
 
-### Parked (carried over, unchanged)
+### Parked (carried over)
 
-- **`CapacityExhausted` is defined but never constructed.**
-  - The variant is defined at `interfaces/src/iextended_metadata_store.rs:12` and no `src/` path constructs it (grep).
-  - Capacity is surfaced only as a `String` at flush time (`flush.rs:36-42`). On the `FlushManager` path even that `String` is now discarded (see FR-05).
-  - `tests/integration_ssd.rs:526-547` (arm `:542`) proves nothing. The earlier report cited `:513-547`/`:530`, which are stale.
-  - Tracked as ALIGN-EMS-002 in `.specify/sync/align-tasks.md`. The maintainer decision of 2026-09-03 to keep it parked stands.
+- **`CapacityExhausted` is defined but never constructed** (`interfaces/src/iextended_metadata_store.rs:12`; grep finds no construction under `src/`). ALIGN-EMS-002 stays parked (maintainer decision 2026-09-03).
+- **What the fix changes:** the flush-time capacity error (`flush.rs:36-42`) now reaches the caller of `force_flush()` as `StorageError("region data … exceeds region capacity …")`, no longer as `Ok`.
+- So the "alternative" route in ALIGN-EMS-002 is unblocked: it now only needs mapping to `CapacityExhausted`.
+- The dependency note at `align-tasks.md:111-116` ("`trigger_flush` currently discards every flush error (`src/flush.rs:177`)") is out of date. The Known Gaps entry `spec.md:185` does not mention that the error now reaches the caller as `StorageError` (P14).
 
 ### Unspecced Code 🆕
 
 | # | Feature | Location | Lines | Suggested Spec |
 |---|---------|----------|-------|----------------|
-| U1 | Ticket-based `trigger_flush` protocol (`FlushTickets { requested, completed }`); a pass serves the tickets taken before its snapshot | `src/flush.rs:88-94`, `:152-178`, `:211-213`, `:223-231`, `:251-257` | ~45 | 001 FR-12 (P7) |
-| U2 | Threshold trigger details: 10 ms polling (`THRESHOLD_POLL_INTERVAL`), `dirty_threshold` clamped to ≥1, threshold **disarmed after a failed flush** until a later pass succeeds, timer measured from the start of each wait (an interval that cannot be represented disables the timer) | `src/flush.rs:14-16`, `:185-206`, `:234` | ~30 | 001 FR-11 (P8) |
-| U3 | `snapshot_dirty` field; `snapshot_entries` → `mark_flushed` pairing and the single-flusher precondition | `src/lib.rs:50-53`, `:93`, `:96-121` | ~30 | 001 FR-14 / FR-17 (P9) |
-| U4 | The final flush on shutdown runs **even when nothing is dirty** (it writes a region and bumps `flush_seq`), and its failure is not reported; public `FlushManager::completed_seq()` accessor | `src/flush.rs:215-219`, `:180-183` | ~10 | 001 FR-13 + Key Entities (P10) |
-| U5 | `force_flush` holds the `flush_trigger` read lock while the trigger runs, so `attach_flush_trigger` blocks until any in-flight `force_flush` returns | `src/lib.rs:230-234`, `:131-133` | ~6 | 001 FR-05 (P11) |
+| U1 | `durable` watermark + `last_error` in `FlushTickets`. A `trigger_flush()` released by a failed pass returns that error (the most recent failure recorded; it is never cleared, but it is returned only when `durable < ticket`). A failed pass leaves the caller's writes dirty, so a later pass may still persist them, and a waiter that wakes after such a pass gets `Ok` | `src/flush.rs:88-97`, `:181-185`, `:237`, `:265-268` | ~15 | 001 FR-05 / FR-12 (P1, P4) |
+| U2 | Ownership between trigger and manager: `attach_flush_trigger` has no detach counterpart, and the trigger closure keeps the `FlushManager` alive for the component's lifetime | `src/lib.rs:131-133`; `src/flush.rs:276-290` | ~5 | 001 FR-13 / FR-05 (P6) |
 
 ## Inter-Spec Conflicts
 
-1. **`plan.md:104` contradicts `spec.md:163`/`:308`.**
-   - `plan.md:104` says `force_flush()` "is currently *not* wired into this path in any build configuration — it is an unconditional no-op".
-   - spec.md (FR-05) says it is implemented with the trigger, and the code agrees (`lib.rs:221-235`).
-2. **`plan.md:162` contradicts `spec.md:259`.**
-   - `plan.md:162` says the crate "currently is **not**" a workspace member.
-   - The root `Cargo.toml:23` (member) and `:125` (workspace dependency) show it is. spec.md:259 also cites `:105`, which is stale.
-3. **`tasks.md:13`, `:18`, `:19` contradict `spec.md:180`, `:259` and `align-tasks.md`.**
-   - tasks.md still has unchecked items "T056 … blocked on ALIGN-001", "ALIGN-001 … missing from workspace" and "ALIGN-002 … unconditional no-op".
-   - spec.md and `align-tasks.md:9-19` record both items as RESOLVED.
-4. **`plan.md:32` and `plan.md:101` contradict the code.**
-   - `plan.md:32` says "share a single in-flight flush"; `plan.md:101` says "reset dirty_count".
-   - They describe the pre-fix behaviour (see FR-12, FR-17).
-5. **spec.md cites a `002-ssd-integration-test` spec that is not tracked in this tree.**
-   - The citations are at `spec.md:7` ("002-FR-011", "002-FR-007"), `:151` ("002-FR-007's ALIGN task") and `:182` ("the 002 SSD test", "002-FR-007").
-   - Only `specs/001-extended-metadata-store/` is tracked. The 002 text survives only in `.specify/sync/backups/`.
+1. **`tasks.md:19` vs code.** It says "Follow-up: flush-failure propagation through `FlushManager::trigger_flush()` (proposal P1, 2026-10-14)", which describes the work as pending. It is implemented in `flush.rs:181-185` (`4a8fe3e7`).
+2. **`align-tasks.md:20` and `:138-176` (ALIGN-EMS-003, status "open") vs code.** The "Current Code" section cites `flush.rs:177` "always ends in `Ok(())`", which is no longer true. Acceptance criterion 1 is met; criteria 2 and 3 are not tested; criterion 4 ("drop the Open clause from FR-05") is pending (P1).
+3. **`spec.md:154` (US6 note) vs `src/repair_test_force_flush_error.rs`.** The note says a test that "installs a trigger and asserts durability (and error propagation) through `force_flush()`" is still a follow-up tracked by P1. That test now exists. ALIGN-EMS-001 (the SSD test) is still open.
+4. **`spec.md:8` ("Previous Sync") still cites `002-FR-011` and `002-FR-007`.** Only `specs/001-*` is tracked. The 2026-10-14 SUPERSEDE (P14) replaced the live references but left this history line. Minor; a historical record (P15).
 
 ## Recommendations
 
-1. **Fix FR-05 first (major).**
-   - The fix: `do_flush` records the pass result, and `trigger_flush` returns `Err` when the pass that served its ticket failed.
-   - Add a test that attaches a `FlushManager` trigger to the component, injects a write fault (`FaultConfig::fail_after_n_writes`), and asserts that `force_flush()` returns `StorageError`.
-   - That test also closes the "follow-up test through `force_flush()`" left open at `spec.md:151`. (P1)
-2. **Make recovery fall back when entries are corrupt (FR-09).**
-   - Treat entry CRC failures, and a parsed entry count lower than `header.entry_count`, as region corruption.
-   - Record a warning, and skip a corrupt record by its declared padded length rather than by one sector. (P2)
-3. **After a fallback recovery, make the recovered region the active one (NFR-04).**
-   - Either return a superblock with `active_region` pointing at the region actually loaded, or make the next flush target the corrupt region.
-   - Add a test: corrupt the active region, recover, inject a crash mid-flush, recover again. (P3)
-4. **Reject keys that cannot be persisted (FR-01).** Keys longer than `u16::MAX` bytes should be rejected at `put` time. This needs a decision on the error variant (an interface change). (P4)
-5. **Add the missing doc comments (SC-7)**, or narrow SC-7. CLAUDE.md requires doc comments on public APIs, so adding them is preferred. (P5)
-6. **Backfill the stale wording.** Update FR-11/12/13/14/17, the FR-05 text and the US6 test list to the shipped behaviour, and fix the conflicting plan.md/tasks.md notes and the 002 citations. (P7–P14)
-7. **Run the tests before the next stamp.** `cargo test -p extended-metadata-store` (default and `--features testing`), `cargo clippy -p extended-metadata-store --features testing -- -D warnings`, and `cargo doc -p extended-metadata-store --no-deps` should run before this report is next stamped `clean`; the SC-2/3/4/5/6 verdicts above are unverified.
+1. **Backfill FR-05 and its satellites** (P1–P3, P12): drop the "Open" clause, cite `flush.rs:181-185`/`:260-270`, list the two new tests, refresh the Known Gaps refs, and mark ALIGN-EMS-003 resolved in `tasks.md`/`align-tasks.md`.
+2. **Break the trigger↔manager cycle (FR-13, P6).** Preferred fix: the `FlushManager` callbacks capture `Weak<ExtendedMetadataStoreComponent>` (no component change), or add a `detach_flush_trigger()` that takes the trigger out and drops the manager. Add a test that the final flush runs when the wiring is torn down. Fix the repair test wiring the same way.
+3. **Finish ALIGN-EMS-003's acceptance tests** (P7): reboot and recover after the healthy `force_flush()`, and restate criterion 3 so that it is deterministic.
+4. **The open ALIGN items stay as they are** (P8–P11: FR-09, NFR-04, FR-01, SC-7). None changed on this branch.
+5. **Refresh the stale line references** in FR-11/12/13 (P4, P5), the CapacityExhausted Known Gap (P14) and the history line (P15). Fix the stale code doc comments (`flush.rs:79`, `:156`, `lib.rs:75`; P13).
+6. **Run the tests before the next `clean` stamp.** That means `cargo test -p extended-metadata-store` (default and `--features testing`), `cargo clippy -p extended-metadata-store --features testing -- -D warnings`, and `cargo doc -p extended-metadata-store --no-deps`.

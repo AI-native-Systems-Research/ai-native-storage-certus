@@ -69,6 +69,10 @@ mod pins;
 pub mod pipeline;
 mod remote_probe;
 
+#[cfg(test)]
+#[path = "repair_test_eviction_events_dropped.rs"]
+mod repair_test_eviction_events_dropped;
+
 use parking_lot::RwLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -86,7 +90,7 @@ use component_core::binding::bind;
 use spdk_env::ISPDKEnv;
 
 use crate::background::{
-    BackgroundEvictor, EvictorConfig, MemoryTierEvictor, MemoryTierEvictorConfig,
+    BackgroundEvictor, EvictionSender, EvictorConfig, MemoryTierEvictor, MemoryTierEvictorConfig,
     ParallelBackgroundWriter, WriteJob,
 };
 pub use crate::metrics::PipelineMetrics;
@@ -426,8 +430,8 @@ define_component! {
             max_eviction_attempts: AtomicUsize,
             store_backpressure_ms: AtomicU64,
             pipeline_metrics: RwLock<Option<Arc<dyn PipelineMetrics>>>,
-            eviction_tx: Arc<Mutex<Option<crossbeam_channel::Sender<EvictionEvent>>>>,
-            eviction_dropped: AtomicU64,
+            eviction_tx: Arc<Mutex<Option<EvictionSender>>>,
+            eviction_dropped: Arc<AtomicU64>,
             tier_counters: Arc<TierEventCounters>,
         },
     }
@@ -560,7 +564,10 @@ impl DispatcherComponent {
         capacity: usize,
     ) -> crossbeam_channel::Receiver<EvictionEvent> {
         let (tx, rx) = crossbeam_channel::bounded(capacity);
-        *self.eviction_tx.lock().unwrap() = Some(tx);
+        *self.eviction_tx.lock().unwrap() = Some(EvictionSender {
+            tx,
+            dropped: Arc::clone(&self.eviction_dropped),
+        });
         rx
     }
 
@@ -572,9 +579,7 @@ impl DispatcherComponent {
     fn emit_eviction(&self, key: CacheKey, reason: EvictionReason) {
         let guard = self.eviction_tx.lock().unwrap();
         if let Some(ref tx) = *guard {
-            if tx.try_send(EvictionEvent { key, reason }).is_err() {
-                self.eviction_dropped.fetch_add(1, Ordering::Relaxed);
-            }
+            tx.emit(EvictionEvent { key, reason });
         }
     }
 
@@ -2942,6 +2947,10 @@ impl IDispatcher for DispatcherComponent {
             if matches!(results[i], Some(Err(DispatcherError::AlreadyExists(_)))) {
                 results[i] =
                     Some(self.serve_concurrently_promoted(&dm, &gpu, *key, regions, warm_raw));
+                // Rewritten with the result: classification marked the key `Ssd`, but
+                // this pass served it out of DRAM after the winner's promotion (FR-009,
+                // FR-010). On a failed recovery the result alone decides the bucket.
+                tier[i] = Some(ServedBy::Dram);
             }
         }
 
@@ -3061,8 +3070,34 @@ impl IDispatcher for DispatcherComponent {
                         r.map(|()| null_stream)
                     }
                     LookupResult::BlockDevice { offset } => {
+                        // Hold the lookup's read pin across the whole promotion: it is
+                        // what stops a concurrent remove or SSD eviction deleting the
+                        // entry, or freeing the fresh slot, while the SSD read and the
+                        // in-place promotion are still running.
+                        let r = match self.promote_and_serve(
+                            key,
+                            offset,
+                            &ipc_handle,
+                            &gpu,
+                            &dm,
+                            &mt,
+                            device,
+                        ) {
+                            // A concurrent cold lookup of this key won the mt.insert
+                            // race: a hit, not a failure — serve it warm once that
+                            // promotion lands, as batch_lookup's recovery pass does.
+                            Err(DispatcherError::AlreadyExists(_)) => self
+                                .serve_concurrently_promoted(
+                                    &dm,
+                                    &gpu,
+                                    key,
+                                    std::slice::from_ref(&ipc_handle),
+                                    warm_raw,
+                                ),
+                            r => r,
+                        };
                         let _ = dm.release_read(key);
-                        self.promote_and_serve(key, offset, &ipc_handle, &gpu, &dm, &mt, device)?;
+                        r?;
                         self.tier_counters.record_promotion_to_gpu();
                         Ok(null_stream)
                     }
@@ -3178,20 +3213,37 @@ impl IDispatcher for DispatcherComponent {
         let alloc_us = t_alloc.elapsed().as_micros() as f64;
 
         // Phase 2: Async DMA copy from GPU into the reserved slot, then sync.
+        // Until Phase 3 registers it, the slot has no dispatch-map entry, so the
+        // evictor can never reclaim it: every failure here must release it, or
+        // the DRAM leaks and a retry of this key fails with AlreadyExists.
         let t_d2h = std::time::Instant::now();
-        let gpu = self
-            .gpu_services
-            .get()
-            .map_err(|_| DispatcherError::NotInitialized("gpu_services not bound".into()))?;
+        let gpu = match self.gpu_services.get() {
+            Ok(g) => g,
+            Err(_) => {
+                let _ = self.release_memory(key);
+                return Err(DispatcherError::NotInitialized(
+                    "gpu_services not bound".into(),
+                ));
+            }
+        };
         // D2H source is on the GPU (ipc_handle.address); make that device current
         // and use its dedicated store stream so D2H doesn't serialize with H2D
         // loads on the warm stream (PCIe full-duplex).
         let device = set_batch_device(&*gpu, ipc_handle.address);
         let store_raw = device_streams_for(&*gpu, device).map_or(0, |s| s.store);
         let stream = GpuStream(store_raw as *mut std::ffi::c_void);
-        self.copy_gpu_to_memory_async(key, std::slice::from_ref(&ipc_handle), stream)?;
-        gpu.stream_synchronize(stream)
-            .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
+        if let Err(e) =
+            self.copy_gpu_to_memory_async(key, std::slice::from_ref(&ipc_handle), stream)
+        {
+            let _ = self.release_memory(key);
+            return Err(e);
+        }
+        if let Err(e) = gpu.stream_synchronize(stream) {
+            let _ = self.release_memory(key);
+            return Err(DispatcherError::IoError(format!(
+                "stream_synchronize failed: {e}"
+            )));
+        }
         let d2h_us = t_d2h.elapsed().as_micros() as f64;
 
         // Phase 3: Register in dispatch-map and enqueue SSD write-through.
@@ -3508,7 +3560,22 @@ impl IDispatcher for DispatcherComponent {
         dm.create_memory_tier_entry(key, mem_ptr, size)
             .map_err(|e| match e {
                 interfaces::DispatchMapError::AlreadyExists(k) => {
-                    let _ = mt.remove(key);
+                    // The tier holds one slot per key, so the existing entry may
+                    // be pointing at this very slot (a repeated or racing
+                    // completion). Free it only when the entry provably lives
+                    // elsewhere; if we cannot tell, keep it — a leaked slot is
+                    // recoverable, a freed live one is not.
+                    let live = match dm.lookup(key) {
+                        Ok(LookupResult::NotExist) => false,
+                        Ok(r) => {
+                            let _ = dm.release_read(key);
+                            matches!(r, LookupResult::MemoryTier { pointer, .. } if pointer == mem_ptr)
+                        }
+                        Err(_) => true,
+                    };
+                    if !live {
+                        let _ = mt.remove(key);
+                    }
                     DispatcherError::AlreadyExists(k)
                 }
                 other => {
@@ -3899,6 +3966,10 @@ impl IDispatcher for DispatcherComponent {
         stats
     }
 }
+
+#[cfg(test)]
+#[path = "repair_test_cold_pin.rs"]
+mod repair_test_cold_pin;
 
 #[cfg(test)]
 mod tests {
@@ -4802,7 +4873,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
         c.dispatch_map
@@ -4967,7 +5038,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
         c.dispatch_map
@@ -5015,7 +5086,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
     }
@@ -5036,7 +5107,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
         let d = query_interface!(c, IDispatcher);
@@ -5059,7 +5130,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -5087,7 +5158,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -5116,7 +5187,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -5145,7 +5216,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -5169,7 +5240,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -5193,7 +5264,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -5222,7 +5293,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -5254,7 +5325,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -5277,7 +5348,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -5301,7 +5372,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         ));
 
@@ -5356,7 +5427,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
         c.dispatch_map.connect(dm).unwrap();
@@ -5390,7 +5461,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
         c.dispatch_map.connect(dm).unwrap();
@@ -5468,7 +5539,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
         c.dispatch_map.connect(dm).unwrap();
@@ -6311,7 +6382,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
 
@@ -6347,7 +6418,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
 
@@ -6418,7 +6489,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
 
@@ -6479,7 +6550,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::clone(&counters),
         );
 
@@ -6576,7 +6647,7 @@ mod tests {
                 AtomicU64::new(0),
                 RwLock::new(None),
                 Arc::new(Mutex::new(None)),
-                AtomicU64::new(0),
+                Arc::new(AtomicU64::new(0)),
                 Arc::clone(&counters),
             );
             let res = c.evict_for_space(&dm, &mt, 4096, 100, 512);
@@ -6660,7 +6731,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
 
@@ -6716,7 +6787,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
         c.dispatch_map
@@ -6785,7 +6856,7 @@ mod tests {
             AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
         );
         c.dispatch_map
@@ -7112,3 +7183,15 @@ mod tests {
         d.shutdown().unwrap();
     }
 }
+
+#[cfg(test)]
+#[path = "repair_test_served_by.rs"]
+mod repair_test_served_by;
+
+#[cfg(test)]
+#[path = "repair_test_copy_completed.rs"]
+mod repair_test_copy_completed;
+
+#[cfg(test)]
+#[path = "repair_test_populate_slot.rs"]
+mod repair_test_populate_slot;

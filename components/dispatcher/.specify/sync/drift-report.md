@@ -1,11 +1,40 @@
 ---
 spec_sync_component: dispatcher
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-14T20:46:27Z
-spec_sync_git_commit: 474ba0a6
-spec_sync_inputs_sha256: 0cd907de408c51e5dc12c768837f69ce0255f020b8b0a6ff2ef1e66cf5d394e7
+spec_sync_synced_at: 2026-10-19T07:08:58Z
+spec_sync_git_commit: 4f8b5554b
+spec_sync_inputs_sha256: a91f93b848af43f215d81a96f7d884a68b5d95264563e2577292aea7651cb287
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Apply 2026-10-14 (branch fix/bundle-dispatcher-ems, approved by Cornel).** **Applied** to `specs/**`, exact proposal text, backup in `.specify/sync/backups/20261019T070414Z/`: **B-01** (FR-036/FR-051 lookup pin through promotion + race recovery), **B-02** (FR-032 + edge case, SSD evictor runs `dm.remove` first), **B-03** (FR-003/FR-059 slot released after post-reserve failure), **B-04** (FR-056 `copy_gpu_to_memory_completed` keeps a live slot), **B-05** (FR-042/FR-050 all eviction paths count drops; stale `Removed` clause), **B-06** (ring-buffer fallback removed, 5 sites), **B-07** (FR-037 stream lifetime), **B-08** (remove order), **B-09** (no `dma_copy_to_host`), **B-10** (002 FR-008 sub-paths), **B-11** (US-11 AS4), plus the notes **N-02** (FR-045 `CERTUS_LOG_REMOTE_DELIVERY`) and **N-03** (FR-056 `CERTUS_LOG_RESERVE`). Both specs got a `Last Synced 2026-10-14` header. This resolves D-01…D-05, D-08, D-09, D-10, D-12, D-14, U-02, U-03, U-05 and the US-11 AS4 note. **Became tasks** in `align-tasks.md` (approved as ALIGN tasks only, no code change in this PR): **A-01** (002 warm-sync failure → `ERROR`, major), **A-02** (`batch_lookup` cold pin, major), **A-03** (`clear_memory_tier` pinned slot, major), **A-04** (no-drives promote re-register), **A-05** (phase-3 release in `copy_gpu_to_memory_completed`), **A-06** (SSD-evictor sender wiring), **A-08** (002 per-value attribution tests). **Stays open** (not approved, recorded in `align-tasks.md` with their notes): **A-07** (FR-058 `store_already_resident`, ALIGN or BACKFILL is Cornel's decision), **N-01** (new FR-062 integrity-check verify-before-serve, MEDIUM), **N-04** (`remove` on a pinned entry, MEDIUM, deferred to the remove-no-wait PR). Drift stays **OPEN** until the code tasks land. No source files changed. The frontmatter is left for the stamping script.
+>
+> **Stamp: clean.** Every drift item of this analysis is resolved (specification updates applied with Cornel's approval) or tracked in `align-tasks.md` (ALIGN tasks and open items, including the decision A-07 where it applies).
+
+> **Sync 2026-10-14 (branch `fix/bundle-dispatcher-ems`) — full re-verification, drift OPEN.** Base `origin/unstable` `acd240255`, HEAD `4f8b5554b`. This branch changes only `src/**` (lib.rs, background.rs and six `repair_test_*` modules). `specs/**` and `components/interfaces` are unchanged, so the frontmatter digest is stale until a spec edit and re-stamp are made (the frontmatter is left exactly as it was; a script re-stamps it). Unlike the delta sweeps below, **every** active FR/SC of both specs was checked against the code. That is 117 items: 108 analysed and 9 out of this component's scope. The six dispatcher repairs on the branch (found by formal verification) are all real fixes. Five of them change behaviour the spec does not yet describe. The sixth (`a7ccc6e48`) makes the code do what spec 002 already says:
+>
+> - **Cold `lookup` keeps its read pin through promotion** (`1d24ff27f`, `src/lib.rs:3072-3103`) and recovers a lost `mt.insert` race inline. This is a BACKFILL of FR-036/FR-051. **The same pin drop still exists in `batch_lookup`** (`src/lib.rs:2434`). That is the shm-queue `LOOKUP` path. It is an ALIGN finding (major), safe only when the caller pins first (Check→Pin).
+> - **SSD evictor runs `dm.remove` before `mt.remove`** (`1d24ff27f`/`d450c7cc1`, `src/background.rs:349-358`). BACKFILL of FR-032 and of the SSD-evictor edge case.
+> - **`populate` releases its slot on every failure after it reserves memory** (`9defa9e1a`, `src/lib.rs:3215-3246`). BACKFILL of FR-003/FR-059. The phase-3 failures inside `copy_gpu_to_memory_completed` (integrity-check path) are still not covered. That is ALIGN.
+> - **`copy_gpu_to_memory_completed` keeps the live slot on `AlreadyExists`** (`ad3654207`, `src/lib.rs:3560-3585`). BACKFILL of FR-056.
+> - **The background evictors count events that do not fit the channel** (`0d3fcde43`, `EvictionSender`, `src/background.rs:225-241`). BACKFILL of FR-042/FR-050. The SSD evictor takes a copy of the sender at `initialize()` (`src/lib.rs:2059`), and both servers create the channel *after* `initialize()`. So the SSD evictor still sends and counts nothing in production. ALIGN.
+> - **The concurrent-promotion recovery attributes `Dram`** (`a7ccc6e48`, `src/lib.rs:2946-2954`). Spec 002 FR-009/FR-010 are now aligned (they were drifted on base).
+>
+> Pre-existing drift found by the full sweep, not caused by this branch:
+> - spec 002 US1-AS3/FR-009: a failed warm batched sync is only logged, and the keys are still reported as `Dram` hits (`src/lib.rs:2750-2755`). **Major.**
+> - FR-038 `clear_memory_tier` frees the slot of a pinned entry and leaves a dangling dispatch-map pointer (`src/lib.rs:3880-3888`). **Major.**
+> - FR-028 / US-9 AS3: the no-drives `promote_and_serve` never re-registers the entry (`src/lib.rs:814-820`).
+> - FR-058: `store_already_resident` is also counted on load paths.
+> - FR-019 / US-9 AS1: names a ring-buffer fallback that does not exist.
+> - FR-037: says per-device streams are destroyed at shutdown; they are not.
+> - Edge case "remove order" is the wrong way round.
+> - FR-050: "Removed on transition failure" is stale.
+> - FR-003 names `dma_copy_to_host`, which populate no longer calls.
+> - spec 002 FR-008: lists "inline fallback", which was removed.
+> - spec 002 FR-027: value-specific tests exist only for `Dram`/`Miss`.
+> - Five unspecced features (integrity-check serve path, remote-delivery probe, reserve logging, remove-of-pinned-entry result, SSD-evictor `Removed` events).
+>
+> Totals: 108 requirements in scope. 81 aligned, 15 drifted, 3 partially implemented, 9 not verifiable without hardware or a cluster, plus 5 unspecced features. **23 proposals (11 BACKFILL, 8 ALIGN, 4 NEW_SPEC), all `approved: false`**; nothing applied. See `proposals.md`.
+
 > **Re-stamp 2026-10-14 (interfaces spec corrected, branch `fix/cold-staging-buf-16mib`).** The FR-033 reconciliation below is unchanged; this re-stamp only refreshes the digest after the matching 4 MiB → 16 MiB correction to interfaces FR-027, which folds into this component's hash. No code re-analysis needed.
 
 > **Sync 2026-10-14 (branch `fix/cold-staging-buf-16mib`).** Delta analysis on a certified baseline: the prior clean stamp was for `547107f3`, and the only input that changed between it and HEAD (`8e12e49f`) is `components/interfaces/src/idispatcher.rs` — the `cold_staging_buf_bytes` default. This component's own `src/**` and `specs/**` were otherwise unchanged, so the one in-scope question is every FR/SC that constrains the staging-buffer size. Spec 001 in scope.
@@ -98,7 +127,282 @@ spec_sync_hash_tool: scripts/spec-sync-hash.sh
 > folded in) and matches `spec_sync_inputs_sha256`; the digest here was recomputed
 > over a clean tree (no untracked files under `src/`/`specs/`) after the last edit.
 
-# Spec Drift Report — dispatcher
+# Spec Drift Report — dispatcher (full sweep, branch `fix/bundle-dispatcher-ems`)
+
+Generated: 2026-10-14 (analysis run 2026-10-18)
+Project: `components/dispatcher` (crate `dispatcher`)
+Specs: `specs/001-dispatcher-cache-interface/spec.md` (415 lines), `specs/002-served-by-tier-attribution/spec.md` (777 lines)
+Branch: `fix/bundle-dispatcher-ems` — HEAD `4f8b5554b`, base `origin/unstable` `acd240255`
+Mode: read-only drift analysis, batch (no questions). Nothing outside `.specify/sync/` was edited.
+
+## Scope and method
+
+**What changed on the branch** (`git diff origin/unstable.. -- components/dispatcher/src`): `src/lib.rs` (165 lines changed), `src/background.rs` (51 lines changed), six new `#[cfg(test)]` modules `src/repair_test_*.rs`. `specs/**` and `components/interfaces/**` are **unchanged** (`git diff --stat` empty). Commits (dispatcher only; `4a8fe3e75` touches `extended-metadata-store` and is out of scope):
+
+| Commit | Finding id (from the repair test header) | Code change |
+|---|---|---|
+| `0d3fcde43` | DIS-INV-EVICTION-EVENTS | `EvictionSender { tx, dropped: Arc<AtomicU64> }` with `emit()`; background evictors now count drops (`src/background.rs:225-241`, `:361`, `:565`; `src/lib.rs:433-434`, `:562-584`) |
+| `a7ccc6e48` | DIS-BATCH-LOOKUP-SERVEDBY-CONCURRENT-DRAM / -OVERWRITE | recovery pass rewrites `tier[i] = Dram` (`src/lib.rs:2946-2954`) |
+| `1d24ff27f` | DIS-SPIN-COLD-LOOKUP-KEEPS-PIN | `lookup_async` BlockDevice arm holds the read pin across `promote_and_serve`; `AlreadyExists` → `serve_concurrently_promoted` (`src/lib.rs:3072-3103`); SSD evictor reorders `dm.remove` before `mt.remove` (`src/background.rs:349-358`) |
+| `d450c7cc1` | DIS-SPIN-SSD-EVICTOR-RELEASES-AFTER-REMOVE | regression test only (`src/repair_test_ssd_evictor_release.rs:290`) |
+| `ad3654207` | DIS-COPY-COMPLETED-EXISTING-ENTRY-PRESERVED | on `AlreadyExists`, free the slot only if the existing entry provably lives elsewhere (`src/lib.rs:3560-3585`) |
+| `9defa9e1a` | DIS-POPULATE-FAILURE-RELEASES-SLOT | `populate` releases the reserved slot on GPU-unbound / D2H / sync failure (`src/lib.rs:3215-3246`) |
+| `4f8b5554b` | — | `#[cfg(test)]` per test module (`src/lib.rs:72-74, 3970-3972, 7186-7197`; `src/background.rs:757-759`) |
+
+**Why this is a full sweep and not a delta.** The previous dated notes are delta sweeps scoped to one input each. They state that their method validates nothing outside that scope ("this stamp is not evidence against it"). The 2026-09-28 sweep also recorded that this component cites only 4 requirement ids in code, so counting citations proves nothing here. This sweep therefore checked **meaning**: each active FR/SC/acceptance scenario was read against the function that implements it. Each verdict cites `file:line`. Requirements marked REMOVED/WITHDRAWN (001 FR-020/021/022/026/027/044, SC-008; 002 FR-016-as-original) are not counted.
+
+**Cross-component evidence consulted (read only):** `components/interfaces/src/idispatcher.rs` (trait, `DispatcherConfig::default` `:105-127`, `ServedBy` `:248-274`), `components/interfaces/src/idispatch_map.rs`, `components/dispatch-map/src/lib.rs` (real `lookup` pins every found entry incl. BlockDevice `:142-150`; `remove` refuses `read_ref>0` with `ActiveReferences` `:341-343`; `try_evict_to_block` `:548-570`), `lib/shmq-dispatcher/src/translate.rs` (`op_pin` `:596-608`, `wire_tier` `:700-710`, `tally_lookup` `:712-734`, `op_lookup` `:736-770`), `apps/certus-server-yaml/build.rs:447-471` and `apps/certus-server/src/main.rs:469,529` (dispatcher `initialize` precedes `create_eviction_channel`).
+
+## Summary
+
+| Category | Count |
+|----------|-------|
+| Specs Analyzed | 2 |
+| Requirements Checked | 117. That is 108 in this component's scope: the active FRs and SCs of both specs plus the acceptance scenarios and edge cases singled out below. The other 9 items of spec 002 belong to other components and are only listed |
+| ✓ Aligned | 81 (75.0% of 108). This is the remainder after the other categories; the aligned items are listed below, grouped where one function implements several requirements |
+| ⚠️ Drifted | 15 (13.9%). 5 are this branch's fixes, which the spec does not yet describe (BACKFILL). 10 were already there before this branch |
+| ◐ Partially implemented | 3 (2.8%). All 3 are gaps this branch's repairs left open or closed on only one path |
+| ✗ Not implemented | 0 |
+| ⧗ Not verifiable here (hardware / cluster / benchmark) | 9 (8.3%) |
+| 🆕 Unspecced Code | 5 |
+
+What this branch's repairs mean for the spec (one line each):
+1. D-01 · FR-036 / FR-051: the cold `lookup` pin and race recovery are now implemented but not specified (**BACKFILL**).
+2. D-02 · FR-032 + edge case: SSD evictor order `dm.remove` → `mt.remove` (**BACKFILL**).
+3. D-03 · FR-003 / FR-059: populate releases its slot after a post-reserve failure (**BACKFILL**). P-01: phase-3 failures are still uncovered (**ALIGN**).
+4. D-04 · FR-056 `copy_gpu_to_memory_completed`: keeps the live slot on `AlreadyExists` (**BACKFILL**).
+5. D-05 · FR-042 / FR-050: background evictor drops are now counted (**BACKFILL**). P-02: the SSD evictor's sender, copied at init, is still dead in production (**ALIGN**).
+6. 002 FR-009/FR-010: now aligned (previously drifted). No spec change needed.
+7. P-03: the cold-pin repair fixed `lookup_async` only; `batch_lookup` still drops the pin (**ALIGN**, major).
+
+## Detailed Findings
+
+### Spec: 001-dispatcher-cache-interface — Dispatcher Cache Interface (Memory-Tier Architecture)
+
+#### Aligned ✓
+
+- FR-001 method inventory → `components/interfaces/src/idispatcher.rs:499-877`. All 24 listed trait methods exist (initialize … tier_event_stats). `create_eviction_channel` / `eviction_dropped_count` are inherent (`src/lib.rs:562-577`).
+- FR-002 `DispatcherError` → `idispatcher.rs:167-181` (NotInitialized, KeyNotFound, AlreadyExists, AllocationFailed, IoError, Timeout, InvalidParameter).
+- FR-004 write-through via `peek` + `convert_to_storage` → `src/lib.rs:1395-1470` (`mt.peek` `:1404`, `convert_to_storage` `:1469`).
+- FR-005 slot not freed on write-through completion → `src/lib.rs:1466-1469` (no `mt.remove`).
+- FR-006 warm path per-region `memcpy_h2d_async` on `warm`, `dma_copy_to_device` fallback → `src/lib.rs:1267-1341`, call `:3057-3064`.
+- FR-007 miss → `KeyNotFound` → `src/lib.rs:3038`, `:2394-2395`.
+- FR-008 `check` no transfer → `src/lib.rs:3110-3129`.
+- FR-009 `remove` frees slot / extent / map entry → `src/lib.rs:3131-3171`; extent drive by `drive_index` `:3164`.
+- FR-010 `define_component!`, provides `[IDispatcher]` → `src/lib.rs:408-411`.
+- FR-011 receptacles incl. `IRemoteLookup` (`src/lib.rs:412-419`). NUMA auto-placement skips the node's first 2 cores (`:604-654`, `.skip(2)` `:641`). `poller_base_cpu + i` (`:1617-1622`). Remote `NotFound`→`KeyNotFound`, `TransportError`→`IoError` (`:2837-2842`).
+- FR-012 validates dispatch_map + memory_tier → `src/lib.rs:1897-1903`.
+- FR-013 dispatch-map ref locking → read pins taken/released throughout (`pins::PinnedKeys` `src/pins.rs:32-49`).
+- FR-014 shutdown joins workers, checkpoints extent managers → `src/lib.rs:2120-2142`.
+- FR-015 / FR-016 N drives × N extent managers, FormatParams from data partition → `src/lib.rs:1817-1839`.
+- FR-017 write-through failure drops silently → `src/lib.rs:1443-1461`.
+- FR-018 `remove` does not wait for write-through → `src/lib.rs:3131-3171` (no flush).
+- FR-023 `touch` → `src/lib.rs:3685-3701`.
+- FR-024 pin-safe `evict_for_space` / `evict_one_clean` (skip unpersisted, never drop) → `src/lib.rs:1055-1173`; fragmentation relief `:1202-1211`.
+- FR-025 `format_on_init=false` recovery via `for_each_extent` + `recover_extent` → `src/lib.rs:1919-1937`.
+- FR-029 / FR-030 / FR-031 SSD evictor start, interval, threshold/low-watermark → `src/lib.rs:2043-2076`, `src/background.rs:311-394`.
+- FR-033 config defaults → `idispatcher.rs:105-127`. All 12 listed defaults match (0.9/0.8/64/5/2048/0.0/0.70/64/2/64/16 MiB/5000), as do the 2026-08-07 fields (128 MiB/128 MiB/10).
+- FR-034 register_host_memory, `ChannelPool` + RAII `ChannelLease`, drain on checkout, connect outside lock → `src/lib.rs:299-357` (drain `:325`, connect outside lock `:315-321`), register `:1983-2003`.
+- FR-035 unregister at shutdown → `src/lib.rs:2144-2149`.
+- FR-039 batch_lookup steps (1)–(6): Err-retry ×5 (`src/lib.rs:2382-2391`). Warm copies queued and pins adopted (`:2418-2431`). `batch_touch` before cold (`:2460-2462`). Deferred warm sync after the cold block (`:2747-2755`), then pin release (`:2759`), then remote (`:2761`). Group by `drive_index` (`:2515-2520`). One lease per drive plus a single scatter-gather call with depth 128 (`:2522`, `:2641-2678`). Input order kept (`:2961-2986`).
+- FR-040 `promote_to_memory_tier` best-effort → `src/lib.rs:3703-3859`.
+- FR-041 `pipelined_ssd_to_dram_only` / `pipelined_multi_ssd_to_dram_only` exist → `src/pipeline.rs:1166`, `:1279`; used per drive thread `src/lib.rs:3826`.
+- FR-043 `PipelineMetrics` trait, optional → `src/metrics.rs:12-47`, `src/lib.rs:556-558`.
+- FR-045 remote forwarding of `KeyNotFound` → `src/lib.rs:2761-2940`.
+- FR-046 / FR-047 / FR-048 / FR-049 memory-tier evictor: start (`src/lib.rs:2079-2105`), idle interval, 200 ms / 500 ms pacing, quadratic pressure, 4× widening (`src/background.rs:507-597`, `:534`, `:547`, `:589-597`), `try_evict_to_block` before `mt.remove` (`:556-562`).
+- FR-051 (batch_lookup half) concurrent-promotion recovery 5 s / 50 µs → `src/lib.rs:1354-1393`, `:2946-2955`.
+- FR-052 per-device `DEVICE_STREAMS` {warm, store, pipe[2]} → `src/lib.rs:456-506`; batch device `:2325-2331`.
+- FR-053 `StagingPool` / `StagingLease`, staging post-pass → `src/pipeline.rs:96-151`, `src/lib.rs:924-1035`, `:2725-2743`.
+- FR-054 drain-all-on-error (`stop_submitting`) → `src/pipeline.rs:310-406`, `:569-682`, `:882-1101`.
+- FR-055 partition-table guard → `src/lib.rs:1778-1788`.
+- FR-057 DI setters → `src/lib.rs:544-558`.
+- FR-060 backpressure 20 ms poll / shared deadline / drop-on-full → `src/lib.rs:3437-3471`, `:3194-3212`, `:3322-3333`.
+- FR-061 `scatter_gather_multi_drive_zero_copy` + `DriveWork` → `src/pipeline.rs:746`, `:771`; proportional split `:853`; single final dual sync `:1124-1125`.
+- User Story 1 AS1–AS5; User Story 2 AS1, AS3; User Story 3 AS1–AS2; User Story 4 AS1–AS3; User Story 5 AS1–AS4 (empty `data_pci_addrs` rejected first `src/lib.rs:1905-1909`); User Story 7 AS1–AS5; User Story 8; User Story 10 AS1–AS5; User Story 11 AS1–AS3, AS5–AS6 (`mixed_batch_defers_warm_sync_past_cold_block` `src/lib.rs:6136`); User Story 12 AS1–AS5.
+- Edge cases: populate-full drop; `evict_for_space` exhaustion; concurrent lookups; SSD-full write-through; unpersisted skip; partition guard.
+- SC-001 – SC-007, SC-009 – SC-011, SC-013, SC-015, SC-016, SC-017 (partition test `the_route_counters_partition_the_served_keys` `src/lib.rs:5954`).
+
+#### Drifted ⚠️
+
+**D-01 · FR-036 / FR-051 — cold single-key `lookup` now holds its read pin across promotion and recovers a lost insert race (branch `1d24ff27f`)** — severity: moderate (spec silent on a correctness property)
+- Spec FR-036 (`spec.md:313`) says only that `lookup_async` "performs the same cache lookup as `lookup` (dispatch-map query, memory-tier hit, BlockDevice promotion)". FR-051 (`spec.md:328`) scopes race recovery to "a `batch_lookup` cold promotion".
+- Code: `lookup_async`'s BlockDevice arm now keeps the `dm.lookup` read pin until `promote_and_serve` returns, so a concurrent `remove` (`dm.remove` → `ActiveReferences`) or SSD eviction cannot delete the entry or free the fresh slot (`src/lib.rs:3072-3076`, release `:3099`). It maps `AlreadyExists` to `serve_concurrently_promoted` (`:3086-3097`). Before the fix (base `lib.rs:3063-3065`) the pin was released *before* promotion.
+- Test: `concurrent_remove_cannot_delete_entry_during_cold_promotion` (`src/repair_test_cold_pin.rs:508`).
+- Direction: BACKFILL (code is a verified fix).
+
+**D-02 · FR-032 + Edge Case "When the SSD evictor removes an entry …" — removal order** — severity: moderate
+- Spec FR-032 (`spec.md:309`): MemoryTier entries are skipped; pinned entries "skipped gracefully (dm.remove fails without panic)". Edge case (`spec.md:236`): "it frees the extent … and removes the dispatch-map entry. No memory-tier operation is needed (the entry was already evicted from DRAM)."
+- Code: the evictor calls `mt.remove(key)` — so a memory-tier operation *is* performed — and since `1d24ff27f` it does so only **after** `dm.remove` succeeds (`src/background.rs:349-358`). The reason is in the comment: a cold lookup can promote the candidate into a fresh slot between `get_evictable_offset` (`:409-429`) and the removal, and freeing first released that slot. The edge case's claim that the entry is always already out of DRAM is false for exactly that race.
+- Test: `ssd_evictor_keeps_slot_when_remove_fails` (`src/repair_test_ssd_evictor_release.rs:290`).
+- Direction: BACKFILL.
+
+**D-03 · FR-003 / FR-059 — populate failure after reservation releases the slot (branch `9defa9e1a`)** — severity: moderate
+- Spec FR-003 (`spec.md:280`) lists the happy path and the drop-on-full case. It says nothing about failures between reserve and registration. FR-059 (`spec.md:354`) says "Entries that fail allocation or DMA do not prevent other entries from succeeding" but not that their slot is released.
+- Code: `populate` calls `release_memory(key)` on gpu-services-unbound (`src/lib.rs:3220-3228`), `copy_gpu_to_memory_async` error (`:3235-3240`) and `stream_synchronize` error (`:3241-3246`). The comment at `:3216-3218` explains that before Phase 3 the slot has no dispatch-map entry, so no evictor can reclaim it. A leak would make every retry fail with `AlreadyExists`. `batch_populate` already did this (`:3316-3319`, `:3346-3354`).
+- Tests: `populate_without_gpu_service_releases_the_slot`, `populate_sync_failure_releases_the_slot_and_allows_retry`, `populate_null_stream_sync_failure_releases_the_slot` (`src/repair_test_populate_slot.rs:485,504,534`).
+- Direction: BACKFILL (the uncovered remainder is P-01 below).
+
+**D-04 · FR-056 `copy_gpu_to_memory_completed` — existing entry preserved on `AlreadyExists` (branch `ad3654207`)** — severity: moderate
+- Spec FR-056 (`spec.md:338`): "finalizes the entry after the async copies complete, transitioning it to a resident `MemoryTier` entry (design invariant P10)." The duplicate case is not specified.
+- Code: on `DispatchMapError::AlreadyExists` it looks the key up again. It frees the slot only if the key no longer exists, or if the existing entry points at a different place. If the existing entry points at **this** slot, or the lookup errors, the slot is kept, and `AlreadyExists` is returned either way (`src/lib.rs:3560-3580`). Before the fix it called `mt.remove(key)` unconditionally, which freed the live slot of a resident entry: a use-after-free for every later reader.
+- Test: `completed_on_registered_key_keeps_the_live_slot` (`src/repair_test_copy_completed.rs:428`).
+- Direction: BACKFILL.
+
+**D-05 · FR-042 / FR-050 — eviction event drop accounting covers the background evictors (branch `0d3fcde43`)** — severity: moderate
+- Spec FR-042 (`spec.md:319`): "Eviction events are emitted … whenever an entry is evicted from the memory-tier by `evict_for_space`. … when the receiver falls behind, events are dropped and a dropped-event counter is incremented". FR-050 (`spec.md:327`): the memory-tier evictor "MUST emit `EvictionEvent { key, reason: Demoted }` (or `Removed` on transition failure)".
+- Code: the sender is now `EvictionSender { tx, dropped: Arc<AtomicU64> }`. `emit()` either queues the event or increments the shared counter (`src/background.rs:225-241`). Users: the foreground path (`src/lib.rs:579-584`), the MT evictor's `Demoted` events (`src/background.rs:564-569`) and the SSD evictor's `Removed` events (`:360-365`). So FR-042's emitter list ("by `evict_for_space`") is too narrow: the background MT evictor and the SSD evictor emit too, and since this branch their drops are counted. FR-050's "(or `Removed` on transition failure)" is stale. The MT evictor `continue`s on transition failure (`:556-558`) and emits nothing. `Removed` comes only from the SSD evictor.
+- Test: `background_evictor_counts_demoted_events_that_do_not_fit` (`src/repair_test_eviction_events_dropped.rs:170`).
+- Direction: BACKFILL.
+
+**D-06 · FR-038 `clear_memory_tier` — frees the slot of a pinned / in-flight entry** — severity: **major** (pre-existing; not caused by this branch)
+- Spec FR-038 (`spec.md:315`): "evicts ALL entries … by calling `IMemoryTier::evict_next()` in a loop until empty. For each evicted key, it transitions the dispatch-map entry to BlockDevice state via `convert_memory_tier_to_block`. If the transition fails (write-through not complete), the entry is removed from the dispatch map entirely."
+- Code: `src/lib.rs:3875-3890` loops `mt.oldest_keys(64)`. It calls `try_evict_to_block`. On **any** failure, including `ActiveReferences` (a pinned, in-flight load), it calls `mt.remove(key)` **unconditionally** and then `dm.remove(key)`. The real dispatch map refuses that `remove` while the key is pinned (`components/dispatch-map/src/lib.rs:341-343`). The result: the slot is freed, but the dispatch-map entry still says `MemoryTier { pointer }`. That is exactly the dangling-pointer pattern this branch's repairs D-02/D-04 remove elsewhere, and what FR-024/FR-049 forbid ("dispatch-map transition happens BEFORE the DRAM slot is freed"). The spec text is also stale in two places: it names `evict_next()` and `convert_memory_tier_to_block`, but the code uses `oldest_keys()` and `try_evict_to_block`. Exposed over shm-queue `CLEAR_MEMORY_TIER` (`lib/shmq-dispatcher/src/translate.rs:355,891-894`) and used by the workload node agent (`apps/workload-generator/crates/workload-node-agent/src/agent.rs:256`).
+- Direction: ALIGN (code fix) plus a spec update of the mechanism wording.
+
+**D-07 · FR-028 / User Story 9 AS3 — no-drives `promote_and_serve` never re-registers the entry** — severity: moderate (pre-existing; memory-tier-only / test mode)
+- Spec FR-028 (`spec.md:305`): "On BlockDevice lookup (promotion), the pipelined reader MUST re-insert the entry into the memory-tier and re-register it as a MemoryTier entry". US-9 AS3 (`spec.md:166`): with no hardware, it "creates a memory-tier slot …, performs a direct GPU DMA from the slot, and re-registers the entry".
+- Code: `src/lib.rs:800-824` calls `dm.create_memory_tier_entry(key, …)` on an entry that already exists (BlockDevice), which returns `AlreadyExists` and is discarded (`.is_ok()` `:814-819`). It then calls `dm.release_write(key)` without holding a write ref (`:820`), which the real map rejects (`RefCountUnderflow`, `components/dispatch-map/src/lib.rs:294-296`). The entry stays BlockDevice, and the inserted slot is orphaned: tracked by the memory tier, unreachable through the map. `batch_lookup`'s no-drives branch does it correctly with `promote_block_to_memory_tier` (`src/lib.rs:2495-2500`). The no-drives branch of `promote_and_serve` was not updated. The failure is hidden, because the mock dispatch map in `src/lib.rs:4428-4451` also returns `AlreadyExists`.
+- Direction: ALIGN.
+
+**D-08 · FR-019 / User Story 9 AS1 / Key Entities "Pipelined Reader" — a `pipelined_ssd_to_gpu` ring-buffer fallback that does not exist** — severity: minor (pre-existing)
+- Spec US-9 AS1 (`spec.md:164`): "The fallback path (ring-buffer `pipelined_ssd_to_gpu`) is used when the memory-tier pool is not CUDA-pinned/SPDK-registered." The Q&A (`spec.md:265`) describes it too, with 8 DmaBuffers.
+- Code: no such function. The pipeline module's public functions are `pipelined_ssd_to_gpu_zero_copy`, `pipelined_multi_object_zero_copy`, `scatter_gather_multi_drive_zero_copy`, `pipelined_ssd_to_dram_only` and `pipelined_multi_ssd_to_dram_only` (`src/pipeline.rs:235,457,771,1166,1279`). `promote_and_serve` always uses the multi-object zero-copy path (`src/lib.rs:875-886`), with no registration check. `pipelined_ssd_to_gpu_zero_copy` is used only by the staging serve (`:998-1011`), not as a "single-entry fallback" for registration failure.
+- Direction: BACKFILL (delete the stale fallback text, and say where `pipelined_ssd_to_gpu_zero_copy` is used now).
+
+**D-09 · FR-037 — "All per-device streams MUST be destroyed during `shutdown()`"** — severity: minor (pre-existing)
+- Spec (`spec.md:314`) says exactly that.
+- Code: `shutdown` destroys only the fallback `warm_stream` and the `PipelineRing` (`src/lib.rs:2151-2161`). `DEVICE_STREAMS` is a process-global `OnceLock<Mutex<HashMap>>` whose entries "live until the process exits" (`src/lib.rs:453-455`, `:467-469`). Nothing destroys them.
+- Direction: BACKFILL (the design comment is explicit and deliberate).
+
+**D-10 · Edge Case "When remove is called … memory-tier slot is freed first, then the dispatch-map entry is removed"** — severity: minor (pre-existing; spec contradicts the safe order)
+- Spec (`spec.md:231`) says exactly that.
+- Code: `remove` calls `dm.remove(key)` first. That refuses pinned entries and stops new lookups from getting the pointer. Only then does it call `mt.remove(key)` (`src/lib.rs:3152-3160`). This is the order FR-024/FR-049 require, and the order this branch now applies to the SSD evictor (D-02). The pre-branch code was already in this order (base `lib.rs:3117`), so the spec is simply stale. It also leaves out that `remove` of a pinned entry returns `KeyNotFound` (see U-04).
+- Direction: BACKFILL.
+
+**D-11 · FR-058 `store_already_resident` — counted on load paths too** — severity: minor (pre-existing)
+- Spec FR-058 (`spec.md:352`) → interfaces FR-018a: "reserves refused because the key was already cached".
+- Code: the counter is incremented in `evict_and_insert` on `MemoryTierError::AlreadyExists` (`src/lib.rs:1213-1222`). `evict_and_insert` is called by `reserve_memory` (store) but also by `promote_and_serve` (`:773`) and the `batch_lookup` cold prep (`:2562-2563`). So every concurrent-promotion race loser (FR-051) on the **load** path also counts as a "store already resident". The counter therefore over-reports store declines in exactly the TP-sibling workload FR-051 describes.
+- Direction: ALIGN (count only on the store path), or BACKFILL the wider meaning. Human decision; see the proposal.
+
+**D-12 · FR-003 — names `IGpuServices::dma_copy_to_host` for populate** — severity: minor (pre-existing)
+- Spec FR-003 (`spec.md:280`): "initiate DMA copy … via `IGpuServices::dma_copy_to_host`". Assumptions (`spec.md:410`) repeat it.
+- Code: `populate` calls `copy_gpu_to_memory_async` → per-region `memcpy_d2h_async` on the `store` stream, then `stream_synchronize` (`src/lib.rs:3232-3246`, `:3519-3537`). `dma_copy_to_host` is not called anywhere in non-test dispatcher code (only the mock at `src/lib.rs:4724`). FR-056 and FR-037 already describe the real path, so FR-003 contradicts them inside the same spec.
+- Direction: BACKFILL.
+
+#### Partially implemented ◐
+
+**P-01 · FR-003 / FR-056 — slot release on phase-3 failure (residual of `9defa9e1a`)** — severity: moderate
+- The populate repair's own invariant (`src/lib.rs:3216-3218`: "every failure here must release it, or the DRAM leaks and a retry of this key fails with AlreadyExists") is enforced for phase 2 only.
+- Gaps in `copy_gpu_to_memory_completed`:
+  - **Missing slot** (`:3558`): returns `KeyNotFound` with nothing to release. Benign.
+  - **integrity-check, after the entry exists** (`:3599-3616`): a `stream_synchronize` or `set_checksum` failure calls `mt.remove(key)` but leaves the just-created dispatch-map entry with `write_ref` held. That is a dangling `MemoryTier` entry that blocks every lookup until timeout.
+  - **`downgrade_reference` failure** (`:3619-3620`): returns `IoError` and leaves the entry write-locked.
+- Direction: ALIGN.
+
+**P-02 · FR-042 — SSD evictor's sender is captured at `initialize()`** — severity: moderate (pre-existing wiring, left open by `0d3fcde43`)
+- `BackgroundEvictor::start` receives `self.eviction_tx.lock().unwrap().clone()` at `initialize()` (`src/lib.rs:2059-2071`). That is a one-time copy, unlike the MT evictor, which gets the shared `Arc<Mutex<Option<…>>>` (`:2101`). Both servers call `create_eviction_channel` **after** dispatcher `initialize` (`apps/certus-server-yaml/build.rs:447-471`; `apps/certus-server/src/main.rs:469` then `:529`). So in production the SSD evictor's copy is `None`: its `Removed` events are never sent, and with this branch's counting they are not counted either. That defeats the "never lost silently" claim the new `EvictionSender` doc makes (`src/background.rs:227-228`).
+- Direction: ALIGN (pass the shared handle, as the MT evictor does).
+
+**P-03 · `batch_lookup` cold path drops its read pin before promotion (the cold-pin repair `1d24ff27f` fixed `lookup_async` only)** — severity: **major**
+- Spec: FR-051 (`spec.md:328`) says "The caller's load pin keeps the entry from being evicted while waiting." D-01's backfill makes the pin-through-promotion guarantee explicit for `lookup`. Nothing in the spec allows `batch_lookup` to be weaker.
+- Code: `batch_lookup` releases the classification pin right away on BlockDevice (`src/lib.rs:2433-2434`). Then it runs `evict_and_insert` → NVMe read → `promote_block_to_memory_tier` with no pin held (`:2562-2717`). An SSD-evictor `dm.remove` or a client `remove` in that window succeeds (the real map refuses only `read_ref>0`, `components/dispatch-map/src/lib.rs:341-343`). The fresh slot is then either freed under the in-flight NVMe/H2D (remove path: `mt.remove` after `dm.remove`) or orphaned, and `promote_block_to_memory_tier` fails with `KeyNotFound` → `IoError`. This is the same race the repair closed for `lookup`, on the path the shm-queue `LOOKUP` op actually uses (`lib/shmq-dispatcher/src/translate.rs:756`). It is safe **only if** the client pinned the key first (`op_pin` → `dispatcher.pin` `translate.rs:596-602`), which the vLLM connector does in its Check→Pin sequence, but `IDispatcher::batch_lookup` does not require it. The same pattern exists in `promote_to_memory_tier` (`src/lib.rs:3726-3729`).
+- Direction: ALIGN (keep the pin as `lookup_async` now does, or make "caller holds a pin" a documented precondition of `batch_lookup`).
+
+#### Not Implemented ✗
+None.
+
+#### Not verifiable here ⧗
+- SC-012: data correctness under FIFO NVMe ordering. Needs NVMe hardware (`--features hardware-test`).
+- SC-014: ≥5× batch-cold throughput. Benchmark only.
+- User Story 11 AS4: per-entry error isolation is implemented (`src/lib.rs:2681-2718`). It is not proven under real NVMe errors. The scenario's wording ("When the thread encounters the error") is also stale, because the cold path has no threads any more; a wording fix is proposed.
+- Edge case "write-ref downgrade lets a concurrent lookup proceed". This depends on dispatch-map semantics (`downgrade_reference` `src/lib.rs:3619`). Not exercised here.
+
+### Spec: 002-served-by-tier-attribution — Serving-Tier Attribution (`served_by`)
+
+#### Aligned ✓
+- FR-001 six values → `idispatcher.rs:248-274` (Dram, Ssd, Remote, Miss, SizeMismatch, Error).
+- FR-002 / SC-001 exactly one value per key and none unspecified → `src/lib.rs:2961-2986`. `None` on `Ok` → `Error` with a `debug_assert` (`:2973-2976`).
+- FR-003 hit/non-hit split → `is_hit()` used by `tally_lookup` (`lib/shmq-dispatcher/src/translate.rs:727-731`); iff test `src/lib.rs:5914-5922`.
+- FR-004 route, not residency → cold marked `Ssd` at classification (`src/lib.rs:2440`).
+- FR-005 `Miss` ⇔ `KeyNotFound` after remote → `src/lib.rs:2977`; test `:5925-5933`.
+- FR-006 `SizeMismatch` from `InvalidParameter` → `src/lib.rs:2981`.
+- FR-007 `Error` otherwise → `src/lib.rs:2982`.
+- **FR-009 / FR-010 — now aligned on this branch** (`a7ccc6e48`). The recovery pass rewrites `tier[i] = Some(ServedBy::Dram)` together with the result (`src/lib.rs:2946-2954`). On base, the key kept the `Ssd` from classification. Test `concurrent_promotion_loser_is_attributed_dram` (`src/repair_test_served_by.rs:432`). *(FR-009 is not fully aligned; see D-13.)*
+- FR-011 staging → `Ssd` (inherits classification, `src/lib.rs:2440`, `:2730-2742`).
+- FR-012 remote overwrite → `tier[pos] = Remote` (`src/lib.rs:2880`). A remote `NotFound` keeps `KeyNotFound` → `Miss`, counted once.
+- FR-013 no lock / allocation / IDispatchMap call per key for attribution → `tier` is one `Vec` per batch (`src/lib.rs:2319`). *(The SSD and DRAM counts are two extra O(n) passes per batch, `:2997-2998`; no lock, so within the requirement.)*
+- FR-017 remote attribution from per-key success → `src/lib.rs:2845-2848`, `:2880`.
+- FR-019 / FR-020 / FR-021 / FR-022 wire byte → `wire_tier` 1/2/3 and 0 for non-served (`lib/shmq-dispatcher/src/translate.rs:700-710`).
+- FR-023 server gets the tier only from the dispatcher → `translate.rs:764`.
+- FR-023a `check_state` untouched → `lib/shmq-dispatcher/src/wire.rs:107`.
+- FR-024 / SC-004 hits + misses + errors = requested → `tally_lookup` (`translate.rs:712-734`).
+- FR-025 aggregates agree with attribution → `tally_lookup` reads `served_by` directly (`translate.rs:724-731`). The route counters come from the same `out` (`src/lib.rs:2997-2999`).
+- FR-026 no dependence on the eviction stream → counters polled via `tier_event_stats` (`src/lib.rs:3945-3967`).
+- FR-033 per-variant counters, per candidate → `src/lib.rs:1071-1089`.
+- FR-034 `eviction_scans_exhausted` → `src/lib.rs:1111`.
+- FR-036 gauges sampled over the 64 oldest → `src/lib.rs:3959-3964`.
+- US1 AS1, AS2, AS4, AS5; US4 AS1–AS3; edge cases "local miss then remote hit", "concurrent promotion", "cold-load staging", "empty batch" (`src/lib.rs:2234-2236`), "mixed batch, one fails".
+
+#### Drifted ⚠️
+
+**D-13 · US1 AS3 / FR-009 / FR-003 — a failed warm batched sync is reported as `Dram` hits** — severity: **major** (pre-existing; identical on base `lib.rs:2745-2749`)
+- Spec 002 US1 AS3 (`spec.md:303-305`): "**Given** a batch in which the batched GPU synchronization fails, **When** `batch_lookup` returns, **Then** every key whose copy was in flight is attributed `ERROR` and none is reported as a hit." The edge case at `spec.md:430-434` says the same: "A failed batched sync rewrites already-`Ok` results to `IoError` … Attribution MUST be rewritten in lockstep".
+- Code: the warm batched sync failure is only **logged** (`src/lib.rs:2750-2755`, `self.log_info(...)`). `results[i]` stays `Ok(())` and `tier[i]` stays `Dram`, so every warm key counts as a hit (`promotions_to_gpu`, `lookup_hits_dram`, wire byte 1) even though the H2D copy may not have landed. The remote-delivery sync does it right: on failure it rewrites each submitted key to `IoError` (`:2907-2917`), and that is tested (`remote_delivery_reports_sync_failure_per_key` `:5817`). No test covers the warm-sync failure.
+- Direction: ALIGN.
+
+**D-14 · FR-008 — lists an "inline fallback" cold sub-path that was removed** — severity: minor
+- Spec (`spec.md:474-477`): "the cold SSD promotion (all of its sub-paths — pooled, inline fallback, no-drives, and staging)". The comment at `src/lib.rs:2435-2437` repeats the list.
+- Code: the inline single-key `promote_and_serve` fallback was removed from `batch_lookup` (spec 001 FR-039(3), `src/lib.rs:2469-2476`). Today's sub-paths are scatter-gather, no-drives and staging (`:2486-2743`).
+- Direction: BACKFILL.
+
+**D-15 · FR-027 / SC-009 — per-value attribution tests exist only for `Dram` and `Miss`** — severity: moderate (pre-existing)
+- Spec (`spec.md:554-555`): "Each attribution value MUST have a test that fails if that value is mis-assigned, in both dispatchers."
+- Code: in this crate, value-specific assertions exist only for `Dram` (`src/repair_test_served_by.rs:484`) and `Miss` (`src/lib.rs:5927`). The other tests check that `is_hit ⇔ is_ok` (`:5916`) and that the route counters sum to the served count (`:5963`), and neither of those can tell `Ssd`, `Dram` and `Remote` apart. A grep for `ServedBy::` across `src/` tests, `tests/` and `benches/` finds no assertion on `Ssd`, `Remote`, `SizeMismatch` or `Error`.
+- Direction: ALIGN (add the tests).
+
+#### Notes on other test requirements (not counted again)
+- FR-028 (tests shown to fail first): met for the repairs on this branch, whose commit messages note a "red-first test", but not evidenced for the attribution values above.
+- FR-029 `integrity-check` configuration: the repair test mocks gate `set_checksum`/`get_checksum` behind the feature (e.g. `src/repair_test_cold_pin.rs:211-215`), so they *compile* under it. No evidence that the suite is *run* under it (no CI workflow in this worktree). Unchanged from the 2026-09-28 coverage table.
+
+#### Not verifiable here ⧗
+- SC-002 (capacity sweep), SC-003 (multi-node), SC-006 (old/new client matrix), SC-007 (unmodified peer), SC-008 (n ≥ 8 benchmark).
+
+#### Owned by other components (listed, not judged)
+FR-014, FR-015, FR-035 (dispatcher-p2p); FR-016-replacement, FR-018 (remote-lookup); FR-030 – FR-032 (documentation process); SC-005 (p2p comparison); US3, US5 (other components).
+
+### Unspecced Code 🆕
+
+| # | Feature | Location | Lines | Suggested Spec |
+|---|---------|----------|-------|----------------|
+| U-01 | `integrity-check` serve-side CRC-32: computed at `copy_gpu_to_memory_completed`, checked before each warm / remote / single-key H2D, mismatch → `IoError` | `src/lib.rs:1237-1259`, `2408-2417`, `2861-2869`, `3047-3055`, `3593-3617` | ~70 | 001 (new FR-062). The interfaces spec specifies only the `IDispatchMap` checksum storage (interfaces `001-interfaces` spec.md:31,167-168), not the dispatcher's verify-before-serve behaviour |
+| U-02 | Remote-delivery stage probe (`CERTUS_LOG_REMOTE_DELIVERY`) | `src/remote_probe.rs` (160), call sites `src/lib.rs:2786-2938` | 160 | 001 (FR-045 note) |
+| U-03 | Opt-in per-call reserve logging (`CERTUS_LOG_RESERVE`) | `src/lib.rs:3379-3394` | 16 | 001 (FR-056 note) |
+| U-04 | `remove` of a pinned or write-locked entry returns `KeyNotFound` (the `ActiveReferences` from `dm.remove` is collapsed; a `dm.lookup` timeout is collapsed too) | `src/lib.rs:3140-3155` | 16 | 001 FR-009 / `contracts/errors.md:33,37` (`Timeout` is listed for `remove` but never returned) |
+| U-05 | SSD evictor emits `EvictionEvent { reason: Removed }` | `src/background.rs:360-365` | 6 | 001 FR-042 / FR-050 (folded into the D-05 proposal) |
+
+## Inter-Spec Conflicts
+
+1. **001 edge case `spec.md:231` vs 001 FR-024/FR-049.** The edge case says `remove` frees the memory-tier slot before the dispatch-map entry. FR-024 ("the dispatch-map transition happens BEFORE the DRAM slot is freed") and FR-049 ("Only after the dispatch-map reflects BlockDevice state MUST the DRAM slot be freed") require the reverse order for eviction, and the code uses the reverse order for `remove` too (D-10).
+2. **001 FR-003 vs 001 FR-056 / FR-037.** FR-003 says populate copies via `dma_copy_to_host`. FR-056/FR-037 say `copy_gpu_to_memory_async` → `memcpy_d2h_async` on `store` (D-12).
+3. **001 FR-038 vs 001 FR-024 / FR-049.** FR-038 allows "removed from the dispatch map entirely" after the slot is gone, with no pin check. FR-024/FR-049 forbid freeing a slot a pinned load points at (D-06).
+4. **001 FR-019 (single-entry fallback "`pipelined_ssd_to_gpu_zero_copy`") vs 001 FR-053 / code.** That function is now the staging-serve primitive, not a registration fallback (D-08).
+5. **002 US1 AS3 vs 001 FR-039 step (2).** 001 describes the deferred warm sync, but not its failure semantics. 002 requires `ERROR` attribution on failure, and the code follows neither (D-13).
+
+## Recommendations
+
+1. **ALIGN, major, fix first:** D-13 (warm-sync failure reported as hits), P-03 (`batch_lookup` cold pin), D-06 (`clear_memory_tier` frees pinned slots). D-13 and D-06 predate this branch. P-03 is the same race this branch's formal-verification repair closed for `lookup`, and it remains on the hot path.
+2. **BACKFILL the five behaviour-changing repairs into spec 001** in the same change as this branch, so the next stamp certifies them: D-01 (FR-036/FR-051), D-02 (FR-032 + edge case), D-03 (FR-003/FR-059), D-04 (FR-056), D-05 (FR-042/FR-050). The sixth repair (`a7ccc6e48`) needs no spec change, since it makes the code match 002 FR-009/FR-010. Exact text is in `proposals.md`.
+3. **ALIGN, moderate:** P-01 (phase-3 slot release), P-02 (SSD evictor sender snapshot), D-07 (no-drives promote).
+4. **BACKFILL, minor, stale text:** D-08, D-09, D-10, D-12, D-14, and US-11 AS4 wording.
+5. **Decide** D-11 (`store_already_resident` scope; ALIGN is proposed, with a BACKFILL alternative) and the U-01…U-04 specs.
+6. **Add per-value attribution tests** (D-15): one each for `Ssd`, `Remote`, `SizeMismatch` and `Error`.
+7. Re-run `scripts/spec-sync-hash.sh components/dispatcher` only after the spec edits land. The current `spec_sync_drift_status: clean` stamp in the frontmatter (`spec_sync_git_commit: 474ba0a6`) predates this branch's `src/**` changes and does **not** describe this branch.
+
+---
+
+# Earlier sweeps (retained for history)
+
+## Sweep 2026-09-21 — Spec Drift Report — dispatcher
 
 Generated: 2026-09-21
 Project: dispatcher (spec: specs/001-dispatcher-cache-interface/spec.md)

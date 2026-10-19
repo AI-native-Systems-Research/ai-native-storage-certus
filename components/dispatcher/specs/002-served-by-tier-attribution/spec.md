@@ -7,6 +7,8 @@
 **Status**: Draft — reconciled 2026-09-25 against a Certus that changed under it; see
 `## Reconciliation`.
 
+**Last Synced**: 2026-10-14 — spec-sync apply on branch `fix/bundle-dispatcher-ems` (approved by Cornel, 2026-10-18). BACKFILL: FR-008 cold sub-path list corrected (no inline fallback). The warm-sync `ERROR` gap (US1 AS3 / FR-009) and the per-value tests (FR-027 / SC-009) are code-side tasks A-01 and A-08 in `.specify/sync/align-tasks.md`.
+
 **Input**: Expose, per looked-up key, **which tier actually served it** — local DRAM, local
 SSD, a peer's DRAM, a peer's SSD — or why it was not served. Today a successful `Lookup`
 is indistinguishable across all four, so no tiered hit rate is measurable.
@@ -472,8 +474,8 @@ assert identical attribution for identical residency, except where FR-014 specif
 ### Dispatcher attribution
 
 - **FR-008**: `components/dispatcher` MUST attribute every key at each resolution site in
-  `batch_lookup`: the warm DRAM hit, the cold SSD promotion (all of its sub-paths — pooled,
-  inline fallback, no-drives, and staging), the remote-delivery block, the
+  `batch_lookup`: the warm DRAM hit, the cold SSD promotion (all of its sub-paths — scatter-gather,
+  no-drives, and staging; the inline single-key fallback was removed, spec 001 FR-039(3)), the remote-delivery block, the
   concurrent-promotion recovery pass, and the not-found and size-mismatch arms.
 - **FR-009**: When a result is overwritten after attribution, the attribution MUST be
   overwritten with it.
