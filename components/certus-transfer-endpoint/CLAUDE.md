@@ -107,6 +107,12 @@ VIII–XI, and a review that does not check them is not a review.
   opcode.** Opcodes name kinds. Fusing mints a new opcode per kind per version,
   including unchanged kinds, and the handler ends up masking the version off anyway
   (D21).
+- **`ffi.rs` struct layouts are pinned, on both sides.** A `const` block in
+  `ffi.rs` asserts Rust sizes/offsets against fixed numbers, and `wrapper.c`
+  `_Static_assert`s the real headers against the same numbers. Change one, change
+  both. Do not "fix" a layout by copying a predecessor crate's `ffi.rs` — four of
+  its definitions were wrong (see `ffi.rs` module docs), including the `IBV_WR_*`
+  numbering, under which a send is posted as an RDMA write.
 - **`RemoteRegion`'s field is `length`, not `size`**, and on the wire the
   trailing two `u32`s are `size` then `rkey` — the opposite order from the
   struct. Both are `u32`, so a transposition silently swaps a length for a key.
@@ -127,7 +133,8 @@ lookup answer is reported as a **miss**, never an error (D14).
 
 ## Current state
 
-Scaffolding. T001–T005 and T068 are done: the crate builds as a default member
-and peer identity is implemented. The interface lands in T006 and the engine in
-Phase 2. See `specs/001-rdma-cache-transfer/tasks.md` for the task list and its
+Scaffolding. T001–T008 and T068 are done: the crate builds as a default member,
+peer identity is implemented, `ITransferEndpoint` is defined in `interfaces`, and
+the verbs FFI (`ffi.rs`) and C shim (`wrapper.c`) exist behind `rdma`. Nothing
+calls them yet; the safe wrappers are T009 and the engine is Phase 2. See `specs/001-rdma-cache-transfer/tasks.md` for the task list and its
 traceability matrix.
