@@ -3070,8 +3070,34 @@ impl IDispatcher for DispatcherComponent {
                         r.map(|()| null_stream)
                     }
                     LookupResult::BlockDevice { offset } => {
+                        // Hold the lookup's read pin across the whole promotion: it is
+                        // what stops a concurrent remove or SSD eviction deleting the
+                        // entry, or freeing the fresh slot, while the SSD read and the
+                        // in-place promotion are still running.
+                        let r = match self.promote_and_serve(
+                            key,
+                            offset,
+                            &ipc_handle,
+                            &gpu,
+                            &dm,
+                            &mt,
+                            device,
+                        ) {
+                            // A concurrent cold lookup of this key won the mt.insert
+                            // race: a hit, not a failure — serve it warm once that
+                            // promotion lands, as batch_lookup's recovery pass does.
+                            Err(DispatcherError::AlreadyExists(_)) => self
+                                .serve_concurrently_promoted(
+                                    &dm,
+                                    &gpu,
+                                    key,
+                                    std::slice::from_ref(&ipc_handle),
+                                    warm_raw,
+                                ),
+                            r => r,
+                        };
                         let _ = dm.release_read(key);
-                        self.promote_and_serve(key, offset, &ipc_handle, &gpu, &dm, &mt, device)?;
+                        r?;
                         self.tier_counters.record_promotion_to_gpu();
                         Ok(null_stream)
                     }
@@ -3908,6 +3934,10 @@ impl IDispatcher for DispatcherComponent {
         stats
     }
 }
+
+#[cfg(test)]
+#[path = "repair_test_cold_pin.rs"]
+mod repair_test_cold_pin;
 
 #[cfg(test)]
 mod tests {

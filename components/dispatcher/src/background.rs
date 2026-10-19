@@ -346,13 +346,16 @@ impl BackgroundEvictor {
                     None => continue,
                 };
 
-                // Remove from memory-tier (no-op if not present).
-                let _ = mt.remove(key);
-
-                // Remove from dispatch-map.
+                // Remove from dispatch-map first: it refuses a pinned entry, and
+                // a cold lookup pins the entry while it promotes it into a fresh
+                // memory-tier slot. Freeing the slot before this check released
+                // that slot from under the in-flight promotion.
                 if dm.remove(key).is_err() {
                     continue;
                 }
+
+                // Remove from memory-tier (no-op if not present).
+                let _ = mt.remove(key);
 
                 if let Some(tx) = eviction_tx {
                     tx.emit(EvictionEvent {
