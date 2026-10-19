@@ -1,283 +1,188 @@
 # Certus
 
-Certus is a generative domain-specific storage system optimized for KV-cache workloads. The system is built using AI-driven construction - not a single line of code is written by hand.  The aims of the project are (1) to develop an AI-methodology that creates, optimizes and validates generated code, (2) demonstrate the value of the methodology in the context of building a hyper-specialized solution for KV-cache.
+Certus is a generative, domain-specific storage system for GPU inference KV-cache
+workloads. It is built entirely by AI agents: no code in the repository is written
+by hand. The project has two aims:
 
-Blogs on the work can be found at https://ai-native-systems-research.github.io/ai-native-systems-research/blog/
+1. Develop an AI methodology that creates, optimizes and formally validates
+   generated code.
+2. Show what that methodology is worth by using it to build a highly specialized
+   KV-cache offload tier for LLM serving (vLLM).
 
+Blog posts about the work: https://ai-native-systems-research.github.io/ai-native-systems-research/blog/
 
-## Claude and Spec-Kit
+## What it does
 
-Install Claude with:
+A `certus-server` process runs a tiered KV-cache (CUDA-pinned DRAM in front of
+NVMe SSD). vLLM reaches it through the `certus-shmq-connector`, which talks to
+the server over a lock-free shared-memory mailbox in `/dev/shm`. Only small
+control messages go through the mailbox. KV blocks move GPU ↔ DRAM ↔ SSD by
+CUDA and SPDK DMA.
 
 ```
+vLLM --shmq--> Dispatcher --> MemoryTier (DRAM) --> BlockDevice --> NVMe SSD
+                    |             ^                     ^
+                    |             | promote (cold hit)  | async write-through
+                 GpuServices (CUDA DMA / CUDA IPC to client GPU)
+```
+
+Main features:
+
+- **Lazy write-through**: a populate returns once the block is in DRAM. It is
+  persisted to SSD in the background.
+- **Pluggable backends**: SPDK userspace NVMe, kernel `io_uring` on raw devices,
+  or file-backed.
+- **Pluggable eviction policies**: LRU, session-lineage, and optimized
+  (O(1) LRU + TinyLFU admission).
+- **Optional GPUDirect P2P**: SSD ↔ GPU through a BAR1 staging ring, skipping
+  the DRAM copy.
+- **Optional multi-node cooperation**: a local miss is looked up on peer nodes
+  (found through Zyre discovery), and the value arrives by one-sided RDMA write.
+
+The full architecture is in
+[design/certus-architecture-overview.md](design/certus-architecture-overview.md).
+Per-profile deployment and data-flow diagrams are under
+[design/profiles/](design/profiles/).
+
+## Component model
+
+Certus is built on a COM-inspired Rust component framework
+([lib/component-framework](lib/component-framework/README.md)). Components
+provide typed interfaces (`define_interface!`) and declare their dependencies as
+receptacles (`define_component!`). Each component is specified, generated,
+tested and verified on its own, so an agent working on one only needs that
+component and its bindings in context. Actors run on dedicated threads and
+communicate over lock-free channels, with NUMA-aware placement.
+
+The server's component graph is declared in a YAML profile and assembled at
+compile time (see [apps/certus-server-yaml](apps/certus-server-yaml/README.md)):
+
+| Profile | Description |
+|---------|-------------|
+| `full` (default) | SPDK NVMe + DRAM tier + GPU DMA, LRU eviction |
+| `full-session-lists` / `full-optimized` | `full` with an alternative eviction policy |
+| `full-p2p` | GPUDirect P2P cold path (`dispatcher-p2p`) |
+| `full-remote` | Multi-node cooperation over RDMA |
+| `full-kernel-block` / `full-fs-block` | Kernel `io_uring` or file-backed block devices |
+| `minimal` | Logger only, no hardware dependencies |
+
+## AI-driven methodology
+
+Components are developed spec-first with
+[Spec Kit](https://github.com/github/spec-kit): each component has `specs/**/spec.md`
+alongside its code. The CI pipeline's spec-sync gate fails when a component's
+code drifts from its specs. On top of that, Claude Code skills in
+[.claude/skills/](.claude/skills/) automate the lifecycle:
+
+- **Create and evolve**: `component-make-new`, `component-make-new-actor`,
+  `component-new-version`, `component-like-existing`, `component-sync-specs`.
+- **Audit**: `component-check-spec-translation`, `component-check-verif-translation`,
+  `component-check-leakage`, `component-sweep`.
+- **Formal verification**: `component-verify` runs the full pipeline. It builds a
+  property inventory, proves it with [Creusot](https://github.com/creusot-rs/creusot)
+  and [Kani](https://github.com/model-checking/kani), and renders a scoring page.
+  Spin/Promela models of concurrent protocols are in [modelling/spin](modelling/spin).
+- **Repair**: `component-repair` fixes the code behind a verification finding.
+- **Profile**: `profile-hardware-ceiling`, `profile-kvoffload-replay-all`,
+  `profile-connector-benches`, `profile-compare-with`.
+
+Code-optimization experiments (evolutionary search over component variants) are
+recorded under [evolution/](evolution/).
+
+Tooling setup:
+
+```bash
 curl -fsSL https://claude.ai/install.sh | bash
-```
-
-Install spec-kit with:
-
-```
 uv tool install specify-cli --from git+https://github.com/github/spec-kit.git@v0.5.1
+specify extension add spec-kit-sync --from https://github.com/bgervin/spec-kit-sync/archive/refs/heads/master.zip
 ```
 
-Install spec-kit-sync extension:
-
-```
-specify extension add spec-kit-async --from https://github.com/bgervin/spec-kit-sync/archive/refs/heads/master.zip
-```
-
-## Quick Start
+## Getting started
 
 ### Prerequisites
 
-- Rust toolchain (edition 2021, MSRV 1.75)
-- Linux (tested on RHEL/Fedora)
-- `memlock` set to unlimited in `/etc/security/limits.conf` (required for SPDK hugepage and VFIO usage):
-  ```
-  * hard memlock unlimited
-  * soft memlock unlimited
-  ```
-  Log out and back in after making this change for it to take effect.
+- Linux (tested on RHEL 9 / Fedora), x86_64.
+- Rust stable, edition 2021, MSRV 1.75 (`deps/install_rust.sh`).
+- For the full server: NVMe SSDs, an NVIDIA GPU with CUDA, and SPDK.
+  `full-remote` also needs RDMA NICs and Zyre. RHEL 9 driver install scripts
+  are in [deploy/rhel9](deploy/rhel9/README.md).
 
+### Build and test without hardware
 
-- Kernel boot parameters for IOMMU and hugepages must be configured (one-time setup, requires reboot):
-  ```bash
-  # For Intel:
-  components/spdk-env/scripts/add_kernel_options.sh
-  # This runs: grubby --update-kernel=ALL --args="intel_iommu=on iommu=pt default_hugepagesz=1G hugepagesz=1G hugepages=4"
-  ```
-  **AMD architectures** require `amd_iommu=on` instead of `intel_iommu=on`:
-  ```bash
-  grubby --update-kernel=ALL --args="amd_iommu=on iommu=pt default_hugepagesz=1G hugepagesz=1G hugepages=4"
-  ```
-  Reboot after applying kernel parameter changes.
-
-### Building without SPDK
-
-The SPDK crates (`spdk-sys`, `spdk-env`, `block-device-spdk-nvme`) are excluded from
-the default workspace members, so a plain `cargo build` works without any SPDK dependencies:
+The default workspace members exclude everything that needs SPDK, CUDA or RDMA:
 
 ```bash
-cargo build            # Build default (non-SPDK) workspace members
+cargo build
+cargo test --all -- --test-threads 1
+cargo clippy -- -D warnings
+cargo doc --no-deps
 ```
 
-### Building with SPDK
-
-To build the SPDK-dependent crates you must first build and install SPDK:
+### Host setup for SPDK (one-time)
 
 ```bash
-# 1. Install system dependencies (requires sudo, RHEL/Fedora)
-deps/install_deps.sh
-
-# 2. Install Python build dependencies
+deps/install_deps.sh                          # system packages (sudo)
 pip install -r deps/requirements.txt
-
-# 3. Clone, build, and install SPDK to deps/spdk-build/
-deps/build_spdk.sh
+deps/build_spdk.sh                            # builds SPDK into deps/spdk-build/
+sudo deps/set_limits.sh                       # memlock unlimited (re-login afterwards)
+components/spdk-env/scripts/add_kernel_options.sh   # IOMMU + 1G hugepages (reboot afterwards)
 ```
 
-Then build individual SPDK crates explicitly:
+`add_kernel_options.sh` sets `intel_iommu=on`. On AMD, use `amd_iommu=on`
+instead. For multi-node cooperation, also run `deps/build_zyre.sh`.
+
+### Build and run the server
 
 ```bash
-cargo build -p spdk-sys
-cargo build -p spdk-env
-cargo build -p block-device-spdk-nvme
+scripts/build-certus-spdk.sh        # = CERTUS_PROFILE=full cargo build -p certus-server-yaml --release
+sudo ./target/release/certus-server-yaml --drive-count 4 --format --memory-tier-size 32G
 ```
 
-Or build everything (default + SPDK members) at once:
+`--format` erases existing on-disk data. Other profiles have their own build
+scripts (`scripts/build-certus-*.sh`). [scripts/run-certus-shmq-server.sh](scripts/run-certus-shmq-server.sh)
+starts the server with NUMA pinning, using the configuration from the benchmark
+runs.
 
-```bash
-cargo build --workspace
-```
+### Connect vLLM
 
-### Running Tests
+[certus-shmq-connector/](certus-shmq-connector/) is a pure-Python vLLM
+`OffloadingSpec` connector, with a container build (`build_connector_container.sh`)
+and a launcher (`run-bench.sh`). The container must share the host IPC namespace
+(`--ipc=host`) so it can see the server's `/dev/shm` mailbox. Kubernetes and llm-d
+deployment material is under [deploy/](deploy/).
 
-```bash
-# Run tests for default (non-SPDK) crates
-cargo test --all
+## Benchmarking and profiling
 
-# Run tests for a specific SPDK crate (requires SPDK built)
-cargo test -p spdk-sys
-cargo test -p spdk-env
-cargo test -p block-device-spdk-nvme
-```
+| Location | Purpose |
+|----------|---------|
+| [benchmarks/](benchmarks/BENCHMARKING.md) | Trace replay (policy layer) and live-serving KV-offload benchmarks |
+| [apps/python](apps/python/README.md) | Direct `certus-server` API benchmarks and integration tests |
+| [apps/iops-benchmark](apps/iops-benchmark/README.md), [apps/extent-benchmark](apps/extent-benchmark/README.md) | Raw NVMe and extent-allocator performance |
+| [apps/workload-generator](apps/workload-generator/README.md) | Multi-node synthetic workload generator |
+| [tools/](tools/) | Connector benches, hardware-ceiling probes, `certus-fio`, simulators |
+| [profiling/](profiling/) | Recorded hardware ceilings and performance matrices |
 
-### Running Benchmarks
+Microbenchmarks use Criterion: `cargo bench`, or for example
+`cargo bench -p extent-manager --bench create_benchmark`.
 
-Benchmarks use [Criterion](https://github.com/bheisler/criterion.rs) and live in
-`lib/component-framework/crates/component-framework/benches/`.
+## Repository layout
 
-```bash
-# Run all benchmarks
-cargo bench
+| Path | Contents |
+|------|----------|
+| `lib/` | Component framework, `spdk-sys` FFI, `shm-queue` mailbox, `shmq-dispatcher` |
+| `components/` | Certus components (dispatcher, memory tier, dispatch map, block devices, extent manager, eviction policies, GPU services, remote lookup/RDMA, Zyre) and shared `interfaces` |
+| `apps/` | `certus-server-yaml` and `certus-server`, benchmarks, test utilities, vLLM serving scripts |
+| `certus-shmq-connector/` | vLLM connector |
+| `design/` | Architecture overview and per-profile design artifacts |
+| `knowledge/` | Internal wiki: component architecture, SPDK, KV-cache workload analysis |
+| `modelling/` | Creusot and Spin formal models |
+| `benchmarks/`, `evaluators/`, `profiling/`, `evolution/` | Performance evaluation and optimization experiments |
+| `deploy/`, `scripts/`, `tools/`, `deps/` | Deployment, build/run scripts, tooling, third-party dependencies |
 
-# Run a specific benchmark suite
-cargo bench --bench channel_spsc_benchmark
-cargo bench --bench channel_mpsc_benchmark
-cargo bench --bench channel_latency_benchmark
-cargo bench --bench numa_latency_benchmark
-cargo bench --bench numa_throughput_benchmark
-```
+Many components have their own `README.md` and `CLAUDE.md`. Read those before
+working in that directory.
 
-After a run, open the Criterion HTML report:
+## Contributing
 
-```bash
-firefox --no-remote lib/component-framework/crates/component-framework/target/criterion/report/index.html
-```
-
-### Running Examples
-
-Component-framework examples:
-
-```bash
-cargo run --example basic
-cargo run --example wiring
-cargo run --example introspection
-cargo run --example binding
-cargo run --example actor_ping_pong
-cargo run --example actor_pipeline
-cargo run --example actor_fan_in
-cargo run --example actor_log
-cargo run --example numa_pinning
-```
-
-SPDK block-device examples (require real NVMe hardware bound to `vfio-pci` with hugepages configured):
-
-```bash
-# Bind NVMe devices to vfio-pci
-sudo deps/spdk/scripts/setup.sh
-
-# Allocate hugepages
-sudo sh -c 'echo 1024 > /proc/sys/vm/nr_hugepages'
-```
-
-### IOPS Benchmark
-
-An NVMe IOPS benchmark application that measures read/write IOPS, throughput (MB/s), and latency percentiles using the `block-device-spdk-nvme` component. Requires SPDK built and NVMe devices bound to VFIO/UIO.
-
-```bash
-# Build
-cargo build -p iops-benchmark --release
-
-# Run with defaults (4KB random reads, QD=32, 1 thread, 10s)
-sudo ./target/release/iops-benchmark
-
-# Custom workload
-sudo ./target/release/iops-benchmark \
-  --op write --block-size 65536 --queue-depth 64 \
-  --threads 4 --duration 30 --pattern sequential
-
-# Mixed read/write, quiet mode
-sudo ./target/release/iops-benchmark --op rw --quiet
-```
-
-See [apps/iops-benchmark/README.md](apps/iops-benchmark/README.md) for full CLI options and sample output.
-
-## Component Framework
-
-The core infrastructure is a Rust component framework inspired by COM (Component Object Model) principles.
-It provides a structured way to define, discover, connect, and manage software components at runtime
-through standardized interfaces, with first-class support for the actor model, high-performance
-lock-free channels, and NUMA-aware execution.
-
-### Key Concepts
-
-- **Interfaces** are declared with `define_interface!` and expose capabilities as trait objects queryable at runtime.
-- **Components** are declared with `define_component!` and implement one or more interfaces. Every component implements `IUnknown` for runtime discovery and connection.
-- **Receptacles** are typed slots that let components declare required dependencies, wired either directly or through a `ComponentRegistry` with string-based `bind()`.
-- **Actors** run on dedicated OS threads, communicate through lock-free channels, and integrate with the component model via `ISender<M>`.
-- **Channels** include built-in SPSC and MPSC lock-free implementations, plus adapters for crossbeam, kanal, rtrb, and tokio.
-- **NUMA** support provides topology discovery, thread pinning, and NUMA-local memory allocation.
-
-For full API documentation, see [lib/component-framework/README.md](lib/component-framework/README.md).
-
-### Building
-
-```bash
-cargo build           # Build all workspace members
-cargo test --all      # Run all tests (unit + integration + doc)
-cargo doc --no-deps   # Build documentation
-```
-
-### Running Examples
-
-Examples live in `lib/component-framework/examples/` and cover the major framework features:
-
-```bash
-# Basic component definition and interface querying
-cargo run --example basic
-
-# Connect two components via receptacles
-cargo run --example wiring
-
-# Enumerate provided interfaces and receptacles at runtime
-cargo run --example introspection
-
-# Registry-based creation and third-party binding
-cargo run --example binding
-
-# Two actors exchanging messages through SPSC channels
-cargo run --example actor_ping_pong
-
-# Three-stage actor pipeline: producer -> processor -> consumer
-cargo run --example actor_pipeline
-
-# Multiple producers feeding a single consumer via MPSC
-cargo run --example actor_fan_in
-
-# Built-in logging actor with level filtering and file output
-cargo run --example actor_log
-
-# NUMA topology discovery, thread pinning, and cross-node latency
-cargo run --example numa_pinning
-```
-
-### Running Benchmarks
-
-Benchmarks use [Criterion](https://github.com/bheisler/criterion.rs) and live in
-`lib/component-framework/crates/component-framework/benches/`.
-
-```bash
-# Run all benchmarks
-cargo bench
-
-# Run a specific benchmark suite
-cargo bench --bench channel_spsc_benchmark
-cargo bench --bench channel_mpsc_benchmark
-cargo bench --bench actor_latency
-cargo bench --bench numa_latency_benchmark
-cargo bench --bench query_interface
-```
-
-Available benchmark suites:
-
-| Suite | What it measures |
-|-------|-----------------|
-| `query_interface` | Interface map lookup (hit and miss) |
-| `receptacle` | Receptacle connect and get latency |
-| `method_dispatch` | Indirect dispatch through `Arc<dyn Trait>` |
-| `registry` | Registry register, create, and list |
-| `binding` | First-party and third-party wiring |
-| `component_ref` | ComponentRef creation and clone overhead |
-| `channel_throughput` | SPSC and MPSC message throughput |
-| `channel_spsc_benchmark` | SPSC throughput across all backends and payload sizes |
-| `channel_mpsc_benchmark` | MPSC throughput with varying producer counts |
-| `channel_latency_benchmark` | Per-message round-trip latency |
-| `actor_latency` | Actor activation time and message round-trip |
-| `numa_latency_benchmark` | Same-node vs cross-node SPSC latency |
-| `numa_throughput_benchmark` | Same-node vs cross-node SPSC throughput |
-
-After running benchmarks, Criterion generates an HTML report with distribution plots, violin charts, and regression analysis. Open the top-level report index in a browser:
-
-```bash
-# Open the Criterion report (after running cargo bench)
-firefox --no-remote lib/component-framework/crates/component-framework/target/criterion/report/index.html
-```
-
-Each benchmark suite has its own sub-report with detailed plots including PDF distribution, iteration times, and comparison against previous runs. Navigate from the index page or access individual reports directly:
-
-```bash
-# Example: open the SPSC channel benchmark report
-firefox --no-remote ./lib/component-framework/crates/component-framework/target/criterion/spsc_throughput_u64/report/index.html
-```
-
-If you are using a remote connection in VS Code, you can use the Live Preview extension to open the remote report files.
+See [CONTRIBUTING.md](CONTRIBUTING.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) and
+[SECURITY.md](SECURITY.md). Licensed under the [Apache License 2.0](LICENSE).
