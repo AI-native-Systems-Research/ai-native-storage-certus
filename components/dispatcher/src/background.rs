@@ -753,3 +753,7 @@ mod tests {
         assert!(flag.load(Ordering::Acquire));
     }
 }
+
+#[cfg(test)]
+#[path = "repair_test_ssd_evictor_release.rs"]
+mod repair_test_ssd_evictor_release;
