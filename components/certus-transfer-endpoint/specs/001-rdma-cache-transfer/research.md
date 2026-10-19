@@ -63,8 +63,8 @@ arrives over zyre and `remote-lookup` calls `push`.
 **Decision**: build `certus-transfer-endpoint` designed for the new path, exposing a subset
 usable by the old. Re-point `remote-lookup` and retire both old crates as a **later** task.
 
-**Rationale**: the duplication argument cuts this way. `ffi.rs` already declares **28
-identical public items** across the two existing crates, so a third copy would be the worst
+**Rationale**: the duplication argument cuts this way. `ffi.rs` already declares **52
+public names in common** across the two existing crates, so a third copy would be the worst
 outcome. Both crates already have `rdma_connect`, `rdma_listen` *and* `rdma_accept`, so the
 connection-management surface for symmetric endpoints largely exists; the only real role
 difference is that the responder never posts work requests. `rdma.rs` shares **zero** public

@@ -269,7 +269,7 @@ unchanged.
   still completes, in chunks.
 - **SC-008**: The duplicated verbs FFI layer is defined once. (Today
   `remote-lookup-rdma-initiator/src/ffi.rs` and
-  `remote-lookup-rdma-responder/src/ffi.rs` declare 28 identical public items.)
+  `remote-lookup-rdma-responder/src/ffi.rs` declare 52 public names in common.)
 - **SC-009**: Two instances on one host, differing only by port, are addressed independently
   and hold separate connections; an identifier without a port is rejected.
 - **SC-010**: After a deadline expires, no write from that peer can land in a reclaimed
