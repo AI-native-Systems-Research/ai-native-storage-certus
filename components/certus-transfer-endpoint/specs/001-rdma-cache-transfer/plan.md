@@ -24,13 +24,13 @@ P1 lands without touching working code. Rationale for every design choice is in
 **Language/Version**: Rust (workspace toolchain)
 
 **Primary Dependencies**: `component-framework` (`define_component!`/`define_interface!`,
-actors, channels), `components/interfaces` (`ILogger`, `IDispatchMap`, and a
-block-device interface under the `spdk` feature — see research D13), `anyhow`. rdma-core (libibverbs/librdmacm) only under the `rdma`
+actors, channels), `components/interfaces` (`ILogger`, `IDispatchMap`, `IMemoryTier`, and `IDispatcher`
+under the `spdk` feature — see research D13), `anyhow`. rdma-core (libibverbs/librdmacm) only under the `rdma`
 feature, via a hand-written FFI layer and a C shim built by `cc`/`pkg-config`.
 
 **Storage**: certus memory tier (DPDK hugepages) for landing slots and for memory-tier
-serving; certus block tier via SPDK for block-tier serving, staged through a registered
-bounce-buffer pool.
+serving; certus block tier for block-tier serving, read by the dispatcher into a bounce
+reserve carved from the memory tier's already-registered pool (research D13, D15).
 
 **Testing**: `cargo test` over an in-process transport seam (no rdma-core, no SPDK, no
 zyre); `#[ignore]`d hardware loopback tests under the `rdma` feature, mirroring the existing
@@ -44,7 +44,8 @@ single-host RDMA loopback for CI-adjacent verification.
 model (receptacles + actor-on-dedicated-thread).
 
 **Performance Goals**: saturate the available link on memory-tier-served transfers; per-entry
-RDMA posting must not serialise behind device reads (hence the bounce-buffer decoupling).
+RDMA posting must not serialise behind device reads (hence the bounce-lease decoupling and
+the reader threads).
 No latency target is set at this stage — the research question is whether explicit transfer
 beats recompute, and the measurement belongs to a later benchmark task.
 
@@ -126,7 +127,7 @@ components/certus-transfer-endpoint/
     │   └── mock.rs       # in-process transport, compiled in every build (D14)
     ├── message.rs   # request/reply framing, context IDs, message credits
     ├── serve.rs     # source side: per-entry lookup/pin/push, outcome accumulation
-    ├── bounce.rs    # registered buffer pool for block-tier serving
+    ├── bounce.rs    # block-tier reads: reader threads over IDispatcher::read_to_bounce (spdk)
     └── telemetry.rs # feature-gated metrics
 ```
 
@@ -156,8 +157,10 @@ blocking at zero. Gate: SC-001 — a fetch with zero zyre messages and zero thir
 messages.
 
 **Phase 4 — block-tier serving (P3).**
-Bounce pool with dual registration, device read, early pin release, `hit_block_tier`
-outcome. Gate: SC-005. Requires OQ3 resolved.
+A bounce reserve in the memory tier (`memory-tier`), `IDispatcher::read_to_bounce`
+(`dispatcher`), and the endpoint's reader threads, early pin release and `hit_block_tier`
+outcome. Three components, because reading an extent belongs to the dispatcher (D13). Gate:
+SC-005.
 
 **Phase 5 — bounds and chunking (FR-014, FR-015).**
 Three named credit domains; internal chunking on exhaustion of any. Gate: SC-007.
@@ -178,8 +181,8 @@ scope** for FR-020 and not required for any P1 success criterion.
 |---|---|---|
 | New component merging two existing roles | `ffi.rs` is already duplicated (52 shared public names); a third copy is worse. Symmetric endpoints need the union of both crates' verbs usage, and both already have connect+listen+accept. | Extending the initiator in place — leaves the crate name a lie and the responder's accept loop stranded. |
 | Symmetric QP usage | The destination connects and sends; the source must reply and push on that same connection. | Two connections per pair — doubles QPs and setups, and the reply still needs a direction. |
-| Three credit domains | They bound genuinely different resources (pins, receive buffers, bounce buffers) and exhaust independently. | One combined counter — would over- or under-restrict two of the three. |
-| Bounce pool with dual registration | RDMA needs `ibv_reg_mr`; the device read needs SPDK-DMA-able memory. Both are required of the same buffer. | Promotion into the memory tier — evicts the source's own working set (D8). |
+| Three credit domains | They bound genuinely different resources (pins, receive buffers, bounce space) and exhaust independently. | One combined counter — would over- or under-restrict two of the three. |
+| Bounce reserve carved from the memory tier's pool | RDMA needs a registered buffer and the device read needs SPDK-DMA-able memory; the pool is already both (D15). | Promotion into the memory tier — evicts the source's own working set (D8). A separate dual-registered pool — a whole 1 GiB hugepage for 16 MiB, and a second registration. |
 | Internal chunking | A single request can reach ~3.4 GiB; and it doubles as credit-based pacing. | Failing the request on resource shortage — unacceptable for a cache path. |
 | Long-lived protection domain, registrations outliving queue pairs | The contract promises landing regions are registered once, and in-flight requests have already advertised per-entry rkeys; a per-connection PD makes those stale on every reconnect (D17). | The predecessor crates' per-connection PD with re-registration on each connect — fine when you only push from your own pool, wrong when a peer holds your rkeys. |
 | Peer-wide abort on deadline | One queue pair per instance pair (D5) means forcing it to ERROR is the only thing that makes a late write impossible, and it necessarily takes the siblings with it (D18). | A queue pair per request, isolating expiry — multiplies QPs by request concurrency, already rejected in D5 for a weaker reason. |

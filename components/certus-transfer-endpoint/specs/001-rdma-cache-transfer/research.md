@@ -121,7 +121,7 @@ non-blocking variant belongs with the non-touching one, as a separate `IDispatch
 
 **Decision**: pin and release **per entry**, not per batch. Memory-tier pins release when
 the RDMA write completes (matched by `wr_id`). Block-tier pins release as soon as the device
-read lands in the bounce buffer — *before* the write is posted.
+read lands in its bounce lease (D15) — *before* the write is posted.
 
 **Rationale**: landing slots are not contiguous, so there is one RDMA write per entry
 anyway (FR-008); pin lifetime therefore has no reason to span the batch. On the block-tier
@@ -178,7 +178,7 @@ hint (costs tier capacity, reintroduces the pollution D8 avoids).
 |---|---|---|
 | send-queue credits | **exists** | in-flight RDMA writes per connection, transitively held read pins |
 | message credits | new | outstanding requests against the peer's posted receive buffers |
-| bounce-buffer occupancy | new | concurrent block-tier-served entries |
+| bounce-buffer occupancy | new | bounce-reserve bytes leased to block-tier entries (D15), and concurrent device reads (the reader count) |
 
 **Rationale**: only the middle one was in the original sketch, and the existing code already
 uses the word "credits" for the first. Conflating them would be easy and confusing.
@@ -758,7 +758,7 @@ information. FR-019 compatibility is therefore unaffected.
 Only **OQ5** remains open, deliberately, and only in part — see *Deferred to the next layer
 up* at the end of this document.
 
-## D13 — Receptacle set: look up through the dispatch map, not the memory tier
+## D13 — Receptacle set: look up through the dispatch map; read the block tier through the dispatcher
 
 **Resolved** (was OQ1). The existing initiator has only `logger: ILogger` and
 `memory_tier: IMemoryTier`, which is why it is memory-tier-only — `IMemoryTier` cannot
@@ -769,17 +769,42 @@ express tri-state residency. This component needs:
 | `logger: ILogger` | as today | no |
 | `dispatch_map: IDispatchMap` | **atomic lookup+pin**, and it returns the tier *and* the block offset in one call (`MemoryTier{pointer,size}` / `BlockDevice{offset}` / `NotExist` / `MismatchSize`) | no |
 | `memory_tier: IMemoryTier` | `pool_info()`, so the whole pool is registered **once**, at initialize, and held for the endpoint's life — the responder's approach, not the initiator's register-per-connect (D17) | no |
-| `block_device` | the device read for block-tier serving | **yes** |
+| `dispatcher: IDispatcher` | `read_to_bounce`: read a pinned block-tier entry into the bounce reserve (D15) | **yes** (`spdk`) |
 
 The dispatch map is what makes D6 and D7 possible: one call yields residency, the source
 address (for memory-tier) or the extent offset (for block-tier), *and* the pin. No separate
 probe, no separate pin call.
 
-Block reads go over `connect_client() -> ClientChannels` — the actor-per-controller model
-with shared-memory client channels, per `CLAUDE.md` — not through direct trait methods. So
-the device-read path is: `dm.lookup(key)` → `BlockDevice{offset}` (pinned) → submit a read
-of that offset into a bounce buffer over the client channel → release pin on read completion
-→ post the RDMA write.
+**The endpoint never touches a block device.** Reading an extent correctly needs facts the
+dispatcher owns and nothing publishes: which of several data drives holds the key (a
+placement hash), the namespace, offset-to-LBA conversion, the device's maximum transfer, and
+the per-reader channel discipline its channel pool exists for. Duplicating any of them in
+this component is a layer violation that drifts silently — the wrong drive is read and the
+result reported as `HitBlockTier`. Nor would its safety be ours to guarantee: what keeps a
+pinned extent from being freed and reused is that the dispatcher removes an entry from the
+map, which a pin refuses, before freeing its extent. That is the dispatcher's convention, not
+an interface this component can depend on.
+
+So the block-tier path hands the **pin** to the dispatcher rather than the device:
+
+1. `dm.lookup(key)` → `BlockDevice{offset}`, pinned (one lookup, one pin, as for every entry).
+2. `dispatcher.read_to_bounce(key, offset, len)` leases bounce space, reads the extent into
+   it on the right drive, and returns the lease `(ptr, len)`. It neither pins nor releases:
+   the caller's pin is what holds the extent still for the read.
+3. The caller releases the pin — the data has been copied (D7).
+4. The caller posts the RDMA write from the lease, which lies inside the registered pool.
+5. On the write's completion the caller returns the lease (`release_bounce`).
+
+`read_to_bounce` blocks for the read, like every other `IDispatcher` method; the endpoint
+calls it from a small pool of reader threads so its own thread never waits on a device. It
+**never promotes** and never touches the memory tier's cache (D8).
+
+**There is no device timeout on this path.** The block-device actor's timeout forgets an
+operation while the drive can still write its buffer, and returns the buffer to the caller;
+reclaiming bounce space then would let a late read land in a lease since handed to another
+entry. So a read is held, with its pin and its lease, until it genuinely completes. A slow or
+hung drive surfaces on the requester as its reply deadline (FR-016) — the right signal, since
+the source's state is then unknown — and that is the intended behaviour, not a gap.
 
 ## D14 — Feature matrix, and the default build's honest degradation
 
@@ -791,28 +816,50 @@ of that offset into a bounce buffer over the client channel → release pin on r
 | `rdma` | memory tier only | real libibverbs/librdmacm |
 | `rdma,spdk` | memory **and** block tier | real verbs |
 
-A build without `spdk` has no `block_device` receptacle bound, so a `BlockDevice{offset}`
+A build without `spdk` has no `dispatcher` receptacle, so a `BlockDevice{offset}`
 answer is reported as **`miss`** rather than failing. That is a clean degradation and
 exactly what Phases 1–3 need: the whole messaging and pin-discipline surface is testable
 with neither rdma-core nor SPDK present, satisfying SC-003 and CLAUDE.md's default-members
 rule. Block-tier serving (Phase 4, P3) is the only thing that requires SPDK.
 
-## D15 — Bounce-pool registration: follow the memory tier, which is already dual-registered
+## D15 — The bounce reserve is carved from the memory tier's pool
 
-**Resolved** (was OQ3). No new mechanism is needed; the precedent is exact.
+**Resolved** (was OQ3). No new registration and no new allocation are needed.
 
 The memory tier is allocated with `spdk_zmalloc` — "hugepage-backed, zero-initialized
 memory", NUMA-aware (`components/memory-tier/src/lib.rs:281-297`) — so it is SPDK-DMA-able
-by construction, which is how promotion reads device data into it today. And the existing
-initiator already registers that same region for RDMA: `rdma.rs` has a `MemoryRegion` whose
-registration path covers memory "owned by the caller (e.g., memory-tier pool)".
+by construction, which is how promotion reads device data into it today. And this endpoint
+already registers that whole pool for RDMA, once, for its life (D17). **So bounce space taken
+from the pool is already both DMA-able and registered**: a leased address passes the same
+inside-the-pool check as a memory-tier hit, and is written by the same path.
 
-**So the memory tier is already both SPDK-DMA-able and `ibv_reg_mr`-registered.** The bounce
-pool should be allocated and registered the same two ways: `spdk_zmalloc` on the NUMA node of
-the serving instance, then `MemoryRegion`-registered over caller-owned memory.
+* **Owned by the memory tier.** The reserve is a range of the memory tier's pool, managed by a
+  second instance of the memory tier's own first-fit free-list allocator (4 KiB-aligned,
+  coalescing). Two allocators from two components over one region would be two sources of
+  truth for which bytes are whose. The dispatcher leases through `IMemoryTier` and the
+  endpoint returns leases through the dispatcher, which forwards.
+* **Taken quietly from the pool, not added to it.** The memory tier sets aside
+  `min(bounce_reserve, pool_size / 8)` at the top of its pool at `initialize`; `capacity()`
+  shrinks by that amount and the initialize log line says so. The default reserve is
+  **16 MiB** — four concurrent reads (the default reader count) of up to 4 MiB, the largest
+  KV block expected (64 KiB in the measured deployment; ~2.25 MiB for Qwen3-8B) — which is
+  0.78% of the servers' 2 GiB default pool and 0.05% of the 30 GiB measured cluster.
+  `set_bounce_reserve(bytes)` overrides it, before `initialize` only; after, it is an error.
+  A separate allocation was rejected: on 1 GiB hugepages (this rig) a 16 MiB pool would cost
+  a whole GiB, and a second region would need its own registration.
+* **Outside the cache.** Reserve space never appears in `capacity()`, `used()` or eviction
+  tracking, so serving a peer can never evict a cached entry (FR-012, SC-005).
+* **Exhaustion is transient; oversize is not.** A lease that does not fit *now* is
+  `NoSpace`: the endpoint releases the entry's pin and re-queues it, retrying when one of its
+  own leases or readers frees. That retry is guaranteed to come because the endpoint is the
+  reserve's only user — an invariant of the reserve, stated so it stays true. A lease that can
+  **never** fit — larger than the reserve, no reserve, or a pool that is not DMA-capable (the
+  `mmap` fallback without SPDK) — is `NeverFits`, and the entry is `Failed`: a configuration
+  fault reported loudly, never retried and never passed off as a miss.
 
 `gpu-services::prepare_memory_for_spdk` is **not** needed — it addresses making *GPU* memory
-SPDK-DMA-able, a different problem.
+SPDK-DMA-able, a different problem. Nor is the dispatcher's own `StagingPool`, which is
+allocated outside the memory tier's pool and so is not registered for RDMA.
 
 ## Upstream change picked up 2026-10-14 (rebase onto unstable)
 

@@ -57,7 +57,8 @@ pub struct RemoteRegion {
 pub enum EntryOutcome {
     /// Served from the source's memory tier.
     HitMemoryTier,
-    /// Served from the source's block tier via a bounce buffer.
+    /// Served from the source's block tier, read by its dispatcher into a bounce
+    /// lease and written from there; never promoted.
     HitBlockTier,
     /// The source does not hold it, holds it at a different size, or cannot
     /// serve it in this build (no `spdk` feature and the entry is block-tier).
@@ -133,9 +134,9 @@ define_interface! {
         /// Register a region that peers may RDMA-write into. Must be called
         /// before any peer request can be satisfied against it.
         ///
-        /// The region must be SPDK-DMA-able and RDMA-registrable — in practice
-        /// allocated by `spdk_zmalloc` on the local NUMA node, as the memory
-        /// tier already is (research D15).
+        /// The region must be RDMA-registrable — in practice the memory tier's
+        /// own pool, allocated by `spdk_zmalloc` on the local NUMA node, as the
+        /// caller's landing slots are.
         ///
         /// Registration is into the endpoint's long-lived protection domain and
         /// outlives any one queue pair, so the returned handle and the `rkey`s
@@ -196,8 +197,9 @@ define_interface! {
 
         /// Snapshot of the credit domains (per direction) and per-outcome
         /// counters, plus protocol-fault, version-downgrade and
-        /// duplicate-connection-resolved counts — an unexercised path must not
-        /// look like a working one (Principle XI).
+        /// duplicate-connection-resolved counts, and block reads attempted,
+        /// completed, failed and deferred — an unexercised path must not look
+        /// like a working one (Principle XI).
         fn stats(&self) -> TransferStats;
     }
 }
@@ -219,6 +221,7 @@ pub struct EndpointConfig {
     pub actor_cpu: Option<usize>,
     pub fetch_deadline: Option<Duration>, // reply deadline from send (FR-016); None waits forever
     pub deadline_action: DeadlineAction,  // FailLoud; ReportPartial is refused at configure
+    pub block_readers: u32,     // concurrent block-tier device reads (spdk); default 4
 }
 
 pub enum DeadlineAction { FailLoud, ReportPartial }
@@ -254,24 +257,31 @@ Implementations MUST uphold, and tests MUST verify:
 3. **No broadcast.** A `Miss` MUST NOT trigger any further peer traffic. This endpoint never
    contacts an instance the caller did not name (D12, SC-006 — note there is deliberately no
    FR for this; it is a property of the mechanism, asserted by SC-006. An earlier draft of
-   this invariant mis-cited FR-012, which is the bounce-buffer/no-promotion requirement).
+   this invariant mis-cited FR-012, which is the bounce-reserve/no-promotion requirement).
 4. **Pin discipline.** Residency and pin come from one dispatch-map lookup. A read reference
-   is released exactly once per *pinned* answer, by the completion reaper owning its
-   `wr_id`, and never for an unpinned answer (Principle IX, D6, D7).
+   is released exactly once per *pinned* answer, and never for an unpinned answer (Principle
+   IX, D6, D7): a memory-tier pin by the completion reaper owning its `wr_id`; a block-tier
+   pin when its device read completes, before its write is posted. An entry deferred for want
+   of bounce space or a reader releases its pin and is looked up afresh when it retries —
+   two pins, each real, never a probe.
 5. **Pin bound.** Concurrently held read pins never exceed the configured send-queue credit
-   limit, regardless of `items.len()` (SC-004).
+   limit plus the device-reader count, regardless of `items.len()` (SC-004).
 6. **Tier neutrality.** Serving any entry leaves the source's memory-tier occupancy and LRU
    order unchanged (SC-005, D8). **Not yet met for memory-tier entries:** the dispatch map's
    lookup refreshes LRU position as it pins, and no `IDispatchMap` call pins without it.
-   Met once a non-touching lookup exists (D6); block-tier serving never promotes.
+   Met once a non-touching lookup exists (D6). **Met for block-tier entries** in the sense
+   SC-005 states: bounce space lies outside the cache, so occupancy is unchanged and no
+   memory-tier entry moves relative to another; the lookup refreshes only the served entry's
+   own position.
 7. **No partial publication.** A landing slot whose write did not complete is not published.
    Slots follow reserve → arrive → commit/abort (FR-018).
 8. **Teardown before reclaim.** After `disconnect(peer)` returns, no write from that peer
    can land (FR-017). The same ordering holds on the deadline path, where the queue pair is
    forced to ERROR and drained *before* any slot is reclaimed, and a fresh connection is
    established only on next need (FR-023).
-9. **Progress under scarcity.** Exhaustion of send-queue credits, message credits or
-   bounce buffers causes chunking, never failure (FR-015).
+9. **Progress under scarcity.** Exhaustion of send-queue credits, message credits, bounce
+   space or device readers causes chunking, never failure (FR-015). An entry that can never
+   fit the bounce reserve is not scarcity: it is `Failed`, logged and counted.
 10. **Deadline fails loudly.** The reply deadline runs from when the request is sent, not
     from the `fetch` call, so a request waiting for a credit cannot expire. On expiry the
     default action is `Deadline(..)` carrying key range, peer, chunk index and queue-pair
@@ -328,6 +338,53 @@ Tearing the queue pair down is the only thing that makes a late write impossible
 mandatory when the peer's state is unknown and gratuitous when it is not. Routing a protocol
 error through the deadline's cleanup would destroy a healthy connection and take unrelated
 requests with it.
+
+## The dispatcher's half: `read_to_bounce` (`spdk`)
+
+The endpoint never addresses a block device (research D13). It hands its pinned entry to the
+dispatcher, which owns drive placement, namespace, LBA conversion, transfer limits and
+channels, and the memory tier, which owns the bounce reserve (research D15):
+
+```rust
+/// A range of the bounce reserve holding one block-tier entry's bytes. Inside the
+/// memory tier's pool, so already DMA-able and RDMA-registered.
+pub struct BounceLease { pub ptr: *mut u8, pub len: u32 }
+
+pub enum BounceError {
+    /// No room in the reserve right now. Transient: retry after a lease returns.
+    NoSpace,
+    /// Can never be satisfied: larger than the reserve, no reserve, or a pool that is
+    /// not DMA-capable. The entry is `Failed`; retrying cannot help.
+    NeverFits(String),
+    /// The device read failed. The lease has been returned.
+    Io(String),
+    NotInitialized(String),
+}
+
+// IDispatcher gains:
+/// Read the block-tier entry `key` at extent `offset`, `len` bytes, into a fresh bounce
+/// lease. The caller MUST hold a pin on `key` (its `BlockDevice{offset}` lookup) for the
+/// duration of the call: the pin, not this method, keeps the extent from being freed. Never
+/// promotes, never touches the cache. Blocks until the read completes, however long that
+/// takes — there is no device timeout, because reclaiming a buffer the drive may still
+/// write is unsafe; a hung device surfaces as the requester's reply deadline.
+fn read_to_bounce(&self, key: CacheKey, offset: u64, len: u32) -> Result<BounceLease, BounceError>;
+/// Return a lease obtained from `read_to_bounce`, once nothing can still read it.
+fn release_bounce(&self, lease: BounceLease);
+
+// IMemoryTier gains:
+/// Override the bounce reserve (default 16 MiB, capped at pool_size / 8). Before
+/// `initialize` only; afterwards an error.
+fn set_bounce_reserve(&self, bytes: usize) -> Result<(), MemoryTierError>;
+fn bounce_alloc(&self, len: u32) -> Result<*mut u8, BounceError>;
+fn bounce_free(&self, ptr: *mut u8, len: u32);
+/// (reserve bytes, bytes leased now)
+fn bounce_usage(&self) -> (usize, usize);
+```
+
+The endpoint is the reserve's **only** user, which is what makes `NoSpace` safe to retry: it
+learns when space frees because it is the one returning leases. `dispatcher-p2p` answers
+`NeverFits` until it implements the method.
 
 ## Why `fetch` returns a context id
 

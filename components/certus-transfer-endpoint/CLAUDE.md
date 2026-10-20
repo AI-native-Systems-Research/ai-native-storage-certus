@@ -59,6 +59,19 @@ VIII–XI, and a review that does not check them is not a review.
   D18). Logging the state is not changing it, and a late write into a reclaimed
   slot corrupts an unrelated entry. Expiry aborts every context on that
   connection; that blast radius is intended and logged.
+- **Never address a block device.** Reading an extent needs the dispatcher's
+  placement hash, namespace, LBA conversion and channel discipline; copying any of
+  it reads the wrong drive and reports the result as `HitBlockTier`. Hand the
+  pinned entry to `IDispatcher::read_to_bounce`, which leases from the memory
+  tier's bounce reserve — already registered, because the whole pool is (D13, D15).
+- **Block-tier reads have no timeout, on purpose.** The device actor's timeout
+  returns a buffer the drive may still write. Hold the read, its pin and its lease
+  until it completes; a hung drive shows up as the requester's reply deadline,
+  which is the intended behaviour. Do not add a device timeout or an abort.
+- **A deferred entry holds no pin.** No reader free, or `NoSpace`: release the pin
+  and re-queue; look it up afresh on retry. Holding pins while waiting breaks
+  SC-004's bound (send credits plus readers). `NeverFits` is `Failed`, not
+  scarcity — never retry it.
 - **Do not add phase barriers.** Memory-tier writes post as soon as they
   resolve; each block-tier write posts when its own device read completes. Never
   lease-all/read-all/post-all (FR-022, D19).
@@ -140,7 +153,10 @@ VIII–XI, and a review that does not check them is not a review.
 - **`select_transport(BuildDefault)` must never fall back to the mock in an
   `rdma` build.** An in-process run reports plausible numbers from no fabric.
 - **Pin state lives in the link's `Slab` and leaves it only through `complete`**
-  (or a partial post's `unposted` list). Do not add another way out: a second
+  (or a partial post's `unposted` list) — with one stated exception: a block-tier
+  pin waits in the read table while its device read runs (nothing is posted yet),
+  and is released when the read completes, before the write is posted; the slab
+  then carries the bounce lease instead. Do not add another way out: a second
   path is a double release, which decrements another reader's pin. Post only via
   the table's `post_sends`/`post_recvs` (over `post_{send,recv}_tracked`) — they
   force `signaled` on, because an unsignaled success never completes and its pin

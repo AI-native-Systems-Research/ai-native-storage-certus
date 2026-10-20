@@ -66,7 +66,7 @@ that Principle VIII requires.
   `remote-lookup`
 - [X] T004 [P] Declare the module skeleton in `src/lib.rs` per plan.md's layout:
   `mod connection; mod message; mod serve; mod telemetry;`, `#[cfg(feature = "rdma")] mod
-  ffi; #[cfg(feature = "rdma")] mod rdma;`, `#[cfg(feature = "spdk")] mod bounce;`, and
+  ffi; #[cfg(feature = "rdma")] mod rdma;`, `mod bounce;` (block-tier reads, `spdk`), and
   `#[cfg(test)] mod loopback_test;` gated for Phase 9
 - [X] T005 [P] Write the component `CLAUDE.md` (plan.md Constitution Check requires one):
   role, the symmetric-endpoint invariant, the feature matrix, and a pointer to Principles
@@ -247,7 +247,7 @@ connection table. This is plan.md Phase 1's engine.
   `rdma_create_qp` rejects a PD from any other context, even one opened on the same device
 - [X] T016 Wire `define_component!` in `src/lib.rs` (depends T006, T012): receptacles
   `logger: ILogger`, `dispatch_map: IDispatchMap` (both ungated, per D13 and T002), and a
-  block-device receptacle gated on `spdk`. Endpoint owns a dedicated actor thread, as both
+  `dispatcher: IDispatcher` receptacle gated on `spdk` (T083). Endpoint owns a dedicated actor thread, as both
   predecessor crates do.
   *Done*: `CertusTransferEndpoint` provides `ITransferEndpoint` and a new
   **`ITransferEndpointAdmin`** (`configure(EndpointConfig)` / `initialize` / `shutdown`, in
@@ -566,50 +566,82 @@ is the MVP.
 ## Phase 6: User Story 3 — serving an entry demoted to SSD (Priority: P3)
 
 **Goal**: plan.md Phase 4. Completeness, not a hot path — measured runs show single-digit-
-percent SSD hit rates. Requires the `spdk` feature.
+percent SSD hit rates. Requires the `spdk` feature. Spans three components, because reading
+an extent belongs to the dispatcher and the bounce reserve to the memory tier (research D13,
+D15); each component's own specs are revised with its code.
 
 **Independent Test**: force a key to the block tier, request it, assert the value arrives,
-the reply says `hit_block_tier`, and the source's memory-tier occupancy and LRU order are
-unchanged.
+the reply says `hit_block_tier`, and the source's memory-tier occupancy and the relative LRU
+order of its memory-tier entries are unchanged.
 
 **Gate**: **SC-005**.
 
-- [ ] T037 [US3] Implement `src/bounce.rs`: a fixed pool of buffers allocated with
-  `spdk_zmalloc` on the serving instance's NUMA node and registered with
-  `MemoryRegion` over caller-owned memory — **both** registrations, because the device
-  read needs SPDK-DMA-able memory and the RDMA needs `ibv_reg_mr`. The memory tier is
-  already dual-registered exactly this way, which is why no new mechanism is needed.
-  `gpu-services::prepare_memory_for_spdk` is **not** used; it addresses GPU memory (D15)
-- [ ] T038 [US3] Implement the device read over `connect_client() -> ClientChannels`
-  (the actor-per-controller model with shared-memory client channels, per the repo
-  `CLAUDE.md`), not direct trait methods: `lookup` → `BlockDevice{offset}` (already
-  pinned) → read that offset into a leased bounce buffer (D13)
-- [ ] T039 [US3] Release the block-tier pin **as soon as the device read completes** —
-  before the RDMA write is posted — because the data has been copied, so only the buffer
-  needs protection thereafter (FR-011, D7). The bounce lease, not the pin, is what the
-  `wr_id` completion then releases
+- [ ] T083 [US3] `interfaces`: `BounceLease { ptr, len }` and `BounceError { NoSpace,
+  NeverFits, Io, NotInitialized }`; `IMemoryTier` gains `set_bounce_reserve`,
+  `bounce_alloc`, `bounce_free`, `bounce_usage`; `IDispatcher` gains `read_to_bounce` and
+  `release_bounce` (contract *The dispatcher's half*). `define_interface!` has no default
+  methods, so every implementor changes in the same commit: test doubles answer
+  `NeverFits`/no reserve, and `dispatcher-p2p` answers `NeverFits` until it implements the
+  path. `EndpointConfig` gains `block_readers` (default 4); `TransferStats` gains
+  `block_reads_attempted`, `_completed`, `_failed` and `block_deferrals`. The endpoint's
+  `spdk` receptacle becomes `dispatcher: IDispatcher`; no block-device receptacle remains
+- [ ] T037 [US3] `memory-tier`: the bounce reserve (D15). At `initialize`, set aside
+  `min(bounce_reserve, pool_size / 8)` — default 16 MiB — at the top of the pool, managed by
+  a second instance of the tier's first-fit free list; `capacity()` excludes it, `used()`
+  and eviction tracking never see it, and the initialize log line states its size.
+  `set_bounce_reserve` after `initialize` is an error. `bounce_alloc` answers `NoSpace` when
+  the request does not fit now and `NeverFits` when it never can: larger than the reserve,
+  no reserve, or a pool that is not DMA-capable (the `mmap` fallback). Tests in the memory
+  tier: capacity shrinks by exactly the reserve, a full cache cannot reach reserve bytes,
+  allocation and coalescing, both errors, the `pool_size / 8` cap
+- [ ] T038 [US3] `dispatcher`: `read_to_bounce(key, offset, len)` — lease from the memory
+  tier, then read `len` bytes (rounded up to the block size) at `offset` on the drive the
+  placement hash chooses for `key`, over a channel leased from that drive's pool, segmented
+  by its maximum transfer, exactly as the promotion read is — but into the lease, and with
+  **no device timeout**: the actor's timeout would hand back a buffer the drive may still
+  write, so the read passes a timeout that cannot fire, named as a constant whose comment
+  says why. On a device error the lease is returned and `Io` reported. It neither pins nor
+  releases: the caller's pin holds the extent still. `release_bounce` forwards to the
+  memory tier. Never promotes, never touches the cache (FR-012, D8). Tests over the
+  dispatcher's mock block device: the right drive and LBA are read, multi-segment entries,
+  `Io` returns the lease, `NoSpace`/`NeverFits` pass through, the cache is untouched
+- [ ] T039 [US3] Release the block-tier pin **as soon as its read completes** — before the
+  write is posted — since the data has been copied, so only the lease needs protection
+  thereafter (FR-011, D7). The pin waits in the endpoint's read table while its read is in
+  flight (nothing is posted yet, so it has no `wr_id`); after the read, the slab carries the
+  **lease**, and the reaper that owns the write's `wr_id` returns it with `release_bounce`.
+  This is the one place a pin leaves other than through a completion, and it is stated as
+  such
 - [ ] T040 [US3] Report `HitBlockTier`, and **never promote** the entry into the source's
   memory tier to serve a peer (FR-012, D8). Promotion-to-serve would evict the source's own
-  working set, making serving peers self-harming
-- [ ] T041 [P] [US3] Without the `spdk` feature there is no block-device receptacle bound,
-  so a `BlockDevice{offset}` answer is reported as **`Miss`** — never `HitBlockTier`, never
-  an error (D14, invariant 2). Release the pin that lookup took, since that answer *was*
+  working set, making serving peers self-harming. Structurally: the endpoint calls only
+  `read_to_bounce`, which never promotes
+- [ ] T041 [P] [US3] Without the `spdk` feature there is no dispatcher receptacle, so a
+  `BlockDevice{offset}` answer is reported as **`Miss`** — never `HitBlockTier`, never an
+  error (D14, invariant 2). Release the pin that lookup took, since that answer *was*
   pinned (contrast T023)
 - [ ] T072 [US3] Remove the read/write phase barrier from the serve path (FR-022, D19):
   resolve and post **memory-tier** writes immediately, without waiting on any device read,
-  and post each block-tier write when its *own* read completes — never "lease N buffers,
-  read all N, post all N". Keep the device queue deep by sizing bounce occupancy for it,
-  which is the one bound that should track device parallelism. This is the only barrier in
-  the design whose cost is milliseconds rather than microseconds, which is why it is the
-  only one with a requirement attached
+  and post each block-tier write when its *own* read completes. Reads run on
+  `block_readers` threads calling `read_to_bounce`, so the endpoint thread never blocks on a
+  device. An entry is looked up only when a send credit is free; a block-tier answer with no
+  reader free, or a read answering `NoSpace`, **releases its pin and re-queues the entry**,
+  retried when a reader or lease frees — it never holds a pin while it waits, so pins stay
+  within send credits plus readers (SC-004). `NeverFits` and `Io` are `Failed`, counted and
+  logged, never retried. A connection torn down mid-read waits for the read: its pin and
+  lease are released when it completes, and the entry is `Failed`. `shutdown` waits for
+  every read in flight, however long the device takes
 - [ ] T073 [US3] Test **SC-011**: on a request mixing memory-tier and block-tier entries,
   every memory-tier write is posted before the first device read completes (hold the mock
-  block device's read completion and assert the memory-tier writes already went out), and
-  the send queue is never idle while unposted entries remain
-- [ ] T042 [US3] Tests: **SC-005** — serving a block-tier entry leaves memory-tier
-  occupancy and LRU order byte-identical (invariant 6); outcome honesty — `HitBlockTier`
-  only when the device was actually read (invariant 2); and the no-`spdk` degradation path
-  of T041
+  dispatcher's read and assert the memory-tier writes already went out), and the send queue
+  is never idle while unposted entries remain
+- [ ] T042 [US3] Tests: **SC-005** — serving a block-tier entry leaves memory-tier occupancy
+  and the relative LRU order of memory-tier entries unchanged; outcome honesty —
+  `HitBlockTier` only when the read actually ran (invariant 2); the pin released before the
+  write is posted, on one recorded sequence; the lease returned after the write completes;
+  deferral under `NoSpace` and under a busy reader pool, both completing; SC-004 with
+  readers; `NeverFits` and `Io` as `Failed`; a teardown and a shutdown mid-read; and the
+  no-`spdk` degradation path of T041
 
 **Checkpoint**: SC-005 — block-tier serving works and is provably tier-neutral.
 
@@ -623,8 +655,9 @@ failure.
 
 **Gate**: **SC-007**.
 
-- [ ] T043 Implement **bounce-buffer occupancy** as the third named domain and expose all
-  three — send-queue credits (T014), message credits (T032), bounce occupancy — as
+- [ ] T043 Implement **bounce-buffer occupancy** as the third named domain — reserve bytes
+  leased (T037) and readers busy (T072) — and expose all three — send-queue credits (T014),
+  message credits (T032), bounce occupancy — as
   separately configured and separately named knobs (FR-014, D10). Do not conflate them:
   they bound genuinely different resources and exhaust independently, and the existing code
   already uses "credits" for the first
@@ -635,7 +668,7 @@ failure.
   recorded offset. Nothing on the wire links the chunks
 - [ ] T045 Source side: answer every `OP_FETCH` message with **exactly one** reply covering
   all its entries (or one `OP_ERROR`), echoing that message's `context_id` — never one reply per batch
-  (FR-007). When bounce buffers are scarce, serve the message's entries as buffers free up
+  (FR-007). When bounce space is scarce, serve the message's entries as leases free up
   and still reply once: scarcity delays the reply, it never multiplies it. This is what keeps
   T080's reply reserve exact
 - [ ] T046 Implement the fetch completion rule: a fetch is complete when every one of its
@@ -645,7 +678,7 @@ failure.
 - [ ] T047 Chunk on exhaustion of any of the three domains, and make progress rather than
   failing (FR-015, invariant 9). A request can reach ~3.4 GiB (~1,536 blocks × 2.25 MiB
   for Qwen3-8B at 24k tokens), which is why chunking is mandatory, not optional
-- [ ] T048 Tests: **SC-007** — with bounce buffers and landing slots made artificially
+- [ ] T048 Tests: **SC-007** — with bounce space and landing slots made artificially
   scarce, a large request still completes, in chunks; outcome order preserved across
   chunk boundaries; and a send blocks (not errors) at zero message credits, while
   `WouldBlock` is returned only when the caller explicitly asked not to block
@@ -825,7 +858,9 @@ this. It is a separate change, after the engine is proven.
 
 - **US2 (P2)**: after Foundational. Independent, and intentionally delivered first.
 - **US1 (P1)**: after Foundational + Phase 4. Shares `src/serve.rs` with US2.
-- **US3 (P3)**: after US1. Adds `src/bounce.rs` and the `spdk` receptacle.
+- **US3 (P3)**: after US1. Touches `interfaces` (T083), `memory-tier` (T037) and
+  `dispatcher` (T038) in that order, then the endpoint's `src/bounce.rs` and its `spdk`
+  dispatcher receptacle.
 
 ### Parallel opportunities
 
@@ -875,9 +910,9 @@ this. It is a separate change, after the engine is proven.
 | FR-009 atomic lookup+pin | T022 |
 | FR-010 never release an unpinned answer | T023, T026 |
 | FR-011 per-entry pin lifetime | T024, T039 |
-| FR-012 bounce buffers, no promotion | T037, T040 |
+| FR-012 bounce reserve, no promotion | T083, T037, T038, T040 |
 | FR-013 bounded concurrency | T014, T043 |
-| FR-014 three credit domains | T014, T032, T043 |
+| FR-014 three credit domains | T014, T032, T043, T072 |
 | FR-015 chunk, never fail | T044–T047, T048 |
 | FR-016 fail-loud deadline | T049–T052 |
 | FR-017 teardown before reclaim | T019, T021, T050 |
@@ -894,7 +929,7 @@ this. It is a separate change, after the engine is proven.
 | SC-001 zero zyre, zero third instance | T035 |
 | SC-002 legacy tests pass | T021, T055 |
 | SC-003 default build, no rdma-core/SPDK | T001, T003, T010, T041 |
-| SC-004 pin bound | T025 |
+| SC-004 pin bound | T025, T072, T042 |
 | SC-005 tier neutrality | T040, T042 |
 | SC-006 all-miss, no broadcast | T035 |
 | SC-007 progress under scarcity | T048 |
