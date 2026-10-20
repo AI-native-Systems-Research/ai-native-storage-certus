@@ -41,16 +41,25 @@ use interfaces::{
     TransferStats,
 };
 
-use crate::connection::slab::TrackedSend;
+use crate::connection::slab::{TrackedRecv, TrackedSend};
 use crate::connection::table::{ConnectionTable, ReapError, TableEvent};
-use crate::connection::transport::{Access, Completion, CompletionError, Region};
+use crate::connection::transport::{
+    Access, Completed, Completion, CompletionError, Region, SendOp,
+};
 use crate::connection::PeerId;
+use crate::message::{self, Header, Kind};
+use crate::msgpool::{MsgBuf, MsgPool};
 use crate::serve::{resolve, Map, MissCause, Pool, Push, PushWork, Resolved};
+use crate::session::{Limits, Phase, Session};
 
 /// What a work request's slab slot carries until its completion is reaped.
 pub(crate) enum Work {
     /// A push's RDMA write, holding the entry's pin.
     Push(PushWork),
+    /// A message being sent from this buffer.
+    Send(MsgBuf),
+    /// A receive posted into this buffer.
+    Recv(MsgBuf),
     /// A receive a test posted only to hold a slot.
     #[cfg(test)]
     Held,
@@ -100,11 +109,20 @@ pub(crate) enum Command {
     /// The local pool's address and rkey, so a test can push into it. Test-only.
     #[cfg(test)]
     PoolKey(mpsc::Sender<(u64, u32)>),
-    /// Post one send on `peer`'s link that the peer has no receive for, so it
-    /// stalls on RNR and everything posted behind it stays in flight. Lets a
-    /// test put writes genuinely in flight at teardown. Test-only.
+    /// Send `bytes` to `peer` as one message, bypassing every protocol rule —
+    /// a hostile or buggy peer, for tests. With `spend` it first takes a
+    /// message credit, as a genuine request would, so the reply is expected.
     #[cfg(test)]
-    Plug(PeerId, mpsc::Sender<Result<(), String>>),
+    Inject {
+        peer: PeerId,
+        bytes: Vec<u8>,
+        spend: bool,
+        reply: mpsc::Sender<Result<(), String>>,
+    },
+    /// `peer`'s session: (negotiated version, peer max_entries, outbound
+    /// (now, peak), inbound (now, peak)). Test-only.
+    #[cfg(test)]
+    SessionOf(PeerId, mpsc::Sender<Option<SessionView>>),
 }
 
 thread_local! {
@@ -138,11 +156,13 @@ pub(crate) fn fatal_on_panic<R>(what: &str, f: impl FnOnce() -> R) -> R {
     }
 }
 
-/// Settle one reaped or drained completion: release its pin and record its
-/// entry's outcome. Returns whether it was a genuine failure (not a flush),
-/// which means the link is now in ERROR and must be torn down.
+/// Settle one push write's completion: release its pin and record its entry's
+/// outcome. Returns whether it was a genuine failure (not a flush), which means
+/// the link is now in ERROR and must be torn down. Message work is not settled
+/// here; see [`EndpointActor::on_message_work`].
 fn settle(pushes: &mut BTreeMap<u64, Push>, map: &Map, c: &Completion, work: Work) -> bool {
     match work {
+        Work::Send(_) | Work::Recv(_) => unreachable!("message work is settled by the actor"),
         Work::Push(pw) => {
             pw.pin.release(&**map);
             let push = pushes
@@ -161,9 +181,35 @@ fn settle(pushes: &mut BTreeMap<u64, Push>, map: &Map, c: &Completion, work: Wor
     }
 }
 
+/// A test's view of a session.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SessionView {
+    pub(crate) version: Option<u16>,
+    pub(crate) peer_max_entries: u32,
+    pub(crate) outbound: (u32, u32),
+    pub(crate) inbound: (u32, u32),
+    pub(crate) credits_available: u32,
+}
+
+/// One connection's messaging: its session, and messages waiting for a send
+/// credit or a buffer.
+struct Conn {
+    session: Session,
+    /// Encoded messages not yet posted, in order. Replies go to the front:
+    /// they spend no message credit, and waiting on one starves the peer.
+    outbox: VecDeque<(MsgBuf, usize)>,
+}
+
 /// The actor's state: the table, until shutdown takes it.
 pub(crate) struct EndpointActor {
     table: Option<ConnectionTable<WorkState>>,
+    limits: Limits,
+    /// Per-connection message state, by peer, for live links only.
+    conns: BTreeMap<PeerId, Conn>,
+    /// Message buffers. Dropped after the table, so after every posted
+    /// receive and send into them has been drained.
+    msgs: MsgPool,
     logger: Box<dyn ILogger + Send + Sync>,
     events: Vec<TableEvent>,
     map: Map,
@@ -191,8 +237,12 @@ impl EndpointActor {
         logger: Box<dyn ILogger + Send + Sync>,
         map: Map,
         pool_region: Region,
+        limits: Limits,
     ) -> Self {
         EndpointActor {
+            limits,
+            conns: BTreeMap::new(),
+            msgs: MsgPool::default(),
             pool: Pool {
                 addr: pool_region.addr(),
                 len: pool_region.len(),
@@ -224,9 +274,19 @@ impl EndpointActor {
             .drain(peer, &mut released, DRAIN_STALL)
             .map_err(|e| format!("draining {peer}: {e}"));
         // Settle what came back even if the drain stopped early: those pins
-        // are ours to release whatever happens next.
+        // and buffers are ours to release whatever happens next.
         for (c, work) in released {
-            settle(&mut self.pushes, &self.map, &c, work);
+            match work {
+                Work::Send(b) | Work::Recv(b) => self.msgs.give(b),
+                work => {
+                    settle(&mut self.pushes, &self.map, &c, work);
+                }
+            }
+        }
+        if let Some(conn) = self.conns.remove(peer) {
+            for (b, _) in conn.outbox {
+                self.msgs.give(b);
+            }
         }
         begun?;
         drained?;
@@ -315,8 +375,17 @@ impl EndpointActor {
         let mut faulted: Vec<PeerId> = Vec::new();
 
         for (&id, push) in self.pushes.iter_mut() {
+            // Not connected, or the capability exchange is not finished: no
+            // data before the peer's OP_HELLO (FR-025).
+            if self
+                .conns
+                .get(&push.peer)
+                .map_or(true, |c| c.session.phase() != Phase::Ready)
+            {
+                continue;
+            }
             let Some(avail) = table.credits(&push.peer).map(|c| c.available() as usize) else {
-                continue; // not connected yet
+                continue;
             };
             let mut queue = VecDeque::new();
             while queue.len() < avail {
@@ -381,13 +450,10 @@ impl EndpointActor {
             }
         }
 
-        let busy: Vec<PeerId> = self
-            .pushes
-            .values()
-            .filter(|p| p.in_flight > 0)
-            .map(|p| p.peer.clone())
-            .collect();
+        // Every live connection has receives posted, so every one is reaped.
+        let busy: Vec<PeerId> = self.conns.keys().cloned().collect();
         let mut reaped = Vec::new();
+        let mut messages: Vec<(PeerId, Completion, Work)> = Vec::new();
         for peer in busy {
             match table.reap(&peer, &mut reaped, REAP_BATCH) {
                 Ok(_) | Err(ReapError::NotLive(_)) => {}
@@ -395,6 +461,10 @@ impl EndpointActor {
             }
             for (c, work) in reaped.drain(..) {
                 did = true;
+                if matches!(work, Work::Send(_) | Work::Recv(_)) {
+                    messages.push((peer.clone(), c, work));
+                    continue;
+                }
                 if settle(&mut self.pushes, &self.map, &c, work) {
                     self.logger.error(&format!(
                         "certus-transfer-endpoint: write to {peer} failed ({}); \
@@ -409,6 +479,27 @@ impl EndpointActor {
             }
         }
 
+        for (peer, c, work) in messages {
+            if let Err(why) = self.on_message_work(&peer, c, work) {
+                self.logger.error(&format!(
+                    "certus-transfer-endpoint: {peer}: {why}; tearing the connection down"
+                ));
+                faulted.push(peer);
+            }
+        }
+        for peer in self.conns.keys().cloned().collect::<Vec<_>>() {
+            match self.flush_outbox(&peer) {
+                Ok(moved) => did |= moved,
+                Err(why) => {
+                    self.logger.error(&format!(
+                        "certus-transfer-endpoint: {peer}: {why}; tearing the connection down"
+                    ));
+                    faulted.push(peer);
+                }
+            }
+        }
+
+        faulted.sort();
         faulted.dedup();
         for peer in faulted {
             if let Err(e) = self.teardown(&peer) {
@@ -417,6 +508,238 @@ impl EndpointActor {
         }
         self.finish_done();
         did
+    }
+
+    // --- messaging (slice B: bring-up) ---------------------------------------
+
+    /// A link just came up: post its receives (reserve + quota) and send our
+    /// `OP_HELLO` on the bootstrap credit. Nothing else is sent until the
+    /// exchange completes.
+    fn bring_up(&mut self, peer: &PeerId) -> Result<(), String> {
+        let table = self.table.as_mut().ok_or("shut down")?;
+        let receives = self.limits.receives() as usize;
+        // Receives, plus one buffer to send OP_HELLO from.
+        self.msgs.reserve(table.transport(), receives + 1)?;
+        let bufs: Vec<MsgBuf> = (0..receives)
+            .map(|_| self.msgs.take().expect("reserved"))
+            .collect();
+        let recvs: Vec<_> = bufs
+            .iter()
+            .map(|&b| TrackedRecv {
+                buf: self.msgs.sge(b, message::MESSAGE_LEN),
+                state: Work::Recv(b),
+            })
+            .collect();
+        // SAFETY: each buffer is the pool's, in this receive's slab slot alone
+        // until its completion, and the pool outlives every drain.
+        if let Err(e) = unsafe { table.post_recvs(peer, recvs) } {
+            for w in e.unposted {
+                if let Work::Recv(b) = w {
+                    self.msgs.give(b);
+                }
+            }
+            return Err(format!("posting receives: {}", e.error));
+        }
+        let mut session = Session::new(self.limits);
+        let hello = session.send_hello();
+        let b = self.msgs.take().expect("reserved");
+        // SAFETY: just taken from the free list, so in no posted request.
+        let len = message::encode_hello(&hello, unsafe { self.msgs.bytes_mut(b) });
+        self.conns.insert(
+            peer.clone(),
+            Conn {
+                session,
+                outbox: VecDeque::from([(b, len)]),
+            },
+        );
+        Ok(())
+    }
+
+    /// Queue a reply (it spends no message credit). Replies go to the front.
+    fn queue_reply(&mut self, peer: &PeerId, encode: impl FnOnce(&mut [u8]) -> usize) {
+        let Some(table) = self.table.as_mut() else {
+            return;
+        };
+        if self.msgs.reserve(table.transport(), 1).is_err() {
+            self.logger.error(&format!(
+                "certus-transfer-endpoint: no buffer to reply to {peer}"
+            ));
+            return;
+        }
+        let b = self.msgs.take().expect("reserved");
+        // SAFETY: just taken from the free list.
+        let len = encode(unsafe { self.msgs.bytes_mut(b) });
+        if let Some(conn) = self.conns.get_mut(peer) {
+            conn.outbox.push_front((b, len));
+        } else {
+            self.msgs.give(b);
+        }
+    }
+
+    /// Post queued messages as far as send credits allow.
+    fn flush_outbox(&mut self, peer: &PeerId) -> Result<bool, String> {
+        let Some(table) = self.table.as_mut() else {
+            return Ok(false);
+        };
+        let Some(conn) = self.conns.get_mut(peer) else {
+            return Ok(false);
+        };
+        if conn.outbox.is_empty() {
+            return Ok(false);
+        }
+        let mut queue: VecDeque<_> = conn
+            .outbox
+            .drain(..)
+            .map(|(b, len)| TrackedSend {
+                op: SendOp::Send,
+                local: self.msgs.sge(b, len),
+                state: Work::Send(b),
+            })
+            .collect();
+        // SAFETY: each send's buffer is in its slab slot alone until the
+        // completion, and the pool outlives every drain.
+        let posted = unsafe { table.post_sends(peer, &mut queue) };
+        // Whatever was not posted goes back, in order, to the front; each
+        // send's local buffer still carries its message's length.
+        while let Some(s) = queue.pop_back() {
+            let Work::Send(b) = s.state else {
+                unreachable!("the outbox holds only sends")
+            };
+            conn.outbox.push_front((b, s.local.len() as usize));
+        }
+        match posted {
+            Ok(n) => Ok(n > 0),
+            Err(e) => Err(format!("posting messages: {e}")),
+        }
+    }
+
+    /// A message completion: a send finished (its buffer comes back), or a
+    /// receive delivered a message (handled, then the buffer re-posted).
+    fn on_message_work(&mut self, peer: &PeerId, c: Completion, work: Work) -> Result<(), String> {
+        match (work, c.result) {
+            (Work::Send(b), _) => {
+                self.msgs.give(b);
+                Ok(())
+            }
+            (Work::Recv(b), Ok(Completed::Recv { byte_len })) => {
+                // SAFETY: the receive completed, so the buffer is in no posted
+                // request until it is re-posted below.
+                let msg = unsafe { self.msgs.read(b, byte_len as usize) };
+                let r = self.on_message(peer, &msg);
+                self.repost(peer, b);
+                r
+            }
+            (Work::Recv(b), Err(_)) => {
+                self.msgs.give(b);
+                Err("a receive failed".into())
+            }
+            (Work::Recv(b), Ok(other)) => {
+                self.msgs.give(b);
+                Err(format!("a receive completed as {other:?}"))
+            }
+            _ => unreachable!("only message work comes here"),
+        }
+    }
+
+    fn repost(&mut self, peer: &PeerId, b: MsgBuf) {
+        let Some(table) = self.table.as_mut() else {
+            self.msgs.give(b);
+            return;
+        };
+        let recv = vec![TrackedRecv {
+            buf: self.msgs.sge(b, message::MESSAGE_LEN),
+            state: Work::Recv(b),
+        }];
+        // SAFETY: as in `bring_up`.
+        if let Err(e) = unsafe { table.post_recvs(peer, recv) } {
+            for w in e.unposted {
+                if let Work::Recv(b) = w {
+                    self.msgs.give(b);
+                }
+            }
+        }
+    }
+
+    /// One inbound message. `Err` tears the connection down: the peer broke
+    /// the protocol in a way this end cannot answer.
+    fn on_message(&mut self, peer: &PeerId, msg: &[u8]) -> Result<(), String> {
+        let version = self
+            .conns
+            .get(peer)
+            .and_then(|c| c.session.version())
+            .unwrap_or(0);
+        let h = match Header::parse(msg, version) {
+            Ok(h) => h,
+            Err(why) => {
+                // A request is answered; a reply is never answered, and a
+                // bad one is a teardown (FR-024).
+                return match message::refusal(msg, why) {
+                    Some(e) => {
+                        self.queue_reply(peer, |out| message::encode_error(&e, out));
+                        Ok(())
+                    }
+                    None => Err(format!("unprocessable reply: {}", why.what)),
+                };
+            }
+        };
+        let conn = self.conns.get_mut(peer).ok_or("no session")?;
+        match h.kind {
+            Kind::Hello => {
+                let hello = message::decode_hello(&h, msg).map_err(|m| m.what.to_string())?;
+                let v = conn
+                    .session
+                    .on_hello(&hello)
+                    .map_err(|e| format!("{e:?}"))?;
+                if v < message::VERSION_MAX {
+                    if let Some(t) = self.table.as_mut() {
+                        t.counters_mut().version_downgrades += 1;
+                    }
+                }
+                self.queue_reply(peer, message::encode_hello_reply);
+                Ok(())
+            }
+            Kind::HelloReply => {
+                message::decode_hello_reply(&h, msg).map_err(|m| m.what.to_string())?;
+                conn.session.on_hello_reply().map_err(|v| format!("{v:?}"))
+            }
+            Kind::Error => {
+                let e = message::decode_error(&h, msg).map_err(|m| m.what.to_string())?;
+                if let Some(t) = self.table.as_mut() {
+                    t.counters_mut().protocol_faults += 1;
+                }
+                conn.session.on_reply().map_err(|v| format!("{v:?}"))?;
+                // Nothing of ours is outstanding yet in slice B; slice C fails
+                // the named context here.
+                self.logger.warn(&format!(
+                    "certus-transfer-endpoint: {peer} refused a request: {e:?}"
+                ));
+                Ok(())
+            }
+            Kind::Fetch | Kind::FetchReply => {
+                // Slice C. Until then a data message is refused, not dropped.
+                if h.kind == Kind::FetchReply {
+                    return Err("a fetch reply, but no fetch was sent".into());
+                }
+                conn.session.on_request().map_err(|v| format!("{v:?}"))?;
+                conn.session.replied();
+                let e = message::ErrorReply {
+                    context_id: h.context_id,
+                    offending_opcode: Kind::Fetch.opcode(),
+                    reason: message::Reason::Other(5),
+                    max_supported_version: message::VERSION_MAX,
+                };
+                self.queue_reply(peer, |out| message::encode_error(&e, out));
+                Ok(())
+            }
+        }
+    }
+
+    /// Whether `peer`'s capability exchange is done. Test-only.
+    #[cfg(test)]
+    pub(crate) fn is_ready(&self, peer: &PeerId) -> bool {
+        self.conns
+            .get(peer)
+            .is_some_and(|c| c.session.phase() == Phase::Ready)
     }
 
     /// Process connection events, logging what a caller does not see.
@@ -453,9 +776,18 @@ impl EndpointActor {
                     "certus-transfer-endpoint: send credits for {peer} clamped from \
                      {configured} to the device's {granted}"
                 )),
-                TableEvent::Up(peer) => self
-                    .logger
-                    .debug(&format!("certus-transfer-endpoint: connected to {peer}")),
+                TableEvent::Up(peer) => {
+                    self.logger
+                        .debug(&format!("certus-transfer-endpoint: connected to {peer}"));
+                    if let Err(e) = self.bring_up(&peer) {
+                        self.logger.error(&format!(
+                            "certus-transfer-endpoint: bringing up {peer}: {e}"
+                        ));
+                        if let Err(e) = self.teardown(&peer) {
+                            self.logger.error(&format!("certus-transfer-endpoint: {e}"));
+                        }
+                    }
+                }
                 TableEvent::LostTieBreak(peer) => self.logger.debug(&format!(
                     "certus-transfer-endpoint: simultaneous connect with {peer} resolved"
                 )),
@@ -536,17 +868,25 @@ impl EndpointActor {
     }
 
     #[cfg(test)]
-    fn plug(&mut self, peer: &PeerId) -> Result<(), String> {
-        use crate::connection::transport::SendOp;
+    fn inject(&mut self, peer: &PeerId, bytes: &[u8], spend: bool) -> Result<(), String> {
+        if spend
+            && !self
+                .conns
+                .get_mut(peer)
+                .ok_or("no session")?
+                .session
+                .try_send_request()
+        {
+            return Err("no message credit".into());
+        }
         let table = self.table.as_mut().ok_or("shut down")?;
-        let region = self.pool_region.as_ref().ok_or("shut down")?;
-        let mut q = VecDeque::from([TrackedSend {
-            op: SendOp::Send,
-            local: region.sge(region.addr(), 8).map_err(|e| e.to_string())?,
-            state: Work::Held,
-        }]);
-        // SAFETY: the pool backs the send and outlives every drain.
-        unsafe { table.post_sends(peer, &mut q) }.map_err(|e| e.to_string())?;
+        self.msgs.reserve(table.transport(), 1)?;
+        let b = self.msgs.take().expect("reserved");
+        // SAFETY: just taken from the free list, so in no posted request.
+        let buf = unsafe { self.msgs.bytes_mut(b) };
+        buf[..bytes.len()].copy_from_slice(bytes);
+        let conn = self.conns.get_mut(peer).ok_or("no session")?;
+        conn.outbox.push_back((b, bytes.len()));
         Ok(())
     }
 
@@ -570,6 +910,7 @@ impl EndpointActor {
             drop(table);
             self.pool_region = None;
             self.landing.clear();
+            self.msgs = MsgPool::default();
             return Ok(());
         }
         // Some link still holds state. Destroying it would lose that state, so
@@ -579,6 +920,7 @@ impl EndpointActor {
         std::mem::forget(table);
         std::mem::forget(self.pool_region.take());
         std::mem::forget(std::mem::take(&mut self.landing));
+        std::mem::forget(std::mem::take(&mut self.msgs));
         Err(failures.join("; "))
     }
 }
@@ -626,15 +968,26 @@ impl ActorHandler<Command> for EndpointActor {
             }
             #[cfg(test)]
             Command::IsUp(peer, reply) => {
-                let up = self
-                    .table
-                    .as_ref()
-                    .is_some_and(|t| t.credits(&peer).is_some());
-                let _ = reply.send(up);
+                let _ = reply.send(self.is_ready(&peer));
             }
             #[cfg(test)]
-            Command::Plug(peer, reply) => {
-                let _ = reply.send(self.plug(&peer));
+            Command::Inject {
+                peer,
+                bytes,
+                spend,
+                reply,
+            } => {
+                let _ = reply.send(self.inject(&peer, &bytes, spend));
+            }
+            #[cfg(test)]
+            Command::SessionOf(peer, reply) => {
+                let _ = reply.send(self.conns.get(&peer).map(|c| SessionView {
+                    version: c.session.version(),
+                    peer_max_entries: c.session.peer_max_entries(),
+                    outbound: c.session.outbound(),
+                    inbound: c.session.inbound(),
+                    credits_available: c.session.credits_available(),
+                }));
             }
             #[cfg(test)]
             Command::PoolKey(reply) => {

@@ -30,7 +30,7 @@
 //!
 //! # Status
 //!
-//! Scaffolding. Tasks T001–T010, T012–T029, T068, T074 and T081 of
+//! Scaffolding. Tasks T001–T010, T012–T030, T032, T068, T074, T076, T077, T080 and T081 of
 //! `specs/001-rdma-cache-transfer/tasks.md` are complete: the crate builds as a
 //! workspace default member, peer identity is implemented, and the verbs FFI, its
 //! C shim and the safe wrappers over them exist behind `rdma`, and the transport
@@ -45,7 +45,9 @@
 mod connection;
 mod endpoint;
 mod message;
+mod msgpool;
 mod serve;
+mod session;
 mod telemetry;
 #[cfg(test)]
 mod test_doubles;
@@ -272,6 +274,22 @@ fn parse_peer(s: &str) -> Result<PeerId, TransferEndpointError> {
 impl ITransferEndpointAdmin for CertusTransferEndpoint {
     fn configure(&self, config: EndpointConfig) -> Result<(), TransferEndpointError> {
         parse_peer(&config.local)?;
+        // Each connection posts one receive per message credit (the reply
+        // reserve) and one per request the peer may send (the quota); the
+        // device must be asked for at least that many.
+        if config.message_credits == 0 || config.inbound_quota == 0 {
+            return Err(TransferEndpointError::Transport(
+                "message_credits and inbound_quota must each be at least 1".into(),
+            ));
+        }
+        let receives = config.message_credits.saturating_add(config.inbound_quota);
+        if config.max_recv_wr < receives {
+            return Err(TransferEndpointError::Transport(format!(
+                "max_recv_wr {} is below the {receives} receives each connection posts \
+                 (message_credits {} + inbound_quota {})",
+                config.max_recv_wr, config.message_credits, config.inbound_quota
+            )));
+        }
         let mut guard = self.lifecycle();
         match &*guard {
             State::Unconfigured | State::Configured(..) => {
@@ -344,9 +362,16 @@ impl ITransferEndpointAdmin for CertusTransferEndpoint {
                 Ok(l) => Box::new(SharedLogger(l)),
                 Err(_) => Box::new(NoopLogger),
             };
-            let actor = Actor::new(EndpointActor::new(table, logger, map, pool_region), |_| {
-                // Unreachable: every handler path aborts on panic itself.
-            });
+            let limits = session::Limits {
+                message_credits: config.message_credits,
+                inbound_quota: config.inbound_quota,
+            };
+            let actor = Actor::new(
+                EndpointActor::new(table, logger, map, pool_region, limits),
+                |_| {
+                    // Unreachable: every handler path aborts on panic itself.
+                },
+            );
             let actor = match config.actor_cpu {
                 Some(cpu) => actor.with_cpu_affinity(
                     CpuSet::from_cpu(cpu)
@@ -965,9 +990,9 @@ mod tests {
         b.ep.shutdown().unwrap();
     }
 
-    /// Writes genuinely in flight at teardown — stalled behind a send the peer
-    /// has no receive for — come back through the drain, and each one's pin
-    /// is released there. `disconnect` is the teardown.
+    /// Writes genuinely in flight at teardown — held there by the mock's
+    /// send-pause knob — come back through the drain, and each one's pin is
+    /// released there. `disconnect` is the teardown.
     #[test]
     fn in_flight_writes_release_their_pins_through_the_drain() {
         let f = MockFabric::new();
@@ -982,8 +1007,8 @@ mod tests {
             let p = pb.clone();
             a.ep.call(|r| Command::IsUp(p, r)).unwrap()
         });
-        let pb3 = pb.clone();
-        a.ep.call(|r| Command::Plug(pb3, r)).unwrap().unwrap();
+        // Hold every send in flight from here on.
+        f.pause_sends(true);
         for k in 0..4 {
             a.map.memory(k, a.pool_addr(k as usize * 8), 8);
         }
@@ -1386,8 +1411,8 @@ mod tests {
             let p = pb.clone();
             a.ep.call(|r| Command::IsUp(p, r)).unwrap()
         });
-        let pb3 = pb.clone();
-        a.ep.call(|r| Command::Plug(pb3, r)).unwrap().unwrap();
+        // Hold every send in flight from here on.
+        f.pause_sends(true);
         for k in 0..3 {
             a.map.memory(k, a.pool_addr(k as usize * 8), 8);
         }
@@ -1440,11 +1465,8 @@ mod tests {
         let completed = stamps(&|e| matches!(e, LogEvent::Completed(l, _) if *l == a_link));
         let closed = stamps(&|e| *e == LogEvent::Closed(a_link));
         assert_eq!(errored.len(), 1, "forced to ERROR once: {log:?}");
-        assert_eq!(
-            completed.len(),
-            4,
-            "the plug and three writes drained: {log:?}"
-        );
+        // The three writes, and the link's posted receives, all flushed.
+        assert!(completed.len() >= 3, "the writes drained: {log:?}");
         assert_eq!(closed.len(), 1, "{log:?}");
         assert_eq!(releases.len(), 3, "three pins released: {releases:?}");
         let (err, close) = (errored[0], closed[0]);
@@ -1463,6 +1485,343 @@ mod tests {
                 "pin {key} released before the link is destroyed"
             );
         }
+        a.ep.shutdown().unwrap();
+        b.ep.shutdown().unwrap();
+    }
+
+    // --- Phase 5 slice B: connection bring-up -------------------------------
+
+    fn session_of(ep: &CertusTransferEndpoint, p: &str) -> Option<endpoint::SessionView> {
+        let p = PeerId::parse(p).unwrap();
+        ep.call(|r| Command::SessionOf(p, r)).unwrap()
+    }
+
+    fn connect(a: &CertusTransferEndpoint, to: &str) {
+        let p = PeerId::parse(to).unwrap();
+        let p2 = p.clone();
+        a.call(|r| Command::Connect(p2, r)).unwrap().unwrap();
+        eventually("the capability exchange", || {
+            let p = p.clone();
+            a.call(|r| Command::IsUp(p, r)).unwrap()
+        });
+    }
+
+    /// Send raw bytes as a request that spends a message credit, as a real
+    /// request would, so its reply is expected.
+    fn inject(ep: &CertusTransferEndpoint, to: &str, bytes: Vec<u8>) {
+        inject_raw(ep, to, bytes, true);
+    }
+
+    fn inject_raw(ep: &CertusTransferEndpoint, to: &str, bytes: Vec<u8>, spend: bool) {
+        let peer = PeerId::parse(to).unwrap();
+        ep.call(|reply| Command::Inject {
+            peer,
+            bytes,
+            spend,
+            reply,
+        })
+        .unwrap()
+        .unwrap();
+    }
+
+    #[test]
+    fn configure_refuses_queues_that_cannot_hold_the_partition() {
+        let ep = CertusTransferEndpoint::create();
+        let mut c = EndpointConfig::new("10.0.0.1:7000");
+        c.message_credits = 0;
+        assert!(matches!(
+            ep.configure(c.clone()),
+            Err(TransferEndpointError::Transport(_))
+        ));
+        c.message_credits = 40;
+        c.inbound_quota = 40;
+        c.max_recv_wr = 64;
+        match ep.configure(c) {
+            Err(TransferEndpointError::Transport(m)) => assert!(m.contains("80"), "{m}"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// FR-025 end to end: both endpoints exchange OP_HELLO on connect, agree
+    /// version 1, adopt each other's limits — the outbound limit is the lower
+    /// of our credits and the peer's quota — and return the bootstrap credit.
+    #[test]
+    fn connecting_runs_the_capability_exchange_at_both_ends() {
+        let f = MockFabric::new();
+        let mk = |name: &str, credits, quota| {
+            let n = node(&f, name, 8);
+            let mut c = EndpointConfig::new(name);
+            c.message_credits = credits;
+            c.inbound_quota = quota;
+            n.ep.configure(c).unwrap();
+            n.ep.use_transport(TransportChoice::Mock(f.clone()));
+            n
+        };
+        let a = mk("10.0.0.1:7000", 6, 2);
+        let b = mk("10.0.0.2:7000", 4, 3);
+        a.ep.initialize().unwrap();
+        b.ep.initialize().unwrap();
+        connect(&a.ep, "10.0.0.2:7000");
+        eventually("b ready too", || {
+            session_of(&b.ep, "10.0.0.1:7000").is_some_and(|s| s.credits_available > 0)
+        });
+        let sa = session_of(&a.ep, "10.0.0.2:7000").unwrap();
+        let sb = session_of(&b.ep, "10.0.0.1:7000").unwrap();
+        assert_eq!((sa.version, sb.version), (Some(1), Some(1)));
+        assert_eq!(sa.credits_available, 3, "a's 6 clamped to b's quota 3");
+        assert_eq!(sb.credits_available, 2, "b's 4 clamped to a's quota 2");
+        assert_eq!(sa.outbound, (0, 1), "the bootstrap credit came back");
+        assert_eq!(sa.peer_max_entries, 340);
+        assert_eq!(a.ep.stats().version_downgrades, 0);
+        a.ep.shutdown().unwrap();
+        b.ep.shutdown().unwrap();
+    }
+
+    /// A data message before the exchange completes is not sent: pushes wait
+    /// (they need a Ready session), and a reconnect re-learns everything.
+    #[test]
+    fn a_reconnect_reruns_the_exchange() {
+        let f = MockFabric::new();
+        let a = node(&f, "10.0.0.1:7000", 8);
+        let b = node(&f, "10.0.0.2:7000", 8);
+        a.ep.initialize().unwrap();
+        b.ep.initialize().unwrap();
+        connect(&a.ep, "10.0.0.2:7000");
+        a.ep.disconnect("10.0.0.2:7000").unwrap();
+        assert!(
+            session_of(&a.ep, "10.0.0.2:7000").is_none(),
+            "dies with the link"
+        );
+        eventually("b torn down", || f.qp_count() == 0);
+        connect(&a.ep, "10.0.0.2:7000");
+        assert_eq!(session_of(&a.ep, "10.0.0.2:7000").unwrap().version, Some(1));
+        a.ep.shutdown().unwrap();
+        b.ep.shutdown().unwrap();
+    }
+
+    /// A peer whose OP_HELLO names no version in common fails the connection
+    /// at establishment, with no request ever issued (SC-013). The peer is a
+    /// raw transport, since an endpoint only ever advertises a good range.
+    #[test]
+    fn an_incompatible_version_fails_the_connection_at_bring_up() {
+        use crate::connection::transport::{Transport, TransportEvent};
+        let f = MockFabric::new();
+        let a = node(&f, "10.0.0.1:7000", 8);
+        a.ep.initialize().unwrap();
+        let mut raw = crate::connection::mock::MockTransport::new(f.clone());
+        let p_raw = PeerId::parse("10.0.0.3:7000").unwrap();
+        raw.listen(&p_raw).unwrap();
+        let p_raw2 = p_raw.clone();
+        a.ep.call(|r| Command::Connect(p_raw2, r)).unwrap().unwrap();
+        let link = accept_raw(&mut raw, &p_raw);
+        send_raw(&mut raw, link, |out| {
+            message::encode_hello(
+                &message::Hello {
+                    max_entries: 340,
+                    max_outstanding_requests: 4,
+                    version_min: 7,
+                    version_max: 9,
+                },
+                out,
+            )
+        });
+        let mut evs = Vec::new();
+        eventually("a tears the connection down", || {
+            raw.poll_events(&mut evs);
+            evs.contains(&TransportEvent::Disconnected { link })
+        });
+        assert!(session_of(&a.ep, "10.0.0.3:7000").is_none());
+        let s = a.ep.stats();
+        assert_eq!(
+            (s.requests_attempted, s.version_downgrades),
+            (0, 0),
+            "nothing issued"
+        );
+        a.ep.shutdown().unwrap();
+        drop(raw);
+    }
+
+    /// Accept the connect a table makes to a raw transport, answering with the
+    /// raw end's identity, and post it some receives. Returns its link.
+    fn accept_raw(
+        raw: &mut crate::connection::mock::MockTransport,
+        me: &PeerId,
+    ) -> crate::connection::transport::LinkId {
+        use crate::connection::transport::{Transport, TransportEvent};
+        let request = {
+            let mut evs = Vec::new();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                raw.poll_events(&mut evs);
+                if let Some(TransportEvent::ConnectRequest { request, .. }) = evs
+                    .iter()
+                    .find(|e| matches!(e, TransportEvent::ConnectRequest { .. }))
+                {
+                    break *request;
+                }
+                assert!(Instant::now() < deadline, "no connect request");
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        };
+        let id = crate::connection::identity::encode_identity(me).unwrap();
+        let caps = crate::connection::transport::QpCaps {
+            max_send_wr: 16,
+            max_recv_wr: 16,
+        };
+        let link = raw.accept(request, &id, caps).unwrap();
+        // Receives for whatever the table sends (its OP_HELLO, its replies).
+        let buf: &'static mut [u8] =
+            Box::leak(vec![0u8; 16 * message::MESSAGE_LEN].into_boxed_slice());
+        // SAFETY: leaked, so it outlives everything.
+        let r: &'static crate::connection::transport::Region = Box::leak(Box::new(
+            unsafe {
+                raw.register(
+                    buf.as_mut_ptr(),
+                    buf.len(),
+                    crate::connection::transport::Access::LOCAL_WRITE,
+                )
+            }
+            .unwrap(),
+        ));
+        let recvs: Vec<_> = (0..16u64)
+            .map(|i| crate::connection::transport::RecvRequest {
+                wr_id: 1000 + i,
+                buf: r
+                    .sge(
+                        r.addr() + i * message::MESSAGE_LEN as u64,
+                        message::MESSAGE_LEN,
+                    )
+                    .unwrap(),
+            })
+            .collect();
+        // SAFETY: as above.
+        unsafe { raw.link(link).unwrap().post_recv(&recvs) }.unwrap();
+        link
+    }
+
+    /// Send one message from a raw transport's link.
+    fn send_raw(
+        raw: &mut crate::connection::mock::MockTransport,
+        link: crate::connection::transport::LinkId,
+        encode: impl FnOnce(&mut [u8]) -> usize,
+    ) {
+        use crate::connection::transport::{Access, SendOp, SendRequest, Transport};
+        let buf: &'static mut [u8] = Box::leak(vec![0u8; message::MESSAGE_LEN].into_boxed_slice());
+        let len = encode(buf);
+        // SAFETY: leaked, so it outlives the send.
+        let r: &'static crate::connection::transport::Region = Box::leak(Box::new(
+            unsafe { raw.register(buf.as_mut_ptr(), buf.len(), Access::LOCAL_WRITE) }.unwrap(),
+        ));
+        // SAFETY: as above.
+        unsafe {
+            raw.link(link).unwrap().post_send(&[SendRequest {
+                wr_id: 1,
+                op: SendOp::Send,
+                local: r.sge(r.addr(), len).unwrap(),
+                signaled: false,
+            }])
+        }
+        .unwrap();
+    }
+
+    /// FR-025: no data before the peer's OP_HELLO. The peer here is a raw
+    /// transport that accepts and posts receives but never says hello, so a
+    /// push to it must stay unsent — not one RDMA write may reach the wire —
+    /// until shutdown fails it.
+    #[test]
+    fn no_data_is_sent_before_the_peers_hello() {
+        use crate::connection::mock::{LogEvent, Sequence};
+        let f = MockFabric::new();
+        let a = node(&f, "10.0.0.1:7000", 8);
+        a.ep.initialize().unwrap();
+        a.map.memory(1, a.pool_addr(0), 8);
+        let mut raw = crate::connection::mock::MockTransport::new(f.clone());
+        let p_raw = PeerId::parse("10.0.0.3:7000").unwrap();
+        crate::connection::transport::Transport::listen(&mut raw, &p_raw).unwrap();
+        let (tx, rx) = mpsc::channel();
+        a.ep.push_async(
+            "10.0.0.3:7000",
+            &[(
+                1,
+                RemoteRegion {
+                    addr: 0,
+                    rkey: 0,
+                    length: 8,
+                },
+            )],
+            Box::new(move |o| tx.send(o).unwrap()),
+        )
+        .unwrap();
+        let seq = Sequence::default();
+        f.record(&seq);
+        let _link = accept_raw(&mut raw, &p_raw);
+        std::thread::sleep(Duration::from_millis(50));
+        assert!(rx.try_recv().is_err(), "the push is still waiting");
+        assert_eq!(a.map.lookups(), 0, "not even looked up: nothing pinned");
+        // a's only send so far is its OP_HELLO; a write would complete too.
+        let a_sends = f
+            .log()
+            .iter()
+            .filter(|(_, e)| matches!(e, LogEvent::Completed(..)))
+            .count();
+        assert!(a_sends <= 1, "only OP_HELLO went out: {:?}", f.log());
+        a.ep.shutdown().unwrap();
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            [EntryOutcome::Failed]
+        );
+        drop(raw);
+    }
+
+    /// An unprocessable *reply* is never answered: it is a teardown (FR-024).
+    /// (Exceeding the inbound quota is a teardown too, but cannot be reached
+    /// end to end in slice B, where each request is answered synchronously as
+    /// it arrives; `session`'s tests cover it, and slice C, whose serving is
+    /// asynchronous, will cover it here.)
+    #[test]
+    fn a_reply_nobody_asked_for_tears_down() {
+        let f = MockFabric::new();
+        let a = node(&f, "10.0.0.1:7000", 8);
+        let b = node(&f, "10.0.0.2:7000", 8);
+        a.ep.initialize().unwrap();
+        b.ep.initialize().unwrap();
+        connect(&a.ep, "10.0.0.2:7000");
+        eventually("b ready", || {
+            session_of(&b.ep, "10.0.0.1:7000").is_some_and(|s| s.credits_available > 0)
+        });
+        let mut msg = vec![0u8; message::MESSAGE_LEN];
+        let n = message::encode_reply(1, 99, &[EntryOutcome::Miss], &mut msg);
+        inject_raw(&a.ep, "10.0.0.2:7000", msg[..n].to_vec(), false);
+        eventually("b tears down", || {
+            session_of(&b.ep, "10.0.0.1:7000").is_none()
+        });
+        a.ep.shutdown().unwrap();
+        b.ep.shutdown().unwrap();
+    }
+
+    /// An unknown opcode is a request, and is answered with OP_ERROR — the
+    /// connection stays up (SC-012's shape; the context failure is slice C).
+    #[test]
+    fn an_unknown_opcode_is_answered_and_the_connection_survives() {
+        let f = MockFabric::new();
+        let a = node(&f, "10.0.0.1:7000", 8);
+        let b = node(&f, "10.0.0.2:7000", 8);
+        a.ep.initialize().unwrap();
+        b.ep.initialize().unwrap();
+        connect(&a.ep, "10.0.0.2:7000");
+        let mut msg = vec![0u8; message::HEADER_LEN];
+        msg[0] = 0x42; // no such kind
+        inject(&a.ep, "10.0.0.2:7000", msg);
+        eventually("a sees b's OP_ERROR", || a.ep.stats().protocol_faults == 1);
+        std::thread::sleep(Duration::from_millis(20));
+        assert!(
+            session_of(&a.ep, "10.0.0.2:7000").is_some(),
+            "still connected"
+        );
+        assert!(
+            session_of(&b.ep, "10.0.0.1:7000").is_some(),
+            "still connected"
+        );
         a.ep.shutdown().unwrap();
         b.ep.shutdown().unwrap();
     }
