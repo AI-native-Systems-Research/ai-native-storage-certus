@@ -68,7 +68,9 @@ unchanged.
   concurrent pushes of one key are safe.
 - **Peer does not understand the message.** Answered with a protocol error reply naming the
   opcode and the sender's highest supported version for that kind, which fails the one context
-  and leaves the connection and its siblings intact (FR-024). A stale binary on one node is
+  and leaves the connection and its siblings intact (FR-024). A *reply* the requester cannot
+  understand is the opposite case: never answered, reported loudly, and the connection torn
+  down, because the peer may have written into slots it can no longer vouch for. A stale binary on one node is
   the common cause and is the case this turns from a mystifying timeout into a precise
   diagnostic.
 - **Key present but stored size does not match the requested region.** Treated as a miss.
@@ -111,8 +113,8 @@ unchanged.
   one transfer is the requester's own bookkeeping, not a wire concern.
 - **FR-008**: Because landing slots are not contiguous, the source MUST issue one RDMA write
   per entry rather than one per batch.
-- **FR-024**: The endpoint MUST answer a message it cannot process with an explicit **protocol
-  error reply**, never with silence. Silence is indistinguishable from a hang, so it would be
+- **FR-024**: The endpoint MUST answer a **request** it cannot process with an explicit
+  **protocol error reply**, sent in place of that request's one reply, never with silence. Silence is indistinguishable from a hang, so it would be
   diagnosed by the FR-016 deadline and would then tear down a healthy connection and abort
   that connection's other contexts (FR-023) — a loud but *wrong* diagnosis, which Principle XI
   treats as worse than none. The error reply MUST echo the `context_id` it is answering, name
@@ -120,7 +122,16 @@ unchanged.
   unsupported version of a known kind, malformed message, or more entries than the receiver's
   posted buffer can hold. It MUST NOT be used for a miss (an outcome) or for resource
   shortage (which chunks, FR-015). Receiving one MUST fail that one context and **leave the
-  connection usable**: the peer is healthy, so the FR-023 teardown path MUST NOT run.
+  connection usable**: the peer is healthy and acted on nothing, so the FR-023 teardown path
+  MUST NOT run. A message of unknown kind MUST be treated as a request and answered.
+
+  The endpoint MUST NOT answer a **reply** (a success reply or a protocol error reply), even
+  one it cannot process: the replier holds no state to act on, and answering replies would
+  allow an error loop. A reply that cannot be processed — malformed, wrong kind, unknown
+  context, or a duplicate — MUST instead be reported loudly and MUST tear the connection down
+  through the FR-023 ordering, aborting its contexts: the peer may have posted writes it can no
+  longer be trusted to have completed, so its landing slots are reclaimed only after teardown
+  (FR-017).
 - **FR-025**: Both ends of a new connection MUST exchange capabilities before either sends a
   data message, and MUST NOT send one until the peer's capabilities are known. The exchange
   MUST report the **protocol version range** the sender supports and the maximum entries it
@@ -132,12 +143,15 @@ unchanged.
   version of the request it answers, so per-kind versions MUST NOT be negotiated
   independently.
 
-  The exchange MUST be **unsolicited and symmetric** — both ends send, there is no reply
-  message and no initiator privilege — and the rule MUST be a **commutative function of the
-  two advertised ranges**, so both ends compute the same answer independently and no
-  arbitrator exists. A reply message or an asymmetric rule (initiator decides, higher version
-  decides) would create a second decision point and with it the possibility of the two ends
-  disagreeing. Capabilities MUST be held on the connection and discarded with it, so a
+  The exchange MUST be **unsolicited and symmetric** — both ends send, with no initiator
+  privilege — and the rule MUST be a **commutative function of the two advertised ranges**, so
+  both ends compute the same answer independently and no arbitrator exists. Each capability
+  message is a request and draws a reply, but that reply MUST carry no content: a reply
+  carrying capabilities or a verdict, or an asymmetric rule (initiator decides, higher version
+  decides), would create a second decision point and with it the possibility of the two ends
+  disagreeing. Because the peer's request quota is learned from this exchange, each end MUST
+  begin a connection with exactly one message credit, for its capability message, and an
+  advertised quota of zero MUST fail the connection. Capabilities MUST be held on the connection and discarded with it, so a
   rebuilt connection re-learns them and an upgraded peer is picked up without separate
   invalidation. It MUST also report how many concurrent requests the peer may have
   outstanding against it (FR-026).

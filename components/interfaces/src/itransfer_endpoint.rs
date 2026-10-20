@@ -187,10 +187,11 @@ pub enum TransferEndpointError {
     /// contexts were aborted with it. Carries key range, peer, chunk index and
     /// queue-pair state.
     Deadline(String),
-    /// The peer answered with a protocol error: unknown opcode, unsupported
-    /// version, malformed message, or more entries than its posted buffer
-    /// holds. The peer is healthy, so **the connection remains usable** and
-    /// sibling contexts are unaffected.
+    /// The peer answered our request with a protocol error: unknown opcode,
+    /// unsupported version, malformed message, or more entries than its posted
+    /// buffer holds. The peer is healthy and acted on nothing, so **the
+    /// connection remains usable** and sibling contexts are unaffected. A
+    /// *reply* we could not process is a teardown, reported as `Transport`.
     Protocol(String),
     /// The peer's supported protocol version range does not intersect the local
     /// one, so no connection was established and no request was issued. Carries

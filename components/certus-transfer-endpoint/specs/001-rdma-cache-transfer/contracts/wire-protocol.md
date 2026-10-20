@@ -18,8 +18,17 @@ into the opcode (research D21).
 |---|---|---|
 | `OP_FETCH` | `0x0000_0001` | kind 1 |
 | `OP_FETCH_REPLY` | `0x0000_0002` | kind 2 |
+| `OP_HELLO_REPLY` | `0x0000_FFFD` | kind 0xFFFD, **unversioned** |
 | `OP_HELLO` | `0x0000_FFFE` | kind 0xFFFE, **unversioned** |
 | `OP_ERROR` | `0x0000_FFFF` | kind 0xFFFF, **unversioned** |
+
+**Requests and replies.** `OP_FETCH` and `OP_HELLO` are **requests**; `OP_FETCH_REPLY`,
+`OP_HELLO_REPLY` and `OP_ERROR` are **replies**. Every request costs one message credit and
+draws exactly one reply — its success reply, or `OP_ERROR` in its place — which lands in the
+requester's reply reserve (*Receive-buffer partitioning*). **A reply is never answered**, not
+even a malformed one; see *Bad replies*. A message of unknown kind is treated as a request
+and answered with `OP_ERROR`: this end only sends requests whose replies it understands, so
+an unknown kind cannot legitimately be a reply to us.
 
 The high 16 bits of `opcode` MUST be zero and are reserved for future kinds. Two kinds carry
 the data plane; everything it needs — chunking, credits, tier attribution — rides in the
@@ -116,10 +125,22 @@ Sent by **both** ends immediately on connection establishment — the endpoint i
 neither side is the client (D5). Neither end sends a data message until the peer's `OP_HELLO`
 has arrived. `context_id`, `version` and `n_entries` are zero.
 
-**There is no `OP_HELLO_REPLY`, deliberately.** The exchange is unsolicited in both
-directions, so after one exchange each end already holds both advertisements and a reply would
-carry nothing new. It would also add a second decision point, which is the only way the two
-ends could end up disagreeing.
+**`OP_HELLO` is a request; `OP_HELLO_REPLY` exists only to balance credits.** Both ends send
+`OP_HELLO` unsolicited, so after one exchange each end holds both advertisements, and the
+version is computed by each end from the two — **nobody decides it**. `OP_HELLO_REPLY` carries
+**no content**: it is header only, `n_entries` zero, and must stay empty forever. Its one job
+is to keep the credit rule uniform — every request costs a credit and draws exactly one reply
+— so `OP_HELLO` needs no special-case buffer in either partition. A reply that carried
+capabilities or a verdict would create a second decision point, the only way the two ends
+could disagree; a contentless one decides nothing.
+
+**Bootstrap.** The quota that sizes each end's credits arrives *inside* `OP_HELLO`, so the
+first `OP_HELLO` is sent before either end knows the other's quota. Each end therefore starts
+every connection with **one** message credit, spends it on `OP_HELLO`, and on the peer's
+`OP_HELLO` sets its limit to the quota the peer advertised (FR-026). This requires each end to
+have at least one reply-reserve buffer and one quota buffer posted before the connection is
+established, and an advertised `max_outstanding_requests` of 0 is invalid (the connection
+fails, as for a non-intersecting version range).
 
 The body is **fixed size**, 40 bytes total, which is what a permanently frozen layout wants:
 
@@ -157,7 +178,9 @@ and an upgraded peer is picked up with no separate invalidation step.
 
 ### `OP_ERROR` (`0x0000_FFFF`)
 
-The answer to any message that cannot be processed. `n_entries` is zero.
+The reply to any **request** that cannot be processed, sent **in place of** that request's
+success reply — so it lands in the same reply-reserve buffer, and the reserve stays exact.
+`n_entries` is zero. A reply is never answered with `OP_ERROR`; see *Bad replies*.
 
 | offset | size | field | notes |
 |---|---|---|---|
@@ -187,6 +210,32 @@ usable: the peer is healthy and answered promptly, so the FR-023 deadline teardo
 run and sibling contexts on the connection must be unaffected. This is the deliberate contrast
 with a deadline, where the peer's state is unknown and tearing the queue pair down is the only
 thing that makes a late write impossible. Two fail-loud paths, two blast radii.
+
+### Bad replies
+
+A reply this end cannot process — malformed, of the wrong kind, naming no outstanding
+context, or a second reply to one request — is **never answered**. The replier holds no
+state for a request once it has replied (its pins are released, its context is gone), so an
+error back would give it nothing to act on, and it cannot be the side left waiting: the side
+that would wait is the one that just received the reply. Answering replies would also allow
+an error-for-an-error loop; not answering them rules it out by construction.
+
+Instead the receiver **reports loudly and tears the connection down** through the FR-023
+path — queue pair to ERROR, drain, *then* reclaim, aborting every context on the connection —
+and counts it as a protocol fault. This is the third case, and it deliberately differs from
+`OP_ERROR` received for our own request. There the peer *acted on nothing*, so failing one
+context is safe. A bad reply comes from a peer that *did* process our request and may have
+posted writes into our landing slots, and whose ordering guarantee (*every write completes
+before the reply*) we can no longer trust; a duplicate reply has also already broken the
+one-reply rule the reserve counts on. Reclaiming those slots without teardown would break
+FR-017. Reconnection then happens on next need, as for any teardown.
+
+**Open — repeated teardown of one peer.** A responder bug that produces bad replies, like one
+that makes requests hang, gives teardown → reconnect on next need → teardown again. It is
+demand-driven, not a spin — one teardown per request sent to that peer, each failing loudly —
+but it also aborts that connection's healthy siblings each time. Whether to add a hold-off
+after a fault teardown, shared by both causes, is deferred until measured; the protocol-fault
+and deadline counters make such a loop visible at once.
 
 ## Receive-buffer sizing
 

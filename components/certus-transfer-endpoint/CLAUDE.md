@@ -65,18 +65,19 @@ VIII–XI, and a review that does not check them is not a review.
 - **The mock seam implements the interface; it is not a bypass of it.** Do not
   copy the initiator's `#[cfg(not(feature = "rdma"))] -> Err(NotInitialized)`
   pattern, which makes the interface untestable without hardware.
-- **`OP_HELLO` and `OP_ERROR` can never be versioned.** They are frozen at version 0,
+- **`OP_HELLO`, `OP_HELLO_REPLY` and `OP_ERROR` can never be versioned.** They are frozen at version 0,
   permanently, because a peer that cannot parse version N must still parse them —
   otherwise an unparseable message is answered with an unparseable error. Extend them
   through their *content* (the open reason-code space, the counted capability list),
   never their layout. Bytes 0-15 of every header are frozen for the same reason
   (D20).
 - **`Protocol` and `Deadline` are both loud, with deliberately different blast
-  radius.** A protocol error means the peer is alive and answered: fail that one
-  context, leave the queue pair alone, let siblings finish. A deadline means the
-  peer's state is unknown: force the QP to ERROR, which necessarily aborts the
-  siblings. Routing a protocol error through the deadline's cleanup would destroy a
-  healthy connection (FR-024 vs FR-023).
+  radius.** An `OP_ERROR` for our request means the peer is alive and acted on
+  nothing: fail that one context, leave the queue pair alone, let siblings finish. A
+  deadline means the peer's state is unknown: force the QP to ERROR, which
+  necessarily aborts the siblings. Routing an `OP_ERROR` through the deadline's
+  cleanup would destroy a healthy connection (FR-024 vs FR-023). A *bad reply* is
+  the third case and does tear down: its sender may have written into our slots.
 - **Chunk against the *peer's* `max_entries`, not your own.** Receive-buffer sizes are
   not assumed equal; `OP_HELLO` advertises them precisely because nothing checked that
   before (FR-025).
@@ -86,9 +87,11 @@ VIII–XI, and a review that does not check them is not a review.
   by a v1 reply, and a reply's meaning is tied to its request's version. The version in
   the fused opcode is a structural guard on the negotiated value, not the mechanism
   (D20 and its *Revision*).
-- **Never answer an unprocessable message with silence.** Silence is
-  indistinguishable from a hang, so it gets diagnosed as one — and then tears down a
-  healthy connection. A stale binary on one node is the common cause.
+- **Never answer an unprocessable request with silence — and never answer a reply.**
+  Silence to a request is indistinguishable from a hang, so it gets diagnosed as one
+  and tears down a healthy connection; a stale binary on one node is the common
+  cause. A reply is never answered, even a bad one: its sender holds no state to act
+  on, and answering replies would allow an error loop. Report it loudly instead.
 - **One connection carries both directions, so keep separate books.** An instance is
   destination for one context and source for another on the same queue pair. Outbound
   and inbound context tables must be *separate* — the requester allocates ids, so the
@@ -111,10 +114,11 @@ VIII–XI, and a review that does not check them is not a review.
   The old link goes to ERROR first. The one undecidable case — a crashed-and-
   restarted peer that out-ranks nobody — is rejected until a deadline notices the
   stale link (D24's known gap). Do not "fix" it by accepting every duplicate.
-- **Nobody decides the version and there is no `OP_HELLO_REPLY`.** Both ends send
-  unsolicited and compute `min(a.max, b.max)` against floor `max(a.min, b.min)`. The
-  rule is commutative, which is *why* the two ends cannot disagree — never replace it
-  with an asymmetric rule or a reply message (D20).
+- **Nobody decides the version, and `OP_HELLO_REPLY` must stay empty.** Both ends
+  send `OP_HELLO` unsolicited and compute `min(a.max, b.max)` against floor
+  `max(a.min, b.min)`. The rule is commutative, which is *why* the two ends cannot
+  disagree. `OP_HELLO_REPLY` exists only so every request draws one reply and the
+  credits balance; giving it content would create a second decision point (D20).
 - **The version is a header field at offset 6, validated once, not fused into the
   opcode.** Opcodes name kinds. Fusing mints a new opcode per kind per version,
   including unchanged kinds, and the handler ends up masking the version off anyway

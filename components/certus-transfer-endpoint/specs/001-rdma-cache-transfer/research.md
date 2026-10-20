@@ -397,7 +397,15 @@ load-bearing.
    version range and the largest request the sender can receive. A requester respects the
    peer's maximum request size rather than its own.
 3. **A protocol error reply exists and is frozen forever**, as the backstop for anything the
-   exchange cannot prevent.
+   exchange cannot prevent. It answers **requests** only; a reply is never answered (see
+   *Replies are never answered* below).
+4. **The capability exchange is a request with a contentless reply.** `OP_HELLO` costs a
+   message credit like any request and draws `OP_HELLO_REPLY`, which carries nothing. The
+   reply exists only so the credit rule is uniform — every request draws exactly one reply —
+   and `OP_HELLO` needs no special buffer outside the receive partition (D22). It decides
+   nothing, so it adds no second decision point; the objection to a reply message is to one
+   that carries capabilities or a verdict. Each connection starts with one credit, spent on
+   `OP_HELLO`, because the peer's quota is only learned from the peer's `OP_HELLO`.
 
 The fused opcode is **kept**, now carrying the negotiated version, but its job has changed: it
 is no longer the versioning mechanism, it is a structural guard on it. Both ends agreed on a
@@ -513,6 +521,26 @@ what a permanently frozen layout wants — the counted array was a variable-leng
 message whose layout can never change, an uncomfortable pairing. And the floor check becomes
 one range intersection instead of a per-kind comparison, so the failure diagnostic is a single
 pair of numbers.
+
+### Replies are never answered
+
+Answering an unprocessable *reply* would buy nothing. The replier holds no state for a request once it has replied — pins released, context
+gone — so an `OP_ERROR` back could only be logged there; and FR-024's reason for answering
+(silence looks like a hang, so the waiting side's deadline would misdiagnose it) does not apply,
+because the side that would wait is the one holding the bad reply. Answering replies would also
+allow an error-for-an-error loop. So `OP_ERROR` answers requests only, and an unknown kind is
+treated as a request, since this end only sends requests whose replies it understands.
+
+The receiver of a bad reply instead reports loudly and **tears the connection down** through
+the FR-023 ordering. Unlike `OP_ERROR` for our own request — where the peer acted on nothing —
+a bad reply comes from a peer that processed the request and may have posted writes, and whose
+write-before-reply guarantee can no longer be trusted. Failing just that context would reclaim
+slots it could still write into (FR-017).
+
+**Considered**: failing only that context. Rejected for the FR-017 reason above. **Deferred**:
+a repeated fault from one peer gives a demand-driven teardown/reconnect cycle, the same shape a
+hanging responder already gives via the deadline. Whether to add a shared hold-off after a fault
+teardown is left until it is measured.
 
 ## D21 — The version is a validated header field, not part of the opcode
 

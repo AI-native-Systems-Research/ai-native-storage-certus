@@ -369,17 +369,24 @@ slots and the reply's per-key outcomes match the source's actual residency.
   frozen permanently — extensibility is through the reason space, not the layout — so add a
   test asserting the encoded size and field offsets, which is the thing a future change would
   silently break
-- [ ] T075 [US1] Answer every unprocessable inbound message with `OP_ERROR` rather than
-  dropping it (FR-024): echo the `context_id`, name the offending opcode, and report the local
-  highest supported version for that kind. On **receipt**, fail that one context with
+- [ ] T075 [US1] Answer every unprocessable inbound **request** with `OP_ERROR` rather than
+  dropping it (FR-024), in place of its success reply: echo the `context_id`, name the
+  offending opcode, and report the local highest supported version for that kind. Treat an
+  unknown kind as a request. On **receipt** of `OP_ERROR`, fail that one context with
   `Protocol(..)` and leave the connection usable — the FR-023 teardown must not run and
-  sibling contexts must be unaffected. Count protocol faults in telemetry; an unexercised path
-  must not look like a working one (Principle XI)
+  sibling contexts must be unaffected. **Never answer a reply.** A reply that cannot be
+  processed (malformed, wrong kind, unknown context, duplicate) is logged loudly with the peer
+  and the offending bytes, counted as a protocol fault, and tears the connection down through
+  T070's ordering. Count both in telemetry; an unexercised path must not look like a working
+  one (Principle XI)
 - [ ] T076 [US1] Implement the frozen `OP_HELLO` codec and exchange (`0x0000_FFFE`,
   unversioned, FR-025, D20): a **fixed-size** 40-byte message — `max_entries: u32`,
   `max_outstanding_requests: u32`, `version_min: u16`, `version_max: u16`, reserved `u32`.
-  There is deliberately **no** `OP_HELLO_REPLY`: the exchange is unsolicited in both
-  directions, so a reply would carry nothing new and would add a second decision point. **Both** ends send it immediately on connection
+  `OP_HELLO` is a request: it costs the connection's one **bootstrap credit** and is answered
+  by `OP_HELLO_REPLY` (`0x0000_FFFD`, unversioned, header only, **no content ever**) purely to
+  balance credits — it must never carry capabilities or a verdict, or D20's second decision
+  point returns. On the peer's `OP_HELLO`, set the message-credit limit to its advertised
+  quota; a quota of 0 fails the connection. **Both** ends send it immediately on connection
   establishment, since the endpoint is symmetric and neither side is the client (D5); no data
   message goes out until the peer's has arrived. Store capabilities on the connection so they
   die with it and a rebuilt connection re-learns them. Fixed size is deliberate: the layout is
@@ -400,8 +407,11 @@ slots and the reply's per-key outcomes match the source's actual residency.
   connection's sibling contexts still complete (assert the QP was *not* forced to ERROR, the
   contrast with T071); **SC-013** — a peer advertising a smaller `max_entries` is never sent a
   larger request, and a peer whose version range does not intersect the local one fails at
-  connect with no request issued; a reason code >= 5 is treated as a failure, not success; and
-  `OP_ERROR`/`OP_HELLO` round-trip at their frozen offsets and fixed sizes
+  connect with no request issued; a reason code >= 5 is treated as a failure, not success;
+  `OP_ERROR`/`OP_HELLO`/`OP_HELLO_REPLY` round-trip at their frozen offsets and fixed sizes;
+  a malformed reply is **not** answered and tears the connection down, while an `OP_ERROR`
+  for our request does not; and the bootstrap credit allows exactly one message before the
+  peer's `OP_HELLO`
 - [ ] T079 [US1] Make the connection's books per direction (FR-026, D22): **separate**
   outbound-request and inbound-serving context tables, since the requester allocates ids and
   one id can be live in both directions on a connection — a single contexts-per-connection map
@@ -413,8 +423,10 @@ slots and the reply's per-key outcomes match the source's actual residency.
   credits to the quota the *peer* advertised, and enforce the granted quota on inbound
   requests. Without this, a peer issuing requests up to the buffer count takes every buffer
   and leaves none for a reply this end is blocked on: an RNR stall, and with two-way traffic
-  a deadlock. **Open:** `OP_HELLO` (one per connection) and an `OP_ERROR` answering a reply
-  also consume a receive buffer and fall in neither partition; account for them here
+  a deadlock. Every message that can arrive is in a partition: `OP_HELLO` is a request
+  (quota), `OP_HELLO_REPLY` and `OP_ERROR` are replies (reserve), and replies are never
+  answered, so nothing lands outside either. Post one reserve and one quota buffer before the
+  connection is established, for the bootstrap exchange
 - [X] T081 *(absorbed into T012 — see there and D24)* Resolve simultaneous connect (FR-027, D23): on detecting a duplicate, both ends keep
   the connection whose **initiator has the lower `PeerId`** and close the other — a
   deterministic function of two known values, no arbitrator, no extra round trip. Requires the
@@ -442,8 +454,9 @@ slots and the reply's per-key outcomes match the source's actual residency.
   (T044) is several contexts, one per chunk, grouped by the requester under the single
   `TransferContextId` that `fetch` returned
 - [ ] T032 [US1] Implement **message credits** (second domain of FR-014): decrement on
-  send, increment on reply, and **block at zero**. Credits are consumed per *message*, not
-  per context, so a chunked fetch of N messages takes N credits
+  every request (`OP_FETCH` and `OP_HELLO`), increment on its one reply (success reply or
+  `OP_ERROR`), and **block at zero**. A connection starts at one credit, for `OP_HELLO`
+  (T076). Credits are consumed per *message*, so a fetch chunked into N messages takes N
 - [ ] T033 [US1] Implement `fetch(peer, items, on_complete)`: send the request, return
   the `TransferContextId` as soon as it is sent, fire `on_complete` once with one outcome
   per requested key when the last reply arrives. The context id exists to correlate a
