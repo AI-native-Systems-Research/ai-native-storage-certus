@@ -89,6 +89,14 @@ pub(crate) enum Command {
         len: usize,
         reply: mpsc::Sender<Result<LandingRegionHandle, String>>,
     },
+    /// Ask `peer` for `items`, written into the caller's landing slots, and
+    /// report one outcome per item (T033). The id is the caller's.
+    Fetch {
+        id: u64,
+        peer: PeerId,
+        items: Vec<(CacheKey, RemoteRegion)>,
+        on_complete: FetchCompletion,
+    },
     /// The legacy push (T017): write each entry the source holds into the
     /// peer's named region, then report one outcome per entry.
     Push {
@@ -212,6 +220,21 @@ struct Conn {
     /// Encoded messages not yet posted, in order. Replies go to the front:
     /// they spend no message credit, and waiting on one starves the peer.
     outbox: VecDeque<(MsgBuf, usize)>,
+    /// Our requests on this connection, by the `context_id` we gave them —
+    /// the **outbound** book. Its ids are ours; the inbound book is the
+    /// pushes with `Finish::Reply`, whose ids are the peer's. The same number
+    /// can be live in both, and they are unrelated (FR-026, D22).
+    outbound: BTreeMap<u64, u64>,
+    next_context: u64,
+}
+
+/// A fetch in progress: one caller's request, on one connection.
+struct Fetch {
+    peer: PeerId,
+    /// Not yet sent: waiting for the exchange, or for a message credit.
+    unsent: Option<Vec<(CacheKey, RemoteRegion)>>,
+    len: usize,
+    on_complete: Option<FetchCompletion>,
 }
 
 /// The actor's state: the table, until shutdown takes it.
@@ -235,9 +258,12 @@ pub(crate) struct EndpointActor {
     /// since a peer may be writing into any of them until teardown.
     landing: BTreeMap<u64, Region>,
     next_landing: u64,
-    /// Pushes in progress, in arrival order.
+    /// Pushes in progress, in arrival order: local `push_async`s and the
+    /// serving of peers' `OP_FETCH`s alike.
     pushes: BTreeMap<u64, Push>,
     next_push: u64,
+    /// Fetches in progress, by the caller's `TransferContextId`.
+    fetches: BTreeMap<u64, Fetch>,
     /// Buffers behind `HoldRecv` receives. Declared after `table`, so they
     /// outlive any drain of it.
     #[cfg(test)]
@@ -269,6 +295,7 @@ impl EndpointActor {
             next_landing: 1,
             pushes: BTreeMap::new(),
             next_push: 0,
+            fetches: BTreeMap::new(),
             #[cfg(test)]
             held: Vec::new(),
         }
@@ -307,7 +334,41 @@ impl EndpointActor {
             .finish_teardown(peer)
             .map_err(|e| format!("destroying {peer}'s links: {e}"))?;
         self.fail_pushes(peer);
+        // Only now, behind the teardown barrier: every write the peer could
+        // make into these fetches' landing slots is impossible (FR-017).
+        self.fail_fetches(peer);
         Ok(())
+    }
+
+    /// End every fetch to `peer`: nothing more can arrive for it, so every
+    /// outcome is `Failed`. Called only once its link is destroyed.
+    fn fail_fetches(&mut self, peer: &PeerId) {
+        let ids: Vec<u64> = self
+            .fetches
+            .iter()
+            .filter(|(_, f)| f.peer == *peer)
+            .map(|(id, _)| *id)
+            .collect();
+        for id in ids {
+            let f = self.fetches.remove(&id).expect("listed above");
+            self.complete_fetch(f, Vec::new());
+        }
+    }
+
+    /// Fire a fetch's callback once, with `outcomes` — or all `Failed` if
+    /// they do not cover the request (a refusal, a teardown) — and count it.
+    fn complete_fetch(&mut self, mut f: Fetch, outcomes: Vec<EntryOutcome>) {
+        let outcomes = if outcomes.len() == f.len {
+            outcomes
+        } else {
+            vec![EntryOutcome::Failed; f.len]
+        };
+        if let Some(t) = self.table.as_mut() {
+            count_outcomes(t.counters_mut(), &outcomes);
+        }
+        if let Some(cb) = f.on_complete.take() {
+            cb(outcomes);
+        }
     }
 
     /// End every push to `peer` that can make no further progress: entries
@@ -385,9 +446,94 @@ impl EndpointActor {
         }
     }
 
+    fn start_fetch(
+        &mut self,
+        id: u64,
+        peer: PeerId,
+        items: Vec<(CacheKey, RemoteRegion)>,
+        on_complete: FetchCompletion,
+    ) {
+        let len = items.len();
+        let fetch = Fetch {
+            peer: peer.clone(),
+            unsent: Some(items),
+            len,
+            on_complete: Some(on_complete),
+        };
+        let Some(table) = self.table.as_mut() else {
+            return self.complete_fetch(fetch, Vec::new());
+        };
+        let c = table.counters_mut();
+        c.requests_attempted += 1;
+        c.entries_requested += len as u64;
+        if let Err(e) = table.ensure(&peer) {
+            self.logger.error(&format!(
+                "certus-transfer-endpoint: fetch from {peer} cannot connect: {e}"
+            ));
+            return self.complete_fetch(fetch, Vec::new());
+        }
+        self.fetches.insert(id, fetch);
+    }
+
+    /// Send every unsent fetch whose connection is ready and has a message
+    /// credit. A fetch larger than the peer accepts is refused before it is
+    /// sent (chunking is Phase 7). Returns whether anything moved.
+    fn send_fetches(&mut self) -> bool {
+        let mut did = false;
+        let mut too_large = Vec::new();
+        for (&id, f) in self.fetches.iter_mut() {
+            let Some(items) = f.unsent.as_ref() else {
+                continue;
+            };
+            let Some(conn) = self.conns.get_mut(&f.peer) else {
+                continue;
+            };
+            if conn.session.phase() != Phase::Ready {
+                continue;
+            }
+            if items.len() > conn.session.peer_max_entries() as usize {
+                too_large.push(id);
+                continue;
+            }
+            if !conn.session.try_send_request() {
+                continue; // no credit: wait, never fail (FR-015)
+            }
+            let Some(table) = self.table.as_mut() else {
+                return did;
+            };
+            if self.msgs.reserve(table.transport(), 1).is_err() {
+                // Unspent: nothing was sent.
+                let _ = conn.session.on_reply();
+                continue;
+            }
+            let items = f.unsent.take().expect("checked above");
+            let ctx = conn.next_context;
+            conn.next_context += 1;
+            conn.outbound.insert(ctx, id);
+            let b = self.msgs.take().expect("reserved");
+            let version = conn.session.version().expect("Ready");
+            // SAFETY: just taken from the free list.
+            let len =
+                message::encode_fetch(version, ctx, &items, unsafe { self.msgs.bytes_mut(b) });
+            conn.outbox.push_back((b, len));
+            did = true;
+        }
+        for id in too_large {
+            let f = self.fetches.remove(&id).expect("listed above");
+            self.logger.warn(&format!(
+                "certus-transfer-endpoint: fetch of {} entries exceeds what {} accepts; \
+                 chunking lands in Phase 7",
+                f.len, f.peer
+            ));
+            self.complete_fetch(f, Vec::new());
+        }
+        did
+    }
+
     /// Resolve and post as far as credits allow, reap what has completed, and
     /// tear down any link a write failed on. Returns whether anything moved.
     fn advance(&mut self) -> bool {
+        let sent = self.send_fetches();
         let Some(table) = self.table.as_mut() else {
             return false;
         };
@@ -531,10 +677,10 @@ impl EndpointActor {
             }
         }
         self.finish_done();
-        did
+        did || sent
     }
 
-    // --- messaging (slice B: bring-up) ---------------------------------------
+    // --- messaging -------------------------------------------------------------
 
     /// A link just came up: post its receives (reserve + quota) and send our
     /// `OP_HELLO` on the bootstrap credit. Nothing else is sent until the
@@ -574,6 +720,8 @@ impl EndpointActor {
             Conn {
                 session,
                 outbox: VecDeque::from([(b, len)]),
+                outbound: BTreeMap::new(),
+                next_context: 0,
             },
         );
         Ok(())
@@ -731,15 +879,58 @@ impl EndpointActor {
                 if let Some(t) = self.table.as_mut() {
                     t.counters_mut().protocol_faults += 1;
                 }
+                // A refusal of one of our fetches fails that context alone; the
+                // peer acted on nothing, so the connection stays (FR-024). It
+                // is matched by context **and** kind: only an OP_ERROR whose
+                // offending opcode is OP_FETCH answers a fetch of ours. An
+                // OP_ERROR naming any other kind answers no request we made
+                // — we send no other request but OP_HELLO, answered by
+                // OP_HELLO_REPLY — so it is a bad reply and tears down.
+                if e.offending_opcode != Kind::Fetch.opcode() {
+                    return Err(format!("OP_ERROR for a request we never sent: {e:?}"));
+                }
+                let id = conn
+                    .outbound
+                    .remove(&e.context_id)
+                    .ok_or("OP_ERROR for no fetch of ours")?;
                 conn.session.on_reply().map_err(|v| format!("{v:?}"))?;
-                // Nothing of ours is outstanding yet in slice B; slice C fails
-                // the named context here.
                 self.logger.warn(&format!(
-                    "certus-transfer-endpoint: {peer} refused a request: {e:?}"
+                    "certus-transfer-endpoint: {peer} refused a fetch: {e:?}"
                 ));
+                if let Some(f) = self.fetches.remove(&id) {
+                    self.complete_fetch(f, Vec::new());
+                }
                 Ok(())
             }
-            Kind::FetchReply => Err("a fetch reply, but no fetch was sent".into()),
+            Kind::FetchReply => {
+                let id = conn
+                    .outbound
+                    .remove(&h.context_id)
+                    .ok_or("a fetch reply for no request of ours")?;
+                let f = self
+                    .fetches
+                    .remove(&id)
+                    .ok_or("a reply for a finished fetch")?;
+                let outcomes = message::decode_reply(&h, msg).map_err(|m| m.what.to_string());
+                let outcomes = match outcomes {
+                    Ok(o) if o.len() == f.len => o,
+                    // A bad reply is a teardown, and the fetch fails with it —
+                    // after the teardown, so its slots are safe to reclaim.
+                    bad => {
+                        self.fetches.insert(id, f);
+                        return Err(match bad {
+                            Err(e) => e,
+                            Ok(o) => format!("{} outcomes for {} entries", o.len(), id),
+                        });
+                    }
+                };
+                conn.session.on_reply().map_err(|v| format!("{v:?}"))?;
+                // Every write for a hit completed before this reply was sent
+                // (the source's ordering guarantee), so each hit is safe for the
+                // caller to commit and each miss or failure to abort (T035).
+                self.complete_fetch(f, outcomes);
+                Ok(())
+            }
             Kind::Fetch => {
                 if let Err(v) = conn.session.on_request() {
                     return Err(format!("{v:?}"));
@@ -803,6 +994,7 @@ impl EndpointActor {
                         "certus-transfer-endpoint: connect to {peer} failed: {reason:?}"
                     ));
                     self.fail_pushes(&peer);
+                    self.fail_fetches(&peer);
                 }
                 TableEvent::RefusedInbound { peer, reason } => self.logger.warn(&format!(
                     "certus-transfer-endpoint: refused inbound connect from {peer:?}: {reason:?}"
@@ -939,10 +1131,17 @@ impl EndpointActor {
                 failures.push(e);
             }
         }
-        // Pushes whose peer the table never held (a refused connect) end here.
-        let stranded: Vec<PeerId> = self.pushes.values().map(|p| p.peer.clone()).collect();
+        // Pushes and fetches whose peer the table never held (a refused
+        // connect) end here.
+        let stranded: Vec<PeerId> = self
+            .pushes
+            .values()
+            .map(|p| p.peer.clone())
+            .chain(self.fetches.values().map(|f| f.peer.clone()))
+            .collect();
         for peer in stranded {
             self.fail_pushes(&peer);
+            self.fail_fetches(&peer);
         }
         let table = self.table.take().expect("checked above");
         if failures.is_empty() {
@@ -993,6 +1192,12 @@ impl ActorHandler<Command> for EndpointActor {
                 items,
                 on_complete,
             } => self.start_push(peer, items, on_complete),
+            Command::Fetch {
+                id,
+                peer,
+                items,
+                on_complete,
+            } => self.start_fetch(id, peer, items, on_complete),
             #[cfg(test)]
             Command::Connect(peer, reply) => {
                 let r = match self.table.as_mut() {
