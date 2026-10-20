@@ -576,7 +576,7 @@ order of its memory-tier entries are unchanged.
 
 **Gate**: **SC-005**.
 
-- [ ] T083 [US3] `interfaces`: `BounceLease { ptr, len }` and `BounceError { NoSpace,
+- [X] T083 [US3] `interfaces`: `BounceLease { ptr, len }` and `BounceError { NoSpace,
   NeverFits, Io, NotInitialized }`; `IMemoryTier` gains `set_bounce_reserve`,
   `bounce_alloc`, `bounce_free`, `bounce_usage`; `IDispatcher` gains `read_to_bounce` and
   `release_bounce` (contract *The dispatcher's half*). `define_interface!` has no default
@@ -585,7 +585,7 @@ order of its memory-tier entries are unchanged.
   path. `EndpointConfig` gains `block_readers` (default 4); `TransferStats` gains
   `block_reads_attempted`, `_completed`, `_failed` and `block_deferrals`. The endpoint's
   `spdk` receptacle becomes `dispatcher: IDispatcher`; no block-device receptacle remains
-- [ ] T037 [US3] `memory-tier`: the bounce reserve (D15). At `initialize`, set aside
+- [X] T037 [US3] `memory-tier`: the bounce reserve (D15). At `initialize`, set aside
   `min(bounce_reserve, pool_size / 8)` — default 16 MiB — at the top of the pool, managed by
   a second instance of the tier's first-fit free list; `capacity()` excludes it, `used()`
   and eviction tracking never see it, and the initialize log line states its size.
@@ -594,7 +594,7 @@ order of its memory-tier entries are unchanged.
   no reserve, or a pool that is not DMA-capable (the `mmap` fallback). Tests in the memory
   tier: capacity shrinks by exactly the reserve, a full cache cannot reach reserve bytes,
   allocation and coalescing, both errors, the `pool_size / 8` cap
-- [ ] T038 [US3] `dispatcher`: `read_to_bounce(key, offset, len)` — lease from the memory
+- [X] T038 [US3] `dispatcher`: `read_to_bounce(key, offset, len)` — lease from the memory
   tier, then read `len` bytes (rounded up to the block size) at `offset` on the drive the
   placement hash chooses for `key`, over a channel leased from that drive's pool, segmented
   by its maximum transfer, exactly as the promotion read is — but into the lease, and with
@@ -605,22 +605,22 @@ order of its memory-tier entries are unchanged.
   memory tier. Never promotes, never touches the cache (FR-012, D8). Tests over the
   dispatcher's mock block device: the right drive and LBA are read, multi-segment entries,
   `Io` returns the lease, `NoSpace`/`NeverFits` pass through, the cache is untouched
-- [ ] T039 [US3] Release the block-tier pin **as soon as its read completes** — before the
+- [X] T039 [US3] Release the block-tier pin **as soon as its read completes** — before the
   write is posted — since the data has been copied, so only the lease needs protection
   thereafter (FR-011, D7). The pin waits in the endpoint's read table while its read is in
   flight (nothing is posted yet, so it has no `wr_id`); after the read, the slab carries the
   **lease**, and the reaper that owns the write's `wr_id` returns it with `release_bounce`.
   This is the one place a pin leaves other than through a completion, and it is stated as
   such
-- [ ] T040 [US3] Report `HitBlockTier`, and **never promote** the entry into the source's
+- [X] T040 [US3] Report `HitBlockTier`, and **never promote** the entry into the source's
   memory tier to serve a peer (FR-012, D8). Promotion-to-serve would evict the source's own
   working set, making serving peers self-harming. Structurally: the endpoint calls only
   `read_to_bounce`, which never promotes
-- [ ] T041 [P] [US3] Without the `spdk` feature there is no dispatcher receptacle, so a
+- [X] T041 [P] [US3] Without the `spdk` feature there is no dispatcher receptacle, so a
   `BlockDevice{offset}` answer is reported as **`Miss`** — never `HitBlockTier`, never an
   error (D14, invariant 2). Release the pin that lookup took, since that answer *was*
   pinned (contrast T023)
-- [ ] T072 [US3] Remove the read/write phase barrier from the serve path (FR-022, D19):
+- [X] T072 [US3] Remove the read/write phase barrier from the serve path (FR-022, D19):
   resolve and post **memory-tier** writes immediately, without waiting on any device read,
   and post each block-tier write when its *own* read completes. Reads run on
   `block_readers` threads calling `read_to_bounce`, so the endpoint thread never blocks on a
@@ -631,17 +631,39 @@ order of its memory-tier entries are unchanged.
   logged, never retried. A connection torn down mid-read waits for the read: its pin and
   lease are released when it completes, and the entry is `Failed`. `shutdown` waits for
   every read in flight, however long the device takes
-- [ ] T073 [US3] Test **SC-011**: on a request mixing memory-tier and block-tier entries,
+- [X] T073 [US3] Test **SC-011**: on a request mixing memory-tier and block-tier entries,
   every memory-tier write is posted before the first device read completes (hold the mock
   dispatcher's read and assert the memory-tier writes already went out), and the send queue
   is never idle while unposted entries remain
-- [ ] T042 [US3] Tests: **SC-005** — serving a block-tier entry leaves memory-tier occupancy
+- [X] T042 [US3] Tests: **SC-005** — serving a block-tier entry leaves memory-tier occupancy
   and the relative LRU order of memory-tier entries unchanged; outcome honesty —
   `HitBlockTier` only when the read actually ran (invariant 2); the pin released before the
   write is posted, on one recorded sequence; the lease returned after the write completes;
   deferral under `NoSpace` and under a busy reader pool, both completing; SC-004 with
   readers; `NeverFits` and `Io` as `Failed`; a teardown and a shutdown mid-read; and the
-  no-`spdk` degradation path of T041
+  no-`spdk` degradation path of T041.
+  *Done*, in four commits: `interfaces` (T083, every implementor stubbed as having no
+  reserve), `memory-tier` (T037), `dispatcher` (T038), and this crate. Here: `bounce.rs`
+  runs `block_readers` threads over a `BlockSource` — `IDispatcher` in an `spdk` build, a
+  test double otherwise, so the read path is tested in the default build. A block-tier
+  answer with a source becomes `Resolved::Block`; its pin waits in the actor's read table
+  (`reads`) and is released when the read returns, before the write is posted; the slab then
+  carries `Hold::Lease`, returned by the reaper (`settle`), which reports `HitBlockTier` only
+  on a successful completion. Ready block writes post ahead of new lookups. No reader free,
+  or `NoSpace`: release the pin, defer, stop looking up for that pass; deferred entries
+  retry as readers free — but not while the reserve is known full, which only a returned
+  lease ends. A `NoSpace` is believed only if nothing was freed after its read was submitted:
+  without that, the last lease can come back before the `NoSpace` it answers is collected,
+  and the deferred entries wait forever (the first version of the reserve test caught
+  exactly that, as a reply deadline). A torn-down push is marked dead: its reads finish and
+  are discarded. `shutdown` waits for every read. Tests (default build, over `DiskSource`):
+  US3 end to end; pin after read, lease after write, on one sequence; SC-011 under a held
+  read; SC-004 with 40 entries over 2 credits + 2 readers; a one-lease reserve deferring
+  and completing; `NeverFits`/`Io` as `Failed`, not retried; teardown and shutdown
+  mid-read; no source is a `Miss`; SC-005's cache bytes and single lookups; and (`spdk`)
+  the `dispatcher` receptacle end to end. SC-005 asserts what is met — the cache's bytes
+  untouched and nothing but one lookup asked of the map — since the `LedgerMap` double
+  keeps no LRU order to compare
 
 **Checkpoint**: SC-005 — block-tier serving works and is provably tier-neutral.
 

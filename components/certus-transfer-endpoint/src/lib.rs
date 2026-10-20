@@ -30,7 +30,7 @@
 //!
 //! # Status
 //!
-//! Scaffolding. Tasks T001–T036, T049–T052, T068, T070, T071 and T074–T082 (all but T011's
+//! Scaffolding. Tasks T001–T042, T049–T052, T068, T070–T083 (all but T011's
 //! remaining faults) of
 //! `specs/001-rdma-cache-transfer/tasks.md` are complete: the crate builds as a
 //! workspace default member, peer identity is implemented, and the verbs FFI, its
@@ -40,8 +40,9 @@
 //! [`CertusTransferEndpoint`] on its endpoint thread. Every transfer method works
 //! end to end over the mock: the legacy `push_async` and `push`, landing
 //! regions, and `fetch` over the request/reply messaging, with a fail-loud reply
-//! deadline. Still to come: the block tier (Phase 6), chunking (Phase 7) and the
-//! verbs transport (Phase 9).
+//! deadline; and with `spdk`, block-tier entries are read by the dispatcher into
+//! the memory tier's bounce reserve and served from there. Still to come:
+//! chunking (Phase 7) and the verbs transport (Phase 9).
 
 #![deny(missing_docs)]
 
@@ -60,7 +61,8 @@ mod ffi;
 #[cfg(feature = "rdma")]
 mod rdma;
 
-#[cfg(feature = "spdk")]
+// In every build, so the read path is tested over a mock source (Principle
+// VIII); only the dispatcher-backed source is `spdk`-gated.
 mod bounce;
 
 #[cfg(all(test, feature = "rdma"))]
@@ -92,13 +94,16 @@ impl Default for Lifecycle {
     }
 }
 
+/// Where block-tier entries are read from.
+type Source = std::sync::Arc<dyn bounce::BlockSource>;
+
 /// Configured, then running, then stopped.
 enum State {
     /// No configuration yet.
     Unconfigured,
     /// Configured; [`ITransferEndpointAdmin::initialize`] starts it. The
     /// transport choice is kept here so tests can substitute an isolated mock.
-    Configured(EndpointConfig, Option<TransportChoice>),
+    Configured(EndpointConfig, Option<TransportChoice>, Option<Source>),
     /// The endpoint thread is running.
     Running(ActorHandle<Command>),
     /// Shut down; not restartable.
@@ -217,11 +222,33 @@ impl CertusTransferEndpoint {
         LifecycleGuard(self.lifecycle.lock().expect("lifecycle lock poisoned"))
     }
 
+    /// Serve block-tier entries from `source` instead of the bound dispatcher.
+    /// Test-only: the default build has no dispatcher receptacle.
+    #[cfg(test)]
+    fn use_block_source(&self, source: Source) {
+        if let State::Configured(_, _, slot) = &mut *self.lifecycle() {
+            *slot = Some(source);
+        }
+    }
+
+    /// The bound dispatcher, as a block source (`spdk` builds).
+    #[cfg(feature = "spdk")]
+    fn block_source(&self) -> Option<Source> {
+        let d = self.dispatcher.get().ok()?;
+        Some(std::sync::Arc::new(bounce::DispatcherSource(d)))
+    }
+
+    /// No block source without `spdk`: block-tier answers are misses (D14).
+    #[cfg(not(feature = "spdk"))]
+    fn block_source(&self) -> Option<Source> {
+        None
+    }
+
     /// Run in an isolated mock fabric instead of the build's default, so tests
     /// in any build cannot collide on an instance name. Call after `configure`.
     #[cfg(test)]
     fn use_transport(&self, choice: TransportChoice) {
-        if let State::Configured(_, slot) = &mut *self.lifecycle() {
+        if let State::Configured(_, slot, _) = &mut *self.lifecycle() {
             *slot = Some(choice);
         }
     }
@@ -313,7 +340,7 @@ impl ITransferEndpointAdmin for CertusTransferEndpoint {
         let mut guard = self.lifecycle();
         match &*guard {
             State::Unconfigured | State::Configured(..) => {
-                *guard = State::Configured(config, None);
+                *guard = State::Configured(config, None, None);
                 Ok(())
             }
             State::Running(_) | State::Stopped => Err(TransferEndpointError::NotInitialized(
@@ -339,7 +366,8 @@ impl ITransferEndpointAdmin for CertusTransferEndpoint {
                 ))
             }
         }
-        let State::Configured(config, choice) = std::mem::replace(&mut *guard, State::Stopped)
+        let State::Configured(config, choice, source) =
+            std::mem::replace(&mut *guard, State::Stopped)
         else {
             unreachable!("checked above, under the same lock");
         };
@@ -386,9 +414,18 @@ impl ITransferEndpointAdmin for CertusTransferEndpoint {
                 message_credits: config.message_credits,
                 inbound_quota: config.inbound_quota,
             };
+            let readers = match source.clone().or_else(|| self.block_source()) {
+                Some(src) => Some(
+                    bounce::Readers::start(src, config.block_readers as usize).map_err(|e| {
+                        TransferEndpointError::Transport(format!("starting block readers: {e}"))
+                    })?,
+                ),
+                None => None,
+            };
             let actor = Actor::new(
                 EndpointActor::new(table, logger, map, pool_region, limits)
-                    .with_deadline(config.fetch_deadline),
+                    .with_deadline(config.fetch_deadline)
+                    .with_readers(readers),
                 |_| {
                     // Unreachable: every handler path aborts on panic itself.
                 },
@@ -411,7 +448,7 @@ impl ITransferEndpointAdmin for CertusTransferEndpoint {
             }
             Err(e) => {
                 // Leave it configured, so a fixed configuration can retry.
-                *guard = State::Configured(config, None);
+                *guard = State::Configured(config, None, source);
                 Err(e)
             }
         }
@@ -896,7 +933,7 @@ mod tests {
         a.map.memory(10, a.pool_addr(0), 64);
         a.map.memory(11, a.pool_addr(64), 64);
         a.map.memory(12, a.pool_addr(128), 32); // wrong size: pinned, must be released
-        a.map.block(13); // block tier: pinned, released, miss until T037
+        a.map.block(13); // block tier with no block source: pinned, released, miss (D14)
         a.map.mismatch(14); // unpinned
         a.map.preload_reader(14); // someone else's pin on it
         let (land, rkey) = pool_key(&b.ep);
@@ -2811,5 +2848,455 @@ mod tests {
         dest.ep.shutdown().unwrap();
         src.ep.shutdown().unwrap();
         drop(slots);
+    }
+
+    // --- Phase 6: block-tier serving (T039-T042, T072, T073) -----------------
+
+    use crate::test_doubles::DiskSource;
+
+    /// A source node at 10.0.0.2:7000 whose block tier is `disk`, leasing
+    /// `leases` x 256 bytes from the top half of its pool, with `readers`
+    /// reader threads and `credits` send credits; and a destination at
+    /// 10.0.0.1:7000 with 4 KiB of landing slots. Both initialized.
+    fn block_pair(
+        f: &MockFabric,
+        leases: usize,
+        readers: u32,
+        credits: u32,
+    ) -> (Node, Node, Arc<DiskSource>, LandingRegionHandle, Box<[u8]>) {
+        let dest = node(f, "10.0.0.1:7000", 8);
+        let src = node_with(f, "10.0.0.2:7000", |c| {
+            c.block_readers = readers;
+            c.send_credits = credits;
+        });
+        assert!(leases * 256 <= 2048, "leases fit the top half of the pool");
+        let disk = Arc::new(DiskSource::new(src.pool_addr(2048), leases, 256));
+        src.ep
+            .use_block_source(Arc::clone(&disk) as Arc<dyn bounce::BlockSource>);
+        dest.ep.initialize().unwrap();
+        src.ep.initialize().unwrap();
+        let mut slots = vec![0u8; 4096].into_boxed_slice();
+        let h = dest
+            .ep
+            .register_landing_region(slots.as_mut_ptr(), slots.len())
+            .unwrap();
+        (dest, src, disk, h, slots)
+    }
+
+    fn fetch_from_src(
+        dest: &Node,
+        items: &[(CacheKey, RemoteRegion)],
+    ) -> mpsc::Receiver<interfaces::FetchResult> {
+        let (tx, rx) = mpsc::channel();
+        dest.ep
+            .fetch(
+                "10.0.0.2:7000",
+                items,
+                Box::new(move |o| {
+                    let _ = tx.send(o);
+                }),
+            )
+            .unwrap();
+        rx
+    }
+
+    /// The independent test of US3: a block-tier entry arrives byte-exact,
+    /// is reported HitBlockTier, and its lease and pin are both returned.
+    #[test]
+    fn a_block_tier_entry_is_read_and_served() {
+        let f = MockFabric::new();
+        let (dest, src, disk, h, slots) = block_pair(&f, 4, 2, 8);
+        disk.put(0x8000, b"from the ssd!!!!");
+        src.map.block_at(7, 0x8000);
+        let rx = fetch_from_src(&dest, &[(7, h.region_at(0, 16).unwrap())]);
+        let out = hits(rx.recv_timeout(Duration::from_secs(5)).unwrap());
+        assert_eq!(out, [EntryOutcome::HitBlockTier]);
+        assert_eq!(&slots[..16], b"from the ssd!!!!");
+        assert_eq!(disk.reads(), 1, "read once");
+        assert_eq!(disk.free_leases(), 4, "the lease came back");
+        assert_eq!(src.map.held(), 0, "the pin came back");
+        assert_eq!(src.map.lookups(), 1, "one lookup: no probe-then-pin");
+        let s = src.ep.stats();
+        assert_eq!(
+            (
+                s.block_reads_attempted,
+                s.block_reads_completed,
+                s.block_reads_failed
+            ),
+            (1, 1, 0)
+        );
+        assert_eq!((s.bounce_buffers_in_use, s.bounce_buffers_peak), (0, 1));
+        assert_eq!(dest.ep.stats().hit_block_tier, 1);
+        dest.ep.shutdown().unwrap();
+        src.ep.shutdown().unwrap();
+        drop(slots);
+    }
+
+    /// T039 (FR-011, D7): the pin is released when the read completes, before
+    /// the write is posted; the lease is freed only after the write completes.
+    /// All three on one recorded sequence.
+    #[test]
+    fn the_block_pin_goes_after_the_read_and_the_lease_after_the_write() {
+        use crate::connection::mock::{LogEvent, Sequence};
+        let f = MockFabric::new();
+        let (dest, src, disk, h, slots) = block_pair(&f, 4, 2, 8);
+        connect(&dest.ep, "10.0.0.2:7000");
+        disk.put(0x8000, b"abcdefgh");
+        src.map.block_at(7, 0x8000);
+        let seq = Sequence::default();
+        f.record(&seq);
+        src.map.record(&seq);
+        disk.record(&seq);
+        let rx = fetch_from_src(&dest, &[(7, h.region_at(0, 8).unwrap())]);
+        assert_eq!(
+            hits(rx.recv_timeout(Duration::from_secs(5)).unwrap()),
+            [EntryOutcome::HitBlockTier]
+        );
+        let stamps = disk.stamps();
+        let read = stamps.iter().find(|s| s.1 == "read").unwrap().0;
+        let freed = stamps.iter().find(|s| s.1 == "free").unwrap().0;
+        let released = src.map.releases()[0].0;
+        // The source's write is the first completion on the source's link
+        // after the read; the mock stamps it when the reaper takes it.
+        let log = f.log();
+        let written = log
+            .iter()
+            .filter(|(st, e)| *st > read && matches!(e, LogEvent::Completed(..)))
+            .map(|(st, _)| *st)
+            .find(|&st| st < freed)
+            .expect("a completion between the read and the free");
+        assert!(read < released, "pin released after the read");
+        assert!(
+            released < written,
+            "pin released before the write completed"
+        );
+        assert!(
+            written < freed,
+            "lease freed only after the write completed"
+        );
+        dest.ep.shutdown().unwrap();
+        src.ep.shutdown().unwrap();
+        drop(slots);
+    }
+
+    /// SC-011 (T073): on a request mixing tiers, every memory-tier write is
+    /// posted and lands while the device read is still held.
+    #[test]
+    fn memory_tier_writes_do_not_wait_for_device_reads() {
+        let f = MockFabric::new();
+        let (dest, mut src, disk, h, slots) = block_pair(&f, 4, 2, 8);
+        src.pool[..24].copy_from_slice(b"mem-one.mem-two.mem-thr.");
+        src.map.memory(1, src.pool_addr(0), 8);
+        src.map.block_at(2, 0x8000);
+        src.map.memory(3, src.pool_addr(8), 8);
+        src.map.memory(4, src.pool_addr(16), 8);
+        disk.put(0x8000, b"block-2.");
+        disk.hold_reads();
+        let items: Vec<_> = (1..=4u64)
+            .map(|k| (k, h.region_at((k as usize - 1) * 8, 8).unwrap()))
+            .collect();
+        let rx = fetch_from_src(&dest, &items);
+        // The read may start after the memory-tier writes land; wait until it
+        // is genuinely held, so what follows is checked under it.
+        eventually("the device read is held", || disk.reading().0 == 1);
+        let base = slots.as_ptr();
+        eventually("the memory-tier writes land under a held read", || {
+            // SAFETY: reading our own slots; the peer writes only the ones
+            // checked, and a torn read just retries.
+            let got = unsafe { std::slice::from_raw_parts(base, 32) };
+            &got[..8] == b"mem-one." && &got[16..32] == b"mem-two.mem-thr."
+        });
+        assert_eq!(disk.reading().0, 1, "the device read is still held");
+        assert!(rx.try_recv().is_err(), "no reply before the block write");
+        assert_eq!(&slots[8..16], [0u8; 8], "nothing yet for the block entry");
+        disk.release_reads();
+        use EntryOutcome::*;
+        assert_eq!(
+            hits(rx.recv_timeout(Duration::from_secs(5)).unwrap()),
+            [HitMemoryTier, HitBlockTier, HitMemoryTier, HitMemoryTier]
+        );
+        assert_eq!(&slots[8..16], b"block-2.");
+        assert_eq!(src.map.held(), 0);
+        dest.ep.shutdown().unwrap();
+        src.ep.shutdown().unwrap();
+        drop(slots);
+    }
+
+    /// SC-004 with readers (T072): pins held never exceed send credits plus
+    /// readers, however many block-tier entries; every entry still lands.
+    #[test]
+    fn block_tier_pins_stay_within_credits_plus_readers() {
+        let f = MockFabric::new();
+        let (dest, src, disk, h, slots) = block_pair(&f, 8, 2, 2);
+        for k in 0..40u64 {
+            disk.put(0x1_0000 + k * 0x100, &[k as u8; 8]);
+            src.map.block_at(k, 0x1_0000 + k * 0x100);
+        }
+        let items: Vec<_> = (0..40u64)
+            .map(|k| (k, h.region_at(k as usize * 8, 8).unwrap()))
+            .collect();
+        let rx = fetch_from_src(&dest, &items);
+        let out = hits(rx.recv_timeout(Duration::from_secs(10)).unwrap());
+        assert!(
+            out.iter().all(|o| *o == EntryOutcome::HitBlockTier),
+            "{out:?}"
+        );
+        for k in 0..40usize {
+            assert_eq!(slots[k * 8..k * 8 + 8], [k as u8; 8], "entry {k}");
+        }
+        assert!(
+            src.map.peak_held() <= 2 + 2,
+            "peak pins {} > credits 2 + readers 2",
+            src.map.peak_held()
+        );
+        assert!(disk.reading().1 <= 2, "at most two reads at once");
+        assert_eq!((src.map.held(), disk.free_leases()), (0, 8));
+        let s = src.ep.stats();
+        assert_eq!(s.block_reads_completed, 40);
+        assert!(s.block_reads_attempted >= 40);
+        dest.ep.shutdown().unwrap();
+        src.ep.shutdown().unwrap();
+        drop(slots);
+    }
+
+    /// A reserve with room for one lease at a time: entries beyond it are
+    /// deferred, holding no pin, and all complete as leases come back.
+    #[test]
+    fn a_full_reserve_defers_and_still_completes() {
+        let f = MockFabric::new();
+        let (dest, src, disk, h, slots) = block_pair(&f, 1, 4, 8);
+        for k in 0..6u64 {
+            disk.put(0x1_0000 + k * 0x100, &[0xa0 + k as u8; 8]);
+            src.map.block_at(k, 0x1_0000 + k * 0x100);
+        }
+        let items: Vec<_> = (0..6u64)
+            .map(|k| (k, h.region_at(k as usize * 8, 8).unwrap()))
+            .collect();
+        let rx = fetch_from_src(&dest, &items);
+        let out = hits(rx.recv_timeout(Duration::from_secs(10)).unwrap());
+        assert_eq!(out, [EntryOutcome::HitBlockTier; 6]);
+        for k in 0..6usize {
+            assert_eq!(slots[k * 8..k * 8 + 8], [0xa0 + k as u8; 8]);
+        }
+        let s = src.ep.stats();
+        assert!(s.block_deferrals > 0, "something waited for the one lease");
+        assert_eq!(s.bounce_buffers_peak, 1);
+        assert_eq!(s.block_reads_failed, 0, "deferral is not failure");
+        assert_eq!((src.map.held(), disk.free_leases()), (0, 1));
+        dest.ep.shutdown().unwrap();
+        src.ep.shutdown().unwrap();
+        drop(slots);
+    }
+
+    /// NeverFits and Io are Failed — counted, never retried — and neither
+    /// leaks a pin or a lease; the entries beside them are served.
+    #[test]
+    fn unservable_block_reads_fail_and_are_not_retried() {
+        let f = MockFabric::new();
+        // Three readers for three entries: none waits for a reader, so any
+        // deferral would be a retry.
+        let (dest, src, disk, h, slots) = block_pair(&f, 4, 3, 8);
+        disk.put(0x100, b"good....");
+        src.map.block_at(1, 0x100);
+        src.map.block_at(2, 0x200);
+        disk.never_fits_at(0x200);
+        src.map.block_at(3, 0x300);
+        disk.fail_at(0x300);
+        let items: Vec<_> = (1..=3u64)
+            .map(|k| (k, h.region_at(k as usize * 8, 8).unwrap()))
+            .collect();
+        let out = hits(
+            fetch_from_src(&dest, &items)
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap(),
+        );
+        use EntryOutcome::*;
+        assert_eq!(out, [HitBlockTier, Failed, Failed]);
+        let s = src.ep.stats();
+        assert_eq!(
+            (
+                s.block_reads_attempted,
+                s.block_reads_completed,
+                s.block_reads_failed
+            ),
+            (3, 1, 2)
+        );
+        assert_eq!(s.block_deferrals, 0, "never retried");
+        assert_eq!(
+            src.map.lookups(),
+            3,
+            "one lookup each: neither failure looked up again"
+        );
+        assert_eq!(
+            disk.reads(),
+            2,
+            "NeverFits issued no read; Io was read once"
+        );
+        assert_eq!((src.map.held(), disk.free_leases()), (0, 4));
+        dest.ep.shutdown().unwrap();
+        src.ep.shutdown().unwrap();
+        drop(slots);
+    }
+
+    /// A teardown while a read is held: the reply never comes, the read is
+    /// waited for, and its pin and lease are both returned when it does.
+    #[test]
+    fn a_teardown_mid_read_returns_the_pin_and_lease_when_the_read_ends() {
+        let f = MockFabric::new();
+        let (dest, src, disk, h, slots) = block_pair(&f, 4, 2, 8);
+        disk.put(0x100, b"late....");
+        src.map.block_at(1, 0x100);
+        disk.hold_reads();
+        let _rx = fetch_from_src(&dest, &[(1, h.region_at(0, 8).unwrap())]);
+        eventually("the read is out", || disk.reading().0 == 1);
+        src.ep.disconnect("10.0.0.1:7000").unwrap();
+        assert_eq!(src.map.held(), 1, "the read still holds its pin");
+        disk.release_reads();
+        eventually("pin and lease back", || {
+            src.map.held() == 0 && disk.free_leases() == 4
+        });
+        assert_eq!(slots[..8], [0u8; 8], "nothing written for a dead push");
+        dest.ep.shutdown().unwrap();
+        src.ep.shutdown().unwrap();
+        drop(slots);
+    }
+
+    /// Shutdown waits for a held read, however long, and returns everything.
+    #[test]
+    fn shutdown_waits_for_reads_in_flight() {
+        let f = MockFabric::new();
+        let (dest, src, disk, h, slots) = block_pair(&f, 4, 2, 8);
+        src.map.block_at(1, 0x100);
+        disk.hold_reads();
+        let _rx = fetch_from_src(&dest, &[(1, h.region_at(0, 8).unwrap())]);
+        eventually("the read is out", || disk.reading().0 == 1);
+        let disk2 = Arc::clone(&disk);
+        let releaser = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(150));
+            disk2.release_reads();
+        });
+        let t0 = Instant::now();
+        src.ep.shutdown().unwrap();
+        assert!(t0.elapsed() >= Duration::from_millis(100), "it waited");
+        releaser.join().unwrap();
+        assert_eq!((src.map.held(), disk.free_leases()), (0, 4));
+        dest.ep.shutdown().unwrap();
+        drop(slots);
+    }
+
+    /// T041 (D14): with no block source, a block-tier answer is a Miss —
+    /// never HitBlockTier, never an error — and its pin is released.
+    #[test]
+    fn without_a_block_source_a_block_entry_is_a_miss() {
+        let f = MockFabric::new();
+        let dest = node(&f, "10.0.0.1:7000", 8);
+        let src = node(&f, "10.0.0.2:7000", 8);
+        dest.ep.initialize().unwrap();
+        src.ep.initialize().unwrap();
+        src.map.block_at(1, 0x100);
+        let mut slots = vec![0u8; 8].into_boxed_slice();
+        let h = dest
+            .ep
+            .register_landing_region(slots.as_mut_ptr(), slots.len())
+            .unwrap();
+        let out = hits(
+            fetch_from_src(&dest, &[(1, h.region_at(0, 8).unwrap())])
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap(),
+        );
+        assert_eq!(out, [EntryOutcome::Miss]);
+        assert_eq!(src.map.held(), 0);
+        assert_eq!(src.ep.stats().block_reads_attempted, 0);
+        dest.ep.shutdown().unwrap();
+        src.ep.shutdown().unwrap();
+        drop(slots);
+    }
+
+    /// SC-005 (T042): serving block-tier entries takes nothing from the
+    /// source's cache — the only memory touched is the bounce range, outside
+    /// the entries the map points at — and it never promotes (the map is never
+    /// asked to create or convert an entry; the double panics if it were).
+    #[test]
+    fn serving_the_block_tier_leaves_the_cache_alone() {
+        let f = MockFabric::new();
+        let (dest, mut src, disk, h, slots) = block_pair(&f, 4, 2, 8);
+        src.pool[..2048].fill(0x5a);
+        src.map.memory(1, src.pool_addr(0), 8);
+        disk.put(0x100, b"cold....");
+        src.map.block_at(2, 0x100);
+        let before = src.pool[..2048].to_vec();
+        let out = hits(
+            fetch_from_src(
+                &dest,
+                &[
+                    (1, h.region_at(0, 8).unwrap()),
+                    (2, h.region_at(8, 8).unwrap()),
+                ],
+            )
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap(),
+        );
+        assert_eq!(
+            out,
+            [EntryOutcome::HitMemoryTier, EntryOutcome::HitBlockTier]
+        );
+        assert_eq!(src.pool[..2048], before[..], "the cache's bytes untouched");
+        assert_eq!(src.map.lookups(), 2, "one lookup each, nothing else asked");
+        dest.ep.shutdown().unwrap();
+        src.ep.shutdown().unwrap();
+        drop(slots);
+    }
+
+    /// The `spdk` wiring: with the `dispatcher` receptacle bound, `initialize`
+    /// starts readers over it, and a block-tier entry is read through
+    /// `read_to_bounce` and its lease returned through `release_bounce`.
+    #[cfg(feature = "spdk")]
+    #[test]
+    fn an_spdk_endpoint_reads_through_its_dispatcher_receptacle() {
+        let f = MockFabric::new();
+        let dest = node(&f, "10.0.0.1:7000", 8);
+        let src = node(&f, "10.0.0.2:7000", 8);
+        let disk = Arc::new(DiskSource::new(src.pool_addr(2048), 2, 256));
+        src.ep
+            .dispatcher
+            .connect(
+                Arc::new(crate::test_doubles::DiskDispatcher(Arc::clone(&disk)))
+                    as Arc<dyn interfaces::IDispatcher + Send + Sync>,
+            )
+            .unwrap();
+        dest.ep.initialize().unwrap();
+        src.ep.initialize().unwrap();
+        disk.put(0x40, b"via the receptacle!!");
+        src.map.block_at(5, 0x40);
+        let mut slots = vec![0u8; 32].into_boxed_slice();
+        let h = dest
+            .ep
+            .register_landing_region(slots.as_mut_ptr(), slots.len())
+            .unwrap();
+        let out = hits(
+            fetch_from_src(&dest, &[(5, h.region_at(0, 20).unwrap())])
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap(),
+        );
+        assert_eq!(out, [EntryOutcome::HitBlockTier]);
+        assert_eq!(&slots[..20], b"via the receptacle!!");
+        assert_eq!(
+            (disk.reads(), disk.free_leases(), src.map.held()),
+            (1, 2, 0)
+        );
+        dest.ep.shutdown().unwrap();
+        src.ep.shutdown().unwrap();
+        drop(slots);
+    }
+
+    #[test]
+    fn configure_refuses_zero_block_readers() {
+        let ep = CertusTransferEndpoint::create();
+        let mut c = EndpointConfig::new("10.0.0.1:7000");
+        c.block_readers = 0;
+        assert!(matches!(
+            ep.configure(c),
+            Err(TransferEndpointError::Transport(m)) if m.contains("block_readers")
+        ));
     }
 }

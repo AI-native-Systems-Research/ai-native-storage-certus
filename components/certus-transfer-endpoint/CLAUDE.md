@@ -193,7 +193,13 @@ VIII–XI, and a review that does not check them is not a review.
   `Ready` before resolving a single entry.
 - **Look up only when a credit is free.** A push resolves an entry — and so
   pins it — only when its write can post at once. Looking ahead "to keep the
-  pipe full" breaks SC-004: pins held would exceed the credits.
+  pipe full" breaks SC-004: pins held would exceed the credits. Block-tier
+  entries add at most one pin per reader thread, so the bound is credits plus
+  `block_readers`.
+- **A `NoSpace` is stale if a lease came back after its read was submitted.**
+  `Readers` stops handing out reads while the reserve is known full, and only a
+  returned lease clears that. Believing a stale `NoSpace` sets "full" after the
+  last lease is already back, and every deferred entry then waits forever.
 - **Serving a peer still touches the source's LRU** (D6): the dispatch map's
   `lookup` refreshes the entry as it pins. Invariant 6 is unmet for memory-tier
   entries until a non-touching lookup exists. Do not claim otherwise.
@@ -234,7 +240,7 @@ lookup answer is reported as a **miss**, never an error (D14).
 
 ## Current state
 
-Scaffolding. T001–T036, T049–T052, T068, T070, T071 and T074–T082 are done, except T011 (Phases 3, 5 and 8 complete: US2 legacy push and US1 fetch work end to end over the mock, with a fail-loud reply deadline): the crate builds as a default member,
+Scaffolding. T001–T042, T049–T052, T068 and T070–T083 are done, except T011 (Phases 3, 5, 6 and 8 complete: US2 legacy push and US1 fetch work end to end over the mock, with a fail-loud reply deadline, and US3 serves block-tier entries through the dispatcher's `read_to_bounce`, `bounce.rs`): the crate builds as a default member,
 peer identity is implemented, `ITransferEndpoint` is defined in `interfaces`, and
 the verbs FFI (`ffi.rs`), C shim (`wrapper.c`) and safe wrappers (`rdma.rs`, T009)
 exist behind `rdma`, and the transport seam plus an in-process mock exist in every

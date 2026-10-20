@@ -41,6 +41,7 @@ use interfaces::{
     TransferEndpointError, TransferStats,
 };
 
+use crate::bounce::Readers;
 use crate::connection::slab::{TrackedRecv, TrackedSend};
 use crate::connection::table::{ConnectionTable, ReapError, TableEvent};
 use crate::connection::transport::{
@@ -49,7 +50,9 @@ use crate::connection::transport::{
 use crate::connection::PeerId;
 use crate::message::{self, Header, Kind};
 use crate::msgpool::{MsgBuf, MsgPool};
-use crate::serve::{resolve, Finish, Map, MissCause, Pool, Push, PushWork, Resolved};
+use crate::serve::{
+    resolve, BlockRead, Finish, Hold, Map, MissCause, Pin, Pool, Push, PushWork, Resolved,
+};
 use crate::session::{Limits, Phase, Session};
 
 /// What a work request's slab slot carries until its completion is reaped.
@@ -164,21 +167,43 @@ pub(crate) fn fatal_on_panic<R>(what: &str, f: impl FnOnce() -> R) -> R {
     }
 }
 
-/// Settle one push write's completion: release its pin and record its entry's
-/// outcome. Returns whether it was a genuine failure (not a flush), which means
+/// Settle one push write's completion: release its pin, or return its bounce
+/// lease, and record its entry's outcome. Returns whether it was a genuine failure (not a flush), which means
 /// the link is now in ERROR and must be torn down. Message work is not settled
 /// here; see [`EndpointActor::on_message_work`].
-fn settle(pushes: &mut BTreeMap<u64, Push>, map: &Map, c: &Completion, work: Work) -> bool {
+fn settle(
+    pushes: &mut BTreeMap<u64, Push>,
+    map: &Map,
+    readers: &mut Option<Readers>,
+    counters: &mut crate::telemetry::Counters,
+    c: &Completion,
+    work: Work,
+) -> bool {
     match work {
         Work::Send(_) | Work::Recv(_) => unreachable!("message work is settled by the actor"),
         Work::Push(pw) => {
-            pw.pin.release(&**map);
+            let hit = match pw.hold {
+                Hold::Pin(pin) => {
+                    pin.release(&**map);
+                    EntryOutcome::HitMemoryTier
+                }
+                Hold::Lease(lease) => {
+                    readers
+                        .as_mut()
+                        .expect("a lease implies a block source")
+                        .release(lease);
+                    counters.bounce_buffers_in_use -= 1;
+                    EntryOutcome::HitBlockTier
+                }
+            };
             let push = pushes
                 .get_mut(&pw.push)
                 .expect("a write completed for a push already finished");
             push.in_flight -= 1;
+            // Only a successful completion is a hit: a failed or flushed
+            // write may or may not have landed, and is reported as not.
             push.outcomes[pw.index] = Some(if c.result.is_ok() {
-                EntryOutcome::HitMemoryTier
+                hit
             } else {
                 EntryOutcome::Failed
             });
@@ -295,6 +320,12 @@ pub(crate) struct EndpointActor {
     next_push: u64,
     /// Fetches in progress, by the caller's `TransferContextId`.
     fetches: BTreeMap<u64, Fetch>,
+    /// The block-tier reader threads, when a block source is bound (`spdk`).
+    readers: Option<Readers>,
+    /// Block-tier reads out, by job id: each entry's pin waits here until its
+    /// read returns (FR-011) — the one place a pin is held outside the slab.
+    reads: BTreeMap<u64, (u64, BlockRead)>,
+    next_read: u64,
     /// The reply deadline, and what to do when it expires (FR-016).
     deadline: Option<Duration>,
     /// Buffers behind `HoldRecv` receives. Declared after `table`, so they
@@ -307,6 +338,13 @@ impl EndpointActor {
     /// Set the reply deadline; `None` disables it.
     pub(crate) fn with_deadline(mut self, deadline: Option<Duration>) -> Self {
         self.deadline = deadline;
+        self
+    }
+
+    /// Serve block-tier entries through `readers`; without them a block-tier
+    /// answer is a miss (D14).
+    pub(crate) fn with_readers(mut self, readers: Option<Readers>) -> Self {
+        self.readers = readers;
         self
     }
 
@@ -335,6 +373,9 @@ impl EndpointActor {
             pushes: BTreeMap::new(),
             next_push: 0,
             fetches: BTreeMap::new(),
+            readers: None,
+            reads: BTreeMap::new(),
+            next_read: 0,
             deadline: None,
             #[cfg(test)]
             held: Vec::new(),
@@ -366,7 +407,15 @@ impl EndpointActor {
             match work {
                 Work::Send(b) | Work::Recv(b) => self.msgs.give(b),
                 work => {
-                    settle(&mut self.pushes, &self.map, &c, work);
+                    let counters = table.counters_mut();
+                    settle(
+                        &mut self.pushes,
+                        &self.map,
+                        &mut self.readers,
+                        counters,
+                        &c,
+                        work,
+                    );
                 }
             }
         }
@@ -490,10 +539,27 @@ impl EndpointActor {
     /// End every push to `peer` that can make no further progress: entries
     /// never looked up become `Failed`. Their pins were never taken.
     fn fail_pushes(&mut self, peer: &PeerId) {
+        let readers = &mut self.readers;
+        let counters = self.table.as_mut().map(|t| t.counters_mut());
+        let mut freed = 0u32;
         for push in self.pushes.values_mut().filter(|p| p.peer == *peer) {
-            for (i, _, _) in push.pending.drain(..) {
+            // Reads still out finish on their own and are discarded then:
+            // their pins and leases are released when they return.
+            push.dead = true;
+            for (i, _, _) in push.pending.drain(..).chain(push.deferred.drain(..)) {
                 push.outcomes[i] = Some(EntryOutcome::Failed);
             }
+            for (i, lease, _) in push.ready.drain(..) {
+                readers
+                    .as_mut()
+                    .expect("a lease implies a block source")
+                    .release(lease);
+                freed += 1;
+                push.outcomes[i] = Some(EntryOutcome::Failed);
+            }
+        }
+        if let Some(c) = counters {
+            c.bounce_buffers_in_use -= freed;
         }
         self.finish_done();
     }
@@ -665,6 +731,7 @@ impl EndpointActor {
     /// tear down any link a write failed on. Returns whether anything moved.
     fn advance(&mut self) -> bool {
         let sent = self.send_fetches();
+        let read = self.collect_reads();
         let Some(table) = self.table.as_mut() else {
             return false;
         };
@@ -689,12 +756,46 @@ impl EndpointActor {
                 continue;
             };
             let mut queue = VecDeque::new();
+            // Block-tier entries already read go first: their pins are gone,
+            // but their leases are held until their writes complete.
+            while queue.len() < avail {
+                let Some((index, lease, remote)) = push.ready.pop_front() else {
+                    break;
+                };
+                did = true;
+                let local = region
+                    .sge(lease.ptr as u64, lease.len as usize)
+                    .expect("a bounce lease lies inside the registered pool");
+                push.in_flight += 1;
+                queue.push_back(TrackedSend {
+                    op: SendOp::RdmaWrite {
+                        remote_addr: remote.addr,
+                        rkey: remote.rkey,
+                    },
+                    local,
+                    state: Work::Push(PushWork {
+                        push: id,
+                        index,
+                        hold: Hold::Lease(lease),
+                    }),
+                });
+            }
+            // Deferred entries retry, in order, as readers free — but not while
+            // the reserve is known full, which only a lease coming back ends.
+            // Each is looked up afresh: its old pin was released when it was
+            // put back.
+            let retry = self.readers.as_ref().map_or(0, Readers::can_read);
+            let n = retry.min(push.deferred.len());
+            for next in push.deferred.drain(..n).rev().collect::<Vec<_>>() {
+                push.pending.push_front(next);
+            }
             while queue.len() < avail {
                 let Some((index, key, remote)) = push.pending.pop_front() else {
                     break;
                 };
                 did = true;
-                match resolve(&*self.map, self.pool, index, key, remote) {
+                let blocks = self.readers.is_some();
+                match resolve(&*self.map, self.pool, blocks, index, key, remote) {
                     (Resolved::Failed, cause) => {
                         push.outcomes[index] = Some(EntryOutcome::Failed);
                         self.logger.warn(&format!(
@@ -720,9 +821,31 @@ impl EndpointActor {
                             state: Work::Push(PushWork {
                                 push: id,
                                 index: w.index,
-                                pin: w.pin,
+                                hold: Hold::Pin(w.pin),
                             }),
                         });
+                    }
+                    (Resolved::Block(b), _) => {
+                        let readers = self.readers.as_mut().expect("resolve saw a source");
+                        let c = table.counters_mut();
+                        if readers.can_read() == 0 {
+                            // No reader, or no bounce space, now: hold no pin
+                            // while waiting (SC-004). And stop looking up for
+                            // this pass, or a long block-tier push would look
+                            // up and release every entry each time round.
+                            b.pin.release(&*self.map);
+                            c.block_deferrals += 1;
+                            push.deferred.push_back((b.index, b.key, b.region));
+                            break;
+                        }
+                        let rid = self.next_read;
+                        self.next_read += 1;
+                        c.block_reads_attempted += 1;
+                        let mut b = b;
+                        b.frees_at = readers.frees();
+                        readers.submit(rid, b.key, b.offset, b.region.length);
+                        push.reading += 1;
+                        self.reads.insert(rid, (id, b));
                     }
                 }
             }
@@ -742,7 +865,16 @@ impl EndpointActor {
                 for unposted in queue.drain(..) {
                     #[allow(irrefutable_let_patterns)] // `Held` exists only in tests
                     if let Work::Push(pw) = unposted.state {
-                        pw.pin.release(&*self.map);
+                        match pw.hold {
+                            Hold::Pin(pin) => pin.release(&*self.map),
+                            Hold::Lease(lease) => {
+                                self.readers
+                                    .as_mut()
+                                    .expect("a lease implies a block source")
+                                    .release(lease);
+                                table.counters_mut().bounce_buffers_in_use -= 1;
+                            }
+                        }
                         push.in_flight -= 1;
                         push.outcomes[pw.index] = Some(EntryOutcome::Failed);
                     }
@@ -766,7 +898,15 @@ impl EndpointActor {
                     messages.push((peer.clone(), c, work));
                     continue;
                 }
-                if settle(&mut self.pushes, &self.map, &c, work) {
+                let counters = table.counters_mut();
+                if settle(
+                    &mut self.pushes,
+                    &self.map,
+                    &mut self.readers,
+                    counters,
+                    &c,
+                    work,
+                ) {
                     self.logger.error(&format!(
                         "certus-transfer-endpoint: write to {peer} failed ({}); \
                          tearing the connection down",
@@ -808,7 +948,85 @@ impl EndpointActor {
             }
         }
         self.finish_done();
-        did || sent
+        did || sent || read
+    }
+
+    /// Take every finished block-tier read: release its pin — the data has
+    /// been copied — and queue its write, or decide its outcome. Returns
+    /// whether any came back.
+    fn collect_reads(&mut self) -> bool {
+        let Some(readers) = self.readers.as_mut() else {
+            return false;
+        };
+        let mut done = Vec::new();
+        while let Some(d) = readers.try_collect() {
+            done.push(d);
+        }
+        let any = !done.is_empty();
+        for (rid, result) in done {
+            self.on_read_done(rid, result);
+        }
+        any
+    }
+
+    /// One block-tier read is back.
+    fn on_read_done(
+        &mut self,
+        rid: u64,
+        result: Result<interfaces::BounceLease, interfaces::BounceError>,
+    ) {
+        let (push_id, b) = self.reads.remove(&rid).expect("a read we handed out");
+        // FR-011: the pin goes now, whatever the result. On success the data
+        // is in the lease, which protects it from here on.
+        Pin::release(b.pin, &*self.map);
+        let push = self
+            .pushes
+            .get_mut(&push_id)
+            .expect("a push lives until its reads are back");
+        push.reading -= 1;
+        let readers = self.readers.as_mut().expect("reads imply readers");
+        let Some(table) = self.table.as_mut() else {
+            if let Ok(lease) = result {
+                readers.release(lease);
+            }
+            return;
+        };
+        let c = table.counters_mut();
+        match result {
+            Ok(lease) if push.dead => {
+                // Its connection is gone: nothing will write from it.
+                c.block_reads_completed += 1;
+                readers.release(lease);
+                push.outcomes[b.index] = Some(EntryOutcome::Failed);
+            }
+            Ok(lease) => {
+                c.block_reads_completed += 1;
+                c.bounce_buffers_in_use += 1;
+                c.bounce_buffers_peak = c.bounce_buffers_peak.max(c.bounce_buffers_in_use);
+                push.ready.push_back((b.index, lease, b.region));
+            }
+            Err(e) if e.is_transient() && !push.dead => {
+                // No bounce space now: put it back, holding no pin, to be
+                // looked up again when a lease frees.
+                readers.mark_full(b.frees_at);
+                c.block_deferrals += 1;
+                push.deferred.push_back((b.index, b.key, b.region));
+            }
+            Err(e) => {
+                if matches!(e, interfaces::BounceError::Io(_)) {
+                    // The source freed the failed read's lease: room again.
+                    readers.reserve_freed();
+                }
+                c.block_reads_failed += u64::from(!e.is_transient());
+                push.outcomes[b.index] = Some(EntryOutcome::Failed);
+                if !e.is_transient() {
+                    self.logger.error(&format!(
+                        "certus-transfer-endpoint: block-tier key {} not served: {e}",
+                        b.key
+                    ));
+                }
+            }
+        }
     }
 
     // --- messaging -------------------------------------------------------------
@@ -1262,6 +1480,15 @@ impl EndpointActor {
                 failures.push(e);
             }
         }
+        // Wait for every block-tier read still out, however long the device
+        // takes: each holds a pin, and a lease the drive is still writing. Their
+        // pushes are dead now, so each lease is returned as it comes back.
+        while let Some(readers) = self.readers.as_mut().filter(|r| r.busy() > 0) {
+            let (rid, r) = readers.collect_blocking();
+            self.on_read_done(rid, r);
+        }
+        // Pushes that were waiting only on those reads end now.
+        self.finish_done();
         // Pushes and fetches whose peer the table never held (a refused
         // connect) end here.
         let stranded: Vec<PeerId> = self
@@ -1275,6 +1502,9 @@ impl EndpointActor {
             self.fail_fetches(&peer, None);
         }
         let table = self.table.take().expect("checked above");
+        if let Some(mut readers) = self.readers.take() {
+            readers.stop();
+        }
         if failures.is_empty() {
             drop(table);
             self.pool_region = None;
