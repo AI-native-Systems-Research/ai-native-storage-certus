@@ -200,8 +200,9 @@ is measured in milliseconds.
 
 Settled after the task list was generated: **one** protocol version governs the wire, each end
 advertises the range it supports, and the connection runs at `min(a.max, b.max)` — exchanged
-**eagerly** once per connection (`OP_HELLO`), with a frozen `OP_ERROR` answering anything
-unprocessable. The fused opcode is kept as a structural guard on the negotiated version rather
+**eagerly** once per connection (`OP_HELLO`, answered by a contentless `OP_HELLO_REPLY` that
+only balances credits), with a frozen `OP_ERROR` answering any unprocessable request —
+replies are never answered; a bad one tears the connection down. The fused opcode is kept as a structural guard on the negotiated version rather
 than as the versioning mechanism. (A first draft versioned each kind independently; D20's
 *Revision* records why that was dropped — it only ever made sense while discovery was lazy,
 and it can represent a v2 request answered by a v1 reply.)

@@ -83,9 +83,10 @@ pub enum TransferEndpointError {
     /// forced to ERROR and this connection's other contexts were aborted with
     /// it (FR-023).
     Deadline(String),
-    /// The peer answered with a protocol error: unknown opcode, unsupported
-    /// version of a known kind, malformed message, or more entries than its
-    /// posted buffer can hold (FR-024).
+    /// The peer answered our request with a protocol error: unknown opcode,
+    /// unsupported version of a known kind, malformed message, or more entries
+    /// than its posted buffer can hold (FR-024). A *reply* we could not process
+    /// is a teardown, reported as `Transport`, not this.
     ///
     /// Distinct from `Deadline` in blast radius as well as cause: the peer is
     /// healthy and answered promptly, so **the connection remains usable** and
@@ -214,17 +215,21 @@ Implementations MUST uphold, and tests MUST verify:
     synchronization point is the end-of-message reply.
 12. **Instance-granular addressing.** Two peers differing only by port are distinct, hold
     distinct connections, and an address without a port is rejected (FR-021, D16).
-13. **Unprocessable messages are answered, not dropped.** A message that cannot be processed
-    draws a protocol error reply naming the offending opcode, within a round trip rather than
-    a deadline. It fails one context; the connection stays usable and its siblings complete
-    (FR-024, SC-012). The reply is never used for a miss or a resource shortage.
+13. **Unprocessable requests are answered; replies never are.** A request that cannot be
+    processed draws a protocol error reply naming the offending opcode, within a round trip
+    rather than a deadline. It fails one context; the connection stays usable and its siblings
+    complete (FR-024, SC-012). The error reply is never used for a miss or a resource shortage.
+    A reply that cannot be processed is never answered: it is reported loudly and tears the
+    connection down through the FR-023 ordering, aborting its contexts, since its sender may
+    have written into slots it can no longer vouch for.
 14. **Capabilities precede data.** No data message is sent on a connection before the peer's
     capabilities are known. One protocol version governs the connection —
     `min(a.max, b.max)`, failing if below `max(a.min, b.min)` — and the peer's maximum request
     size is respected rather than the local one. A non-intersecting range fails at connect, not
     on a request (FR-025, SC-013). Capabilities are per connection and re-learned when one is
     rebuilt. The rule is **commutative**, so both ends compute the same verdict with no
-    arbitrator and no reply message (SC-014).
+    arbitrator; each capability message draws a reply that carries nothing and exists only
+    to balance credits (SC-014).
 15. **One connection, two directions, separate books.** An instance may be destination for one
     context and source for another on the same queue pair. Outbound-request and inbound-serving
     context tables are separate — the requester allocates ids, so one id can be live in both
