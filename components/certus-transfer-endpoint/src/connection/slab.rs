@@ -52,6 +52,13 @@ pub enum WrKind {
 }
 
 impl WrKind {
+    /// Whether this kind occupies a send-queue slot, and so holds a send credit.
+    pub fn is_send_queue(self) -> bool {
+        !matches!(self, WrKind::Recv)
+    }
+}
+
+impl WrKind {
     fn of(c: Completed) -> Self {
         match c {
             Completed::Send => WrKind::Send,
@@ -106,6 +113,9 @@ pub struct Slab<T> {
     slots: Vec<Slot<T>>,
     free: Vec<u32>,
     outstanding: usize,
+    /// Of `outstanding`, how many are send-queue requests — what the send
+    /// credits must equal (see `connection::credits`).
+    send_outstanding: usize,
 }
 
 fn wr_id(index: u32, generation: u32) -> u64 {
@@ -126,6 +136,7 @@ impl<T> Slab<T> {
                 .collect(),
             free: (0..capacity).rev().collect(),
             outstanding: 0,
+            send_outstanding: 0,
         }
     }
 
@@ -136,6 +147,11 @@ impl<T> Slab<T> {
     /// Requests posted and not yet completed.
     pub fn outstanding(&self) -> usize {
         self.outstanding
+    }
+
+    /// Outstanding send-queue requests (sends and writes, not receives).
+    pub fn send_outstanding(&self) -> usize {
+        self.send_outstanding
     }
 
     pub fn available(&self) -> usize {
@@ -154,6 +170,7 @@ impl<T> Slab<T> {
         slot.generation = slot.generation.wrapping_add(1);
         slot.entry = Some((kind, state));
         self.outstanding += 1;
+        self.send_outstanding += usize::from(kind.is_send_queue());
         Ok(wr_id(index, slot.generation))
     }
 
@@ -161,6 +178,13 @@ impl<T> Slab<T> {
     /// reaper's half of Principle IX. A failed completion is attributed by
     /// `wr_id` alone, since verbs leaves its opcode undefined.
     pub fn complete(&mut self, c: &Completion) -> Result<T, SlabError<T>> {
+        self.complete_kind(c).map(|(_, state)| state)
+    }
+
+    /// [`complete`](Self::complete), also returning the kind the slot was
+    /// posted as. A failed completion does not say which queue it came from,
+    /// so this is the only way to know whether it returns a send credit.
+    pub fn complete_kind(&mut self, c: &Completion) -> Result<(WrKind, T), SlabError<T>> {
         let (index, generation) = (c.wr_id as u32, (c.wr_id >> 32) as u32);
         let Some((kind, state)) = self
             .slots
@@ -172,6 +196,7 @@ impl<T> Slab<T> {
         };
         self.free.push(index);
         self.outstanding -= 1;
+        self.send_outstanding -= usize::from(kind.is_send_queue());
         match c.result {
             Ok(done) if WrKind::of(done) != kind => Err(SlabError::KindMismatch {
                 wr_id: c.wr_id,
@@ -179,7 +204,7 @@ impl<T> Slab<T> {
                 completed: WrKind::of(done),
                 state,
             }),
-            _ => Ok(state),
+            _ => Ok((kind, state)),
         }
     }
 
@@ -190,9 +215,10 @@ impl<T> Slab<T> {
         let index = wr_id as u32;
         let slot = &mut self.slots[index as usize];
         debug_assert_eq!(slot.generation, (wr_id >> 32) as u32);
-        let (_, state) = slot.entry.take().expect("abandoned an empty slot");
+        let (kind, state) = slot.entry.take().expect("abandoned an empty slot");
         self.free.push(index);
         self.outstanding -= 1;
+        self.send_outstanding -= usize::from(kind.is_send_queue());
         state
     }
 }
