@@ -204,11 +204,21 @@ connection table. This is plan.md Phase 1's engine.
   drift (`debug_assert`ed). `live()` is gone: a raw link would let a caller poll around
   the credits. Held pins ≤ in-flight ≤ limit by construction; T025 still owes the
   end-to-end SC-004 test. `peak` kept for T015
-- [ ] T015 [P] Implement `src/telemetry.rs`: ZST no-op with
+- [X] T015 [P] Implement `src/telemetry.rs`: ZST no-op with
   `#[allow(clippy::unused_self)]` when `telemetry` is off, `AtomicU64` counters when on,
   identical method surface. Counters: per-outcome totals, each credit domain's current and
   peak depth, chunk count, deadline expiries. Principle XI forbids structuring these so an
-  unexercised path looks like a working one — so count *attempts* alongside completions
+  unexercised path looks like a working one — so count *attempts* alongside completions.
+  *Done, with the task text overridden:* `ITransferEndpoint::stats()` returns
+  `TransferStats` in **every** build, so gating its fields would make the default build
+  report zeros — the plausible-number-from-an-unexercised-path XI forbids. **Two tiers**:
+  `Counters` (every `TransferStats` field) is always counted, as plain integers on the
+  endpoint thread (atomics vs snapshot is T016's call); `Extras` (connect attempts /
+  established / failed — not in `TransferStats`) is the feature-gated ZST, whose snapshot is
+  `None`, not zeros, when off. Send-queue gauges are read from the live links' credits at
+  snapshot time; the peak is folded into `Counters` when a link retires so it survives.
+  Filled now: send-queue in-flight + peak, `duplicate_connections_resolved` (once per race,
+  at the end whose attempt was discarded). Every other field names the task that fills it
 - [X] T068 [P] Implement `PeerId` in `src/connection.rs`: parse and normalize a
   `"ip:port"` instance address, rejecting a missing port and port 0 rather than defaulting
   either (FR-021, D16). Reuse the grammar of

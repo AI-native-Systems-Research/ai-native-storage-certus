@@ -73,6 +73,8 @@ use super::transport::{
     Completion, Link, LinkId, QpCaps, RdmaError, RequestId, Transport, TransportEvent,
 };
 use super::PeerId;
+use crate::telemetry::{Counters, ExtraStats, Extras};
+use interfaces::TransferStats;
 
 /// Whether a peer's link is ready to carry work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -249,6 +251,8 @@ pub struct ConnectionTable<T> {
     /// Which peer each live, pending or draining link belongs to.
     owners: HashMap<LinkId, PeerId>,
     scratch: Vec<TransportEvent>,
+    counters: Counters,
+    extras: Extras,
 }
 
 impl<T> ConnectionTable<T> {
@@ -283,11 +287,38 @@ impl<T> ConnectionTable<T> {
             entries: HashMap::new(),
             owners: HashMap::new(),
             scratch: Vec::new(),
+            counters: Counters::default(),
+            extras: Extras::new(),
         })
     }
 
     pub fn local(&self) -> &PeerId {
         &self.local
+    }
+
+    /// A snapshot of the endpoint's counters. The send-queue gauges are read
+    /// from the live links' credits now, so they cannot drift from what the
+    /// credits enforce.
+    pub fn stats(&self) -> TransferStats {
+        let live = self
+            .entries
+            .values()
+            .filter_map(|e| e.live.as_ref().filter(|l| l.up));
+        let (in_flight, peak) = live.fold((0u32, 0u32), |(sum, peak), l| {
+            (sum + l.credits.in_flight(), peak.max(l.credits.peak()))
+        });
+        self.counters.snapshot(in_flight, peak)
+    }
+
+    /// The always-counted tier, for the layers above that fill its other
+    /// fields (see `crate::telemetry`).
+    pub fn counters_mut(&mut self) -> &mut Counters {
+        &mut self.counters
+    }
+
+    /// The `telemetry` tier: `None` when the feature is off.
+    pub fn extra_stats(&self) -> Option<ExtraStats> {
+        self.extras.snapshot()
     }
 
     /// The transport, for registering memory.
@@ -316,10 +347,14 @@ impl<T> ConnectionTable<T> {
                 return Err(TableError::Draining(peer.clone()));
             }
         }
+        self.extras.connect_attempted();
         let link = self
             .transport
             .connect(peer, &self.identity, self.caps)
-            .map_err(TableError::Transport)?;
+            .map_err(|e| {
+                self.extras.connect_failed();
+                TableError::Transport(e)
+            })?;
         self.entries.entry(peer.clone()).or_default().pending = Some(link);
         self.owners.insert(link, peer.clone());
         Ok(Readiness::Connecting)
@@ -565,6 +600,7 @@ impl<T> ConnectionTable<T> {
     /// credits go with it: nothing posts on a draining link, and the slab
     /// alone accounts for what is still outstanding there.
     fn retire(&mut self, peer: &PeerId, live: Live<T>) -> Result<(), RdmaError> {
+        self.counters.fold_peak(live.credits.peak());
         let result = self
             .transport
             .link(live.link)
@@ -615,19 +651,16 @@ impl<T> ConnectionTable<T> {
                     return;
                 };
                 match decode_reject(&private_data) {
-                    Some(RejectReason::Duplicate) => out.push(TableEvent::LostTieBreak(peer)),
-                    reason => out.push(TableEvent::Failed {
-                        peer,
-                        reason: ConnectFailure::Rejected(reason),
-                    }),
+                    Some(RejectReason::Duplicate) => {
+                        self.counters.duplicate_connections_resolved += 1;
+                        out.push(TableEvent::LostTieBreak(peer))
+                    }
+                    reason => self.failed(peer, ConnectFailure::Rejected(reason), out),
                 }
             }
             TransportEvent::ConnectError { link, reason } => {
                 if let Some(peer) = self.take_pending(link) {
-                    out.push(TableEvent::Failed {
-                        peer,
-                        reason: ConnectFailure::Unreachable(reason),
-                    });
+                    self.failed(peer, ConnectFailure::Unreachable(reason), out);
                 }
             }
             TransportEvent::Disconnected { link } => {
@@ -635,10 +668,7 @@ impl<T> ConnectionTable<T> {
                     return;
                 };
                 if self.take_pending(link).is_some() {
-                    out.push(TableEvent::Failed {
-                        peer,
-                        reason: ConnectFailure::Disconnected,
-                    });
+                    self.failed(peer, ConnectFailure::Disconnected, out);
                 } else if self.entries[&peer]
                     .live
                     .as_ref()
@@ -649,6 +679,11 @@ impl<T> ConnectionTable<T> {
                 // A draining link's disconnect changes nothing: it is in ERROR.
             }
         }
+    }
+
+    fn failed(&mut self, peer: PeerId, reason: ConnectFailure, out: &mut Vec<TableEvent>) {
+        self.extras.connect_failed();
+        out.push(TableEvent::Failed { peer, reason });
     }
 
     /// If `link` is a pending outbound attempt, abandon it and name its peer.
@@ -706,7 +741,11 @@ impl<T> ConnectionTable<T> {
             None => {
                 if let Some(link) = pending {
                     // We lose the race: our attempt goes, theirs is accepted.
+                    // Counted here and on a Duplicate reject — the two ways an
+                    // end discards its own attempt — so a race counts once
+                    // across the pair, never at the winner too.
                     self.take_pending(link);
+                    self.counters.duplicate_connections_resolved += 1;
                 }
             }
             Some(Initiator::Local) if !peer_wins => {
@@ -755,15 +794,14 @@ impl<T> ConnectionTable<T> {
         let answered = decode_identity(private_data);
         if answered.as_ref() != Some(&peer) {
             self.take_pending(link);
-            out.push(TableEvent::Failed {
-                peer: peer.clone(),
-                reason: ConnectFailure::NameMismatch {
-                    dialed: peer,
-                    answered,
-                },
-            });
+            let reason = ConnectFailure::NameMismatch {
+                dialed: peer.clone(),
+                answered,
+            };
+            self.failed(peer, reason, out);
             return;
         }
+        self.extras.connect_established();
         let slab = self.slab_for(link);
         let (credits, _) = self.credits_for(link);
         let e = self.entries.get_mut(&peer).unwrap();
@@ -1684,5 +1722,111 @@ mod tests {
             a.reap(&p, &mut Vec::new(), 1),
             Err(ReapError::NotLive(_))
         ));
+    }
+
+    // --- counters (T015) ------------------------------------------------------
+
+    /// A race counts once across the pair — at the end whose own attempt was
+    /// discarded — under every poll order.
+    #[test]
+    fn a_race_counts_one_duplicate_across_the_pair() {
+        for order in 0..2 {
+            let f = MockFabric::new();
+            let mut lo = table(&f, "10.0.0.1:7000");
+            let mut hi = table(&f, "10.0.0.2:7000");
+            let (plo, phi) = (lo.local().clone(), hi.local().clone());
+            lo.ensure(&phi).unwrap();
+            hi.ensure(&plo).unwrap();
+            if order == 0 {
+                settle(&mut [&mut lo, &mut hi]);
+            } else {
+                settle(&mut [&mut hi, &mut lo]);
+            }
+            let total = lo.stats().duplicate_connections_resolved
+                + hi.stats().duplicate_connections_resolved;
+            assert_eq!(total, 1, "order {order}");
+        }
+        // No race, no count.
+        let f = MockFabric::new();
+        let mut a = table(&f, "10.0.0.1:7000");
+        let mut b = table(&f, "10.0.0.2:7000");
+        a.ensure(&b.local().clone()).unwrap();
+        settle(&mut [&mut a, &mut b]);
+        assert_eq!(a.stats().duplicate_connections_resolved, 0);
+        assert_eq!(b.stats().duplicate_connections_resolved, 0);
+    }
+
+    /// The send-queue gauges come from the live credits, and the peak outlives
+    /// the link that reached it.
+    #[test]
+    fn send_queue_gauges_track_credits_and_peak_survives_retirement() {
+        let f = MockFabric::new();
+        let mut a = table_with(&f, "10.0.0.1:7000", 4);
+        let mut b = table(&f, "10.0.0.2:7000");
+        let (pa, pb) = (a.local().clone(), b.local().clone());
+        a.ensure(&pb).unwrap();
+        settle(&mut [&mut a, &mut b]);
+        let mut src = [0u8; 8];
+        // SAFETY: `src` outlives the region and the drain below.
+        let rs = unsafe {
+            a.transport()
+                .register(src.as_mut_ptr(), 8, Access::LOCAL_WRITE)
+        }
+        .unwrap();
+        // Three sends stall on RNR (no receive at b), so they stay in flight.
+        let mut q: VecDeque<_> = TAGS[..3]
+            .iter()
+            .map(|&state| TrackedSend {
+                op: SendOp::Send,
+                local: rs.sge(rs.addr(), 8).unwrap(),
+                state,
+            })
+            .collect();
+        // SAFETY: as above.
+        assert_eq!(unsafe { a.post_sends(&pb, &mut q) }, Ok(3));
+        let s = a.stats();
+        assert_eq!(
+            (s.send_queue_in_flight, s.send_queue_peak_in_flight),
+            (3, 3)
+        );
+
+        a.begin_teardown(&pb).unwrap();
+        a.drain(&pb, &mut Vec::new(), Duration::from_secs(1))
+            .unwrap();
+        a.finish_teardown(&pb).unwrap();
+        let s = a.stats();
+        assert_eq!(s.send_queue_in_flight, 0, "no live link");
+        assert_eq!(s.send_queue_peak_in_flight, 3, "the peak survives the link");
+        drop(rs);
+        settle(&mut [&mut a, &mut b]);
+        b.begin_teardown(&pa).unwrap();
+        b.finish_teardown(&pa).unwrap();
+    }
+
+    #[cfg(feature = "telemetry")]
+    #[test]
+    fn extras_count_connect_attempts_and_outcomes() {
+        let f = MockFabric::new();
+        let mut a = table(&f, "10.0.0.1:7000");
+        let mut b = table(&f, "10.0.0.2:7000");
+        a.ensure(&b.local().clone()).unwrap();
+        a.ensure(&peer("10.0.0.9:1")).unwrap();
+        settle(&mut [&mut a, &mut b]);
+        assert_eq!(
+            a.extra_stats(),
+            Some(ExtraStats {
+                connects_attempted: 2,
+                connects_established: 1,
+                connects_failed: 1,
+            })
+        );
+    }
+
+    #[cfg(not(feature = "telemetry"))]
+    #[test]
+    fn extras_are_absent_not_zero_without_the_feature() {
+        let f = MockFabric::new();
+        let a = table(&f, "10.0.0.1:7000");
+        assert_eq!(a.extra_stats(), None);
     }
 }
