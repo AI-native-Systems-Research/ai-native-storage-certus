@@ -135,27 +135,81 @@ pub struct TransferContextId(pub u64);
 /// it stay valid across a reconnect. That differs from the predecessor crates,
 /// which re-register on every connect.
 ///
+/// The handle carries what a caller needs to name a slot inside the region to a
+/// peer: its address, length and `rkey`. [`region_at`](Self::region_at) builds
+/// the [`RemoteRegion`] for one slot, bounds-checked.
+///
 /// # Examples
 ///
 /// ```
 /// use interfaces::LandingRegionHandle;
 ///
-/// // Opaque: implementations mint handles, callers only pass them back.
-/// let h = LandingRegionHandle::new(1);
-/// assert_eq!(h.id(), 1);
+/// // Implementations mint handles; callers read them and pass them back.
+/// let h = LandingRegionHandle::new(1, 0x1000, 4096, 0x42);
+/// assert_eq!((h.id(), h.addr(), h.len(), h.rkey()), (1, 0x1000, 4096, 0x42));
+///
+/// let slot = h.region_at(1024, 512).unwrap();
+/// assert_eq!((slot.addr, slot.length, slot.rkey), (0x1400, 512, 0x42));
+/// // A slot past the end of the region is refused, not truncated.
+/// assert!(h.region_at(4000, 512).is_none());
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct LandingRegionHandle(u64);
+pub struct LandingRegionHandle {
+    id: u64,
+    addr: u64,
+    len: usize,
+    rkey: u32,
+}
 
 impl LandingRegionHandle {
     /// Mint a handle. Called by the implementing component, not by callers.
-    pub fn new(id: u64) -> Self {
-        Self(id)
+    pub fn new(id: u64, addr: u64, len: usize, rkey: u32) -> Self {
+        LandingRegionHandle {
+            id,
+            addr,
+            len,
+            rkey,
+        }
     }
 
-    /// The opaque identifier behind this handle.
+    /// The endpoint's identifier for this registration.
     pub fn id(&self) -> u64 {
-        self.0
+        self.id
+    }
+
+    /// Start of the registered region.
+    pub fn addr(&self) -> u64 {
+        self.addr
+    }
+
+    /// Length of the registered region in bytes.
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Whether the region is empty. Never true for a handle an endpoint
+    /// returned: empty registrations are refused.
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// The remote key a peer needs to write into the region.
+    pub fn rkey(&self) -> u32 {
+        self.rkey
+    }
+
+    /// The [`RemoteRegion`] for the `len` bytes at `offset` into the region,
+    /// or `None` if they do not lie wholly inside it.
+    pub fn region_at(&self, offset: usize, len: u32) -> Option<RemoteRegion> {
+        let end = offset.checked_add(len as usize)?;
+        if end > self.len {
+            return None;
+        }
+        Some(RemoteRegion {
+            addr: self.addr.checked_add(offset as u64)?,
+            rkey: self.rkey,
+            length: len,
+        })
     }
 }
 
@@ -381,11 +435,14 @@ impl EndpointConfig {
 
 component_macros::define_interface! {
     pub ITransferEndpoint {
-        /// Register a region that peers may RDMA-write into.
+        /// Register a region that peers may RDMA-write into, returning the
+        /// handle that names slots inside it.
         ///
         /// Must be called before any peer request can be satisfied against the
         /// region. Registration happens once — not per request — and is what
-        /// makes a remote key valid.
+        /// makes a remote key valid. It lasts for the endpoint's life: there is
+        /// no deregistration, because releasing a region safely means proving
+        /// no peer can still write into it.
         ///
         /// The region must be both SPDK-DMA-able and RDMA-registrable; in
         /// practice it is allocated by `spdk_zmalloc` on the local NUMA node, as
@@ -393,11 +450,17 @@ component_macros::define_interface! {
         /// long-lived protection domain and outlives every queue pair, so the
         /// returned handle and its remote keys survive a reconnect.
         ///
+        /// **Precondition** (this method cannot be `unsafe`, so it is stated
+        /// here): `[base, base + len)` must stay allocated until
+        /// [`ITransferEndpointAdmin::shutdown`] returns, and must not be held as
+        /// a Rust reference while a peer may write into it.
+        ///
         /// # Errors
         ///
-        /// [`TransferEndpointError::NotInitialized`] if the endpoint has no
-        /// device open, or [`TransferEndpointError::Transport`] if registration
-        /// fails.
+        /// [`TransferEndpointError::NotInitialized`] if the endpoint is not
+        /// running; [`TransferEndpointError::Transport`] if the range is null,
+        /// empty, overlaps the memory-tier pool or another landing region, or
+        /// the registration itself fails.
         fn register_landing_region(
             &self,
             base: *mut u8,
