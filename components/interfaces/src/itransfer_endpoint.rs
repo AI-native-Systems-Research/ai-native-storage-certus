@@ -400,6 +400,9 @@ pub struct TransferStats {
 /// let c = EndpointConfig::new("10.0.0.102:7000");
 /// assert_eq!(c.local, "10.0.0.102:7000");
 /// assert_eq!(c.send_credits, 8);
+/// // A receive is posted per message credit (the reply reserve) and per
+/// // request the peer may send (the quota).
+/// assert!(c.max_recv_wr >= c.message_credits + c.inbound_quota);
 /// assert!(c.actor_cpu.is_none());
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -416,6 +419,14 @@ pub struct EndpointConfig {
     /// Send-queue credits per connection: in-flight send-queue requests, and
     /// so held read pins. Clamped to what the device grants.
     pub send_credits: u32,
+    /// Message credits per connection: requests this end may have outstanding
+    /// against the peer. Also the size of this end's reply reserve — one
+    /// posted receive per credit, since each request draws exactly one reply.
+    /// The peer's advertised quota may lower the effective value further.
+    pub message_credits: u32,
+    /// The inbound-request quota this end advertises: how many requests the
+    /// peer may have outstanding against it. One posted receive each.
+    pub inbound_quota: u32,
     /// CPU to pin the endpoint thread to, normally one on the NIC's NUMA node.
     pub actor_cpu: Option<usize>,
 }
@@ -428,6 +439,8 @@ impl EndpointConfig {
             max_send_wr: 128,
             max_recv_wr: 64,
             send_credits: 8,
+            message_credits: 8,
+            inbound_quota: 8,
             actor_cpu: None,
         }
     }
@@ -569,7 +582,10 @@ component_macros::define_interface! {
         /// # Errors
         ///
         /// [`TransferEndpointError::InvalidEndpoint`] if `config.local` is not a
-        /// `"host:port"`; [`TransferEndpointError::NotInitialized`] carrying
+        /// `"host:port"`; [`TransferEndpointError::Transport`] if the queue
+        /// sizes cannot hold what the protocol posts — `message_credits` or
+        /// `inbound_quota` of zero, or `max_recv_wr` below their sum;
+        /// [`TransferEndpointError::NotInitialized`] carrying
         /// "already initialized" once the endpoint has started, since a running
         /// endpoint cannot change its name or its queue sizes.
         fn configure(&self, config: EndpointConfig) -> Result<(), TransferEndpointError>;
