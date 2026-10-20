@@ -27,6 +27,10 @@
 //! and each link closed, stamped from a sequence counter tests may share with
 //! other instruments, so teardown-before-reclaim is assertable as an order.
 //!
+//! It also has one fault knob, `MockFabric::pause_sends`, which holds every
+//! posted send in flight, so a test can tear a connection down with writes
+//! genuinely outstanding.
+//!
 //! Not yet modelled (T011): a finite RNR retry, injected inbound messages,
 //! `LOCAL_WRITE` enforcement on receive buffers, and timing — everything here
 //! happens at post or poll.
@@ -95,6 +99,20 @@ impl MockFabric {
         self.lock().log = Some((seq.clone(), Vec::new()));
     }
 
+    /// Hold every posted send in flight (a fault knob): nothing executes
+    /// until cleared, but forcing ERROR still flushes it.
+    #[cfg(test)]
+    pub(crate) fn pause_sends(&self, on: bool) {
+        let mut f = self.lock();
+        f.sends_paused = on;
+        if !on {
+            let links: Vec<_> = f.qps.keys().copied().collect();
+            for l in links {
+                f.progress(l);
+            }
+        }
+    }
+
     /// The events recorded so far, with their stamps, in order.
     #[cfg(test)]
     pub(crate) fn log(&self) -> Vec<(u64, LogEvent)> {
@@ -129,6 +147,10 @@ struct Fabric {
     qps: HashMap<LinkId, Qp>,
     #[cfg(test)]
     log: Option<(Sequence, Vec<(u64, LogEvent)>)>,
+    /// While set, no send queue executes: posted work stays in flight until
+    /// the knob is cleared or its queue pair is forced to ERROR.
+    #[cfg(test)]
+    sends_paused: bool,
 }
 
 struct RegionEntry {
@@ -285,6 +307,10 @@ impl Fabric {
 
     /// Execute `link`'s send queue in order for as long as it can proceed.
     fn progress(&mut self, link: LinkId) {
+        #[cfg(test)]
+        if self.sends_paused {
+            return;
+        }
         loop {
             let qp = self.qp(link);
             if qp.state != QpState::Rts {

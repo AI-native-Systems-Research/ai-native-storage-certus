@@ -426,7 +426,7 @@ slots and the reply's per-key outcomes match the source's actual residency.
   and the offending bytes, counted as a protocol fault, and tears the connection down through
   T070's ordering. Count both in telemetry; an unexercised path must not look like a working
   one (Principle XI)
-- [ ] T076 [US1] Implement the frozen `OP_HELLO` codec and exchange (`0x0000_FFFE`,
+- [X] T076 [US1] Implement the frozen `OP_HELLO` codec and exchange (`0x0000_FFFE`,
   unversioned, FR-025, D20): a **fixed-size** 40-byte message — `max_entries: u32`,
   `max_outstanding_requests: u32`, `version_min: u16`, `version_max: u16`, reserved `u32`.
   `OP_HELLO` is a request: it costs the connection's one **bootstrap credit** and is answered
@@ -438,7 +438,7 @@ slots and the reply's per-key outcomes match the source's actual residency.
   message goes out until the peer's has arrived. Store capabilities on the connection so they
   die with it and a rebuilt connection re-learns them. Fixed size is deliberate: the layout is
   frozen forever, so a variable-length body would be the wrong shape (D20 *Revision*)
-- [ ] T077 [US1] Apply the negotiated capabilities: the connection's version is
+- [X] T077 [US1] Apply the negotiated capabilities: the connection's version is
   `min(a.version_max, b.version_max)`, carried in the header's `version` field (offset 6) of
   every data-plane message thereafter and validated once on receipt (D21); chunk against the **peer's** `max_entries` rather than the local one — the
   two sides are not assumed to have equal receive buffers, which nothing checked before this
@@ -462,8 +462,10 @@ slots and the reply's per-key outcomes match the source's actual residency.
 - [ ] T079 [US1] Make the connection's books per direction (FR-026, D22): **separate**
   outbound-request and inbound-serving context tables, since the requester allocates ids and
   one id can be live in both directions on a connection — a single contexts-per-connection map
-  silently conflates two unrelated requests — plus per-direction message credits
-- [ ] T080 [US1] Partition posted receive buffers (FR-026, D22): reserve **exactly one buffer
+  silently conflates two unrelated requests — plus per-direction message credits.
+  *Credits per direction done in slice B* (`Session`: outbound limit and in-flight, inbound
+  quota and in-service, counted separately); the two context tables are slice C
+- [X] T080 [US1] Partition posted receive buffers (FR-026, D22): reserve **exactly one buffer
   per own message credit** for replies — exact because each request message draws exactly one
   reply (FR-007, T045) — and advertise a separate inbound-request quota as the peer's
   `max_outstanding_requests`; post reserve + quota in all. Clamp this end's effective message
@@ -487,8 +489,11 @@ slots and the reply's per-key outcomes match the source's actual residency.
   connection and agree which *(done in T012, under all four poll orders plus the
   reject-before-request order)*; **SC-016** — a peer at full inbound-request quota does not stop
   this end receiving replies, and two-way traffic at full quota makes progress rather than
-  deadlocking; plus one context id live in both directions resolving to two distinct contexts
-- [ ] T030 [US1] Post receive buffers **unconditionally** on every connection, whether or
+  deadlocking; plus one context id live in both directions resolving to two distinct contexts.
+  *SC-014 done in slice B* (`negotiation_is_commutative`, every pair of ranges up to 4); the
+  SC-016 bookkeeping is unit-tested on `Session`, and its end-to-end form needs slice C's
+  asynchronous serving
+- [X] T030 [US1] Post receive buffers **unconditionally** on every connection, whether or
   not the local caller uses messaging (FR-005). Derive `max_entries` from the buffer size
   rather than configuring it separately: `(8192 - 24) / 24` = **340** entries per
   `OP_FETCH`, and that is the value `RequestTooLarge { max_entries }` reports. Post
@@ -500,10 +505,19 @@ slots and the reply's per-key outcomes match the source's actual residency.
   ids, match replies by echoed id. A context is one request **message**; a chunked fetch
   (T044) is several contexts, one per chunk, grouped by the requester under the single
   `TransferContextId` that `fetch` returned
-- [ ] T032 [US1] Implement **message credits** (second domain of FR-014): decrement on
+- [X] T032 [US1] Implement **message credits** (second domain of FR-014): decrement on
   every request (`OP_FETCH` and `OP_HELLO`), increment on its one reply (success reply or
   `OP_ERROR`), and **block at zero**. A connection starts at one credit, for `OP_HELLO`
-  (T076). Credits are consumed per *message*, so a fetch chunked into N messages takes N
+  (T076). Credits are consumed per *message*, so a fetch chunked into N messages takes N.
+  *Done* (slice B) in `src/session.rs`: a per-connection `Session` with the bootstrap credit,
+  the outbound limit `min(message_credits, peer's quota)`, and blocking — a request without
+  a credit waits, never fails. Data waits for the peer's `OP_HELLO` **and** our
+  `OP_HELLO_REPLY`. Receives (reserve + quota) are posted from a registered `MsgPool` of 8
+  KiB buffers as a link comes up (T030, T080), and re-posted after each delivery; the hello
+  exchange negotiates a commutative version and fails the connection on no overlap, a zero
+  quota or a zero `max_entries` (T076, T077). A reply nobody asked for, an unparseable
+  reply, or a request past the advertised quota tears the connection down; an unknown
+  opcode is answered with `OP_ERROR` and the connection survives
 - [ ] T033 [US1] Implement `fetch(peer, items, on_complete)`: send the request, return
   the `TransferContextId` as soon as it is sent, fire `on_complete` once with one outcome
   per requested key when the last reply arrives. The context id exists to correlate a

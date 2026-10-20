@@ -158,6 +158,10 @@ VIII–XI, and a review that does not check them is not a review.
   (absent, wrong size, a tier this build cannot serve). Anything lost to a fault —
   connection, refused or flushed write, failed lookup — is `Failed`. Reporting a
   fault as a miss makes a broken path look like a cold cache.
+- **No data message before the capability exchange completes.** A link comes
+  up with one bootstrap message credit, spent on `OP_HELLO`; data waits for both
+  the peer's `OP_HELLO` and our `OP_HELLO_REPLY`. Pushes check the session is
+  `Ready` before resolving a single entry.
 - **Look up only when a credit is free.** A push resolves an entry — and so
   pins it — only when its write can post at once. Looking ahead "to keep the
   pipe full" breaks SC-004: pins held would exceed the credits.
@@ -201,7 +205,7 @@ lookup answer is reported as a **miss**, never an error (D14).
 
 ## Current state
 
-Scaffolding. T001–T010, T012–T029, T068, T074 and T081 are done (Phase 3 complete; Phase 5's codecs in `message.rs`): the crate builds as a default member,
+Scaffolding. T001–T010, T012–T030, T032, T068, T074, T076, T077, T080 and T081 are done (Phase 3 complete; Phase 5 slices A and B: codecs in `message.rs`, bring-up in `session.rs` and `msgpool.rs`): the crate builds as a default member,
 peer identity is implemented, `ITransferEndpoint` is defined in `interfaces`, and
 the verbs FFI (`ffi.rs`), C shim (`wrapper.c`) and safe wrappers (`rdma.rs`, T009)
 exist behind `rdma`, and the transport seam plus an in-process mock exist in every
