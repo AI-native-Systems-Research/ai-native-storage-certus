@@ -7,26 +7,23 @@
 //! responder accepts but never posts, the initiator connects but never accepts.
 //!
 //! The transport seam ([`transport`]) and its in-process implementation
-//! ([`mock`]) are T010. Still scaffolding: fault injection in the mock (T011),
-//! the table (T012), the `wr_id` slab (T013) and send-queue credits (T014).
+//! ([`mock`]) are T010; the connection table ([`table`]) and the connect-time
+//! identity it relies on ([`identity`]) are T012, which also absorbed T081's
+//! simultaneous-connect rule. Still scaffolding: fault injection in the mock
+//! (T011), the `wr_id` slab (T013) and send-queue credits (T014).
 
 use std::fmt;
 
+pub mod identity;
 pub mod mock;
+pub mod table;
 pub mod transport;
-
-// Scaffolding note: the items below are exercised only by this module's unit
-// tests until T012 builds the connection table on them and T006 maps
-// `PeerIdError` onto `TransferEndpointError::InvalidEndpoint`. The `allow`s are
-// deliberately per-item rather than module-wide, so code added here later is
-// still checked — remove them in T012.
 
 /// Why an instance address could not be parsed.
 ///
 /// T006 maps this onto `TransferEndpointError::InvalidEndpoint`; it is separate
 /// so peer parsing does not wait on the interface definition.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum PeerIdError {
     /// No `':'` separator, so no port was supplied. Never defaulted (FR-021).
     MissingPort(String),
@@ -74,13 +71,11 @@ impl std::error::Error for PeerIdError {}
 /// [`Display`](fmt::Display) form is the normalized string and is what the
 /// connection table keys on.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[allow(dead_code)]
 pub struct PeerId {
     host: String,
     port: u16,
 }
 
-#[allow(dead_code)]
 impl PeerId {
     /// Parse and normalize a `"host:port"` instance address.
     ///
@@ -116,11 +111,15 @@ impl PeerId {
     }
 
     /// The host part, without brackets stripped.
+    // Read by the verbs transport to resolve the address (T053).
+    #[allow(dead_code)]
     pub fn host(&self) -> &str {
         &self.host
     }
 
     /// The port part, always non-zero.
+    // Read by the verbs transport to resolve the address (T053).
+    #[allow(dead_code)]
     pub fn port(&self) -> u16 {
         self.port
     }
