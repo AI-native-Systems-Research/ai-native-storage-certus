@@ -294,8 +294,12 @@ hardware loopback scenario, pass against this component with messaging unused.
   Block-tier answers release their pin and report `Miss` until T037-T040. **Adds
   `EntryOutcome::Failed`** (and `TransferStats::failed`, wire outcome byte 3): a fault is
   never reported as a miss
-- [ ] T018 [US2] Implement blocking `push` over `push_async` (contract: one outcome per
-  item, in order)
+- [X] T018 [US2] Implement blocking `push` over `push_async` (contract: one outcome per
+  item, in order). *Done*: waits on a one-shot channel the callback fills, which
+  `push_async`'s exactly-once guarantee makes safe. The contract says `push` must not be
+  called from a completion callback; called there it would wait on its own thread forever,
+  so an endpoint thread is marked (thread-local, set in `on_start`) and `push` is refused
+  there with an error naming `push_async`
 - [X] T019 [US2] *(done in T016)* Implement `disconnect(peer)`: transition the peer's QP to ERROR, drain and
   discard its completions, and do not return until no write from that peer can still land
   (FR-017, Principle IX's last clause). This is the existing `Disconnect`/`DisconnectAck`

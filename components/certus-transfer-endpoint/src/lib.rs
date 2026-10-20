@@ -30,14 +30,14 @@
 //!
 //! # Status
 //!
-//! Scaffolding. Tasks T001–T010, T012–T017, T019, T022–T026, T068 and T081 of
+//! Scaffolding. Tasks T001–T010, T012–T019, T022–T026, T068 and T081 of
 //! `specs/001-rdma-cache-transfer/tasks.md` are complete: the crate builds as a
 //! workspace default member, peer identity is implemented, and the verbs FFI, its
 //! C shim and the safe wrappers over them exist behind `rdma`, and the transport
 //! seam with its in-process mock, the connection table over it, and its per-link
 //! `wr_id` slab, send-queue credits and counters exist in every build, owned by
 //! [`CertusTransferEndpoint`] on its endpoint thread. The legacy `push_async`
-//! serves memory-tier entries end to end; the other transfer methods return
+//! and `push` serve memory-tier entries end to end; the other transfer methods return
 //! `NotInitialized` naming the task that lands them.
 
 #![deny(missing_docs)]
@@ -442,13 +442,37 @@ impl ITransferEndpoint for CertusTransferEndpoint {
             .map_err(|e| TransferEndpointError::Transport(format!("endpoint thread: {e}")))
     }
 
+    /// [`push_async`](Self::push_async), waiting for its outcomes: one per
+    /// item, in request order.
+    ///
+    /// Refused on an endpoint thread — from a completion callback, say — where
+    /// waiting would deadlock: the thread it waits on is itself.
     fn push(
         &self,
         endpoint: &str,
-        _items: &[(CacheKey, RemoteRegion)],
+        items: &[(CacheKey, RemoteRegion)],
     ) -> Result<Vec<EntryOutcome>, TransferEndpointError> {
-        parse_peer(endpoint)?;
-        Err(not_yet("T018"))
+        if endpoint::on_endpoint_thread() {
+            return Err(TransferEndpointError::Transport(
+                "push called on an endpoint thread (from a completion callback?) would \
+                 wait on itself; use push_async"
+                    .into(),
+            ));
+        }
+        let (tx, rx) = mpsc::channel();
+        self.push_async(
+            endpoint,
+            items,
+            Box::new(move |outcomes| {
+                // The caller may have stopped waiting; nothing to do then.
+                let _ = tx.send(outcomes);
+            }),
+        )?;
+        // push_async guarantees the callback fires exactly once — on
+        // completion, failure, teardown or shutdown — so this returns.
+        rx.recv().map_err(|_| {
+            TransferEndpointError::Transport("endpoint thread exited without completing".into())
+        })
     }
 
     fn disconnect(&self, peer: &str) -> Result<(), TransferEndpointError> {
@@ -586,8 +610,8 @@ mod tests {
             ep.push("10.0.0.2", &[]),
             Err(TransferEndpointError::InvalidEndpoint(_))
         ));
-        match ep.push("10.0.0.2:7000", &[]) {
-            Err(TransferEndpointError::NotInitialized(m)) => assert!(m.contains("T018"), "{m}"),
+        match ep.fetch("10.0.0.2:7000", &[], Box::new(|_| {})) {
+            Err(TransferEndpointError::NotInitialized(m)) => assert!(m.contains("T033"), "{m}"),
             other => panic!("{other:?}"),
         }
         assert!(matches!(
@@ -1030,5 +1054,89 @@ mod tests {
         );
         assert_eq!(a.map.held(), 0);
         drop(silent);
+    }
+
+    // --- blocking push (T018) -------------------------------------------------
+
+    /// `push` returns the same outcomes, in the same order, as `push_async`
+    /// delivers to its callback.
+    #[test]
+    fn blocking_push_returns_outcomes_in_order() {
+        let f = MockFabric::new();
+        let a = node(&f, "10.0.0.1:7000", 2);
+        let b = node(&f, "10.0.0.2:7000", 8);
+        a.ep.initialize().unwrap();
+        b.ep.initialize().unwrap();
+        a.map.memory(1, a.pool_addr(0), 8);
+        a.map.memory(3, a.pool_addr(8), 8);
+        let (land, rkey) = pool_key(&b.ep);
+        let at = |off| RemoteRegion {
+            addr: land + off,
+            rkey,
+            length: 8,
+        };
+        let out =
+            a.ep.push(
+                "10.0.0.2:7000",
+                &[(1, at(0)), (2, at(8)), (3, at(16)), (4, at(24))],
+            )
+            .unwrap();
+        use EntryOutcome::*;
+        assert_eq!(out, [HitMemoryTier, Miss, HitMemoryTier, Miss]);
+        assert_eq!(a.map.held(), 0);
+        // An empty push is answered, not hung.
+        assert_eq!(a.ep.push("10.0.0.2:7000", &[]).unwrap(), []);
+        a.ep.shutdown().unwrap();
+        b.ep.shutdown().unwrap();
+    }
+
+    #[test]
+    fn blocking_push_reports_errors_and_failures() {
+        let f = MockFabric::new();
+        let a = node(&f, "10.0.0.1:7000", 8);
+        assert!(matches!(
+            a.ep.push("10.0.0.2:7000", &[]),
+            Err(TransferEndpointError::NotInitialized(_))
+        ));
+        a.ep.initialize().unwrap();
+        let r = RemoteRegion {
+            addr: 0,
+            rkey: 0,
+            length: 8,
+        };
+        assert_eq!(
+            a.ep.push("10.0.0.9:7000", &[(1, r)]).unwrap(),
+            [EntryOutcome::Failed],
+            "nobody listening"
+        );
+        a.ep.shutdown().unwrap();
+    }
+
+    /// The contract forbids `push` from a completion callback. Called there it
+    /// is refused, not deadlocked: the callback runs on the endpoint thread,
+    /// which `push` would wait on.
+    #[test]
+    fn push_from_a_completion_callback_is_refused_not_deadlocked() {
+        let f = MockFabric::new();
+        let a = node(&f, "10.0.0.1:7000", 8);
+        a.ep.initialize().unwrap();
+        let (tx, rx) = mpsc::channel();
+        let inner = Arc::clone(&a.ep);
+        a.ep.push_async(
+            "10.0.0.9:7000",
+            &[],
+            Box::new(move |_| {
+                let _ = tx.send(inner.push("10.0.0.9:7000", &[]).map(|_| ()));
+            }),
+        )
+        .unwrap();
+        let r = rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the callback ran and push returned instead of hanging");
+        match r {
+            Err(TransferEndpointError::Transport(m)) => assert!(m.contains("push_async"), "{m}"),
+            other => panic!("{other:?}"),
+        }
+        a.ep.shutdown().unwrap();
     }
 }
