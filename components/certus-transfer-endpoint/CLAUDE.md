@@ -201,7 +201,7 @@ lookup answer is reported as a **miss**, never an error (D14).
 
 ## Current state
 
-Scaffolding. T001–T010, T012–T026, T068 and T081 are done (Phase 3 complete): the crate builds as a default member,
+Scaffolding. T001–T010, T012–T029, T068, T074 and T081 are done (Phase 3 complete; Phase 5's codecs in `message.rs`): the crate builds as a default member,
 peer identity is implemented, `ITransferEndpoint` is defined in `interfaces`, and
 the verbs FFI (`ffi.rs`), C shim (`wrapper.c`) and safe wrappers (`rdma.rs`, T009)
 exist behind `rdma`, and the transport seam plus an in-process mock exist in every
