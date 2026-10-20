@@ -30,15 +30,15 @@
 //!
 //! # Status
 //!
-//! Scaffolding. Tasks T001–T010, T012–T016, T019, T068 and T081 of
+//! Scaffolding. Tasks T001–T010, T012–T017, T019, T022–T026, T068 and T081 of
 //! `specs/001-rdma-cache-transfer/tasks.md` are complete: the crate builds as a
 //! workspace default member, peer identity is implemented, and the verbs FFI, its
 //! C shim and the safe wrappers over them exist behind `rdma`, and the transport
 //! seam with its in-process mock, the connection table over it, and its per-link
 //! `wr_id` slab, send-queue credits and counters exist in every build, owned by
-//! [`CertusTransferEndpoint`] on its endpoint thread. No transfer logic exists
-//! yet: the transfer methods return `NotInitialized` naming the task that lands
-//! them.
+//! [`CertusTransferEndpoint`] on its endpoint thread. The legacy `push_async`
+//! serves memory-tier entries end to end; the other transfer methods return
+//! `NotInitialized` naming the task that lands them.
 
 #![deny(missing_docs)]
 
@@ -47,6 +47,8 @@ mod endpoint;
 mod message;
 mod serve;
 mod telemetry;
+#[cfg(test)]
+mod test_doubles;
 
 #[cfg(feature = "rdma")]
 mod ffi;
@@ -70,7 +72,7 @@ use interfaces::{
 };
 
 use crate::connection::table::ConnectionTable;
-use crate::connection::transport::{select_transport, QpCaps, TransportChoice};
+use crate::connection::transport::{select_transport, Access, QpCaps, TransportChoice};
 use crate::connection::PeerId;
 use crate::endpoint::{Command, EndpointActor};
 
@@ -138,7 +140,9 @@ mod component {
     use component_framework::define_component;
     #[cfg(feature = "spdk")]
     use interfaces::IBlockDevice;
-    use interfaces::{IDispatchMap, ILogger, ITransferEndpoint, ITransferEndpointAdmin};
+    use interfaces::{
+        IDispatchMap, ILogger, IMemoryTier, ITransferEndpoint, ITransferEndpointAdmin,
+    };
 
     use super::Lifecycle;
 
@@ -150,6 +154,7 @@ mod component {
             receptacles: {
                 logger: ILogger,
                 dispatch_map: IDispatchMap,
+                memory_tier: IMemoryTier,
             },
             fields: {
                 lifecycle: Mutex<Lifecycle>,
@@ -165,6 +170,7 @@ mod component {
             receptacles: {
                 logger: ILogger,
                 dispatch_map: IDispatchMap,
+                memory_tier: IMemoryTier,
                 block_device: IBlockDevice,
             },
             fields: {
@@ -176,7 +182,11 @@ mod component {
 
 /// A symmetric RDMA endpoint for explicit certus-to-certus KV cache transfer:
 /// provides [`ITransferEndpoint`] and [`ITransferEndpointAdmin`]. Receptacles:
-/// `logger` (optional), `dispatch_map`, and `block_device` with `spdk`.
+/// `logger` (optional); `dispatch_map`, for atomic lookup-and-pin (D6, D13);
+/// `memory_tier`, whose pool is registered **once**, at `initialize`, and held
+/// for the endpoint's life so its `rkey` survives every reconnect (D17) — the
+/// responder's approach, not the initiator's register-per-connect; and
+/// `block_device` with `spdk`.
 pub use component::CertusTransferEndpoint;
 
 impl CertusTransferEndpoint {
@@ -303,13 +313,38 @@ impl ITransferEndpointAdmin for CertusTransferEndpoint {
                 max_send_wr: config.max_send_wr,
                 max_recv_wr: config.max_recv_wr,
             };
-            let table = ConnectionTable::new(transport, local, caps, config.send_credits)
+            let map = self.dispatch_map.get().map_err(|_| {
+                TransferEndpointError::NotInitialized("dispatch_map receptacle not bound".into())
+            })?;
+            let tier = self.memory_tier.get().map_err(|_| {
+                TransferEndpointError::NotInitialized("memory_tier receptacle not bound".into())
+            })?;
+            let (pool_base, pool_len) = tier.pool_info().ok_or_else(|| {
+                TransferEndpointError::NotInitialized(
+                    "memory tier pool not initialized (pool_info returned None)".into(),
+                )
+            })?;
+            let mut table = ConnectionTable::new(transport, local, caps, config.send_credits)
                 .map_err(|e| TransferEndpointError::Transport(e.to_string()))?;
+            // Once, for the endpoint's life: the source of every push and,
+            // with fetch, where peers land data — so both write flags.
+            // SAFETY: the memory tier owns the pool for the process's life;
+            // the region is dropped only after the table, so after every write
+            // it backs has been drained. Pool memory is never held as a Rust
+            // reference by this crate.
+            let pool_region = unsafe {
+                table.transport().register(
+                    pool_base,
+                    pool_len,
+                    Access::LOCAL_WRITE | Access::REMOTE_WRITE,
+                )
+            }
+            .map_err(|e| TransferEndpointError::Transport(format!("registering the pool: {e}")))?;
             let logger: Box<dyn ILogger + Send + Sync> = match self.logger.get() {
                 Ok(l) => Box::new(SharedLogger(l)),
                 Err(_) => Box::new(NoopLogger),
             };
-            let actor = Actor::new(EndpointActor::new(table, logger), |_| {
+            let actor = Actor::new(EndpointActor::new(table, logger, map, pool_region), |_| {
                 // Unreachable: every handler path aborts on panic itself.
             });
             let actor = match config.actor_cpu {
@@ -377,14 +412,34 @@ impl ITransferEndpoint for CertusTransferEndpoint {
         Err(not_yet("T033"))
     }
 
+    /// Push each entry this endpoint holds into the peer's named region,
+    /// then fire `on_complete` once, on the endpoint thread, with one outcome
+    /// per item in request order (invariant 1). Returns once queued.
+    ///
+    /// Each entry is looked up — and pinned — only when a send credit is free
+    /// to post its write at once, so pins held never exceed the credits
+    /// (SC-004). An entry the source does not serve from memory is a `Miss`:
+    /// absent, the wrong size, or block-tier (until T037-T040). An entry not
+    /// delivered for any other reason — a connection that could not be made
+    /// or was lost, a refused or flushed write, a failed lookup — is `Failed`.
     fn push_async(
         &self,
         endpoint: &str,
-        _items: &[(CacheKey, RemoteRegion)],
-        _on_complete: FetchCompletion,
+        items: &[(CacheKey, RemoteRegion)],
+        on_complete: FetchCompletion,
     ) -> Result<(), TransferEndpointError> {
-        parse_peer(endpoint)?;
-        Err(not_yet("T017"))
+        let peer = parse_peer(endpoint)?;
+        let guard = self.lifecycle();
+        let State::Running(handle) = &*guard else {
+            return Err(not_running());
+        };
+        handle
+            .send(Command::Push {
+                peer,
+                items: items.to_vec(),
+                on_complete,
+            })
+            .map_err(|e| TransferEndpointError::Transport(format!("endpoint thread: {e}")))
     }
 
     fn push(
@@ -413,13 +468,51 @@ impl ITransferEndpoint for CertusTransferEndpoint {
 mod tests {
     use super::*;
     use crate::connection::mock::MockFabric;
+    use crate::test_doubles::{LedgerMap, PoolTier};
+    use std::sync::Arc;
     use std::time::{Duration, Instant};
 
-    fn endpoint(fabric: &MockFabric, local: &str) -> std::sync::Arc<CertusTransferEndpoint> {
+    /// An endpoint plus the memory it serves from: a pool, and a ledger
+    /// dispatch map answering into it.
+    struct Node {
+        ep: Arc<CertusTransferEndpoint>,
+        map: Arc<LedgerMap>,
+        pool: Box<[u8]>,
+    }
+
+    impl Node {
+        fn pool_addr(&self, off: usize) -> u64 {
+            self.pool.as_ptr() as u64 + off as u64
+        }
+    }
+
+    fn node(fabric: &MockFabric, local: &str, send_credits: u32) -> Node {
+        let mut pool = vec![0u8; 4096].into_boxed_slice();
         let ep = CertusTransferEndpoint::create();
-        ep.configure(EndpointConfig::new(local)).unwrap();
+        let map = Arc::new(LedgerMap::new());
+        ep.dispatch_map
+            .connect(Arc::clone(&map) as Arc<dyn interfaces::IDispatchMap + Send + Sync>)
+            .unwrap();
+        ep.memory_tier
+            .connect(Arc::new(PoolTier {
+                base: pool.as_mut_ptr(),
+                len: pool.len(),
+            })
+                as Arc<dyn interfaces::IMemoryTier + Send + Sync>)
+            .unwrap();
+        let mut config = EndpointConfig::new(local);
+        config.send_credits = send_credits;
+        ep.configure(config).unwrap();
         ep.use_transport(TransportChoice::Mock(fabric.clone()));
-        ep
+        Node { ep, map, pool }
+    }
+
+    /// An endpoint with its receptacles bound; the memory behind them is
+    /// leaked, which is harmless in a test that never pushes.
+    fn endpoint(fabric: &MockFabric, local: &str) -> Arc<CertusTransferEndpoint> {
+        let n = node(fabric, local, 8);
+        std::mem::forget(n.pool);
+        n.ep
     }
 
     /// Wait for `cond`, polling: the endpoint threads connect on their own.
@@ -433,7 +526,20 @@ mod tests {
 
     #[test]
     fn lifecycle_is_enforced() {
-        let ep = CertusTransferEndpoint::create();
+        let ep = endpoint(&MockFabric::new(), "10.0.0.9:1");
+        let ep = {
+            // Start from unconfigured, but with receptacles bound.
+            let fresh = CertusTransferEndpoint::create();
+            fresh
+                .dispatch_map
+                .connect(ep.dispatch_map.get().unwrap())
+                .unwrap();
+            fresh
+                .memory_tier
+                .connect(ep.memory_tier.get().unwrap())
+                .unwrap();
+            fresh
+        };
         let not_init = |r: Result<(), TransferEndpointError>| {
             matches!(r, Err(TransferEndpointError::NotInitialized(_)))
         };
@@ -484,6 +590,10 @@ mod tests {
             Err(TransferEndpointError::NotInitialized(m)) => assert!(m.contains("T018"), "{m}"),
             other => panic!("{other:?}"),
         }
+        assert!(matches!(
+            ep.push_async("10.0.0.2", &[], Box::new(|_| {})),
+            Err(TransferEndpointError::InvalidEndpoint(_))
+        ));
         ep.shutdown().unwrap();
     }
 
@@ -584,7 +694,14 @@ mod tests {
     #[test]
     fn a_refused_initialize_leaves_the_state_alone() {
         let f = MockFabric::new();
+        let bound = endpoint(&f, "10.0.0.9:1");
         let ep = CertusTransferEndpoint::create();
+        ep.dispatch_map
+            .connect(bound.dispatch_map.get().unwrap())
+            .unwrap();
+        ep.memory_tier
+            .connect(bound.memory_tier.get().unwrap())
+            .unwrap();
         assert!(ep.initialize().is_err(), "not configured");
         ep.configure(EndpointConfig::new("10.0.0.1:7000"))
             .expect("still configurable after a refused initialize");
@@ -608,5 +725,310 @@ mod tests {
             weak.upgrade().is_some(),
             "the framework cycle is gone: revisit shutdown docs"
         );
+    }
+
+    // --- push (T017) and its pin discipline (T022-T026) -----------------------
+
+    fn pool_key(ep: &CertusTransferEndpoint) -> (u64, u32) {
+        ep.call(Command::PoolKey).unwrap()
+    }
+
+    /// Push `items` from `src` and wait for the callback.
+    fn push_and_wait(
+        src: &CertusTransferEndpoint,
+        to: &str,
+        items: &[(CacheKey, RemoteRegion)],
+    ) -> Vec<EntryOutcome> {
+        let (tx, rx) = mpsc::channel();
+        src.push_async(to, items, Box::new(move |o| tx.send(o).unwrap()))
+            .unwrap();
+        rx.recv_timeout(Duration::from_secs(10))
+            .expect("on_complete fired")
+    }
+
+    #[test]
+    fn initialize_needs_the_dispatch_map_and_a_pool() {
+        let ep = CertusTransferEndpoint::create();
+        ep.configure(EndpointConfig::new("10.0.0.1:7000")).unwrap();
+        ep.use_transport(TransportChoice::Mock(MockFabric::new()));
+        match ep.initialize() {
+            Err(TransferEndpointError::NotInitialized(m)) => assert!(m.contains("dispatch_map")),
+            other => panic!("{other:?}"),
+        }
+        ep.dispatch_map
+            .connect(Arc::new(LedgerMap::new()) as Arc<dyn interfaces::IDispatchMap + Send + Sync>)
+            .unwrap();
+        ep.memory_tier
+            .connect(Arc::new(PoolTier {
+                base: std::ptr::null_mut(),
+                len: 0,
+            })
+                as Arc<dyn interfaces::IMemoryTier + Send + Sync>)
+            .unwrap();
+        ep.use_transport(TransportChoice::Mock(MockFabric::new()));
+        match ep.initialize() {
+            Err(TransferEndpointError::NotInitialized(m)) => assert!(m.contains("pool"), "{m}"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// The legacy path end to end over the mock: values land byte-exact in
+    /// the peer's memory, outcomes come back in request order, every miss kind
+    /// is a miss, and the pin ledger balances (T026).
+    #[test]
+    fn push_writes_hits_reports_misses_and_balances_every_pin() {
+        let f = MockFabric::new();
+        let mut a = node(&f, "10.0.0.1:7000", 8);
+        let b = node(&f, "10.0.0.2:7000", 8);
+        a.ep.initialize().unwrap();
+        b.ep.initialize().unwrap();
+        for (i, byte) in a.pool[..256].iter_mut().enumerate() {
+            *byte = i as u8;
+        }
+        a.map.memory(10, a.pool_addr(0), 64);
+        a.map.memory(11, a.pool_addr(64), 64);
+        a.map.memory(12, a.pool_addr(128), 32); // wrong size: pinned, must be released
+        a.map.block(13); // block tier: pinned, released, miss until T037
+        a.map.mismatch(14); // unpinned
+        a.map.preload_reader(14); // someone else's pin on it
+        let (land, rkey) = pool_key(&b.ep);
+        let at = |off: u64| RemoteRegion {
+            addr: land + off,
+            rkey,
+            length: 64,
+        };
+        let items = [
+            (10, at(1024)),
+            (99, at(0)), // absent
+            (11, at(1088)),
+            (12, at(0)),
+            (13, at(0)),
+            (14, at(0)),
+        ];
+        let out = push_and_wait(&a.ep, "10.0.0.2:7000", &items);
+        use EntryOutcome::*;
+        assert_eq!(out, [HitMemoryTier, Miss, HitMemoryTier, Miss, Miss, Miss]);
+        assert_eq!(&b.pool[1024..1088], &a.pool[0..64], "entry 10 landed");
+        assert_eq!(&b.pool[1088..1152], &a.pool[64..128], "entry 11 landed");
+        assert_eq!(b.pool[0..64], [0u8; 64], "nothing for the misses");
+        for key in [10, 11, 12, 13] {
+            assert_eq!(
+                a.map.read_ref(key),
+                0,
+                "key {key}'s pin released exactly once"
+            );
+        }
+        assert_eq!(a.map.read_ref(14), 1, "the other reader's pin untouched");
+        assert_eq!(a.map.lookups(), 6, "one lookup per entry, no probe");
+        let s = a.ep.stats();
+        assert_eq!((s.requests_attempted, s.requests_completed), (1, 1));
+        assert_eq!((s.entries_requested, s.hit_memory_tier, s.miss), (6, 2, 4));
+        a.ep.shutdown().unwrap();
+        b.ep.shutdown().unwrap();
+    }
+
+    /// SC-004 (T025): with send credits n, a push of n x 100 entries never
+    /// holds more than n pins at once, independent of the request's length.
+    #[test]
+    fn pins_held_never_exceed_send_credits() {
+        let f = MockFabric::new();
+        let n = 3u32;
+        let a = node(&f, "10.0.0.1:7000", n);
+        let b = node(&f, "10.0.0.2:7000", 8);
+        a.ep.initialize().unwrap();
+        b.ep.initialize().unwrap();
+        let count = n as u64 * 100;
+        for key in 0..count {
+            a.map.memory(key, a.pool_addr((key % 64) as usize * 16), 16);
+        }
+        let (land, rkey) = pool_key(&b.ep);
+        let items: Vec<_> = (0..count)
+            .map(|k| {
+                (
+                    k,
+                    RemoteRegion {
+                        addr: land + (k % 64) * 16,
+                        rkey,
+                        length: 16,
+                    },
+                )
+            })
+            .collect();
+        let out = push_and_wait(&a.ep, "10.0.0.2:7000", &items);
+        assert!(out.iter().all(|o| *o == EntryOutcome::HitMemoryTier));
+        assert!(
+            a.map.peak_held() <= n as i64,
+            "peak {} pins held with {n} credits",
+            a.map.peak_held()
+        );
+        assert!(a.map.peak_held() >= 1);
+        assert_eq!(a.map.held(), 0, "every pin released");
+        assert!(a.ep.stats().send_queue_peak_in_flight <= n);
+        a.ep.shutdown().unwrap();
+        b.ep.shutdown().unwrap();
+    }
+
+    /// A push to an instance nobody listens at fails every entry — `Failed`,
+    /// not `Miss`, since nothing was learned about residency — pins nothing
+    /// (entries are looked up only once connected), and fires.
+    #[test]
+    fn push_to_an_unreachable_peer_misses_everything_and_pins_nothing() {
+        let f = MockFabric::new();
+        let a = node(&f, "10.0.0.1:7000", 8);
+        a.ep.initialize().unwrap();
+        a.map.memory(1, a.pool_addr(0), 8);
+        let region = RemoteRegion {
+            addr: 0,
+            rkey: 0,
+            length: 8,
+        };
+        let out = push_and_wait(&a.ep, "10.0.0.9:7000", &[(1, region), (2, region)]);
+        assert_eq!(out, [EntryOutcome::Failed, EntryOutcome::Failed]);
+        assert_eq!((a.ep.stats().failed, a.ep.stats().miss), (2, 0));
+        assert_eq!(a.map.lookups(), 0, "nothing looked up, so nothing pinned");
+        a.ep.shutdown().unwrap();
+    }
+
+    /// A write the peer refuses (bad rkey) fails, tears the connection down,
+    /// and releases every pin — the in-flight one through the drain.
+    #[test]
+    fn a_refused_write_tears_down_and_releases_every_pin() {
+        let f = MockFabric::new();
+        let a = node(&f, "10.0.0.1:7000", 4);
+        let b = node(&f, "10.0.0.2:7000", 8);
+        a.ep.initialize().unwrap();
+        b.ep.initialize().unwrap();
+        for k in 0..6 {
+            a.map.memory(k, a.pool_addr(k as usize * 8), 8);
+        }
+        let (land, rkey) = pool_key(&b.ep);
+        let items: Vec<_> = (0..6u64)
+            .map(|k| {
+                (
+                    k,
+                    RemoteRegion {
+                        addr: land + k * 8,
+                        rkey: if k == 2 { rkey ^ 0xdead } else { rkey },
+                        length: 8,
+                    },
+                )
+            })
+            .collect();
+        let out = push_and_wait(&a.ep, "10.0.0.2:7000", &items);
+        assert_eq!(out.len(), 6);
+        assert_eq!(
+            out[..2],
+            [EntryOutcome::HitMemoryTier; 2],
+            "before the fault"
+        );
+        assert_eq!(out[2], EntryOutcome::Failed, "the refused write");
+        assert!(
+            out[3..].iter().all(|o| *o == EntryOutcome::Failed),
+            "the rest were flushed or never sent: {out:?}"
+        );
+        assert_eq!(a.ep.stats().miss, 0, "a refused write is not a cold cache");
+        assert_eq!(
+            a.map.held(),
+            0,
+            "every pin released, including flushed ones"
+        );
+        eventually("the connection torn down", || f.qp_count() == 0);
+        a.ep.shutdown().unwrap();
+        b.ep.shutdown().unwrap();
+    }
+
+    /// Writes genuinely in flight at teardown — stalled behind a send the peer
+    /// has no receive for — come back through the drain, and each one's pin
+    /// is released there. `disconnect` is the teardown.
+    #[test]
+    fn in_flight_writes_release_their_pins_through_the_drain() {
+        let f = MockFabric::new();
+        let a = node(&f, "10.0.0.1:7000", 8);
+        let b = node(&f, "10.0.0.2:7000", 8);
+        a.ep.initialize().unwrap();
+        b.ep.initialize().unwrap();
+        let pb = PeerId::parse("10.0.0.2:7000").unwrap();
+        let pb2 = pb.clone();
+        a.ep.call(|r| Command::Connect(pb2, r)).unwrap().unwrap();
+        eventually("connected", || {
+            let p = pb.clone();
+            a.ep.call(|r| Command::IsUp(p, r)).unwrap()
+        });
+        let pb3 = pb.clone();
+        a.ep.call(|r| Command::Plug(pb3, r)).unwrap().unwrap();
+        for k in 0..4 {
+            a.map.memory(k, a.pool_addr(k as usize * 8), 8);
+        }
+        let (land, rkey) = pool_key(&b.ep);
+        let items: Vec<_> = (0..4u64)
+            .map(|k| {
+                (
+                    k,
+                    RemoteRegion {
+                        addr: land + 512 + k * 8,
+                        rkey,
+                        length: 8,
+                    },
+                )
+            })
+            .collect();
+        let (tx, rx) = mpsc::channel();
+        a.ep.push_async(
+            "10.0.0.2:7000",
+            &items,
+            Box::new(move |o| tx.send(o).unwrap()),
+        )
+        .unwrap();
+        eventually("all four pinned and in flight", || a.map.held() == 4);
+        assert!(rx.try_recv().is_err(), "nothing has completed");
+
+        a.ep.disconnect("10.0.0.2:7000").unwrap();
+        assert_eq!(a.map.held(), 0, "the drain released every in-flight pin");
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            [EntryOutcome::Failed; 4],
+            "flushed, not served"
+        );
+        assert_eq!(b.pool[512..544], [0u8; 32], "nothing landed");
+        a.ep.shutdown().unwrap();
+        b.ep.shutdown().unwrap();
+    }
+
+    /// Shutdown with a push in flight (stalled on a peer that never accepts)
+    /// fires the callback and leaves no pin held.
+    #[test]
+    fn shutdown_mid_push_fires_the_callback_and_holds_nothing() {
+        let f = MockFabric::new();
+        let a = node(&f, "10.0.0.1:7000", 8);
+        a.ep.initialize().unwrap();
+        // A raw listener that never answers: the connect stays pending.
+        let mut silent = crate::connection::mock::MockTransport::new(f.clone());
+        crate::connection::transport::Transport::listen(
+            &mut silent,
+            &PeerId::parse("10.0.0.2:7000").unwrap(),
+        )
+        .unwrap();
+        a.map.memory(1, a.pool_addr(0), 8);
+        let (tx, rx) = mpsc::channel();
+        a.ep.push_async(
+            "10.0.0.2:7000",
+            &[(
+                1,
+                RemoteRegion {
+                    addr: 0,
+                    rkey: 0,
+                    length: 8,
+                },
+            )],
+            Box::new(move |o| tx.send(o).unwrap()),
+        )
+        .unwrap();
+        a.ep.shutdown().unwrap();
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            [EntryOutcome::Failed]
+        );
+        assert_eq!(a.map.held(), 0);
+        drop(silent);
     }
 }

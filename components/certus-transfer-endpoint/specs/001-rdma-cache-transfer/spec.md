@@ -105,7 +105,11 @@ unchanged.
 - **FR-006**: A transfer request MUST carry: a context ID, the destination's rkey, base
   address, per-entry size, and a list of `(block key, landing slot index)` pairs.
 - **FR-007**: A transfer reply MUST carry the context ID and one outcome per requested key,
-  from `{ hit_memory_tier, hit_block_tier, miss }`, in request order. Each request message
+  from `{ hit_memory_tier, hit_block_tier, miss, failed }`, in request order. `miss` means the
+  source does not serve the entry (absent, a different size, or a tier this build cannot
+  serve); `failed` means it was not delivered for any other reason (a failed lookup, a
+  refused or flushed write, a connection that could not be made or was lost, a protocol
+  fault, a deadline). The two MUST NOT be conflated: a broken path is not a cold cache. Each request message
   MUST carry its **own** context ID and MUST draw exactly one reply (or one protocol error,
   FR-024): the source MUST NOT split a reply, so that a requester's reply reserve (FR-026) is
   bounded exactly by its own message credits. When the requester chunks a transfer, each
@@ -186,8 +190,13 @@ unchanged.
   location and pin in a single dispatch-map lookup, which returns memory-tier and
   block-tier answers already pinned. It MUST NOT determine residency with an unpinned probe
   and then pin.
-- **FR-010**: The source MUST NOT release a read reference for an answer that was never
-  pinned (`NotExist`, size mismatch). Doing so decrements another reader's pin.
+- **FR-010**: The source MUST release exactly the read references its lookup took, each
+  exactly once. An answer that was never pinned (`NotExist`, `MismatchSize`) MUST NOT be
+  released — that decrements another reader's pin. An answer that was pinned but cannot be
+  served — a memory-tier entry whose stored size differs from the requested one, or a
+  block-tier entry in a build that cannot serve it — MUST be released before reporting
+  `miss`, or the entry stays pinned and can never be evicted. The lookup takes no size, so
+  a size mismatch is detected by the source and comes back **pinned**.
 - **FR-011**: Pins MUST be held and released **per entry**, not per batch. A memory-tier
   pin is released when its RDMA write completes (matched by work-request id). A block-tier
   pin is released as soon as the device read into the bounce buffer completes — before the

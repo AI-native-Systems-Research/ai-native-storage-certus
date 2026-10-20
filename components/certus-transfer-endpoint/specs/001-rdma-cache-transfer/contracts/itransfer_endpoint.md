@@ -62,6 +62,10 @@ pub enum EntryOutcome {
     /// The source does not hold it, holds it at a different size, or cannot
     /// serve it in this build (no `spdk` feature and the entry is block-tier).
     Miss,
+    /// Not delivered for a reason other than residency: connection not made
+    /// or lost, write refused or flushed, protocol fault, deadline, or the
+    /// source's lookup failed. Unlike a miss, asking again may succeed.
+    Failed,
 }
 
 /// Identifies one in-flight fetch. Echoed in the reply.
@@ -217,7 +221,9 @@ Implementations MUST uphold, and tests MUST verify:
    *i* corresponds to `items[i]`. True across internal chunking.
 2. **Outcome honesty.** `HitBlockTier` is reported only when the value was actually read
    from the block device. A build without `spdk` reports `Miss` for block-tier entries, never
-   `HitBlockTier` and never an error (research D14).
+   `HitBlockTier` and never an error (research D14). `Miss` and `Failed` are never
+   conflated: an entry lost to a fault is `Failed`, never `Miss`, so a broken path cannot
+   pass for a cold cache (Principle XI).
 3. **No broadcast.** A `Miss` MUST NOT trigger any further peer traffic. This endpoint never
    contacts an instance the caller did not name (D12, SC-006 — note there is deliberately no
    FR for this; it is a property of the mechanism, asserted by SC-006. An earlier draft of
@@ -228,7 +234,9 @@ Implementations MUST uphold, and tests MUST verify:
 5. **Pin bound.** Concurrently held read pins never exceed the configured send-queue credit
    limit, regardless of `items.len()` (SC-004).
 6. **Tier neutrality.** Serving any entry leaves the source's memory-tier occupancy and LRU
-   order unchanged (SC-005, D8).
+   order unchanged (SC-005, D8). **Not yet met for memory-tier entries:** the dispatch map's
+   lookup refreshes LRU position as it pins, and no `IDispatchMap` call pins without it.
+   Met once a non-touching lookup exists (D6); block-tier serving never promotes.
 7. **No partial publication.** A landing slot whose write did not complete is not published.
    Slots follow reserve → arrive → commit/abort (FR-018).
 8. **Teardown before reclaim.** After `disconnect(peer)` returns, no write from that peer

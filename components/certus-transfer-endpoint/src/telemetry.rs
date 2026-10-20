@@ -39,6 +39,8 @@ pub struct Counters {
     /// Filled by T017 / T033.
     pub miss: u64,
     /// Filled by T017 / T033.
+    pub failed: u64,
+    /// Filled by T017 / T033.
     pub requests_attempted: u64,
     /// Filled by T017 / T033.
     pub requests_completed: u64,
@@ -81,6 +83,7 @@ impl Counters {
             hit_memory_tier: self.hit_memory_tier,
             hit_block_tier: self.hit_block_tier,
             miss: self.miss,
+            failed: self.failed,
             requests_attempted: self.requests_attempted,
             requests_completed: self.requests_completed,
             chunks_sent: self.chunks_sent,
@@ -177,6 +180,7 @@ mod tests {
             hit_memory_tier: 2,
             hit_block_tier: 3,
             miss: 4,
+            failed: 40,
             requests_attempted: 5,
             requests_completed: 6,
             chunks_sent: 7,
@@ -198,6 +202,7 @@ mod tests {
                 hit_memory_tier: 2,
                 hit_block_tier: 3,
                 miss: 4,
+                failed: 40,
                 requests_attempted: 5,
                 requests_completed: 6,
                 chunks_sent: 7,

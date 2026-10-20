@@ -93,15 +93,29 @@ handles both client-role and server-role over the same control connection".
 
 **Decision**: obtain location and pin in a single dispatch-map lookup. Never probe-then-pin.
 
-**Rationale**: the dispatch map "increments `read_ref` **before** it inspects the location,
-so `MemoryTier` and `BlockDevice` answers both come back pinned, while `NotExist` and
-`MismatchSize` return earlier, unpinned". So there is no window — provided we do not
-introduce one. Using `Check` to decide the tier first *would* introduce it, because `Check`
-releases immediately.
+**Rationale**: the dispatch map increments `read_ref` under its lock **before** it reads the
+location (`dispatch-map/src/lib.rs`, `lookup`), so `MemoryTier` and `BlockDevice` answers
+both come back pinned and `NotExist` comes back unpinned. So there is no window — provided
+we do not introduce one. Using `Check` to decide the tier first *would* introduce it, because
+`Check` releases immediately.
 
-**Corollary**: never release a read reference for an answer that was never pinned; doing so
-decrements another reader's pin. This is the live `Dispatcher::check()` defect (it computes
-`exists = !matches!(result, NotExist)` and releases on that), deferred separately.
+**`lookup` takes no size, and never returns `MismatchSize`.** The variant exists in
+`LookupResult` but the current map does not produce it: an entry of the wrong size comes
+back as `MemoryTier { size }`, **pinned**, and the size comparison is the caller's.
+
+**Corollary**: release exactly what the lookup pinned, exactly once. Never release an
+unpinned answer (`NotExist`, and `MismatchSize` should a map return it) — that decrements
+another reader's pin, the live `Dispatcher::check()` defect (it computes
+`exists = !matches!(result, NotExist)` and releases on that), deferred separately. And
+always release a pinned answer that is not served — a wrong-size memory-tier entry, or a
+block-tier entry this build cannot serve — or it stays pinned and is never evictable.
+
+**Two costs of `lookup` this design accepts for now.** It also refreshes the entry's LRU
+position (`eviction_policy.touch`), so serving a peer reorders the source's cache: invariant
+6 / SC-005 is **not met for memory-tier serving** until `IDispatchMap` gains a lookup that
+pins without touching. And it blocks up to 2 s while a writer holds the entry, on the
+endpoint thread; rare and bounded, and a timeout is reported as a counted miss. A
+non-blocking variant belongs with the non-touching one, as a separate `IDispatchMap` change.
 
 ## D7 — Per-entry pin lifetime, with early release on the block-tier path
 
@@ -754,6 +768,7 @@ express tri-state residency. This component needs:
 |---|---|---|
 | `logger: ILogger` | as today | no |
 | `dispatch_map: IDispatchMap` | **atomic lookup+pin**, and it returns the tier *and* the block offset in one call (`MemoryTier{pointer,size}` / `BlockDevice{offset}` / `NotExist` / `MismatchSize`) | no |
+| `memory_tier: IMemoryTier` | `pool_info()`, so the whole pool is registered **once**, at initialize, and held for the endpoint's life — the responder's approach, not the initiator's register-per-connect (D17) | no |
 | `block_device` | the device read for block-tier serving | **yes** |
 
 The dispatch map is what makes D6 and D7 possible: one call yields residency, the source
