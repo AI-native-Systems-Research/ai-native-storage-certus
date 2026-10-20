@@ -23,3 +23,6 @@ eviction-policy-lru.workspace = true
 [[bench]]
 name = "dispatch_map_benchmark"
 harness = false
+
+[lints]
+workspace = true

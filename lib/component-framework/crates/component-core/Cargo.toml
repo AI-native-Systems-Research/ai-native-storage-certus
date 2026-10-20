@@ -12,3 +12,6 @@ kanal = "0.1"
 libc = "0.2"
 rtrb = "0.3"
 tokio = { version = "1", features = ["sync"] }
+
+[lints]
+workspace = true

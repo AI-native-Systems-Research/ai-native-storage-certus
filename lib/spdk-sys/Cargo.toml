@@ -9,3 +9,6 @@ build = "build.rs"
 
 [build-dependencies]
 bindgen = "0.71"
+
+[lints]
+workspace = true

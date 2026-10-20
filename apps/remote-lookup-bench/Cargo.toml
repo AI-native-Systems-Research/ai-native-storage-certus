@@ -24,3 +24,6 @@ publish = false
 shm-queue.workspace = true
 shmq-dispatcher.workspace = true
 clap = { version = "4", features = ["derive", "env"] }
+
+[lints]
+workspace = true

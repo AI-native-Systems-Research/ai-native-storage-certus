@@ -32,3 +32,6 @@ required-features = ["spdk"]
 name = "throughput"
 harness = false
 required-features = ["spdk"]
+
+[lints]
+workspace = true

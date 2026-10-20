@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Certus is a generative domain-specific filesystem for inferencing workloads, built on a COM-inspired Rust component framework. Components are developed independently with low coupling and integrated via typed interfaces and receptacles. This design keeps LLM context windows small by scoping work to one component plus its bindings.
 
-**Platform**: Linux only (tested on RHEL/Fedora). Rust stable, edition 2021, MSRV 1.75.
+**Platform**: Linux only (tested on RHEL/Fedora). Rust stable, edition 2021, MSRV 1.81. Rust posture (lint levels, tooling) is recorded in `docs/agents/rust.md`.
 
 ## Build Commands
 

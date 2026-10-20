@@ -11,3 +11,6 @@ crate-type = ["dylib"]
 [dependencies]
 component-core.workspace = true
 example-helloworld.workspace = true
+
+[lints]
+workspace = true

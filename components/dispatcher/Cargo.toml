@@ -57,3 +57,6 @@ required-features = ["hardware-test"]
 name = "dispatcher_hw_benchmark"
 harness = false
 required-features = ["hardware-test"]
+
+[lints]
+workspace = true

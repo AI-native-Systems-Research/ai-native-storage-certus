@@ -53,3 +53,6 @@ path = "actor_factory.rs"
 [[example]]
 name = "actor_log"
 path = "actor_log.rs"
+
+[lints]
+workspace = true

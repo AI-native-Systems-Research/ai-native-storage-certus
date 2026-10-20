@@ -17,3 +17,6 @@ default = []
 integrity-check = []
 spdk = ["dep:spdk-sys"]
 gpu = []
+
+[lints]
+workspace = true

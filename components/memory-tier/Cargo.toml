@@ -19,3 +19,6 @@ spdk-sys = { workspace = true, optional = true }
 
 [dev-dependencies]
 eviction-policy-lru.workspace = true
+
+[lints]
+workspace = true

@@ -8,3 +8,6 @@ publish = false
 [dependencies]
 component-framework.workspace = true
 example-helloworld.workspace = true
+
+[lints]
+workspace = true

@@ -14,3 +14,6 @@ component-core.workspace = true
 [features]
 default = ["gpu"]
 gpu = ["gpu-services/gpu", "interfaces/gpu"]
+
+[lints]
+workspace = true
