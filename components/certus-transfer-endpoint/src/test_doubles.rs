@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
+use crate::connection::mock::Sequence;
 use interfaces::{
     CacheKey, DispatchMapError, IDispatchMap, IMemoryTier, LookupResult, MemoryTierError,
     MemoryTierTelemetrySnapshot,
@@ -25,6 +26,9 @@ struct Ledger {
     answers: HashMap<CacheKey, Answer>,
     read_ref: HashMap<CacheKey, i64>,
     peak_total: i64,
+    /// Each release, stamped from the shared sequence when one is set.
+    releases: Vec<(u64, CacheKey)>,
+    seq: Option<Sequence>,
 }
 
 impl Ledger {
@@ -94,6 +98,16 @@ impl LedgerMap {
     pub(crate) fn lookups(&self) -> u64 {
         self.lookups.load(Ordering::Relaxed)
     }
+
+    /// Stamp every release from `seq`, shared with the fabric's event log.
+    pub(crate) fn record(&self, seq: &Sequence) {
+        self.ledger.lock().unwrap().seq = Some(seq.clone());
+    }
+
+    /// Releases so far, stamped, in order.
+    pub(crate) fn releases(&self) -> Vec<(u64, CacheKey)> {
+        self.ledger.lock().unwrap().releases.clone()
+    }
 }
 
 impl IDispatchMap for LedgerMap {
@@ -131,6 +145,9 @@ impl IDispatchMap for LedgerMap {
             *r >= 0,
             "release_read({key}) without a pin: another reader's pin was decremented"
         );
+        if let Some(stamp) = l.seq.as_ref().map(Sequence::next) {
+            l.releases.push((stamp, key));
+        }
         Ok(())
     }
 
