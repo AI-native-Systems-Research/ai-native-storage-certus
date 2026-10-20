@@ -49,7 +49,7 @@ use crate::connection::transport::{
 use crate::connection::PeerId;
 use crate::message::{self, Header, Kind};
 use crate::msgpool::{MsgBuf, MsgPool};
-use crate::serve::{resolve, Map, MissCause, Pool, Push, PushWork, Resolved};
+use crate::serve::{resolve, Finish, Map, MissCause, Pool, Push, PushWork, Resolved};
 use crate::session::{Limits, Phase, Session};
 
 /// What a work request's slab slot carries until its completion is reaped.
@@ -178,6 +178,19 @@ fn settle(pushes: &mut BTreeMap<u64, Push>, map: &Map, c: &Completion, work: Wor
         }
         #[cfg(test)]
         Work::Held => false,
+    }
+}
+
+/// Count a finished request's outcomes.
+fn count_outcomes(c: &mut crate::telemetry::Counters, outcomes: &[EntryOutcome]) {
+    c.requests_completed += 1;
+    for o in outcomes {
+        match o {
+            EntryOutcome::HitMemoryTier => c.hit_memory_tier += 1,
+            EntryOutcome::HitBlockTier => c.hit_block_tier += 1,
+            EntryOutcome::Miss => c.miss += 1,
+            EntryOutcome::Failed => c.failed += 1,
+        }
     }
 }
 
@@ -318,18 +331,27 @@ impl EndpointActor {
             .collect();
         for id in done {
             let mut push = self.pushes.remove(&id).expect("listed above");
-            let outcomes = push.finish();
-            if let Some(t) = self.table.as_mut() {
-                let c = t.counters_mut();
-                c.requests_completed += 1;
-                for o in outcomes {
-                    match o {
-                        EntryOutcome::HitMemoryTier => c.hit_memory_tier += 1,
-                        EntryOutcome::HitBlockTier => c.hit_block_tier += 1,
-                        EntryOutcome::Miss => c.miss += 1,
-                        EntryOutcome::Failed => c.failed += 1,
+            let peer = push.peer.clone();
+            match push.finish() {
+                (outcomes, Some(Finish::Callback(cb))) => {
+                    if let Some(t) = self.table.as_mut() {
+                        count_outcomes(t.counters_mut(), &outcomes);
+                    }
+                    cb(outcomes);
+                }
+                (outcomes, Some(Finish::Reply { context_id })) => {
+                    // Every write has completed — the ordering guarantee — so
+                    // the reply can now say which entries landed (T034). The
+                    // peer's request leaves service when the reply is queued.
+                    if let Some(conn) = self.conns.get_mut(&peer) {
+                        conn.session.replied();
+                        let version = conn.session.version().unwrap_or(message::VERSION_MAX);
+                        self.queue_reply(&peer, |out| {
+                            message::encode_reply(version, context_id, &outcomes, out)
+                        });
                     }
                 }
+                (_, None) => {}
             }
         }
     }
@@ -351,8 +373,10 @@ impl EndpointActor {
         let ensured = table.ensure(&peer);
         let id = self.next_push;
         self.next_push += 1;
-        self.pushes
-            .insert(id, Push::new(peer.clone(), items, on_complete));
+        self.pushes.insert(
+            id,
+            Push::new(peer.clone(), items, Finish::Callback(on_complete)),
+        );
         if let Err(e) = ensured {
             self.logger.error(&format!(
                 "certus-transfer-endpoint: push to {peer} cannot connect: {e}"
@@ -715,20 +739,35 @@ impl EndpointActor {
                 ));
                 Ok(())
             }
-            Kind::Fetch | Kind::FetchReply => {
-                // Slice C. Until then a data message is refused, not dropped.
-                if h.kind == Kind::FetchReply {
-                    return Err("a fetch reply, but no fetch was sent".into());
+            Kind::FetchReply => Err("a fetch reply, but no fetch was sent".into()),
+            Kind::Fetch => {
+                if let Err(v) = conn.session.on_request() {
+                    return Err(format!("{v:?}"));
                 }
-                conn.session.on_request().map_err(|v| format!("{v:?}"))?;
-                conn.session.replied();
-                let e = message::ErrorReply {
-                    context_id: h.context_id,
-                    offending_opcode: Kind::Fetch.opcode(),
-                    reason: message::Reason::Other(5),
-                    max_supported_version: message::VERSION_MAX,
+                let items = match message::decode_fetch(&h, msg) {
+                    Ok(items) => items,
+                    Err(why) => {
+                        conn.session.replied();
+                        let e = message::refusal(msg, why).expect("a request");
+                        self.queue_reply(peer, |out| message::encode_error(&e, out));
+                        return Ok(());
+                    }
                 };
-                self.queue_reply(peer, |out| message::encode_error(&e, out));
+                // Serve it exactly as a push: the same lookup, pin, write and
+                // release (Phase 3); it finishes by replying, once.
+                let id = self.next_push;
+                self.next_push += 1;
+                self.pushes.insert(
+                    id,
+                    Push::new(
+                        peer.clone(),
+                        items,
+                        Finish::Reply {
+                            context_id: h.context_id,
+                        },
+                    ),
+                );
+                self.finish_done(); // an empty fetch is answered at once
                 Ok(())
             }
         }

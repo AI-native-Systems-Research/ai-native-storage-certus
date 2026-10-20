@@ -180,7 +180,17 @@ pub(crate) struct PushWork {
     pub(crate) pin: Pin,
 }
 
-/// One `push_async` in progress on the endpoint thread.
+/// Who a finished push reports to.
+pub(crate) enum Finish {
+    /// A local caller's `push_async`: fire its callback.
+    Callback(FetchCompletion),
+    /// A peer's `OP_FETCH`: reply to it, echoing `context_id`, once every
+    /// write has completed — the reply ordering guarantee (T034).
+    Reply { context_id: u64 },
+}
+
+/// One push in progress on the endpoint thread: a local `push_async`, or the
+/// serving of a peer's `OP_FETCH`, which is the same work.
 pub(crate) struct Push {
     pub(crate) peer: PeerId,
     /// Entries not yet looked up, in request order.
@@ -189,15 +199,11 @@ pub(crate) struct Push {
     pub(crate) outcomes: Vec<Option<EntryOutcome>>,
     /// Writes posted and not yet completed.
     pub(crate) in_flight: usize,
-    pub(crate) on_complete: Option<FetchCompletion>,
+    pub(crate) finish: Option<Finish>,
 }
 
 impl Push {
-    pub(crate) fn new(
-        peer: PeerId,
-        items: Vec<(CacheKey, RemoteRegion)>,
-        on_complete: FetchCompletion,
-    ) -> Self {
+    pub(crate) fn new(peer: PeerId, items: Vec<(CacheKey, RemoteRegion)>, finish: Finish) -> Self {
         Push {
             peer,
             outcomes: vec![None; items.len()],
@@ -207,7 +213,7 @@ impl Push {
                 .map(|(i, (k, r))| (i, k, r))
                 .collect(),
             in_flight: 0,
-            on_complete: Some(on_complete),
+            finish: Some(finish),
         }
     }
 
@@ -215,19 +221,16 @@ impl Push {
         self.pending.is_empty() && self.in_flight == 0
     }
 
-    /// Fire `on_complete` exactly once with every outcome. Undecided entries —
-    /// ones a failed connection never got to — are reported `Failed`: nothing
-    /// arrived for them, and not because the source lacks them.
-    pub(crate) fn finish(&mut self) -> Vec<EntryOutcome> {
+    /// Every outcome, and who to report them to — exactly once. Undecided
+    /// entries — ones a failed connection never got to — are `Failed`:
+    /// nothing arrived for them, and not because the source lacks them.
+    pub(crate) fn finish(&mut self) -> (Vec<EntryOutcome>, Option<Finish>) {
         let outcomes: Vec<_> = self
             .outcomes
             .iter()
             .map(|o| o.unwrap_or(EntryOutcome::Failed))
             .collect();
-        if let Some(cb) = self.on_complete.take() {
-            cb(outcomes.clone());
-        }
-        outcomes
+        (outcomes, self.finish.take())
     }
 }
 
@@ -322,20 +325,16 @@ mod tests {
     }
 
     #[test]
-    fn finish_fires_once_and_fills_undecided_as_failed() {
-        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let s = Arc::clone(&seen);
+    fn finish_reports_once_and_fills_undecided_as_failed() {
         let mut p = Push::new(
             PeerId::parse("10.0.0.2:1").unwrap(),
             vec![(1, region(1)), (2, region(1))],
-            Box::new(move |o| s.lock().unwrap().push(o)),
+            Finish::Reply { context_id: 4 },
         );
         p.outcomes[0] = Some(EntryOutcome::HitMemoryTier);
-        assert_eq!(
-            p.finish(),
-            [EntryOutcome::HitMemoryTier, EntryOutcome::Failed]
-        );
-        p.finish();
-        assert_eq!(seen.lock().unwrap().len(), 1, "fired exactly once");
+        let (o, f) = p.finish();
+        assert_eq!(o, [EntryOutcome::HitMemoryTier, EntryOutcome::Failed]);
+        assert!(matches!(f, Some(Finish::Reply { context_id: 4 })));
+        assert!(p.finish().1.is_none(), "reported exactly once");
     }
 }
