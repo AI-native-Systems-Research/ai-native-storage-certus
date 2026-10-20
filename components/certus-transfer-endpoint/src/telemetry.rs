@@ -50,10 +50,18 @@ pub struct Counters {
     pub requests_outstanding_outbound: u32,
     /// Gauge; filled by T079.
     pub requests_in_service_inbound: u32,
-    /// Gauge; filled by T043.
+    /// Gauge; filled by T072.
     pub bounce_buffers_in_use: u32,
-    /// Filled by T043.
+    /// Filled by T072.
     pub bounce_buffers_peak: u32,
+    /// Filled by T072.
+    pub block_reads_attempted: u64,
+    /// Filled by T072.
+    pub block_reads_completed: u64,
+    /// Filled by T072.
+    pub block_reads_failed: u64,
+    /// Filled by T072.
+    pub block_deferrals: u64,
     /// Reply deadlines that expired and tore a connection down (T050, T070).
     pub deadline_expiries: u64,
     /// Filled by T075.
@@ -93,6 +101,10 @@ impl Counters {
             requests_in_service_inbound: self.requests_in_service_inbound,
             bounce_buffers_in_use: self.bounce_buffers_in_use,
             bounce_buffers_peak: self.bounce_buffers_peak,
+            block_reads_attempted: self.block_reads_attempted,
+            block_reads_completed: self.block_reads_completed,
+            block_reads_failed: self.block_reads_failed,
+            block_deferrals: self.block_deferrals,
             deadline_expiries: self.deadline_expiries,
             protocol_faults: self.protocol_faults,
             version_downgrades: self.version_downgrades,
@@ -188,6 +200,10 @@ mod tests {
             requests_in_service_inbound: 9,
             bounce_buffers_in_use: 10,
             bounce_buffers_peak: 11,
+            block_reads_attempted: 18,
+            block_reads_completed: 19,
+            block_reads_failed: 20,
+            block_deferrals: 21,
             deadline_expiries: 12,
             protocol_faults: 13,
             version_downgrades: 14,
@@ -212,6 +228,10 @@ mod tests {
                 requests_in_service_inbound: 9,
                 bounce_buffers_in_use: 10,
                 bounce_buffers_peak: 11,
+                block_reads_attempted: 18,
+                block_reads_completed: 19,
+                block_reads_failed: 20,
+                block_deferrals: 21,
                 deadline_expiries: 12,
                 protocol_faults: 13,
                 version_downgrades: 14,

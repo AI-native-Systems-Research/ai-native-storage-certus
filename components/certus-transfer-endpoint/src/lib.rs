@@ -20,7 +20,7 @@
 //! |---|---|
 //! | *(none)* | connection table, framing, credits and pin logic over an in-process seam |
 //! | `rdma` | the real libibverbs/librdmacm transport |
-//! | `spdk` | block-tier serving: block-device receptacle and bounce-buffer pool |
+//! | `spdk` | block-tier serving: a `dispatcher` receptacle that reads entries into the memory tier's bounce reserve |
 //! | `telemetry` | extra metrics beyond `stats()` (which counts in every build) |
 //!
 //! Without `spdk` a block-tier lookup answer is reported as a miss rather than
@@ -144,7 +144,7 @@ mod component {
 
     use component_framework::define_component;
     #[cfg(feature = "spdk")]
-    use interfaces::IBlockDevice;
+    use interfaces::IDispatcher;
     use interfaces::{
         IDispatchMap, ILogger, IMemoryTier, ITransferEndpoint, ITransferEndpointAdmin,
     };
@@ -176,7 +176,7 @@ mod component {
                 logger: ILogger,
                 dispatch_map: IDispatchMap,
                 memory_tier: IMemoryTier,
-                block_device: IBlockDevice,
+                dispatcher: IDispatcher,
             },
             fields: {
                 lifecycle: Mutex<Lifecycle>,
@@ -190,8 +190,9 @@ mod component {
 /// `logger` (optional); `dispatch_map`, for atomic lookup-and-pin (D6, D13);
 /// `memory_tier`, whose pool is registered **once**, at `initialize`, and held
 /// for the endpoint's life so its `rkey` survives every reconnect (D17) — the
-/// responder's approach, not the initiator's register-per-connect; and
-/// `block_device` with `spdk`.
+/// responder's approach, not the initiator's register-per-connect; and, with
+/// `spdk`, `dispatcher`, which reads a pinned block-tier entry into the memory
+/// tier's bounce reserve (D13, D15) — the endpoint never addresses a device.
 pub use component::CertusTransferEndpoint;
 
 impl CertusTransferEndpoint {
@@ -286,6 +287,11 @@ impl ITransferEndpointAdmin for CertusTransferEndpoint {
         if config.message_credits == 0 || config.inbound_quota == 0 {
             return Err(TransferEndpointError::Transport(
                 "message_credits and inbound_quota must each be at least 1".into(),
+            ));
+        }
+        if config.block_readers == 0 {
+            return Err(TransferEndpointError::Transport(
+                "block_readers must be at least 1".into(),
             ));
         }
         if config.deadline_action != interfaces::DeadlineAction::FailLoud {

@@ -276,4 +276,16 @@ impl IMemoryTier for PoolTier {
     fn telemetry_snapshot(&self) -> MemoryTierTelemetrySnapshot {
         unimplemented!()
     }
+    fn set_bounce_reserve(&self, _: usize) -> Result<(), MemoryTierError> {
+        unimplemented!()
+    }
+    fn bounce_alloc(&self, _: u32) -> Result<interfaces::BounceLease, interfaces::BounceError> {
+        unimplemented!("the endpoint leases only through the dispatcher (D13)")
+    }
+    fn bounce_free(&self, _: interfaces::BounceLease) {
+        unimplemented!()
+    }
+    fn bounce_usage(&self) -> (usize, usize) {
+        unimplemented!()
+    }
 }

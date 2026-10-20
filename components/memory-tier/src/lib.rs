@@ -623,6 +623,25 @@ impl IMemoryTier for MemoryTierComponent {
         state.spdk_allocated
     }
 
+    // No bounce reserve yet: T037 adds it.
+    fn set_bounce_reserve(&self, _: usize) -> Result<(), MemoryTierError> {
+        Ok(())
+    }
+
+    fn bounce_alloc(&self, _: u32) -> Result<interfaces::BounceLease, interfaces::BounceError> {
+        Err(interfaces::BounceError::NeverFits(
+            "memory tier has no bounce reserve".into(),
+        ))
+    }
+
+    fn bounce_free(&self, _: interfaces::BounceLease) {
+        unreachable!("bounce_alloc never hands out a lease")
+    }
+
+    fn bounce_usage(&self) -> (usize, usize) {
+        (0, 0)
+    }
+
     fn telemetry_snapshot(&self) -> MemoryTierTelemetrySnapshot {
         #[cfg(feature = "telemetry")]
         {

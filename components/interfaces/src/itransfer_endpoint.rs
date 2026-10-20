@@ -404,10 +404,21 @@ pub struct TransferStats {
     pub requests_outstanding_outbound: u32,
     /// Peer requests we are currently serving.
     pub requests_in_service_inbound: u32,
-    /// Bounce buffers leased for block-tier serving.
+    /// Bounce leases held for block-tier serving: reads in flight plus writes
+    /// from a lease not yet completed.
     pub bounce_buffers_in_use: u32,
     /// High-water mark of the above.
     pub bounce_buffers_peak: u32,
+    /// Block-tier reads handed to the dispatcher.
+    pub block_reads_attempted: u64,
+    /// Of those, reads that filled a lease.
+    pub block_reads_completed: u64,
+    /// Of those, reads that failed or could never fit the bounce reserve; each
+    /// entry is reported `Failed`.
+    pub block_reads_failed: u64,
+    /// Block-tier entries put back in the queue for want of a free reader or
+    /// bounce space, their pin released, to be looked up again. Not failures.
+    pub block_deferrals: u64,
     /// Deadlines that expired, each having torn down a connection.
     pub deadline_expiries: u64,
     /// Protocol error replies received or sent.
@@ -468,6 +479,10 @@ pub struct EndpointConfig {
     pub fetch_deadline: Option<std::time::Duration>,
     /// What a reply deadline does on expiry.
     pub deadline_action: DeadlineAction,
+    /// Concurrent block-tier device reads, each on its own reader thread
+    /// (`spdk` builds; ignored otherwise). With `send_credits`, it bounds the
+    /// read pins held at once. Must be at least 1.
+    pub block_readers: u32,
 }
 
 /// What a fetch's reply deadline does when it expires (FR-016).
@@ -507,6 +522,7 @@ impl EndpointConfig {
             actor_cpu: None,
             fetch_deadline: Some(std::time::Duration::from_secs(5)),
             deadline_action: DeadlineAction::FailLoud,
+            block_readers: 4,
         }
     }
 }
