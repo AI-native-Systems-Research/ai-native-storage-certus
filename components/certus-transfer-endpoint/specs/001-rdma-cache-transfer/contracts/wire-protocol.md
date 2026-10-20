@@ -273,7 +273,7 @@ its own `OP_FETCH` message with **its own `context_id`**, each costing its own m
   the wire says two messages belong to one fetch, and the source never needs to know.
 - The **source never splits a reply.** Every `OP_FETCH` message draws **exactly one** answer
   — one `OP_FETCH_REPLY` covering all of that message's entries, or one `OP_ERROR` — echoing
-  that message's `context_id`. A source short of bounce buffers (D10) serves the message's
+  that message's `context_id`. A source short of bounce space or device readers (D10) serves the message's
   entries as buffers free up, chunking internally (FR-015), and still replies once; scarcity
   delays the reply, it never multiplies it.
 - A fetch is complete when every one of its chunks has been answered.
@@ -322,7 +322,7 @@ cleanly rather than leave a hole.
   an `rkey` already sent on the wire stays valid across a reconnect (D17). A retry after a
   forced teardown therefore needs no re-registration and no new addresses.
 - A closed connection aborts every context outstanding on it. Each side releases its own
-  resources: the source its pins and bounce buffers, the requester its landing slots — the
+  resources: the source its pins and bounce leases (each only once its read or write has completed), the requester its landing slots — the
   latter only after teardown completes (FR-017).
 - Loss of liveness **without** a close is not covered by the transport; it is the
   destination deadline's job (FR-016). On expiry the queue pair is forced to ERROR and
