@@ -71,8 +71,12 @@ pub enum EntryOutcome {
 /// Identifies one in-flight fetch. Echoed in the reply.
 pub struct TransferContextId(pub u64);
 
-/// Opaque handle for a region peers may write into.
-pub struct LandingRegionHandle(/* private */);
+/// A registered region peers may write into: what a caller needs to name a
+/// slot in it to a peer. `region_at(offset, len)` builds that slot's
+/// `RemoteRegion`, bounds-checked. Registered for the endpoint's life; there is
+/// no deregistration, since releasing a region means proving no peer can
+/// still write into it.
+pub struct LandingRegionHandle { /* id, addr, len, rkey — read-only accessors */ }
 
 pub enum TransferEndpointError {
     NotInitialized(String),

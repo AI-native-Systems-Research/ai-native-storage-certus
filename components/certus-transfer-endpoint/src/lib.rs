@@ -30,7 +30,7 @@
 //!
 //! # Status
 //!
-//! Scaffolding. Tasks T001–T010, T012–T019, T022–T026, T068 and T081 of
+//! Scaffolding. Tasks T001–T010, T012–T020, T022–T026, T068 and T081 of
 //! `specs/001-rdma-cache-transfer/tasks.md` are complete: the crate builds as a
 //! workspace default member, peer identity is implemented, and the verbs FFI, its
 //! C shim and the safe wrappers over them exist behind `rdma`, and the transport
@@ -394,12 +394,16 @@ impl ITransferEndpointAdmin for CertusTransferEndpoint {
 }
 
 impl ITransferEndpoint for CertusTransferEndpoint {
+    /// See the interface for the precondition this cannot enforce: the range
+    /// stays allocated until `shutdown` returns.
     fn register_landing_region(
         &self,
-        _base: *mut u8,
-        _len: usize,
+        base: *mut u8,
+        len: usize,
     ) -> Result<LandingRegionHandle, TransferEndpointError> {
-        Err(not_yet("T020"))
+        let base = base as usize;
+        self.call(|reply| Command::Register { base, len, reply })?
+            .map_err(TransferEndpointError::Transport)
     }
 
     fn fetch(
@@ -1138,5 +1142,123 @@ mod tests {
             other => panic!("{other:?}"),
         }
         a.ep.shutdown().unwrap();
+    }
+
+    // --- landing regions (T020) -----------------------------------------------
+
+    /// A region registered at the destination is where a source's push lands,
+    /// named through the handle's own `rkey` and `region_at`.
+    #[test]
+    fn a_registered_landing_region_receives_a_push() {
+        let f = MockFabric::new();
+        let mut a = node(&f, "10.0.0.1:7000", 8);
+        let b = node(&f, "10.0.0.2:7000", 8);
+        a.ep.initialize().unwrap();
+        b.ep.initialize().unwrap();
+        a.pool[..16].copy_from_slice(b"landing-region!!");
+        a.map.memory(1, a.pool_addr(0), 16);
+
+        let mut slots = vec![0u8; 256].into_boxed_slice();
+        let h =
+            b.ep.register_landing_region(slots.as_mut_ptr(), slots.len())
+                .unwrap();
+        assert_eq!((h.addr(), h.len()), (slots.as_ptr() as u64, 256));
+        let slot = h.region_at(64, 16).unwrap();
+        assert_eq!(
+            a.ep.push("10.0.0.2:7000", &[(1, slot)]).unwrap(),
+            [EntryOutcome::HitMemoryTier]
+        );
+        assert_eq!(&slots[64..80], b"landing-region!!");
+        assert_eq!(slots[..64], [0u8; 64], "nothing outside the slot");
+        a.ep.shutdown().unwrap();
+        b.ep.shutdown().unwrap();
+    }
+
+    /// An rkey survives a reconnect: registration belongs to the endpoint,
+    /// not to a connection (D17).
+    #[test]
+    fn a_landing_region_survives_a_reconnect() {
+        let f = MockFabric::new();
+        let a = node(&f, "10.0.0.1:7000", 8);
+        let b = node(&f, "10.0.0.2:7000", 8);
+        a.ep.initialize().unwrap();
+        b.ep.initialize().unwrap();
+        a.map.memory(1, a.pool_addr(0), 8);
+        let mut slots = vec![0u8; 64].into_boxed_slice();
+        let h =
+            b.ep.register_landing_region(slots.as_mut_ptr(), slots.len())
+                .unwrap();
+        let slot = h.region_at(0, 8).unwrap();
+        assert_eq!(
+            a.ep.push("10.0.0.2:7000", &[(1, slot)]).unwrap(),
+            [EntryOutcome::HitMemoryTier]
+        );
+        a.ep.disconnect("10.0.0.2:7000").unwrap();
+        eventually("both ends torn down", || f.qp_count() == 0);
+        // A new connection, the same handle and rkey.
+        assert_eq!(
+            a.ep.push("10.0.0.2:7000", &[(1, slot)]).unwrap(),
+            [EntryOutcome::HitMemoryTier]
+        );
+        a.ep.shutdown().unwrap();
+        b.ep.shutdown().unwrap();
+        drop(slots);
+    }
+
+    #[test]
+    fn landing_regions_refuse_null_empty_and_overlaps() {
+        let f = MockFabric::new();
+        let a = node(&f, "10.0.0.1:7000", 8);
+        assert!(matches!(
+            a.ep.register_landing_region(std::ptr::null_mut(), 64),
+            Err(TransferEndpointError::NotInitialized(_))
+        ));
+        a.ep.initialize().unwrap();
+        let mut buf = vec![0u8; 256].into_boxed_slice();
+        let base = buf.as_mut_ptr();
+        let refused = |r: Result<LandingRegionHandle, TransferEndpointError>| {
+            matches!(r, Err(TransferEndpointError::Transport(_)))
+        };
+        assert!(refused(
+            a.ep.register_landing_region(std::ptr::null_mut(), 64)
+        ));
+        assert!(refused(a.ep.register_landing_region(base, 0)));
+        let pool = a.pool.as_ptr() as *mut u8;
+        // SAFETY: only the address is used; the call is refused.
+        assert!(
+            refused(a.ep.register_landing_region(unsafe { pool.add(100) }, 8)),
+            "pool"
+        );
+        let first = a.ep.register_landing_region(base, 128).unwrap();
+        // SAFETY: inside `buf`.
+        let half = unsafe { base.add(64) };
+        assert!(refused(a.ep.register_landing_region(half, 128)), "overlap");
+        // One byte of overlap at either edge is still an overlap.
+        // SAFETY: inside `buf`; only the address is used.
+        let one_into_start = unsafe { base.add(127) };
+        assert!(
+            refused(a.ep.register_landing_region(one_into_start, 64)),
+            "a range starting on the region's last byte"
+        );
+        // Starts 63 bytes before `buf`, so its last byte is `buf`'s first.
+        // `wrapping_sub` needs no `unsafe`; the address is refused before any
+        // registration and never dereferenced.
+        let ends_one_in = base.wrapping_sub(63);
+        assert!(
+            refused(a.ep.register_landing_region(ends_one_in, 64)),
+            "a range ending on the region's first byte"
+        );
+        assert!(
+            refused(a.ep.register_landing_region(base, 128)),
+            "the same range twice"
+        );
+        // SAFETY: inside `buf`, adjacent to `first` but not overlapping.
+        let second =
+            a.ep.register_landing_region(unsafe { base.add(128) }, 128)
+                .unwrap();
+        assert_ne!(first.id(), second.id());
+        assert_ne!(first.rkey(), second.rkey());
+        a.ep.shutdown().unwrap();
+        drop(buf);
     }
 }
