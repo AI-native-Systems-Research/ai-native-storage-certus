@@ -129,7 +129,8 @@ has arrived. `context_id`, `version` and `n_entries` are zero.
 **`OP_HELLO` is a request; `OP_HELLO_REPLY` exists only to balance credits.** Both ends send
 `OP_HELLO` unsolicited, so after one exchange each end holds both advertisements, and the
 version is computed by each end from the two — **nobody decides it**. `OP_HELLO_REPLY` carries
-**no content**: it is header only, `n_entries` zero, and must stay empty forever. Its one job
+**no content**: it is the 24-byte header only, `context_id` and `n_entries` zero, and must
+stay empty forever. Its one job
 is to keep the credit rule uniform — every request costs a credit and draws exactly one reply
 — so `OP_HELLO` needs no special-case buffer in either partition. A reply that carried
 capabilities or a verdict would create a second decision point, the only way the two ends
@@ -179,13 +180,15 @@ and an upgraded peer is picked up with no separate invalidation step.
 
 ### `OP_ERROR` (`0x0000_FFFF`)
 
+**Fixed size: 32 bytes total**, header included — frozen, like `OP_HELLO`'s 40.
+
 The reply to any **request** that cannot be processed, sent **in place of** that request's
 success reply — so it lands in the same reply-reserve buffer, and the reserve stays exact.
 `n_entries` is zero. A reply is never answered with `OP_ERROR`; see *Bad replies*.
 
 | offset | size | field | notes |
 |---|---|---|---|
-| 24 | 4 | `offending_opcode` | the whole fused word as received |
+| 24 | 4 | `offending_opcode` | the whole opcode word as received |
 | 28 | 2 | `reason` | below |
 | 30 | 2 | `max_supported_version` | highest **protocol** version the sender supports; 0 if the opcode's kind is unknown entirely |
 
@@ -345,8 +348,8 @@ Three consequences:
 
 A posted receive buffer does not know what will land in it, and on a shared connection two
 independent streams compete for the same pool: replies owed to this end, and requests
-originated by the peer. With `message_credits x 8 KiB` posted — 64 KiB at 8 credits — a peer
-issuing 8 requests can consume every buffer, leaving nowhere for a reply this end is blocked
+originated by the peer. Were only one buffer posted per own message credit, a peer issuing
+that many requests could consume every one, leaving nowhere for a reply this end is blocked
 waiting on. That is an RNR stall and, with traffic both ways, a credible deadlock.
 
 So each end partitions its posted receives into two parts:
@@ -380,14 +383,13 @@ context and nothing has to be migrated.
 ## What is deliberately not here
 
 - **No per-entry completion notification.** Subsumed by the reply ordering guarantee above.
-- ~~**No negotiation.**~~ **Superseded by D20.** The original stance was that the fused opcode
-  is matched or rejected and never negotiated. It now *is* negotiated, once per connection, via
+- **No version discovery by trial.** The version is negotiated once per connection, via
   `OP_HELLO` — because the alternative (learning the peer's version from an error and retrying)
   requires re-framing and re-sending a request whose landing slots are already reserved and
   whose rkeys are already advertised, which is strictly more machinery than one exchange at
   connect. The exchange also makes `max_entries` explicit, which nothing previously checked.
-  The fused opcode is unchanged and still does the structural work: a version bump *is* an
-  opcode change, so an unknown version cannot be misparsed as a known one.
+  The structural guard is the header's `version` field, validated once against the
+  negotiated version (D21): a message at the wrong version is refused, never misparsed.
 - **No authentication or capability check.** Single-tenant assumption (spec Assumptions);
   RDMA write access into landing slots is accepted.
 - **No peer discovery.** The peer is named by the caller, which got it from llm-d.
