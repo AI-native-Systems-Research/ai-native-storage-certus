@@ -304,6 +304,51 @@ pub struct TransferStats {
     pub duplicate_connections_resolved: u64,
 }
 
+/// Start-up configuration for an endpoint, given through
+/// [`ITransferEndpointAdmin::configure`] before
+/// [`initialize`](ITransferEndpointAdmin::initialize).
+///
+/// # Examples
+///
+/// ```
+/// use interfaces::EndpointConfig;
+///
+/// let c = EndpointConfig::new("10.0.0.102:7000");
+/// assert_eq!(c.local, "10.0.0.102:7000");
+/// assert_eq!(c.send_credits, 8);
+/// assert!(c.actor_cpu.is_none());
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EndpointConfig {
+    /// This instance's own `"host:port"`: the address peers dial, and the name
+    /// it identifies itself by when it connects. Every instance must be named
+    /// by the same string everywhere (a peer's dialed name is checked against
+    /// the name it answers to), and a missing port is an error.
+    pub local: String,
+    /// Send-queue work requests the device is asked to accept per connection.
+    pub max_send_wr: u32,
+    /// Receive work requests the device is asked to accept per connection.
+    pub max_recv_wr: u32,
+    /// Send-queue credits per connection: in-flight send-queue requests, and
+    /// so held read pins. Clamped to what the device grants.
+    pub send_credits: u32,
+    /// CPU to pin the endpoint thread to, normally one on the NIC's NUMA node.
+    pub actor_cpu: Option<usize>,
+}
+
+impl EndpointConfig {
+    /// Defaults for everything but the local address.
+    pub fn new(local: impl Into<String>) -> Self {
+        EndpointConfig {
+            local: local.into(),
+            max_send_wr: 128,
+            max_recv_wr: 64,
+            send_credits: 8,
+            actor_cpu: None,
+        }
+    }
+}
+
 component_macros::define_interface! {
     pub ITransferEndpoint {
         /// Register a region that peers may RDMA-write into.
@@ -419,5 +464,48 @@ component_macros::define_interface! {
 
         /// Snapshot the endpoint's counters.
         fn stats(&self) -> TransferStats;
+    }
+}
+
+component_macros::define_interface! {
+    pub ITransferEndpointAdmin {
+        /// Set the start-up configuration. Takes effect at
+        /// [`initialize`](Self::initialize); later calls before it replace
+        /// earlier ones.
+        ///
+        /// # Errors
+        ///
+        /// [`TransferEndpointError::InvalidEndpoint`] if `config.local` is not a
+        /// `"host:port"`; [`TransferEndpointError::NotInitialized`] carrying
+        /// "already initialized" once the endpoint has started, since a running
+        /// endpoint cannot change its name or its queue sizes.
+        fn configure(&self, config: EndpointConfig) -> Result<(), TransferEndpointError>;
+
+        /// Start listening as the configured instance and start the endpoint
+        /// thread. Until this succeeds, every `ITransferEndpoint` method
+        /// returns [`TransferEndpointError::NotInitialized`].
+        ///
+        /// # Errors
+        ///
+        /// [`TransferEndpointError::NotInitialized`] if not configured or
+        /// already initialized; [`TransferEndpointError::Transport`] if the
+        /// transport cannot listen.
+        fn initialize(&self) -> Result<(), TransferEndpointError>;
+
+        /// Stop the endpoint: refuse new work, tear down and drain every
+        /// connection so all held state is released, then join the thread.
+        /// Idempotent.
+        ///
+        /// This is the **only** way to stop a running endpoint. A component
+        /// holds references to itself for interface queries, so releasing
+        /// every handle does not drop it; an endpoint never shut down keeps its
+        /// thread, its listener and its connections until the process exits.
+        ///
+        /// # Errors
+        ///
+        /// [`TransferEndpointError::Transport`] if a connection could not be
+        /// drained; the thread is still joined, but that connection's queue
+        /// pair is deliberately left undestroyed rather than lose what it holds.
+        fn shutdown(&self) -> Result<(), TransferEndpointError>;
     }
 }
