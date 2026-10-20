@@ -70,7 +70,7 @@ use super::slab::{
     TrackedRecv, TrackedSend,
 };
 use super::transport::{
-    Completion, Link, LinkId, QpCaps, RdmaError, RequestId, Transport, TransportEvent,
+    Completion, Link, LinkId, QpCaps, QpState, RdmaError, RequestId, Transport, TransportEvent,
 };
 use super::PeerId;
 use crate::telemetry::{Counters, ExtraStats, Extras};
@@ -364,6 +364,14 @@ impl<T> ConnectionTable<T> {
     pub fn credits(&self, peer: &PeerId) -> Option<&SendCredits> {
         let live = self.entries.get(peer)?.live.as_ref().filter(|l| l.up)?;
         Some(&live.credits)
+    }
+
+    /// The device-reported state of the peer's established link, for a
+    /// deadline's diagnostic: whether the queue pair is still RTS, or already
+    /// in ERROR, says which side stalled.
+    pub fn link_state(&mut self, peer: &PeerId) -> Option<QpState> {
+        let (link, _) = self.up_link(peer)?;
+        link.state().ok()
     }
 
     fn up_link(&mut self, peer: &PeerId) -> Option<(&mut dyn Link, &mut Live<T>)> {

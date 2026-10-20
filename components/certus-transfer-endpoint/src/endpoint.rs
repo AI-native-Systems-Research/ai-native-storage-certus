@@ -33,12 +33,12 @@
 
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use component_core::actor::ActorHandler;
 use interfaces::{
     CacheKey, EntryOutcome, FetchCompletion, ILogger, LandingRegionHandle, RemoteRegion,
-    TransferStats,
+    TransferEndpointError, TransferStats,
 };
 
 use crate::connection::slab::{TrackedRecv, TrackedSend};
@@ -234,7 +234,38 @@ struct Fetch {
     /// Not yet sent: waiting for the exchange, or for a message credit.
     unsent: Option<Vec<(CacheKey, RemoteRegion)>>,
     len: usize,
+    /// The requested keys' range, for a deadline's diagnostic.
+    keys: (CacheKey, CacheKey),
+    /// When the request was handed to the transport, and the context id it
+    /// went out under. The reply deadline runs from here: a fetch waiting
+    /// for a credit or the exchange is queued, not stuck.
+    sent: Option<(Instant, u64)>,
     on_complete: Option<FetchCompletion>,
+}
+
+/// Why a whole fetch fails before a usable reply: the `Err` its callback
+/// receives. Every slot of the request is to be treated as not landed.
+#[derive(Clone)]
+enum Abort {
+    /// The peer refused it with OP_ERROR.
+    Refused(String),
+    /// Its connection could not be made, or was torn down.
+    Lost(String),
+    /// This fetch's own reply deadline expired.
+    Deadline(String),
+    /// Larger than the peer accepts.
+    TooLarge(usize),
+}
+
+impl Abort {
+    fn error(self) -> TransferEndpointError {
+        match self {
+            Abort::Refused(m) => TransferEndpointError::Protocol(m),
+            Abort::Lost(m) => TransferEndpointError::Transport(m),
+            Abort::Deadline(m) => TransferEndpointError::Deadline(m),
+            Abort::TooLarge(n) => TransferEndpointError::RequestTooLarge { max_entries: n },
+        }
+    }
 }
 
 /// The actor's state: the table, until shutdown takes it.
@@ -264,6 +295,8 @@ pub(crate) struct EndpointActor {
     next_push: u64,
     /// Fetches in progress, by the caller's `TransferContextId`.
     fetches: BTreeMap<u64, Fetch>,
+    /// The reply deadline, and what to do when it expires (FR-016).
+    deadline: Option<Duration>,
     /// Buffers behind `HoldRecv` receives. Declared after `table`, so they
     /// outlive any drain of it.
     #[cfg(test)]
@@ -271,6 +304,12 @@ pub(crate) struct EndpointActor {
 }
 
 impl EndpointActor {
+    /// Set the reply deadline; `None` disables it.
+    pub(crate) fn with_deadline(mut self, deadline: Option<Duration>) -> Self {
+        self.deadline = deadline;
+        self
+    }
+
     pub(crate) fn new(
         table: ConnectionTable<WorkState>,
         logger: Box<dyn ILogger + Send + Sync>,
@@ -296,6 +335,7 @@ impl EndpointActor {
             pushes: BTreeMap::new(),
             next_push: 0,
             fetches: BTreeMap::new(),
+            deadline: None,
             #[cfg(test)]
             held: Vec::new(),
         }
@@ -305,6 +345,13 @@ impl EndpointActor {
     /// When this returns `Ok`, no write from `peer` can still land. Every pin
     /// the drain returns is released, and every push to `peer` is finished.
     fn teardown(&mut self, peer: &PeerId) -> Result<(), String> {
+        self.teardown_for(peer, None)
+    }
+
+    /// [`teardown`](Self::teardown), naming why: `cause` is the fetch whose
+    /// deadline expired, if that is what this is, so its siblings are
+    /// reported as aborted by it.
+    fn teardown_for(&mut self, peer: &PeerId, cause: Option<(u64, String)>) -> Result<(), String> {
         let table = self.table.as_mut().ok_or("endpoint is shut down")?;
         let begun = table
             .begin_teardown(peer)
@@ -336,13 +383,15 @@ impl EndpointActor {
         self.fail_pushes(peer);
         // Only now, behind the teardown barrier: every write the peer could
         // make into these fetches' landing slots is impossible (FR-017).
-        self.fail_fetches(peer);
+        self.fail_fetches(peer, cause);
         Ok(())
     }
 
-    /// End every fetch to `peer`: nothing more can arrive for it, so every
-    /// outcome is `Failed`. Called only once its link is destroyed.
-    fn fail_fetches(&mut self, peer: &PeerId) {
+    /// End every fetch to `peer`: no reply can arrive for it. Called only
+    /// once its link is destroyed, so its slots are safe to reclaim. With a
+    /// `cause`, that fetch's deadline expired — it fails with `Deadline` and
+    /// the rest are siblings aborted by it.
+    fn fail_fetches(&mut self, peer: &PeerId, cause: Option<(u64, String)>) {
         let ids: Vec<u64> = self
             .fetches
             .iter()
@@ -351,24 +400,91 @@ impl EndpointActor {
             .collect();
         for id in ids {
             let f = self.fetches.remove(&id).expect("listed above");
-            self.complete_fetch(f, Vec::new());
+            let abort = match &cause {
+                Some((expired, why)) if *expired == id => Abort::Deadline(why.clone()),
+                Some((expired, _)) => Abort::Lost(format!(
+                    "aborted: the connection to {peer} was torn down after the reply \
+                     deadline of fetch {expired} expired"
+                )),
+                None => Abort::Lost(format!("the connection to {peer} was lost")),
+            };
+            self.abort_fetch(f, abort);
         }
     }
 
-    /// Fire a fetch's callback once, with `outcomes` — or all `Failed` if
-    /// they do not cover the request (a refusal, a teardown) — and count it.
+    /// Fire a fetch's callback once with the peer's reply, and count it.
     fn complete_fetch(&mut self, mut f: Fetch, outcomes: Vec<EntryOutcome>) {
-        let outcomes = if outcomes.len() == f.len {
-            outcomes
-        } else {
-            vec![EntryOutcome::Failed; f.len]
-        };
+        debug_assert_eq!(
+            outcomes.len(),
+            f.len,
+            "a reply's length is checked on receipt"
+        );
         if let Some(t) = self.table.as_mut() {
             count_outcomes(t.counters_mut(), &outcomes);
         }
         if let Some(cb) = f.on_complete.take() {
-            cb(outcomes);
+            cb(Ok(outcomes));
         }
+    }
+
+    /// Fire a fetch's callback once with why there is no usable reply. Every
+    /// entry counts as failed.
+    fn abort_fetch(&mut self, mut f: Fetch, why: Abort) {
+        if let Some(t) = self.table.as_mut() {
+            count_outcomes(t.counters_mut(), &vec![EntryOutcome::Failed; f.len]);
+        }
+        if let Some(cb) = f.on_complete.take() {
+            cb(Err(why.error()));
+        }
+    }
+
+    /// Fire the reply deadline of every sent fetch that has waited too long
+    /// (T049). Detection is by time, not connection state: a peer that hangs
+    /// with its connection open is invisible to the transport. Expiry follows
+    /// the T070 order — log, force ERROR, drain, destroy, *then* fail every
+    /// fetch on the connection — through the same barrier as `disconnect`.
+    fn check_deadlines(&mut self) -> bool {
+        let Some(limit) = self.deadline else {
+            return false;
+        };
+        let now = Instant::now();
+        let mut expired: BTreeMap<PeerId, (u64, String)> = BTreeMap::new();
+        for (&id, f) in &self.fetches {
+            let Some((sent, ctx)) = f.sent else {
+                continue;
+            };
+            if now.duration_since(sent) < limit || expired.contains_key(&f.peer) {
+                continue;
+            }
+            let qp = self
+                .table
+                .as_mut()
+                .and_then(|t| t.link_state(&f.peer))
+                .map_or_else(|| "no link".to_string(), |s| format!("{s:?}"));
+            let siblings = self.fetches.values().filter(|g| g.peer == f.peer).count() - 1;
+            let why = format!(
+                "no reply from {peer} within {limit:?}: keys {lo}..={hi} ({n} entries), \
+                 chunk 0 (context {ctx}), queue pair {qp}; tearing the connection down \
+                 aborts {siblings} sibling fetch(es)",
+                peer = f.peer,
+                lo = f.keys.0,
+                hi = f.keys.1,
+                n = f.len,
+            );
+            expired.insert(f.peer.clone(), (id, why));
+        }
+        let did = !expired.is_empty();
+        for (peer, (id, why)) in expired {
+            self.logger
+                .error(&format!("certus-transfer-endpoint: deadline: {why}"));
+            if let Some(t) = self.table.as_mut() {
+                t.counters_mut().deadline_expiries += 1;
+            }
+            if let Err(e) = self.teardown_for(&peer, Some((id, why))) {
+                self.logger.error(&format!("certus-transfer-endpoint: {e}"));
+            }
+        }
+        did
     }
 
     /// End every push to `peer` that can make no further progress: entries
@@ -398,7 +514,9 @@ impl EndpointActor {
                     if let Some(t) = self.table.as_mut() {
                         count_outcomes(t.counters_mut(), &outcomes);
                     }
-                    cb(outcomes);
+                    // A push is always per entry: hits certainly landed, and
+                    // everything else — flushed, refused, never sent — did not.
+                    cb(Ok(outcomes));
                 }
                 (outcomes, Some(Finish::Reply { context_id })) => {
                     // Every write has completed — the ordering guarantee — so
@@ -425,7 +543,9 @@ impl EndpointActor {
     ) {
         let Some(table) = self.table.as_mut() else {
             // Shut down between queueing and handling: nothing was attempted.
-            on_complete(vec![EntryOutcome::Failed; items.len()]);
+            on_complete(Err(TransferEndpointError::NotInitialized(
+                "endpoint is shut down".into(),
+            )));
             return;
         };
         let c = table.counters_mut();
@@ -454,14 +574,20 @@ impl EndpointActor {
         on_complete: FetchCompletion,
     ) {
         let len = items.len();
+        let keys = (
+            items.iter().map(|(k, _)| *k).min().unwrap_or(0),
+            items.iter().map(|(k, _)| *k).max().unwrap_or(0),
+        );
         let fetch = Fetch {
             peer: peer.clone(),
             unsent: Some(items),
             len,
+            keys,
+            sent: None,
             on_complete: Some(on_complete),
         };
         let Some(table) = self.table.as_mut() else {
-            return self.complete_fetch(fetch, Vec::new());
+            return self.abort_fetch(fetch, Abort::Lost("endpoint is shut down".into()));
         };
         let c = table.counters_mut();
         c.requests_attempted += 1;
@@ -470,7 +596,7 @@ impl EndpointActor {
             self.logger.error(&format!(
                 "certus-transfer-endpoint: fetch from {peer} cannot connect: {e}"
             ));
-            return self.complete_fetch(fetch, Vec::new());
+            return self.abort_fetch(fetch, Abort::Lost(format!("cannot connect to {peer}: {e}")));
         }
         self.fetches.insert(id, fetch);
     }
@@ -510,6 +636,7 @@ impl EndpointActor {
             let ctx = conn.next_context;
             conn.next_context += 1;
             conn.outbound.insert(ctx, id);
+            f.sent = Some((Instant::now(), ctx));
             let b = self.msgs.take().expect("reserved");
             let version = conn.session.version().expect("Ready");
             // SAFETY: just taken from the free list.
@@ -520,12 +647,16 @@ impl EndpointActor {
         }
         for id in too_large {
             let f = self.fetches.remove(&id).expect("listed above");
+            let max = self
+                .conns
+                .get(&f.peer)
+                .map_or(0, |c| c.session.peer_max_entries() as usize);
             self.logger.warn(&format!(
-                "certus-transfer-endpoint: fetch of {} entries exceeds what {} accepts; \
+                "certus-transfer-endpoint: fetch of {} entries exceeds the {max} {} accepts; \
                  chunking lands in Phase 7",
                 f.len, f.peer
             ));
-            self.complete_fetch(f, Vec::new());
+            self.abort_fetch(f, Abort::TooLarge(max));
         }
         did
     }
@@ -898,7 +1029,7 @@ impl EndpointActor {
                     "certus-transfer-endpoint: {peer} refused a fetch: {e:?}"
                 ));
                 if let Some(f) = self.fetches.remove(&id) {
-                    self.complete_fetch(f, Vec::new());
+                    self.abort_fetch(f, Abort::Refused(format!("{peer} refused it: {e:?}")));
                 }
                 Ok(())
             }
@@ -994,7 +1125,7 @@ impl EndpointActor {
                         "certus-transfer-endpoint: connect to {peer} failed: {reason:?}"
                     ));
                     self.fail_pushes(&peer);
-                    self.fail_fetches(&peer);
+                    self.fail_fetches(&peer, None);
                 }
                 TableEvent::RefusedInbound { peer, reason } => self.logger.warn(&format!(
                     "certus-transfer-endpoint: refused inbound connect from {peer:?}: {reason:?}"
@@ -1141,7 +1272,7 @@ impl EndpointActor {
             .collect();
         for peer in stranded {
             self.fail_pushes(&peer);
-            self.fail_fetches(&peer);
+            self.fail_fetches(&peer, None);
         }
         let table = self.table.take().expect("checked above");
         if failures.is_empty() {
@@ -1245,7 +1376,8 @@ impl ActorHandler<Command> for EndpointActor {
         fatal_on_panic("endpoint poll", || {
             let events = self.pump();
             let work = self.advance();
-            events || work
+            let expired = self.check_deadlines();
+            events || work || expired
         })
     }
 
