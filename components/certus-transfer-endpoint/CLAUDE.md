@@ -135,8 +135,14 @@ VIII–XI, and a review that does not check them is not a review.
 - **Pin state lives in the link's `Slab` and leaves it only through `complete`**
   (or a partial post's `unposted` list). Do not add another way out: a second
   path is a double release, which decrements another reader's pin. Post only via
-  `post_{send,recv}_tracked` — they force `signaled` on, because an unsignaled
-  success never completes and its pin would never come back.
+  the table's `post_sends`/`post_recvs` (over `post_{send,recv}_tracked`) — they
+  force `signaled` on, because an unsignaled success never completes and its pin
+  would never come back.
+- **Send credits count every send-queue request, not just RDMA writes.** FR-014
+  says "writes", but requests and replies share the queue; counting only writes
+  lets messages fill it under writes that think they have room. Receives hold no
+  send credit — they are T080's partition. And poll a live link only through
+  `reap`: it is what returns credits, so polling around it leaks them.
 - **A `wr_id` carries a generation for a reason.** Draining links are polled after
   ERROR, so a slot can be reused while its previous occupant's completion is still
   in flight. Never strip it to "simplify" back to the predecessor's bare index.
@@ -167,13 +173,13 @@ lookup answer is reported as a **miss**, never an error (D14).
 
 ## Current state
 
-Scaffolding. T001–T010, T012, T013, T068 and T081 are done: the crate builds as a default member,
+Scaffolding. T001–T010, T012–T014, T068 and T081 are done: the crate builds as a default member,
 peer identity is implemented, `ITransferEndpoint` is defined in `interfaces`, and
 the verbs FFI (`ffi.rs`), C shim (`wrapper.c`) and safe wrappers (`rdma.rs`, T009)
 exist behind `rdma`, and the transport seam plus an in-process mock exist in every
 build (`connection/transport.rs`, `connection/mock.rs`, T010), driven by the
 connection table (`connection/table.rs`, T012, which also resolves simultaneous
-connect), with a `wr_id` slab per link (`connection/slab.rs`, T013). Nothing
-owns the table yet; the endpoint component is T016 and the verbs
+connect), with a `wr_id` slab per link (`connection/slab.rs`, T013) and send-queue
+credits (`connection/credits.rs`, T014). Nothing owns the table yet; the endpoint component is T016 and the verbs
 side of the seam is T053. See `specs/001-rdma-cache-transfer/tasks.md` for the task list and its
 traceability matrix.

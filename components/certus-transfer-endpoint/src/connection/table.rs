@@ -57,14 +57,18 @@
 // Consumed by the endpoint from T016 onward.
 #![allow(dead_code)]
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::time::Duration;
 
+use super::credits::SendCredits;
 use super::identity::{
     decode_identity, decode_reject, encode_identity, encode_reject, RejectReason, MAX_IDENTITY_LEN,
 };
-use super::slab::{drain, DrainError, Slab};
+use super::slab::{
+    drain, post_recv_tracked, post_send_tracked, DrainError, Slab, SlabError, TrackedPostError,
+    TrackedRecv, TrackedSend,
+};
 use super::transport::{
     Completion, Link, LinkId, QpCaps, RdmaError, RequestId, Transport, TransportEvent,
 };
@@ -73,8 +77,8 @@ use super::PeerId;
 /// Whether a peer's link is ready to carry work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Readiness {
-    /// Established; [`ConnectionTable::live`] returns it. Data messages still
-    /// wait for the peer's `OP_HELLO` (T076).
+    /// Established; [`ConnectionTable::post_sends`] and friends accept work
+    /// for it. Data messages still wait for the peer's `OP_HELLO` (T076).
     Ready,
     /// A connect or accept is in flight; [`TableEvent::Up`] follows, or
     /// [`TableEvent::Failed`].
@@ -88,6 +92,8 @@ pub enum TableError {
     SelfConnect,
     /// A teardown is in progress; no fresh connection until it finishes.
     Draining(PeerId),
+    /// No established link to the peer, so nothing can be posted to it.
+    NotLive(PeerId),
     /// `finish_teardown` while a draining link still holds state.
     Undrained {
         peer: PeerId,
@@ -101,6 +107,7 @@ impl fmt::Display for TableError {
         match self {
             TableError::SelfConnect => write!(f, "cannot connect to the local instance"),
             TableError::Draining(p) => write!(f, "connection to {p} is still being torn down"),
+            TableError::NotLive(p) => write!(f, "no established connection to {p}"),
             TableError::Undrained { peer, outstanding } => write!(
                 f,
                 "{outstanding} work requests to {peer} are still outstanding; drain first"
@@ -154,6 +161,33 @@ pub enum TableEvent {
         peer: Option<PeerId>,
         reason: RejectReason,
     },
+    /// The configured send-credit limit exceeds what the device granted this
+    /// link, and was clamped to the grant. Reported once, when the link comes
+    /// up, so a limit that is not in force never looks as if it were.
+    CreditsClamped {
+        peer: PeerId,
+        configured: u32,
+        granted: u32,
+    },
+}
+
+/// A completion the reaper could not attribute; see [`SlabError`]. Every
+/// variant is a defect, so the caller should fail loudly.
+#[derive(Debug)]
+pub enum ReapError<T> {
+    NotLive(PeerId),
+    Slab(SlabError<T>),
+    Poll(RdmaError),
+}
+
+impl<T> fmt::Display for ReapError<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ReapError::NotLive(p) => write!(f, "no established connection to {p}"),
+            ReapError::Slab(e) => write!(f, "{e}"),
+            ReapError::Poll(e) => write!(f, "{e}"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -167,6 +201,7 @@ struct Live<T> {
     initiator: Initiator,
     up: bool,
     slab: Slab<T>,
+    credits: SendCredits,
 }
 
 /// A link in ERROR, with whatever its slab still holds.
@@ -177,7 +212,7 @@ struct Draining<T> {
 
 struct Entry<T> {
     /// Our outbound attempt, not yet established. It has no slab: nothing can
-    /// be posted on a link before it is live (see [`ConnectionTable::live`]).
+    /// be posted on a link before it is live.
     pending: Option<LinkId>,
     live: Option<Live<T>>,
     /// In ERROR, awaiting the caller's drain and `finish_teardown`.
@@ -208,6 +243,8 @@ pub struct ConnectionTable<T> {
     local: PeerId,
     identity: Vec<u8>,
     caps: QpCaps,
+    /// Configured send-credit limit per link, before clamping to the grant.
+    send_credits: u32,
     entries: HashMap<PeerId, Entry<T>>,
     /// Which peer each live, pending or draining link belongs to.
     owners: HashMap<LinkId, PeerId>,
@@ -215,12 +252,21 @@ pub struct ConnectionTable<T> {
 }
 
 impl<T> ConnectionTable<T> {
-    /// Listen as `local` on `transport`. Every link gets `caps`.
+    /// Listen as `local` on `transport`. Every link gets `caps`, and at most
+    /// `send_credits` send-queue requests in flight (clamped to the grant).
     pub fn new(
         mut transport: Box<dyn Transport>,
         local: PeerId,
         caps: QpCaps,
+        send_credits: u32,
     ) -> Result<Self, TableError> {
+        if send_credits == 0 {
+            // Nothing could ever be posted: every send would wait forever.
+            return Err(TableError::Transport(RdmaError::Invalid {
+                op: "ConnectionTable::new",
+                reason: "send_credits must be at least 1",
+            }));
+        }
         let identity =
             encode_identity(&local).ok_or(TableError::Transport(RdmaError::Invalid {
                 op: "ConnectionTable::new",
@@ -233,6 +279,7 @@ impl<T> ConnectionTable<T> {
             local,
             identity,
             caps,
+            send_credits,
             entries: HashMap::new(),
             owners: HashMap::new(),
             scratch: Vec::new(),
@@ -278,14 +325,137 @@ impl<T> ConnectionTable<T> {
         Ok(Readiness::Connecting)
     }
 
-    /// The peer's established link and its slab — the only way to post. Post
-    /// through [`post_send_tracked`](super::slab::post_send_tracked) and
-    /// [`post_recv_tracked`](super::slab::post_recv_tracked), and release
-    /// state only through [`Slab::complete`].
-    pub fn live(&mut self, peer: &PeerId) -> Option<(&mut dyn Link, &mut Slab<T>)> {
+    /// The peer's send credits, while it has an established link.
+    pub fn credits(&self, peer: &PeerId) -> Option<&SendCredits> {
+        let live = self.entries.get(peer)?.live.as_ref().filter(|l| l.up)?;
+        Some(&live.credits)
+    }
+
+    fn up_link(&mut self, peer: &PeerId) -> Option<(&mut dyn Link, &mut Live<T>)> {
         let live = self.entries.get_mut(peer)?.live.as_mut().filter(|l| l.up)?;
         let link = self.transport.link(live.link)?;
-        Some((link, &mut live.slab))
+        Some((link, live))
+    }
+
+    /// Post send-queue requests from the front of `queue` for as long as
+    /// `peer`'s send credits allow, leaving the rest queued for the caller —
+    /// FR-015's "chunk, don't fail" at this layer. Returns how many were
+    /// posted; call again after [`reap`](Self::reap) returns credits.
+    ///
+    /// On a transport failure partway, the requests not queued go back on the
+    /// **front** of `queue`, in their original order, and their credits are
+    /// returned; the queued ones complete through `reap` as usual.
+    ///
+    /// # Safety
+    ///
+    /// As [`Link::post_send`]: every local buffer must stay valid until its
+    /// completion is reaped or the link is forced to ERROR and drained.
+    pub unsafe fn post_sends<'a>(
+        &mut self,
+        peer: &PeerId,
+        queue: &mut VecDeque<TrackedSend<'a, T>>,
+    ) -> Result<usize, TableError> {
+        let Some((link, live)) = self.up_link(peer) else {
+            return Err(TableError::NotLive(peer.clone()));
+        };
+        let n = live.credits.take(queue.len().min(u32::MAX as usize) as u32) as usize;
+        if n == 0 {
+            return Ok(0);
+        }
+        let batch: Vec<_> = queue.drain(..n).collect();
+        let shape: Vec<_> = batch.iter().map(|r| (r.op, r.local)).collect();
+        let result = post_send_tracked(link, &mut live.slab, batch);
+        let posted = match result {
+            Ok(()) => Ok(n),
+            Err(TrackedPostError {
+                accepted,
+                error,
+                unposted,
+            }) => {
+                live.credits.give_back(unposted.len() as u32);
+                for ((op, local), state) in shape[accepted..].iter().zip(unposted).rev() {
+                    queue.push_front(TrackedSend {
+                        op: *op,
+                        local: *local,
+                        state,
+                    });
+                }
+                Err(TableError::Transport(error))
+            }
+        };
+        debug_assert_eq!(
+            live.credits.in_flight() as usize,
+            live.slab.send_outstanding()
+        );
+        posted
+    }
+
+    /// Post receive buffers on `peer`'s link. Receives hold no send credit;
+    /// their bound is the receive partition (FR-026, T080).
+    ///
+    /// # Safety
+    ///
+    /// As [`Link::post_recv`].
+    pub unsafe fn post_recvs<'a>(
+        &mut self,
+        peer: &PeerId,
+        reqs: Vec<TrackedRecv<'a, T>>,
+    ) -> Result<(), TrackedPostError<T>> {
+        let Some((link, live)) = self.up_link(peer) else {
+            return Err(TrackedPostError {
+                accepted: 0,
+                error: RdmaError::Invalid {
+                    op: "post_recvs",
+                    reason: "no established connection to the peer",
+                },
+                unposted: reqs.into_iter().map(|r| r.state).collect(),
+            });
+        };
+        post_recv_tracked(link, &mut live.slab, reqs)
+    }
+
+    /// Poll `peer`'s link for up to `max` completions, releasing each one's
+    /// state through the slab onto `out` and returning a send credit for each
+    /// send-queue completion. This is the only way to poll a live link, so the
+    /// credits and the slab cannot drift apart.
+    ///
+    /// Every completion polled is processed even if one fails to attribute, so
+    /// none is lost; the first such failure is returned after.
+    pub fn reap(
+        &mut self,
+        peer: &PeerId,
+        out: &mut Vec<(Completion, T)>,
+        max: usize,
+    ) -> Result<usize, ReapError<T>> {
+        let Some((link, live)) = self.up_link(peer) else {
+            return Err(ReapError::NotLive(peer.clone()));
+        };
+        let mut batch = Vec::new();
+        let n = link.poll(&mut batch, max).map_err(ReapError::Poll)?;
+        let mut first_error = None;
+        for c in batch {
+            match live.slab.complete_kind(&c) {
+                Ok((kind, state)) => {
+                    if kind.is_send_queue() {
+                        live.credits.give_back(1);
+                    }
+                    out.push((c, state));
+                }
+                Err(e) => {
+                    if let SlabError::KindMismatch { posted, .. } = &e {
+                        if posted.is_send_queue() {
+                            live.credits.give_back(1);
+                        }
+                    }
+                    first_error.get_or_insert(ReapError::Slab(e));
+                }
+            }
+        }
+        debug_assert_eq!(
+            live.credits.in_flight() as usize,
+            live.slab.send_outstanding()
+        );
+        first_error.map_or(Ok(n), Err)
     }
 
     /// Whether `peer` has links awaiting drain and `finish_teardown`.
@@ -379,7 +549,21 @@ impl<T> ConnectionTable<T> {
         Slab::with_capacity(caps.max_send_wr as usize + caps.max_recv_wr as usize)
     }
 
-    /// Force `live` to ERROR and move it to `peer`'s draining set.
+    /// Credits for a new link, and whether the configured limit was clamped.
+    fn credits_for(&mut self, link: LinkId) -> (SendCredits, Option<u32>) {
+        let granted = self
+            .transport
+            .link(link)
+            .expect("new link missing from its transport")
+            .granted()
+            .max_send_wr;
+        let clamped = (self.send_credits > granted).then_some(granted);
+        (SendCredits::new(self.send_credits, granted), clamped)
+    }
+
+    /// Force `live` to ERROR and move it to `peer`'s draining set. Its send
+    /// credits go with it: nothing posts on a draining link, and the slab
+    /// alone accounts for what is still outstanding there.
     fn retire(&mut self, peer: &PeerId, live: Live<T>) -> Result<(), RdmaError> {
         let result = self
             .transport
@@ -534,11 +718,13 @@ impl<T> ConnectionTable<T> {
         match self.transport.accept(request, &self.identity, self.caps) {
             Ok(link) => {
                 let slab = self.slab_for(link);
+                let (credits, _) = self.credits_for(link);
                 self.entries.entry(peer.clone()).or_default().live = Some(Live {
                     link,
                     initiator: Initiator::Peer,
                     up: false,
                     slab,
+                    credits,
                 });
                 self.owners.insert(link, peer);
             }
@@ -558,7 +744,8 @@ impl<T> ConnectionTable<T> {
             .expect("owned link has no entry");
         if let Some(live) = e.live.as_mut().filter(|l| l.link == link) {
             live.up = true;
-            out.push(TableEvent::Up(peer));
+            out.push(TableEvent::Up(peer.clone()));
+            self.report_clamp(&peer, link, out);
             return;
         }
         if e.pending != Some(link) {
@@ -578,6 +765,7 @@ impl<T> ConnectionTable<T> {
             return;
         }
         let slab = self.slab_for(link);
+        let (credits, _) = self.credits_for(link);
         let e = self.entries.get_mut(&peer).unwrap();
         e.pending = None;
         e.live = Some(Live {
@@ -585,8 +773,20 @@ impl<T> ConnectionTable<T> {
             initiator: Initiator::Local,
             up: true,
             slab,
+            credits,
         });
-        out.push(TableEvent::Up(peer));
+        out.push(TableEvent::Up(peer.clone()));
+        self.report_clamp(&peer, link, out);
+    }
+
+    fn report_clamp(&mut self, peer: &PeerId, link: LinkId, out: &mut Vec<TableEvent>) {
+        if let (_, Some(granted)) = self.credits_for(link) {
+            out.push(TableEvent::CreditsClamped {
+                peer: peer.clone(),
+                configured: self.send_credits,
+                granted,
+            });
+        }
     }
 }
 
@@ -621,8 +821,7 @@ impl<T> Drop for ConnectionTable<T> {
 mod tests {
     use super::*;
     use crate::connection::mock::{MockFabric, MockTransport};
-    use crate::connection::slab::{post_recv_tracked, post_send_tracked, TrackedRecv, TrackedSend};
-    use crate::connection::transport::{Access, Completed, CompletionError, SendOp};
+    use crate::connection::transport::{Access, Completed, CompletionError, Region, SendOp};
 
     const CAPS: QpCaps = QpCaps {
         max_send_wr: 8,
@@ -634,10 +833,15 @@ mod tests {
     }
 
     fn table(fabric: &MockFabric, name: &str) -> ConnectionTable<Tag> {
+        table_with(fabric, name, CAPS.max_send_wr)
+    }
+
+    fn table_with(fabric: &MockFabric, name: &str, send_credits: u32) -> ConnectionTable<Tag> {
         ConnectionTable::new(
             Box::new(MockTransport::new(fabric.clone())),
             peer(name),
             CAPS,
+            send_credits,
         )
         .unwrap()
     }
@@ -688,37 +892,28 @@ mod tests {
                 .register(src.as_mut_ptr(), 4, Access::LOCAL_WRITE)
         }
         .unwrap();
-        {
-            let (link, slab) = b.live(&pb).expect("b has a link to a");
-            // SAFETY: as above.
-            unsafe {
-                post_recv_tracked(
-                    link,
-                    slab,
-                    vec![TrackedRecv {
-                        buf: rd.sge(rd.addr(), 4).unwrap(),
-                        state: "recv",
-                    }],
-                )
-            }
-            .unwrap();
+        // SAFETY: as above.
+        unsafe {
+            b.post_recvs(
+                &pb,
+                vec![TrackedRecv {
+                    buf: rd.sge(rd.addr(), 4).unwrap(),
+                    state: "recv",
+                }],
+            )
         }
-        {
-            let (link, slab) = a.live(&pa).expect("a has a link to b");
-            // SAFETY: as above.
-            unsafe {
-                post_send_tracked(
-                    link,
-                    slab,
-                    vec![TrackedSend {
-                        op: SendOp::Send,
-                        local: rs.sge(rs.addr(), 4).unwrap(),
-                        state: "send",
-                    }],
-                )
-            }
-            .unwrap();
-        }
+        .expect("b has a link to a");
+        let mut q = VecDeque::from([TrackedSend {
+            op: SendOp::Send,
+            local: rs.sge(rs.addr(), 4).unwrap(),
+            state: "send",
+        }]);
+        // SAFETY: as above.
+        assert_eq!(
+            unsafe { a.post_sends(&pa, &mut q) },
+            Ok(1),
+            "a has a link to b"
+        );
         assert_eq!(
             reap(b, &pb),
             [(Ok(Completed::Recv { byte_len: 4 }), "recv")]
@@ -728,17 +923,14 @@ mod tests {
         assert_eq!(&dst, msg);
     }
 
-    /// Poll `peer`'s live link and release each completion through its slab.
+    /// Reap `peer`'s live link: each completion's result and released state.
     fn reap(
         t: &mut ConnectionTable<Tag>,
         peer: &PeerId,
     ) -> Vec<(Result<Completed, CompletionError>, Tag)> {
-        let (link, slab) = t.live(peer).unwrap();
-        let mut c = Vec::new();
-        link.poll(&mut c, 64).unwrap();
-        c.iter()
-            .map(|c| (c.result, slab.complete(c).unwrap()))
-            .collect()
+        let mut out = Vec::new();
+        t.reap(peer, &mut out, 64).unwrap();
+        out.into_iter().map(|(c, t)| (c.result, t)).collect()
     }
 
     #[test]
@@ -1021,7 +1213,7 @@ mod tests {
                 }
             }]
         );
-        assert!(a.live(&dialed).is_none());
+        assert!(a.credits(&dialed).is_none(), "no link was kept");
     }
 
     #[test]
@@ -1035,7 +1227,7 @@ mod tests {
 
         assert_eq!(a.begin_teardown(&pb), Ok(true));
         assert!(a.is_draining(&pb));
-        assert!(a.live(&pb).is_none());
+        assert!(a.credits(&pb).is_none());
         assert_eq!(a.ensure(&pb), Err(TableError::Draining(pb.clone())));
 
         // b notices (a's link is in ERROR, but a has not disconnected): b's own
@@ -1081,26 +1273,17 @@ mod tests {
                 .register(src.as_mut_ptr(), 8, Access::LOCAL_WRITE)
         }
         .unwrap();
-        {
-            let (link, slab) = a.live(&pb).unwrap();
-            // Two sends with no receive posted at b: both stay queued (RNR).
-            // SAFETY: as above.
-            unsafe {
-                post_send_tracked(
-                    link,
-                    slab,
-                    ["pin-1", "pin-2"]
-                        .into_iter()
-                        .map(|state| TrackedSend {
-                            op: SendOp::Send,
-                            local: rs.sge(rs.addr(), 8).unwrap(),
-                            state,
-                        })
-                        .collect(),
-                )
-            }
-            .unwrap();
-        }
+        // Two sends with no receive posted at b: both stay queued (RNR).
+        let mut q: VecDeque<_> = ["pin-1", "pin-2"]
+            .into_iter()
+            .map(|state| TrackedSend {
+                op: SendOp::Send,
+                local: rs.sge(rs.addr(), 8).unwrap(),
+                state,
+            })
+            .collect();
+        // SAFETY: as above.
+        assert_eq!(unsafe { a.post_sends(&pb, &mut q) }, Ok(2));
         a.begin_teardown(&pb).unwrap();
         assert_eq!(
             a.finish_teardown(&pb),
@@ -1145,12 +1328,10 @@ mod tests {
                 .register(buf.as_mut_ptr(), 8, Access::LOCAL_WRITE)
         }
         .unwrap();
-        let (link, slab) = a.live(&pb).unwrap();
         // SAFETY: as above.
         unsafe {
-            post_recv_tracked(
-                link,
-                slab,
+            a.post_recvs(
+                &pb,
                 vec![TrackedRecv {
                     buf: r.sge(r.addr(), 8).unwrap(),
                     state: "held",
@@ -1184,10 +1365,324 @@ mod tests {
             Box::new(MockTransport::new(MockFabric::new())),
             peer(&long),
             CAPS,
+            8,
         );
         assert!(matches!(
             r,
             Err(TableError::Transport(RdmaError::Invalid { .. }))
+        ));
+    }
+
+    // --- send-queue credits (T014) -------------------------------------------
+
+    /// Backing memory for [`writes`]: `src` at the writer, `land` at the target.
+    struct Writes {
+        src: Vec<u8>,
+        land: Vec<u8>,
+    }
+
+    /// Register `bufs` and describe `n` one-byte writes, the i-th from
+    /// `src[i]` to `land[i]`: (source region, landing region, (op, local addr)).
+    fn writes(
+        a: &mut ConnectionTable<Tag>,
+        b: &mut ConnectionTable<Tag>,
+        bufs: &mut Writes,
+        n: usize,
+    ) -> (Region, Region, Vec<(SendOp, u64)>) {
+        // SAFETY: `bufs` outlives both regions and every completion in the
+        // calling test.
+        let rs = unsafe {
+            a.transport()
+                .register(bufs.src.as_mut_ptr(), bufs.src.len(), Access::LOCAL_WRITE)
+        }
+        .unwrap();
+        let rl = unsafe {
+            b.transport().register(
+                bufs.land.as_mut_ptr(),
+                bufs.land.len(),
+                Access::LOCAL_WRITE | Access::REMOTE_WRITE,
+            )
+        }
+        .unwrap();
+        let ops = (0..n as u64)
+            .map(|i| {
+                (
+                    SendOp::RdmaWrite {
+                        remote_addr: rl.addr() + i,
+                        rkey: rl.rkey(),
+                    },
+                    rs.addr() + i,
+                )
+            })
+            .collect();
+        (rs, rl, ops)
+    }
+
+    const TAGS: [&str; 12] = [
+        "w0", "w1", "w2", "w3", "w4", "w5", "w6", "w7", "w8", "w9", "w10", "w11",
+    ];
+
+    /// SC-004's bound at this layer, and FR-015's chunking: a queue longer
+    /// than the credit limit posts in chunks, never holds more than the limit
+    /// in flight, and keeps request order.
+    #[test]
+    fn credits_bound_in_flight_and_chunk_a_long_queue() {
+        let f = MockFabric::new();
+        let mut a = table_with(&f, "10.0.0.1:7000", 3);
+        let mut b = table(&f, "10.0.0.2:7000");
+        let pb = b.local().clone();
+        a.ensure(&pb).unwrap();
+        settle(&mut [&mut a, &mut b]);
+        let mut bufs = Writes {
+            src: (0..12).collect(),
+            land: vec![0; 12],
+        };
+        let (rs, rl, ops) = writes(&mut a, &mut b, &mut bufs, 12);
+        let mut q: VecDeque<_> = ops
+            .iter()
+            .zip(TAGS)
+            .map(|((op, addr), state)| TrackedSend {
+                op: *op,
+                local: rs.sge(*addr, 1).unwrap(),
+                state,
+            })
+            .collect();
+
+        let mut done = Vec::new();
+        let mut rounds = 0;
+        while !q.is_empty() || a.credits(&pb).unwrap().in_flight() > 0 {
+            // SAFETY: the regions outlive the loop.
+            let posted = unsafe { a.post_sends(&pb, &mut q) }.unwrap();
+            assert!(posted <= 3);
+            assert!(
+                a.credits(&pb).unwrap().in_flight() <= 3,
+                "never past the limit"
+            );
+            let mut out = Vec::new();
+            a.reap(&pb, &mut out, 64).unwrap();
+            done.extend(out.into_iter().map(|(_, t)| t));
+            rounds += 1;
+            assert!(rounds < 100, "no progress");
+        }
+        assert_eq!(done, TAGS, "every write completes, in order");
+        assert_eq!(a.credits(&pb).unwrap().peak(), 3);
+        assert!(rounds >= 4, "12 writes at 3 credits take at least 4 rounds");
+        drop((rs, rl));
+        assert_eq!(bufs.land, bufs.src);
+    }
+
+    /// A queue that cannot proceed — sends stalled on RNR — keeps its credits
+    /// held, and the rest of the queue waits rather than failing.
+    #[test]
+    fn exhausted_credits_post_nothing_and_fail_nothing() {
+        let f = MockFabric::new();
+        let mut a = table_with(&f, "10.0.0.1:7000", 2);
+        let mut b = table(&f, "10.0.0.2:7000");
+        let pb = b.local().clone();
+        a.ensure(&pb).unwrap();
+        settle(&mut [&mut a, &mut b]);
+        let mut src = [0u8; 8];
+        // SAFETY: `src` outlives the region and the drain below.
+        let rs = unsafe {
+            a.transport()
+                .register(src.as_mut_ptr(), 8, Access::LOCAL_WRITE)
+        }
+        .unwrap();
+        let mut q: VecDeque<_> = TAGS[..5]
+            .iter()
+            .map(|&state| TrackedSend {
+                op: SendOp::Send,
+                local: rs.sge(rs.addr(), 8).unwrap(),
+                state,
+            })
+            .collect();
+        // SAFETY: as above.
+        assert_eq!(unsafe { a.post_sends(&pb, &mut q) }, Ok(2));
+        assert_eq!(
+            unsafe { a.post_sends(&pb, &mut q) },
+            Ok(0),
+            "no credit, no post"
+        );
+        assert_eq!(q.len(), 3, "the rest waits");
+        assert_eq!(q.front().unwrap().state, "w2", "in order");
+        assert!(reap(&mut a, &pb).is_empty(), "stalled on RNR: nothing back");
+
+        a.begin_teardown(&pb).unwrap();
+        let mut out = Vec::new();
+        a.drain(&pb, &mut out, Duration::from_secs(1)).unwrap();
+        assert_eq!(out.len(), 2, "the two in flight drain as flushed");
+        a.finish_teardown(&pb).unwrap();
+        drop(rs);
+    }
+
+    /// A transport refusal partway returns the unqueued requests to the front
+    /// of the queue, in order, and their credits with them. Through the table
+    /// alone the device never refuses — credits are clamped to its depth — so
+    /// the test fills device slots behind the table's back.
+    #[test]
+    fn transport_refusal_requeues_at_the_front_and_returns_credits() {
+        let f = MockFabric::new();
+        let mut a = table_with(&f, "10.0.0.1:7000", 4);
+        let mut b = table(&f, "10.0.0.2:7000");
+        let pb = b.local().clone();
+        a.ensure(&pb).unwrap();
+        settle(&mut [&mut a, &mut b]);
+        let mut bufs = Writes {
+            src: vec![1; 8],
+            land: vec![0; 8],
+        };
+        let (rs, rl, ops) = writes(&mut a, &mut b, &mut bufs, 5);
+        // Raw writes execute at once but hold their device slots until polled:
+        // 7 of the 8, leaving room for exactly one more.
+        let raw = a.entries[&pb].live.as_ref().unwrap().link;
+        for k in 0..7 {
+            // SAFETY: the regions outlive every completion below.
+            unsafe {
+                a.transport().link(raw).unwrap().post_send(&[
+                    crate::connection::transport::SendRequest {
+                        wr_id: u64::MAX - k,
+                        op: ops[4].0,
+                        local: rs.sge(ops[4].1, 1).unwrap(),
+                        signaled: true,
+                    },
+                ])
+            }
+            .unwrap();
+        }
+        let mut q: VecDeque<_> = ops[..4]
+            .iter()
+            .zip(["x", "y", "z", "w"])
+            .map(|((op, addr), state)| TrackedSend {
+                op: *op,
+                local: rs.sge(*addr, 1).unwrap(),
+                state,
+            })
+            .collect();
+        // Four credits, so all four are tried; the device takes x only.
+        // SAFETY: as above.
+        let r = unsafe { a.post_sends(&pb, &mut q) };
+        assert!(matches!(r, Err(TableError::Transport(_))), "{r:?}");
+        let order: Vec<_> = q.iter().map(|r| r.state).collect();
+        assert_eq!(order, ["y", "z", "w"], "unqueued back in front, in order");
+        assert_eq!(
+            a.credits(&pb).unwrap().in_flight(),
+            1,
+            "their credits returned"
+        );
+
+        // Reaping processes every completion even though the raw ones are
+        // unattributable: x comes back, and the error is still reported.
+        let mut out = Vec::new();
+        let e = a.reap(&pb, &mut out, 64);
+        assert!(
+            matches!(e, Err(ReapError::Slab(SlabError::UnknownWrId(_)))),
+            "{e:?}"
+        );
+        assert_eq!(out.iter().map(|(_, t)| *t).collect::<Vec<_>>(), ["x"]);
+        assert_eq!(a.credits(&pb).unwrap().in_flight(), 0);
+        // SAFETY: as above.
+        assert_eq!(
+            unsafe { a.post_sends(&pb, &mut q) },
+            Ok(3),
+            "the rest go now"
+        );
+        let mut out = Vec::new();
+        a.reap(&pb, &mut out, 64).unwrap();
+        assert_eq!(
+            out.iter().map(|(_, t)| *t).collect::<Vec<_>>(),
+            ["y", "z", "w"]
+        );
+        drop((rs, rl));
+    }
+
+    #[test]
+    fn credits_clamped_to_the_grant_are_reported() {
+        let f = MockFabric::new();
+        let mut a = table_with(&f, "10.0.0.1:7000", 64);
+        let mut b = table(&f, "10.0.0.2:7000");
+        let (pa, pb) = (a.local().clone(), b.local().clone());
+        a.ensure(&pb).unwrap();
+        let evs = settle(&mut [&mut a, &mut b]);
+        assert_eq!(
+            evs[0],
+            [
+                TableEvent::Up(pb.clone()),
+                TableEvent::CreditsClamped {
+                    peer: pb.clone(),
+                    configured: 64,
+                    granted: CAPS.max_send_wr
+                }
+            ]
+        );
+        assert_eq!(
+            evs[1],
+            [TableEvent::Up(pa)],
+            "b's limit was within the grant"
+        );
+        assert_eq!(a.credits(&pb).unwrap().limit(), CAPS.max_send_wr);
+    }
+
+    #[test]
+    fn receives_hold_no_send_credit() {
+        let f = MockFabric::new();
+        let mut a = table_with(&f, "10.0.0.1:7000", 1);
+        let mut b = table(&f, "10.0.0.2:7000");
+        let pb = b.local().clone();
+        a.ensure(&pb).unwrap();
+        settle(&mut [&mut a, &mut b]);
+        let mut buf = [0u8; 32];
+        // SAFETY: `buf` outlives the region and the drain below.
+        let r = unsafe {
+            a.transport()
+                .register(buf.as_mut_ptr(), 32, Access::LOCAL_WRITE)
+        }
+        .unwrap();
+        let recvs = TAGS[..4]
+            .iter()
+            .enumerate()
+            .map(|(i, &state)| TrackedRecv {
+                buf: r.sge(r.addr() + 8 * i as u64, 8).unwrap(),
+                state,
+            })
+            .collect();
+        // SAFETY: as above.
+        unsafe { a.post_recvs(&pb, recvs) }.unwrap();
+        assert_eq!(a.credits(&pb).unwrap().in_flight(), 0);
+        a.begin_teardown(&pb).unwrap();
+        a.drain(&pb, &mut Vec::new(), Duration::from_secs(1))
+            .unwrap();
+        a.finish_teardown(&pb).unwrap();
+        drop(r);
+    }
+
+    #[test]
+    fn zero_credits_is_refused() {
+        let r = ConnectionTable::<Tag>::new(
+            Box::new(MockTransport::new(MockFabric::new())),
+            peer("10.0.0.1:7000"),
+            CAPS,
+            0,
+        );
+        assert!(matches!(
+            r,
+            Err(TableError::Transport(RdmaError::Invalid { .. }))
+        ));
+    }
+
+    #[test]
+    fn posting_to_a_peer_without_a_link_is_refused() {
+        let f = MockFabric::new();
+        let mut a = table(&f, "10.0.0.1:7000");
+        let p = peer("10.0.0.9:1");
+        let mut q: VecDeque<TrackedSend<'_, Tag>> = VecDeque::new();
+        // SAFETY: nothing is posted.
+        assert_eq!(
+            unsafe { a.post_sends(&p, &mut q) },
+            Err(TableError::NotLive(p.clone()))
+        );
+        assert!(matches!(
+            a.reap(&p, &mut Vec::new(), 1),
+            Err(ReapError::NotLive(_))
         ));
     }
 }
