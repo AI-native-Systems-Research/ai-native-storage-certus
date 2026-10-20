@@ -7,7 +7,7 @@ those slots and replies with a per-key outcome. It replaces zyre broadcast/reap 
 no broadcast, no polling, no reap.
 
 Design documents live with the component, not at repo root:
-`specs/001-rdma-cache-transfer/` (spec, plan, research D1–D19, contracts, tasks)
+`specs/001-rdma-cache-transfer/` (spec, plan, research D1–D24, contracts, tasks)
 and `.specify/memory/constitution.md`.
 
 ## The invariants that matter
@@ -99,6 +99,18 @@ VIII–XI, and a review that does not check them is not a review.
   whose initiator has the lower `PeerId`, resolved at accept via the connect
   `private_data`, before `OP_HELLO`. Two live connections defeat `disconnect`: tearing
   one down leaves the other able to write into a reclaimed slot (FR-027, D23).
+- **The connect `private_data` identity is frozen, like `OP_HELLO`.** It travels
+  before the version exchange, so a peer must always be able to parse it: extend it
+  by a new format byte, never by changing format 1 (D24). Received private data is
+  zero-padded, hence the explicit length.
+- **Name every instance by the same string everywhere.** The table checks that an
+  acceptor answers to the name it was dialed by and fails the link otherwise;
+  `10.0.0.2:7000` and `node2:7000` are different instances to it, and there is no
+  resolver (D16, D24).
+- **A duplicate the race cannot explain means the peer lost its link: newer wins.**
+  The old link goes to ERROR first. The one undecidable case — a crashed-and-
+  restarted peer that out-ranks nobody — is rejected until a deadline notices the
+  stale link (D24's known gap). Do not "fix" it by accepting every duplicate.
 - **Nobody decides the version and there is no `OP_HELLO_REPLY`.** Both ends send
   unsolicited and compute `min(a.max, b.max)` against floor `max(a.min, b.min)`. The
   rule is commutative, which is *why* the two ends cannot disagree — never replace it
@@ -147,10 +159,12 @@ lookup answer is reported as a **miss**, never an error (D14).
 
 ## Current state
 
-Scaffolding. T001–T010 and T068 are done: the crate builds as a default member,
+Scaffolding. T001–T010, T012, T068 and T081 are done: the crate builds as a default member,
 peer identity is implemented, `ITransferEndpoint` is defined in `interfaces`, and
 the verbs FFI (`ffi.rs`), C shim (`wrapper.c`) and safe wrappers (`rdma.rs`, T009)
 exist behind `rdma`, and the transport seam plus an in-process mock exist in every
-build (`connection/transport.rs`, `connection/mock.rs`, T010). Nothing drives the
-seam yet; the connection table is T012 and the verbs side of the seam is T053. See `specs/001-rdma-cache-transfer/tasks.md` for the task list and its
+build (`connection/transport.rs`, `connection/mock.rs`, T010), driven by the
+connection table (`connection/table.rs`, T012, which also resolves simultaneous
+connect). Nothing owns the table yet; the endpoint component is T016 and the verbs
+side of the seam is T053. See `specs/001-rdma-cache-transfer/tasks.md` for the task list and its
 traceability matrix.

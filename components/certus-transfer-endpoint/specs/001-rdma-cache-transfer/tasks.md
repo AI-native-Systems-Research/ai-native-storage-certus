@@ -157,13 +157,21 @@ connection table. This is plan.md Phase 1's engine.
   receive buffers, and recorded QP→ERROR ordering so teardown-before-reclaim is assertable.
   Two endpoints in one process and the one-sided write that copies into the target address
   already exist (T010)
-- [ ] T012 Implement the **symmetric** `ConnectionTable` in `src/connection/` (depends
+- [X] T012 Implement the **symmetric** `ConnectionTable` in `src/connection/` (depends
   T010, T068, D5): one QP per peer **instance** pair keyed by `PeerId`, established on first
   need and reused. Remove the temporary per-item `#[allow(dead_code)]` attributes T068 left
   on `PeerId`/`PeerIdError` once this consumes them
   (FR-002), with a connection usable regardless of whether it was inbound-accepted or
   outbound-initiated, and **either end able to post work requests** (FR-001). This is the
-  thing neither existing crate can do
+  thing neither existing crate can do.
+  *Done* in `src/connection/table.rs` + `src/connection/identity.rs`, and **absorbs T081**:
+  a table cannot file an inbound link without the initiator's identity, and once it can, it
+  meets duplicates, for which both stopgaps are wrong (reject-all livelocks a race,
+  accept-all keeps two connections). Identity format, name-echo check and the two
+  "newer wins" cases are research **D24**. Teardown is two-step — `begin_teardown` forces
+  ERROR and moves the link to a draining set, `finish_teardown` destroys it after the
+  caller's drain (T019/T013) — and a draining peer refuses reconnect at both ends (FR-023).
+  No automatic retry; self-connect is an error. T068's `dead_code` allows removed
 - [ ] T013 [P] Implement the `wr_id` slab in `src/connection/` (depends T010): allocate
   a slot per posted work request carrying the per-entry state its completion must release
   (pin, bounce lease, context + entry index). This is the mechanism Principle IX requires
@@ -369,7 +377,7 @@ slots and the reply's per-key outcomes match the source's actual residency.
   granted quota on inbound requests. Without this, a peer issuing requests up to the buffer
   count takes every buffer and leaves none for a reply this end is blocked on: an RNR stall,
   and with two-way traffic a deadlock
-- [ ] T081 Resolve simultaneous connect (FR-027, D23): on detecting a duplicate, both ends keep
+- [X] T081 *(absorbed into T012 — see there and D24)* Resolve simultaneous connect (FR-027, D23): on detecting a duplicate, both ends keep
   the connection whose **initiator has the lower `PeerId`** and close the other — a
   deterministic function of two known values, no arbitrator, no extra round trip. Requires the
   initiator to identify itself in the connect `private_data` (D16 puts a certus instance id
@@ -379,7 +387,8 @@ slots and the reply's per-key outcomes match the source's actual residency.
   reclaimed slot (FR-017)
 - [ ] T082 Tests for T079-T081: **SC-014** — commutativity of version selection over a table of
   range pairs; **SC-015** — two mock endpoints initiating simultaneously converge on one
-  connection and agree which; **SC-016** — a peer at full inbound-request quota does not stop
+  connection and agree which *(done in T012, under all four poll orders plus the
+  reject-before-request order)*; **SC-016** — a peer at full inbound-request quota does not stop
   this end receiving replies, and two-way traffic at full quota makes progress rather than
   deadlocking; plus one context id live in both directions resolving to two distinct contexts
 - [ ] T030 [US1] Post receive buffers **unconditionally** on every connection, whether or
@@ -721,7 +730,7 @@ this. It is a separate change, after the engine is proven.
 | FR-024 protocol error reply | T074, T075, T078 |
 | FR-025 single negotiated version + capability exchange | T076, T077, T078 |
 | FR-026 bidirectional connection: namespaces, credits, buffers | T079, T080, T082 |
-| FR-027 simultaneous-connect resolution | T081, T082 |
+| FR-027 simultaneous-connect resolution | T012 (absorbed T081), T082 |
 | SC-001 zero zyre, zero third instance | T035 |
 | SC-002 legacy tests pass | T021, T055 |
 | SC-003 default build, no rdma-core/SPDK | T001, T003, T010, T041 |
@@ -730,17 +739,18 @@ this. It is a separate change, after the engine is proven.
 | SC-006 all-miss, no broadcast | T035 |
 | SC-007 progress under scarcity | T048 |
 | SC-008 FFI defined once | T007 |
-| SC-009 two instances per host addressed independently | T068 |
+| SC-009 two instances per host addressed independently | T068, T012 |
 | SC-010 no late write after deadline; rkey survives reconnect | T071 |
 | SC-011 no read/write phase barrier | T073 |
 | SC-012 unknown opcode answered, connection survives | T078 |
 | SC-013 peer max_entries respected, floor fails at connect | T078 |
 | SC-014 version rule is commutative | T077, T082 |
-| SC-015 one connection survives a race | T081, T082 |
+| SC-015 one connection survives a race | T012 |
 | SC-016 replies not starved by inbound requests | T080, T082 |
 | D21 version is a validated header field | T027 |
 | D22 one connection, both directions | T079, T080 |
-| D23 deterministic race resolution | T081 |
+| D23 deterministic race resolution | T012 |
+| D24 connect-time identity, name echo, newer wins | T012 |
 | D20 one negotiated version, frozen messages, eager discovery | T027, T074-T078 |
 | D17 long-lived PD, registrations outlive QPs | T069, T020 |
 | Principle VIII default build | T002, T003, T010, T054–T056 |

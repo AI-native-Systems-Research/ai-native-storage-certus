@@ -30,12 +30,13 @@
 //!
 //! # Status
 //!
-//! Scaffolding. Tasks T001–T010 and T068 of
+//! Scaffolding. Tasks T001–T010, T012, T068 and T081 of
 //! `specs/001-rdma-cache-transfer/tasks.md` are complete: the crate builds as a
 //! workspace default member, peer identity is implemented, and the verbs FFI, its
 //! C shim and the safe wrappers over them exist behind `rdma`, and the transport
-//! seam with its in-process mock exists in every build. No transfer logic exists
-//! yet — the connection table is T012 and the engine is Phase 2.
+//! seam with its in-process mock and the connection table over it exist in every
+//! build. No transfer logic exists yet — the endpoint is T016 and the engine is
+//! Phase 2.
 
 #![deny(missing_docs)]
 

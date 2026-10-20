@@ -58,6 +58,12 @@ impl MockFabric {
         PROCESS.get_or_init(MockFabric::new).clone()
     }
 
+    /// Queue pairs alive on the fabric, both ends counted.
+    #[cfg(test)]
+    pub(crate) fn qp_count(&self) -> usize {
+        self.lock().qps.len()
+    }
+
     fn lock(&self) -> MutexGuard<'_, Fabric> {
         // A panic while holding the lock leaves the fabric inconsistent;
         // carrying on would turn one failure into misleading others.
