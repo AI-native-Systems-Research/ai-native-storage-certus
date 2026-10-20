@@ -96,6 +96,18 @@ pub(crate) enum Command {
     Plug(PeerId, mpsc::Sender<Result<(), String>>),
 }
 
+thread_local! {
+    /// Set on an endpoint thread for its whole life, so a blocking call made
+    /// *from* that thread — a completion callback calling `push` — is caught
+    /// instead of waiting forever on itself.
+    static ON_ENDPOINT_THREAD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether the caller is running on an endpoint thread.
+pub(crate) fn on_endpoint_thread() -> bool {
+    ON_ENDPOINT_THREAD.with(|f| f.get())
+}
+
 /// Run `f`, aborting the process if it panics. See the module docs.
 pub(crate) fn fatal_on_panic<R>(what: &str, f: impl FnOnce() -> R) -> R {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
@@ -511,6 +523,10 @@ impl EndpointActor {
 }
 
 impl ActorHandler<Command> for EndpointActor {
+    fn on_start(&mut self) {
+        ON_ENDPOINT_THREAD.with(|f| f.set(true));
+    }
+
     fn handle(&mut self, cmd: Command) {
         fatal_on_panic("endpoint command", || match cmd {
             Command::Stats(reply) => {
