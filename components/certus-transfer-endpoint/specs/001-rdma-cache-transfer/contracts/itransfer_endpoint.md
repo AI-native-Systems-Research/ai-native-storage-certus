@@ -257,7 +257,9 @@ requests with it.
 ## Why `fetch` returns a context id
 
 The caller needs it for exactly one reason: to correlate a `Deadline` error, or a log line,
-with the request it came from — including distinguishing the context that actually expired
+with the request it came from. It names the caller's whole fetch; a fetch the endpoint
+chunks puts several wire `context_id`s on the wire, one per chunk message, and the endpoint
+maps them back to this one (wire-protocol *Chunking*) — including distinguishing the context that actually expired
 from the siblings aborted with it when its connection was torn down (FR-023). It is **not** a handle for cancellation — cancelling a fetch
 cannot be made safe without the destination holding its landing slots anyway, and holding
 them is the whole point of FR-017. If cancellation is ever wanted, it must be a separate

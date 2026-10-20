@@ -589,6 +589,16 @@ than as having disposed of it.
    quota is why `OP_HELLO` carries `max_outstanding_requests`, and it had to be added **before**
    that layout froze.
 
+   **The reservation is exact only because replies are never split.** If a source could send
+   one reply per batch it completed, N outstanding requests could draw more than N replies and
+   overrun an N-buffer reserve. So the source sends exactly one reply per request message
+   (FR-007), the reserve is exactly one buffer per own message credit, and posted receives
+   total reserve + quota — 16 buffers at the defaults of 8 and 8. Large requests are still
+   chunked, by the requester, where each chunk costs a credit and carries its own context id,
+   so a reply names exactly the message it answers even when chunks are served out of order.
+   Split replies would buy only progress reporting within a message, which D19 values at
+   ~0.1%.
+
 ## D23 — Simultaneous connect is resolved by a deterministic rule, not an arbitrator
 
 **Decision**: on detecting a duplicate, both ends keep the connection whose **initiator is the

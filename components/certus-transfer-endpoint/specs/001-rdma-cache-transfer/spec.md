@@ -103,7 +103,12 @@ unchanged.
 - **FR-006**: A transfer request MUST carry: a context ID, the destination's rkey, base
   address, per-entry size, and a list of `(block key, landing slot index)` pairs.
 - **FR-007**: A transfer reply MUST carry the context ID and one outcome per requested key,
-  from `{ hit_memory_tier, hit_block_tier, miss }`, in request order.
+  from `{ hit_memory_tier, hit_block_tier, miss }`, in request order. Each request message
+  MUST carry its **own** context ID and MUST draw exactly one reply (or one protocol error,
+  FR-024): the source MUST NOT split a reply, so that a requester's reply reserve (FR-026) is
+  bounded exactly by its own message credits. When the requester chunks a transfer, each
+  chunk is a separate request message with its own context ID; correlating the chunks of
+  one transfer is the requester's own bookkeeping, not a wire concern.
 - **FR-008**: Because landing slots are not contiguous, the source MUST issue one RDMA write
   per entry rather than one per batch.
 - **FR-024**: The endpoint MUST answer a message it cannot process with an explicit **protocol
@@ -147,9 +152,10 @@ unchanged.
     peer's posted receives; the two counters are independent.
   - **Awaited replies MUST NOT be starved by inbound requests.** Both consume the same posted
     receive buffers, so a peer issuing requests up to the buffer count can leave no buffer for
-    a reply the local side is blocked on. Each end MUST reserve receive buffers for the
-    replies its own outstanding requests will need, and advertise the remainder as the peer's
-    inbound-request quota; a peer MUST NOT exceed the quota it was granted.
+    a reply the local side is blocked on. Each end MUST reserve one receive buffer per own
+    message credit for replies — exact, because each request draws one reply (FR-007) — and
+    advertise a separate inbound-request quota to the peer; a peer MUST NOT exceed the quota
+    it was granted, and posts reserve + quota receive buffers in all.
 - **FR-027**: Because either end may initiate (FR-001), both MAY initiate simultaneously. The
   endpoint MUST converge on **exactly one** connection per instance pair, chosen by a
   deterministic rule over the two `PeerId`s that both ends evaluate identically, with no
