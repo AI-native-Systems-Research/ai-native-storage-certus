@@ -30,7 +30,7 @@
 //!
 //! # Status
 //!
-//! Scaffolding. Tasks T001–T010, T012–T020, T022–T026, T068 and T081 of
+//! Scaffolding. Tasks T001–T010, T012–T026, T068 and T081 of
 //! `specs/001-rdma-cache-transfer/tasks.md` are complete: the crate builds as a
 //! workspace default member, peer identity is implemented, and the verbs FFI, its
 //! C shim and the safe wrappers over them exist behind `rdma`, and the transport
@@ -1260,5 +1260,210 @@ mod tests {
         assert_ne!(first.rkey(), second.rkey());
         a.ep.shutdown().unwrap();
         drop(buf);
+    }
+
+    // --- Phase 3 checkpoint (T021) --------------------------------------------
+
+    /// SC-002's spirit: the default build — no `rdma`, no `spdk` — serves a
+    /// memory-tier entry end to end through `ITransferEndpoint` itself, as a
+    /// caller holding only the interface would.
+    #[test]
+    fn the_default_build_serves_through_the_interface() {
+        let f = MockFabric::new();
+        let mut a = node(&f, "10.0.0.1:7000", 8);
+        let b = node(&f, "10.0.0.2:7000", 8);
+        a.ep.initialize().unwrap();
+        b.ep.initialize().unwrap();
+        a.pool[..4].copy_from_slice(b"KVKV");
+        a.map.memory(7, a.pool_addr(0), 4);
+        let source: Arc<dyn ITransferEndpoint + Send + Sync> = a.ep.clone();
+        let destination: Arc<dyn ITransferEndpoint + Send + Sync> = b.ep.clone();
+        let mut slots = vec![0u8; 16].into_boxed_slice();
+        let h = destination
+            .register_landing_region(slots.as_mut_ptr(), slots.len())
+            .unwrap();
+        assert_eq!(
+            source
+                .push("10.0.0.2:7000", &[(7, h.region_at(0, 4).unwrap())])
+                .unwrap(),
+            [EntryOutcome::HitMemoryTier]
+        );
+        assert_eq!(&slots[..4], b"KVKV");
+        a.ep.shutdown().unwrap();
+        b.ep.shutdown().unwrap();
+        drop(slots);
+    }
+
+    /// Invariant 1 under load: a request posted across many credit rounds,
+    /// with hits and misses interleaved, still reports index i for items[i].
+    #[test]
+    fn outcomes_keep_request_order_across_credit_rounds() {
+        let f = MockFabric::new();
+        let a = node(&f, "10.0.0.1:7000", 3);
+        let b = node(&f, "10.0.0.2:7000", 8);
+        a.ep.initialize().unwrap();
+        b.ep.initialize().unwrap();
+        let (land, rkey) = pool_key(&b.ep);
+        let mut expect = Vec::new();
+        let items: Vec<_> = (0..50u64)
+            .map(|k| {
+                // Every third key absent, every fifth (otherwise) the wrong size.
+                match (k % 3, k % 5) {
+                    (0, _) => expect.push(EntryOutcome::Miss),
+                    (_, 0) => {
+                        a.map.memory(k, a.pool_addr(k as usize * 8), 4);
+                        expect.push(EntryOutcome::Miss);
+                    }
+                    _ => {
+                        a.map.memory(k, a.pool_addr(k as usize * 8), 8);
+                        expect.push(EntryOutcome::HitMemoryTier);
+                    }
+                }
+                (
+                    k,
+                    RemoteRegion {
+                        addr: land + k * 8,
+                        rkey,
+                        length: 8,
+                    },
+                )
+            })
+            .collect();
+        assert_eq!(a.ep.push("10.0.0.2:7000", &items).unwrap(), expect);
+        assert_eq!(a.map.held(), 0);
+        a.ep.shutdown().unwrap();
+        b.ep.shutdown().unwrap();
+    }
+
+    /// FR-002: repeated pushes to one peer reuse one connection.
+    #[test]
+    fn repeated_pushes_reuse_one_connection() {
+        let f = MockFabric::new();
+        let a = node(&f, "10.0.0.1:7000", 8);
+        let b = node(&f, "10.0.0.2:7000", 8);
+        a.ep.initialize().unwrap();
+        b.ep.initialize().unwrap();
+        a.map.memory(1, a.pool_addr(0), 8);
+        let (land, rkey) = pool_key(&b.ep);
+        let item = [(
+            1,
+            RemoteRegion {
+                addr: land,
+                rkey,
+                length: 8,
+            },
+        )];
+        for round in 0..5 {
+            assert_eq!(
+                a.ep.push("10.0.0.2:7000", &item).unwrap(),
+                [EntryOutcome::HitMemoryTier],
+                "round {round}"
+            );
+            assert_eq!(f.qp_count(), 2, "round {round}: still one connection");
+        }
+        a.ep.shutdown().unwrap();
+        b.ep.shutdown().unwrap();
+    }
+
+    /// Invariant 8 as an order, from the mock's event log and the pin ledger
+    /// on one shared sequence: on `disconnect` with writes in flight, the
+    /// queue pair is forced to ERROR **before** any of their completions is
+    /// taken, every pin is released only **after** a completion, and the link
+    /// is destroyed only **after** every release.
+    #[test]
+    fn teardown_orders_error_then_drain_then_release_then_close() {
+        use crate::connection::mock::{LogEvent, Sequence};
+        let f = MockFabric::new();
+        let seq = Sequence::default();
+        let a = node(&f, "10.0.0.1:7000", 8);
+        let b = node(&f, "10.0.0.2:7000", 8);
+        a.ep.initialize().unwrap();
+        b.ep.initialize().unwrap();
+        let pb = PeerId::parse("10.0.0.2:7000").unwrap();
+        let pb2 = pb.clone();
+        a.ep.call(|r| Command::Connect(pb2, r)).unwrap().unwrap();
+        eventually("connected", || {
+            let p = pb.clone();
+            a.ep.call(|r| Command::IsUp(p, r)).unwrap()
+        });
+        let pb3 = pb.clone();
+        a.ep.call(|r| Command::Plug(pb3, r)).unwrap().unwrap();
+        for k in 0..3 {
+            a.map.memory(k, a.pool_addr(k as usize * 8), 8);
+        }
+        let (land, rkey) = pool_key(&b.ep);
+        let items: Vec<_> = (0..3u64)
+            .map(|k| {
+                (
+                    k,
+                    RemoteRegion {
+                        addr: land + k * 8,
+                        rkey,
+                        length: 8,
+                    },
+                )
+            })
+            .collect();
+        let (tx, rx) = mpsc::channel();
+        a.ep.push_async(
+            "10.0.0.2:7000",
+            &items,
+            Box::new(move |o| tx.send(o).unwrap()),
+        )
+        .unwrap();
+        eventually("three writes in flight", || a.map.held() == 3);
+
+        f.record(&seq);
+        a.map.record(&seq);
+        a.ep.disconnect("10.0.0.2:7000").unwrap();
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            [EntryOutcome::Failed; 3]
+        );
+
+        let log = f.log();
+        let releases = a.map.releases();
+        let a_link = log
+            .iter()
+            .find_map(|(_, e)| match e {
+                LogEvent::Completed(l, _) => Some(*l),
+                _ => None,
+            })
+            .expect("a's link completed something");
+        let stamps = |want: &dyn Fn(&LogEvent) -> bool| -> Vec<u64> {
+            log.iter()
+                .filter(|(_, e)| want(e))
+                .map(|(s, _)| *s)
+                .collect()
+        };
+        let errored = stamps(&|e| *e == LogEvent::ToError(a_link));
+        let completed = stamps(&|e| matches!(e, LogEvent::Completed(l, _) if *l == a_link));
+        let closed = stamps(&|e| *e == LogEvent::Closed(a_link));
+        assert_eq!(errored.len(), 1, "forced to ERROR once: {log:?}");
+        assert_eq!(
+            completed.len(),
+            4,
+            "the plug and three writes drained: {log:?}"
+        );
+        assert_eq!(closed.len(), 1, "{log:?}");
+        assert_eq!(releases.len(), 3, "three pins released: {releases:?}");
+        let (err, close) = (errored[0], closed[0]);
+        assert!(
+            completed.iter().all(|&c| err < c),
+            "ERROR before every completion: {log:?}"
+        );
+        for (r, key) in &releases {
+            assert!(err < *r, "pin {key} released after ERROR");
+            assert!(
+                completed.iter().any(|&c| c < *r),
+                "pin {key} released after a completion"
+            );
+            assert!(
+                *r < close,
+                "pin {key} released before the link is destroyed"
+            );
+        }
+        a.ep.shutdown().unwrap();
+        b.ep.shutdown().unwrap();
     }
 }

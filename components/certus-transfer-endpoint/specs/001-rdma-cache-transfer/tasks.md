@@ -154,7 +154,8 @@ connection table. This is plan.md Phase 1's engine.
   unsignaled slots retiring only behind a later completion
 - [ ] T011 [P] Extend the in-process mock in `src/connection/mock.rs` (depends T010) with
   fault injection: injectable inbound messages, a finite RNR retry, `LOCAL_WRITE` checks on
-  receive buffers, and recorded QP→ERROR ordering so teardown-before-reclaim is assertable.
+  receive buffers, and recorded QP→ERROR ordering so teardown-before-reclaim is assertable
+  *(the recorded ordering is done, in T021)*.
   Two endpoints in one process and the one-sided write that copies into the target address
   already exist (T010)
 - [X] T012 Implement the **symmetric** `ConnectionTable` in `src/connection/` (depends
@@ -317,11 +318,15 @@ hardware loopback scenario, pass against this component with messaging unused.
   write is the FR-017 barrier generalised). A null, empty, or pool- or region-overlapping
   range is refused. The memory-must-outlive-shutdown precondition is documented on the
   method, which `define_interface!` cannot make `unsafe`
-- [ ] T021 [US2] Tests in-module: order-and-length invariant 1 over the mock seam
+- [X] T021 [US2] Tests in-module: order-and-length invariant 1 over the mock seam
   (`items.len()` outcomes, index *i* ↔ `items[i]`); connection reuse across repeated
   pushes (FR-002); teardown-before-reclaim ordering asserted from the mock's recorded
   QP→ERROR sequence (invariant 8); and a `#[test]` that the default build serves a
-  memory-tier entry through the **interface**, not merely through `connection`
+  memory-tier entry through the **interface**, not merely through `connection`.
+  *Done*, building T011's ERROR-ordering piece for it: the mock fabric records an event log
+  (ToError, each Completed handed out, Closed) stamped from a `Sequence` the ledger dispatch
+  map also stamps its releases from, so the test asserts one order — ERROR, then the drain's
+  completions, then each pin's release, then the link's destruction
 
 **Checkpoint**: SC-002 — the legacy surface is complete and tested with zero messaging,
 and `remote-lookup` has not been modified.
