@@ -230,6 +230,40 @@ When the memory-tier DRAM pool approaches capacity, a background evictor proacti
 
 ---
 
+### User Story 13 - Read a Block-Tier Entry for a Peer, Without Promoting (Priority: P3)
+
+The certus-transfer-endpoint serves a peer an entry this node holds only on SSD. It must not
+read the device itself — drive placement, LBA conversion, MDTS and channel discipline are the
+dispatcher's — and it must not promote, which would evict this node's own working set to serve
+someone else. It holds a pin on the entry (its `BlockDevice { offset }` lookup) and calls
+`read_to_bounce(key, offset, len)`; the dispatcher leases bounce space from the memory tier's
+reserve (outside the cache), reads the extent into it from the drive the key is placed on, and
+returns the lease. The caller writes from it and returns it with `release_bounce`.
+
+**Why this priority**: block-tier serving is a completeness path — measured SSD hit rates are
+single-digit percent — but done in the wrong layer it reads the wrong drive and reports the
+result as a hit.
+
+**Independent Test**: two mock drives with distinct byte patterns; for a key placed on each,
+`read_to_bounce` returns a lease holding that drive's bytes at that LBA.
+
+**Acceptance Scenarios**:
+
+1. **Given** a pinned block-tier entry, **When** `read_to_bounce` is called, **Then** the
+   extent is read from drive `drive_index(key, N)` at LBA `offset / block_size`, segmented by
+   the drive's maximum transfer, into a fresh lease; nothing is promoted and the cache is
+   untouched.
+2. **Given** the reserve is full, **When** `read_to_bounce` is called, **Then** it returns
+   `NoSpace` without issuing a read; **given** `len` exceeds what the reserve can ever hold,
+   **Then** `NeverFits`.
+3. **Given** a segment fails, **When** other segments are still reading into the lease,
+   **Then** the call waits for all of them, frees the lease, and returns `Io`.
+4. **Given** a hung drive, **When** `read_to_bounce` is waiting, **Then** it keeps waiting —
+   there is no device timeout, because a timed-out read is forgotten while the drive may still
+   write the lease.
+
+---
+
 ### Edge Cases
 
 - When memory-tier insertion fails during populate (pool full after eviction attempt), populate first applies bounded store backpressure (`reserve_memory` retries the reservation for up to `store_backpressure_ms`, default 5 s; FR-033) and then, if the tier is still full, best-effort **drops** the store: it returns `Ok(())` with no dispatch-map entry created (the block is not cached; a later lookup misses and recomputes). It does NOT return `AllocationFailed` to the caller — a full cache must never be fatal to the store path, because the vLLM offloading connector asserts `transfer_result.success` and would kill the engine on a store error. Setting `store_backpressure_ms = 0` disables only the retry (`reserve_memory` fails fast); the best-effort drop still applies, so populate still returns `Ok(())`. *(Sync 2026-09-09 — code authoritative, commits `39ffee9b`/`c400ced8`; see FR-060.)*
@@ -367,6 +401,24 @@ When the memory-tier DRAM pool approaches capacity, a background evictor proacti
 
   This complements the read-path staging fallback (FR-053): together they ensure memory-tier saturation degrades to an uncached serve rather than a fatal `AllocationFailed` — on the store path and the load path respectively.
 
+- **FR-062**: `read_to_bounce(key, offset, len)` MUST read a block-tier entry into a lease from
+  `IMemoryTier::bounce_alloc`, for serving a peer, under these rules:
+  - The caller holds the entry's pin for the whole call; the method neither takes nor releases
+    one. It MUST NOT promote and MUST NOT touch the cache or the dispatch map.
+  - The read targets the drive chosen by the write path's placement hash (`drive_index`), at
+    LBA `offset / block_size`, `len` rounded up to the block size, segmented by the drive's
+    maximum transfer, over a channel checked out of that drive's `ChannelPool`.
+  - Reads pass `BOUNCE_READ_TIMEOUT_MS` (`u32::MAX` ms), a timeout that cannot fire: the
+    actor's timeout forgets an operation the drive may still be writing, and freeing a lease
+    then would let a late read land in another entry's bytes. A hung drive surfaces as the
+    requesting peer's own reply deadline, by design.
+  - Like FR-054, it drains every submitted read before returning, even after a failure. A
+    settled failure frees the lease and returns `Io`. A read the actor ended without its
+    completion (a timeout, or an error ahead of a controller reset) leaves the lease
+    **leaked**, logged as an error, never freed.
+  - `NoSpace` and `NeverFits` from the memory tier pass through, before any read is issued;
+    no drives is `NeverFits`, an uninitialized dispatcher `NotInitialized`.
+  `release_bounce(lease)` forwards to `IMemoryTier::bounce_free`.
 - **FR-061** *(Sync 2026-09-21 — backfilled; the multi-drive scatter-gather cold path shipped with no requirement. Commit `6f35b13a` "optimizer iter-005: scatter-gather")*: The pipeline module MUST provide a multi-drive scatter-gather cold-read path, `scatter_gather_multi_drive_zero_copy(gpu, streams: &[GpuStream; 2], drive_works: &[DriveWork], chunk_size, max_queue_depth, metrics) -> Vec<Vec<Result<(), DispatcherError>>>`, that `batch_lookup` uses to serve cold (BlockDevice) entries spread across multiple data drives. Each `DriveWork { channels: &ClientChannels, drive: &dyn IBlockDevice, jobs: &[ColdReadJob] }` descriptor names one drive's checked-out client channel and its cold-read jobs. The function MUST:
   - Segment every job's read against its drive's block size (respecting MDTS per FR-019) and, on the **caller thread**, run a **single multiplexed poll loop** that fans NVMe reads out to all drives simultaneously and fans completions in — there are NO spawned per-drive worker threads and NO persistent `ColdReadPool` (FR-044, retired).
   - Distribute the supplied `max_queue_depth` (128 from `batch_lookup`) **proportionally across drives by segment count**, so a drive holding more data gets a deeper share of the shared in-flight budget.
@@ -407,6 +459,12 @@ When the memory-tier DRAM pool approaches capacity, a background evictor proacti
 - **SC-014**: `batch_lookup` with a batch of 20 cold entries across 3 drives completes with total wall time bounded by the slowest single drive (parallel promotion), achieving ≥5x throughput improvement over sequential single-entry lookups.
 - **SC-015**: Concurrent `batch_lookup` promotions of the same cold key both succeed — the loser of the `IMemoryTier::insert` race is served the winner's promoted data (via the concurrent-promotion recovery pass) rather than failing the load with `AlreadyExists`.
 - **SC-016** *(Sync 2026-08-20 — backfilled; covers FR-057)*: With mock block-device and extent-manager factories injected via `set_block_device_factory` / `set_extent_manager_factory` and a `PipelineMetrics` recorder installed via `set_pipeline_metrics`, a test can exercise dispatcher data-path operations and observe their pipeline timings without SPDK/NVMe hardware; when no factory is injected the dispatcher uses its default hard-coded implementations.
+- **SC-018** *(covers FR-062)*: Over in-memory mock drives: a key on each of two drives reads
+  that drive's bytes at its LBA; an entry larger than the maximum transfer arrives whole from
+  consecutive segments; a failed segment frees the lease only after its held siblings
+  complete; `NoSpace`/`NeverFits` issue no read; eight concurrent readers on one drive each
+  read their own bytes over at most eight pooled channels; and the bounce timeout cannot
+  overflow the actor's deadline arithmetic.
 - **SC-017** *(Sync 2026-08-31 — backfilled; covers FR-058)*: `tier_event_stats()` returns counters that are zero at startup and increase monotonically as tier movements occur: after a populate/lookup/evict cycle, `promotions_to_gpu` reflects served lookups and the eviction counters reflect demotions/removals, and the delta between two successive snapshots equals the number of tier events in that window. A dispatcher variant that performs no tiering returns all-zero counters. *(Sync 2026-09-28)* The two remote counters are verified separately, because a tiering cycle does not exercise them: `remote_lookup_hits` MUST NOT move on a purely local hit, and `remote_lookup_hits + remote_lookup_misses` MUST equal the number of keys forwarded to `IRemoteLookup` less any transport failures. *(Sync 2026-09-29)* And `lookup_hits_dram + lookup_hits_ssd + remote_lookup_hits` MUST equal the served-key count over the same interval — the partition property, which is checkable without any knowledge of the workload.
 
 ## Assumptions
