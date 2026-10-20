@@ -43,7 +43,8 @@
 //! peer's disconnect, or newer-wins, the table forces the link to ERROR, moves
 //! it to the peer's draining set and reports [`TableEvent::Down`]. The caller
 //! then drains each draining link until every outstanding `wr_id` is
-//! accounted for, reclaims, and calls [`finish_teardown`]. While a peer has
+//! accounted for ([`drain`](ConnectionTable::drain)), reclaims, and calls
+//! [`finish_teardown`], which refuses while any slab still holds state. While a peer has
 //! draining links and no live one, neither end may reconnect: [`ensure`]
 //! refuses and an inbound request is rejected `Draining` (FR-023's "fresh
 //! connection only after reclaim"). Newer-wins is the one exception — the old
@@ -58,17 +59,21 @@
 
 use std::collections::HashMap;
 use std::fmt;
+use std::time::Duration;
 
 use super::identity::{
     decode_identity, decode_reject, encode_identity, encode_reject, RejectReason, MAX_IDENTITY_LEN,
 };
-use super::transport::{Link, LinkId, QpCaps, RdmaError, RequestId, Transport, TransportEvent};
+use super::slab::{drain, DrainError, Slab};
+use super::transport::{
+    Completion, Link, LinkId, QpCaps, RdmaError, RequestId, Transport, TransportEvent,
+};
 use super::PeerId;
 
 /// Whether a peer's link is ready to carry work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Readiness {
-    /// Established; [`ConnectionTable::link`] returns it. Data messages still
+    /// Established; [`ConnectionTable::live`] returns it. Data messages still
     /// wait for the peer's `OP_HELLO` (T076).
     Ready,
     /// A connect or accept is in flight; [`TableEvent::Up`] follows, or
@@ -83,6 +88,11 @@ pub enum TableError {
     SelfConnect,
     /// A teardown is in progress; no fresh connection until it finishes.
     Draining(PeerId),
+    /// `finish_teardown` while a draining link still holds state.
+    Undrained {
+        peer: PeerId,
+        outstanding: usize,
+    },
     Transport(RdmaError),
 }
 
@@ -91,6 +101,10 @@ impl fmt::Display for TableError {
         match self {
             TableError::SelfConnect => write!(f, "cannot connect to the local instance"),
             TableError::Draining(p) => write!(f, "connection to {p} is still being torn down"),
+            TableError::Undrained { peer, outstanding } => write!(
+                f,
+                "{outstanding} work requests to {peer} are still outstanding; drain first"
+            ),
             TableError::Transport(e) => write!(f, "{e}"),
         }
     }
@@ -148,41 +162,59 @@ enum Initiator {
     Peer,
 }
 
-#[derive(Debug, Clone, Copy)]
-struct Live {
+struct Live<T> {
     link: LinkId,
     initiator: Initiator,
     up: bool,
+    slab: Slab<T>,
 }
 
-#[derive(Default)]
-struct Entry {
-    /// Our outbound attempt, not yet established.
+/// A link in ERROR, with whatever its slab still holds.
+struct Draining<T> {
+    link: LinkId,
+    slab: Slab<T>,
+}
+
+struct Entry<T> {
+    /// Our outbound attempt, not yet established. It has no slab: nothing can
+    /// be posted on a link before it is live (see [`ConnectionTable::live`]).
     pending: Option<LinkId>,
-    live: Option<Live>,
+    live: Option<Live<T>>,
     /// In ERROR, awaiting the caller's drain and `finish_teardown`.
-    draining: Vec<LinkId>,
+    draining: Vec<Draining<T>>,
 }
 
-impl Entry {
+impl<T> Default for Entry<T> {
+    fn default() -> Self {
+        Entry {
+            pending: None,
+            live: None,
+            draining: Vec::new(),
+        }
+    }
+}
+
+impl<T> Entry<T> {
     fn is_empty(&self) -> bool {
         self.pending.is_none() && self.live.is_none() && self.draining.is_empty()
     }
 }
 
-/// One local instance's connections, keyed by peer instance.
-pub struct ConnectionTable {
+/// One local instance's connections, keyed by peer instance. `T` is the
+/// per-work-request state each link's [`Slab`] holds until the request's
+/// completion releases it.
+pub struct ConnectionTable<T> {
     transport: Box<dyn Transport>,
     local: PeerId,
     identity: Vec<u8>,
     caps: QpCaps,
-    entries: HashMap<PeerId, Entry>,
+    entries: HashMap<PeerId, Entry<T>>,
     /// Which peer each live, pending or draining link belongs to.
     owners: HashMap<LinkId, PeerId>,
     scratch: Vec<TransportEvent>,
 }
 
-impl ConnectionTable {
+impl<T> ConnectionTable<T> {
     /// Listen as `local` on `transport`. Every link gets `caps`.
     pub fn new(
         mut transport: Box<dyn Transport>,
@@ -211,6 +243,11 @@ impl ConnectionTable {
         &self.local
     }
 
+    /// The transport, for registering memory.
+    pub fn transport(&mut self) -> &mut dyn Transport {
+        &mut *self.transport
+    }
+
     /// Make sure `peer` is connected or connecting, starting a connect only if
     /// there is neither a link nor an attempt.
     pub fn ensure(&mut self, peer: &PeerId) -> Result<Readiness, TableError> {
@@ -218,7 +255,7 @@ impl ConnectionTable {
             return Err(TableError::SelfConnect);
         }
         if let Some(e) = self.entries.get(peer) {
-            if let Some(live) = e.live {
+            if let Some(live) = &e.live {
                 return Ok(if live.up {
                     Readiness::Ready
                 } else {
@@ -241,26 +278,21 @@ impl ConnectionTable {
         Ok(Readiness::Connecting)
     }
 
-    /// The peer's established link.
-    pub fn link(&mut self, peer: &PeerId) -> Option<&mut dyn Link> {
-        let live = self.entries.get(peer)?.live.filter(|l| l.up)?;
-        self.transport.link(live.link)
+    /// The peer's established link and its slab — the only way to post. Post
+    /// through [`post_send_tracked`](super::slab::post_send_tracked) and
+    /// [`post_recv_tracked`](super::slab::post_recv_tracked), and release
+    /// state only through [`Slab::complete`].
+    pub fn live(&mut self, peer: &PeerId) -> Option<(&mut dyn Link, &mut Slab<T>)> {
+        let live = self.entries.get_mut(peer)?.live.as_mut().filter(|l| l.up)?;
+        let link = self.transport.link(live.link)?;
+        Some((link, &mut live.slab))
     }
 
-    /// Any link the table holds, live or draining — for draining by id.
-    pub fn link_by_id(&mut self, link: LinkId) -> Option<&mut dyn Link> {
-        if !self.owners.contains_key(&link) {
-            return None;
-        }
-        self.transport.link(link)
-    }
-
-    /// The peer's draining links, which the caller must drain before
-    /// [`finish_teardown`](Self::finish_teardown).
-    pub fn draining(&self, peer: &PeerId) -> &[LinkId] {
+    /// Whether `peer` has links awaiting drain and `finish_teardown`.
+    pub fn is_draining(&self, peer: &PeerId) -> bool {
         self.entries
             .get(peer)
-            .map_or(&[][..], |e| e.draining.as_slice())
+            .is_some_and(|e| !e.draining.is_empty())
     }
 
     /// Start tearing `peer` down: its live link goes to ERROR and joins the
@@ -279,22 +311,52 @@ impl ConnectionTable {
             self.forget_if_empty(peer);
             return Ok(false);
         };
-        self.retire(peer, live.link)?;
+        self.retire(peer, live)?;
         Ok(true)
     }
 
-    /// Destroy `peer`'s draining links. The caller must already have drained
-    /// them: destroying a QP discards its completions, so anything not
-    /// accounted for by then is lost.
-    pub fn finish_teardown(&mut self, peer: &PeerId) {
+    /// Drain every draining link of `peer`, moving each completion and the
+    /// state it releases onto `out` (FR-023's "drain and discard"; discarding
+    /// is the caller's, after it has released what each state holds).
+    pub fn drain(
+        &mut self,
+        peer: &PeerId,
+        out: &mut Vec<(Completion, T)>,
+        stall: Duration,
+    ) -> Result<(), DrainError<T>> {
         let Some(e) = self.entries.get_mut(peer) else {
-            return;
+            return Ok(());
         };
-        for link in std::mem::take(&mut e.draining) {
-            self.owners.remove(&link);
-            self.transport.close(link);
+        for d in &mut e.draining {
+            let link = self
+                .transport
+                .link(d.link)
+                .expect("draining link missing from its transport");
+            drain(link, &mut d.slab, out, stall)?;
+        }
+        Ok(())
+    }
+
+    /// Destroy `peer`'s draining links. Refused while any of them still holds
+    /// state: destroying a queue pair discards its completions, so every pin
+    /// still held would be lost rather than released (Principle IX).
+    pub fn finish_teardown(&mut self, peer: &PeerId) -> Result<(), TableError> {
+        let Some(e) = self.entries.get_mut(peer) else {
+            return Ok(());
+        };
+        let outstanding: usize = e.draining.iter().map(|d| d.slab.outstanding()).sum();
+        if outstanding > 0 {
+            return Err(TableError::Undrained {
+                peer: peer.clone(),
+                outstanding,
+            });
+        }
+        for d in std::mem::take(&mut e.draining) {
+            self.owners.remove(&d.link);
+            self.transport.close(d.link);
         }
         self.forget_if_empty(peer);
+        Ok(())
     }
 
     /// Process every pending connection event, without blocking.
@@ -307,11 +369,21 @@ impl ConnectionTable {
         self.scratch = evs;
     }
 
-    /// Force `link` to ERROR and move it to `peer`'s draining set.
-    fn retire(&mut self, peer: &PeerId, link: LinkId) -> Result<(), RdmaError> {
-        let result = self
+    /// A slab for `link`, sized to its granted send plus receive depth.
+    fn slab_for(&mut self, link: LinkId) -> Slab<T> {
+        let caps = self
             .transport
             .link(link)
+            .expect("new link missing from its transport")
+            .granted();
+        Slab::with_capacity(caps.max_send_wr as usize + caps.max_recv_wr as usize)
+    }
+
+    /// Force `live` to ERROR and move it to `peer`'s draining set.
+    fn retire(&mut self, peer: &PeerId, live: Live<T>) -> Result<(), RdmaError> {
+        let result = self
+            .transport
+            .link(live.link)
             .expect("table link missing from its transport")
             .to_error();
         // Draining whether or not the transition reported success: the link is
@@ -320,7 +392,10 @@ impl ConnectionTable {
             .get_mut(peer)
             .expect("retired link has no entry")
             .draining
-            .push(link);
+            .push(Draining {
+                link: live.link,
+                slab: live.slab,
+            });
         result
     }
 
@@ -336,7 +411,7 @@ impl ConnectionTable {
         let Some(live) = self.entries.get_mut(peer).and_then(|e| e.live.take()) else {
             return;
         };
-        if let Err(e) = self.retire(peer, live.link) {
+        if let Err(e) = self.retire(peer, live) {
             panic!("cannot force the link to {peer} to ERROR, so late writes stay possible: {e}");
         }
         out.push(TableEvent::Down(peer.clone()));
@@ -380,7 +455,11 @@ impl ConnectionTable {
                         peer,
                         reason: ConnectFailure::Disconnected,
                     });
-                } else if self.entries[&peer].live.is_some_and(|l| l.link == link) {
+                } else if self.entries[&peer]
+                    .live
+                    .as_ref()
+                    .is_some_and(|l| l.link == link)
+                {
                     self.take_down(&peer, out);
                 }
                 // A draining link's disconnect changes nothing: it is in ERROR.
@@ -389,6 +468,8 @@ impl ConnectionTable {
     }
 
     /// If `link` is a pending outbound attempt, abandon it and name its peer.
+    /// Safe to close outright: a pending link has no slab, so nothing on it
+    /// holds state.
     fn take_pending(&mut self, link: LinkId) -> Option<PeerId> {
         let peer = self.owners.get(&link)?.clone();
         let e = self.entries.get_mut(&peer)?;
@@ -424,7 +505,11 @@ impl ConnectionTable {
         };
         let peer_wins = peer < self.local;
         let (pending, live, draining) = match self.entries.get(&peer) {
-            Some(e) => (e.pending, e.live, !e.draining.is_empty()),
+            Some(e) => (
+                e.pending,
+                e.live.as_ref().map(|l| l.initiator),
+                !e.draining.is_empty(),
+            ),
             None => (None, None, false),
         };
         match live {
@@ -437,12 +522,10 @@ impl ConnectionTable {
             None => {
                 if let Some(link) = pending {
                     // We lose the race: our attempt goes, theirs is accepted.
-                    self.entries.get_mut(&peer).unwrap().pending = None;
-                    self.owners.remove(&link);
-                    self.transport.close(link);
+                    self.take_pending(link);
                 }
             }
-            Some(l) if l.initiator == Initiator::Local && !peer_wins => {
+            Some(Initiator::Local) if !peer_wins => {
                 return self.reject(request, Some(peer), RejectReason::Duplicate, out);
             }
             // Newer wins: the peer has lost the live link.
@@ -450,10 +533,12 @@ impl ConnectionTable {
         }
         match self.transport.accept(request, &self.identity, self.caps) {
             Ok(link) => {
+                let slab = self.slab_for(link);
                 self.entries.entry(peer.clone()).or_default().live = Some(Live {
                     link,
                     initiator: Initiator::Peer,
                     up: false,
+                    slab,
                 });
                 self.owners.insert(link, peer);
             }
@@ -492,14 +577,43 @@ impl ConnectionTable {
             });
             return;
         }
+        let slab = self.slab_for(link);
         let e = self.entries.get_mut(&peer).unwrap();
         e.pending = None;
         e.live = Some(Live {
             link,
             initiator: Initiator::Local,
             up: true,
+            slab,
         });
         out.push(TableEvent::Up(peer));
+    }
+}
+
+impl<T> Drop for ConnectionTable<T> {
+    /// Dropping the table destroys every queue pair, discarding their
+    /// completions — so any state still held would never be released. That is
+    /// a defect in the owner's shutdown, which must tear down and drain every
+    /// peer first, and is reported rather than silently leaked (Principle XI).
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            return;
+        }
+        let held: usize = self
+            .entries
+            .values()
+            .flat_map(|e| {
+                e.live
+                    .iter()
+                    .map(|l| l.slab.outstanding())
+                    .chain(e.draining.iter().map(|d| d.slab.outstanding()))
+            })
+            .sum();
+        assert_eq!(
+            held, 0,
+            "connection table dropped with {held} work requests still holding state; \
+             tear down and drain every peer first"
+        );
     }
 }
 
@@ -507,9 +621,8 @@ impl ConnectionTable {
 mod tests {
     use super::*;
     use crate::connection::mock::{MockFabric, MockTransport};
-    use crate::connection::transport::{
-        Access, Completed, Completion, QpState, RecvRequest, SendOp, SendRequest,
-    };
+    use crate::connection::slab::{post_recv_tracked, post_send_tracked, TrackedRecv, TrackedSend};
+    use crate::connection::transport::{Access, Completed, CompletionError, SendOp};
 
     const CAPS: QpCaps = QpCaps {
         max_send_wr: 8,
@@ -520,7 +633,7 @@ mod tests {
         PeerId::parse(s).unwrap()
     }
 
-    fn table(fabric: &MockFabric, name: &str) -> ConnectionTable {
+    fn table(fabric: &MockFabric, name: &str) -> ConnectionTable<Tag> {
         ConnectionTable::new(
             Box::new(MockTransport::new(fabric.clone())),
             peer(name),
@@ -529,7 +642,7 @@ mod tests {
         .unwrap()
     }
 
-    fn poll(t: &mut ConnectionTable) -> Vec<TableEvent> {
+    fn poll(t: &mut ConnectionTable<Tag>) -> Vec<TableEvent> {
         let mut out = Vec::new();
         t.poll(&mut out);
         out
@@ -538,7 +651,7 @@ mod tests {
     /// Poll every table until nothing more happens. A round can process
     /// transport events without producing a table event (an accept does), so
     /// quiescence is two rounds in a row with nothing to report.
-    fn settle(ts: &mut [&mut ConnectionTable]) -> Vec<Vec<TableEvent>> {
+    fn settle(ts: &mut [&mut ConnectionTable<Tag>]) -> Vec<Vec<TableEvent>> {
         let mut all = vec![Vec::new(); ts.len()];
         let mut quiet = 0;
         while quiet < 2 {
@@ -553,65 +666,79 @@ mod tests {
         all
     }
 
+    /// Test state: what each work request was, so the release can be checked.
+    type Tag = &'static str;
+
     /// Send `msg` from `a` to `b` over their links and check it arrives — so a
-    /// test proves the two ends hold *the same* connection.
-    fn exchange(a: &mut ConnectionTable, b: &mut ConnectionTable, msg: &[u8; 4]) {
+    /// test proves the two ends hold *the same* connection. Uses the tracked
+    /// path, so every exchange also checks the slab hands each state back.
+    fn exchange(a: &mut ConnectionTable<Tag>, b: &mut ConnectionTable<Tag>, msg: &[u8; 4]) {
         let (pa, pb) = (b.local().clone(), a.local().clone());
         let mut src = *msg;
         let mut dst = [0u8; 4];
-        assert!(b.link(&pb).is_some(), "b has a link to a");
-        // SAFETY: `dst` outlives the region and the completion below.
+        // SAFETY: `dst` and `src` outlive their regions and the completions
+        // polled below.
         let rd = unsafe {
-            b.transport
+            b.transport()
                 .register(dst.as_mut_ptr(), 4, Access::LOCAL_WRITE)
-                .unwrap()
-        };
-        // SAFETY: as above, for `src`.
-        let rs = unsafe {
-            a.transport
-                .register(src.as_mut_ptr(), 4, Access::LOCAL_WRITE)
-                .unwrap()
-        };
-        // SAFETY: both buffers outlive the completions polled below.
-        unsafe {
-            b.link(&pb)
-                .unwrap()
-                .post_recv(&[RecvRequest {
-                    wr_id: 1,
-                    buf: rd.sge(rd.addr(), 4).unwrap(),
-                }])
-                .unwrap();
-            a.link(&pa)
-                .expect("a has a link to b")
-                .post_send(&[SendRequest {
-                    wr_id: 2,
-                    op: SendOp::Send,
-                    local: rs.sge(rs.addr(), 4).unwrap(),
-                    signaled: true,
-                }])
-                .unwrap();
         }
-        let mut c = Vec::new();
-        b.link(&pb).unwrap().poll(&mut c, 8).unwrap();
+        .unwrap();
+        let rs = unsafe {
+            a.transport()
+                .register(src.as_mut_ptr(), 4, Access::LOCAL_WRITE)
+        }
+        .unwrap();
+        {
+            let (link, slab) = b.live(&pb).expect("b has a link to a");
+            // SAFETY: as above.
+            unsafe {
+                post_recv_tracked(
+                    link,
+                    slab,
+                    vec![TrackedRecv {
+                        buf: rd.sge(rd.addr(), 4).unwrap(),
+                        state: "recv",
+                    }],
+                )
+            }
+            .unwrap();
+        }
+        {
+            let (link, slab) = a.live(&pa).expect("a has a link to b");
+            // SAFETY: as above.
+            unsafe {
+                post_send_tracked(
+                    link,
+                    slab,
+                    vec![TrackedSend {
+                        op: SendOp::Send,
+                        local: rs.sge(rs.addr(), 4).unwrap(),
+                        state: "send",
+                    }],
+                )
+            }
+            .unwrap();
+        }
         assert_eq!(
-            c,
-            [Completion {
-                wr_id: 1,
-                result: Ok(Completed::Recv { byte_len: 4 })
-            }]
+            reap(b, &pb),
+            [(Ok(Completed::Recv { byte_len: 4 }), "recv")]
         );
-        // Retire the send, so the next exchange sees only its own completions.
-        c.clear();
-        a.link(&pa).unwrap().poll(&mut c, 8).unwrap();
-        assert_eq!(
-            c,
-            [Completion {
-                wr_id: 2,
-                result: Ok(Completed::Send)
-            }]
-        );
+        assert_eq!(reap(a, &pa), [(Ok(Completed::Send), "send")]);
         drop((rs, rd));
         assert_eq!(&dst, msg);
+    }
+
+    /// Poll `peer`'s live link and release each completion through its slab.
+    fn reap(
+        t: &mut ConnectionTable<Tag>,
+        peer: &PeerId,
+    ) -> Vec<(Result<Completed, CompletionError>, Tag)> {
+        let (link, slab) = t.live(peer).unwrap();
+        let mut c = Vec::new();
+        link.poll(&mut c, 64).unwrap();
+        c.iter()
+            .map(|c| (c.result, slab.complete(c).unwrap()))
+            .collect()
     }
 
     #[test]
@@ -748,15 +875,10 @@ mod tests {
             evs,
             [TableEvent::Down(pb.clone()), TableEvent::Up(pb.clone())]
         );
-        let old = a.draining(&pb)[0];
-        assert_eq!(
-            a.link_by_id(old).unwrap().state(),
-            Ok(QpState::Err),
-            "ERROR before replacement"
-        );
+        assert!(a.is_draining(&pb), "the old link was retired, not dropped");
         assert_eq!(a.ensure(&pb), Ok(Readiness::Ready), "the new link serves");
-        a.finish_teardown(&pb);
-        assert!(a.draining(&pb).is_empty());
+        a.finish_teardown(&pb).unwrap();
+        assert!(!a.is_draining(&pb));
         drop((b1, b2));
     }
 
@@ -899,7 +1021,7 @@ mod tests {
                 }
             }]
         );
-        assert!(a.link(&dialed).is_none());
+        assert!(a.live(&dialed).is_none());
     }
 
     #[test]
@@ -912,15 +1034,14 @@ mod tests {
         settle(&mut [&mut a, &mut b]);
 
         assert_eq!(a.begin_teardown(&pb), Ok(true));
-        let old = a.draining(&pb)[0];
-        assert_eq!(a.link_by_id(old).unwrap().state(), Ok(QpState::Err));
-        assert!(a.link(&pb).is_none());
+        assert!(a.is_draining(&pb));
+        assert!(a.live(&pb).is_none());
         assert_eq!(a.ensure(&pb), Err(TableError::Draining(pb.clone())));
 
         // b notices (a's link is in ERROR, but a has not disconnected): b's own
         // link is still live, so it would not redial. Force b to: its peer is
         // down from its view once a destroys the link.
-        a.finish_teardown(&pb);
+        a.finish_teardown(&pb).unwrap();
         let evs = settle(&mut [&mut a, &mut b]);
         assert_eq!(evs[1], [TableEvent::Down(pa.clone())]);
         // Now b is draining and a is clear: a's redial is refused by b (FR-023
@@ -934,11 +1055,111 @@ mod tests {
                 reason: ConnectFailure::Rejected(Some(RejectReason::Draining))
             }]
         );
-        b.finish_teardown(&pa);
+        b.finish_teardown(&pa).unwrap();
         a.ensure(&pb).unwrap();
         let evs = settle(&mut [&mut a, &mut b]);
         assert_eq!(evs[0], [TableEvent::Up(pb.clone())]);
         exchange(&mut b, &mut a, b"back");
+    }
+
+    /// Principle IX across teardown: a write in flight when the link is
+    /// forced to ERROR comes back through the drain exactly once, and the link
+    /// cannot be destroyed while it is still held.
+    #[test]
+    fn teardown_drains_every_held_state_before_destroying_the_link() {
+        let f = MockFabric::new();
+        let mut a = table(&f, "10.0.0.1:7000");
+        let mut b = table(&f, "10.0.0.2:7000");
+        let (pa, pb) = (a.local().clone(), b.local().clone());
+        a.ensure(&pb).unwrap();
+        settle(&mut [&mut a, &mut b]);
+
+        let mut src = [9u8; 8];
+        // SAFETY: `src` outlives the region and the drain below.
+        let rs = unsafe {
+            a.transport()
+                .register(src.as_mut_ptr(), 8, Access::LOCAL_WRITE)
+        }
+        .unwrap();
+        {
+            let (link, slab) = a.live(&pb).unwrap();
+            // Two sends with no receive posted at b: both stay queued (RNR).
+            // SAFETY: as above.
+            unsafe {
+                post_send_tracked(
+                    link,
+                    slab,
+                    ["pin-1", "pin-2"]
+                        .into_iter()
+                        .map(|state| TrackedSend {
+                            op: SendOp::Send,
+                            local: rs.sge(rs.addr(), 8).unwrap(),
+                            state,
+                        })
+                        .collect(),
+                )
+            }
+            .unwrap();
+        }
+        a.begin_teardown(&pb).unwrap();
+        assert_eq!(
+            a.finish_teardown(&pb),
+            Err(TableError::Undrained {
+                peer: pb.clone(),
+                outstanding: 2
+            }),
+            "destroying now would lose both pins"
+        );
+
+        let mut released = Vec::new();
+        a.drain(&pb, &mut released, Duration::from_secs(1)).unwrap();
+        let mut tags: Vec<_> = released.iter().map(|(c, t)| (c.result, *t)).collect();
+        tags.sort_by_key(|(_, t)| *t);
+        assert_eq!(
+            tags,
+            [
+                (Err(CompletionError::Flushed), "pin-1"),
+                (Err(CompletionError::Flushed), "pin-2")
+            ]
+        );
+        a.finish_teardown(&pb).unwrap();
+        drop(rs);
+        settle(&mut [&mut a, &mut b]);
+        b.begin_teardown(&pa).unwrap();
+        b.finish_teardown(&pa).unwrap();
+    }
+
+    #[test]
+    #[should_panic(expected = "still holding state")]
+    fn dropping_a_table_with_held_state_is_loud() {
+        let f = MockFabric::new();
+        let mut a = table(&f, "10.0.0.1:7000");
+        let mut b = table(&f, "10.0.0.2:7000");
+        let pb = b.local().clone();
+        a.ensure(&pb).unwrap();
+        settle(&mut [&mut a, &mut b]);
+        let mut buf = [0u8; 8];
+        // SAFETY: the receive is never delivered; the table is dropped first.
+        let r = unsafe {
+            a.transport()
+                .register(buf.as_mut_ptr(), 8, Access::LOCAL_WRITE)
+        }
+        .unwrap();
+        let (link, slab) = a.live(&pb).unwrap();
+        // SAFETY: as above.
+        unsafe {
+            post_recv_tracked(
+                link,
+                slab,
+                vec![TrackedRecv {
+                    buf: r.sge(r.addr(), 8).unwrap(),
+                    state: "held",
+                }],
+            )
+        }
+        .unwrap();
+        drop(r);
+        drop(a);
     }
 
     #[test]
@@ -959,7 +1180,7 @@ mod tests {
     #[test]
     fn local_name_too_long_for_private_data_is_refused() {
         let long = format!("{}:1", "h".repeat(MAX_IDENTITY_LEN));
-        let r = ConnectionTable::new(
+        let r = ConnectionTable::<Tag>::new(
             Box::new(MockTransport::new(MockFabric::new())),
             peer(&long),
             CAPS,

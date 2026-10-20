@@ -172,10 +172,20 @@ connection table. This is plan.md Phase 1's engine.
   ERROR and moves the link to a draining set, `finish_teardown` destroys it after the
   caller's drain (T019/T013) — and a draining peer refuses reconnect at both ends (FR-023).
   No automatic retry; self-connect is an error. T068's `dead_code` allows removed
-- [ ] T013 [P] Implement the `wr_id` slab in `src/connection/` (depends T010): allocate
+- [X] T013 [P] Implement the `wr_id` slab in `src/connection/` (depends T010): allocate
   a slot per posted work request carrying the per-entry state its completion must release
   (pin, bounce lease, context + entry index). This is the mechanism Principle IX requires
-  for "released by the completion reaper that owns its work-request id"
+  for "released by the completion reaper that owns its work-request id".
+  *Done* in `src/connection/slab.rs`: generic `Slab<T>`, one per link, held by the table
+  (`ConnectionTable<T>`; `live(peer)` is now the only way to post). `wr_id` = slot index
+  (low 32) | **generation** (high 32): draining links are polled after ERROR, so a reused
+  slot can meet its previous occupant's late completion — the predecessor's slab was safe
+  only because recovery destroyed the CQ. State goes in at `insert` and comes back only via
+  `complete` or a partial post's `unposted` list. Tracked sends are always signaled.
+  `post_{send,recv}_tracked` own the partial-failure hazard; `drain` polls an ERROR link
+  until the slab is empty, failing loudly on a stall. `finish_teardown` refuses
+  (`Undrained`) while a slab holds state, and dropping a table that holds state panics.
+  The `entry_push` bench stays with T057
 - [ ] T014 Implement **send-queue credits** in `src/connection/` (depends T012, T013):
   bound in-flight RDMA writes per connection, with partial batch posting and a completion
   reaper that refills. First of the three domains of D10/FR-014; the other two arrive in

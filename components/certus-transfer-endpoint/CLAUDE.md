@@ -132,6 +132,14 @@ VIII–XI, and a review that does not check them is not a review.
   tighten the mock, never loosen it to make a test pass.
 - **`select_transport(BuildDefault)` must never fall back to the mock in an
   `rdma` build.** An in-process run reports plausible numbers from no fabric.
+- **Pin state lives in the link's `Slab` and leaves it only through `complete`**
+  (or a partial post's `unposted` list). Do not add another way out: a second
+  path is a double release, which decrements another reader's pin. Post only via
+  `post_{send,recv}_tracked` — they force `signaled` on, because an unsignaled
+  success never completes and its pin would never come back.
+- **A `wr_id` carries a generation for a reason.** Draining links are polled after
+  ERROR, so a slot can be reused while its previous occupant's completion is still
+  in flight. Never strip it to "simplify" back to the predecessor's bare index.
 - **Ask the device for QP state, never `ibv_qp::state`.** That field is
   libibverbs' cache of the last state software set; it stays RTS after the device
   forces ERROR. `QueuePair::state` uses `ibv_query_qp`. The predecessors read the
@@ -159,12 +167,13 @@ lookup answer is reported as a **miss**, never an error (D14).
 
 ## Current state
 
-Scaffolding. T001–T010, T012, T068 and T081 are done: the crate builds as a default member,
+Scaffolding. T001–T010, T012, T013, T068 and T081 are done: the crate builds as a default member,
 peer identity is implemented, `ITransferEndpoint` is defined in `interfaces`, and
 the verbs FFI (`ffi.rs`), C shim (`wrapper.c`) and safe wrappers (`rdma.rs`, T009)
 exist behind `rdma`, and the transport seam plus an in-process mock exist in every
 build (`connection/transport.rs`, `connection/mock.rs`, T010), driven by the
 connection table (`connection/table.rs`, T012, which also resolves simultaneous
-connect). Nothing owns the table yet; the endpoint component is T016 and the verbs
+connect), with a `wr_id` slab per link (`connection/slab.rs`, T013). Nothing
+owns the table yet; the endpoint component is T016 and the verbs
 side of the seam is T053. See `specs/001-rdma-cache-transfer/tasks.md` for the task list and its
 traceability matrix.
