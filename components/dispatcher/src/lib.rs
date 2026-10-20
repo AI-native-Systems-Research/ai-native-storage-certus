@@ -3933,21 +3933,54 @@ impl IDispatcher for DispatcherComponent {
             .get()
             .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
 
+        // A pinned entry (a lookup or the write-through holds a reference) can be
+        // neither demoted nor removed, and its slot must NOT be freed: the entry
+        // still points at it and the pin holder may be copying from it. Such an
+        // entry keeps its slot and is retried until the pin drops. The wait is
+        // bounded so a pin that is never released cannot hang the call: at the
+        // deadline the still-pinned entries stay resident and the call fails with
+        // `Timeout`, so `Ok(count)` always means the memory tier was emptied.
+        let timeout = std::time::Duration::from_secs(5);
+        let start = std::time::Instant::now();
         let mut count = 0;
+        let mut pinned = 0;
         loop {
-            let candidates = mt.oldest_keys(64);
+            // Widen the window past the entries left pinned on the last pass, so
+            // they cannot hide the clearable ones behind them.
+            let candidates = mt.oldest_keys(64 + pinned);
             if candidates.is_empty() {
                 break;
             }
+            let mut cleared = 0;
+            pinned = 0;
             for key in candidates {
-                if dm.try_evict_to_block(key).is_ok() {
+                let done = match dm.try_evict_to_block(key) {
+                    Ok(()) => true,
+                    Err(interfaces::DispatchMapError::ActiveReferences(_)) => false,
+                    // Entry not evictable (no SSD copy) — force remove. The entry
+                    // goes first: a pin taken since the demotion attempt refuses
+                    // the remove, and the slot is then kept for the retry.
+                    Err(_) => !matches!(
+                        dm.remove(key),
+                        Err(interfaces::DispatchMapError::ActiveReferences(_))
+                    ),
+                };
+                if done {
                     let _ = mt.remove(key);
+                    count += 1;
+                    cleared += 1;
                 } else {
-                    // Entry not evictable (no SSD copy) — force remove.
-                    let _ = mt.remove(key);
-                    let _ = dm.remove(key);
+                    pinned += 1;
                 }
-                count += 1;
+            }
+            if cleared == 0 {
+                if start.elapsed() >= timeout {
+                    return Err(DispatcherError::Timeout(format!(
+                        "clear_memory_tier: {pinned} pinned entries still resident \
+                         after clearing {count}"
+                    )));
+                }
+                std::thread::sleep(std::time::Duration::from_micros(50));
             }
         }
         Ok(count)
@@ -4032,6 +4065,10 @@ impl IDispatcher for DispatcherComponent {
 #[cfg(test)]
 #[path = "repair_test_cold_pin.rs"]
 mod repair_test_cold_pin;
+
+#[cfg(test)]
+#[path = "repair_test_clear_mt_pinned.rs"]
+mod repair_test_clear_mt_pinned;
 
 #[cfg(test)]
 mod tests {
