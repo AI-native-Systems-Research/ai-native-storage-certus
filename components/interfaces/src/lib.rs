@@ -58,6 +58,7 @@ pub use ilogger::ILogger;
 pub use imemory_tier::IMemoryTier;
 pub use imemory_tier::MemoryTierError;
 pub use imemory_tier::MemoryTierTelemetrySnapshot;
+pub use imemory_tier::{BounceError, BounceLease, DEFAULT_BOUNCE_RESERVE};
 pub use iremote_lookup::IRemoteLookup;
 pub use iremote_lookup::LookupConfig;
 pub use iremote_lookup::RemoteLookupError;

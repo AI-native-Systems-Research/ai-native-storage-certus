@@ -1085,6 +1085,21 @@ mod tests {
         fn tier_event_stats(&self) -> TierEventStats {
             TierEventStats::default()
         }
+
+        fn read_to_bounce(
+            &self,
+            _key: CacheKey,
+            _offset: u64,
+            _len: u32,
+        ) -> Result<interfaces::BounceLease, interfaces::BounceError> {
+            Err(interfaces::BounceError::NeverFits(
+                "block-tier serving is a test double with no bounce reserve".into(),
+            ))
+        }
+
+        fn release_bounce(&self, _lease: interfaces::BounceLease) {
+            unreachable!("read_to_bounce never hands out a lease here")
+        }
     }
 
     fn translator(disp: Arc<MockDispatcher>) -> Translator {

@@ -530,6 +530,21 @@ impl IMemoryTier for MockMemoryTier {
     fn telemetry_snapshot(&self) -> MemoryTierTelemetrySnapshot {
         MemoryTierTelemetrySnapshot::default()
     }
+    // A test double with no bounce reserve.
+    fn set_bounce_reserve(&self, _: usize) -> Result<(), interfaces::MemoryTierError> {
+        Ok(())
+    }
+    fn bounce_alloc(&self, _: u32) -> Result<interfaces::BounceLease, interfaces::BounceError> {
+        Err(interfaces::BounceError::NeverFits(
+            "no bounce reserve".into(),
+        ))
+    }
+    fn bounce_free(&self, _: interfaces::BounceLease) {
+        unreachable!("no lease was ever handed out")
+    }
+    fn bounce_usage(&self) -> (usize, usize) {
+        (0, 0)
+    }
 }
 
 // ---------------------------------------------------------------------------
