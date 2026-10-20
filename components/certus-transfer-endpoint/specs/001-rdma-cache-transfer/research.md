@@ -612,6 +612,49 @@ context's landing slots are reachable over a doomed connection.
 whenever the higher-id instance is the one that needs data, since the lower has no reason to
 connect.
 
+## D24 — Connect-time identity: a frozen pre-HELLO format, echoed both ways
+
+**Decision**: the connect `private_data` carries the initiator's normalized `PeerId` in a
+frozen format — `'C' 'T'`, format byte `0x01`, a length byte, then the name as UTF-8. The
+acceptor echoes **its own** name the same way in the accept `private_data`, and the
+initiator fails the link (`NameMismatch`) unless that equals the name it dialed. A reject
+carries `'C' 'T' 0x01 reason`, with reasons `1` duplicate (D23's loser — not a failure),
+`2` malformed identity, `3` draining (FR-023: no fresh connection until reclaim). Unknown
+reasons are kept, never guessed.
+
+**Rationale**: D23 decides at accept and D16 keys the table by instance, and both need the
+inbound link's `PeerId` — which the connection cannot supply, since its source address
+carries an ephemeral port. These bytes travel **before** `OP_HELLO`, so the D20 argument
+applies with full force: a peer that cannot parse them cannot be told so. Hence the same
+discipline — frozen layout, versioned only by its own format byte. The length byte is needed
+because librdmacm zero-pads received private data to the transport's limit. Connect private
+data is limited to **56 bytes** (`rdma_connect(3)`, RDMA_PS_TCP), so a name longer than 52
+bytes is refused when the table is built, not at first connect.
+
+**Why echo the acceptor's name**: the tie-break and FR-002's reuse both assume every
+instance is named by the *same string* everywhere. If A dials `10.0.0.2:7000` and B calls
+itself `node2:7000`, nothing else notices: B files A's link under A and dials A itself, and
+the pair silently holds two connections — the state D22 calls unacceptable. D16 rules out a
+resolver, so the mismatch must be detected; echoing costs nothing and makes it loud
+(Principle XI).
+
+**Two cases the D23 rule does not decide, resolved "newer wins"**: an inbound request from a
+peer whose live link that same peer initiated, or whose live link we initiated but the peer
+out-ranks. Neither can arise from a race — an end connects only when it holds neither link
+nor attempt — so the peer has lost the link: usually a restart, or a teardown whose
+`Disconnected` has not arrived. Rejecting would lock the peer out until the stale link is
+noticed, which for an idle RC link may be never. So the old link is forced to ERROR first
+(FR-017), its contexts aborted, and the new one accepted. **Known gap**: a peer that
+crashed without its connection being torn down, restarted, and out-ranks nobody is
+indistinguishable from the race's loser and is rejected `duplicate` until this end notices
+the stale link — at the latest by a request deadline (FR-016). A clean exit tears its
+connections down, so this needs a node crash; a per-start incarnation number in the
+identity would close it, and is deferred.
+
+**Also considered**: rejecting every duplicate (livelocks a simultaneous connect — both ends
+reject) and accepting every duplicate (two connections). Both are what the table would have
+done without D23 in place, which is why T081's rule was folded into T012.
+
 ## Rig facts (measured 2026-10-15, read-only, cluster left running)
 
 Recorded because several decisions above were written against assumed numbers.
