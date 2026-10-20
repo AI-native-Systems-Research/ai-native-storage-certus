@@ -9,12 +9,13 @@
 //! The transport seam ([`transport`]) and its in-process implementation
 //! ([`mock`]) are T010; the connection table ([`table`]) and the connect-time
 //! identity it relies on ([`identity`]) are T012, which also absorbed T081's
-//! simultaneous-connect rule. The `wr_id` slab ([`slab`]) is T013. Still
-//! scaffolding: fault injection in the mock (T011) and send-queue credits
-//! (T014).
+//! simultaneous-connect rule. The `wr_id` slab ([`slab`]) is T013 and
+//! send-queue credits ([`credits`]) are T014. Still scaffolding: fault
+//! injection in the mock (T011).
 
 use std::fmt;
 
+pub mod credits;
 pub mod identity;
 pub mod mock;
 pub mod slab;
