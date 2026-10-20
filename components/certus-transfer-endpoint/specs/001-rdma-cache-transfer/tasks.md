@@ -435,8 +435,8 @@ slots and the reply's per-key outcomes match the source's actual residency.
   die with it and a rebuilt connection re-learns them. Fixed size is deliberate: the layout is
   frozen forever, so a variable-length body would be the wrong shape (D20 *Revision*)
 - [ ] T077 [US1] Apply the negotiated capabilities: the connection's version is
-  `min(a.version_max, b.version_max)`, stamped into the version half of every data-plane
-  opcode thereafter; chunk against the **peer's** `max_entries` rather than the local one — the
+  `min(a.version_max, b.version_max)`, carried in the header's `version` field (offset 6) of
+  every data-plane message thereafter and validated once on receipt (D21); chunk against the **peer's** `max_entries` rather than the local one — the
   two sides are not assumed to have equal receive buffers, which nothing checked before this
   exchange existed. Fail the **connection** with `IncompatiblePeer(..)` at establishment if the
   negotiated version falls below `max(a.version_min, b.version_min)`, naming peer and both
@@ -509,9 +509,11 @@ slots and the reply's per-key outcomes match the source's actual residency.
   for an entry reported as a hit has completed before the reply is sent. This is what
   makes the one-sided write safe with no `WRITE_WITH_IMM` and no per-entry completion
   notification, so the requester can treat reply arrival as the completion signal
-- [ ] T035 [US1] Implement reserve → arrive → commit/abort on the destination: publish
-  only entries whose write completed, release the rest; never publish a partially written
-  entry (FR-018, invariant 7)
+- [ ] T035 [US1] Make reserve → arrive → commit/abort possible for the **caller**, who owns
+  the landing slots and publishes them: the endpoint never reports a hit for an entry whose
+  write did not complete, so a `Miss`, a `Failed` or a teardown is what tells the caller to
+  abort that slot, and a hit is safe to commit. Never let a partially written entry read as a
+  hit (FR-018, invariant 7). The endpoint itself reserves and publishes nothing
 - [ ] T036 [US1] Tests: codec round-trip including unknown-opcode rejection and
   unknown-outcome-as-Miss; **SC-001** — a fetch over the mock seam with the zyre receptacle
   absent entirely (the component has no zyre dependency, FR-004, so this is structural)
