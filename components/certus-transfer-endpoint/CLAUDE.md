@@ -201,7 +201,7 @@ lookup answer is reported as a **miss**, never an error (D14).
 
 ## Current state
 
-Scaffolding. T001–T010, T012–T019, T022–T026, T068 and T081 are done: the crate builds as a default member,
+Scaffolding. T001–T010, T012–T020, T022–T026, T068 and T081 are done: the crate builds as a default member,
 peer identity is implemented, `ITransferEndpoint` is defined in `interfaces`, and
 the verbs FFI (`ffi.rs`), C shim (`wrapper.c`) and safe wrappers (`rdma.rs`, T009)
 exist behind `rdma`, and the transport seam plus an in-process mock exist in every
@@ -212,7 +212,8 @@ credits (`connection/credits.rs`, T014), and counters (`telemetry.rs`, T015).
 The component (`CertusTransferEndpoint`, T016) owns the table on its endpoint
 thread (`endpoint.rs`) behind `ITransferEndpointAdmin`. `push_async` (T017) serves
 memory-tier entries end to end with the full pin discipline (`serve.rs`, T022-T026),
-and `push` (T018) waits on it;
+and `push` (T018) waits on it; landing regions register once for the endpoint's
+life (T020);
 `disconnect` and `stats` work; the rest say which task they land in. The verbs side of the
 seam is T053. See `specs/001-rdma-cache-transfer/tasks.md` for the task list and its
 traceability matrix.

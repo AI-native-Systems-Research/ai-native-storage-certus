@@ -36,11 +36,14 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use component_core::actor::ActorHandler;
-use interfaces::{CacheKey, EntryOutcome, FetchCompletion, ILogger, RemoteRegion, TransferStats};
+use interfaces::{
+    CacheKey, EntryOutcome, FetchCompletion, ILogger, LandingRegionHandle, RemoteRegion,
+    TransferStats,
+};
 
 use crate::connection::slab::TrackedSend;
 use crate::connection::table::{ConnectionTable, ReapError, TableEvent};
-use crate::connection::transport::{Completion, CompletionError, Region};
+use crate::connection::transport::{Access, Completion, CompletionError, Region};
 use crate::connection::PeerId;
 use crate::serve::{resolve, Map, MissCause, Pool, Push, PushWork, Resolved};
 
@@ -69,6 +72,14 @@ pub(crate) enum Command {
     Disconnect(PeerId, mpsc::Sender<Result<(), String>>),
     /// Tear down and drain every peer, then drop the table. The last command.
     Shutdown(mpsc::Sender<Result<(), String>>),
+    /// Register `[base, base + len)` for peers to write into (T020). The
+    /// address travels as an integer: the precondition on
+    /// `register_landing_region` makes it the caller's to keep valid.
+    Register {
+        base: usize,
+        len: usize,
+        reply: mpsc::Sender<Result<LandingRegionHandle, String>>,
+    },
     /// The legacy push (T017): write each entry the source holds into the
     /// peer's named region, then report one outcome per entry.
     Push {
@@ -160,6 +171,11 @@ pub(crate) struct EndpointActor {
     /// The memory-tier pool's registration. Declared after `table`, and
     /// released only after it, so every write the pool backs has been drained.
     pool_region: Option<Region>,
+    /// Landing regions, by handle id. Like the pool, declared after `table`
+    /// and released only after it — or leaked with it if a drain stalls —
+    /// since a peer may be writing into any of them until teardown.
+    landing: BTreeMap<u64, Region>,
+    next_landing: u64,
     /// Pushes in progress, in arrival order.
     pushes: BTreeMap<u64, Push>,
     next_push: u64,
@@ -186,6 +202,8 @@ impl EndpointActor {
             events: Vec::new(),
             map,
             pool_region: Some(pool_region),
+            landing: BTreeMap::new(),
+            next_landing: 1,
             pushes: BTreeMap::new(),
             next_push: 0,
             #[cfg(test)]
@@ -446,6 +464,47 @@ impl EndpointActor {
         did
     }
 
+    /// Register a landing region, refusing a range that overlaps the pool or
+    /// another landing region: one byte under two keys helps nobody.
+    fn register(&mut self, base: usize, len: usize) -> Result<LandingRegionHandle, String> {
+        let table = self.table.as_mut().ok_or("endpoint is shut down")?;
+        if base == 0 || len == 0 {
+            return Err("landing region is null or empty".into());
+        }
+        let start = base as u64;
+        let end = start
+            .checked_add(len as u64)
+            .ok_or("landing region wraps the address space")?;
+        let overlaps = |r: &Region| start < r.addr() + r.len() as u64 && r.addr() < end;
+        if self.pool_region.as_ref().is_some_and(overlaps) {
+            return Err(format!(
+                "landing region 0x{start:x}+{len} overlaps the memory-tier pool"
+            ));
+        }
+        if let Some((id, _)) = self.landing.iter().find(|(_, r)| overlaps(r)) {
+            return Err(format!(
+                "landing region 0x{start:x}+{len} overlaps landing region {id}"
+            ));
+        }
+        // SAFETY: `register_landing_region`'s documented precondition — the
+        // range stays allocated until shutdown returns and is not held as a
+        // Rust reference while peers may write it. The region is dropped only
+        // after the table, so after every write into it has been drained.
+        let region = unsafe {
+            table.transport().register(
+                base as *mut u8,
+                len,
+                Access::LOCAL_WRITE | Access::REMOTE_WRITE,
+            )
+        }
+        .map_err(|e| format!("registering the landing region: {e}"))?;
+        let id = self.next_landing;
+        self.next_landing += 1;
+        let handle = LandingRegionHandle::new(id, region.addr(), region.len(), region.rkey());
+        self.landing.insert(id, region);
+        Ok(handle)
+    }
+
     #[cfg(test)]
     fn hold_recv(&mut self, peer: &PeerId) -> Result<(), String> {
         use crate::connection::slab::TrackedRecv;
@@ -510,14 +569,16 @@ impl EndpointActor {
         if failures.is_empty() {
             drop(table);
             self.pool_region = None;
+            self.landing.clear();
             return Ok(());
         }
         // Some link still holds state. Destroying it would lose that state, so
-        // the table — and the pool registration its writes use — is leaked
-        // instead; its queue pairs stay in ERROR, which is what makes late
-        // writes impossible. The failure is reported.
+        // the table — and every registration its writes use, the pool and the
+        // landing regions — is leaked instead; its queue pairs stay in ERROR,
+        // which is what makes late writes impossible. The failure is reported.
         std::mem::forget(table);
         std::mem::forget(self.pool_region.take());
+        std::mem::forget(std::mem::take(&mut self.landing));
         Err(failures.join("; "))
     }
 }
@@ -542,6 +603,9 @@ impl ActorHandler<Command> for EndpointActor {
             }
             Command::Shutdown(reply) => {
                 let _ = reply.send(self.shutdown());
+            }
+            Command::Register { base, len, reply } => {
+                let _ = reply.send(self.register(base, len));
             }
             Command::Push {
                 peer,

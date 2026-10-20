@@ -225,7 +225,7 @@ connection table. This is plan.md Phase 1's engine.
   `remote-lookup-rdma-initiator/src/connection.rs:1075` `parse_endpoint` rather than
   inventing a second one. Unit-test that two addresses differing only by port are distinct
   keys, that a host-only address is rejected, and that both may be the local host
-- [ ] T069 Implement protection-domain ownership in `src/rdma.rs` (depends T009): T009's
+- [ ] T069 *(moved into T053)* Implement protection-domain ownership in `src/rdma.rs` (depends T009): T009's
   `ProtectionDomain` is one PD on one device; this task is the **per-device table**,
   lazy allocation after address resolution, and shutdown ordering — **one PD
   per device, owned by the endpoint for its lifetime**, with memory regions registered into
@@ -305,10 +305,18 @@ hardware loopback scenario, pass against this component with messaging unused.
   (FR-017, Principle IX's last clause). This is the existing `Disconnect`/`DisconnectAck`
   barrier, kept — and it is also the mechanism the deadline path reuses (FR-023, T070), so
   it must abort every context outstanding on the connection, not just one
-- [ ] T020 [US2] Implement `register_landing_region(base, len)` returning
+- [X] T020 [US2] Implement `register_landing_region(base, len)` returning
   `LandingRegionHandle`: register once, not per request; an `rkey` is only valid because
   of it (wire-protocol.md "Connection and lifecycle"). Register into the long-lived PD of
-  T069 so the handle and its `rkey`s survive a reconnect (D17); depends on T069
+  T069 so the handle and its `rkey`s survive a reconnect (D17); depends on T069.
+  *Done against the seam, without T069*: registration belongs to the endpoint, not to a
+  connection, in every transport, and survives a reconnect (tested). T069's per-device PD
+  table exists only to make the **verbs** transport keep that promise, so it moved into
+  T053. The handle now carries `addr`/`len`/`rkey` and `region_at(offset, len)` — as a bare
+  id it gave a caller no way to name a slot. No deregistration (proving no peer can still
+  write is the FR-017 barrier generalised). A null, empty, or pool- or region-overlapping
+  range is refused. The memory-must-outlive-shutdown precondition is documented on the
+  method, which `define_interface!` cannot make `unsafe`
 - [ ] T021 [US2] Tests in-module: order-and-length invariant 1 over the mock seam
   (`items.len()` outcomes, index *i* ↔ `items[i]`); connection reuse across repeated
   pushes (FR-002); teardown-before-reclaim ordering asserted from the mock's recorded
@@ -655,7 +663,9 @@ failing deadline rather than none.
 - [ ] T053 Implement the real `rdma`-gated transport behind the T010 seam using T009's
   wrappers: `rdma_listen`/`rdma_accept`/`rdma_connect`, with the accepted and the
   initiated QP equally able to post (FR-001). Both predecessor crates already have all
-  three calls, so this is combination rather than new ground
+  three calls, so this is combination rather than new ground. **Includes T069**: the seam
+  promises a registration outlives every queue pair (T020 relies on it, and the mock keeps
+  it); the verbs transport keeps it with one PD per device, as T069 describes
 - [ ] T054 [P] Write `src/loopback_test.rs`: `#[ignore]`d single-host RDMA loopback
   covering a full `fetch` — request, source push, reply, publication — mirroring the
   pattern of `remote-lookup-rdma-initiator/src/loopback_test.rs`
@@ -842,7 +852,7 @@ this. It is a separate change, after the engine is proven.
 | D23 deterministic race resolution | T012 |
 | D24 connect-time identity, name echo, newer wins | T012 |
 | D20 one negotiated version, frozen messages, eager discovery | T027, T074-T078 |
-| D17 long-lived PD, registrations outlive QPs | T069, T020 |
+| D17 long-lived PD, registrations outlive QPs | T020 (seam), T053 + T069 (verbs) |
 | Principle VIII default build | T002, T003, T010, T054–T056 |
 | Principle IX pin discipline | T013, T022–T026, T039 |
 | Principle X bounded resources | T014, T032, T043, T047 |
