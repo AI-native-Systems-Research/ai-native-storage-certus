@@ -300,30 +300,60 @@ impl fmt::Display for TransferEndpointError {
 
 impl std::error::Error for TransferEndpointError {}
 
-/// Completion callback for [`ITransferEndpoint::fetch`].
+/// What a request delivers to its [`FetchCompletion`]: one [`EntryOutcome`]
+/// per requested key, in request order — or, for a fetch, the reason no reply
+/// arrived.
 ///
-/// Receives exactly one [`EntryOutcome`] per requested key, in request order,
-/// and is invoked **once** — after the last chunk, even when the endpoint split
-/// the request internally. Boxed rather than generic so the interface stays
-/// object-safe.
+/// A hit is reported only when the write is **certain** to have landed: its
+/// completion succeeded, which on a reliable connection means the peer's NIC
+/// acknowledged it. A failed or flushed write is uncertain — it may have
+/// landed in part, or whole with only the acknowledgement lost — and is never
+/// a hit. Everything that is not a hit must be treated as not landed.
+pub type FetchResult = Result<Vec<EntryOutcome>, TransferEndpointError>;
+
+/// Completion callback for [`ITransferEndpoint::fetch`],
+/// [`push_async`](ITransferEndpoint::push_async) and, behind it,
+/// [`push`](ITransferEndpoint::push).
 ///
-/// The callback runs on the endpoint's own thread, so it must not block: that
-/// thread posts work requests and reaps completions for every context on the
-/// connection.
+/// Invoked **once** — after the last chunk, even when the endpoint split the
+/// request internally. For a **fetch**:
+///
+/// * `Ok(outcomes)` — the peer replied. Each hit's write completed before the
+///   reply was sent, so its slot is safe to commit; every other outcome means
+///   abort that slot.
+/// * `Err(..)` — no usable reply: [`TransferEndpointError::Deadline`] (none
+///   came in time), [`TransferEndpointError::Protocol`] (the peer refused the
+///   request), [`TransferEndpointError::Transport`] (the connection could not
+///   be made, or was torn down — including as a sibling of another request's
+///   deadline), or [`TransferEndpointError::RequestTooLarge`]. **Every** slot
+///   of the request must be treated as not landed. The callback fires only
+///   after this end's queue pair to the peer has been forced to ERROR and
+///   drained, so no write can still land: the slots are safe to reclaim.
+///
+/// For a **push** the outcome is always per entry, since some entries may have
+/// landed before a connection was lost: `Ok`, with a hit for each write that
+/// certainly landed and `Failed` for the rest. `Err` only if the push could
+/// not start at all.
+///
+/// Boxed rather than generic so the interface stays object-safe. The callback
+/// runs on the endpoint's own thread, so it must not block: that thread posts
+/// work requests and reaps completions for every context on the connection.
 ///
 /// # Examples
 ///
 /// ```
-/// use interfaces::{EntryOutcome, FetchCompletion};
+/// use interfaces::{EntryOutcome, FetchCompletion, FetchResult, TransferEndpointError};
 ///
-/// let seen: std::sync::Arc<std::sync::Mutex<Vec<EntryOutcome>>> = Default::default();
+/// let seen: std::sync::Arc<std::sync::Mutex<Option<FetchResult>>> = Default::default();
 /// let sink = std::sync::Arc::clone(&seen);
-/// let cb: FetchCompletion = Box::new(move |outcomes| *sink.lock().unwrap() = outcomes);
+/// let cb: FetchCompletion = Box::new(move |r| *sink.lock().unwrap() = Some(r));
 ///
-/// cb(vec![EntryOutcome::HitMemoryTier]);
-/// assert_eq!(*seen.lock().unwrap(), vec![EntryOutcome::HitMemoryTier]);
+/// cb(Err(TransferEndpointError::Deadline("no reply from 10.0.0.2:7000".into())));
+/// let got = seen.lock().unwrap().take().unwrap();
+/// assert!(matches!(got, Err(TransferEndpointError::Deadline(_))));
+/// # let _ = EntryOutcome::Miss;
 /// ```
-pub type FetchCompletion = Box<dyn FnOnce(Vec<EntryOutcome>) + Send>;
+pub type FetchCompletion = Box<dyn FnOnce(FetchResult) + Send>;
 
 /// A snapshot of endpoint counters.
 ///
@@ -429,6 +459,39 @@ pub struct EndpointConfig {
     pub inbound_quota: u32,
     /// CPU to pin the endpoint thread to, normally one on the NIC's NUMA node.
     pub actor_cpu: Option<usize>,
+    /// The destination-side **reply deadline**: how long a fetch may wait for
+    /// its reply, measured from when its request is handed to the transport —
+    /// not from the call, since a request waiting for a credit is queued, not
+    /// stuck. `None` disables it. Distinct from any source-side stall cap on
+    /// uncompleted writes, which is not this and is not configured here
+    /// (FR-016).
+    pub fetch_deadline: Option<std::time::Duration>,
+    /// What a reply deadline does on expiry.
+    pub deadline_action: DeadlineAction,
+}
+
+/// What a fetch's reply deadline does when it expires (FR-016).
+///
+/// # Examples
+///
+/// ```
+/// use interfaces::DeadlineAction;
+///
+/// assert_eq!(DeadlineAction::default(), DeadlineAction::FailLoud);
+/// ```
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum DeadlineAction {
+    /// Log the key range, peer, chunk and queue-pair state, tear the
+    /// connection down — forcing ERROR before anything is reclaimed — and fail
+    /// the request with [`TransferEndpointError::Deadline`]. Every other
+    /// request on the connection is aborted with it, and the blast radius is
+    /// logged.
+    #[default]
+    FailLoud,
+    /// Report what arrived and let the caller recompute. **Deferred, not
+    /// implemented**: configuring it is refused, never silently treated as
+    /// `FailLoud`.
+    ReportPartial,
 }
 
 impl EndpointConfig {
@@ -442,6 +505,8 @@ impl EndpointConfig {
             message_credits: 8,
             inbound_quota: 8,
             actor_cpu: None,
+            fetch_deadline: Some(std::time::Duration::from_secs(5)),
+            deadline_action: DeadlineAction::FailLoud,
         }
     }
 }
@@ -498,8 +563,9 @@ component_macros::define_interface! {
         /// # Completion guarantee
         ///
         /// If this returns `Ok`, `on_complete` is invoked exactly once on every
-        /// outcome — full success, all-miss, protocol error, deadline, or
-        /// teardown with the context outstanding. If it returns `Err`, the
+        /// outcome — `Ok` for a reply (full success or all-miss), `Err` for a
+        /// protocol error, a deadline, or a teardown with the request
+        /// outstanding; see [`FetchCompletion`]. If it returns `Err`, the
         /// callback is dropped without being invoked, so a callback that
         /// releases resources must do so on drop as well as on call.
         ///
@@ -584,7 +650,8 @@ component_macros::define_interface! {
         /// [`TransferEndpointError::InvalidEndpoint`] if `config.local` is not a
         /// `"host:port"`; [`TransferEndpointError::Transport`] if the queue
         /// sizes cannot hold what the protocol posts — `message_credits` or
-        /// `inbound_quota` of zero, or `max_recv_wr` below their sum;
+        /// `inbound_quota` of zero, or `max_recv_wr` below their sum, or a
+        /// `deadline_action` that is not implemented;
         /// [`TransferEndpointError::NotInitialized`] carrying
         /// "already initialized" once the endpoint has started, since a running
         /// endpoint cannot change its name or its queue sizes.

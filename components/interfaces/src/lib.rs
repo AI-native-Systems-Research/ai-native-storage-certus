@@ -74,9 +74,11 @@ pub use iremote_lookup_rdma_responder::{
 // Ungated: the endpoint's receptacles are ILogger and IDispatchMap, both
 // available without the `spdk` feature, so the component can be a workspace
 // default member.
+pub use itransfer_endpoint::DeadlineAction;
 pub use itransfer_endpoint::EndpointConfig;
 pub use itransfer_endpoint::EntryOutcome;
 pub use itransfer_endpoint::FetchCompletion;
+pub use itransfer_endpoint::FetchResult;
 pub use itransfer_endpoint::ITransferEndpoint;
 pub use itransfer_endpoint::ITransferEndpointAdmin;
 pub use itransfer_endpoint::LandingRegionHandle;
