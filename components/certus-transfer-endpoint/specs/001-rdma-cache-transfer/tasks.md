@@ -339,8 +339,9 @@ slots and the reply's per-key outcomes match the source's actual residency.
 
 - [ ] T027 [US1] Implement the 24-byte header codec in `src/message.rs`: `opcode` naming a
   **kind only** (`OP_FETCH = 1`, `OP_FETCH_REPLY = 2`, `OP_HELLO = 0xFFFE`,
-  `OP_ERROR = 0xFFFF`, high 16 bits MUST be zero), `flags` bit 0 = `MORE`, **`version` at
-  offset 6**, `context_id`, `n_entries`, reserved fields that MUST be zero. Little-endian.
+  `OP_ERROR = 0xFFFF`, high 16 bits MUST be zero), `flags` (reserved, MUST be zero),
+  **`version` at offset 6**, `context_id`, `n_entries`, reserved fields that MUST be zero.
+  Little-endian.
   Dispatch on `opcode` alone and **validate `version` once** against the connection's
   negotiated version — a consistency check, not a dispatch key, answered with `OP_ERROR`
   reason 2 on mismatch (D21). Do not reintroduce a fused opcode: a bump would mint a new
@@ -405,12 +406,15 @@ slots and the reply's per-key outcomes match the source's actual residency.
   outbound-request and inbound-serving context tables, since the requester allocates ids and
   one id can be live in both directions on a connection — a single contexts-per-connection map
   silently conflates two unrelated requests — plus per-direction message credits
-- [ ] T080 [US1] Partition posted receive buffers (FR-026, D22): reserve enough for the replies
-  this end's own outstanding requests can generate — a count its own message credits already
-  bound — and advertise the remainder as the peer's `max_outstanding_requests`; enforce the
-  granted quota on inbound requests. Without this, a peer issuing requests up to the buffer
-  count takes every buffer and leaves none for a reply this end is blocked on: an RNR stall,
-  and with two-way traffic a deadlock
+- [ ] T080 [US1] Partition posted receive buffers (FR-026, D22): reserve **exactly one buffer
+  per own message credit** for replies — exact because each request message draws exactly one
+  reply (FR-007, T045) — and advertise a separate inbound-request quota as the peer's
+  `max_outstanding_requests`; post reserve + quota in all. Clamp this end's effective message
+  credits to the quota the *peer* advertised, and enforce the granted quota on inbound
+  requests. Without this, a peer issuing requests up to the buffer count takes every buffer
+  and leaves none for a reply this end is blocked on: an RNR stall, and with two-way traffic
+  a deadlock. **Open:** `OP_HELLO` (one per connection) and an `OP_ERROR` answering a reply
+  also consume a receive buffer and fall in neither partition; account for them here
 - [X] T081 *(absorbed into T012 — see there and D24)* Resolve simultaneous connect (FR-027, D23): on detecting a duplicate, both ends keep
   the connection whose **initiator has the lower `PeerId`** and close the other — a
   deterministic function of two known values, no arbitrator, no extra round trip. Requires the
@@ -428,12 +432,15 @@ slots and the reply's per-key outcomes match the source's actual residency.
 - [ ] T030 [US1] Post receive buffers **unconditionally** on every connection, whether or
   not the local caller uses messaging (FR-005). Derive `max_entries` from the buffer size
   rather than configuring it separately: `(8192 - 24) / 24` = **340** entries per
-  `OP_FETCH`, and that is the value `RequestTooLarge { max_entries }` reports. Posted-recv
-  memory is `message_credits × 8 KiB` — 64 KiB per peer at 8 credits, which is why this
-  can be unconditional instead of negotiated
+  `OP_FETCH`, and that is the value `RequestTooLarge { max_entries }` reports. Post
+  **reserve + quota** buffers (T080): one per own message credit for replies, plus the
+  inbound-request quota advertised to the peer — 16 × 8 KiB = 128 KiB per peer at the
+  defaults of 8 and 8, which is why this can be unconditional instead of negotiated
 - [ ] T031 [US1] Implement the context table in `src/message.rs`: `TransferContext` =
   context id, peer, key list, landing slots, outstanding-entry count, deadline. Allocate
-  ids, match replies by echoed id
+  ids, match replies by echoed id. A context is one request **message**; a chunked fetch
+  (T044) is several contexts, one per chunk, grouped by the requester under the single
+  `TransferContextId` that `fetch` returned
 - [ ] T032 [US1] Implement **message credits** (second domain of FR-014): decrement on
   send, increment on reply, and **block at zero**. Credits are consumed per *message*, not
   per context, so a chunked fetch of N messages takes N credits
@@ -527,13 +534,19 @@ failure.
   separately configured and separately named knobs (FR-014, D10). Do not conflate them:
   they bound genuinely different resources and exhaust independently, and the existing code
   already uses "credits" for the first
-- [ ] T044 Implement requester-side chunking when `items.len() > max_entries`: chunks of
-  one context share a `context_id`, and every chunk but the last sets `MORE`
-- [ ] T045 Implement source-side reply chunking: one reply per batch completed, each
-  covering a contiguous run of the request's entries, `MORE` on all but the last
-- [ ] T046 Implement the context completion rule: a `context_id` is complete when a reply
-  without `MORE` has been seen **and** the outcome counts sum to the number of entries
-  requested. `on_complete` fires once, after the last chunk, with the full outcome vector
+- [ ] T044 Implement requester-side chunking when `items.len() > max_entries` (the peer's):
+  each chunk is its own `OP_FETCH` with **its own `context_id`**, and the requester records,
+  per chunk id, the caller's fetch and the chunk's offset in its item list. Replies to the
+  chunks of one fetch may arrive in any order (FR-013); each is placed by its chunk's
+  recorded offset. Nothing on the wire links the chunks
+- [ ] T045 Source side: answer every `OP_FETCH` message with **exactly one** reply covering
+  all its entries (or one `OP_ERROR`), echoing that message's `context_id` — never one reply per batch
+  (FR-007). When bounce buffers are scarce, serve the message's entries as buffers free up
+  and still reply once: scarcity delays the reply, it never multiplies it. This is what keeps
+  T080's reply reserve exact
+- [ ] T046 Implement the fetch completion rule: a fetch is complete when every one of its
+  chunks has been answered (one reply per chunk, FR-007), and the outcome counts sum to the
+  number of entries requested. `on_complete` fires once, after the last chunk, with the full outcome vector
   in request order — invariant 1 must hold *across* chunking
 - [ ] T047 Chunk on exhaustion of any of the three domains, and make progress rather than
   failing (FR-015, invariant 9). A request can reach ~3.4 GiB (~1,536 blocks × 2.25 MiB

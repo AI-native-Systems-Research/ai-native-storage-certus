@@ -57,9 +57,9 @@ per kind per version.
 | offset | size | field | notes |
 |---|---|---|---|
 | 0 | 4 | `opcode` | message kind; high 16 bits MUST be zero |
-| 4 | 2 | `flags` | bit 0 = `MORE` (another chunk of this context follows); rest reserved, MUST be zero |
+| 4 | 2 | `flags` | reserved, MUST be zero; in the frozen prefix so a future flag needs no layout change |
 | 6 | 2 | `version` | protocol version in force; validated, not dispatched on. Zero and ignored for `OP_HELLO`/`OP_ERROR` |
-| 8 | 8 | `context_id` | identifies the fetch; echoed in `OP_FETCH_REPLY` |
+| 8 | 8 | `context_id` | identifies one request **message**; echoed in its one reply |
 | 16 | 4 | `n_entries` | entries in *this* message |
 | 20 | 4 | reserved | MUST be zero; keeps the entry vector 8-byte aligned |
 
@@ -197,31 +197,56 @@ With an 8 KiB buffer: `(8192 - 24) / 24` = **340 entries** per `OP_FETCH`. At 2.
 per block that is ~765 MiB of KV per message — far more than any single scheduler step will
 ask for — and it bounds `OP_FETCH_REPLY` at `24 + 340` = 364 bytes.
 
-Posted-receive memory per peer is `message_credits x 8 KiB`. At 8 credits that is 64 KiB per
-peer — negligible, which is why FR-005 can post unconditionally rather than negotiate.
+Posted-receive memory per peer is `(message_credits + inbound_quota) x 8 KiB` — the reply
+reserve plus the peer's quota (*Receive-buffer partitioning*). At the defaults of 8 credits
+and an 8-request quota that is 16 buffers, 128 KiB per peer — still negligible, which is why
+FR-005 can post unconditionally rather than negotiate.
 
 `max_entries` is derived from the buffer size, not configured independently, and is what
 `RequestTooLarge { max_entries }` reports. It is also what `OP_HELLO` advertises, so a peer
 with a different buffer size is honoured rather than overrun — the two sides are **not**
 assumed equal.
 
-## Chunking and the `MORE` flag
+## Chunking
 
-A fetch larger than `max_entries`, or one the source cannot satisfy at once for want of
-bounce buffers (D10), is split. Chunks of one context share a `context_id`; every chunk but
-the last sets `MORE`.
+A fetch larger than the peer's `max_entries` is split by the **requester** into chunks, each
+its own `OP_FETCH` message with **its own `context_id`**, each costing its own message credit.
 
-- The **requester** chunks when `items.len() > max_entries`.
-- The **source** MAY further split its *replies* — it sends a reply per batch it completes,
-  each covering a contiguous run of that request's entries, with `MORE` set on all but the
-  last.
-- A `context_id` is complete when a reply without `MORE` has been seen and the outcome
-  counts sum to the number of entries requested.
+- The **requester** chunks when `items.len() > max_entries` (the peer's, see `OP_HELLO`).
+  It keeps the mapping from each chunk's `context_id` to the caller's fetch and that chunk's
+  offset in the caller's item list. The `TransferContextId` that `fetch` returns names the
+  whole fetch and stays a local value; when a fetch is not chunked the two may coincide, but
+  nothing may assume they do. Chunking is entirely a requester-side concern: nothing on
+  the wire says two messages belong to one fetch, and the source never needs to know.
+- The **source never splits a reply.** Every `OP_FETCH` message draws **exactly one** answer
+  — one `OP_FETCH_REPLY` covering all of that message's entries, or one `OP_ERROR` — echoing
+  that message's `context_id`. A source short of bounce buffers (D10) serves the message's
+  entries as buffers free up, chunking internally (FR-015), and still replies once; scarcity
+  delays the reply, it never multiplies it.
+- A fetch is complete when every one of its chunks has been answered.
 
-Message credits are consumed per *message*, not per context, so a chunked fetch of N
-messages consumes N credits and blocks when they are exhausted — which is the credit-based
+**Why each chunk has its own id.** FR-013 lets the source serve messages concurrently, so
+replies to the chunks of one fetch may arrive in any order. With one id per message, a reply
+names exactly the request it answers, and the requester places its outcomes from that
+chunk's recorded offset; nothing else on the wire is needed. A shared id plus a
+first-entry-offset header field was the alternative, and it buys nothing a requester-side
+table does not already give — while putting a second correlation key on the wire for every
+message forever.
+
+**Why exactly one reply per request.** The requester's receive reservation for replies
+(*Receive-buffer partitioning*, below) is sized from its own message credits, which bound
+its outstanding request *messages*. That bound only covers the replies if each message
+draws a bounded number of them. With source-split replies, N outstanding requests could
+produce more than N replies and overrun the reservation — the RNR stall the partition exists
+to prevent. One reply per message makes the reservation exactly the credit count. The cost
+is that a requester learns a large message's outcomes only when all of it is served; D19
+already shows cross-message overlap is worth ~0.1%, and requester-side chunking still bounds
+how much any one reply waits for.
+
+Message credits are consumed per *message*, so a fetch chunked into N messages consumes N
+credits and blocks when they are exhausted — which is the credit-based
 pacing that answers the incast concern (D10). Because credits block only at zero, several
-messages of one context are normally in flight at once; that overlap is free and is **not** a
+chunks of one fetch are normally in flight at once; that overlap is free and is **not** a
 throughput lever worth engineering (D19 — the inter-message bubble is smaller than a single
 entry's write). The barrier that does cost is inside a message, on the block-tier path, and
 FR-022 forbids it.
@@ -274,11 +299,17 @@ originated by the peer. With `message_credits x 8 KiB` posted — 64 KiB at 8 cr
 issuing 8 requests can consume every buffer, leaving nowhere for a reply this end is blocked
 waiting on. That is an RNR stall and, with traffic both ways, a credible deadlock.
 
-So each end partitions its posted receives: enough reserved for the replies its own
-outstanding requests can generate — a number it knows, because its own message credits bound
-it — and the remainder advertised as the peer's `max_outstanding_requests`. A peer MUST NOT
-exceed the quota it was granted. The partition is self-consistent precisely because each end
-sizes the reply reservation from a bound it already enforces locally.
+So each end partitions its posted receives into two parts:
+
+- a **reply reserve** of exactly one buffer per own message credit — each request message
+  draws exactly one reply (*Chunking*, above), and credits bound the request messages
+  outstanding, so this is exact rather than an estimate;
+- an **inbound-request quota**, advertised as the peer's `max_outstanding_requests`.
+
+Total posted = reserve + quota. A peer MUST NOT exceed the quota it was granted, so its
+effective message credits are `min(its configured credits, the quota we advertised)`. The
+partition is self-consistent precisely because each end sizes the reply reserve from a bound
+it already enforces locally.
 
 ### Simultaneous connect
 
