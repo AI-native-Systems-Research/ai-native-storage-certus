@@ -1,6 +1,7 @@
 //! Background write worker for memory-tier-to-SSD persistence and SSD eviction.
 
 use crossbeam_channel::{Receiver, Sender};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -236,6 +237,130 @@ impl EvictionSender {
     pub fn emit(&self, event: EvictionEvent) {
         if self.tx.try_send(event).is_err() {
             self.dropped.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Write-through pins
+// ---------------------------------------------------------------------------
+
+/// Owner of the dispatch-map read pin `populate` leaves on a new entry for its
+/// background write-through (released by the job's `convert_to_storage`).
+///
+/// A read reference carries no owner, so `IDispatchMap::remove` cannot tell this
+/// pin from a live reader and refuses until the job has run. FR-018 says `remove`
+/// must not wait for that: this ledger records which keys hold such a pin so
+/// `remove` can take it over, and makes the job and `remove` agree on who
+/// releases the pin and who frees the DRAM slot the job may still be reading.
+#[derive(Default)]
+pub struct WriteThroughPins {
+    keys: Mutex<HashMap<CacheKey, PinState>>,
+}
+
+#[derive(Default)]
+struct PinState {
+    /// The write-through pin is held.
+    pinned: bool,
+    /// The job owning the pin is queued and has not started.
+    queued: bool,
+    /// The job owning the pin is running (reading the DRAM slot).
+    running: bool,
+    /// `remove` took the entry while the job ran: the job frees the slot.
+    removed: bool,
+    /// Queued jobs whose pin `remove` already released; they are dropped.
+    stale: u32,
+}
+
+/// What a write job does, decided by [`WriteThroughPins::start`].
+pub(crate) enum JobStart {
+    /// The job owns the key's pin: write, then settle under [`WriteThroughPins::finish`].
+    Owned,
+    /// `remove` already released this job's pin and removed the entry.
+    Stale,
+    /// No pin is recorded for the key (`schedule_write_through`): run as is.
+    Untracked,
+}
+
+impl WriteThroughPins {
+    /// Record the pin `populate` just left on `key` and queue its job with
+    /// `enqueue` (true if queued). Under the lock, so the job cannot start first.
+    pub(crate) fn pin(&self, key: CacheKey, enqueue: impl FnOnce() -> bool) {
+        let mut keys = self.keys.lock().unwrap();
+        let s = keys.entry(key).or_default();
+        s.pinned = true;
+        s.queued = enqueue();
+    }
+
+    /// A write job for `key` was dequeued.
+    pub(crate) fn start(&self, key: CacheKey) -> JobStart {
+        let mut keys = self.keys.lock().unwrap();
+        let Some(s) = keys.get_mut(&key) else {
+            return JobStart::Untracked;
+        };
+        if s.stale > 0 {
+            s.stale -= 1;
+            Self::forget_if_idle(&mut keys, key);
+            return JobStart::Stale;
+        }
+        if !s.queued {
+            return JobStart::Untracked;
+        }
+        s.queued = false;
+        s.running = true;
+        JobStart::Owned
+    }
+
+    /// The owned job for `key` is done with the DRAM slot. Runs `settle` under the
+    /// lock: `settle(true)` if the job still owns the pin (it converts or releases
+    /// it), `settle(false)` if `remove` took the entry meanwhile (the job frees the
+    /// slot and the extent it wrote).
+    pub(crate) fn finish(&self, key: CacheKey, settle: impl FnOnce(bool)) {
+        let mut keys = self.keys.lock().unwrap();
+        let owned = keys.get_mut(&key).map_or(true, |s| {
+            s.running = false;
+            s.pinned = false;
+            !std::mem::take(&mut s.removed)
+        });
+        settle(owned);
+        Self::forget_if_idle(&mut keys, key);
+    }
+
+    /// `dm.remove(key)` refused with `ActiveReferences`. If the reference is the
+    /// write-through pin, take it over: release it and remove the entry without
+    /// waiting for the job (FR-018). A reader's reference still refuses.
+    ///
+    /// Returns `None` if refused, `Some(job_frees_slot)` once the entry is gone;
+    /// `job_frees_slot` is true when the job is reading the slot right now.
+    pub(crate) fn remove_entry(&self, dm: &dyn IDispatchMap, key: CacheKey) -> Option<bool> {
+        let mut keys = self.keys.lock().unwrap();
+        let Some(s) = keys.get_mut(&key).filter(|s| s.pinned) else {
+            // No pin recorded (any more): the refusing reference may have been a
+            // pin released since, so try once more.
+            return dm.remove(key).ok().map(|()| false);
+        };
+        dm.release_read(key).ok()?;
+        if dm.remove(key).is_err() {
+            // A reader holds the key too: give the pin back to the job.
+            let _ = dm.take_read(key);
+            return None;
+        }
+        s.pinned = false;
+        if std::mem::take(&mut s.queued) {
+            s.stale += 1;
+        }
+        s.removed = s.running;
+        let job_frees_slot = s.running;
+        Self::forget_if_idle(&mut keys, key);
+        Some(job_frees_slot)
+    }
+
+    fn forget_if_idle(keys: &mut HashMap<CacheKey, PinState>, key: CacheKey) {
+        if keys
+            .get(&key)
+            .is_some_and(|s| !s.pinned && !s.queued && !s.running && s.stale == 0)
+        {
+            keys.remove(&key);
         }
     }
 }
