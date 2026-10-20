@@ -404,8 +404,8 @@ pub struct TransferStats {
     pub requests_outstanding_outbound: u32,
     /// Peer requests we are currently serving.
     pub requests_in_service_inbound: u32,
-    /// Bounce leases held for block-tier serving: reads in flight plus writes
-    /// from a lease not yet completed.
+    /// Bounce leases holding a block-tier entry's data: read, and waiting
+    /// for or in its write. A read still in progress is not counted here.
     pub bounce_buffers_in_use: u32,
     /// High-water mark of the above.
     pub bounce_buffers_peak: u32,

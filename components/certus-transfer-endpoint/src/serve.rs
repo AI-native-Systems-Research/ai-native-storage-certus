@@ -12,7 +12,8 @@
 //! | `MismatchSize` | no | `Miss`; **release nothing** (not returned by the current map, kept in case) |
 //! | `MemoryTier`, size matches, inside the pool | **yes** | post a write; the pin travels in the slab and is released by the reaper that owns its `wr_id` |
 //! | `MemoryTier`, wrong size or outside the pool | **yes** | `Miss`; **release it now** |
-//! | `BlockDevice` | **yes** | `Miss` until block-tier serving (T037-T040); **release it now** |
+//! | `BlockDevice`, a block source bound (`spdk`) | **yes** | read it: the pin waits in the read table while the dispatcher reads the extent into a bounce lease, and is released when the read finishes — *before* the write is posted; the slab then carries the lease |
+//! | `BlockDevice`, no block source | **yes** | `Miss`; **release it now** |
 //! | `Err(..)` (e.g. a 2 s writer timeout) | no | `Failed`; release nothing |
 //!
 //! The rule is *release exactly what `lookup` pinned, exactly once*. The wrong-
@@ -40,7 +41,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 use interfaces::{
-    CacheKey, EntryOutcome, FetchCompletion, IDispatchMap, LookupResult, RemoteRegion,
+    BounceLease, CacheKey, EntryOutcome, FetchCompletion, IDispatchMap, LookupResult, RemoteRegion,
 };
 
 use crate::connection::transport::SendOp;
@@ -112,9 +113,24 @@ pub(crate) struct Write {
     pub(crate) pin: Pin,
 }
 
+/// A block-tier entry to read before it can be written: its pin, held until
+/// the read finishes.
+pub(crate) struct BlockRead {
+    pub(crate) index: usize,
+    pub(crate) key: CacheKey,
+    pub(crate) offset: u64,
+    pub(crate) region: RemoteRegion,
+    pub(crate) pin: Pin,
+    /// The readers' free count when the read was submitted (see
+    /// `Readers::mark_full`).
+    pub(crate) frees_at: u64,
+}
+
 /// What one lookup resolved an entry to.
 pub(crate) enum Resolved {
     Write(Write),
+    /// Block tier, with a block source to read it: read, then write.
+    Block(BlockRead),
     Miss,
     /// The lookup itself failed: not a statement about residency.
     Failed,
@@ -131,9 +147,12 @@ pub(crate) enum MissCause {
 }
 
 /// Resolve one entry with **one** `lookup`, applying the module's pin table.
+/// `blocks` says whether a block source is bound: without one, a block-tier
+/// answer is a miss (D14).
 pub(crate) fn resolve(
     map: &dyn IDispatchMap,
     pool: Pool,
+    blocks: bool,
     index: usize,
     key: CacheKey,
     region: RemoteRegion,
@@ -141,6 +160,17 @@ pub(crate) fn resolve(
     match map.lookup(key) {
         Ok(LookupResult::NotExist) => (Resolved::Miss, Some(MissCause::Absent)),
         Ok(LookupResult::MismatchSize) => (Resolved::Miss, Some(MissCause::WrongSize)),
+        Ok(LookupResult::BlockDevice { offset }) if blocks => (
+            Resolved::Block(BlockRead {
+                index,
+                key,
+                offset,
+                region,
+                pin: Pin::taken(key),
+                frees_at: 0,
+            }),
+            None,
+        ),
         Ok(LookupResult::BlockDevice { .. }) => {
             Pin::taken(key).release(map);
             (Resolved::Miss, Some(MissCause::BlockTier))
@@ -173,11 +203,20 @@ pub(crate) fn resolve(
     }
 }
 
+/// What keeps a posted write's source bytes from changing under it.
+pub(crate) enum Hold {
+    /// A memory-tier entry: its pin, released when the write completes.
+    Pin(Pin),
+    /// A block-tier entry, already read: the bounce lease it was read into,
+    /// returned when the write completes. Its pin was released after the read.
+    Lease(BounceLease),
+}
+
 /// What a posted write carries in its slab slot until the reaper frees it.
 pub(crate) struct PushWork {
     pub(crate) push: u64,
     pub(crate) index: usize,
-    pub(crate) pin: Pin,
+    pub(crate) hold: Hold,
 }
 
 /// Who a finished push reports to.
@@ -195,10 +234,19 @@ pub(crate) struct Push {
     pub(crate) peer: PeerId,
     /// Entries not yet looked up, in request order.
     pub(crate) pending: VecDeque<(usize, CacheKey, RemoteRegion)>,
+    /// Block-tier entries put back for want of a free reader or bounce space,
+    /// their pins released; looked up afresh when a reader or lease frees.
+    pub(crate) deferred: VecDeque<(usize, CacheKey, RemoteRegion)>,
+    /// Block-tier entries read into a lease and waiting for a send credit.
+    pub(crate) ready: VecDeque<(usize, BounceLease, RemoteRegion)>,
     /// One outcome per item; `None` until decided.
     pub(crate) outcomes: Vec<Option<EntryOutcome>>,
     /// Writes posted and not yet completed.
     pub(crate) in_flight: usize,
+    /// Block-tier reads handed out and not yet back.
+    pub(crate) reading: usize,
+    /// Its connection was torn down: reads still out are discarded on return.
+    pub(crate) dead: bool,
     pub(crate) finish: Option<Finish>,
 }
 
@@ -212,13 +260,21 @@ impl Push {
                 .enumerate()
                 .map(|(i, (k, r))| (i, k, r))
                 .collect(),
+            deferred: VecDeque::new(),
+            ready: VecDeque::new(),
             in_flight: 0,
+            reading: 0,
+            dead: false,
             finish: Some(finish),
         }
     }
 
     pub(crate) fn is_done(&self) -> bool {
-        self.pending.is_empty() && self.in_flight == 0
+        self.pending.is_empty()
+            && self.deferred.is_empty()
+            && self.ready.is_empty()
+            && self.in_flight == 0
+            && self.reading == 0
     }
 
     /// Every outcome, and who to report them to — exactly once. Undecided
@@ -270,7 +326,7 @@ mod tests {
         let mut writes = Vec::new();
         let mut causes = Vec::new();
         for key in 0..=5u64 {
-            let (r, cause) = resolve(&m, POOL, key as usize, key, region(64));
+            let (r, cause) = resolve(&m, POOL, false, key as usize, key, region(64));
             causes.push(cause);
             if let Resolved::Write(w) = r {
                 writes.push(w);
@@ -304,10 +360,26 @@ mod tests {
         let m = LedgerMap::new();
         m.mismatch(9);
         m.preload_reader(9); // someone else's pin
-        let (r, cause) = resolve(&m, POOL, 0, 9, region(64));
+        let (r, cause) = resolve(&m, POOL, false, 0, 9, region(64));
         assert!(matches!(r, Resolved::Miss));
         assert_eq!(cause, Some(MissCause::WrongSize));
         assert_eq!(m.read_ref(9), 1, "the other reader's pin is untouched");
+    }
+
+    /// With a block source, a block-tier answer keeps its pin for the read —
+    /// still one lookup — and hands back the offset to read.
+    #[test]
+    fn a_block_answer_with_a_source_keeps_its_pin_for_the_read() {
+        let m = LedgerMap::new();
+        m.block_at(4, 0x2000);
+        let (r, cause) = resolve(&m, POOL, true, 3, 4, region(64));
+        let Resolved::Block(b) = r else {
+            panic!("expected a block read");
+        };
+        assert_eq!((b.index, b.key, b.offset, cause), (3, 4, 0x2000, None));
+        assert_eq!(m.read_ref(4), 1, "pinned for the read");
+        b.pin.release(&m);
+        assert_eq!((m.read_ref(4), m.lookups()), (0, 1));
     }
 
     #[test]

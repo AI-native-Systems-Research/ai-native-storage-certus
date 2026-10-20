@@ -9,14 +9,14 @@ use std::sync::Mutex;
 
 use crate::connection::mock::Sequence;
 use interfaces::{
-    CacheKey, DispatchMapError, IDispatchMap, IMemoryTier, LookupResult, MemoryTierError,
-    MemoryTierTelemetrySnapshot,
+    BounceError, BounceLease, CacheKey, DispatchMapError, IDispatchMap, IMemoryTier, LookupResult,
+    MemoryTierError, MemoryTierTelemetrySnapshot,
 };
 
 #[derive(Clone, Copy)]
 enum Answer {
     Memory { addr: u64, size: u32 },
-    Block,
+    Block { offset: u64 },
     Mismatch,
     Timeout,
 }
@@ -59,7 +59,11 @@ impl LedgerMap {
     }
 
     pub(crate) fn block(&self, key: CacheKey) {
-        self.set(key, Answer::Block);
+        self.set(key, Answer::Block { offset: 0 });
+    }
+
+    pub(crate) fn block_at(&self, key: CacheKey, offset: u64) {
+        self.set(key, Answer::Block { offset });
     }
 
     pub(crate) fn mismatch(&self, key: CacheKey) {
@@ -123,9 +127,9 @@ impl IDispatchMap for LedgerMap {
             None => LookupResult::NotExist,
             Some(Answer::Mismatch) => LookupResult::MismatchSize,
             Some(Answer::Timeout) => return Err(DispatchMapError::Timeout(key)),
-            Some(Answer::Block) => {
+            Some(Answer::Block { offset }) => {
                 pinned(&mut l);
-                LookupResult::BlockDevice { offset: 0 }
+                LookupResult::BlockDevice { offset }
             }
             Some(Answer::Memory { addr, size }) => {
                 pinned(&mut l);
@@ -286,6 +290,300 @@ impl IMemoryTier for PoolTier {
         unimplemented!()
     }
     fn bounce_usage(&self) -> (usize, usize) {
+        unimplemented!()
+    }
+}
+
+/// A block source over a "disk" in memory, reading into leases carved from a
+/// range the test gives it — the top of its node's pool, as the memory tier's
+/// bounce reserve is. Fixed-size leases, so a test can exhaust them exactly.
+/// Reads can be held until released, failed, or refused for lack of space;
+/// each read and each lease free is stamped from the shared sequence.
+pub(crate) struct DiskSource {
+    disk: Mutex<HashMap<u64, Vec<u8>>>,
+    leases: Mutex<Vec<u64>>,
+    lease_bytes: u32,
+    hold: Mutex<bool>,
+    released: std::sync::Condvar,
+    fail: Mutex<std::collections::HashSet<u64>>,
+    never_fits: Mutex<std::collections::HashSet<u64>>,
+    reads: AtomicU64,
+    reading: AtomicU64,
+    peak_reading: AtomicU64,
+    seq: Mutex<Option<Sequence>>,
+    stamps: Mutex<Vec<(u64, &'static str, u64)>>,
+}
+
+// SAFETY: lease addresses are integers here; the bytes they name belong to the
+// test's pool, which outlives the endpoint using this source.
+unsafe impl Send for DiskSource {}
+// SAFETY: as above; all state is behind mutexes or atomics.
+unsafe impl Sync for DiskSource {}
+
+impl DiskSource {
+    /// Leases of `lease_bytes` at `base`, `count` of them.
+    pub(crate) fn new(base: u64, count: usize, lease_bytes: u32) -> Self {
+        DiskSource {
+            disk: Mutex::new(HashMap::new()),
+            leases: Mutex::new(
+                (0..count as u64)
+                    .rev()
+                    .map(|i| base + i * lease_bytes as u64)
+                    .collect(),
+            ),
+            lease_bytes,
+            hold: Mutex::new(false),
+            released: std::sync::Condvar::new(),
+            fail: Mutex::default(),
+            never_fits: Mutex::default(),
+            reads: AtomicU64::new(0),
+            reading: AtomicU64::new(0),
+            peak_reading: AtomicU64::new(0),
+            seq: Mutex::new(None),
+            stamps: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Put `bytes` on the disk at extent `offset`.
+    pub(crate) fn put(&self, offset: u64, bytes: &[u8]) {
+        self.disk.lock().unwrap().insert(offset, bytes.to_vec());
+    }
+
+    /// Hold every read until [`release_reads`](Self::release_reads).
+    pub(crate) fn hold_reads(&self) {
+        *self.hold.lock().unwrap() = true;
+    }
+
+    pub(crate) fn release_reads(&self) {
+        *self.hold.lock().unwrap() = false;
+        self.released.notify_all();
+    }
+
+    /// Fail reads of the extent at `offset` with `Io`.
+    pub(crate) fn fail_at(&self, offset: u64) {
+        self.fail.lock().unwrap().insert(offset);
+    }
+
+    /// Answer reads of the extent at `offset` with `NeverFits`.
+    pub(crate) fn never_fits_at(&self, offset: u64) {
+        self.never_fits.lock().unwrap().insert(offset);
+    }
+
+    /// Reads begun, ever.
+    pub(crate) fn reads(&self) -> u64 {
+        self.reads.load(Ordering::SeqCst)
+    }
+
+    /// Reads in progress now, and the most at once.
+    pub(crate) fn reading(&self) -> (u64, u64) {
+        (
+            self.reading.load(Ordering::SeqCst),
+            self.peak_reading.load(Ordering::SeqCst),
+        )
+    }
+
+    /// Leases free now.
+    pub(crate) fn free_leases(&self) -> usize {
+        self.leases.lock().unwrap().len()
+    }
+
+    /// Stamp each read's end ("read") and each lease free ("free"), by offset
+    /// or address, from `seq`.
+    pub(crate) fn record(&self, seq: &Sequence) {
+        *self.seq.lock().unwrap() = Some(seq.clone());
+    }
+
+    pub(crate) fn stamps(&self) -> Vec<(u64, &'static str, u64)> {
+        self.stamps.lock().unwrap().clone()
+    }
+
+    fn stamp(&self, what: &'static str, of: u64) {
+        if let Some(s) = self.seq.lock().unwrap().as_ref() {
+            self.stamps.lock().unwrap().push((s.next(), what, of));
+        }
+    }
+}
+
+impl crate::bounce::BlockSource for DiskSource {
+    fn read(&self, _key: CacheKey, offset: u64, len: u32) -> Result<BounceLease, BounceError> {
+        if self.never_fits.lock().unwrap().contains(&offset) || len > self.lease_bytes {
+            return Err(BounceError::NeverFits(format!("{len} bytes")));
+        }
+        let addr = self
+            .leases
+            .lock()
+            .unwrap()
+            .pop()
+            .ok_or(BounceError::NoSpace)?;
+        self.reads.fetch_add(1, Ordering::SeqCst);
+        let now = self.reading.fetch_add(1, Ordering::SeqCst) + 1;
+        self.peak_reading.fetch_max(now, Ordering::SeqCst);
+        let mut held = self.hold.lock().unwrap();
+        while *held {
+            held = self.released.wait(held).unwrap();
+        }
+        drop(held);
+        self.reading.fetch_sub(1, Ordering::SeqCst);
+        if self.fail.lock().unwrap().contains(&offset) {
+            self.leases.lock().unwrap().push(addr);
+            self.stamp("read", offset);
+            return Err(BounceError::Io("injected".into()));
+        }
+        let bytes = self
+            .disk
+            .lock()
+            .unwrap()
+            .get(&offset)
+            .cloned()
+            .unwrap_or_default();
+        let n = bytes.len().min(len as usize);
+        // SAFETY: `addr` is a lease of `lease_bytes >= len` bytes in the
+        // test's pool, owned by this read until the lease is freed.
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), addr as *mut u8, n) };
+        self.stamp("read", offset);
+        Ok(BounceLease {
+            ptr: addr as *mut u8,
+            len,
+        })
+    }
+
+    fn release(&self, lease: BounceLease) {
+        let mut l = self.leases.lock().unwrap();
+        assert!(
+            !l.contains(&(lease.ptr as u64)),
+            "bounce lease {:?} freed twice",
+            lease.ptr
+        );
+        l.push(lease.ptr as u64);
+        drop(l);
+        self.stamp("free", lease.ptr as u64);
+    }
+}
+
+/// A dispatcher that serves `read_to_bounce` from a [`DiskSource`] and
+/// implements nothing else: for checking that an `spdk` endpoint binds its
+/// `dispatcher` receptacle and reads through it.
+#[cfg(feature = "spdk")]
+pub(crate) struct DiskDispatcher(pub(crate) std::sync::Arc<DiskSource>);
+
+#[cfg(feature = "spdk")]
+impl interfaces::IDispatcher for DiskDispatcher {
+    fn read_to_bounce(
+        &self,
+        key: CacheKey,
+        offset: u64,
+        len: u32,
+    ) -> Result<BounceLease, BounceError> {
+        crate::bounce::BlockSource::read(&*self.0, key, offset, len)
+    }
+    fn release_bounce(&self, lease: BounceLease) {
+        crate::bounce::BlockSource::release(&*self.0, lease)
+    }
+
+    fn initialize(
+        &self,
+        _: interfaces::DispatcherConfig,
+    ) -> Result<(), interfaces::DispatcherError> {
+        unimplemented!()
+    }
+    fn shutdown(&self) -> Result<(), interfaces::DispatcherError> {
+        unimplemented!()
+    }
+    fn lookup(
+        &self,
+        _: CacheKey,
+        _: interfaces::IpcHandle,
+    ) -> Result<(), interfaces::DispatcherError> {
+        unimplemented!()
+    }
+    fn lookup_async(
+        &self,
+        _: CacheKey,
+        _: interfaces::IpcHandle,
+    ) -> Result<interfaces::GpuStream, interfaces::DispatcherError> {
+        unimplemented!()
+    }
+    fn batch_lookup(
+        &self,
+        _: &[(CacheKey, Vec<interfaces::IpcHandle>)],
+    ) -> Vec<interfaces::LookupOutcome> {
+        unimplemented!()
+    }
+    fn check(&self, _: CacheKey) -> Result<bool, interfaces::DispatcherError> {
+        unimplemented!()
+    }
+    fn remove(&self, _: CacheKey) -> Result<(), interfaces::DispatcherError> {
+        unimplemented!()
+    }
+    fn populate(
+        &self,
+        _: CacheKey,
+        _: interfaces::IpcHandle,
+    ) -> Result<(), interfaces::DispatcherError> {
+        unimplemented!()
+    }
+    fn batch_populate(
+        &self,
+        _: &[(CacheKey, interfaces::IpcHandle)],
+    ) -> Vec<Result<(), interfaces::DispatcherError>> {
+        unimplemented!()
+    }
+    fn reserve_memory(
+        &self,
+        _: CacheKey,
+        _: u32,
+        _: u64,
+        _: Option<std::time::Instant>,
+    ) -> Result<*mut u8, interfaces::DispatcherError> {
+        unimplemented!()
+    }
+    fn copy_gpu_to_memory_async(
+        &self,
+        _: CacheKey,
+        _: &[interfaces::IpcHandle],
+        _: interfaces::GpuStream,
+    ) -> Result<(), interfaces::DispatcherError> {
+        unimplemented!()
+    }
+    fn copy_gpu_to_memory_completed(
+        &self,
+        _: CacheKey,
+        _: u32,
+    ) -> Result<(), interfaces::DispatcherError> {
+        unimplemented!()
+    }
+    fn release_memory(&self, _: CacheKey) -> Result<(), interfaces::DispatcherError> {
+        unimplemented!()
+    }
+    fn pin(&self, _: CacheKey) -> Result<(), interfaces::DispatcherError> {
+        unimplemented!()
+    }
+    fn unpin(&self, _: CacheKey) -> Result<(), interfaces::DispatcherError> {
+        unimplemented!()
+    }
+    fn touch(&self, _: CacheKey) -> Result<(), interfaces::DispatcherError> {
+        unimplemented!()
+    }
+    fn promote_to_memory_tier(&self, _: &[CacheKey]) {
+        unimplemented!("serving a peer never promotes (FR-012)")
+    }
+    fn clear_memory_tier(&self) -> Result<usize, interfaces::DispatcherError> {
+        unimplemented!()
+    }
+    fn flush_to_ssd(&self) -> Result<usize, interfaces::DispatcherError> {
+        unimplemented!()
+    }
+    fn schedule_write_through(
+        &self,
+        _: CacheKey,
+        _: u32,
+    ) -> Result<(), interfaces::DispatcherError> {
+        unimplemented!()
+    }
+    fn read_write_stats(&self) -> interfaces::ReadWriteStats {
+        unimplemented!()
+    }
+    fn tier_event_stats(&self) -> interfaces::TierEventStats {
         unimplemented!()
     }
 }
