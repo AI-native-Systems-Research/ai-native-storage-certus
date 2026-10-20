@@ -22,9 +22,14 @@
 //! Local buffers are read, and receive buffers written, when the work request
 //! *executes*, not when it is posted — that is when the NIC touches them.
 //!
+//! The fabric can record an event log (T011's ERROR-ordering piece, built for
+//! T021): each queue pair forced to ERROR, each completion handed to a poller,
+//! and each link closed, stamped from a sequence counter tests may share with
+//! other instruments, so teardown-before-reclaim is assertable as an order.
+//!
 //! Not yet modelled (T011): a finite RNR retry, injected inbound messages,
-//! recorded ERROR-before-reclaim ordering, `LOCAL_WRITE` enforcement on
-//! receive buffers, and timing — everything here happens at post or poll.
+//! `LOCAL_WRITE` enforcement on receive buffers, and timing — everything here
+//! happens at post or poll.
 
 // Consumed from T011/T012 onward.
 #![allow(dead_code)]
@@ -46,6 +51,32 @@ pub struct MockFabric {
     inner: Arc<Mutex<Fabric>>,
 }
 
+/// One entry in a fabric's event log, from the point of view of the link's
+/// owner.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LogEvent {
+    /// The queue pair entered ERROR: after this, nothing it carries lands.
+    ToError(LinkId),
+    /// A poller took this completion off the link.
+    Completed(LinkId, u64),
+    /// The link was destroyed.
+    Closed(LinkId),
+}
+
+/// A sequence counter shared by every instrument in a test, so events they
+/// record separately can be put in one order.
+#[cfg(test)]
+#[derive(Clone, Default)]
+pub(crate) struct Sequence(Arc<std::sync::atomic::AtomicU64>);
+
+#[cfg(test)]
+impl Sequence {
+    pub(crate) fn next(&self) -> u64 {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
 impl MockFabric {
     /// A fresh, isolated fabric. Tests should use one each.
     pub fn new() -> Self {
@@ -56,6 +87,22 @@ impl MockFabric {
     pub fn process() -> Self {
         static PROCESS: OnceLock<MockFabric> = OnceLock::new();
         PROCESS.get_or_init(MockFabric::new).clone()
+    }
+
+    /// Start recording the event log, stamped from `seq`.
+    #[cfg(test)]
+    pub(crate) fn record(&self, seq: &Sequence) {
+        self.lock().log = Some((seq.clone(), Vec::new()));
+    }
+
+    /// The events recorded so far, with their stamps, in order.
+    #[cfg(test)]
+    pub(crate) fn log(&self) -> Vec<(u64, LogEvent)> {
+        self.lock()
+            .log
+            .as_ref()
+            .map(|(_, l)| l.clone())
+            .unwrap_or_default()
     }
 
     /// Queue pairs alive on the fabric, both ends counted.
@@ -80,6 +127,8 @@ struct Fabric {
     requests: HashMap<(TransportId, RequestId), LinkId>,
     regions: HashMap<u32, RegionEntry>,
     qps: HashMap<LinkId, Qp>,
+    #[cfg(test)]
+    log: Option<(Sequence, Vec<(u64, LogEvent)>)>,
 }
 
 struct RegionEntry {
@@ -178,7 +227,18 @@ impl Fabric {
 
     /// Force `link` to ERROR, flushing everything queued on it, then let its
     /// peer discover that (its pending sends fail).
+    #[cfg(test)]
+    fn note(&mut self, ev: LogEvent) {
+        if let Some((seq, log)) = self.log.as_mut() {
+            log.push((seq.next(), ev));
+        }
+    }
+
     fn force_error(&mut self, link: LinkId) {
+        #[cfg(test)]
+        if self.qps.get(&link).is_some_and(|q| q.state != QpState::Err) {
+            self.note(LogEvent::ToError(link));
+        }
         let qp = self.qp(link);
         qp.state = QpState::Err;
         for wr in qp.sq.iter_mut().filter(|wr| !wr.done) {
@@ -571,6 +631,8 @@ impl Transport for MockTransport {
         f.sever(link);
         f.requests.retain(|_, l| *l != link);
         f.qps.remove(&link);
+        #[cfg(test)]
+        f.note(LogEvent::Closed(link));
     }
 }
 
@@ -745,6 +807,10 @@ impl Link for MockLink {
             }
             out.push(c);
             n += 1;
+        }
+        #[cfg(test)]
+        for c in &out[out.len() - n..] {
+            f.note(LogEvent::Completed(self.link, c.wr_id));
         }
         Ok(n)
     }
