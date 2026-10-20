@@ -68,6 +68,22 @@ pub enum EntryOutcome {
     Failed,
 }
 
+/// What a request's completion delivers. `Ok` carries one outcome per entry,
+/// in request order. For a fetch, `Err` means no usable reply exists —
+/// `Deadline`, `Protocol` (the peer refused it), `Transport` (connection lost or
+/// torn down, including as a sibling of another fetch's deadline) or
+/// `RequestTooLarge` — and every slot of the request is to be treated as not
+/// landed. It fires only after the queue pair to that peer is forced to ERROR
+/// and drained (or, for `Protocol`, never had a write aimed at it), so the
+/// slots are safe to reclaim. A write whose landing cannot be confirmed is
+/// never reported as a hit: only a successful completion counts.
+///
+/// A push reports per entry whatever happens, since some writes may have
+/// landed before a fault: `Ok`, `Failed` for each entry not confirmed, and
+/// `Err` only if the push never started.
+pub type FetchResult = Result<Vec<EntryOutcome>, TransferEndpointError>;
+pub type FetchCompletion = Box<dyn FnOnce(FetchResult) + Send>;
+
 /// Identifies one in-flight fetch. Echoed in the reply.
 pub struct TransferContextId(pub u64);
 
@@ -136,8 +152,9 @@ define_interface! {
         /// into already-reserved landing slots.
         ///
         /// Blocks if message credits are exhausted (FR-014). Returns as soon as
-        /// the request is sent; `on_complete` fires with one `EntryOutcome` per
-        /// requested key, in request order, when the reply arrives.
+        /// the request is queued; `on_complete` fires with `Ok` — one
+        /// `EntryOutcome` per requested key, in request order — when the reply
+        /// arrives, or with `Err` when no usable reply can (see `FetchResult`).
         ///
         /// The endpoint may split the request internally; `on_complete` fires
         /// once, after the last chunk.
@@ -197,8 +214,14 @@ pub struct EndpointConfig {
     pub max_send_wr: u32,       // per-connection send-queue depth requested
     pub max_recv_wr: u32,       // per-connection receive-queue depth requested
     pub send_credits: u32,      // in-flight send-queue requests (and so held pins) per connection
+    pub message_credits: u32,   // requests outstanding against a peer; also the reply reserve
+    pub inbound_quota: u32,     // requests a peer may have outstanding against us (advertised)
     pub actor_cpu: Option<usize>,
+    pub fetch_deadline: Option<Duration>, // reply deadline from send (FR-016); None waits forever
+    pub deadline_action: DeadlineAction,  // FailLoud; ReportPartial is refused at configure
 }
+
+pub enum DeadlineAction { FailLoud, ReportPartial }
 
 define_interface! {
     pub ITransferEndpointAdmin {
@@ -221,8 +244,8 @@ itself for interface queries, so releasing every handle does not drop it.
 
 Implementations MUST uphold, and tests MUST verify:
 
-1. **Order and length.** `on_complete` receives exactly `items.len()` outcomes, and index
-   *i* corresponds to `items[i]`. True across internal chunking.
+1. **Order and length.** An `Ok` completion carries exactly `items.len()` outcomes, and
+   index *i* corresponds to `items[i]`. True across internal chunking.
 2. **Outcome honesty.** `HitBlockTier` is reported only when the value was actually read
    from the block device. A build without `spdk` reports `Miss` for block-tier entries, never
    `HitBlockTier` and never an error (research D14). `Miss` and `Failed` are never
@@ -249,9 +272,13 @@ Implementations MUST uphold, and tests MUST verify:
    established only on next need (FR-023).
 9. **Progress under scarcity.** Exhaustion of send-queue credits, message credits or
    bounce buffers causes chunking, never failure (FR-015).
-10. **Deadline fails loudly.** On expiry the default action is `Deadline(..)` carrying key
-    range, peer, chunk index and queue-pair state — not a silent partial success
-    (Principle XI). Expiry aborts every sibling context on that connection, and says so.
+10. **Deadline fails loudly.** The reply deadline runs from when the request is sent, not
+    from the `fetch` call, so a request waiting for a credit cannot expire. On expiry the
+    default action is `Deadline(..)` carrying key range, peer, chunk index and queue-pair
+    state — not a silent partial success (Principle XI). Expiry aborts every sibling context
+    on that connection, each failing with `Transport` naming the expired fetch, and the log
+    line says how many. Every callback fires after the queue pair is destroyed. The degrading
+    action is refused at `configure`, never accepted and treated as fail-loud.
 11. **No phase barriers.** Within a request the source never drains its send queue between
     entries and never waits for device reads before posting memory-tier writes; each
     block-tier entry is posted when its own read completes (FR-022, D19). The only

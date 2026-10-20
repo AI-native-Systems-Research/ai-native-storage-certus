@@ -54,7 +54,7 @@ pub struct Counters {
     pub bounce_buffers_in_use: u32,
     /// Filled by T043.
     pub bounce_buffers_peak: u32,
-    /// Filled by T050 / T070.
+    /// Reply deadlines that expired and tore a connection down (T050, T070).
     pub deadline_expiries: u64,
     /// Filled by T075.
     pub protocol_faults: u64,

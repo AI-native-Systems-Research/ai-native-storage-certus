@@ -30,7 +30,8 @@
 //!
 //! # Status
 //!
-//! Scaffolding. Tasks T001–T036, T068 and T074–T082 (all but T011's remaining faults) of
+//! Scaffolding. Tasks T001–T036, T049–T052, T068, T070, T071 and T074–T082 (all but T011's
+//! remaining faults) of
 //! `specs/001-rdma-cache-transfer/tasks.md` are complete: the crate builds as a
 //! workspace default member, peer identity is implemented, and the verbs FFI, its
 //! C shim and the safe wrappers over them exist behind `rdma`, and the transport
@@ -38,9 +39,9 @@
 //! `wr_id` slab, send-queue credits and counters exist in every build, owned by
 //! [`CertusTransferEndpoint`] on its endpoint thread. Every transfer method works
 //! end to end over the mock: the legacy `push_async` and `push`, landing
-//! regions, and `fetch` over the request/reply messaging. Still to come: the
-//! block tier (Phase 6), chunking (Phase 7), deadlines (Phase 8) and the verbs
-//! transport (Phase 9).
+//! regions, and `fetch` over the request/reply messaging, with a fail-loud reply
+//! deadline. Still to come: the block tier (Phase 6), chunking (Phase 7) and the
+//! verbs transport (Phase 9).
 
 #![deny(missing_docs)]
 
@@ -287,6 +288,14 @@ impl ITransferEndpointAdmin for CertusTransferEndpoint {
                 "message_credits and inbound_quota must each be at least 1".into(),
             ));
         }
+        if config.deadline_action != interfaces::DeadlineAction::FailLoud {
+            // FR-016: the degrading action is deferred. Refused here, never
+            // quietly run as FailLoud (Principle XI).
+            return Err(TransferEndpointError::Transport(format!(
+                "deadline_action {:?} is deferred and not implemented; only FailLoud is",
+                config.deadline_action
+            )));
+        }
         let receives = config.message_credits.saturating_add(config.inbound_quota);
         if config.max_recv_wr < receives {
             return Err(TransferEndpointError::Transport(format!(
@@ -372,7 +381,8 @@ impl ITransferEndpointAdmin for CertusTransferEndpoint {
                 inbound_quota: config.inbound_quota,
             };
             let actor = Actor::new(
-                EndpointActor::new(table, logger, map, pool_region, limits),
+                EndpointActor::new(table, logger, map, pool_region, limits)
+                    .with_deadline(config.fetch_deadline),
                 |_| {
                     // Unreachable: every handler path aborts on panic itself.
                 },
@@ -532,7 +542,7 @@ impl ITransferEndpoint for CertusTransferEndpoint {
         // completion, failure, teardown or shutdown — so this returns.
         rx.recv().map_err(|_| {
             TransferEndpointError::Transport("endpoint thread exited without completing".into())
-        })
+        })?
     }
 
     fn disconnect(&self, peer: &str) -> Result<(), TransferEndpointError> {
@@ -571,6 +581,15 @@ mod tests {
     }
 
     fn node(fabric: &MockFabric, local: &str, send_credits: u32) -> Node {
+        node_with(fabric, local, |c| c.send_credits = send_credits)
+    }
+
+    /// A node whose configuration `tweak` adjusts before `configure`.
+    fn node_with(
+        fabric: &MockFabric,
+        local: &str,
+        tweak: impl FnOnce(&mut EndpointConfig),
+    ) -> Node {
         let mut pool = vec![0u8; 4096].into_boxed_slice();
         let ep = CertusTransferEndpoint::create();
         let map = Arc::new(LedgerMap::new());
@@ -585,7 +604,7 @@ mod tests {
                 as Arc<dyn interfaces::IMemoryTier + Send + Sync>)
             .unwrap();
         let mut config = EndpointConfig::new(local);
-        config.send_credits = send_credits;
+        tweak(&mut config);
         ep.configure(config).unwrap();
         ep.use_transport(TransportChoice::Mock(fabric.clone()));
         Node { ep, map, pool }
@@ -597,6 +616,11 @@ mod tests {
         let n = node(fabric, local, 8);
         std::mem::forget(n.pool);
         n.ep
+    }
+
+    /// The outcomes of a request that got a reply (a fetch) or ran (a push).
+    fn hits(r: interfaces::FetchResult) -> Vec<EntryOutcome> {
+        r.unwrap_or_else(|e| panic!("expected outcomes, got {e:?}"))
     }
 
     /// Wait for `cond`, polling: the endpoint threads connect on their own.
@@ -818,8 +842,10 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         src.push_async(to, items, Box::new(move |o| tx.send(o).unwrap()))
             .unwrap();
-        rx.recv_timeout(Duration::from_secs(10))
-            .expect("on_complete fired")
+        hits(
+            rx.recv_timeout(Duration::from_secs(10))
+                .expect("on_complete fired"),
+        )
     }
 
     #[test]
@@ -1061,7 +1087,7 @@ mod tests {
         a.ep.disconnect("10.0.0.2:7000").unwrap();
         assert_eq!(a.map.held(), 0, "the drain released every in-flight pin");
         assert_eq!(
-            rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            hits(rx.recv_timeout(Duration::from_secs(5)).unwrap()),
             [EntryOutcome::Failed; 4],
             "flushed, not served"
         );
@@ -1101,7 +1127,7 @@ mod tests {
         .unwrap();
         a.ep.shutdown().unwrap();
         assert_eq!(
-            rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            hits(rx.recv_timeout(Duration::from_secs(5)).unwrap()),
             [EntryOutcome::Failed]
         );
         assert_eq!(a.map.held(), 0);
@@ -1465,7 +1491,7 @@ mod tests {
         a.map.record(&seq);
         a.ep.disconnect("10.0.0.2:7000").unwrap();
         assert_eq!(
-            rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            hits(rx.recv_timeout(Duration::from_secs(5)).unwrap()),
             [EntryOutcome::Failed; 3]
         );
 
@@ -1786,7 +1812,7 @@ mod tests {
         assert!(a_sends <= 1, "only OP_HELLO went out: {:?}", f.log());
         a.ep.shutdown().unwrap();
         assert_eq!(
-            rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            hits(rx.recv_timeout(Duration::from_secs(5)).unwrap()),
             [EntryOutcome::Failed]
         );
         drop(raw);
@@ -1918,12 +1944,15 @@ mod tests {
             .map(|_| rx.recv_timeout(Duration::from_secs(5)).unwrap())
             .collect();
         got.sort_by_key(|(w, _)| *w);
+        assert!(
+            matches!(&got[0], (0, Err(TransferEndpointError::Protocol(_)))),
+            "the refused fetch fails as a whole: {:?}",
+            got[0]
+        );
         assert_eq!(
-            got,
-            [
-                (0, vec![EntryOutcome::Failed]),
-                (1, vec![EntryOutcome::Miss])
-            ]
+            hits(got.remove(1).1),
+            [EntryOutcome::Miss],
+            "its sibling is answered"
         );
         assert!(
             session_of(&a.ep, "10.0.0.3:7000").is_some(),
@@ -1972,7 +2001,7 @@ mod tests {
                 Box::new(move |o| tx.send(o).unwrap()),
             )
             .unwrap();
-        let out = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let out = hits(rx.recv_timeout(Duration::from_secs(5)).unwrap());
         use EntryOutcome::*;
         assert_eq!(out, [HitMemoryTier, Miss, HitMemoryTier]);
         assert_eq!(&slots[0..8], b"first...");
@@ -2024,7 +2053,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            hits(rx.recv_timeout(Duration::from_secs(5)).unwrap()),
             [EntryOutcome::Miss; 4]
         );
         std::thread::sleep(Duration::from_millis(20));
@@ -2080,7 +2109,7 @@ mod tests {
         );
         f.pause_sends(false);
         assert_eq!(
-            rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            hits(rx.recv_timeout(Duration::from_secs(5)).unwrap()),
             [EntryOutcome::HitMemoryTier]
         );
         dest.ep.shutdown().unwrap();
@@ -2135,7 +2164,10 @@ mod tests {
         });
         f.pause_sends(false);
         let mut got: Vec<_> = (0..2)
-            .map(|_| rx.recv_timeout(Duration::from_secs(5)).unwrap())
+            .map(|_| {
+                let (w, r) = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                (w, hits(r))
+            })
             .collect();
         got.sort_by_key(|(w, _)| *w);
         assert_eq!(
@@ -2219,7 +2251,7 @@ mod tests {
         }
         for _ in 0..20 {
             assert_eq!(
-                rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+                hits(rx.recv_timeout(Duration::from_secs(5)).unwrap()),
                 [EntryOutcome::HitMemoryTier]
             );
         }
@@ -2286,7 +2318,13 @@ mod tests {
         dest.ep.disconnect("10.0.0.2:7000").unwrap();
         // disconnect returns only after the barrier, and the callback fired
         // before it returned: nothing can still write into the slot.
-        assert_eq!(rx.try_recv().unwrap(), [EntryOutcome::Failed]);
+        assert!(
+            matches!(
+                rx.try_recv().unwrap(),
+                Err(TransferEndpointError::Transport(_))
+            ),
+            "a fetch with no reply fails as a whole"
+        );
         f.pause_sends(false);
         dest.ep.shutdown().unwrap();
         src.ep.shutdown().unwrap();
@@ -2305,8 +2343,23 @@ mod tests {
         LandingRegionHandle,
         Box<[u8]>,
     ) {
+        raw_peer_with(f, max_entries, |_| {})
+    }
+
+    /// [`raw_peer`], with a's configuration adjusted by `tweak`.
+    fn raw_peer_with(
+        f: &MockFabric,
+        max_entries: u32,
+        tweak: impl FnOnce(&mut EndpointConfig),
+    ) -> (
+        Node,
+        crate::connection::mock::MockTransport,
+        crate::connection::transport::LinkId,
+        LandingRegionHandle,
+        Box<[u8]>,
+    ) {
         use crate::connection::transport::Transport;
-        let a = node(f, "10.0.0.1:7000", 8);
+        let a = node_with(f, "10.0.0.1:7000", tweak);
         a.ep.initialize().unwrap();
         let mut raw = crate::connection::mock::MockTransport::new(f.clone());
         let p_raw = PeerId::parse("10.0.0.3:7000").unwrap();
@@ -2340,7 +2393,7 @@ mod tests {
         a: &CertusTransferEndpoint,
         h: &LandingRegionHandle,
         n: usize,
-    ) -> mpsc::Receiver<Vec<EntryOutcome>> {
+    ) -> mpsc::Receiver<interfaces::FetchResult> {
         let (tx, rx) = mpsc::channel();
         let items: Vec<_> = (0..n)
             .map(|i| (i as u64, h.region_at(i * 8, 8).unwrap()))
@@ -2371,10 +2424,10 @@ mod tests {
         send_raw(&mut raw, link, |out| {
             message::encode_reply(1, 0, &[EntryOutcome::HitMemoryTier], out)
         });
-        assert_eq!(
+        assert!(matches!(
             rx.recv_timeout(Duration::from_secs(5)).unwrap(),
-            [EntryOutcome::Failed; 2]
-        );
+            Err(TransferEndpointError::Transport(_))
+        ));
         eventually("a tears down", || {
             session_of(&a.ep, "10.0.0.3:7000").is_none()
         });
@@ -2407,10 +2460,10 @@ mod tests {
         eventually("a tears down", || {
             session_of(&a.ep, "10.0.0.3:7000").is_none()
         });
-        assert_eq!(
+        assert!(matches!(
             rx.recv_timeout(Duration::from_secs(5)).unwrap(),
-            [EntryOutcome::Failed]
-        );
+            Err(TransferEndpointError::Transport(_))
+        ));
         a.ep.shutdown().unwrap();
         drop((raw, slots));
     }
@@ -2422,10 +2475,10 @@ mod tests {
         let f = MockFabric::new();
         let (a, raw, _link, h, slots) = raw_peer(&f, 2);
         let rx = fetch_one(&a.ep, &h, 3);
-        assert_eq!(
+        assert!(matches!(
             rx.recv_timeout(Duration::from_secs(5)).unwrap(),
-            [EntryOutcome::Failed; 3]
-        );
+            Err(TransferEndpointError::RequestTooLarge { max_entries: 2 })
+        ));
         let s = session_of(&a.ep, "10.0.0.3:7000").unwrap();
         assert_eq!(s.outbound, (0, 1), "only OP_HELLO ever went out");
         let ok = fetch_one(&a.ep, &h, 2);
@@ -2487,8 +2540,10 @@ mod tests {
         }
         for _ in 0..2 * n {
             assert_eq!(
-                rx.recv_timeout(Duration::from_secs(10))
-                    .expect("no deadlock"),
+                hits(
+                    rx.recv_timeout(Duration::from_secs(10))
+                        .expect("no deadlock")
+                ),
                 [EntryOutcome::HitMemoryTier]
             );
         }
@@ -2506,5 +2561,249 @@ mod tests {
         a.ep.shutdown().unwrap();
         b.ep.shutdown().unwrap();
         drop((slots_a, slots_b));
+    }
+
+    // --- Phase 8: reply deadlines ------------------------------------------
+
+    fn fast_deadline(c: &mut EndpointConfig) {
+        c.fetch_deadline = Some(Duration::from_millis(50));
+    }
+
+    /// T052/T071: a peer that never replies. The fetch fails with `Deadline`,
+    /// naming the peer, keys, context and queue-pair state; its sibling on the
+    /// same connection is aborted with `Transport`; both callbacks fire only
+    /// after the queue pair went to ERROR and was destroyed; and a write the
+    /// peer attempts afterwards lands nowhere.
+    #[test]
+    fn an_expired_deadline_errors_the_qp_then_fails_every_fetch() {
+        use crate::connection::mock::{LogEvent, Sequence};
+        use crate::connection::transport::{Access, SendOp, SendRequest, Transport};
+        let f = MockFabric::new();
+        let seq = Sequence::default();
+        let (a, mut raw, link, h, slots) = raw_peer_with(&f, 340, fast_deadline);
+        f.record(&seq);
+        let stamped = |rx: mpsc::Receiver<interfaces::FetchResult>| {
+            let (tx, out) = mpsc::channel();
+            let seq = seq.clone();
+            std::thread::spawn(move || {
+                if let Ok(r) = rx.recv_timeout(Duration::from_secs(5)) {
+                    let _ = tx.send((r, seq.next()));
+                }
+            });
+            out
+        };
+        // The stamp is taken after the callback, so it orders after it too.
+        let expired = stamped(fetch_one(&a.ep, &h, 2));
+        eventually("the first fetch is out", || {
+            session_of(&a.ep, "10.0.0.3:7000").is_some_and(|s| s.outbound.0 == 1)
+        });
+        let (tx, rx) = mpsc::channel();
+        a.ep.fetch(
+            "10.0.0.3:7000",
+            &[(7, h.region_at(16, 8).unwrap())],
+            Box::new(move |o| {
+                let _ = tx.send(o);
+            }),
+        )
+        .unwrap();
+        let sibling = stamped(rx);
+        let (r, done) = expired.recv_timeout(Duration::from_secs(5)).unwrap();
+        let Err(TransferEndpointError::Deadline(why)) = r else {
+            panic!("expected Deadline, got {r:?}");
+        };
+        for part in [
+            "10.0.0.3:7000",
+            "keys 0..=1",
+            "2 entries",
+            "context 0",
+            "queue pair Rts",
+        ] {
+            assert!(why.contains(part), "{part:?} missing from {why:?}");
+        }
+        let (r, sib_done) = sibling.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(
+            matches!(&r, Err(TransferEndpointError::Transport(m)) if m.contains("aborted")),
+            "{r:?}"
+        );
+        let log = f.log();
+        let first =
+            |want: &dyn Fn(&LogEvent) -> bool| log.iter().find(|(_, e)| want(e)).map(|(s, _)| *s);
+        let errored = first(&|e| matches!(e, LogEvent::ToError(_))).expect("forced to ERROR");
+        let closed = first(&|e| matches!(e, LogEvent::Closed(_))).expect("destroyed");
+        assert!(
+            errored < closed && closed < done && closed < sib_done,
+            "{log:?}"
+        );
+        let s = a.ep.stats();
+        assert_eq!(s.deadline_expiries, 1);
+        assert_eq!(s.requests_attempted, 2);
+        assert!(session_of(&a.ep, "10.0.0.3:7000").is_none(), "torn down");
+
+        // The late write: the peer finally answers, into the slot.
+        let late: &'static mut [u8] = Box::leak(b"LATE!!!!".to_vec().into_boxed_slice());
+        // SAFETY: leaked, so it outlives the send.
+        let r: &'static crate::connection::transport::Region = Box::leak(Box::new(
+            unsafe { raw.register(late.as_mut_ptr(), late.len(), Access::LOCAL_WRITE) }.unwrap(),
+        ));
+        let slot = h.region_at(0, 8).unwrap();
+        let l = raw.link(link).expect("the peer's end is still alive");
+        {
+            // SAFETY: as above.
+            unsafe {
+                l.post_send(&[SendRequest {
+                    wr_id: 9,
+                    op: SendOp::RdmaWrite {
+                        remote_addr: slot.addr,
+                        rkey: slot.rkey,
+                    },
+                    local: r.sge(r.addr(), 8).unwrap(),
+                    signaled: true,
+                }])
+            }
+            .expect("the peer can still post");
+        }
+        let mut done = Vec::new();
+        eventually("the late write completes", || {
+            raw.link(link).unwrap().poll(&mut done, 16).unwrap();
+            done.iter().any(|c| c.wr_id == 9)
+        });
+        let c = done.iter().find(|c| c.wr_id == 9).unwrap();
+        assert!(c.result.is_err(), "the late write was refused: {c:?}");
+        assert_eq!(slots[..8], [0u8; 8], "no write lands after expiry");
+        a.ep.shutdown().unwrap();
+        drop((raw, slots));
+    }
+
+    /// With no deadline configured, a silent peer is waited on: nothing
+    /// expires, and a reply long after still completes the fetch.
+    #[test]
+    fn no_deadline_waits_for_the_reply() {
+        let f = MockFabric::new();
+        let (a, mut raw, link, h, slots) = raw_peer_with(&f, 340, |c| c.fetch_deadline = None);
+        let rx = fetch_one(&a.ep, &h, 1);
+        assert!(
+            rx.recv_timeout(Duration::from_millis(200)).is_err(),
+            "still waiting"
+        );
+        send_raw(&mut raw, link, |out| {
+            message::encode_reply(1, 0, &[EntryOutcome::Miss], out)
+        });
+        assert_eq!(
+            hits(rx.recv_timeout(Duration::from_secs(5)).unwrap()),
+            [EntryOutcome::Miss]
+        );
+        assert_eq!(a.ep.stats().deadline_expiries, 0);
+        a.ep.shutdown().unwrap();
+        drop((raw, slots));
+    }
+
+    /// The deadline runs from the send, not the `fetch` call (FR-016): a fetch
+    /// held back — here until the capability exchange completes — does not
+    /// expire however long it waits.
+    #[test]
+    fn a_fetch_not_yet_sent_does_not_expire() {
+        use crate::connection::transport::Transport;
+        let f = MockFabric::new();
+        let a = node_with(&f, "10.0.0.1:7000", fast_deadline);
+        a.ep.initialize().unwrap();
+        let mut raw = crate::connection::mock::MockTransport::new(f.clone());
+        let p_raw = PeerId::parse("10.0.0.3:7000").unwrap();
+        raw.listen(&p_raw).unwrap();
+        let p2 = p_raw.clone();
+        a.ep.call(|r| Command::Connect(p2, r)).unwrap().unwrap();
+        let link = accept_raw(&mut raw, &p_raw);
+        send_raw(&mut raw, link, |out| {
+            message::encode_hello(
+                &message::Hello {
+                    max_entries: 340,
+                    max_outstanding_requests: 4,
+                    version_min: 1,
+                    version_max: 1,
+                },
+                out,
+            )
+        });
+        // No OP_HELLO_REPLY yet: the bootstrap credit is still out.
+        let mut slots = vec![0u8; 8].into_boxed_slice();
+        let h =
+            a.ep.register_landing_region(slots.as_mut_ptr(), slots.len())
+                .unwrap();
+        let rx = fetch_one(&a.ep, &h, 1);
+        assert!(
+            rx.recv_timeout(Duration::from_millis(250)).is_err(),
+            "unsent for 5x the deadline, and not expired"
+        );
+        assert_eq!(a.ep.stats().deadline_expiries, 0);
+        send_raw(&mut raw, link, message::encode_hello_reply);
+        eventually("the fetch is out", || {
+            session_of(&a.ep, "10.0.0.3:7000").is_some_and(|s| s.outbound.0 == 1)
+        });
+        send_raw(&mut raw, link, |out| {
+            message::encode_reply(1, 0, &[EntryOutcome::Miss], out)
+        });
+        assert_eq!(
+            hits(rx.recv_timeout(Duration::from_secs(5)).unwrap()),
+            [EntryOutcome::Miss]
+        );
+        a.ep.shutdown().unwrap();
+        drop((raw, slots));
+    }
+
+    /// `ReportPartial` is deferred: refused at configure, never accepted and
+    /// silently treated as `FailLoud`.
+    #[test]
+    fn report_partial_is_refused_at_configure() {
+        let ep = CertusTransferEndpoint::create();
+        let mut c = EndpointConfig::new("10.0.0.1:7000");
+        c.deadline_action = interfaces::DeadlineAction::ReportPartial;
+        assert!(matches!(
+            ep.configure(c),
+            Err(TransferEndpointError::Transport(m)) if m.contains("ReportPartial")
+        ));
+        ep.configure(EndpointConfig::new("10.0.0.1:7000")).unwrap();
+    }
+
+    /// SC-010: after an expiry, the next fetch to that peer reconnects lazily
+    /// and lands through the same landing-region handle — its rkey survived.
+    #[test]
+    fn after_an_expiry_the_next_fetch_reconnects_with_the_same_handle() {
+        let f = MockFabric::new();
+        let dest = node_with(&f, "10.0.0.1:7000", fast_deadline);
+        let mut src = node(&f, "10.0.0.2:7000", 8);
+        dest.ep.initialize().unwrap();
+        src.ep.initialize().unwrap();
+        src.pool[..8].copy_from_slice(b"value...");
+        src.map.memory(1, src.pool_addr(0), 8);
+        connect(&dest.ep, "10.0.0.2:7000");
+        let mut slots = vec![0u8; 8].into_boxed_slice();
+        let h = dest
+            .ep
+            .register_landing_region(slots.as_mut_ptr(), slots.len())
+            .unwrap();
+        let fetch = || {
+            let (tx, rx) = mpsc::channel();
+            dest.ep
+                .fetch(
+                    "10.0.0.2:7000",
+                    &[(1, h.region_at(0, 8).unwrap())],
+                    Box::new(move |o| {
+                        let _ = tx.send(o);
+                    }),
+                )
+                .unwrap();
+            rx.recv_timeout(Duration::from_secs(5)).unwrap()
+        };
+        f.pause_sends(true);
+        assert!(matches!(fetch(), Err(TransferEndpointError::Deadline(_))));
+        f.pause_sends(false);
+        assert_eq!(slots[..], [0u8; 8], "the flushed request served nothing");
+        assert_eq!(src.map.lookups(), 0);
+        assert_eq!(hits(fetch()), [EntryOutcome::HitMemoryTier]);
+        assert_eq!(&slots[..], b"value...");
+        assert_eq!(dest.ep.stats().deadline_expiries, 1);
+        assert_eq!(src.map.held(), 0);
+        dest.ep.shutdown().unwrap();
+        src.ep.shutdown().unwrap();
+        drop(slots);
     }
 }

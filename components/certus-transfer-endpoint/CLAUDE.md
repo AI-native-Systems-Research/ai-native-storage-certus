@@ -154,6 +154,15 @@ VIII–XI, and a review that does not check them is not a review.
   `TransferStats` field behind `telemetry`: the default build would report zeros
   for work it did. Send-queue gauges are read from the live credits, not counted
   twice. A counter still unfilled names its task in `telemetry.rs`.
+- **A fetch with no usable reply fails as a whole; a push never does.** A fetch's
+  completion is `Err` on deadline, refusal, teardown or size, and every slot of it is to
+  be aborted; a push reports per entry, because some of its writes may have landed. Only
+  a successful completion is a hit — a write that may have landed is reported as not
+  landed, and the caller throws the slot out. Fire a fetch's `Err` only after the
+  teardown barrier, never before.
+- **The reply deadline runs from the send, not the `fetch` call.** A fetch waiting for a
+  credit or the capability exchange is not overdue; timing it from the call turns
+  back-pressure into spurious teardowns.
 - **`Failed` is not `Miss`.** `Miss` means the source does not serve the entry
   (absent, wrong size, a tier this build cannot serve). Anything lost to a fault —
   connection, refused or flushed write, failed lookup — is `Failed`. Reporting a
@@ -209,7 +218,7 @@ lookup answer is reported as a **miss**, never an error (D14).
 
 ## Current state
 
-Scaffolding. T001–T036, T068 and T074–T082 are done, except T011 (Phases 3 and 5 complete: US2 legacy push and US1 fetch work end to end over the mock): the crate builds as a default member,
+Scaffolding. T001–T036, T049–T052, T068, T070, T071 and T074–T082 are done, except T011 (Phases 3, 5 and 8 complete: US2 legacy push and US1 fetch work end to end over the mock, with a fail-loud reply deadline): the crate builds as a default member,
 peer identity is implemented, `ITransferEndpoint` is defined in `interfaces`, and
 the verbs FFI (`ffi.rs`), C shim (`wrapper.c`) and safe wrappers (`rdma.rs`, T009)
 exist behind `rdma`, and the transport seam plus an in-process mock exist in every

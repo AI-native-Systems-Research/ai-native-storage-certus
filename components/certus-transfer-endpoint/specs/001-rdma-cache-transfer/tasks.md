@@ -524,8 +524,8 @@ slots and the reply's per-key outcomes match the source's actual residency.
   reply, or a request past the advertised quota tears the connection down; an unknown
   opcode is answered with `OP_ERROR` and the connection survives
 - [X] T033 [US1] Implement `fetch(peer, items, on_complete)`: send the request, return
-  the `TransferContextId` as soon as it is sent, fire `on_complete` once with one outcome
-  per requested key when the last reply arrives. The context id exists to correlate a
+  the `TransferContextId` as soon as it is sent, fire `on_complete` once — `Ok` with one
+  outcome per requested key when the last reply arrives, `Err` when no usable reply can. The context id exists to correlate a
   `Deadline` error or a log line with its request — it is explicitly **not** a
   cancellation handle
 - [X] T034 [US1] Enforce the reply **ordering guarantee** on the source: every RDMA write
@@ -661,21 +661,21 @@ failure.
 serving everything else, leaving one stuck request on a healthy-looking engine. Hence a
 failing deadline rather than none.
 
-- [ ] T049 Implement destination-side deadline tracking per context: detect a request
+- [X] T049 Implement destination-side deadline tracking per context: detect a request
   neither fulfilled nor refused. Detection is by **deadline, not connection state** — a
   peer that hangs or partitions with the connection open is invisible to the transport,
   and a closed connection is a separate path that aborts its contexts directly
-- [ ] T050 Implement the default **fail-loud** action: log the key range, peer, chunk index
+- [X] T050 Implement the default **fail-loud** action: log the key range, peer, chunk index
   and queue-pair state, then fail the request with `Deadline(..)` carrying that diagnostic
   state (FR-016, invariant 10). Release the context's resources, and reclaim landing slots
   only behind the T019 teardown barrier — see T070 for the ordering, which is the part that
   is safety-critical rather than diagnostic
-- [ ] T051 [P] Add the configuration knob for the action, with the degrading alternative
+- [X] T051 [P] Add the configuration knob for the action, with the degrading alternative
   (report what arrived and let the caller recompute) **deliberately unimplemented** —
   Principle XI requires any degrading alternative to be opt-in and separately configured,
   and the spec defers this one. Selecting it must fail at configuration time with a clear
   message, not silently behave as fail-loud
-- [ ] T070 Implement the deadline **cleanup ordering** (FR-023, D18), which is where the
+- [X] T070 Implement the deadline **cleanup ordering** (FR-023, D18), which is where the
   correctness lives: transition the QP to ERROR → drain and discard its completions →
   reclaim the landing slots → allow a fresh connection only on next need. Logging
   queue-pair state (T050) is not a substitute for changing it: a slow-but-live source whose
@@ -683,16 +683,33 @@ failing deadline rather than none.
   on that connection and log the blast radius; do **not** narrow it by opening extra
   connections per request. Name this destination-side *reply deadline* distinctly from any
   source-side stall cap (the precedent's `STALL_TIMEOUT`, `connection.rs:116`)
-- [ ] T071 Tests for T070, over the mock seam: a late write from a stalled peer, injected
+- [X] T071 Tests for T070, over the mock seam: a late write from a stalled peer, injected
   after expiry, **cannot** land in a slot that has been reclaimed (assert from the mock's
   recorded QP→ERROR-before-reclaim ordering); sibling contexts on the connection are
   reported aborted, not silently dropped; and a subsequent fetch to the same peer succeeds
   over a fresh connection **without** re-registering the landing region, proving the `rkey`
   survived (SC-010, D17)
-- [ ] T052 Tests: a stalled mock peer with the connection held open produces a
+- [X] T052 Tests: a stalled mock peer with the connection held open produces a
   `Deadline` error carrying all four diagnostic fields; a closed connection instead aborts
   its outstanding contexts and releases each side's own resources; and the deferred
-  degrading action is rejected at configuration time
+  degrading action is rejected at configuration time.
+  *Done.* The completion became `FetchResult = Result<Vec<EntryOutcome>, _>`: a fetch with no
+  usable reply fails as a whole (`Deadline`, `Protocol`, `Transport`, `RequestTooLarge`) and
+  every slot is to be aborted; a push still reports per entry, `Err` only if it never
+  started. Only a successful completion is a hit — a write that may or may not have landed
+  is reported as not landed. `fetch_deadline` (default 5 s, `None` disables) runs from the
+  **send**, so a fetch waiting on a credit or the capability exchange cannot expire. The
+  endpoint thread checks it when idle; the oldest expired fetch per peer is logged with the
+  peer, key range, entry count, chunk and context, the queue-pair state as the device
+  reports it, and the sibling count, then torn down through the `disconnect` barrier
+  (ERROR → drain → destroy) and only then are callbacks fired — the expired fetch `Deadline`,
+  each sibling `Transport` naming it. A later fetch reconnects lazily. `deadline_action:
+  ReportPartial` is refused at `configure`. Tests: the stalled peer (all diagnostic
+  fields, `deadline_expiries`, ERROR and destroy stamped before both callbacks, a late
+  write from the peer refused with the slot untouched), the sibling abort, no deadline
+  waits, an unsent fetch outlives 5x the deadline, `ReportPartial` refused, and the
+  reconnect through the same handle (SC-010). The closed-connection case was already
+  covered by slice C's teardown test
 
 **Checkpoint**: a hang is loud, and a plausible-but-wrong measurement is not reachable.
 

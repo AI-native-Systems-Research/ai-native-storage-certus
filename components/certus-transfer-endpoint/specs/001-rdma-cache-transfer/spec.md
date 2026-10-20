@@ -228,7 +228,8 @@ unchanged.
 
 - **FR-016**: A destination-side deadline MUST detect a request that is neither fulfilled
   nor refused. Detection MUST be by deadline, not by connection state: a peer that hangs or
-  partitions with its connection open is invisible to the transport. The action MUST be
+  partitions with its connection open is invisible to the transport. The deadline MUST run
+  from when the request is sent, so a request waiting for a credit cannot expire. The action MUST be
   configurable, defaulting to **fail loudly** — log the key range, peer, chunk and
   queue-pair state, then fail the request. A degrading action (report what arrived and let
   the caller recompute) is deferred, not implemented. This destination-side *reply* deadline
