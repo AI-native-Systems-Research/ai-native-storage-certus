@@ -178,6 +178,37 @@ define_interface! {
 }
 ```
 
+### Lifecycle: `ITransferEndpointAdmin`
+
+`ITransferEndpoint` carries no lifecycle, so a second interface does, as
+`IRemoteLookupRdmaResponderAdmin` does for the responder:
+
+```rust
+pub struct EndpointConfig {
+    pub local: String,          // this instance's "host:port" — dialed by peers, and its own name
+    pub max_send_wr: u32,       // per-connection send-queue depth requested
+    pub max_recv_wr: u32,       // per-connection receive-queue depth requested
+    pub send_credits: u32,      // in-flight send-queue requests (and so held pins) per connection
+    pub actor_cpu: Option<usize>,
+}
+
+define_interface! {
+    pub ITransferEndpointAdmin {
+        fn configure(&self, config: EndpointConfig) -> Result<(), TransferEndpointError>;
+        fn initialize(&self) -> Result<(), TransferEndpointError>;
+        fn shutdown(&self) -> Result<(), TransferEndpointError>;
+    }
+}
+```
+
+Until `initialize` succeeds, every `ITransferEndpoint` method returns `NotInitialized` — a
+real lifecycle state in every build, not the predecessor's "built without `rdma`" bypass.
+`initialize` listens as `config.local` and starts the endpoint thread, which owns the
+connection table; the `&self` methods reach it as commands. `shutdown` refuses new work,
+tears down and drains every connection so all held state is released, then joins the
+thread. It is the **only** way to stop a running endpoint: a component holds references to
+itself for interface queries, so releasing every handle does not drop it.
+
 ## Invariants
 
 Implementations MUST uphold, and tests MUST verify:

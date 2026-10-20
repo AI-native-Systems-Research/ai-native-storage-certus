@@ -151,6 +151,13 @@ VIII–XI, and a review that does not check them is not a review.
   `TransferStats` field behind `telemetry`: the default build would report zeros
   for work it did. Send-queue gauges are read from the live credits, not counted
   twice. A counter still unfilled names its task in `telemetry.rs`.
+- **A panic on the endpoint thread aborts the process.** The framework actor would
+  catch it and carry on with a corrupt table, risking a silent double release.
+  Never call table code on that thread outside `fatal_on_panic`.
+- **Only `shutdown` stops an endpoint.** `define_component!` holds `Arc`s of the
+  component in its own interface map, so dropping every handle does not drop it.
+  And `shutdown` must drain before it drops the table, or the table's own drop
+  aborts.
 - **A `wr_id` carries a generation for a reason.** Draining links are polled after
   ERROR, so a slot can be reused while its previous occupant's completion is still
   in flight. Never strip it to "simplify" back to the predecessor's bare index.
@@ -181,7 +188,7 @@ lookup answer is reported as a **miss**, never an error (D14).
 
 ## Current state
 
-Scaffolding. T001–T010, T012–T015, T068 and T081 are done: the crate builds as a default member,
+Scaffolding. T001–T010, T012–T016, T019, T068 and T081 are done: the crate builds as a default member,
 peer identity is implemented, `ITransferEndpoint` is defined in `interfaces`, and
 the verbs FFI (`ffi.rs`), C shim (`wrapper.c`) and safe wrappers (`rdma.rs`, T009)
 exist behind `rdma`, and the transport seam plus an in-process mock exist in every
@@ -189,6 +196,8 @@ build (`connection/transport.rs`, `connection/mock.rs`, T010), driven by the
 connection table (`connection/table.rs`, T012, which also resolves simultaneous
 connect), with a `wr_id` slab per link (`connection/slab.rs`, T013) and send-queue
 credits (`connection/credits.rs`, T014), and counters (`telemetry.rs`, T015).
-Nothing owns the table yet; the endpoint component is T016 and the verbs
-side of the seam is T053. See `specs/001-rdma-cache-transfer/tasks.md` for the task list and its
+The component (`CertusTransferEndpoint`, T016) owns the table on its endpoint
+thread (`endpoint.rs`) behind `ITransferEndpointAdmin`; `disconnect` and `stats`
+work, the transfer methods say which task they land in. The verbs side of the
+seam is T053. See `specs/001-rdma-cache-transfer/tasks.md` for the task list and its
 traceability matrix.

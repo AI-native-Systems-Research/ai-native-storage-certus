@@ -244,10 +244,24 @@ connection table. This is plan.md Phase 1's engine.
   `Send + Sync`, justified by its `ibv_mr` being immutable after registration. Key the
   table by the `ibv_context` pointer librdmacm hands the id (`ProtectionDomain::same_device`):
   `rdma_create_qp` rejects a PD from any other context, even one opened on the same device
-- [ ] T016 Wire `define_component!` in `src/lib.rs` (depends T006, T012): receptacles
+- [X] T016 Wire `define_component!` in `src/lib.rs` (depends T006, T012): receptacles
   `logger: ILogger`, `dispatch_map: IDispatchMap` (both ungated, per D13 and T002), and a
   block-device receptacle gated on `spdk`. Endpoint owns a dedicated actor thread, as both
-  predecessor crates do
+  predecessor crates do.
+  *Done*: `CertusTransferEndpoint` provides `ITransferEndpoint` and a new
+  **`ITransferEndpointAdmin`** (`configure(EndpointConfig)` / `initialize` / `shutdown`, in
+  `interfaces`, ungated) — the interface carried no lifecycle. Until `initialize`, every
+  transfer method returns `NotInitialized`. The thread is the framework `Actor`
+  (`src/endpoint.rs`), with **panics made fatal**: every handler path runs under
+  `fatal_on_panic`, which aborts rather than let the framework swallow a broken pin, slab or
+  credit invariant. Interface methods are `Command`s; `stats`/`disconnect` wait on a one-shot
+  reply. A peer whose link goes `Down` is torn down and drained on the thread at once.
+  `shutdown` tears down and drains every peer before dropping the table; a stalled drain is
+  reported and the table leaked rather than destroyed holding state. **Shutdown is the only
+  way to stop it**: `define_component!` keeps `Arc`s of the component in its own interface
+  map, so it is never dropped by releasing handles (pinned by a test). `fetch`, `push_async`,
+  `push`, `register_landing_region` validate their peer and return `NotInitialized("…lands
+  in Txxx")`
 
 **Checkpoint**: the engine builds and the mock seam carries a message and a simulated
 write end to end, with neither rdma-core nor SPDK present.
@@ -273,7 +287,7 @@ hardware loopback scenario, pass against this component with messaging unused.
   saturates the link at 2.25 MiB per entry, so this is about avoiding idle, not depth (D19)
 - [ ] T018 [US2] Implement blocking `push` over `push_async` (contract: one outcome per
   item, in order)
-- [ ] T019 [US2] Implement `disconnect(peer)`: transition the peer's QP to ERROR, drain and
+- [X] T019 [US2] *(done in T016)* Implement `disconnect(peer)`: transition the peer's QP to ERROR, drain and
   discard its completions, and do not return until no write from that peer can still land
   (FR-017, Principle IX's last clause). This is the existing `Disconnect`/`DisconnectAck`
   barrier, kept — and it is also the mechanism the deadline path reuses (FR-023, T070), so

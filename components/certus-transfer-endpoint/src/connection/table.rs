@@ -493,6 +493,12 @@ impl<T> ConnectionTable<T> {
         first_error.map_or(Ok(n), Err)
     }
 
+    /// Every peer the table holds anything for — a pending connect, a live
+    /// link or a draining one. Shutdown tears each down.
+    pub fn peers(&self) -> Vec<PeerId> {
+        self.entries.keys().cloned().collect()
+    }
+
     /// Whether `peer` has links awaiting drain and `finish_teardown`.
     pub fn is_draining(&self, peer: &PeerId) -> bool {
         self.entries
