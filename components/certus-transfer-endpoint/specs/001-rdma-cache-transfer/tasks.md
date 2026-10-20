@@ -278,13 +278,22 @@ hardware loopback scenario, pass against this component with messaging unused.
 
 **Gate**: **SC-002**.
 
-- [ ] T017 [US2] Implement `push_async(endpoint, &[(CacheKey, RemoteRegion)],
+- [X] T017 [US2] Implement `push_async(endpoint, &[(CacheKey, RemoteRegion)],
   on_complete)` in `src/serve.rs` + `src/lib.rs`: resolve or open the connection, post one
   RDMA write **per entry** (FR-008 — landing slots are not contiguous, so there is no
   batch write to post), accumulate outcomes, fire `on_complete` once with one outcome per
   item in request order. Post continuously: refill on each completion and never drain the
   send queue between entries while unposted entries remain (FR-022). A window of 2-4 already
-  saturates the link at 2.25 MiB per entry, so this is about avoiding idle, not depth (D19)
+  saturates the link at 2.25 MiB per entry, so this is about avoiding idle, not depth (D19).
+  *Done* on the endpoint thread (`src/endpoint.rs`, `src/serve.rs`). Entries are looked up —
+  and pinned — **lazily, only as send credits free**, so pins held never exceed the credits
+  and nothing is pinned while a connection is still being made. A write failure tears the
+  connection down; every exit (completion, failure, peer down, disconnect, shutdown) releases
+  each pin exactly once and fires `on_complete` once. New receptacle `memory_tier`, whose
+  pool is registered once at initialize (LOCAL|REMOTE_WRITE), the responder's approach.
+  Block-tier answers release their pin and report `Miss` until T037-T040. **Adds
+  `EntryOutcome::Failed`** (and `TransferStats::failed`, wire outcome byte 3): a fault is
+  never reported as a miss
 - [ ] T018 [US2] Implement blocking `push` over `push_async` (contract: one outcome per
   item, in order)
 - [X] T019 [US2] *(done in T016)* Implement `disconnect(peer)`: transition the peer's QP to ERROR, drain and
@@ -315,26 +324,29 @@ Principle IX explicitly" (Workflow rule 6).
 
 **Gate**: **SC-004**.
 
-- [ ] T022 [XC] Implement the per-entry serve step in `src/serve.rs`: **one**
+- [X] T022 [XC] Implement the per-entry serve step in `src/serve.rs`: **one**
   `dispatch_map.lookup(key)` yields residency *and* the pin *and* the address
   (`MemoryTier{pointer,size}`) or the extent offset (`BlockDevice{offset}`) together
   (FR-009, D6). Do not use `Check` to pick the tier first — it releases immediately and
   would reintroduce exactly the probe-then-pin window the dispatch map is built to avoid
-- [ ] T023 [XC] Never release a read reference for an unpinned answer: `NotExist` and
-  `MismatchSize` return before the pin, so releasing on them decrements another reader's
-  pin (FR-010, D6 corollary, Principle IX). Treat `MismatchSize` as `Miss` (spec edge
-  case: "key present but stored size does not match"). Note this is the live
-  `Dispatcher::check()` defect — `exists = !matches!(result, NotExist)` then release —
-  which is tracked separately and must **not** be reproduced here
-- [ ] T024 [XC] Release a memory-tier pin from the completion reaper that owns its
+- [X] T023 [XC] Release exactly what `lookup` pinned, exactly once (FR-010, D6 corollary,
+  Principle IX). `NotExist` (and `MismatchSize`, should a map return it) are **unpinned**:
+  releasing on them decrements another reader's pin — the live `Dispatcher::check()` defect
+  (`exists = !matches!(result, NotExist)` then release), tracked separately and **not**
+  reproduced here. But `lookup` takes no size and the current map never returns
+  `MismatchSize`: a **wrong-size entry comes back `MemoryTier`, pinned**, and must be
+  released before reporting `Miss`, or it is never evictable. The same for a block-tier
+  answer this build cannot serve. Every pin is a `serve::Pin`, which panics if dropped
+  unreleased
+- [X] T024 [XC] Release a memory-tier pin from the completion reaper that owns its
   `wr_id`, per entry, never per batch (FR-011, D7, depends T013)
-- [ ] T025 [XC] Test **SC-004**: with send-queue credits set to *n*, a push of
+- [X] T025 [XC] Test **SC-004**: with send-queue credits set to *n*, a push of
   *n* × 100 entries never holds more than *n* concurrent pins. Instrument the mock
   dispatch map to record peak concurrent `read_ref`, and assert the bound independently of
   `items.len()` (invariant 5)
-- [ ] T026 [XC] Test the double-release hazard directly: a request mixing hits,
-  `NotExist` and `MismatchSize` leaves every key's `read_ref` at exactly its starting
-  value. An over-release corrupts an unrelated reader and no ordinary test catches it —
+- [X] T026 [XC] Test the double-release hazard directly: a request mixing hits,
+  `NotExist`, a wrong-size entry, a block-tier entry and `MismatchSize` leaves every key's
+  `read_ref` at exactly its starting value — including another reader's pin left untouched. An over-release corrupts an unrelated reader and no ordinary test catches it —
   Principle IX's rationale asks for this one specifically
 
 **Checkpoint**: SC-004 holds, and the pin ledger balances across mixed outcomes.

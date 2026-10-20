@@ -22,9 +22,12 @@ VIII–XI, and a review that does not check them is not a review.
   unconditionally). Hardware tests are `#[ignore]`d. If a behaviour can only be
   tested on a NIC, the seam is wrong.
 - **IX — pin discipline.** Residency and pin come from **one**
-  `IDispatchMap::lookup`; never probe-then-pin. Never release a read reference
-  for an answer that was not pinned (`NotExist`, `MismatchSize`) — that
-  decrements another reader's pin and no ordinary test catches it. Pins are per
+  `IDispatchMap::lookup`; never probe-then-pin. Release exactly what it pinned,
+  exactly once: never an unpinned answer (`NotExist`, `MismatchSize`) — that
+  decrements another reader's pin and no ordinary test catches it — but always a
+  pinned one you do not serve. `lookup` takes no size, so a **wrong-size entry
+  comes back pinned** and must be released; the current map never returns
+  `MismatchSize` at all. Pins are per
   entry, never per batch, released by the completion reaper owning their
   `wr_id`. A landing slot is not reclaimed or published until queue-pair
   teardown guarantees no write can still land.
@@ -151,6 +154,16 @@ VIII–XI, and a review that does not check them is not a review.
   `TransferStats` field behind `telemetry`: the default build would report zeros
   for work it did. Send-queue gauges are read from the live credits, not counted
   twice. A counter still unfilled names its task in `telemetry.rs`.
+- **`Failed` is not `Miss`.** `Miss` means the source does not serve the entry
+  (absent, wrong size, a tier this build cannot serve). Anything lost to a fault —
+  connection, refused or flushed write, failed lookup — is `Failed`. Reporting a
+  fault as a miss makes a broken path look like a cold cache.
+- **Look up only when a credit is free.** A push resolves an entry — and so
+  pins it — only when its write can post at once. Looking ahead "to keep the
+  pipe full" breaks SC-004: pins held would exceed the credits.
+- **Serving a peer still touches the source's LRU** (D6): the dispatch map's
+  `lookup` refreshes the entry as it pins. Invariant 6 is unmet for memory-tier
+  entries until a non-touching lookup exists. Do not claim otherwise.
 - **A panic on the endpoint thread aborts the process.** The framework actor would
   catch it and carry on with a corrupt table, risking a silent double release.
   Never call table code on that thread outside `fatal_on_panic`.
@@ -188,7 +201,7 @@ lookup answer is reported as a **miss**, never an error (D14).
 
 ## Current state
 
-Scaffolding. T001–T010, T012–T016, T019, T068 and T081 are done: the crate builds as a default member,
+Scaffolding. T001–T010, T012–T017, T019, T022–T026, T068 and T081 are done: the crate builds as a default member,
 peer identity is implemented, `ITransferEndpoint` is defined in `interfaces`, and
 the verbs FFI (`ffi.rs`), C shim (`wrapper.c`) and safe wrappers (`rdma.rs`, T009)
 exist behind `rdma`, and the transport seam plus an in-process mock exist in every
@@ -197,7 +210,8 @@ connection table (`connection/table.rs`, T012, which also resolves simultaneous
 connect), with a `wr_id` slab per link (`connection/slab.rs`, T013) and send-queue
 credits (`connection/credits.rs`, T014), and counters (`telemetry.rs`, T015).
 The component (`CertusTransferEndpoint`, T016) owns the table on its endpoint
-thread (`endpoint.rs`) behind `ITransferEndpointAdmin`; `disconnect` and `stats`
-work, the transfer methods say which task they land in. The verbs side of the
+thread (`endpoint.rs`) behind `ITransferEndpointAdmin`. `push_async` (T017) serves
+memory-tier entries end to end with the full pin discipline (`serve.rs`, T022-T026);
+`disconnect` and `stats` work; the rest say which task they land in. The verbs side of the
 seam is T053. See `specs/001-rdma-cache-transfer/tasks.md` for the task list and its
 traceability matrix.

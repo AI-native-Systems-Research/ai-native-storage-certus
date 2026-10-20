@@ -110,9 +110,10 @@ free — the requester may land entries across several registered regions.
 
 Header, then one outcome byte per entry in request order, zero-padded to an 8-byte boundary.
 
-Outcome byte: `0` = Miss, `1` = HitMemoryTier, `2` = HitBlockTier. Values >= 3 reserved; a
-receiver MUST treat an unknown outcome as Miss rather than erroring, so a future source can
-add a tier without breaking an old requester.
+Outcome byte: `0` = Miss, `1` = HitMemoryTier, `2` = HitBlockTier, `3` = Failed (the source
+holds the entry, or could not tell, but did not deliver it — its lookup failed, or its write
+did). Values >= 4 reserved; a receiver MUST treat an unknown outcome as Miss rather than
+erroring, so a future source can add a tier without breaking an old requester.
 
 **Ordering guarantee**: every RDMA write for an entry reported as a hit MUST have completed
 before the reply is sent. The requester may therefore treat reply arrival as the completion
