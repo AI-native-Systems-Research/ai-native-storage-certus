@@ -30,15 +30,17 @@
 //!
 //! # Status
 //!
-//! Scaffolding. Tasks T001–T010, T012–T030, T032, T068, T074, T076, T077, T080 and T081 of
+//! Scaffolding. Tasks T001–T036, T068 and T074–T082 (all but T011's remaining faults) of
 //! `specs/001-rdma-cache-transfer/tasks.md` are complete: the crate builds as a
 //! workspace default member, peer identity is implemented, and the verbs FFI, its
 //! C shim and the safe wrappers over them exist behind `rdma`, and the transport
 //! seam with its in-process mock, the connection table over it, and its per-link
 //! `wr_id` slab, send-queue credits and counters exist in every build, owned by
-//! [`CertusTransferEndpoint`] on its endpoint thread. The legacy `push_async`
-//! and `push` serve memory-tier entries end to end; the other transfer methods return
-//! `NotInitialized` naming the task that lands them.
+//! [`CertusTransferEndpoint`] on its endpoint thread. Every transfer method works
+//! end to end over the mock: the legacy `push_async` and `push`, landing
+//! regions, and `fetch` over the request/reply messaging. Still to come: the
+//! block tier (Phase 6), chunking (Phase 7), deadlines (Phase 8) and the verbs
+//! transport (Phase 9).
 
 #![deny(missing_docs)]
 
@@ -259,12 +261,15 @@ impl std::ops::DerefMut for LifecycleGuard<'_> {
     }
 }
 
-fn not_running() -> TransferEndpointError {
-    TransferEndpointError::NotInitialized("endpoint is not running".into())
+/// Ids for `fetch`'s `TransferContextId`: unique per process, so a log line
+/// or a `Deadline` names one fetch unambiguously.
+fn next_fetch_id() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
-fn not_yet(task: &str) -> TransferEndpointError {
-    TransferEndpointError::NotInitialized(format!("not implemented yet: lands in {task}"))
+fn not_running() -> TransferEndpointError {
+    TransferEndpointError::NotInitialized("endpoint is not running".into())
 }
 
 fn parse_peer(s: &str) -> Result<PeerId, TransferEndpointError> {
@@ -431,14 +436,40 @@ impl ITransferEndpoint for CertusTransferEndpoint {
             .map_err(TransferEndpointError::Transport)
     }
 
+    /// Ask `peer` for `items`: it writes each entry it holds into the named
+    /// landing slot, then replies once with one outcome per item, which
+    /// `on_complete` receives in request order. Returns once queued.
+    ///
+    /// A hit means the entry's write completed before the reply was sent, so
+    /// its slot is safe to commit; every other outcome means abort it. A
+    /// request larger than the peer accepts is reported all `Failed` until
+    /// chunking lands (Phase 7).
     fn fetch(
         &self,
         peer: &str,
-        _items: &[(CacheKey, RemoteRegion)],
-        _on_complete: FetchCompletion,
+        items: &[(CacheKey, RemoteRegion)],
+        on_complete: FetchCompletion,
     ) -> Result<TransferContextId, TransferEndpointError> {
-        parse_peer(peer)?;
-        Err(not_yet("T033"))
+        let peer = parse_peer(peer)?;
+        if items.len() > message::MAX_ENTRIES as usize {
+            return Err(TransferEndpointError::RequestTooLarge {
+                max_entries: message::MAX_ENTRIES as usize,
+            });
+        }
+        let guard = self.lifecycle();
+        let State::Running(handle) = &*guard else {
+            return Err(not_running());
+        };
+        let id = next_fetch_id();
+        handle
+            .send(Command::Fetch {
+                id,
+                peer,
+                items: items.to_vec(),
+                on_complete,
+            })
+            .map_err(|e| TransferEndpointError::Transport(format!("endpoint thread: {e}")))?;
+        Ok(TransferContextId(id))
     }
 
     /// Push each entry this endpoint holds into the peer's named region,
@@ -631,29 +662,21 @@ mod tests {
     }
 
     #[test]
-    fn unimplemented_methods_say_which_task_and_validate_first() {
+    fn transfer_methods_validate_the_peer_first() {
         let f = MockFabric::new();
         let ep = endpoint(&f, "10.0.0.1:7000");
         ep.initialize().unwrap();
-        assert!(matches!(
-            ep.push("10.0.0.2", &[]),
-            Err(TransferEndpointError::InvalidEndpoint(_))
-        ));
-        match ep.fetch("10.0.0.2:7000", &[], Box::new(|_| {})) {
-            Err(TransferEndpointError::NotInitialized(m)) => assert!(m.contains("T033"), "{m}"),
-            other => panic!("{other:?}"),
-        }
-        assert!(matches!(
-            ep.push_async("10.0.0.2", &[], Box::new(|_| {})),
-            Err(TransferEndpointError::InvalidEndpoint(_))
+        let invalid = |r: Result<(), TransferEndpointError>| {
+            matches!(r, Err(TransferEndpointError::InvalidEndpoint(_)))
+        };
+        assert!(invalid(ep.push("10.0.0.2", &[]).map(|_| ())));
+        assert!(invalid(ep.push_async("10.0.0.2", &[], Box::new(|_| {}))));
+        assert!(invalid(
+            ep.fetch("10.0.0.2", &[], Box::new(|_| {})).map(|_| ())
         ));
         ep.shutdown().unwrap();
     }
 
-    /// The checkpoint: two endpoints over the mock, each on its own thread,
-    /// connect; `disconnect` at one end is the FR-017 barrier, the other end
-    /// sees its link go down and finishes its own teardown; both shut down with
-    /// every queue pair destroyed.
     #[test]
     fn two_endpoints_connect_disconnect_and_shut_down_clean() {
         let f = MockFabric::new();
@@ -1506,12 +1529,8 @@ mod tests {
         });
     }
 
-    /// Send raw bytes as a request that spends a message credit, as a real
-    /// request would, so its reply is expected.
-    fn inject(ep: &CertusTransferEndpoint, to: &str, bytes: Vec<u8>) {
-        inject_raw(ep, to, bytes, true);
-    }
-
+    /// Send raw bytes to `to`, as a hostile or buggy peer would. With `spend`
+    /// it takes a message credit first, as a genuine request would.
     fn inject_raw(ep: &CertusTransferEndpoint, to: &str, bytes: Vec<u8>, spend: bool) {
         let peer = PeerId::parse(to).unwrap();
         ep.call(|reply| Command::Inject {
@@ -1799,30 +1818,693 @@ mod tests {
         b.ep.shutdown().unwrap();
     }
 
-    /// An unknown opcode is a request, and is answered with OP_ERROR — the
-    /// connection stays up (SC-012's shape; the context failure is slice C).
+    /// SC-012, from the answering side: a request of unknown kind is answered
+    /// with OP_ERROR naming it — within a round trip, never left to a
+    /// deadline — and the answering end stays connected. The OP_ERROR comes
+    /// back for a request the injecting end never really made, so *that* end
+    /// treats it as a bad reply and tears down, which is the right answer
+    /// there; the next test covers an OP_ERROR for a genuine fetch.
     #[test]
-    fn an_unknown_opcode_is_answered_and_the_connection_survives() {
+    fn an_unknown_opcode_is_answered_and_the_answerer_survives() {
         let f = MockFabric::new();
         let a = node(&f, "10.0.0.1:7000", 8);
         let b = node(&f, "10.0.0.2:7000", 8);
         a.ep.initialize().unwrap();
         b.ep.initialize().unwrap();
         connect(&a.ep, "10.0.0.2:7000");
+        eventually("b ready", || {
+            session_of(&b.ep, "10.0.0.1:7000").is_some_and(|s| s.credits_available > 0)
+        });
         let mut msg = vec![0u8; message::HEADER_LEN];
         msg[0] = 0x42; // no such kind
-        inject(&a.ep, "10.0.0.2:7000", msg);
-        eventually("a sees b's OP_ERROR", || a.ep.stats().protocol_faults == 1);
-        std::thread::sleep(Duration::from_millis(20));
-        assert!(
-            session_of(&a.ep, "10.0.0.2:7000").is_some(),
-            "still connected"
-        );
-        assert!(
-            session_of(&b.ep, "10.0.0.1:7000").is_some(),
-            "still connected"
+        inject_raw(&a.ep, "10.0.0.2:7000", msg, false);
+        eventually("a receives b's OP_ERROR", || {
+            a.ep.stats().protocol_faults == 1
+        });
+        assert_eq!(
+            b.ep.stats().protocol_faults,
+            0,
+            "b answered; it did not fault"
         );
         a.ep.shutdown().unwrap();
         b.ep.shutdown().unwrap();
+    }
+
+    /// SC-012, from the requesting side: an OP_ERROR for one of our fetches
+    /// fails exactly that fetch, and the connection and a sibling fetch on it
+    /// complete normally. The refusal comes from a raw peer, since an endpoint
+    /// only refuses what it cannot parse.
+    #[test]
+    fn an_op_error_fails_one_fetch_and_spares_its_siblings() {
+        use crate::connection::transport::Transport;
+        let f = MockFabric::new();
+        let a = node(&f, "10.0.0.1:7000", 8);
+        a.ep.initialize().unwrap();
+        let mut raw = crate::connection::mock::MockTransport::new(f.clone());
+        let p_raw = PeerId::parse("10.0.0.3:7000").unwrap();
+        raw.listen(&p_raw).unwrap();
+        let p2 = p_raw.clone();
+        a.ep.call(|r| Command::Connect(p2, r)).unwrap().unwrap();
+        let link = accept_raw(&mut raw, &p_raw);
+        send_raw(&mut raw, link, |out| {
+            message::encode_hello(
+                &message::Hello {
+                    max_entries: 340,
+                    max_outstanding_requests: 4,
+                    version_min: 1,
+                    version_max: 1,
+                },
+                out,
+            )
+        });
+        send_raw(&mut raw, link, message::encode_hello_reply);
+        eventually("a ready", || {
+            session_of(&a.ep, "10.0.0.3:7000").is_some_and(|s| s.credits_available > 0)
+        });
+        let mut slots = vec![0u8; 64].into_boxed_slice();
+        let h =
+            a.ep.register_landing_region(slots.as_mut_ptr(), slots.len())
+                .unwrap();
+        let (tx, rx) = mpsc::channel();
+        for which in [0, 1] {
+            let tx = tx.clone();
+            a.ep.fetch(
+                "10.0.0.3:7000",
+                &[(which, h.region_at(which as usize * 8, 8).unwrap())],
+                Box::new(move |o| tx.send((which, o)).unwrap()),
+            )
+            .unwrap();
+        }
+        eventually("both fetches out", || {
+            session_of(&a.ep, "10.0.0.3:7000").is_some_and(|s| s.outbound.0 == 2)
+        });
+        // a numbers its contexts from 0 per connection: refuse context 0,
+        // answer context 1 with a miss.
+        send_raw(&mut raw, link, |out| {
+            message::encode_error(
+                &message::ErrorReply {
+                    context_id: 0,
+                    offending_opcode: message::Kind::Fetch.opcode(),
+                    reason: message::Reason::Malformed,
+                    max_supported_version: 1,
+                },
+                out,
+            )
+        });
+        send_raw(&mut raw, link, |out| {
+            message::encode_reply(1, 1, &[EntryOutcome::Miss], out)
+        });
+        let mut got: Vec<_> = (0..2)
+            .map(|_| rx.recv_timeout(Duration::from_secs(5)).unwrap())
+            .collect();
+        got.sort_by_key(|(w, _)| *w);
+        assert_eq!(
+            got,
+            [
+                (0, vec![EntryOutcome::Failed]),
+                (1, vec![EntryOutcome::Miss])
+            ]
+        );
+        assert!(
+            session_of(&a.ep, "10.0.0.3:7000").is_some(),
+            "the connection stays"
+        );
+        assert_eq!(a.ep.stats().protocol_faults, 1);
+        let _ = raw.link(link);
+        a.ep.shutdown().unwrap();
+        drop((raw, slots));
+    }
+
+    // --- Phase 5 slice C: fetch --------------------------------------------------
+
+    /// SC-001: the destination names one peer and a run of keys; the values
+    /// land in its slots and the outcomes come back in request order. There is
+    /// no zyre receptacle at all (FR-004, structurally), and no third endpoint
+    /// on the fabric hears a single message.
+    #[test]
+    fn a_fetch_lands_values_from_the_one_named_peer() {
+        let f = MockFabric::new();
+        let dest = node(&f, "10.0.0.1:7000", 8);
+        let mut src = node(&f, "10.0.0.2:7000", 8);
+        let bystander = node(&f, "10.0.0.3:7000", 8);
+        for n in [&dest, &src, &bystander] {
+            n.ep.initialize().unwrap();
+        }
+        src.pool[..16].copy_from_slice(b"first...second..");
+        src.map.memory(10, src.pool_addr(0), 8);
+        src.map.memory(12, src.pool_addr(8), 8);
+        let mut slots = vec![0u8; 64].into_boxed_slice();
+        let h = dest
+            .ep
+            .register_landing_region(slots.as_mut_ptr(), slots.len())
+            .unwrap();
+        let items = [
+            (10, h.region_at(0, 8).unwrap()),
+            (11, h.region_at(8, 8).unwrap()), // the source lacks it
+            (12, h.region_at(16, 8).unwrap()),
+        ];
+        let (tx, rx) = mpsc::channel();
+        let ctx = dest
+            .ep
+            .fetch(
+                "10.0.0.2:7000",
+                &items,
+                Box::new(move |o| tx.send(o).unwrap()),
+            )
+            .unwrap();
+        let out = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        use EntryOutcome::*;
+        assert_eq!(out, [HitMemoryTier, Miss, HitMemoryTier]);
+        assert_eq!(&slots[0..8], b"first...");
+        assert_eq!(slots[8..16], [0u8; 8], "nothing for the miss");
+        assert_eq!(&slots[16..24], b"second..");
+        assert!(ctx.0 > 0);
+        assert_eq!(src.map.held(), 0, "the source released every pin");
+        assert_eq!(bystander.map.lookups(), 0);
+        assert!(
+            session_of(&bystander.ep, "10.0.0.1:7000").is_none(),
+            "never contacted"
+        );
+        assert!(
+            session_of(&bystander.ep, "10.0.0.2:7000").is_none(),
+            "never contacted"
+        );
+        let s = dest.ep.stats();
+        assert_eq!((s.requests_attempted, s.requests_completed), (1, 1));
+        assert_eq!((s.hit_memory_tier, s.miss), (2, 1));
+        for n in [&dest, &src, &bystander] {
+            n.ep.shutdown().unwrap();
+        }
+        drop(slots);
+    }
+
+    /// SC-006: a fetch for keys the peer lacks returns all Miss and causes no
+    /// further traffic — no retry, no other peer asked (invariant 3, D12).
+    #[test]
+    fn an_all_miss_fetch_is_answered_and_nothing_follows() {
+        let f = MockFabric::new();
+        let dest = node(&f, "10.0.0.1:7000", 8);
+        let src = node(&f, "10.0.0.2:7000", 8);
+        dest.ep.initialize().unwrap();
+        src.ep.initialize().unwrap();
+        let mut slots = vec![0u8; 32].into_boxed_slice();
+        let h = dest
+            .ep
+            .register_landing_region(slots.as_mut_ptr(), slots.len())
+            .unwrap();
+        let items: Vec<_> = (0..4u64)
+            .map(|k| (k, h.region_at(k as usize * 8, 8).unwrap()))
+            .collect();
+        let (tx, rx) = mpsc::channel();
+        dest.ep
+            .fetch(
+                "10.0.0.2:7000",
+                &items,
+                Box::new(move |o| tx.send(o).unwrap()),
+            )
+            .unwrap();
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            [EntryOutcome::Miss; 4]
+        );
+        std::thread::sleep(Duration::from_millis(20));
+        let sd = session_of(&dest.ep, "10.0.0.2:7000").unwrap();
+        assert_eq!(sd.outbound, (0, 1), "exactly one request ever went out");
+        assert_eq!(src.map.lookups(), 4, "one lookup per key, and no more");
+        assert_eq!(slots[..], [0u8; 32]);
+        dest.ep.shutdown().unwrap();
+        src.ep.shutdown().unwrap();
+        drop(slots);
+    }
+
+    /// T034: the source replies only after every write for a hit has
+    /// completed. With the source's sends held in flight, the destination's
+    /// callback must not fire — a reply sent early would let it.
+    #[test]
+    fn the_reply_waits_for_the_writes() {
+        let f = MockFabric::new();
+        let dest = node(&f, "10.0.0.1:7000", 8);
+        let src = node(&f, "10.0.0.2:7000", 8);
+        dest.ep.initialize().unwrap();
+        src.ep.initialize().unwrap();
+        src.map.memory(1, src.pool_addr(0), 8);
+        connect(&dest.ep, "10.0.0.2:7000");
+        eventually("src ready", || {
+            session_of(&src.ep, "10.0.0.1:7000").is_some_and(|s| s.credits_available > 0)
+        });
+        let mut slots = vec![0u8; 8].into_boxed_slice();
+        let h = dest
+            .ep
+            .register_landing_region(slots.as_mut_ptr(), slots.len())
+            .unwrap();
+        // Pause, then fetch: the request itself is held until released, so
+        // release only the request, by letting sends run until the source has
+        // the pin — its write posted — and pausing again before it executes.
+        f.pause_sends(true);
+        let (tx, rx) = mpsc::channel();
+        dest.ep
+            .fetch(
+                "10.0.0.2:7000",
+                &[(1, h.region_at(0, 8).unwrap())],
+                Box::new(move |o| tx.send(o).unwrap()),
+            )
+            .unwrap();
+        eventually("the request is queued", || {
+            session_of(&dest.ep, "10.0.0.2:7000").is_some_and(|s| s.outbound.0 == 1)
+        });
+        f.step_sends_until(|| src.map.held() == 1);
+        std::thread::sleep(Duration::from_millis(30));
+        assert!(
+            rx.try_recv().is_err(),
+            "no reply while the write is in flight"
+        );
+        f.pause_sends(false);
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            [EntryOutcome::HitMemoryTier]
+        );
+        dest.ep.shutdown().unwrap();
+        src.ep.shutdown().unwrap();
+        drop(slots);
+    }
+
+    /// FR-026 / D22: one connection, both directions, separate books. Each
+    /// end fetches from the other at once; each numbers its requests from 0,
+    /// so context 0 is live in both directions, and the two never cross.
+    #[test]
+    fn the_same_context_id_live_both_ways_is_two_requests() {
+        let f = MockFabric::new();
+        let mut a = node(&f, "10.0.0.1:7000", 8);
+        let mut b = node(&f, "10.0.0.2:7000", 8);
+        a.ep.initialize().unwrap();
+        b.ep.initialize().unwrap();
+        a.pool[..4].copy_from_slice(b"AAAA");
+        b.pool[..4].copy_from_slice(b"BBBB");
+        a.map.memory(1, a.pool_addr(0), 4);
+        b.map.memory(2, b.pool_addr(0), 4);
+        let mut slots_a = vec![0u8; 4].into_boxed_slice();
+        let mut slots_b = vec![0u8; 4].into_boxed_slice();
+        let ha =
+            a.ep.register_landing_region(slots_a.as_mut_ptr(), 4)
+                .unwrap();
+        let hb =
+            b.ep.register_landing_region(slots_b.as_mut_ptr(), 4)
+                .unwrap();
+        connect(&a.ep, "10.0.0.2:7000");
+        eventually("b ready", || {
+            session_of(&b.ep, "10.0.0.1:7000").is_some_and(|s| s.credits_available > 0)
+        });
+        f.pause_sends(true); // both requests out before either is served
+        let (tx, rx) = mpsc::channel();
+        let ta = tx.clone();
+        a.ep.fetch(
+            "10.0.0.2:7000",
+            &[(2, ha.region_at(0, 4).unwrap())],
+            Box::new(move |o| ta.send(("a", o)).unwrap()),
+        )
+        .unwrap();
+        b.ep.fetch(
+            "10.0.0.1:7000",
+            &[(1, hb.region_at(0, 4).unwrap())],
+            Box::new(move |o| tx.send(("b", o)).unwrap()),
+        )
+        .unwrap();
+        eventually("both requests queued", || {
+            session_of(&a.ep, "10.0.0.2:7000").is_some_and(|s| s.outbound.0 == 1)
+                && session_of(&b.ep, "10.0.0.1:7000").is_some_and(|s| s.outbound.0 == 1)
+        });
+        f.pause_sends(false);
+        let mut got: Vec<_> = (0..2)
+            .map(|_| rx.recv_timeout(Duration::from_secs(5)).unwrap())
+            .collect();
+        got.sort_by_key(|(w, _)| *w);
+        assert_eq!(
+            got,
+            [
+                ("a", vec![EntryOutcome::HitMemoryTier]),
+                ("b", vec![EntryOutcome::HitMemoryTier])
+            ]
+        );
+        assert_eq!(&slots_a[..], b"BBBB", "a got b's value");
+        assert_eq!(&slots_b[..], b"AAAA", "b got a's value");
+        a.ep.shutdown().unwrap();
+        b.ep.shutdown().unwrap();
+        drop((slots_a, slots_b));
+    }
+
+    /// FR-026's quota, now reachable end to end: serving is asynchronous, so
+    /// requests pile up in service. A peer sending past the quota it was
+    /// granted is torn down.
+    #[test]
+    fn requests_past_the_quota_tear_down() {
+        let f = MockFabric::new();
+        let a = node(&f, "10.0.0.1:7000", 8);
+        let b = node(&f, "10.0.0.2:7000", 8);
+        a.ep.initialize().unwrap();
+        b.ep.initialize().unwrap();
+        b.map.memory(1, b.pool_addr(0), 8);
+        connect(&a.ep, "10.0.0.2:7000");
+        eventually("b ready", || {
+            session_of(&b.ep, "10.0.0.1:7000").is_some_and(|s| s.credits_available > 0)
+        });
+        let (land, rkey) = pool_key(&a.ep);
+        let region = RemoteRegion {
+            addr: land,
+            rkey,
+            length: 8,
+        };
+        // Hold b's writes in flight so its fetches stay in service, then send
+        // nine against a quota of eight, bypassing a's own credits.
+        f.pause_sends(true);
+        let mut msg = vec![0u8; message::MESSAGE_LEN];
+        for ctx in 100..109u64 {
+            let n = message::encode_fetch(1, ctx, &[(1, region)], &mut msg);
+            inject_raw(&a.ep, "10.0.0.2:7000", msg[..n].to_vec(), false);
+        }
+        std::thread::sleep(Duration::from_millis(20));
+        f.pause_sends(false);
+        eventually("b tears down", || {
+            session_of(&b.ep, "10.0.0.1:7000").is_none()
+        });
+        assert_eq!(b.map.held(), 0, "every pin released through the drain");
+        a.ep.shutdown().unwrap();
+        b.ep.shutdown().unwrap();
+    }
+
+    /// Message credits block, never fail (FR-015): more fetches than credits
+    /// all complete.
+    #[test]
+    fn more_fetches_than_credits_all_complete() {
+        let f = MockFabric::new();
+        let dest = node(&f, "10.0.0.1:7000", 8);
+        let src = node(&f, "10.0.0.2:7000", 8);
+        dest.ep.initialize().unwrap();
+        src.ep.initialize().unwrap();
+        src.map.memory(1, src.pool_addr(0), 8);
+        let mut slots = vec![0u8; 8 * 20].into_boxed_slice();
+        let h = dest
+            .ep
+            .register_landing_region(slots.as_mut_ptr(), slots.len())
+            .unwrap();
+        let (tx, rx) = mpsc::channel();
+        for i in 0..20usize {
+            let tx = tx.clone();
+            dest.ep
+                .fetch(
+                    "10.0.0.2:7000",
+                    &[(1, h.region_at(i * 8, 8).unwrap())],
+                    Box::new(move |o| tx.send(o).unwrap()),
+                )
+                .unwrap();
+        }
+        for _ in 0..20 {
+            assert_eq!(
+                rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+                [EntryOutcome::HitMemoryTier]
+            );
+        }
+        let s = session_of(&dest.ep, "10.0.0.2:7000").unwrap();
+        assert!(s.outbound.1 <= 8, "never more than the credits out: {s:?}");
+        dest.ep.shutdown().unwrap();
+        src.ep.shutdown().unwrap();
+        drop(slots);
+    }
+
+    /// A fetch the peer cannot take whole is refused, never truncated:
+    /// RequestTooLarge past one message, until chunking lands.
+    #[test]
+    fn a_fetch_too_large_for_one_message_is_refused() {
+        let f = MockFabric::new();
+        let dest = node(&f, "10.0.0.1:7000", 8);
+        dest.ep.initialize().unwrap();
+        let items = vec![
+            (
+                1,
+                RemoteRegion {
+                    addr: 0,
+                    rkey: 0,
+                    length: 1
+                }
+            );
+            message::MAX_ENTRIES as usize + 1
+        ];
+        assert!(matches!(
+            dest.ep.fetch("10.0.0.2:7000", &items, Box::new(|_| {})),
+            Err(TransferEndpointError::RequestTooLarge { max_entries: 340 })
+        ));
+        dest.ep.shutdown().unwrap();
+    }
+
+    /// A fetch in flight when its connection is torn down reports Failed —
+    /// and only after the teardown, so its slots are safe to reclaim.
+    #[test]
+    fn a_fetch_lost_to_a_teardown_fails_after_the_barrier() {
+        let f = MockFabric::new();
+        let dest = node(&f, "10.0.0.1:7000", 8);
+        let src = node(&f, "10.0.0.2:7000", 8);
+        dest.ep.initialize().unwrap();
+        src.ep.initialize().unwrap();
+        src.map.memory(1, src.pool_addr(0), 8);
+        connect(&dest.ep, "10.0.0.2:7000");
+        let mut slots = vec![0u8; 8].into_boxed_slice();
+        let h = dest
+            .ep
+            .register_landing_region(slots.as_mut_ptr(), slots.len())
+            .unwrap();
+        f.pause_sends(true);
+        let (tx, rx) = mpsc::channel();
+        dest.ep
+            .fetch(
+                "10.0.0.2:7000",
+                &[(1, h.region_at(0, 8).unwrap())],
+                Box::new(move |o| tx.send(o).unwrap()),
+            )
+            .unwrap();
+        eventually("the fetch is out", || {
+            session_of(&dest.ep, "10.0.0.2:7000").is_some_and(|s| s.outbound.0 == 1)
+        });
+        dest.ep.disconnect("10.0.0.2:7000").unwrap();
+        // disconnect returns only after the barrier, and the callback fired
+        // before it returned: nothing can still write into the slot.
+        assert_eq!(rx.try_recv().unwrap(), [EntryOutcome::Failed]);
+        f.pause_sends(false);
+        dest.ep.shutdown().unwrap();
+        src.ep.shutdown().unwrap();
+        drop(slots);
+    }
+
+    /// A raw peer at 10.0.0.3:7000 that a has connected to and greeted, with
+    /// `max_entries` as given: (a, the raw transport, its link, a's slots).
+    fn raw_peer(
+        f: &MockFabric,
+        max_entries: u32,
+    ) -> (
+        Node,
+        crate::connection::mock::MockTransport,
+        crate::connection::transport::LinkId,
+        LandingRegionHandle,
+        Box<[u8]>,
+    ) {
+        use crate::connection::transport::Transport;
+        let a = node(f, "10.0.0.1:7000", 8);
+        a.ep.initialize().unwrap();
+        let mut raw = crate::connection::mock::MockTransport::new(f.clone());
+        let p_raw = PeerId::parse("10.0.0.3:7000").unwrap();
+        raw.listen(&p_raw).unwrap();
+        let p2 = p_raw.clone();
+        a.ep.call(|r| Command::Connect(p2, r)).unwrap().unwrap();
+        let link = accept_raw(&mut raw, &p_raw);
+        send_raw(&mut raw, link, |out| {
+            message::encode_hello(
+                &message::Hello {
+                    max_entries,
+                    max_outstanding_requests: 4,
+                    version_min: 1,
+                    version_max: 1,
+                },
+                out,
+            )
+        });
+        send_raw(&mut raw, link, message::encode_hello_reply);
+        eventually("a ready", || {
+            session_of(&a.ep, "10.0.0.3:7000").is_some_and(|s| s.credits_available > 0)
+        });
+        let mut slots = vec![0u8; 64].into_boxed_slice();
+        let h =
+            a.ep.register_landing_region(slots.as_mut_ptr(), slots.len())
+                .unwrap();
+        (a, raw, link, h, slots)
+    }
+
+    fn fetch_one(
+        a: &CertusTransferEndpoint,
+        h: &LandingRegionHandle,
+        n: usize,
+    ) -> mpsc::Receiver<Vec<EntryOutcome>> {
+        let (tx, rx) = mpsc::channel();
+        let items: Vec<_> = (0..n)
+            .map(|i| (i as u64, h.region_at(i * 8, 8).unwrap()))
+            .collect();
+        a.fetch(
+            "10.0.0.3:7000",
+            &items,
+            // `let _`: a test may stop listening before the fetch completes,
+            // and a callback that panics on the endpoint thread aborts.
+            Box::new(move |o| {
+                let _ = tx.send(o);
+            }),
+        )
+        .unwrap();
+        rx
+    }
+
+    /// A reply with the wrong number of outcomes is a bad reply: torn down,
+    /// and the fetch fails — never a truncated or padded answer.
+    #[test]
+    fn a_reply_of_the_wrong_length_tears_down() {
+        let f = MockFabric::new();
+        let (a, mut raw, link, h, slots) = raw_peer(&f, 340);
+        let rx = fetch_one(&a.ep, &h, 2);
+        eventually("the fetch is out", || {
+            session_of(&a.ep, "10.0.0.3:7000").is_some_and(|s| s.outbound.0 == 1)
+        });
+        send_raw(&mut raw, link, |out| {
+            message::encode_reply(1, 0, &[EntryOutcome::HitMemoryTier], out)
+        });
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            [EntryOutcome::Failed; 2]
+        );
+        eventually("a tears down", || {
+            session_of(&a.ep, "10.0.0.3:7000").is_none()
+        });
+        a.ep.shutdown().unwrap();
+        drop((raw, slots));
+    }
+
+    /// An OP_ERROR is matched by context **and** kind: one naming our
+    /// fetch's context but another kind answers nothing we sent, and is a
+    /// teardown, not a refusal of the fetch.
+    #[test]
+    fn an_op_error_naming_the_wrong_kind_tears_down() {
+        let f = MockFabric::new();
+        let (a, mut raw, link, h, slots) = raw_peer(&f, 340);
+        let rx = fetch_one(&a.ep, &h, 1);
+        eventually("the fetch is out", || {
+            session_of(&a.ep, "10.0.0.3:7000").is_some_and(|s| s.outbound.0 == 1)
+        });
+        send_raw(&mut raw, link, |out| {
+            message::encode_error(
+                &message::ErrorReply {
+                    context_id: 0,
+                    offending_opcode: message::Kind::Hello.opcode(),
+                    reason: message::Reason::Malformed,
+                    max_supported_version: 1,
+                },
+                out,
+            )
+        });
+        eventually("a tears down", || {
+            session_of(&a.ep, "10.0.0.3:7000").is_none()
+        });
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            [EntryOutcome::Failed]
+        );
+        a.ep.shutdown().unwrap();
+        drop((raw, slots));
+    }
+
+    /// FR-025: a fetch is sized against the **peer's** max_entries, not ours.
+    /// Larger than the peer accepts, it is never sent, and fails.
+    #[test]
+    fn a_fetch_larger_than_the_peer_accepts_is_not_sent() {
+        let f = MockFabric::new();
+        let (a, raw, _link, h, slots) = raw_peer(&f, 2);
+        let rx = fetch_one(&a.ep, &h, 3);
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            [EntryOutcome::Failed; 3]
+        );
+        let s = session_of(&a.ep, "10.0.0.3:7000").unwrap();
+        assert_eq!(s.outbound, (0, 1), "only OP_HELLO ever went out");
+        let ok = fetch_one(&a.ep, &h, 2);
+        eventually("a two-entry fetch is sent", || {
+            session_of(&a.ep, "10.0.0.3:7000").is_some_and(|s| s.outbound.0 == 1)
+        });
+        drop(ok);
+        a.ep.shutdown().unwrap();
+        drop((raw, slots));
+    }
+
+    /// SC-016 end to end: both ends fetch from each other at full quota at
+    /// once, and every fetch completes. Progress alone cannot show the reply
+    /// reserve is there: a receive is copied out and re-posted as soon as it
+    /// is handled, so a buffer shortage only stalls a sender on RNR retry, it
+    /// never wedges both ends. What the reserve guarantees is that **no send
+    /// ever finds its peer without a buffer** — requests use the quota,
+    /// replies the reserve — so the mock's RNR-stall count must stay zero.
+    #[test]
+    fn two_way_traffic_at_full_quota_makes_progress() {
+        let f = MockFabric::new();
+        let a = node(&f, "10.0.0.1:7000", 8);
+        let b = node(&f, "10.0.0.2:7000", 8);
+        a.ep.initialize().unwrap();
+        b.ep.initialize().unwrap();
+        a.map.memory(1, a.pool_addr(0), 8);
+        b.map.memory(1, b.pool_addr(0), 8);
+        let n = 24; // three times the credits, in each direction
+        let mut slots_a = vec![0u8; 8 * n].into_boxed_slice();
+        let mut slots_b = vec![0u8; 8 * n].into_boxed_slice();
+        let ha =
+            a.ep.register_landing_region(slots_a.as_mut_ptr(), 8 * n)
+                .unwrap();
+        let hb =
+            b.ep.register_landing_region(slots_b.as_mut_ptr(), 8 * n)
+                .unwrap();
+        connect(&a.ep, "10.0.0.2:7000");
+        eventually("b ready", || {
+            session_of(&b.ep, "10.0.0.1:7000").is_some_and(|s| s.credits_available > 0)
+        });
+        // Bring-up can cost one RNR stall: the initiator's OP_HELLO can reach
+        // the acceptor before its thread has handled `Up` and posted receives
+        // (RNR retry absorbs it). That is not the reserve's concern, so the
+        // count is taken from here, with both ends ready.
+        let stalls_at_ready = f.rnr_stalls();
+        let (tx, rx) = mpsc::channel();
+        for i in 0..n {
+            for (ep, to, h) in [(&a.ep, "10.0.0.2:7000", &ha), (&b.ep, "10.0.0.1:7000", &hb)] {
+                let tx = tx.clone();
+                ep.fetch(
+                    to,
+                    &[(1, h.region_at(i * 8, 8).unwrap())],
+                    Box::new(move |o| {
+                        let _ = tx.send(o);
+                    }),
+                )
+                .unwrap();
+            }
+        }
+        for _ in 0..2 * n {
+            assert_eq!(
+                rx.recv_timeout(Duration::from_secs(10))
+                    .expect("no deadlock"),
+                [EntryOutcome::HitMemoryTier]
+            );
+        }
+        let sa = session_of(&a.ep, "10.0.0.2:7000").unwrap();
+        let sb = session_of(&b.ep, "10.0.0.1:7000").unwrap();
+        assert!(
+            sa.inbound.1 <= 8 && sb.inbound.1 <= 8,
+            "quota held: {sa:?} {sb:?}"
+        );
+        assert_eq!(
+            f.rnr_stalls(),
+            stalls_at_ready,
+            "no message waited for a buffer once both ends were ready"
+        );
+        a.ep.shutdown().unwrap();
+        b.ep.shutdown().unwrap();
+        drop((slots_a, slots_b));
     }
 }

@@ -416,7 +416,7 @@ slots and the reply's per-key outcomes match the source's actual residency.
   frozen permanently — extensibility is through the reason space, not the layout — so add a
   test asserting the encoded size and field offsets, which is the thing a future change would
   silently break
-- [ ] T075 [US1] Answer every unprocessable inbound **request** with `OP_ERROR` rather than
+- [X] T075 [US1] Answer every unprocessable inbound **request** with `OP_ERROR` rather than
   dropping it (FR-024), in place of its success reply: echo the `context_id`, name the
   offending opcode, and report the local highest supported version for that kind. Treat an
   unknown kind as a request. On **receipt** of `OP_ERROR`, fail that one context with
@@ -449,7 +449,7 @@ slots and the reply's per-key outcomes match the source's actual residency.
   negotiation, which would permit a v2 request answered by a v1 reply (D20 *Revision*). The
   selection rule MUST be commutative, with no arbitrator: add a property test asserting that
   for every pair of ranges both argument orders give the same version and verdict (SC-014)
-- [ ] T078 [US1] Tests for T074-T077: **SC-012** — an unknown opcode injected over the mock
+- [X] T078 [US1] Tests for T074-T077: **SC-012** — an unknown opcode injected over the mock
   seam draws an `OP_ERROR` within a round trip, the context fails with `Protocol(..)`, and the
   connection's sibling contexts still complete (assert the QP was *not* forced to ERROR, the
   contrast with T071); **SC-013** — a peer advertising a smaller `max_entries` is never sent a
@@ -459,12 +459,15 @@ slots and the reply's per-key outcomes match the source's actual residency.
   a malformed reply is **not** answered and tears the connection down, while an `OP_ERROR`
   for our request does not; and the bootstrap credit allows exactly one message before the
   peer's `OP_HELLO`
-- [ ] T079 [US1] Make the connection's books per direction (FR-026, D22): **separate**
+- [X] T079 [US1] Make the connection's books per direction (FR-026, D22): **separate**
   outbound-request and inbound-serving context tables, since the requester allocates ids and
   one id can be live in both directions on a connection — a single contexts-per-connection map
   silently conflates two unrelated requests — plus per-direction message credits.
   *Credits per direction done in slice B* (`Session`: outbound limit and in-flight, inbound
-  quota and in-service, counted separately); the two context tables are slice C
+  quota and in-service, counted separately); the two context tables are slice C.
+  *Context tables done in slice C*: the outbound book is each connection's `outbound` map
+  (our `context_id`s, numbered from 0 per connection), the inbound book the serving pushes
+  (`Finish::Reply`, the peer's ids); `the_same_context_id_live_both_ways_is_two_requests`
 - [X] T080 [US1] Partition posted receive buffers (FR-026, D22): reserve **exactly one buffer
   per own message credit** for replies — exact because each request message draws exactly one
   reply (FR-007, T045) — and advertise a separate inbound-request quota as the peer's
@@ -484,7 +487,7 @@ slots and the reply's per-key outcomes match the source's actual residency.
   is posted, so the loser dies holding no context. Do **not** tolerate two connections:
   `disconnect` tears down *the* queue pair, so a survivor could still land a write into a
   reclaimed slot (FR-017)
-- [ ] T082 Tests for T079-T081: **SC-014** — commutativity of version selection over a table of
+- [X] T082 Tests for T079-T081: **SC-014** — commutativity of version selection over a table of
   range pairs; **SC-015** — two mock endpoints initiating simultaneously converge on one
   connection and agree which *(done in T012, under all four poll orders plus the
   reject-before-request order)*; **SC-016** — a peer at full inbound-request quota does not stop
@@ -492,7 +495,9 @@ slots and the reply's per-key outcomes match the source's actual residency.
   deadlocking; plus one context id live in both directions resolving to two distinct contexts.
   *SC-014 done in slice B* (`negotiation_is_commutative`, every pair of ranges up to 4); the
   SC-016 bookkeeping is unit-tested on `Session`, and its end-to-end form needs slice C's
-  asynchronous serving
+  asynchronous serving. *SC-016 end to end done in slice C*: both ends fetching from each
+  other at three times the credits all complete, and the mock's RNR-stall count stays flat
+  once both ends are ready — with the reply reserve not posted it rises (24 stalls)
 - [X] T030 [US1] Post receive buffers **unconditionally** on every connection, whether or
   not the local caller uses messaging (FR-005). Derive `max_entries` from the buffer size
   rather than configuring it separately: `(8192 - 24) / 24` = **340** entries per
@@ -500,7 +505,7 @@ slots and the reply's per-key outcomes match the source's actual residency.
   **reserve + quota** buffers (T080): one per own message credit for replies, plus the
   inbound-request quota advertised to the peer — 16 × 8 KiB = 128 KiB per peer at the
   defaults of 8 and 8, which is why this can be unconditional instead of negotiated
-- [ ] T031 [US1] Implement the context table in `src/message.rs`: `TransferContext` =
+- [X] T031 [US1] Implement the context table in `src/message.rs`: `TransferContext` =
   context id, peer, key list, landing slots, outstanding-entry count, deadline. Allocate
   ids, match replies by echoed id. A context is one request **message**; a chunked fetch
   (T044) is several contexts, one per chunk, grouped by the requester under the single
@@ -518,27 +523,40 @@ slots and the reply's per-key outcomes match the source's actual residency.
   quota or a zero `max_entries` (T076, T077). A reply nobody asked for, an unparseable
   reply, or a request past the advertised quota tears the connection down; an unknown
   opcode is answered with `OP_ERROR` and the connection survives
-- [ ] T033 [US1] Implement `fetch(peer, items, on_complete)`: send the request, return
+- [X] T033 [US1] Implement `fetch(peer, items, on_complete)`: send the request, return
   the `TransferContextId` as soon as it is sent, fire `on_complete` once with one outcome
   per requested key when the last reply arrives. The context id exists to correlate a
   `Deadline` error or a log line with its request — it is explicitly **not** a
   cancellation handle
-- [ ] T034 [US1] Enforce the reply **ordering guarantee** on the source: every RDMA write
+- [X] T034 [US1] Enforce the reply **ordering guarantee** on the source: every RDMA write
   for an entry reported as a hit has completed before the reply is sent. This is what
   makes the one-sided write safe with no `WRITE_WITH_IMM` and no per-entry completion
   notification, so the requester can treat reply arrival as the completion signal
-- [ ] T035 [US1] Make reserve → arrive → commit/abort possible for the **caller**, who owns
+- [X] T035 [US1] Make reserve → arrive → commit/abort possible for the **caller**, who owns
   the landing slots and publishes them: the endpoint never reports a hit for an entry whose
   write did not complete, so a `Miss`, a `Failed` or a teardown is what tells the caller to
   abort that slot, and a hit is safe to commit. Never let a partially written entry read as a
   hit (FR-018, invariant 7). The endpoint itself reserves and publishes nothing
-- [ ] T036 [US1] Tests: codec round-trip including unknown-opcode rejection and
+- [X] T036 [US1] Tests: codec round-trip including unknown-opcode rejection and
   unknown-outcome-as-Miss; **SC-001** — a fetch over the mock seam with the zyre receptacle
   absent entirely (the component has no zyre dependency, FR-004, so this is structural)
   and a message counter proving no third peer was contacted; **SC-006** — a request for
   keys the peer lacks returns all-`Miss` and generates no further peer traffic
   (invariant 3, D12: a miss must **not** fall back to broadcast — this mechanism is the
-  alternative to broadcast, not a layer above it)
+  alternative to broadcast, not a layer above it).
+  *Done* (slice C). `fetch` sends one `OP_FETCH` per call once the session is ready and a
+  message credit is free (more fetches than credits wait, never fail), refusing anything
+  larger than the **peer's** `max_entries`; the source serves it with Phase 3's push path —
+  one lookup per entry, pins in the slab, release by the reaper — and replies **once, after
+  every write's completion** (T034, `Finish::Reply`). A hit therefore means the write
+  landed, so the caller may commit it; anything else, abort (T035). An `OP_ERROR` fails the
+  one fetch whose context **and** kind it names, the connection staying up (T075, SC-012);
+  one naming another kind, a reply for no request of ours, or a reply of the wrong length is
+  a bad reply and tears down. A fetch lost to a teardown fails only after the barrier. Tests:
+  SC-001 (values land from the one named peer; a third endpoint is never contacted; no zyre
+  receptacle exists), SC-006 (all-miss, one request, no follow-up), T034 (no reply while
+  the write is held in flight), SC-012 from both sides, the quota teardown end to end, the
+  same context id live both ways, message credits blocking, and the size refusals
 
 **Checkpoint**: SC-001 and SC-006 — US1 is functional end to end over the mock seam. This
 is the MVP.

@@ -113,6 +113,36 @@ impl MockFabric {
         }
     }
 
+    /// While sends are paused, let them run one at a time — each a separate
+    /// step the endpoint threads can react to — until `cond` holds, then
+    /// leave them paused. For holding exactly the work a test wants in flight.
+    #[cfg(test)]
+    pub(crate) fn step_sends_until(&self, mut cond: impl FnMut() -> bool) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !cond() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "step_sends_until timed out"
+            );
+            {
+                let mut f = self.lock();
+                f.send_budget = 1;
+                let links: Vec<_> = f.qps.keys().copied().collect();
+                for l in links {
+                    f.progress(l);
+                }
+                f.send_budget = 0;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+
+    /// Times a send has stalled on a peer with no receive posted.
+    #[cfg(test)]
+    pub(crate) fn rnr_stalls(&self) -> u64 {
+        self.lock().rnr_stalls
+    }
+
     /// The events recorded so far, with their stamps, in order.
     #[cfg(test)]
     pub(crate) fn log(&self) -> Vec<(u64, LogEvent)> {
@@ -151,6 +181,13 @@ struct Fabric {
     /// the knob is cleared or its queue pair is forced to ERROR.
     #[cfg(test)]
     sends_paused: bool,
+    /// While paused, how many sends may still execute: lets a test step
+    /// paused work forward one request at a time.
+    #[cfg(test)]
+    send_budget: usize,
+    /// Times a send found its peer with no receive posted and stalled.
+    #[cfg(test)]
+    rnr_stalls: u64,
 }
 
 struct RegionEntry {
@@ -307,11 +344,11 @@ impl Fabric {
 
     /// Execute `link`'s send queue in order for as long as it can proceed.
     fn progress(&mut self, link: LinkId) {
-        #[cfg(test)]
-        if self.sends_paused {
-            return;
-        }
         loop {
+            #[cfg(test)]
+            if self.sends_paused && self.send_budget == 0 {
+                return;
+            }
             let qp = self.qp(link);
             if qp.state != QpState::Rts {
                 return;
@@ -324,6 +361,11 @@ impl Fabric {
                 (wr.op, wr.addr, wr.len, wr.wr_id, wr.signaled)
             };
             let peer_link = qp.peer;
+            // A step is spent only on a send that actually executes.
+            #[cfg(test)]
+            if self.sends_paused {
+                self.send_budget -= 1;
+            }
             let peer = match peer_link {
                 Peer::Connected(p) if self.qps[&p].state != QpState::Err => p,
                 // No responder: the requester's retries run out.
@@ -364,6 +406,10 @@ impl Fabric {
                     let Some(recv) = self.qp(peer).rq.pop_front() else {
                         // RNR with infinite retry: stall, and so does
                         // everything queued behind this send.
+                        #[cfg(test)]
+                        {
+                            self.rnr_stalls += 1;
+                        }
                         return;
                     };
                     if len > recv.len {
