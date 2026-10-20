@@ -1,53 +1,50 @@
 # Sync Apply Report — dispatcher
 
-Applied: 2026-10-19T07:04:14Z (sync date 2026-10-14) · Branch: `fix/bundle-dispatcher-ems` (HEAD `4f8b5554b`) · Mode: batch
-Approved by: Cornel Constantinescu, 2026-10-18 (PR approval page, groups A-D)
-Backup: `.specify/sync/backups/20261019T070414Z/specs/{001-dispatcher-cache-interface,002-served-by-tier-attribution}/spec.md`
+Applied: 2026-10-20T22:58:11Z (sync date 2026-10-14) · Branch: `fix/dispatcher-remove-clear-mt` (HEAD `cccfb328e`, base `origin/unstable` `af221dd82`) · Mode: batch
+Approved by: Cornel Constantinescu, 2026-10-20 ("let's finish the PR")
+Backup: `.specify/sync/backups/20261020T225811Z/specs/001-dispatcher-cache-interface/{spec.md,contracts/errors.md,contracts/idispatcher.md}`
 
 ## Changes Made
 
 ### Specs Updated
 
-All BACKFILL edits are the exact old→new text from `proposals.md`. Before the replacement, each `old` string was confirmed to occur exactly once.
+All BACKFILL edits use the exact old→new text from `proposals.md` / `proposals.json`. Before each replacement, the `old` string was confirmed to occur exactly once in its file.
 
 | Proposal | Spec | Requirement | Change Type |
 |---|---|---|---|
-| B-01 | 001 | FR-036 (lookup pin through promotion) | Modified |
-| B-01 | 001 | FR-051 (single-key lookup race recovery) | Modified |
-| B-02 | 001 | FR-032 (SSD evictor dm.remove first) | Modified |
-| B-02 | 001 | Edge case: SSD evictor removal | Modified |
-| B-03 | 001 | FR-003 (release slot after post-reserve failure) | Modified |
-| B-03 | 001 | FR-059 (`batch_populate` per-entry release) | Modified |
-| B-04 | 001 | FR-056 `copy_gpu_to_memory_completed` | Modified |
-| B-05 | 001 | FR-042 (all emitters, `EvictionSender`) | Modified |
-| B-05 | 001 | FR-050 (stale `Removed` clause) | Modified |
-| B-06 | 001 | FR-019 / US-9 AS1 / Q&A / Key Entities (5 edits) | Modified |
-| B-07 | 001 | FR-037 (stream lifetime at shutdown) | Modified |
-| B-08 | 001 | Edge case: remove order | Modified |
-| B-09 | 001 | FR-003 + Assumptions (D2H primitive) | Modified |
-| B-10 | 002 | FR-008 (cold sub-paths) | Modified |
-| B-11 | 001 | User Story 11 AS4 | Modified |
-| N-02 | 001 | FR-045 — `CERTUS_LOG_REMOTE_DELIVERY` diagnostics note | Added (note) |
-| N-03 | 001 | FR-056 `reserve_memory` — `CERTUS_LOG_RESERVE` diagnostics note | Added (note) |
-| — | 001 | `**Last Synced**: 2026-10-14` header | Added |
-| — | 002 | `**Last Synced**: 2026-10-14` header | Added |
+| B-1 | 001 `spec.md` | FR-018 (`remove` takes over the pending write-through's pin; slot/extent ownership afterwards) | Modified |
+| B-2 | 001 `spec.md` | Edge case: remove (what refuses `remove`; the job frees the slot when mid-copy) | Modified |
+| B-3 | 001 `spec.md` | FR-038 `clear_memory_tier` (`oldest_keys` scan, pinned entries keep their slot, exact count, 5 s `Timeout`) | Modified |
+| B-4 | 001 `spec.md` | Assumptions: background writer read reference (`schedule_write_through` gap stated) | Modified |
+| B-5 | 001 `contracts/errors.md` | `Timeout` row (`pin`, `clear_memory_tier`) and `KeyNotFound` row (`remove` refusals) | Modified (2 edits) |
+| B-6 | 001 `contracts/idispatcher.md` | `remove` doc comment (no write reference) and `remove()` postcondition | Modified (2 edits) |
+| — | 001 `spec.md` | `**Last Synced**: 2026-10-14` header for branch `fix/dispatcher-remove-clear-mt` | Added |
+
+Spec 002 was not touched (no proposal).
 
 ### New Specs Created
-- None. N-02 and N-03 are notes on existing FRs, appended with the draft text exactly as given.
+- None.
 
 ### Supersede
 - None proposed.
 
 ### Implementation Tasks Generated
-- 7 ALIGN tasks in `.specify/sync/align-tasks.md`: A-01, A-02, A-03, A-04, A-05, A-06, A-08. All were approved as tasks only, so no code was changed.
-- 3 open decision items in the same file: A-07, N-01, N-04.
+- 4 ALIGN tasks appended to `.specify/sync/align-tasks.md`. All were approved as tasks only, so no code was changed:
+  - **A-1** (FR-013 + Assumption: a `schedule_write_through` job must own the pin it settles, major)
+  - **A-2** (SC-003 vs FR-009: `remove` must free the extent of a persisted resident entry, moderate)
+  - **A-3** (FR-056 vs FR-038: `clear_memory_tier` must not free a reserved-but-not-completed slot, moderate). The open decision is recorded with the approval note's recommendation (a): skip an uncompleted reservation like a pinned entry.
+  - **A-4** (FR-018 residual handshake windows, minor, LOW confidence)
+- Closed in `align-tasks.md` (the proposals' `close_after_apply`):
+  - **A-03**: code fixed by `cccfb328e`, spec by B-3.
+  - **N-04**: specified by B-2, B-5 and B-6.
 
 ### Not Applied
 | Proposal | Reason |
 |---|---|
-| A-07 | Not approved. Waits for Cornel's decision (ALIGN or BACKFILL). Recorded as an open item. |
-| N-01 | Not approved. A MEDIUM-confidence new requirement (Cornel's rule). Recorded as an open item. |
-| N-04 | Not approved. MEDIUM confidence, and it belongs to the remove-no-wait PR. Recorded as an open item. |
+| — | None. All 10 proposals of this run were approved. No proposal is unapproved with an `approval_note`, so no new open item was added. |
+| B-3 companion edit (`components/interfaces/src/idispatcher.rs:802-806` doc comment) | Outside `specs/**`. Not part of the BACKFILL, so not edited. The doc comment still says "Entries still being written are removed entirely". |
+
+Still open from the `fix/bundle-dispatcher-ems` run, unchanged: A-01, A-02, A-04, A-05, A-06, A-08 (tasks), and A-07 and N-01 (decisions).
 
 No source files were modified, nor the interfaces crate or any file outside `components/dispatcher/specs/` and `components/dispatcher/.specify/sync/`. The `spec_sync_*` frontmatter in `drift-report.md` was not touched; a script re-stamps it.
 
@@ -55,5 +52,5 @@ No source files were modified, nor the interfaces crate or any file outside `com
 
 1. Review the updated specs: `git diff -- components/dispatcher/specs`.
 2. Re-stamp the drift-report frontmatter with `scripts/spec-sync-hash.sh`.
-3. Implement A-01, A-02 and A-03 (major) from `align-tasks.md`.
-4. Decide A-07, N-01 and N-04.
+3. Implement A-1 (major) and A-2 from `align-tasks.md`. Confirm the A-3 decision. Model-check A-4.
+4. Fix the `IDispatcher::clear_memory_tier` doc comment in the interfaces crate in a follow-up.

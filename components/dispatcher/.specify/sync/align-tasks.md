@@ -71,7 +71,9 @@ changed.** Line numbers refer to HEAD `4f8b5554b`.
 - [ ] `repair_test_cold_pin`'s concurrent-remove test is ported to `batch_lookup` and passes. It must fail before the fix.
 - [ ] The shm-queue `LOOKUP` path (`lib/shmq-dispatcher/src/translate.rs:756`) is covered.
 
-## Task: Align 001-dispatcher-cache-interface/FR-038 `clear_memory_tier` (A-03, OPEN, major)
+## Task: Align 001-dispatcher-cache-interface/FR-038 `clear_memory_tier` (A-03, ✅ RESOLVED 2026-10-20, major)
+
+> **Resolved** by the apply on branch `fix/dispatcher-remove-clear-mt`. Code fixed in commit `cccfb328e`. The acceptance criteria are covered by `src/repair_test_clear_mt_pinned.rs:599,621,644`. The FR-038 wording was updated by B-3 of that run. Reserved-but-not-completed slots are a separate case, tracked as A-3 below.
 
 **Spec Requirement**: 001 FR-038. Clearing must not leave a dispatch-map entry that points at a freed slot.
 **Current Code**: on *any* `try_evict_to_block` failure, `ActiveReferences` included, the code calls `mt.remove(key)` unconditionally and then `dm.remove(key)`. The map refuses that removal while the entry is pinned, which leaves a dangling `MemoryTier` pointer (`src/lib.rs:3875-3890`). The path is reachable over shm-queue `CLEAR_MEMORY_TIER`.
@@ -142,8 +144,83 @@ changed.** Line numbers refer to HEAD `4f8b5554b`.
 
 - Draft FR-062 text: see `proposals.md` § N-01. CRC-32 is computed after the store D2H (`src/lib.rs:3593-3617`) and checked before every warm, remote and single-key H2D. A mismatch returns `IoError` and is attributed `ERROR`. Cold SSD promotions are not verified.
 
-### OPEN N-04 — 001/FR-009 + `contracts/errors.md`: `remove` on a pinned entry (MEDIUM confidence)
+### ✅ RESOLVED N-04 — 001/FR-009 + `contracts/errors.md`: `remove` on a pinned entry (MEDIUM confidence)
+
+> **Resolved 2026-10-20** by the apply on branch `fix/dispatcher-remove-clear-mt` (the remove-no-wait PR). B-2 (remove edge case), B-5 (`contracts/errors.md` `Timeout` + `KeyNotFound` rows) and B-6 (`contracts/idispatcher.md` `remove`) specify the result the draft below asked about. The BACKFILL option was taken: `remove` stays `KeyNotFound`, with no distinct busy error.
 > Approval note: *"MEDIUM confidence: record as an open item; it belongs to the remove-no-wait PR"*
 
 - Draft: a pinned or write-locked entry → `remove` frees nothing and returns `KeyNotFound`, and a dispatch-map timeout is reported as `KeyNotFound` as well. Drop `remove` from the `Timeout` row of `contracts/errors.md:37`. *Alternative (ALIGN)*: return `Timeout` or a distinct error, so callers can tell busy from absent. Deferred to the remove-no-wait PR.
+
+---
+
+# Apply 2026-10-14 — branch `fix/dispatcher-remove-clear-mt` (approved by Cornel, 2026-10-20)
+
+Source: `.specify/sync/proposals.json` / `proposals.md` (analysis run 2026-10-20, HEAD
+`cccfb328e`). Approved by Cornel Constantinescu, 2026-10-20 ("let's finish the PR"). This
+run's ids are single-digit (A-1…A-4). Each one was approved as an ALIGN task only, so
+**no code was changed**. A-1, A-2 and A-4 carry the note *"approved as an ALIGN task only:
+record in align-tasks.md, no code change in this PR"*. A-3 carries its own note, quoted in
+the task. Line numbers refer to HEAD `cccfb328e`, relative to `components/dispatcher/`.
+
+## Task: Align 001-dispatcher-cache-interface/FR-013 (+ Assumption, interfaces FR-031a): a `schedule_write_through` job must own the pin it settles (A-1, OPEN, major)
+
+**Spec Requirement**: 001 FR-013 ("The dispatcher MUST use appropriate read/write locking on the dispatch map to ensure thread safety during concurrent operations"), the Assumption on the background writer's read reference as amended by B-4, and interfaces FR-031a (non-blocking, best-effort).
+**Current Code**: remote-lookup publishes the entry with `read_ref == 0` and then calls `schedule_write_through` (`components/remote-lookup/src/actor.rs:600-629`). The job is enqueued with no pin and no ledger record (`src/lib.rs:4017-4024`). It runs as `JobStart::Untracked` (`src/background.rs:297-300`; `src/lib.rs:1419-1421`), but it still settles with `convert_to_storage`, which decrements any read reference (`components/dispatch-map/src/lib.rs:194-196`), or with `release_read` (`src/lib.rs:1442-1455`). That consumes a concurrent reader's pin: a warm `batch_lookup` hit (`:2477`), a cold `lookup_async` (`:3121-3148`) or a client `pin` (`:3715-3730`). The evictors or `remove` can then free the slot under that reader's DMA. The job also reads the slot unpinned (`mt.peek`, `:1468`).
+**Required Change**:
+1. In `schedule_write_through`, call `dm.take_read(key)` first. On failure, return `Ok(())` without enqueueing (best-effort, FR-031a). Then record the pin and enqueue through `self.write_through_pins.pin(key, || writer.enqueue(…).is_ok())`, as `copy_gpu_to_memory_completed` does (`src/lib.rs:3684-3695`). If the enqueue fails, release the pin.
+2. Make `PinState::pinned` a count, or refuse a second schedule while one is pending.
+3. `JobStart::Untracked` must not settle a pin it never took. Either settle only when a pin is recorded, or make it unreachable (`debug_assert`).
+**Files to Modify**: `components/dispatcher/src/lib.rs`, `components/dispatcher/src/background.rs`, a new test module
+**Estimated Effort**: medium
+
+### Acceptance Criteria
+- [ ] A reader's pin survives a scheduled and completed write-through: `dm.remove` and `try_evict_to_block` are still refused, and the reader's `release_read` does not underflow.
+- [ ] The test fails on HEAD `cccfb328e`.
+
+## Task: Align 001-dispatcher-cache-interface/SC-003 (vs FR-009): `remove` must free the SSD extent of a persisted resident entry (A-2, OPEN, moderate)
+
+**Spec Requirement**: 001 SC-003 ("Cache removal frees all associated resources (memory-tier slots and SSD extents) so that they can be reused", `spec.md:390`). FR-009 (`:288`) frees the extent only "if in BlockDevice state" and should be widened in the same change.
+**Current Code**: the extent offset comes only from `LookupResult::BlockDevice` (`src/lib.rs:3189-3199`). For a MemoryTier entry with `ssd_offset: Some`, `remove_extent` is never called (`:3220-3226`), and nothing frees the extent later. With `format_on_init=false`, the next `initialize` recovers the removed key from the leaked extent (`src/lib.rs:1975-1976`).
+**Required Change**: have `IDispatchMap::remove` return the removed entry's location, or add `IDispatchMap::ssd_offset(key) -> Option<u64>` read under the same lock. `remove` then frees `ssd_offset` for BlockDevice entries and for persisted MemoryTier entries. Keep the ledger case unchanged: a running job frees what it wrote. Amend FR-009 to "free the extent on SSD (if the entry has one: BlockDevice, or MemoryTier with a completed write-through)".
+**Files to Modify**: `components/interfaces/src/idispatch_map.rs`, `components/dispatch-map/src/lib.rs`, `components/dispatcher/src/lib.rs` (`remove`), the mocks
+**Estimated Effort**: medium
+
+### Acceptance Criteria
+- [ ] `populate` → `flush_to_ssd` → `remove` frees the extent (the extent manager no longer lists it).
+- [ ] A `format_on_init=false` re-initialize does not resurrect the removed key.
+
+## Task: Align 001-dispatcher-cache-interface/FR-056 vs FR-038: `clear_memory_tier` must not free a reserved-but-not-completed slot (A-3, OPEN — decision recorded, moderate)
+
+> Approval note: *"record as an ALIGN task with the open decision; recommendation (a): clear_memory_tier skips a reservation that is not completed, like a pinned entry; no code change in this PR"*
+
+**Spec Requirement**: 001 FR-056 (the reserve → copy → complete lifecycle owns its slot until completion or `release_memory`, `spec.md:338-341`) against FR-038 (empty the tier, as amended by B-3).
+**Current Code**: a reserved key is tracked by the memory tier at once (`components/memory-tier/src/lib.rs:345-367`), so `oldest_keys` returns it. It has no dispatch-map entry yet (created at `src/lib.rs:3618`). `clear_memory_tier` gets `KeyNotFound` from both `try_evict_to_block` and `dm.remove`, counts the key as cleared, and frees the slot while the caller's D2H may still be writing into it (`src/lib.rs:3957-3969`). The later `copy_gpu_to_memory_completed` fails `KeyNotFound` (`:3616`).
+**Open decision**: is `clear_memory_tier` an administrative call made only on a quiescent node (the workload node agent's use, `apps/workload-generator/crates/workload-node-agent/src/agent.rs:256`), or must it be safe under live stores, as the J22 repair implies?
+- **(a) ALIGN — recommended**: in `clear_memory_tier`, treat `KeyNotFound` from `try_evict_to_block` as owned by an in-flight store and skip it like a pinned entry. The 5 s `Timeout` then also covers a reservation that is never completed.
+- **(b) BACKFILL a precondition**: add to FR-038 "MUST NOT be called while stores are in flight; reserved-but-not-completed slots are freed and their completion fails `KeyNotFound`."
+**Required Change (for a)**: as above, in `clear_memory_tier`.
+**Files to Modify**: `components/dispatcher/src/lib.rs`, `components/dispatcher/src/repair_test_clear_mt_pinned.rs`
+**Estimated Effort**: small
+
+### Acceptance Criteria
+- [ ] Decision (a) or (b) confirmed by Cornel.
+- [ ] (a): a test runs reserve → `clear_memory_tier` → `copy_gpu_to_memory_completed` and asserts the slot was never freed while reserved.
+
+## Task: Align 001-dispatcher-cache-interface/FR-018 (as amended by B-1): close the two residual windows of the remove/write-through handshake (A-4, OPEN, minor, LOW confidence)
+
+**Spec Requirement**: 001 FR-018 as amended by B-1: "A job already reading the DRAM slot finishes, then frees the slot …; in that case `remove` MUST NOT free the slot itself." This implies that nobody else frees the slot while the job reads it.
+**Current Code**:
+- **(a) Give-back window.** `remove_entry` calls `release_read` before `dm.remove`, and calls `take_read` only after that fails (`src/background.rs:342-346`). Between the two, the running job's pin is not held. A concurrent reader's release plus a second `remove` (`src/lib.rs:3203`, outside the ledger lock) or a `clear_memory_tier` (`:3957-3969`) can then remove the entry and free the slot under the job. `take_read` can also wait out the dispatch-map timeout while holding the ledger mutex.
+- **(b) Re-store during hand-off.** After `remove` returns `Ok` with `job_frees_slot`, a re-store of the key fails `AlreadyExists` until the job's `finish` (`src/lib.rs:1214-1223`, `:1432`).
+**Required Change**: first extend the Loom/Spin model with two `remove`s plus one reader against one running job, to confirm (a). If (a) is confirmed, replace release-then-remove with one dispatch-map operation that removes the entry only if exactly one read reference is held, and consumes it (for example `IDispatchMap::remove_with_read(key)`). For (b), have `reserve_memory` treat `AlreadyExists` on a key the ledger shows as removed and running as transient: retry it under backpressure, and do not count it in `store_already_resident`.
+**Files to Modify**: `components/dispatcher/src/background.rs`, `components/dispatcher/src/lib.rs` (`reserve_memory` / `evict_and_insert`), possibly `components/interfaces/src/idispatch_map.rs` and `components/dispatch-map`
+**Estimated Effort**: medium
+
+### Acceptance Criteria
+- [ ] The model passes with two `remove`s plus a reader against a running job.
+- [ ] Re-storing a key while its removed write-through is still running succeeds.
+
+## Open items from this run
+
+None. Every proposal of this run was approved, and none is unapproved with an `approval_note`. Still open from the `fix/bundle-dispatcher-ems` run: A-01, A-02, A-04, A-05, A-06, A-08 (tasks), and A-07 and N-01 (decisions).
 
