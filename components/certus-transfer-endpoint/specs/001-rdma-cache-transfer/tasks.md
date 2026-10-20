@@ -380,7 +380,7 @@ slots and the reply's per-key outcomes match the source's actual residency.
 
 **Gate**: **SC-001** — zero zyre messages, zero messages to any third node.
 
-- [ ] T027 [US1] Implement the 24-byte header codec in `src/message.rs`: `opcode` naming a
+- [X] T027 [US1] Implement the 24-byte header codec in `src/message.rs`: `opcode` naming a
   **kind only** (`OP_FETCH = 1`, `OP_FETCH_REPLY = 2`, `OP_HELLO = 0xFFFE`,
   `OP_ERROR = 0xFFFF`, high 16 bits MUST be zero), `flags` (reserved, MUST be zero),
   **`version` at offset 6**, `context_id`, `n_entries`, reserved fields that MUST be zero.
@@ -389,22 +389,26 @@ slots and the reply's per-key outcomes match the source's actual residency.
   negotiated version — a consistency check, not a dispatch key, answered with `OP_ERROR`
   reason 2 on mismatch (D21). Do not reintroduce a fused opcode: a bump would mint a new
   opcode for every kind including unchanged ones, and the handler would mask the version
-  straight back off. Bytes 0-15 (`opcode`, `flags`, first reserved, `context_id`) are
+  straight back off. Bytes 0-15 (`opcode`, `flags`, `version`, `context_id`) are
   the **frozen prefix** — identical in every version of every kind, forever, because they are
   the minimum needed to reject a message, say *why*, and still correlate the rejection
-  (D20, D21). Encode that as a type or a constant, not a convention — the fusing is what makes an unknown version structurally an
-  unknown opcode rather than a misparse
-- [ ] T028 [P] [US1] Implement the 24-byte entry codec: `(key u64, addr u64, size u32,
+  (D20, D21). Encode that as a type, not a convention: a receiver parses the prefix first,
+  so whatever it cannot understand it can still name, refuse and correlate.
+  *Done* (slice A, with T028, T029, T074 and the `OP_HELLO`/`OP_HELLO_REPLY` codecs) in
+  `src/message.rs`: `Prefix` is the frozen 16 bytes, `Header::parse` checks the version
+  once, every reserved field must be zero on receipt, and `refusal` builds the `OP_ERROR`
+  for an unparseable request and refuses to answer a reply
+- [X] T028 [P] [US1] Implement the 24-byte entry codec: `(key u64, addr u64, size u32,
   rkey u32)` — exactly `(CacheKey, RemoteRegion)`. **Absolute addresses, not slot
   indices**: `IMemoryTier` is an allocator keyed by `CacheKey` with per-entry size and has
   no index-addressable slot table, so indices would invent a layout the tier does not
   have. The per-entry `rkey` rides in what would otherwise be alignment padding and lets
   one request land across several registered regions
-- [ ] T029 [P] [US1] Implement the reply codec: one outcome byte per entry in request
-  order (`0` Miss, `1` HitMemoryTier, `2` HitBlockTier), zero-padded to an 8-byte
-  boundary. A receiver MUST treat an unknown outcome (≥ 3) as `Miss`, never as an error,
+- [X] T029 [P] [US1] Implement the reply codec: one outcome byte per entry in request
+  order (`0` Miss, `1` HitMemoryTier, `2` HitBlockTier, `3` Failed), zero-padded to an 8-byte
+  boundary. A receiver MUST treat an unknown outcome (≥ 4) as `Miss`, never as an error,
   so a future source can add a tier without breaking an old requester
-- [ ] T074 [P] [US1] Implement the frozen `OP_ERROR` codec in `src/message.rs`
+- [X] T074 [P] [US1] Implement the frozen `OP_ERROR` codec in `src/message.rs`
   (`0x0000_FFFF`, unversioned, D20): 24-byte header plus `offending_opcode: u32`,
   `reason: u16`, `max_supported_version: u16`. Reason codes 1 unknown opcode, 2 unsupported
   version of a known kind, 3 malformed message, 4 `n_entries` exceeds the posted buffer; 0
