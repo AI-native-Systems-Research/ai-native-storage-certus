@@ -58,14 +58,25 @@ use crate::iremote_lookup_rdma_initiator::RemoteRegion;
 /// None of those cause further peer traffic — this mechanism is the alternative
 /// to broadcast lookup, not a layer above it.
 ///
+/// `Failed` is kept apart from `Miss` deliberately. A miss says the source does
+/// not have the entry; a failure says it was not delivered for a reason that
+/// has nothing to do with what the source holds. A caller that cannot tell the
+/// two apart would treat a broken connection as a cold cache (Principle XI).
+///
 /// # Examples
 ///
 /// ```
 /// use interfaces::EntryOutcome;
 ///
 /// // Outcomes are per entry and carry the tier that served them.
-/// let outcomes = vec![EntryOutcome::HitMemoryTier, EntryOutcome::Miss];
+/// let outcomes = vec![
+///     EntryOutcome::HitMemoryTier,
+///     EntryOutcome::Miss,
+///     EntryOutcome::Failed,
+/// ];
 /// assert_eq!(outcomes.iter().filter(|o| **o == EntryOutcome::Miss).count(), 1);
+/// // Only a hit delivered data.
+/// assert_eq!(outcomes.iter().filter(|o| o.is_hit()).count(), 1);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntryOutcome {
@@ -78,6 +89,21 @@ pub enum EntryOutcome {
     /// serve it in this build — a build without the `spdk` feature reports a
     /// block-tier entry as a miss rather than failing.
     Miss,
+    /// Not delivered for a reason other than residency: the connection could
+    /// not be made or was lost, the write was refused or flushed, a protocol
+    /// fault, a deadline, or the source's own lookup failed. Nothing usable
+    /// arrived for the entry; unlike a miss, asking again may succeed.
+    Failed,
+}
+
+impl EntryOutcome {
+    /// Whether data for the entry arrived.
+    pub fn is_hit(self) -> bool {
+        matches!(
+            self,
+            EntryOutcome::HitMemoryTier | EntryOutcome::HitBlockTier
+        )
+    }
 }
 
 /// Identifies one in-flight fetch, echoed in the peer's reply.
@@ -276,6 +302,10 @@ pub struct TransferStats {
     pub hit_block_tier: u64,
     /// Entries reported as a miss.
     pub miss: u64,
+    /// Entries reported as failed: not delivered for a reason other than
+    /// residency. Kept apart from `miss` so a broken path is never counted as
+    /// a cold cache.
+    pub failed: u64,
     /// Fetches begun.
     pub requests_attempted: u64,
     /// Fetches whose completion fired.
