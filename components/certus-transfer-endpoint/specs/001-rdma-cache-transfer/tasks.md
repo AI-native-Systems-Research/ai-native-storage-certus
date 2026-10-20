@@ -131,30 +131,44 @@ connection table. This is plan.md Phase 1's engine.
   QP state is read with `ibv_query_qp`, not `ibv_qp::state` — the latter is libibverbs'
   cache of what software last set and misses a device-forced ERROR (the initiator's
   `is_qp_healthy` reads the cache). 4 `#[ignore]`d hardware tests pass on `mlx5_0`
-- [ ] T010 Define the **transport seam** in `src/connection.rs`: traits for a listener
+- [X] T010 Define the **transport seam** in `src/connection.rs`: traits for a listener
   and a peer link that carry a QP and can *both* post and receive, with `CmEvent`-style
   inbound delivery. **The seam must be selected per build, with the interface working in
   every build** — do *not* copy the initiator's
   `#[cfg(not(feature = "rdma"))] push_async -> Err(NotInitialized)` pattern, which makes
   the interface untestable without hardware. D14 and contract invariant 2 both require
   the default build to *serve* over the mock seam, so the seam is the implementation of
-  the interface, not a bypass of it (Principle VIII, Workflow rule 2 "Seam First")
-- [ ] T011 [P] Implement the in-process mock transport in `src/connection.rs` (depends
-  T010): two endpoints in one process, injectable inbound messages, a simulated one-sided
-  write that copies into the target address, and recorded QP→ERROR ordering so
-  teardown-before-reclaim is assertable
-- [ ] T012 Implement the **symmetric** `ConnectionTable` in `src/connection.rs` (depends
+  the interface, not a bypass of it (Principle VIII, Workflow rule 2 "Seam First").
+  *Done* in `src/connection/transport.rs`, with a minimal mock in `src/connection/mock.rs`
+  (`connection.rs` became `connection/mod.rs`). The seam is **verbs-shaped** — `wr_id`s,
+  posted receives, per-link completions — so T013/T014/FR-026/FR-023 are testable without
+  a NIC. `Transport` (listen, register, connect/accept/reject, events) and `Link` (post,
+  poll, `to_error`, state, disconnect) are trait objects; connect is event-driven and the
+  caller decides accept/reject (D23). **One endpoint thread owns every link; one CQ per
+  link.** The mock is compiled in every build; `select_transport(BuildDefault)` is the
+  process fabric without `rdma` and an explicit error with it until T053 (no silent
+  fallback to the mock, Principle XI). `RdmaError`/`PostError`/`QpState`/`QpCaps`/`Access`
+  moved out of `rdma.rs` into the seam; `rdma.rs` posts `RawSge`s. The minimal mock
+  already models in-order execution with an infinite-retry RNR stall, checked one-sided
+  writes (bad `rkey` → `REM_ACCESS_ERR`, both ends ERROR), flush on ERROR, capacity, and
+  unsignaled slots retiring only behind a later completion
+- [ ] T011 [P] Extend the in-process mock in `src/connection/mock.rs` (depends T010) with
+  fault injection: injectable inbound messages, a finite RNR retry, `LOCAL_WRITE` checks on
+  receive buffers, and recorded QP→ERROR ordering so teardown-before-reclaim is assertable.
+  Two endpoints in one process and the one-sided write that copies into the target address
+  already exist (T010)
+- [ ] T012 Implement the **symmetric** `ConnectionTable` in `src/connection/` (depends
   T010, T068, D5): one QP per peer **instance** pair keyed by `PeerId`, established on first
   need and reused. Remove the temporary per-item `#[allow(dead_code)]` attributes T068 left
   on `PeerId`/`PeerIdError` once this consumes them
   (FR-002), with a connection usable regardless of whether it was inbound-accepted or
   outbound-initiated, and **either end able to post work requests** (FR-001). This is the
   thing neither existing crate can do
-- [ ] T013 [P] Implement the `wr_id` slab in `src/connection.rs` (depends T010): allocate
+- [ ] T013 [P] Implement the `wr_id` slab in `src/connection/` (depends T010): allocate
   a slot per posted work request carrying the per-entry state its completion must release
   (pin, bounce lease, context + entry index). This is the mechanism Principle IX requires
   for "released by the completion reaper that owns its work-request id"
-- [ ] T014 Implement **send-queue credits** in `src/connection.rs` (depends T012, T013):
+- [ ] T014 Implement **send-queue credits** in `src/connection/` (depends T012, T013):
   bound in-flight RDMA writes per connection, with partial batch posting and a completion
   reaper that refills. First of the three domains of D10/FR-014; the other two arrive in
   Phase 7

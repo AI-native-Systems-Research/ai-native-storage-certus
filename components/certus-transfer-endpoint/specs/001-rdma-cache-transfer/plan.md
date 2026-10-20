@@ -120,8 +120,10 @@ components/certus-transfer-endpoint/
     ├── lib.rs       # define_component!, receptacles, ITransferEndpoint impl
     ├── ffi.rs       # verbs FFI declarations — THE single copy (SC-008)
     ├── rdma.rs      # safe wrappers: QP lifecycle, reg_mr, post_send/recv, poll
-    ├── connection.rs# symmetric connection table, per-peer state machine, credits,
-    │                #   wr_id slab, transport seam (real + mock)
+    ├── connection/  # symmetric connection table, per-peer state machine, credits,
+    │   │            #   wr_id slab (mod.rs)
+    │   ├── transport.rs  # the verbs-shaped transport seam and per-build selection
+    │   └── mock.rs       # in-process transport, compiled in every build (D14)
     ├── message.rs   # request/reply framing, context IDs, message credits
     ├── serve.rs     # source side: per-entry lookup/pin/push, outcome accumulation
     ├── bounce.rs    # registered buffer pool for block-tier serving

@@ -28,8 +28,10 @@
 //! * **No connect/accept state machine** — that is T053, over the T010 seam.
 //! * **No per-device PD table** — that is T069. [`ProtectionDomain`] owns one PD
 //!   on one device.
-//! * **No CQ-sharing policy.** A queue pair takes any CQ for each side; whether
-//!   CQs are per connection or per device follows from the threading model.
+//! * **No CQ-sharing policy here.** A queue pair takes any CQ for each side; the
+//!   seam (`connection::transport`) decides one CQ per link.
+//! * **No seam types.** Errors, access flags, QP state and completions are the
+//!   seam's, shared with the mock; this module adds only what is verbs-specific.
 //!
 //! # Device context lifetime
 //!
@@ -47,86 +49,25 @@
 use std::ffi::c_void;
 use std::fmt;
 use std::net::SocketAddrV4;
-use std::ops::BitOr;
 use std::os::raw::c_int;
 use std::ptr;
 use std::sync::Arc;
 
+use crate::connection::transport::{
+    check_range, wc_status_name, Access, Completed, Completion, CompletionError, PostError, QpCaps,
+    QpState, RdmaError, SendOp,
+};
 use crate::ffi;
 
 // --- errors ------------------------------------------------------------------
 
-/// A failure in the verbs layer.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RdmaError {
-    /// A verbs or rdma_cm call failed. `errno` is the real cause: the `rdma_*`
-    /// calls return -1 and set `errno`, the `ibv_post_*` calls return it, and
-    /// the allocating calls return null and set it.
-    Verb { op: &'static str, errno: i32 },
-    /// A local buffer does not lie inside the memory region it was cut from.
-    OutOfRegion {
-        addr: u64,
-        len: usize,
-        region_addr: u64,
-        region_len: usize,
-    },
-    /// An argument was rejected before any call was made.
-    Invalid {
-        op: &'static str,
-        reason: &'static str,
-    },
-}
-
-impl RdmaError {
-    /// Capture `errno` for a call that just failed.
-    fn last(op: &'static str) -> Self {
-        RdmaError::Verb {
-            op,
-            errno: std::io::Error::last_os_error().raw_os_error().unwrap_or(0),
-        }
+/// Capture `errno` for a call that just failed.
+fn last_error(op: &'static str) -> RdmaError {
+    RdmaError::Verb {
+        op,
+        errno: std::io::Error::last_os_error().raw_os_error().unwrap_or(0),
     }
 }
-
-impl fmt::Display for RdmaError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            RdmaError::Verb { op, errno } => write!(
-                f,
-                "{op} failed: {}",
-                std::io::Error::from_raw_os_error(*errno)
-            ),
-            RdmaError::OutOfRegion {
-                addr,
-                len,
-                region_addr,
-                region_len,
-            } => write!(
-                f,
-                "buffer 0x{addr:x}+{len} is outside region 0x{region_addr:x}+{region_len}"
-            ),
-            RdmaError::Invalid { op, reason } => write!(f, "{op}: {reason}"),
-        }
-    }
-}
-
-impl std::error::Error for RdmaError {}
-
-/// A batch post that stopped partway. Work requests before index `accepted`
-/// were queued and will complete; the one at `accepted` and everything after
-/// it were not.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PostError {
-    pub accepted: usize,
-    pub error: RdmaError,
-}
-
-impl fmt::Display for PostError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} after {} accepted", self.error, self.accepted)
-    }
-}
-
-impl std::error::Error for PostError {}
 
 /// Panic on a failed release unless already unwinding. With the `Arc`
 /// ordering above, a release can only fail through a defect in this crate (or
@@ -134,10 +75,7 @@ impl std::error::Error for PostError {}
 /// a leaked PD that later makes every `ibv_dealloc_pd` fail.
 fn released(op: &'static str, ret: c_int) {
     if ret != 0 && !std::thread::panicking() {
-        panic!(
-            "{op} failed during release: {ret} ({})",
-            RdmaError::last(op)
-        );
+        panic!("{op} failed during release: {ret} ({})", last_error(op));
     }
 }
 
@@ -170,7 +108,7 @@ impl ProtectionDomain {
         // SAFETY: `ctx` is librdmacm's live device context (module docs).
         let pd = unsafe { ffi::ibv_alloc_pd(ctx) };
         if pd.is_null() {
-            return Err(RdmaError::last("ibv_alloc_pd"));
+            return Err(last_error("ibv_alloc_pd"));
         }
         Ok(Arc::new(ProtectionDomain { ctx, pd }))
     }
@@ -192,26 +130,12 @@ impl Drop for ProtectionDomain {
 
 // --- memory regions ----------------------------------------------------------
 
-/// `ibv_reg_mr` access flags.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Access(c_int);
-
-impl Access {
-    /// Required for anything the NIC writes locally (receives) and implied by
-    /// the remote-write flag.
-    pub const LOCAL_WRITE: Access = Access(ffi::IBV_ACCESS_LOCAL_WRITE);
-    /// A peer may RDMA-write here: landing regions.
-    pub const REMOTE_WRITE: Access = Access(ffi::IBV_ACCESS_REMOTE_WRITE);
-    /// A peer may RDMA-read here. Nothing in this design reads remotely.
-    pub const REMOTE_READ: Access = Access(ffi::IBV_ACCESS_REMOTE_READ);
-}
-
-impl BitOr for Access {
-    type Output = Access;
-    fn bitor(self, rhs: Access) -> Access {
-        Access(self.0 | rhs.0)
-    }
-}
+// The seam's `Access` carries the verbs values directly.
+const _: () = {
+    assert!(Access::LOCAL_WRITE.0 == ffi::IBV_ACCESS_LOCAL_WRITE);
+    assert!(Access::REMOTE_WRITE.0 == ffi::IBV_ACCESS_REMOTE_WRITE);
+    assert!(Access::REMOTE_READ.0 == ffi::IBV_ACCESS_REMOTE_READ);
+};
 
 /// A registration of caller-owned memory into a [`ProtectionDomain`].
 ///
@@ -261,7 +185,7 @@ impl MemoryRegion {
         // SAFETY: `pd` is live; the range is valid per this function's contract.
         let mr = ffi::ibv_reg_mr(pd.pd, addr as *mut c_void, len, access.0);
         if mr.is_null() {
-            return Err(RdmaError::last("ibv_reg_mr"));
+            return Err(last_error("ibv_reg_mr"));
         }
         // SAFETY: `ibv_reg_mr` succeeded, so `mr` points to a filled `ibv_mr`.
         let (lkey, rkey) = ((*mr).lkey, (*mr).rkey);
@@ -313,31 +237,6 @@ impl Drop for MemoryRegion {
     }
 }
 
-/// `[addr, addr + len)` lies within `[region_addr, region_addr + region_len)`
-/// and `len` fits a scatter/gather entry. Overflow-safe.
-fn check_range(
-    region_addr: u64,
-    region_len: usize,
-    addr: u64,
-    len: usize,
-) -> Result<(), RdmaError> {
-    let out = || RdmaError::OutOfRegion {
-        addr,
-        len,
-        region_addr,
-        region_len,
-    };
-    if len > u32::MAX as usize {
-        return Err(out());
-    }
-    let offset = addr.checked_sub(region_addr).ok_or_else(out)?;
-    let end = offset.checked_add(len as u64).ok_or_else(out)?;
-    if end > region_len as u64 {
-        return Err(out());
-    }
-    Ok(())
-}
-
 /// A buffer inside a [`MemoryRegion`], checked at construction; the region
 /// supplies the `lkey`, so a caller cannot pair a buffer with the wrong key.
 #[derive(Clone, Copy)]
@@ -348,11 +247,31 @@ pub struct LocalBuf<'a> {
 }
 
 impl LocalBuf<'_> {
-    fn sge(&self) -> ffi::ibv_sge {
+    pub fn raw(&self) -> RawSge {
+        RawSge {
+            addr: self.addr,
+            len: self.len,
+            lkey: self.region.lkey,
+        }
+    }
+}
+
+/// A scatter/gather entry as verbs takes it. Built only from an already
+/// bounds-checked buffer: [`LocalBuf::raw`] here, or the seam's `Sge` once the
+/// verbs transport (T053) has matched its `lkey` to a region it holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RawSge {
+    pub addr: u64,
+    pub len: u32,
+    pub lkey: u32,
+}
+
+impl RawSge {
+    fn to_ffi(self) -> ffi::ibv_sge {
         ffi::ibv_sge {
             addr: self.addr,
             length: self.len,
-            lkey: self.region.lkey,
+            lkey: self.lkey,
         }
     }
 }
@@ -383,7 +302,7 @@ impl CompletionQueue {
         // SAFETY: `pd.ctx` is the live device context; no channel, vector 0.
         let cq = unsafe { ffi::ibv_create_cq(pd.ctx, cqe, ptr::null_mut(), ptr::null_mut(), 0) };
         if cq.is_null() {
-            return Err(RdmaError::last("ibv_create_cq"));
+            return Err(last_error("ibv_create_cq"));
         }
         Ok(Arc::new(CompletionQueue {
             _pd: Arc::clone(pd),
@@ -479,6 +398,33 @@ impl WorkCompletion {
     }
 }
 
+impl WorkCompletion {
+    /// The seam's form. The opcode is read only on success, where verbs
+    /// defines it.
+    pub fn to_completion(&self) -> Completion {
+        let result = match self.0.status {
+            ffi::IBV_WC_SUCCESS => Ok(if self.is_recv() {
+                Completed::Recv {
+                    byte_len: self.0.byte_len,
+                }
+            } else if self.0.opcode == ffi::IBV_WC_RDMA_WRITE {
+                Completed::Write
+            } else {
+                Completed::Send
+            }),
+            ffi::IBV_WC_WR_FLUSH_ERR => Err(CompletionError::Flushed),
+            status => Err(CompletionError::Failed {
+                status,
+                vendor_err: self.0.vendor_err,
+            }),
+        };
+        Completion {
+            wr_id: self.0.wr_id,
+            result,
+        }
+    }
+}
+
 impl fmt::Debug for WorkCompletion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("WorkCompletion")
@@ -489,39 +435,6 @@ impl fmt::Debug for WorkCompletion {
             .field("byte_len", &self.0.byte_len)
             .field("qp_num", &self.0.qp_num)
             .finish()
-    }
-}
-
-/// Name of an `ibv_wc_status`, so a completion error is diagnosable from the
-/// log alone. `RETRY_EXC_ERR` and `RNR_RETRY_EXC_ERR` are the two that usually
-/// mean a peer problem rather than a local one.
-fn wc_status_name(status: c_int) -> &'static str {
-    match status {
-        0 => "SUCCESS",
-        1 => "LOC_LEN_ERR",
-        2 => "LOC_QP_OP_ERR",
-        3 => "LOC_EEC_OP_ERR",
-        4 => "LOC_PROT_ERR",
-        5 => "WR_FLUSH_ERR",
-        6 => "MW_BIND_ERR",
-        7 => "BAD_RESP_ERR",
-        8 => "LOC_ACCESS_ERR",
-        9 => "REM_INV_REQ_ERR",
-        10 => "REM_ACCESS_ERR",
-        11 => "REM_OP_ERR",
-        12 => "RETRY_EXC_ERR",
-        13 => "RNR_RETRY_EXC_ERR",
-        14 => "LOC_RDD_VIOL_ERR",
-        15 => "REM_INV_RD_REQ_ERR",
-        16 => "REM_ABORT_ERR",
-        17 => "INV_EECN_ERR",
-        18 => "INV_EEC_STATE_ERR",
-        19 => "FATAL_ERR",
-        20 => "RESP_TIMEOUT_ERR",
-        21 => "GENERAL_ERR",
-        22 => "TM_ERR",
-        23 => "TM_RNDV_INCOMPLETE",
-        _ => "UNKNOWN",
     }
 }
 
@@ -544,7 +457,7 @@ impl EventChannel {
         // SAFETY: no preconditions.
         let ch = unsafe { ffi::rdma_create_event_channel() };
         if ch.is_null() {
-            return Err(RdmaError::last("rdma_create_event_channel"));
+            return Err(last_error("rdma_create_event_channel"));
         }
         Ok(Arc::new(EventChannel { ch }))
     }
@@ -558,7 +471,7 @@ impl EventChannel {
         let mut ev: *mut ffi::rdma_cm_event = ptr::null_mut();
         // SAFETY: `ch` is live; `ev` is an out-pointer.
         if unsafe { ffi::rdma_get_cm_event(self.ch, &mut ev) } != 0 {
-            return Err(RdmaError::last("rdma_get_cm_event"));
+            return Err(last_error("rdma_get_cm_event"));
         }
         Ok(CmEvent { ev, channel: self })
     }
@@ -724,7 +637,7 @@ impl CmId {
         let ret =
             unsafe { ffi::rdma_create_id(channel.ch, &mut id, ptr::null_mut(), ffi::RDMA_PS_TCP) };
         if ret != 0 {
-            return Err(RdmaError::last("rdma_create_id"));
+            return Err(last_error("rdma_create_id"));
         }
         Ok(CmId {
             id,
@@ -752,7 +665,7 @@ impl CmId {
         let ret =
             unsafe { ffi::rdma_bind_addr(self.id, (&mut sin as *mut ffi::sockaddr_in).cast()) };
         if ret != 0 {
-            return Err(RdmaError::last("rdma_bind_addr"));
+            return Err(last_error("rdma_bind_addr"));
         }
         Ok(())
     }
@@ -760,7 +673,7 @@ impl CmId {
     pub fn listen(&mut self, backlog: c_int) -> Result<(), RdmaError> {
         // SAFETY: `id` is live.
         if unsafe { ffi::rdma_listen(self.id, backlog) } != 0 {
-            return Err(RdmaError::last("rdma_listen"));
+            return Err(last_error("rdma_listen"));
         }
         Ok(())
     }
@@ -785,7 +698,7 @@ impl CmId {
             )
         };
         if ret != 0 {
-            return Err(RdmaError::last("rdma_resolve_addr"));
+            return Err(last_error("rdma_resolve_addr"));
         }
         Ok(())
     }
@@ -795,7 +708,7 @@ impl CmId {
     pub fn resolve_route(&mut self, timeout_ms: c_int) -> Result<(), RdmaError> {
         // SAFETY: `id` is live.
         if unsafe { ffi::rdma_resolve_route(self.id, timeout_ms) } != 0 {
-            return Err(RdmaError::last("rdma_resolve_route"));
+            return Err(last_error("rdma_resolve_route"));
         }
         Ok(())
     }
@@ -805,7 +718,7 @@ impl CmId {
         // SAFETY: `id` is live; `p` and its private data outlive this call,
         // which copies them into the request.
         if unsafe { ffi::rdma_connect(self.id, &mut p) } != 0 {
-            return Err(RdmaError::last("rdma_connect"));
+            return Err(last_error("rdma_connect"));
         }
         Ok(())
     }
@@ -814,7 +727,7 @@ impl CmId {
         let mut p = param.to_ffi("rdma_accept")?;
         // SAFETY: as for `connect`.
         if unsafe { ffi::rdma_accept(self.id, &mut p) } != 0 {
-            return Err(RdmaError::last("rdma_accept"));
+            return Err(last_error("rdma_accept"));
         }
         Ok(())
     }
@@ -833,7 +746,7 @@ impl CmId {
         };
         // SAFETY: `id` is live; `data` covers `len` bytes for the call.
         if unsafe { ffi::rdma_reject(self.id, data, len) } != 0 {
-            return Err(RdmaError::last("rdma_reject"));
+            return Err(last_error("rdma_reject"));
         }
         Ok(())
     }
@@ -843,7 +756,7 @@ impl CmId {
     pub fn disconnect(&mut self) -> Result<(), RdmaError> {
         // SAFETY: `id` is live.
         if unsafe { ffi::rdma_disconnect(self.id) } != 0 {
-            return Err(RdmaError::last("rdma_disconnect"));
+            return Err(last_error("rdma_disconnect"));
         }
         Ok(())
     }
@@ -892,7 +805,7 @@ impl CmId {
         // SAFETY: `id`, `pd` and both CQs are live and on one device; `attr` is
         // valid for the call, which writes the granted capacities back into it.
         if unsafe { ffi::rdma_create_qp(self.id, pd.pd, &mut attr) } != 0 {
-            return Err(RdmaError::last("rdma_create_qp"));
+            return Err(last_error("rdma_create_qp"));
         }
         // SAFETY: `rdma_create_qp` succeeded, so `id.qp` is the new QP.
         let qp = unsafe { (*self.id).qp };
@@ -926,28 +839,8 @@ impl Drop for CmId {
 
 // --- queue pairs -------------------------------------------------------------
 
-/// Requested (or, from [`QueuePair::granted`], granted) work-request depths.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct QpCaps {
-    pub max_send_wr: u32,
-    pub max_recv_wr: u32,
-}
-
-/// `enum ibv_qp_state`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum QpState {
-    Reset,
-    Init,
-    Rtr,
-    Rts,
-    Sqd,
-    Sqe,
-    Err,
-    Unknown(c_int),
-}
-
-impl From<c_int> for QpState {
-    fn from(s: c_int) -> Self {
+fn qp_state(s: c_int) -> QpState {
+    {
         match s {
             ffi::IBV_QPS_RESET => QpState::Reset,
             ffi::IBV_QPS_INIT => QpState::Init,
@@ -995,7 +888,7 @@ impl QueuePair {
                 errno: -ret,
             });
         }
-        Ok(QpState::from(ret))
+        Ok(qp_state(ret))
     }
 
     /// Force the QP to ERROR. Afterwards no further write it carries can land
@@ -1022,14 +915,14 @@ impl QueuePair {
     /// Every local buffer must stay valid, and its region registered, until the
     /// request's completion is reaped or the QP is flushed and drained. For a
     /// `Send` the NIC reads the buffer asynchronously, so it must not be
-    /// modified in that window either. Bounds and keys are already checked by
-    /// [`MemoryRegion::local`]; this contract is only about *time*, which Rust
+    /// modified in that window either. Bounds and keys were checked when each
+    /// [`RawSge`] was built; this contract is only about *time*, which Rust
     /// cannot see.
-    pub unsafe fn post_send(&self, reqs: &[SendRequest<'_>]) -> Result<(), PostError> {
+    pub unsafe fn post_send(&self, reqs: &[VerbsSend]) -> Result<(), PostError> {
         if reqs.is_empty() {
             return Ok(());
         }
-        let mut sges: Vec<ffi::ibv_sge> = reqs.iter().map(|r| r.local.sge()).collect();
+        let mut sges: Vec<ffi::ibv_sge> = reqs.iter().map(|r| r.local.to_ffi()).collect();
         let mut wrs: Vec<ffi::ibv_send_wr> = Vec::with_capacity(reqs.len());
         for (r, sge) in reqs.iter().zip(sges.iter_mut()) {
             // SAFETY: `ibv_send_wr` is integers, raw pointers and unions of
@@ -1072,11 +965,11 @@ impl QueuePair {
     /// Every buffer must stay valid, registered, and unread by anyone else
     /// until its completion is reaped or the QP is flushed and drained: the
     /// NIC writes it at an unknown time in that window.
-    pub unsafe fn post_recv(&self, reqs: &[RecvRequest<'_>]) -> Result<(), PostError> {
+    pub unsafe fn post_recv(&self, reqs: &[VerbsRecv]) -> Result<(), PostError> {
         if reqs.is_empty() {
             return Ok(());
         }
-        let mut sges: Vec<ffi::ibv_sge> = reqs.iter().map(|r| r.buf.sge()).collect();
+        let mut sges: Vec<ffi::ibv_sge> = reqs.iter().map(|r| r.buf.to_ffi()).collect();
         let mut wrs: Vec<ffi::ibv_recv_wr> = reqs
             .iter()
             .zip(sges.iter_mut())
@@ -1130,58 +1023,30 @@ fn post_result<T>(
     })
 }
 
-/// What a send work request does.
+/// One send-side work request, as verbs posts it. The seam's `SendRequest`
+/// maps onto this in the verbs transport (T053).
 #[derive(Debug, Clone, Copy)]
-pub enum SendOp {
-    /// Two-sided: consumes one of the peer's posted receives (messages).
-    Send,
-    /// One-sided write into the peer's memory (values into landing slots).
-    RdmaWrite { remote_addr: u64, rkey: u32 },
-}
-
-/// One send-side work request.
-#[derive(Clone, Copy)]
-pub struct SendRequest<'a> {
+pub struct VerbsSend {
     /// Echoed in the completion; the `wr_id` slab (T013) allocates it.
     pub wr_id: u64,
     pub op: SendOp,
-    pub local: LocalBuf<'a>,
+    pub local: RawSge,
     /// Whether to generate a completion on success. An unsignaled request
     /// still completes on error, and still occupies the send queue until a
     /// later signaled one completes.
     pub signaled: bool,
 }
 
-/// One receive buffer.
-#[derive(Clone, Copy)]
-pub struct RecvRequest<'a> {
+/// One receive buffer, as verbs posts it.
+#[derive(Debug, Clone, Copy)]
+pub struct VerbsRecv {
     pub wr_id: u64,
-    pub buf: LocalBuf<'a>,
+    pub buf: RawSge,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn range_inside_and_at_edges() {
-        assert!(check_range(0x1000, 0x100, 0x1000, 0x100).is_ok());
-        assert!(check_range(0x1000, 0x100, 0x10ff, 1).is_ok());
-        assert!(check_range(0x1000, 0x100, 0x1100, 0).is_ok());
-    }
-
-    #[test]
-    fn range_outside_rejected() {
-        assert!(check_range(0x1000, 0x100, 0x0fff, 1).is_err());
-        assert!(check_range(0x1000, 0x100, 0x10ff, 2).is_err());
-        assert!(check_range(0x1000, 0x100, 0x1101, 0).is_err());
-    }
-
-    #[test]
-    fn range_overflow_rejected() {
-        assert!(check_range(0, usize::MAX, u64::MAX, 2).is_err());
-        assert!(check_range(0, usize::MAX, 0, u32::MAX as usize + 1).is_err());
-    }
 
     #[test]
     fn private_data_over_255_rejected_not_truncated() {
@@ -1282,9 +1147,9 @@ mod tests {
         assert_eq!(qp.state().unwrap(), QpState::Init);
 
         let reqs: Vec<_> = (0..3u64)
-            .map(|i| RecvRequest {
+            .map(|i| VerbsRecv {
                 wr_id: 100 + i,
-                buf: mr.local(mr.addr() + i * 1024, 1024).unwrap(),
+                buf: mr.local(mr.addr() + i * 1024, 1024).unwrap().raw(),
             })
             .collect();
         // SAFETY: `buf`/`mr` outlive the drain below.
@@ -1299,6 +1164,7 @@ mod tests {
             let n = cq.poll(&mut wcs).unwrap();
             seen.extend(wcs[..n].iter().map(|wc| {
                 assert!(wc.is_flushed(), "{wc:?}");
+                assert_eq!(wc.to_completion().result, Err(CompletionError::Flushed));
                 wc.wr_id()
             }));
             if seen.len() == 3 {
@@ -1321,9 +1187,9 @@ mod tests {
         }
         .unwrap();
         let qp = id.create_qp(&pd, &cq, &cq, CAPS).unwrap();
-        let local = mr.local(mr.addr(), 64).unwrap();
+        let local = mr.local(mr.addr(), 64).unwrap().raw();
         let reqs: Vec<_> = (0..3u64)
-            .map(|i| SendRequest {
+            .map(|i| VerbsSend {
                 wr_id: i,
                 op: SendOp::Send,
                 local,

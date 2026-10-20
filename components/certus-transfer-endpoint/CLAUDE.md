@@ -113,6 +113,13 @@ VIII–XI, and a review that does not check them is not a review.
   both. Do not "fix" a layout by copying a predecessor crate's `ffi.rs` — four of
   its definitions were wrong (see `ffi.rs` module docs), including the `IBV_WR_*`
   numbering, under which a send is posted as an RDMA write.
+- **The mock is a model of RC verbs, not a stub.** Sends execute in order and an
+  RNR stall blocks everything behind it; writes are checked against the target's
+  registrations; ERROR flushes; unsignaled requests hold their slot. If the engine
+  passes over the mock only because the mock is lenient, the seam is wrong —
+  tighten the mock, never loosen it to make a test pass.
+- **`select_transport(BuildDefault)` must never fall back to the mock in an
+  `rdma` build.** An in-process run reports plausible numbers from no fabric.
 - **Ask the device for QP state, never `ibv_qp::state`.** That field is
   libibverbs' cache of the last state software set; it stays RTS after the device
   forces ERROR. `QueuePair::state` uses `ibv_query_qp`. The predecessors read the
@@ -140,9 +147,10 @@ lookup answer is reported as a **miss**, never an error (D14).
 
 ## Current state
 
-Scaffolding. T001–T009 and T068 are done: the crate builds as a default member,
+Scaffolding. T001–T010 and T068 are done: the crate builds as a default member,
 peer identity is implemented, `ITransferEndpoint` is defined in `interfaces`, and
 the verbs FFI (`ffi.rs`), C shim (`wrapper.c`) and safe wrappers (`rdma.rs`, T009)
-exist behind `rdma`. Nothing above them calls them yet; the seam is T010 and the
-engine is Phase 2. See `specs/001-rdma-cache-transfer/tasks.md` for the task list and its
+exist behind `rdma`, and the transport seam plus an in-process mock exist in every
+build (`connection/transport.rs`, `connection/mock.rs`, T010). Nothing drives the
+seam yet; the connection table is T012 and the verbs side of the seam is T053. See `specs/001-rdma-cache-transfer/tasks.md` for the task list and its
 traceability matrix.
