@@ -98,6 +98,15 @@ _Static_assert(IBV_WR_SEND == 2, "IBV_WR_SEND");
 _Static_assert(IBV_SEND_SIGNALED == 2, "IBV_SEND_SIGNALED");
 _Static_assert(IBV_WC_SUCCESS == 0, "IBV_WC_SUCCESS");
 _Static_assert(IBV_WC_WR_FLUSH_ERR == 5, "IBV_WC_WR_FLUSH_ERR");
+/* The mock's completion statuses (connection/transport.rs `wc`), which have no
+ * ffi.rs mirror to be checked by the Rust half. */
+_Static_assert(IBV_WC_LOC_LEN_ERR == 1, "IBV_WC_LOC_LEN_ERR");
+_Static_assert(IBV_WC_REM_INV_REQ_ERR == 9, "IBV_WC_REM_INV_REQ_ERR");
+_Static_assert(IBV_WC_REM_ACCESS_ERR == 10, "IBV_WC_REM_ACCESS_ERR");
+_Static_assert(IBV_WC_RETRY_EXC_ERR == 12, "IBV_WC_RETRY_EXC_ERR");
+_Static_assert(IBV_WC_RNR_RETRY_EXC_ERR == 13, "IBV_WC_RNR_RETRY_EXC_ERR");
+_Static_assert(IBV_ACCESS_LOCAL_WRITE == 1, "IBV_ACCESS_LOCAL_WRITE");
+_Static_assert(IBV_ACCESS_REMOTE_READ == 4, "IBV_ACCESS_REMOTE_READ");
 _Static_assert(IBV_WC_SEND == 0, "IBV_WC_SEND");
 _Static_assert(IBV_WC_RDMA_WRITE == 1, "IBV_WC_RDMA_WRITE");
 _Static_assert(IBV_WC_RECV == 128, "IBV_WC_RECV");

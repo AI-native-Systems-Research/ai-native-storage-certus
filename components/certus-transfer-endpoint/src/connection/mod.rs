@@ -6,11 +6,14 @@
 //! research D5). That is the thing neither predecessor crate can do — the
 //! responder accepts but never posts, the initiator connects but never accepts.
 //!
-//! Scaffolding beyond [`PeerId`]: the transport seam lands in T010, the mock in
-//! T011, the table in T012, the `wr_id` slab in T013 and send-queue credits in
-//! T014.
+//! The transport seam ([`transport`]) and its in-process implementation
+//! ([`mock`]) are T010. Still scaffolding: fault injection in the mock (T011),
+//! the table (T012), the `wr_id` slab (T013) and send-queue credits (T014).
 
 use std::fmt;
+
+pub mod mock;
+pub mod transport;
 
 // Scaffolding note: the items below are exercised only by this module's unit
 // tests until T012 builds the connection table on them and T006 maps
