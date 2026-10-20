@@ -1,0 +1,324 @@
+# vLLM KV offload plugin interface, as released in vLLM v0.28.0.
+# What an out-of-tree OffloadingSpec (manager + worker) must implement and may rely on.
+# vLLM marks this API experimental and subject to change between releases.
+#
+# Path abbreviations used in file:line references (all at tag v0.28.0):
+#   base  = vllm/v1/kv_offload/base.py
+#   sched = vllm/distributed/kv_transfer/kv_connector/v1/offloading/scheduler.py
+#   wrk   = vllm/distributed/kv_transfer/kv_connector/v1/offloading/worker.py
+#   conn  = vllm/distributed/kv_transfer/kv_connector/v1/offloading_connector.py
+#   core  = vllm/v1/core/sched/scheduler.py
+#   mixin = vllm/v1/worker/kv_connector_model_runner_mixin.py
+
+api_version: "v0.28.0"
+api_stability: "Experimental - subject to change between vLLM releases"
+verified_against: "vllm v0.28.0 (tag)"
+testing:
+  this_contract: "Source-verified against the v0.28.0 tag only. Not run on vLLM 0.28.0."
+  certus_shmq_connector:
+    built_and_smoke_tested: ["0.20.0", "0.22.0", "0.23.0", "0.24.0", "0.26.0"]  # certus-shmq-connector/pyproject.toml
+    compat_supported_versions: ["0.20", "0.22", "0.23", "0.24", "0.26", "0.29", "0.30"]  # compat.py SUPPORTED_VERSIONS; 0.28 is not listed
+  scope: "The shapes below are the v0.28.0 shapes. For older releases see version_history."
+
+plugin_mechanism:
+  discovery: |
+    conn:69-71 builds an OffloadingConfig and calls OffloadingSpecFactory.create_spec(config).
+    The factory (vllm/v1/kv_offload/factory.py:30-58) reads extra_config["spec_name"]
+    (default "CPUOffloadingSpec"). Registered names (CPUOffloadingSpec, TieringOffloadingSpec)
+    win; otherwise it imports extra_config["spec_module_path"] and takes getattr(module, spec_name).
+    The class must subclass OffloadingSpec; it is constructed as spec_cls(config).
+  instances: |
+    One spec instance per connector role (conn:69-82). The SCHEDULER-role instance calls
+    get_manager() once (sched:501). Each WORKER-role instance calls get_worker(kv_caches) once,
+    from register_kv_caches or register_cross_layers_kv_cache (wrk:66-67).
+  config_example: |
+    {"kv_connector": "OffloadingConnector", "kv_role": "kv_both",
+     "kv_connector_extra_config": {"spec_name": "<YourSpec>", "spec_module_path": "<your.module>",
+                                   "block_size": 16}}
+  extra_config_keys_read_by_vllm: |
+    block_size: offload chunk size in tokens; must be a multiple of the GPU block size.
+    blocks_per_chunk: same thing in GPU blocks. Setting both raises ValueError
+    (offloading/config.py:67-96); default is 1 block per chunk.
+    offload_prompt_only (default True), self_describing_kv_events (default False): read by
+    OffloadingSpec.__init__ (base:586-599). canonical_layout (default False): offloading/config.py:138.
+    cpu_bytes_to_use is read only by CPUOffloadingSpec (cpu/spec.py:80).
+  spec_base_attributes: |
+    OffloadingSpec.__init__(config) (base:582-603) sets: config, extra_config,
+    replicated_layout=False, kv_events_config (OffloadingKVEventsConfig{enable_kv_cache_events,
+    self_describing_kv_events}), offload_prompt_only, tokens_per_block (tuple per group),
+    tokens_per_hash, blocks_per_chunk. A subclass must call super().__init__(config).
+    vLLM reads spec.offload_prompt_only (sched:297, applied at sched:595-596) and
+    spec.replicated_layout (wrk:55-57). Base sets replicated_layout=False regardless of
+    config.replicated_layout; a spec that wants the single-writer layout sets it itself.
+
+required_interfaces:
+  OffloadingSpec:                                     # base:572-625
+    init: "(config: OffloadingConfig)"
+    abstract:
+      get_manager: "() -> OffloadingManager"
+      get_worker: "(kv_caches: CanonicalKVCaches) -> OffloadingWorker"
+    optional:
+      build_metric_definitions: "@classmethod (extra_config: dict[str, Any]) -> dict[str, OffloadingMetricMetadata]  # default {}"
+  OffloadingManager:                                  # base:220-394; scheduler side, single thread
+    abstract:
+      lookup: "(key: OffloadKey, req_context: ReqContext) -> LookupResult"
+      prepare_load: "(keys: Collection[OffloadKey], req_context: ReqContext) -> LoadStoreSpec"
+      prepare_store: "(keys: Collection[OffloadKey], req_context: ReqContext) -> PrepareStoreOutput | None"
+      on_new_request: "(req_context: ReqContext) -> RequestOffloadingContext"
+    optional:   # base defaults are no-ops / empty / False / None
+      touch: "(keys: Collection[OffloadKey], req_context: ReqContext) -> None"
+      complete_load: "(keys: Collection[OffloadKey], req_context: ReqContext) -> None"
+      complete_store: "(keys: Collection[OffloadKey], req_context: ReqContext, success: bool = True) -> None"
+      on_request_finished: "(req_context: ReqContext) -> None"
+      take_events: "() -> Iterable[OffloadingEvent]"
+      on_schedule_end: "(context: ScheduleEndContext) -> None"
+      has_pending_work: "() -> bool   # while True the engine keeps stepping (sched:1499-1505)"
+      reset_cache: "() -> None        # 'Evict all tracked blocks and reset internal state' (base:384-386)"
+      get_stats: "() -> OffloadingConnectorStats | None"
+      shutdown: "() -> None"
+  OffloadingWorker:                                   # base:545-569; worker side, one per rank
+    abstract:
+      submit_store: "(job_id: int, src_spec: GPULoadStoreSpec, dst_spec: LoadStoreSpec) -> bool"
+      submit_load: "(job_id: int, src_spec: LoadStoreSpec, dst_spec: GPULoadStoreSpec) -> bool"
+      get_finished: "() -> list[TransferResult]   # non-blocking poll, called every step (wrk:358)"
+      wait: "(job_ids: set[int]) -> None          # blocking; flush path only (wrk:316-317)"
+    optional:
+      shutdown: "() -> None"
+
+key_types:   # all in base unless noted
+  OffloadKey: "NewType('OffloadKey', bytes) = block_hash + group_idx.to_bytes(4, 'big', signed=False) (base:26-41)"
+  LookupResult: "Enum {MISS, HIT, HIT_PENDING, RETRY} (auto values) (base:107-113)"
+  Medium: "Enum {CPU='CPU', STORAGE='STORAGE'} (base:47-51)"
+  Locality: "Enum {LOCAL='LOCAL', REMOTE='REMOTE'} (base:54-58)"
+  TierMatcher: "NamedTuple(medium: Medium|None=None, locality: Locality|None=None); matches(): None matches anything (base:61-70)"
+  TierFilter: |
+    @dataclass(frozen=True) matchers: tuple[TierMatcher, ...] = (); allows(medium, locality) -> bool;
+    TierFilter.ALL = TierFilter(matchers=(TierMatcher(),)) sentinel (base:73-87).
+    vLLM builds it from kv_transfer_params["kv_load_tiers"] = [{"medium":..,"locality":..}, ...]
+    (sched:62-64, 431-486); [] means no tier, all-invalid entries mean ALL. vLLM itself does not
+    filter on it; honouring it is the manager's job.
+  ReqContext: |
+    @dataclass: req_id: str; kv_transfer_params: dict[str, Any] | None = None;
+    load_tier_filter: TierFilter = TierFilter.ALL; _state: dict[type, Any] (init=False);
+    set_state(val) stores by type(val), get_state(cls) -> value | None (base:90-104).
+    One instance per request, created at on_new_request (sched:475-486, 924-934) and passed to
+    every later call for that request.
+  OffloadPolicy: "Enum {BLOCK_LEVEL='block_level', REQUEST_LEVEL='request_level'} (base:116-122)"
+  RequestOffloadingContext: |
+    @dataclass with one field: policy: OffloadPolicy = BLOCK_LEVEL (base:125-127).
+    BLOCK_LEVEL skips chunks that were prefix hits; REQUEST_LEVEL keeps next_stored_chunk_idx at 0,
+    so hit chunks are offered to prepare_store again (sched:1072-1076).
+  ScheduleEndContext: "NamedTuple(new_req_ids: Collection[str], preempted_req_ids: Collection[str]) (base:130-136); filled at sched:1447-1450"
+  LoadStoreSpec: "plain base class, no fields (base:139-143); the manager's own subclass travels to the worker"
+  PrepareStoreOutput: "@dataclass keys_to_store: list[OffloadKey]; store_spec: LoadStoreSpec; evicted_keys: list[OffloadKey] (base:146-150)"
+  OffloadingEvent: "@dataclass keys: list[OffloadKey]; medium: Medium; removed: bool (True=removed, False=stored); locality: Locality|None = None (base:153-159)"
+  GPULoadStoreSpec: |
+    block_ids: np.ndarray[int64]; group_sizes: Sequence[int]; block_indices: Sequence[int];
+    asserts sum(group_sizes)==len(block_ids) and len(block_indices)==len(group_sizes) (base:397-440).
+    Blocks are ordered by group; block_indices[i] is the request-relative index of group i's first block.
+  TransferResult: "@dataclass job_id: int; success: bool; transfer_size: int|None=None; transfer_time: float|None=None (base:537-542)"
+  CanonicalKVCacheTensor: "tensor: torch.Tensor (num_blocks, ...) int8 view; page_size_bytes: int (padded) (base:443-457)"
+  CanonicalKVCacheRef: "tensor_idx: int; page_size_bytes: int (un-padded); mapping: CanonicalPageMapping | None = None, None = uncertified (base:502-514)"
+  CanonicalPageMapping: "frozen: canonical_page_size_bytes, local_page_size_bytes, runs: tuple[CopyRun,...], num_writers, writer_index, parallelism_agnostic; is_writer(block_id) (base:460-499)"
+  CanonicalKVCaches:
+    fields: "tensors: list[CanonicalKVCacheTensor]; group_data_refs: list[list[CanonicalKVCacheRef]] (base:517-534)"
+    layouts_at_v0_28_0: |
+      Cross-layer: ONE tensor for all layers, page_size_bytes = per-layer page * num_layers, a single
+      group with a single ref and mapping=None (wrk:245-290). Used when the connector prefers it
+      (conn:51-53: prefer_cross_layer_blocks = not canonical_layout) and use_uniform_kv_cache holds:
+      one KV group, one attention group, AttentionSpec, no per-token-head quant, backend indexes KV
+      by block stride (mixin:115-162; gpu_model_runner.py:7693, 7807-7815).
+      Packed layout (e.g. DSv4, block_stride > 0): ONE tensor, one ref per group (wrk:150-175).
+      Otherwise: one tensor per KVCacheTensor; layers sharing a tensor share one entry; refs carry
+      mapping only when canonical mappings were derived (wrk:177-243).
+      A worker must handle any tensor count, including 1.
+
+lookup_semantics:
+  where_called: |
+    Only for a WAITING request with request.num_computed_tokens == 0 (core:811), i.e. at admission
+    and again after preemption (preemption resets it to 0, core:1356). Never during decode.
+    Scan starts after the GPU prefix-cache hit (num_locally_computed_tokens, sched:769-770).
+  MISS:
+    meaning: "Not stored, or not loadable by this connector"
+    vllm_behavior: |
+      Full-attention prefix scan stops; earlier HITs are still used and the rest is prefilled
+      (sched:629-630). Sliding-window groups scan from the end and reset the streak without
+      stopping (sched:644-664).
+  HIT:
+    meaning: "Stored and readable now; prepare_load + load may follow in this step"
+    vllm_behavior: "Counts toward the hit length (sched:614-621). See invariant V2-hit-means-readable-now."
+  HIT_PENDING:
+    meaning: "Found but not yet readable (base:231-233), e.g. store not completed (cpu/manager.py:125-126) or promotion started (tiering/manager.py:404)"
+    vllm_behavior: "Counts toward the hit length and defers the whole request (sched:622-624, 648-653)"
+  RETRY:
+    meaning: "Answer not known yet; ask again later"
+    vllm_behavior: "Does not count as a hit (sliding window: resets the streak) and defers the whole request (sched:625-628, 654-659)"
+  deferral: |
+    Any HIT_PENDING/RETRY in the scanned range makes _lookup return None (sched:828-833).
+    get_num_new_matched_tokens returns (None, False); the core scheduler moves the request to
+    skipped_waiting (core:835-841, 1161-1162) and repeats all lookups on a later step.
+    The scan continues after a deferral so the manager can start async work for later keys.
+    Exception: a deferred partial-tail boundary key only defers when complete_hit == 0 (sched:920-921).
+  call_pattern: |
+    lookup must be idempotent and cheap. The same key can be looked up several times in one step:
+    the group convergence loop re-runs groups (sched:812-823) and partial-tail boundaries are looked up
+    separately (sched:893-903). It is looked up again on every step while the request is deferred.
+    No lookup happens while the request still has in-flight jobs (sched:962-967) or when
+    skip_reading_prefix_cache is set (sched:973-974). A computed hit can still be dropped without any
+    callback if a hit chunk is already being loaded by another request (sched:836-859).
+  partial_tail: |
+    Only when supports_partial_tail (sched:279-290: blocks_per_chunk == 1, one block size, a mamba
+    "align" group, no other windowed groups, no EAGLE, DCP == 1). Boundary keys are
+    make_offload_key(block_hashes[boundary // tokens_per_hash - 1], group_idx) (sched:870-874).
+
+offload_key_derivation: |
+  For chunk i of group g: key = make_offload_key(req.block_hashes[(i+1) * hashes_per_chunk - 1], g),
+  i.e. the hash of the chunk's LAST hash-block (sched:356-370; hashes_per_chunk at sched:253-256).
+  Block hashes are chained from NONE_HASH through the whole prefix and include extra keys
+  (LoRA name, cache_salt, multimodal) (vllm/v1/core/kv_cache_utils.py:539-600), so a key identifies
+  the full prefix, not only the chunk's tokens. NONE_HASH = hash_fn(PYTHONHASHSEED) when that env
+  var is set, else os.urandom(32) for every hash algorithm (kv_cache_utils.py:100-115; default algo
+  "sha256", vllm/config/cache.py:98). Keys match across processes or instances only when
+  PYTHONHASHSEED and prefix_caching_hash_algo match.
+
+calling_sequences:
+  load: |
+    Per request, inside core.schedule() of one step:
+    1. get_num_new_matched_tokens (core:829-833 -> sched:936-991):
+       _lookup -> manager.lookup per key (sched:612, 645, 902), then touch (sched:989), always,
+       including after a deferral.
+    2. allocate_slots (core:1033); if it fails the loop breaks, no callback (core:1047-1054).
+    3. update_state_after_alloc (core:1061-1065 -> sched:993): returns early if
+       num_external_tokens == 0 (sched:996); else manager.prepare_load(keys_to_load) (sched:1078),
+       load job recorded with pending_count = world_size (sched:1083-1097).
+    4. build_connector_meta puts the job in this step's metadata (sched:1478-1482).
+    5. Same step, every worker: mixin:95 start_load_kv -> conn:105-108 -> worker.submit_load (wrk:326-330).
+       The request waits in WAITING_FOR_REMOTE_KVS (core:1083-1087).
+    6. worker.get_finished() each step (wrk:358) -> completed ids in worker metadata.
+    7. Scheduler: once all world_size ranks reported, manager.complete_load(keys) (sched:1549-1570).
+  store: |
+    1. build_connector_meta -> _build_store_jobs (sched:1248-1441): manager.prepare_store(new keys)
+       (sched:1326; partial-tail stores at sched:1201).
+       None: warning + ALLOCATION_FAILURE counter, next_stored_chunk_idx not advanced, so the same
+       chunks are offered again next step (sched:1329-1334).
+       Empty keys_to_store: treated as already stored, index advanced (sched:1336-1338).
+       Otherwise touch (sched:1340) and a job for keys_to_store only (sched:1413-1424).
+    2. Worker, same step: get_finished -> prepare_store_kv only queues it (conn:127-136, wrk:332-344).
+    3. Worker, NEXT step: submit_store in handle_preemptions (wrk:310-314) or start_kv_transfers (wrk:321-324).
+       With spec.replicated_layout, ranks != 0 never submit; they ack at once (wrk:301-303, 334-337).
+    4. After all world_size ranks report: manager.complete_store(job_status.keys, req_context),
+       no success argument (sched:1566). keys = set(keys_to_store) (sched:1416).
+  touch: |
+    Called after the request's lookups (sched:977 then 989) and after each accepted prepare_store
+    (sched:1340), with all of the request's offload keys including GPU-prefix-cache hits;
+    sliding-window groups pass only the chunks still needed; plus the partial-tail boundary key when
+    one was chosen (sched:666-695). touch() never precedes the lookups of the same request in the
+    same step; whatever it records can be read by a later step's or a later request's lookup.
+  per_step_order: |
+    build_connector_meta (sched:1443-1497), called at the end of core.schedule() (core:1298):
+    _update_req_states -> on_schedule_end(ScheduleEndContext) (1451) -> preemption / block-reuse
+    flush sets (1453-1474) -> prepare_store for partial-tail and normal stores (1476-1477) ->
+    on_request_finished for requests finished since the previous step (1486-1491).
+    on_schedule_end therefore runs before that step's prepare_store calls, after its lookups/prepare_load.
+  request_lifecycle: |
+    on_new_request (sched:924-934) -> lookups/loads/stores -> core request_finished
+    (sched:1602-1641; keeps state) -> request id lands in the next step's finished_req_ids
+    (core:2407, 1284) -> last prepare_store for it -> on_request_finished (sched:1486-1491).
+    After on_request_finished no prepare_* call follows for that request, but complete_store /
+    complete_load for already-submitted jobs may still arrive (base:335-353, sched:1584-1585).
+    A request finished without tracked state gets on_new_request and on_request_finished
+    back to back (sched:1618-1624).
+  flush_and_wait: |
+    jobs_to_flush holds store jobs of preempted requests (sched:1454-1460), store jobs whose GPU
+    blocks were reallocated (sched:1463-1474, 1434-1439) and, after reset_cache, every in-flight job
+    including loads (sched:1665). Next step's handle_preemptions submits queued stores, then calls
+    worker.wait(jobs_to_flush) (wrk:297-317). wait() receives ids the worker already reported, never
+    submitted (non-writer ranks), or does not know; it must ignore them (the CPU worker does,
+    cpu/gpu_worker.py:706-710).
+  reset_cache: |
+    Scheduler reset_cache (sched:1656-1695): flush all jobs, on_request_finished for finished
+    unsignalled requests, manager.reset_cache(), all store progress reset to chunk 0, job ids below
+    _stale_job_threshold dropped when they complete later (sched:1551-1557). Reached through
+    core reset_prefix_cache -> reset_connector_cache (core:2511-2566, conn:201-204).
+  eviction: |
+    No evict() call. Eviction is the manager's decision, typically inside prepare_store.
+    PrepareStoreOutput.evicted_keys is not read anywhere in vLLM (only defined at base:150).
+    vLLM learns of stores/removals only through take_events() -> OffloadingEvent(removed=...)
+    (sched:1643-1654, events.py:231-246).
+
+concurrency:
+  process_model: |
+    Separate spec, manager and worker instances. They may share one process: with world_size == 1
+    the executor defaults to "uni" (vllm/config/parallel.py:955-956) and the worker runs inside the
+    EngineCore process. With mp they are separate processes. The only channel is connector metadata
+    (OffloadingConnectorMetadata down, OffloadingWorkerMetadata up). Rely neither on shared state nor
+    on isolation.
+  manager_thread_model: "Called from the single scheduler thread; no internal locking required by vLLM."
+  multi_rank: |
+    One manager decides residency. Every job goes to every rank; manager callbacks fire only after
+    all world_size ranks report it (num_workers at sched:293, pending_count at sched:1092/1415,
+    sched:1559-1562). Every rank must complete every job it is given.
+  per_request_jobs: |
+    A request has either one load job or one or more store jobs in flight, never both
+    (asserted at sched:1089-1090 and sched:1400-1403).
+
+invariants:
+  - id: V1-transfers-never-fail
+    text: |
+      Every submit_store/submit_load must return True and every TransferResult.success must be True.
+      vLLM asserts both in wrk (v0.28.0):
+        wrk:312-313  handle_preemptions   success = submit_store(...); assert success
+        wrk:322-323  start_kv_transfers   success = submit_store(...); assert success
+        wrk:329-330  start_kv_transfers   success = submit_load(...);  assert success
+        wrk:359-361  get_finished         "# we currently do not support job failures"; assert transfer_result.success
+      The AssertionError kills the engine: under mp the worker returns a FAILURE reply
+      (vllm/v1/executor/multiproc_executor.py:979-992), collective_rpc raises RuntimeError
+      (:434-437) and EngineCore logs "EngineCore encountered a fatal error" and sends engine-dead
+      (vllm/v1/engine/core.py:1343-1348). OffloadingConnector has no load-error path
+      (get_block_ids_with_load_errors not overridden; base returns set(),
+      kv_connector/v1/base.py:396-414).
+      A store that cannot be kept is dropped by the connector and reported as success; afterwards its
+      keys must look up as MISS. A load must never fail, so the manager must not answer HIT unless the
+      worker can serve the load; prepare_load has no failure return.
+      vLLM never calls complete_store with success=False (sched:1566 passes no success argument).
+      Only vLLM's own TieringOffloadingManager passes False, to its primary tier
+      (tiering/manager.py:291-296 via complete_write = complete_store at :115; forwarding at :654).
+  - id: V2-hit-means-readable-now
+    text: |
+      HIT means readable now. A HIT can be loaded in the same engine step: lookup (sched:612/645/902)
+      -> prepare_load (sched:1078) -> load job in this step's metadata (sched:1478-1482) ->
+      worker.submit_load (wrk:329) in this step's execute_model (mixin:95). From HIT until
+      complete_load the block must stay readable and prepare_load must succeed for it
+      (the CPU manager asserts readiness, cpu/manager.py:138-139).
+      A block whose store is in flight (complete_store not yet called; base:310-311 "Following this
+      call, the blocks become loadable") or that is being promoted must be MISS or HIT_PENDING.
+      HIT_PENDING counts toward the hit length, RETRY does not (sched:622-628, 648-659); either one
+      defers the whole request (sched:828-833).
+      A HIT does not guarantee a load: allocation failure (core:1047-1054), num_external_tokens == 0
+      (sched:996), group trimming (sched:802-810) or a chunk already being loaded (sched:852-859) drop
+      it with no callback. Do not pin or reserve on lookup; pin in prepare_load, release in complete_load.
+  - id: V7-prepare-store-none-retried
+    text: "prepare_store -> None is not an error; vLLM offers the same chunks again next step (sched:1329-1334). It must not have side effects that assume the store happened."
+  - id: V6-lookup-idempotent
+    text: "lookup can be called many times per key per step and on every deferred step; it must be side-effect safe and cheap (sched:812-823, 893-903; core:835-841)."
+  - id: V9-callbacks-after-finish
+    text: "complete_store/complete_load may arrive after on_request_finished for the same req_context (base:339-342)."
+  - id: V10-wait-tolerates-any-id
+    text: "worker.wait() must accept ids that are finished, never submitted on this rank, or loads (wrk:297-317, sched:1665)."
+  - id: V8-eviction-via-events
+    text: "vLLM never evicts and never reads evicted_keys; stored/removed state reaches vLLM only via take_events() (base:150, sched:1643-1654)."
+  - id: V11-instances-not-processes
+    text: "Manager and worker are separate instances that may share a process (uni executor); communicate only through connector metadata (conn:69-82, config/parallel.py:955-956)."
+
+version_history:   # first release tag containing each element; checked with git show <tag>:<path>
+  "0.20.x": "Modules vllm.v1.kv_offload.abstract / spec / mediums / worker.worker. ReqContext has only kv_transfer_params. touch(keys), complete_load(keys), complete_store(keys, success=True). lookup -> bool | None."
+  "0.20.2rc0 / 0.21.0": "touch after the request's lookups (#41228, 941fb50835). v0.20.0, v0.20.1 and v0.20.2 (not descended from v0.20.2rc0) touch before lookup."
+  "0.21.0": "vllm.v1.kv_offload.base; req_context argument on touch, complete_load, complete_store."
+  "0.22.0": "ReqContext.req_id; reset_cache."
+  "0.23.0": "on_new_request (abstract), OffloadPolicy, RequestOffloadingContext, on_request_finished, on_schedule_end() without argument; spec.offload_prompt_only (default True)."
+  "0.24.0": "has_pending_work, get_stats; spec.kv_events_config (OffloadingKVEventsConfig)."
+  "<=0.24": "Spec.get_handlers(kv_caches) yields OffloadingHandler.transfer_async(job_id, TransferSpec) -> bool; TransferResult has transfer_type; the same assert-on-failure pattern as V1-transfers-never-fail."
+  "0.25.0": "OffloadingWorker {submit_store, submit_load, get_finished, wait, shutdown} and Spec.get_worker(CanonicalKVCaches); TransferResult in base without transfer_type; LookupResult {MISS, HIT, HIT_PENDING, RETRY} (#46363, bb61177e49); ScheduleEndContext and on_schedule_end(context)."
+  "0.26.0": "OffloadingSpec.__init__(config: OffloadingConfig) (<=0.25: (vllm_config, kv_cache_config)); spec.tokens_per_hash / blocks_per_chunk; Locality and OffloadingEvent.locality. OffloadingEvent.medium is str through 0.26."
+  "0.27.0": "Medium {CPU, STORAGE}, TierMatcher, TierFilter, ReqContext.load_tier_filter (#48123); ReqContext._state/set_state/get_state; CanonicalPageMapping, CopyRun, CanonicalKVCacheRef.mapping; spec.replicated_layout and non-writer acks."
+  "0.28.0": "OffloadingConfig.canonical_layout and prefer_cross_layer_blocks = not canonical_layout (<=0.27: always True); partial-tail boundary lookups, loads, stores and touch."
