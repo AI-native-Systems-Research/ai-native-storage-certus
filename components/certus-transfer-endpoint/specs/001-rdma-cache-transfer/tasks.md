@@ -177,7 +177,8 @@ connection table. This is plan.md Phase 1's engine.
   (pin, bounce lease, context + entry index). This is the mechanism Principle IX requires
   for "released by the completion reaper that owns its work-request id".
   *Done* in `src/connection/slab.rs`: generic `Slab<T>`, one per link, held by the table
-  (`ConnectionTable<T>`; `live(peer)` is now the only way to post). `wr_id` = slot index
+  (`ConnectionTable<T>`; `live(peer)` was the only way to post — T014 replaced it with
+  `post_sends`/`post_recvs`/`reap`). `wr_id` = slot index
   (low 32) | **generation** (high 32): draining links are polled after ERROR, so a reused
   slot can meet its previous occupant's late completion — the predecessor's slab was safe
   only because recovery destroyed the CQ. State goes in at `insert` and comes back only via
@@ -186,10 +187,23 @@ connection table. This is plan.md Phase 1's engine.
   until the slab is empty, failing loudly on a stall. `finish_teardown` refuses
   (`Undrained`) while a slab holds state, and dropping a table that holds state panics.
   The `entry_push` bench stays with T057
-- [ ] T014 Implement **send-queue credits** in `src/connection/` (depends T012, T013):
+- [X] T014 Implement **send-queue credits** in `src/connection/` (depends T012, T013):
   bound in-flight RDMA writes per connection, with partial batch posting and a completion
   reaper that refills. First of the three domains of D10/FR-014; the other two arrive in
-  Phase 7
+  Phase 7.
+  *Done* in `src/connection/credits.rs` + the table: `SendCredits` per live link, limit
+  = min(configured, granted `max_send_wr`), a clamp reported once as
+  `TableEvent::CreditsClamped`; zero credits refused at construction. **Counts every
+  send-queue request, not only writes** — requests and replies fill the same queue, so
+  counting writes alone would let messages fill it under writes that think they have
+  room (a reply holds a credit a write could use; accepted). Receives hold none (FR-026
+  partitions them, T080). `post_sends(peer, &mut VecDeque)` posts from the front as far
+  as credits go and leaves the rest; a transport refusal requeues the unposted at the
+  front in order and returns their credits. `reap(peer)` is the only way to poll a live
+  link and refills one credit per send-queue completion, so credits and slab cannot
+  drift (`debug_assert`ed). `live()` is gone: a raw link would let a caller poll around
+  the credits. Held pins ≤ in-flight ≤ limit by construction; T025 still owes the
+  end-to-end SC-004 test. `peak` kept for T015
 - [ ] T015 [P] Implement `src/telemetry.rs`: ZST no-op with
   `#[allow(clippy::unused_self)]` when `telemetry` is off, `AtomicU64` counters when on,
   identical method surface. Counters: per-outcome totals, each credit domain's current and
