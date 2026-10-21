@@ -37,6 +37,7 @@ rw-telemetry = ["block-device-spdk-nvme?/telemetry"]
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
 eviction-policy-lru.workspace = true
+eviction-policy-optimized.workspace = true
 logger.workspace = true
 libc = "0.2"
 
