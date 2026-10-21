@@ -188,6 +188,8 @@ fn eviction_reaches_persisted_entries_behind_an_unpersisted_admission_front() {
     mt_comp.eviction_policy.connect(ep).unwrap();
     let mt: Arc<dyn IMemoryTier + Send + Sync> =
         query_interface!(mt_comp, IMemoryTier).expect("memory tier provides IMemoryTier");
+    // No bounce reserve: the pool is sized to the cache exactly.
+    mt.set_bounce_reserve(0).unwrap();
     mt.initialize(((PERSISTED + UNPERSISTED) * SLOT as u64) as usize, None)
         .unwrap();
 
@@ -256,6 +258,7 @@ fn eviction_still_fails_when_nothing_in_the_tier_is_demotable() {
     let mt_comp = MemoryTierComponent::new_default();
     mt_comp.eviction_policy.connect(ep).unwrap();
     let mt: Arc<dyn IMemoryTier + Send + Sync> = query_interface!(mt_comp, IMemoryTier).unwrap();
+    mt.set_bounce_reserve(0).unwrap();
     mt.initialize((UNPERSISTED * SLOT as u64) as usize, None)
         .unwrap();
 
