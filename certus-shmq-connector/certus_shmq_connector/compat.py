@@ -35,7 +35,7 @@ so the existing ``>= (0, 26)`` flags carry forward unchanged. The one genuinely-
 gained ``kv_cache_layout``). The material 0.30 *tiering* changes (backpressure detector,
 ParentManager, serve_external_requests(parent), kvcr tier) are NOT gated here because
 this connector is a top-level OffloadingSpec, not a SecondaryTierManager — see
-knowledge/contracts/MIGRATION-v026-to-v030.md.
+knowledge/contracts/vllm-offloading-interface-v030.yaml.
 """
 
 from __future__ import annotations
@@ -185,7 +185,7 @@ FEATURES: dict[str, "callable"] = {
     # reading the field on an older release that happened to predate it would raise —
     # gating at 0.30 fails safe (falls back to None). The material 0.30 *tiering*
     # deltas are intentionally NOT represented here (this connector is a top-level
-    # OffloadingSpec, not a SecondaryTierManager) — see MIGRATION-v026-to-v030.md.
+    # OffloadingSpec, not a SecondaryTierManager) — see vllm-offloading-interface-v030.yaml.
     "kvcache_layout_field": lambda v: v >= (0, 30),  # verified @0.30 (present); conservative floor
 }
 
