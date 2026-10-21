@@ -163,6 +163,12 @@ VIII–XI, and a review that does not check them is not a review.
   both. Do not "fix" a layout by copying a predecessor crate's `ffi.rs` — four of
   its definitions were wrong (see `ffi.rs` module docs), including the `IBV_WR_*`
   numbering, under which a send is posted as an RDMA write.
+- **Where the mock is stricter than mlx5, it is on purpose.** A receive into
+  memory without `LOCAL_WRITE` lands on mlx5 but fails here, as verbs says.
+  Where they differ otherwise, the mock follows the NIC: a send longer than its
+  receive fails only the receive, and both queue pairs stay up — the teardown
+  is the endpoint's. `verbs::receive_faults_as_the_nic_reports_them` keeps the
+  NIC's side checked; rerun it before changing either.
 - **The mock is a model of RC verbs, not a stub.** Sends execute in order and an
   RNR stall blocks everything behind it; writes are checked against the target's
   registrations; ERROR flushes; unsignaled requests hold their slot. If the engine
@@ -264,7 +270,7 @@ lookup answer is reported as a **miss**, never an error (D14).
 
 ## Current state
 
-T001–T083 are done, except T011's remaining faults and Phase 11, which is out of scope (Phases 3 and 5–10 complete: US2 legacy push and US1 fetch work end to end over the mock, with a fail-loud reply deadline, and US3 serves block-tier entries through the dispatcher's `read_to_bounce`, `bounce.rs`; fetches of any length are chunked against the peer's `max_entries`; an `rdma` build runs over the verbs transport, `connection/verbs.rs`, validated node2 ↔ node5): the crate builds as a default member,
+T001–T083 are done; Phase 11 is out of scope (Phases 3 and 5–10 complete: US2 legacy push and US1 fetch work end to end over the mock, with a fail-loud reply deadline, and US3 serves block-tier entries through the dispatcher's `read_to_bounce`, `bounce.rs`; fetches of any length are chunked against the peer's `max_entries`; an `rdma` build runs over the verbs transport, `connection/verbs.rs`, validated node2 ↔ node5): the crate builds as a default member,
 peer identity is implemented, `ITransferEndpoint` is defined in `interfaces`, and
 the verbs FFI (`ffi.rs`), C shim (`wrapper.c`) and safe wrappers (`rdma.rs`, T009)
 exist behind `rdma`, and the transport seam plus an in-process mock exist in every

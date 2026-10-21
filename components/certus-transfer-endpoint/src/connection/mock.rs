@@ -22,20 +22,35 @@
 //! Local buffers are read, and receive buffers written, when the work request
 //! *executes*, not when it is posted — that is when the NIC touches them.
 //!
-//! The fabric can record an event log (T011's ERROR-ordering piece, built for
-//! T021): each queue pair forced to ERROR, each completion handed to a poller,
-//! and each link closed, stamped from a sequence counter tests may share with
-//! other instruments, so teardown-before-reclaim is assertable as an order.
+//! Receives fail as verbs and the NIC say they do:
 //!
-//! It also has one fault knob, `MockFabric::pause_sends`, which holds every
-//! posted send in flight, so a test can tear a connection down with writes
-//! genuinely outstanding.
+//! * **A send longer than its receive** fails the receive `LOC_LEN_ERR`; the
+//!   send completes and both queue pairs stay up, as on mlx5. Whether that is
+//!   a teardown is the endpoint's decision, not the fabric's.
+//! * **A receive into memory without `LOCAL_WRITE`** fails `LOC_PROT_ERR` and
+//!   both ends go to ERROR. That is verbs' rule; mlx5 lets such a receive land.
+//!   The mock is the stricter of the two on purpose, so code relying on one
+//!   provider's leniency fails here rather than on another provider.
 //!
-//! Not yet modelled (T011): a finite RNR retry, injected inbound messages,
-//! `LOCAL_WRITE` enforcement on receive buffers, and timing — everything here
-//! happens at post or poll.
+//! `connection::verbs::receive_faults_as_the_nic_reports_them` keeps both
+//! reference behaviours checked on hardware.
+//!
+//! The fabric can record an event log: each queue pair forced to ERROR, each
+//! completion handed to a poller, and each link closed, stamped from a
+//! sequence counter tests may share with other instruments, so
+//! teardown-before-reclaim is assertable as an order.
+//!
+//! Fault knobs, test-only: `pause_sends` holds every posted send in flight (and
+//! `step_sends_until` lets them out one at a time); `hold_sends_from` holds one
+//! endpoint's, to release them as a single burst; `rnr_retry_limit` gives
+//! sends a finite RNR retry, so a missing receive fails `RNR_RETRY_EXC_ERR`
+//! instead of waiting. Inbound messages are injected at the endpoint
+//! (`Command::Inject`) or from a raw transport in the tests, not here.
+//!
+//! Not modelled: timing — everything happens at post or poll. The hardware
+//! tests cover it.
 
-// Consumed from T011/T012 onward.
+// Some of the fabric's API is used only by tests or only by one build.
 #![allow(dead_code)]
 
 use std::collections::{HashMap, VecDeque};
@@ -143,6 +158,48 @@ impl MockFabric {
         self.lock().rnr_stalls
     }
 
+    /// Hold every send from the endpoint listening as `local`, or release
+    /// them: on release they run at once, in order, as one burst.
+    #[cfg(test)]
+    pub(crate) fn hold_sends_from(&self, local: &PeerId, on: bool) {
+        let mut f = self.lock();
+        let owner = *f.listeners.get(local).expect("a listening endpoint");
+        if on {
+            f.held.insert(owner);
+        } else {
+            f.held.remove(&owner);
+            let links: Vec<_> = f
+                .qps
+                .iter()
+                .filter(|(_, q)| q.owner == owner)
+                .map(|(l, _)| *l)
+                .collect();
+            for l in links {
+                f.progress(l);
+            }
+        }
+    }
+
+    /// Sends posted by the endpoint listening as `local` and not yet run.
+    #[cfg(test)]
+    pub(crate) fn pending_sends_from(&self, local: &PeerId) -> usize {
+        let f = self.lock();
+        let owner = f.listeners[local];
+        f.qps
+            .values()
+            .filter(|q| q.owner == owner)
+            .map(|q| q.sq.iter().filter(|wr| !wr.done).count())
+            .sum()
+    }
+
+    /// Give every send a finite RNR retry of `n` stalls (`None`: forever, the
+    /// transport's setting). A fault knob: it shows what a missing receive
+    /// costs when nothing retries it away.
+    #[cfg(test)]
+    pub(crate) fn rnr_retry_limit(&self, n: Option<u32>) {
+        self.lock().rnr_retry_limit = n;
+    }
+
     /// The events recorded so far, with their stamps, in order.
     #[cfg(test)]
     pub(crate) fn log(&self) -> Vec<(u64, LogEvent)> {
@@ -188,6 +245,18 @@ struct Fabric {
     /// Times a send found its peer with no receive posted and stalled.
     #[cfg(test)]
     rnr_stalls: u64,
+    /// A finite RNR retry (a fault knob): after this many stalls on one send,
+    /// it fails `RNR_RETRY_EXC_ERR` and both queue pairs go to ERROR, as on
+    /// hardware with `rnr_retry_count` below 7. `None` is the transport's 7:
+    /// retry forever. The mock has no clock, so a "retry" is each time the
+    /// stalled send is tried again — whenever its queue pair, or its peer's,
+    /// next makes progress.
+    #[cfg(test)]
+    rnr_retry_limit: Option<u32>,
+    /// Transports whose sends are held (a fault knob, like `sends_paused` but
+    /// for one end only).
+    #[cfg(test)]
+    held: std::collections::HashSet<TransportId>,
 }
 
 struct RegionEntry {
@@ -226,12 +295,18 @@ struct SqWr {
     addr: u64,
     len: u32,
     done: bool,
+    /// RNR stalls this send has met; counted against `rnr_retry_limit`.
+    #[cfg(test)]
+    rnr_retries: u32,
 }
 
 struct RqWr {
     wr_id: u64,
     addr: u64,
     len: u32,
+    /// Its region lacks `LOCAL_WRITE`: the receive fails `LOC_PROT_ERR` when
+    /// a send lands on it, as verbs specifies.
+    read_only: bool,
 }
 
 fn verb(op: &'static str, errno: i32) -> RdmaError {
@@ -349,6 +424,10 @@ impl Fabric {
             if self.sends_paused && self.send_budget == 0 {
                 return;
             }
+            #[cfg(test)]
+            if self.held.contains(&self.qps[&link].owner) {
+                return;
+            }
             let qp = self.qp(link);
             if qp.state != QpState::Rts {
                 return;
@@ -404,15 +483,49 @@ impl Fabric {
                 }
                 SendOp::Send => {
                     let Some(recv) = self.qp(peer).rq.pop_front() else {
-                        // RNR with infinite retry: stall, and so does
-                        // everything queued behind this send.
+                        // RNR: stall, and so does everything queued behind
+                        // this send. With the transport's infinite retry that
+                        // is all; with a finite one, the send fails once its
+                        // retries run out and the connection goes to ERROR.
                         #[cfg(test)]
                         {
                             self.rnr_stalls += 1;
+                            let limit = self.rnr_retry_limit;
+                            let wr = &mut self.qp(link).sq[i];
+                            wr.rnr_retries += 1;
+                            if limit.is_some_and(|n| wr.rnr_retries > n) {
+                                self.fail_head(link, wc::RNR_RETRY_EXC_ERR);
+                                self.force_error(peer);
+                            }
                         }
                         return;
                     };
+                    if recv.read_only {
+                        // The NIC may not write a buffer whose region lacks
+                        // LOCAL_WRITE. Verbs specifies the receive fails
+                        // LOC_PROT_ERR; mlx5 in fact lets it land (probed on
+                        // hardware, connection::verbs). The mock enforces the
+                        // spec, so code that relies on mlx5's leniency is
+                        // caught here rather than on another provider.
+                        let p = self.qp(peer);
+                        p.cq.push_back((
+                            Completion {
+                                wr_id: recv.wr_id,
+                                result: Err(failed(wc::LOC_PROT_ERR)),
+                            },
+                            false,
+                        ));
+                        // Our send first: forcing the peer to ERROR would
+                        // otherwise fail it as RETRY_EXC_ERR instead.
+                        self.fail_head(link, wc::REM_OP_ERR);
+                        return self.force_error(peer);
+                    }
                     if len > recv.len {
+                        // Too long for the receive it landed in: the receive
+                        // fails LOC_LEN_ERR, the send still completes, and
+                        // neither queue pair leaves RTS (measured on mlx5,
+                        // connection::verbs). What to make of a failed
+                        // receive is the endpoint's call, not the fabric's.
                         let p = self.qp(peer);
                         p.cq.push_back((
                             Completion {
@@ -421,8 +534,18 @@ impl Fabric {
                             },
                             false,
                         ));
-                        self.force_error(peer);
-                        return self.fail_head(link, wc::REM_INV_REQ_ERR);
+                        let qp = self.qp(link);
+                        qp.sq[i].done = true;
+                        if signaled {
+                            qp.cq.push_back((
+                                Completion {
+                                    wr_id,
+                                    result: Ok(Completed::Send),
+                                },
+                                true,
+                            ));
+                        }
+                        continue;
                     }
                     // SAFETY: the send buffer is valid until completion, and
                     // the receive buffer is valid and untouched by anyone else
@@ -809,6 +932,8 @@ impl Link for MockLink {
                 addr: r.local.addr(),
                 len: r.local.len(),
                 done: flushed,
+                #[cfg(test)]
+                rnr_retries: 0,
             });
             if flushed {
                 qp.cq.push_back((
@@ -847,10 +972,16 @@ impl Link for MockLink {
                     error: verb("ibv_post_recv", errno::ENOMEM),
                 });
             }
+            let read_only = !f
+                .regions
+                .get(&r.buf.region().rkey())
+                .is_some_and(|e| e.access.contains(Access::LOCAL_WRITE));
+            let qp = f.qp(self.link);
             qp.rq.push_back(RqWr {
                 wr_id: r.wr_id,
                 addr: r.buf.addr(),
                 len: r.buf.len(),
+                read_only,
             });
             // A peer stalled on RNR towards us may now proceed.
             if let Peer::Connected(peer) = qp.peer {
@@ -1306,5 +1437,134 @@ mod tests {
         // SAFETY: rejected before registration.
         let r = unsafe { t.register(buf.as_mut_ptr(), 8, Access::REMOTE_WRITE) };
         assert_eq!(r.err(), Some(verb("ibv_reg_mr", errno::EINVAL)));
+    }
+
+    /// Post one 8-byte send from a's link, signaled.
+    fn send8(p: &mut Pair, src: &Region, wr_id: u64) {
+        // SAFETY: `src`'s buffer outlives the completions the tests poll.
+        unsafe {
+            p.a.link(p.la).unwrap().post_send(&[SendRequest {
+                wr_id,
+                op: SendOp::Send,
+                local: src.sge(src.addr(), 8).unwrap(),
+                signaled: true,
+            }])
+        }
+        .unwrap();
+    }
+
+    /// A finite RNR retry: a send with no receive to land in fails
+    /// RNR_RETRY_EXC_ERR once its retries run out, and both ends go to ERROR.
+    #[test]
+    fn a_finite_rnr_retry_runs_out() {
+        let mut p = pair();
+        let fabric = p.a.fabric.clone();
+        fabric.rnr_retry_limit(Some(2));
+        let mut src = [1u8; 8];
+        let rs = reg(&mut p.a, &mut src, Access::LOCAL_WRITE);
+        send8(&mut p, &rs, 1); // tried once: stall 1
+        assert!(poll(&mut p.a, p.la).is_empty(), "still retrying");
+        // Each further attempt is another retry: progress on either end.
+        fabric.pause_sends(false); // stall 2
+        assert!(poll(&mut p.a, p.la).is_empty(), "still within the limit");
+        fabric.pause_sends(false); // stall 3: past the limit
+        let c = poll(&mut p.a, p.la);
+        assert_eq!(c[0].result, Err(failed(wc::RNR_RETRY_EXC_ERR)), "{c:?}");
+        assert_eq!(p.a.link(p.la).unwrap().state().unwrap(), QpState::Err);
+        assert_eq!(p.b.link(p.lb).unwrap().state().unwrap(), QpState::Err);
+        assert_eq!(fabric.rnr_stalls(), 3);
+    }
+
+    /// With the limit set, a receive posted in time still saves the send.
+    #[test]
+    fn a_receive_in_time_beats_a_finite_rnr_retry() {
+        let mut p = pair();
+        p.a.fabric.rnr_retry_limit(Some(1));
+        let mut src = [2u8; 8];
+        let mut dst = [0u8; 8];
+        let rs = reg(&mut p.a, &mut src, Access::LOCAL_WRITE);
+        let rd = reg(&mut p.b, &mut dst, Access::LOCAL_WRITE);
+        send8(&mut p, &rs, 1); // stall 1, within the limit
+                               // SAFETY: `dst` outlives the completion polled below.
+        unsafe {
+            p.b.link(p.lb).unwrap().post_recv(&[RecvRequest {
+                wr_id: 9,
+                buf: rd.sge(rd.addr(), 8).unwrap(),
+            }])
+        }
+        .unwrap();
+        assert_eq!(poll(&mut p.a, p.la)[0].result, Ok(Completed::Send));
+        assert_eq!(dst, [2u8; 8]);
+        assert_eq!(p.a.link(p.la).unwrap().state().unwrap(), QpState::Rts);
+    }
+
+    /// A receive buffer whose region lacks LOCAL_WRITE: the send that lands on
+    /// it fails the receive LOC_PROT_ERR and both ends go to ERROR — verbs'
+    /// rule, enforced here although mlx5 lets it land. The buffer is untouched.
+    #[test]
+    fn a_receive_into_read_only_memory_fails() {
+        let mut p = pair();
+        let mut src = [3u8; 8];
+        let mut dst = [0u8; 8];
+        let rs = reg(&mut p.a, &mut src, Access::LOCAL_WRITE);
+        let rd = reg(&mut p.b, &mut dst, Access::REMOTE_READ);
+        // SAFETY: as above.
+        unsafe {
+            p.b.link(p.lb).unwrap().post_recv(&[RecvRequest {
+                wr_id: 9,
+                buf: rd.sge(rd.addr(), 8).unwrap(),
+            }])
+        }
+        .unwrap();
+        send8(&mut p, &rs, 1);
+        let cb = poll(&mut p.b, p.lb);
+        assert_eq!(cb[0].wr_id, 9);
+        assert_eq!(cb[0].result, Err(failed(wc::LOC_PROT_ERR)));
+        assert_eq!(poll(&mut p.a, p.la)[0].result, Err(failed(wc::REM_OP_ERR)));
+        assert_eq!(dst, [0u8; 8], "nothing written");
+        assert_eq!(p.b.link(p.lb).unwrap().state().unwrap(), QpState::Err);
+    }
+
+    /// A send longer than the receive it lands in: the receive fails
+    /// LOC_LEN_ERR, the send completes, and both queue pairs stay up and
+    /// usable — as measured on mlx5.
+    #[test]
+    fn a_send_longer_than_its_receive_fails_only_the_receive() {
+        let mut p = pair();
+        let mut src = [4u8; 16];
+        let mut dst = [0u8; 16];
+        let rs = reg(&mut p.a, &mut src, Access::LOCAL_WRITE);
+        let rd = reg(&mut p.b, &mut dst, Access::LOCAL_WRITE);
+        let recv = |p: &mut Pair, wr_id, at: u64, len| {
+            // SAFETY: `dst` outlives the completions polled below.
+            unsafe {
+                p.b.link(p.lb).unwrap().post_recv(&[RecvRequest {
+                    wr_id,
+                    buf: rd.sge(rd.addr() + at, len).unwrap(),
+                }])
+            }
+            .unwrap();
+        };
+        recv(&mut p, 9, 0, 4);
+        send8(&mut p, &rs, 1);
+        assert_eq!(poll(&mut p.a, p.la)[0].result, Ok(Completed::Send));
+        let cb = poll(&mut p.b, p.lb);
+        assert_eq!(
+            (cb[0].wr_id, cb[0].result),
+            (9, Err(failed(wc::LOC_LEN_ERR)))
+        );
+        assert_eq!(dst[..4], [0u8; 4], "nothing written into the short buffer");
+        for l in [(&mut p.a, p.la), (&mut p.b, p.lb)] {
+            assert_eq!(l.0.link(l.1).unwrap().state().unwrap(), QpState::Rts);
+        }
+        // Still usable.
+        recv(&mut p, 10, 8, 8);
+        send8(&mut p, &rs, 2);
+        assert_eq!(poll(&mut p.a, p.la)[0].result, Ok(Completed::Send));
+        assert_eq!(
+            poll(&mut p.b, p.lb)[0].result,
+            Ok(Completed::Recv { byte_len: 8 })
+        );
+        assert_eq!(dst[8..16], [4u8; 8]);
     }
 }

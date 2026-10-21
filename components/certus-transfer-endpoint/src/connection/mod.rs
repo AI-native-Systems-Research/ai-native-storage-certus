@@ -10,8 +10,8 @@
 //! ([`mock`]) are T010; the connection table ([`table`]) and the connect-time
 //! identity it relies on ([`identity`]) are T012, which also absorbed T081's
 //! simultaneous-connect rule. The `wr_id` slab ([`slab`]) is T013 and
-//! send-queue credits ([`credits`]) are T014. Still scaffolding: fault
-//! injection in the mock (T011).
+//! send-queue credits ([`credits`]) are T014; the mock's fault knobs are T011,
+//! and the verbs transport (`verbs`, behind `rdma`) is T053.
 
 use std::fmt;
 

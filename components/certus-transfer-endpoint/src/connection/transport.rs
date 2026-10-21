@@ -368,9 +368,11 @@ impl CompletionError {
 pub mod wc {
     pub const SUCCESS: i32 = 0;
     pub const LOC_LEN_ERR: i32 = 1;
+    pub const LOC_PROT_ERR: i32 = 4;
     pub const WR_FLUSH_ERR: i32 = 5;
     pub const REM_INV_REQ_ERR: i32 = 9;
     pub const REM_ACCESS_ERR: i32 = 10;
+    pub const REM_OP_ERR: i32 = 11;
     pub const RETRY_EXC_ERR: i32 = 12;
     pub const RNR_RETRY_EXC_ERR: i32 = 13;
 }

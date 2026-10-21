@@ -30,8 +30,7 @@
 //!
 //! # Status
 //!
-//! Tasks T001–T083 (all but T011's
-//! remaining faults) of
+//! Tasks T001–T083 of
 //! `specs/001-rdma-cache-transfer/tasks.md` are complete: the crate builds as a
 //! workspace default member, peer identity is implemented, and the verbs FFI, its
 //! C shim and the safe wrappers over them exist behind `rdma`, and the transport
@@ -3636,6 +3635,144 @@ mod tests {
         dest.ep.shutdown().unwrap();
         src.ep.shutdown().unwrap();
         drop(slots);
+    }
+
+    // --- T011: fabric faults ------------------------------------------------
+
+    /// A peer that sends more than a receive buffer holds: on the NIC only the
+    /// receive fails and both queue pairs stay up, so tearing the connection
+    /// down is the endpoint's own decision — it does, and loudly; a fetch
+    /// outstanding on it fails after the barrier.
+    #[test]
+    fn an_oversized_message_is_the_endpoints_teardown() {
+        use crate::connection::transport::{Access, SendOp, SendRequest, Transport};
+        let f = MockFabric::new();
+        let (a, mut raw, link, h, slots) = raw_peer(&f, 340);
+        let rx = fetch_one(&a.ep, &h, 1);
+        eventually("the fetch is out", || {
+            session_of(&a.ep, "10.0.0.3:7000").is_some_and(|s| s.outbound.0 == 1)
+        });
+        let big: &'static mut [u8] =
+            Box::leak(vec![0u8; message::MESSAGE_LEN + 64].into_boxed_slice());
+        // SAFETY: leaked, so it outlives the send.
+        let r: &'static crate::connection::transport::Region = Box::leak(Box::new(
+            unsafe { raw.register(big.as_mut_ptr(), big.len(), Access::LOCAL_WRITE) }.unwrap(),
+        ));
+        // SAFETY: as above.
+        unsafe {
+            raw.link(link).unwrap().post_send(&[SendRequest {
+                wr_id: 2,
+                op: SendOp::Send,
+                local: r.sge(r.addr(), big.len()).unwrap(),
+                signaled: false,
+            }])
+        }
+        .unwrap();
+        assert!(matches!(
+            rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            Err(TransferEndpointError::Transport(_))
+        ));
+        eventually("a tore down", || {
+            session_of(&a.ep, "10.0.0.3:7000").is_none()
+        });
+        a.ep.shutdown().unwrap();
+        drop((raw, slots));
+    }
+
+    /// FR-026 under a finite RNR retry, made deterministic. Every fetch
+    /// misses, so the source replies at once with no writes. a's sends are
+    /// held while b's 8 requests reach a and a answers them: a's send queue
+    /// holds 8 replies. a then asks for 8 of its own, posted behind (a has 16
+    /// send credits, so all 16 are on its send queue at once). Released,
+    /// all 16 messages run at b in one burst, inside one call, before b's
+    /// thread can re-post a single receive. With the partition b posted 8
+    /// reserve + 8 quota and every one lands; without the reserve it posted 8,
+    /// the ninth finds none, and with a retry limit of zero that is
+    /// `RNR_RETRY_EXC_ERR`: the connection goes to ERROR and the fetches fail
+    /// loudly rather than stall. The deadlock the partition prevents, visible.
+    #[test]
+    fn the_receive_partition_survives_a_finite_rnr_retry() {
+        fn run(no_reserve: bool) -> (usize, usize, u64) {
+            let f = MockFabric::new();
+            // 16 send credits, so a's 8 replies and 8 requests are all on its
+            // send queue at once: with 8, the requests wait in the outbox
+            // behind the replies and the burst is never 16.
+            let a = node(&f, "10.0.0.1:7000", 16);
+            let b = node(&f, "10.0.0.2:7000", 8);
+            a.ep.initialize().unwrap();
+            b.ep.initialize().unwrap();
+            if no_reserve {
+                for n in [&a, &b] {
+                    n.ep.call(Command::NoReplyReserve).unwrap();
+                }
+            }
+            let mut slots_a = vec![0u8; 64].into_boxed_slice();
+            let mut slots_b = vec![0u8; 64].into_boxed_slice();
+            let ha =
+                a.ep.register_landing_region(slots_a.as_mut_ptr(), 64)
+                    .unwrap();
+            let hb =
+                b.ep.register_landing_region(slots_b.as_mut_ptr(), 64)
+                    .unwrap();
+            connect(&a.ep, "10.0.0.2:7000");
+            eventually("both ready", || {
+                session_of(&b.ep, "10.0.0.1:7000").is_some_and(|s| s.credits_available == 8)
+                    && session_of(&a.ep, "10.0.0.2:7000").is_some_and(|s| s.credits_available == 8)
+            });
+            f.rnr_retry_limit(Some(0));
+            let stalls = f.rnr_stalls();
+            let a_id = PeerId::parse("10.0.0.1:7000").unwrap();
+            f.hold_sends_from(&a_id, true);
+            let (tx, rx) = mpsc::channel();
+            let ask = |ep: &CertusTransferEndpoint, to: &str, h: &LandingRegionHandle| {
+                for i in 0..8 {
+                    let tx = tx.clone();
+                    ep.fetch(
+                        to,
+                        &[(99, h.region_at(i * 8, 8).unwrap())], // held by nobody
+                        Box::new(move |o| {
+                            let _ = tx.send(o);
+                        }),
+                    )
+                    .unwrap();
+                }
+            };
+            ask(&b.ep, "10.0.0.1:7000", &hb);
+            eventually("a answered all 8, its replies held", || {
+                f.pending_sends_from(&a_id) == 8
+            });
+            ask(&a.ep, "10.0.0.2:7000", &ha);
+            eventually("a's 8 requests queued behind", || {
+                f.pending_sends_from(&a_id) == 16
+            });
+            f.hold_sends_from(&a_id, false); // the burst
+            let (mut ok, mut failed) = (0, 0);
+            for _ in 0..16 {
+                match rx
+                    .recv_timeout(Duration::from_secs(10))
+                    .expect("every fetch completes")
+                {
+                    Ok(_) => ok += 1,
+                    Err(_) => failed += 1,
+                }
+            }
+            let stalled = f.rnr_stalls() - stalls;
+            a.ep.shutdown().unwrap();
+            b.ep.shutdown().unwrap();
+            drop((slots_a, slots_b));
+            (ok, failed, stalled)
+        }
+        assert_eq!(
+            run(false),
+            (16, 0, 0),
+            "with the reserve: no RNR, all answered"
+        );
+        let (ok, failed, stalled) = run(true);
+        assert_eq!(stalled, 1, "without it the ninth message found no buffer");
+        assert!(
+            failed > 0,
+            "and the connection failed loudly: {ok} ok, {failed} failed"
+        );
     }
 
     #[test]

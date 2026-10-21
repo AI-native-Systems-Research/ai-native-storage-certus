@@ -103,8 +103,10 @@ _Static_assert(IBV_WC_WR_FLUSH_ERR == 5, "IBV_WC_WR_FLUSH_ERR");
 /* The mock's completion statuses (connection/transport.rs `wc`), which have no
  * ffi.rs mirror to be checked by the Rust half. */
 _Static_assert(IBV_WC_LOC_LEN_ERR == 1, "IBV_WC_LOC_LEN_ERR");
+_Static_assert(IBV_WC_LOC_PROT_ERR == 4, "IBV_WC_LOC_PROT_ERR");
 _Static_assert(IBV_WC_REM_INV_REQ_ERR == 9, "IBV_WC_REM_INV_REQ_ERR");
 _Static_assert(IBV_WC_REM_ACCESS_ERR == 10, "IBV_WC_REM_ACCESS_ERR");
+_Static_assert(IBV_WC_REM_OP_ERR == 11, "IBV_WC_REM_OP_ERR");
 _Static_assert(IBV_WC_RETRY_EXC_ERR == 12, "IBV_WC_RETRY_EXC_ERR");
 _Static_assert(IBV_WC_RNR_RETRY_EXC_ERR == 13, "IBV_WC_RNR_RETRY_EXC_ERR");
 _Static_assert(IBV_ACCESS_LOCAL_WRITE == 1, "IBV_ACCESS_LOCAL_WRITE");
