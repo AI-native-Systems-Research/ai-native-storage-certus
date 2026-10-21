@@ -164,8 +164,15 @@ fn main() -> ExitCode {
 
     // Resolve the trace: --sharegpt, --weka-file, --qwen-file, or --dataset (download-on-demand).
     let (trace, source, trace_name) = if let Some(ref p) = cli.sharegpt {
-        let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.display().to_string());
-        match eviction_replay_benchmark::sharegpt::load(p, Some(cli.block_chars), cli.max_conversations) {
+        let name = p
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| p.display().to_string());
+        match eviction_replay_benchmark::sharegpt::load(
+            p,
+            Some(cli.block_chars),
+            cli.max_conversations,
+        ) {
             Ok(t) => (
                 t,
                 format!("sharegpt {} (block_chars={})", p.display(), cli.block_chars),
@@ -177,7 +184,10 @@ fn main() -> ExitCode {
             }
         }
     } else if let Some(ref p) = cli.weka_file {
-        let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.display().to_string());
+        let name = p
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| p.display().to_string());
         match eviction_replay_benchmark::weka::load(p, cli.max_conversations) {
             Ok(t) => (t, format!("weka {}", p.display()), name),
             Err(e) => {
@@ -188,7 +198,10 @@ fn main() -> ExitCode {
     } else {
         let (path, src, name) = match &cli.qwen_file {
             Some(p) => {
-                let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.display().to_string());
+                let name = p
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| p.display().to_string());
                 (p.clone(), format!("qwen-file {}", p.display()), name)
             }
             None => match dataset::ensure(cli.dataset.id()) {
@@ -374,8 +387,8 @@ fn generate_pdf(
     let title_line = title.lines().next().unwrap_or(title);
     let pdf_str = pdf_path.display().to_string();
 
-    let mut script_file = tempfile::NamedTempFile::new()
-        .map_err(|e| format!("failed to create temp script: {e}"))?;
+    let mut script_file =
+        tempfile::NamedTempFile::new().map_err(|e| format!("failed to create temp script: {e}"))?;
     script_file
         .write_all(PLOT_SCRIPT.as_bytes())
         .map_err(|e| format!("failed to write temp script: {e}"))?;
