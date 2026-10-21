@@ -1,0 +1,60 @@
+@startuml
+skinparam shadowing false
+skinparam defaultFontSize 11
+
+title Cache Put / Populate Flow (full-optimized)
+
+participant "Client\n(vLLM connector)" as client
+participant "shmq-dispatcher\n(/dev/shm)" as shmq
+participant "Dispatcher" as disp
+participant "MemoryTier\n(DRAM pool)" as mt
+participant "DispatchMap" as dm
+participant "BackgroundWriter" as bgw
+participant "ExtentManager" as em
+participant "BlockDevice\n(NVMe SSD)" as ssd
+
+== Split Store (Reserve -> CopyToStore -> CommitStore) ==
+
+client -> shmq: Reserve (keys, sizes)
+shmq -> shmq: batch_deadline =\nnow + store_backpressure
+loop each key
+  shmq -> disp: reserve_memory(key, size,\nsession, Some(batch_deadline))
+  disp -> mt: evict_and_insert\n(LRU, pin-safe; skip unpersisted)
+  alt pool full and before deadline
+    disp -> disp: sleep 20 ms, retry\n(store_backpressure_events++)
+  else deadline passed
+    disp --> shmq: AllocationFailed -> ok=0\n(client skips caching)
+  end
+  mt -> mt: policy.track(key):\nCMS++ ; est(key) <= est(LRU head)\n? push_front : push_back
+  mt --> disp: mem_ptr
+end
+shmq --> client: [ok]*n
+
+client -> shmq: CopyToStore (HandleBatch,\nN regions per block)
+shmq -> shmq: ipc_cache_open\n-> device_ptrs
+shmq -> disp: copy_gpu_to_memory_async\n(key, regions, null stream)
+disp -> disp: cudaMemcpyAsync D2H per region\n(store stream) + sync
+note right of disp: region L -> slot + sum(sizes[0..L])
+
+client -> shmq: CommitStore (keys)
+shmq -> disp: copy_gpu_to_memory_completed(key, size)
+disp -> dm: create_memory_tier_entry\n(key, ptr, size) [write ref]
+note right of dm: Entry visible to\ncheck/lookup immediately
+disp -> dm: downgrade_reference\n(write -> read)
+disp -> bgw: enqueue WriteJob\n(key, size, splitmix64(key) % N)
+disp --> shmq: Ok
+shmq --> client: [ok]*n
+
+== Asynchronous Write-Through ==
+
+bgw -> mt: get(key) -> (ptr, size)
+bgw -> em: reserve_extent(key, size)\n-> WriteHandle
+bgw -> ssd: write segments\n(MDTS-aware, zero-copy from slot)
+bgw -> em: publish()\n(finalize extent)
+bgw -> dm: convert_to_storage\n(key, block_offset)
+note right of dm: ssd_offset set; entry stays\nMemoryTier, now durable/evictable
+bgw -> dm: release_read(key)
+
+note over mt, ssd: Single-call populate(key, IpcHandle) runs the same steps;\non AllocationFailed after the budget it drops the store and returns Ok\n(store_drops_on_full++).
+
+@enduml
