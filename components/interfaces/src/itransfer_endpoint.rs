@@ -364,7 +364,8 @@ pub type FetchCompletion = Box<dyn FnOnce(FetchResult) + Send>;
 pub struct TransferStats {
     /// Entries named across all requests.
     pub entries_requested: u64,
-    /// Entries served from a memory tier.
+    /// Entries of this end's own requests that came back from a peer's memory
+    /// tier. Serving a peer's request is not counted here.
     pub hit_memory_tier: u64,
     /// Entries served from a block tier.
     pub hit_block_tier: u64,
