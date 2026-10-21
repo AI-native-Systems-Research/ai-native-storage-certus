@@ -246,26 +246,78 @@ struct Conn {
     /// they spend no message credit, and waiting on one starves the peer.
     outbox: VecDeque<(MsgBuf, usize)>,
     /// Our requests on this connection, by the `context_id` we gave them —
-    /// the **outbound** book. Its ids are ours; the inbound book is the
-    /// pushes with `Finish::Reply`, whose ids are the peer's. The same number
-    /// can be live in both, and they are unrelated (FR-026, D22).
-    outbound: BTreeMap<u64, u64>,
+    /// the **outbound** book: (fetch id, chunk index). Its ids are ours; the
+    /// inbound book is the pushes with `Finish::Reply`, whose ids are the
+    /// peer's. The same number can be live in both, and they are unrelated
+    /// (FR-026, D22). One id per chunk message: nothing on the wire links the
+    /// chunks of one fetch.
+    outbound: BTreeMap<u64, (u64, usize)>,
     next_context: u64,
 }
 
-/// A fetch in progress: one caller's request, on one connection.
+/// A fetch in progress: one caller's request, on one connection, split into
+/// chunks of the peer's `max_entries` once its `OP_HELLO` says what that is.
 struct Fetch {
     peer: PeerId,
-    /// Not yet sent: waiting for the exchange, or for a message credit.
-    unsent: Option<Vec<(CacheKey, RemoteRegion)>>,
+    /// Not yet chunked: the exchange has not told us the peer's limit.
+    items: Option<Vec<(CacheKey, RemoteRegion)>>,
+    chunks: Vec<Chunk>,
     len: usize,
-    /// The requested keys' range, for a deadline's diagnostic.
-    keys: (CacheKey, CacheKey),
-    /// When the request was handed to the transport, and the context id it
-    /// went out under. The reply deadline runs from here: a fetch waiting
-    /// for a credit or the exchange is queued, not stuck.
-    sent: Option<(Instant, u64)>,
+    /// One per item, filled from each chunk's reply at its recorded offset.
+    outcomes: Vec<Option<EntryOutcome>>,
+    /// The first chunk the peer refused, if any: the fetch then fails as a
+    /// whole once every chunk has settled (a prefix is never half-filled).
+    refused: Option<String>,
     on_complete: Option<FetchCompletion>,
+}
+
+/// One message's worth of a fetch.
+struct Chunk {
+    /// Where its entries start in the caller's item list.
+    offset: usize,
+    items: Vec<(CacheKey, RemoteRegion)>,
+    state: ChunkState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChunkState {
+    /// Waiting for a message credit.
+    Unsent,
+    /// On the wire: when it was handed to the transport, and the context id it
+    /// went out under. The reply deadline runs from here: a chunk waiting
+    /// for a credit or the exchange is queued, not stuck.
+    Sent { at: Instant, ctx: u64 },
+    /// Answered, or refused.
+    Settled,
+}
+
+impl Fetch {
+    /// Split into chunks of at most `max` entries, in request order — which
+    /// is key order for a prefix, so a stall truncates it cleanly.
+    fn chunk(&mut self, max: usize) {
+        let items = self.items.take().expect("chunked once");
+        let max = max.max(1);
+        self.chunks = items
+            .chunks(max)
+            .enumerate()
+            .map(|(i, c)| Chunk {
+                offset: i * max,
+                items: c.to_vec(),
+                state: ChunkState::Unsent,
+            })
+            .collect();
+    }
+
+    /// Every chunk answered or refused. An empty fetch is settled at once.
+    fn settled(&self) -> bool {
+        self.items.is_none() && self.chunks.iter().all(|c| c.state == ChunkState::Settled)
+    }
+
+    /// The requested keys' range, for a deadline's diagnostic.
+    fn keys(chunk: &Chunk) -> (CacheKey, CacheKey) {
+        let ks = chunk.items.iter().map(|(k, _)| *k);
+        (ks.clone().min().unwrap_or(0), ks.max().unwrap_or(0))
+    }
 }
 
 /// Why a whole fetch fails before a usable reply: the `Err` its callback
@@ -278,8 +330,6 @@ enum Abort {
     Lost(String),
     /// This fetch's own reply deadline expired.
     Deadline(String),
-    /// Larger than the peer accepts.
-    TooLarge(usize),
 }
 
 impl Abort {
@@ -288,7 +338,6 @@ impl Abort {
             Abort::Refused(m) => TransferEndpointError::Protocol(m),
             Abort::Lost(m) => TransferEndpointError::Transport(m),
             Abort::Deadline(m) => TransferEndpointError::Deadline(m),
-            Abort::TooLarge(n) => TransferEndpointError::RequestTooLarge { max_entries: n },
         }
     }
 }
@@ -320,6 +369,8 @@ pub(crate) struct EndpointActor {
     next_push: u64,
     /// Fetches in progress, by the caller's `TransferContextId`.
     fetches: BTreeMap<u64, Fetch>,
+    /// The fetch that last sent a chunk: the next turn starts after it.
+    turn: u64,
     /// The block-tier reader threads, when a block source is bound (`spdk`).
     readers: Option<Readers>,
     /// Block-tier reads out, by job id: each entry's pin waits here until its
@@ -373,6 +424,7 @@ impl EndpointActor {
             pushes: BTreeMap::new(),
             next_push: 0,
             fetches: BTreeMap::new(),
+            turn: 0,
             readers: None,
             reads: BTreeMap::new(),
             next_read: 0,
@@ -461,13 +513,19 @@ impl EndpointActor {
         }
     }
 
-    /// Fire a fetch's callback once with the peer's reply, and count it.
-    fn complete_fetch(&mut self, mut f: Fetch, outcomes: Vec<EntryOutcome>) {
-        debug_assert_eq!(
-            outcomes.len(),
-            f.len,
-            "a reply's length is checked on receipt"
-        );
+    /// Fire a fetch's callback once, every chunk having been answered, and
+    /// count it: its outcomes, or — if the peer refused any chunk — `Protocol`
+    /// for the whole fetch, since a fetch with a hole is not a usable prefix.
+    fn complete_fetch(&mut self, mut f: Fetch) {
+        debug_assert!(f.settled());
+        if let Some(why) = f.refused.take() {
+            return self.abort_fetch(f, Abort::Refused(why));
+        }
+        let outcomes: Vec<EntryOutcome> = f
+            .outcomes
+            .iter()
+            .map(|o| o.expect("every chunk was answered"))
+            .collect();
         if let Some(t) = self.table.as_mut() {
             count_outcomes(t.counters_mut(), &outcomes);
         }
@@ -499,26 +557,36 @@ impl EndpointActor {
         let now = Instant::now();
         let mut expired: BTreeMap<PeerId, (u64, String)> = BTreeMap::new();
         for (&id, f) in &self.fetches {
-            let Some((sent, ctx)) = f.sent else {
-                continue;
-            };
-            if now.duration_since(sent) < limit || expired.contains_key(&f.peer) {
+            if expired.contains_key(&f.peer) {
                 continue;
             }
+            let late = f
+                .chunks
+                .iter()
+                .enumerate()
+                .find_map(|(k, c)| match c.state {
+                    ChunkState::Sent { at, ctx } if now.duration_since(at) >= limit => {
+                        Some((k, c, ctx))
+                    }
+                    _ => None,
+                });
+            let Some((k, chunk, ctx)) = late else {
+                continue;
+            };
             let qp = self
                 .table
                 .as_mut()
                 .and_then(|t| t.link_state(&f.peer))
                 .map_or_else(|| "no link".to_string(), |s| format!("{s:?}"));
             let siblings = self.fetches.values().filter(|g| g.peer == f.peer).count() - 1;
+            let (lo, hi) = Fetch::keys(chunk);
             let why = format!(
                 "no reply from {peer} within {limit:?}: keys {lo}..={hi} ({n} entries), \
-                 chunk 0 (context {ctx}), queue pair {qp}; tearing the connection down \
-                 aborts {siblings} sibling fetch(es)",
+                 chunk {k} of {of} (context {ctx}), queue pair {qp}; tearing the connection \
+                 down aborts {siblings} sibling fetch(es)",
                 peer = f.peer,
-                lo = f.keys.0,
-                hi = f.keys.1,
-                n = f.len,
+                n = chunk.items.len(),
+                of = f.chunks.len(),
             );
             expired.insert(f.peer.clone(), (id, why));
         }
@@ -640,16 +708,13 @@ impl EndpointActor {
         on_complete: FetchCompletion,
     ) {
         let len = items.len();
-        let keys = (
-            items.iter().map(|(k, _)| *k).min().unwrap_or(0),
-            items.iter().map(|(k, _)| *k).max().unwrap_or(0),
-        );
         let fetch = Fetch {
             peer: peer.clone(),
-            unsent: Some(items),
+            items: Some(items),
+            chunks: Vec::new(),
             len,
-            keys,
-            sent: None,
+            outcomes: vec![None; len],
+            refused: None,
             on_complete: Some(on_complete),
         };
         let Some(table) = self.table.as_mut() else {
@@ -667,62 +732,83 @@ impl EndpointActor {
         self.fetches.insert(id, fetch);
     }
 
-    /// Send every unsent fetch whose connection is ready and has a message
-    /// credit. A fetch larger than the peer accepts is refused before it is
-    /// sent (chunking is Phase 7). Returns whether anything moved.
+    /// Send unsent chunks while their connections are ready and have message
+    /// credits: a fetch is chunked against the peer's `max_entries` once its
+    /// `OP_HELLO` is in, and its chunks go out in order, one per credit (FR-015
+    /// — waiting, never failing). Fetches to one peer take turns, a chunk each
+    /// per round, so one large fetch cannot hold every credit while a small
+    /// one waits. Returns whether anything moved.
     fn send_fetches(&mut self) -> bool {
         let mut did = false;
-        let mut too_large = Vec::new();
-        for (&id, f) in self.fetches.iter_mut() {
-            let Some(items) = f.unsent.as_ref() else {
-                continue;
-            };
-            let Some(conn) = self.conns.get_mut(&f.peer) else {
-                continue;
-            };
-            if conn.session.phase() != Phase::Ready {
-                continue;
+        let mut empty = Vec::new();
+        loop {
+            let mut sent_this_round = false;
+            // Each round starts after the fetch that last sent a chunk, so a
+            // freed credit goes to the next fetch in turn, not the oldest.
+            use std::ops::Bound::{Excluded, Unbounded};
+            let order: Vec<u64> = self
+                .fetches
+                .range((Excluded(self.turn), Unbounded))
+                .chain(self.fetches.range(..=self.turn))
+                .map(|(&id, _)| id)
+                .collect();
+            for id in order {
+                let f = self.fetches.get_mut(&id).expect("listed above");
+                let Some(conn) = self.conns.get_mut(&f.peer) else {
+                    continue;
+                };
+                if conn.session.phase() != Phase::Ready {
+                    continue;
+                }
+                if f.items.is_some() {
+                    f.chunk(conn.session.peer_max_entries() as usize);
+                    if f.chunks.is_empty() {
+                        empty.push(id);
+                        continue;
+                    }
+                }
+                let Some(k) = f.chunks.iter().position(|c| c.state == ChunkState::Unsent) else {
+                    continue;
+                };
+                if !conn.session.try_send_request() {
+                    continue; // no credit: wait, never fail (FR-015)
+                }
+                let Some(table) = self.table.as_mut() else {
+                    return did;
+                };
+                if self.msgs.reserve(table.transport(), 1).is_err() {
+                    // Unspent: nothing was sent.
+                    let _ = conn.session.on_reply();
+                    continue;
+                }
+                let ctx = conn.next_context;
+                conn.next_context += 1;
+                conn.outbound.insert(ctx, (id, k));
+                let chunk = &mut f.chunks[k];
+                chunk.state = ChunkState::Sent {
+                    at: Instant::now(),
+                    ctx,
+                };
+                let b = self.msgs.take().expect("reserved");
+                let version = conn.session.version().expect("Ready");
+                // SAFETY: just taken from the free list.
+                let len = message::encode_fetch(version, ctx, &chunk.items, unsafe {
+                    self.msgs.bytes_mut(b)
+                });
+                conn.outbox.push_back((b, len));
+                table.counters_mut().chunks_sent += 1;
+                self.turn = id;
+                sent_this_round = true;
+                did = true;
             }
-            if items.len() > conn.session.peer_max_entries() as usize {
-                too_large.push(id);
-                continue;
+            if !sent_this_round {
+                break;
             }
-            if !conn.session.try_send_request() {
-                continue; // no credit: wait, never fail (FR-015)
-            }
-            let Some(table) = self.table.as_mut() else {
-                return did;
-            };
-            if self.msgs.reserve(table.transport(), 1).is_err() {
-                // Unspent: nothing was sent.
-                let _ = conn.session.on_reply();
-                continue;
-            }
-            let items = f.unsent.take().expect("checked above");
-            let ctx = conn.next_context;
-            conn.next_context += 1;
-            conn.outbound.insert(ctx, id);
-            f.sent = Some((Instant::now(), ctx));
-            let b = self.msgs.take().expect("reserved");
-            let version = conn.session.version().expect("Ready");
-            // SAFETY: just taken from the free list.
-            let len =
-                message::encode_fetch(version, ctx, &items, unsafe { self.msgs.bytes_mut(b) });
-            conn.outbox.push_back((b, len));
-            did = true;
         }
-        for id in too_large {
+        // Nothing to ask for: answered at once, with no outcomes.
+        for id in empty {
             let f = self.fetches.remove(&id).expect("listed above");
-            let max = self
-                .conns
-                .get(&f.peer)
-                .map_or(0, |c| c.session.peer_max_entries() as usize);
-            self.logger.warn(&format!(
-                "certus-transfer-endpoint: fetch of {} entries exceeds the {max} {} accepts; \
-                 chunking lands in Phase 7",
-                f.len, f.peer
-            ));
-            self.abort_fetch(f, Abort::TooLarge(max));
+            self.complete_fetch(f);
         }
         did
     }
@@ -1238,46 +1324,70 @@ impl EndpointActor {
                 if e.offending_opcode != Kind::Fetch.opcode() {
                     return Err(format!("OP_ERROR for a request we never sent: {e:?}"));
                 }
-                let id = conn
+                let (id, k) = conn
                     .outbound
                     .remove(&e.context_id)
                     .ok_or("OP_ERROR for no fetch of ours")?;
                 conn.session.on_reply().map_err(|v| format!("{v:?}"))?;
                 self.logger.warn(&format!(
-                    "certus-transfer-endpoint: {peer} refused a fetch: {e:?}"
+                    "certus-transfer-endpoint: {peer} refused chunk {k} of fetch {id}: {e:?}"
                 ));
-                if let Some(f) = self.fetches.remove(&id) {
-                    self.abort_fetch(f, Abort::Refused(format!("{peer} refused it: {e:?}")));
+                if let Some(f) = self.fetches.get_mut(&id) {
+                    // The rest of the fetch still settles — its other chunks
+                    // may be writing into its slots — and then fails whole.
+                    f.chunks[k].state = ChunkState::Settled;
+                    f.refused
+                        .get_or_insert(format!("{peer} refused chunk {k}: {e:?}"));
+                    // Unsent chunks are not worth sending now.
+                    for c in &mut f.chunks {
+                        if c.state == ChunkState::Unsent {
+                            c.state = ChunkState::Settled;
+                        }
+                    }
+                    if f.settled() {
+                        let f = self.fetches.remove(&id).expect("just found");
+                        self.complete_fetch(f);
+                    }
                 }
                 Ok(())
             }
             Kind::FetchReply => {
-                let id = conn
+                let (id, k) = conn
                     .outbound
                     .remove(&h.context_id)
                     .ok_or("a fetch reply for no request of ours")?;
                 let f = self
                     .fetches
-                    .remove(&id)
+                    .get_mut(&id)
                     .ok_or("a reply for a finished fetch")?;
-                let outcomes = message::decode_reply(&h, msg).map_err(|m| m.what.to_string());
-                let outcomes = match outcomes {
-                    Ok(o) if o.len() == f.len => o,
+                let want = f.chunks[k].items.len();
+                let outcomes = match message::decode_reply(&h, msg) {
+                    Ok(o) if o.len() == want => o,
                     // A bad reply is a teardown, and the fetch fails with it —
                     // after the teardown, so its slots are safe to reclaim.
-                    bad => {
-                        self.fetches.insert(id, f);
-                        return Err(match bad {
-                            Err(e) => e,
-                            Ok(o) => format!("{} outcomes for {} entries", o.len(), id),
-                        });
+                    Ok(o) => {
+                        return Err(format!(
+                            "{} outcomes for chunk {k} of fetch {id}, of {want} entries",
+                            o.len()
+                        ))
                     }
+                    Err(e) => return Err(e.what.to_string()),
                 };
                 conn.session.on_reply().map_err(|v| format!("{v:?}"))?;
                 // Every write for a hit completed before this reply was sent
                 // (the source's ordering guarantee), so each hit is safe for the
                 // caller to commit and each miss or failure to abort (T035).
-                self.complete_fetch(f, outcomes);
+                // Placed by the chunk's offset: replies to one fetch's chunks
+                // may come in any order (FR-013).
+                let chunk = &mut f.chunks[k];
+                chunk.state = ChunkState::Settled;
+                for (i, o) in outcomes.into_iter().enumerate() {
+                    f.outcomes[chunk.offset + i] = Some(o);
+                }
+                if f.settled() {
+                    let f = self.fetches.remove(&id).expect("just found");
+                    self.complete_fetch(f);
+                }
                 Ok(())
             }
             Kind::Fetch => {
