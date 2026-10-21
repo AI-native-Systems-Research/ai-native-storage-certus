@@ -21,7 +21,7 @@ component-macros.workspace = true
 # Only IMemoryTier/ILogger are used, neither of which needs the spdk feature.
 interfaces.workspace = true
 
-anyhow = "1"
+anyhow = "1.0.103"
 
 [build-dependencies]
 cc = "1"

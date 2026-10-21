@@ -356,7 +356,7 @@ fn empirical_reads_samples_from_a_file() {
     std::fs::write(&path, "# a comment\n3 1\n2,5\n\n4\n").unwrap();
 
     let mut d: Distribution =
-        serde_yaml::from_str("{empirical: {file: lengths.txt}}").expect("parses");
+        serde_norway::from_str("{empirical: {file: lengths.txt}}").expect("parses");
     // Unloaded, it refuses to resolve rather than silently sampling nothing.
     assert!(d.resolve(None).is_err());
     d.load_sample_files(&dir).expect("loads");
@@ -479,7 +479,7 @@ fn effective_bounds_are_never_escaped() {
 fn infinity_is_legal_in_any_numeric_position() {
     // `lifetime: {constant: inf}` is how a description says "never expires", so
     // it must resolve and sample rather than being rejected as degenerate.
-    let d: Distribution = serde_yaml::from_str("{constant: inf}").unwrap();
+    let d: Distribution = serde_norway::from_str("{constant: inf}").unwrap();
     let r = d.resolve(None).unwrap();
     let mut g = rng::seeded(61);
     assert_eq!(r.sample(&mut g), f64::INFINITY);
@@ -487,9 +487,9 @@ fn infinity_is_legal_in_any_numeric_position() {
 
     // And as an explicit upper bound, where it must be a no-op.
     let bounded: Distribution =
-        serde_yaml::from_str("{exponential: {mean: 10, min: 1, max: inf}}").unwrap();
+        serde_norway::from_str("{exponential: {mean: 10, min: 1, max: inf}}").unwrap();
     let unbounded: Distribution =
-        serde_yaml::from_str("{exponential: {mean: 10, min: 1}}").unwrap();
+        serde_norway::from_str("{exponential: {mean: 10, min: 1}}").unwrap();
     assert_eq!(
         bounded.resolve(None).unwrap().effective(),
         unbounded.resolve(None).unwrap().effective()

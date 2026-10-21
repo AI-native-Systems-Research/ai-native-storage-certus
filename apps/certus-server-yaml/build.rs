@@ -507,7 +507,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 2. Parse and validate manifest
     let yaml_content = fs::read_to_string(&manifest_path)
         .unwrap_or_else(|e| panic!("cannot read profile '{manifest_path}': {e}"));
-    let manifest: ProfileManifest = serde_yaml::from_str(&yaml_content)
+    let manifest: ProfileManifest = serde_norway::from_str(&yaml_content)
         .unwrap_or_else(|e| panic!("invalid YAML in '{manifest_path}': {e}"));
     validate_manifest(&manifest);
 

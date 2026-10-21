@@ -20,7 +20,7 @@ publish = false
 rand = "0.8"
 rand_chacha = "0.3"
 serde = { version = "1", features = ["derive"] }
-serde_yaml = "0.9"
+serde_norway = "0.9"
 
 [dev-dependencies]
 criterion = "0.5"
