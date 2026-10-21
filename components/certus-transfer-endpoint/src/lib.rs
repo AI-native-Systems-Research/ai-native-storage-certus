@@ -30,7 +30,7 @@
 //!
 //! # Status
 //!
-//! Scaffolding. Tasks T001–T056, T068–T083 (all but T011's
+//! Tasks T001–T083 (all but T011's
 //! remaining faults) of
 //! `specs/001-rdma-cache-transfer/tasks.md` are complete: the crate builds as a
 //! workspace default member, peer identity is implemented, and the verbs FFI, its
@@ -43,7 +43,7 @@
 //! deadline; and with `spdk`, block-tier entries are read by the dispatcher into
 //! the memory tier's bounce reserve and served from there. A fetch of any length
 //! is chunked against the peer's `max_entries`. An `rdma` build runs over the
-//! verbs transport. Still to come: benchmarks and polish (Phase 10).
+//! verbs transport. Phase 11, the cutover, is out of scope here.
 
 #![deny(missing_docs)]
 
@@ -199,6 +199,119 @@ mod component {
 /// responder's approach, not the initiator's register-per-connect; and, with
 /// `spdk`, `dispatcher`, which reads a pinned block-tier entry into the memory
 /// tier's bounce reserve (D13, D15) — the endpoint never addresses a device.
+///
+/// # Example
+///
+/// Two endpoints, wired and started as an application would, then a push of
+/// one cached entry from one into the other's landing region. The default
+/// build runs this over the in-process mock. An `rdma` build runs the same
+/// code over the NIC, which needs real RDMA addresses — so there the example
+/// is compiled but not run (`loopback_test` is its hardware counterpart).
+///
+#[cfg_attr(not(feature = "rdma"), doc = "```")]
+#[cfg_attr(feature = "rdma", doc = "```no_run")]
+/// use std::sync::{Arc, Mutex};
+/// use certus_transfer_endpoint::CertusTransferEndpoint;
+/// use interfaces::{
+///     CacheKey, DispatchMapError, EndpointConfig, EntryOutcome, IDispatchMap, IMemoryTier,
+///     ITransferEndpoint, ITransferEndpointAdmin, LookupResult,
+/// };
+/// # use interfaces::{BounceError, BounceLease, MemoryTierError, MemoryTierTelemetrySnapshot};
+///
+/// // A dispatch map holding one entry, pinned per lookup as the real one is.
+/// struct OneEntry { addr: u64, pins: Mutex<i64> }
+/// impl IDispatchMap for OneEntry {
+///     fn lookup(&self, key: CacheKey) -> Result<LookupResult, DispatchMapError> {
+///         if key != 7 { return Ok(LookupResult::NotExist) }
+///         *self.pins.lock().unwrap() += 1;
+///         Ok(LookupResult::MemoryTier { pointer: self.addr as *mut u8, size: 5 })
+///     }
+///     fn release_read(&self, _: CacheKey) -> Result<(), DispatchMapError> {
+///         *self.pins.lock().unwrap() -= 1;
+///         Ok(())
+///     }
+///     // ... the rest of the interface, unused here
+/// #   fn initialize(&self) -> Result<(), DispatchMapError> { Ok(()) }
+/// #   fn convert_to_storage(&self, _: CacheKey, _: u64) -> Result<(), DispatchMapError> { unimplemented!() }
+/// #   fn take_read(&self, _: CacheKey) -> Result<(), DispatchMapError> { unimplemented!() }
+/// #   fn take_write(&self, _: CacheKey) -> Result<(), DispatchMapError> { unimplemented!() }
+/// #   fn release_write(&self, _: CacheKey) -> Result<(), DispatchMapError> { unimplemented!() }
+/// #   fn downgrade_reference(&self, _: CacheKey) -> Result<(), DispatchMapError> { unimplemented!() }
+/// #   fn remove(&self, _: CacheKey) -> Result<(), DispatchMapError> { unimplemented!() }
+/// #   fn touch(&self, _: CacheKey) -> Result<(), DispatchMapError> { unimplemented!() }
+/// #   fn entry_size(&self, _: CacheKey) -> Result<u32, DispatchMapError> { unimplemented!() }
+/// #   fn oldest_keys(&self, _: usize) -> Vec<CacheKey> { unimplemented!() }
+/// #   fn create_memory_tier_entry(&self, _: CacheKey, _: *mut u8, _: u32) -> Result<(), DispatchMapError> { unimplemented!() }
+/// #   fn convert_memory_tier_to_block(&self, _: CacheKey) -> Result<(), DispatchMapError> { unimplemented!() }
+/// #   fn promote_block_to_memory_tier(&self, _: CacheKey, _: *mut u8, _: u32) -> Result<(), DispatchMapError> { unimplemented!() }
+/// #   fn is_evictable(&self, _: CacheKey) -> bool { unimplemented!() }
+/// #   fn try_evict_to_block(&self, _: CacheKey) -> Result<(), DispatchMapError> { unimplemented!() }
+/// #   fn recover_extent(&self, _: CacheKey, _: u64, _: u32) -> Result<(), DispatchMapError> { unimplemented!() }
+/// }
+///
+/// // A memory tier reporting its pool, which the endpoint registers once.
+/// struct Pool(usize, usize);
+/// // SAFETY: only the pool's address and length are read.
+/// unsafe impl Send for Pool {}
+/// unsafe impl Sync for Pool {}
+/// impl IMemoryTier for Pool {
+///     fn pool_info(&self) -> Option<(*mut u8, usize)> { Some((self.0 as *mut u8, self.1)) }
+///     // ... the rest of the interface, unused here
+/// #   fn initialize(&self, _: usize, _: Option<i32>) -> Result<(), MemoryTierError> { unimplemented!() }
+/// #   fn insert(&self, _: CacheKey, _: u32) -> Result<*mut u8, MemoryTierError> { unimplemented!() }
+/// #   fn get(&self, _: CacheKey) -> Option<(*mut u8, u32)> { unimplemented!() }
+/// #   fn peek(&self, _: CacheKey) -> Option<(*mut u8, u32)> { unimplemented!() }
+/// #   fn evict_next(&self) -> Option<CacheKey> { unimplemented!() }
+/// #   fn evict_next_for_key(&self, _: CacheKey) -> Option<CacheKey> { unimplemented!() }
+/// #   fn oldest_keys(&self, _: usize) -> Vec<CacheKey> { unimplemented!() }
+/// #   fn remove(&self, _: CacheKey) -> Result<(), MemoryTierError> { unimplemented!() }
+/// #   fn touch(&self, _: CacheKey) { unimplemented!() }
+/// #   fn batch_touch(&self, _: &[CacheKey]) { unimplemented!() }
+/// #   fn contains(&self, _: CacheKey) -> bool { unimplemented!() }
+/// #   fn capacity(&self) -> usize { self.1 }
+/// #   fn used(&self) -> usize { unimplemented!() }
+/// #   fn is_dma_capable(&self) -> bool { unimplemented!() }
+/// #   fn clear(&self) -> Result<usize, MemoryTierError> { unimplemented!() }
+/// #   fn telemetry_snapshot(&self) -> MemoryTierTelemetrySnapshot { unimplemented!() }
+/// #   fn set_bounce_reserve(&self, _: usize) -> Result<(), MemoryTierError> { unimplemented!() }
+/// #   fn bounce_alloc(&self, _: u32) -> Result<BounceLease, BounceError> { unimplemented!() }
+/// #   fn bounce_free(&self, _: BounceLease) { unimplemented!() }
+/// #   fn bounce_usage(&self) -> (usize, usize) { unimplemented!() }
+/// }
+///
+/// fn endpoint(local: &str, pool: &mut [u8], map: Arc<OneEntry>) -> Arc<CertusTransferEndpoint> {
+///     let ep = CertusTransferEndpoint::create();
+///     ep.dispatch_map.connect(map).unwrap();
+///     ep.memory_tier
+///         .connect(Arc::new(Pool(pool.as_mut_ptr() as usize, pool.len())))
+///         .unwrap();
+///     ep.configure(EndpointConfig::new(local)).unwrap();
+///     ep.initialize().unwrap();
+///     ep
+/// }
+///
+/// let mut src_pool = *b"hello, peer.....";
+/// let map = Arc::new(OneEntry { addr: src_pool.as_ptr() as u64, pins: Mutex::new(0) });
+/// let src = endpoint("10.20.30.1:7000", &mut src_pool, Arc::clone(&map));
+/// let mut dst_pool = [0u8; 16];
+/// let dst = endpoint("10.20.30.2:7000", &mut dst_pool, Arc::new(OneEntry { addr: 0, pins: Mutex::new(0) }));
+///
+/// // The destination names a slot in a region peers may write into.
+/// let mut landing = vec![0u8; 64];
+/// let slots = dst.register_landing_region(landing.as_mut_ptr(), landing.len()).unwrap();
+///
+/// // Key 7 is held; key 8 is not.
+/// let out = src
+///     .push("10.20.30.2:7000", &[(7, slots.region_at(0, 5).unwrap()),
+///                                (8, slots.region_at(8, 5).unwrap())])
+///     .unwrap();
+/// assert_eq!(out, [EntryOutcome::HitMemoryTier, EntryOutcome::Miss]);
+/// assert_eq!(&landing[..5], b"hello");
+/// assert_eq!(*map.pins.lock().unwrap(), 0, "the pin was released");
+///
+/// src.shutdown().unwrap();
+/// dst.shutdown().unwrap();
+/// ```
 pub use component::CertusTransferEndpoint;
 
 impl CertusTransferEndpoint {
