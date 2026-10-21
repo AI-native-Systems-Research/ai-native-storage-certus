@@ -443,15 +443,24 @@ pub struct EndpointConfig {
     /// Receive work requests the device is asked to accept per connection.
     pub max_recv_wr: u32,
     /// Send-queue credits per connection: in-flight send-queue requests, and
-    /// so held read pins. Clamped to what the device grants.
+    /// so held read pins. Clamped to what the device grants. Default 8: the
+    /// bandwidth-delay product at 200 Gb/s and the measured write round trip
+    /// asks for 3 at 64 KiB entries and 2 at 2.25 MiB; 8 keeps headroom for
+    /// the endpoint thread's polling, which the derivation does not model
+    /// (certus-transfer-endpoint research D10).
     pub send_credits: u32,
     /// Message credits per connection: requests this end may have outstanding
     /// against the peer. Also the size of this end's reply reserve — one
     /// posted receive per credit, since each request draws exactly one reply.
     /// The peer's advertised quota may lower the effective value further.
+    /// Default 4: two keep the link busy — one message on the wire, one
+    /// waiting at the source — and two more cover the source's per-message
+    /// service time at its worst measured (D10).
     pub message_credits: u32,
     /// The inbound-request quota this end advertises: how many requests the
-    /// peer may have outstanding against it. One posted receive each.
+    /// peer may have outstanding against it. One posted receive each. Default
+    /// 4, matching the peers' `message_credits`: a larger quota buys nothing a
+    /// peer will use and lets one peer queue more work here.
     pub inbound_quota: u32,
     /// CPU to pin the endpoint thread to, normally one on the NIC's NUMA node.
     pub actor_cpu: Option<usize>,
@@ -502,8 +511,8 @@ impl EndpointConfig {
             max_send_wr: 128,
             max_recv_wr: 64,
             send_credits: 8,
-            message_credits: 8,
-            inbound_quota: 8,
+            message_credits: 4,
+            inbound_quota: 4,
             actor_cpu: None,
             fetch_deadline: Some(std::time::Duration::from_secs(5)),
             deadline_action: DeadlineAction::FailLoud,
