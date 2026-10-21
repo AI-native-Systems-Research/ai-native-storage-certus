@@ -1,7 +1,7 @@
 //! Background write worker for memory-tier-to-SSD persistence and SSD eviction.
 
 use crossbeam_channel::{Receiver, Sender};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -253,9 +253,14 @@ impl EvictionSender {
 /// must not wait for that: this ledger records which keys hold such a pin so
 /// `remove` can take it over, and makes the job and `remove` agree on who
 /// releases the pin and who frees the DRAM slot the job may still be reading.
+///
+/// It also records the keys whose latest write-through failed, so that
+/// `flush_to_ssd` can report an entry left with no SSD copy.
 #[derive(Default)]
 pub struct WriteThroughPins {
     keys: Mutex<HashMap<CacheKey, PinState>>,
+    /// Keys whose latest write-through did not land on the block device.
+    failed: Mutex<HashSet<CacheKey>>,
 }
 
 #[derive(Default)]
@@ -353,6 +358,25 @@ impl WriteThroughPins {
         let job_frees_slot = s.running;
         Self::forget_if_idle(&mut keys, key);
         Some(job_frees_slot)
+    }
+
+    /// A write-through for `key` was settled: `landed` if its data reached the
+    /// block device and the SSD offset was recorded.
+    pub(crate) fn record_write(&self, key: CacheKey, landed: bool) {
+        let mut failed = self.failed.lock().unwrap();
+        if landed {
+            failed.remove(&key);
+        } else {
+            failed.insert(key);
+        }
+    }
+
+    /// Number of keys whose latest write-through failed and that `resident`
+    /// still holds; keys no longer resident (removed since) are forgotten.
+    pub(crate) fn failed_writes(&self, resident: impl Fn(CacheKey) -> bool) -> usize {
+        let mut failed = self.failed.lock().unwrap();
+        failed.retain(|&key| resident(key));
+        failed.len()
     }
 
     fn forget_if_idle(keys: &mut HashMap<CacheKey, PinState>, key: CacheKey) {

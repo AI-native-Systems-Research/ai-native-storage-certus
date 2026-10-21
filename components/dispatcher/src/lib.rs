@@ -1393,19 +1393,22 @@ impl DispatcherComponent {
         }
     }
 
+    /// Returns whether the data landed (an SSD offset was recorded).
     fn process_write_job(
         dm: &Arc<dyn IDispatchMap + Send + Sync>,
         mt: &Arc<dyn IMemoryTier + Send + Sync>,
         drives: &[Arc<dyn IBlockDevice + Send + Sync>],
         extent_mgrs: &[Arc<dyn IExtentManager + Send + Sync>],
         job: WriteJob,
-    ) {
+    ) -> bool {
         let written = Self::write_through(mt, drives, extent_mgrs, &job);
         Self::settle_write_through(dm, job.key, written);
+        written.is_some()
     }
 
     /// Run a dequeued write-through job, coordinated with `remove` through `pins`
-    /// so that `remove` never has to wait for it (FR-018).
+    /// so that `remove` never has to wait for it (FR-018). The outcome is
+    /// recorded in `pins`, so that `flush_to_ssd` can report a failed write.
     fn run_write_job(
         pins: &WriteThroughPins,
         dm: &Arc<dyn IDispatchMap + Send + Sync>,
@@ -1417,13 +1420,16 @@ impl DispatcherComponent {
         match pins.start(job.key) {
             JobStart::Stale => return,
             JobStart::Untracked => {
-                return Self::process_write_job(dm, mt, drives, extent_mgrs, job)
+                let key = job.key;
+                let landed = Self::process_write_job(dm, mt, drives, extent_mgrs, job);
+                return pins.record_write(key, landed);
             }
             JobStart::Owned => {}
         }
         let written = Self::write_through(mt, drives, extent_mgrs, &job);
         pins.finish(job.key, |owned| {
             if owned {
+                pins.record_write(job.key, written.is_some());
                 Self::settle_write_through(dm, job.key, written);
                 return;
             }
@@ -3990,15 +3996,38 @@ impl IDispatcher for DispatcherComponent {
         self.ensure_initialized()?;
 
         // Block until the background writer has processed all enqueued jobs.
-        let flushed = if let Some(ref writer) = *self.bg_writer.lock().unwrap() {
-            let before = writer.in_flight();
+        if let Some(ref writer) = *self.bg_writer.lock().unwrap() {
             writer.flush();
-            before
-        } else {
-            0
-        };
+        }
 
-        Ok(flushed)
+        let dm = self
+            .dispatch_map
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
+        let mt = self
+            .memory_tier
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
+
+        // An empty queue is not a persisted tier: a write-through that failed
+        // left its entry resident with no SSD copy, and `clear_memory_tier`
+        // would then drop the only copy. Report it instead of `Ok`.
+        let failed = self
+            .write_through_pins
+            .failed_writes(|key| mt.contains(key));
+        if failed > 0 {
+            return Err(DispatcherError::IoError(format!(
+                "flush_to_ssd: {failed} memory-tier entries have no SSD copy: \
+                 their write-through to the block device failed"
+            )));
+        }
+
+        // The entries that now have a valid SSD offset.
+        Ok(mt
+            .oldest_keys(usize::MAX)
+            .into_iter()
+            .filter(|&key| dm.is_evictable(key))
+            .count())
     }
 
     fn schedule_write_through(
@@ -4069,6 +4098,10 @@ mod repair_test_cold_pin;
 #[cfg(test)]
 #[path = "repair_test_clear_mt_pinned.rs"]
 mod repair_test_clear_mt_pinned;
+
+#[cfg(test)]
+#[path = "repair_test_flush_failed_write.rs"]
+mod repair_test_flush_failed_write;
 
 #[cfg(test)]
 mod tests {
