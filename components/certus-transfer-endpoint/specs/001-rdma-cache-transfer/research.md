@@ -188,6 +188,44 @@ pacing, which answers the incast concern (a push design otherwise moves rate con
 sender), and it shrinks over-reservation against llm-d's lagging index to one chunk's worth
 rather than the whole prefix.
 
+### Sizing the defaults
+
+Each window should cover its bandwidth-delay product: `limit ≥ rate × time held ÷ bytes per
+unit`, at 200 Gb/s (25 GB/s). Measured 2026-10-20, node2 ↔ node5, NUMA-0 pinned:
+
+| quantity | measured |
+|---|---|
+| `ib_write_lat` 64 B / 64 KiB / 2.25 MiB (one way) | 2.2 / 9.7 / 166 µs |
+| `ib_send_lat` 8 KiB | 3.7 µs |
+| real `dispatch-map` `lookup` + `release_read`, uncontended | 0.51 µs |
+| endpoint: 340-entry all-miss fetch, call to callback | 35-59 µs |
+| endpoint: 1-entry hit fetch | 31 µs or ~75 µs (bimodal, by run) |
+| endpoint: 340 × 64 KiB hit fetch | 1.46 ms (15.3 GB/s) |
+
+* **Message credits: 4.** A credit is held for the network round trip plus the source's
+  service of the message — decode, a lookup and pin per entry, its writes, the reply. Its
+  fixed part is ~40 µs measured with a test dispatch map, plus 340 × 0.51 µs = 173 µs of
+  real lookups: ~210 µs. One 340 × 64 KiB message is 0.89 ms on the wire (32 ms at
+  2.25 MiB), so one on the wire and one waiting at the source keep the link busy —
+  `ceil(1 + 210 / 890) = 2` at either size. 4 doubles that for slack. 8 bought nothing and
+  posted twice the receives.
+* **Inbound quota: 4**, matching the peers' credits. It is policy, not delay: how much of
+  this node one peer may queue. Larger buys nothing a peer will use.
+* **Send credits: 8, deliberately above the derivation.** A write holds its credit for wire
+  time plus the write round trip: `ceil((2.6 + 4.4) / 2.6) = 3` at 64 KiB on the `ib` floor,
+  2 at 2.25 MiB. A sweep of the source's credits (3 reps × 4 rounds, 1,536 × 64 KiB) gave
+  11.2 GB/s at 2 and 14-18 GB/s, non-monotonic, from 4 to 32, with the spread inside each
+  setting as large as the differences between them; a 340-entry message took 1.46 ms at
+  every setting from 4 up. Below 4 the window is the limit; above it something the formula
+  does not model is — the endpoint thread's polling, whose bimodal 31/75 µs single-entry
+  fetch points at idle parking. 8 is kept: above the derived 3, with headroom, and not fitted
+  to that noise.
+* **Block readers: 4, and the 16 MiB reserve** are set by the device, not the link. At
+  ~100 µs a read, 4 readers sustain 4 × 64 KiB / 100 µs ≈ 2.6 GB/s of block-tier serving;
+  filling 25 GB/s would take ~38 reads in flight and ~150 MiB of reserve at 4 MiB entries.
+  That is acceptable only because block-tier hits are single-digit percent (D9); if that
+  premise changes, this is the bound to revisit.
+
 ## D11 — Fail loudly; graceful degradation deferred
 
 **Decision**: a destination-side deadline detects a request neither fulfilled nor refused.
@@ -360,7 +398,7 @@ Both columns are given because the figure matters to the argument: the rig's act
 **200 Gb/s** (see *Rig facts* below), and a slower link must not change the conclusion. It
 does not, and is in fact *stronger* at the lower rate — the bubble is 0.008-0.04% of a message at 50G versus ~0.1% at 200G, and
 it stays well below the cost of a single entry's write either way. So overlapping messages
-buys essentially nothing at any link rate this design will see. Message credits default to 8 and block only at zero, so that overlap already exists at
+buys essentially nothing at any link rate this design will see. Message credits default to 4 (sized under D10) and block only at zero, so that overlap already exists at
 no cost; it just must not drive design. The same arithmetic disposes of deep send-queue
 pipelining: at 2.25 MiB per entry this path is bandwidth-bound and a window of 2-4 saturates
 the link.
@@ -634,7 +672,7 @@ than as having disposed of it.
    one reply per batch it completed, N outstanding requests could draw more than N replies and
    overrun an N-buffer reserve. So the source sends exactly one reply per request message
    (FR-007), the reserve is exactly one buffer per own message credit, and posted receives
-   total reserve + quota — 16 buffers at the defaults of 8 and 8. Large requests are still
+   total reserve + quota — 8 buffers at the defaults of 4 and 4. Large requests are still
    chunked, by the requester, where each chunk costs a credit and carries its own context id,
    so a reply names exactly the message it answers even when chunks are served out of order.
    Split replies would buy only progress reporting within a message, which D19 values at

@@ -516,8 +516,9 @@ slots and the reply's per-key outcomes match the source's actual residency.
   rather than configuring it separately: `(8192 - 24) / 24` = **340** entries per
   `OP_FETCH`, and that is the size the requester chunks to (T044). Post
   **reserve + quota** buffers (T080): one per own message credit for replies, plus the
-  inbound-request quota advertised to the peer — 16 × 8 KiB = 128 KiB per peer at the
-  defaults of 8 and 8, which is why this can be unconditional instead of negotiated
+  inbound-request quota advertised to the peer — 8 × 8 KiB = 64 KiB per peer at the
+  defaults of 4 and 4 (sized in research D10), which is why this can be unconditional
+  instead of negotiated
 - [X] T031 [US1] Implement the context table in `src/message.rs`: `TransferContext` =
   context id, peer, key list, landing slots, outstanding-entry count, deadline. Allocate
   ids, match replies by echoed id. A context is one request **message**; a chunked fetch

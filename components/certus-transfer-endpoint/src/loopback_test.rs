@@ -67,12 +67,20 @@ impl Node {
     }
 
     /// A node at a fixed address, for the two-node test.
+    /// `CERTUS_T056_SEND_CREDITS` overrides the send-credit default.
     fn at(addr: &str, pool_len: usize) -> Self {
         let addr = addr.to_string();
+        let credits: Option<u32> = std::env::var("CERTUS_T056_SEND_CREDITS")
+            .ok()
+            .and_then(|s| s.parse().ok());
         Self::build_at(
             Some(addr),
             pool_len,
-            |_| {},
+            |c| {
+                if let Some(n) = credits {
+                    c.send_credits = n;
+                }
+            },
             None::<fn(&crate::test_doubles::DiskSource)>,
         )
     }
@@ -424,6 +432,40 @@ fn two_node() {
             let items: Vec<(u64, RemoteRegion)> = (0..T056_KEYS)
                 .map(|k| (k as u64, h.region_at(k * ENTRY, ENTRY as u32).unwrap()))
                 .collect();
+            // Round-trip probe, for the credit derivation (research D10):
+            // medians of many rounds, each a whole fetch from call to callback.
+            // A 1-entry hit is one message plus one write; a 340-entry fetch
+            // of keys the source lacks (offset past T056_KEYS) is one message
+            // and its full per-entry lookup cost, with no writes; a 340-entry
+            // hit adds the writes.
+            {
+                let median = |items: &[(u64, RemoteRegion)], want: EntryOutcome| {
+                    let mut t = Vec::with_capacity(200);
+                    for _ in 0..200 {
+                        let t0 = std::time::Instant::now();
+                        let (tx, rx) = mpsc::channel();
+                        dest.ep
+                            .fetch(&peer, items, Box::new(move |r| tx.send(r).unwrap()))
+                            .unwrap();
+                        let out = wait(&rx).unwrap();
+                        t.push(t0.elapsed());
+                        assert!(out.iter().all(|o| *o == want));
+                    }
+                    t.sort();
+                    (t[t.len() / 2], t[t.len() * 99 / 100])
+                };
+                let one_hit = median(&items[..1], EntryOutcome::HitMemoryTier);
+                let miss: Vec<(u64, RemoteRegion)> = items[..340]
+                    .iter()
+                    .map(|(k, r)| (*k + 1_000_000, *r))
+                    .collect();
+                let many_miss = median(&miss, EntryOutcome::Miss);
+                let many_hit = median(&items[..340], EntryOutcome::HitMemoryTier);
+                println!(
+                    "T056 rtt: 1 hit {:?} (p99 {:?}); 340 miss {:?} (p99 {:?}); 340 hit {:?} (p99 {:?})",
+                    one_hit.0, one_hit.1, many_miss.0, many_miss.1, many_hit.0, many_hit.1
+                );
+            }
             for round in 0..5 {
                 slots.fill(0);
                 let t0 = std::time::Instant::now();

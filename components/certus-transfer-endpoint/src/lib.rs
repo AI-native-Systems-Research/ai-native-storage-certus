@@ -2407,7 +2407,11 @@ mod tests {
             );
         }
         let s = session_of(&dest.ep, "10.0.0.2:7000").unwrap();
-        assert!(s.outbound.1 <= 8, "never more than the credits out: {s:?}");
+        let credits = EndpointConfig::new("x:1").message_credits;
+        assert!(
+            s.outbound.1 <= credits,
+            "never more than the {credits} credits out: {s:?}"
+        );
         dest.ep.shutdown().unwrap();
         src.ep.shutdown().unwrap();
         drop(slots);
@@ -2711,7 +2715,7 @@ mod tests {
         b.ep.initialize().unwrap();
         a.map.memory(1, a.pool_addr(0), 8);
         b.map.memory(1, b.pool_addr(0), 8);
-        let n = 24; // three times the credits, in each direction
+        let n = 24; // several times the credits, in each direction
         let mut slots_a = vec![0u8; 8 * n].into_boxed_slice();
         let mut slots_b = vec![0u8; 8 * n].into_boxed_slice();
         let ha =
@@ -2754,9 +2758,10 @@ mod tests {
         }
         let sa = session_of(&a.ep, "10.0.0.2:7000").unwrap();
         let sb = session_of(&b.ep, "10.0.0.1:7000").unwrap();
+        let quota = EndpointConfig::new("x:1").inbound_quota;
         assert!(
-            sa.inbound.1 <= 8 && sb.inbound.1 <= 8,
-            "quota held: {sa:?} {sb:?}"
+            sa.inbound.1 <= quota && sb.inbound.1 <= quota,
+            "quota {quota} held: {sa:?} {sb:?}"
         );
         assert_eq!(
             f.rnr_stalls(),
@@ -3694,11 +3699,21 @@ mod tests {
     fn the_receive_partition_survives_a_finite_rnr_retry() {
         fn run(no_reserve: bool) -> (usize, usize, u64) {
             let f = MockFabric::new();
-            // 16 send credits, so a's 8 replies and 8 requests are all on its
-            // send queue at once: with 8, the requests wait in the outbox
-            // behind the replies and the burst is never 16.
-            let a = node(&f, "10.0.0.1:7000", 16);
-            let b = node(&f, "10.0.0.2:7000", 8);
+            // 8 message credits and an 8-request quota on both, so b posts
+            // 8 + 8 receives and the burst is 16 — not the defaults, which
+            // the partition's arithmetic does not depend on. 16 send credits
+            // on a, so its 8 replies and 8 requests are all on its send queue
+            // at once: with 8, the requests wait in the outbox behind the
+            // replies and the burst is never 16.
+            let eight = |c: &mut EndpointConfig| {
+                c.message_credits = 8;
+                c.inbound_quota = 8;
+            };
+            let a = node_with(&f, "10.0.0.1:7000", |c| {
+                eight(c);
+                c.send_credits = 16;
+            });
+            let b = node_with(&f, "10.0.0.2:7000", eight);
             a.ep.initialize().unwrap();
             b.ep.initialize().unwrap();
             if no_reserve {

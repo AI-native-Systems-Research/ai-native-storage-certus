@@ -40,6 +40,10 @@ the endpoint waits or chunks, never fails:
 A fetch of any length is split into chunks of the peer's advertised `max_entries`
 (340 per 8 KiB message), each its own message and credit.
 
+Defaults — `send_credits` 8, `message_credits` 4, `inbound_quota` 4, `block_readers` 4 —
+are sized from the bandwidth-delay product at 200 Gb/s and round trips measured node2 ↔
+node5; the arithmetic, and why `send_credits` sits above it, is in research D10.
+
 ## Features
 
 Nothing is enabled by default, and the default build is the one CI runs.
@@ -92,7 +96,7 @@ CERTUS_RDMA_TEST_IP=10.0.0.102 numactl -N0 -m0 \
   1,536-entry all-miss fetch (five messages).
 
 Measured 2026-10-20 on node2, single-host loopback over `mlx5_0` (200 Gb/s RoCE),
-NUMA 0, default credits:
+NUMA 0, `send_credits` 8 and `message_credits` 8 (the defaults then):
 
 | benchmark | mock | verbs |
 |---|---|---|
