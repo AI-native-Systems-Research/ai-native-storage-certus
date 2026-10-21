@@ -226,7 +226,8 @@ relative LRU order of its memory-tier entries are unchanged.
   - **send-queue credits** — in-flight RDMA writes per connection; this transitively bounds
     held read pins, which is the existing rationale for the bound;
   - **message credits** — outstanding requests against the peer's posted receive buffers.
-    The destination decrements on send and increments on reply; a send MUST block at zero;
+    The destination decrements on send and increments on reply; at zero a request MUST
+    wait inside the endpoint — never fail, and never block the caller;
   - **bounce-buffer occupancy** — bounce-reserve bytes leased to block-tier entries, and
     concurrent device reads (the reader count).
 - **FR-015**: On exhaustion of any bound, the endpoint MUST chunk internally and make
@@ -307,8 +308,9 @@ relative LRU order of its memory-tier entries are unchanged.
   block-tier entry refreshes that entry's own position; nothing in the memory tier moves.)
 - **SC-006**: A request naming keys the peer does not hold returns all-`miss` and generates
   no broadcast traffic.
-- **SC-007**: With bounce space or landing slots artificially scarce, a large request
-  still completes, in chunks.
+- **SC-007**: With bounce space, message credits or the peer's `max_entries` artificially
+  scarce, a large request still completes, in chunks, with its outcomes in request order.
+  (Landing slots are the caller's: it requests only what it reserved.)
 - **SC-008**: The duplicated verbs FFI layer is defined once. (Today
   `remote-lookup-rdma-initiator/src/ffi.rs` and
   `remote-lookup-rdma-responder/src/ffi.rs` declare 52 public names in common.)

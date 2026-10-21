@@ -72,9 +72,10 @@ pub enum EntryOutcome {
 /// What a request's completion delivers. `Ok` carries one outcome per entry,
 /// in request order. For a fetch, `Err` means no usable reply exists —
 /// `Deadline`, `Protocol` (the peer refused it), `Transport` (connection lost or
-/// torn down, including as a sibling of another fetch's deadline) or
-/// `RequestTooLarge` — and every slot of the request is to be treated as not
-/// landed. It fires only after the queue pair to that peer is forced to ERROR
+/// torn down, including as a sibling of another fetch's deadline) — and every
+/// slot of the request is to be treated as not landed, even when the endpoint
+/// split it and some chunks were answered (a refused chunk fails the whole
+/// fetch, once every chunk has settled: a prefix is never half-filled). It fires only after the queue pair to that peer is forced to ERROR
 /// and drained (or, for `Protocol`, never had a write aimed at it), so the
 /// slots are safe to reclaim. A write whose landing cannot be confirmed is
 /// never reported as a hit: only a successful completion counts.
@@ -98,11 +99,6 @@ pub struct LandingRegionHandle { /* id, addr, len, rkey — read-only accessors 
 pub enum TransferEndpointError {
     NotInitialized(String),
     InvalidEndpoint(String),
-    /// The request exceeds what one message can carry; the caller should chunk,
-    /// or let the endpoint chunk internally (FR-015).
-    RequestTooLarge { max_entries: usize },
-    /// Message credits exhausted and the caller asked not to block.
-    WouldBlock,
     /// The deadline expired with the request neither fulfilled nor refused.
     /// Carries diagnostic state (FR-016, Principle XI). The queue pair has been
     /// forced to ERROR and this connection's other contexts were aborted with
@@ -152,13 +148,16 @@ define_interface! {
         /// DESTINATION SIDE. Ask one named peer for a key run, to be written
         /// into already-reserved landing slots.
         ///
-        /// Blocks if message credits are exhausted (FR-014). Returns as soon as
-        /// the request is queued; `on_complete` fires with `Ok` — one
-        /// `EntryOutcome` per requested key, in request order — when the reply
-        /// arrives, or with `Err` when no usable reply can (see `FetchResult`).
+        /// Returns as soon as the request is queued — never blocking the
+        /// caller, and never failing for want of a message credit: chunks
+        /// wait inside the endpoint for one (FR-014, FR-015). `on_complete`
+        /// fires with `Ok` — one `EntryOutcome` per requested key, in request
+        /// order — when every chunk has been answered, or with `Err` when no
+        /// usable reply can be had (see `FetchResult`).
         ///
-        /// The endpoint may split the request internally; `on_complete` fires
-        /// once, after the last chunk.
+        /// Any length is accepted. The endpoint splits it into chunks of the
+        /// peer's `max_entries`, sent in request order, and `on_complete`
+        /// fires once, after the last.
         fn fetch(
             &self,
             peer: &str,

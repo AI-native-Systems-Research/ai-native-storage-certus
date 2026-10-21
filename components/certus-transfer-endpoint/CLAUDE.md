@@ -94,6 +94,14 @@ VIII–XI, and a review that does not check them is not a review.
   necessarily aborts the siblings. Routing an `OP_ERROR` through the deadline's
   cleanup would destroy a healthy connection (FR-024 vs FR-023). A *bad reply* is
   the third case and does tear down: its sender may have written into our slots.
+- **A fetch settles before it completes, whatever happens to its chunks.** Its
+  callback fires once, after every chunk is answered or refused — never as soon
+  as one chunk fails, since the others may still be writing into its slots. A
+  refused chunk fails the whole fetch with `Protocol`: a prefix with a hole is
+  not usable. The deadline is per chunk; teardown aborts all of them.
+- **Fetches take turns for credits.** Each sending round starts after the fetch
+  that sent last. Starting from the oldest lets one large fetch hold every credit
+  while a one-entry fetch waits behind all its chunks.
 - **Chunk against the *peer's* `max_entries`, not your own.** Receive-buffer sizes are
   not assumed equal; `OP_HELLO` advertises them precisely because nothing checked that
   before (FR-025).
@@ -240,7 +248,7 @@ lookup answer is reported as a **miss**, never an error (D14).
 
 ## Current state
 
-Scaffolding. T001–T042, T049–T052, T068 and T070–T083 are done, except T011 (Phases 3, 5, 6 and 8 complete: US2 legacy push and US1 fetch work end to end over the mock, with a fail-loud reply deadline, and US3 serves block-tier entries through the dispatcher's `read_to_bounce`, `bounce.rs`): the crate builds as a default member,
+Scaffolding. T001–T052, T068 and T070–T083 are done, except T011 (Phases 3, 5, 6, 7 and 8 complete: US2 legacy push and US1 fetch work end to end over the mock, with a fail-loud reply deadline, and US3 serves block-tier entries through the dispatcher's `read_to_bounce`, `bounce.rs`; fetches of any length are chunked against the peer's `max_entries`): the crate builds as a default member,
 peer identity is implemented, `ITransferEndpoint` is defined in `interfaces`, and
 the verbs FFI (`ffi.rs`), C shim (`wrapper.c`) and safe wrappers (`rdma.rs`, T009)
 exist behind `rdma`, and the transport seam plus an in-process mock exist in every

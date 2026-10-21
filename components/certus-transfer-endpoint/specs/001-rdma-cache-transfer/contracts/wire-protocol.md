@@ -255,8 +255,8 @@ reserve plus the peer's quota (*Receive-buffer partitioning*). At the defaults o
 and an 8-request quota that is 16 buffers, 128 KiB per peer — still negligible, which is why
 FR-005 can post unconditionally rather than negotiate.
 
-`max_entries` is derived from the buffer size, not configured independently, and is what
-`RequestTooLarge { max_entries }` reports. It is also what `OP_HELLO` advertises, so a peer
+`max_entries` is derived from the buffer size, not configured independently, and is the
+size the requester chunks to. It is also what `OP_HELLO` advertises, so a peer
 with a different buffer size is honoured rather than overrun — the two sides are **not**
 assumed equal.
 
@@ -276,7 +276,14 @@ its own `OP_FETCH` message with **its own `context_id`**, each costing its own m
   that message's `context_id`. A source short of bounce space or device readers (D10) serves the message's
   entries as buffers free up, chunking internally (FR-015), and still replies once; scarcity
   delays the reply, it never multiplies it.
-- A fetch is complete when every one of its chunks has been answered.
+- A fetch is complete when every one of its chunks has been answered or refused. A
+  refused chunk fails the whole fetch with `Protocol` — but only after its siblings have
+  settled, since they may still be writing into its slots; chunks not yet sent are not
+  sent. A fetch with a hole is not a usable prefix.
+- Fetches to one peer take turns for message credits, a chunk at a time, so one large
+  fetch cannot hold every credit while a small one waits behind it.
+- The reply deadline runs per chunk, from that chunk's send, and its diagnostic names the
+  chunk (`chunk k of n`). Expiry aborts the whole fetch, with the rest of the connection.
 
 **Why each chunk has its own id.** FR-013 lets the source serve messages concurrently, so
 replies to the chunks of one fetch may arrive in any order. With one id per message, a reply

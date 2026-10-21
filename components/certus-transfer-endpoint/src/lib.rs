@@ -30,7 +30,7 @@
 //!
 //! # Status
 //!
-//! Scaffolding. Tasks T001–T042, T049–T052, T068, T070–T083 (all but T011's
+//! Scaffolding. Tasks T001–T052, T068, T070–T083 (all but T011's
 //! remaining faults) of
 //! `specs/001-rdma-cache-transfer/tasks.md` are complete: the crate builds as a
 //! workspace default member, peer identity is implemented, and the verbs FFI, its
@@ -41,8 +41,9 @@
 //! end to end over the mock: the legacy `push_async` and `push`, landing
 //! regions, and `fetch` over the request/reply messaging, with a fail-loud reply
 //! deadline; and with `spdk`, block-tier entries are read by the dispatcher into
-//! the memory tier's bounce reserve and served from there. Still to come:
-//! chunking (Phase 7) and the verbs transport (Phase 9).
+//! the memory tier's bounce reserve and served from there. A fetch of any length
+//! is chunked against the peer's `max_entries`. Still to come: the verbs
+//! transport (Phase 9).
 
 #![deny(missing_docs)]
 
@@ -494,9 +495,9 @@ impl ITransferEndpoint for CertusTransferEndpoint {
     /// `on_complete` receives in request order. Returns once queued.
     ///
     /// A hit means the entry's write completed before the reply was sent, so
-    /// its slot is safe to commit; every other outcome means abort it. A
-    /// request larger than the peer accepts is reported all `Failed` until
-    /// chunking lands (Phase 7).
+    /// its slot is safe to commit; every other outcome means abort it. Any
+    /// length is accepted: the endpoint chunks against the peer's
+    /// `max_entries`.
     fn fetch(
         &self,
         peer: &str,
@@ -504,11 +505,6 @@ impl ITransferEndpoint for CertusTransferEndpoint {
         on_complete: FetchCompletion,
     ) -> Result<TransferContextId, TransferEndpointError> {
         let peer = parse_peer(peer)?;
-        if items.len() > message::MAX_ENTRIES as usize {
-            return Err(TransferEndpointError::RequestTooLarge {
-                max_entries: message::MAX_ENTRIES as usize,
-            });
-        }
         let guard = self.lifecycle();
         let State::Running(handle) = &*guard else {
             return Err(not_running());
@@ -2305,31 +2301,6 @@ mod tests {
         drop(slots);
     }
 
-    /// A fetch the peer cannot take whole is refused, never truncated:
-    /// RequestTooLarge past one message, until chunking lands.
-    #[test]
-    fn a_fetch_too_large_for_one_message_is_refused() {
-        let f = MockFabric::new();
-        let dest = node(&f, "10.0.0.1:7000", 8);
-        dest.ep.initialize().unwrap();
-        let items = vec![
-            (
-                1,
-                RemoteRegion {
-                    addr: 0,
-                    rkey: 0,
-                    length: 1
-                }
-            );
-            message::MAX_ENTRIES as usize + 1
-        ];
-        assert!(matches!(
-            dest.ep.fetch("10.0.0.2:7000", &items, Box::new(|_| {})),
-            Err(TransferEndpointError::RequestTooLarge { max_entries: 340 })
-        ));
-        dest.ep.shutdown().unwrap();
-    }
-
     /// A fetch in flight when its connection is torn down reports Failed —
     /// and only after the teardown, so its slots are safe to reclaim.
     #[test]
@@ -2511,24 +2482,103 @@ mod tests {
         drop((raw, slots));
     }
 
-    /// FR-025: a fetch is sized against the **peer's** max_entries, not ours.
-    /// Larger than the peer accepts, it is never sent, and fails.
+    /// FR-025, T044: a fetch is chunked against the **peer's** max_entries,
+    /// not ours. Against a peer taking 2, five entries go out as three
+    /// messages, each its own context id, each costing its own credit; the
+    /// replies come back in reverse and are placed by each chunk's offset.
     #[test]
-    fn a_fetch_larger_than_the_peer_accepts_is_not_sent() {
+    fn a_fetch_is_chunked_against_the_peers_max_entries() {
         let f = MockFabric::new();
-        let (a, raw, _link, h, slots) = raw_peer(&f, 2);
+        let (a, mut raw, link, h, slots) = raw_peer(&f, 2);
+        let rx = fetch_one(&a.ep, &h, 5);
+        eventually("three chunks are out", || {
+            session_of(&a.ep, "10.0.0.3:7000").is_some_and(|s| s.outbound.0 == 3)
+        });
+        assert_eq!(a.ep.stats().chunks_sent, 3);
+        use EntryOutcome::*;
+        // Context ids are per connection, from 0: chunks 0, 1, 2. Answer the
+        // last first, each with outcomes that say which chunk they answer.
+        for (ctx, outcomes) in [
+            (2u64, vec![HitMemoryTier]),
+            (0, vec![Miss, HitMemoryTier]),
+            (1, vec![Failed, Miss]),
+        ] {
+            assert!(
+                rx.try_recv().is_err(),
+                "no completion before the last chunk"
+            );
+            send_raw(&mut raw, link, |out| {
+                message::encode_reply(1, ctx, &outcomes, out)
+            });
+        }
+        assert_eq!(
+            hits(rx.recv_timeout(Duration::from_secs(5)).unwrap()),
+            [Miss, HitMemoryTier, Failed, Miss, HitMemoryTier],
+            "in request order, whatever order the replies came in"
+        );
+        a.ep.shutdown().unwrap();
+        drop((raw, slots));
+    }
+
+    /// A chunk's reply of the wrong length is a bad reply, even when it is
+    /// the right length for the whole fetch.
+    #[test]
+    fn a_chunk_reply_must_match_its_chunk() {
+        let f = MockFabric::new();
+        let (a, mut raw, link, h, slots) = raw_peer(&f, 2);
         let rx = fetch_one(&a.ep, &h, 3);
+        eventually("two chunks are out", || {
+            session_of(&a.ep, "10.0.0.3:7000").is_some_and(|s| s.outbound.0 == 2)
+        });
+        send_raw(&mut raw, link, |out| {
+            message::encode_reply(1, 1, &[EntryOutcome::Miss; 3], out)
+        });
         assert!(matches!(
             rx.recv_timeout(Duration::from_secs(5)).unwrap(),
-            Err(TransferEndpointError::RequestTooLarge { max_entries: 2 })
+            Err(TransferEndpointError::Transport(_))
         ));
-        let s = session_of(&a.ep, "10.0.0.3:7000").unwrap();
-        assert_eq!(s.outbound, (0, 1), "only OP_HELLO ever went out");
-        let ok = fetch_one(&a.ep, &h, 2);
-        eventually("a two-entry fetch is sent", || {
-            session_of(&a.ep, "10.0.0.3:7000").is_some_and(|s| s.outbound.0 == 1)
+        a.ep.shutdown().unwrap();
+        drop((raw, slots));
+    }
+
+    /// Decision (a): one refused chunk fails the whole fetch with Protocol —
+    /// but only once its sibling chunks have settled, since they may be
+    /// writing into its slots. Unsent chunks are not sent.
+    #[test]
+    fn a_refused_chunk_fails_the_fetch_after_its_siblings_settle() {
+        let f = MockFabric::new();
+        let (a, mut raw, link, h, slots) = raw_peer(&f, 1);
+        // Peer quota 4, our credits 8: four chunks out, two more waiting.
+        let rx = fetch_one(&a.ep, &h, 6);
+        eventually("four chunks are out", || {
+            session_of(&a.ep, "10.0.0.3:7000").is_some_and(|s| s.outbound.0 == 4)
         });
-        drop(ok);
+        let refuse = message::ErrorReply {
+            context_id: 1,
+            offending_opcode: message::Kind::Fetch.opcode(),
+            reason: message::Reason::Other(9),
+            max_supported_version: 1,
+        };
+        send_raw(&mut raw, link, |out| message::encode_error(&refuse, out));
+        for ctx in [0u64, 2] {
+            send_raw(&mut raw, link, |out| {
+                message::encode_reply(1, ctx, &[EntryOutcome::HitMemoryTier], out)
+            });
+        }
+        assert!(
+            rx.recv_timeout(Duration::from_millis(100)).is_err(),
+            "chunk 3 is still out"
+        );
+        send_raw(&mut raw, link, |out| {
+            message::encode_reply(1, 3, &[EntryOutcome::Miss], out)
+        });
+        assert!(matches!(
+            rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            Err(TransferEndpointError::Protocol(m)) if m.contains("chunk 1")
+        ));
+        let s = session_of(&a.ep, "10.0.0.3:7000").expect("the connection stays up");
+        assert_eq!(s.outbound.0, 0, "the two unsent chunks were never sent");
+        assert_eq!(a.ep.stats().chunks_sent, 4);
         a.ep.shutdown().unwrap();
         drop((raw, slots));
     }
@@ -3284,6 +3334,192 @@ mod tests {
             (disk.reads(), disk.free_leases(), src.map.held()),
             (1, 2, 0)
         );
+        dest.ep.shutdown().unwrap();
+        src.ep.shutdown().unwrap();
+        drop(slots);
+    }
+
+    // --- Phase 7: chunking (T043-T048) --------------------------------------
+
+    /// SC-007, T046: a ~3.4 GiB-shaped fetch — 1,536 entries, five 340-entry
+    /// messages — completes over two message credits, every entry landing
+    /// byte-exact and every outcome in request order across chunk boundaries.
+    /// The memory/block mix shows each chunk is served whole.
+    #[test]
+    fn a_large_fetch_completes_in_chunks_over_few_credits() {
+        let f = MockFabric::new();
+        let dest = node_with(&f, "10.0.0.1:7000", |c| c.message_credits = 2);
+        let mut src = node(&f, "10.0.0.2:7000", 8);
+        dest.ep.initialize().unwrap();
+        src.ep.initialize().unwrap();
+        // 16 distinct 2-byte values, shared round-robin by the keys.
+        for v in 0..16usize {
+            src.pool[v * 2..v * 2 + 2].copy_from_slice(&[v as u8, 0xee]);
+        }
+        const N: usize = 1536;
+        for k in 0..N as u64 {
+            if k % 7 == 3 {
+                continue; // a miss now and then
+            }
+            src.map.memory(k, src.pool_addr((k as usize % 16) * 2), 2);
+        }
+        let mut slots = vec![0u8; N * 2].into_boxed_slice();
+        let h = dest
+            .ep
+            .register_landing_region(slots.as_mut_ptr(), slots.len())
+            .unwrap();
+        let items: Vec<_> = (0..N)
+            .map(|i| (i as u64, h.region_at(i * 2, 2).unwrap()))
+            .collect();
+        let rx = fetch_from_src(&dest, &items);
+        let out = hits(rx.recv_timeout(Duration::from_secs(20)).unwrap());
+        assert_eq!(out.len(), N);
+        for (i, o) in out.iter().enumerate() {
+            if i % 7 == 3 {
+                assert_eq!(*o, EntryOutcome::Miss, "entry {i}");
+                assert_eq!(slots[i * 2..i * 2 + 2], [0, 0]);
+            } else {
+                assert_eq!(*o, EntryOutcome::HitMemoryTier, "entry {i}");
+                assert_eq!(slots[i * 2..i * 2 + 2], [(i % 16) as u8, 0xee], "entry {i}");
+            }
+        }
+        let s = dest.ep.stats();
+        assert_eq!(s.chunks_sent, 5, "ceil(1536 / 340)");
+        assert_eq!((s.requests_attempted, s.requests_completed), (1, 1));
+        let peak = session_of(&dest.ep, "10.0.0.2:7000").unwrap().outbound.1;
+        assert!(peak <= 2, "never more than two chunks out: {peak}");
+        assert_eq!(src.map.held(), 0);
+        dest.ep.shutdown().unwrap();
+        src.ep.shutdown().unwrap();
+        drop(slots);
+    }
+
+    /// Credits are waited for, never failed on: with the peer stalled, a
+    /// fetch of six one-entry chunks against two credits sends exactly two,
+    /// and the rest go as replies return the credits.
+    #[test]
+    fn chunks_wait_for_message_credits() {
+        let f = MockFabric::new();
+        let (a, mut raw, link, h, slots) = raw_peer_with(&f, 1, |c| c.message_credits = 2);
+        let rx = fetch_one(&a.ep, &h, 6);
+        eventually("two chunks are out", || {
+            session_of(&a.ep, "10.0.0.3:7000").is_some_and(|s| s.outbound.0 == 2)
+        });
+        // Settle time for a wrong extra send to show; the check is that none does.
+        std::thread::sleep(Duration::from_millis(50));
+        assert_eq!(a.ep.stats().chunks_sent, 2, "the rest wait for credits");
+        assert!(rx.try_recv().is_err(), "waiting is not failing");
+        for ctx in 0..6u64 {
+            eventually("chunk is out", || a.ep.stats().chunks_sent > ctx);
+            send_raw(&mut raw, link, |out| {
+                message::encode_reply(1, ctx, &[EntryOutcome::Miss], out)
+            });
+        }
+        assert_eq!(
+            hits(rx.recv_timeout(Duration::from_secs(5)).unwrap()),
+            [EntryOutcome::Miss; 6]
+        );
+        assert_eq!(session_of(&a.ep, "10.0.0.3:7000").unwrap().outbound.1, 2);
+        a.ep.shutdown().unwrap();
+        drop((raw, slots));
+    }
+
+    /// Fetches to one peer take turns a chunk at a time: a small fetch queued
+    /// behind a large one goes out before the large one's later chunks.
+    #[test]
+    fn a_small_fetch_is_not_starved_by_a_large_one() {
+        let f = MockFabric::new();
+        let (a, mut raw, link, h, slots) = raw_peer_with(&f, 1, |c| c.message_credits = 1);
+        let big = fetch_one(&a.ep, &h, 4); // context 0 goes out at once
+        eventually("the first chunk is out", || a.ep.stats().chunks_sent == 1);
+        let (tx, small) = mpsc::channel();
+        a.ep.fetch(
+            "10.0.0.3:7000",
+            &[(9, h.region_at(40, 8).unwrap())],
+            Box::new(move |o| {
+                let _ = tx.send(o);
+            }),
+        )
+        .unwrap();
+        eventually("the small fetch is queued", || {
+            a.ep.stats().requests_attempted == 2
+        });
+        // Freeing the one credit: the small fetch's turn comes next.
+        send_raw(&mut raw, link, |out| {
+            message::encode_reply(1, 0, &[EntryOutcome::Miss], out)
+        });
+        eventually("a second message is out", || a.ep.stats().chunks_sent == 2);
+        send_raw(&mut raw, link, |out| {
+            message::encode_reply(1, 1, &[EntryOutcome::HitMemoryTier], out)
+        });
+        assert_eq!(
+            hits(small.recv_timeout(Duration::from_secs(5)).unwrap()),
+            [EntryOutcome::HitMemoryTier],
+            "context 1 was the small fetch's"
+        );
+        assert!(big.try_recv().is_err(), "the large fetch is still going");
+        a.ep.shutdown().unwrap();
+        drop((raw, slots));
+    }
+
+    /// The deadline runs per chunk, from its own send, and names it: a stalled
+    /// third chunk aborts the whole fetch, after the teardown.
+    #[test]
+    fn a_stalled_chunk_names_itself_and_fails_the_fetch() {
+        let f = MockFabric::new();
+        let (a, mut raw, link, h, slots) = raw_peer_with(&f, 1, fast_deadline);
+        let rx = fetch_one(&a.ep, &h, 3);
+        eventually("three chunks are out", || {
+            session_of(&a.ep, "10.0.0.3:7000").is_some_and(|s| s.outbound.0 == 3)
+        });
+        for ctx in [0u64, 1] {
+            send_raw(&mut raw, link, |out| {
+                message::encode_reply(1, ctx, &[EntryOutcome::HitMemoryTier], out)
+            });
+        }
+        let r = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let Err(TransferEndpointError::Deadline(why)) = r else {
+            panic!("expected Deadline, got {r:?}");
+        };
+        for part in ["chunk 2 of 3", "context 2", "keys 2..=2", "1 entries"] {
+            assert!(why.contains(part), "{part:?} missing from {why:?}");
+        }
+        assert!(
+            session_of(&a.ep, "10.0.0.3:7000").is_none(),
+            "torn down first"
+        );
+        a.ep.shutdown().unwrap();
+        drop((raw, slots));
+    }
+
+    /// T045: scarcity at the source delays its reply, never splits it. A
+    /// six-entry block-tier request served through a one-lease reserve draws
+    /// exactly one reply, after many deferrals.
+    #[test]
+    fn a_scarce_source_still_replies_once_per_request() {
+        let f = MockFabric::new();
+        let (dest, src, disk, h, slots) = block_pair(&f, 1, 2, 8);
+        for k in 0..6u64 {
+            disk.put(0x100 * (k + 1), &[k as u8 + 1; 8]);
+            src.map.block_at(k, 0x100 * (k + 1));
+        }
+        let items: Vec<_> = (0..6u64)
+            .map(|k| (k, h.region_at(k as usize * 8, 8).unwrap()))
+            .collect();
+        let rx = fetch_from_src(&dest, &items);
+        assert_eq!(
+            hits(rx.recv_timeout(Duration::from_secs(10)).unwrap()),
+            [EntryOutcome::HitBlockTier; 6]
+        );
+        let s = session_of(&dest.ep, "10.0.0.2:7000").unwrap();
+        assert_eq!(s.outbound, (0, 1), "one request out at most, and none now");
+        assert!(
+            src.ep.stats().block_deferrals > 0,
+            "it was genuinely scarce"
+        );
+        // The source's inbound books: one request, one reply.
+        let s = session_of(&src.ep, "10.0.0.1:7000").unwrap();
+        assert_eq!(s.inbound, (0, 1));
         dest.ep.shutdown().unwrap();
         src.ep.shutdown().unwrap();
         drop(slots);

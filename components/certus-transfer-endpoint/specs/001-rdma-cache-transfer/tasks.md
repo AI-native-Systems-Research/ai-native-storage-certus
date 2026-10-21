@@ -501,7 +501,7 @@ slots and the reply's per-key outcomes match the source's actual residency.
 - [X] T030 [US1] Post receive buffers **unconditionally** on every connection, whether or
   not the local caller uses messaging (FR-005). Derive `max_entries` from the buffer size
   rather than configuring it separately: `(8192 - 24) / 24` = **340** entries per
-  `OP_FETCH`, and that is the value `RequestTooLarge { max_entries }` reports. Post
+  `OP_FETCH`, and that is the size the requester chunks to (T044). Post
   **reserve + quota** buffers (T080): one per own message credit for replies, plus the
   inbound-request quota advertised to the peer — 16 × 8 KiB = 128 KiB per peer at the
   defaults of 8 and 8, which is why this can be unconditional instead of negotiated
@@ -677,33 +677,53 @@ failure.
 
 **Gate**: **SC-007**.
 
-- [ ] T043 Implement **bounce-buffer occupancy** as the third named domain — reserve bytes
+- [X] T043 Implement **bounce-buffer occupancy** as the third named domain — reserve bytes
   leased (T037) and readers busy (T072) — and expose all three — send-queue credits (T014),
   message credits (T032), bounce occupancy — as
   separately configured and separately named knobs (FR-014, D10). Do not conflate them:
   they bound genuinely different resources and exhaust independently, and the existing code
   already uses "credits" for the first
-- [ ] T044 Implement requester-side chunking when `items.len() > max_entries` (the peer's):
+- [X] T044 Implement requester-side chunking when `items.len() > max_entries` (the peer's):
   each chunk is its own `OP_FETCH` with **its own `context_id`**, and the requester records,
   per chunk id, the caller's fetch and the chunk's offset in its item list. Replies to the
   chunks of one fetch may arrive in any order (FR-013); each is placed by its chunk's
   recorded offset. Nothing on the wire links the chunks
-- [ ] T045 Source side: answer every `OP_FETCH` message with **exactly one** reply covering
+- [X] T045 Source side: answer every `OP_FETCH` message with **exactly one** reply covering
   all its entries (or one `OP_ERROR`), echoing that message's `context_id` — never one reply per batch
   (FR-007). When bounce space is scarce, serve the message's entries as leases free up
   and still reply once: scarcity delays the reply, it never multiplies it. This is what keeps
   T080's reply reserve exact
-- [ ] T046 Implement the fetch completion rule: a fetch is complete when every one of its
+- [X] T046 Implement the fetch completion rule: a fetch is complete when every one of its
   chunks has been answered (one reply per chunk, FR-007), and the outcome counts sum to the
   number of entries requested. `on_complete` fires once, after the last chunk, with the full outcome vector
   in request order — invariant 1 must hold *across* chunking
-- [ ] T047 Chunk on exhaustion of any of the three domains, and make progress rather than
+- [X] T047 Chunk on exhaustion of any of the three domains, and make progress rather than
   failing (FR-015, invariant 9). A request can reach ~3.4 GiB (~1,536 blocks × 2.25 MiB
   for Qwen3-8B at 24k tokens), which is why chunking is mandatory, not optional
-- [ ] T048 Tests: **SC-007** — with bounce space and landing slots made artificially
-  scarce, a large request still completes, in chunks; outcome order preserved across
-  chunk boundaries; and a send blocks (not errors) at zero message credits, while
-  `WouldBlock` is returned only when the caller explicitly asked not to block
+- [X] T048 Tests: **SC-007** — with bounce space, message credits and the peer's
+  `max_entries` made artificially scarce, a large request still completes, in chunks;
+  outcome order preserved across chunk boundaries; and a chunk waits (never errors) at zero
+  message credits — `fetch` never blocks the caller and never fails for want of a credit.
+  Landing slots are the caller's to reserve, and it requests only what it reserved, so
+  their scarcity is not the endpoint's to test.
+  *Done* (with T043-T047). `fetch` takes any length and has no size or would-block error.
+  Once the peer's `OP_HELLO` is in, a
+  fetch is split into chunks of its `max_entries`, in request order; each chunk is a
+  message with its own `context_id`, its own credit, its own send time. The outbound book
+  maps `context_id` → (fetch, chunk); a reply is checked against its chunk's length and
+  placed at its offset, so replies may arrive in any order. Fetches take turns a chunk at
+  a time, starting after whichever sent last. A refused chunk marks the fetch refused and
+  its unsent chunks settled; once every chunk is settled it fails whole with `Protocol`
+  (decision (a)). The deadline runs per chunk and names it. T043 and T045 needed no code:
+  the three domains were already separate knobs and counters, and the source already
+  replies once per message — scarcity delays the reply (Phase 6's deferral). T047 is the
+  sum. Tests: 1,536 entries in five chunks over two credits, byte-exact and in order;
+  reverse-order replies placed by offset; a chunk reply of the whole fetch's length is a
+  bad reply; a refused chunk failing the fetch only after its siblings, unsent chunks
+  unsent; chunks waiting for credits; a small fetch not starved by a large one (which
+  caught a real oldest-first bug); a stalled chunk naming itself; and one reply per
+  request from a one-lease reserve. Nine planted bugs, all caught — five by the endpoint
+  aborting on an invariant it checks
 
 **Checkpoint**: SC-007 — scarcity degrades to chunking, never to failure.
 
@@ -749,7 +769,7 @@ failing deadline rather than none.
   its outstanding contexts and releases each side's own resources; and the deferred
   degrading action is rejected at configuration time.
   *Done.* The completion became `FetchResult = Result<Vec<EntryOutcome>, _>`: a fetch with no
-  usable reply fails as a whole (`Deadline`, `Protocol`, `Transport`, `RequestTooLarge`) and
+  usable reply fails as a whole (`Deadline`, `Protocol`, `Transport`) and
   every slot is to be aborted; a push still reports per entry, `Err` only if it never
   started. Only a successful completion is a hit — a write that may or may not have landed
   is reported as not landed. `fetch_deadline` (default 5 s, `None` disables) runs from the
