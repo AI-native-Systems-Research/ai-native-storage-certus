@@ -349,24 +349,23 @@ already give for free, and engineer nothing further for it.
 **Rationale**: the magnitudes are three orders of magnitude apart, so only one of them can
 matter.
 
-| quantity | at 50G (measured rig) | at 200G |
+| quantity | at 50G | at 200G (measured rig) |
 |---|---|---|
 | one `OP_FETCH` of 340 × 2.25 MiB | ~130 ms | ~30 ms |
 | one 2.25 MiB entry write | ~380 us | ~90 us |
 | inter-message bubble (reply RTT + lookup) | ~10-50 us | ~10-50 us |
 | a device read on the block-tier path | ~100 us - ms | ~100 us - ms |
 
-Both columns are given because the figure matters to the argument and the two rigs differ:
-the active port on the current node is **50 Gbps** (see *Rig facts* below), while the
-precedent's comment assumes 200G RoCE. The conclusion is invariant, and is in fact *stronger*
-at the lower rate — the bubble is 0.008-0.04% of a message at 50G versus ~0.1% at 200G, and
+Both columns are given because the figure matters to the argument: the rig's active port is
+**200 Gb/s** (see *Rig facts* below), and a slower link must not change the conclusion. It
+does not, and is in fact *stronger* at the lower rate — the bubble is 0.008-0.04% of a message at 50G versus ~0.1% at 200G, and
 it stays well below the cost of a single entry's write either way. So overlapping messages
 buys essentially nothing at any link rate this design will see. Message credits default to 8 and block only at zero, so that overlap already exists at
 no cost; it just must not drive design. The same arithmetic disposes of deep send-queue
 pipelining: at 2.25 MiB per entry this path is bandwidth-bound and a window of 2-4 saturates
 the link.
 
-Note the one place the margin *narrows* at 50G: a device read (~100 us - ms) stops being much
+Note the one place the margin *narrows* on a slower link, at 50G: a device read (~100 us - ms) stops being much
 larger than a single entry's write (~380 us) and becomes comparable to it. That does not
 change the conclusion below — a lease-all/read-all/post-all barrier still idles the wire for
 the whole read phase, whatever one read costs — but it does mean the block-tier barrier is the
@@ -716,7 +715,7 @@ Recorded because several decisions above were written against assumed numbers.
 | rdma-core | 2510.0.11-1.el9, with `rdma-core-devel`; `libibverbs` 1.14.58.0, `librdmacm` 1.3.58.0 |
 | headers | `/usr/include/infiniband/verbs.h`, `/usr/include/rdma/rdma_cma.h` present |
 | devices | **two**: `mlx5_0` -> `ens3f0np0`, `mlx5_1` -> `ens3f1np1` (dual-port ConnectX, fw 32.38.1002) |
-| active port | `mlx5_0` only: `PORT_ACTIVE`, **50 Gbps**, MTU 4096, `link_layer: Ethernet` (RoCE) |
+| active port | `mlx5_0` only: `PORT_ACTIVE`, **200 Gb/s (4X HDR)**, MTU 4096, `link_layer: Ethernet` (RoCE) |
 | down port | `mlx5_1`: `PORT_DOWN` / `phys_state: DISABLED` |
 | RDMA data-path address | `10.0.0.102/24` on `ens3f0np0` (GUID `...45579c` matches `mlx5_0`) |
 | NUMA | host has 2 nodes (0: 0-15,32-47 / 1: 16-31,48-63); **both RDMA devices are on NUMA node 0** |
@@ -739,8 +738,8 @@ Consequences for the decisions above:
   on NUMA node 0, so the NUMA-1 instance has no local NIC and its traffic crosses the
   inter-socket link regardless. D15 allocates the bounce pool on the *serving instance's*
   NUMA node, which is right for the device read but leaves NIC DMA remote for that instance.
-  This is a measurement caveat, not a design change — but a 50G link and a cross-socket hop
-  should both be stated when any transfer number from this rig is quoted.
+  This is a measurement caveat, not a design change — but a cross-socket hop should be stated
+  when any transfer number from this rig is quoted.
 * **Phase 9 scope on this node**: single-host loopback (T054, T055) runs on `mlx5_0`. The
   two-node test (T056) needs the peer node's equivalent. A topology with one NIC per NUMA
   domain is *not* currently available, since the second port is down and both ports are on

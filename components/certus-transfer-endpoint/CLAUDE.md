@@ -147,6 +147,16 @@ VIII–XI, and a review that does not check them is not a review.
   opcode.** Opcodes name kinds. Fusing mints a new opcode per kind per version,
   including unchanged kinds, and the handler ends up masking the version off anyway
   (D21).
+- **The verbs transport has one device and one PD, made at `listen`.** The
+  endpoint registers its pool before any connection exists, so the PD must
+  already be there: `listen` binds the id and allocates it on that device. A
+  connect that resolves to another device fails — its regions do not exist
+  there. Do not "fix" that by creating a PD per connection: an `rkey` on the
+  wire would then die with the queue pair (D17).
+- **A late write after ERROR is slow to report, not unsafe.** The responder
+  drops it silently, so the writer sees `RETRY_EXC_ERR` only after rdma_cm's
+  ACK-timeout retries, ~14 s on mlx5. It never lands. Do not shorten a test to
+  "expect a failed completion soon".
 - **`ffi.rs` struct layouts are pinned, on both sides.** A `const` block in
   `ffi.rs` asserts Rust sizes/offsets against fixed numbers, and `wrapper.c`
   `_Static_assert`s the real headers against the same numbers. Change one, change
@@ -248,7 +258,7 @@ lookup answer is reported as a **miss**, never an error (D14).
 
 ## Current state
 
-Scaffolding. T001–T052, T068 and T070–T083 are done, except T011 (Phases 3, 5, 6, 7 and 8 complete: US2 legacy push and US1 fetch work end to end over the mock, with a fail-loud reply deadline, and US3 serves block-tier entries through the dispatcher's `read_to_bounce`, `bounce.rs`; fetches of any length are chunked against the peer's `max_entries`): the crate builds as a default member,
+Scaffolding. T001–T056, T068 and T069–T083 are done, except T011 (Phases 3 and 5–9 complete: US2 legacy push and US1 fetch work end to end over the mock, with a fail-loud reply deadline, and US3 serves block-tier entries through the dispatcher's `read_to_bounce`, `bounce.rs`; fetches of any length are chunked against the peer's `max_entries`; an `rdma` build runs over the verbs transport, `connection/verbs.rs`, validated node2 ↔ node5): the crate builds as a default member,
 peer identity is implemented, `ITransferEndpoint` is defined in `interfaces`, and
 the verbs FFI (`ffi.rs`), C shim (`wrapper.c`) and safe wrappers (`rdma.rs`, T009)
 exist behind `rdma`, and the transport seam plus an in-process mock exist in every

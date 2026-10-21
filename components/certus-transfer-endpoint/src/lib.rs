@@ -30,7 +30,7 @@
 //!
 //! # Status
 //!
-//! Scaffolding. Tasks T001–T052, T068, T070–T083 (all but T011's
+//! Scaffolding. Tasks T001–T056, T068–T083 (all but T011's
 //! remaining faults) of
 //! `specs/001-rdma-cache-transfer/tasks.md` are complete: the crate builds as a
 //! workspace default member, peer identity is implemented, and the verbs FFI, its
@@ -42,8 +42,8 @@
 //! regions, and `fetch` over the request/reply messaging, with a fail-loud reply
 //! deadline; and with `spdk`, block-tier entries are read by the dispatcher into
 //! the memory tier's bounce reserve and served from there. A fetch of any length
-//! is chunked against the peer's `max_entries`. Still to come: the verbs
-//! transport (Phase 9).
+//! is chunked against the peer's `max_entries`. An `rdma` build runs over the
+//! verbs transport. Still to come: benchmarks and polish (Phase 10).
 
 #![deny(missing_docs)]
 

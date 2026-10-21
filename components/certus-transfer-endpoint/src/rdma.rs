@@ -25,9 +25,10 @@
 //!   `rdma_connect`/`rdma_accept` drive those transitions; only the transition
 //!   to ERROR is explicit ([`QueuePair::to_error`]), because it is what makes a
 //!   late write impossible, which the deadline path depends on (FR-023).
-//! * **No connect/accept state machine** — that is T053, over the T010 seam.
-//! * **No per-device PD table** — that is T069. [`ProtectionDomain`] owns one PD
-//!   on one device.
+//! * **No connect/accept state machine** — that is the verbs transport
+//!   (`connection::verbs`), over the T010 seam.
+//! * **No PD policy.** [`ProtectionDomain`] owns one PD on one device; the
+//!   verbs transport makes exactly one, on the device it listens on.
 //! * **No CQ-sharing policy here.** A queue pair takes any CQ for each side; the
 //!   seam (`connection::transport`) decides one CQ per link.
 //! * **No seam types.** Errors, access flags, QP state and completions are the
@@ -60,6 +61,8 @@ use crate::connection::transport::{
 use crate::ffi;
 
 // --- errors ------------------------------------------------------------------
+
+const EAGAIN: i32 = 11;
 
 /// Capture `errno` for a call that just failed.
 fn last_error(op: &'static str) -> RdmaError {
@@ -462,6 +465,30 @@ impl EventChannel {
         Ok(Arc::new(EventChannel { ch }))
     }
 
+    /// Make [`try_event`](Self::try_event) non-blocking. Once set,
+    /// [`get_event`](Self::get_event) no longer waits either.
+    pub fn set_nonblocking(&self) -> Result<(), RdmaError> {
+        // SAFETY: `ch` is live.
+        let ret = unsafe { ffi::certus_te_cm_channel_nonblocking(self.ch) };
+        if ret != 0 {
+            return Err(RdmaError::Verb {
+                op: "fcntl(O_NONBLOCK)",
+                errno: ret,
+            });
+        }
+        Ok(())
+    }
+
+    /// The next CM event if one is pending, without waiting; the channel must
+    /// be [non-blocking](Self::set_nonblocking).
+    pub fn try_event(self: &Arc<Self>) -> Result<Option<CmEvent<'_>>, RdmaError> {
+        match self.get_event() {
+            Ok(ev) => Ok(Some(ev)),
+            Err(RdmaError::Verb { errno, .. }) if errno == EAGAIN => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
     /// Block for the next CM event. The returned guard acks it on drop.
     ///
     /// Hold the guard only briefly: `rdma_destroy_id` waits until every event
@@ -824,6 +851,11 @@ impl CmId {
 
     pub fn qp(&self) -> Option<&QueuePair> {
         self.qp.as_ref()
+    }
+
+    /// Whether this id is bound or resolved to a device yet.
+    pub fn has_device(&self) -> bool {
+        !self.verbs().is_null()
     }
 }
 

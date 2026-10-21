@@ -226,7 +226,7 @@ connection table. This is plan.md Phase 1's engine.
   `remote-lookup-rdma-initiator/src/connection.rs:1075` `parse_endpoint` rather than
   inventing a second one. Unit-test that two addresses differing only by port are distinct
   keys, that a host-only address is rejected, and that both may be the local host
-- [ ] T069 *(moved into T053)* Implement protection-domain ownership in `src/rdma.rs` (depends T009): T009's
+- [X] T069 *(moved into T053)* Implement protection-domain ownership in `src/rdma.rs` (depends T009): T009's
   `ProtectionDomain` is one PD on one device; this task is the **per-device table**,
   lazy allocation after address resolution, and shutdown ordering — **one PD
   per device, owned by the endpoint for its lifetime**, with memory regions registered into
@@ -795,20 +795,38 @@ failing deadline rather than none.
 **Purpose**: the real verbs path behind the seam proven in Phases 2–8. Every test here is
 `#[ignore]`d so a default `cargo test` never needs a NIC (Principle VIII).
 
-- [ ] T053 Implement the real `rdma`-gated transport behind the T010 seam using T009's
+- [X] T053 Implement the real `rdma`-gated transport behind the T010 seam using T009's
   wrappers: `rdma_listen`/`rdma_accept`/`rdma_connect`, with the accepted and the
   initiated QP equally able to post (FR-001). Both predecessor crates already have all
   three calls, so this is combination rather than new ground. **Includes T069**: the seam
   promises a registration outlives every queue pair (T020 relies on it, and the mock keeps
   it); the verbs transport keeps it with one PD per device, as T069 describes
-- [ ] T054 [P] Write `src/loopback_test.rs`: `#[ignore]`d single-host RDMA loopback
+- [X] T054 [P] Write `src/loopback_test.rs`: `#[ignore]`d single-host RDMA loopback
   covering a full `fetch` — request, source push, reply, publication — mirroring the
   pattern of `remote-lookup-rdma-initiator/src/loopback_test.rs`
-- [ ] T055 [P] Add an `#[ignore]`d loopback test for the legacy `push` path, reproducing
+- [X] T055 [P] Add an `#[ignore]`d loopback test for the legacy `push` path, reproducing
   the scenario of the initiator's `loopback_push_writes_into_remote_buffer`, so SC-002 is
   discharged on hardware and not only over the seam
-- [ ] T056 Validate on two nodes across the RoCE fabric with GPU↔NUMA↔instance pinning as
-  the rigs require, and record the run under `evidence/`
+- [X] T056 Validate on two nodes across the RoCE fabric with GPU↔NUMA↔instance pinning as
+  the rigs require, and record the run under `evidence/`.
+  *Done* (T053-T056, with T069). `src/connection/verbs.rs` is the verbs transport behind
+  the seam, and `select_transport(BuildDefault)` returns it in an `rdma` build — never the
+  mock. The listening id is bound at `listen`, which the endpoint calls before registering
+  anything, and the one protection domain is made on its device: every region goes into it
+  and outlives every queue pair, and a connect that resolves to another device fails (one
+  device per endpoint). The event channel is non-blocking (a C shim sets `O_NONBLOCK`), and
+  an outbound connect is a state machine — resolve address, resolve route, connect —
+  advanced by events. One CQ per link, sized to both queues. Hosts are IPv4 literals.
+  `retry_count` and `rnr_retry_count` are 7 (RNR: retry forever, which the receive
+  partition makes safe); no RDMA reads, so no responder resources. Hardware tests, all
+  `#[ignore]`d: both ends send and write; ERROR flushes receives and a late write is
+  refused (`RETRY_EXC_ERR` after ~14 s at rdma_cm's default ACK timeout — it never lands);
+  a reject carries its reason; a registration outlives two connections; a connect to nobody
+  fails as an event; one poll reaps a burst. Loopback through the interface (T054, T055):
+  a fetch round trip and a three-chunk fetch, the legacy push of 64 writes back to front,
+  a deadline against a live-but-silent source with the late write not landing and the same
+  handle reconnecting, and a lost source. T056 ran node2 ↔ node5 at ~19 GB/s steady for
+  96 MiB fetches of 64 KiB entries — `evidence/t056-two-node.md`
 
 **Checkpoint**: `cargo test -- --ignored` passes on an RDMA box; CI is unaffected.
 
