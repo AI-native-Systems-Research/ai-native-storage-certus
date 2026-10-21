@@ -939,6 +939,7 @@ mod tests {
                 .register(dst.as_mut_ptr(), 4, Access::LOCAL_WRITE)
         }
         .unwrap();
+        // SAFETY: as above.
         let rs = unsafe {
             a.transport()
                 .register(src.as_mut_ptr(), 4, Access::LOCAL_WRITE)
@@ -1448,6 +1449,7 @@ mod tests {
                 .register(bufs.src.as_mut_ptr(), bufs.src.len(), Access::LOCAL_WRITE)
         }
         .unwrap();
+        // SAFETY: as above.
         let rl = unsafe {
             b.transport().register(
                 bufs.land.as_mut_ptr(),

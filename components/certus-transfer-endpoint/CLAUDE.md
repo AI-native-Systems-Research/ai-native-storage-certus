@@ -243,6 +243,12 @@ VIII–XI, and a review that does not check them is not a review.
   struct. Both are `u32`, so a transposition silently swaps a length for a key.
   Name fields explicitly in the codec.
 
+- **Benchmark through the interface, never around it.** A benchmark that calls
+  the codec or the push loop directly measures something no caller runs, and
+  needs internals exported to do it. Measure a piece inside the real path, by
+  difference (all-miss beside all-hit). Quote loopback numbers as loopback: a
+  loopback write crosses one NIC twice.
+
 ## Build and test
 
 ```sh
@@ -258,7 +264,7 @@ lookup answer is reported as a **miss**, never an error (D14).
 
 ## Current state
 
-Scaffolding. T001–T056, T068 and T069–T083 are done, except T011 (Phases 3 and 5–9 complete: US2 legacy push and US1 fetch work end to end over the mock, with a fail-loud reply deadline, and US3 serves block-tier entries through the dispatcher's `read_to_bounce`, `bounce.rs`; fetches of any length are chunked against the peer's `max_entries`; an `rdma` build runs over the verbs transport, `connection/verbs.rs`, validated node2 ↔ node5): the crate builds as a default member,
+T001–T083 are done, except T011's remaining faults and Phase 11, which is out of scope (Phases 3 and 5–10 complete: US2 legacy push and US1 fetch work end to end over the mock, with a fail-loud reply deadline, and US3 serves block-tier entries through the dispatcher's `read_to_bounce`, `bounce.rs`; fetches of any length are chunked against the peer's `max_entries`; an `rdma` build runs over the verbs transport, `connection/verbs.rs`, validated node2 ↔ node5): the crate builds as a default member,
 peer identity is implemented, `ITransferEndpoint` is defined in `interfaces`, and
 the verbs FFI (`ffi.rs`), C shim (`wrapper.c`) and safe wrappers (`rdma.rs`, T009)
 exist behind `rdma`, and the transport seam plus an in-process mock exist in every

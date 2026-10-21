@@ -834,22 +834,25 @@ failing deadline rather than none.
 
 ## Phase 10: Benchmarks, documentation and polish
 
-- [ ] T057 [P] Criterion benchmark in `benches/` for the **per-entry push path** —
+- [X] T057 [P] Criterion benchmark in `benches/` for the **per-entry push path** —
   required by plan.md and Principle IV, and the per-entry posting of FR-008 is precisely
   the path whose cost needs measuring. Copy the dev-dependency setup from the responder
   crate
-- [ ] T058 [P] Criterion benchmark for the message codec (header + entry vector encode and
-  decode at 340 entries)
-- [ ] T059 [P] Doc comments with **runnable** examples on every public item (Principle
+- [X] T058 [P] Criterion benchmark for the message codec, measured inside the real path,
+  not alone: a 340-entry `fetch` that misses every entry writes nothing, so what remains is
+  the request's encode, the source's decode and resolve, the reply's encode and decode, and
+  the credits and thread hops between; an all-hit fetch of the same shape beside it
+  attributes the writes
+- [X] T059 [P] Doc comments with **runnable** examples on every public item (Principle
   III), using the initiator's `lib.rs` example as the model; `cargo test --doc -p
   certus-transfer-endpoint` passes
-- [ ] T060 [P] Write `README.md`: role, the symmetric-endpoint property, the three credit
+- [X] T060 [P] Write `README.md`: role, the symmetric-endpoint property, the three credit
   domains, the feature matrix, and the default-member note from T003
-- [ ] T061 `cargo doc -p certus-transfer-endpoint --no-deps` warning-free (Principle III)
-- [ ] T062 `cargo fmt --check` and `cargo clippy -p certus-transfer-endpoint
+- [X] T061 `cargo doc -p certus-transfer-endpoint --no-deps` warning-free (Principle III)
+- [X] T062 `cargo fmt --check` and `cargo clippy -p certus-transfer-endpoint
   --all-features -- -D warnings` (Principle V); confirm every `unsafe` item carries a
   `// SAFETY:` comment
-- [ ] T063 Run `/component-check-leakage` and confirm the component is reached only through
+- [X] T063 Run `/component-check-leakage` and confirm the component is reached only through
   its interfaces (Principle I)
 - [X] T064 [P] **Design-document hygiene — DONE.** Fixed before the spec set was committed:
   (a) `research.md`'s "Open questions for the plan phase" heading, which was immediately
@@ -869,6 +872,19 @@ failing deadline rather than none.
   fmt/clippy task in the responder's — replaced with the real test,
   `remote-lookup-rdma-initiator/src/loopback_test.rs::loopback_push_writes_into_remote_buffer`,
   which T055 reproduces
+
+  *Done* (T057-T063). Both benchmarks go through `ITransferEndpoint` only, as a caller
+  would, over the build's own transport — the mock, or verbs with `CERTUS_RDMA_TEST_IP`
+  (skipped without it, never substituted). No internals are exported for them: a benchmark
+  that called the codec directly would measure something no caller runs. Results and the
+  `ib_write_bw` comparison are in `README.md`: a 340-entry all-miss fetch costs ~30 µs over
+  verbs; loopback pushes run at 9.6-10.1 GiB/s against `ib_write_bw`'s 12.9-15.0 GiB/s on
+  the same loopback, and two nodes reach the fabric's rate (T056). One runnable example on
+  `CertusTransferEndpoint` (`create` → wire → `initialize` → `push` → `shutdown`), compiled
+  but not run in an `rdma` build, where it would need real addresses. Every `unsafe` block
+  and impl now carries `// SAFETY:` (two test sites lacked one). `/component-check-leakage`:
+  no crate depends on this one yet (cutover is Phase 11) and this one depends on no other
+  component's struct — clean.
 
 **Checkpoint**: the component meets every constitutional gate and the design documents
 agree with themselves.
