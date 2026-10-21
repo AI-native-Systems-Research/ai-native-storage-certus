@@ -117,6 +117,10 @@ pub(crate) enum Command {
     /// a shutdown that drains from one that does not. Test-only.
     #[cfg(test)]
     HoldRecv(PeerId, mpsc::Sender<Result<(), String>>),
+    /// Post no reply reserve on links brought up from now on: FR-026's fault.
+    /// Test-only.
+    #[cfg(test)]
+    NoReplyReserve(mpsc::Sender<()>),
     /// The local pool's address and rkey, so a test can push into it. Test-only.
     #[cfg(test)]
     PoolKey(mpsc::Sender<(u64, u32)>),
@@ -383,6 +387,9 @@ pub(crate) struct EndpointActor {
     /// outlive any drain of it.
     #[cfg(test)]
     held: Vec<(Box<[u8; 64]>, Region)>,
+    /// Post only the inbound quota, no reply reserve (a fault, for tests).
+    #[cfg(test)]
+    pub(crate) no_reply_reserve: bool,
 }
 
 impl EndpointActor {
@@ -431,6 +438,8 @@ impl EndpointActor {
             deadline: None,
             #[cfg(test)]
             held: Vec::new(),
+            #[cfg(test)]
+            no_reply_reserve: false,
         }
     }
 
@@ -1123,6 +1132,14 @@ impl EndpointActor {
     fn bring_up(&mut self, peer: &PeerId) -> Result<(), String> {
         let table = self.table.as_mut().ok_or("shut down")?;
         let receives = self.limits.receives() as usize;
+        // The fault a test asks for: no reply reserve, so replies compete with
+        // inbound requests for the quota's buffers (FR-026's deadlock).
+        #[cfg(test)]
+        let receives = if self.no_reply_reserve {
+            self.limits.inbound_quota as usize
+        } else {
+            receives
+        };
         // Receives, plus one buffer to send OP_HELLO from.
         self.msgs.reserve(table.transport(), receives + 1)?;
         let bufs: Vec<MsgBuf> = (0..receives)
@@ -1680,6 +1697,11 @@ impl ActorHandler<Command> for EndpointActor {
             #[cfg(test)]
             Command::HoldRecv(peer, reply) => {
                 let _ = reply.send(self.hold_recv(&peer));
+            }
+            #[cfg(test)]
+            Command::NoReplyReserve(reply) => {
+                self.no_reply_reserve = true;
+                let _ = reply.send(());
             }
             #[cfg(test)]
             Command::IsUp(peer, reply) => {

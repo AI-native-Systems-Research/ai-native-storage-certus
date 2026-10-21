@@ -152,12 +152,25 @@ connection table. This is plan.md Phase 1's engine.
   already models in-order execution with an infinite-retry RNR stall, checked one-sided
   writes (bad `rkey` → `REM_ACCESS_ERR`, both ends ERROR), flush on ERROR, capacity, and
   unsignaled slots retiring only behind a later completion
-- [ ] T011 [P] Extend the in-process mock in `src/connection/mock.rs` (depends T010) with
+- [X] T011 [P] Extend the in-process mock in `src/connection/mock.rs` (depends T010) with
   fault injection: injectable inbound messages, a finite RNR retry, `LOCAL_WRITE` checks on
-  receive buffers, and recorded QP→ERROR ordering so teardown-before-reclaim is assertable
-  *(the recorded ordering is done, in T021)*.
+  receive buffers, and recorded QP→ERROR ordering so teardown-before-reclaim is assertable.
   Two endpoints in one process and the one-sided write that copies into the target address
-  already exist (T010)
+  already exist (T010).
+  *Done*. The recorded ordering is the event log (T021). Injected inbound messages are met
+  at the endpoint (`Command::Inject`) and by raw transports in the tests, which every
+  malformed-message test uses; a fabric-level injector would be a third way. **Finite RNR
+  retry**: `rnr_retry_limit(Some(n))` fails a send `RNR_RETRY_EXC_ERR` after n stalls and
+  forces both ends to ERROR. With it at zero, a deterministic burst — 8 replies and 8
+  requests released at once onto one peer — completes with no stall when the receive
+  partition is posted, and fails loudly at the ninth message when the reply reserve is
+  withheld (a test-only `NoReplyReserve`): FR-026's deadlock made visible. **Receive
+  checks**, set from probes on mlx5: a send longer than its receive fails the receive
+  `LOC_LEN_ERR` and leaves both queue pairs up — the mock had been failing the send and
+  forcing ERROR, so the endpoint's own teardown on a failed receive went untested, and now
+  is; a receive into memory without `LOCAL_WRITE` lands on mlx5 but fails `LOC_PROT_ERR`
+  here, which is verbs' rule, deliberately stricter. Both reference behaviours stay checked
+  by an `#[ignore]`d hardware test. Six planted bugs, all caught. Timing is not modelled
 - [X] T012 Implement the **symmetric** `ConnectionTable` in `src/connection/` (depends
   T010, T068, D5): one QP per peer **instance** pair keyed by `PeerId`, established on first
   need and reused. Remove the temporary per-item `#[allow(dead_code)]` attributes T068 left

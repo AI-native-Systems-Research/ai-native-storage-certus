@@ -1005,6 +1005,87 @@ mod tests {
         drop((ra, rb));
     }
 
+    /// The reference behaviour the mock's two receive checks were set from
+    /// (T011), kept as tests so a driver or firmware change shows up: on mlx5
+    /// a receive into memory registered without `LOCAL_WRITE` lands anyway —
+    /// verbs says it should fail, so the mock fails it — and a send longer
+    /// than its receive fails only the receive, leaving both queue pairs up
+    /// and usable, which the mock copies.
+    #[test]
+    #[ignore = "needs an RDMA device; set CERTUS_RDMA_TEST_IP"]
+    fn receive_faults_as_the_nic_reports_them() {
+        let (mut a, _) = listening();
+        let (mut b, b_addr) = listening();
+        let (la, lb) = connected(&mut a, &mut b, &b_addr);
+        let mut abuf = vec![7u8; 64];
+        let mut ro = vec![0u8; 4096];
+        let mut rw = vec![0u8; 4096];
+        // SAFETY: buffers outlive the regions.
+        let ra = unsafe { a.register(abuf.as_mut_ptr(), 64, Access::LOCAL_WRITE) }.unwrap();
+        let rro = unsafe { b.register(ro.as_mut_ptr(), 4096, Access::REMOTE_READ) }.unwrap();
+        let rrw = unsafe { b.register(rw.as_mut_ptr(), 4096, Access::LOCAL_WRITE) }.unwrap();
+        let send = |a: &mut VerbsTransport, wr_id, len| {
+            // SAFETY: as above.
+            unsafe {
+                a.link(la)
+                    .unwrap()
+                    .post_send(&[SendRequest {
+                        wr_id,
+                        op: SendOp::Send,
+                        local: ra.sge(ra.addr(), len).unwrap(),
+                        signaled: true,
+                    }])
+                    .unwrap();
+            }
+        };
+        let recv = |b: &mut VerbsTransport, wr_id, r: &Region, len| {
+            // SAFETY: as above.
+            unsafe {
+                b.link(lb)
+                    .unwrap()
+                    .post_recv(&[RecvRequest {
+                        wr_id,
+                        buf: r.sge(r.addr(), len).unwrap(),
+                    }])
+                    .unwrap();
+            }
+        };
+        // Without LOCAL_WRITE: lands on mlx5.
+        recv(&mut b, 5, &rro, 64);
+        send(&mut a, 1, 8);
+        assert_eq!(poll_until(&mut a, la, 1)[0].result, Ok(Completed::Send));
+        assert_eq!(
+            poll_until(&mut b, lb, 1)[0].result,
+            Ok(Completed::Recv { byte_len: 8 })
+        );
+        assert_eq!(ro[..8], [7u8; 8]);
+        // Longer than the receive: the receive fails, the send does not.
+        recv(&mut b, 6, &rrw, 8);
+        send(&mut a, 2, 32);
+        assert_eq!(poll_until(&mut a, la, 1)[0].result, Ok(Completed::Send));
+        let c = poll_until(&mut b, lb, 1);
+        assert_eq!(
+            c[0].result,
+            Err(CompletionError::Failed {
+                status: crate::connection::transport::wc::LOC_LEN_ERR,
+                vendor_err: 0
+            })
+        );
+        assert_eq!(a.link(la).unwrap().state().unwrap(), QpState::Rts);
+        assert_eq!(b.link(lb).unwrap().state().unwrap(), QpState::Rts);
+        // And both still work.
+        recv(&mut b, 7, &rrw, 64);
+        send(&mut a, 3, 8);
+        assert_eq!(poll_until(&mut a, la, 1)[0].result, Ok(Completed::Send));
+        assert_eq!(
+            poll_until(&mut b, lb, 1)[0].result,
+            Ok(Completed::Recv { byte_len: 8 })
+        );
+        a.close(la);
+        b.close(lb);
+        drop((ra, rro, rrw));
+    }
+
     #[test]
     fn hosts_must_be_ipv4_literals() {
         let p = PeerId::parse("node5:7000").unwrap();
