@@ -251,8 +251,8 @@ per block that is ~765 MiB of KV per message — far more than any single schedu
 ask for — and it bounds `OP_FETCH_REPLY` at `24 + 340` = 364 bytes.
 
 Posted-receive memory per peer is `(message_credits + inbound_quota) x 8 KiB` — the reply
-reserve plus the peer's quota (*Receive-buffer partitioning*). At the defaults of 8 credits
-and an 8-request quota that is 16 buffers, 128 KiB per peer — still negligible, which is why
+reserve plus the peer's quota (*Receive-buffer partitioning*). At the defaults of 4 credits
+and a 4-request quota that is 8 buffers, 64 KiB per peer — negligible, which is why
 FR-005 can post unconditionally rather than negotiate.
 
 `max_entries` is derived from the buffer size, not configured independently, and is the
