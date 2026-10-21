@@ -1212,14 +1212,11 @@ impl DispatcherComponent {
                     }
                 }
                 Err(interfaces::MemoryTierError::AlreadyExists(k)) => {
-                    // Not a capacity refusal: someone else — a concurrent writer, or a
-                    // remote fetch's `publish_success` — already put this key in the
-                    // tier. Counted here because this return bypasses the backpressure
-                    // retry in `reserve_memory`, so it leaves no trace in either store
-                    // counter, and the shm-queue wire collapses it into the same flat
-                    // zero as a genuine pool-full. Without this counter a run can show
-                    // stores declined while eviction never failed once.
-                    self.tier_counters.record_store_already_resident();
+                    // Not a capacity refusal: someone else — a concurrent writer, a
+                    // remote fetch's `publish_success`, or a concurrent promotion —
+                    // already put this key in the tier. Not counted here: this helper
+                    // is shared with the load paths, where a lost promotion race is a
+                    // hit. `reserve_memory` counts the store refusals.
                     return Err(DispatcherError::AlreadyExists(k));
                 }
                 Err(e) => {
@@ -3505,8 +3502,13 @@ impl IDispatcher for DispatcherComponent {
                     self.store_backpressure_ms.load(Ordering::Relaxed),
                 );
                 if budget.is_zero() {
-                    let mem_ptr = self.evict_and_insert(&dm, &mt, key, size, max_attempts)?;
-                    return Ok(mem_ptr);
+                    return match self.evict_and_insert(&dm, &mt, key, size, max_attempts) {
+                        Err(e @ DispatcherError::AlreadyExists(_)) => {
+                            self.tier_counters.record_store_already_resident();
+                            Err(e)
+                        }
+                        r => r,
+                    };
                 }
                 std::time::Instant::now() + budget
             }
@@ -3529,6 +3531,15 @@ impl IDispatcher for DispatcherComponent {
                         );
                     }
                     std::thread::sleep(POLL);
+                }
+                Err(e @ DispatcherError::AlreadyExists(_)) => {
+                    // Not a capacity refusal: the key is already cached. It bypasses
+                    // the backpressure retry, so it leaves no trace in either store
+                    // counter, and the shm-queue wire collapses it into the same flat
+                    // zero as a genuine pool-full. Without this counter a run can show
+                    // stores declined while eviction never failed once.
+                    self.tier_counters.record_store_already_resident();
+                    return Err(e);
                 }
                 Err(e) => return Err(e),
             }
@@ -6671,7 +6682,7 @@ mod tests {
     /// cannot tell them apart.
     ///
     /// `op_reserve` reports every reserve error as the same flat zero, and the
-    /// already-resident path returns from `evict_and_insert` immediately — bypassing
+    /// already-resident path returns from `reserve_memory` immediately — bypassing
     /// the backpressure retry, so it bumps neither `store_backpressure_events` nor
     /// `store_drops_on_full`. The observable consequence, measured on four instances:
     /// 7.28% of stores "declined" while `eviction_scans_exhausted` was 0, i.e. eviction
@@ -6688,7 +6699,7 @@ mod tests {
         let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(16384));
         let counters = Arc::new(TierEventCounters::default());
         let c = DispatcherComponent::new(
-            AtomicBool::new(false),
+            AtomicBool::new(true),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -6705,9 +6716,11 @@ mod tests {
             Arc::clone(&counters),
             Arc::new(WriteThroughPins::default()),
         );
+        c.dispatch_map.connect(Arc::clone(&dm)).unwrap();
+        c.memory_tier.connect(Arc::clone(&mt)).unwrap();
 
         // First reserve succeeds and leaves the key resident.
-        c.evict_and_insert(&dm, &mt, 7, 4096, 100)
+        c.reserve_memory(7, 4096, 0, None)
             .expect("the first insert has room and must succeed");
         assert_eq!(
             counters.snapshot().store_already_resident,
@@ -6717,7 +6730,7 @@ mod tests {
 
         // Second reserve of the SAME key: the tier still has room, so this can only
         // fail because the key is already there.
-        let res = c.evict_and_insert(&dm, &mt, 7, 4096, 100);
+        let res = c.reserve_memory(7, 4096, 0, None);
         assert!(
             matches!(res, Err(DispatcherError::AlreadyExists(7))),
             "a repeat reserve of a resident key must report AlreadyExists, got {res:?}",
@@ -7355,3 +7368,7 @@ mod repair_test_populate_slot;
 #[cfg(test)]
 #[path = "repair_test_remove_no_wait.rs"]
 mod repair_test_remove_no_wait;
+
+#[cfg(test)]
+#[path = "repair_test_store_already_resident.rs"]
+mod repair_test_store_already_resident;
