@@ -445,8 +445,8 @@ pub struct EndpointConfig {
     /// Send-queue credits per connection: in-flight send-queue requests, and
     /// so held read pins. Clamped to what the device grants. Default 8: the
     /// bandwidth-delay product at 200 Gb/s and the measured write round trip
-    /// asks for 3 at 64 KiB entries and 2 at 2.25 MiB; 8 keeps headroom for
-    /// the endpoint thread's polling, which the derivation does not model
+    /// asks for 3 at 64 KiB entries and 2 at 2.25 MiB, and a measured sweep
+    /// found 8 matching 16's throughput at half the pins held, with 32 worse
     /// (certus-transfer-endpoint research D10).
     pub send_credits: u32,
     /// Message credits per connection: requests this end may have outstanding

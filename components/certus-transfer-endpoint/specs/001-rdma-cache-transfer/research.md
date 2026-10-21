@@ -199,7 +199,8 @@ unit`, at 200 Gb/s (25 GB/s). Measured 2026-10-20, node2 ↔ node5, NUMA-0 pinne
 | `ib_send_lat` 8 KiB | 3.7 µs |
 | real `dispatch-map` `lookup` + `release_read`, uncontended | 0.51 µs |
 | endpoint: 340-entry all-miss fetch, call to callback | 35-59 µs |
-| endpoint: 1-entry hit fetch | 31 µs or ~75 µs (bimodal, by run) |
+| endpoint: 1-entry hit fetch, warm path | 22-30 µs |
+| endpoint: 1-entry hit fetch, cold path (see below) | ~70 µs, falling to ~25 µs over ~2,000 fetches |
 | endpoint: 340 × 64 KiB hit fetch | 1.46 ms (15.3 GB/s) |
 
 * **Message credits: 4.** A credit is held for the network round trip plus the source's
@@ -211,15 +212,32 @@ unit`, at 200 Gb/s (25 GB/s). Measured 2026-10-20, node2 ↔ node5, NUMA-0 pinne
   posted twice the receives.
 * **Inbound quota: 4**, matching the peers' credits. It is policy, not delay: how much of
   this node one peer may queue. Larger buys nothing a peer will use.
-* **Send credits: 8, deliberately above the derivation.** A write holds its credit for wire
-  time plus the write round trip: `ceil((2.6 + 4.4) / 2.6) = 3` at 64 KiB on the `ib` floor,
-  2 at 2.25 MiB. A sweep of the source's credits (3 reps × 4 rounds, 1,536 × 64 KiB) gave
-  11.2 GB/s at 2 and 14-18 GB/s, non-monotonic, from 4 to 32, with the spread inside each
-  setting as large as the differences between them; a 340-entry message took 1.46 ms at
-  every setting from 4 up. Below 4 the window is the limit; above it something the formula
-  does not model is — the endpoint thread's polling, whose bimodal 31/75 µs single-entry
-  fetch points at idle parking. 8 is kept: above the derived 3, with headroom, and not fitted
-  to that noise.
+* **Send credits: 8, above the derived minimum.** A write holds its credit for wire time plus
+  the write round trip: `ceil((2.6 + 4.4) / 2.6) = 3` at 64 KiB on the `ib` floor, 2 at
+  2.25 MiB. Swept on a warm path (below) — the source's credits, 3 reps × 4 rounds of
+  1,536 × 64 KiB fetches, after 20 bulk fetches:
+
+  | send credits | 2 | 4 | 8 | 16 | 32 |
+  |---|---|---|---|---|---|
+  | GB/s, median (min-max) | 11.1 (10.6-11.2) | 13.2 (10.9-15.2) | 14.4 (11.5-17.2) | 14.4 (14.1-14.6) | 12.7 (10.2-12.8) |
+
+  Below 4 the window is the limit, as derived. 8 and 16 tie on the median, and 16's spread
+  is the tightest; 32 is worse, not better. A 340-entry message takes 1.45 ms (15.3 GB/s) at
+  every setting from 4 up, so the cap there is per message, not the credit window. 8 is
+  kept: it reaches 16's median at half the pins held (SC-004), and nothing measured argues
+  for more.
+* **A cold path costs ~40 µs a fetch, not the endpoint.** A fetch issued after the path has
+  been idle took ~70 µs, falling to ~25 µs over ~2,000 fetches; 20 bulk fetches first made it
+  ~25 µs from the start, and 200 ms of idle between bursts held it at ~41 µs. Stage timing
+  put all of it in one place: the source's RDMA write, post to completion (52 → 11 µs); every
+  endpoint stage — queueing, posting, decoding, replying — stayed at 1-2 µs. Pre-touching the
+  landing memory and spreading writes over fresh pages changed nothing, and the endpoint
+  threads busy-poll, so it is not page faults, translation, or CPU idle. It is in the NIC or
+  platform path, warmed by traffic and cooled by idleness; telling NIC power management,
+  PCIe link power and IOMMU state apart needs root on the hosts. Under load the path is warm
+  — every bulk number here is warm — so it costs latency on sparse single fetches, not
+  throughput. The first, cold send-credit sweep had runs starting cold or warm at random,
+  which is why it read 4-32 as indistinguishable.
 * **Block readers: 4, and the 16 MiB reserve** are set by the device, not the link. At
   ~100 µs a read, 4 readers sustain 4 × 64 KiB / 100 µs ≈ 2.6 GB/s of block-tier serving;
   filling 25 GB/s would take ~38 reads in flight and ~150 MiB of reserve at 4 MiB entries.
