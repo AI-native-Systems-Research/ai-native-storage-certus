@@ -1,0 +1,113 @@
+# Containerfile — single-node DeepSeek 3FS cluster in ONE privileged container.
+#
+# Runs FoundationDB + mgmtd + meta + storage + the hf3fs FUSE client together and
+# exports the FUSE mount to the host (rshared bind) so the vLLM HF3FSKVConnector
+# container can bind it in. Built by ./build.sh; started by ./run.sh.
+#
+# The 3FS ref and SHUFFLE_METHOD MUST match the client side baked into
+# localhost/vllm-hf3fs-bench (apps/vllm-serve/Dockerfile.hf3fs): build.sh reads the
+# wheel version (hf3fs_py_usrbio 1.2.9+<sha>) out of that image and passes it here.
+#
+# Stages:
+#   deps    — Ubuntu 22.04 toolchain + runtime libs (upstream dockerfile/dev.dockerfile)
+#   build   — compiles only the five binaries we need (not the test tree)
+#   final   — deps + FDB server + binaries + upstream config templates + bootstrap
+
+ARG UBUNTU_VERSION=22.04
+
+# ══════════════════════════════════════════════════════════════════════════════
+FROM docker.io/library/ubuntu:${UBUNTU_VERSION} AS deps
+SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
+ARG FDB_VERSION=7.3.63
+ARG LIBFUSE_VERSION=3.16.2
+
+# Upstream's Ubuntu 22.04 package list, plus rdma-core (libibverbs + the mlx5
+# provider — without ibverbs-providers RDMA silently finds no devices), python3 for
+# the config renderer, and a few diagnostics.
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      git wget curl ca-certificates \
+      clang-format-14 clang-14 clang-tidy-14 lld-14 \
+      build-essential meson ninja-build gcc-12 g++-12 cmake pkg-config \
+      google-perftools libaio-dev libboost-all-dev libdouble-conversion-dev \
+      libdwarf-dev libgflags-dev libgmock-dev libgoogle-glog-dev \
+      libgoogle-perftools-dev libgtest-dev liblz4-dev liblzma-dev libssl-dev \
+      libunwind-dev libuv1-dev \
+      libibverbs-dev librdmacm-dev ibverbs-providers ibverbs-utils \
+      python3 iproute2 procps util-linux \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN wget -q "https://github.com/apple/foundationdb/releases/download/${FDB_VERSION}/foundationdb-clients_${FDB_VERSION}-1_amd64.deb" \
+  && dpkg -i "foundationdb-clients_${FDB_VERSION}-1_amd64.deb" \
+  && rm -f "foundationdb-clients_${FDB_VERSION}-1_amd64.deb"
+
+# libfuse >= 3.16.1 from source. -Dutils=false: the utils' install helper mknods
+# /dev/fuse and writes init scripts, which fails in a build container. fusermount3 is
+# not needed — hf3fs_fuse_main runs as root and mounts via mount(2); entrypoint.sh
+# unmounts with umount.
+RUN wget -qO- "https://github.com/libfuse/libfuse/releases/download/fuse-${LIBFUSE_VERSION}/fuse-${LIBFUSE_VERSION}.tar.gz" \
+      | tar -xzf - -C /tmp \
+  && cd "/tmp/fuse-${LIBFUSE_VERSION}" && mkdir build && cd build \
+  && meson setup .. -Dexamples=false -Dtests=false -Dutils=false && meson configure -D default_library=both \
+  && ninja && ninja install && ldconfig \
+  && rm -rf /tmp/fuse-*
+
+# ══════════════════════════════════════════════════════════════════════════════
+FROM deps AS build
+ARG HF3FS_REF
+ARG SHUFFLE_METHOD=stdshuffle
+ARG BUILD_JOBS=32
+ARG RUST_VERSION=1.85.0
+
+RUN [ -n "${HF3FS_REF}" ] || { echo "HF3FS_REF build-arg is required (build.sh sets it)"; exit 1; }
+
+ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo PATH=/usr/local/cargo/bin:$PATH
+RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain "${RUST_VERSION}"
+
+RUN git clone https://github.com/deepseek-ai/3fs /src/3fs \
+  && cd /src/3fs && git checkout "${HF3FS_REF}" \
+  && git submodule update --init --recursive \
+  && ./patches/apply.sh
+
+# Compile in its own layer so packaging tweaks below don't recompile (~30+ min).
+RUN cd /src/3fs \
+  && cmake -S . -B build -G Ninja \
+       -DCMAKE_CXX_COMPILER=clang++-14 -DCMAKE_C_COMPILER=clang-14 \
+       -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSHUFFLE_METHOD="${SHUFFLE_METHOD}" \
+  && cmake --build build -j "${BUILD_JOBS}" \
+       --target mgmtd_main meta_main storage_main hf3fs_fuse_main admin_cli
+
+# podman/buildah does not carry SHELL into child stages (OCI format) — /bin/sh here,
+# so no bash brace expansion.
+RUN cd /src/3fs \
+  && mkdir -p /out/bin /out/lib /out/configs \
+  && for b in mgmtd_main meta_main storage_main hf3fs_fuse_main admin_cli; do cp "build/bin/$b" /out/bin/; done \
+  && find build -type f \( -name 'lib*.so' -o -name 'lib*.so.*' \) -exec cp -n {} /out/lib/ \; \
+  && cp configs/*.toml /out/configs/ \
+  && git rev-parse HEAD > /out/HF3FS_REF
+
+# ══════════════════════════════════════════════════════════════════════════════
+FROM deps AS final
+ARG FDB_VERSION=7.3.63
+
+# FDB server: extract only (the deb's postinst tries to start an init service).
+RUN wget -q "https://github.com/apple/foundationdb/releases/download/${FDB_VERSION}/foundationdb-server_${FDB_VERSION}-1_amd64.deb" \
+  && dpkg-deb -x "foundationdb-server_${FDB_VERSION}-1_amd64.deb" / \
+  && rm -f "foundationdb-server_${FDB_VERSION}-1_amd64.deb" \
+  && /usr/sbin/fdbserver --version | head -1
+
+COPY --from=build /out/bin/ /opt/3fs/bin/
+COPY --from=build /out/lib/ /opt/3fs/lib/
+COPY --from=build /out/configs/ /opt/3fs/templates/
+COPY --from=build /out/HF3FS_REF /opt/3fs/HF3FS_REF
+RUN echo /opt/3fs/lib > /etc/ld.so.conf.d/3fs.conf && ldconfig \
+  && for b in /opt/3fs/bin/*; do \
+       if ldd "$b" | grep -q 'not found'; then echo "missing libs for $b:"; ldd "$b" | grep 'not found'; exit 1; fi; \
+     done
+
+COPY render_configs.py entrypoint.sh /opt/3fs/
+RUN chmod +x /opt/3fs/entrypoint.sh
+
+LABEL org.certus.image="certus-3fs-cluster" \
+      org.certus.run="./run.sh (rootful podman, --privileged --network host --ipc host)"
+
+ENTRYPOINT ["/opt/3fs/entrypoint.sh"]

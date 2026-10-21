@@ -1,0 +1,178 @@
+# Dockerfile.hf3fs — vLLM + the DeepSeek 3FS USRBIO client, for vLLM's in-tree
+# HF3FSKVConnector (the "hf3fs" KV-offload backend driven by run-serve-h3fs0-cc131k.sh).
+#
+# The stock vllm/vllm-openai image carries the connector code but NOT the 3FS client
+# the connector dlopens (`from hf3fs_fuse.io import ...` -> the compiled
+# `hf3fs_py_usrbio` extension). There is no pip package for it: it is produced by
+# building deepseek-ai/3fs from source. This image does that in a builder stage,
+# then installs the resulting wheel + 3FS's own shared lib onto the vLLM base.
+#
+#   docs: https://docs.vllm.ai/en/latest/api/vllm/distributed/kv_transfer/kv_connector/v1/hf3fs/hf3fs_connector/
+#   3FS:  https://github.com/deepseek-ai/3fs
+#
+# Build via the wrapper (selects VLLM_VERSION, tags, store):
+#   ./build_h3fs_container.sh 0.30.0
+# or directly:
+#   podman build -f apps/vllm-serve/Dockerfile.hf3fs \
+#       --build-arg VLLM_VERSION=0.30.0 -t vllm-hf3fs-bench:vllm0.30.0 apps/vllm-serve
+#
+# ── HEADS-UP: heavy, version-sensitive build ─────────────────────────────────────
+# 3FS is a large C++/Rust project (FoundationDB client, libfuse >=3.16.1, clang-14,
+# Rust >=1.75, Boost, folly). The pinned versions below (FDB_VERSION, LIBFUSE_VERSION,
+# RUST_VERSION, HF3FS_REF) and the final-stage runtime lib list are the knobs most
+# likely to need tuning for a given 3FS commit / base image — called out inline.
+#
+# Builder and final stages share ONE base (the target vLLM image): the extension is
+# dynamically linked, so building on the same base means every runtime shared lib it
+# needs (Boost, glog, libevent, libaio, libdwarf, libfuse3, libfdb_c) is native to
+# the final image. Only 3FS's own libs (libhf3fs_api_shared.so etc. — not on apt,
+# not in the wheel) are copied between stages. See the toolchain-fix RUN for the
+# clang-14 vs libstdc++ handling.
+
+# VLLM_VERSION is global (before the first FROM) so both stage FROM lines can use it.
+ARG VLLM_VERSION
+# Builder base defaults to the SAME image as the final stage (native-lib + cp312 ABI
+# match). Override only with a compatible image.
+ARG HF3FS_BUILDER_BASE=docker.io/vllm/vllm-openai:v${VLLM_VERSION}
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Stage 1 — builder: compile the 3FS USRBIO client wheel + stage its private libs.
+# ══════════════════════════════════════════════════════════════════════════════
+FROM ${HF3FS_BUILDER_BASE} AS builder
+ENTRYPOINT []
+SHELL ["/bin/bash", "-euxo", "pipefail", "-c"]
+
+ARG HF3FS_REF=main
+ARG FDB_VERSION=7.3.63
+ARG LIBFUSE_VERSION=3.16.2
+ARG RUST_VERSION=1.85.0
+ARG BUILD_JOBS=32
+ARG HF3FS_SHUFFLE_METHOD=stdshuffle
+
+# 3FS build toolchain (deepseek-ai/3fs README) + fetch tools. python3-dev is NOT
+# installed: the wheel must build against the base image's Python 3.12 (whose dev
+# headers ship in the vLLM image), not apt's python3.
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      ca-certificates curl wget git pkg-config \
+      cmake ninja-build build-essential \
+      clang-14 clang-format-14 clang-tidy-14 lld-14 \
+      gcc-12 g++-12 \
+      libuv1-dev liblz4-dev liblzma-dev libdouble-conversion-dev libdwarf-dev \
+      libunwind-dev libaio-dev libgflags-dev libgoogle-glog-dev libgtest-dev \
+      libgmock-dev libgoogle-perftools-dev google-perftools libssl-dev \
+      libboost-all-dev meson \
+  && rm -rf /var/lib/apt/lists/*
+
+# Toolchain fix: 3FS's pinned clang-14 cannot parse GCC 13's libstdc++ <chrono>
+# (consteval hh_mm_ss::_S_fractional_width) — GCC 13 is the noble (24.04) default.
+# Relocate the gcc-13 headers + lib dir so clang-14 falls back to the gcc-12
+# libstdc++-12 installed above (verified: clang-14 then resolves /usr/include/c++/12
+# and compiles the pattern clean). The clang-14 PACKAGE stays installed — unlike
+# apt-removing gcc-13, which drags clang-14 out with it on noble.
+#
+# Moving gcc-13's lib dir breaks the DEFAULT `cc`/`gcc` (still gcc-13), which the
+# libfuse meson build and Rust's `cc` crate invoke — so also repoint the default
+# C/C++ compiler to the intact gcc-12. On a base whose default is already gcc-12/11
+# the gcc-13 dirs are absent (mv's are no-ops) and the repoint is harmless.
+RUN for d in /usr/include/c++/13 /usr/lib/gcc/x86_64-linux-gnu/13; do \
+      if [ -e "$d" ]; then mv "$d" "$d.disabled"; fi; \
+    done; \
+    if [ -x /usr/bin/gcc-12 ]; then \
+      ln -sf /usr/bin/gcc-12 /usr/bin/gcc; ln -sf /usr/bin/gcc-12 /usr/bin/cc; \
+      ln -sf /usr/bin/g++-12 /usr/bin/g++; ln -sf /usr/bin/g++-12 /usr/bin/c++; \
+    fi; \
+    cc --version | head -1
+
+# FoundationDB client (>=7.1): headers + libfdb_c.so (the .so is shipped to final).
+RUN wget -qO /tmp/fdb-clients.deb \
+      "https://github.com/apple/foundationdb/releases/download/${FDB_VERSION}/foundationdb-clients_${FDB_VERSION}-1_amd64.deb" \
+  && dpkg -i /tmp/fdb-clients.deb \
+  && rm -f /tmp/fdb-clients.deb
+
+# libfuse >=3.16.1 from source (distro packages an older 3.x). -Dutils=false drops
+# the fusermount3 utilities + their failing post-install helper; this client links
+# libfuse3.so for USRBIO and never mounts anything itself.
+RUN cd /tmp \
+  && wget -qO fuse.tar.gz \
+       "https://github.com/libfuse/libfuse/releases/download/fuse-${LIBFUSE_VERSION}/fuse-${LIBFUSE_VERSION}.tar.gz" \
+  && tar xf fuse.tar.gz && cd "fuse-${LIBFUSE_VERSION}" \
+  && meson setup build --prefix=/usr/local -Dexamples=false -Dtests=false -Dutils=false \
+  && ninja -C build && ninja -C build install && ldconfig \
+  && rm -rf /tmp/fuse.tar.gz "/tmp/fuse-${LIBFUSE_VERSION}"
+
+# Rust (>=1.75) for the hf3fs-usrbio-sys crate.
+ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo PATH=/usr/local/cargo/bin:$PATH
+RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain "${RUST_VERSION}"
+
+# Clone 3FS (own layer so build-flag iteration doesn't re-fetch the submodule tree).
+RUN git clone https://github.com/deepseek-ai/3fs /src/3fs \
+  && cd /src/3fs && git checkout "${HF3FS_REF}" \
+  && git submodule update --init --recursive \
+  && ( [ -x patches/apply.sh ] && ./patches/apply.sh || echo "no patches/apply.sh at ${HF3FS_REF}" )
+
+# Build the hf3fs_py_usrbio wheel (setup.py drives the cmake target hf3fs_py_usrbio
+# with clang-14; $CMAKE_ARGS supplies the mandatory SHUFFLE_METHOD).
+ENV CMAKE_BUILD_PARALLEL_LEVEL=${BUILD_JOBS}
+RUN cd /src/3fs \
+  && CMAKE_ARGS="-DSHUFFLE_METHOD=${HF3FS_SHUFFLE_METHOD}" \
+     pip wheel . --no-deps --no-build-isolation -w /wheels \
+  && ls -l /wheels
+
+# Stage 3FS's own build-tree shared libs (including libhf3fs_api_shared.so, which the
+# extension links but which is neither in the wheel nor on apt). Everything else the
+# extension links is native to the shared base (apt in the final stage).
+RUN mkdir -p /hf3fs-libs \
+  && find /src/3fs -type f \( -name 'lib*.so' -o -name 'lib*.so.*' \) -path '*build*' \
+       -exec cp -n -av {} /hf3fs-libs/ \; \
+  && echo "[Dockerfile.hf3fs] staged 3FS libs:" && ls -l /hf3fs-libs
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Stage 2 — final: the vLLM base + the 3FS client wheel and its runtime libs.
+# ══════════════════════════════════════════════════════════════════════════════
+FROM docker.io/vllm/vllm-openai:v${VLLM_VERSION} AS final
+
+LABEL org.certus.image="vllm-hf3fs" \
+      org.certus.connector="HF3FSKVConnector" \
+      org.certus.gpu-required="true" \
+      org.certus.host-prereq="a live 3FS FUSE mount bind-mounted at hf3fs_storage_path; nvidia-container-toolkit (podman CDI / docker --gpus)"
+
+# Runtime shared libs the hf3fs_py_usrbio extension links, by their base-native
+# soname. Names vary by Ubuntu release (noble/24.04 uses a `t64` suffix for some,
+# and Boost is 1.83), so install best-effort per package (trying a `${p}t64`
+# variant); the ldd dump + import smoke-test below reveal anything still missing.
+RUN apt-get update && for p in \
+      libaio1 libuv1 liblz4-1 liblzma5 libdouble-conversion3 libunwind8 \
+      libgflags2.2 libgoogle-glog0v6 libgoogle-glog0v5 libgoogle-perftools4 \
+      libevent-2.1-7 libdwarf1 \
+      libboost-context1.83.0 libboost-filesystem1.83.0 libboost-program-options1.83.0 \
+      libboost-regex1.83.0 libboost-system1.83.0 libboost-thread1.83.0 libboost-atomic1.83.0 ; do \
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$p" \
+        || DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${p}t64" \
+        || echo "[Dockerfile.hf3fs] runtime lib '$p' not installed (may be unneeded / static)" ; \
+    done \
+  && rm -rf /var/lib/apt/lists/*
+
+# 3FS's own libs, plus libfuse3 (built from source) and the FoundationDB client lib,
+# into a private dir on the loader path. These sonames are used only by the 3FS
+# extension, so a global ld.so.conf entry does not shadow the base image's libs.
+COPY --from=builder /hf3fs-libs/ /opt/hf3fs-libs/
+COPY --from=builder /usr/local/lib/x86_64-linux-gnu/libfuse3.so* /opt/hf3fs-libs/
+COPY --from=builder /usr/lib/libfdb_c.so* /opt/hf3fs-libs/
+RUN echo /opt/hf3fs-libs > /etc/ld.so.conf.d/hf3fs.conf && ldconfig
+
+# Install the 3FS client wheel (compiled extension + hf3fs_fuse package).
+COPY --from=builder /wheels/ /tmp/wheels/
+RUN pip install --no-cache-dir /tmp/wheels/*.whl && rm -rf /tmp/wheels
+
+# Dump the extension's dynamic deps (find_spec does not import it, so it works even
+# if a dep is missing), then fail the build if the connector's import target is not
+# loadable — the whole point of the image. A "not found" in the ldd line names a
+# missing lib: add its package to the loop above, or (if it is a 3FS lib) ensure it
+# was staged into /hf3fs-libs.
+RUN so="$(python3 -c 'import importlib.util as u; s=u.find_spec("hf3fs_py_usrbio"); print(s.origin if s else "")')"; \
+    echo "[Dockerfile.hf3fs] extension: ${so:-<not found>}"; \
+    [ -n "$so" ] && { echo "[Dockerfile.hf3fs] ldd:"; ldd "$so" || true; } ; \
+    python3 -c "import hf3fs_fuse.io; print('[Dockerfile.hf3fs] hf3fs_fuse.io import OK')"
+
+# The run script sets `--entrypoint vllm` explicitly, so the base entrypoint is
+# irrelevant; leave the vLLM base image's defaults in place.
