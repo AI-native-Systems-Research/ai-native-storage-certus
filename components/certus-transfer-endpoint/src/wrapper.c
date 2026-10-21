@@ -10,6 +10,8 @@
  * predecessor crate's shim when both are linked into one binary.
  */
 
+#include <errno.h>
+#include <fcntl.h>
 #include <stddef.h>
 #include <string.h>
 #include <netinet/in.h>
@@ -158,3 +160,14 @@ int certus_te_query_qp_state(struct ibv_qp *qp) {
     int ret = ibv_query_qp(qp, &attr, IBV_QP_STATE, &init_attr);
     return ret ? -ret : (int)attr.qp_state;
 }
+
+/* Make `ch`'s fd non-blocking, so rdma_get_cm_event returns -1/EAGAIN when no
+ * event is pending instead of waiting: the endpoint thread polls for events
+ * between its other work and must never block in it. Returns 0 or an errno. */
+int certus_te_cm_channel_nonblocking(struct rdma_event_channel *ch) {
+    int flags = fcntl(ch->fd, F_GETFL);
+    if (flags < 0 || fcntl(ch->fd, F_SETFL, flags | O_NONBLOCK) < 0)
+        return errno;
+    return 0;
+}
+

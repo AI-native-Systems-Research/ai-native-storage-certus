@@ -21,6 +21,8 @@ pub mod mock;
 pub mod slab;
 pub mod table;
 pub mod transport;
+#[cfg(feature = "rdma")]
+pub mod verbs;
 
 /// Why an instance address could not be parsed.
 ///
@@ -114,15 +116,15 @@ impl PeerId {
     }
 
     /// The host part, without brackets stripped.
-    // Read by the verbs transport to resolve the address (T053).
-    #[allow(dead_code)]
+    // Read by the verbs transport, built only with `rdma`.
+    #[cfg_attr(not(feature = "rdma"), allow(dead_code))]
     pub fn host(&self) -> &str {
         &self.host
     }
 
     /// The port part, always non-zero.
-    // Read by the verbs transport to resolve the address (T053).
-    #[allow(dead_code)]
+    // Read by the verbs transport, built only with `rdma`.
+    #[cfg_attr(not(feature = "rdma"), allow(dead_code))]
     pub fn port(&self) -> u16 {
         self.port
     }

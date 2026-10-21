@@ -486,6 +486,8 @@ extern "C" {
     // errno on failure. `ibv_qp::state` is only libibverbs' cache of the last
     // state *software* set, so it misses the device forcing a QP to ERROR.
     pub fn certus_te_query_qp_state(qp: *mut ibv_qp) -> c_int;
+    /// Set `ch`'s fd `O_NONBLOCK`; 0 or an errno.
+    pub fn certus_te_cm_channel_nonblocking(ch: *mut rdma_event_channel) -> c_int;
 
     // libc byte-order and address helpers.
     pub fn htons(hostshort: u16) -> u16;

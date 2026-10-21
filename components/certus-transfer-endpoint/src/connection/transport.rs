@@ -576,15 +576,12 @@ fn build_default() -> Result<Box<dyn Transport>, RdmaError> {
     Ok(Box::new(MockTransport::new(MockFabric::process())))
 }
 
-/// Until T053 an `rdma` build has no default transport. That is reported, not
-/// papered over with the mock: an `rdma` build silently running in-process
-/// would yield plausible numbers from no fabric at all (Principle XI).
+/// An `rdma` build's default is verbs, and never falls back to the mock: an
+/// `rdma` build silently running in-process would yield plausible numbers from
+/// no fabric at all (Principle XI). A missing device fails at `listen`.
 #[cfg(feature = "rdma")]
 fn build_default() -> Result<Box<dyn Transport>, RdmaError> {
-    Err(RdmaError::Invalid {
-        op: "select_transport",
-        reason: "the verbs transport lands in T053; until then `rdma` has no default",
-    })
+    Ok(Box::new(super::verbs::VerbsTransport::new()?))
 }
 
 #[cfg(test)]
@@ -626,14 +623,15 @@ mod tests {
         drop(t);
     }
 
+    /// An `rdma` build's default is verbs, never the mock: listening on an
+    /// address that is no RDMA device fails, where the mock would succeed.
     #[cfg(feature = "rdma")]
     #[test]
-    fn rdma_build_has_no_silent_default_before_t053() {
-        assert!(matches!(
-            select_transport(TransportChoice::BuildDefault),
-            Err(RdmaError::Invalid { .. })
-        ));
-        // An explicit mock still works in this build.
-        assert!(select_transport(TransportChoice::Mock(MockFabric::new())).is_ok());
+    fn rdma_build_defaults_to_verbs_never_the_mock() {
+        let mut t = select_transport(TransportChoice::BuildDefault).unwrap();
+        let loopback = PeerId::parse("127.0.0.1:7").unwrap();
+        assert!(t.listen(&loopback).is_err(), "127.0.0.1 is no RDMA device");
+        let mut m = select_transport(TransportChoice::Mock(MockFabric::new())).unwrap();
+        assert!(m.listen(&loopback).is_ok(), "an explicit mock still works");
     }
 }

@@ -4,8 +4,464 @@
 //! NIC (constitution Principle VIII). Run them explicitly on an RDMA host:
 //!
 //! ```text
-//! cargo test -p certus-transfer-endpoint --features rdma -- --ignored
+//! CERTUS_RDMA_TEST_IP=10.0.0.102 \
+//!     cargo test -p certus-transfer-endpoint --features rdma -- --ignored
 //! ```
 //!
-//! Scaffolding: the fetch round trip lands in T054 and the legacy push path in
-//! T055, both mirroring `remote-lookup-rdma-initiator/src/loopback_test.rs`.
+//! Two whole endpoints in one process, on two ports of the one address (D16),
+//! over the build's own transport — verbs — through the interface only, as a
+//! caller would use them. The seam-level verbs tests are in
+//! `connection::verbs`.
+
+use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::{mpsc, Arc};
+use std::time::Duration;
+
+use interfaces::{
+    EndpointConfig, EntryOutcome, FetchResult, IDispatchMap, IMemoryTier, ITransferEndpoint,
+    ITransferEndpointAdmin, RemoteRegion, TransferEndpointError,
+};
+
+use crate::test_doubles::{LedgerMap, PoolTier};
+use crate::CertusTransferEndpoint;
+
+fn ip() -> String {
+    std::env::var("CERTUS_RDMA_TEST_IP")
+        .expect("set CERTUS_RDMA_TEST_IP to a local RDMA (RoCE) IPv4 address")
+}
+
+/// A fresh instance address per endpoint, so parallel tests cannot collide.
+fn addr() -> String {
+    static NEXT: AtomicU16 = AtomicU16::new(0);
+    let port =
+        43000 + (std::process::id() % 500) as u16 * 16 + NEXT.fetch_add(1, Ordering::Relaxed);
+    format!("{}:{port}", ip())
+}
+
+/// An endpoint over verbs, serving from `pool` through `map`.
+struct Node {
+    ep: Arc<CertusTransferEndpoint>,
+    map: Arc<LedgerMap>,
+    pool: Box<[u8]>,
+    addr: String,
+    disk: Option<Arc<crate::test_doubles::DiskSource>>,
+}
+
+impl Node {
+    fn new(pool_len: usize, tweak: impl FnOnce(&mut EndpointConfig)) -> Self {
+        Self::build(
+            pool_len,
+            tweak,
+            None::<fn(&crate::test_doubles::DiskSource)>,
+        )
+    }
+
+    /// A node whose block tier is a [`DiskSource`] leasing from the top half
+    /// of its pool, prepared by `prep` before the node starts.
+    fn with_source(pool_len: usize, prep: impl FnOnce(&crate::test_doubles::DiskSource)) -> Self {
+        Self::build(pool_len, |_| {}, Some(prep))
+    }
+
+    fn disk(&self) -> Arc<crate::test_doubles::DiskSource> {
+        Arc::clone(self.disk.as_ref().expect("a node with a source"))
+    }
+
+    /// A node at a fixed address, for the two-node test.
+    fn at(addr: &str, pool_len: usize) -> Self {
+        let addr = addr.to_string();
+        Self::build_at(
+            Some(addr),
+            pool_len,
+            |_| {},
+            None::<fn(&crate::test_doubles::DiskSource)>,
+        )
+    }
+
+    fn build<P: FnOnce(&crate::test_doubles::DiskSource)>(
+        pool_len: usize,
+        tweak: impl FnOnce(&mut EndpointConfig),
+        prep: Option<P>,
+    ) -> Self {
+        Self::build_at(None, pool_len, tweak, prep)
+    }
+
+    fn build_at<P: FnOnce(&crate::test_doubles::DiskSource)>(
+        at: Option<String>,
+        pool_len: usize,
+        tweak: impl FnOnce(&mut EndpointConfig),
+        prep: Option<P>,
+    ) -> Self {
+        let mut pool = vec![0u8; pool_len].into_boxed_slice();
+        let ep = CertusTransferEndpoint::create();
+        let map = Arc::new(LedgerMap::new());
+        ep.dispatch_map
+            .connect(Arc::clone(&map) as Arc<dyn IDispatchMap + Send + Sync>)
+            .unwrap();
+        ep.memory_tier
+            .connect(Arc::new(PoolTier {
+                base: pool.as_mut_ptr(),
+                len: pool.len(),
+            }) as Arc<dyn IMemoryTier + Send + Sync>)
+            .unwrap();
+        let addr = at.unwrap_or_else(addr);
+        let mut config = EndpointConfig::new(&addr);
+        tweak(&mut config);
+        ep.configure(config).unwrap();
+        let disk = prep.map(|prep| {
+            let half = pool_len / 2;
+            let disk = Arc::new(crate::test_doubles::DiskSource::new(
+                pool.as_ptr() as u64 + half as u64,
+                (half / 256).min(8),
+                256,
+            ));
+            prep(&disk);
+            ep.use_block_source(Arc::clone(&disk) as Arc<dyn crate::bounce::BlockSource>);
+            disk
+        });
+        ep.initialize().expect("initialize over verbs");
+        Node {
+            ep,
+            map,
+            pool,
+            addr,
+            disk,
+        }
+    }
+
+    fn pool_addr(&self, off: usize) -> u64 {
+        self.pool.as_ptr() as u64 + off as u64
+    }
+}
+
+impl Drop for Node {
+    fn drop(&mut self) {
+        let _ = self.ep.shutdown();
+    }
+}
+
+fn wait(rx: &mpsc::Receiver<FetchResult>) -> FetchResult {
+    rx.recv_timeout(Duration::from_secs(20))
+        .expect("on_complete fired")
+}
+
+/// T054: a full fetch over the NIC — request, the source's writes, its reply,
+/// and the caller seeing each value land exactly where it named — then a
+/// chunked one (SC-007 on hardware) through the same handle.
+#[test]
+#[ignore = "needs an RDMA device; set CERTUS_RDMA_TEST_IP"]
+fn loopback_fetch_round_trip() {
+    let dest = Node::new(4096, |_| {});
+    let mut src = Node::new(1 << 20, |_| {});
+    for (i, b) in src.pool.iter_mut().enumerate() {
+        *b = (i % 251) as u8;
+    }
+    // Three hits of different sizes and a miss.
+    src.map.memory(10, src.pool_addr(0), 4096);
+    src.map.memory(11, src.pool_addr(8192), 65536);
+    src.map.memory(13, src.pool_addr(200_000), 100);
+    let mut slots = vec![0u8; 1 << 20].into_boxed_slice();
+    let h = dest
+        .ep
+        .register_landing_region(slots.as_mut_ptr(), slots.len())
+        .unwrap();
+    let items = [
+        (10, h.region_at(0, 4096).unwrap()),
+        (11, h.region_at(4096, 65536).unwrap()),
+        (12, h.region_at(70_000, 64).unwrap()),
+        (13, h.region_at(80_000, 100).unwrap()),
+    ];
+    let (tx, rx) = mpsc::channel();
+    dest.ep
+        .fetch(&src.addr, &items, Box::new(move |r| tx.send(r).unwrap()))
+        .unwrap();
+    use EntryOutcome::*;
+    assert_eq!(
+        wait(&rx).unwrap(),
+        [HitMemoryTier, HitMemoryTier, Miss, HitMemoryTier]
+    );
+    assert_eq!(&slots[..4096], &src.pool[..4096]);
+    assert_eq!(&slots[4096..4096 + 65536], &src.pool[8192..8192 + 65536]);
+    assert!(
+        slots[70_000..70_064].iter().all(|&b| b == 0),
+        "nothing for the miss"
+    );
+    assert_eq!(&slots[80_000..80_100], &src.pool[200_000..200_100]);
+    assert_eq!(src.map.held(), 0, "every pin released");
+
+    // 700 one-KiB entries: three chunks against the peer's 340.
+    slots.fill(0);
+    for k in 0..700u64 {
+        src.map
+            .memory(1000 + k, src.pool_addr(k as usize * 1024), 1024);
+    }
+    let items: Vec<(u64, RemoteRegion)> = (0..700usize)
+        .map(|k| (1000 + k as u64, h.region_at(k * 1024, 1024).unwrap()))
+        .collect();
+    let (tx, rx) = mpsc::channel();
+    dest.ep
+        .fetch(&src.addr, &items, Box::new(move |r| tx.send(r).unwrap()))
+        .unwrap();
+    assert_eq!(wait(&rx).unwrap(), vec![HitMemoryTier; 700]);
+    assert_eq!(&slots[..700 * 1024], &src.pool[..700 * 1024]);
+    let s = dest.ep.stats();
+    assert_eq!(s.chunks_sent, 1 + 3);
+    assert_eq!(src.map.held(), 0);
+    drop(slots);
+}
+
+/// T055, SC-002 on hardware: the legacy push writes a source's entries into a
+/// peer's registered memory — the initiator's
+/// `loopback_push_writes_into_remote_buffer`, through this endpoint. Many
+/// writes are in flight at once, each to its own slot, so a window that
+/// mismatched sources to destinations would corrupt the comparison.
+#[test]
+#[ignore = "needs an RDMA device; set CERTUS_RDMA_TEST_IP"]
+fn loopback_push_writes_into_remote_buffer() {
+    const WRITES: usize = 64;
+    const PIECE: usize = 16 * 1024;
+    let mut src = Node::new(WRITES * PIECE, |c| c.send_credits = 16);
+    let dst = Node::new(4096, |_| {});
+    for (i, b) in src.pool.iter_mut().enumerate() {
+        *b = (i % 251) as u8;
+    }
+    for k in 0..WRITES {
+        src.map
+            .memory(k as u64, src.pool_addr(k * PIECE), PIECE as u32);
+    }
+    let mut landing = vec![0u8; WRITES * PIECE].into_boxed_slice();
+    let h = dst
+        .ep
+        .register_landing_region(landing.as_mut_ptr(), landing.len())
+        .unwrap();
+    // Written back to front, so a slot error cannot hide behind identity.
+    let items: Vec<(u64, RemoteRegion)> = (0..WRITES)
+        .map(|k| {
+            let slot = WRITES - 1 - k;
+            (k as u64, h.region_at(slot * PIECE, PIECE as u32).unwrap())
+        })
+        .collect();
+    let out = src.ep.push(&dst.addr, &items).unwrap();
+    assert_eq!(out, vec![EntryOutcome::HitMemoryTier; WRITES]);
+    for k in 0..WRITES {
+        let slot = WRITES - 1 - k;
+        assert_eq!(
+            &landing[slot * PIECE..(slot + 1) * PIECE],
+            &src.pool[k * PIECE..(k + 1) * PIECE],
+            "entry {k} in slot {slot}"
+        );
+    }
+    assert!(src.map.peak_held() <= 16, "SC-004 on hardware");
+    assert_eq!(src.map.held(), 0);
+    drop(landing);
+}
+
+/// FR-023 / SC-010 end to end on hardware: a source that is alive, connected
+/// and silent — its block-tier read held — trips the requester's deadline,
+/// which forces the queue pair to ERROR before failing the fetch; when the
+/// read is released the source's late write finds no queue pair to land
+/// through, and the next fetch reconnects through the same handle.
+#[test]
+#[ignore = "needs an RDMA device; set CERTUS_RDMA_TEST_IP"]
+fn loopback_deadline_tears_down_then_reconnects() {
+    let dest = Node::new(4096, |c| {
+        c.fetch_deadline = Some(Duration::from_millis(300))
+    });
+    let src = Node::with_source(4096, |disk| {
+        disk.put(0x100, b"too late");
+        disk.hold_reads();
+    });
+    src.map.block_at(1, 0x100);
+    src.map.memory(2, src.pool_addr(0), 8);
+    let mut slots = vec![0u8; 64].into_boxed_slice();
+    let h = dest
+        .ep
+        .register_landing_region(slots.as_mut_ptr(), slots.len())
+        .unwrap();
+    let (tx, rx) = mpsc::channel();
+    dest.ep
+        .fetch(
+            &src.addr,
+            &[(1, h.region_at(0, 8).unwrap())],
+            Box::new(move |r| tx.send(r).unwrap()),
+        )
+        .unwrap();
+    let r = wait(&rx);
+    let Err(TransferEndpointError::Deadline(why)) = &r else {
+        panic!("expected Deadline, got {r:?}");
+    };
+    assert!(why.contains("queue pair Rts"), "{why}");
+    assert_eq!(dest.ep.stats().deadline_expiries, 1);
+    src.disk().release_reads();
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(slots[..8], [0u8; 8], "the late write did not land");
+    // The same handle, over a fresh connection.
+    let (tx, rx) = mpsc::channel();
+    dest.ep
+        .fetch(
+            &src.addr,
+            &[(2, h.region_at(8, 8).unwrap())],
+            Box::new(move |r| tx.send(r).unwrap()),
+        )
+        .unwrap();
+    assert_eq!(wait(&rx).unwrap(), [EntryOutcome::HitMemoryTier]);
+    drop(slots);
+}
+
+/// A source that shuts down drops its connection; a fetch outstanding on it
+/// fails with `Transport`, and a fetch to a fresh source lands through the
+/// same handle.
+#[test]
+#[ignore = "needs an RDMA device; set CERTUS_RDMA_TEST_IP"]
+fn loopback_lost_source_then_another() {
+    let dest = Node::new(4096, |_| {});
+    let src = Node::with_source(4096, |disk| disk.hold_reads());
+    src.map.block_at(1, 0x100);
+    let mut slots = vec![0u8; 64].into_boxed_slice();
+    let h = dest
+        .ep
+        .register_landing_region(slots.as_mut_ptr(), slots.len())
+        .unwrap();
+    let (tx, rx) = mpsc::channel();
+    dest.ep
+        .fetch(
+            &src.addr,
+            &[(1, h.region_at(0, 8).unwrap())],
+            Box::new(move |r| tx.send(r).unwrap()),
+        )
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(200));
+    let disk = src.disk();
+    let stopper = std::thread::spawn(move || drop(src));
+    std::thread::sleep(Duration::from_millis(100));
+    disk.release_reads(); // shutdown waits for the read
+    stopper.join().unwrap();
+    assert!(
+        matches!(wait(&rx), Err(TransferEndpointError::Transport(_))),
+        "the connection was lost"
+    );
+    let src2 = Node::new(4096, |_| {});
+    src2.map.memory(2, src2.pool_addr(0), 8);
+    let (tx, rx) = mpsc::channel();
+    dest.ep
+        .fetch(
+            &src2.addr,
+            &[(2, h.region_at(16, 8).unwrap())],
+            Box::new(move |r| tx.send(r).unwrap()),
+        )
+        .unwrap();
+    assert_eq!(wait(&rx).unwrap(), [EntryOutcome::HitMemoryTier]);
+    drop(slots);
+}
+
+/// T056: two nodes across the RoCE fabric. Run the `source` half on one node
+/// and the `dest` half on the other, each pinned to its NIC's NUMA node:
+///
+/// ```text
+/// # on the source node
+/// CERTUS_T056_ROLE=source CERTUS_T056_LOCAL=10.0.0.105:47100 CERTUS_RDMA_TEST_IP=10.0.0.105 \
+///   numactl -N0 -m0 cargo test --release -p certus-transfer-endpoint --features rdma \
+///   two_node -- --ignored --nocapture
+/// # on the destination node
+/// CERTUS_T056_ROLE=dest CERTUS_T056_LOCAL=10.0.0.102:47100 CERTUS_T056_PEER=10.0.0.105:47100 \
+///   CERTUS_RDMA_TEST_IP=10.0.0.102 numactl -N0 -m0 cargo test ... two_node -- --ignored --nocapture
+/// ```
+///
+/// The source serves `T056_KEYS` 64 KiB entries, entry `k` filled with a
+/// pattern only it has, for `CERTUS_T056_SECS` (default 60). The destination
+/// fetches them in one chunked request several times, checks every byte, and
+/// prints one `T056` line per round with its throughput.
+#[test]
+#[ignore = "two nodes; see the doc comment"]
+fn two_node() {
+    const T056_KEYS: usize = 1536;
+    const ENTRY: usize = 64 * 1024;
+    let Ok(role) = std::env::var("CERTUS_T056_ROLE") else {
+        // Not a two-node run: `-- --ignored` on one RDMA box runs everything
+        // else here, and this test has no peer to talk to.
+        eprintln!("two_node: CERTUS_T056_ROLE unset; this test needs two nodes, skipping");
+        return;
+    };
+    let local = std::env::var("CERTUS_T056_LOCAL").expect("CERTUS_T056_LOCAL=ip:port");
+    let fill = |k: usize, i: usize| ((k * 131 + i * 7) % 251) as u8;
+    match role.as_str() {
+        "source" => {
+            let secs: u64 = std::env::var("CERTUS_T056_SECS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(60);
+            let src = Node::at(&local, T056_KEYS * ENTRY);
+            // SAFETY of the cast: the pool is ours and nothing reads it yet.
+            let pool = src.pool.as_ptr() as *mut u8;
+            for k in 0..T056_KEYS {
+                for i in 0..ENTRY {
+                    // SAFETY: inside the pool, before any peer reads it.
+                    unsafe { *pool.add(k * ENTRY + i) = fill(k, i) };
+                }
+                src.map
+                    .memory(k as u64, src.pool_addr(k * ENTRY), ENTRY as u32);
+            }
+            println!("T056 source {local}: serving {T056_KEYS} x {ENTRY} B for {secs} s");
+            std::thread::sleep(Duration::from_secs(secs));
+            let s = src.ep.stats();
+            println!(
+                "T056 source done: hits {} misses {} failed {} protocol_faults {} pins held {}",
+                s.hit_memory_tier,
+                s.miss,
+                s.failed,
+                s.protocol_faults,
+                src.map.held()
+            );
+            assert_eq!(src.map.held(), 0);
+        }
+        "dest" => {
+            let peer = std::env::var("CERTUS_T056_PEER").expect("CERTUS_T056_PEER=ip:port");
+            let dest = Node::at(&local, 4096);
+            let mut slots = vec![0u8; T056_KEYS * ENTRY].into_boxed_slice();
+            let h = dest
+                .ep
+                .register_landing_region(slots.as_mut_ptr(), slots.len())
+                .unwrap();
+            let items: Vec<(u64, RemoteRegion)> = (0..T056_KEYS)
+                .map(|k| (k as u64, h.region_at(k * ENTRY, ENTRY as u32).unwrap()))
+                .collect();
+            for round in 0..5 {
+                slots.fill(0);
+                let t0 = std::time::Instant::now();
+                let (tx, rx) = mpsc::channel();
+                dest.ep
+                    .fetch(&peer, &items, Box::new(move |r| tx.send(r).unwrap()))
+                    .unwrap();
+                let out = wait(&rx).unwrap_or_else(|e| panic!("round {round}: {e:?}"));
+                let dt = t0.elapsed();
+                assert_eq!(
+                    out,
+                    vec![EntryOutcome::HitMemoryTier; T056_KEYS],
+                    "round {round}"
+                );
+                for k in 0..T056_KEYS {
+                    for i in (0..ENTRY).step_by(509) {
+                        assert_eq!(
+                            slots[k * ENTRY + i],
+                            fill(k, i),
+                            "round {round} key {k} byte {i}"
+                        );
+                    }
+                }
+                let bytes = (T056_KEYS * ENTRY) as f64;
+                println!(
+                    "T056 round {round}: {T056_KEYS} entries, {:.1} MiB in {:.1} ms = {:.2} GB/s",
+                    bytes / (1 << 20) as f64,
+                    dt.as_secs_f64() * 1e3,
+                    bytes / dt.as_secs_f64() / 1e9
+                );
+            }
+            let s = dest.ep.stats();
+            println!(
+                "T056 dest done: chunks_sent {} requests {}/{} deadline_expiries {}",
+                s.chunks_sent, s.requests_completed, s.requests_attempted, s.deadline_expiries
+            );
+            drop(slots);
+        }
+        other => panic!("CERTUS_T056_ROLE={other}: want source or dest"),
+    }
+}
