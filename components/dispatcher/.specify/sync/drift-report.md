@@ -1,9 +1,9 @@
 ---
 spec_sync_component: dispatcher
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-19T07:08:58Z
-spec_sync_git_commit: 4f8b5554b
-spec_sync_inputs_sha256: a91f93b848af43f215d81a96f7d884a68b5d95264563e2577292aea7651cb287
+spec_sync_synced_at: 2026-10-21T23:27:22Z
+spec_sync_git_commit: f10f7ec9
+spec_sync_inputs_sha256: 4da527443ea30b48152567a4c38dbed5ab46c33f5a357bf500dff644600eec72
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Apply 2026-10-14 (branch fix/bundle-dispatcher-ems, approved by Cornel).** **Applied** to `specs/**`, exact proposal text, backup in `.specify/sync/backups/20261019T070414Z/`: **B-01** (FR-036/FR-051 lookup pin through promotion + race recovery), **B-02** (FR-032 + edge case, SSD evictor runs `dm.remove` first), **B-03** (FR-003/FR-059 slot released after post-reserve failure), **B-04** (FR-056 `copy_gpu_to_memory_completed` keeps a live slot), **B-05** (FR-042/FR-050 all eviction paths count drops; stale `Removed` clause), **B-06** (ring-buffer fallback removed, 5 sites), **B-07** (FR-037 stream lifetime), **B-08** (remove order), **B-09** (no `dma_copy_to_host`), **B-10** (002 FR-008 sub-paths), **B-11** (US-11 AS4), plus the notes **N-02** (FR-045 `CERTUS_LOG_REMOTE_DELIVERY`) and **N-03** (FR-056 `CERTUS_LOG_RESERVE`). Both specs got a `Last Synced 2026-10-14` header. This resolves D-01…D-05, D-08, D-09, D-10, D-12, D-14, U-02, U-03, U-05 and the US-11 AS4 note. **Became tasks** in `align-tasks.md` (approved as ALIGN tasks only, no code change in this PR): **A-01** (002 warm-sync failure → `ERROR`, major), **A-02** (`batch_lookup` cold pin, major), **A-03** (`clear_memory_tier` pinned slot, major), **A-04** (no-drives promote re-register), **A-05** (phase-3 release in `copy_gpu_to_memory_completed`), **A-06** (SSD-evictor sender wiring), **A-08** (002 per-value attribution tests). **Stays open** (not approved, recorded in `align-tasks.md` with their notes): **A-07** (FR-058 `store_already_resident`, ALIGN or BACKFILL is Cornel's decision), **N-01** (new FR-062 integrity-check verify-before-serve, MEDIUM), **N-04** (`remove` on a pinned entry, MEDIUM, deferred to the remove-no-wait PR). Drift stays **OPEN** until the code tasks land. No source files changed. The frontmatter is left for the stamping script.
