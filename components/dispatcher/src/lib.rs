@@ -438,6 +438,15 @@ define_component! {
     }
 }
 
+/// Eviction candidates scanned per foreground eviction step, multiplied by the
+/// step number so the scan reaches past pinned / unpersisted entries as pressure
+/// persists.
+const EVICT_SCAN_STEP: usize = 4;
+
+/// Deepest foreground eviction scan; also the depth of the last-chance scan taken
+/// before reporting the memory tier full.
+const EVICT_SCAN_MAX: usize = 1024;
+
 /// No-op free function for temporary DmaBuffer wrappers around memory-tier pointers.
 /// The memory-tier component owns the memory; this wrapper must not free it.
 unsafe extern "C" fn noop_free(_ptr: *mut std::ffi::c_void) {}
@@ -1116,12 +1125,20 @@ impl DispatcherComponent {
     /// Evict entries from the memory-tier until `needed` bytes are free.
     ///
     /// Every iteration frees one pin-safe eviction victim via [`Self::evict_one_clean`],
-    /// widening the scan as pressure persists. Evicted entries transition
-    /// MemoryTier → BlockDevice in the dispatch-map (data remains on SSD from the
-    /// prior write-through). If no candidate in the widening scan is evictable —
-    /// every oldest entry is pinned by an in-flight load or not yet written
-    /// through — this returns `AllocationFailed` rather than corrupt a pinned
-    /// slot; the caller leaves the block uncached.
+    /// widening the scan as pressure persists; when the regular scan finds nothing it
+    /// retries once at the full depth ([`EVICT_SCAN_MAX`]) before giving up. Evicted
+    /// entries transition MemoryTier → BlockDevice in the dispatch-map (data remains
+    /// on SSD from the prior write-through). If no candidate within that depth is
+    /// evictable — every one is pinned by an in-flight load or not yet written
+    /// through — this returns `AllocationFailed` rather than corrupt a pinned slot;
+    /// the caller leaves the block uncached.
+    ///
+    /// The last-chance scan is what makes the widening real. Without it the first
+    /// scan that frees nothing returns at once, so the window never grows past
+    /// [`EVICT_SCAN_STEP`] and a front of unpersisted entries hides every demotable
+    /// one behind it. `eviction-policy-optimized` produces exactly that front: its
+    /// TinyLFU gate admits a not-more-popular store at the LRU head, so under a store
+    /// burst the head is all fresh, unpersisted keys.
     // NOTE: This only handles global capacity pressure. If keys are heavily skewed
     // to one shard (e.g., all keys ≡ 0 mod 16), the target shard can fill while
     // global used() < capacity(). In that case insert() will return PoolFull after
@@ -1134,8 +1151,6 @@ impl DispatcherComponent {
         _target_key: CacheKey,
         max_attempts: usize,
     ) -> Result<(), DispatcherError> {
-        const MAX_SCAN: usize = 4;
-
         let mut attempts = 0usize;
         while mt.used() + needed as usize > mt.capacity() {
             attempts += 1;
@@ -1159,13 +1174,18 @@ impl DispatcherComponent {
 
             // Free one pin-safe victim, widening the scan as pressure persists so
             // we look deeper into the eviction order past pinned/unpersisted entries.
-            let scan = (MAX_SCAN * attempts).min(1024);
-            if !self.evict_one_clean(dm, mt, scan) {
-                // Every scanned candidate is pinned by an in-flight load. Do NOT
-                // blind-free — that would reclaim DRAM a load still points at.
-                // Surface pool-full; the caller leaves the block uncached.
+            // A miss at the regular depth gets one full-depth retry before failing;
+            // otherwise the first miss ends the loop and the scan never widens.
+            let scan = (EVICT_SCAN_STEP * attempts).min(EVICT_SCAN_MAX);
+            let freed = self.evict_one_clean(dm, mt, scan)
+                || (scan < EVICT_SCAN_MAX && self.evict_one_clean(dm, mt, EVICT_SCAN_MAX));
+            if !freed {
+                // Every candidate in reach is pinned or unpersisted. Do NOT
+                // blind-free — that would reclaim DRAM a load still points at, or
+                // drop a key a connector has just Checked. Surface pool-full; the
+                // caller leaves the block uncached.
                 return Err(DispatcherError::AllocationFailed(
-                    "memory-tier full: all eviction candidates are pinned by in-flight loads"
+                    "memory-tier full: no eviction candidate is both written through and unpinned"
                         .into(),
                 ));
             }
@@ -1187,7 +1207,6 @@ impl DispatcherComponent {
         size: u32,
         max_attempts: usize,
     ) -> Result<*mut u8, DispatcherError> {
-        const MAX_SCAN: usize = 4;
         let mut attempts = 0usize;
         loop {
             self.evict_for_space(dm, mt, size, key, max_attempts.saturating_sub(attempts))?;
@@ -1204,7 +1223,7 @@ impl DispatcherComponent {
                     // fragmentation. If nothing is evictable (all pinned or
                     // unpersisted), fail rather than blind-free a slot an
                     // in-flight load still points at.
-                    if !self.evict_one_clean(dm, mt, MAX_SCAN * attempts) {
+                    if !self.evict_one_clean(dm, mt, EVICT_SCAN_MAX) {
                         return Err(DispatcherError::AllocationFailed(
                             "memory-tier full: no evictable (unpinned, persisted) entry to relieve fragmentation"
                                 .into(),
@@ -7372,3 +7391,7 @@ mod repair_test_remove_no_wait;
 #[cfg(test)]
 #[path = "repair_test_store_already_resident.rs"]
 mod repair_test_store_already_resident;
+
+#[cfg(test)]
+#[path = "repair_test_eviction_window_tinylfu.rs"]
+mod repair_test_eviction_window_tinylfu;
