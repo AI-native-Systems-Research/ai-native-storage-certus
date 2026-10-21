@@ -10,7 +10,7 @@ description = "Core traits and types for the COM-style component framework"
 crossbeam-channel = "0.5"
 kanal = "0.1"
 libc = "0.2"
-rtrb = "0.3"
+rtrb = "0.3.5"
 tokio = { version = "1", features = ["sync"] }
 
 [lints]
