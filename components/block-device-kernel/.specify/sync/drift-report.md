@@ -1,11 +1,13 @@
 ---
 spec_sync_component: block-device-kernel
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-14T21:37:08Z
-spec_sync_git_commit: d1f6f8c1
-spec_sync_inputs_sha256: cdcfb6efea0894246a7c3490fa2343d9acb66b47d2951111e00a27f7bbd72036
+spec_sync_synced_at: 2026-10-21T23:03:30Z
+spec_sync_git_commit: efd502331
+spec_sync_inputs_sha256: 8a875ecb4538b3453aee6371c951d70a788847181f89850d0c6524bb266825f7
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-21 (transitive, `components/interfaces` changed on branch `fix/dispatcher-remove-clear-mt`).** Only `components/interfaces` changed for this component: `IDispatcher` doc comments (`flush_to_ssd` errors, `clear_memory_tier`, `batch_lookup`) and the interfaces spec (FR-008, FR-009, FR-017, FR-018, FR-018a, FR-021, FR-023, Overview, NFR-002, Implementation Notes; text only, no type or signature changed). This component uses some of the named items (4 files), but no type, signature or behaviour of them changed. This component's last full sync below stands; no re-analysis was needed.
+
 > **Re-stamp 2026-10-14 (transitive, merge of unstable 6f5743cc into this branch).** Only `components/interfaces` changed for this component (`DispatcherConfig::cold_staging_buf_bytes` default 4 -> 16 MiB, #550); `block-device-kernel` does not use it (grep over its src/ and specs/: 0 hits). This branch's full sync below stands; no re-analysis was needed.
 
 > **Re-stamp 2026-10-14 (transitive: `components/interfaces` changed, branch `fix/cold-staging-buf-16mib`).** The spec-sync digest folds `components/interfaces/{src,specs}` into every component's hash, so the single interface change on this branch — `DispatcherConfig::cold_staging_buf_bytes` default 4 MiB → 16 MiB (commit `8e12e49f`) and the matching correction to interfaces FR-027 — invalidates every component's stamp at once; this is the design, not a defect. **No code re-analysis was performed for this component, and none was needed:** its own `src/**` and `specs/**` are unchanged on this branch, and it does not reference `cold_staging_buf_bytes` (consumed only by the dispatcher's host-DRAM cold-staging pool). Digest refreshed to the recomputed value.

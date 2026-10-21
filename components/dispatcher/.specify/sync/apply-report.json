@@ -1,51 +1,60 @@
 {
-  "applied": "2026-10-20T22:58:11Z",
-  "sync_date": "2026-10-14",
+  "applied": "2026-10-21T22:53:16Z",
+  "sync_date": "2026-10-21",
   "project": "dispatcher",
   "branch": "fix/dispatcher-remove-clear-mt",
-  "head": "cccfb328e",
-  "base": "af221dd82",
+  "head": "efd502331",
+  "base": "a25e9be29",
   "mode": "batch",
-  "approved_by": "Cornel Constantinescu, 2026-10-20 (\"let's finish the PR\")",
-  "backup": ".specify/sync/backups/20261020T225811Z/",
+  "approved_by": "Cornel, 2026-10-21 (\"Approved by Cornel 2026-10-21 (groups 1, 3, 4)\")",
+  "backup": ".specify/sync/backups/20261021T225316Z/",
   "backed_up_files": [
     "specs/001-dispatcher-cache-interface/spec.md",
     "specs/001-dispatcher-cache-interface/contracts/errors.md",
-    "specs/001-dispatcher-cache-interface/contracts/idispatcher.md"
+    ".specify/sync/apply-report.md (2026-10-20)",
+    ".specify/sync/apply-report.json (2026-10-20)"
   ],
   "applied_proposals": [
-    {"id": "B-1", "type": "BACKFILL", "spec": "001", "file": "specs/001-dispatcher-cache-interface/spec.md", "requirement": "FR-018", "edits": 1},
-    {"id": "B-2", "type": "BACKFILL", "spec": "001", "file": "specs/001-dispatcher-cache-interface/spec.md", "requirement": "edge case: remove", "edits": 1},
-    {"id": "B-3", "type": "BACKFILL", "spec": "001", "file": "specs/001-dispatcher-cache-interface/spec.md", "requirement": "FR-038", "edits": 1},
-    {"id": "B-4", "type": "BACKFILL", "spec": "001", "file": "specs/001-dispatcher-cache-interface/spec.md", "requirement": "Assumptions: background writer read reference", "edits": 1},
-    {"id": "B-5", "type": "BACKFILL", "spec": "001", "file": "specs/001-dispatcher-cache-interface/contracts/errors.md", "requirement": "Timeout + KeyNotFound rows", "edits": 2},
-    {"id": "B-6", "type": "BACKFILL", "spec": "001", "file": "specs/001-dispatcher-cache-interface/contracts/idispatcher.md", "requirement": "remove doc comment + postcondition", "edits": 2}
+    {"id": "B-7", "type": "BACKFILL", "spec": "001", "file": "specs/001-dispatcher-cache-interface/spec.md", "requirement": "FR-056 flush_to_ssd", "edits": 1,
+     "before": "`flush_to_ssd() -> usize` forces a synchronous write-through flush ... (design invariant P9).",
+     "after": "`flush_to_ssd() -> Result<usize, DispatcherError>` ... (design invariant P9). The count is taken after the queue has drained. ... so the count is a lower bound. Only `Ok` versus `IoError` is the persistence guarantee."},
+    {"id": "B-8", "type": "BACKFILL", "spec": "001", "file": "specs/001-dispatcher-cache-interface/spec.md", "requirement": "FR-017", "edits": 1,
+     "before": "... the background writer silently drops the job. The dispatch map entry remains in MemoryTier state. (Known limitation.)",
+     "after": "... drops the job without retrying it ... The failure MUST be recorded per key, and `flush_to_ssd` MUST report it as `IoError` while the key is still in the memory tier (FR-056). ..."},
+    {"id": "B-9", "type": "BACKFILL", "spec": "001", "file": "specs/001-dispatcher-cache-interface/contracts/errors.md", "requirement": "IoError row", "edits": 1,
+     "before": "| `IoError` | `lookup`, `batch_lookup`, `initialize`, `commit_store` | Block device read/write error, device init failure.",
+     "after": "| `IoError` | `lookup`, `batch_lookup`, `initialize`, `commit_store`, `flush_to_ssd` | Block device read/write error, device init failure. **For `flush_to_ssd`**: ..."}
+  ],
+  "applied_by_hand_before_this_run": [
+    {"id": "interfaces-5", "type": "ALIGN (doc comment)", "file": "components/interfaces/src/idispatcher.rs", "requirement": "clear_memory_tier doc", "note": "approved; applied by hand in the working tree; not edited by this apply"},
+    {"id": "interfaces-6", "type": "ALIGN (doc comment)", "file": "components/interfaces/src/idispatcher.rs", "requirement": "batch_lookup doc", "note": "approved; applied by hand in the working tree; not edited by this apply"}
   ],
   "metadata_edits": [
-    {"spec": "001", "change": "Last Synced 2026-10-14 header added (branch fix/dispatcher-remove-clear-mt)"}
+    {"spec": "001", "change": "Last Synced 2026-10-21 header added (branch fix/dispatcher-remove-clear-mt)"}
   ],
   "align_tasks": {
     "file": ".specify/sync/align-tasks.md",
-    "ids": ["A-1", "A-2", "A-3", "A-4"],
-    "approval_notes": {
-      "A-1": "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR",
-      "A-2": "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR",
-      "A-3": "record as an ALIGN task with the open decision; recommendation (a): clear_memory_tier skips a reservation that is not completed, like a pinned entry; no code change in this PR",
-      "A-4": "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR"
+    "approved_ids": [],
+    "open_items": {
+      "A-5": "TRACK (Cornel 2026-10-21): code change for a later repair with a test first; not in this PR."
     }
   },
-  "closed_in_align_tasks": [
-    {"id": "A-03", "reason": "code fixed by cccfb328e; spec by B-3"},
-    {"id": "N-04", "reason": "specified by B-2, B-5, B-6"}
+  "cross_component_open_items": [
+    {"id": "interfaces-7", "component": "dispatcher-p2p", "file": "components/interfaces/.specify/sync/align-tasks.md",
+     "approval_note": "TRACK (Cornel 2026-10-21): port the 3 dispatcher repairs to dispatcher-p2p in a separate PR with its own Loom tests and spec sync."}
   ],
-  "open_items": [],
-  "carried_over_open": ["A-01", "A-02", "A-04", "A-05", "A-06", "A-07", "A-08", "N-01"],
+  "closed_in_align_tasks": [
+    {"id": "A-07", "reason": "resolved in code by efd502331 (ALIGN option); FR-058 already aligned, interfaces FR-018a approved"}
+  ],
+  "carried_over_open": ["A-1", "A-2", "A-3", "A-4", "A-01", "A-02", "A-04", "A-05", "A-06", "A-08", "N-01"],
   "not_applied": [
-    {"what": "B-3 companion_code_edit components/interfaces/src/idispatcher.rs:802-806", "reason": "outside specs/**; not part of the BACKFILL"}
+    {"what": "A-5", "reason": "not approved (TRACK)"},
+    {"what": "B-7 ALIGN alternative (IDispatchMap::ssd_offset)", "reason": "not chosen; depends on A-2"},
+    {"what": "B-7 companion_outside_specs components/interfaces/src/idispatcher.rs flush_to_ssd count line", "reason": "outside specs/**; not part of the BACKFILL"}
   ],
   "new_specs_created": [],
   "supersede_applied": [],
   "source_files_modified": [],
   "frontmatter_touched": false,
-  "drift_status_after_apply": "open (4 new ALIGN tasks incl. A-3 decision + 6 carried-over tasks + 2 carried-over decisions)"
+  "drift_status_after_apply": "open (A-5 + interfaces-7 tracked; 10 carried-over tasks + N-01 decision)"
 }

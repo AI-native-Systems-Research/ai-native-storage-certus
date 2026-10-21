@@ -14,19 +14,23 @@
 > argument (+ `BlockSemantics`/`SessionId` documented under FR-020); `integrity-check`
 > feature and `set_checksum`/`get_checksum` added to the Overview and FR-007;
 > `push_async`/`PushCompletion` added to FR-030/FR-033; FR-018 `LookupResult`
-> label corrected to 4-variant. **Deferred (not applied):** FR-014/FR-025
-> `IExtendedMetadataStore` remains an orphaned module — it is defined in
-> `src/iextended_metadata_store.rs` but never declared/re-exported from `lib.rs`,
-> so it is not part of the compiled crate. A real consumer
-> (`extended-metadata-store`) implements it and would fail to build; this latent
-> break is masked only because that crate is excluded from the workspace.
+> label corrected to 4-variant. FR-014/FR-025 `IExtendedMetadataStore` was then
+> an orphaned module (deferred). *(Resolved 2026-08-20: now declared and
+> re-exported, ungated, at `src/lib.rs:83,105`; see `.specify/sync/align-tasks.md`.)*
+
+> **Last Synced 2026-10-21** (branch `fix/dispatcher-remove-clear-mt`, approved by
+> Cornel): backfilled FR-017 (`Command`/`Completion` counts, `ReadWriteStats`
+> histograms), FR-018 (`DispatcherConfig` 19 fields, `TierEventStats`), FR-008 / US2
+> (method inventory, `copy_gpu_to_memory_async` regions, `clear_memory_tier` /
+> `flush_to_ssd` result contracts), FR-021, FR-023, Overview/FR-009 gating, NFR-002 and
+> the Implementation Notes. See `.specify/sync/apply-report.md`.
 
 ## Overview
 
 The `interfaces` crate provides centralized trait definitions for all Certus component interfaces. It allows components to depend on interface definitions without pulling in implementation crates, enforcing low coupling and enabling independent development. Interfaces are defined using the `define_interface!` procedural macro from `component-macros`, and all components implement `IUnknown` for runtime interface discovery.
 
-The crate has two Cargo features:
-- **`spdk`** (optional): Gates SPDK-dependent interfaces and types (`IBlockDevice`, `IBlockDeviceAdmin`, `ISPDKEnv`, `IDispatcher`, `IDispatchMap`, `IMemoryTier`, `IExtentManager`, `IPartitionTable`) and supporting types (`DmaBuffer`, `PciAddress`, etc.).
+The crate has three Cargo features:
+- **`spdk`** (optional): Gates SPDK-dependent interfaces and types (`IBlockDevice`, `IBlockDeviceAdmin`, `ISPDKEnv`, `IDispatcher`, `IDispatchMap`, `IExtentManager`, `IPartitionTable`; `IMemoryTier` is deliberately **not** gated, since its signatures use only raw pointers and crate-local types) and supporting types (`DmaBuffer`, `PciAddress`, etc.).
 - **`gpu`** (optional): Reserved for GPU-specific conditional compilation.
 - **`integrity-check`** (optional): Adds optional per-entry CRC-32 checksums to `IDispatchMap` (`set_checksum`/`get_checksum`, see FR-007); off by default, with no trait or struct surface change when disabled.
 
@@ -46,7 +50,7 @@ The crate has two Cargo features:
 **As the** dispatcher component, **I want to** use typed interfaces for block devices, extent managers, memory tiers, and GPU services **so that** I can orchestrate data flow without compile-time coupling to specific implementations.
 
 **Acceptance Criteria:**
-- `IDispatcher` provides `initialize`, `shutdown`, `lookup`, `lookup_async`, `batch_lookup`, `check`, `remove`, `populate`, `reserve_memory`, `copy_gpu_to_memory_async`, `copy_gpu_to_memory_completed`, `release_memory`, `touch`, `promote_to_memory_tier`, `clear_memory_tier`, and `flush_to_ssd` methods.
+- `IDispatcher` provides `initialize`, `shutdown`, `lookup`, `lookup_async`, `batch_lookup`, `check`, `remove`, `populate`, `batch_populate`, `reserve_memory`, `copy_gpu_to_memory_async`, `copy_gpu_to_memory_completed`, `release_memory`, `pin`, `unpin`, `touch`, `promote_to_memory_tier`, `clear_memory_tier`, `flush_to_ssd`, `schedule_write_through`, `read_write_stats`, and `tier_event_stats` methods.
 - `IDispatchMap` provides reference-counted cache entry management with read/write locking semantics.
 - `IMemoryTier` provides a DRAM pool with pluggable eviction (via `IEvictionPolicy`), sharded allocation, and NUMA awareness.
 
@@ -176,19 +180,22 @@ The crate has two Cargo features:
 - **Method**: `check(&self, key: CacheKey) -> Result<bool, DispatcherError>` - Check entry existence.
 - **Method**: `remove(&self, key: CacheKey) -> Result<(), DispatcherError>` - Remove entry and free resources.
 - **Method**: `populate(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError>` - Populate cache from GPU memory.
+- **Method**: `batch_populate(&self, entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), DispatcherError>>` - Semantically `populate` per entry, but all D2H copies are submitted asynchronously and a single `stream_synchronize` covers the batch. Returns one `Result` per entry, in order.
 - **Method**: `reserve_memory(&self, key: CacheKey, size: u32, session_id: u64, deadline: Option<std::time::Instant>) -> Result<*mut u8, DispatcherError>` - Reserve memory-tier slot. `session_id` is an opaque per-request identifier (0 = unset) supplied by the client; it carries no allocation semantics and is used only for observability. `deadline` bounds how long a full-tier reservation may backpressure (retry LRU eviction) before returning `AllocationFailed`: `None` uses the dispatcher's own `store_backpressure_ms` budget measured from the start of this call (legacy per-call behavior); `Some(instant)` retries only until `instant` — a deadline the caller shares across a batch of reserves so the batch's *total* backpressure is bounded (rather than paying the full budget per key), then makes one best-effort attempt and fails fast. *(Sync 2026-09-15 — code authoritative, commit `bec6c6ec`: added the `deadline` parameter so a multi-key OP_RESERVE batch does not overrun the client's request deadline.)*
-- **Method**: `copy_gpu_to_memory_async(&self, key: CacheKey, ipc_handle: IpcHandle, stream: GpuStream) -> Result<(), DispatcherError>` - DMA copy into reserved slot.
+- **Method**: `copy_gpu_to_memory_async(&self, key: CacheKey, regions: &[IpcHandle], stream: GpuStream) -> Result<(), DispatcherError>` - DMA copy into reserved slot. The N regions are gathered contiguously into the one slot (region L lands at `slot + sum of preceding region sizes`), so a block split into N per-layer GPU allocations (vLLM 0.23+) is stored as one unit; `regions.len() == 1` is the legacy single-allocation path.
 - **Method**: `copy_gpu_to_memory_completed(&self, key: CacheKey, size: u32) -> Result<(), DispatcherError>` - Finalize populated slot.
 - **Method**: `release_memory(&self, key: CacheKey) -> Result<(), DispatcherError>` - Release reserved slot (cancellation path).
 - **Method**: `touch(&self, key: CacheKey) -> Result<(), DispatcherError>` - Refresh eviction timestamp.
 - **Method**: `promote_to_memory_tier(&self, keys: &[CacheKey])` - Promote SSD-resident entries to DRAM.
-- **Method**: `clear_memory_tier(&self) -> Result<usize, DispatcherError>` - Evict all memory-tier entries.
-- **Method**: `flush_to_ssd(&self) -> Result<usize, DispatcherError>` - Flush pending writes to SSD.
+- **Method**: `clear_memory_tier(&self) -> Result<usize, DispatcherError>` - Empty the memory tier: entries with an SSD copy are demoted to BlockDevice, entries without one are removed. A **pinned** entry (a lookup, a client `pin`, or the pending write-through's own reference) keeps its slot and is retried; if pinned entries remain when the implementation's bounded wait expires, returns `Timeout` and leaves them resident. `Ok(n)` means the tier was emptied, and `n` counts only entries actually demoted or removed. *(Sync 2026-10-21 — CODE CHANGE, repair `cccfb328e`; behaviour in dispatcher spec 001 FR-038.)*
+- **Method**: `flush_to_ssd(&self) -> Result<usize, DispatcherError>` - Block until every queued write-through has run. Returns `IoError` if a write-through failed for an entry that is still in the memory tier (that entry has no SSD copy, so a later `clear_memory_tier` would drop its only copy); otherwise returns the number of memory-tier entries that now have a valid SSD offset. *(Sync 2026-10-21 — CODE CHANGE, repair `9bd231d85` / DIS-FLUSH-REPORTS-FAILED-WRITE; behaviour in dispatcher spec 001 FR-056.)*
 - **Method**: `pin(&self, key: CacheKey) -> Result<(), DispatcherError>` - Take an eviction-protection reference on a cache entry; multiple pins on the same key stack (ref-count increments).
 - **Method**: `unpin(&self, key: CacheKey) -> Result<(), DispatcherError>` - Release an eviction-protection reference; the entry becomes evictable again once all pins are released.
 - **Method**: `read_write_stats(&self) -> ReadWriteStats` - Return cumulative per-direction SSD read/write byte, op, and latency counters aggregated across all data drives (zeroed unless built with the `telemetry` feature; monotonic).
+- **Method**: `tier_event_stats(&self) -> TierEventStats` - Cumulative KV-cache tier-movement counters (see FR-018, FR-018a); always populated (not telemetry-gated); implementations that do no tiering return zeroes.
+- **Method**: `schedule_write_through(&self, key: CacheKey, size: u32) -> Result<(), DispatcherError>` - Non-blocking, best-effort background write-through; contract in FR-031a.
 
-#### FR-009: IMemoryTier Interface (feature: spdk)
+#### FR-009: IMemoryTier Interface
 - **Method**: `initialize(&self, pool_size: usize, numa_node: Option<i32>) -> Result<(), MemoryTierError>` - Initialize pool with NUMA binding.
 - **Method**: `insert(&self, key: CacheKey, size: u32) -> Result<*mut u8, MemoryTierError>` - Allocate slot.
 - **Method**: `get(&self, key: CacheKey) -> Option<(*mut u8, u32)>` - Get pointer, refreshing eviction order.
@@ -309,17 +316,18 @@ The crate has two Cargo features:
 - `TelemetrySnapshot`: IO statistics (ops, latency, throughput).
 - `OpHandle`: Unique async operation identifier.
 - `NamespaceInfo`: NVMe namespace metadata.
-- `Command`: 12-variant enum for all NVMe operations (ReadSync, WriteSync, ReadAsync, WriteAsync, WriteZeros, BatchSubmit, AbortOp, NsProbe, NsCreate, NsFormat, NsDelete, ControllerReset).
-- `Completion`: 11-variant enum for operation results (ReadDone, WriteDone, WriteZerosDone, AbortAck, Timeout, NsProbeResult, NsCreated, NsFormatted, NsDeleted, ResetDone, Error); derives `Clone` (in addition to `Debug`) so the block-device actor can `try_send` a clone of a completion on a full ring without consuming the original, enabling non-blocking completion delivery.
+- `Command`: 13-variant enum for all NVMe operations (ReadSync, WriteSync, ReadAsync, WriteAsync, WriteZeros, BatchSubmit, AbortOp, NsProbe, NsCreate, NsFormat, NsDelete, ControllerReset, FlushSync). *(Sync 2026-10-21 — backfilled: `FlushSync { ns_id }` forces the namespace's volatile write cache to media, added in `e56a8b4e6` for the extent-manager `volatile_write_cache` feature; behaviour in block-device-spdk-nvme FR-031.)*
+- `Completion`: 12-variant enum for operation results (ReadDone, WriteDone, WriteZerosDone, AbortAck, Timeout, NsProbeResult, NsCreated, NsFormatted, NsDeleted, ResetDone, FlushDone, Error); derives `Clone` (in addition to `Debug`) so the block-device actor can `try_send` a clone of a completion on a full ring without consuming the original, enabling non-blocking completion delivery.
 - `ClientChannels`: Channel pair (command_tx, completion_rx).
-- `ReadWriteStats`: Cumulative per-direction (read/write) byte, op, and latency-sum counters with `total_ops`/`total_bytes`/`mean_read_latency_ns`/`mean_write_latency_ns` helpers; returned by `IBlockDevice::read_write_stats` and `IDispatcher::read_write_stats` (see FR-004/FR-008).
+- `ReadWriteStats`: Cumulative per-direction (read/write) byte, op, and latency-sum counters plus per-direction power-of-two IO-size histograms (`read_size_buckets`/`write_size_buckets`, `IO_SIZE_BUCKETS` = 25 buckets; `size_bucket`/`bucket_lower_bound` map sizes to buckets), with `total_ops`/`total_bytes`/`mean_read_latency_ns`/`mean_write_latency_ns` helpers and `merge_from` for aggregating across drives; returned by `IBlockDevice::read_write_stats` and `IDispatcher::read_write_stats` (see FR-004/FR-008).
 
 #### FR-018: Supporting Types - Dispatcher
-- `DispatcherConfig`: 18-field configuration — `data_pci_addrs`, `max_cache_entries`, `format_on_init`, SSD eviction params (`ssd_eviction_threshold`, `ssd_eviction_low_watermark`, `ssd_eviction_batch_size`, `ssd_eviction_interval_secs`), `poller_base_cpu`, `max_eviction_attempts`, `backfill_delay_ms`, partition sizes (`metadata_partition_size`, `extended_metadata_partition_size`), memory-tier proactive DRAM→SSD demotion params (`memory_tier_eviction_threshold`, `memory_tier_eviction_low_watermark`, `memory_tier_eviction_batch_size`, `memory_tier_eviction_interval_secs` — analogous to the SSD eviction sweep, disabled by default via threshold 0.0), and cold-load staging (`cold_staging_slots`, `cold_staging_buf_bytes`).
+- `DispatcherConfig`: 19-field configuration — `data_pci_addrs`, `max_cache_entries`, `format_on_init`, SSD eviction params (`ssd_eviction_threshold`, `ssd_eviction_low_watermark`, `ssd_eviction_batch_size`, `ssd_eviction_interval_secs`), `poller_base_cpu`, `max_eviction_attempts`, `store_backpressure_ms` (store-path backpressure budget, default 5000 ms, 0 = fail fast; see `reserve_memory` in FR-008), `backfill_delay_ms`, partition sizes (`metadata_partition_size`, `extended_metadata_partition_size`), memory-tier proactive DRAM→SSD demotion params (`memory_tier_eviction_threshold`, `memory_tier_eviction_low_watermark`, `memory_tier_eviction_batch_size`, `memory_tier_eviction_interval_secs` — analogous to the SSD eviction sweep, disabled by default via threshold 0.0), and cold-load staging (`cold_staging_slots`, `cold_staging_buf_bytes`).
 - `IpcHandle`: Opaque GPU memory handle (pointer + size).
 - `DispatcherError`: 7-variant error enum.
 - `CacheKey`: Type alias for `u64`.
 - `LookupResult`: 4-variant enum (NotExist, MismatchSize, BlockDevice, MemoryTier).
+- `TierEventStats` *(Sync 2026-10-21 — backfilled)*: `Copy + Default` 16-field snapshot returned by `IDispatcher::tier_event_stats` — promotions (`promotions_to_memory`, `promotions_to_gpu`), the route partition (`lookup_hits_dram`, `lookup_hits_ssd`, `remote_lookup_hits`, `remote_lookup_misses`), evictions (`evictions_from_memory`, `evictions_from_ssd`), store refusals (`store_backpressure_events`, `store_drops_on_full`, `store_already_resident`; see FR-018a), clean-eviction diagnostics (`evictions_blocked_by_pin`, `eviction_scans_exhausted`, `evictions_blocked_unpersisted`) and the two **gauges** `oldest_sampled`/`oldest_persisted`. All other fields are monotonic since process start.
 - `EvictionEvent` / `EvictionReason` *(moved here 2026-10-02)*: `EvictionEvent { key, reason }` with `EvictionReason` being `Demoted` (to the block device) or `Removed`. Emitted best-effort on every memory-tier eviction over a bounded single-subscriber channel, with drop-and-count backpressure; the behavioural contract lives with the dispatchers (dispatcher spec 001 FR-042/FR-050, dispatcher-p2p spec 001 FR-017).
   - **Defined here, and only here, because two components emit it.** Both `dispatcher` and `dispatcher-p2p` publish these events, and a type defined in one of them cannot be named by the other without one dispatcher depending on the other — which is what prevented the `full-p2p` profile from building at all. A shared vocabulary type belongs in `interfaces` for the same reason `CacheKey` and `LookupResult` do.
 
@@ -328,7 +336,7 @@ The crate has two Cargo features:
   - `store_backpressure_events` — retries taken while the tier was momentarily full.
   - `store_drops_on_full` — the backpressure budget elapsed and the store was dropped.
   - `store_already_resident` — `mt.insert` returned `AlreadyExists`: another writer, or a remote fetch's `publish_success`, got there first. **Not a capacity refusal.**
-- `store_already_resident` MUST be counted rather than inferred, because that path returns from `evict_and_insert` immediately and so bumps neither of the other two. A measured run showed 7.28% of stores refused while `eviction_scans_exhausted` was 0 — eviction never failed once — which no combination of the pre-existing counters could explain.
+- `store_already_resident` MUST be counted rather than inferred, because that path bypasses the backpressure retry and so bumps neither of the other two. *(Sync 2026-10-21 — CODE CHANGE, repair DIS-STORE-ALREADY-RESIDENT-COUNTS-STORES-ONLY: it is counted only in `reserve_memory`, the store path. A load that loses the insert race to a concurrent promotion is a hit and is not counted.)* A measured run showed 7.28% of stores refused while `eviction_scans_exhausted` was 0 — eviction never failed once — which no combination of the pre-existing counters could explain.
 - All three MUST be exposed by the server's metrics endpoint. They existed in this struct and were computed by the dispatcher, but were published nowhere, so the question above could not be answered from a scrape.
 - **Known asymmetry, recorded not resolved**: on the load path the identical `AlreadyExists` from `mt.insert` is treated as a *hit* (`serve_concurrently_promoted`), while on the store path it is surfaced as a failure. Whether the wire should keep conflating "already cached" with "cache full" is a protocol question; these counters measure it without settling it.
 
@@ -347,7 +355,7 @@ The crate has two Cargo features:
 - `Extent`: Committed extent (key, size, offset).
 - `ExtentKey`: Type alias for `u64`.
 - `ExtentManagerError`: 5-variant error enum.
-- `FormatParams`: 10-field format configuration with defaults.
+- `FormatParams`: 9-field format configuration with defaults (`data_disk_size`, `slab_size`, `max_extent_size`, `sector_size`, `region_count`, `metadata_alignment`, `instance_id`, `metadata_disk_ns_id`, `metadata_region_size`); `FormatParams::new(data_disk_size, instance_id)` fills the rest from `Default`.
 - `WriteHandle`: Publish/abort handle with auto-abort on drop.
 
 #### FR-022: Supporting Types - GPU Services
@@ -379,7 +387,7 @@ The crate has two Cargo features:
   - Hold time is attributed **per batch, not per key**: one batch pinning *n* keys for one interval blocks eviction for that interval, not *n* times it. A batch that pinned nothing records nothing, since it blocked nothing.
   - `peer_pin_hold_us_max` is the **only** hold-time field, and it is a high-water mark rather than an average by design: one batch held for seconds among thousands of fast ones stalls the tier for that whole window, which is exactly the case an average would hide.
   - ~~`peer_pins_taken`~~ / ~~`peer_pin_hold_us_total`~~ — **SUPERSEDED 2026-10-05, removed.** Both were published in the 6-field version of this type and are gone. `peer_pins_taken` measured **1.000×** `peer_served_keys` across all three measured runs — an exact duplicate of an already-published field, and the only per-key atomic among these counters. `peer_pin_hold_us_total` could not produce the mean it existed for: it accumulated per **batch** while every key count here is per **key**, so the quotient is batch-µs-per-key rather than a mean hold, and no batch count is exposed anywhere to form a real one. A counter that cannot answer its own question is removed rather than left to be misread.
-- `LookupConfig`: 10-field configuration for `IRemoteLookup::initialize` — `group`, `quorum_pct`, `phase1_timeout`, `op_deadline`, `max_retry_rounds`, `max_keys_per_query`, `bind_ip`, `actor_cpu`, `discovery` (optional `GossipConfig`, see FR-032), `node_endpoint`. Implements `Default`.
+- `LookupConfig`: 12-field configuration for `IRemoteLookup::initialize` — `group`, `quorum_pct`, `phase1_timeout`, `op_deadline`, `caller_wait` (optional; how long `batch_lookup` blocks the caller, `None` = until `op_deadline`), `connection_teardown_timeout` (grace before an orphaned landing slot's peer QP is torn down and the slot reclaimed; default 1000 ms), `max_retry_rounds`, `max_keys_per_query`, `bind_ip`, `actor_cpu`, `discovery` (optional `GossipConfig`, see FR-032), `node_endpoint`. Implements `Default`. Semantics of `caller_wait` and `connection_teardown_timeout` are specified in remote-lookup spec 002.
 - ~~`LookupRef`~~ / ~~`RemoteRequestHandlerError`~~ — **SUPERSEDED**, removed together with `IRemoteRequestHandler` (see FR-013). No replacement type exists: the RDMA split's writes are one-sided (no zero-copy handle is returned to a caller) and its errors are `RemoteLookupRdmaInitiatorError`/`RemoteLookupRdmaResponderError` (FR-033/FR-034).
 
 #### FR-031a: IDispatcher - Scheduling Persistence *(New 2026-10-02)*
@@ -480,7 +488,7 @@ The crate has two Cargo features:
 
 #### NFR-002: Feature-Gated Compilation
 - SPDK-dependent code compiles only with `--features spdk`, allowing the default build to work without SPDK installed.
-- GPU-specific code is gated behind `--features gpu`.
+- The `gpu` feature is declared but currently gates nothing (reserved, see Overview). `IGpuServices` and its types compile in every build; its methods that take SPDK `DmaBuffer`s are gated behind `spdk`.
 
 #### NFR-003: Thread Safety
 - All types that cross thread boundaries implement `Send` (with documented SAFETY justifications for unsafe impls).
@@ -542,4 +550,4 @@ The crate has two Cargo features:
 - SPDK-gated interfaces are conditionally compiled at the module level (`#[cfg(feature = "spdk")]`).
 - `DmaBuffer::Drop` checks the global `SPDK_ENV_ACTIVE` flag to avoid calling into torn-down SPDK infrastructure.
 - `WriteHandle` uses `Option<Box<dyn FnOnce()>>` closures for publish/abort, consumed on first call, with drop guard for abort.
-- Several interfaces have formally verified properties documented in comments (IDispatchMap: 10 props, IDispatcher: 10 props, IExtentManager: 10 props, IGpuServices: 10 props, IMemoryTier: 10 props).
+- Verification status is not recorded in the interface definitions: per-property proof claims were removed from `IDispatchMap`, `IDispatcher`, `IExtentManager` and `IMemoryTier` in `a93b5620f` (2026-08-20) and live with each component's verification artifacts. `IGpuServices` still carries a comment summarising `components/gpu-services/verif/` (`src/igpu_services.rs:231-246`).

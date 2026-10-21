@@ -1,11 +1,23 @@
 ---
 spec_sync_component: dispatcher
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-20T23:03:58Z
-spec_sync_git_commit: cccfb328e
-spec_sync_inputs_sha256: ddea2de5b33c9ea3f27dfffdde3c8a39c132508656f055c4cd9d1e98bfc09253
+spec_sync_synced_at: 2026-10-21T23:03:30Z
+spec_sync_git_commit: efd502331
+spec_sync_inputs_sha256: fddbf882a22464c075cd5197a08f22e8318a5c6638a1a65ec405b060fbb6dbf4
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Apply 2026-10-21 (branch fix/dispatcher-remove-clear-mt, approved by Cornel).** Approved 2026-10-21 ("groups 1, 3, 4"); applied 2026-10-21T22:53:16Z at HEAD `efd502331`. **Applied** with the exact proposal text; backup in `.specify/sync/backups/20261021T225316Z/`: **B-7** (001 FR-056 `flush_to_ssd`: return type `Result<usize, DispatcherError>`; the count is taken after the drain over `is_evictable` entries and is a lower bound; only `Ok` vs `IoError` is the guarantee), **B-8** (001 FR-017: a failed write-through is no longer silent; it is recorded per key and reported by `flush_to_ssd` as `IoError` while the key is resident, commit `9bd231d85`), **B-9** (`contracts/errors.md` `IoError` row lists `flush_to_ssd`). Spec 001 got a `Last Synced 2026-10-21` header. This resolves D-19, D-20, D-21 and U-08. Also recorded as **applied** (approved, applied by hand in the working tree before this run, `src/` not edited by the apply): interfaces proposals **5** (`clear_memory_tier` doc comment, which also clears the stale-doc item in the last bullet above) and **6** (`batch_lookup` doc comment). **Closed** in `align-tasks.md`: **A-07** (resolved in code by `efd502331`). **Became tasks**: none approved this run. **Stays open**, recorded in `align-tasks.md` with its TRACK note: **A-5** (P-06, FR-056 + FR-017: tie the failed-write record to the entry it describes; later repair, test first); and **interfaces 7** (the `dispatcher-p2p` port of the three repairs), recorded in `components/interfaces/.specify/sync/align-tasks.md` as a task for the component `dispatcher-p2p`. Carried over, unchanged: A-1, A-2, A-3 (decision), A-4, A-01, A-02, A-04, A-05, A-06, A-08, N-01. Drift stays **OPEN** until the code tasks land. No source files changed by this apply. The frontmatter is left for the stamping script.
+
+> **Sync 2026-10-21 (branch fix/dispatcher-remove-clear-mt) — two more formal-verification repairs re-verified, drift OPEN.** Base `origin/unstable` `a25e9be29` (merged into the branch by `95cdcb5e5`), HEAD `efd502331`, plus the spec edits Cornel approved, which are in the working tree and not yet committed: spec 001 FR-056 `flush_to_ssd`, interfaces FR-018a, and the interfaces `IDispatcher::flush_to_ssd` doc comment. Since the last sweep (`ec4277c0e`, which analysed `cccfb328e`), the component's inputs changed only through two commits. `9bd231d85` (DIS-FLUSH-REPORTS-FAILED-WRITE, Spin J23) makes `flush_to_ssd` return `IoError` while an entry whose write-through failed is still resident, and makes it count the resident entries that have an SSD copy. `efd502331` (DIS-STORE-ALREADY-RESIDENT-COUNTS-STORES-ONLY, Cornel's decision A-07 = ALIGN) counts `store_already_resident` only in `reserve_memory`. The merge from `origin/unstable` touched nothing under `components/`, `lib/` or `apps/`. Both new hunks were re-read in full, together with every requirement that reads or writes the new state: the write-through ledger, `flush_to_ssd`, `remove`, `clear_memory_tier`, `reserve_memory`, `evict_and_insert` and the load paths that share it. The text applied on 2026-10-20 (FR-018, the remove edge case, FR-038, the writer Assumption, and the two contract rows) was checked line by line against the current code. All of it matches. Every other earlier verdict was re-anchored to HEAD and spot-checked. That puts 111 items in scope: the earlier 109, plus the FR-056 `flush_to_ssd` bullet and the `contracts/errors.md` `IoError` row, both newly counted because this branch changed what they should say. Results: 89 aligned, 8 drifted, 5 partially implemented, 9 not verifiable here, and 2 unspecced features (1 folded into a BACKFILL).
+>
+> - **Resolved in code:** D-11 / open decision **A-07**. `store_already_resident` is now counted only on the store path (`src/lib.rs:3505-3511`, `:3535-3543`; no count in `evict_and_insert`, `:1214-1221`; test `src/repair_test_store_already_resident.rs:474`). FR-058 and interfaces FR-018a (approved text) are aligned. A-07 can be closed in `align-tasks.md`.
+> - **The approved FR-056 `flush_to_ssd` text matches the main behaviour** (`src/lib.rs:4006-4042`; tests `src/repair_test_flush_failed_write.rs:607,638`). Two gaps found adversarially: (D-19, minor) the count uses `IDispatchMap::is_evictable` (`components/dispatch-map/src/lib.rs:530-546`), so a persisted entry that is pinned at that moment is not counted, and the bullet still shows the return type as `-> usize`; (P-06, minor) a failure record is forgotten only once the key is no longer in the memory tier (`src/background.rs:376-379`). A re-reserved new incarnation of the key therefore inherits the old failure, and a landed write whose `convert_to_storage` failed is recorded as landed (`src/lib.rs:1401-1403`, `:1429`, `:1452`). **BACKFILL B-7, ALIGN A-5.**
+> - **Text this branch made stale:** FR-017 still says a failed write-through is "silently" dropped. It is now recorded and surfaced by `flush_to_ssd` (D-20, **BACKFILL B-8**). `contracts/errors.md:36` does not list `flush_to_ssd` for `IoError` (D-21, **BACKFILL B-9**).
+> - **Still open, re-verified unchanged at HEAD:** A-1 (`schedule_write_through` takes no pin; `src/lib.rs:4044-4066`, `JobStart::Untracked` `src/background.rs:303-305`, `:311-313`), A-2 (`remove` leaks a persisted resident entry's extent; `src/lib.rs:3192-3229`), A-3 (`clear_memory_tier` frees reserved slots; `:3974-3988`), A-4 (ledger give-back window; `src/background.rs:347-351`), A-01 (`:2803-2808`), A-02 (`:2488-2489`), A-04 (`:815-821`), A-05 (`:3668-3695`), A-06 (`:2111`), A-08 (still no value-specific test for `Ssd`/`Remote`/`SizeMismatch`/`Error`), N-01 (integrity-check).
+> - **Outside this component's specs, recorded only:** `dispatcher-p2p` implements `flush_to_ssd` the old way: it returns the queue length from before the flush and never returns `IoError` (`components/dispatcher-p2p/src/lib.rs:2889-2902`). That breaks the interface contract as edited (`components/interfaces/src/idispatcher.rs:826-838`). The shm-queue reply field is still named `jobs_flushed` (`lib/shmq-dispatcher/src/wire.rs:46-47`, `src/translate.rs:901-910`). The interfaces `clear_memory_tier` doc comment is still stale (`idispatcher.rs:806-810`).
+>
+> **4 proposals (3 BACKFILL, 1 ALIGN, 0 other), all `approved: false`.** Nothing was applied. See `proposals.md`. The frontmatter is left exactly as it was: the stamping script owns it, and its `clean` stamp predates `9bd231d85` and `efd502331`.
+
 > **Apply 2026-10-14 (branch fix/dispatcher-remove-clear-mt, approved by Cornel).** Approved 2026-10-20 ("let's finish the PR"); applied 2026-10-20T22:58:11Z. **Applied** with the exact proposal text; backup in `.specify/sync/backups/20261020T225811Z/`: **B-1** (FR-018: `remove` takes over the pending write-through's pin; who frees the slot and the extent afterwards), **B-2** (remove edge case: only a reader's or client's pin, or a write lock past the wait, refuses `remove`), **B-3** (FR-038 `clear_memory_tier`: `oldest_keys` scan, pinned entries keep their slot, exact count, 5 s `Timeout`), **B-4** (Assumption: only `copy_gpu_to_memory_completed` jobs hold a read reference; the `schedule_write_through` gap is stated), **B-5** (`contracts/errors.md` `Timeout` → `pin`/`clear_memory_tier`; `KeyNotFound` covers `remove` refusals), **B-6** (`contracts/idispatcher.md` `remove` takes no write reference; postcondition). Spec 001 got a `Last Synced 2026-10-14` header. This resolves D-06, D-10′, D-18, U-04, U-06 and U-07, and closes the earlier **A-03** and **N-04** in `align-tasks.md`. **Became tasks** in `align-tasks.md` (approved as ALIGN tasks only, no code change in this PR): **A-1** (FR-013: a `schedule_write_through` job must own the pin it settles, major), **A-2** (SC-003: `remove` must free the extent of a persisted resident entry), **A-3** (FR-056 vs FR-038: reserved-but-not-completed slots; the decision is recorded with recommendation (a), skip like a pinned entry), **A-4** (FR-018 residual handshake windows, LOW confidence). **Stays open**: no new item from this run, since all 10 proposals were approved. Carried over, unchanged: A-01, A-02, A-04, A-05, A-06, A-08 (tasks), and A-07 and N-01 (decisions). The interfaces-crate `clear_memory_tier` doc comment (the B-3 companion edit) is outside `specs/**` and was not edited. Drift stays **OPEN** until the code tasks land. No source files changed. The frontmatter is left for the stamping script.
 >
 > **Stamp: clean.** Every drift item of this analysis is resolved (specification updates applied with Cornel's approval) or tracked in `align-tasks.md` (ALIGN tasks A-1 to A-4; A-3 with the recommended option (a)).
@@ -144,7 +156,248 @@ spec_sync_hash_tool: scripts/spec-sync-hash.sh
 > folded in) and matches `spec_sync_inputs_sha256`; the digest here was recomputed
 > over a clean tree (no untracked files under `src/`/`specs/`) after the last edit.
 
-# Spec Drift Report — dispatcher (branch `fix/dispatcher-remove-clear-mt`)
+# Spec Drift Report — dispatcher (branch `fix/dispatcher-remove-clear-mt`, second sweep)
+
+Generated: 2026-10-21
+Project: `components/dispatcher` (crate `dispatcher`)
+Specs: `specs/001-dispatcher-cache-interface/spec.md` (419 lines), `specs/002-served-by-tier-attribution/spec.md` (779 lines)
+Branch: `fix/dispatcher-remove-clear-mt`. HEAD `efd502331`, base `origin/unstable` `a25e9be29` (merged into the branch by `95cdcb5e5`). Approved spec edits that are not yet committed are in the working tree (see below).
+Mode: read-only drift analysis, batch (no questions). Nothing outside `.specify/sync/` was edited.
+
+## Scope and method
+
+**Inputs that changed since the last sweep** (`ec4277c0e`, the apply of the 2026-10-20 analysis of `cccfb328e`):
+
+| Commit | Finding id | Code change |
+|---|---|---|
+| `9bd231d85` | DIS-FLUSH-REPORTS-FAILED-WRITE (Spin J23; Loom) | `WriteThroughPins` also keeps a `failed: HashSet<CacheKey>` (`src/background.rs:262-263`). `record_write` (`:363-372`) and `failed_writes` (`:374-380`) maintain it. `process_write_job` returns `written.is_some()` (`src/lib.rs:1394-1404`). `run_write_job` records the outcome of Untracked jobs (`:1419-1423`) and of owned jobs (`:1429`). `flush_to_ssd` drains the queue, returns `IoError` if a resident key's latest write failed, and otherwise counts the resident keys for which `is_evictable` is true (`src/lib.rs:4006-4042`). Tests: `src/repair_test_flush_failed_write.rs:607,638`. |
+| `efd502331` | DIS-STORE-ALREADY-RESIDENT-COUNTS-STORES-ONLY (decision A-07 = ALIGN; Loom) | The counter is removed from `evict_and_insert` (`src/lib.rs:1214-1221`) and added to both `AlreadyExists` exits of `reserve_memory` (`:3505-3511`, `:3535-3543`). The unit test now calls `reserve_memory` (`src/lib.rs:6696`). New test `src/repair_test_store_already_resident.rs:474`. |
+
+`git diff --stat ec4277c0e..HEAD -- components lib apps` lists only those four files. The merge commit `95cdcb5e5` brought in only `knowledge/`.
+
+**Approved spec edits in the working tree** (`git diff -- components/dispatcher/specs components/interfaces`). This sweep checks them but does not propose to undo them:
+- spec 001 FR-056 `flush_to_ssd` bullet (`spec.md:346`);
+- interfaces `001-interfaces` FR-018a, the `store_already_resident` paragraph (`components/interfaces/specs/001-interfaces/spec.md:331`);
+- the `# Errors` section of the `IDispatcher::flush_to_ssd` doc comment (`components/interfaces/src/idispatcher.rs:832-837`).
+
+**Method.**
+- (1) Both new hunks were re-read in full, with the semantics of the real dependencies they rely on:
+  - `DispatchMap::is_evictable` requires `read_ref == 0 && write_ref == 0 && MemoryTier { ssd_offset: Some }` (`components/dispatch-map/src/lib.rs:530-546`).
+  - `convert_to_storage` decrements any read reference (`:176-196`).
+  - `MemoryTier::oldest_keys` is the eviction policy's `peek_front_n` over every tracked key, reserved-but-not-completed slots included (`components/memory-tier/src/lib.rs:435-443`; `components/eviction-policy-lru/src/lru_list.rs:107-118`).
+  - `MemoryTier::contains` is "a slot exists" (`components/memory-tier/src/lib.rs:568-575`).
+  - A `WriteHandle` dropped before `publish` aborts its extent (`components/interfaces/src/iextent_manager.rs:149-155`).
+- (2) Adversarial question for the failure record: for each actor that creates, frees or re-creates a slot for a key, does `flush_to_ssd` report exactly the resident entries that have no SSD copy because their write failed? For the counter: which callers reach each `AlreadyExists` exit? (`reserve_memory` callers: `src/lib.rs:3255`, `:3368`, `lib/shmq-dispatcher/src/translate.rs:531`. Load paths that call `evict_and_insert`: `promote_and_serve`, `batch_lookup` cold-prep.)
+- (3) The text applied on 2026-10-20 (B-1…B-6) was compared clause by clause with the current code.
+- (4) Every other verdict was re-anchored to HEAD. Offsets in `lib.rs`: −3 at `1214-1221`, +3 after `1404`, +17 after `3545`, +40 after `4004`. Offsets in `background.rs`: +5 after `263`, +24 after `381`. Each anchor cited below was spot-checked at its new line.
+
+## Summary
+
+| Category | Count |
+|----------|-------|
+| Specs Analyzed | 2 |
+| Requirements Checked | 120. That is 111 in this component's scope: the active FRs and SCs of both specs, the acceptance scenarios and edge cases named below, the writer Assumption, and, newly counted, the FR-056 `flush_to_ssd` bullet and the `contracts/errors.md` `IoError` row. The other 9 items of spec 002 belong to other components and are only listed. |
+| ✓ Aligned | 89 (80.2% of 111) |
+| ⚠️ Drifted | 8 (7.2%). 3 are new, all BACKFILL: D-19 (FR-056 `flush_to_ssd` bullet), D-20 (FR-017), D-21 (`contracts/errors.md` `IoError`). 5 are carried over as ALIGN tasks: D-16/A-1, D-17/A-2, D-07/A-04, D-13/A-01, D-15/A-08. |
+| ◐ Partially implemented | 5 (4.5%), all carried over: P-01/A-05, P-02/A-06, P-03/A-02, P-04/A-4, P-05/A-3. The new P-06 (ALIGN A-5) is a second finding on the FR-056 `flush_to_ssd` item, so it is not counted again. |
+| ✗ Not implemented | 0 |
+| ⧗ Not verifiable here (hardware / cluster / benchmark) | 9 (8.1%) |
+| 🆕 Unspecced Code | 2: U-08 (the failed-write record; folded into **B-8**) and U-01 (integrity-check, open item N-01) |
+
+Changes since the 2026-10-20 sweep (86 / 9 / 5 / 9 of 109):
+- D-06, D-10′ and D-18 became aligned once B-1…B-6 were applied (`ec4277c0e`).
+- D-11 became aligned through the code (`efd502331`).
+- FR-017 moved from aligned to drifted (D-20).
+- Two items were added (D-19, D-21).
+
+What this branch's two new commits mean for the spec (one line each):
+1. `efd502331`: FR-058 and interfaces FR-018a are now **aligned**, which closes open decision **A-07**. One residual case stays with A-4(b): a re-store while a removed write-through still holds the slot is counted although `check()` says the key is absent (`src/lib.rs:3535-3543`).
+2. `9bd231d85`: the approved FR-056 text is met in its main case. Two details are not right yet: the count predicate and the `-> usize` signature (**BACKFILL** B-7), and a failure record that outlives its entry (**ALIGN** A-5).
+3. `9bd231d85`: FR-017's "silently drops" is now half true. The store's caller is still not told, but `flush_to_ssd` is (**BACKFILL** B-8). `contracts/errors.md:36` lacks `flush_to_ssd` (**BACKFILL** B-9).
+
+## Detailed Findings
+
+### Spec: 001-dispatcher-cache-interface — Dispatcher Cache Interface (Memory-Tier Architecture)
+
+#### Aligned ✓
+
+*Verified against the text applied on 2026-10-20 (B-1…B-6), clause by clause:*
+- **FR-018** (`spec.md:299`). This item was ◐ P-04 last time. Its main case is now specified, and P-04 stays a partial finding on it (see below).
+  - The pin is recorded before enqueue: `src/lib.rs:3701-3712`, `WriteThroughPins::pin` `src/background.rs:293-298`.
+  - The pin is taken over on `ActiveReferences`: `src/lib.rs:3206-3215` → `remove_entry` `src/background.rs:340-361`. The pin is given back if a reader holds the key: `:348-351`.
+  - A queued job is dropped: `start` → `Stale` `:306-310`.
+  - A running job frees the slot and extent: `src/lib.rs:1433-1439`, and `remove` skips its own `mt.remove` (`:3219-3221`).
+  - Normal settle: `:1445-1458`.
+- **Edge case "remove"** (`spec.md:235`): the order is entry → slot → extent (`src/lib.rs:3206-3229`). `KeyNotFound` for a reader's or client's pin (`:3213`) and for a write lock that outlasts the wait (`:3201`).
+- **FR-038** (`spec.md:319`) → `clear_memory_tier` `src/lib.rs:3940-4004`:
+  - window `oldest_keys(64 + pinned)` `:3967`;
+  - `try_evict_to_block` first `:3974`, `ActiveReferences` kept `:3976`;
+  - `dm.remove` before `mt.remove`, kept on `ActiveReferences` `:3980-3983`;
+  - exact count `:3985-3988`; 50 µs pause `:4000`; 5 s `Timeout` `:3993-3998`.
+  - *(The reserved-slot case is still P-05.)*
+- **Assumption, write-through read reference** (`spec.md:418`): `downgrade_reference` `src/lib.rs:3694` + ledger `:3703`. `schedule_write_through` takes no pin (`:4044-4066`). The gap is stated in the spec and tracked as A-1.
+- **`contracts/errors.md`** `KeyNotFound` and `Timeout` rows (`:33`, `:37`) → `remove` `src/lib.rs:3201`, `:3213-3214`; `pin` `:3742-3744`; `clear_memory_tier` `:3995`. **`contracts/idispatcher.md:171`** (the `remove` postcondition) → `:3206-3232`.
+
+*Resolved in code by `efd502331`:*
+- **FR-058 `store_already_resident`** (`spec.md:356`, "reserves refused because the key was already cached rather than for want of space") and **interfaces FR-018a** (approved text):
+  - `reserve_memory` counts the refusal on both exits (budget 0: `src/lib.rs:3505-3511`; retry loop: `:3535-3543`).
+  - `evict_and_insert`, which the load paths share, no longer counts it (`:1214-1221`).
+  - Every caller of `reserve_memory` is on the store path: `populate` `:3255`, `batch_populate` `:3368`, shm-queue `op_reserve` `lib/shmq-dispatcher/src/translate.rs:531`.
+  - Tests: `a_reserve_refused_as_already_cached_is_counted_apart_from_one_refused_for_space` (`src/lib.rs:6696`), and `lookup_that_loses_promotion_race_is_not_counted_as_store_already_resident` (`src/repair_test_store_already_resident.rs:474`).
+
+*Re-anchored and spot-checked (verdicts unchanged from the 2026-10-20 sweep):*
+- FR-001 → `components/interfaces/src/idispatcher.rs` trait; `create_eviction_channel` / `eviction_dropped_count` inherent `src/lib.rs:563-578`. FR-002 → `idispatcher.rs` `DispatcherError`.
+- FR-003 → `populate` `src/lib.rs:3239-3320`: drop-on-full `:3257-3271`; release on GPU-unbound / copy / sync failure `:3281-3307`; register `:3311`.
+- FR-004 → `write_through` `src/lib.rs:1463-1521` (`mt.peek` `:1471`, `publish` `:1519`); settle `:1445-1458`. FR-005 → the owned settle never frees the slot (`:1428-1431`).
+- FR-006 → `serve_memory_tier_to_gpu` `src/lib.rs:1265-1339`. FR-007 / FR-008 → `lookup_async` `:3055-3160`, `check` `:3162-3181`.
+- FR-009 (as worded) → `remove` `src/lib.rs:3183-3232`, extent `:3223-3229` via `drive_index` *(SC-003 consequence: D-17)*.
+- FR-010, FR-011 (receptacles, NUMA auto-pin `compute_numa_cpu_assignments` `:605`, remote `NotFound`→`KeyNotFound`).
+- FR-012 → `src/lib.rs:1948-1956`.
+- FR-014 / SC-006 → `shutdown` `src/lib.rs:2169`: writer drained `:2180` (`src/background.rs:109-145`), checkpoint `:2183-2190`.
+- FR-015 / FR-016.
+- FR-019, FR-023 → `touch` `src/lib.rs:3764-3780`.
+- FR-024 → `evict_one_clean` `src/lib.rs:1056`, `evict_for_space` `:1129`, fragmentation relief `:1203-1212`.
+- FR-025 → `recover_extent` `src/lib.rs:1979`.
+- FR-029 – FR-031; FR-032 + SSD-evictor edge cases → `dm.remove` first `src/background.rs:498-504`, `mt.remove` `:507`, `Removed` `:509-514`, extent `:516-524`.
+- FR-033 – FR-035.
+- FR-036 → `src/lib.rs:3124-3150` (pin held through `promote_and_serve` `:3129`; `AlreadyExists` → `serve_concurrently_promoted` `:3142`).
+- FR-037, FR-039 (1)–(6) → retry `src/lib.rs:2434-2443`; `warm_pins` `:2408`; deferred warm sync `:2803-2808`, then `drop(warm_pins)` `:2812`; remote after; scatter-gather `:2722`; input order `:3008-3036`.
+- FR-040 → `src/lib.rs:3782-3938`. FR-041. FR-042 (as amended; wiring gap P-02). FR-043, FR-045.
+- FR-046 – FR-049 → MT evictor `try_evict_to_block` `src/background.rs:705`, then `mt.remove` `:709`. FR-050 → `Demoted` `:713-718`.
+- FR-051 → `serve_concurrently_promoted` `src/lib.rs:1352-1391`; batch recovery `:3001`.
+- FR-052 – FR-055, FR-057, FR-059 → `batch_populate` `src/lib.rs:3324-3429`. FR-060 → `:3498-3546`. FR-061.
+- User Stories 1–5, 7–12 acceptance scenarios as listed in the 2026-10-20 sweep: US-1 AS3 `AlreadyExists` from `populate` → `:3272`; US-4 AS1 `src/repair_test_remove_no_wait.rs:465`.
+- Edge cases: populate-full; evict exhaustion; write-ref downgrade (⧗); concurrent lookups; SSD-full write-through; unpersisted skip; SSD-evictor all-pinned; SSD-evictor order; partition guard.
+- SC-001, SC-002, SC-004 – SC-007, SC-009 – SC-011, SC-013, SC-015, SC-016, SC-017.
+
+#### Drifted ⚠️
+
+**D-19 · FR-056 `flush_to_ssd` bullet (approved 2026-10-21 text, `spec.md:346`): the count leaves out pinned entries, and the signature is written `-> usize`.** Severity: minor.
+- Spec: "`flush_to_ssd() -> usize` … returns the number of memory-tier entries that have an SSD copy, or `IoError` if a write-through to SSD failed for an entry that is still in the memory tier."
+- Code (`src/lib.rs:4037-4041`): `mt.oldest_keys(usize::MAX).filter(|&key| dm.is_evictable(key)).count()`.
+  - `is_evictable` is true only for `read_ref == 0 && write_ref == 0 && ssd_offset: Some` (`components/dispatch-map/src/lib.rs:530-546`).
+  - So a resident, persisted entry that a reader, a client `pin`, or a warm `batch_lookup` H2D holds at that moment has an SSD copy but is **not counted**.
+  - The method returns `Result<usize, DispatcherError>` (`src/lib.rs:4006`; trait `idispatcher.rs:838`).
+- The interface doc ("Returns the number of entries that now have a valid SSD offset", `idispatcher.rs:830`) has the same imprecision. Its only consumer, shm-queue `FLUSH_TO_SSD` (`lib/shmq-dispatcher/src/translate.rs:903-910`), passes the number through for display (`apps/remote-lookup-bench/src/main.rs:1051-1070`).
+- Why not ALIGN by default: no `IDispatchMap` method exposes `ssd_offset` without the pin check (`LookupResult::MemoryTier` carries no offset). That is the interface addition A-2 needs anyway.
+- Direction: **BACKFILL** (B-7). The approved sentence is kept as it is; one clarifying sentence and the signature are added. *Alternative:* ALIGN together with A-2's `IDispatchMap::ssd_offset(key)`.
+
+**D-20 · FR-017 (`spec.md:298`): "the background writer silently drops the job" is stale since `9bd231d85`.** Severity: minor.
+- Code:
+  - The writer records every settled write-through, per key: `record_write(key, written.is_some())`, from `run_write_job` (`src/lib.rs:1419-1423`, `:1429`; `src/background.rs:363-372`).
+  - While such a key is still resident, `flush_to_ssd` returns `IoError("flush_to_ssd: {failed} memory-tier entries have no SSD copy …")` (`src/lib.rs:4026-4034`).
+  - The store's caller is still not told (FR-003 returns `Ok` before the job runs), and the job is not retried.
+- FR-017 does not say this. The edge cases at `spec.md:234` and `:237` and the Assumption at `:417` stay true as worded: they describe the entry, not reporting. FR-056 now says it from the other side, so FR-017 should point to it.
+- U-08: the failed-write record (`src/background.rs:257-263`, `:363-380`, ~25 lines) appears in no spec. It is folded into **B-8**.
+- Direction: **BACKFILL** (B-8).
+
+**D-21 · `contracts/errors.md:36` (`IoError` row) does not list `flush_to_ssd`.** Severity: minor.
+- Code: `flush_to_ssd` returns `DispatcherError::IoError` when a resident key's latest write-through failed (`src/lib.rs:4029-4034`). The interface doc lists it (`idispatcher.rs:832-837`, approved).
+- The row's "Raised by" column is `lookup`, `batch_lookup`, `initialize`, `commit_store`.
+- Direction: **BACKFILL** (B-9), parallel to the 2026-10-20 B-5 fix of the `Timeout` row.
+
+**D-16 · FR-013 + Assumption: a `schedule_write_through` job takes no pin, yet settles as if it held one.** Severity: major. Unchanged, task **A-1**. Re-anchored:
+- enqueue without a pin: `src/lib.rs:4057-4064`;
+- `JobStart::Untracked`: `src/background.rs:303-305`, `:311-313`;
+- settle with `convert_to_storage` / `release_read`: `src/lib.rs:1421` → `:1452`, `:1455`;
+- caller: `components/remote-lookup/src/actor.rs:604-630`.
+- *New on this branch:* the job's outcome is now also recorded (`:1422`). If the slot was freed and re-reserved under it, the job may write the new incarnation's bytes and record `landed = true` even though `convert_to_storage` failed (see P-06(b)).
+
+**D-17 · SC-003 vs FR-009: `remove` of a persisted resident entry leaks its extent.** Severity: moderate. Unchanged, task **A-2**: `src/lib.rs:3192-3202`, `:3223-3229`; recovery `:1979`. `flush_to_ssd_counts_entries_with_an_ssd_offset` (`src/repair_test_flush_failed_write.rs:638`) now proves that both entries carry `ssd_offset` after a flush. A `remove` of either one would leak its extent.
+
+**D-07 · FR-028 / US-9 AS3: the no-drives `promote_and_serve` never re-registers.** Unchanged, task **A-04**, `src/lib.rs:815-821`.
+
+#### Partially implemented ◐
+
+**P-06 · FR-056 `flush_to_ssd`: the failure record is not tied to the entry it describes.** Severity: minor. Confidence: MEDIUM for (a), which follows directly from the code; LOW for (b), which is reachable only through the A-1/A-4 windows. Same item as D-19, not counted again.
+- (a) **Stale record across incarnations.**
+  - `failed_writes` keeps a key while `mt.contains(key)` is true, and drops it only when the key is gone (`src/background.rs:376-379`). `remove` (`src/lib.rs:3183-3232`) and `clear_memory_tier` (`:3940-4004`) do not touch the record.
+  - Scenario: key K's write-through fails. `remove(K)`, then a new store of K reserves a fresh slot (`reserve_memory` → `mt.insert`, `:1194`), while its completion is still pending. The shm-queue reserve / CopyToStore / complete steps are separate requests.
+  - A `flush_to_ssd` in that interval returns `IoError` for a write of the *previous* entry. The resident slot has had no write-through yet, and the spec says "failed for an entry that is still in the memory tier".
+  - It is cleared only once the new job lands (`record_write(K, true)`).
+- (b) **"Landed" means "written", not "recorded".**
+  - `process_write_job` and the owned branch record `written.is_some()` (`src/lib.rs:1401-1403`, `:1429`). The result of `convert_to_storage` is discarded (`:1452`), although `record_write`'s doc says "landed if its data reached the block device **and the SSD offset was recorded**" (`src/background.rs:363-364`).
+  - An Untracked job (D-16) whose entry was removed meanwhile gets `KeyNotFound` from `convert_to_storage`, yet it counts as landed, and its published extent leaks.
+  - If the key has been re-created, the old job's `convert_to_storage` stamps its offset onto the new entry, whose bytes it may never have written.
+- Direction: **ALIGN** (A-5).
+
+**P-04 · FR-018: two residual windows in the remove/write-through handshake.** Unchanged, task **A-4**: `src/background.rs:347-351`; `src/lib.rs:3206-3215`; re-store `:1214-1221` → `:3535-3543`. *Note:* window (b) now hits the store counter directly: the transient `AlreadyExists` is counted in `store_already_resident` by `reserve_memory` (`:3541`).
+
+**P-05 · FR-056 vs FR-038: `clear_memory_tier` frees reserved-but-not-completed slots.** Unchanged, task **A-3** (recommendation (a)): `src/lib.rs:3974-3988`; entry created only at `:3635`.
+
+**P-01 · FR-003 / FR-056: phase-3 release.** Unchanged, task **A-05**: the integrity-check failure paths call `mt.remove` and leave the dispatch-map entry (`src/lib.rs:3674-3691`); a `downgrade_reference` failure (`:3694-3695`).
+
+**P-02 · FR-042: the SSD evictor holds a sender snapshot.** Unchanged, task **A-06**: `src/lib.rs:2111` (the MT evictor shares the live `Arc`, `:2153`).
+
+**P-03 · FR-051 / FR-036: the `batch_lookup` cold path drops its pin before promotion.** Unchanged, task **A-02**: `src/lib.rs:2488-2489`.
+
+#### Not Implemented ✗
+None.
+
+#### Not verifiable here ⧗
+- SC-012 (FIFO NVMe correctness, needs hardware).
+- SC-014 (≥5× batch-cold throughput, needs a benchmark).
+- User Story 11 AS4 under real NVMe errors.
+- The edge case "write-ref downgrade lets a concurrent lookup proceed" (`src/lib.rs:3694`).
+
+That is 4 items here; with the 5 in spec 002, 9 in total.
+
+### Spec: 002-served-by-tier-attribution — Serving-Tier Attribution (`served_by`)
+
+This branch does not touch it: no hunk is on an attribution path, and `store_already_resident` / `flush_to_ssd` are not mentioned in it. Every verdict was re-anchored and spot-checked.
+
+#### Aligned ✓
+- FR-001 → `idispatcher.rs` `ServedBy`/`LookupOutcome`.
+- FR-002 / SC-001 → `src/lib.rs:3008-3036` (`debug_assert` `:3026`).
+- FR-003 → `lib/shmq-dispatcher/src/translate.rs`.
+- FR-004 – FR-008, FR-010 – FR-013, FR-017, FR-019 – FR-026, FR-033, FR-034, FR-036, SC-004.
+- FR-009 / FR-010 recovery → `:3001`.
+- US1 AS1, AS2, AS4, AS5; US4 AS1–AS3; edge cases as listed in the 2026-10-20 sweep.
+
+#### Drifted ⚠️
+- **D-13 · US1 AS3 / FR-009:** a failed warm batched sync is only logged (`src/lib.rs:2803-2808`). Major. Task **A-01**, unchanged.
+- **D-15 · FR-027 / SC-009:** a grep for `assert…ServedBy::{Ssd,Remote,SizeMismatch,Error}` in `src/` still finds nothing. Task **A-08**, unchanged.
+
+#### Not verifiable here ⧗
+SC-002, SC-003, SC-006, SC-007, SC-008.
+
+#### Owned by other components (listed, not judged)
+- dispatcher-p2p: FR-014, FR-015, FR-035.
+- remote-lookup: FR-016 (replacement), FR-018.
+- Documentation process: FR-030 – FR-032.
+- SC-005; US3, US5.
+
+### Unspecced Code 🆕
+
+| # | Feature | Location | Lines | Suggested Spec |
+|---|---------|----------|-------|----------------|
+| U-08 | Per-key failed-write record (`record_write`, `failed_writes`), behind `flush_to_ssd`'s `IoError` | `src/background.rs:257-263`, `:363-380`; `src/lib.rs:1419-1423`, `:1429`, `:4026-4034` | ~35 | 001 FR-017 + FR-056 (folded into **B-8**; behaviour in (a) above is ALIGN A-5, not backfilled) |
+| U-01 | `integrity-check` verify-before-serve | `src/lib.rs:1236-1257`, `:3668-3692` and the warm/remote/single-key verify sites | ~70 | Open item **N-01** in `align-tasks.md`. Not re-proposed. |
+
+## Inter-Spec Conflicts
+
+1. **001 SC-003 vs 001 FR-009:** the extent of a persisted resident entry (D-17). Still open, A-2.
+2. **001 FR-056 vs 001 FR-038:** reserved slots (P-05). Still open, A-3.
+3. **001 Assumption / interfaces FR-031a vs code:** the `schedule_write_through` job's pin (D-16). The spec now states the gap; the code is still A-1.
+4. **New: 001 FR-017 ("silently drops") vs 001 FR-056 (`flush_to_ssd` reports the failure).** They do not contradict each other, but FR-017 reads as if nothing records the failure (D-20). B-8 resolves it.
+5. **New, cross-component (not this component's specs):** the interfaces `IDispatcher::flush_to_ssd` contract (`components/interfaces/src/idispatcher.rs:824-838`, approved) vs the `dispatcher-p2p` implementation (`components/dispatcher-p2p/src/lib.rs:2889-2902`). The p2p version still returns the number of jobs in the queue before the flush, and it never returns `IoError`. The shm-queue reply is still called `jobs_flushed` (`lib/shmq-dispatcher/src/wire.rs:46-47`, `src/translate.rs:901`), which no longer describes the number. Run the `dispatcher-p2p` sync. `lib/shmq-dispatcher` has no `specs/`.
+6. **Carried over:** the interfaces `clear_memory_tier` doc comment (`idispatcher.rs:806-810`, "Entries still being written are removed entirely") still predates FR-038 as amended. It is a code-side companion edit, outside `specs/**`.
+- **Resolved since the last sweep:** `contracts/errors.md` `Timeout` row; FR-038 vs FR-024/FR-049 text; FR-058 vs the load-path counting (A-07).
+
+## Recommendations
+
+1. **BACKFILL, in this branch's PR**, so the next stamp certifies `9bd231d85`: B-7 (FR-056 `flush_to_ssd` count and signature), B-8 (FR-017), B-9 (`contracts/errors.md` `IoError`). Exact text is in `proposals.md`. Add a spec 001 `Last Synced 2026-10-21` header in the same apply. The working-tree FR-056 edit carries only an inline note.
+2. **Close A-07** in `align-tasks.md`. Code `efd502331` took the ALIGN option, and its acceptance is covered by `src/repair_test_store_already_resident.rs:474` and `src/lib.rs:6696`.
+3. **ALIGN, minor:** A-5. Tie each failure record to the slot it was written from, and record "landed" only when `convert_to_storage` succeeds. Do this together with A-1, because (b) is reachable only through the A-1/A-4 windows.
+4. Still open, priority unchanged: A-1, A-01, A-02 (major); A-2, A-3, A-04, A-05, A-06, A-08 (moderate); A-4 (minor, LOW confidence); N-01 (decision).
+5. Cross-component: align `dispatcher-p2p::flush_to_ssd` with the edited interface contract, and rename or redocument the shm-queue `jobs_flushed` reply field.
+6. Re-run `scripts/spec-sync-hash.sh components/dispatcher` only after the spec edits are committed. The frontmatter stamp (`spec_sync_git_commit: cccfb328e`) predates `9bd231d85` and `efd502331`, and the approved working-tree edits are not in it.
+
+---
+
+# Earlier sweeps (retained for history)
+
+## Sweep 2026-10-20 — branch `fix/dispatcher-remove-clear-mt` (HEAD `cccfb328e`; line numbers refer to that commit; its BACKFILL items B-1…B-6 were applied in `ec4277c0e`, and its ALIGN items are A-1…A-4 in `align-tasks.md`)
 
 Generated: 2026-10-14 (sync date; analysis run 2026-10-20)
 Project: `components/dispatcher` (crate `dispatcher`)
@@ -363,8 +616,6 @@ FR-014, FR-015, FR-035 (dispatcher-p2p); FR-016-replacement, FR-018 (remote-look
 7. Re-run `scripts/spec-sync-hash.sh components/dispatcher` only after the spec edits land. The frontmatter's `clean` stamp (`spec_sync_git_commit: 4f8b5554b`) predates this branch's `src/**` changes.
 
 ---
-
-# Earlier sweeps (retained for history)
 
 ## Full sweep 2026-10-14 — branch `fix/bundle-dispatcher-ems` (HEAD `4f8b5554b`; line numbers refer to that commit; its BACKFILL items were applied in `a9306c3f6`, and its ALIGN items are in `align-tasks.md`)
 

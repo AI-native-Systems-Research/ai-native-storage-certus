@@ -132,7 +132,9 @@ changed.** Line numbers refer to HEAD `4f8b5554b`.
 
 ## Open items (not approved — awaiting a decision)
 
-### OPEN A-07 — 001/FR-058 `store_already_resident` counts load-path race losers (minor)
+### ✅ RESOLVED A-07 — 001/FR-058 `store_already_resident` counts load-path race losers (minor)
+
+> **Resolved 2026-10-21** in code by `efd502331` (repair of `7db1a25a1`, branch `fix/dispatcher-remove-clear-mt`): the ALIGN option was taken. `store_already_resident` is now counted only in `reserve_memory`, the store path; a load that loses the insert race is a hit and is not counted. FR-058 ("reserves refused") already said this, and interfaces FR-018a was edited to match (approved). Tests: `src/repair_test_store_already_resident.rs:474`, `src/lib.rs:6696`. No spec edit was needed.
 > Approval note: *"waits for Cornel's decision (ALIGN as a task, or BACKFILL); record in align-tasks.md as an open decision"*
 
 - **Option ALIGN**: move `record_store_already_resident()` out of `evict_and_insert` (`src/lib.rs:1213-1222`) into `reserve_memory`'s `Err(AlreadyExists)` handling.
@@ -223,4 +225,45 @@ the task. Line numbers refer to HEAD `cccfb328e`, relative to `components/dispat
 ## Open items from this run
 
 None. Every proposal of this run was approved, and none is unapproved with an `approval_note`. Still open from the `fix/bundle-dispatcher-ems` run: A-01, A-02, A-04, A-05, A-06, A-08 (tasks), and A-07 and N-01 (decisions).
+
+---
+
+# Apply 2026-10-21 — branch `fix/dispatcher-remove-clear-mt` (approved by Cornel, 2026-10-21)
+
+Source: `.specify/sync/proposals.json` / `proposals.md` (analysis run 2026-10-21, HEAD
+`efd502331`). B-7, B-8 and B-9 were approved and applied to `specs/**` (see
+`apply-report.md`). This run's only ALIGN proposal, A-5, is **not approved**: it carries a
+TRACK note and is recorded below as an open item. **No code was changed.** A-07 above is
+closed (resolved in code by `efd502331`). Line numbers refer to HEAD `efd502331`, relative
+to `components/dispatcher/`.
+
+## Open items from this run (not approved — tracked)
+
+### OPEN A-5 — Align 001-dispatcher-cache-interface/FR-056 + FR-017 (as amended by B-8): tie the failed-write record to the entry it describes (minor; MEDIUM confidence for (a), LOW for (b))
+
+> Approval note: *"TRACK (Cornel 2026-10-21): code change for a later repair with a test first; not in this PR."*
+
+**Spec Requirement**: 001 FR-056 (`flush_to_ssd` returns `IoError` "if a write-through to SSD failed for an entry that is still in the memory tier", `spec.md:348`) and FR-017 as amended by B-8 (the record "is cleared when a later write-through of the key lands, or when the key is no longer in the memory tier", `spec.md:300`).
+**Current Code**:
+- (a) **The record outlives its entry.** The `failed` set of `WriteThroughPins` is keyed by `CacheKey` only and is forgotten only when `mt.contains(key)` is false at the moment `flush_to_ssd` runs (`src/background.rs:376-379`). `remove` (`src/lib.rs:3183-3232`) and `clear_memory_tier` (`:3940-4004`) leave it alone. So: K's write fails → `remove(K)` → a new store of K is reserved (`reserve_memory`, `:3431`) but not yet completed → `flush_to_ssd` returns `IoError` for an entry that no write-through has touched.
+- (b) **"Landed" does not check that the offset was recorded.** The outcome is recorded as `written.is_some()` (`src/lib.rs:1401-1403`, `:1429`), while the result of `convert_to_storage` is discarded (`:1452`), although the `record_write` doc says landed means "the SSD offset was recorded" (`src/background.rs:363-364`). Reachable only through the A-1 / A-4 windows.
+**Required Change**:
+1. Clear the key's failure record in `remove`, after the dispatch-map entry is gone (`src/lib.rs:3206-3215`), and in `clear_memory_tier` where an entry is removed without an SSD copy (`:3980-3983`), e.g. with a new `WriteThroughPins::forget_failure(key)`.
+2. Make `settle_write_through` return `dm.convert_to_storage(..).is_ok()` and pass that to `record_write` instead of `written.is_some()`; the same in `process_write_job`.
+3. Leave the success count to B-7 / A-2.
+**Files to Modify**: `src/lib.rs` (`remove`, `clear_memory_tier`, `settle_write_through`, `process_write_job`, `run_write_job`), `src/background.rs` (`WriteThroughPins`), `src/repair_test_flush_failed_write.rs` (new cases)
+**Estimated Effort**: small (do it together with A-1)
+
+### Acceptance Criteria
+- [ ] Write fails, `remove`, re-reserve, `flush_to_ssd`: the result is `Ok`. The test is written first and fails on HEAD `efd502331`.
+- [ ] A job whose `convert_to_storage` returns `KeyNotFound` is recorded as not landed.
+- [ ] `flush_to_ssd_returns_err_when_a_write_through_failed` and `flush_to_ssd_counts_entries_with_an_ssd_offset` still pass.
+
+## Still open (carried over, re-verified at HEAD `efd502331` by the 2026-10-21 analysis)
+
+A-1, A-2, A-3 (decision recorded), A-4 (2026-10-14 apply); A-01, A-02, A-04, A-05, A-06, A-08 (tasks) and N-01 (decision) from earlier runs.
+
+## Cross-component (recorded elsewhere)
+
+- `dispatcher-p2p` still has the pre-repair `remove` / `clear_memory_tier` / `flush_to_ssd` behaviour. That task is interfaces proposal 7 (TRACK) and is recorded in `components/interfaces/.specify/sync/align-tasks.md`, for the component `dispatcher-p2p`.
 
