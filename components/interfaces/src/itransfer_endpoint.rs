@@ -241,10 +241,6 @@ impl LandingRegionHandle {
 ///
 /// let err = TransferEndpointError::InvalidEndpoint("no port".into());
 /// assert!(err.to_string().contains("invalid endpoint"));
-///
-/// // A request too large for one message reports the limit it must chunk to.
-/// let err = TransferEndpointError::RequestTooLarge { max_entries: 340 };
-/// assert!(err.to_string().contains("340"));
 /// ```
 #[derive(Debug, Clone)]
 pub enum TransferEndpointError {
@@ -253,15 +249,6 @@ pub enum TransferEndpointError {
     /// The peer address could not be parsed as a normalized `"host:port"`.
     /// A missing port is an error, never a default.
     InvalidEndpoint(String),
-    /// The request exceeds what one message can carry. The caller may chunk, or
-    /// let the endpoint chunk internally. The limit is derived from the
-    /// receiving peer's buffer, not assumed equal to the local one.
-    RequestTooLarge {
-        /// Entries that fit in one request to this peer.
-        max_entries: usize,
-    },
-    /// Message credits are exhausted and the caller asked not to block.
-    WouldBlock,
     /// The deadline expired with the request neither fulfilled nor refused.
     /// The queue pair has been forced to ERROR and this connection's other
     /// contexts were aborted with it. Carries key range, peer, chunk index and
@@ -286,10 +273,6 @@ impl fmt::Display for TransferEndpointError {
         match self {
             Self::NotInitialized(msg) => write!(f, "not initialized: {msg}"),
             Self::InvalidEndpoint(msg) => write!(f, "invalid endpoint: {msg}"),
-            Self::RequestTooLarge { max_entries } => {
-                write!(f, "request too large: at most {max_entries} entries")
-            }
-            Self::WouldBlock => write!(f, "message credits exhausted and told not to block"),
             Self::Deadline(msg) => write!(f, "deadline expired: {msg}"),
             Self::Protocol(msg) => write!(f, "protocol error from peer: {msg}"),
             Self::IncompatiblePeer(msg) => write!(f, "incompatible peer: {msg}"),
@@ -325,8 +308,9 @@ pub type FetchResult = Result<Vec<EntryOutcome>, TransferEndpointError>;
 ///   came in time), [`TransferEndpointError::Protocol`] (the peer refused the
 ///   request), [`TransferEndpointError::Transport`] (the connection could not
 ///   be made, or was torn down — including as a sibling of another request's
-///   deadline), or [`TransferEndpointError::RequestTooLarge`]. **Every** slot
-///   of the request must be treated as not landed. The callback fires only
+///   deadline). **Every** slot of the request must be treated as not landed,
+///   even when the endpoint split it and some chunks were answered: a fetch
+///   with a hole is reported as failing, so a prefix is never half-filled. The callback fires only
 ///   after this end's queue pair to the peer has been forced to ERROR and
 ///   drained, so no write can still land: the slots are safe to reclaim.
 ///
@@ -564,14 +548,17 @@ component_macros::define_interface! {
         /// DESTINATION SIDE. Ask one named peer for a key run, to be written
         /// into landing slots the caller has already reserved.
         ///
-        /// Returns as soon as the request is sent; `on_complete` fires later
-        /// with one [`EntryOutcome`] per requested key, in request order. The
-        /// endpoint may split the request internally — against the *peer's*
-        /// advertised limit, which is not assumed equal to the local one — and
+        /// Returns as soon as the request is queued; `on_complete` fires later
+        /// with one [`EntryOutcome`] per requested key, in request order. Any
+        /// length is accepted: the endpoint splits the request into chunks of
+        /// the *peer's* advertised `max_entries` — not assumed equal to the
+        /// local one — each its own message, sent in key order, and
         /// `on_complete` still fires exactly once, after the last chunk.
         ///
-        /// Blocks if message credits are exhausted. No request is sent before
-        /// the connection's capability exchange has completed.
+        /// Never blocks the caller and never fails for want of a message
+        /// credit: chunks wait inside the endpoint until a credit is free. No
+        /// request is sent before the connection's capability exchange has
+        /// completed.
         ///
         /// A miss does **not** trigger any further peer traffic: this endpoint
         /// never contacts an instance the caller did not name.
@@ -590,9 +577,8 @@ component_macros::define_interface! {
         /// [`TransferEndpointError::InvalidEndpoint`] if `peer` is not a
         /// normalized `"host:port"`; [`TransferEndpointError::IncompatiblePeer`]
         /// if its version range does not intersect the local one;
-        /// [`TransferEndpointError::RequestTooLarge`] if the caller asked not to
-        /// chunk; [`TransferEndpointError::NotInitialized`] if no landing region
-        /// is registered.
+        /// [`TransferEndpointError::NotInitialized`] if no landing region is
+        /// registered.
         fn fetch(
             &self,
             peer: &str,
