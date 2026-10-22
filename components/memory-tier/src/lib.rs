@@ -110,8 +110,9 @@ struct MemoryTierState {
 }
 
 // SAFETY: pool_ptr points to mmap'd or SPDK-allocated memory accessible from any thread.
-// RwLock<Pool> serializes access. Immutable fields (pool_ptr, pool_size, spdk_allocated)
-// are only written during initialize() which is protected by the outer RwLock on the component.
+// RwLock<Pool> and Mutex<Bounce> serialize access. Immutable fields (pool_ptr, pool_size,
+// cache_size, spdk_allocated) are only written during initialize(), which is protected by the
+// outer RwLock on the component.
 unsafe impl Send for MemoryTierState {}
 unsafe impl Sync for MemoryTierState {}
 
@@ -958,7 +959,8 @@ mod tests {
         ));
     }
 
-    /// FR-012: a full cache cannot reach the reserve, and allocating never evicts.
+    /// FR-031 (and certus-transfer-endpoint FR-012): a full cache cannot reach
+    /// the reserve, and allocating never evicts.
     #[test]
     fn the_cache_and_the_reserve_never_share_bytes() {
         let c = setup();
@@ -1052,6 +1054,15 @@ mod tests {
             uninit.bounce_alloc(4096),
             Err(BounceError::NotInitialized(_))
         ));
+    }
+
+    #[test]
+    #[should_panic(expected = "not a live buffer")]
+    fn freeing_a_buffer_twice_is_loud() {
+        let mt = query_interface!(setup(), IMemoryTier).unwrap();
+        let l = mt.bounce_alloc(4096).unwrap();
+        mt.bounce_free(l);
+        mt.bounce_free(l);
     }
 
     #[test]
