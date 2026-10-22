@@ -128,85 +128,66 @@ impl EntryOutcome {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TransferContextId(pub u64);
 
-/// Handle for a registered region that peers may RDMA-write into.
+/// Where a fetched entry lands: `length` bytes at `addr`, in this endpoint's
+/// own memory-tier pool.
 ///
-/// Registration happens once, not per request, and lives in the endpoint's
-/// long-lived protection domain, so the handle and the remote keys derived from
-/// it stay valid across a reconnect. That differs from the predecessor crates,
-/// which re-register on every connect.
-///
-/// The handle carries what a caller needs to name a slot inside the region to a
-/// peer: its address, length and `rkey`. [`region_at`](Self::region_at) builds
-/// the [`RemoteRegion`] for one slot, bounds-checked.
+/// A destination lands fetched entries in memory-tier buffers it has
+/// allocated and not yet published. The pool is registered for RDMA once, at
+/// `initialize`, so a slot needs no registration of its own: the endpoint
+/// checks it lies inside the pool and names the pool's remote key to the peer.
 ///
 /// # Examples
 ///
 /// ```
-/// use interfaces::LandingRegionHandle;
+/// use interfaces::LocalSlot;
 ///
-/// // Implementations mint handles; callers read them and pass them back.
-/// let h = LandingRegionHandle::new(1, 0x1000, 4096, 0x42);
-/// assert_eq!((h.id(), h.addr(), h.len(), h.rkey()), (1, 0x1000, 4096, 0x42));
-///
-/// let slot = h.region_at(1024, 512).unwrap();
-/// assert_eq!((slot.addr, slot.length, slot.rkey), (0x1400, 512, 0x42));
-/// // A slot past the end of the region is refused, not truncated.
-/// assert!(h.region_at(4000, 512).is_none());
+/// // One slot per key, each a buffer the caller allocated in the memory tier.
+/// let slot = LocalSlot { addr: 0x7f00_0000_1000, length: 65536 };
+/// assert_eq!(slot.length, 65536);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct LandingRegionHandle {
-    id: u64,
-    addr: u64,
-    len: usize,
-    rkey: u32,
+pub struct LocalSlot {
+    /// Start of the slot, inside the memory-tier pool.
+    pub addr: u64,
+    /// Bytes the entry may fill. An entry of any other size is a miss.
+    pub length: u32,
 }
 
-impl LandingRegionHandle {
-    /// Mint a handle. Called by the implementing component, not by callers.
-    pub fn new(id: u64, addr: u64, len: usize, rkey: u32) -> Self {
-        LandingRegionHandle {
-            id,
-            addr,
-            len,
-            rkey,
-        }
-    }
+/// The memory-tier pool as peers write into it, from
+/// [`ITransferEndpoint::landing_region`]. A pool may exceed 4 GiB, so unlike a
+/// [`RemoteRegion`] its length is a `u64`; [`region_at`](Self::region_at)
+/// names one slot inside it.
+///
+/// # Examples
+///
+/// ```
+/// use interfaces::LandingRegion;
+///
+/// let pool = LandingRegion { addr: 0x1000, len: 4096, rkey: 0x42 };
+/// let slot = pool.region_at(1024, 512).unwrap();
+/// assert_eq!((slot.addr, slot.length, slot.rkey), (0x1400, 512, 0x42));
+/// // A slot past the end is refused, not truncated.
+/// assert!(pool.region_at(4000, 512).is_none());
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct LandingRegion {
+    /// Start of the pool.
+    pub addr: u64,
+    /// Length of the pool in bytes.
+    pub len: u64,
+    /// The remote key a peer writes into the pool with.
+    pub rkey: u32,
+}
 
-    /// The endpoint's identifier for this registration.
-    pub fn id(&self) -> u64 {
-        self.id
-    }
-
-    /// Start of the registered region.
-    pub fn addr(&self) -> u64 {
-        self.addr
-    }
-
-    /// Length of the registered region in bytes.
-    pub fn len(&self) -> usize {
-        self.len
-    }
-
-    /// Whether the region is empty. Never true for a handle an endpoint
-    /// returned: empty registrations are refused.
-    pub fn is_empty(&self) -> bool {
-        self.len == 0
-    }
-
-    /// The remote key a peer needs to write into the region.
-    pub fn rkey(&self) -> u32 {
-        self.rkey
-    }
-
-    /// The [`RemoteRegion`] for the `len` bytes at `offset` into the region,
-    /// or `None` if they do not lie wholly inside it.
-    pub fn region_at(&self, offset: usize, len: u32) -> Option<RemoteRegion> {
-        let end = offset.checked_add(len as usize)?;
-        if end > self.len {
+impl LandingRegion {
+    /// The [`RemoteRegion`] for the `len` bytes at `offset` into the pool, or
+    /// `None` if they do not lie wholly inside it.
+    pub fn region_at(&self, offset: u64, len: u32) -> Option<RemoteRegion> {
+        if offset.checked_add(len as u64)? > self.len {
             return None;
         }
         Some(RemoteRegion {
-            addr: self.addr.checked_add(offset as u64)?,
+            addr: self.addr.checked_add(offset)?,
             rkey: self.rkey,
             length: len,
         })
@@ -244,7 +225,7 @@ impl LandingRegionHandle {
 /// ```
 #[derive(Debug, Clone)]
 pub enum TransferEndpointError {
-    /// A required receptacle is unbound, or no landing region is registered.
+    /// A required receptacle is unbound, or the endpoint is not running.
     NotInitialized(String),
     /// The peer address could not be parsed as a normalized `"host:port"`.
     /// A missing port is an error, never a default.
@@ -524,40 +505,9 @@ impl EndpointConfig {
 
 component_macros::define_interface! {
     pub ITransferEndpoint {
-        /// Register a region that peers may RDMA-write into, returning the
-        /// handle that names slots inside it.
-        ///
-        /// Must be called before any peer request can be satisfied against the
-        /// region. Registration happens once — not per request — and is what
-        /// makes a remote key valid. It lasts for the endpoint's life: there is
-        /// no deregistration, because releasing a region safely means proving
-        /// no peer can still write into it.
-        ///
-        /// The region must be both SPDK-DMA-able and RDMA-registrable; in
-        /// practice it is allocated by `spdk_zmalloc` on the local NUMA node, as
-        /// the memory tier already is. Registration goes into the endpoint's
-        /// long-lived protection domain and outlives every queue pair, so the
-        /// returned handle and its remote keys survive a reconnect.
-        ///
-        /// **Precondition** (this method cannot be `unsafe`, so it is stated
-        /// here): `[base, base + len)` must stay allocated until
-        /// [`ITransferEndpointAdmin::shutdown`] returns, and must not be held as
-        /// a Rust reference while a peer may write into it.
-        ///
-        /// # Errors
-        ///
-        /// [`TransferEndpointError::NotInitialized`] if the endpoint is not
-        /// running; [`TransferEndpointError::Transport`] if the range is null,
-        /// empty, overlaps the memory-tier pool or another landing region, or
-        /// the registration itself fails.
-        fn register_landing_region(
-            &self,
-            base: *mut u8,
-            len: usize,
-        ) -> Result<LandingRegionHandle, TransferEndpointError>;
-
-        /// DESTINATION SIDE. Ask one named peer for a key run, to be written
-        /// into landing slots the caller has already reserved.
+        /// DESTINATION SIDE. Ask one named peer for a key run, each written
+        /// into a [`LocalSlot`] the caller has already allocated in its memory
+        /// tier and not yet published.
         ///
         /// Returns as soon as the request is queued; `on_complete` fires later
         /// with one [`EntryOutcome`] per requested key, in request order. Any
@@ -587,16 +537,31 @@ component_macros::define_interface! {
         ///
         /// [`TransferEndpointError::InvalidEndpoint`] if `peer` is not a
         /// normalized `"host:port"`; [`TransferEndpointError::NotInitialized`]
-        /// if no landing region is registered. A peer whose version range
+        /// if the endpoint is not running; [`TransferEndpointError::Transport`]
+        /// if a slot does not lie wholly inside the memory-tier pool, before
+        /// anything is sent. A peer whose version range
         /// does not intersect the local one is found only at the capability
         /// exchange, after this returns, so it reaches `on_complete` as
         /// [`TransferEndpointError::IncompatiblePeer`].
         fn fetch(
             &self,
             peer: &str,
-            items: &[(CacheKey, RemoteRegion)],
+            items: &[(CacheKey, LocalSlot)],
             on_complete: FetchCompletion,
         ) -> Result<TransferContextId, TransferEndpointError>;
+
+        /// The memory-tier pool as peers write into it: its address, length
+        /// and the remote key a pushing peer names. Registered once, at
+        /// `initialize`, for the endpoint's life, so it is the same across
+        /// reconnects. `fetch` needs none of it — the endpoint supplies the
+        /// key itself; this is what a legacy control plane hands a pusher,
+        /// which then names slots inside the region.
+        ///
+        /// # Errors
+        ///
+        /// [`TransferEndpointError::NotInitialized`] if the endpoint is not
+        /// running.
+        fn landing_region(&self) -> Result<LandingRegion, TransferEndpointError>;
 
         /// LEGACY SUBSET. Source-initiated push with no messaging, for callers
         /// whose control plane is elsewhere.
