@@ -644,6 +644,17 @@ a mismatched build would be *misparsed* rather than rejected — and with `addr`
 body, a misparse is an RDMA write to the wrong place. The field is two bytes of existing
 padding; the check is one comparison.
 
+**The low bit marks a reply.** A request's opcode is even, and its success reply is the same
+opcode with the low bit set: `OP_FETCH` 0x0002 / `OP_FETCH_REPLY` 0x0003, `OP_HELLO` 0xFFFC /
+`OP_HELLO_REPLY` 0xFFFD; `OP_ERROR`, the reply to any request, is 0xFFFF. Without it a
+receiver could not tell an opcode it does not know as a request — owed an `OP_ERROR` — from a
+reply, which must never be answered; it had to guess "request", and answering a reply from a
+newer peer opens the error-for-an-error loop D20 rules out. With it, an unknown even opcode is
+answered and the connection stays, and an unknown odd one is a reply that may or may not
+return a message credit: the credits are in doubt, so it is a teardown (FR-024). The
+numbering changed once, to this, before anything was published; it is frozen from now on, as
+the header prefix is (D20).
+
 ## D22 — One connection per instance pair, carrying both directions
 
 **Decision**: keep exactly one queue pair per instance pair, used in both directions, as

@@ -48,6 +48,12 @@ const _: () = assert!(MAX_ENTRIES == 340);
 
 /// A message kind. The high 16 bits of the opcode word are zero for every
 /// kind that exists; a word with any of them set is an unknown kind.
+///
+/// The low bit says which side of an exchange a message is: a request's
+/// opcode is even, and its success reply is the same opcode with the low bit
+/// set. So even an opcode this build does not know is known to be a request,
+/// to answer with `OP_ERROR`, or a reply, never to answer ([`is_reply_opcode`]).
+/// `OP_ERROR`, the reply to any request, is odd.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Kind {
     Fetch,
@@ -63,20 +69,20 @@ pub(crate) enum Kind {
 impl Kind {
     pub(crate) const fn opcode(self) -> u32 {
         match self {
-            Kind::Fetch => 0x0000_0001,
-            Kind::FetchReply => 0x0000_0002,
+            Kind::Fetch => 0x0000_0002,
+            Kind::FetchReply => 0x0000_0003,
+            Kind::Hello => 0x0000_FFFC,
             Kind::HelloReply => 0x0000_FFFD,
-            Kind::Hello => 0x0000_FFFE,
             Kind::Error => 0x0000_FFFF,
         }
     }
 
     fn from_opcode(op: u32) -> Option<Self> {
         Some(match op {
-            0x0000_0001 => Kind::Fetch,
-            0x0000_0002 => Kind::FetchReply,
+            0x0000_0002 => Kind::Fetch,
+            0x0000_0003 => Kind::FetchReply,
+            0x0000_FFFC => Kind::Hello,
             0x0000_FFFD => Kind::HelloReply,
-            0x0000_FFFE => Kind::Hello,
             0x0000_FFFF => Kind::Error,
             _ => return None,
         })
@@ -89,8 +95,13 @@ impl Kind {
 
     /// Whether this kind is a reply. Replies are never answered.
     pub(crate) fn is_reply(self) -> bool {
-        matches!(self, Kind::FetchReply | Kind::HelloReply | Kind::Error)
+        is_reply_opcode(self.opcode())
     }
+}
+
+/// Whether an opcode word, known or not, is a reply: its low bit is set.
+pub(crate) const fn is_reply_opcode(op: u32) -> bool {
+    op & 1 == 1
 }
 
 /// `OP_ERROR` reasons. The space is open: unknown values are kept.
@@ -480,10 +491,11 @@ pub(crate) fn decode_error(h: &Header, msg: &[u8]) -> Result<ErrorReply, Malform
 }
 
 /// The `OP_ERROR` answering an unparseable request. `None` when the bytes do
-/// not even hold a prefix, or are a reply: replies are never answered.
+/// not even hold a prefix, or are a reply — of a known kind or not, by the
+/// opcode's low bit: replies are never answered.
 pub(crate) fn refusal(msg: &[u8], why: Malformed) -> Option<ErrorReply> {
     let p = Prefix::parse(msg)?;
-    if p.kind().is_some_and(Kind::is_reply) {
+    if is_reply_opcode(p.opcode) {
         return None;
     }
     Some(ErrorReply {
@@ -513,7 +525,7 @@ mod tests {
             n_entries: 0x0A0B_0C0D,
         }
         .encode(&mut b);
-        assert_eq!(&b[0..4], &[1, 0, 0, 0], "opcode, little-endian");
+        assert_eq!(&b[0..4], &[2, 0, 0, 0], "opcode, little-endian");
         assert_eq!(&b[4..6], &[0, 0], "flags");
         assert_eq!(&b[6..8], &[0x02, 0x01], "version at offset 6");
         assert_eq!(&b[8..16], &[1, 2, 3, 4, 5, 6, 7, 8], "context_id");
@@ -522,7 +534,7 @@ mod tests {
         let p = Prefix::parse(&b).unwrap();
         assert_eq!(
             (p.opcode, p.version, p.context_id),
-            (1, 0x0102, 0x0807_0605_0403_0201)
+            (2, 0x0102, 0x0807_0605_0403_0201)
         );
     }
 
@@ -538,8 +550,38 @@ mod tests {
             assert_eq!(k.opcode() >> 16, 0, "{k:?}");
             assert_eq!(Kind::from_opcode(k.opcode()), Some(k));
         }
-        assert_eq!(Kind::from_opcode(0x0001_0001), None, "high half set");
-        assert_eq!(Kind::from_opcode(3), None);
+        assert_eq!(Kind::from_opcode(0x0001_0002), None, "high half set");
+        assert_eq!(Kind::from_opcode(4), None);
+        // The numbers are frozen: they are on the wire.
+        assert_eq!(
+            [
+                Kind::Fetch,
+                Kind::FetchReply,
+                Kind::Hello,
+                Kind::HelloReply,
+                Kind::Error
+            ]
+            .map(Kind::opcode),
+            [0x0002, 0x0003, 0xFFFC, 0xFFFD, 0xFFFF]
+        );
+    }
+
+    /// A reply is its request's opcode with the low bit set, and every reply,
+    /// `OP_ERROR` included, is odd.
+    #[test]
+    fn the_low_bit_marks_a_reply() {
+        assert_eq!(Kind::FetchReply.opcode(), Kind::Fetch.opcode() | 1);
+        assert_eq!(Kind::HelloReply.opcode(), Kind::Hello.opcode() | 1);
+        for k in [Kind::FetchReply, Kind::HelloReply, Kind::Error] {
+            assert!(k.is_reply(), "{k:?}");
+        }
+        for k in [Kind::Fetch, Kind::Hello] {
+            assert!(!k.is_reply(), "{k:?}");
+        }
+        assert!(
+            is_reply_opcode(0x41) && !is_reply_opcode(0x42),
+            "unknown too"
+        );
     }
 
     #[test]
@@ -667,7 +709,7 @@ mod tests {
         };
         let mut b = [0u8; MESSAGE_LEN];
         assert_eq!(encode_hello(&hello, &mut b), 40);
-        assert_eq!(u32_at(&b, 0), 0x0000_FFFE);
+        assert_eq!(u32_at(&b, 0), 0x0000_FFFC);
         assert_eq!(u16_at(&b, 6), 0, "version 0, forever");
         assert_eq!(
             (
@@ -737,7 +779,7 @@ mod tests {
             n_entries: 0,
         }
         .encode(&mut b);
-        b[0] = 9; // unknown kind: treated as a request
+        b[0] = 8; // an unknown kind, even: a request
         let why = Header::parse(&b, 1).unwrap_err();
         let r = refusal(&b, why).unwrap();
         assert_eq!(
@@ -747,8 +789,10 @@ mod tests {
                 r.reason,
                 r.max_supported_version
             ),
-            (77, 9, Reason::UnknownOpcode, 0)
+            (77, 8, Reason::UnknownOpcode, 0)
         );
+        b[0] = 9; // an unknown kind, odd: a reply, never answered
+        assert_eq!(refusal(&b, Header::parse(&b, 1).unwrap_err()), None);
         for reply in [Kind::FetchReply, Kind::HelloReply, Kind::Error] {
             b[0..4].copy_from_slice(&reply.opcode().to_le_bytes());
             assert_eq!(

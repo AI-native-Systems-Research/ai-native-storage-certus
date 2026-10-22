@@ -25,9 +25,10 @@
 use interfaces::TransferStats;
 
 /// The always-counted tier: every [`TransferStats`] field that is a count or a
-/// gauge kept here. The send-queue gauges are not: they are read from the live
-/// links' credits when a snapshot is taken (see `ConnectionTable::stats`), so
-/// they cannot drift from what the credits enforce.
+/// gauge kept here. The live gauges are not: the send-queue ones are read from
+/// the links' credits when a snapshot is taken (see `ConnectionTable::stats`),
+/// and the request gauges from the sessions' message credits, so neither can
+/// drift from what the credits enforce.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Counters {
     /// Filled by T017 (push) and T033 (fetch).
@@ -46,10 +47,6 @@ pub struct Counters {
     pub requests_completed: u64,
     /// Filled by T044.
     pub chunks_sent: u64,
-    /// Gauge; filled by T079.
-    pub requests_outstanding_outbound: u32,
-    /// Gauge; filled by T079.
-    pub requests_in_service_inbound: u32,
     /// Gauge; filled by T072.
     pub bounce_buffers_in_use: u32,
     /// Filled by T072.
@@ -97,8 +94,10 @@ impl Counters {
             chunks_sent: self.chunks_sent,
             send_queue_in_flight: in_flight,
             send_queue_peak_in_flight: self.send_queue_peak_in_flight.max(live_peak),
-            requests_outstanding_outbound: self.requests_outstanding_outbound,
-            requests_in_service_inbound: self.requests_in_service_inbound,
+            // The message-credit gauges are the endpoint's, read from its
+            // sessions (`Command::Stats`).
+            requests_outstanding_outbound: 0,
+            requests_in_service_inbound: 0,
             bounce_buffers_in_use: self.bounce_buffers_in_use,
             bounce_buffers_peak: self.bounce_buffers_peak,
             block_reads_attempted: self.block_reads_attempted,
@@ -196,8 +195,6 @@ mod tests {
             requests_attempted: 5,
             requests_completed: 6,
             chunks_sent: 7,
-            requests_outstanding_outbound: 8,
-            requests_in_service_inbound: 9,
             bounce_buffers_in_use: 10,
             bounce_buffers_peak: 11,
             block_reads_attempted: 18,
@@ -224,8 +221,8 @@ mod tests {
                 chunks_sent: 7,
                 send_queue_in_flight: 17,
                 send_queue_peak_in_flight: 16,
-                requests_outstanding_outbound: 8,
-                requests_in_service_inbound: 9,
+                requests_outstanding_outbound: 0,
+                requests_in_service_inbound: 0,
                 bounce_buffers_in_use: 10,
                 bounce_buffers_peak: 11,
                 block_reads_attempted: 18,

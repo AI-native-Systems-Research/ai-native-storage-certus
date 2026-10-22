@@ -394,8 +394,9 @@ slots and the reply's per-key outcomes match the source's actual residency.
 **Gate**: **SC-001** — zero zyre messages, zero messages to any third node.
 
 - [X] T027 [US1] Implement the 24-byte header codec in `src/message.rs`: `opcode` naming a
-  **kind only** (`OP_FETCH = 1`, `OP_FETCH_REPLY = 2`, `OP_HELLO = 0xFFFE`,
-  `OP_ERROR = 0xFFFF`, high 16 bits MUST be zero), `flags` (reserved, MUST be zero),
+  **kind only** (`OP_FETCH = 2`, `OP_FETCH_REPLY = 3`, `OP_HELLO = 0xFFFC`,
+  `OP_HELLO_REPLY = 0xFFFD`, `OP_ERROR = 0xFFFF`; a reply is its request with the low bit
+  set; high 16 bits MUST be zero), `flags` (reserved, MUST be zero),
   **`version` at offset 6**, `context_id`, `n_entries`, reserved fields that MUST be zero.
   Little-endian.
   Dispatch on `opcode` alone and **validate `version` once** against the connection's
@@ -431,15 +432,18 @@ slots and the reply's per-key outcomes match the source's actual residency.
   silently break
 - [X] T075 [US1] Answer every unprocessable inbound **request** with `OP_ERROR` rather than
   dropping it (FR-024), in place of its success reply: echo the `context_id`, name the
-  offending opcode, and report the local highest supported version for that kind. Treat an
-  unknown kind as a request. On **receipt** of `OP_ERROR`, fail that one context with
+  offending opcode, and report the local highest supported version for that kind. Classify an
+  unknown kind by the opcode's low bit: even is a request, answered; odd is a reply, a
+  teardown. A request before `OP_HELLO`, and a duplicate `OP_HELLO`, are answered too, and the
+  connection kept: teardown is only for FR-024's four cases. On **receipt** of `OP_ERROR`, fail that one context with
   `Protocol(..)` and leave the connection usable — the FR-023 teardown must not run and
   sibling contexts must be unaffected. **Never answer a reply.** A reply that cannot be
   processed (malformed, wrong kind, unknown context, duplicate) is logged loudly with the peer
   and the offending bytes, counted as a protocol fault, and tears the connection down through
-  T070's ordering. Count both in telemetry; an unexercised path must not look like a working
-  one (Principle XI)
-- [X] T076 [US1] Implement the frozen `OP_HELLO` codec and exchange (`0x0000_FFFE`,
+  T070's ordering. Count both in telemetry — `protocol_faults` counts every `OP_ERROR` sent or
+  received and every teardown an inbound message causes; an unexercised path must not look
+  like a working one (Principle XI)
+- [X] T076 [US1] Implement the frozen `OP_HELLO` codec and exchange (`0x0000_FFFC`,
   unversioned, FR-025, D20): a **fixed-size** 40-byte message — `max_entries: u32`,
   `max_outstanding_requests: u32`, `version_min: u16`, `version_max: u16`, reserved `u32`.
   `OP_HELLO` is a request: it costs the connection's one **bootstrap credit** and is answered

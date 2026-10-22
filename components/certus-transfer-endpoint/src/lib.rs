@@ -1807,8 +1807,12 @@ mod tests {
         let mut raw = crate::connection::mock::MockTransport::new(f.clone());
         let p_raw = PeerId::parse("10.0.0.3:7000").unwrap();
         raw.listen(&p_raw).unwrap();
-        let p_raw2 = p_raw.clone();
-        a.ep.call(|r| Command::Connect(p_raw2, r)).unwrap().unwrap();
+        let mut slots = vec![0u8; 8].into_boxed_slice();
+        let h =
+            a.ep.register_landing_region(slots.as_mut_ptr(), slots.len())
+                .unwrap();
+        // The fetch connects, and waits for the exchange that then fails.
+        let rx = fetch_one(&a.ep, &h, 1);
         let link = accept_raw(&mut raw, &p_raw);
         send_raw(&mut raw, link, |out| {
             message::encode_hello(
@@ -1827,14 +1831,20 @@ mod tests {
             evs.contains(&TransportEvent::Disconnected { link })
         });
         assert!(session_of(&a.ep, "10.0.0.3:7000").is_none());
+        match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
+            Err(TransferEndpointError::IncompatiblePeer(m)) => {
+                assert!(m.contains("7..=9") && m.contains("1..=1"), "{m}")
+            }
+            other => panic!("{other:?}"),
+        }
         let s = a.ep.stats();
         assert_eq!(
-            (s.requests_attempted, s.version_downgrades),
-            (0, 0),
-            "nothing issued"
+            (s.chunks_sent, s.version_downgrades, s.protocol_faults),
+            (0, 0, 1),
+            "nothing issued, and the fault counted"
         );
         a.ep.shutdown().unwrap();
-        drop(raw);
+        drop((raw, slots));
     }
 
     /// Accept the connect a table makes to a raw transport, answering with the
@@ -1995,12 +2005,13 @@ mod tests {
         b.ep.shutdown().unwrap();
     }
 
-    /// SC-012, from the answering side: a request of unknown kind is answered
-    /// with OP_ERROR naming it — within a round trip, never left to a
-    /// deadline — and the answering end stays connected. The OP_ERROR comes
-    /// back for a request the injecting end never really made, so *that* end
-    /// treats it as a bad reply and tears down, which is the right answer
-    /// there; the next test covers an OP_ERROR for a genuine fetch.
+    /// SC-012, from the answering side: a request of unknown kind (an even
+    /// opcode) is answered with OP_ERROR naming it — within a round trip,
+    /// never left to a deadline — and the answering end stays connected,
+    /// counting the refusal it sent. The OP_ERROR comes back for a request
+    /// the injecting end never really made, so *that* end treats it as a bad
+    /// reply and tears down, which is the right answer there; the next test
+    /// covers an OP_ERROR for a genuine fetch.
     #[test]
     fn an_unknown_opcode_is_answered_and_the_answerer_survives() {
         let f = MockFabric::new();
@@ -2013,15 +2024,16 @@ mod tests {
             session_of(&b.ep, "10.0.0.1:7000").is_some_and(|s| s.credits_available > 0)
         });
         let mut msg = vec![0u8; message::HEADER_LEN];
-        msg[0] = 0x42; // no such kind
+        msg[0] = 0x42; // no such kind, and even: a request
         inject_raw(&a.ep, "10.0.0.2:7000", msg, false);
-        eventually("a receives b's OP_ERROR", || {
-            a.ep.stats().protocol_faults == 1
+        eventually("a receives b's OP_ERROR, and tears down", || {
+            a.ep.stats().protocol_faults == 1 && session_of(&a.ep, "10.0.0.2:7000").is_none()
         });
+        assert_eq!(b.ep.stats().protocol_faults, 1, "b counts the refusal");
         assert_eq!(
-            b.ep.stats().protocol_faults,
+            b.ep.stats().deadline_expiries,
             0,
-            "b answered; it did not fault"
+            "b answered within a round trip"
         );
         a.ep.shutdown().unwrap();
         b.ep.shutdown().unwrap();
@@ -2258,11 +2270,17 @@ mod tests {
             rx.try_recv().is_err(),
             "no reply while the write is in flight"
         );
+        assert_eq!(dest.ep.stats().requests_outstanding_outbound, 1);
+        assert_eq!(src.ep.stats().requests_in_service_inbound, 1);
         f.pause_sends(false);
         assert_eq!(
             hits(rx.recv_timeout(Duration::from_secs(5)).unwrap()),
             [EntryOutcome::HitMemoryTier]
         );
+        eventually("both gauges back to zero", || {
+            dest.ep.stats().requests_outstanding_outbound == 0
+                && src.ep.stats().requests_in_service_inbound == 0
+        });
         dest.ep.shutdown().unwrap();
         src.ep.shutdown().unwrap();
         drop(slots);
@@ -2596,6 +2614,125 @@ mod tests {
         ));
         a.ep.shutdown().unwrap();
         drop((raw, slots));
+    }
+
+    /// An unknown *odd* opcode is a reply this end cannot read: it may
+    /// return a credit or not, so the credits are in doubt and the
+    /// connection goes, counted — never answered.
+    #[test]
+    fn an_unknown_reply_tears_down_unanswered() {
+        let f = MockFabric::new();
+        let (a, mut raw, link, h, slots) = raw_peer(&f, 340);
+        let rx = fetch_one(&a.ep, &h, 1);
+        eventually("the fetch is out", || {
+            session_of(&a.ep, "10.0.0.3:7000").is_some_and(|s| s.outbound.0 == 1)
+        });
+        send_raw(&mut raw, link, |out| {
+            out[..message::HEADER_LEN].fill(0);
+            out[0] = 0x41;
+            message::HEADER_LEN
+        });
+        assert!(matches!(
+            rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            Err(TransferEndpointError::Transport(_))
+        ));
+        let s = a.ep.stats();
+        assert_eq!(s.protocol_faults, 1, "counted");
+        assert_eq!(s.deadline_expiries, 0, "not left to a deadline");
+        a.ep.shutdown().unwrap();
+        drop((raw, slots));
+    }
+
+    /// FR-024: a bad reply's teardown is counted as a protocol fault, so a
+    /// teardown loop shows in `stats()`.
+    #[test]
+    fn a_bad_reply_teardown_is_counted() {
+        let f = MockFabric::new();
+        let (a, mut raw, link, h, slots) = raw_peer(&f, 340);
+        let rx = fetch_one(&a.ep, &h, 2);
+        eventually("the fetch is out", || {
+            session_of(&a.ep, "10.0.0.3:7000").is_some_and(|s| s.outbound.0 == 1)
+        });
+        send_raw(&mut raw, link, |out| {
+            message::encode_reply(1, 0, &[EntryOutcome::Miss], out)
+        });
+        assert!(rx.recv_timeout(Duration::from_secs(5)).unwrap().is_err());
+        assert_eq!(a.ep.stats().protocol_faults, 1);
+        a.ep.shutdown().unwrap();
+        drop((raw, slots));
+    }
+
+    /// A second OP_HELLO is answered with OP_ERROR, counted, and the session
+    /// already agreed stands: a fetch on it still completes.
+    #[test]
+    fn a_duplicate_hello_is_refused_and_the_session_stands() {
+        let f = MockFabric::new();
+        let (a, mut raw, link, h, slots) = raw_peer(&f, 340);
+        send_raw(&mut raw, link, |out| {
+            message::encode_hello(
+                &message::Hello {
+                    max_entries: 340,
+                    max_outstanding_requests: 4,
+                    version_min: 1,
+                    version_max: 1,
+                },
+                out,
+            )
+        });
+        eventually("a refuses it", || a.ep.stats().protocol_faults == 1);
+        let rx = fetch_one(&a.ep, &h, 1);
+        eventually("the fetch is out", || {
+            session_of(&a.ep, "10.0.0.3:7000").is_some_and(|s| s.outbound.0 == 1)
+        });
+        send_raw(&mut raw, link, |out| {
+            message::encode_reply(1, 0, &[EntryOutcome::Miss], out)
+        });
+        assert_eq!(
+            hits(rx.recv_timeout(Duration::from_secs(5)).unwrap()),
+            [EntryOutcome::Miss]
+        );
+        a.ep.shutdown().unwrap();
+        drop((raw, slots));
+    }
+
+    /// FR-024: a request before the peer's OP_HELLO is answered with
+    /// OP_ERROR, counted, and the connection stays: once the peer says hello,
+    /// the session comes up as usual.
+    #[test]
+    fn a_request_before_hello_is_refused_and_the_connection_stays() {
+        use crate::connection::transport::Transport;
+        let f = MockFabric::new();
+        let a = node(&f, "10.0.0.1:7000", 8);
+        a.ep.initialize().unwrap();
+        let mut raw = crate::connection::mock::MockTransport::new(f.clone());
+        let p_raw = PeerId::parse("10.0.0.3:7000").unwrap();
+        raw.listen(&p_raw).unwrap();
+        let p2 = p_raw.clone();
+        a.ep.call(|r| Command::Connect(p2, r)).unwrap().unwrap();
+        let link = accept_raw(&mut raw, &p_raw);
+        send_raw(&mut raw, link, |out| message::encode_fetch(0, 5, &[], out));
+        eventually("a refuses it", || a.ep.stats().protocol_faults == 1);
+        assert!(
+            session_of(&a.ep, "10.0.0.3:7000").is_some(),
+            "still connected"
+        );
+        send_raw(&mut raw, link, |out| {
+            message::encode_hello(
+                &message::Hello {
+                    max_entries: 340,
+                    max_outstanding_requests: 4,
+                    version_min: 1,
+                    version_max: 1,
+                },
+                out,
+            )
+        });
+        send_raw(&mut raw, link, message::encode_hello_reply);
+        eventually("a ready", || {
+            session_of(&a.ep, "10.0.0.3:7000").is_some_and(|s| s.credits_available > 0)
+        });
+        a.ep.shutdown().unwrap();
+        drop(raw);
     }
 
     /// FR-025, T044: a fetch is chunked against the **peer's** max_entries,
@@ -3683,6 +3820,7 @@ mod tests {
         eventually("a tore down", || {
             session_of(&a.ep, "10.0.0.3:7000").is_none()
         });
+        assert_eq!(a.ep.stats().protocol_faults, 1, "and counted it");
         a.ep.shutdown().unwrap();
         drop((raw, slots));
     }

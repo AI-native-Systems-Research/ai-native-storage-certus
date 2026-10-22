@@ -114,9 +114,10 @@ pub enum TransferEndpointError {
     /// sibling contexts are unaffected. Carries the offending opcode, the
     /// reason, and the peer's highest supported version for that kind.
     Protocol(String),
-    /// The peer's supported protocol version range does not intersect the local
-    /// one, so no connection was established and no request was issued
-    /// (FR-025). Names peer and both ranges.
+    /// The peer's capability exchange made a connection impossible — no
+    /// protocol version in common, or a zero quota or `max_entries` — so no
+    /// request was issued (FR-025). Names peer and, for a version mismatch,
+    /// both ranges. Delivered to `on_complete`: the exchange follows `fetch`.
     IncompatiblePeer(String),
     Transport(String),
 }
@@ -300,7 +301,11 @@ Implementations MUST uphold, and tests MUST verify:
     complete (FR-024, SC-012). The error reply is never used for a miss or a resource shortage.
     A reply that cannot be processed is never answered: it is reported loudly and tears the
     connection down through the FR-023 ordering, aborting its contexts, since its sender may
-    have written into slots it can no longer vouch for.
+    have written into slots it can no longer vouch for. An opcode's low bit says which it is,
+    known kind or not: even is a request, odd a reply. A connection is torn down only when the
+    queue pair is in ERROR, a write may still land in memory about to be reclaimed, the
+    credit accounting is in doubt, or the peer's version or framing cannot be trusted
+    (FR-024); every refusal sent or received, and every such teardown, is a protocol fault.
 14. **Capabilities precede data.** No data message is sent on a connection before the peer's
     capabilities are known. One protocol version governs the connection —
     `min(a.max, b.max)`, failing if below `max(a.min, b.min)` — and the peer's maximum request

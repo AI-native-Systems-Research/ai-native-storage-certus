@@ -53,7 +53,7 @@ use crate::msgpool::{MsgBuf, MsgPool};
 use crate::serve::{
     resolve, BlockRead, Finish, Hold, Map, MissCause, Pin, Pool, Push, PushWork, Resolved,
 };
-use crate::session::{Limits, Phase, Session};
+use crate::session::{HelloError, Limits, Phase, Session, Violation};
 
 /// What a work request's slab slot carries until its completion is reaped.
 pub(crate) enum Work {
@@ -168,6 +168,20 @@ pub(crate) fn fatal_on_panic<R>(what: &str, f: impl FnOnce() -> R) -> R {
             );
             std::process::abort();
         }
+    }
+}
+
+/// Why `peer`'s `OP_HELLO` makes a connection impossible, for the fetches it
+/// fails with `IncompatiblePeer`.
+fn incompatibility(peer: &PeerId, e: &HelloError) -> String {
+    match e {
+        HelloError::Incompatible { ours, theirs } => format!(
+            "{peer} speaks protocol versions {}..={}, this end {}..={}: none in common",
+            theirs.0, theirs.1, ours.0, ours.1
+        ),
+        HelloError::ZeroQuota => format!("{peer} advertised an inbound quota of 0"),
+        HelloError::ZeroMaxEntries => format!("{peer} advertised a max_entries of 0"),
+        HelloError::Duplicate => unreachable!("a duplicate OP_HELLO is answered, not fatal"),
     }
 }
 
@@ -334,6 +348,8 @@ enum Abort {
     Lost(String),
     /// This fetch's own reply deadline expired.
     Deadline(String),
+    /// The capability exchange failed, so no request was ever issued.
+    Incompatible(String),
 }
 
 impl Abort {
@@ -342,7 +358,42 @@ impl Abort {
             Abort::Refused(m) => TransferEndpointError::Protocol(m),
             Abort::Lost(m) => TransferEndpointError::Transport(m),
             Abort::Deadline(m) => TransferEndpointError::Deadline(m),
+            Abort::Incompatible(m) => TransferEndpointError::IncompatiblePeer(m),
         }
+    }
+}
+
+/// Why a connection is being torn down, for what its fetches are told.
+enum Cause {
+    /// Lost, disconnected, or faulted: the fetches fail with `Transport`.
+    Lost,
+    /// The reply deadline of this fetch expired: it fails with `Deadline`,
+    /// and its siblings as aborted by it.
+    Deadline(u64, String),
+    /// The capability exchange failed: every fetch fails `IncompatiblePeer`.
+    Incompatible(String),
+}
+
+/// Why an inbound message tears its connection down. Every one is counted as
+/// a protocol fault.
+enum Fault {
+    /// The peer broke the protocol in a way this end cannot answer: a bad
+    /// reply, a request over quota, a message it could not read.
+    Protocol(String),
+    /// The peer's `OP_HELLO` makes a connection impossible: no version in
+    /// common, or a zero quota or `max_entries`.
+    Incompatible(String),
+}
+
+impl From<String> for Fault {
+    fn from(why: String) -> Self {
+        Fault::Protocol(why)
+    }
+}
+
+impl From<&str> for Fault {
+    fn from(why: &str) -> Self {
+        Fault::Protocol(why.to_string())
     }
 }
 
@@ -447,13 +498,12 @@ impl EndpointActor {
     /// When this returns `Ok`, no write from `peer` can still land. Every pin
     /// the drain returns is released, and every push to `peer` is finished.
     fn teardown(&mut self, peer: &PeerId) -> Result<(), String> {
-        self.teardown_for(peer, None)
+        self.teardown_for(peer, Cause::Lost)
     }
 
-    /// [`teardown`](Self::teardown), naming why: `cause` is the fetch whose
-    /// deadline expired, if that is what this is, so its siblings are
-    /// reported as aborted by it.
-    fn teardown_for(&mut self, peer: &PeerId, cause: Option<(u64, String)>) -> Result<(), String> {
+    /// [`teardown`](Self::teardown), naming why, for what its fetches are
+    /// told.
+    fn teardown_for(&mut self, peer: &PeerId, cause: Cause) -> Result<(), String> {
         let table = self.table.as_mut().ok_or("endpoint is shut down")?;
         let begun = table
             .begin_teardown(peer)
@@ -493,15 +543,14 @@ impl EndpointActor {
         self.fail_pushes(peer);
         // Only now, behind the teardown barrier: every write the peer could
         // make into these fetches' landing slots is impossible (FR-017).
-        self.fail_fetches(peer, cause);
+        self.fail_fetches(peer, &cause);
         Ok(())
     }
 
     /// End every fetch to `peer`: no reply can arrive for it. Called only
-    /// once its link is destroyed, so its slots are safe to reclaim. With a
-    /// `cause`, that fetch's deadline expired — it fails with `Deadline` and
-    /// the rest are siblings aborted by it.
-    fn fail_fetches(&mut self, peer: &PeerId, cause: Option<(u64, String)>) {
+    /// once its link is destroyed, so its slots are safe to reclaim, and
+    /// failed as `cause` says.
+    fn fail_fetches(&mut self, peer: &PeerId, cause: &Cause) {
         let ids: Vec<u64> = self
             .fetches
             .iter()
@@ -510,13 +559,14 @@ impl EndpointActor {
             .collect();
         for id in ids {
             let f = self.fetches.remove(&id).expect("listed above");
-            let abort = match &cause {
-                Some((expired, why)) if *expired == id => Abort::Deadline(why.clone()),
-                Some((expired, _)) => Abort::Lost(format!(
+            let abort = match cause {
+                Cause::Deadline(expired, why) if *expired == id => Abort::Deadline(why.clone()),
+                Cause::Deadline(expired, _) => Abort::Lost(format!(
                     "aborted: the connection to {peer} was torn down after the reply \
                      deadline of fetch {expired} expired"
                 )),
-                None => Abort::Lost(format!("the connection to {peer} was lost")),
+                Cause::Incompatible(why) => Abort::Incompatible(why.clone()),
+                Cause::Lost => Abort::Lost(format!("the connection to {peer} was lost")),
             };
             self.abort_fetch(f, abort);
         }
@@ -606,7 +656,7 @@ impl EndpointActor {
             if let Some(t) = self.table.as_mut() {
                 t.counters_mut().deadline_expiries += 1;
             }
-            if let Err(e) = self.teardown_for(&peer, Some((id, why))) {
+            if let Err(e) = self.teardown_for(&peer, Cause::Deadline(id, why)) {
                 self.logger.error(&format!("certus-transfer-endpoint: {e}"));
             }
         }
@@ -1015,12 +1065,25 @@ impl EndpointActor {
             }
         }
 
+        let mut incompatible: BTreeMap<PeerId, String> = BTreeMap::new();
         for (peer, c, work) in messages {
-            if let Err(why) = self.on_message_work(&peer, c, work) {
+            if let Err(fault) = self.on_message_work(&peer, c, work) {
+                if let Some(t) = self.table.as_mut() {
+                    t.counters_mut().protocol_faults += 1;
+                }
+                let why = match fault {
+                    Fault::Protocol(why) => {
+                        faulted.push(peer.clone());
+                        why
+                    }
+                    Fault::Incompatible(why) => {
+                        incompatible.insert(peer.clone(), why.clone());
+                        why
+                    }
+                };
                 self.logger.error(&format!(
                     "certus-transfer-endpoint: {peer}: {why}; tearing the connection down"
                 ));
-                faulted.push(peer);
             }
         }
         for peer in self.conns.keys().cloned().collect::<Vec<_>>() {
@@ -1037,8 +1100,14 @@ impl EndpointActor {
 
         faulted.sort();
         faulted.dedup();
+        faulted.retain(|p| !incompatible.contains_key(p));
         for peer in faulted {
             if let Err(e) = self.teardown(&peer) {
+                self.logger.error(&format!("certus-transfer-endpoint: {e}"));
+            }
+        }
+        for (peer, why) in incompatible {
+            if let Err(e) = self.teardown_for(&peer, Cause::Incompatible(why)) {
                 self.logger.error(&format!("certus-transfer-endpoint: {e}"));
             }
         }
@@ -1239,7 +1308,12 @@ impl EndpointActor {
 
     /// A message completion: a send finished (its buffer comes back), or a
     /// receive delivered a message (handled, then the buffer re-posted).
-    fn on_message_work(&mut self, peer: &PeerId, c: Completion, work: Work) -> Result<(), String> {
+    ///
+    /// A receive that fails is a teardown, though the queue pair may still be
+    /// up (a message longer than the buffer fails only the receive): with the
+    /// message unread, this end cannot tell a request it owes a reply from a
+    /// reply that returns a credit, so its credit accounting is in doubt.
+    fn on_message_work(&mut self, peer: &PeerId, c: Completion, work: Work) -> Result<(), Fault> {
         match (work, c.result) {
             (Work::Send(b), _) => {
                 self.msgs.give(b);
@@ -1253,13 +1327,13 @@ impl EndpointActor {
                 self.repost(peer, b);
                 r
             }
-            (Work::Recv(b), Err(_)) => {
+            (Work::Recv(b), Err(e)) => {
                 self.msgs.give(b);
-                Err("a receive failed".into())
+                Err(format!("a receive failed ({})", e.status_name()).into())
             }
             (Work::Recv(b), Ok(other)) => {
                 self.msgs.give(b);
-                Err(format!("a receive completed as {other:?}"))
+                Err(format!("a receive completed as {other:?}").into())
             }
             _ => unreachable!("only message work comes here"),
         }
@@ -1284,9 +1358,22 @@ impl EndpointActor {
         }
     }
 
-    /// One inbound message. `Err` tears the connection down: the peer broke
-    /// the protocol in a way this end cannot answer.
-    fn on_message(&mut self, peer: &PeerId, msg: &[u8]) -> Result<(), String> {
+    /// Answer a request with `OP_ERROR`, in place of its reply, and count it:
+    /// a refusal sent is a protocol fault, as one received is.
+    fn refuse(&mut self, peer: &PeerId, e: message::ErrorReply) {
+        if let Some(t) = self.table.as_mut() {
+            t.counters_mut().protocol_faults += 1;
+        }
+        self.queue_reply(peer, |out| message::encode_error(&e, out));
+    }
+
+    /// One inbound message. `Err` tears the connection down, and only when
+    /// it must (FR-024): the peer may have written into our slots (a bad
+    /// reply), our credit accounting is in doubt (a reply nobody asked for, a
+    /// request over quota), or no connection was agreed (a failed capability
+    /// exchange). A request this end merely cannot process is answered with
+    /// `OP_ERROR` and the connection stays.
+    fn on_message(&mut self, peer: &PeerId, msg: &[u8]) -> Result<(), Fault> {
         let version = self
             .conns
             .get(peer)
@@ -1299,10 +1386,10 @@ impl EndpointActor {
                 // bad one is a teardown (FR-024).
                 return match message::refusal(msg, why) {
                     Some(e) => {
-                        self.queue_reply(peer, |out| message::encode_error(&e, out));
+                        self.refuse(peer, e);
                         Ok(())
                     }
-                    None => Err(format!("unprocessable reply: {}", why.what)),
+                    None => Err(format!("unprocessable reply: {}", why.what).into()),
                 };
             }
         };
@@ -1310,10 +1397,24 @@ impl EndpointActor {
         match h.kind {
             Kind::Hello => {
                 let hello = message::decode_hello(&h, msg).map_err(|m| m.what.to_string())?;
-                let v = conn
-                    .session
-                    .on_hello(&hello)
-                    .map_err(|e| format!("{e:?}"))?;
+                let v = match conn.session.on_hello(&hello) {
+                    Ok(v) => v,
+                    // The session already agreed stands; the request is
+                    // answered, so the peer's credits still balance.
+                    Err(HelloError::Duplicate) => {
+                        self.refuse(
+                            peer,
+                            message::ErrorReply {
+                                context_id: h.context_id,
+                                offending_opcode: Kind::Hello.opcode(),
+                                reason: message::Reason::Malformed,
+                                max_supported_version: message::VERSION_MAX,
+                            },
+                        );
+                        return Ok(());
+                    }
+                    Err(e) => return Err(Fault::Incompatible(incompatibility(peer, &e))),
+                };
                 if v < message::VERSION_MAX {
                     if let Some(t) = self.table.as_mut() {
                         t.counters_mut().version_downgrades += 1;
@@ -1324,13 +1425,12 @@ impl EndpointActor {
             }
             Kind::HelloReply => {
                 message::decode_hello_reply(&h, msg).map_err(|m| m.what.to_string())?;
-                conn.session.on_hello_reply().map_err(|v| format!("{v:?}"))
+                conn.session
+                    .on_hello_reply()
+                    .map_err(|v| format!("{v:?}").into())
             }
             Kind::Error => {
                 let e = message::decode_error(&h, msg).map_err(|m| m.what.to_string())?;
-                if let Some(t) = self.table.as_mut() {
-                    t.counters_mut().protocol_faults += 1;
-                }
                 // A refusal of one of our fetches fails that context alone; the
                 // peer acted on nothing, so the connection stays (FR-024). It
                 // is matched by context **and** kind: only an OP_ERROR whose
@@ -1339,13 +1439,18 @@ impl EndpointActor {
                 // — we send no other request but OP_HELLO, answered by
                 // OP_HELLO_REPLY — so it is a bad reply and tears down.
                 if e.offending_opcode != Kind::Fetch.opcode() {
-                    return Err(format!("OP_ERROR for a request we never sent: {e:?}"));
+                    return Err(format!("OP_ERROR for a request we never sent: {e:?}").into());
                 }
                 let (id, k) = conn
                     .outbound
                     .remove(&e.context_id)
                     .ok_or("OP_ERROR for no fetch of ours")?;
                 conn.session.on_reply().map_err(|v| format!("{v:?}"))?;
+                // Counted only once it is a refusal of ours: a bad one is
+                // counted as the teardown it causes.
+                if let Some(t) = self.table.as_mut() {
+                    t.counters_mut().protocol_faults += 1;
+                }
                 self.logger.warn(&format!(
                     "certus-transfer-endpoint: {peer} refused chunk {k} of fetch {id}: {e:?}"
                 ));
@@ -1386,9 +1491,10 @@ impl EndpointActor {
                         return Err(format!(
                             "{} outcomes for chunk {k} of fetch {id}, of {want} entries",
                             o.len()
-                        ))
+                        )
+                        .into())
                     }
-                    Err(e) => return Err(e.what.to_string()),
+                    Err(e) => return Err(e.what.into()),
                 };
                 conn.session.on_reply().map_err(|v| format!("{v:?}"))?;
                 // Every write for a hit completed before this reply was sent
@@ -1408,15 +1514,32 @@ impl EndpointActor {
                 Ok(())
             }
             Kind::Fetch => {
-                if let Err(v) = conn.session.on_request() {
-                    return Err(format!("{v:?}"));
+                match conn.session.on_request() {
+                    Ok(()) => {}
+                    // Before any version is agreed: answered, since it took no
+                    // credit this end counts and its reply lands in the peer's
+                    // reserve. (A versioned one fails the header parse.)
+                    Err(Violation::BeforeHello) => {
+                        self.refuse(
+                            peer,
+                            message::ErrorReply {
+                                context_id: h.context_id,
+                                offending_opcode: Kind::Fetch.opcode(),
+                                reason: message::Reason::UnsupportedVersion,
+                                max_supported_version: message::VERSION_MAX,
+                            },
+                        );
+                        return Ok(());
+                    }
+                    // Over quota: the peer's credits disagree with ours.
+                    Err(v) => return Err(format!("{v:?}").into()),
                 }
                 let items = match message::decode_fetch(&h, msg) {
                     Ok(items) => items,
                     Err(why) => {
                         conn.session.replied();
                         let e = message::refusal(msg, why).expect("a request");
-                        self.queue_reply(peer, |out| message::encode_error(&e, out));
+                        self.refuse(peer, e);
                         return Ok(());
                     }
                 };
@@ -1470,7 +1593,7 @@ impl EndpointActor {
                         "certus-transfer-endpoint: connect to {peer} failed: {reason:?}"
                     ));
                     self.fail_pushes(&peer);
-                    self.fail_fetches(&peer, None);
+                    self.fail_fetches(&peer, &Cause::Lost);
                 }
                 TableEvent::RefusedInbound { peer, reason } => self.logger.warn(&format!(
                     "certus-transfer-endpoint: refused inbound connect from {peer:?}: {reason:?}"
@@ -1626,7 +1749,7 @@ impl EndpointActor {
             .collect();
         for peer in stranded {
             self.fail_pushes(&peer);
-            self.fail_fetches(&peer, None);
+            self.fail_fetches(&peer, &Cause::Lost);
         }
         let table = self.table.take().expect("checked above");
         if let Some(mut readers) = self.readers.take() {
@@ -1659,11 +1782,17 @@ impl ActorHandler<Command> for EndpointActor {
     fn handle(&mut self, cmd: Command) {
         fatal_on_panic("endpoint command", || match cmd {
             Command::Stats(reply) => {
-                let stats = self
+                let mut stats = self
                     .table
                     .as_ref()
                     .map(ConnectionTable::stats)
                     .unwrap_or_default();
+                // Read from the sessions now, like the send-queue gauges, so
+                // they cannot drift from the message credits they describe.
+                for c in self.conns.values() {
+                    stats.requests_outstanding_outbound += c.session.outbound().0;
+                    stats.requests_in_service_inbound += c.session.inbound().0;
+                }
                 let _ = reply.send(stats);
             }
             Command::Disconnect(peer, reply) => {
