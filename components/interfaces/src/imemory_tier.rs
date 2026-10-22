@@ -107,8 +107,8 @@ unsafe impl Send for BounceBuffer {}
 pub enum BounceError {
     /// No room in the reserve right now. Retry after a buffer is freed.
     NoSpace,
-    /// Can never be satisfied: larger than the whole reserve, no reserve, or a
-    /// pool the device cannot DMA into. Retrying cannot help.
+    /// Can never be satisfied: zero length, larger than the whole reserve, no
+    /// reserve, or a pool the device cannot DMA into. Retrying cannot help.
     NeverFits(String),
     /// The device read failed. Any buffer taken for it has been freed.
     Io(String),
@@ -149,7 +149,9 @@ component_macros::define_interface! {
         /// Allocate a slot for `key` of `size` bytes and return a pointer to it.
         ///
         /// The returned pointer is valid until the slot is evicted or removed.
-        /// Returns `PoolFull` if insufficient contiguous space is available.
+        /// Returns `InvalidSize` for a size of 0, `NotInitialized` before
+        /// `initialize`, and `PoolFull` if insufficient contiguous space is
+        /// available.
         fn insert(&self, key: CacheKey, size: u32) -> Result<*mut u8, MemoryTierError>;
 
         /// Get the pointer and size for an existing slot, refreshing its
@@ -196,13 +198,17 @@ component_macros::define_interface! {
         /// Check whether a slot exists for `key`.
         fn contains(&self, key: CacheKey) -> bool;
 
-        /// Return the total pool capacity in bytes.
+        /// Return the bytes the cache may use: the pool size less the bounce
+        /// reserve (see [`set_bounce_reserve`](Self::set_bounce_reserve)),
+        /// ending on a 4 KiB boundary where the reserve begins. Zero before
+        /// `initialize`.
         fn capacity(&self) -> usize;
 
         /// Return the number of bytes currently allocated.
         fn used(&self) -> usize;
 
-        /// Return the base pointer and size of the pool for CUDA host registration.
+        /// Return the base pointer and size of the whole pool, bounce reserve
+        /// included, for CUDA host and RDMA registration.
         fn pool_info(&self) -> Option<(*mut u8, usize)>;
 
         /// Returns `true` when the pool is backed by SPDK hugepages and pointers
@@ -226,9 +232,10 @@ component_macros::define_interface! {
         /// this is an error. Zero means no reserve.
         fn set_bounce_reserve(&self, bytes: usize) -> Result<(), MemoryTierError>;
 
-        /// Lease `len` bytes of the bounce reserve. `NoSpace` if they do not fit
-        /// now; `NeverFits` if they never can — larger than the reserve, no
-        /// reserve, or a pool that is not DMA-capable.
+        /// Allocate `len` bytes of the bounce reserve. `NoSpace` if they do not
+        /// fit now; `NeverFits` if they never can — zero, larger than the
+        /// reserve, no reserve, or a pool that is not DMA-capable;
+        /// `NotInitialized` before `initialize`.
         fn bounce_alloc(&self, len: u32) -> Result<BounceBuffer, BounceError>;
 
         /// Free a buffer from [`bounce_alloc`](Self::bounce_alloc). Only once no

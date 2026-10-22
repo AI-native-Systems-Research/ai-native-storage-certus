@@ -913,7 +913,9 @@ component_macros::define_interface! {
         /// Errors: `NoSpace` (the reserve is full now — retry later),
         /// `NeverFits` (it never can be satisfied: larger than the reserve, no
         /// data drives, or a drive block that does not divide the reserve's
-        /// 4 KiB pages), `Io` (the read failed; the buffer has been freed).
+        /// 4 KiB pages), `Io` (the read failed; the buffer has been freed, or
+        /// leaked if the drive may still write it), `NotInitialized` (the
+        /// dispatcher or its memory tier is not ready).
         ///
         /// The read holds no dispatcher-wide lock while it waits on the
         /// device, so a hung read does not hold up `shutdown`.
