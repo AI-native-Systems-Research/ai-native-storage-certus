@@ -2950,14 +2950,14 @@ impl IDispatcher for DispatcherP2pComponent {
         _key: CacheKey,
         _offset: u64,
         _len: u32,
-    ) -> Result<interfaces::BounceLease, interfaces::BounceError> {
+    ) -> Result<interfaces::BounceBuffer, interfaces::BounceError> {
         Err(interfaces::BounceError::NeverFits(
             "block-tier serving is not implemented by dispatcher-p2p".into(),
         ))
     }
 
-    fn release_bounce(&self, _lease: interfaces::BounceLease) {
-        unreachable!("read_to_bounce never hands out a lease here")
+    fn release_bounce(&self, _buf: interfaces::BounceBuffer) {
+        unreachable!("read_to_bounce never hands out a buffer here")
     }
 }
 
@@ -3134,13 +3134,16 @@ mod tests {
         fn set_bounce_reserve(&self, _: usize) -> Result<(), interfaces::MemoryTierError> {
             Ok(())
         }
-        fn bounce_alloc(&self, _: u32) -> Result<interfaces::BounceLease, interfaces::BounceError> {
+        fn bounce_alloc(
+            &self,
+            _: u32,
+        ) -> Result<interfaces::BounceBuffer, interfaces::BounceError> {
             Err(interfaces::BounceError::NeverFits(
                 "no bounce reserve".into(),
             ))
         }
-        fn bounce_free(&self, _: interfaces::BounceLease) {
-            unreachable!("no lease was ever handed out")
+        fn bounce_free(&self, _: interfaces::BounceBuffer) {
+            unreachable!("no buffer was ever handed out")
         }
         fn bounce_usage(&self) -> (usize, usize) {
             (0, 0)

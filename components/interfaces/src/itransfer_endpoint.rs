@@ -389,14 +389,14 @@ pub struct TransferStats {
     pub requests_outstanding_outbound: u32,
     /// Peer requests we are currently serving.
     pub requests_in_service_inbound: u32,
-    /// Bounce leases holding a block-tier entry's data: read, and waiting
+    /// Bounce buffers holding a block-tier entry's data: read, and waiting
     /// for or in its write. A read still in progress is not counted here.
     pub bounce_buffers_in_use: u32,
     /// High-water mark of the above.
     pub bounce_buffers_peak: u32,
     /// Block-tier reads handed to the dispatcher.
     pub block_reads_attempted: u64,
-    /// Of those, reads that filled a lease.
+    /// Of those, reads that filled a buffer.
     pub block_reads_completed: u64,
     /// Of those, reads that failed or could never fit the bounce reserve; each
     /// entry is reported `Failed`.

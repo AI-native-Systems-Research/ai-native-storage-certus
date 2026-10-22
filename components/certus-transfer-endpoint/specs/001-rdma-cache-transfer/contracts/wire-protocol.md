@@ -329,7 +329,7 @@ cleanly rather than leave a hole.
   an `rkey` already sent on the wire stays valid across a reconnect (D17). A retry after a
   forced teardown therefore needs no re-registration and no new addresses.
 - A closed connection aborts every context outstanding on it. Each side releases its own
-  resources: the source its pins and bounce leases (each only once its read or write has completed), the requester its landing slots — the
+  resources: the source its pins and bounce buffers (each only once its read or write has completed), the requester its landing slots — the
   latter only after teardown completes (FR-017).
 - Loss of liveness **without** a close is not covered by the transport; it is the
   destination deadline's job (FR-016). On expiry the queue pair is forced to ERROR and

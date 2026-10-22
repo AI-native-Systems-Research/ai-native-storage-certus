@@ -219,10 +219,10 @@ impl IMemoryTier for PoolOnly {
     fn set_bounce_reserve(&self, _: usize) -> Result<(), MemoryTierError> {
         unimplemented!()
     }
-    fn bounce_alloc(&self, _: u32) -> Result<interfaces::BounceLease, interfaces::BounceError> {
+    fn bounce_alloc(&self, _: u32) -> Result<interfaces::BounceBuffer, interfaces::BounceError> {
         unimplemented!()
     }
-    fn bounce_free(&self, _: interfaces::BounceLease) {
+    fn bounce_free(&self, _: interfaces::BounceBuffer) {
         unimplemented!()
     }
     fn bounce_usage(&self) -> (usize, usize) {

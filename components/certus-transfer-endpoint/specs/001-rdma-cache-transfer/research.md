@@ -121,7 +121,7 @@ non-blocking variant belongs with the non-touching one, as a separate `IDispatch
 
 **Decision**: pin and release **per entry**, not per batch. Memory-tier pins release when
 the RDMA write completes (matched by `wr_id`). Block-tier pins release as soon as the device
-read lands in its bounce lease (D15) — *before* the write is posted.
+read lands in its bounce buffer (D15) — *before* the write is posted.
 
 **Rationale**: landing slots are not contiguous, so there is one RDMA write per entry
 anyway (FR-008); pin lifetime therefore has no reason to span the batch. On the block-tier
@@ -178,7 +178,7 @@ hint (costs tier capacity, reintroduces the pollution D8 avoids).
 |---|---|---|
 | send-queue credits | **exists** | in-flight RDMA writes per connection, transitively held read pins |
 | message credits | new | outstanding requests against the peer's posted receive buffers |
-| bounce-buffer occupancy | new | bounce-reserve bytes leased to block-tier entries (D15), and concurrent device reads (the reader count) |
+| bounce-buffer occupancy | new | bounce-reserve bytes allocated to block-tier entries (D15), and concurrent device reads (the reader count) |
 
 **Rationale**: only the middle one was in the original sketch, and the existing code already
 uses the word "credits" for the first. Conflating them would be easy and confusing.
@@ -238,7 +238,7 @@ unit`, at 200 Gb/s (25 GB/s). Measured 2026-10-20, node2 ↔ node5, NUMA-0 pinne
   — every bulk number here is warm — so it costs latency on sparse single fetches, not
   throughput. The first, cold send-credit sweep had runs starting cold or warm at random,
   which is why it read 4-32 as indistinguishable.
-* **Block readers: 4, and the 16 MiB reserve** are set by the device, not the link. At
+* **Block readers: 4, and the 32 MiB reserve** are set by the device, not the link. At
   ~100 µs a read, 4 readers sustain 4 × 64 KiB / 100 µs ≈ 2.6 GB/s of block-tier serving;
   filling 25 GB/s would take ~38 reads in flight and ~150 MiB of reserve at 4 MiB entries.
   That is acceptable only because block-tier hits are single-digit percent (D9); if that
@@ -423,11 +423,11 @@ the link.
 
 Note the one place the margin *narrows* on a slower link, at 50G: a device read (~100 us - ms) stops being much
 larger than a single entry's write (~380 us) and becomes comparable to it. That does not
-change the conclusion below — a lease-all/read-all/post-all barrier still idles the wire for
+change the conclusion below — a buffer-all/read-all/post-all barrier still idles the wire for
 the whole read phase, whatever one read costs — but it does mean the block-tier barrier is the
 only one whose cost stays in the same order of magnitude as the transfer itself.
 
-**What does matter** is the block-tier read barrier. A source that leases N bounce buffers,
+**What does matter** is the block-tier read barrier. A source that buffers N bounce buffers,
 reads all N, posts all N writes and only then replies idles the wire for the entire read
 phase — the one barrier whose cost is measured in milliseconds. D7's early pin release and D9's
 decoupling argument already make the pipelined form expressible ("the bounce buffer
@@ -843,12 +843,12 @@ an interface this component can depend on.
 So the block-tier path hands the **pin** to the dispatcher rather than the device:
 
 1. `dm.lookup(key)` → `BlockDevice{offset}`, pinned (one lookup, one pin, as for every entry).
-2. `dispatcher.read_to_bounce(key, offset, len)` leases bounce space, reads the extent into
-   it on the right drive, and returns the lease `(ptr, len)`. It neither pins nor releases:
+2. `dispatcher.read_to_bounce(key, offset, len)` buffers bounce space, reads the extent into
+   it on the right drive, and returns the buffer `(ptr, len)`. It neither pins nor releases:
    the caller's pin is what holds the extent still for the read.
 3. The caller releases the pin — the data has been copied (D7).
-4. The caller posts the RDMA write from the lease, which lies inside the registered pool.
-5. On the write's completion the caller returns the lease (`release_bounce`).
+4. The caller posts the RDMA write from the buffer, which lies inside the registered pool.
+5. On the write's completion the caller returns the buffer (`release_bounce`).
 
 `read_to_bounce` blocks for the read, like every other `IDispatcher` method; the endpoint
 calls it from a small pool of reader threads so its own thread never waits on a device. It
@@ -856,8 +856,8 @@ calls it from a small pool of reader threads so its own thread never waits on a 
 
 **There is no device timeout on this path.** The block-device actor's timeout forgets an
 operation while the drive can still write its buffer, and returns the buffer to the caller;
-reclaiming bounce space then would let a late read land in a lease since handed to another
-entry. So a read is held, with its pin and its lease, until it genuinely completes. A slow or
+reclaiming bounce space then would let a late read land in a buffer since handed to another
+entry. So a read is held, with its pin and its buffer, until it genuinely completes. A slow or
 hung drive surfaces on the requester as its reply deadline (FR-016) — the right signal, since
 the source's state is then unknown — and that is the intended behaviour, not a gap.
 
@@ -885,29 +885,30 @@ The memory tier is allocated with `spdk_zmalloc` — "hugepage-backed, zero-init
 memory", NUMA-aware (`components/memory-tier/src/lib.rs:281-297`) — so it is SPDK-DMA-able
 by construction, which is how promotion reads device data into it today. And this endpoint
 already registers that whole pool for RDMA, once, for its life (D17). **So bounce space taken
-from the pool is already both DMA-able and registered**: a leased address passes the same
+from the pool is already both DMA-able and registered**: a allocated address passes the same
 inside-the-pool check as a memory-tier hit, and is written by the same path.
 
 * **Owned by the memory tier.** The reserve is a range of the memory tier's pool, managed by a
   second instance of the memory tier's own first-fit free-list allocator (4 KiB-aligned,
   coalescing). Two allocators from two components over one region would be two sources of
-  truth for which bytes are whose. The dispatcher leases through `IMemoryTier` and the
-  endpoint returns leases through the dispatcher, which forwards.
+  truth for which bytes are whose. The dispatcher buffers through `IMemoryTier` and the
+  endpoint returns buffers through the dispatcher, which forwards.
 * **Taken quietly from the pool, not added to it.** The memory tier sets aside
   `min(bounce_reserve, pool_size / 8)` at the top of its pool at `initialize`; `capacity()`
   shrinks by that amount and the initialize log line says so. The default reserve is
-  **16 MiB** — four concurrent reads (the default reader count) of up to 4 MiB, the largest
-  KV block expected (64 KiB in the measured deployment; ~2.25 MiB for Qwen3-8B) — which is
-  0.78% of the servers' 2 GiB default pool and 0.05% of the 30 GiB measured cluster.
+  **32 MiB** — four concurrent reads (the default reader count) of up to 8 MiB, the largest
+  KV block the dispatcher already provides for (`cold_staging_buf_bytes`: a 64-token block,
+  per worker; 64 KiB in the measured deployment, ~2.25 MiB for Qwen3-8B) — which is 1.6% of
+  the servers' 2 GiB default pool and 0.1% of the 30 GiB measured cluster.
   `set_bounce_reserve(bytes)` overrides it, before `initialize` only; after, it is an error.
-  A separate allocation was rejected: on 1 GiB hugepages (this rig) a 16 MiB pool would cost
+  A separate allocation was rejected: on 1 GiB hugepages (this rig) a 32 MiB pool would cost
   a whole GiB, and a second region would need its own registration.
 * **Outside the cache.** Reserve space never appears in `capacity()`, `used()` or eviction
   tracking, so serving a peer can never evict a cached entry (FR-012, SC-005).
-* **Exhaustion is transient; oversize is not.** A lease that does not fit *now* is
+* **Exhaustion is transient; oversize is not.** A buffer that does not fit *now* is
   `NoSpace`: the endpoint releases the entry's pin and re-queues it, retrying when one of its
-  own leases or readers frees. That retry is guaranteed to come because the endpoint is the
-  reserve's only user — an invariant of the reserve, stated so it stays true. A lease that can
+  own buffers or readers frees. That retry is guaranteed to come because the endpoint is the
+  reserve's only user — an invariant of the reserve, stated so it stays true. A buffer that can
   **never** fit — larger than the reserve, no reserve, or a pool that is not DMA-capable (the
   `mmap` fallback without SPDK) — is `NeverFits`, and the entry is `Failed`: a configuration
   fault reported loudly, never retried and never passed off as a miss.

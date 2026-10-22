@@ -58,7 +58,7 @@ pub enum EntryOutcome {
     /// Served from the source's memory tier.
     HitMemoryTier,
     /// Served from the source's block tier, read by its dispatcher into a bounce
-    /// lease and written from there; never promoted.
+    /// buffer and written from there; never promoted.
     HitBlockTier,
     /// The source does not hold it, holds it at a different size, or cannot
     /// serve it in this build (no `spdk` feature and the entry is block-tier).
@@ -347,42 +347,42 @@ channels, and the memory tier, which owns the bounce reserve (research D15):
 ```rust
 /// A range of the bounce reserve holding one block-tier entry's bytes. Inside the
 /// memory tier's pool, so already DMA-able and RDMA-registered.
-pub struct BounceLease { pub ptr: *mut u8, pub len: u32 }
+pub struct BounceBuffer { pub ptr: *mut u8, pub len: u32 }
 
 pub enum BounceError {
-    /// No room in the reserve right now. Transient: retry after a lease returns.
+    /// No room in the reserve right now. Transient: retry after a buffer returns.
     NoSpace,
     /// Can never be satisfied: larger than the reserve, no reserve, or a pool that is
     /// not DMA-capable. The entry is `Failed`; retrying cannot help.
     NeverFits(String),
-    /// The device read failed. The lease has been returned.
+    /// The device read failed. The buffer has been returned.
     Io(String),
     NotInitialized(String),
 }
 
 // IDispatcher gains:
 /// Read the block-tier entry `key` at extent `offset`, `len` bytes, into a fresh bounce
-/// lease. The caller MUST hold a pin on `key` (its `BlockDevice{offset}` lookup) for the
+/// buffer. The caller MUST hold a pin on `key` (its `BlockDevice{offset}` lookup) for the
 /// duration of the call: the pin, not this method, keeps the extent from being freed. Never
 /// promotes, never touches the cache. Blocks until the read completes, however long that
 /// takes — there is no device timeout, because reclaiming a buffer the drive may still
 /// write is unsafe; a hung device surfaces as the requester's reply deadline.
-fn read_to_bounce(&self, key: CacheKey, offset: u64, len: u32) -> Result<BounceLease, BounceError>;
-/// Return a lease obtained from `read_to_bounce`, once nothing can still read it.
-fn release_bounce(&self, lease: BounceLease);
+fn read_to_bounce(&self, key: CacheKey, offset: u64, len: u32) -> Result<BounceBuffer, BounceError>;
+/// Return a buffer obtained from `read_to_bounce`, once nothing can still read it.
+fn release_bounce(&self, buf: BounceBuffer);
 
 // IMemoryTier gains:
-/// Override the bounce reserve (default 16 MiB, capped at pool_size / 8). Before
+/// Override the bounce reserve (default 32 MiB, capped at pool_size / 8). Before
 /// `initialize` only; afterwards an error.
 fn set_bounce_reserve(&self, bytes: usize) -> Result<(), MemoryTierError>;
 fn bounce_alloc(&self, len: u32) -> Result<*mut u8, BounceError>;
 fn bounce_free(&self, ptr: *mut u8, len: u32);
-/// (reserve bytes, bytes leased now)
+/// (reserve bytes, bytes allocated now)
 fn bounce_usage(&self) -> (usize, usize);
 ```
 
 The endpoint is the reserve's **only** user, which is what makes `NoSpace` safe to retry: it
-learns when space frees because it is the one returning leases. `dispatcher-p2p` answers
+learns when space frees because it is the one returning buffers. `dispatcher-p2p` answers
 `NeverFits` until it implements the method.
 
 ## Why `fetch` returns a context id

@@ -236,31 +236,31 @@ The certus-transfer-endpoint serves a peer an entry this node holds only on SSD.
 read the device itself — drive placement, LBA conversion, MDTS and channel discipline are the
 dispatcher's — and it must not promote, which would evict this node's own working set to serve
 someone else. It holds a pin on the entry (its `BlockDevice { offset }` lookup) and calls
-`read_to_bounce(key, offset, len)`; the dispatcher leases bounce space from the memory tier's
+`read_to_bounce(key, offset, len)`; the dispatcher buffers bounce space from the memory tier's
 reserve (outside the cache), reads the extent into it from the drive the key is placed on, and
-returns the lease. The caller writes from it and returns it with `release_bounce`.
+returns the buffer. The caller writes from it and returns it with `release_bounce`.
 
 **Why this priority**: block-tier serving is a completeness path — measured SSD hit rates are
 single-digit percent — but done in the wrong layer it reads the wrong drive and reports the
 result as a hit.
 
 **Independent Test**: two mock drives with distinct byte patterns; for a key placed on each,
-`read_to_bounce` returns a lease holding that drive's bytes at that LBA.
+`read_to_bounce` returns a buffer holding that drive's bytes at that LBA.
 
 **Acceptance Scenarios**:
 
 1. **Given** a pinned block-tier entry, **When** `read_to_bounce` is called, **Then** the
    extent is read from drive `drive_index(key, N)` at LBA `offset / block_size`, segmented by
-   the drive's maximum transfer, into a fresh lease; nothing is promoted and the cache is
+   the drive's maximum transfer, into a fresh buffer; nothing is promoted and the cache is
    untouched.
 2. **Given** the reserve is full, **When** `read_to_bounce` is called, **Then** it returns
    `NoSpace` without issuing a read; **given** `len` exceeds what the reserve can ever hold,
    **Then** `NeverFits`.
-3. **Given** a segment fails, **When** other segments are still reading into the lease,
-   **Then** the call waits for all of them, frees the lease, and returns `Io`.
+3. **Given** a segment fails, **When** other segments are still reading into the buffer,
+   **Then** the call waits for all of them, frees the buffer, and returns `Io`.
 4. **Given** a hung drive, **When** `read_to_bounce` is waiting, **Then** it keeps waiting —
    there is no device timeout, because a timed-out read is forgotten while the drive may still
-   write the lease.
+   write the buffer.
 
 ---
 
@@ -401,7 +401,7 @@ result as a hit.
 
   This complements the read-path staging fallback (FR-053): together they ensure memory-tier saturation degrades to an uncached serve rather than a fatal `AllocationFailed` — on the store path and the load path respectively.
 
-- **FR-062**: `read_to_bounce(key, offset, len)` MUST read a block-tier entry into a lease from
+- **FR-062**: `read_to_bounce(key, offset, len)` MUST read a block-tier entry into a buffer from
   `IMemoryTier::bounce_alloc`, for serving a peer, under these rules:
   - The caller holds the entry's pin for the whole call; the method neither takes nor releases
     one. It MUST NOT promote and MUST NOT touch the cache or the dispatch map.
@@ -409,16 +409,16 @@ result as a hit.
     LBA `offset / block_size`, `len` rounded up to the block size, segmented by the drive's
     maximum transfer, over a channel checked out of that drive's `ChannelPool`.
   - Reads pass `BOUNCE_READ_TIMEOUT_MS` (`u32::MAX` ms), a timeout that cannot fire: the
-    actor's timeout forgets an operation the drive may still be writing, and freeing a lease
+    actor's timeout forgets an operation the drive may still be writing, and freeing a buffer
     then would let a late read land in another entry's bytes. A hung drive surfaces as the
     requesting peer's own reply deadline, by design.
   - Like FR-054, it drains every submitted read before returning, even after a failure. A
-    settled failure frees the lease and returns `Io`. A read the actor ended without its
-    completion (a timeout, or an error ahead of a controller reset) leaves the lease
+    settled failure frees the buffer and returns `Io`. A read the actor ended without its
+    completion (a timeout, or an error ahead of a controller reset) leaves the buffer
     **leaked**, logged as an error, never freed.
   - `NoSpace` and `NeverFits` from the memory tier pass through, before any read is issued;
     no drives is `NeverFits`, an uninitialized dispatcher `NotInitialized`.
-  `release_bounce(lease)` forwards to `IMemoryTier::bounce_free`.
+  `release_bounce(buf)` forwards to `IMemoryTier::bounce_free`.
 - **FR-061** *(Sync 2026-09-21 — backfilled; the multi-drive scatter-gather cold path shipped with no requirement. Commit `6f35b13a` "optimizer iter-005: scatter-gather")*: The pipeline module MUST provide a multi-drive scatter-gather cold-read path, `scatter_gather_multi_drive_zero_copy(gpu, streams: &[GpuStream; 2], drive_works: &[DriveWork], chunk_size, max_queue_depth, metrics) -> Vec<Vec<Result<(), DispatcherError>>>`, that `batch_lookup` uses to serve cold (BlockDevice) entries spread across multiple data drives. Each `DriveWork { channels: &ClientChannels, drive: &dyn IBlockDevice, jobs: &[ColdReadJob] }` descriptor names one drive's checked-out client channel and its cold-read jobs. The function MUST:
   - Segment every job's read against its drive's block size (respecting MDTS per FR-019) and, on the **caller thread**, run a **single multiplexed poll loop** that fans NVMe reads out to all drives simultaneously and fans completions in — there are NO spawned per-drive worker threads and NO persistent `ColdReadPool` (FR-044, retired).
   - Distribute the supplied `max_queue_depth` (128 from `batch_lookup`) **proportionally across drives by segment count**, so a drive holding more data gets a deeper share of the shared in-flight budget.
@@ -461,7 +461,7 @@ result as a hit.
 - **SC-016** *(Sync 2026-08-20 — backfilled; covers FR-057)*: With mock block-device and extent-manager factories injected via `set_block_device_factory` / `set_extent_manager_factory` and a `PipelineMetrics` recorder installed via `set_pipeline_metrics`, a test can exercise dispatcher data-path operations and observe their pipeline timings without SPDK/NVMe hardware; when no factory is injected the dispatcher uses its default hard-coded implementations.
 - **SC-018** *(covers FR-062)*: Over in-memory mock drives: a key on each of two drives reads
   that drive's bytes at its LBA; an entry larger than the maximum transfer arrives whole from
-  consecutive segments; a failed segment frees the lease only after its held siblings
+  consecutive segments; a failed segment frees the buffer only after its held siblings
   complete; `NoSpace`/`NeverFits` issue no read; eight concurrent readers on one drive each
   read their own bytes over at most eight pooled channels; and the bounce timeout cannot
   overflow the actor's deadline arithmetic.

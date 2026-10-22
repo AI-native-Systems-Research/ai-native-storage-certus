@@ -4,14 +4,14 @@
 //!
 //! The endpoint never addresses a block device (research D13). It hands a
 //! pinned `BlockDevice { offset }` entry to its source, which reads the extent
-//! into a lease from the memory tier's bounce reserve — inside the pool this
+//! into a buffer from the memory tier's bounce reserve — inside the pool this
 //! endpoint already registered, so the write goes out from it like any
 //! memory-tier hit (D15). Serving never promotes, so a peer cannot evict the
 //! source's own working set (FR-012, D8).
 //!
 //! A read blocks for as long as the device takes — there is no device timeout,
 //! by decision: a timed-out read is forgotten while the drive may still write
-//! its lease. So reads run on `block_readers` threads of their own, never the
+//! its buffer. So reads run on `block_readers` threads of their own, never the
 //! endpoint thread, and the endpoint keeps posting memory-tier writes while
 //! they run (FR-022). The pin of an entry being read stays on the endpoint
 //! thread, in its read table, and is released when the read's result comes
@@ -21,16 +21,16 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
-use interfaces::{BounceError, BounceLease, CacheKey};
+use interfaces::{BounceBuffer, BounceError, CacheKey};
 
 /// Where block-tier entries are read from: the dispatcher in an `spdk` build,
 /// a test double in tests. Called from reader threads, never the endpoint's.
 pub(crate) trait BlockSource: Send + Sync {
     /// Read `len` bytes of the pinned entry `key` at extent `offset` into a
-    /// fresh bounce lease. Blocks until the read completes.
-    fn read(&self, key: CacheKey, offset: u64, len: u32) -> Result<BounceLease, BounceError>;
-    /// Return a lease once nothing can still read it.
-    fn release(&self, lease: BounceLease);
+    /// fresh bounce buffer. Blocks until the read completes.
+    fn read(&self, key: CacheKey, offset: u64, len: u32) -> Result<BounceBuffer, BounceError>;
+    /// Return a buffer once nothing can still read it.
+    fn release(&self, buf: BounceBuffer);
 }
 
 /// The `spdk` build's source: the bound dispatcher.
@@ -39,11 +39,11 @@ pub(crate) struct DispatcherSource(pub(crate) Arc<dyn interfaces::IDispatcher + 
 
 #[cfg(feature = "spdk")]
 impl BlockSource for DispatcherSource {
-    fn read(&self, key: CacheKey, offset: u64, len: u32) -> Result<BounceLease, BounceError> {
+    fn read(&self, key: CacheKey, offset: u64, len: u32) -> Result<BounceBuffer, BounceError> {
         self.0.read_to_bounce(key, offset, len)
     }
-    fn release(&self, lease: BounceLease) {
-        self.0.release_bounce(lease)
+    fn release(&self, buf: BounceBuffer) {
+        self.0.release_bounce(buf)
     }
 }
 
@@ -56,7 +56,7 @@ struct Job {
 }
 
 /// What a reader hands back: the job's id and the read's result.
-pub(crate) type ReadDone = (u64, Result<BounceLease, BounceError>);
+pub(crate) type ReadDone = (u64, Result<BounceBuffer, BounceError>);
 
 /// The reader threads, and the channels to and from them.
 pub(crate) struct Readers {
@@ -68,11 +68,11 @@ pub(crate) struct Readers {
     count: usize,
     busy: usize,
     /// A read answered `NoSpace` and no space has been freed since. The
-    /// endpoint is the reserve's only user, so only its own lease returning
+    /// endpoint is the reserve's only user, so only its own buffer returning
     /// can make room: retrying sooner would only spin lookups.
     full: bool,
     /// Frees so far. A `NoSpace` is believed only if nothing was freed after
-    /// its read was submitted: otherwise the last lease can come back before
+    /// its read was submitted: otherwise the last buffer can come back before
     /// the `NoSpace` it answers is collected, nothing clears `full` again, and
     /// every deferred entry waits forever.
     frees: u64,
@@ -97,7 +97,7 @@ impl Readers {
                         let Ok(job) = job else {
                             return; // the endpoint dropped its sender: shut down
                         };
-                        // A panic here would strand the read's pin and lease,
+                        // A panic here would strand the read's pin and buffer,
                         // and shutdown waits for every read, so it is fatal.
                         let r = crate::endpoint::fatal_on_panic("block-tier read", || {
                             source.read(job.key, job.offset, job.len)
@@ -144,7 +144,7 @@ impl Readers {
     }
 
     /// Bounce space was freed other than through [`release`](Self::release):
-    /// a failed read's lease, which the source frees itself.
+    /// a failed read's buffer, which the source frees itself.
     pub(crate) fn reserve_freed(&mut self) {
         self.full = false;
         self.frees += 1;
@@ -193,9 +193,9 @@ impl Readers {
         r
     }
 
-    /// Return a lease to the source; there is room again.
-    pub(crate) fn release(&mut self, lease: BounceLease) {
-        self.source.release(lease);
+    /// Return a buffer to the source; there is room again.
+    pub(crate) fn release(&mut self, buf: BounceBuffer) {
+        self.source.release(buf);
         self.full = false;
         self.frees += 1;
     }

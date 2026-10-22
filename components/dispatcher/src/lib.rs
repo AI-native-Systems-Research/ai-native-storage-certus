@@ -4125,7 +4125,7 @@ impl IDispatcher for DispatcherComponent {
         key: CacheKey,
         offset: u64,
         len: u32,
-    ) -> Result<interfaces::BounceLease, interfaces::BounceError> {
+    ) -> Result<interfaces::BounceBuffer, interfaces::BounceError> {
         use interfaces::BounceError;
         self.ensure_initialized()
             .map_err(|e| BounceError::NotInitialized(e.to_string()))?;
@@ -4137,7 +4137,7 @@ impl IDispatcher for DispatcherComponent {
         if drives.is_empty() {
             return Err(BounceError::NeverFits("no data drives".into()));
         }
-        let lease = mt.bounce_alloc(len)?;
+        let buf = mt.bounce_alloc(len)?;
         // The same placement hash as the write path: the extent is on this
         // drive, and reading another drive's offset reads someone else's data.
         let drive = &drives[Self::drive_index(key, drives.len())];
@@ -4148,7 +4148,7 @@ impl IDispatcher for DispatcherComponent {
             .checkout()
             .map_err(|e| pipeline::BounceReadError::Settled(e.to_string()))
             .and_then(|channels| {
-                // SAFETY: the lease is `len` bytes rounded up to 4 KiB of the
+                // SAFETY: the buffer is `len` bytes rounded up to 4 KiB of the
                 // memory tier's DMA-capable pool (bounce_alloc refuses
                 // otherwise), held by nobody else until it is freed; the
                 // caller's pin keeps the extent at `offset` from being reused.
@@ -4156,7 +4156,7 @@ impl IDispatcher for DispatcherComponent {
                     pipeline::read_into_bounce(
                         &*drive.block_dev_iface,
                         channels.channels(),
-                        lease.ptr,
+                        buf.ptr,
                         offset / block_size,
                         len as usize,
                         chunk_size,
@@ -4165,20 +4165,20 @@ impl IDispatcher for DispatcherComponent {
                 }
             });
         match read {
-            Ok(()) => Ok(lease),
+            Ok(()) => Ok(buf),
             Err(pipeline::BounceReadError::Settled(e)) => {
-                mt.bounce_free(lease);
+                mt.bounce_free(buf);
                 Err(BounceError::Io(format!(
                     "key {key} at offset {offset}: {e}"
                 )))
             }
             Err(pipeline::BounceReadError::Unsettled(e)) => {
                 // Leaked, never freed: the drive may still be writing it, and a
-                // freed lease is handed to the next entry. The reserve shrinks
+                // freed buf is handed to the next entry. The reserve shrinks
                 // by it for the life of the process, which is loud enough.
                 self.log_error(&format!(
                     "dispatcher: read_to_bounce key {key}: {e}; leaking its {len}-byte \
-                     bounce lease, since the drive may still write it"
+                     bounce buffer, since the drive may still write it"
                 ));
                 Err(BounceError::Io(format!(
                     "key {key} at offset {offset}: {e}"
@@ -4187,9 +4187,9 @@ impl IDispatcher for DispatcherComponent {
         }
     }
 
-    fn release_bounce(&self, lease: interfaces::BounceLease) {
+    fn release_bounce(&self, buf: interfaces::BounceBuffer) {
         if let Ok(mt) = self.memory_tier.get() {
-            mt.bounce_free(lease);
+            mt.bounce_free(buf);
         }
     }
 }
@@ -4242,13 +4242,13 @@ mod tests {
         capacity: usize,
         fail_insert: bool,
         /// A bounce reserve for `read_to_bounce`, if the test gives one:
-        /// fixed-size leases, so a test can exhaust it exactly.
+        /// fixed-size buffers, so a test can exhaust it exactly.
         bounce: Option<MockBounce>,
     }
 
     struct MockBounce {
         mem: Vec<u8>,
-        lease_bytes: usize,
+        buffer_bytes: usize,
         free: Vec<usize>,
     }
 
@@ -4266,13 +4266,13 @@ mod tests {
             }
         }
 
-        /// A tier with `leases` bounce leases of `lease_bytes` each.
-        fn with_bounce(capacity: usize, leases: usize, lease_bytes: usize) -> Self {
+        /// A tier with `buffers` bounce buffers of `buffer_bytes` each.
+        fn with_bounce(capacity: usize, buffers: usize, buffer_bytes: usize) -> Self {
             let mt = Self::new(capacity);
             mt.inner.lock().unwrap().bounce = Some(MockBounce {
-                mem: vec![0u8; leases * lease_bytes],
-                lease_bytes,
-                free: (0..leases).rev().collect(),
+                mem: vec![0u8; buffers * buffer_bytes],
+                buffer_bytes,
+                free: (0..buffers).rev().collect(),
             });
             mt
         }
@@ -4412,33 +4412,33 @@ mod tests {
         fn bounce_alloc(
             &self,
             len: u32,
-        ) -> Result<interfaces::BounceLease, interfaces::BounceError> {
+        ) -> Result<interfaces::BounceBuffer, interfaces::BounceError> {
             let mut inner = self.inner.lock().unwrap();
             let Some(b) = inner.bounce.as_mut() else {
                 return Err(interfaces::BounceError::NeverFits(
                     "no bounce reserve".into(),
                 ));
             };
-            if len as usize > b.lease_bytes {
+            if len as usize > b.buffer_bytes {
                 return Err(interfaces::BounceError::NeverFits(
-                    "larger than a lease".into(),
+                    "larger than a buffer".into(),
                 ));
             }
             let i = b.free.pop().ok_or(interfaces::BounceError::NoSpace)?;
-            let ptr = b.mem[i * b.lease_bytes..].as_mut_ptr();
-            Ok(interfaces::BounceLease { ptr, len })
+            let ptr = b.mem[i * b.buffer_bytes..].as_mut_ptr();
+            Ok(interfaces::BounceBuffer { ptr, len })
         }
-        fn bounce_free(&self, lease: interfaces::BounceLease) {
+        fn bounce_free(&self, buf: interfaces::BounceBuffer) {
             let mut inner = self.inner.lock().unwrap();
-            let b = inner.bounce.as_mut().expect("a lease implies a reserve");
-            let i = (lease.ptr as usize - b.mem.as_ptr() as usize) / b.lease_bytes;
-            assert!(!b.free.contains(&i), "bounce lease freed twice");
+            let b = inner.bounce.as_mut().expect("a buffer implies a reserve");
+            let i = (buf.ptr as usize - b.mem.as_ptr() as usize) / b.buffer_bytes;
+            assert!(!b.free.contains(&i), "bounce buffer freed twice");
             b.free.push(i);
         }
         fn bounce_usage(&self) -> (usize, usize) {
             let inner = self.inner.lock().unwrap();
             inner.bounce.as_ref().map_or((0, 0), |b| {
-                (b.mem.len(), b.mem.len() - b.free.len() * b.lease_bytes)
+                (b.mem.len(), b.mem.len() - b.free.len() * b.buffer_bytes)
             })
         }
     }
@@ -7649,17 +7649,17 @@ mod tests {
     }
 
     /// An initialized dispatcher whose data drives are `disks`, in order, and
-    /// whose memory tier has `leases` bounce leases of `lease_bytes`.
+    /// whose memory tier has `buffers` bounce buffers of `buffer_bytes`.
     fn bounce_dispatcher(
         disks: &[Arc<BounceDisk>],
-        leases: usize,
-        lease_bytes: usize,
+        buffers: usize,
+        buffer_bytes: usize,
     ) -> (Arc<DispatcherComponent>, Arc<MockMemoryTier>) {
         let (c, _) = setup_initialized();
         let mt = Arc::new(MockMemoryTier::with_bounce(
             1024 * 1024,
-            leases,
-            lease_bytes,
+            buffers,
+            buffer_bytes,
         ));
         c.memory_tier.disconnect().ok();
         c.memory_tier
@@ -7686,7 +7686,7 @@ mod tests {
     }
 
     /// The key-to-drive placement is the write path's: two drives, a key per
-    /// drive, each read from its own drive at its own LBA, into a lease.
+    /// drive, each read from its own drive at its own LBA, into a buffer.
     #[test]
     fn read_to_bounce_reads_the_drive_the_key_is_on() {
         let disks = [
@@ -7702,39 +7702,39 @@ mod tests {
         };
         for drive in 0..2 {
             let key = on(drive);
-            let lease = d.read_to_bounce(key, 3 * 4096, 4096).unwrap();
-            // SAFETY: the lease is ours until released.
-            let got = unsafe { std::slice::from_raw_parts(lease.ptr, 4096) };
+            let buf = d.read_to_bounce(key, 3 * 4096, 4096).unwrap();
+            // SAFETY: the buffer is ours until released.
+            let got = unsafe { std::slice::from_raw_parts(buf.ptr, 4096) };
             let want = [0x10u8, 0x80][drive] + 3;
             assert!(got.iter().all(|&b| b == want), "drive {drive}, page 3");
             assert_eq!(*disks[drive].lbas.lock().unwrap(), [3]);
-            d.release_bounce(lease);
+            d.release_bounce(buf);
         }
-        assert_eq!(mt.bounce_free_count(), 4, "every lease returned");
+        assert_eq!(mt.bounce_free_count(), 4, "every buffer returned");
     }
 
     /// An entry larger than the drive's maximum transfer is read in segments,
-    /// at consecutive LBAs, into one lease; a length short of a page is read
+    /// at consecutive LBAs, into one buffer; a length short of a page is read
     /// as a whole page.
     #[test]
     fn read_to_bounce_segments_by_the_maximum_transfer() {
         let disks = [pattern_disk(16, 0, 8192)];
         let (c, _mt) = bounce_dispatcher(&disks, 1, 16384);
         let d = query_interface!(c, IDispatcher).unwrap();
-        let lease = d.read_to_bounce(1, 4 * 4096, 3 * 4096 + 100).unwrap();
-        assert_eq!(lease.len, 3 * 4096 + 100);
+        let buf = d.read_to_bounce(1, 4 * 4096, 3 * 4096 + 100).unwrap();
+        assert_eq!(buf.len, 3 * 4096 + 100);
         let mut lbas = disks[0].lbas.lock().unwrap().clone();
         lbas.sort();
         assert_eq!(lbas, [4, 6], "two segments of at most 8 KiB, four pages");
-        // SAFETY: the lease is ours until released.
-        let got = unsafe { std::slice::from_raw_parts(lease.ptr, 4 * 4096) };
+        // SAFETY: the buffer is ours until released.
+        let got = unsafe { std::slice::from_raw_parts(buf.ptr, 4 * 4096) };
         for (i, page) in got.chunks(4096).enumerate() {
             assert!(page.iter().all(|&b| b == 4 + i as u8), "page {i}");
         }
-        d.release_bounce(lease);
+        d.release_bounce(buf);
     }
 
-    /// A failed read frees its lease and reports Io; nothing is promoted and
+    /// A failed read frees its buffer and reports Io; nothing is promoted and
     /// the cache is untouched.
     #[test]
     fn a_failed_read_returns_its_lease() {
@@ -7744,7 +7744,7 @@ mod tests {
         let d = query_interface!(c, IDispatcher).unwrap();
         let r = d.read_to_bounce(1, 4096, 3 * 4096);
         assert!(matches!(r, Err(interfaces::BounceError::Io(_))), "{r:?}");
-        assert_eq!(mt.bounce_free_count(), 1, "the lease came back");
+        assert_eq!(mt.bounce_free_count(), 1, "the buffer came back");
         assert_eq!(
             disks[0].in_flight.load(Ordering::SeqCst),
             0,
@@ -7754,8 +7754,8 @@ mod tests {
     }
 
     /// A failure does not return while other segments are still reading into
-    /// the lease: segment 0 fails at once, the other three are held, and the
-    /// call waits for them before it frees the lease.
+    /// the buffer: segment 0 fails at once, the other three are held, and the
+    /// call waits for them before it frees the buffer.
     #[test]
     fn a_failed_read_waits_for_its_siblings_before_freeing() {
         let disks = [pattern_disk(16, 0, 4096)];
@@ -7779,7 +7779,7 @@ mod tests {
                 .is_err(),
             "returned with reads outstanding"
         );
-        assert_eq!(mt.bounce_free_count(), 0, "the lease is still the read's");
+        assert_eq!(mt.bounce_free_count(), 0, "the buffer is still the read's");
         disks[0].release();
         let r = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
         assert!(matches!(r, Err(interfaces::BounceError::Io(_))));
@@ -7808,7 +7808,7 @@ mod tests {
         assert!(d.read_to_bounce(2, 0, 4096).is_ok(), "room again");
     }
 
-    /// No drives, no reserve, not initialized: never a lease.
+    /// No drives, no reserve, not initialized: never a buffer.
     #[test]
     fn read_to_bounce_refuses_what_it_cannot_serve() {
         let (c, _) = setup_initialized();
@@ -7839,12 +7839,12 @@ mod tests {
                 let d = Arc::clone(&d);
                 thread::spawn(move || {
                     for _ in 0..20 {
-                        let lease = d.read_to_bounce(1, i * 2 * 4096, 8192).unwrap();
-                        // SAFETY: the lease is ours until released.
-                        let got = unsafe { std::slice::from_raw_parts(lease.ptr, 8192) };
+                        let buf = d.read_to_bounce(1, i * 2 * 4096, 8192).unwrap();
+                        // SAFETY: the buffer is ours until released.
+                        let got = unsafe { std::slice::from_raw_parts(buf.ptr, 8192) };
                         assert!(got[..4096].iter().all(|&b| b == (2 * i) as u8));
                         assert!(got[4096..].iter().all(|&b| b == (2 * i + 1) as u8));
-                        d.release_bounce(lease);
+                        d.release_bounce(buf);
                     }
                 })
             })
@@ -7861,7 +7861,7 @@ mod tests {
     }
 
     /// The bounce read's timeout must never fire: the actor would forget a read
-    /// the drive may still be writing into a lease.
+    /// the drive may still be writing into a buffer.
     #[test]
     fn the_bounce_read_timeout_cannot_fire_or_overflow() {
         assert!(pipeline::BOUNCE_READ_TIMEOUT_MS >= 30 * 24 * 3600 * 1000);

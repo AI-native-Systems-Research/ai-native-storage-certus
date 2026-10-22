@@ -105,18 +105,18 @@ define_interface! {
         fn touch(&self, key: CacheKey) -> Result<(), DispatcherError>;
 
         /// Read a pinned block-tier entry, `len` bytes at extent `offset`, into a
-        /// fresh bounce lease from the memory tier, for serving a peer (FR-062).
+        /// fresh bounce buffer from the memory tier, for serving a peer (FR-062).
         /// The caller holds the pin for the call. Never promotes, never touches
         /// the cache. Blocks until the read completes — no device timeout.
         ///
         /// # Errors
         /// `NoSpace` (reserve full now), `NeverFits` (never can be), `Io` (the
-        /// read failed; the lease has been freed), `NotInitialized`.
+        /// read failed; the buffer has been freed), `NotInitialized`.
         fn read_to_bounce(&self, key: CacheKey, offset: u64, len: u32)
-            -> Result<BounceLease, BounceError>;
+            -> Result<BounceBuffer, BounceError>;
 
-        /// Free a lease from `read_to_bounce` once nothing can still read it.
-        fn release_bounce(&self, lease: BounceLease);
+        /// Free a buffer from `read_to_bounce` once nothing can still read it.
+        fn release_bounce(&self, buf: BounceBuffer);
     }
 }
 ```

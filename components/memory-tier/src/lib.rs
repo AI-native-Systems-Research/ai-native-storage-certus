@@ -24,7 +24,7 @@ use std::sync::RwLock;
 
 use component_framework::define_component;
 use interfaces::{
-    BlockSemantics, BounceError, BounceLease, CacheKey, EvictionHandle, IEvictionPolicy, ILogger,
+    BlockSemantics, BounceBuffer, BounceError, CacheKey, EvictionHandle, IEvictionPolicy, ILogger,
     IMemoryTier, MemoryTierError, MemoryTierTelemetrySnapshot, PoolId,
 };
 
@@ -78,12 +78,12 @@ struct Pool {
     slots: HashMap<CacheKey, Slot>,
 }
 
-/// The bounce reserve: the top of the pool, outside the cache, leased to
+/// The bounce reserve: the top of the pool, outside the cache, allocated to
 /// serve block-tier entries to peers (see `IMemoryTier::bounce_alloc`).
 struct Bounce {
     /// Offsets relative to the reserve's start.
     allocator: FreeList,
-    /// Live leases, offset → length asked for: `bounce_free` checks against it,
+    /// Live buffers, offset → length asked for: `bounce_free` checks against it,
     /// because a wrong free would corrupt the free list silently.
     live: HashMap<usize, u32>,
 }
@@ -100,7 +100,7 @@ struct MemoryTierState {
     pool: RwLock<Pool>,
     initialized: AtomicBool,
     spdk_allocated: bool,
-    /// Tests stand in for SPDK: lets the bounce reserve lease from an `mmap`
+    /// Tests stand in for SPDK: lets the bounce reserve allocate from an `mmap`
     /// pool, which no device reads into in a unit test anyway.
     #[cfg(test)]
     pretend_dma: bool,
@@ -681,7 +681,7 @@ impl IMemoryTier for MemoryTierComponent {
         Ok(())
     }
 
-    fn bounce_alloc(&self, len: u32) -> Result<BounceLease, BounceError> {
+    fn bounce_alloc(&self, len: u32) -> Result<BounceBuffer, BounceError> {
         let state = self.state.read().unwrap();
         if !state.initialized.load(Ordering::Acquire) {
             return Err(BounceError::NotInitialized("pool not initialized".into()));
@@ -693,7 +693,7 @@ impl IMemoryTier for MemoryTierComponent {
         let dma = state.spdk_allocated;
         if !dma {
             // The mmap fallback: a device cannot DMA into it, so a read into a
-            // lease could never be done in place. Not transient.
+            // buffer could never be done in place. Not transient.
             return Err(BounceError::NeverFits(
                 "the pool is not DMA-capable (no SPDK environment)".into(),
             ));
@@ -710,23 +710,23 @@ impl IMemoryTier for MemoryTierComponent {
             .allocate(len as usize)
             .ok_or(BounceError::NoSpace)?;
         bounce.live.insert(off, len);
-        // SAFETY: `off + need <= reserve`, so the lease lies inside the
+        // SAFETY: `off + need <= reserve`, so the buffer lies inside the
         // reserve, which is the top `reserve` bytes of the pool allocation.
         let ptr = unsafe { state.pool_ptr.add(state.cache_size + off) };
-        Ok(BounceLease { ptr, len })
+        Ok(BounceBuffer { ptr, len })
     }
 
-    fn bounce_free(&self, lease: BounceLease) {
+    fn bounce_free(&self, buf: BounceBuffer) {
         let state = self.state.read().unwrap();
         let base = state.pool_ptr as usize + state.cache_size;
-        let off = (lease.ptr as usize).wrapping_sub(base);
+        let off = (buf.ptr as usize).wrapping_sub(base);
         let mut bounce = state.bounce.lock().unwrap();
         match bounce.live.remove(&off) {
-            Some(len) if len == lease.len => bounce.allocator.deallocate(off, len as usize),
-            // Loud: freeing what was not leased, or with another length, would
-            // hand bytes in use to the next lease.
+            Some(len) if len == buf.len => bounce.allocator.deallocate(off, len as usize),
+            // Loud: freeing what was not allocated, or with another length, would
+            // hand bytes in use to the next buffer.
             other => {
-                panic!("bounce_free of {lease:?}, which is not a live lease (found {other:?})")
+                panic!("bounce_free of {buf:?}, which is not a live buffer (found {other:?})")
             }
         }
     }
@@ -914,7 +914,7 @@ mod tests {
 
     #[test]
     fn the_default_reserve_is_taken_quietly_and_capped() {
-        // A 1 GiB pool: the full 16 MiB default.
+        // A 1 GiB pool: the full 32 MiB default.
         let mt = query_interface!(fresh(), IMemoryTier).unwrap();
         mt.initialize(1 << 30, None).unwrap();
         assert_eq!(mt.bounce_usage(), (interfaces::DEFAULT_BOUNCE_RESERVE, 0));
@@ -950,7 +950,7 @@ mod tests {
         ));
     }
 
-    /// FR-012: a full cache cannot reach the reserve, and leasing never evicts.
+    /// FR-012: a full cache cannot reach the reserve, and allocating never evicts.
     #[test]
     fn the_cache_and_the_reserve_never_share_bytes() {
         let c = setup();
@@ -979,21 +979,21 @@ mod tests {
     fn leases_are_transient_until_freed_and_coalesce() {
         let mt = query_interface!(setup(), IMemoryTier).unwrap();
         // 8 pages of reserve.
-        let leases: Vec<_> = (0..4).map(|_| mt.bounce_alloc(2 * 4096).unwrap()).collect();
+        let buffers: Vec<_> = (0..4).map(|_| mt.bounce_alloc(2 * 4096).unwrap()).collect();
         assert_eq!(mt.bounce_alloc(1), Err(BounceError::NoSpace), "full now");
-        mt.bounce_free(leases[1]);
-        mt.bounce_free(leases[2]);
-        // Two freed neighbours coalesce: a 4-page lease fits again.
+        mt.bounce_free(buffers[1]);
+        mt.bounce_free(buffers[2]);
+        // Two freed neighbours coalesce: a 4-page buffer fits again.
         let big = mt.bounce_alloc(4 * 4096).unwrap();
-        assert_eq!(big.ptr, leases[1].ptr);
+        assert_eq!(big.ptr, buffers[1].ptr);
         mt.bounce_free(big);
-        mt.bounce_free(leases[0]);
-        mt.bounce_free(leases[3]);
+        mt.bounce_free(buffers[0]);
+        mt.bounce_free(buffers[3]);
         assert_eq!(mt.bounce_usage().1, 0);
         assert!(mt.bounce_alloc(8 * 4096).is_ok(), "all of it, in one");
     }
 
-    /// Without SPDK the pool is mmap'd and no device can DMA into a lease.
+    /// Without SPDK the pool is mmap'd and no device can DMA into a buffer.
     #[test]
     fn a_pool_that_is_not_dma_capable_never_fits() {
         let c = fresh();
@@ -1022,11 +1022,11 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "not a live lease")]
+    #[should_panic(expected = "not a live buffer")]
     fn freeing_with_the_wrong_length_is_loud() {
         let mt = query_interface!(setup(), IMemoryTier).unwrap();
         let l = mt.bounce_alloc(4096).unwrap();
-        mt.bounce_free(BounceLease { len: 8192, ..l });
+        mt.bounce_free(BounceBuffer { len: 8192, ..l });
     }
 
     #[test]
@@ -1036,7 +1036,7 @@ mod tests {
         mt.insert(1, 4096).unwrap();
         mt.clear().unwrap();
         assert_eq!(mt.capacity(), 56 * 4096);
-        assert_eq!(mt.bounce_usage().1, 4096, "a lease survives clear");
+        assert_eq!(mt.bounce_usage().1, 4096, "a buffer survives clear");
         mt.bounce_free(l);
     }
 }

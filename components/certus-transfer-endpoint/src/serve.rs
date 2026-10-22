@@ -12,7 +12,7 @@
 //! | `MismatchSize` | no | `Miss`; **release nothing** (not returned by the current map, kept in case) |
 //! | `MemoryTier`, size matches, inside the pool | **yes** | post a write; the pin travels in the slab and is released by the reaper that owns its `wr_id` |
 //! | `MemoryTier`, wrong size or outside the pool | **yes** | `Miss`; **release it now** |
-//! | `BlockDevice`, a block source bound (`spdk`) | **yes** | read it: the pin waits in the read table while the dispatcher reads the extent into a bounce lease, and is released when the read finishes — *before* the write is posted; the slab then carries the lease |
+//! | `BlockDevice`, a block source bound (`spdk`) | **yes** | read it: the pin waits in the read table while the dispatcher reads the extent into a bounce buffer, and is released when the read finishes — *before* the write is posted; the slab then carries the buffer |
 //! | `BlockDevice`, no block source | **yes** | `Miss`; **release it now** |
 //! | `Err(..)` (e.g. a 2 s writer timeout) | no | `Failed`; release nothing |
 //!
@@ -41,7 +41,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 use interfaces::{
-    BounceLease, CacheKey, EntryOutcome, FetchCompletion, IDispatchMap, LookupResult, RemoteRegion,
+    BounceBuffer, CacheKey, EntryOutcome, FetchCompletion, IDispatchMap, LookupResult, RemoteRegion,
 };
 
 use crate::connection::transport::SendOp;
@@ -207,9 +207,9 @@ pub(crate) fn resolve(
 pub(crate) enum Hold {
     /// A memory-tier entry: its pin, released when the write completes.
     Pin(Pin),
-    /// A block-tier entry, already read: the bounce lease it was read into,
+    /// A block-tier entry, already read: the bounce buffer it was read into,
     /// returned when the write completes. Its pin was released after the read.
-    Lease(BounceLease),
+    Buffer(BounceBuffer),
 }
 
 /// What a posted write carries in its slab slot until the reaper frees it.
@@ -235,10 +235,10 @@ pub(crate) struct Push {
     /// Entries not yet looked up, in request order.
     pub(crate) pending: VecDeque<(usize, CacheKey, RemoteRegion)>,
     /// Block-tier entries put back for want of a free reader or bounce space,
-    /// their pins released; looked up afresh when a reader or lease frees.
+    /// their pins released; looked up afresh when a reader or buffer frees.
     pub(crate) deferred: VecDeque<(usize, CacheKey, RemoteRegion)>,
-    /// Block-tier entries read into a lease and waiting for a send credit.
-    pub(crate) ready: VecDeque<(usize, BounceLease, RemoteRegion)>,
+    /// Block-tier entries read into a buffer and waiting for a send credit.
+    pub(crate) ready: VecDeque<(usize, BounceBuffer, RemoteRegion)>,
     /// One outcome per item; `None` until decided.
     pub(crate) outcomes: Vec<Option<EntryOutcome>>,
     /// Writes posted and not yet completed.
