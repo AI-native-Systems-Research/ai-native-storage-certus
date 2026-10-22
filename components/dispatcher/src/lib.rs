@@ -7728,6 +7728,7 @@ mod tests {
             d.release_bounce(buf);
         }
         assert_eq!(mt.bounce_free_count(), 4, "every buffer returned");
+        assert_eq!(mt.used(), 0, "serving promotes nothing into the cache");
     }
 
     /// An entry larger than the drive's maximum transfer is read in segments,
@@ -7929,7 +7930,7 @@ mod tests {
     /// the drive may still be writing into a buffer.
     #[test]
     fn the_bounce_read_timeout_cannot_fire_or_overflow() {
-        assert!(pipeline::BOUNCE_READ_TIMEOUT_MS >= 30 * 24 * 3600 * 1000);
+        const _: () = assert!(pipeline::BOUNCE_READ_TIMEOUT_MS >= 30 * 24 * 3600 * 1000);
         // The actor computes start + ms * ticks_per_ms in u64; a 10 GHz TSC
         // must not overflow it.
         assert!(pipeline::BOUNCE_READ_TIMEOUT_MS
