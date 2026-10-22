@@ -51,17 +51,27 @@ const BACKLOG: i32 = 64;
 const RETRY_COUNT: u8 = 7;
 
 /// RNR retries: 7 is RC's "retry forever". The receive partition (FR-026) is
-/// what keeps a receive posted for every reply, so an RNR stall means only
-/// that one is about to be; failing on it instead would turn a moment's
-/// back-pressure into a teardown.
+/// what keeps a receive posted for every message, and a link's first receives
+/// are posted before the peer can send (`connect_posting`, `accept_posting`),
+/// so an RNR stall means only that a re-post is about to land; failing on it
+/// instead would turn a moment's back-pressure into a teardown.
 const RNR_RETRY_COUNT: u8 = 7;
 
 /// Where an outbound connect has got to.
 enum Dialing {
-    /// `rdma_resolve_addr` issued; the private data waits for `connect`.
-    Address { private_data: Vec<u8>, caps: QpCaps },
+    /// `rdma_resolve_addr` issued; the private data and first receives wait
+    /// for the queue pair.
+    Address {
+        private_data: Vec<u8>,
+        caps: QpCaps,
+        recvs: Vec<VerbsRecv>,
+    },
     /// `rdma_resolve_route` issued.
-    Route { private_data: Vec<u8>, caps: QpCaps },
+    Route {
+        private_data: Vec<u8>,
+        caps: QpCaps,
+        recvs: Vec<VerbsRecv>,
+    },
     /// `rdma_connect` issued; waiting for ESTABLISHED, REJECTED or an error.
     Connecting,
     /// Established, or accepted: both ends may post.
@@ -186,6 +196,28 @@ impl VerbsTransport {
         })
     }
 
+    /// A new link's first receives, checked for owner and depth, as verbs
+    /// posts them.
+    fn raw_recvs(
+        &self,
+        recvs: &[RecvRequest<'_>],
+        op: &'static str,
+    ) -> Result<Vec<VerbsRecv>, RdmaError> {
+        if recvs.iter().any(|r| r.buf.region().owner() != self.id) {
+            return Err(RdmaError::Invalid {
+                op,
+                reason: "buffer is registered with another transport",
+            });
+        }
+        Ok(recvs
+            .iter()
+            .map(|r| VerbsRecv {
+                wr_id: r.wr_id,
+                buf: raw(r.buf),
+            })
+            .collect())
+    }
+
     fn param(private_data: &[u8]) -> ConnParam<'_> {
         ConnParam {
             private_data,
@@ -206,22 +238,47 @@ impl VerbsTransport {
             return;
         };
         let step = match (std::mem::replace(&mut l.state, Dialing::Down), kind) {
-            (Dialing::Address { private_data, caps }, ffi::RDMA_CM_EVENT_ADDR_RESOLVED) => {
+            (
+                Dialing::Address {
+                    private_data,
+                    caps,
+                    recvs,
+                },
+                ffi::RDMA_CM_EVENT_ADDR_RESOLVED,
+            ) => {
                 l.id.resolve_route(RESOLVE_TIMEOUT_MS)
-                    .map(|()| l.state = Dialing::Route { private_data, caps })
+                    .map(|()| {
+                        l.state = Dialing::Route {
+                            private_data,
+                            caps,
+                            recvs,
+                        }
+                    })
                     .map_err(|e| format!("resolving the route: {e}"))
             }
-            (Dialing::Route { private_data, caps }, ffi::RDMA_CM_EVENT_ROUTE_RESOLVED) => {
-                make_qp(&pd, &mut l.id, caps, "rdma_create_qp")
-                    .map_err(|e| e.to_string())
-                    .and_then(|(cq, granted)| {
-                        l.cq = Some(cq);
-                        l.granted = granted;
-                        l.id.connect(Self::param(&private_data))
-                            .map_err(|e| format!("connecting: {e}"))
-                    })
-                    .map(|()| l.state = Dialing::Connecting)
-            }
+            (
+                Dialing::Route {
+                    private_data,
+                    caps,
+                    recvs,
+                },
+                ffi::RDMA_CM_EVENT_ROUTE_RESOLVED,
+            ) => make_qp(&pd, &mut l.id, caps, "rdma_create_qp")
+                .map_err(|e| e.to_string())
+                .and_then(|(cq, granted)| {
+                    l.cq = Some(cq);
+                    l.granted = granted;
+                    // The first receives, before the request goes out: the
+                    // acceptor sends OP_HELLO on its own ESTABLISHED, which
+                    // can beat ours.
+                    let qp = l.id.qp().expect("make_qp just created it");
+                    // SAFETY: `connect_posting`'s contract, carried here.
+                    unsafe { qp.post_recv(&recvs) }
+                        .map_err(|e| format!("posting the first receives: {}", e.error))?;
+                    l.id.connect(Self::param(&private_data))
+                        .map_err(|e| format!("connecting: {e}"))
+                })
+                .map(|()| l.state = Dialing::Connecting),
             (_, k) => Err(format!("unexpected connection-manager event {k}")),
         };
         if let Err(reason) = step {
@@ -286,11 +343,12 @@ impl Transport for VerbsTransport {
         ))
     }
 
-    fn connect(
+    unsafe fn connect_posting(
         &mut self,
         peer: &PeerId,
         private_data: &[u8],
         caps: QpCaps,
+        recvs: &[RecvRequest<'_>],
     ) -> Result<LinkId, RdmaError> {
         if private_data.len() > super::transport::MAX_CONNECT_PRIVATE_DATA {
             return Err(RdmaError::Invalid {
@@ -299,6 +357,8 @@ impl Transport for VerbsTransport {
             });
         }
         self.pd("rdma_connect")?;
+        // Checked now: the queue pair they are posted on comes later.
+        let recvs = self.raw_recvs(recvs, "rdma_connect")?;
         let dst = socket_addr(peer, "rdma_resolve_addr")?;
         let mut id = CmId::new(&self.channel)?;
         id.resolve_addr(dst, RESOLVE_TIMEOUT_MS)?;
@@ -313,6 +373,7 @@ impl Transport for VerbsTransport {
                 state: Dialing::Address {
                     private_data: private_data.to_vec(),
                     caps,
+                    recvs,
                 },
                 initiator: true,
                 owner: self.id,
@@ -322,11 +383,12 @@ impl Transport for VerbsTransport {
         Ok(link)
     }
 
-    fn accept(
+    unsafe fn accept_posting(
         &mut self,
         request: RequestId,
         private_data: &[u8],
         caps: QpCaps,
+        recvs: &[RecvRequest<'_>],
     ) -> Result<LinkId, RdmaError> {
         if private_data.len() > super::transport::MAX_ACCEPT_PRIVATE_DATA {
             return Err(RdmaError::Invalid {
@@ -334,6 +396,7 @@ impl Transport for VerbsTransport {
                 reason: "private_data exceeds 196 bytes",
             });
         }
+        let recvs = self.raw_recvs(recvs, "rdma_accept")?;
         let mut id = self.requests.remove(&request).ok_or(RdmaError::Invalid {
             op: "rdma_accept",
             reason: "no such pending request",
@@ -346,6 +409,14 @@ impl Transport for VerbsTransport {
                 return Err(e);
             }
         };
+        // The first receives, before the accept: the initiator may send as
+        // soon as it reaches it, before ESTABLISHED arrives here.
+        let qp = id.qp().expect("make_qp just created it");
+        // SAFETY: `accept_posting`'s contract.
+        if let Err(e) = unsafe { qp.post_recv(&recvs) } {
+            let _ = id.reject(&[]);
+            return Err(e.error);
+        }
         id.accept(Self::param(private_data))?;
         let link = LinkId(self.next_id());
         self.by_token.insert(id.token(), link);
@@ -680,6 +751,88 @@ mod tests {
             t.link(l).unwrap().poll(&mut out, 16).unwrap();
         }
         out
+    }
+
+    /// FR-026 on the NIC: receives handed to `connect_posting` and
+    /// `accept_posting` are on each queue pair before the other end can send,
+    /// so a send each way, posted the moment each end sees ESTABLISHED, lands
+    /// with no other receive ever posted.
+    #[test]
+    #[ignore = "needs an RDMA device; set CERTUS_RDMA_TEST_IP"]
+    fn first_receives_are_posted_with_the_connection() {
+        let (mut a, _) = listening();
+        let (mut b, b_addr) = listening();
+        let mut abuf = vec![0u8; 4096];
+        let mut bbuf = vec![0u8; 4096];
+        // SAFETY: both buffers outlive their regions, dropped at the end.
+        let ra = unsafe { a.register(abuf.as_mut_ptr(), 4096, Access::LOCAL_WRITE) }.unwrap();
+        // SAFETY: as above.
+        let rb = unsafe { b.register(bbuf.as_mut_ptr(), 4096, Access::LOCAL_WRITE) }.unwrap();
+        let ar = [RecvRequest {
+            wr_id: 11,
+            buf: ra.sge(ra.addr() + 2048, 64).unwrap(),
+        }];
+        let br = [RecvRequest {
+            wr_id: 22,
+            buf: rb.sge(rb.addr() + 2048, 64).unwrap(),
+        }];
+        // SAFETY: the buffers outlive the completions polled below.
+        let la = unsafe { a.connect_posting(&b_addr, b"id", CAPS, &ar) }.unwrap();
+        let (_, eb) = pump(&mut a, &mut b, |_, eb| request_of(eb).is_some());
+        let (req, _) = request_of(&eb).unwrap();
+        // SAFETY: as above.
+        let lb = unsafe { b.accept_posting(req, b"", CAPS, &br) }.unwrap();
+        abuf[..2].copy_from_slice(b"ab");
+        bbuf[..2].copy_from_slice(b"ba");
+        fn send(wr_id: u64, r: &Region) -> SendRequest<'_> {
+            SendRequest {
+                wr_id,
+                op: SendOp::Send,
+                local: r.sge(r.addr(), 2).unwrap(),
+                signaled: true,
+            }
+        }
+        let (mut ea, mut eb) = (Vec::new(), Vec::new());
+        let (mut sent_a, mut sent_b) = (false, false);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !(sent_a && sent_b) {
+            assert!(Instant::now() < deadline, "events: a {ea:?}, b {eb:?}");
+            a.poll_events(&mut ea);
+            b.poll_events(&mut eb);
+            if !sent_a && established(&ea, la).is_some() {
+                // SAFETY: as above.
+                unsafe { a.link(la).unwrap().post_send(&[send(1, &ra)]) }.unwrap();
+                sent_a = true;
+            }
+            if !sent_b && established(&eb, lb).is_some() {
+                // SAFETY: as above.
+                unsafe { b.link(lb).unwrap().post_send(&[send(2, &rb)]) }.unwrap();
+                sent_b = true;
+            }
+        }
+        let mut ca = poll_until(&mut a, la, 2);
+        let mut cb = poll_until(&mut b, lb, 2);
+        ca.sort_by_key(|c| c.wr_id);
+        cb.sort_by_key(|c| c.wr_id);
+        assert_eq!(
+            ca.iter().map(|c| (c.wr_id, c.result)).collect::<Vec<_>>(),
+            [
+                (1, Ok(Completed::Send)),
+                (11, Ok(Completed::Recv { byte_len: 2 }))
+            ]
+        );
+        assert_eq!(
+            cb.iter().map(|c| (c.wr_id, c.result)).collect::<Vec<_>>(),
+            [
+                (2, Ok(Completed::Send)),
+                (22, Ok(Completed::Recv { byte_len: 2 }))
+            ]
+        );
+        assert_eq!(&abuf[2048..2050], b"ba");
+        assert_eq!(&bbuf[2048..2050], b"ab");
+        a.close(la);
+        b.close(lb);
+        drop((ra, rb));
     }
 
     /// FR-001: the accepted and the initiated QP are equally able to post, a

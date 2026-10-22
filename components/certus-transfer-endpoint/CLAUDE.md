@@ -135,7 +135,9 @@ VIII–XI, and a review that does not check them is not a review.
   and inbound context tables must be *separate* — the requester allocates ids, so the
   same id can be live both ways — credits are per direction, and posted receive buffers
   are partitioned so a peer at full inbound-request quota cannot starve a reply you are
-  waiting on (that one is an RNR deadlock, FR-026/D22).
+  waiting on (that one is an RNR deadlock, FR-026/D22). The partition is posted *with*
+  the connect or accept, before the peer can send — posting it on `Up` races the peer's
+  first `OP_HELLO`, which only infinite RNR retry hides.
 - **Both ends may connect at once; exactly one connection must survive.** Keep the one
   whose initiator has the lower `PeerId`, resolved at accept via the connect
   `private_data`, before `OP_HELLO`. Two live connections defeat `disconnect`: tearing

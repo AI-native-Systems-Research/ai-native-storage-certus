@@ -342,6 +342,40 @@ impl Fabric {
             .expect("mock link has no queue pair")
     }
 
+    /// Post a new link's first receives, all or none, checked as
+    /// `post_recv` checks them. Nothing is connected yet, so no peer progresses.
+    fn post_initial(
+        &mut self,
+        owner: TransportId,
+        link: LinkId,
+        recvs: &[RecvRequest<'_>],
+        op: &'static str,
+    ) -> Result<(), RdmaError> {
+        if recvs.len() > self.qps[&link].caps.max_recv_wr as usize {
+            return Err(verb(op, errno::ENOMEM));
+        }
+        if recvs.iter().any(|r| r.buf.region().owner() != owner) {
+            return Err(RdmaError::Invalid {
+                op,
+                reason: "buffer is registered with another transport",
+            });
+        }
+        let entries: Vec<RqWr> = recvs
+            .iter()
+            .map(|r| RqWr {
+                wr_id: r.wr_id,
+                addr: r.buf.addr(),
+                len: r.buf.len(),
+                read_only: !self
+                    .regions
+                    .get(&r.buf.region().rkey())
+                    .is_some_and(|e| e.access.contains(Access::LOCAL_WRITE)),
+            })
+            .collect();
+        self.qp(link).rq.extend(entries);
+        Ok(())
+    }
+
     fn new_qp(&mut self, owner: TransportId, caps: QpCaps) -> LinkId {
         let link = LinkId(self.next());
         self.qps.insert(
@@ -692,11 +726,12 @@ impl Transport for MockTransport {
         ))
     }
 
-    fn connect(
+    unsafe fn connect_posting(
         &mut self,
         peer: &PeerId,
         private_data: &[u8],
         caps: QpCaps,
+        recvs: &[RecvRequest<'_>],
     ) -> Result<LinkId, RdmaError> {
         if private_data.len() > MAX_CONNECT_PRIVATE_DATA {
             return Err(RdmaError::Invalid {
@@ -707,6 +742,12 @@ impl Transport for MockTransport {
         let link = {
             let mut f = self.fabric.lock();
             let link = f.new_qp(self.id, caps);
+            // Before the request reaches the listener, as verbs posts them
+            // before `rdma_connect`.
+            if let Err(e) = f.post_initial(self.id, link, recvs, "rdma_connect") {
+                f.qps.remove(&link);
+                return Err(e);
+            }
             match f.listeners.get(peer).copied() {
                 None => f.event(
                     self.id,
@@ -733,11 +774,12 @@ impl Transport for MockTransport {
         Ok(link)
     }
 
-    fn accept(
+    unsafe fn accept_posting(
         &mut self,
         request: RequestId,
         private_data: &[u8],
         caps: QpCaps,
+        recvs: &[RecvRequest<'_>],
     ) -> Result<LinkId, RdmaError> {
         if private_data.len() > MAX_ACCEPT_PRIVATE_DATA {
             return Err(RdmaError::Invalid {
@@ -752,6 +794,14 @@ impl Transport for MockTransport {
                 .remove(&(self.id, request))
                 .ok_or_else(|| verb("rdma_accept", errno::EINVAL))?;
             let link = f.new_qp(self.id, caps);
+            // Before the initiator learns it is connected, as verbs posts them
+            // before `rdma_accept`. A failure leaves the request unanswered,
+            // as a failed verbs accept does.
+            if let Err(e) = f.post_initial(self.id, link, recvs, "rdma_accept") {
+                f.qps.remove(&link);
+                f.requests.insert((self.id, request), initiator);
+                return Err(e);
+            }
             f.qp(link).state = QpState::Rts;
             f.qp(link).peer = Peer::Connected(initiator);
             let init_owner = {

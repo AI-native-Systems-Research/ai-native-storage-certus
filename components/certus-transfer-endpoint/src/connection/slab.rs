@@ -144,6 +144,19 @@ impl<T> Slab<T> {
         self.slots.len()
     }
 
+    /// Add free slots up to `capacity`; never shrinks.
+    pub fn grow_to(&mut self, capacity: usize) {
+        let capacity = u32::try_from(capacity).expect("slab capacity exceeds u32");
+        let old = self.slots.len() as u32;
+        for index in old..capacity {
+            self.slots.push(Slot {
+                generation: 0,
+                entry: None,
+            });
+            self.free.insert(0, index);
+        }
+    }
+
     /// Requests posted and not yet completed.
     pub fn outstanding(&self) -> usize {
         self.outstanding
@@ -206,6 +219,23 @@ impl<T> Slab<T> {
             }),
             _ => Ok((kind, state)),
         }
+    }
+
+    /// Every state held, for a link whose requests were never queued or can
+    /// never complete: a connect that failed with its first receives posted
+    /// on a queue pair the transport then destroyed, so no completion — and
+    /// no write into the buffers — can follow.
+    pub fn abandon_all(&mut self) -> Vec<T> {
+        let mut out = Vec::with_capacity(self.outstanding);
+        for (index, slot) in self.slots.iter_mut().enumerate() {
+            if let Some((_, state)) = slot.entry.take() {
+                self.free.push(index as u32);
+                out.push(state);
+            }
+        }
+        self.outstanding = 0;
+        self.send_outstanding = 0;
+        out
     }
 
     /// Release a slot whose request was **never queued**. Private: only the
@@ -336,6 +366,28 @@ pub unsafe fn post_send_tracked<T>(
             .map(|r| slab.abandon(r.wr_id))
             .collect(),
     })
+}
+
+/// Give `reqs` slots, for a post the caller makes itself — a link's first
+/// receives, which go to the transport with the connect or accept. If that
+/// post fails, nothing was queued: [`abandon_all`](Slab::abandon_all) takes
+/// the states back.
+pub fn track_recvs<'a, T>(
+    slab: &mut Slab<T>,
+    reqs: Vec<TrackedRecv<'a, T>>,
+) -> Result<Vec<RecvRequest<'a>>, Vec<T>> {
+    if reqs.len() > slab.available() {
+        return Err(reqs.into_iter().map(|r| r.state).collect());
+    }
+    Ok(reqs
+        .into_iter()
+        .map(|r| RecvRequest {
+            wr_id: slab
+                .insert(WrKind::Recv, r.state)
+                .unwrap_or_else(|_| unreachable!("room was checked")),
+            buf: r.buf,
+        })
+        .collect())
 }
 
 /// [`post_send_tracked`] for receive buffers.
@@ -756,5 +808,48 @@ mod tests {
         link.to_error().unwrap();
         let err = drain(link, &mut slab, &mut Vec::new(), Duration::from_millis(10)).unwrap_err();
         assert!(matches!(err, DrainError::Stuck { outstanding: 1 }), "{err}");
+    }
+
+    /// A link's first receives are tracked before their post; if the link
+    /// never comes up, every state comes back once, and the slots are free.
+    #[test]
+    fn first_receives_are_tracked_then_abandoned_whole() {
+        let mut slab: Slab<&str> = Slab::with_capacity(4);
+        let mut buf = [0u8; 20];
+        let f = crate::connection::mock::MockFabric::new();
+        let mut t = crate::connection::mock::MockTransport::new(f);
+        // SAFETY: `buf` outlives the region, and nothing is posted.
+        let r = unsafe {
+            crate::connection::transport::Transport::register(
+                &mut t,
+                buf.as_mut_ptr(),
+                20,
+                crate::connection::transport::Access::LOCAL_WRITE,
+            )
+        }
+        .unwrap();
+        let reqs = |n: usize| {
+            (0..n)
+                .map(|i| TrackedRecv {
+                    buf: r.sge(r.addr() + i as u64 * 4, 4).unwrap(),
+                    state: ["a", "b", "c", "d", "e"][i],
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            track_recvs(&mut slab, reqs(5)).err(),
+            Some(vec!["a", "b", "c", "d", "e"])
+        );
+        assert_eq!(slab.outstanding(), 0, "refused whole");
+        let posted = track_recvs(&mut slab, reqs(3)).unwrap();
+        assert_eq!(posted.len(), 3);
+        assert_eq!((slab.outstanding(), slab.send_outstanding()), (3, 0));
+        let mut back = slab.abandon_all();
+        back.sort();
+        assert_eq!(back, ["a", "b", "c"]);
+        assert_eq!((slab.outstanding(), slab.available()), (0, 4));
+        slab.grow_to(6);
+        assert_eq!(slab.available(), 6);
+        drop(r);
     }
 }

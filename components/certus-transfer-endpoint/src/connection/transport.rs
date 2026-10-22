@@ -524,20 +524,62 @@ pub trait Transport: Send {
 
     /// Start connecting to `peer`; the outcome arrives as an event naming the
     /// returned link. `private_data` is at most
-    /// [`MAX_CONNECT_PRIVATE_DATA`] bytes.
+    /// [`MAX_CONNECT_PRIVATE_DATA`] bytes. No receives are posted with it.
     fn connect(
         &mut self,
         peer: &PeerId,
         private_data: &[u8],
         caps: QpCaps,
+    ) -> Result<LinkId, RdmaError> {
+        // SAFETY: there are no buffers to keep valid.
+        unsafe { self.connect_posting(peer, private_data, caps, &[]) }
+    }
+
+    /// [`connect`](Self::connect), with `recvs` posted on the link's queue
+    /// pair as soon as it exists — before the connect request is sent, so
+    /// before the peer can send anything. A peer that sends the moment it is
+    /// connected then finds them posted, and no first message depends on RNR
+    /// retry. If the connect fails, they are destroyed with the link
+    /// ([`close`](Self::close)) and never complete.
+    ///
+    /// # Safety
+    ///
+    /// As [`Link::post_recv`], from this call until the link's receives are
+    /// reaped or drained, or the link is closed.
+    unsafe fn connect_posting(
+        &mut self,
+        peer: &PeerId,
+        private_data: &[u8],
+        caps: QpCaps,
+        recvs: &[RecvRequest<'_>],
     ) -> Result<LinkId, RdmaError>;
 
-    /// Accept an inbound request, returning its link.
+    /// Accept an inbound request, returning its link. No receives are posted
+    /// with it.
     fn accept(
         &mut self,
         request: RequestId,
         private_data: &[u8],
         caps: QpCaps,
+    ) -> Result<LinkId, RdmaError> {
+        // SAFETY: there are no buffers to keep valid.
+        unsafe { self.accept_posting(request, private_data, caps, &[]) }
+    }
+
+    /// [`accept`](Self::accept), with `recvs` posted on the new queue pair
+    /// before the accept is sent: the initiator may send as soon as the
+    /// accept reaches it, before this end sees ESTABLISHED. On `Err` nothing
+    /// was posted that can still complete or land.
+    ///
+    /// # Safety
+    ///
+    /// As [`connect_posting`](Self::connect_posting).
+    unsafe fn accept_posting(
+        &mut self,
+        request: RequestId,
+        private_data: &[u8],
+        caps: QpCaps,
+        recvs: &[RecvRequest<'_>],
     ) -> Result<LinkId, RdmaError>;
 
     /// Refuse an inbound request, telling the peer why (D23's loser).

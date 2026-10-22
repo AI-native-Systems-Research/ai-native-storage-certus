@@ -66,8 +66,8 @@ use super::identity::{
     decode_identity, decode_reject, encode_identity, encode_reject, RejectReason, MAX_IDENTITY_LEN,
 };
 use super::slab::{
-    drain, post_recv_tracked, post_send_tracked, DrainError, Slab, SlabError, TrackedPostError,
-    TrackedRecv, TrackedSend,
+    drain, post_recv_tracked, post_send_tracked, track_recvs, DrainError, Slab, SlabError,
+    TrackedPostError, TrackedRecv, TrackedSend,
 };
 use super::transport::{
     Completion, Link, LinkId, QpCaps, QpState, RdmaError, RequestId, Transport, TransportEvent,
@@ -212,10 +212,17 @@ struct Draining<T> {
     slab: Slab<T>,
 }
 
+/// Our outbound attempt, not yet established, with the slab its first
+/// receives were posted through (see [`ConnectionTable::ensure_with`]).
+struct Pending<T> {
+    link: LinkId,
+    slab: Slab<T>,
+}
+
 struct Entry<T> {
-    /// Our outbound attempt, not yet established. It has no slab: nothing can
-    /// be posted on a link before it is live.
-    pending: Option<LinkId>,
+    /// Our outbound attempt, not yet established. Only its first receives are
+    /// on it: nothing else can be posted before it is live.
+    pending: Option<Pending<T>>,
     live: Option<Live<T>>,
     /// In ERROR, awaiting the caller's drain and `finish_teardown`.
     draining: Vec<Draining<T>>,
@@ -251,9 +258,19 @@ pub struct ConnectionTable<T> {
     /// Which peer each live, pending or draining link belongs to.
     owners: HashMap<LinkId, PeerId>,
     scratch: Vec<TransportEvent>,
+    /// States of first receives on links that never came up, whose queue
+    /// pairs are destroyed: nothing can complete or land in them. The owner
+    /// collects them with [`take_abandoned`](ConnectionTable::take_abandoned).
+    abandoned: Vec<T>,
     counters: Counters,
     extras: Extras,
 }
+
+/// Where a new link's first receives come from: called once per link the
+/// table opens, as it opens it, so they are posted before the peer can send
+/// (FR-026). It may return fewer than a link needs, or none; the owner posts
+/// the rest once the link is up.
+pub type RecvSupply<'s, 'a, T> = &'s mut dyn FnMut() -> Vec<TrackedRecv<'a, T>>;
 
 impl<T> ConnectionTable<T> {
     /// Listen as `local` on `transport`. Every link gets `caps`, and at most
@@ -287,6 +304,7 @@ impl<T> ConnectionTable<T> {
             entries: HashMap::new(),
             owners: HashMap::new(),
             scratch: Vec::new(),
+            abandoned: Vec::new(),
             counters: Counters::default(),
             extras: Extras::new(),
         })
@@ -327,8 +345,23 @@ impl<T> ConnectionTable<T> {
     }
 
     /// Make sure `peer` is connected or connecting, starting a connect only if
-    /// there is neither a link nor an attempt.
+    /// there is neither a link nor an attempt. Posts no receives with it.
     pub fn ensure(&mut self, peer: &PeerId) -> Result<Readiness, TableError> {
+        // SAFETY: there are no buffers.
+        unsafe { self.ensure_with(peer, &mut Vec::new) }
+    }
+
+    /// [`ensure`](Self::ensure), with the first receives of a new connect
+    /// drawn from `supply` and posted before the request goes out.
+    ///
+    /// # Safety
+    ///
+    /// As [`Link::post_recv`] for every buffer `supply` returns.
+    pub unsafe fn ensure_with<'a>(
+        &mut self,
+        peer: &PeerId,
+        supply: RecvSupply<'_, 'a, T>,
+    ) -> Result<Readiness, TableError> {
         if *peer == self.local {
             return Err(TableError::SelfConnect);
         }
@@ -348,16 +381,46 @@ impl<T> ConnectionTable<T> {
             }
         }
         self.extras.connect_attempted();
-        let link = self
-            .transport
-            .connect(peer, &self.identity, self.caps)
-            .map_err(|e| {
+        let mut slab = self.new_slab();
+        let recvs = match track_recvs(&mut slab, supply()) {
+            Ok(r) => r,
+            Err(states) => {
+                self.abandoned.extend(states);
+                Vec::new()
+            }
+        };
+        // SAFETY: the caller's contract, for `supply`'s buffers.
+        let connected = unsafe {
+            self.transport
+                .connect_posting(peer, &self.identity, self.caps, &recvs)
+        };
+        let link = match connected {
+            Ok(link) => link,
+            Err(e) => {
+                // Nothing was queued: the transport posts all or none.
+                self.abandoned.extend(slab.abandon_all());
                 self.extras.connect_failed();
-                TableError::Transport(e)
-            })?;
-        self.entries.entry(peer.clone()).or_default().pending = Some(link);
+                return Err(TableError::Transport(e));
+            }
+        };
+        self.entries.entry(peer.clone()).or_default().pending = Some(Pending { link, slab });
         self.owners.insert(link, peer.clone());
         Ok(Readiness::Connecting)
+    }
+
+    /// States of first receives on links that never came up — their buffers
+    /// are free again (see `abandoned`).
+    pub fn take_abandoned(&mut self) -> Vec<T> {
+        std::mem::take(&mut self.abandoned)
+    }
+
+    /// Receives outstanding on `peer`'s live link: for the owner to post the
+    /// rest of a link's receives when it comes up.
+    pub fn recvs_posted(&self, peer: &PeerId) -> usize {
+        self.entries
+            .get(peer)
+            .and_then(|e| e.live.as_ref())
+            .map_or(0, |l| l.slab.outstanding() - l.slab.send_outstanding())
     }
 
     /// The peer's send credits, while it has an established link.
@@ -522,9 +585,10 @@ impl<T> ConnectionTable<T> {
         let Some(e) = self.entries.get_mut(peer) else {
             return Ok(false);
         };
-        if let Some(link) = e.pending.take() {
-            self.owners.remove(&link);
-            self.transport.close(link);
+        if let Some(mut p) = e.pending.take() {
+            self.owners.remove(&p.link);
+            self.transport.close(p.link);
+            self.abandoned.extend(p.slab.abandon_all());
         }
         let Some(live) = self.entries.get_mut(peer).and_then(|e| e.live.take()) else {
             self.forget_if_empty(peer);
@@ -578,24 +642,49 @@ impl<T> ConnectionTable<T> {
         Ok(())
     }
 
-    /// Process every pending connection event, without blocking.
+    /// Process every pending connection event, without blocking. Accepts
+    /// post no receives with them.
     pub fn poll(&mut self, out: &mut Vec<TableEvent>) {
+        // SAFETY: there are no buffers.
+        unsafe { self.poll_with(out, &mut Vec::new) }
+    }
+
+    /// [`poll`](Self::poll), with each accept's first receives drawn from
+    /// `supply` and posted before the accept is sent.
+    ///
+    /// # Safety
+    ///
+    /// As [`ensure_with`](Self::ensure_with).
+    pub unsafe fn poll_with<'a>(
+        &mut self,
+        out: &mut Vec<TableEvent>,
+        supply: RecvSupply<'_, 'a, T>,
+    ) {
         let mut evs = std::mem::take(&mut self.scratch);
         self.transport.poll_events(&mut evs);
         for ev in evs.drain(..) {
-            self.handle(ev, out);
+            // SAFETY: the caller's contract.
+            unsafe { self.handle(ev, out, supply) };
         }
         self.scratch = evs;
     }
 
-    /// A slab for `link`, sized to its granted send plus receive depth.
-    fn slab_for(&mut self, link: LinkId) -> Slab<T> {
+    /// A slab for a new link, before the device says what it granted: sized
+    /// to the depths requested, and grown at establishment if more was
+    /// granted ([`fit_slab`](Self::fit_slab)).
+    fn new_slab(&self) -> Slab<T> {
+        Slab::with_capacity(self.caps.max_send_wr as usize + self.caps.max_recv_wr as usize)
+    }
+
+    /// Grow `slab` to `link`'s granted send plus receive depth, so a full
+    /// slab means a full queue pair.
+    fn fit_slab(&mut self, link: LinkId, slab: &mut Slab<T>) {
         let caps = self
             .transport
             .link(link)
             .expect("new link missing from its transport")
             .granted();
-        Slab::with_capacity(caps.max_send_wr as usize + caps.max_recv_wr as usize)
+        slab.grow_to(caps.max_send_wr as usize + caps.max_recv_wr as usize);
     }
 
     /// Credits for a new link, and whether the configured limit was clamped.
@@ -651,12 +740,20 @@ impl<T> ConnectionTable<T> {
         out.push(TableEvent::Down(peer.clone()));
     }
 
-    fn handle(&mut self, ev: TransportEvent, out: &mut Vec<TableEvent>) {
+    /// # Safety
+    ///
+    /// As [`ensure_with`](Self::ensure_with), for `supply`.
+    unsafe fn handle<'a>(
+        &mut self,
+        ev: TransportEvent,
+        out: &mut Vec<TableEvent>,
+        supply: RecvSupply<'_, 'a, T>,
+    ) {
         match ev {
             TransportEvent::ConnectRequest {
                 request,
                 private_data,
-            } => self.on_request(request, &private_data, out),
+            } => unsafe { self.on_request(request, &private_data, out, supply) },
             TransportEvent::Established { link, private_data } => {
                 self.on_established(link, &private_data, out)
             }
@@ -701,17 +798,19 @@ impl<T> ConnectionTable<T> {
     }
 
     /// If `link` is a pending outbound attempt, abandon it and name its peer.
-    /// Safe to close outright: a pending link has no slab, so nothing on it
-    /// holds state.
+    /// Safe to close outright: only its first receives are on it, and closing
+    /// destroys the queue pair, so none can complete or land; their states go
+    /// to `abandoned`.
     fn take_pending(&mut self, link: LinkId) -> Option<PeerId> {
         let peer = self.owners.get(&link)?.clone();
         let e = self.entries.get_mut(&peer)?;
-        if e.pending != Some(link) {
+        if e.pending.as_ref().map(|p| p.link) != Some(link) {
             return None;
         }
-        e.pending = None;
+        let mut p = e.pending.take().expect("checked above");
         self.owners.remove(&link);
         self.transport.close(link);
+        self.abandoned.extend(p.slab.abandon_all());
         self.forget_if_empty(&peer);
         Some(peer)
     }
@@ -729,7 +828,16 @@ impl<T> ConnectionTable<T> {
         out.push(TableEvent::RefusedInbound { peer, reason });
     }
 
-    fn on_request(&mut self, request: RequestId, private_data: &[u8], out: &mut Vec<TableEvent>) {
+    /// # Safety
+    ///
+    /// As [`ensure_with`](Self::ensure_with), for `supply`.
+    unsafe fn on_request<'a>(
+        &mut self,
+        request: RequestId,
+        private_data: &[u8],
+        out: &mut Vec<TableEvent>,
+        supply: RecvSupply<'_, 'a, T>,
+    ) {
         let peer = match decode_identity(private_data) {
             Some(p) if p != self.local => p,
             claimed => {
@@ -739,7 +847,7 @@ impl<T> ConnectionTable<T> {
         let peer_wins = peer < self.local;
         let (pending, live, draining) = match self.entries.get(&peer) {
             Some(e) => (
-                e.pending,
+                e.pending.as_ref().map(|p| p.link),
                 e.live.as_ref().map(|l| l.initiator),
                 !e.draining.is_empty(),
             ),
@@ -768,9 +876,22 @@ impl<T> ConnectionTable<T> {
             // Newer wins: the peer has lost the live link.
             Some(_) => self.take_down(&peer, out),
         }
-        match self.transport.accept(request, &self.identity, self.caps) {
+        let mut slab = self.new_slab();
+        let recvs = match track_recvs(&mut slab, supply()) {
+            Ok(r) => r,
+            Err(states) => {
+                self.abandoned.extend(states);
+                Vec::new()
+            }
+        };
+        // SAFETY: the caller's contract, for `supply`'s buffers.
+        let accepted = unsafe {
+            self.transport
+                .accept_posting(request, &self.identity, self.caps, &recvs)
+        };
+        match accepted {
             Ok(link) => {
-                let slab = self.slab_for(link);
+                self.fit_slab(link, &mut slab);
                 let (credits, _) = self.credits_for(link);
                 self.entries.entry(peer.clone()).or_default().live = Some(Live {
                     link,
@@ -782,8 +903,12 @@ impl<T> ConnectionTable<T> {
                 self.owners.insert(link, peer);
             }
             // The initiator abandoned the request before we answered; nothing
-            // was created and its end reports its own outcome.
-            Err(_) => self.forget_if_empty(&peer),
+            // was created, nothing posted can complete, and its end reports
+            // its own outcome.
+            Err(_) => {
+                self.abandoned.extend(slab.abandon_all());
+                self.forget_if_empty(&peer);
+            }
         }
     }
 
@@ -801,7 +926,7 @@ impl<T> ConnectionTable<T> {
             self.report_clamp(&peer, link, out);
             return;
         }
-        if e.pending != Some(link) {
+        if e.pending.as_ref().map(|p| p.link) != Some(link) {
             return;
         }
         // Our connect completed: the acceptor must answer to the dialed name.
@@ -816,10 +941,17 @@ impl<T> ConnectionTable<T> {
             return;
         }
         self.extras.connect_established();
-        let slab = self.slab_for(link);
+        let mut slab = self
+            .entries
+            .get_mut(&peer)
+            .unwrap()
+            .pending
+            .take()
+            .expect("checked above")
+            .slab;
+        self.fit_slab(link, &mut slab);
         let (credits, _) = self.credits_for(link);
         let e = self.entries.get_mut(&peer).unwrap();
-        e.pending = None;
         e.live = Some(Live {
             link,
             initiator: Initiator::Local,
@@ -858,9 +990,11 @@ impl<T> Drop for ConnectionTable<T> {
                 e.live
                     .iter()
                     .map(|l| l.slab.outstanding())
+                    .chain(e.pending.iter().map(|p| p.slab.outstanding()))
                     .chain(e.draining.iter().map(|d| d.slab.outstanding()))
             })
-            .sum();
+            .sum::<usize>()
+            + self.abandoned.len();
         assert_eq!(
             held, 0,
             "connection table dropped with {held} work requests still holding state; \

@@ -43,8 +43,10 @@ use interfaces::{
 
 use crate::bounce::Readers;
 use crate::connection::slab::{TrackedRecv, TrackedSend};
-use crate::connection::table::{ConnectionTable, ReapError, TableEvent};
-use crate::connection::transport::{Completed, Completion, CompletionError, Region, SendOp};
+use crate::connection::table::{ConnectionTable, Readiness, ReapError, TableError, TableEvent};
+use crate::connection::transport::{
+    Completed, Completion, CompletionError, Region, SendOp, Transport,
+};
 use crate::connection::PeerId;
 use crate::message::{self, Header, Kind};
 use crate::msgpool::{MsgBuf, MsgPool};
@@ -168,6 +170,41 @@ fn incompatibility(peer: &PeerId, e: &HelloError) -> String {
         HelloError::ZeroQuota => format!("{peer} advertised an inbound quota of 0"),
         HelloError::ZeroMaxEntries => format!("{peer} advertised a max_entries of 0"),
         HelloError::Duplicate => unreachable!("a duplicate OP_HELLO is answered, not fatal"),
+    }
+}
+
+/// Message buffers set aside for one new link's first receives, taken out
+/// of the pool before the table opens the link, so lending them as receives
+/// needs only a shared borrow of the pool. Whatever no link takes goes back.
+struct Stock(Vec<MsgBuf>);
+
+impl Stock {
+    /// Up to `n` buffers, growing the pool if it can; fewer, or none, if not
+    /// — a short supply is posted at bring-up instead.
+    fn take(msgs: &mut MsgPool, transport: &mut dyn Transport, n: usize) -> Stock {
+        let n = if msgs.reserve(transport, n).is_ok() {
+            n
+        } else {
+            0
+        };
+        Stock((0..n).map_while(|_| msgs.take()).collect())
+    }
+
+    /// The whole stock as receives, once; nothing after.
+    fn supply<'a>(&mut self, msgs: &'a MsgPool) -> Vec<TrackedRecv<'a, Work>> {
+        std::mem::take(&mut self.0)
+            .into_iter()
+            .map(|b| TrackedRecv {
+                buf: msgs.sge(b, message::MESSAGE_LEN),
+                state: Work::Recv(b),
+            })
+            .collect()
+    }
+
+    fn give_back(self, msgs: &mut MsgPool) {
+        for b in self.0 {
+            msgs.give(b);
+        }
     }
 }
 
@@ -514,6 +551,12 @@ impl EndpointActor {
                 self.msgs.give(b);
             }
         }
+        // Receives on a connect it abandoned, if one was pending.
+        for w in table.take_abandoned() {
+            if let Work::Recv(b) = w {
+                self.msgs.give(b);
+            }
+        }
         begun?;
         drained?;
         table
@@ -723,7 +766,7 @@ impl EndpointActor {
         let c = table.counters_mut();
         c.requests_attempted += 1;
         c.entries_requested += items.len() as u64;
-        let ensured = table.ensure(&peer);
+        let ensured = self.ensure(&peer);
         let id = self.next_push;
         self.next_push += 1;
         self.pushes.insert(
@@ -761,7 +804,7 @@ impl EndpointActor {
         let c = table.counters_mut();
         c.requests_attempted += 1;
         c.entries_requested += len as u64;
-        if let Err(e) = table.ensure(&peer) {
+        if let Err(e) = self.ensure(&peer) {
             self.logger.error(&format!(
                 "certus-transfer-endpoint: fetch from {peer} cannot connect: {e}"
             ));
@@ -1172,8 +1215,9 @@ impl EndpointActor {
     /// A link just came up: post its receives (reserve + quota) and send our
     /// `OP_HELLO` on the bootstrap credit. Nothing else is sent until the
     /// exchange completes.
-    fn bring_up(&mut self, peer: &PeerId) -> Result<(), String> {
-        let table = self.table.as_mut().ok_or("shut down")?;
+    /// The receives each connection posts: the reply reserve plus the
+    /// inbound quota (FR-026).
+    fn first_receives(&self) -> usize {
         let receives = self.limits.receives() as usize;
         // The fault a test asks for: no reply reserve, so replies compete with
         // inbound requests for the quota's buffers (FR-026's deadlock).
@@ -1183,6 +1227,46 @@ impl EndpointActor {
         } else {
             receives
         };
+        receives
+    }
+
+    /// Make sure `peer` is connected or connecting; a new connect carries its
+    /// first receives, posted before the request goes out (FR-026).
+    fn ensure(&mut self, peer: &PeerId) -> Result<Readiness, TableError> {
+        let want = self.first_receives();
+        let table = self
+            .table
+            .as_mut()
+            .expect("callers check the endpoint runs");
+        let mut stock = Stock::take(&mut self.msgs, table.transport(), want);
+        let msgs = &self.msgs;
+        let mut supply = || stock.supply(msgs);
+        // SAFETY: as in `pump`.
+        let r = unsafe { table.ensure_with(peer, &mut supply) };
+        stock.give_back(&mut self.msgs);
+        self.release_abandoned();
+        r
+    }
+
+    /// Return the buffers of first receives whose links never came up: their
+    /// queue pairs are destroyed, so nothing can complete or land in them.
+    fn release_abandoned(&mut self) {
+        let Some(table) = self.table.as_mut() else {
+            return;
+        };
+        for w in table.take_abandoned() {
+            if let Work::Recv(b) = w {
+                self.msgs.give(b);
+            }
+        }
+    }
+
+    fn bring_up(&mut self, peer: &PeerId) -> Result<(), String> {
+        let want = self.first_receives();
+        let table = self.table.as_mut().ok_or("shut down")?;
+        // Normally all of them went with the connect or accept; post whatever
+        // a short supply left out.
+        let receives = want.saturating_sub(table.recvs_posted(peer));
         // Receives, plus one buffer to send OP_HELLO from.
         self.msgs.reserve(table.transport(), receives + 1)?;
         let bufs: Vec<MsgBuf> = (0..receives)
@@ -1547,10 +1631,22 @@ impl EndpointActor {
 
     /// Process connection events, logging what a caller does not see.
     fn pump(&mut self) -> bool {
+        let want = self.first_receives();
         let Some(table) = self.table.as_mut() else {
             return false;
         };
-        table.poll(&mut self.events);
+        // An accept takes its first receives from here, so they are posted
+        // before the initiator can send (FR-026). One link's worth is set
+        // aside per poll; a poll accepting more posts the rest at bring-up.
+        let mut stock = Stock::take(&mut self.msgs, table.transport(), want);
+        let msgs = &self.msgs;
+        let mut supply = || stock.supply(msgs);
+        // SAFETY: each buffer is the pool's, in its receive's slab slot alone
+        // until its completion or its link's destruction, and the pool
+        // outlives every drain.
+        unsafe { table.poll_with(&mut self.events, &mut supply) };
+        stock.give_back(&mut self.msgs);
+        self.release_abandoned();
         let events = std::mem::take(&mut self.events);
         let did = !events.is_empty();
         for ev in events {
@@ -1684,6 +1780,8 @@ impl EndpointActor {
             self.fail_pushes(&peer);
             self.fail_fetches(&peer, &Cause::Lost);
         }
+        // Receives on connects that never came up, closed by the teardowns.
+        self.release_abandoned();
         let table = self.table.take().expect("checked above");
         if let Some(mut readers) = self.readers.take() {
             readers.stop();
@@ -1745,8 +1843,8 @@ impl ActorHandler<Command> for EndpointActor {
             } => self.start_fetch(id, peer, items, on_complete),
             #[cfg(test)]
             Command::Connect(peer, reply) => {
-                let r = match self.table.as_mut() {
-                    Some(t) => t.ensure(&peer).map(|_| ()).map_err(|e| e.to_string()),
+                let r = match self.table {
+                    Some(_) => self.ensure(&peer).map(|_| ()).map_err(|e| e.to_string()),
                     None => Err("endpoint is shut down".into()),
                 };
                 let _ = reply.send(r);
