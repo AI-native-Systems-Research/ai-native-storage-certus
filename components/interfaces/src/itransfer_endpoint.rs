@@ -260,9 +260,10 @@ pub enum TransferEndpointError {
     /// connection remains usable** and sibling contexts are unaffected. A
     /// *reply* we could not process is a teardown, reported as `Transport`.
     Protocol(String),
-    /// The peer's supported protocol version range does not intersect the local
-    /// one, so no connection was established and no request was issued. Carries
-    /// peer and both ranges.
+    /// The peer's capability exchange made a connection impossible — no
+    /// protocol version in common, or a zero quota or `max_entries` — so no
+    /// request was issued. Carries peer and, for a version mismatch, both
+    /// ranges.
     IncompatiblePeer(String),
     /// The transport failed.
     Transport(String),
@@ -585,10 +586,11 @@ component_macros::define_interface! {
         /// # Errors
         ///
         /// [`TransferEndpointError::InvalidEndpoint`] if `peer` is not a
-        /// normalized `"host:port"`; [`TransferEndpointError::IncompatiblePeer`]
-        /// if its version range does not intersect the local one;
-        /// [`TransferEndpointError::NotInitialized`] if no landing region is
-        /// registered.
+        /// normalized `"host:port"`; [`TransferEndpointError::NotInitialized`]
+        /// if no landing region is registered. A peer whose version range
+        /// does not intersect the local one is found only at the capability
+        /// exchange, after this returns, so it reaches `on_complete` as
+        /// [`TransferEndpointError::IncompatiblePeer`].
         fn fetch(
             &self,
             peer: &str,
