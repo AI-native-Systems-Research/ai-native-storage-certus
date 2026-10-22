@@ -588,7 +588,8 @@ component_macros::define_interface! {
         /// lookups. For entries on SSD (cold path), promotes them in parallel
         /// to exploit multi-drive bandwidth.
         ///
-        /// Returns one `Result` per input entry, in the same order.
+        /// Returns one [`LookupOutcome`] per input entry, in the same order: the
+        /// result together with how the key was served (`served_by`).
         ///
         /// Each entry carries one or more GPU destination regions. A block that
         /// the client exports as a single coalesced allocation (vLLM <=0.22,
@@ -803,11 +804,22 @@ component_macros::define_interface! {
         /// propagated.
         fn promote_to_memory_tier(&self, keys: &[CacheKey]);
 
-        /// Evict all entries from the memory-tier, demoting them to block-device-backed.
+        /// Empty the memory tier, demoting entries to block-device-backed where possible.
         ///
         /// Entries whose write-through has completed are converted to block-device
-        /// state in the dispatch map. Entries still being written are removed entirely.
-        /// Returns the number of entries cleared.
+        /// state in the dispatch map. Entries with no SSD copy are removed. An entry
+        /// that is pinned — by a lookup, a client `pin`, or its own pending
+        /// write-through — keeps its DRAM slot and is retried until the pin drops:
+        /// its dispatch-map entry still points at the slot.
+        ///
+        /// Returns the number of entries actually demoted or removed; `Ok` means
+        /// the memory tier was emptied.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`DispatcherError::Timeout`] if pinned entries are still
+        /// resident when the implementation's bounded wait expires. They stay
+        /// resident and cached.
         ///
         /// # Examples
         ///
@@ -829,6 +841,12 @@ component_macros::define_interface! {
         /// dropping them.
         ///
         /// Returns the number of entries that now have a valid SSD offset.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`DispatcherError::IoError`] if a write-through to SSD failed
+        /// for an entry that is still in the memory tier. That entry has no SSD
+        /// copy, so a later `clear_memory_tier` would drop its only copy.
         fn flush_to_ssd(&self) -> Result<usize, DispatcherError>;
 
         /// Enqueue a background write-through for a key already resident in the memory

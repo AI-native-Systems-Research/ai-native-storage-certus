@@ -90,8 +90,8 @@ use component_core::binding::bind;
 use spdk_env::ISPDKEnv;
 
 use crate::background::{
-    BackgroundEvictor, EvictionSender, EvictorConfig, MemoryTierEvictor, MemoryTierEvictorConfig,
-    ParallelBackgroundWriter, WriteJob,
+    BackgroundEvictor, EvictionSender, EvictorConfig, JobStart, MemoryTierEvictor,
+    MemoryTierEvictorConfig, ParallelBackgroundWriter, WriteJob, WriteThroughPins,
 };
 pub use crate::metrics::PipelineMetrics;
 
@@ -433,6 +433,7 @@ define_component! {
             eviction_tx: Arc<Mutex<Option<EvictionSender>>>,
             eviction_dropped: Arc<AtomicU64>,
             tier_counters: Arc<TierEventCounters>,
+            write_through_pins: Arc<WriteThroughPins>,
         },
     }
 }
@@ -1230,14 +1231,11 @@ impl DispatcherComponent {
                     }
                 }
                 Err(interfaces::MemoryTierError::AlreadyExists(k)) => {
-                    // Not a capacity refusal: someone else — a concurrent writer, or a
-                    // remote fetch's `publish_success` — already put this key in the
-                    // tier. Counted here because this return bypasses the backpressure
-                    // retry in `reserve_memory`, so it leaves no trace in either store
-                    // counter, and the shm-queue wire collapses it into the same flat
-                    // zero as a genuine pool-full. Without this counter a run can show
-                    // stores declined while eviction never failed once.
-                    self.tier_counters.record_store_already_resident();
+                    // Not a capacity refusal: someone else — a concurrent writer, a
+                    // remote fetch's `publish_success`, or a concurrent promotion —
+                    // already put this key in the tier. Not counted here: this helper
+                    // is shared with the load paths, where a lost promotion race is a
+                    // hit. `reserve_memory` counts the store refusals.
                     return Err(DispatcherError::AlreadyExists(k));
                 }
                 Err(e) => {
@@ -1411,28 +1409,89 @@ impl DispatcherComponent {
         }
     }
 
+    /// Returns whether the data landed (an SSD offset was recorded).
     fn process_write_job(
         dm: &Arc<dyn IDispatchMap + Send + Sync>,
         mt: &Arc<dyn IMemoryTier + Send + Sync>,
         drives: &[Arc<dyn IBlockDevice + Send + Sync>],
         extent_mgrs: &[Arc<dyn IExtentManager + Send + Sync>],
         job: WriteJob,
+    ) -> bool {
+        let written = Self::write_through(mt, drives, extent_mgrs, &job);
+        Self::settle_write_through(dm, job.key, written);
+        written.is_some()
+    }
+
+    /// Run a dequeued write-through job, coordinated with `remove` through `pins`
+    /// so that `remove` never has to wait for it (FR-018). The outcome is
+    /// recorded in `pins`, so that `flush_to_ssd` can report a failed write.
+    fn run_write_job(
+        pins: &WriteThroughPins,
+        dm: &Arc<dyn IDispatchMap + Send + Sync>,
+        mt: &Arc<dyn IMemoryTier + Send + Sync>,
+        drives: &[Arc<dyn IBlockDevice + Send + Sync>],
+        extent_mgrs: &[Arc<dyn IExtentManager + Send + Sync>],
+        job: WriteJob,
     ) {
-        // Get the memory-tier pointer without refreshing its eviction-order position —
-        // the write-through must not prevent this entry from being evicted under memory pressure.
-        let (mem_ptr, _size) = match mt.peek(job.key) {
-            Some(v) => v,
-            None => {
-                let _ = dm.release_read(job.key);
+        match pins.start(job.key) {
+            JobStart::Stale => return,
+            JobStart::Untracked => {
+                let key = job.key;
+                let landed = Self::process_write_job(dm, mt, drives, extent_mgrs, job);
+                return pins.record_write(key, landed);
+            }
+            JobStart::Owned => {}
+        }
+        let written = Self::write_through(mt, drives, extent_mgrs, &job);
+        pins.finish(job.key, |owned| {
+            if owned {
+                pins.record_write(job.key, written.is_some());
+                Self::settle_write_through(dm, job.key, written);
                 return;
             }
-        };
+            // `remove` took the entry while we were reading the slot: free the
+            // slot, and the extent just written, which nothing points at now.
+            let _ = mt.remove(job.key);
+            if let (Some(offset), false) = (written, drives.is_empty()) {
+                let drive_idx = job.device_index % drives.len();
+                let _ = extent_mgrs[drive_idx % extent_mgrs.len()].remove_extent(offset);
+            }
+        });
+    }
+
+    /// Release the write-through pin: `convert_to_storage` records the SSD copy
+    /// and decrements the read reference; without a copy the pin is just released.
+    fn settle_write_through(
+        dm: &Arc<dyn IDispatchMap + Send + Sync>,
+        key: CacheKey,
+        written: Option<u64>,
+    ) {
+        match written {
+            Some(block_offset) => {
+                let _ = dm.convert_to_storage(key, block_offset);
+            }
+            None => {
+                let _ = dm.release_read(key);
+            }
+        }
+    }
+
+    /// Copy the entry's DRAM slot to SSD. Returns the offset of the published
+    /// extent (a synthetic one with no block devices), or `None` if nothing was
+    /// written.
+    fn write_through(
+        mt: &Arc<dyn IMemoryTier + Send + Sync>,
+        drives: &[Arc<dyn IBlockDevice + Send + Sync>],
+        extent_mgrs: &[Arc<dyn IExtentManager + Send + Sync>],
+        job: &WriteJob,
+    ) -> Option<u64> {
+        // Get the memory-tier pointer without refreshing its eviction-order position —
+        // the write-through must not prevent this entry from being evicted under memory pressure.
+        let (mem_ptr, _size) = mt.peek(job.key)?;
 
         if drives.is_empty() {
             // No block devices: mark as converted with a synthetic offset.
-            let block_offset = job.key * 4096;
-            let _ = dm.convert_to_storage(job.key, block_offset);
-            return;
+            return Some(job.key * 4096);
         }
 
         let drive_idx = job.device_index % drives.len();
@@ -1452,20 +1511,14 @@ impl DispatcherComponent {
             )
         } {
             Ok(buf) => buf,
-            Err(_) => {
-                let _ = dm.release_read(job.key);
-                return;
-            }
+            Err(_) => return None,
         };
 
         // Allocate extent via the extent manager.
         let iem = &extent_mgrs[drive_idx % extent_mgrs.len()];
         let write_handle = match iem.reserve_extent(job.key, aligned_bytes as u32) {
             Ok(wh) => wh,
-            Err(_) => {
-                let _ = dm.release_read(job.key);
-                return;
-            }
+            Err(_) => return None,
         };
 
         let block_offset = write_handle.extent_offset();
@@ -1475,17 +1528,15 @@ impl DispatcherComponent {
         if Self::write_buffer_to_ssd(&**drive, &temp_buf, start_lba, total_bytes, dma_capable)
             .is_err()
         {
-            let _ = dm.release_read(job.key);
-            return; // write_handle drops → abort
+            return None; // write_handle drops → abort
         }
 
         // Prevent the noop-free DmaBuffer from being dropped normally.
         std::mem::forget(temp_buf);
 
         // Data written successfully — commit the extent metadata.
-        // convert_to_storage also decrements the read reference.
         let _ = write_handle.publish();
-        let _ = dm.convert_to_storage(job.key, block_offset);
+        Some(block_offset)
     }
 }
 
@@ -2046,13 +2097,14 @@ impl IDispatcher for DispatcherComponent {
 
         let num_writer_drives = bg_drives.len().max(1);
         let writer = ParallelBackgroundWriter::start(num_writer_drives, |drive_idx| {
+            let pins = Arc::clone(&self.write_through_pins);
             let dm = Arc::clone(&dm_for_writer);
             let mt = Arc::clone(&mt_for_writer);
             let drives = bg_drives.clone();
             let extent_mgrs = bg_extent_mgrs.clone();
             let _ = drive_idx;
             move |job: WriteJob| {
-                Self::process_write_job(&dm, &mt, &drives, &extent_mgrs, job);
+                Self::run_write_job(&pins, &dm, &mt, &drives, &extent_mgrs, job);
             }
         });
 
@@ -3170,11 +3222,20 @@ impl IDispatcher for DispatcherComponent {
 
         // Remove from dispatch-map first (prevents new lookups from obtaining
         // the memory-tier pointer while we free it).
-        dm.remove(key)
-            .map_err(|_| DispatcherError::KeyNotFound(key))?;
+        let job_frees_slot = match dm.remove(key) {
+            Ok(()) => false,
+            // FR-018: the pin of a pending write-through does not hold remove up;
+            // remove takes it over instead of waiting for the job.
+            Err(interfaces::DispatchMapError::ActiveReferences(_)) => self
+                .write_through_pins
+                .remove_entry(&*dm, key)
+                .ok_or(DispatcherError::KeyNotFound(key))?,
+            Err(_) => return Err(DispatcherError::KeyNotFound(key)),
+        };
 
         // Now safe to free the DRAM slot — no new readers can find this entry.
-        if let Ok(mt) = self.memory_tier.get() {
+        // A write-through still reading it frees it when done.
+        if let (Ok(mt), false) = (self.memory_tier.get(), job_frees_slot) {
             let _ = mt.remove(key);
         }
 
@@ -3460,8 +3521,13 @@ impl IDispatcher for DispatcherComponent {
                     self.store_backpressure_ms.load(Ordering::Relaxed),
                 );
                 if budget.is_zero() {
-                    let mem_ptr = self.evict_and_insert(&dm, &mt, key, size, max_attempts)?;
-                    return Ok(mem_ptr);
+                    return match self.evict_and_insert(&dm, &mt, key, size, max_attempts) {
+                        Err(e @ DispatcherError::AlreadyExists(_)) => {
+                            self.tier_counters.record_store_already_resident();
+                            Err(e)
+                        }
+                        r => r,
+                    };
                 }
                 std::time::Instant::now() + budget
             }
@@ -3484,6 +3550,15 @@ impl IDispatcher for DispatcherComponent {
                         );
                     }
                     std::thread::sleep(POLL);
+                }
+                Err(e @ DispatcherError::AlreadyExists(_)) => {
+                    // Not a capacity refusal: the key is already cached. It bypasses
+                    // the backpressure retry, so it leaves no trace in either store
+                    // counter, and the shm-queue wire collapses it into the same flat
+                    // zero as a genuine pool-full. Without this counter a run can show
+                    // stores declined while eviction never failed once.
+                    self.tier_counters.record_store_already_resident();
+                    return Err(e);
                 }
                 Err(e) => return Err(e),
             }
@@ -3643,13 +3718,17 @@ impl IDispatcher for DispatcherComponent {
             dd.len().max(1)
         };
         let guard = self.bg_writer.lock().unwrap();
-        if let Some(ref writer) = *guard {
-            let _ = writer.enqueue(WriteJob {
-                key,
-                size,
-                device_index: Self::drive_index(key, num_drives),
-            });
-        }
+        // Record the pin before its job can run, so `remove` can take it over.
+        self.write_through_pins.pin(key, || match *guard {
+            Some(ref writer) => writer
+                .enqueue(WriteJob {
+                    key,
+                    size,
+                    device_index: Self::drive_index(key, num_drives),
+                })
+                .is_ok(),
+            None => false,
+        });
 
         Ok(())
     }
@@ -3890,21 +3969,54 @@ impl IDispatcher for DispatcherComponent {
             .get()
             .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
 
+        // A pinned entry (a lookup or the write-through holds a reference) can be
+        // neither demoted nor removed, and its slot must NOT be freed: the entry
+        // still points at it and the pin holder may be copying from it. Such an
+        // entry keeps its slot and is retried until the pin drops. The wait is
+        // bounded so a pin that is never released cannot hang the call: at the
+        // deadline the still-pinned entries stay resident and the call fails with
+        // `Timeout`, so `Ok(count)` always means the memory tier was emptied.
+        let timeout = std::time::Duration::from_secs(5);
+        let start = std::time::Instant::now();
         let mut count = 0;
+        let mut pinned = 0;
         loop {
-            let candidates = mt.oldest_keys(64);
+            // Widen the window past the entries left pinned on the last pass, so
+            // they cannot hide the clearable ones behind them.
+            let candidates = mt.oldest_keys(64 + pinned);
             if candidates.is_empty() {
                 break;
             }
+            let mut cleared = 0;
+            pinned = 0;
             for key in candidates {
-                if dm.try_evict_to_block(key).is_ok() {
+                let done = match dm.try_evict_to_block(key) {
+                    Ok(()) => true,
+                    Err(interfaces::DispatchMapError::ActiveReferences(_)) => false,
+                    // Entry not evictable (no SSD copy) — force remove. The entry
+                    // goes first: a pin taken since the demotion attempt refuses
+                    // the remove, and the slot is then kept for the retry.
+                    Err(_) => !matches!(
+                        dm.remove(key),
+                        Err(interfaces::DispatchMapError::ActiveReferences(_))
+                    ),
+                };
+                if done {
                     let _ = mt.remove(key);
+                    count += 1;
+                    cleared += 1;
                 } else {
-                    // Entry not evictable (no SSD copy) — force remove.
-                    let _ = mt.remove(key);
-                    let _ = dm.remove(key);
+                    pinned += 1;
                 }
-                count += 1;
+            }
+            if cleared == 0 {
+                if start.elapsed() >= timeout {
+                    return Err(DispatcherError::Timeout(format!(
+                        "clear_memory_tier: {pinned} pinned entries still resident \
+                         after clearing {count}"
+                    )));
+                }
+                std::thread::sleep(std::time::Duration::from_micros(50));
             }
         }
         Ok(count)
@@ -3914,15 +4026,38 @@ impl IDispatcher for DispatcherComponent {
         self.ensure_initialized()?;
 
         // Block until the background writer has processed all enqueued jobs.
-        let flushed = if let Some(ref writer) = *self.bg_writer.lock().unwrap() {
-            let before = writer.in_flight();
+        if let Some(ref writer) = *self.bg_writer.lock().unwrap() {
             writer.flush();
-            before
-        } else {
-            0
-        };
+        }
 
-        Ok(flushed)
+        let dm = self
+            .dispatch_map
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
+        let mt = self
+            .memory_tier
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
+
+        // An empty queue is not a persisted tier: a write-through that failed
+        // left its entry resident with no SSD copy, and `clear_memory_tier`
+        // would then drop the only copy. Report it instead of `Ok`.
+        let failed = self
+            .write_through_pins
+            .failed_writes(|key| mt.contains(key));
+        if failed > 0 {
+            return Err(DispatcherError::IoError(format!(
+                "flush_to_ssd: {failed} memory-tier entries have no SSD copy: \
+                 their write-through to the block device failed"
+            )));
+        }
+
+        // The entries that now have a valid SSD offset.
+        Ok(mt
+            .oldest_keys(usize::MAX)
+            .into_iter()
+            .filter(|&key| dm.is_evictable(key))
+            .count())
     }
 
     fn schedule_write_through(
@@ -3989,6 +4124,14 @@ impl IDispatcher for DispatcherComponent {
 #[cfg(test)]
 #[path = "repair_test_cold_pin.rs"]
 mod repair_test_cold_pin;
+
+#[cfg(test)]
+#[path = "repair_test_clear_mt_pinned.rs"]
+mod repair_test_clear_mt_pinned;
+
+#[cfg(test)]
+#[path = "repair_test_flush_failed_write.rs"]
+mod repair_test_flush_failed_write;
 
 #[cfg(test)]
 mod tests {
@@ -4894,6 +5037,7 @@ mod tests {
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
         );
         c.dispatch_map
             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
@@ -5059,6 +5203,7 @@ mod tests {
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
         );
         c.dispatch_map
             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
@@ -5107,6 +5252,7 @@ mod tests {
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
         );
     }
 
@@ -5128,6 +5274,7 @@ mod tests {
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
         );
         let d = query_interface!(c, IDispatcher);
         assert!(d.is_some());
@@ -5151,6 +5298,7 @@ mod tests {
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let config = DispatcherConfig {
@@ -5179,6 +5327,7 @@ mod tests {
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let config = DispatcherConfig {
@@ -5208,6 +5357,7 @@ mod tests {
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let mut buf = vec![0u8; 4096];
@@ -5237,6 +5387,7 @@ mod tests {
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let err = d.check(42);
@@ -5261,6 +5412,7 @@ mod tests {
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let err = d.remove(42);
@@ -5285,6 +5437,7 @@ mod tests {
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let mut buf = vec![0u8; 4096];
@@ -5314,6 +5467,7 @@ mod tests {
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         // Even though not initialized, zero-size check comes after init check.
@@ -5346,6 +5500,7 @@ mod tests {
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         assert!(d.shutdown().is_ok());
@@ -5369,6 +5524,7 @@ mod tests {
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         assert!(d.shutdown().is_ok());
@@ -5393,6 +5549,7 @@ mod tests {
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
         ));
 
         let handles: Vec<_> = (0..4)
@@ -5448,6 +5605,7 @@ mod tests {
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
         );
         c.dispatch_map.connect(dm).unwrap();
         c.memory_tier.connect(mt).unwrap();
@@ -5482,6 +5640,7 @@ mod tests {
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
         );
         c.dispatch_map.connect(dm).unwrap();
         c.logger.connect(logger).unwrap();
@@ -5560,6 +5719,7 @@ mod tests {
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
         );
         c.dispatch_map.connect(dm).unwrap();
         c.logger.connect(logger).unwrap();
@@ -6231,9 +6391,8 @@ mod tests {
         let mut buf = vec![0u8; 4096];
         d.populate(1, make_handle(&mut buf)).unwrap();
         assert_eq!(dm.entry_count(), 1);
-        // Wait for the write-through: its `convert_to_storage` is what consumes the
-        // read-pin `downgrade_reference` installs during populate. Until then the
-        // entry is legitimately pinned and `remove` refuses it.
+        // Removing after the write-through has landed (`remove` no longer needs to
+        // wait for it — see repair_test_remove_no_wait for the pending case).
         d.flush_to_ssd().unwrap();
         assert!(d.remove(1).is_ok());
         assert_eq!(dm.entry_count(), 0);
@@ -6403,6 +6562,7 @@ mod tests {
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
         );
 
         // Pool is now full (16384 used). Trying to add 4096 more should evict.
@@ -6439,6 +6599,7 @@ mod tests {
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
         );
 
         // Plenty of space, no eviction needed.
@@ -6510,6 +6671,7 @@ mod tests {
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
         );
 
         // Pool is full (16384 used). Asking for one more slot forces eviction,
@@ -6539,7 +6701,7 @@ mod tests {
     /// cannot tell them apart.
     ///
     /// `op_reserve` reports every reserve error as the same flat zero, and the
-    /// already-resident path returns from `evict_and_insert` immediately — bypassing
+    /// already-resident path returns from `reserve_memory` immediately — bypassing
     /// the backpressure retry, so it bumps neither `store_backpressure_events` nor
     /// `store_drops_on_full`. The observable consequence, measured on four instances:
     /// 7.28% of stores "declined" while `eviction_scans_exhausted` was 0, i.e. eviction
@@ -6556,7 +6718,7 @@ mod tests {
         let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(16384));
         let counters = Arc::new(TierEventCounters::default());
         let c = DispatcherComponent::new(
-            AtomicBool::new(false),
+            AtomicBool::new(true),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -6571,10 +6733,13 @@ mod tests {
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
             Arc::clone(&counters),
+            Arc::new(WriteThroughPins::default()),
         );
+        c.dispatch_map.connect(Arc::clone(&dm)).unwrap();
+        c.memory_tier.connect(Arc::clone(&mt)).unwrap();
 
         // First reserve succeeds and leaves the key resident.
-        c.evict_and_insert(&dm, &mt, 7, 4096, 100)
+        c.reserve_memory(7, 4096, 0, None)
             .expect("the first insert has room and must succeed");
         assert_eq!(
             counters.snapshot().store_already_resident,
@@ -6584,7 +6749,7 @@ mod tests {
 
         // Second reserve of the SAME key: the tier still has room, so this can only
         // fail because the key is already there.
-        let res = c.evict_and_insert(&dm, &mt, 7, 4096, 100);
+        let res = c.reserve_memory(7, 4096, 0, None);
         assert!(
             matches!(res, Err(DispatcherError::AlreadyExists(7))),
             "a repeat reserve of a resident key must report AlreadyExists, got {res:?}",
@@ -6668,6 +6833,7 @@ mod tests {
                 Arc::new(Mutex::new(None)),
                 Arc::new(AtomicU64::new(0)),
                 Arc::clone(&counters),
+                Arc::new(WriteThroughPins::default()),
             );
             let res = c.evict_for_space(&dm, &mt, 4096, 100, 512);
             assert!(
@@ -6752,6 +6918,7 @@ mod tests {
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
         );
 
         // One demotion frees exactly one slot, which is enough.
@@ -6808,6 +6975,7 @@ mod tests {
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
         );
         c.dispatch_map
             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
@@ -6877,6 +7045,7 @@ mod tests {
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
             Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
         );
         c.dispatch_map
             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
@@ -7214,6 +7383,14 @@ mod repair_test_copy_completed;
 #[cfg(test)]
 #[path = "repair_test_populate_slot.rs"]
 mod repair_test_populate_slot;
+
+#[cfg(test)]
+#[path = "repair_test_remove_no_wait.rs"]
+mod repair_test_remove_no_wait;
+
+#[cfg(test)]
+#[path = "repair_test_store_already_resident.rs"]
+mod repair_test_store_already_resident;
 
 #[cfg(test)]
 #[path = "repair_test_eviction_window_tinylfu.rs"]

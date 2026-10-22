@@ -174,6 +174,7 @@ fn dispatcher(counters: Arc<TierEventCounters>) -> Arc<DispatcherComponent> {
         Arc::new(Mutex::new(None)),
         Arc::new(AtomicU64::new(0)),
         counters,
+        Arc::new(crate::background::WriteThroughPins::default()),
     )
 }
 
