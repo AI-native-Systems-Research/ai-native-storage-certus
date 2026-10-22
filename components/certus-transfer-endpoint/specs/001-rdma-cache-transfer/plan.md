@@ -44,7 +44,7 @@ single-host RDMA loopback for CI-adjacent verification.
 model (receptacles + actor-on-dedicated-thread).
 
 **Performance Goals**: saturate the available link on memory-tier-served transfers; per-entry
-RDMA posting must not serialise behind device reads (hence the bounce-lease decoupling and
+RDMA posting must not serialise behind device reads (hence the bounce-buffer decoupling and
 the reader threads).
 No latency target is set at this stage — the research question is whether explicit transfer
 beats recompute, and the measurement belongs to a later benchmark task.
@@ -182,7 +182,7 @@ scope** for FR-020 and not required for any P1 success criterion.
 | New component merging two existing roles | `ffi.rs` is already duplicated (52 shared public names); a third copy is worse. Symmetric endpoints need the union of both crates' verbs usage, and both already have connect+listen+accept. | Extending the initiator in place — leaves the crate name a lie and the responder's accept loop stranded. |
 | Symmetric QP usage | The destination connects and sends; the source must reply and push on that same connection. | Two connections per pair — doubles QPs and setups, and the reply still needs a direction. |
 | Three credit domains | They bound genuinely different resources (pins, receive buffers, bounce space) and exhaust independently. | One combined counter — would over- or under-restrict two of the three. |
-| Bounce reserve carved from the memory tier's pool | RDMA needs a registered buffer and the device read needs SPDK-DMA-able memory; the pool is already both (D15). | Promotion into the memory tier — evicts the source's own working set (D8). A separate dual-registered pool — a whole 1 GiB hugepage for 16 MiB, and a second registration. |
+| Bounce reserve carved from the memory tier's pool | RDMA needs a registered buffer and the device read needs SPDK-DMA-able memory; the pool is already both (D15). | Promotion into the memory tier — evicts the source's own working set (D8). A separate dual-registered pool — a whole 1 GiB hugepage for 32 MiB, and a second registration. |
 | Internal chunking | A single request can reach ~3.4 GiB; and it doubles as credit-based pacing. | Failing the request on resource shortage — unacceptable for a cache path. |
 | Long-lived protection domain, registrations outliving queue pairs | The contract promises landing regions are registered once, and in-flight requests have already advertised per-entry rkeys; a per-connection PD makes those stale on every reconnect (D17). | The predecessor crates' per-connection PD with re-registration on each connect — fine when you only push from your own pool, wrong when a peer holds your rkeys. |
 | Peer-wide abort on deadline | One queue pair per instance pair (D5) means forcing it to ERROR is the only thing that makes a late write impossible, and it necessarily takes the siblings with it (D18). | A queue pair per request, isolating expiry — multiplies QPs by request concurrency, already rejected in D5 for a weaker reason. |

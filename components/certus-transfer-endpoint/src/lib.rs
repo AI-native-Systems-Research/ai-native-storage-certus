@@ -215,7 +215,7 @@ mod component {
 ///     CacheKey, DispatchMapError, EndpointConfig, EntryOutcome, IDispatchMap, IMemoryTier,
 ///     ITransferEndpoint, ITransferEndpointAdmin, LookupResult,
 /// };
-/// # use interfaces::{BounceError, BounceLease, MemoryTierError, MemoryTierTelemetrySnapshot};
+/// # use interfaces::{BounceError, BounceBuffer, MemoryTierError, MemoryTierTelemetrySnapshot};
 ///
 /// // A dispatch map holding one entry, pinned per lookup as the real one is.
 /// struct OneEntry { addr: u64, pins: Mutex<i64> }
@@ -273,8 +273,8 @@ mod component {
 /// #   fn clear(&self) -> Result<usize, MemoryTierError> { unimplemented!() }
 /// #   fn telemetry_snapshot(&self) -> MemoryTierTelemetrySnapshot { unimplemented!() }
 /// #   fn set_bounce_reserve(&self, _: usize) -> Result<(), MemoryTierError> { unimplemented!() }
-/// #   fn bounce_alloc(&self, _: u32) -> Result<BounceLease, BounceError> { unimplemented!() }
-/// #   fn bounce_free(&self, _: BounceLease) { unimplemented!() }
+/// #   fn bounce_alloc(&self, _: u32) -> Result<BounceBuffer, BounceError> { unimplemented!() }
+/// #   fn bounce_free(&self, _: BounceBuffer) { unimplemented!() }
 /// #   fn bounce_usage(&self) -> (usize, usize) { unimplemented!() }
 /// }
 ///
@@ -3021,13 +3021,13 @@ mod tests {
 
     use crate::test_doubles::DiskSource;
 
-    /// A source node at 10.0.0.2:7000 whose block tier is `disk`, leasing
-    /// `leases` x 256 bytes from the top half of its pool, with `readers`
+    /// A source node at 10.0.0.2:7000 whose block tier is `disk`, allocating
+    /// `buffers` x 256 bytes from the top half of its pool, with `readers`
     /// reader threads and `credits` send credits; and a destination at
     /// 10.0.0.1:7000 with 4 KiB of landing slots. Both initialized.
     fn block_pair(
         f: &MockFabric,
-        leases: usize,
+        buffers: usize,
         readers: u32,
         credits: u32,
     ) -> (Node, Node, Arc<DiskSource>, LandingRegionHandle, Box<[u8]>) {
@@ -3036,8 +3036,11 @@ mod tests {
             c.block_readers = readers;
             c.send_credits = credits;
         });
-        assert!(leases * 256 <= 2048, "leases fit the top half of the pool");
-        let disk = Arc::new(DiskSource::new(src.pool_addr(2048), leases, 256));
+        assert!(
+            buffers * 256 <= 2048,
+            "buffers fit the top half of the pool"
+        );
+        let disk = Arc::new(DiskSource::new(src.pool_addr(2048), buffers, 256));
         src.ep
             .use_block_source(Arc::clone(&disk) as Arc<dyn bounce::BlockSource>);
         dest.ep.initialize().unwrap();
@@ -3068,7 +3071,7 @@ mod tests {
     }
 
     /// The independent test of US3: a block-tier entry arrives byte-exact,
-    /// is reported HitBlockTier, and its lease and pin are both returned.
+    /// is reported HitBlockTier, and its buffer and pin are both returned.
     #[test]
     fn a_block_tier_entry_is_read_and_served() {
         let f = MockFabric::new();
@@ -3080,7 +3083,7 @@ mod tests {
         assert_eq!(out, [EntryOutcome::HitBlockTier]);
         assert_eq!(&slots[..16], b"from the ssd!!!!");
         assert_eq!(disk.reads(), 1, "read once");
-        assert_eq!(disk.free_leases(), 4, "the lease came back");
+        assert_eq!(disk.free_buffers(), 4, "the buffer came back");
         assert_eq!(src.map.held(), 0, "the pin came back");
         assert_eq!(src.map.lookups(), 1, "one lookup: no probe-then-pin");
         let s = src.ep.stats();
@@ -3100,7 +3103,7 @@ mod tests {
     }
 
     /// T039 (FR-011, D7): the pin is released when the read completes, before
-    /// the write is posted; the lease is freed only after the write completes.
+    /// the write is posted; the buffer is freed only after the write completes.
     /// All three on one recorded sequence.
     #[test]
     fn the_block_pin_goes_after_the_read_and_the_lease_after_the_write() {
@@ -3139,7 +3142,7 @@ mod tests {
         );
         assert!(
             written < freed,
-            "lease freed only after the write completed"
+            "buffer freed only after the write completed"
         );
         dest.ep.shutdown().unwrap();
         src.ep.shutdown().unwrap();
@@ -3217,7 +3220,7 @@ mod tests {
             src.map.peak_held()
         );
         assert!(disk.reading().1 <= 2, "at most two reads at once");
-        assert_eq!((src.map.held(), disk.free_leases()), (0, 8));
+        assert_eq!((src.map.held(), disk.free_buffers()), (0, 8));
         let s = src.ep.stats();
         assert_eq!(s.block_reads_completed, 40);
         assert!(s.block_reads_attempted >= 40);
@@ -3226,8 +3229,8 @@ mod tests {
         drop(slots);
     }
 
-    /// A reserve with room for one lease at a time: entries beyond it are
-    /// deferred, holding no pin, and all complete as leases come back.
+    /// A reserve with room for one buffer at a time: entries beyond it are
+    /// deferred, holding no pin, and all complete as buffers come back.
     #[test]
     fn a_full_reserve_defers_and_still_completes() {
         let f = MockFabric::new();
@@ -3246,17 +3249,17 @@ mod tests {
             assert_eq!(slots[k * 8..k * 8 + 8], [0xa0 + k as u8; 8]);
         }
         let s = src.ep.stats();
-        assert!(s.block_deferrals > 0, "something waited for the one lease");
+        assert!(s.block_deferrals > 0, "something waited for the one buffer");
         assert_eq!(s.bounce_buffers_peak, 1);
         assert_eq!(s.block_reads_failed, 0, "deferral is not failure");
-        assert_eq!((src.map.held(), disk.free_leases()), (0, 1));
+        assert_eq!((src.map.held(), disk.free_buffers()), (0, 1));
         dest.ep.shutdown().unwrap();
         src.ep.shutdown().unwrap();
         drop(slots);
     }
 
     /// NeverFits and Io are Failed — counted, never retried — and neither
-    /// leaks a pin or a lease; the entries beside them are served.
+    /// leaks a pin or a buffer; the entries beside them are served.
     #[test]
     fn unservable_block_reads_fail_and_are_not_retried() {
         let f = MockFabric::new();
@@ -3299,14 +3302,14 @@ mod tests {
             2,
             "NeverFits issued no read; Io was read once"
         );
-        assert_eq!((src.map.held(), disk.free_leases()), (0, 4));
+        assert_eq!((src.map.held(), disk.free_buffers()), (0, 4));
         dest.ep.shutdown().unwrap();
         src.ep.shutdown().unwrap();
         drop(slots);
     }
 
     /// A teardown while a read is held: the reply never comes, the read is
-    /// waited for, and its pin and lease are both returned when it does.
+    /// waited for, and its pin and buffer are both returned when it does.
     #[test]
     fn a_teardown_mid_read_returns_the_pin_and_lease_when_the_read_ends() {
         let f = MockFabric::new();
@@ -3319,8 +3322,8 @@ mod tests {
         src.ep.disconnect("10.0.0.1:7000").unwrap();
         assert_eq!(src.map.held(), 1, "the read still holds its pin");
         disk.release_reads();
-        eventually("pin and lease back", || {
-            src.map.held() == 0 && disk.free_leases() == 4
+        eventually("pin and buffer back", || {
+            src.map.held() == 0 && disk.free_buffers() == 4
         });
         assert_eq!(slots[..8], [0u8; 8], "nothing written for a dead push");
         dest.ep.shutdown().unwrap();
@@ -3346,7 +3349,7 @@ mod tests {
         src.ep.shutdown().unwrap();
         assert!(t0.elapsed() >= Duration::from_millis(100), "it waited");
         releaser.join().unwrap();
-        assert_eq!((src.map.held(), disk.free_leases()), (0, 4));
+        assert_eq!((src.map.held(), disk.free_buffers()), (0, 4));
         dest.ep.shutdown().unwrap();
         drop(slots);
     }
@@ -3416,7 +3419,7 @@ mod tests {
 
     /// The `spdk` wiring: with the `dispatcher` receptacle bound, `initialize`
     /// starts readers over it, and a block-tier entry is read through
-    /// `read_to_bounce` and its lease returned through `release_bounce`.
+    /// `read_to_bounce` and its buffer returned through `release_bounce`.
     #[cfg(feature = "spdk")]
     #[test]
     fn an_spdk_endpoint_reads_through_its_dispatcher_receptacle() {
@@ -3448,7 +3451,7 @@ mod tests {
         assert_eq!(out, [EntryOutcome::HitBlockTier]);
         assert_eq!(&slots[..20], b"via the receptacle!!");
         assert_eq!(
-            (disk.reads(), disk.free_leases(), src.map.held()),
+            (disk.reads(), disk.free_buffers(), src.map.held()),
             (1, 2, 0)
         );
         dest.ep.shutdown().unwrap();
@@ -3610,7 +3613,7 @@ mod tests {
     }
 
     /// T045: scarcity at the source delays its reply, never splits it. A
-    /// six-entry block-tier request served through a one-lease reserve draws
+    /// six-entry block-tier request served through a one-buffer reserve draws
     /// exactly one reply, after many deferrals.
     #[test]
     fn a_scarce_source_still_replies_once_per_request() {

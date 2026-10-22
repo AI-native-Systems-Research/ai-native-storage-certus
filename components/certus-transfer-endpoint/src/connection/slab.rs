@@ -9,7 +9,7 @@
 //! that was never posted, the posting helper's `unposted` list. There is no
 //! third path, so there is no way to release twice.
 //!
-//! The slab is generic: what a slot carries (pin key, bounce lease, context and
+//! The slab is generic: what a slot carries (pin key, bounce buffer, context and
 //! entry index) is the serve path's type, not this module's.
 //!
 //! # Why a generation number

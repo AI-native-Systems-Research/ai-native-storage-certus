@@ -1321,7 +1321,7 @@ pub unsafe fn pipelined_ssd_to_dram_only(
 /// Read timeout for [`read_into_bounce`], in milliseconds: one that never fires.
 ///
 /// The block-device actor's timeout forgets an operation while the drive may
-/// still write its buffer. For a bounce lease that is unsafe: the lease would be
+/// still write its buffer. For a bounce buffer that is unsafe: the buffer would be
 /// freed and handed to another entry under a read still in flight. So this path
 /// waits for every read to complete, however long the device takes, and a hung
 /// device surfaces as the requesting peer's own reply deadline. `u32::MAX` ms
@@ -1330,15 +1330,15 @@ pub unsafe fn pipelined_ssd_to_dram_only(
 pub const BOUNCE_READ_TIMEOUT_MS: u64 = u32::MAX as u64;
 
 /// Read `total_bytes` from `start_lba` into `dst`, which must lie in a bounce
-/// lease, keeping up to `max_queue_depth` segments in flight.
+/// buffer, keeping up to `max_queue_depth` segments in flight.
 ///
 /// Unlike [`pipelined_ssd_to_dram_only`], an error does not return while reads
 /// are outstanding: every submitted segment is waited for. On success, and on
 /// a [`BounceReadError::Settled`] failure, the device holds no reference to
-/// `dst` and the lease may be freed. On [`BounceReadError::Unsettled`] a read
+/// `dst` and the buffer may be freed. On [`BounceReadError::Unsettled`] a read
 /// ended without proof the drive stopped writing — a timeout, or an error the
 /// actor reports *before* the controller reset that stops the DMA — and the
-/// lease must never be reused.
+/// buffer must never be reused.
 ///
 /// # Safety
 /// - `dst` must be valid, DMA-capable memory for `total_bytes` rounded up to the
@@ -1373,7 +1373,7 @@ pub unsafe fn read_into_bounce(
     for seg in &segments {
         // SAFETY: inside `dst`, whose extent the caller guarantees.
         let ptr = unsafe { dst.add(seg.buffer_offset) as *mut std::ffi::c_void };
-        // SAFETY: `noop_free` — the memory belongs to the lease, not the wrapper.
+        // SAFETY: `noop_free` — the memory belongs to the buffer, not the wrapper.
         let buf = unsafe {
             DmaBuffer::from_raw(ptr, seg.length.next_multiple_of(block_size), noop_free, -1)
         }

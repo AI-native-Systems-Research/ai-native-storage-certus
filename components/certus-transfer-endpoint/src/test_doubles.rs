@@ -9,7 +9,7 @@ use std::sync::Mutex;
 
 use crate::connection::mock::Sequence;
 use interfaces::{
-    BounceError, BounceLease, CacheKey, DispatchMapError, IDispatchMap, IMemoryTier, LookupResult,
+    BounceBuffer, BounceError, CacheKey, DispatchMapError, IDispatchMap, IMemoryTier, LookupResult,
     MemoryTierError, MemoryTierTelemetrySnapshot,
 };
 
@@ -283,10 +283,10 @@ impl IMemoryTier for PoolTier {
     fn set_bounce_reserve(&self, _: usize) -> Result<(), MemoryTierError> {
         unimplemented!()
     }
-    fn bounce_alloc(&self, _: u32) -> Result<interfaces::BounceLease, interfaces::BounceError> {
-        unimplemented!("the endpoint leases only through the dispatcher (D13)")
+    fn bounce_alloc(&self, _: u32) -> Result<interfaces::BounceBuffer, interfaces::BounceError> {
+        unimplemented!("the endpoint buffers only through the dispatcher (D13)")
     }
-    fn bounce_free(&self, _: interfaces::BounceLease) {
+    fn bounce_free(&self, _: interfaces::BounceBuffer) {
         unimplemented!()
     }
     fn bounce_usage(&self) -> (usize, usize) {
@@ -294,15 +294,15 @@ impl IMemoryTier for PoolTier {
     }
 }
 
-/// A block source over a "disk" in memory, reading into leases carved from a
+/// A block source over a "disk" in memory, reading into buffers carved from a
 /// range the test gives it — the top of its node's pool, as the memory tier's
-/// bounce reserve is. Fixed-size leases, so a test can exhaust them exactly.
+/// bounce reserve is. Fixed-size buffers, so a test can exhaust them exactly.
 /// Reads can be held until released, failed, or refused for lack of space;
-/// each read and each lease free is stamped from the shared sequence.
+/// each read and each buffer free is stamped from the shared sequence.
 pub(crate) struct DiskSource {
     disk: Mutex<HashMap<u64, Vec<u8>>>,
-    leases: Mutex<Vec<u64>>,
-    lease_bytes: u32,
+    buffers: Mutex<Vec<u64>>,
+    buffer_bytes: u32,
     hold: Mutex<bool>,
     released: std::sync::Condvar,
     fail: Mutex<std::collections::HashSet<u64>>,
@@ -314,24 +314,24 @@ pub(crate) struct DiskSource {
     stamps: Mutex<Vec<(u64, &'static str, u64)>>,
 }
 
-// SAFETY: lease addresses are integers here; the bytes they name belong to the
+// SAFETY: buffer addresses are integers here; the bytes they name belong to the
 // test's pool, which outlives the endpoint using this source.
 unsafe impl Send for DiskSource {}
 // SAFETY: as above; all state is behind mutexes or atomics.
 unsafe impl Sync for DiskSource {}
 
 impl DiskSource {
-    /// Leases of `lease_bytes` at `base`, `count` of them.
-    pub(crate) fn new(base: u64, count: usize, lease_bytes: u32) -> Self {
+    /// Buffers of `buffer_bytes` at `base`, `count` of them.
+    pub(crate) fn new(base: u64, count: usize, buffer_bytes: u32) -> Self {
         DiskSource {
             disk: Mutex::new(HashMap::new()),
-            leases: Mutex::new(
+            buffers: Mutex::new(
                 (0..count as u64)
                     .rev()
-                    .map(|i| base + i * lease_bytes as u64)
+                    .map(|i| base + i * buffer_bytes as u64)
                     .collect(),
             ),
-            lease_bytes,
+            buffer_bytes,
             hold: Mutex::new(false),
             released: std::sync::Condvar::new(),
             fail: Mutex::default(),
@@ -382,12 +382,12 @@ impl DiskSource {
         )
     }
 
-    /// Leases free now.
-    pub(crate) fn free_leases(&self) -> usize {
-        self.leases.lock().unwrap().len()
+    /// Buffers free now.
+    pub(crate) fn free_buffers(&self) -> usize {
+        self.buffers.lock().unwrap().len()
     }
 
-    /// Stamp each read's end ("read") and each lease free ("free"), by offset
+    /// Stamp each read's end ("read") and each buffer free ("free"), by offset
     /// or address, from `seq`.
     pub(crate) fn record(&self, seq: &Sequence) {
         *self.seq.lock().unwrap() = Some(seq.clone());
@@ -405,12 +405,12 @@ impl DiskSource {
 }
 
 impl crate::bounce::BlockSource for DiskSource {
-    fn read(&self, _key: CacheKey, offset: u64, len: u32) -> Result<BounceLease, BounceError> {
-        if self.never_fits.lock().unwrap().contains(&offset) || len > self.lease_bytes {
+    fn read(&self, _key: CacheKey, offset: u64, len: u32) -> Result<BounceBuffer, BounceError> {
+        if self.never_fits.lock().unwrap().contains(&offset) || len > self.buffer_bytes {
             return Err(BounceError::NeverFits(format!("{len} bytes")));
         }
         let addr = self
-            .leases
+            .buffers
             .lock()
             .unwrap()
             .pop()
@@ -425,7 +425,7 @@ impl crate::bounce::BlockSource for DiskSource {
         drop(held);
         self.reading.fetch_sub(1, Ordering::SeqCst);
         if self.fail.lock().unwrap().contains(&offset) {
-            self.leases.lock().unwrap().push(addr);
+            self.buffers.lock().unwrap().push(addr);
             self.stamp("read", offset);
             return Err(BounceError::Io("injected".into()));
         }
@@ -437,26 +437,26 @@ impl crate::bounce::BlockSource for DiskSource {
             .cloned()
             .unwrap_or_default();
         let n = bytes.len().min(len as usize);
-        // SAFETY: `addr` is a lease of `lease_bytes >= len` bytes in the
-        // test's pool, owned by this read until the lease is freed.
+        // SAFETY: `addr` is a buffer of `buffer_bytes >= len` bytes in the
+        // test's pool, owned by this read until the buffer is freed.
         unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), addr as *mut u8, n) };
         self.stamp("read", offset);
-        Ok(BounceLease {
+        Ok(BounceBuffer {
             ptr: addr as *mut u8,
             len,
         })
     }
 
-    fn release(&self, lease: BounceLease) {
-        let mut l = self.leases.lock().unwrap();
+    fn release(&self, buf: BounceBuffer) {
+        let mut l = self.buffers.lock().unwrap();
         assert!(
-            !l.contains(&(lease.ptr as u64)),
-            "bounce lease {:?} freed twice",
-            lease.ptr
+            !l.contains(&(buf.ptr as u64)),
+            "bounce buffer {:?} freed twice",
+            buf.ptr
         );
-        l.push(lease.ptr as u64);
+        l.push(buf.ptr as u64);
         drop(l);
-        self.stamp("free", lease.ptr as u64);
+        self.stamp("free", buf.ptr as u64);
     }
 }
 
@@ -473,11 +473,11 @@ impl interfaces::IDispatcher for DiskDispatcher {
         key: CacheKey,
         offset: u64,
         len: u32,
-    ) -> Result<BounceLease, BounceError> {
+    ) -> Result<BounceBuffer, BounceError> {
         crate::bounce::BlockSource::read(&*self.0, key, offset, len)
     }
-    fn release_bounce(&self, lease: BounceLease) {
-        crate::bounce::BlockSource::release(&*self.0, lease)
+    fn release_bounce(&self, buf: BounceBuffer) {
+        crate::bounce::BlockSource::release(&*self.0, buf)
     }
 
     fn initialize(

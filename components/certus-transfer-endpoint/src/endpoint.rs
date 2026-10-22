@@ -172,7 +172,7 @@ pub(crate) fn fatal_on_panic<R>(what: &str, f: impl FnOnce() -> R) -> R {
 }
 
 /// Settle one push write's completion: release its pin, or return its bounce
-/// lease, and record its entry's outcome. Returns whether it was a genuine failure (not a flush), which means
+/// buffer, and record its entry's outcome. Returns whether it was a genuine failure (not a flush), which means
 /// the link is now in ERROR and must be torn down. Message work is not settled
 /// here; see [`EndpointActor::on_message_work`].
 fn settle(
@@ -191,11 +191,11 @@ fn settle(
                     pin.release(&**map);
                     EntryOutcome::HitMemoryTier
                 }
-                Hold::Lease(lease) => {
+                Hold::Buffer(buf) => {
                     readers
                         .as_mut()
-                        .expect("a lease implies a block source")
-                        .release(lease);
+                        .expect("a buffer implies a block source")
+                        .release(buf);
                     counters.bounce_buffers_in_use -= 1;
                     EntryOutcome::HitBlockTier
                 }
@@ -621,16 +621,16 @@ impl EndpointActor {
         let mut freed = 0u32;
         for push in self.pushes.values_mut().filter(|p| p.peer == *peer) {
             // Reads still out finish on their own and are discarded then:
-            // their pins and leases are released when they return.
+            // their pins and buffers are released when they return.
             push.dead = true;
             for (i, _, _) in push.pending.drain(..).chain(push.deferred.drain(..)) {
                 push.outcomes[i] = Some(EntryOutcome::Failed);
             }
-            for (i, lease, _) in push.ready.drain(..) {
+            for (i, buf, _) in push.ready.drain(..) {
                 readers
                     .as_mut()
-                    .expect("a lease implies a block source")
-                    .release(lease);
+                    .expect("a buffer implies a block source")
+                    .release(buf);
                 freed += 1;
                 push.outcomes[i] = Some(EntryOutcome::Failed);
             }
@@ -852,15 +852,15 @@ impl EndpointActor {
             };
             let mut queue = VecDeque::new();
             // Block-tier entries already read go first: their pins are gone,
-            // but their leases are held until their writes complete.
+            // but their buffers are held until their writes complete.
             while queue.len() < avail {
-                let Some((index, lease, remote)) = push.ready.pop_front() else {
+                let Some((index, buf, remote)) = push.ready.pop_front() else {
                     break;
                 };
                 did = true;
                 let local = region
-                    .sge(lease.ptr as u64, lease.len as usize)
-                    .expect("a bounce lease lies inside the registered pool");
+                    .sge(buf.ptr as u64, buf.len as usize)
+                    .expect("a bounce buffer lies inside the registered pool");
                 push.in_flight += 1;
                 queue.push_back(TrackedSend {
                     op: SendOp::RdmaWrite {
@@ -871,12 +871,12 @@ impl EndpointActor {
                     state: Work::Push(PushWork {
                         push: id,
                         index,
-                        hold: Hold::Lease(lease),
+                        hold: Hold::Buffer(buf),
                     }),
                 });
             }
             // Deferred entries retry, in order, as readers free — but not while
-            // the reserve is known full, which only a lease coming back ends.
+            // the reserve is known full, which only a buffer coming back ends.
             // Each is looked up afresh: its old pin was released when it was
             // put back.
             let retry = self.readers.as_ref().map_or(0, Readers::can_read);
@@ -962,11 +962,11 @@ impl EndpointActor {
                     if let Work::Push(pw) = unposted.state {
                         match pw.hold {
                             Hold::Pin(pin) => pin.release(&*self.map),
-                            Hold::Lease(lease) => {
+                            Hold::Buffer(buf) => {
                                 self.readers
                                     .as_mut()
-                                    .expect("a lease implies a block source")
-                                    .release(lease);
+                                    .expect("a buffer implies a block source")
+                                    .release(buf);
                                 table.counters_mut().bounce_buffers_in_use -= 1;
                             }
                         }
@@ -1068,11 +1068,11 @@ impl EndpointActor {
     fn on_read_done(
         &mut self,
         rid: u64,
-        result: Result<interfaces::BounceLease, interfaces::BounceError>,
+        result: Result<interfaces::BounceBuffer, interfaces::BounceError>,
     ) {
         let (push_id, b) = self.reads.remove(&rid).expect("a read we handed out");
         // FR-011: the pin goes now, whatever the result. On success the data
-        // is in the lease, which protects it from here on.
+        // is in the buffer, which protects it from here on.
         Pin::release(b.pin, &*self.map);
         let push = self
             .pushes
@@ -1081,35 +1081,35 @@ impl EndpointActor {
         push.reading -= 1;
         let readers = self.readers.as_mut().expect("reads imply readers");
         let Some(table) = self.table.as_mut() else {
-            if let Ok(lease) = result {
-                readers.release(lease);
+            if let Ok(buf) = result {
+                readers.release(buf);
             }
             return;
         };
         let c = table.counters_mut();
         match result {
-            Ok(lease) if push.dead => {
+            Ok(buf) if push.dead => {
                 // Its connection is gone: nothing will write from it.
                 c.block_reads_completed += 1;
-                readers.release(lease);
+                readers.release(buf);
                 push.outcomes[b.index] = Some(EntryOutcome::Failed);
             }
-            Ok(lease) => {
+            Ok(buf) => {
                 c.block_reads_completed += 1;
                 c.bounce_buffers_in_use += 1;
                 c.bounce_buffers_peak = c.bounce_buffers_peak.max(c.bounce_buffers_in_use);
-                push.ready.push_back((b.index, lease, b.region));
+                push.ready.push_back((b.index, buf, b.region));
             }
             Err(e) if e.is_transient() && !push.dead => {
                 // No bounce space now: put it back, holding no pin, to be
-                // looked up again when a lease frees.
+                // looked up again when a buffer frees.
                 readers.mark_full(b.frees_at);
                 c.block_deferrals += 1;
                 push.deferred.push_back((b.index, b.key, b.region));
             }
             Err(e) => {
                 if matches!(e, interfaces::BounceError::Io(_)) {
-                    // The source freed the failed read's lease: room again.
+                    // The source freed the failed read's buffer: room again.
                     readers.reserve_freed();
                 }
                 c.block_reads_failed += u64::from(!e.is_transient());
@@ -1608,8 +1608,8 @@ impl EndpointActor {
             }
         }
         // Wait for every block-tier read still out, however long the device
-        // takes: each holds a pin, and a lease the drive is still writing. Their
-        // pushes are dead now, so each lease is returned as it comes back.
+        // takes: each holds a pin, and a buffer the drive is still writing. Their
+        // pushes are dead now, so each buffer is returned as it comes back.
         while let Some(readers) = self.readers.as_mut().filter(|r| r.busy() > 0) {
             let (rid, r) = readers.collect_blocking();
             self.on_read_done(rid, r);

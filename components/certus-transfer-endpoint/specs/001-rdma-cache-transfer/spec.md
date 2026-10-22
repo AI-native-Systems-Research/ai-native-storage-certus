@@ -39,7 +39,7 @@ pass against the new endpoint with messaging unused.
 ### User Story 3 - The source serves an entry that has been demoted to SSD (Priority: P3)
 
 A requested key is resident on the source's block device rather than in its memory tier.
-The source reads it into a bounce lease — space set aside in its memory tier's pool, outside
+The source reads it into a bounce buffer — space set aside in its memory tier's pool, outside
 the cache — pushes from there, and reports `hit_block_tier`. Its own memory tier is **not**
 polluted: no promotion occurs, so serving a peer does not evict the source's own working set.
 
@@ -203,8 +203,8 @@ relative LRU order of its memory-tier entries are unchanged.
   a size mismatch is detected by the source and comes back **pinned**.
 - **FR-011**: Pins MUST be held and released **per entry**, not per batch. A memory-tier
   pin is released when its RDMA write completes (matched by work-request id). A block-tier
-  pin is held for the device read and released as soon as the read into its bounce lease
-  completes — before the write is posted — since the data has been copied; the lease is then
+  pin is held for the device read and released as soon as the read into its bounce buffer
+  completes — before the write is posted — since the data has been copied; the buffer is then
   returned when the write completes.
 - **FR-012**: Block-tier entries MUST be served from an RDMA-registered bounce reserve, set
   aside in the memory tier's pool outside its cache and read into by the dispatcher (research
@@ -228,7 +228,7 @@ relative LRU order of its memory-tier entries are unchanged.
   - **message credits** — outstanding requests against the peer's posted receive buffers.
     The destination decrements on send and increments on reply; at zero a request MUST
     wait inside the endpoint — never fail, and never block the caller;
-  - **bounce-buffer occupancy** — bounce-reserve bytes leased to block-tier entries, and
+  - **bounce-buffer occupancy** — bounce-reserve bytes allocated to block-tier entries, and
     concurrent device reads (the reader count).
 - **FR-015**: On exhaustion of any bound, the endpoint MUST chunk internally and make
   progress, not fail.
@@ -273,7 +273,7 @@ relative LRU order of its memory-tier entries are unchanged.
 - **TransferRequest / TransferReply** — the two verbs messages of FR-006 / FR-007.
 - **RemoteRegion** — a landing slot: rkey, address, size. Already exists.
 - **EntryOutcome** — `hit_memory_tier | hit_block_tier | miss | failed`.
-- **BounceLease** — `(ptr, len)` in the bounce reserve: a range of the memory tier's pool,
+- **BounceBuffer** — `(ptr, len)` in the bounce reserve: a range of the memory tier's pool,
   outside the cache, that the dispatcher reads a block-tier entry into and the endpoint
   writes from. Already DMA-able and RDMA-registered, because the pool is.
 - **PeerConnection** — one queue pair per instance pair, used in **both** directions, keyed by
@@ -349,7 +349,7 @@ relative LRU order of its memory-tier entries are unchanged.
   local tier hit.
 - **Block-tier serving is a completeness path, not a hot path.** Measured workload-generator
   runs show single-digit-percent SSD hit rates, and a well-sized memory tier avoids them
-  altogether; the bounce reserve is sized accordingly (16 MiB by default, taken quietly from
+  altogether; the bounce reserve is sized accordingly (32 MiB by default, taken quietly from
   the pool), and SSD/RDMA pipelining is out of scope.
 - **Single-tenant trust.** RDMA write access into a peer's landing slots is acceptable;
   no cross-tenant isolation is attempted.

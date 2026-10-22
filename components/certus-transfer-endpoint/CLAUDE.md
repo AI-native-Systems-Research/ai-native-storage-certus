@@ -62,10 +62,10 @@ VIII–XI, and a review that does not check them is not a review.
 - **Never address a block device.** Reading an extent needs the dispatcher's
   placement hash, namespace, LBA conversion and channel discipline; copying any of
   it reads the wrong drive and reports the result as `HitBlockTier`. Hand the
-  pinned entry to `IDispatcher::read_to_bounce`, which leases from the memory
+  pinned entry to `IDispatcher::read_to_bounce`, which buffers from the memory
   tier's bounce reserve — already registered, because the whole pool is (D13, D15).
 - **Block-tier reads have no timeout, on purpose.** The device actor's timeout
-  returns a buffer the drive may still write. Hold the read, its pin and its lease
+  returns a buffer the drive may still write. Hold the read, its pin and its buffer
   until it completes; a hung drive shows up as the requester's reply deadline,
   which is the intended behaviour. Do not add a device timeout or an abort.
 - **A deferred entry holds no pin.** No reader free, or `NoSpace`: release the pin
@@ -180,7 +180,7 @@ VIII–XI, and a review that does not check them is not a review.
   (or a partial post's `unposted` list) — with one stated exception: a block-tier
   pin waits in the read table while its device read runs (nothing is posted yet),
   and is released when the read completes, before the write is posted; the slab
-  then carries the bounce lease instead. Do not add another way out: a second
+  then carries the bounce buffer instead. Do not add another way out: a second
   path is a double release, which decrements another reader's pin. Post only via
   the table's `post_sends`/`post_recvs` (over `post_{send,recv}_tracked`) — they
   force `signaled` on, because an unsignaled success never completes and its pin
@@ -220,10 +220,10 @@ VIII–XI, and a review that does not check them is not a review.
   pipe full" breaks SC-004: pins held would exceed the credits. Block-tier
   entries add at most one pin per reader thread, so the bound is credits plus
   `block_readers`.
-- **A `NoSpace` is stale if a lease came back after its read was submitted.**
+- **A `NoSpace` is stale if a buffer came back after its read was submitted.**
   `Readers` stops handing out reads while the reserve is known full, and only a
   returned lease clears that. Believing a stale `NoSpace` sets "full" after the
-  last lease is already back, and every deferred entry then waits forever.
+  last buffer is already back, and every deferred entry then waits forever.
 - **Serving a peer still touches the source's LRU** (D6): the dispatch map's
   `lookup` refreshes the entry as it pins. Invariant 6 is unmet for memory-tier
   entries until a non-touching lookup exists. Do not claim otherwise.

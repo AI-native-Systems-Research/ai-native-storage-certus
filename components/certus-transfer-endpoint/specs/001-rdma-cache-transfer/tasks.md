@@ -188,7 +188,7 @@ connection table. This is plan.md Phase 1's engine.
   No automatic retry; self-connect is an error. T068's `dead_code` allows removed
 - [X] T013 [P] Implement the `wr_id` slab in `src/connection/` (depends T010): allocate
   a slot per posted work request carrying the per-entry state its completion must release
-  (pin, bounce lease, context + entry index). This is the mechanism Principle IX requires
+  (pin, bounce buffer, context + entry index). This is the mechanism Principle IX requires
   for "released by the completion reaper that owns its work-request id".
   *Done* in `src/connection/slab.rs`: generic `Slab<T>`, one per link, held by the table
   (`ConnectionTable<T>`; `live(peer)` was the only way to post — T014 replaced it with
@@ -590,7 +590,7 @@ order of its memory-tier entries are unchanged.
 
 **Gate**: **SC-005**.
 
-- [X] T083 [US3] `interfaces`: `BounceLease { ptr, len }` and `BounceError { NoSpace,
+- [X] T083 [US3] `interfaces`: `BounceBuffer { ptr, len }` and `BounceError { NoSpace,
   NeverFits, Io, NotInitialized }`; `IMemoryTier` gains `set_bounce_reserve`,
   `bounce_alloc`, `bounce_free`, `bounce_usage`; `IDispatcher` gains `read_to_bounce` and
   `release_bounce` (contract *The dispatcher's half*). `define_interface!` has no default
@@ -600,7 +600,7 @@ order of its memory-tier entries are unchanged.
   `block_reads_attempted`, `_completed`, `_failed` and `block_deferrals`. The endpoint's
   `spdk` receptacle becomes `dispatcher: IDispatcher`; no block-device receptacle remains
 - [X] T037 [US3] `memory-tier`: the bounce reserve (D15). At `initialize`, set aside
-  `min(bounce_reserve, pool_size / 8)` — default 16 MiB — at the top of the pool, managed by
+  `min(bounce_reserve, pool_size / 8)` — default 32 MiB — at the top of the pool, managed by
   a second instance of the tier's first-fit free list; `capacity()` excludes it, `used()`
   and eviction tracking never see it, and the initialize log line states its size.
   `set_bounce_reserve` after `initialize` is an error. `bounce_alloc` answers `NoSpace` when
@@ -608,22 +608,22 @@ order of its memory-tier entries are unchanged.
   no reserve, or a pool that is not DMA-capable (the `mmap` fallback). Tests in the memory
   tier: capacity shrinks by exactly the reserve, a full cache cannot reach reserve bytes,
   allocation and coalescing, both errors, the `pool_size / 8` cap
-- [X] T038 [US3] `dispatcher`: `read_to_bounce(key, offset, len)` — lease from the memory
+- [X] T038 [US3] `dispatcher`: `read_to_bounce(key, offset, len)` — allocate from the memory
   tier, then read `len` bytes (rounded up to the block size) at `offset` on the drive the
   placement hash chooses for `key`, over a channel leased from that drive's pool, segmented
-  by its maximum transfer, exactly as the promotion read is — but into the lease, and with
+  by its maximum transfer, exactly as the promotion read is — but into the buffer, and with
   **no device timeout**: the actor's timeout would hand back a buffer the drive may still
   write, so the read passes a timeout that cannot fire, named as a constant whose comment
-  says why. On a device error the lease is returned and `Io` reported. It neither pins nor
+  says why. On a device error the buffer is returned and `Io` reported. It neither pins nor
   releases: the caller's pin holds the extent still. `release_bounce` forwards to the
   memory tier. Never promotes, never touches the cache (FR-012, D8). Tests over the
   dispatcher's mock block device: the right drive and LBA are read, multi-segment entries,
-  `Io` returns the lease, `NoSpace`/`NeverFits` pass through, the cache is untouched
+  `Io` returns the buffer, `NoSpace`/`NeverFits` pass through, the cache is untouched
 - [X] T039 [US3] Release the block-tier pin **as soon as its read completes** — before the
-  write is posted — since the data has been copied, so only the lease needs protection
+  write is posted — since the data has been copied, so only the buffer needs protection
   thereafter (FR-011, D7). The pin waits in the endpoint's read table while its read is in
   flight (nothing is posted yet, so it has no `wr_id`); after the read, the slab carries the
-  **lease**, and the reaper that owns the write's `wr_id` returns it with `release_bounce`.
+  **bounce buffer**, and the reaper that owns the write's `wr_id` returns it with `release_bounce`.
   This is the one place a pin leaves other than through a completion, and it is stated as
   such
 - [X] T040 [US3] Report `HitBlockTier`, and **never promote** the entry into the source's
@@ -640,10 +640,10 @@ order of its memory-tier entries are unchanged.
   `block_readers` threads calling `read_to_bounce`, so the endpoint thread never blocks on a
   device. An entry is looked up only when a send credit is free; a block-tier answer with no
   reader free, or a read answering `NoSpace`, **releases its pin and re-queues the entry**,
-  retried when a reader or lease frees — it never holds a pin while it waits, so pins stay
+  retried when a reader or buffer frees — it never holds a pin while it waits, so pins stay
   within send credits plus readers (SC-004). `NeverFits` and `Io` are `Failed`, counted and
   logged, never retried. A connection torn down mid-read waits for the read: its pin and
-  lease are released when it completes, and the entry is `Failed`. `shutdown` waits for
+  buffer are released when it completes, and the entry is `Failed`. `shutdown` waits for
   every read in flight, however long the device takes
 - [X] T073 [US3] Test **SC-011**: on a request mixing memory-tier and block-tier entries,
   every memory-tier write is posted before the first device read completes (hold the mock
@@ -652,7 +652,7 @@ order of its memory-tier entries are unchanged.
 - [X] T042 [US3] Tests: **SC-005** — serving a block-tier entry leaves memory-tier occupancy
   and the relative LRU order of memory-tier entries unchanged; outcome honesty —
   `HitBlockTier` only when the read actually ran (invariant 2); the pin released before the
-  write is posted, on one recorded sequence; the lease returned after the write completes;
+  write is posted, on one recorded sequence; the buffer returned after the write completes;
   deferral under `NoSpace` and under a busy reader pool, both completing; SC-004 with
   readers; `NeverFits` and `Io` as `Failed`; a teardown and a shutdown mid-read; and the
   no-`spdk` degradation path of T041.
@@ -662,17 +662,17 @@ order of its memory-tier entries are unchanged.
   test double otherwise, so the read path is tested in the default build. A block-tier
   answer with a source becomes `Resolved::Block`; its pin waits in the actor's read table
   (`reads`) and is released when the read returns, before the write is posted; the slab then
-  carries `Hold::Lease`, returned by the reaper (`settle`), which reports `HitBlockTier` only
+  carries `Hold::Buffer`, returned by the reaper (`settle`), which reports `HitBlockTier` only
   on a successful completion. Ready block writes post ahead of new lookups. No reader free,
   or `NoSpace`: release the pin, defer, stop looking up for that pass; deferred entries
   retry as readers free — but not while the reserve is known full, which only a returned
-  lease ends. A `NoSpace` is believed only if nothing was freed after its read was submitted:
-  without that, the last lease can come back before the `NoSpace` it answers is collected,
+  buffer ends. A `NoSpace` is believed only if nothing was freed after its read was submitted:
+  without that, the last buffer can come back before the `NoSpace` it answers is collected,
   and the deferred entries wait forever (the first version of the reserve test caught
   exactly that, as a reply deadline). A torn-down push is marked dead: its reads finish and
   are discarded. `shutdown` waits for every read. Tests (default build, over `DiskSource`):
-  US3 end to end; pin after read, lease after write, on one sequence; SC-011 under a held
-  read; SC-004 with 40 entries over 2 credits + 2 readers; a one-lease reserve deferring
+  US3 end to end; pin after read, buffer after write, on one sequence; SC-011 under a held
+  read; SC-004 with 40 entries over 2 credits + 2 readers; a one-buffer reserve deferring
   and completing; `NeverFits`/`Io` as `Failed`, not retried; teardown and shutdown
   mid-read; no source is a `Miss`; SC-005's cache bytes and single lookups; and (`spdk`)
   the `dispatcher` receptacle end to end. SC-005 asserts what is met — the cache's bytes
@@ -692,7 +692,7 @@ failure.
 **Gate**: **SC-007**.
 
 - [X] T043 Implement **bounce-buffer occupancy** as the third named domain — reserve bytes
-  leased (T037) and readers busy (T072) — and expose all three — send-queue credits (T014),
+  allocated (T037) and readers busy (T072) — and expose all three — send-queue credits (T014),
   message credits (T032), bounce occupancy — as
   separately configured and separately named knobs (FR-014, D10). Do not conflate them:
   they bound genuinely different resources and exhaust independently, and the existing code
@@ -704,7 +704,7 @@ failure.
   recorded offset. Nothing on the wire links the chunks
 - [X] T045 Source side: answer every `OP_FETCH` message with **exactly one** reply covering
   all its entries (or one `OP_ERROR`), echoing that message's `context_id` — never one reply per batch
-  (FR-007). When bounce space is scarce, serve the message's entries as leases free up
+  (FR-007). When bounce space is scarce, serve the message's entries as buffers free up
   and still reply once: scarcity delays the reply, it never multiplies it. This is what keeps
   T080's reply reserve exact
 - [X] T046 Implement the fetch completion rule: a fetch is complete when every one of its
@@ -736,7 +736,7 @@ failure.
   bad reply; a refused chunk failing the fetch only after its siblings, unsent chunks
   unsent; chunks waiting for credits; a small fetch not starved by a large one (which
   caught a real oldest-first bug); a stalled chunk naming itself; and one reply per
-  request from a one-lease reserve. Nine planted bugs, all caught — five by the endpoint
+  request from a one-buffer reserve. Nine planted bugs, all caught — five by the endpoint
   aborting on an invariant it checks
 
 **Checkpoint**: SC-007 — scarcity degrades to chunking, never to failure.

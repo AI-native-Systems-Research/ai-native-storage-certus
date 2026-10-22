@@ -295,13 +295,13 @@ impl IMemoryTier for PoolMt {
     fn set_bounce_reserve(&self, _: usize) -> Result<(), MemoryTierError> {
         Ok(())
     }
-    fn bounce_alloc(&self, _: u32) -> Result<interfaces::BounceLease, interfaces::BounceError> {
+    fn bounce_alloc(&self, _: u32) -> Result<interfaces::BounceBuffer, interfaces::BounceError> {
         Err(interfaces::BounceError::NeverFits(
             "no bounce reserve".into(),
         ))
     }
-    fn bounce_free(&self, _: interfaces::BounceLease) {
-        unreachable!("no lease was ever handed out")
+    fn bounce_free(&self, _: interfaces::BounceBuffer) {
+        unreachable!("no buffer was ever handed out")
     }
     fn bounce_usage(&self) -> (usize, usize) {
         (0, 0)

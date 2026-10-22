@@ -56,7 +56,7 @@ impl Node {
         )
     }
 
-    /// A node whose block tier is a [`DiskSource`] leasing from the top half
+    /// A node whose block tier is a [`DiskSource`] allocating from the top half
     /// of its pool, prepared by `prep` before the node starts.
     fn with_source(pool_len: usize, prep: impl FnOnce(&crate::test_doubles::DiskSource)) -> Self {
         Self::build(pool_len, |_| {}, Some(prep))
