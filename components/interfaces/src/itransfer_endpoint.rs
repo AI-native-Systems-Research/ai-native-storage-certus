@@ -363,13 +363,14 @@ pub struct TransferStats {
     pub requests_completed: u64,
     /// Messages sent, counting chunks separately.
     pub chunks_sent: u64,
-    /// In-flight RDMA writes, which transitively bounds held read pins.
+    /// In-flight send-queue requests (RDMA writes and message sends), which
+    /// transitively bounds held read pins.
     pub send_queue_in_flight: u32,
     /// High-water mark of the above; compare against the configured limit.
     pub send_queue_peak_in_flight: u32,
-    /// Our requests awaiting a reply.
+    /// Our requests awaiting a reply, now, across connections.
     pub requests_outstanding_outbound: u32,
-    /// Peer requests we are currently serving.
+    /// Peer requests we are currently serving, now, across connections.
     pub requests_in_service_inbound: u32,
     /// Bounce buffers holding a block-tier entry's data: read, and waiting
     /// for or in its write. A read still in progress is not counted here.
@@ -388,7 +389,8 @@ pub struct TransferStats {
     pub block_deferrals: u64,
     /// Deadlines that expired, each having torn down a connection.
     pub deadline_expiries: u64,
-    /// Protocol error replies received or sent.
+    /// Protocol faults: every `OP_ERROR` sent or received, and every
+    /// connection torn down because of an inbound message.
     pub protocol_faults: u64,
     /// Connections that negotiated below the local maximum version.
     pub version_downgrades: u64,
@@ -429,7 +431,7 @@ pub struct EndpointConfig {
     /// bandwidth-delay product at 200 Gb/s and the measured write round trip
     /// asks for 3 at 64 KiB entries and 2 at 2.25 MiB, and a measured sweep
     /// found 8 matching 16's throughput at half the pins held, with 32 worse
-    /// (certus-transfer-endpoint research D10).
+    /// (certus-transfer-endpoint research D10). Must be at least 1.
     pub send_credits: u32,
     /// Message credits per connection: requests this end may have outstanding
     /// against the peer. Also the size of this end's reply reserve — one
@@ -629,8 +631,9 @@ component_macros::define_interface! {
         /// [`TransferEndpointError::InvalidEndpoint`] if `config.local` is not a
         /// `"host:port"`; [`TransferEndpointError::Transport`] if the queue
         /// sizes cannot hold what the protocol posts — `message_credits` or
-        /// `inbound_quota` of zero, or `max_recv_wr` below their sum, or a
-        /// `deadline_action` that is not implemented;
+        /// `inbound_quota` of zero, or `max_recv_wr` below their sum,
+        /// `block_readers` of zero, or a `deadline_action` that is not
+        /// implemented;
         /// [`TransferEndpointError::NotInitialized`] carrying
         /// "already initialized" once the endpoint has started, since a running
         /// endpoint cannot change its name or its queue sizes.
@@ -643,8 +646,8 @@ component_macros::define_interface! {
         /// # Errors
         ///
         /// [`TransferEndpointError::NotInitialized`] if not configured or
-        /// already initialized; [`TransferEndpointError::Transport`] if the
-        /// transport cannot listen.
+        /// already initialized; [`TransferEndpointError::Transport`] if
+        /// `send_credits` is zero or the transport cannot listen.
         fn initialize(&self) -> Result<(), TransferEndpointError>;
 
         /// Stop the endpoint: refuse new work, tear down and drain every
