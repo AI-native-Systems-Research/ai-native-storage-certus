@@ -89,12 +89,17 @@ pub type FetchCompletion = Box<dyn FnOnce(FetchResult) + Send>;
 /// Identifies one in-flight fetch. Echoed in the reply.
 pub struct TransferContextId(pub u64);
 
-/// A registered region peers may write into: what a caller needs to name a
-/// slot in it to a peer. `region_at(offset, len)` builds that slot's
-/// `RemoteRegion`, bounds-checked. Registered for the endpoint's life; there is
-/// no deregistration, since releasing a region means proving no peer can
-/// still write into it.
-pub struct LandingRegionHandle { /* id, addr, len, rkey — read-only accessors */ }
+/// Where a fetched entry lands: `length` bytes at `addr`, inside this
+/// endpoint's own memory-tier pool — a buffer the caller allocated there and
+/// has not published. The pool is registered once, at `initialize`, so a slot
+/// needs no registration; the endpoint names the pool's rkey to the peer.
+pub struct LocalSlot { pub addr: u64, pub length: u32 }
+
+/// The pool as peers write into it: `addr`, `len` (a `u64`: a pool may exceed
+/// 4 GiB) and `rkey`. `region_at(offset, len)` builds one slot's
+/// `RemoteRegion`, bounds-checked — what a legacy control plane hands a
+/// pusher. Registered for the endpoint's life, so the same across reconnects.
+pub struct LandingRegion { pub addr: u64, pub len: u64, pub rkey: u32 }
 
 pub enum TransferEndpointError {
     NotInitialized(String),
@@ -128,26 +133,17 @@ pub enum TransferEndpointError {
 ```rust
 define_interface! {
     pub trait ITransferEndpoint {
-        /// Register a region that peers may RDMA-write into. Must be called
-        /// before any peer request can be satisfied against it.
-        ///
-        /// The region must be RDMA-registrable — in practice the memory tier's
-        /// own pool, allocated by `spdk_zmalloc` on the local NUMA node, as the
-        /// caller's landing slots are.
-        ///
-        /// Registration is into the endpoint's long-lived protection domain and
-        /// outlives any one queue pair, so the returned handle and the `rkey`s
-        /// derived from it stay valid across a reconnect (research D17). This
-        /// differs from the predecessor crates, which re-register per
-        /// connection.
-        fn register_landing_region(
-            &self,
-            base: *mut u8,
-            len: usize,
-        ) -> Result<LandingRegionHandle, TransferEndpointError>;
+        /// The memory-tier pool as peers write into it. The pool is registered
+        /// once, at `initialize`, into the endpoint's long-lived protection
+        /// domain, which outlives any one queue pair, so its `rkey` stays valid
+        /// across a reconnect (research D17). `fetch` needs none of it; this
+        /// is what a legacy control plane hands a pusher.
+        fn landing_region(&self) -> Result<LandingRegion, TransferEndpointError>;
 
-        /// DESTINATION SIDE. Ask one named peer for a key run, to be written
-        /// into already-reserved landing slots.
+        /// DESTINATION SIDE. Ask one named peer for a key run, each written
+        /// into a `LocalSlot` the caller has allocated in its memory tier and
+        /// not yet published. A slot outside the pool is refused, before
+        /// anything is sent.
         ///
         /// Returns as soon as the request is queued — never blocking the
         /// caller, and never failing for want of a message credit: chunks
@@ -162,7 +158,7 @@ define_interface! {
         fn fetch(
             &self,
             peer: &str,
-            items: &[(CacheKey, RemoteRegion)],
+            items: &[(CacheKey, LocalSlot)],
             on_complete: FetchCompletion,
         ) -> Result<TransferContextId, TransferEndpointError>;
 

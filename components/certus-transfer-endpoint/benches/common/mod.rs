@@ -17,8 +17,8 @@ use std::time::Duration;
 use certus_transfer_endpoint::CertusTransferEndpoint;
 use interfaces::{
     CacheKey, DispatchMapError, EndpointConfig, EntryOutcome, IDispatchMap, IMemoryTier,
-    ITransferEndpoint, ITransferEndpointAdmin, LandingRegionHandle, LookupResult, MemoryTierError,
-    MemoryTierTelemetrySnapshot, RemoteRegion,
+    ITransferEndpoint, ITransferEndpointAdmin, LandingRegion, LocalSlot, LookupResult,
+    MemoryTierError, MemoryTierTelemetrySnapshot, RemoteRegion,
 };
 
 /// Where an endpoint listens: the RoCE address with `rdma`, a loopback-shaped
@@ -294,29 +294,42 @@ impl Drop for Node {
     }
 }
 
-/// Landing slots for `count` entries of `size` bytes, registered with `ep`.
+/// Where `count` entries of `size` bytes land at a destination: slots
+/// `0..count` of its own pool, as a caller lands fetches in memory-tier
+/// buffers it has not yet published, and as a pusher names them from the
+/// destination's `landing_region`.
 pub struct Slots {
-    pub mem: Box<[u8]>,
-    pub handle: LandingRegionHandle,
+    pool: LandingRegion,
 }
 
 impl Slots {
-    pub fn new(ep: &CertusTransferEndpoint, count: usize, size: usize) -> Slots {
-        let mut mem = vec![0u8; count * size].into_boxed_slice();
-        let handle = ep
-            .register_landing_region(mem.as_mut_ptr(), mem.len())
-            .unwrap();
-        Slots { mem, handle }
+    pub fn new(dest: &Node, count: usize, size: usize) -> Slots {
+        let pool = dest.ep.landing_region().unwrap();
+        assert!((count * size) as u64 <= pool.len, "the slots fit the pool");
+        Slots { pool }
     }
 
-    /// Key `k` into slot `k`, for keys `0..count`.
-    pub fn items(&self, count: usize, size: usize) -> Vec<(CacheKey, RemoteRegion)> {
+    /// Key `k` into slot `k`, for keys `0..count`, as `fetch` names them.
+    pub fn items(&self, count: usize, size: usize) -> Vec<(CacheKey, LocalSlot)> {
         (0..count)
             .map(|k| {
                 (
                     k as CacheKey,
-                    self.handle.region_at(k * size, size as u32).unwrap(),
+                    LocalSlot {
+                        addr: self.pool.addr + (k * size) as u64,
+                        length: size as u32,
+                    },
                 )
+            })
+            .collect()
+    }
+
+    /// The same slots as a push names them.
+    pub fn regions(&self, count: usize, size: usize) -> Vec<(CacheKey, RemoteRegion)> {
+        (0..count)
+            .map(|k| {
+                let r = self.pool.region_at((k * size) as u64, size as u32).unwrap();
+                (k as CacheKey, r)
             })
             .collect()
     }
@@ -326,7 +339,7 @@ impl Slots {
 pub fn fetch(
     dest: &CertusTransferEndpoint,
     peer: &str,
-    items: &[(CacheKey, RemoteRegion)],
+    items: &[(CacheKey, LocalSlot)],
 ) -> Vec<EntryOutcome> {
     let (tx, rx) = mpsc::channel();
     dest.fetch(peer, items, Box::new(move |r| tx.send(r).unwrap()))

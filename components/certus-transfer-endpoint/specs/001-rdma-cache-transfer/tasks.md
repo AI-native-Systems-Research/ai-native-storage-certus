@@ -88,8 +88,8 @@ connection table. This is plan.md Phase 1's engine.
 - [X] T006 Define `ITransferEndpoint` in
   `components/interfaces/src/itransfer_endpoint.rs` via `define_interface!`, **ungated**
   (Principle I, contracts/itransfer_endpoint.md): methods
-  `register_landing_region`, `fetch`, `push_async`, `push`, `disconnect`, `stats`, plus
-  types `EntryOutcome`, `TransferContextId`, `LandingRegionHandle`,
+  `landing_region`, `fetch`, `push_async`, `push`, `disconnect`, `stats`, plus
+  types `EntryOutcome`, `TransferContextId`, `LocalSlot`, `LandingRegion`,
   `TransferEndpointError`, `FetchCompletion`, `TransferStats`. Reuse the existing
   `RemoteRegion` and `CacheKey` verbatim. **No `serve()` method** — serving is reactive
   by design, and exposing it would invite callers to schedule it
@@ -274,7 +274,7 @@ connection table. This is plan.md Phase 1's engine.
   reported and the table leaked rather than destroyed holding state. **Shutdown is the only
   way to stop it**: `define_component!` keeps `Arc`s of the component in its own interface
   map, so it is never dropped by releasing handles (pinned by a test). `fetch`, `push_async`,
-  `push`, `register_landing_region` validate their peer and return `NotInitialized("…lands
+  `push` validate their peer and return `NotInitialized("…lands
   in Txxx")`
 
 **Checkpoint**: the engine builds and the mock seam carries a message and a simulated
@@ -319,18 +319,19 @@ hardware loopback scenario, pass against this component with messaging unused.
   (FR-017, Principle IX's last clause). This is the existing `Disconnect`/`DisconnectAck`
   barrier, kept — and it is also the mechanism the deadline path reuses (FR-023, T070), so
   it must abort every context outstanding on the connection, not just one
-- [X] T020 [US2] Implement `register_landing_region(base, len)` returning
-  `LandingRegionHandle`: register once, not per request; an `rkey` is only valid because
-  of it (wire-protocol.md "Connection and lifecycle"). Register into the long-lived PD of
-  T069 so the handle and its `rkey`s survive a reconnect (D17); depends on T069.
+- [X] T020 [US2] Land in the memory-tier pool, registered once at `initialize`, not per
+  request; an `rkey` is only valid because of it (wire-protocol.md "Connection and
+  lifecycle"). Register into the long-lived PD of T069 so its `rkey` survives a reconnect
+  (D17); depends on T069. `fetch` takes `LocalSlot { addr, length }` per key — a memory-tier
+  buffer the caller has allocated and not published — refused unless inside the pool;
+  `landing_region()` reports the pool's `addr`/`len`/`rkey` for a pusher. There is no
+  separate landing-region registration: the only destination is the pool.
   *Done against the seam, without T069*: registration belongs to the endpoint, not to a
   connection, in every transport, and survives a reconnect (tested). T069's per-device PD
   table exists only to make the **verbs** transport keep that promise, so it moved into
-  T053. The handle now carries `addr`/`len`/`rkey` and `region_at(offset, len)` — as a bare
-  id it gave a caller no way to name a slot. No deregistration (proving no peer can still
-  write is the FR-017 barrier generalised). A null, empty, or pool- or region-overlapping
-  range is refused. The memory-must-outlive-shutdown precondition is documented on the
-  method, which `define_interface!` cannot make `unsafe`
+  T053. No deregistration (proving no peer can still write is the FR-017 barrier
+  generalised). A slot outside the pool, by a byte at either edge or by wrapping, is
+  refused before anything is sent (tested)
 - [X] T021 [US2] Tests in-module: order-and-length invariant 1 over the mock seam
   (`items.len()` outcomes, index *i* ↔ `items[i]`); connection reuse across repeated
   pushes (FR-002); teardown-before-reclaim ordering asserted from the mock's recorded
@@ -780,7 +781,7 @@ failing deadline rather than none.
   after expiry, **cannot** land in a slot that has been reclaimed (assert from the mock's
   recorded QP→ERROR-before-reclaim ordering); sibling contexts on the connection are
   reported aborted, not silently dropped; and a subsequent fetch to the same peer succeeds
-  over a fresh connection **without** re-registering the landing region, proving the `rkey`
+  over a fresh connection **without** re-registering the pool, proving the `rkey`
   survived (SC-010, D17)
 - [X] T052 Tests: a stalled mock peer with the connection held open produces a
   `Deadline` error carrying all four diagnostic fields; a closed connection instead aborts

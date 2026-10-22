@@ -3,14 +3,14 @@
 ## Summary
 
 A symmetric RDMA endpoint for explicit certus-to-certus KV cache transfer. A
-destination reserves landing slots in its own memory, names **one** peer (chosen
+destination reserves landing slots in its own memory tier, names **one** peer (chosen
 externally, by llm-d), and asks it for a run of block keys; the source RDMA-writes
 each value it holds straight into its slot and replies once with a per-key
 outcome. There is no broadcast, no polling and no reap: exactly one peer is asked,
 exactly once.
 
 `CertusTransferEndpoint` provides `ITransferEndpoint` (`fetch`, the legacy
-`push_async`/`push`, `register_landing_region`, `disconnect`, `stats`) and
+`push_async`/`push`, `landing_region`, `disconnect`, `stats`) and
 `ITransferEndpointAdmin` (`configure`, `initialize`, `shutdown`). Its receptacles
 are `logger` (optional), `dispatch_map` (atomic lookup-and-pin), `memory_tier`
 (the pool, registered once for the endpoint's life) and, with `spdk`, `dispatcher`

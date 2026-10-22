@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use interfaces::{
     EndpointConfig, EntryOutcome, FetchResult, IDispatchMap, IMemoryTier, ITransferEndpoint,
-    ITransferEndpointAdmin, RemoteRegion, TransferEndpointError,
+    ITransferEndpointAdmin, LocalSlot, RemoteRegion, TransferEndpointError,
 };
 
 use crate::test_doubles::{LedgerMap, PoolTier};
@@ -139,6 +139,31 @@ impl Node {
     fn pool_addr(&self, off: usize) -> u64 {
         self.pool.as_ptr() as u64 + off as u64
     }
+
+    /// The `len` bytes at `off` into the pool, as a fetch lands in them: a
+    /// destination lands in its own pool.
+    fn slot(&self, off: usize, len: u32) -> LocalSlot {
+        assert!(off + len as usize <= self.pool.len(), "inside the pool");
+        LocalSlot {
+            addr: self.pool_addr(off),
+            length: len,
+        }
+    }
+
+    /// The same bytes as a push names them, with the pool's rkey.
+    fn region(&self, off: usize, len: u32) -> RemoteRegion {
+        let rkey = self.ep.landing_region().expect("running").rkey;
+        RemoteRegion {
+            addr: self.slot(off, len).addr,
+            rkey,
+            length: len,
+        }
+    }
+
+    /// The pool's bytes, read back once the writes checked have completed.
+    fn bytes(&self) -> &[u8] {
+        &self.pool
+    }
 }
 
 impl Drop for Node {
@@ -153,12 +178,12 @@ fn wait(rx: &mpsc::Receiver<FetchResult>) -> FetchResult {
 }
 
 /// T054: a full fetch over the NIC — request, the source's writes, its reply,
-/// and the caller seeing each value land exactly where it named — then a
-/// chunked one (SC-007 on hardware) through the same handle.
+/// and the caller seeing each value land exactly where it named, in its own
+/// pool — then a chunked one (SC-007 on hardware) into the same pool.
 #[test]
 #[ignore = "needs an RDMA device; set CERTUS_RDMA_TEST_IP"]
 fn loopback_fetch_round_trip() {
-    let dest = Node::new(4096, |_| {});
+    let mut dest = Node::new(1 << 20, |_| {});
     let mut src = Node::new(1 << 20, |_| {});
     for (i, b) in src.pool.iter_mut().enumerate() {
         *b = (i % 251) as u8;
@@ -167,16 +192,11 @@ fn loopback_fetch_round_trip() {
     src.map.memory(10, src.pool_addr(0), 4096);
     src.map.memory(11, src.pool_addr(8192), 65536);
     src.map.memory(13, src.pool_addr(200_000), 100);
-    let mut slots = vec![0u8; 1 << 20].into_boxed_slice();
-    let h = dest
-        .ep
-        .register_landing_region(slots.as_mut_ptr(), slots.len())
-        .unwrap();
     let items = [
-        (10, h.region_at(0, 4096).unwrap()),
-        (11, h.region_at(4096, 65536).unwrap()),
-        (12, h.region_at(70_000, 64).unwrap()),
-        (13, h.region_at(80_000, 100).unwrap()),
+        (10, dest.slot(0, 4096)),
+        (11, dest.slot(4096, 65536)),
+        (12, dest.slot(70_000, 64)),
+        (13, dest.slot(80_000, 100)),
     ];
     let (tx, rx) = mpsc::channel();
     dest.ep
@@ -187,6 +207,7 @@ fn loopback_fetch_round_trip() {
         wait(&rx).unwrap(),
         [HitMemoryTier, HitMemoryTier, Miss, HitMemoryTier]
     );
+    let slots = dest.bytes();
     assert_eq!(&slots[..4096], &src.pool[..4096]);
     assert_eq!(&slots[4096..4096 + 65536], &src.pool[8192..8192 + 65536]);
     assert!(
@@ -197,28 +218,27 @@ fn loopback_fetch_round_trip() {
     assert_eq!(src.map.held(), 0, "every pin released");
 
     // 700 one-KiB entries: three chunks against the peer's 340.
-    slots.fill(0);
+    dest.pool.fill(0);
     for k in 0..700u64 {
         src.map
             .memory(1000 + k, src.pool_addr(k as usize * 1024), 1024);
     }
-    let items: Vec<(u64, RemoteRegion)> = (0..700usize)
-        .map(|k| (1000 + k as u64, h.region_at(k * 1024, 1024).unwrap()))
+    let items: Vec<(u64, LocalSlot)> = (0..700usize)
+        .map(|k| (1000 + k as u64, dest.slot(k * 1024, 1024)))
         .collect();
     let (tx, rx) = mpsc::channel();
     dest.ep
         .fetch(&src.addr, &items, Box::new(move |r| tx.send(r).unwrap()))
         .unwrap();
     assert_eq!(wait(&rx).unwrap(), vec![HitMemoryTier; 700]);
-    assert_eq!(&slots[..700 * 1024], &src.pool[..700 * 1024]);
+    assert_eq!(&dest.bytes()[..700 * 1024], &src.pool[..700 * 1024]);
     let s = dest.ep.stats();
     assert_eq!(s.chunks_sent, 1 + 3);
     assert_eq!(src.map.held(), 0);
-    drop(slots);
 }
 
 /// T055, SC-002 on hardware: the legacy push writes a source's entries into a
-/// peer's registered memory — the initiator's
+/// peer's pool — the initiator's
 /// `loopback_push_writes_into_remote_buffer`, through this endpoint. Many
 /// writes are in flight at once, each to its own slot, so a window that
 /// mismatched sources to destinations would corrupt the comparison.
@@ -228,7 +248,7 @@ fn loopback_push_writes_into_remote_buffer() {
     const WRITES: usize = 64;
     const PIECE: usize = 16 * 1024;
     let mut src = Node::new(WRITES * PIECE, |c| c.send_credits = 16);
-    let dst = Node::new(4096, |_| {});
+    let dst = Node::new(WRITES * PIECE, |_| {});
     for (i, b) in src.pool.iter_mut().enumerate() {
         *b = (i % 251) as u8;
     }
@@ -236,20 +256,16 @@ fn loopback_push_writes_into_remote_buffer() {
         src.map
             .memory(k as u64, src.pool_addr(k * PIECE), PIECE as u32);
     }
-    let mut landing = vec![0u8; WRITES * PIECE].into_boxed_slice();
-    let h = dst
-        .ep
-        .register_landing_region(landing.as_mut_ptr(), landing.len())
-        .unwrap();
     // Written back to front, so a slot error cannot hide behind identity.
     let items: Vec<(u64, RemoteRegion)> = (0..WRITES)
         .map(|k| {
             let slot = WRITES - 1 - k;
-            (k as u64, h.region_at(slot * PIECE, PIECE as u32).unwrap())
+            (k as u64, dst.region(slot * PIECE, PIECE as u32))
         })
         .collect();
     let out = src.ep.push(&dst.addr, &items).unwrap();
     assert_eq!(out, vec![EntryOutcome::HitMemoryTier; WRITES]);
+    let landing = dst.bytes();
     for k in 0..WRITES {
         let slot = WRITES - 1 - k;
         assert_eq!(
@@ -260,14 +276,13 @@ fn loopback_push_writes_into_remote_buffer() {
     }
     assert!(src.map.peak_held() <= 16, "SC-004 on hardware");
     assert_eq!(src.map.held(), 0);
-    drop(landing);
 }
 
 /// FR-023 / SC-010 end to end on hardware: a source that is alive, connected
 /// and silent — its block-tier read held — trips the requester's deadline,
 /// which forces the queue pair to ERROR before failing the fetch; when the
 /// read is released the source's late write finds no queue pair to land
-/// through, and the next fetch reconnects through the same handle.
+/// through, and the next fetch reconnects and lands in the same pool.
 #[test]
 #[ignore = "needs an RDMA device; set CERTUS_RDMA_TEST_IP"]
 fn loopback_deadline_tears_down_then_reconnects() {
@@ -280,16 +295,11 @@ fn loopback_deadline_tears_down_then_reconnects() {
     });
     src.map.block_at(1, 0x100);
     src.map.memory(2, src.pool_addr(0), 8);
-    let mut slots = vec![0u8; 64].into_boxed_slice();
-    let h = dest
-        .ep
-        .register_landing_region(slots.as_mut_ptr(), slots.len())
-        .unwrap();
     let (tx, rx) = mpsc::channel();
     dest.ep
         .fetch(
             &src.addr,
-            &[(1, h.region_at(0, 8).unwrap())],
+            &[(1, dest.slot(0, 8))],
             Box::new(move |r| tx.send(r).unwrap()),
         )
         .unwrap();
@@ -301,39 +311,33 @@ fn loopback_deadline_tears_down_then_reconnects() {
     assert_eq!(dest.ep.stats().deadline_expiries, 1);
     src.disk().release_reads();
     std::thread::sleep(Duration::from_millis(300));
-    assert_eq!(slots[..8], [0u8; 8], "the late write did not land");
-    // The same handle, over a fresh connection.
+    assert_eq!(dest.bytes()[..8], [0u8; 8], "the late write did not land");
+    // The same pool and rkey, over a fresh connection.
     let (tx, rx) = mpsc::channel();
     dest.ep
         .fetch(
             &src.addr,
-            &[(2, h.region_at(8, 8).unwrap())],
+            &[(2, dest.slot(8, 8))],
             Box::new(move |r| tx.send(r).unwrap()),
         )
         .unwrap();
     assert_eq!(wait(&rx).unwrap(), [EntryOutcome::HitMemoryTier]);
-    drop(slots);
 }
 
 /// A source that shuts down drops its connection; a fetch outstanding on it
-/// fails with `Transport`, and a fetch to a fresh source lands through the
-/// same handle.
+/// fails with `Transport`, and a fetch to a fresh source lands in the same
+/// pool.
 #[test]
 #[ignore = "needs an RDMA device; set CERTUS_RDMA_TEST_IP"]
 fn loopback_lost_source_then_another() {
     let dest = Node::new(4096, |_| {});
     let src = Node::with_source(4096, |disk| disk.hold_reads());
     src.map.block_at(1, 0x100);
-    let mut slots = vec![0u8; 64].into_boxed_slice();
-    let h = dest
-        .ep
-        .register_landing_region(slots.as_mut_ptr(), slots.len())
-        .unwrap();
     let (tx, rx) = mpsc::channel();
     dest.ep
         .fetch(
             &src.addr,
-            &[(1, h.region_at(0, 8).unwrap())],
+            &[(1, dest.slot(0, 8))],
             Box::new(move |r| tx.send(r).unwrap()),
         )
         .unwrap();
@@ -353,12 +357,11 @@ fn loopback_lost_source_then_another() {
     dest.ep
         .fetch(
             &src2.addr,
-            &[(2, h.region_at(16, 8).unwrap())],
+            &[(2, dest.slot(16, 8))],
             Box::new(move |r| tx.send(r).unwrap()),
         )
         .unwrap();
     assert_eq!(wait(&rx).unwrap(), [EntryOutcome::HitMemoryTier]);
-    drop(slots);
 }
 
 /// T056: two nodes across the RoCE fabric. Run the `source` half on one node
@@ -423,14 +426,9 @@ fn two_node() {
         }
         "dest" => {
             let peer = std::env::var("CERTUS_T056_PEER").expect("CERTUS_T056_PEER=ip:port");
-            let dest = Node::at(&local, 4096);
-            let mut slots = vec![0u8; T056_KEYS * ENTRY].into_boxed_slice();
-            let h = dest
-                .ep
-                .register_landing_region(slots.as_mut_ptr(), slots.len())
-                .unwrap();
-            let items: Vec<(u64, RemoteRegion)> = (0..T056_KEYS)
-                .map(|k| (k as u64, h.region_at(k * ENTRY, ENTRY as u32).unwrap()))
+            let mut dest = Node::at(&local, T056_KEYS * ENTRY);
+            let items: Vec<(u64, LocalSlot)> = (0..T056_KEYS)
+                .map(|k| (k as u64, dest.slot(k * ENTRY, ENTRY as u32)))
                 .collect();
             // Round-trip probe, for the credit derivation (research D10):
             // medians of many rounds, each a whole fetch from call to callback.
@@ -439,7 +437,7 @@ fn two_node() {
             // and its full per-entry lookup cost, with no writes; a 340-entry
             // hit adds the writes.
             {
-                let median = |items: &[(u64, RemoteRegion)], want: EntryOutcome| {
+                let median = |items: &[(u64, LocalSlot)], want: EntryOutcome| {
                     let mut t = Vec::with_capacity(200);
                     for _ in 0..200 {
                         let t0 = std::time::Instant::now();
@@ -455,7 +453,7 @@ fn two_node() {
                     (t[t.len() / 2], t[t.len() * 99 / 100])
                 };
                 let one_hit = median(&items[..1], EntryOutcome::HitMemoryTier);
-                let miss: Vec<(u64, RemoteRegion)> = items[..340]
+                let miss: Vec<(u64, LocalSlot)> = items[..340]
                     .iter()
                     .map(|(k, r)| (*k + 1_000_000, *r))
                     .collect();
@@ -467,7 +465,7 @@ fn two_node() {
                 );
             }
             for round in 0..5 {
-                slots.fill(0);
+                dest.pool.fill(0);
                 let t0 = std::time::Instant::now();
                 let (tx, rx) = mpsc::channel();
                 dest.ep
@@ -480,6 +478,7 @@ fn two_node() {
                     vec![EntryOutcome::HitMemoryTier; T056_KEYS],
                     "round {round}"
                 );
+                let slots = dest.bytes();
                 for k in 0..T056_KEYS {
                     for i in (0..ENTRY).step_by(509) {
                         assert_eq!(
@@ -502,7 +501,6 @@ fn two_node() {
                 "T056 dest done: chunks_sent {} requests {}/{} deadline_expiries {}",
                 s.chunks_sent, s.requests_completed, s.requests_attempted, s.deadline_expiries
             );
-            drop(slots);
         }
         other => panic!("CERTUS_T056_ROLE={other}: want source or dest"),
     }

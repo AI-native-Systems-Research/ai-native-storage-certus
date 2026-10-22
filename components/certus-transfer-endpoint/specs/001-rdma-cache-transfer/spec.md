@@ -283,13 +283,16 @@ relative LRU order of its memory-tier entries are unchanged.
 - **TransferContext** — one in-flight request: context ID, peer, key list, landing slots,
   outstanding-entry count, deadline.
 - **TransferRequest / TransferReply** — the two verbs messages of FR-006 / FR-007.
-- **RemoteRegion** — a landing slot: rkey, address, size. Already exists.
+- **LocalSlot** — where a fetched entry lands: address and length of a buffer the destination
+  has allocated in its own memory tier and not yet published. Needs no registration: the
+  pool is registered once, and the endpoint names its rkey.
+- **RemoteRegion** — a slot as the wire names it: rkey, address, size. Already exists.
 - **EntryOutcome** — `hit_memory_tier | hit_block_tier | miss | failed`.
 - **BounceBuffer** — `(ptr, len)` in the bounce reserve: a range of the memory tier's pool,
   outside the cache, that the dispatcher reads a block-tier entry into and the endpoint
   writes from. Already DMA-able and RDMA-registered, because the pool is.
 - **PeerConnection** — one queue pair per instance pair, used in **both** directions, keyed by
-  `PeerId` and replaceable without invalidating a landing region. Holds per-direction credit
+  `PeerId` and replaceable without invalidating the pool's registration. Holds per-direction credit
   counters, separate outbound-request and inbound-serving context tables, and the negotiated
   capabilities (FR-026).
 - **PeerId** — an instance-granular peer address, carrying at least host and port (FR-021).
@@ -331,7 +334,7 @@ relative LRU order of its memory-tier entries are unchanged.
 - **SC-010**: After a deadline expires, no write from that peer can land in a reclaimed
   landing slot, and every sibling context on the connection is reported as aborted. A
   subsequent fetch to the same peer succeeds over a fresh connection without re-registering
-  the landing region.
+  the pool.
 - **SC-011**: On a request mixing memory-tier and block-tier entries, every memory-tier write
   is posted before the first device read completes, and the send queue is never idle while
   unposted entries remain.

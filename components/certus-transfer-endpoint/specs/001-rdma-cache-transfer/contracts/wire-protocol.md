@@ -330,9 +330,10 @@ cleanly rather than leave a hole.
   addressed as a normalized `"ip:port"`, so two instances on one host are distinct peers
   (FR-021, D16). The requester connects; the source replies and pushes over that same
   connection.
-- Landing regions are registered once (`register_landing_region`), not per request;
-  registration is what makes an `rkey` valid. The per-entry `rkey` on the wire selects
-  among the requester's registered regions — it does not imply per-request registration.
+- The requester's memory-tier pool is registered once, at `initialize`, not per request;
+  registration is what makes an `rkey` valid, and every fetched entry lands in that pool, so
+  the per-entry `rkey` on the wire is the pool's — it does not imply per-request
+  registration.
   Registration lives in a long-lived protection domain and outlives any one queue pair, so
   an `rkey` already sent on the wire stays valid across a reconnect (D17). A retry after a
   forced teardown therefore needs no re-registration and no new addresses.

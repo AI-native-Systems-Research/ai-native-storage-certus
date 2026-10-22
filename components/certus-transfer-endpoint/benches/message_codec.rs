@@ -34,8 +34,8 @@ fn fetch(c: &mut Criterion) {
         if resident {
             src.hold(n, ENTRY);
         }
-        let dst = common::Node::new(&host, 4096);
-        let slots = common::Slots::new(&dst.ep, n, ENTRY);
+        let dst = common::Node::new(&host, n * ENTRY);
+        let slots = common::Slots::new(&dst, n, ENTRY);
         let items = slots.items(n, ENTRY);
         let want = vec![
             if resident {

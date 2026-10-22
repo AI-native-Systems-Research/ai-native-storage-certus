@@ -39,9 +39,9 @@ fn push(c: &mut Criterion) {
         for &n in counts {
             let src = common::Node::new(&host, n * size);
             src.hold(n, size);
-            let dst = common::Node::new(&host, 4096);
-            let slots = common::Slots::new(&dst.ep, n, size);
-            let items = slots.items(n, size);
+            let dst = common::Node::new(&host, n * size);
+            let slots = common::Slots::new(&dst, n, size);
+            let items = slots.regions(n, size);
             // Connect and warm up outside the measurement.
             assert_eq!(
                 src.ep.push(&dst.addr, &items).unwrap(),

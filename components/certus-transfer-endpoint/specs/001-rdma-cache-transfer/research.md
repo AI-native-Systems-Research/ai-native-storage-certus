@@ -304,11 +304,12 @@ certus instance id instead.
 
 ## D17 — One long-lived protection domain; registrations outlive queue pairs
 
-**Decision**: the endpoint owns one protection domain per device for its lifetime. Landing
-regions are registered once into that PD and stay registered; queue pairs are created,
+**Decision**: the endpoint owns one protection domain per device for its lifetime. The
+memory-tier pool, where every fetched entry lands, is registered once into that PD and stays
+registered; queue pairs are created,
 destroyed and rebuilt beneath them. An `rkey` therefore survives a reconnect.
 
-**Rationale**: `contracts/itransfer_endpoint.md` already promises that landing regions are
+**Rationale**: `contracts/itransfer_endpoint.md` promises that the landing pool is
 registered once, not per request, and that registration is what makes an `rkey` valid. That
 promise is only true if MR lifetime is decoupled from QP lifetime. It also makes recovery
 cheap: after a deadline forces a teardown (FR-023), a retry needs no re-registration and the
@@ -322,10 +323,10 @@ lifetime equals connection lifetime and an rkey changes across a reconnect. That
 for a crate that only ever pushes from its own pool, and intolerable here, where the
 destination has *already advertised* per-entry rkeys inside an in-flight request.
 
-**Also considered**: keeping the per-connection PD and re-validating `LandingRegionHandle`
-after every reconnect. Rejected: it makes every in-flight request's rkeys stale on
-reconnect, turns the handle into something callers must re-check, and contradicts the
-contract's "registered once".
+**Also considered**: keeping the per-connection PD and re-validating the pool's rkey after
+every reconnect. Rejected: it makes every in-flight request's rkeys stale on reconnect,
+turns the key into something callers must re-check, and contradicts the contract's
+"registered once".
 
 **Note**: an MR belongs to a PD, not to a QP, so this is the natural verbs model rather than a
 trick; the precedent's coupling is an artifact of letting `rdma_cm` own the PD per connection.
