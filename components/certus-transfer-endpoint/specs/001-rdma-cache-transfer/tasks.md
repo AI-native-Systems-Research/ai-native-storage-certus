@@ -496,8 +496,11 @@ slots and the reply's per-key outcomes match the source's actual residency.
   and leaves none for a reply this end is blocked on: an RNR stall, and with two-way traffic
   a deadlock. Every message that can arrive is in a partition: `OP_HELLO` is a request
   (quota), `OP_HELLO_REPLY` and `OP_ERROR` are replies (reserve), and replies are never
-  answered, so nothing lands outside either. Post one reserve and one quota buffer before the
-  connection is established, for the bootstrap exchange
+  answered, so nothing lands outside either. Post the whole partition before the
+  connection is established, for the bootstrap exchange: the receives go to the transport
+  with the connect or accept (`connect_posting`/`accept_posting`), onto the queue pair
+  before the connect request or the accept is sent, so no first message depends on RNR
+  retry (tested with a zero RNR retry, and on mlx5)
 - [X] T081 *(absorbed into T012 — see there and D24)* Resolve simultaneous connect (FR-027, D23): on detecting a duplicate, both ends keep
   the connection whose **initiator has the lower `PeerId`** and close the other — a
   deterministic function of two known values, no arbitrator, no extra round trip. Requires the

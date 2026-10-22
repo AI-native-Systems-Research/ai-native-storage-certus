@@ -151,8 +151,10 @@ first `OP_HELLO` is sent before either end knows the other's quota. Each end the
 every connection with **one** message credit, spends it on `OP_HELLO`, and on the peer's
 `OP_HELLO` sets its limit to the quota the peer advertised (FR-026). This requires each end to
 have at least one reply-reserve buffer and one quota buffer posted before the connection is
-established, and an advertised `max_outstanding_requests` of 0 is invalid (the connection
-fails, as for a non-intersecting version range).
+established — each end posts its whole partition on the queue pair before it sends the
+connect request or the accept, since the other end may send `OP_HELLO` the moment it sees
+the connection up — and an advertised `max_outstanding_requests` of 0 is invalid (the
+connection fails, as for a non-intersecting version range).
 
 The body is **fixed size**, 40 bytes total, which is what a permanently frozen layout wants:
 

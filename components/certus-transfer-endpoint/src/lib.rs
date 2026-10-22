@@ -2886,11 +2886,6 @@ mod tests {
         eventually("b ready", || {
             session_of(&b.ep, "10.0.0.1:7000").is_some_and(|s| s.credits_available > 0)
         });
-        // Bring-up can cost one RNR stall: the initiator's OP_HELLO can reach
-        // the acceptor before its thread has handled `Up` and posted receives
-        // (RNR retry absorbs it). That is not the reserve's concern, so the
-        // count is taken from here, with both ends ready.
-        let stalls_at_ready = f.rnr_stalls();
         let (tx, rx) = mpsc::channel();
         for i in 0..n {
             for (ep, to, h) in [(&a.ep, "10.0.0.2:7000", &ha), (&b.ep, "10.0.0.1:7000", &hb)] {
@@ -2923,9 +2918,47 @@ mod tests {
         );
         assert_eq!(
             f.rnr_stalls(),
-            stalls_at_ready,
-            "no message waited for a buffer once both ends were ready"
+            0,
+            "no message waited for a buffer, bring-up included"
         );
+        a.ep.shutdown().unwrap();
+        b.ep.shutdown().unwrap();
+    }
+
+    /// FR-026: a link's receives are posted before the peer can send. With
+    /// no RNR retry at all, the first OP_HELLO each way — sent the instant
+    /// each end sees the link up — must find a receive, or the connection
+    /// goes to ERROR. Many bring-ups, so a race lost even rarely shows; and
+    /// both directions of initiation, since each end's first receives travel
+    /// a different path (with the connect, with the accept).
+    #[test]
+    fn the_first_messages_find_receives_posted() {
+        let f = MockFabric::new();
+        f.rnr_retry_limit(Some(0));
+        let a = node(&f, "10.0.0.1:7000", 8);
+        let b = node(&f, "10.0.0.2:7000", 8);
+        a.ep.initialize().unwrap();
+        b.ep.initialize().unwrap();
+        for round in 0..200 {
+            let (from, to, name) = if round % 2 == 0 {
+                (&a.ep, &b.ep, "10.0.0.2:7000")
+            } else {
+                (&b.ep, &a.ep, "10.0.0.1:7000")
+            };
+            let back = if round % 2 == 0 {
+                "10.0.0.1:7000"
+            } else {
+                "10.0.0.2:7000"
+            };
+            connect(from, name);
+            eventually("both ends ready", || {
+                session_of(from, name).is_some_and(|s| s.credits_available > 0)
+                    && session_of(to, back).is_some_and(|s| s.credits_available > 0)
+            });
+            from.disconnect(name).unwrap();
+            eventually("both ends torn down", || f.qp_count() == 0);
+        }
+        assert_eq!(f.rnr_stalls(), 0, "no first message waited for a buffer");
         a.ep.shutdown().unwrap();
         b.ep.shutdown().unwrap();
     }
