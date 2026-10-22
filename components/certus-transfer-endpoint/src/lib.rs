@@ -1142,6 +1142,9 @@ mod tests {
         a.map.block(13); // block tier with no block source: pinned, released, miss (D14)
         a.map.mismatch(14); // unpinned
         a.map.preload_reader(14); // someone else's pin on it
+                                  // Outside the pool: the map and the tier disagree, a fault, not
+                                  // residency. Pinned, released, Failed.
+        a.map.memory(15, 0x9_0000, 64);
         let (land, rkey) = pool_key(&b.ep);
         let at = |off: u64| RemoteRegion {
             addr: land + off,
@@ -1155,14 +1158,18 @@ mod tests {
             (12, at(0)),
             (13, at(0)),
             (14, at(0)),
+            (15, at(0)),
         ];
         let out = push_and_wait(&a.ep, "10.0.0.2:7000", &items);
         use EntryOutcome::*;
-        assert_eq!(out, [HitMemoryTier, Miss, HitMemoryTier, Miss, Miss, Miss]);
+        assert_eq!(
+            out,
+            [HitMemoryTier, Miss, HitMemoryTier, Miss, Miss, Miss, Failed]
+        );
         assert_eq!(&b.pool[1024..1088], &a.pool[0..64], "entry 10 landed");
         assert_eq!(&b.pool[1088..1152], &a.pool[64..128], "entry 11 landed");
         assert_eq!(b.pool[0..64], [0u8; 64], "nothing for the misses");
-        for key in [10, 11, 12, 13] {
+        for key in [10, 11, 12, 13, 15] {
             assert_eq!(
                 a.map.read_ref(key),
                 0,
@@ -1170,10 +1177,13 @@ mod tests {
             );
         }
         assert_eq!(a.map.read_ref(14), 1, "the other reader's pin untouched");
-        assert_eq!(a.map.lookups(), 6, "one lookup per entry, no probe");
+        assert_eq!(a.map.lookups(), 7, "one lookup per entry, no probe");
         let s = a.ep.stats();
         assert_eq!((s.requests_attempted, s.requests_completed), (1, 1));
-        assert_eq!((s.entries_requested, s.hit_memory_tier, s.miss), (6, 2, 4));
+        assert_eq!(
+            (s.entries_requested, s.hit_memory_tier, s.miss, s.failed),
+            (7, 2, 4, 1)
+        );
         a.ep.shutdown().unwrap();
         b.ep.shutdown().unwrap();
     }

@@ -117,7 +117,7 @@ relative LRU order of its memory-tier entries are unchanged.
   from `{ hit_memory_tier, hit_block_tier, miss, failed }`, in request order. `miss` means the
   source does not serve the entry (absent, a different size, or a tier this build cannot
   serve); `failed` means it was not delivered for any other reason (a failed lookup, a
-  refused or flushed write, a connection that could not be made or was lost, a protocol
+  lookup answering a location outside the registered pool, a refused or flushed write, a connection that could not be made or was lost, a protocol
   fault, a deadline). The two MUST NOT be conflated: a broken path is not a cold cache. Each request message
   MUST carry its **own** context ID and MUST draw exactly one reply (or one protocol error,
   FR-024): the source MUST NOT split a reply, so that a requester's reply reserve (FR-026) is
