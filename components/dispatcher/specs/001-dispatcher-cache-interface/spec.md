@@ -260,7 +260,10 @@ result as a hit.
    **Then** the call waits for all of them, frees the buffer, and returns `Io`.
 4. **Given** a hung drive, **When** `read_to_bounce` is waiting, **Then** it keeps waiting —
    there is no device timeout, because a timed-out read is forgotten while the drive may still
-   write the buffer.
+   write the buffer — and **When** `shutdown` is called meanwhile, **Then** it completes: the
+   read holds no lock `shutdown` needs.
+5. **Given** a drive whose block size is larger than 4 KiB, **When** `read_to_bounce` is
+   called, **Then** it returns `NeverFits`, taking no buffer and issuing no read.
 
 ---
 
@@ -316,6 +319,7 @@ result as a hit.
   - **Write / cache management**: `populate`, `batch_populate`, `remove`, `touch`, `promote_to_memory_tier`.
   - **GPU-staged memory-lifecycle primitives** (see FR-056): `reserve_memory`, `copy_gpu_to_memory_async`, `copy_gpu_to_memory_completed`, `release_memory`, `pin`, `unpin`.
   - **Durability / introspection** (see FR-056): `flush_to_ssd`, `schedule_write_through`, `read_write_stats`. *(Sync 2026-10-05 — `schedule_write_through` added; it enqueues a background write-through for an already-resident entry and MUST NOT block, where `flush_to_ssd` blocks until every queued job lands. Contract in interfaces `001-interfaces` FR-031a; its caller is remote-lookup `002-remote-lookup-rdma` FR-039.)*
+  - **Peer block-tier serving** (see FR-062): `read_to_bounce`, `release_bounce`.
 
   The eviction-notification methods `create_eviction_channel` and `eviction_dropped_count` (FR-042) are inherent methods on the concrete `DispatcherComponent` rather than trait methods on `IDispatcher`.
 - **FR-002**: System MUST define a `DispatcherError` error type in the shared interfaces crate, covering all failure modes (not initialized, key not found, duplicate key, I/O error, allocation failure, invalid parameter).
@@ -414,10 +418,19 @@ result as a hit.
     requesting peer's own reply deadline, by design.
   - Like FR-054, it drains every submitted read before returning, even after a failure. A
     settled failure frees the buffer and returns `Io`. A read the actor ended without its
-    completion (a timeout, or an error ahead of a controller reset) leaves the buffer
-    **leaked**, logged as an error, never freed.
+    completion (`Completion::Timeout`, or any `Completion::Error` naming an operation — a
+    controller reset or the actor shutting down) leaves the buffer **leaked**, logged as an
+    error, never freed. A disconnected completion channel, a failed submit and a failed
+    channel checkout are settled. At most 16 segments are in flight.
   - `NoSpace` and `NeverFits` from the memory tier pass through, before any read is issued;
-    no drives is `NeverFits`, an uninitialized dispatcher `NotInitialized`.
+    no drives is `NeverFits`, an uninitialized dispatcher `NotInitialized`. A drive whose
+    block size does not divide the reserve's 4 KiB pages is `NeverFits`, before any buffer is
+    taken: the read is rounded to whole blocks and the buffer to whole pages, so such a block
+    would read past the buffer's end.
+  - It MUST NOT hold the `data_drives` lock across the device read: it takes the drive's
+    `IBlockDevice` and `ChannelPool` handles and releases the lock first. A read has no
+    timeout, and `shutdown` takes that lock for writing, so holding it would let one hung
+    drive hang `shutdown`.
   `release_bounce(buf)` forwards to `IMemoryTier::bounce_free`.
 - **FR-061** *(Sync 2026-09-21 — backfilled; the multi-drive scatter-gather cold path shipped with no requirement. Commit `6f35b13a` "optimizer iter-005: scatter-gather")*: The pipeline module MUST provide a multi-drive scatter-gather cold-read path, `scatter_gather_multi_drive_zero_copy(gpu, streams: &[GpuStream; 2], drive_works: &[DriveWork], chunk_size, max_queue_depth, metrics) -> Vec<Vec<Result<(), DispatcherError>>>`, that `batch_lookup` uses to serve cold (BlockDevice) entries spread across multiple data drives. Each `DriveWork { channels: &ClientChannels, drive: &dyn IBlockDevice, jobs: &[ColdReadJob] }` descriptor names one drive's checked-out client channel and its cold-read jobs. The function MUST:
   - Segment every job's read against its drive's block size (respecting MDTS per FR-019) and, on the **caller thread**, run a **single multiplexed poll loop** that fans NVMe reads out to all drives simultaneously and fans completions in — there are NO spawned per-drive worker threads and NO persistent `ColdReadPool` (FR-044, retired).
@@ -430,12 +443,13 @@ result as a hit.
 
 - **CacheKey**: A 64-bit identifier for cached data elements. Used to address entries in the dispatch map and memory-tier.
 - **IPC Handle**: Contains a pointer to a GPU memory region and a size. Used for DMA transfers between GPU and host memory.
-- **Memory-Tier Slot**: A region in the pre-allocated DRAM pool managed by `IMemoryTier`. Holds cached data for fast access. Eviction is capacity-based (bytes used vs pool size).
+- **Memory-Tier Slot**: A region in the pre-allocated DRAM pool managed by `IMemoryTier`. Holds cached data for fast access. Eviction is capacity-based (bytes used vs the cache's capacity, which is the pool less the memory tier's bounce reserve, at most an eighth of the pool; FR-062).
 - **Dispatch Map Entry**: A record tracking the state of a cached element -- MemoryTier (pointer + size + optional ssd_offset) or BlockDevice (ssd_offset only).
 - **Extent**: A contiguous region on a data block device, managed by the extent manager, used to store write-through cache data.
 - **Data Block Device**: An NVMe SSD that holds persisted cache data. There are N data block devices in the system.
 - **Background Writer**: A dedicated thread that processes write-through jobs, reading from memory-tier pointers via `IMemoryTier::peek()` (to avoid refreshing LRU) and writing to SSD via extent managers.
-- **Pipelined Reader**: A sliding-window zero-copy pipeline (`pipeline.rs`) that maintains up to `max_queue_depth` concurrent in-flight NVMe reads into unique memory-tier offsets. Variants: (1) `pipelined_multi_object_zero_copy` (single-drive batch of N objects, used by the single-entry cold path `promote_and_serve` — tag-based completion routing and **coalesced per-object H2D**: NVMe segment completions trigger immediate next-read resubmission, and once all segments for an object complete, one `memcpy_h2d_async` copies the entire DRAM slot; a periodic sync every `PIPELINE_RING_SIZE` (32) object-H2D copies bounds GPU queue depth); (2) `scatter_gather_multi_drive_zero_copy` (**primary batch cold path** for `batch_lookup`, FR-061 — the same coalesced per-object H2D machinery but multiplexing several drives' NVMe I/O in one caller-thread poll loop, taking a slice of per-drive `DriveWork` descriptors and distributing the total `max_queue_depth` across drives by segment count; no periodic sync — NVMe is reaped continuously and one final dual pipe-stream sync covers the batch); (3) `pipelined_ssd_to_gpu_zero_copy` (single object, per-segment H2D via `dma_copy_to_device_async`; used by the cold-load staging serve, FR-053). Memory-tier SPDK+CUDA co-registration is required.
+- **Pipelined Reader**: A sliding-window zero-copy pipeline (`pipeline.rs`) that maintains up to `max_queue_depth` concurrent in-flight NVMe reads into unique memory-tier offsets. Variants: (1) `pipelined_multi_object_zero_copy` (single-drive batch of N objects, used by the single-entry cold path `promote_and_serve` — tag-based completion routing and **coalesced per-object H2D**: NVMe segment completions trigger immediate next-read resubmission, and once all segments for an object complete, one `memcpy_h2d_async` copies the entire DRAM slot; a periodic sync every `PIPELINE_RING_SIZE` (32) object-H2D copies bounds GPU queue depth); (2) `scatter_gather_multi_drive_zero_copy` (**primary batch cold path** for `batch_lookup`, FR-061 — the same coalesced per-object H2D machinery but multiplexing several drives' NVMe I/O in one caller-thread poll loop, taking a slice of per-drive `DriveWork` descriptors and distributing the total `max_queue_depth` across drives by segment count; no periodic sync — NVMe is reaped continuously and one final dual pipe-stream sync covers the batch); (3) `pipelined_ssd_to_gpu_zero_copy` (single object, per-segment H2D via `dma_copy_to_device_async`; used by the cold-load staging serve, FR-053); (4) `read_into_bounce` (single object into a bounce buffer, no GPU, queue depth 16, `BOUNCE_READ_TIMEOUT_MS`, drains every read and reports `Settled`/`Unsettled`; used by `read_to_bounce`, FR-062). Memory-tier SPDK+CUDA co-registration is required.
+- **Bounce Buffer**: A range of the memory tier's bounce reserve (`IMemoryTier::bounce_alloc`), outside the cache's slots, holding one block-tier entry read for a peer by `read_to_bounce` (FR-062). It is never in the dispatch map and is returned with `release_bounce`; a buffer a drive may still be writing is leaked, never returned.
 - **Background SSD Evictor**: A dedicated thread that periodically checks SSD utilization and evicts the oldest BlockDevice entries when capacity exceeds a threshold.
 - **Background Memory-Tier Evictor**: A dedicated thread that proactively demotes LRU entries from DRAM memory-tier to SSD-backed BlockDevice state when DRAM utilization exceeds a configurable threshold, preventing on-demand eviction stalls on the populate hot path.
 
@@ -463,15 +477,16 @@ result as a hit.
   that drive's bytes at its LBA; an entry larger than the maximum transfer arrives whole from
   consecutive segments; a failed segment frees the buffer only after its held siblings
   complete; `NoSpace`/`NeverFits` issue no read; eight concurrent readers on one drive each
-  read their own bytes over at most eight pooled channels; and the bounce timeout cannot
-  overflow the actor's deadline arithmetic.
+  read their own bytes over at most eight pooled channels; `shutdown` completes while a read
+  is held on a hung drive; a drive with 8 KiB blocks is `NeverFits` with no buffer taken and
+  no read issued; and the bounce timeout cannot overflow the actor's deadline arithmetic.
 - **SC-017** *(Sync 2026-08-31 — backfilled; covers FR-058)*: `tier_event_stats()` returns counters that are zero at startup and increase monotonically as tier movements occur: after a populate/lookup/evict cycle, `promotions_to_gpu` reflects served lookups and the eviction counters reflect demotions/removals, and the delta between two successive snapshots equals the number of tier events in that window. A dispatcher variant that performs no tiering returns all-zero counters. *(Sync 2026-09-28)* The two remote counters are verified separately, because a tiering cycle does not exercise them: `remote_lookup_hits` MUST NOT move on a purely local hit, and `remote_lookup_hits + remote_lookup_misses` MUST equal the number of keys forwarded to `IRemoteLookup` less any transport failures. *(Sync 2026-09-29)* And `lookup_hits_dram + lookup_hits_ssd + remote_lookup_hits` MUST equal the served-key count over the same interval — the partition property, which is checkable without any knowledge of the workload.
 
 ## Assumptions
 
 - Clients provide valid IPC handles referencing accessible GPU memory regions. The dispatcher does not validate GPU memory accessibility.
 - The SPDK environment is initialized and active before the dispatcher's `initialize()` is called (via the ISPDKEnv receptacle). When ISPDKEnv is not connected, the dispatcher operates in memory-tier-only mode.
-- The memory-tier pool is pre-allocated before initialization. The dispatcher does not manage the pool lifecycle (only calls insert/get/peek/remove/evict_next/oldest_keys/touch).
+- The memory-tier pool is pre-allocated before initialization. The dispatcher does not manage the pool lifecycle (it calls `insert`, `get`, `peek`, `remove`, `contains`, `oldest_keys`, `touch`, `batch_touch`, `capacity`, `used`, `pool_info`, `is_dma_capable`, and, for FR-062, `bounce_alloc`/`bounce_free`).
 - DMA buffer allocation for the pipelined reader uses SPDK DMA allocation (falls back to libc `aligned_alloc` without SPDK).
 - GPU-to-host DMA transfers use per-region `memcpy_d2h_async` via `copy_gpu_to_memory_async` (FR-056) for both the single-entry and the batch store path; both `populate_from_gpu` and `batch_populate` resolve the dedicated `store` stream (enabling PCIe full-duplex overlap with concurrent H2D lookups on `warm`; `populate_from_gpu` moved off `warm` in commit `9b83ebe1`, Sync 2026-09-02), and null-stream callers (shm-queue CopyToStore) get the `store` stream resolved internally with an explicit sync before return. Host-to-GPU DMA transfers use per-region `memcpy_h2d_async` on the device's `warm` stream (raw pointer path for memory-tier hits) or `dma_copy_to_device_async` (DmaBuffer path for pipeline/promotion), falling back to synchronous `dma_copy_to_device` when streams are unavailable (lookup direction). The cold pipeline uses coalesced per-object `memcpy_h2d_async` after all NVMe segments complete.
 - NVMe SSDs have a Maximum Data Transfer Size (MDTS) limit. The `io_segmenter` module provides MDTS-aware I/O splitting.
