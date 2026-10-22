@@ -4151,7 +4151,7 @@ impl IDispatcher for DispatcherComponent {
         };
         // The read is rounded up to whole blocks and the buffer to whole pages,
         // so a block that does not divide a page reads past the buffer's end.
-        let block_size = dev.block_size() as u64;
+        let block_size = u64::from(dev.block_size());
         if block_size == 0 || 4096 % block_size != 0 {
             return Err(BounceError::NeverFits(format!(
                 "drive block size {block_size} does not divide the reserve's 4 KiB pages"

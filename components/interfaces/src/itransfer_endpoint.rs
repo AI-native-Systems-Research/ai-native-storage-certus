@@ -98,6 +98,7 @@ pub enum EntryOutcome {
 
 impl EntryOutcome {
     /// Whether data for the entry arrived.
+    #[must_use]
     pub fn is_hit(self) -> bool {
         matches!(
             self,
@@ -182,8 +183,9 @@ pub struct LandingRegion {
 impl LandingRegion {
     /// The [`RemoteRegion`] for the `len` bytes at `offset` into the pool, or
     /// `None` if they do not lie wholly inside it.
+    #[must_use]
     pub fn region_at(&self, offset: u64, len: u32) -> Option<RemoteRegion> {
-        if offset.checked_add(len as u64)? > self.len {
+        if offset.checked_add(u64::from(len))? > self.len {
             return None;
         }
         Some(RemoteRegion {

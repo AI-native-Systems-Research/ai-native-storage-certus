@@ -118,6 +118,7 @@ pub enum BounceError {
 
 impl BounceError {
     /// Whether the same request may succeed later.
+    #[must_use]
     pub fn is_transient(&self) -> bool {
         matches!(self, Self::NoSpace)
     }

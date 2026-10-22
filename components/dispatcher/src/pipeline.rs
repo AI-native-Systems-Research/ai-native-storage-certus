@@ -1297,6 +1297,12 @@ pub enum BounceReadError {
 /// actor reports *before* the controller reset that stops the DMA — and the
 /// buffer must never be reused.
 ///
+/// # Errors
+///
+/// [`BounceReadError::Settled`] if a segment failed and every submitted read
+/// has completed; [`BounceReadError::Unsettled`] if a read may still be
+/// writing `dst`.
+///
 /// # Safety
 /// - `dst` must be valid, DMA-capable memory for `total_bytes` rounded up to the
 ///   block size, untouched by anyone else until this returns.
@@ -1321,7 +1327,7 @@ pub unsafe fn read_into_bounce(
     let mut bufs = Vec::with_capacity(num_chunks);
     for seg in &segments {
         // SAFETY: inside `dst`, whose extent the caller guarantees.
-        let ptr = unsafe { dst.add(seg.buffer_offset) as *mut std::ffi::c_void };
+        let ptr = unsafe { dst.add(seg.buffer_offset).cast::<std::ffi::c_void>() };
         // SAFETY: `noop_free` — the memory belongs to the buffer, not the wrapper.
         let buf = unsafe {
             DmaBuffer::from_raw(ptr, seg.length.next_multiple_of(block_size), noop_free, -1)
