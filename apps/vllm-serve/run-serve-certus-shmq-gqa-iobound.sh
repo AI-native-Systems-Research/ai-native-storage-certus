@@ -63,7 +63,7 @@ GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.9}"
 # No KV cap by default: ~20G/util pool >> ~1.75G one-sequence floor at 32768, and any
 # I/O is driven by oversubscription, not a cap. KV_CACHE_BYTES=4G to cap and spill more.
 KV_CACHE_BYTES="${KV_CACHE_BYTES-}"
-OFFLOAD_BLOCK_SIZE="${OFFLOAD_BLOCK_SIZE-64}"          # 64-token offload blocks (3.5 MiB each at 56 KiB/tok)
+OFFLOAD_BLOCK_SIZE="${OFFLOAD_BLOCK_SIZE-}"          # must stay empty: the connector offloads one GPU block per key
 # Pin vLLM 0.30 to match the cputier arm (run-serve-cputier-gqa-iobound.sh) for a
 # same-version A/B. This is also the base default, set explicitly here for parity.
 IMAGE="${IMAGE:-localhost/certus-shmq-connector:vllm0.30.0}"

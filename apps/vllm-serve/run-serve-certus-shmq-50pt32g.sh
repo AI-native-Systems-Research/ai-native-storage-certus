@@ -45,7 +45,7 @@ MAX_MODEL_LEN="${MAX_MODEL_LEN:-49152}"
 TENSOR_PARALLEL="${TENSOR_PARALLEL:-2}"
 # hbm=10 is TOTAL GPU KV; KV_CACHE_BYTES is PER WORKER, so 10G / TP=2 = 5G.
 KV_CACHE_BYTES="${KV_CACHE_BYTES-5G}"
-OFFLOAD_BLOCK_SIZE="${OFFLOAD_BLOCK_SIZE-64}"
+OFFLOAD_BLOCK_SIZE="${OFFLOAD_BLOCK_SIZE-}"
 DRAM_GB="${DRAM_GB:-32}"                                # expected certus-server memory tier
 # Bound the prefill chunk so activation memory stays flat on long prompts.
 EXTRA_SERVE_ARGS="${EXTRA_SERVE_ARGS:---max-num-batched-tokens 8192}"
