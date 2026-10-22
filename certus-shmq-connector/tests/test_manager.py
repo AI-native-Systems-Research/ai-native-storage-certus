@@ -1090,6 +1090,33 @@ def test_take_events_surfaces_removed_not_demoted():
     assert list(mgr.take_events()) == []
 
 
+def test_take_events_medium_matches_vllm_tracker_enum_keys():
+    import importlib
+
+    import conftest
+    from certus_shmq_connector import compat
+
+    conftest.build_fake_vllm((0, 29))
+    importlib.reload(compat)
+    try:
+        from vllm.v1.kv_offload.base import Medium
+
+        ring = FakeRing()
+        mgr = ShmqCertusOffloadingManager(
+            ring, block_size_bytes=4096, events_enabled=True
+        )
+        key = b"\x03" * 36
+        _store_keys(mgr, ring, [key])
+        ring.events = [(_key_to_u64(key), REASON_REMOVED)]
+        (event,) = mgr.take_events()
+
+        tracker = {Medium.CPU: "cpu", Medium.STORAGE: "storage"}
+        assert tracker[event.medium] == "storage"
+    finally:
+        conftest.build_fake_vllm((0, 20))
+        importlib.reload(compat)
+
+
 def test_take_events_unknown_key_skipped():
     ring = FakeRing()
     ring.events = [(100, REASON_REMOVED)]
