@@ -3,7 +3,7 @@ spec_sync_component: dispatcher
 spec_sync_drift_status: clean
 spec_sync_synced_at: 2026-10-22T00:46:08Z
 spec_sync_git_commit: 8cb0509c
-spec_sync_inputs_sha256: ecd58f3ff947b27205ff0ca0b09806e149c385a5e4559a7ad8977daa71b5f343
+spec_sync_inputs_sha256: 0b086a21e00cea6780c7d858aa8cad2899f4b90e42ca4f882d1c5cd845111078
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Merge 2026-10-21: unstable `460a6f554` (#558, Daniel: last-chance full-depth eviction scan) merged into `fix/dispatcher-remove-clear-mt`.** #558 changes only `evict_for_space` and the fragmentation relief in `evict_and_insert` (scan depth), with its own spec backfill (FR-024, eviction section, scenarios 2-3, Session Q&A; note below). This branch's changes in the same file are elsewhere: `remove`, `clear_memory_tier`, `flush_to_ssd`, and the `store_already_resident` counter, which A-07 moved out of `evict_and_insert` into `reserve_memory`. The only conflicts were the test-module list in `src/lib.rs` (both kept), the 001 `**Last Synced**` header lines (both kept), and this report (both notes kept). The merged code was re-checked: the counter is not in `evict_and_insert`. #558's new test `src/repair_test_eviction_window_tinylfu.rs` was written before this branch's `WriteThroughPins` constructor argument, so its `DispatcherComponent::new` call gets that one extra argument (test only). Dispatcher tests 102/102, 5 runs out of 5. Both syncs stand, and this re-stamp certifies the merged inputs.
