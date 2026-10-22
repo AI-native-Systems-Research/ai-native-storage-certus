@@ -14,3 +14,6 @@ spdk-env.workspace = true
 gpu-services = { workspace = true, features = ["p2p"] }
 logger.workspace = true
 clap = { version = "4", features = ["derive"] }
+
+[lints]
+workspace = true

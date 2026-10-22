@@ -29,3 +29,6 @@ volatile_write_cache = []
 [[bench]]
 name = "benchmarks"
 harness = false
+
+[lints]
+workspace = true

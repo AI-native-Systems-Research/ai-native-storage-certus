@@ -78,7 +78,7 @@ pub const MAX_DISCARDED_MASS: f64 = 0.05;
 /// ```
 /// use workload_model::description::Declared;
 ///
-/// let d: Declared<u32> = serde_yaml::from_str("{b: 2, a: 1}").unwrap();
+/// let d: Declared<u32> = serde_norway::from_str("{b: 2, a: 1}").unwrap();
 /// // Document order, not sorted order: `b` was declared first.
 /// assert_eq!(d.index_of("b"), Some(0));
 /// assert_eq!(d.index_of("a"), Some(1));
@@ -372,7 +372,7 @@ impl std::str::FromStr for WorkloadDescription {
     type Err = Error;
 
     fn from_str(yaml: &str) -> Result<Self> {
-        serde_yaml::from_str(yaml).map_err(Error::new)
+        serde_norway::from_str(yaml).map_err(Error::new)
     }
 }
 
@@ -858,7 +858,7 @@ mod tests {
 
     #[test]
     fn declared_preserves_document_order() {
-        let d: Declared<u32> = serde_yaml::from_str("{zebra: 1, apple: 2, mango: 3}").unwrap();
+        let d: Declared<u32> = serde_norway::from_str("{zebra: 1, apple: 2, mango: 3}").unwrap();
         let names: Vec<&str> = d.iter().map(|(_, n, _)| n).collect();
         assert_eq!(names, ["zebra", "apple", "mango"]);
         assert_eq!(d.index_of("zebra"), Some(0));
@@ -868,25 +868,25 @@ mod tests {
     #[test]
     fn duplicate_declaration_is_refused() {
         // YAML would let the later entry win, shifting every class_id after it.
-        let e = serde_yaml::from_str::<Declared<u32>>("{a: 1, a: 2}");
+        let e = serde_norway::from_str::<Declared<u32>>("{a: 1, a: 2}");
         assert!(e.is_err(), "duplicate name accepted");
     }
 
     #[test]
     fn population_accepts_all_three_spellings() {
         assert_eq!(
-            serde_yaml::from_str::<Population>("50").unwrap(),
+            serde_norway::from_str::<Population>("50").unwrap(),
             Population::Poisson(50)
         );
         assert_eq!(
-            serde_yaml::from_str::<Population>("{poisson: 50}").unwrap(),
+            serde_norway::from_str::<Population>("{poisson: 50}").unwrap(),
             Population::Poisson(50)
         );
         assert_eq!(
-            serde_yaml::from_str::<Population>("{exact: 10}").unwrap(),
+            serde_norway::from_str::<Population>("{exact: 10}").unwrap(),
             Population::Exact(10)
         );
-        assert!(serde_yaml::from_str::<Population>("{pareto: 10}").is_err());
+        assert!(serde_norway::from_str::<Population>("{pareto: 10}").is_err());
     }
 
     #[test]

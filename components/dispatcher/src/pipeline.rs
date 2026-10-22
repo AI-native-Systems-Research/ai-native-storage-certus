@@ -821,8 +821,7 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
                     let ptr =
                         unsafe { job.mem_ptr.add(seg.buffer_offset) as *mut std::ffi::c_void };
                     let buf_size = seg.length.next_multiple_of(block_size);
-                    let buf =
-                        unsafe { DmaBuffer::from_raw(ptr, buf_size, noop_free, -1) }.unwrap();
+                    let buf = unsafe { DmaBuffer::from_raw(ptr, buf_size, noop_free, -1) }.unwrap();
                     Arc::new(Mutex::new(buf))
                 })
                 .collect();
@@ -999,8 +998,7 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
                 if !stop_submitting[d] && submitted[d] < ds.work.len() {
                     let (next_obj, next_seg) = ds.work[submitted[d]];
                     let next_obj_data = &ds.objs[next_obj];
-                    let next_tag =
-                        (next_obj * ds.max_segments_per_obj + next_seg) as u64;
+                    let next_tag = (next_obj * ds.max_segments_per_obj + next_seg) as u64;
 
                     if dw
                         .channels

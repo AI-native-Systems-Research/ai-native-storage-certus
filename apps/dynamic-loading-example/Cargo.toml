@@ -9,3 +9,6 @@ publish = false
 component-core.workspace = true
 example-helloworld.workspace = true
 libloading.workspace = true
+
+[lints]
+workspace = true

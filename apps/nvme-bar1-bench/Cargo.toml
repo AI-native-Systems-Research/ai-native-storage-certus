@@ -16,3 +16,6 @@ gpu-services = { workspace = true, features = ["p2p"] }
 logger.workspace = true
 clap = { version = "4", features = ["derive"] }
 libc = "0.2"
+
+[lints]
+workspace = true

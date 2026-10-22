@@ -21,7 +21,7 @@ component-macros.workspace = true
 # Only IMemoryTier/ILogger are used, neither of which needs the spdk feature.
 interfaces.workspace = true
 
-anyhow = "1"
+anyhow = "1.0.103"
 
 [build-dependencies]
 cc = "1"
@@ -33,3 +33,6 @@ criterion = { version = "0.5", features = ["html_reports"] }
 [[bench]]
 name = "push_telemetry"
 harness = false
+
+[lints]
+workspace = true

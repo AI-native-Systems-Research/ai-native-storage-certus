@@ -64,3 +64,6 @@ harness = false
 [[bench]]
 name = "numa_throughput_benchmark"
 harness = false
+
+[lints]
+workspace = true

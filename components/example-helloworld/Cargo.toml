@@ -10,3 +10,6 @@ component-framework.workspace = true
 component-core.workspace = true
 interfaces.workspace = true
 logger.workspace = true
+
+[lints]
+workspace = true

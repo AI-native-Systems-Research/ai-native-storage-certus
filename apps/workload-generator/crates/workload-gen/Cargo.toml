@@ -42,7 +42,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # The hardware file (FR-082). YAML for extensibility, and the same reader the
 # description already uses, so an unknown field is a refusal in both.
-serde_yaml = "0.9"
+serde_norway = "0.9"
 # Latency percentiles live in the binary only, never in the simulation core. The
 # agent ships back a histogram rather than percentiles, because quantiles do not
 # merge across nodes and histograms do (contracts/node-agent-wire.md).
@@ -53,3 +53,6 @@ libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3"
+
+[lints]
+workspace = true

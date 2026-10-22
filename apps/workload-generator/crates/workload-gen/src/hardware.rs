@@ -277,7 +277,7 @@ pub fn read(explicit: Option<&Path>) -> Result<Option<Hardware>, String> {
     };
     let text = std::fs::read_to_string(&path)
         .map_err(|e| format!("cannot read the hardware file {}: {e}", path.display()))?;
-    let doc: HardwareDoc = serde_yaml::from_str(&text)
+    let doc: HardwareDoc = serde_norway::from_str(&text)
         .map_err(|e| format!("cannot parse the hardware file {}: {e}", path.display()))?;
     if doc.version != HARDWARE_VERSION {
         return Err(format!(

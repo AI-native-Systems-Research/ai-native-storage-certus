@@ -33,3 +33,6 @@ eviction-replay-benchmark = { path = "../../../eviction-replay-benchmark" }
 # overloading it would make `--include-ignored` unable to run the slow tests
 # without also running the ones that cannot pass off-cluster.
 ci-fast = []
+
+[lints]
+workspace = true
