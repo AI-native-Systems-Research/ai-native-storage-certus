@@ -11,7 +11,8 @@
 //! | `NotExist` | no | `Miss`; **release nothing** |
 //! | `MismatchSize` | no | `Miss`; **release nothing** (not returned by the current map, kept in case) |
 //! | `MemoryTier`, size matches, inside the pool | **yes** | post a write; the pin travels in the slab and is released by the reaper that owns its `wr_id` |
-//! | `MemoryTier`, wrong size or outside the pool | **yes** | `Miss`; **release it now** |
+//! | `MemoryTier`, wrong size | **yes** | `Miss`; **release it now** |
+//! | `MemoryTier`, outside the pool | **yes** | `Failed` (map and tier disagree); **release it now** |
 //! | `BlockDevice`, a block source bound (`spdk`) | **yes** | read it: the pin waits in the read table while the dispatcher reads the extent into a bounce buffer, and is released when the read finishes — *before* the write is posted; the slab then carries the buffer |
 //! | `BlockDevice`, no block source | **yes** | `Miss`; **release it now** |
 //! | `Err(..)` (e.g. a 2 s writer timeout) | no | `Failed`; release nothing |
@@ -181,9 +182,11 @@ pub(crate) fn resolve(
                 pin.release(map);
                 return (Resolved::Miss, Some(MissCause::WrongSize));
             }
+            // The map and the tier disagree about where the pool is: a fault,
+            // not residency, so it must not read as a cold cache.
             if !pool.contains(pointer as u64, size as usize) {
                 pin.release(map);
-                return (Resolved::Miss, Some(MissCause::OutsidePool));
+                return (Resolved::Failed, Some(MissCause::OutsidePool));
             }
             (
                 Resolved::Write(Write {

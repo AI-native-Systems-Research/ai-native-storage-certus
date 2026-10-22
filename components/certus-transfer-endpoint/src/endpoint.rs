@@ -48,9 +48,7 @@ use crate::connection::transport::{Completed, Completion, CompletionError, Regio
 use crate::connection::PeerId;
 use crate::message::{self, Header, Kind};
 use crate::msgpool::{MsgBuf, MsgPool};
-use crate::serve::{
-    resolve, BlockRead, Finish, Hold, Map, MissCause, Pin, Pool, Push, PushWork, Resolved,
-};
+use crate::serve::{resolve, BlockRead, Finish, Hold, Map, Pin, Pool, Push, PushWork, Resolved};
 use crate::session::{HelloError, Limits, Phase, Session, Violation};
 
 /// What a work request's slab slot carries until its completion is reaped.
@@ -928,13 +926,8 @@ impl EndpointActor {
                             "certus-transfer-endpoint: key {key} not served: {cause:?}"
                         ));
                     }
-                    (Resolved::Miss, cause) => {
+                    (Resolved::Miss, _) => {
                         push.outcomes[index] = Some(EntryOutcome::Miss);
-                        if let Some(c @ MissCause::OutsidePool) = cause {
-                            self.logger.warn(&format!(
-                                "certus-transfer-endpoint: key {key} not served: {c:?}"
-                            ));
-                        }
                     }
                     (Resolved::Write(w), _) => {
                         let local = region

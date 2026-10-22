@@ -219,7 +219,8 @@ VIII–XI, and a review that does not check them is not a review.
   back-pressure into spurious teardowns.
 - **`Failed` is not `Miss`.** `Miss` means the source does not serve the entry
   (absent, wrong size, a tier this build cannot serve). Anything lost to a fault —
-  connection, refused or flushed write, failed lookup — is `Failed`. Reporting a
+  connection, refused or flushed write, failed lookup, a lookup answering outside the
+  registered pool (the map and the tier disagree) — is `Failed`. Reporting a
   fault as a miss makes a broken path look like a cold cache.
 - **The source replies only after its writes complete.** That is the whole of
   the ordering guarantee: a hit in a reply means the write landed, so the caller
