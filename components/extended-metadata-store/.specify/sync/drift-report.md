@@ -1,11 +1,13 @@
 ---
 spec_sync_component: extended-metadata-store
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-21T23:04:39Z
-spec_sync_git_commit: efd502331
-spec_sync_inputs_sha256: 9917fb19bfe385c943c8b4b9bc32ef6e1be388a798121b5f7e8af342025e2b48
+spec_sync_synced_at: 2026-10-22T22:39:40Z
+spec_sync_git_commit: ef6b84c3
+spec_sync_inputs_sha256: b958d588908cb81cbb66bb02997358360b16cfed0230cbb6702f9e3e57e33754
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-22 (transitive: `components/interfaces` changed, branch `001-rdma-cache-transfer`).** The spec-sync digest folds `components/interfaces/{src,specs}` into every component's hash, so this branch's interface changes stale every stamp at once; that is the design. They are: a new `ITransferEndpoint`/`ITransferEndpointAdmin` module (`fetch` with `LocalSlot`, `landing_region`, `push`/`push_async`, `disconnect`, `stats`; `EndpointConfig`, `TransferStats`); the bounce reserve on `IMemoryTier` (`set_bounce_reserve`, `bounce_alloc`, `bounce_free`, `bounce_usage`; `BounceBuffer`, `BounceError`, `DEFAULT_BOUNCE_RESERVE` = 32 MiB); `IDispatcher::read_to_bounce`/`release_bounce`; `IDispatchMap`/`LookupResult` ungated from `spdk`; and doc and spec corrections (FR-008 inventory, plan.md interface table). **No code re-analysis was performed for this component, and none was needed:** its own `src/**` and `specs/**` are identical to `origin/unstable` (checked with `git diff`), it references none of the items above (grep over its src/ and specs/: 0 hits), and it implements neither `IMemoryTier` nor `IDispatcher`, the two traits that gained methods. Digest refreshed to the recomputed value.
+
 > **Re-stamp 2026-10-21 (transitive, `components/interfaces` changed on branch `fix/dispatcher-remove-clear-mt`).** Only `components/interfaces` changed for this component: `IDispatcher` doc comments (`flush_to_ssd` errors, `clear_memory_tier`, `batch_lookup`) and the interfaces spec (FR-008, FR-009, FR-017, FR-018, FR-018a, FR-021, FR-023, Overview, NFR-002, Implementation Notes; text only, no type or signature changed). This component uses some of the named items (2 files), but no type, signature or behaviour of them changed. This component's last full sync below stands; no re-analysis was needed.
 
 > **Apply 2026-10-14 (branch fix/bundle-dispatcher-ems, approved by Cornel).** All 15 proposals in `proposals.json` were approved by Cornel Constantinescu on 2026-10-18 (PR approval page, groups A–D) and applied on 2026-10-19 in batch mode. Backups are in `.specify/sync/backups/20261019T070424Z/`; details are in `apply-report.{md,json}`. **Applied to the spec (no code change):**

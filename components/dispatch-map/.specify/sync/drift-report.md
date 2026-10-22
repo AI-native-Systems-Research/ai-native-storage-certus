@@ -1,11 +1,13 @@
 ---
 spec_sync_component: dispatch-map
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-21T23:03:30Z
-spec_sync_git_commit: efd502331
-spec_sync_inputs_sha256: 37a89b4b2eb2579122605aea228bc8029a2dfb4197586858901a15c7858a53a8
+spec_sync_synced_at: 2026-10-22T22:39:40Z
+spec_sync_git_commit: ef6b84c3
+spec_sync_inputs_sha256: 07fa7da29e05e104d51f17d551fe99bca628fc5f042a71b05f38405b03c7eeea
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-22 (transitive: `components/interfaces` changed, branch `001-rdma-cache-transfer`).** The spec-sync digest folds `components/interfaces/{src,specs}` into every component's hash, so this branch's interface changes stale every stamp at once; that is the design. They are: a new `ITransferEndpoint`/`ITransferEndpointAdmin` module (`fetch` with `LocalSlot`, `landing_region`, `push`/`push_async`, `disconnect`, `stats`; `EndpointConfig`, `TransferStats`); the bounce reserve on `IMemoryTier` (`set_bounce_reserve`, `bounce_alloc`, `bounce_free`, `bounce_usage`; `BounceBuffer`, `BounceError`, `DEFAULT_BOUNCE_RESERVE` = 32 MiB); `IDispatcher::read_to_bounce`/`release_bounce`; `IDispatchMap`/`LookupResult` ungated from `spdk`; and doc and spec corrections (FR-008 inventory, plan.md interface table). **No code re-analysis was performed for this component, and none was needed:** its own `src/**` and `specs/**` are identical to `origin/unstable` (checked with `git diff`), it references none of the items above (grep over its src/ and specs/: 0 hits), and it implements neither `IMemoryTier` nor `IDispatcher`, the two traits that gained methods. Digest refreshed to the recomputed value.
+
 > **Re-stamp 2026-10-21 (transitive, `components/interfaces` changed on branch `fix/dispatcher-remove-clear-mt`).** Only `components/interfaces` changed for this component: `IDispatcher` doc comments (`flush_to_ssd` errors, `clear_memory_tier`, `batch_lookup`) and the interfaces spec (FR-008, FR-009, FR-017, FR-018, FR-018a, FR-021, FR-023, Overview, NFR-002, Implementation Notes; text only, no type or signature changed). This component uses none of the changed items (grep over its src/ and specs/: 0 hits). This component's last full sync below stands; no re-analysis was needed.
 
 > **Re-stamp 2026-10-14 (interfaces FR-027 fold-in, branch `fix/cold-staging-buf-16mib`).** `components/interfaces/{src,specs}` folds into this component's spec-sync digest, so correcting interfaces FR-027 (`DispatcherConfig::cold_staging_buf_bytes` default 4 MiB → 16 MiB, matching commit `8e12e49f`) moves this component's hash. dispatch-map's own reconciliation is current — its `src/specs` were fully synced and stamped clean by PR #542 (merged into this branch; see the note below) — and it does not reference `cold_staging_buf_bytes` (consumed only by the dispatcher's host-DRAM cold-staging pool), so no re-analysis was needed for the interfaces change. Digest refreshed to match the committed merged tree.

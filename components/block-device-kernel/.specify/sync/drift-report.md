@@ -1,11 +1,13 @@
 ---
 spec_sync_component: block-device-kernel
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-21T23:03:30Z
-spec_sync_git_commit: efd502331
-spec_sync_inputs_sha256: 8a875ecb4538b3453aee6371c951d70a788847181f89850d0c6524bb266825f7
+spec_sync_synced_at: 2026-10-22T22:39:40Z
+spec_sync_git_commit: ef6b84c3
+spec_sync_inputs_sha256: bb2ec54cca5152cf7563519b4e8f2eacd5a6199e692b9943b378a06dfb58fca7
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-22 (transitive: `components/interfaces` changed, branch `001-rdma-cache-transfer`).** The spec-sync digest folds `components/interfaces/{src,specs}` into every component's hash, so this branch's interface changes stale every stamp at once; that is the design. They are: a new `ITransferEndpoint`/`ITransferEndpointAdmin` module (`fetch` with `LocalSlot`, `landing_region`, `push`/`push_async`, `disconnect`, `stats`; `EndpointConfig`, `TransferStats`); the bounce reserve on `IMemoryTier` (`set_bounce_reserve`, `bounce_alloc`, `bounce_free`, `bounce_usage`; `BounceBuffer`, `BounceError`, `DEFAULT_BOUNCE_RESERVE` = 32 MiB); `IDispatcher::read_to_bounce`/`release_bounce`; `IDispatchMap`/`LookupResult` ungated from `spdk`; and doc and spec corrections (FR-008 inventory, plan.md interface table). **No code re-analysis was performed for this component, and none was needed:** its own `src/**` and `specs/**` are identical to `origin/unstable` (checked with `git diff`), it references none of the items above (grep over its src/ and specs/: 0 hits), and it implements neither `IMemoryTier` nor `IDispatcher`, the two traits that gained methods. Digest refreshed to the recomputed value.
+
 > **Re-stamp 2026-10-21 (transitive, `components/interfaces` changed on branch `fix/dispatcher-remove-clear-mt`).** Only `components/interfaces` changed for this component: `IDispatcher` doc comments (`flush_to_ssd` errors, `clear_memory_tier`, `batch_lookup`) and the interfaces spec (FR-008, FR-009, FR-017, FR-018, FR-018a, FR-021, FR-023, Overview, NFR-002, Implementation Notes; text only, no type or signature changed). This component uses some of the named items (4 files), but no type, signature or behaviour of them changed. This component's last full sync below stands; no re-analysis was needed.
 
 > **Re-stamp 2026-10-14 (transitive, merge of unstable 6f5743cc into this branch).** Only `components/interfaces` changed for this component (`DispatcherConfig::cold_staging_buf_bytes` default 4 -> 16 MiB, #550); `block-device-kernel` does not use it (grep over its src/ and specs/: 0 hits). This branch's full sync below stands; no re-analysis was needed.

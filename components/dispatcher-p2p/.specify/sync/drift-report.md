@@ -1,11 +1,13 @@
 ---
 spec_sync_component: dispatcher-p2p
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-21T23:03:30Z
-spec_sync_git_commit: efd502331
-spec_sync_inputs_sha256: 7f3f0582d216475aba4c4cbfe884f0349fe87507007575c47eb3b6ae2ae55850
+spec_sync_synced_at: 2026-10-22T22:39:40Z
+spec_sync_git_commit: ef6b84c3
+spec_sync_inputs_sha256: c617404b745fa5beeaf9ecc8fa60e0c03051e5686adef97944dfa6620e81d23f
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-10-22 (branch `001-rdma-cache-transfer`) — stub check.** This branch's only change to the component is the `IDispatcher` stub pair `read_to_bounce` (always `BounceError::NeverFits`: block-tier serving is not implemented here) and `release_bounce` (unreachable) in `src/lib.rs`, required because the trait gained them. Checked against the spec: `contracts/idispatcher.md` claimed every method behaves identically to the standard dispatcher — **DRIFTED, code authoritative**; backfilled with a *Block-tier serving (not implemented)* table (commit `ca9a0b17`), so a transfer endpoint bound here reports such an entry `Failed`. Nothing else in src/ or specs/ changed versus `origin/unstable`; the rest of `interfaces`' change is transitive, as for every component. No actionable drift remains.
+
 > **Re-stamp 2026-10-21 (transitive, `components/interfaces` changed on branch `fix/dispatcher-remove-clear-mt`), drift TRACKED.** The `IDispatcher` contract was made precise in this branch (approved by Cornel 2026-10-21): `flush_to_ssd` returns `IoError` when a write-through failed for an entry still in the memory tier; `clear_memory_tier` keeps the slot of a pinned entry; `remove` does not fail while a write-through is pending. **This component does not follow it yet**: `src/lib.rs:2889-2902` (`flush_to_ssd` returns the queue length before the flush, never `IoError`), :2833-2864 (`clear_memory_tier` frees the slot on any `try_evict_to_block` error, including `ActiveReferences`), :2380-2381 (`remove` maps every `dm.remove` error to `KeyNotFound`). Tracked as task interfaces-7 in `components/interfaces/.specify/sync/align-tasks.md` (port the three dispatcher repairs in a separate PR with its own Loom tests and spec sync). Found by the interfaces analysis from reading the code; not reproduced at runtime. Stamped `clean` because this drift is recorded as a task, not left unresolved.
 
 > **Re-stamp 2026-10-14 (transitive: `components/interfaces` changed, branch `fix/cold-staging-buf-16mib`).** The spec-sync digest folds `components/interfaces/{src,specs}` into every component's hash, so the single interface change on this branch — `DispatcherConfig::cold_staging_buf_bytes` default 4 MiB → 16 MiB (commit `8e12e49f`) and the matching correction to interfaces FR-027 — invalidates every component's stamp at once; this is the design, not a defect. **No code re-analysis was performed for this component, and none was needed:** its own `src/**` and `specs/**` are unchanged on this branch, and it does not reference `cold_staging_buf_bytes` (consumed only by the dispatcher's host-DRAM cold-staging pool). Digest refreshed to the recomputed value.

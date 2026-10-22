@@ -1,11 +1,15 @@
 ---
 spec_sync_component: interfaces
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-21T23:04:39Z
-spec_sync_git_commit: efd502331
-spec_sync_inputs_sha256: c550f9c06936fdd8b91090d3dd51e9cdabe3e84f6b97de0e9fa73786c684f673
+spec_sync_synced_at: 2026-10-22T22:39:40Z
+spec_sync_git_commit: ef6b84c3
+spec_sync_inputs_sha256: 62679b6d02d57733c365599615674bf18861a99ed246d65fd4f026a7dce829be
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-10-22 (branch `001-rdma-cache-transfer`) — full analysis, resolved.** The analysis below (*Sync 2026-10-21*) found 12 items; all are resolved. Backfilled into `specs/001-interfaces/spec.md` (commits `eb3915d7`, `0bd76e82`): the spdk gate list; FR-007/FR-009 headings and `IMemoryTier`'s four bounce methods; FR-008's `read_to_bounce`/`release_bounce` and the full 24-method `IDispatcher` inventory (`batch_populate`, `schedule_write_through`, `tier_event_stats`, `copy_gpu_to_memory_async`'s `regions`); FR-019's `BounceBuffer`/`BounceError`/`DEFAULT_BOUNCE_RESERVE` (32 MiB = 4 readers × 8 MiB); new FR-035/FR-036 for `ITransferEndpoint`/`ITransferEndpointAdmin`; NFR-003; and `plan.md`'s crate structure and interface table regenerated from src (20 traits, 178 methods). Code changes made on review, so the interface the specs describe is the one built: `BounceLease` → `BounceBuffer`; `fetch` takes `LocalSlot`s and `register_landing_region`/`LandingRegionHandle` are replaced by `landing_region() -> LandingRegion` (`e44736b9`); doc comments for `IncompatiblePeer`, `protocol_faults`, `send_queue_in_flight`, `capacity`, `pool_info`, `insert`, `bounce_alloc`. No actionable drift remains.
+
+> **Rebased 2026-10-22 onto `unstable` `ccc792d3`.** Upstream's interfaces sync (`dc236dd9`) backfilled FR-008's `IDispatcher` inventory independently; merged on rebase into one list in declaration order (upstream's descriptions, plus `read_to_bounce`/`release_bounce`; a duplicated `pin`/`unpin` pair dropped), and the Overview now names three features. Stamped against the rebased tree.
+
 > **Apply 2026-10-21 (branch fix/dispatcher-remove-clear-mt, approved by Cornel).** Batch apply of the 12 approved proposals listed in `proposals.json`. Backup: `.specify/sync/backups/20261021T225804Z/`. Details: `apply-report.{md,json}`.
 >
 > - **Applied: 10 BACKFILL proposals** to `specs/001-interfaces/spec.md`, each using the exact old→new text from the proposal. **1** FR-017: `Command` 13 / `Completion` 12 variants, plus the `ReadWriteStats` histograms. **2** FR-018: `DispatcherConfig` 19 fields, plus a new `TierEventStats` bullet. **3** FR-008 / US2: `copy_gpu_to_memory_async(regions: &[IpcHandle])`, plus `batch_populate`, `tier_event_stats` and `schedule_write_through`; the US2 inventory goes from 16 to 22 methods. **4** FR-008: result contracts for `clear_memory_tier` (pinned entries kept, `Timeout`) and `flush_to_ssd` (`IoError`). **8** FR-023: `LookupConfig` 12 fields. **9** FR-021: `FormatParams` 9 fields. **10** Overview / FR-009: three features, `IMemoryTier` ungated. **11** NFR-002: `gpu` gates nothing. **12** Implementation Notes: verified-properties claim corrected. **13** Banner: FR-014 "deferred" marked resolved. A `Last Synced 2026-10-21` banner line was also added.

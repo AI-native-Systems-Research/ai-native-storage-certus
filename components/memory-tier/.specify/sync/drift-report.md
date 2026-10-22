@@ -1,11 +1,13 @@
 ---
 spec_sync_component: memory-tier
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-21T23:04:39Z
-spec_sync_git_commit: efd502331
-spec_sync_inputs_sha256: b76d515b6cfa79523e8a129952720041e9a2606e602ea77d61483cb0defd7dc4
+spec_sync_synced_at: 2026-10-22T22:39:40Z
+spec_sync_git_commit: ef6b84c3
+spec_sync_inputs_sha256: d2e39ddd618fdc9cc32d2fb3001e67bce0d0911880ce4bbd68ff5bf51ddf819c
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-10-22 (branch `001-rdma-cache-transfer`) — full analysis, resolved.** The analysis below (*Sync 2026-10-21*) raised 14 proposals. P1 was a real defect: on a pool that is not a whole number of pages the reserve started mid-page; fixed by rounding the cache down to a page, with a test (`a171f5ba`). P2-P7, P10-P12 backfilled into spec.md, plan.md and tasks.md (`d0af9872`); P8 applied in `interfaces/src/imemory_tier.rs`; P9 by a new test, `freeing_a_buffer_twice_is_loud`. P13 decided: the reserve is taken whether or not the pool is DMA-capable, and FR-031 says so (`07286b2a`). P14 (align-tasks bookkeeping) and the earlier open items FR-013, SC-3, U2 stand as recorded in `align-tasks.md` — declared open items, not drift. No actionable drift remains.
+
 > **Re-stamp 2026-10-21 (transitive, `components/interfaces` changed on branch `fix/dispatcher-remove-clear-mt`).** Only `components/interfaces` changed for this component: `IDispatcher` doc comments (`flush_to_ssd` errors, `clear_memory_tier`, `batch_lookup`) and the interfaces spec (FR-008, FR-009, FR-017, FR-018, FR-018a, FR-021, FR-023, Overview, NFR-002, Implementation Notes; text only, no type or signature changed). This component uses some of the named items (4 files), but no type, signature or behaviour of them changed. This component's last full sync below stands; no re-analysis was needed.
 
 > **Re-stamp 2026-10-14 (transitive, merge of unstable 6f5743cc into this branch).** Only `components/interfaces` changed for this component (`DispatcherConfig::cold_staging_buf_bytes` default 4 -> 16 MiB, #550); `memory-tier` does not use it (grep over its src/ and specs/: 0 hits). This branch's full sync below stands; no re-analysis was needed.

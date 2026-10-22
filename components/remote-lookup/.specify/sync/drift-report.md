@@ -1,11 +1,13 @@
 ---
 spec_sync_component: remote-lookup
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-21T23:04:39Z
-spec_sync_git_commit: efd502331
-spec_sync_inputs_sha256: 65a459d47641dc7aaa243c8bd23df432f89154f9ed3bd7dbf8ed1269d63c539c
+spec_sync_synced_at: 2026-10-22T22:39:40Z
+spec_sync_git_commit: ef6b84c3
+spec_sync_inputs_sha256: fd2291f2862e602064a09753bce47454eafa7c05f83cbdcddc7722d73bd9a975
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-10-22 (branch `001-rdma-cache-transfer`) — stub check.** This branch's only change is in `src/seams.rs`: the test-double `IMemoryTier` gained the four bounce-reserve methods `IMemoryTier` now requires (no reserve: `bounce_alloc` is `NeverFits`, `bounce_free` unreachable, `bounce_usage` `(0, 0)`), and the test-double `IDispatcher` gained `read_to_bounce` (`NeverFits`) and `release_bounce`. No logic, spec or behaviour of remote-lookup changed; certus-transfer-endpoint's FR-020 permits exactly this. The rest is the transitive `interfaces` change, which this component's specs do not reference (grep: 0 hits). No actionable drift.
+
 > **Re-stamp 2026-10-21 (transitive, `components/interfaces` changed on branch `fix/dispatcher-remove-clear-mt`).** Only `components/interfaces` changed for this component: `IDispatcher` doc comments (`flush_to_ssd` errors, `clear_memory_tier`, `batch_lookup`) and the interfaces spec (FR-008, FR-009, FR-017, FR-018, FR-018a, FR-021, FR-023, Overview, NFR-002, Implementation Notes; text only, no type or signature changed). This component uses some of the named items (19 files), but no type, signature or behaviour of them changed. This component's last full sync below stands; no re-analysis was needed.
 
 > **Re-stamp 2026-10-14 (transitive: `components/interfaces` changed, branch `fix/cold-staging-buf-16mib`).** The spec-sync digest folds `components/interfaces/{src,specs}` into every component's hash, so the single interface change on this branch — `DispatcherConfig::cold_staging_buf_bytes` default 4 MiB → 16 MiB (commit `8e12e49f`) and the matching correction to interfaces FR-027 — invalidates every component's stamp at once; this is the design, not a defect. **No code re-analysis was performed for this component, and none was needed:** its own `src/**` and `specs/**` are unchanged on this branch, and it does not reference `cold_staging_buf_bytes` (consumed only by the dispatcher's host-DRAM cold-staging pool). Digest refreshed to the recomputed value.
