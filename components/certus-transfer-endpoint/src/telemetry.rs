@@ -12,15 +12,9 @@
 //! identical method surface so call sites never change, and a snapshot that is
 //! `None` rather than zeros when off.
 //!
-//! # Unfilled counters
-//!
-//! Several `TransferStats` fields belong to tasks not yet built. Each is
-//! declared here with the task that fills it, so an unfilled counter is
-//! findable rather than silently zero; until then it reads 0, and the
-//! attempt/completion pairs are what make a missing path visible.
-
-// Fed by the endpoint from T016 onward.
-#![allow(dead_code)]
+//! Every `TransferStats` field is filled. The live gauges are read at each
+//! snapshot rather than counted: the send-queue ones from the links' credits,
+//! the request ones from the sessions' message credits.
 
 use interfaces::TransferStats;
 
@@ -29,41 +23,27 @@ use interfaces::TransferStats;
 /// the links' credits when a snapshot is taken (see `ConnectionTable::stats`),
 /// and the request gauges from the sessions' message credits, so neither can
 /// drift from what the credits enforce.
+/// Each field means what the [`TransferStats`] field of the same name says.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Counters {
-    /// Filled by T017 (push) and T033 (fetch).
     pub entries_requested: u64,
-    /// Filled by T017 / T033.
     pub hit_memory_tier: u64,
-    /// Filled by T040.
     pub hit_block_tier: u64,
-    /// Filled by T017 / T033.
     pub miss: u64,
-    /// Filled by T017 / T033.
     pub failed: u64,
-    /// Filled by T017 / T033.
     pub requests_attempted: u64,
-    /// Filled by T017 / T033.
     pub requests_completed: u64,
-    /// Filled by T044.
     pub chunks_sent: u64,
-    /// Gauge; filled by T072.
+    /// A gauge, kept here because it changes only on the endpoint thread.
     pub bounce_buffers_in_use: u32,
-    /// Filled by T072.
     pub bounce_buffers_peak: u32,
-    /// Filled by T072.
     pub block_reads_attempted: u64,
-    /// Filled by T072.
     pub block_reads_completed: u64,
-    /// Filled by T072.
     pub block_reads_failed: u64,
-    /// Filled by T072.
     pub block_deferrals: u64,
     /// Reply deadlines that expired and tore a connection down (T050, T070).
     pub deadline_expiries: u64,
-    /// Filled by T075.
     pub protocol_faults: u64,
-    /// Filled by T077.
     pub version_downgrades: u64,
     /// Counted by the connection table: once per simultaneous-connect race, at
     /// the end whose own attempt was discarded.

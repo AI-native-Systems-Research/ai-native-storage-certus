@@ -32,9 +32,11 @@ actual residency.
 arrives over zyre, and it invokes a push with `(key, remote-region)` pairs. It does not use
 verbs messages, context IDs, or the reply path. It sees no behaviour change.
 
-**Independently testable**: the existing `remote-lookup` test layer and the hardware loopback
-test `remote-lookup-rdma-initiator/src/loopback_test.rs::loopback_push_writes_into_remote_buffer`
-pass against the new endpoint with messaging unused.
+**Independently testable**: the scenario of the hardware loopback test
+`remote-lookup-rdma-initiator/src/loopback_test.rs::loopback_push_writes_into_remote_buffer`
+passes through the new endpoint's push, and its order, reuse and teardown properties hold
+over the mock seam, with messaging unused. Running the `remote-lookup` test layer itself
+against the endpoint is part of the cutover (T065).
 
 ### User Story 3 - The source serves an entry that has been demoted to SSD (Priority: P3)
 
@@ -71,7 +73,8 @@ relative LRU order of its memory-tier entries are unchanged.
 - **Duplicate or overlapping requests for the same key.** Pins are reference-counted;
   concurrent pushes of one key are safe.
 - **Peer does not understand the message.** Answered with a protocol error reply naming the
-  opcode and the sender's highest supported version for that kind, which fails the one context
+  opcode and the sender's highest supported protocol version (0 if the kind itself is
+  unknown), which fails the one context
   and leaves the connection and its siblings intact (FR-024). A *reply* the requester cannot
   understand is the opposite case: never answered, reported loudly, and the connection torn
   down, because the peer may have written into slots it can no longer vouch for. A stale binary on one node is
@@ -106,8 +109,10 @@ relative LRU order of its memory-tier entries are unchanged.
 
 - **FR-005**: The endpoint MUST post receive buffers unconditionally, whether or not the
   caller uses messaging.
-- **FR-006**: A transfer request MUST carry: a context ID, the destination's rkey, base
-  address, per-entry size, and a list of `(block key, landing slot index)` pairs.
+- **FR-006**: A transfer request MUST carry a context ID and, per entry, the block key and that
+  entry's landing slot as an absolute destination address, size and rkey — the content of
+  `(CacheKey, RemoteRegion)`. The source MUST NOT need a base address, a slot index or a
+  uniform entry size: the memory tier is not index-addressable.
 - **FR-007**: A transfer reply MUST carry the context ID and one outcome per requested key,
   from `{ hit_memory_tier, hit_block_tier, miss, failed }`, in request order. `miss` means the
   source does not serve the entry (absent, a different size, or a tier this build cannot
@@ -159,7 +164,9 @@ relative LRU order of its memory-tier entries are unchanged.
   `min(a.max, b.max)`, and the **connection** MUST fail at establishment if that falls below
   `max(a.min, b.min)` — with a diagnostic naming peer and both ranges, not a failed request
   and not a later deadline. A requester MUST respect the peer's maximum request size rather
-  than its own. One version governs the whole protocol: a reply's meaning is tied to the
+  than assume it equals its own; it chunks to the smaller of the peer's advertised
+  `max_entries` and the largest request it can itself encode in one send buffer. An advertised
+  `max_entries` of zero MUST fail the connection, as a zero quota does. One version governs the whole protocol: a reply's meaning is tied to the
   version of the request it answers, so per-kind versions MUST NOT be negotiated
   independently.
 
@@ -200,6 +207,15 @@ relative LRU order of its memory-tier entries are unchanged.
   tears down *the* queue pair, so a second one could still land a write into a slot already
   reclaimed, defeating FR-017.
 
+  A duplicate the race cannot explain — from an end that already owns or out-ranks the live
+  link — MUST be resolved *newer wins*: the old link goes to ERROR first. An inbound request
+  while the peer's previous link is still draining MUST be refused. An acceptor MUST answer to
+  the name it was dialed by, else the link fails. Known gap: a crashed-and-restarted peer that
+  out-ranks nobody is refused until a deadline notices the stale link (research D24).
+- **FR-028**: A panic on the endpoint thread or a block-reader thread MUST abort the process:
+  continuing with a possibly corrupt pin, slab or credit table risks a silent double release
+  (Principle XI).
+
 **Per-entry handling on the source**
 
 - **FR-009**: Residency determination and pinning MUST be atomic. The source MUST obtain
@@ -235,13 +251,18 @@ relative LRU order of its memory-tier entries are unchanged.
 **Resource bounds** — three distinct domains, separately configured and named
 
 - **FR-014**: The endpoint MUST bound each of:
-  - **send-queue credits** — in-flight RDMA writes per connection; this transitively bounds
-    held read pins, which is the existing rationale for the bound;
+  - **send-queue credits** — in-flight send-queue work requests per connection: RDMA writes
+    *and* message sends, which share the queue (counting only writes would let messages
+    overfill it). This transitively bounds held read pins, which is the existing rationale for
+    the bound. Send credits are clamped to the depth the device grants, and the clamp is
+    logged;
   - **message credits** — outstanding requests against the peer's posted receive buffers.
     The destination decrements on send and increments on reply; at zero a request MUST
     wait inside the endpoint — never fail, and never block the caller;
   - **bounce-buffer occupancy** — bounce-reserve bytes allocated to block-tier entries, and
-    concurrent device reads (the reader count).
+    concurrent device reads (the reader count). A `NoSpace` is believed only if no buffer was
+    returned after its read was submitted: otherwise a deferred entry could wait for space
+    that is already free.
 - **FR-015**: On exhaustion of any bound, the endpoint MUST chunk internally and make
   progress, not fail.
 
@@ -250,7 +271,9 @@ relative LRU order of its memory-tier entries are unchanged.
 - **FR-016**: A destination-side deadline MUST detect a request that is neither fulfilled
   nor refused. Detection MUST be by deadline, not by connection state: a peer that hangs or
   partitions with its connection open is invisible to the transport. The deadline MUST run
-  from when the request is sent, so a request waiting for a credit cannot expire. The action MUST be
+  from when the request takes its message credit and is queued to the connection's send
+  queue — not from the `fetch` call — so a request waiting for a message credit or the
+  capability exchange cannot expire. The action MUST be
   configurable, defaulting to **fail loudly** — log the key range, peer, chunk and
   queue-pair state, then fail the request. A degrading action (report what arrived and let
   the caller recompute) is deferred, not implemented. This destination-side *reply* deadline
@@ -273,20 +296,25 @@ relative LRU order of its memory-tier entries are unchanged.
 
 - **FR-019**: The endpoint MUST expose a push entry point usable by `remote-lookup`
   unchanged: `(endpoint, [(key, remote-region)], completion)` with one status per item in
-  order, and no messaging involved.
-- **FR-020**: `remote-lookup` MUST NOT be modified as part of delivering P1. Re-pointing it
+  order, and no messaging involved. The blocking `push` MUST be refused, not deadlock, when
+  called on an endpoint thread (from a completion callback, say).
+- **FR-020**: `remote-lookup`'s logic MUST NOT be modified as part of delivering P1. The only
+  permitted change is to its test doubles, where an interface it implements grows (the
+  bounce-reserve methods of `IMemoryTier` and `read_to_bounce`/`release_bounce` of
+  `IDispatcher`); those doubles refuse every buffer. Re-pointing it
   at this endpoint, and retiring `remote-lookup-rdma-initiator` and
   `remote-lookup-rdma-responder`, is a later task.
 
 ### Key Entities
 
-- **TransferContext** — one in-flight request: context ID, peer, key list, landing slots,
-  outstanding-entry count, deadline.
+- **TransferContext** — one in-flight request message (one chunk of a fetch): context ID,
+  peer, its entries and their landing slots, its offset in the caller's fetch, and its send
+  time, from which the reply deadline runs.
 - **TransferRequest / TransferReply** — the two verbs messages of FR-006 / FR-007.
 - **LocalSlot** — where a fetched entry lands: address and length of a buffer the destination
   has allocated in its own memory tier and not yet published. Needs no registration: the
   pool is registered once, and the endpoint names its rkey.
-- **RemoteRegion** — a slot as the wire names it: rkey, address, size. Already exists.
+- **RemoteRegion** — a slot as the wire names it: `addr`, `rkey`, `length`. Already exists.
 - **EntryOutcome** — `hit_memory_tier | hit_block_tier | miss | failed`.
 - **BounceBuffer** — `(ptr, len)` in the bounce reserve: a range of the memory tier's pool,
   outside the cache, that the dispatcher reads a block-tier entry into and the endpoint
@@ -300,9 +328,10 @@ relative LRU order of its memory-tier entries are unchanged.
   granted inbound-request quota; learned at connect and discarded with the connection
   (FR-025, FR-026).
 - **ProtocolError** — the error reply of FR-024: offending opcode, reason, and the sender's
-  highest supported version for that kind.
-- **LandingRegion** — a registered region peers may write into. Its registration outlives any
-  one queue pair, so its `rkey` survives a reconnect; see research D17.
+  highest supported protocol version (0 if the kind itself is unknown).
+- **LandingRegion** — the memory-tier pool as peers write into it: address, length and rkey.
+  Registered once, at `initialize`; the registration outlives any one queue pair, so its
+  `rkey` survives a reconnect; see research D17.
 
 ## Success Criteria *(mandatory)*
 
@@ -310,9 +339,11 @@ relative LRU order of its memory-tier entries are unchanged.
 
 - **SC-001**: A destination fetches a requested key run from one named peer with **zero**
   zyre messages and **zero** messages to any third instance.
-- **SC-002**: The existing `remote-lookup` test layer and the initiator's
-  `loopback_push_writes_into_remote_buffer` hardware loopback test pass against this endpoint
-  with messaging unused.
+- **SC-002**: The legacy push surface reproduces the initiator's
+  `loopback_push_writes_into_remote_buffer` scenario on hardware through this endpoint, and
+  its order, reuse and teardown properties hold over the mock seam, with messaging unused.
+  Running the `remote-lookup` test layer itself against this endpoint requires re-pointing its
+  receptacle and is part of the cutover (T065), not of P1.
 - **SC-003**: The crate builds and unit-tests with `--no-default-features` equivalent: no
   rdma-core, no zyre.
 - **SC-004**: Peak concurrently held read pins on a source never exceeds the configured
@@ -326,7 +357,9 @@ relative LRU order of its memory-tier entries are unchanged.
 - **SC-007**: With bounce space, message credits or the peer's `max_entries` artificially
   scarce, a large request still completes, in chunks, with its outcomes in request order.
   (Landing slots are the caller's: it requests only what it reserved.)
-- **SC-008**: The duplicated verbs FFI layer is defined once. (Today
+- **SC-008**: This crate defines the verbs FFI once, as the single copy the predecessors will
+  share or be replaced by; the duplication itself ends when `remote-lookup-rdma-initiator` and
+  `-responder` are retired (T066). (Today
   `remote-lookup-rdma-initiator/src/ffi.rs` and
   `remote-lookup-rdma-responder/src/ffi.rs` declare 52 public names in common.)
 - **SC-009**: Two instances on one host, differing only by port, are addressed independently

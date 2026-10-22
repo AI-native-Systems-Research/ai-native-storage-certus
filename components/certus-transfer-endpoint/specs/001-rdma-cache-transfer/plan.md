@@ -226,16 +226,6 @@ version exists.
 
 ## Next Step
 
-All design documents are complete, and `tasks.md` is generated — 67 tasks, T001–T067, grouped
-by the Implementation Phasing above rather than by spec priority order, each tracing to the
-FR / SC / decision / principle it discharges.
+Phases 1–10 of `tasks.md` (T001–T083) are complete; Phase 11 (cutover and retirement,
+T065–T067) is out of scope.
 
-**Begin at T001–T002.** T002 is a prerequisite the phasing above did not anticipate:
-`IDispatchMap` and `LookupResult` are `#[cfg(feature = "spdk")]` *re-exports* in
-`components/interfaces/src/lib.rs`, although `idispatch_map.rs` references no SPDK type. D13
-requires that receptacle in the **default** build, so until the re-exports are ungated,
-enabling it forces `interfaces/spdk` → `spdk-sys` and the component cannot be a workspace
-`default-member` — which Principle VIII requires. This is the same trap the workspace root
-`Cargo.toml` already documents for `remote-lookup`, and ungating is the direction it names
-("ungate those opaque-pointer trait definitions … as was done for `IMemoryTier`"). Ungate
-first, then add to `default-members`, then build the engine.

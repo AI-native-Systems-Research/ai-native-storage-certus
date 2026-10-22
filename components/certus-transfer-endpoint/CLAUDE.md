@@ -284,19 +284,23 @@ lookup answer is reported as a **miss**, never an error (D14).
 
 ## Current state
 
-T001–T083 are done; Phase 11 is out of scope (Phases 3 and 5–10 complete: US2 legacy push and US1 fetch work end to end over the mock, with a fail-loud reply deadline, and US3 serves block-tier entries through the dispatcher's `read_to_bounce`, `bounce.rs`; fetches of any length are chunked against the peer's `max_entries`; an `rdma` build runs over the verbs transport, `connection/verbs.rs`, validated node2 ↔ node5): the crate builds as a default member,
-peer identity is implemented, `ITransferEndpoint` is defined in `interfaces`, and
-the verbs FFI (`ffi.rs`), C shim (`wrapper.c`) and safe wrappers (`rdma.rs`, T009)
-exist behind `rdma`, and the transport seam plus an in-process mock exist in every
-build (`connection/transport.rs`, `connection/mock.rs`, T010), driven by the
-connection table (`connection/table.rs`, T012, which also resolves simultaneous
-connect), with a `wr_id` slab per link (`connection/slab.rs`, T013) and send-queue
-credits (`connection/credits.rs`, T014), and counters (`telemetry.rs`, T015).
-The component (`CertusTransferEndpoint`, T016) owns the table on its endpoint
-thread (`endpoint.rs`) behind `ITransferEndpointAdmin`. `push_async` (T017) serves
-memory-tier entries end to end with the full pin discipline (`serve.rs`, T022-T026),
-and `push` (T018) waits on it; fetched entries land in the memory-tier pool,
-registered once for the endpoint's life (T020);
-`disconnect` and `stats` work; the rest say which task they land in. The verbs side of the
-seam is T053. See `specs/001-rdma-cache-transfer/tasks.md` for the task list and its
-traceability matrix.
+T001–T083 are done; Phase 11 (cutover and retirement, T065–T067) is out of scope.
+Every `ITransferEndpoint` and `ITransferEndpointAdmin` method is implemented:
+
+- **US1 fetch** end to end, chunked against the peer's `max_entries`, landing in
+  `LocalSlot`s of the destination's own pool, with a fail-loud reply deadline.
+- **US2 legacy push** (`push_async`, `push`), with the full pin discipline
+  (`serve.rs`).
+- **US3 block tier**: entries read through the dispatcher's `read_to_bounce` on
+  reader threads (`bounce.rs`), with `spdk`.
+- **Transports**: the in-process mock in every build (`connection/mock.rs`) and
+  verbs with `rdma` (`connection/verbs.rs`, over `ffi.rs`, `wrapper.c` and
+  `rdma.rs`), validated node2 ↔ node5.
+- **Engine**: the connection table (`connection/table.rs`, which also resolves
+  simultaneous connect), a `wr_id` slab per link (`connection/slab.rs`), send
+  credits (`connection/credits.rs`), sessions and message credits (`session.rs`),
+  the codecs (`message.rs`), counters (`telemetry.rs`), all owned by the endpoint
+  thread (`endpoint.rs`).
+
+See `specs/001-rdma-cache-transfer/tasks.md` for the task list and its traceability
+matrix.
