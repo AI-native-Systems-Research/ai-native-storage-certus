@@ -37,16 +37,14 @@ use std::time::{Duration, Instant};
 
 use component_core::actor::ActorHandler;
 use interfaces::{
-    CacheKey, EntryOutcome, FetchCompletion, ILogger, LandingRegionHandle, RemoteRegion,
-    TransferEndpointError, TransferStats,
+    CacheKey, EntryOutcome, FetchCompletion, ILogger, RemoteRegion, TransferEndpointError,
+    TransferStats,
 };
 
 use crate::bounce::Readers;
 use crate::connection::slab::{TrackedRecv, TrackedSend};
 use crate::connection::table::{ConnectionTable, ReapError, TableEvent};
-use crate::connection::transport::{
-    Access, Completed, Completion, CompletionError, Region, SendOp,
-};
+use crate::connection::transport::{Completed, Completion, CompletionError, Region, SendOp};
 use crate::connection::PeerId;
 use crate::message::{self, Header, Kind};
 use crate::msgpool::{MsgBuf, MsgPool};
@@ -84,16 +82,9 @@ pub(crate) enum Command {
     Disconnect(PeerId, mpsc::Sender<Result<(), String>>),
     /// Tear down and drain every peer, then drop the table. The last command.
     Shutdown(mpsc::Sender<Result<(), String>>),
-    /// Register `[base, base + len)` for peers to write into (T020). The
-    /// address travels as an integer: the precondition on
-    /// `register_landing_region` makes it the caller's to keep valid.
-    Register {
-        base: usize,
-        len: usize,
-        reply: mpsc::Sender<Result<LandingRegionHandle, String>>,
-    },
-    /// Ask `peer` for `items`, written into the caller's landing slots, and
-    /// report one outcome per item (T033). The id is the caller's.
+    /// Ask `peer` for `items`, written into the caller's slots of the pool —
+    /// already checked against it, and carrying its rkey — and report one
+    /// outcome per item (T033). The id is the caller's.
     Fetch {
         id: u64,
         peer: PeerId,
@@ -121,9 +112,6 @@ pub(crate) enum Command {
     /// Test-only.
     #[cfg(test)]
     NoReplyReserve(mpsc::Sender<()>),
-    /// The local pool's address and rkey, so a test can push into it. Test-only.
-    #[cfg(test)]
-    PoolKey(mpsc::Sender<(u64, u32)>),
     /// Send `bytes` to `peer` as one message, bypassing every protocol rule —
     /// a hostile or buggy peer, for tests. With `spend` it first takes a
     /// message credit, as a genuine request would, so the reply is expected.
@@ -413,11 +401,6 @@ pub(crate) struct EndpointActor {
     /// The memory-tier pool's registration. Declared after `table`, and
     /// released only after it, so every write the pool backs has been drained.
     pool_region: Option<Region>,
-    /// Landing regions, by handle id. Like the pool, declared after `table`
-    /// and released only after it — or leaked with it if a drain stalls —
-    /// since a peer may be writing into any of them until teardown.
-    landing: BTreeMap<u64, Region>,
-    next_landing: u64,
     /// Pushes in progress, in arrival order: local `push_async`s and the
     /// serving of peers' `OP_FETCH`s alike.
     pushes: BTreeMap<u64, Push>,
@@ -477,8 +460,6 @@ impl EndpointActor {
             events: Vec::new(),
             map,
             pool_region: Some(pool_region),
-            landing: BTreeMap::new(),
-            next_landing: 1,
             pushes: BTreeMap::new(),
             next_push: 0,
             fetches: BTreeMap::new(),
@@ -1626,47 +1607,6 @@ impl EndpointActor {
         did
     }
 
-    /// Register a landing region, refusing a range that overlaps the pool or
-    /// another landing region: one byte under two keys helps nobody.
-    fn register(&mut self, base: usize, len: usize) -> Result<LandingRegionHandle, String> {
-        let table = self.table.as_mut().ok_or("endpoint is shut down")?;
-        if base == 0 || len == 0 {
-            return Err("landing region is null or empty".into());
-        }
-        let start = base as u64;
-        let end = start
-            .checked_add(len as u64)
-            .ok_or("landing region wraps the address space")?;
-        let overlaps = |r: &Region| start < r.addr() + r.len() as u64 && r.addr() < end;
-        if self.pool_region.as_ref().is_some_and(overlaps) {
-            return Err(format!(
-                "landing region 0x{start:x}+{len} overlaps the memory-tier pool"
-            ));
-        }
-        if let Some((id, _)) = self.landing.iter().find(|(_, r)| overlaps(r)) {
-            return Err(format!(
-                "landing region 0x{start:x}+{len} overlaps landing region {id}"
-            ));
-        }
-        // SAFETY: `register_landing_region`'s documented precondition — the
-        // range stays allocated until shutdown returns and is not held as a
-        // Rust reference while peers may write it. The region is dropped only
-        // after the table, so after every write into it has been drained.
-        let region = unsafe {
-            table.transport().register(
-                base as *mut u8,
-                len,
-                Access::LOCAL_WRITE | Access::REMOTE_WRITE,
-            )
-        }
-        .map_err(|e| format!("registering the landing region: {e}"))?;
-        let id = self.next_landing;
-        self.next_landing += 1;
-        let handle = LandingRegionHandle::new(id, region.addr(), region.len(), region.rkey());
-        self.landing.insert(id, region);
-        Ok(handle)
-    }
-
     #[cfg(test)]
     fn hold_recv(&mut self, peer: &PeerId) -> Result<(), String> {
         use crate::connection::slab::TrackedRecv;
@@ -1758,17 +1698,15 @@ impl EndpointActor {
         if failures.is_empty() {
             drop(table);
             self.pool_region = None;
-            self.landing.clear();
             self.msgs = MsgPool::default();
             return Ok(());
         }
         // Some link still holds state. Destroying it would lose that state, so
         // the table — and every registration its writes use, the pool and the
-        // landing regions — is leaked instead; its queue pairs stay in ERROR,
+        // message buffers — is leaked instead; its queue pairs stay in ERROR,
         // which is what makes late writes impossible. The failure is reported.
         std::mem::forget(table);
         std::mem::forget(self.pool_region.take());
-        std::mem::forget(std::mem::take(&mut self.landing));
         std::mem::forget(std::mem::take(&mut self.msgs));
         Err(failures.join("; "))
     }
@@ -1800,9 +1738,6 @@ impl ActorHandler<Command> for EndpointActor {
             }
             Command::Shutdown(reply) => {
                 let _ = reply.send(self.shutdown());
-            }
-            Command::Register { base, len, reply } => {
-                let _ = reply.send(self.register(base, len));
             }
             Command::Push {
                 peer,
@@ -1854,11 +1789,6 @@ impl ActorHandler<Command> for EndpointActor {
                     inbound: c.session.inbound(),
                     credits_available: c.session.credits_available(),
                 }));
-            }
-            #[cfg(test)]
-            Command::PoolKey(reply) => {
-                let r = self.pool_region.as_ref().expect("running");
-                let _ = reply.send((r.addr(), r.rkey()));
             }
         });
     }

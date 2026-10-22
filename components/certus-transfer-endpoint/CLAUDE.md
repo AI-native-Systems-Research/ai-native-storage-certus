@@ -111,6 +111,20 @@ VIII–XI, and a review that does not check them is not a review.
   by a v1 reply, and a reply's meaning is tied to its request's version. The header's
   `version` field is a structural guard on the negotiated value, not the mechanism
   (D20 and its *Revision*, D21).
+- **The opcode's low bit says request or reply, known kind or not.** Requests are
+  even; a reply is its request's opcode with the low bit set; `OP_ERROR` is odd. An
+  unknown even opcode is answered and the connection kept; an unknown odd one may or
+  may not return a credit, so it is a teardown. Frozen from now on (D21).
+- **Tear a connection down only when you must** (FR-024): the QP is in ERROR; a
+  write may still land in memory about to be reclaimed; the credit accounting is in
+  doubt; or the peer's version or framing cannot be trusted. A request before
+  `OP_HELLO`, a duplicate `OP_HELLO` or a malformed request is answered with
+  `OP_ERROR`, never a teardown. Count every refusal and every such teardown in
+  `protocol_faults`.
+- **A fetch lands only in the destination's own pool.** `fetch` takes `LocalSlot`s —
+  memory-tier buffers the caller allocated and has not published — checks each lies
+  inside the pool, and supplies the pool's rkey. There is no landing-region
+  registration: the pool, registered once at `initialize`, is the only destination.
 - **Never answer an unprocessable request with silence — and never answer a reply.**
   Silence to a request is indistinguishable from a hang, so it gets diagnosed as one
   and tears down a healthy connection; a stale binary on one node is the common
@@ -281,8 +295,8 @@ credits (`connection/credits.rs`, T014), and counters (`telemetry.rs`, T015).
 The component (`CertusTransferEndpoint`, T016) owns the table on its endpoint
 thread (`endpoint.rs`) behind `ITransferEndpointAdmin`. `push_async` (T017) serves
 memory-tier entries end to end with the full pin discipline (`serve.rs`, T022-T026),
-and `push` (T018) waits on it; landing regions register once for the endpoint's
-life (T020);
+and `push` (T018) waits on it; fetched entries land in the memory-tier pool,
+registered once for the endpoint's life (T020);
 `disconnect` and `stats` work; the rest say which task they land in. The verbs side of the
 seam is T053. See `specs/001-rdma-cache-transfer/tasks.md` for the task list and its
 traceability matrix.
