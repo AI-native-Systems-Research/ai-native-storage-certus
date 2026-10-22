@@ -19,11 +19,6 @@
 //! Everything is little-endian, and every reserved field must be zero on
 //! receipt — a non-zero one is a malformed message, not ignored, so that a
 //! future use of the field can never be misread by an old receiver.
-//!
-//! Context tables (T031) and message credits (T032) land in later slices.
-
-// Consumed by the request path from T030 onward.
-#![allow(dead_code)]
 
 use interfaces::{CacheKey, EntryOutcome, RemoteRegion};
 
@@ -93,7 +88,9 @@ impl Kind {
         matches!(self, Kind::Hello | Kind::HelloReply | Kind::Error)
     }
 
-    /// Whether this kind is a reply. Replies are never answered.
+    /// Whether this kind is a reply. Replies are never answered. The receive
+    /// path classifies by [`is_reply_opcode`], which covers unknown kinds too.
+    #[cfg(test)]
     pub(crate) fn is_reply(self) -> bool {
         is_reply_opcode(self.opcode())
     }

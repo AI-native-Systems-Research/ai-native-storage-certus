@@ -680,8 +680,10 @@ impl ITransferEndpoint for CertusTransferEndpoint {
     ///
     /// Each entry is looked up — and pinned — only when a send credit is free
     /// to post its write at once, so pins held never exceed the credits
-    /// (SC-004). An entry the source does not serve from memory is a `Miss`:
-    /// absent, the wrong size, or block-tier (until T037-T040). An entry not
+    /// (SC-004), plus one per block reader. An entry the source does not serve
+    /// is a `Miss`: absent, the wrong size, or block-tier in a build without
+    /// `spdk` (with it, block-tier entries are read through the dispatcher and
+    /// served as `HitBlockTier`). An entry not
     /// delivered for any other reason — a connection that could not be made
     /// or was lost, a refused or flushed write, a failed lookup — is `Failed`.
     fn push_async(
@@ -1752,7 +1754,7 @@ mod tests {
         b.ep.shutdown().unwrap();
     }
 
-    // --- Phase 5 slice B: connection bring-up -------------------------------
+    // --- connection bring-up ---------------------------------------------------
 
     fn session_of(ep: &CertusTransferEndpoint, p: &str) -> Option<endpoint::SessionView> {
         let p = PeerId::parse(p).unwrap();
@@ -2040,10 +2042,8 @@ mod tests {
     }
 
     /// An unprocessable *reply* is never answered: it is a teardown (FR-024).
-    /// (Exceeding the inbound quota is a teardown too, but cannot be reached
-    /// end to end in slice B, where each request is answered synchronously as
-    /// it arrives; `session`'s tests cover it, and slice C, whose serving is
-    /// asynchronous, will cover it here.)
+    /// Exceeding the inbound quota is the other request-side teardown;
+    /// `requests_past_the_quota_tear_down` covers it.
     #[test]
     fn a_reply_nobody_asked_for_tears_down() {
         let f = MockFabric::new();
@@ -2184,7 +2184,7 @@ mod tests {
         drop(raw);
     }
 
-    // --- Phase 5 slice C: fetch --------------------------------------------------
+    // --- fetch ------------------------------------------------------------------
 
     /// SC-001: the destination names one peer and a run of keys; the values
     /// land in its slots and the outcomes come back in request order. There is

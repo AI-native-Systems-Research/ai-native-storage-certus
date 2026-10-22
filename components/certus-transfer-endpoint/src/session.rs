@@ -28,9 +28,6 @@
 //! tracked separately so a peer saturating its quota cannot take a buffer a
 //! reply this end awaits will need (SC-016).
 
-// Consumed by the request path in slice C.
-#![allow(dead_code)]
-
 use crate::message::{Hello, MAX_ENTRIES, VERSION_MAX, VERSION_MIN};
 
 /// The outcome of negotiating two advertised version ranges.

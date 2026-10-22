@@ -343,7 +343,8 @@ hardware loopback scenario, pass against this component with messaging unused.
   completions, then each pin's release, then the link's destruction
 
 **Checkpoint**: SC-002 — the legacy surface is complete and tested with zero messaging,
-and `remote-lookup` has not been modified.
+and `remote-lookup`'s logic has not been modified (its test doubles gained the T083 bounce
+methods).
 
 ---
 
@@ -524,9 +525,9 @@ slots and the reply's per-key outcomes match the source's actual residency.
   inbound-request quota advertised to the peer — 8 × 8 KiB = 64 KiB per peer at the
   defaults of 4 and 4 (sized in research D10), which is why this can be unconditional
   instead of negotiated
-- [X] T031 [US1] Implement the context table in `src/message.rs`: `TransferContext` =
-  context id, peer, key list, landing slots, outstanding-entry count, deadline. Allocate
-  ids, match replies by echoed id. A context is one request **message**; a chunked fetch
+- [X] T031 [US1] Implement the context tables in `src/endpoint.rs`: the per-connection
+  outbound book `context_id → (fetch, chunk)` and the per-fetch chunk list (offset, entries,
+  send time). Allocate ids per connection, match replies by echoed id. A context is one request **message**; a chunked fetch
   (T044) is several contexts, one per chunk, grouped by the requester under the single
   `TransferContextId` that `fetch` returned
 - [X] T032 [US1] Implement **message credits** (second domain of FR-014): decrement on
@@ -1021,8 +1022,9 @@ this. It is a separate change, after the engine is proven.
 | FR-025 single negotiated version + capability exchange | T076, T077, T078 |
 | FR-026 bidirectional connection: namespaces, credits, buffers | T079, T080, T082 |
 | FR-027 simultaneous-connect resolution | T012 (absorbed T081), T082 |
+| FR-028 a panic on an endpoint or reader thread aborts | T016, T072 |
 | SC-001 zero zyre, zero third instance | T035 |
-| SC-002 legacy tests pass | T021, T055 |
+| SC-002 legacy push scenario on hardware, properties over the mock | T021, T055 |
 | SC-003 default build, no rdma-core/SPDK | T001, T003, T010, T041 |
 | SC-004 pin bound | T025, T072, T042 |
 | SC-005 tier neutrality | T040, T042 |

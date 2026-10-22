@@ -25,7 +25,9 @@ already delivered the request out of band.
 ## Peer addressing
 
 `peer` and `endpoint` are the same thing under two names: a **normalized instance address**,
-`"ip:port"`. The legacy methods keep the name `endpoint` so their signature compatibility
+`"host:port"` (an IPv6 literal bracketed), compared as written: there is no resolver, so
+every instance must be named by the same string everywhere. The legacy methods keep the name
+`endpoint` so their signature compatibility
 with `IRemoteLookupRdmaInitiator` stays visible (FR-019); `fetch` uses `peer` because that is
 what the spec calls it. Both are parsed by the same grammar.
 
@@ -117,7 +119,7 @@ pub enum TransferEndpointError {
     /// Distinct from `Deadline` in blast radius as well as cause: the peer is
     /// healthy and answered promptly, so **the connection remains usable** and
     /// sibling contexts are unaffected. Carries the offending opcode, the
-    /// reason, and the peer's highest supported version for that kind.
+    /// reason, and the peer's highest supported protocol version.
     Protocol(String),
     /// The peer's capability exchange made a connection impossible — no
     /// protocol version in common, or a zero quota or `max_entries` — so no
@@ -195,7 +197,9 @@ define_interface! {
         /// counters, plus protocol-fault, version-downgrade and
         /// duplicate-connection-resolved counts, and block reads attempted,
         /// completed, failed and deferred — an unexercised path must not look
-        /// like a working one (Principle XI).
+        /// like a working one (Principle XI). Counted in every build; the
+        /// `telemetry` feature adds connect counters, which are not in
+        /// `TransferStats`.
         fn stats(&self) -> TransferStats;
     }
 }
@@ -231,12 +235,15 @@ define_interface! {
 }
 ```
 
-Until `initialize` succeeds, every `ITransferEndpoint` method returns `NotInitialized` — a
-real lifecycle state in every build, not the predecessor's "built without `rdma`" bypass.
+Until `initialize` succeeds, every `ITransferEndpoint` method that can fail returns
+`NotInitialized`; `stats()`, which cannot fail, returns all-zero counters before `initialize`
+and after `shutdown`. `NotInitialized` is a real lifecycle state in every build, not the
+predecessor's "built without `rdma`" bypass.
 `initialize` listens as `config.local` and starts the endpoint thread, which owns the
 connection table; the `&self` methods reach it as commands. `shutdown` refuses new work,
 tears down and drains every connection so all held state is released, then joins the
-thread. It is the **only** way to stop a running endpoint: a component holds references to
+thread. A connection whose drain makes no progress for 5 s is reported, and its queue pairs
+and every registration are deliberately leaked, never destroyed with state held. It is the **only** way to stop a running endpoint: a component holds references to
 itself for interface queries, so releasing every handle does not drop it.
 
 ## Invariants
@@ -278,8 +285,9 @@ Implementations MUST uphold, and tests MUST verify:
 9. **Progress under scarcity.** Exhaustion of send-queue credits, message credits, bounce
    space or device readers causes chunking, never failure (FR-015). An entry that can never
    fit the bounce reserve is not scarcity: it is `Failed`, logged and counted.
-10. **Deadline fails loudly.** The reply deadline runs from when the request is sent, not
-    from the `fetch` call, so a request waiting for a credit cannot expire. On expiry the
+10. **Deadline fails loudly.** The reply deadline runs from when the request takes its
+    message credit and is queued to the connection's send queue, not from the `fetch` call,
+    so a request waiting for a message credit or the capability exchange cannot expire. On expiry the
     default action is `Deadline(..)` carrying key range, peer, chunk index and queue-pair
     state — not a silent partial success (Principle XI). Expiry aborts every sibling context
     on that connection, each failing with `Transport` naming the expired fetch, and the log
@@ -376,8 +384,10 @@ fn release_bounce(&self, buf: BounceBuffer);
 /// Override the bounce reserve (default 32 MiB, capped at pool_size / 8). Before
 /// `initialize` only; afterwards an error.
 fn set_bounce_reserve(&self, bytes: usize) -> Result<(), MemoryTierError>;
-fn bounce_alloc(&self, len: u32) -> Result<*mut u8, BounceError>;
-fn bounce_free(&self, ptr: *mut u8, len: u32);
+/// `len` is rounded up to 4 KiB in the reserve; `bounce_usage` reports both
+/// values after rounding.
+fn bounce_alloc(&self, len: u32) -> Result<BounceBuffer, BounceError>;
+fn bounce_free(&self, buf: BounceBuffer);
 /// (reserve bytes, bytes allocated now)
 fn bounce_usage(&self) -> (usize, usize);
 ```

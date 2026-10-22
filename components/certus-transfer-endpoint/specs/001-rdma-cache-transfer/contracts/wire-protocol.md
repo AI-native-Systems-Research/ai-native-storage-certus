@@ -44,7 +44,8 @@ header flags or the body rather than in more kinds.
 `OP_HELLO` and `OP_ERROR` are **frozen for all time**: they are the messages a peer must be
 able to parse *even when it cannot parse the version in question*, since versioning them would
 mean answering an unparseable message with an unparseable error. They carry `version = 0`,
-which no real version uses, and a receiver ignores the version field for them. They stay
+which no real version uses; a receiver accepts them whatever version was negotiated and
+refuses any non-zero version on them as malformed. They stay
 extensible through their **content** — an open reason-code space — never through their layout
 (research D20).
 
@@ -74,7 +75,7 @@ per kind per version.
 |---|---|---|---|
 | 0 | 4 | `opcode` | message kind; high 16 bits MUST be zero |
 | 4 | 2 | `flags` | reserved, MUST be zero; in the frozen prefix so a future flag needs no layout change |
-| 6 | 2 | `version` | protocol version in force; validated, not dispatched on. Zero and ignored for `OP_HELLO`/`OP_ERROR` |
+| 6 | 2 | `version` | protocol version in force; validated, not dispatched on. Zero for `OP_HELLO`, `OP_HELLO_REPLY` and `OP_ERROR`, whatever was negotiated |
 | 8 | 8 | `context_id` | identifies one request **message**; echoed in its one reply |
 | 16 | 4 | `n_entries` | entries in *this* message |
 | 20 | 4 | reserved | MUST be zero; keeps the entry vector 8-byte aligned |
@@ -116,6 +117,8 @@ free — the requester may land entries across several registered regions.
 ### `OP_FETCH_REPLY` (`0x0000_0003`)
 
 Header, then one outcome byte per entry in request order, zero-padded to an 8-byte boundary.
+A message whose length does not match `n_entries`, or whose padding or reserved header fields
+are not zero, is malformed.
 
 Outcome byte: `0` = Miss, `1` = HitMemoryTier, `2` = HitBlockTier, `3` = Failed (the source
 holds the entry, or could not tell, but did not deliver it — its lookup failed, or its write
@@ -256,7 +259,7 @@ Receive buffers are posted unconditionally, whether or not the local caller uses
 
 With an 8 KiB buffer: `(8192 - 24) / 24` = **340 entries** per `OP_FETCH`. At 2.25 MiB
 per block that is ~765 MiB of KV per message — far more than any single scheduler step will
-ask for — and it bounds `OP_FETCH_REPLY` at `24 + 340` = 364 bytes.
+ask for — and it bounds `OP_FETCH_REPLY` at `24 + 344` = 368 bytes (340 outcome bytes padded to 8).
 
 Posted-receive memory per peer is `(message_credits + inbound_quota) x 8 KiB` — the reply
 reserve plus the peer's quota (*Receive-buffer partitioning*). At the defaults of 4 credits
@@ -327,7 +330,9 @@ cleanly rather than leave a hole.
 ## Connection and lifecycle
 
 - One queue pair per peer **instance** pair, either end able to post (D5). A peer is
-  addressed as a normalized `"ip:port"`, so two instances on one host are distinct peers
+  addressed as a normalized `"host:port"` (an IPv6 literal bracketed), compared as written:
+  there is no resolver, so every instance must be named by the same string everywhere. Two
+  instances on one host are distinct peers
   (FR-021, D16). The requester connects; the source replies and pushes over that same
   connection.
 - The requester's memory-tier pool is registered once, at `initialize`, not per request;
@@ -395,6 +400,20 @@ initiator to identify itself in the connection request, which is what the connec
 `PeerId`). Resolution happens at **accept**, before `OP_HELLO` is posted — and since no data
 message may be sent before the exchange completes, the losing queue pair dies holding no
 context and nothing has to be migrated.
+
+### Connect private data
+
+The identity travels in `rdma_cm` private data, **before** `OP_HELLO`, so its layout is
+frozen like `OP_HELLO`'s (research D24). Received private data is zero-padded to the
+transport's limit (56 bytes), so the identity carries an explicit length:
+
+| message | bytes |
+|---|---|
+| connect, accept | `'C' 'T' 0x01 len` then `len` bytes of the normalized `PeerId`, UTF-8 |
+| reject | `'C' 'T' 0x01 reason` — 1 duplicate (the other link survives), 2 malformed identity, 3 still draining a previous link; unknown reasons are kept, not guessed |
+
+The acceptor echoes its own name, and a name other than the one it was dialed by fails the
+link. A later format is a new value of the format byte, never a change to format 1.
 
 ## What is deliberately not here
 
