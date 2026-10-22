@@ -287,6 +287,11 @@ def _build_worker_class():
         # ── transport bodies (run on the pool; identical across versions) ──
 
         def _do_store(self, gpu_block_ids: list[int], keys: list[int]) -> bool:
+            if len(gpu_block_ids) != len(keys):
+                raise AssertionError(
+                    f"store: {len(gpu_block_ids)} GPU blocks != {len(keys)} keys "
+                    f"(one key per GPU block required)"
+                )
             # Fold this worker's TP rank into every key: the manager Reserved the
             # matching per-rank namespaced keys (see manager.prepare_store), so the
             # store lands under the same key the pre-load Check/Pin will look up.
@@ -339,6 +344,11 @@ def _build_worker_class():
             return True
 
         def _do_load(self, gpu_block_ids: list[int], keys: list[int]) -> bool:
+            if len(gpu_block_ids) != len(keys):
+                raise AssertionError(
+                    f"load: {len(gpu_block_ids)} GPU blocks != {len(keys)} keys "
+                    f"(one key per GPU block required)"
+                )
             # Same rank fold as the store path — load this worker's own shard.
             ns_keys = [ns_key(k, self._rank, self._world_size) for k in keys]
             entries = [
