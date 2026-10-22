@@ -1,93 +1,89 @@
 {
-  "generated": "2026-10-14T00:00:00Z",
-  "analysis_run": "2026-10-18",
+  "generated": "2026-10-21T00:00:00Z",
+  "analysis_run": "2026-10-21",
   "project": "dispatcher",
   "component_path": "components/dispatcher",
-  "branch": "fix/bundle-dispatcher-ems",
-  "head": "4f8b5554b",
-  "base": "origin/unstable acd240255",
-  "method": "Full meaning-based sweep: every active FR/SC/acceptance scenario of specs 001 and 002 read against the implementing function, with file:line evidence. Branch delta: git diff origin/unstable.. -- components/dispatcher/src (specs/** and components/interfaces unchanged). Citation counting was not used (the component cites 4 of 120 requirement ids).",
+  "branch": "fix/dispatcher-remove-clear-mt",
+  "head": "efd502331",
+  "base": "origin/unstable a25e9be29 (merged by 95cdcb5e5)",
+  "working_tree_spec_edits_approved": [
+    "specs/001-dispatcher-cache-interface/spec.md:346 FR-056 flush_to_ssd bullet",
+    "components/interfaces/specs/001-interfaces/spec.md:331 FR-018a store_already_resident",
+    "components/interfaces/src/idispatcher.rs:832-837 flush_to_ssd # Errors"
+  ],
+  "baseline": "previous sweep analysed cccfb328e; its B-1..B-6 were applied in ec4277c0e. git diff ec4277c0e..HEAD -- components lib apps touches only src/lib.rs, src/background.rs and two new repair_test modules (commits 9bd231d85, efd502331); the merge 95cdcb5e5 brought only knowledge/.",
+  "method": "Both new hunks re-read in full against real dispatch-map / memory-tier / eviction-policy / extent-manager semantics; the 2026-10-20 applied text (B-1..B-6) re-checked clause by clause; all other verdicts re-anchored (lib.rs offsets -3 at 1214, +3 after 1404, +17 after 3545, +40 after 4004; background.rs +5 after 263, +24 after 381) and spot-checked. Adversarial: for each actor that creates, frees or re-creates a key's slot, does flush_to_ssd report exactly the resident entries left without an SSD copy; which callers reach each AlreadyExists exit.",
   "drift_status": "open",
-  "frontmatter_note": "spec_sync_* frontmatter left unchanged on purpose (a script re-stamps it); its 'clean' status predates this branch's src/** changes.",
+  "frontmatter_note": "spec_sync_* frontmatter left unchanged on purpose (a script re-stamps it); its stamp (cccfb328e) predates 9bd231d85 and efd502331 and the approved working-tree edits.",
   "summary": {
     "specs_analyzed": 2,
-    "requirements_checked": 117,
-    "requirements_in_scope": 108,
-    "aligned": 81,
-    "drifted": 15,
-    "partially_implemented": 3,
+    "requirements_checked": 120,
+    "requirements_in_scope": 111,
+    "aligned": 89,
+    "drifted": 8,
+    "partially_implemented": 5,
     "not_implemented": 0,
     "not_verifiable": 9,
     "out_of_component_scope": 9,
-    "unspecced_features": 5,
-    "drift_caused_by_branch_fixes": 5,
-    "drift_pre_existing": 10
+    "unspecced_features": 2
   },
-  "branch_commits": [
-    {"commit": "0d3fcde43", "finding": "DIS-INV-EVICTION-EVENTS", "effect": "EvictionSender counts background eviction-event drops", "locations": ["src/background.rs:225-241", "src/background.rs:361", "src/background.rs:565", "src/lib.rs:562-584"]},
-    {"commit": "a7ccc6e48", "finding": "DIS-BATCH-LOOKUP-SERVEDBY-CONCURRENT-DRAM", "effect": "recovery pass attributes Dram", "locations": ["src/lib.rs:2946-2954"]},
-    {"commit": "1d24ff27f", "finding": "DIS-SPIN-COLD-LOOKUP-KEEPS-PIN", "effect": "lookup_async keeps read pin across promote_and_serve; SSD evictor dm.remove before mt.remove", "locations": ["src/lib.rs:3072-3103", "src/background.rs:349-358"]},
-    {"commit": "d450c7cc1", "finding": "DIS-SPIN-SSD-EVICTOR-RELEASES-AFTER-REMOVE", "effect": "regression test only", "locations": ["src/repair_test_ssd_evictor_release.rs:290"]},
-    {"commit": "ad3654207", "finding": "DIS-COPY-COMPLETED-EXISTING-ENTRY-PRESERVED", "effect": "copy_gpu_to_memory_completed keeps live slot on AlreadyExists", "locations": ["src/lib.rs:3560-3585"]},
-    {"commit": "9defa9e1a", "finding": "DIS-POPULATE-FAILURE-RELEASES-SLOT", "effect": "populate releases slot on post-reserve failure", "locations": ["src/lib.rs:3215-3246"]},
-    {"commit": "4f8b5554b", "finding": null, "effect": "#[cfg(test)] per repair test module", "locations": ["src/lib.rs:72-74", "src/lib.rs:3970-3972", "src/lib.rs:7186-7197", "src/background.rs:757-759"]}
+  "branch_commits_since_last_sweep": [
+    {"commit": "9bd231d85", "finding": "DIS-FLUSH-REPORTS-FAILED-WRITE", "effect": "WriteThroughPins records per-key failed write-throughs; flush_to_ssd returns IoError while such a key is resident, else counts resident is_evictable keys (was: queue length before flush)", "locations": ["src/background.rs:257-263", "src/background.rs:363-380", "src/lib.rs:1393-1441", "src/lib.rs:4006-4042"], "tests": ["src/repair_test_flush_failed_write.rs:607", "src/repair_test_flush_failed_write.rs:638"]},
+    {"commit": "efd502331", "finding": "DIS-STORE-ALREADY-RESIDENT-COUNTS-STORES-ONLY (decision A-07 = ALIGN)", "effect": "store_already_resident counted only in reserve_memory, not in evict_and_insert shared with load paths", "locations": ["src/lib.rs:1214-1221", "src/lib.rs:3505-3511", "src/lib.rs:3535-3543"], "tests": ["src/repair_test_store_already_resident.rs:474", "src/lib.rs:6696"]}
+  ],
+  "resolved_since_previous": [
+    {"id": "D-06", "requirement": "001/FR-038", "how": "B-3 applied (ec4277c0e); text matches src/lib.rs:3940-4004"},
+    {"id": "D-10'", "requirement": "001/Edge case: remove", "how": "B-2/B-6 applied; matches src/lib.rs:3183-3232"},
+    {"id": "D-18", "requirement": "001/Assumption writer read reference", "how": "B-4 applied; matches src/lib.rs:3694-3712, 4044-4066"},
+    {"id": "D-11/A-07", "requirement": "001/FR-058 store_already_resident + interfaces FR-018a", "how": "code efd502331 (ALIGN option); close A-07 in align-tasks.md"}
   ],
   "specs": [
     {
       "id": "001-dispatcher-cache-interface",
       "title": "Dispatcher Cache Interface (Memory-Tier Architecture)",
-      "aligned": ["FR-001", "FR-002", "FR-004", "FR-005", "FR-006", "FR-007", "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-014", "FR-015", "FR-016", "FR-017", "FR-018", "FR-023", "FR-024", "FR-025", "FR-029", "FR-030", "FR-031", "FR-033", "FR-034", "FR-035", "FR-039", "FR-040", "FR-041", "FR-043", "FR-045", "FR-046", "FR-047", "FR-048", "FR-049", "FR-052", "FR-053", "FR-054", "FR-055", "FR-057", "FR-060", "FR-061", "SC-001", "SC-002", "SC-003", "SC-004", "SC-005", "SC-006", "SC-007", "SC-009", "SC-010", "SC-011", "SC-013", "SC-015", "SC-016", "SC-017"],
+      "aligned": ["FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007", "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-014", "FR-015", "FR-016", "FR-019", "FR-023", "FR-024", "FR-025", "FR-029", "FR-030", "FR-031", "FR-032", "FR-033", "FR-034", "FR-035", "FR-036", "FR-037", "FR-038", "FR-039", "FR-040", "FR-041", "FR-043", "FR-045", "FR-046", "FR-047", "FR-048", "FR-049", "FR-050", "FR-051", "FR-052", "FR-053", "FR-054", "FR-055", "FR-057", "FR-058", "FR-059", "FR-060", "FR-061", "SC-001", "SC-002", "SC-004", "SC-005", "SC-006", "SC-007", "SC-009", "SC-010", "SC-011", "SC-013", "SC-015", "SC-016", "SC-017", "US1 AS1-AS5", "US2 AS1-AS4", "US3 AS1-AS2", "US4 AS1-AS3", "US5 AS1-AS4", "US7 AS1-AS5", "US8", "US9 AS1-AS2", "US10 AS1-AS5", "US11 AS1-AS6", "US12 AS1-AS5", "Edge case: remove", "Assumption: write-through read reference", "contracts/errors.md KeyNotFound + Timeout rows", "contracts/idispatcher.md remove postcondition", "Edge cases: populate-full, evict exhaustion, concurrent lookups, SSD-full write-through, unpersisted skip, SSD-evictor all-pinned, SSD-evictor order, partition guard"],
       "drifted": [
-        {"id": "D-01", "requirement": "FR-036 / FR-051", "spec_text": "For SSD promotion paths the copy completes synchronously and a null stream is returned. / When a `batch_lookup` cold promotion loses the `IMemoryTier::insert` race", "spec_location": "specs/001-dispatcher-cache-interface/spec.md:313,328", "actual": "lookup_async holds the dm.lookup read pin across promote_and_serve and maps AlreadyExists to serve_concurrently_promoted", "location": "components/dispatcher/src/lib.rs:3072-3103", "severity": "moderate", "cause": "branch 1d24ff27f", "direction": "BACKFILL", "test": "src/repair_test_cold_pin.rs:508"},
-        {"id": "D-02", "requirement": "FR-032 + edge case (SSD evictor removal)", "spec_text": "No memory-tier operation is needed (the entry was already evicted from DRAM).", "spec_location": "specs/001-dispatcher-cache-interface/spec.md:236,309", "actual": "dm.remove first; on failure skip; then mt.remove; then emit Removed and free extent", "location": "components/dispatcher/src/background.rs:349-374", "severity": "moderate", "cause": "branch 1d24ff27f/d450c7cc1", "direction": "BACKFILL", "test": "src/repair_test_ssd_evictor_release.rs:290"},
-        {"id": "D-03", "requirement": "FR-003 / FR-059", "spec_text": "(no post-reserve failure behaviour specified)", "spec_location": "specs/001-dispatcher-cache-interface/spec.md:280,354", "actual": "populate calls release_memory on gpu-unbound, D2H error and sync error", "location": "components/dispatcher/src/lib.rs:3215-3246", "severity": "moderate", "cause": "branch 9defa9e1a", "direction": "BACKFILL", "test": "src/repair_test_populate_slot.rs:485,504,534"},
-        {"id": "D-04", "requirement": "FR-056 copy_gpu_to_memory_completed", "spec_text": "finalizes the entry after the async copies complete, transitioning it to a resident `MemoryTier` entry (design invariant P10).", "spec_location": "specs/001-dispatcher-cache-interface/spec.md:338", "actual": "on AlreadyExists frees the slot only if the existing entry provably does not reference it", "location": "components/dispatcher/src/lib.rs:3560-3580", "severity": "moderate", "cause": "branch ad3654207", "direction": "BACKFILL", "test": "src/repair_test_copy_completed.rs:428"},
-        {"id": "D-05", "requirement": "FR-042 / FR-050", "spec_text": "whenever an entry is evicted from the memory-tier by `evict_for_space` / (or `Removed` on transition failure)", "spec_location": "specs/001-dispatcher-cache-interface/spec.md:319,327", "actual": "MT evictor and SSD evictor also emit through EvictionSender, drops counted; MT evictor emits nothing on transition failure; Removed only from SSD evictor", "location": "components/dispatcher/src/background.rs:225-241,360-365,556-569", "severity": "moderate", "cause": "branch 0d3fcde43", "direction": "BACKFILL", "test": "src/repair_test_eviction_events_dropped.rs:170"},
-        {"id": "D-06", "requirement": "FR-038 clear_memory_tier", "spec_text": "by calling `IMemoryTier::evict_next()` ... via `convert_memory_tier_to_block`. If the transition fails (write-through not complete), the entry is removed from the dispatch map entirely.", "spec_location": "specs/001-dispatcher-cache-interface/spec.md:315", "actual": "oldest_keys + try_evict_to_block; on any failure incl. ActiveReferences calls mt.remove unconditionally then dm.remove (refused when pinned) -> dangling MemoryTier pointer", "location": "components/dispatcher/src/lib.rs:3875-3890", "severity": "major", "cause": "pre-existing", "direction": "ALIGN"},
-        {"id": "D-07", "requirement": "FR-028 / US-9 AS3", "spec_text": "MUST re-insert the entry into the memory-tier and re-register it as a MemoryTier entry", "spec_location": "specs/001-dispatcher-cache-interface/spec.md:166,305", "actual": "no-drives promote_and_serve calls create_memory_tier_entry on an existing entry (AlreadyExists, ignored) and release_write without a write ref; entry stays BlockDevice, slot orphaned", "location": "components/dispatcher/src/lib.rs:800-824", "severity": "moderate", "cause": "pre-existing", "direction": "ALIGN"},
-        {"id": "D-08", "requirement": "FR-019 / US-9 AS1 / Q&A / Key Entities", "spec_text": "The fallback path (ring-buffer `pipelined_ssd_to_gpu`) is used when the memory-tier pool is not CUDA-pinned/SPDK-registered.", "spec_location": "specs/001-dispatcher-cache-interface/spec.md:164,265,296,378", "actual": "no pipelined_ssd_to_gpu exists; pipelined_ssd_to_gpu_zero_copy is used only by serve_cold_staged", "location": "components/dispatcher/src/pipeline.rs:235,457,771,1166,1279; src/lib.rs:998-1011", "severity": "minor", "cause": "pre-existing", "direction": "BACKFILL"},
-        {"id": "D-09", "requirement": "FR-037", "spec_text": "All per-device streams MUST be destroyed during `shutdown()`.", "spec_location": "specs/001-dispatcher-cache-interface/spec.md:314", "actual": "DEVICE_STREAMS entries live until process exit; shutdown destroys warm_stream and PipelineRing only", "location": "components/dispatcher/src/lib.rs:453-455,2151-2161", "severity": "minor", "cause": "pre-existing", "direction": "BACKFILL"},
-        {"id": "D-10", "requirement": "Edge case: remove order", "spec_text": "the memory-tier slot is freed first, then the dispatch-map entry is removed", "spec_location": "specs/001-dispatcher-cache-interface/spec.md:231", "actual": "dm.remove first, then mt.remove, then remove_extent", "location": "components/dispatcher/src/lib.rs:3152-3168", "severity": "minor", "cause": "pre-existing", "direction": "BACKFILL"},
-        {"id": "D-11", "requirement": "FR-058 store_already_resident", "spec_text": "reserves refused because the key was already cached", "spec_location": "specs/001-dispatcher-cache-interface/spec.md:352", "actual": "incremented in evict_and_insert, so load-path concurrent-promotion losers are counted too", "location": "components/dispatcher/src/lib.rs:1213-1222,773,2562-2563", "severity": "minor", "cause": "pre-existing", "direction": "ALIGN (alt. BACKFILL; human decision)"},
-        {"id": "D-12", "requirement": "FR-003 / Assumptions", "spec_text": "via `IGpuServices::dma_copy_to_host`", "spec_location": "specs/001-dispatcher-cache-interface/spec.md:280,410", "actual": "copy_gpu_to_memory_async (memcpy_d2h_async on store stream) + stream_synchronize; no non-test dma_copy_to_host call", "location": "components/dispatcher/src/lib.rs:3232-3246,3519-3537", "severity": "minor", "cause": "pre-existing", "direction": "BACKFILL"}
+        {"id": "D-19", "requirement": "FR-056 flush_to_ssd bullet (approved 2026-10-21)", "spec_text": "flush_to_ssd() -> usize ... returns the number of memory-tier entries that have an SSD copy, or IoError if a write-through to SSD failed for an entry that is still in the memory tier", "actual": "returns Result<usize, DispatcherError>; count = resident keys with dm.is_evictable (also requires read_ref==0 && write_ref==0), so pinned persisted entries are not counted", "location": "src/lib.rs:4006, 4037-4041; components/dispatch-map/src/lib.rs:530-546", "severity": "minor", "direction": "BACKFILL", "proposals": ["B-7"]},
+        {"id": "D-20", "requirement": "FR-017", "spec_text": "the background writer silently drops the job. The dispatch map entry remains in MemoryTier state. (Known limitation.)", "actual": "failure recorded per key (record_write) and reported by flush_to_ssd as IoError while the key is resident", "location": "src/lib.rs:1419-1423, 1429, 4026-4034; src/background.rs:363-380", "severity": "minor", "direction": "BACKFILL", "proposals": ["B-8"]},
+        {"id": "D-21", "requirement": "contracts/errors.md IoError row", "spec_text": "| IoError | lookup, batch_lookup, initialize, commit_store | ...", "actual": "flush_to_ssd also returns IoError", "location": "src/lib.rs:4029-4034; components/interfaces/src/idispatcher.rs:832-837", "severity": "minor", "direction": "BACKFILL", "proposals": ["B-9"]},
+        {"id": "D-16", "requirement": "FR-013 (+ Assumption, interfaces FR-031a)", "spec_text": "MUST use appropriate read/write locking on the dispatch map", "actual": "schedule_write_through job takes no pin (JobStart::Untracked) but settles with convert_to_storage/release_read", "location": "src/lib.rs:4057-4064, 1419-1423, 1445-1458; src/background.rs:303-305, 311-313", "severity": "major", "direction": "ALIGN", "carried_over": "A-1"},
+        {"id": "D-17", "requirement": "SC-003 (vs FR-009)", "spec_text": "Cache removal frees all associated resources (memory-tier slots and SSD extents)", "actual": "remove of a persisted MemoryTier entry frees no extent", "location": "src/lib.rs:3192-3202, 3223-3229, 1979", "severity": "moderate", "direction": "ALIGN", "carried_over": "A-2"},
+        {"id": "D-07", "requirement": "FR-028 / US9 AS3", "spec_text": "re-insert the entry into the memory-tier and re-register it as a MemoryTier entry", "actual": "no-drives promote_and_serve: create_memory_tier_entry -> AlreadyExists ignored; stray release_write", "location": "src/lib.rs:815-821", "severity": "moderate", "direction": "ALIGN", "carried_over": "A-04"}
       ],
       "partially_implemented": [
-        {"id": "P-01", "requirement": "FR-003 / FR-056 (phase-3 slot release)", "actual": "integrity-check sync/set_checksum failure frees slot but leaves the new dispatch-map entry write-locked and dangling; downgrade_reference failure leaves it write-locked", "location": "components/dispatcher/src/lib.rs:3599-3620", "severity": "moderate", "cause": "residual of 9defa9e1a", "direction": "ALIGN"},
-        {"id": "P-02", "requirement": "FR-042 (SSD evictor sender)", "actual": "BackgroundEvictor receives a one-time clone of eviction_tx at initialize(); both servers create the channel after initialize, so the SSD evictor never emits or counts", "location": "components/dispatcher/src/lib.rs:2059-2071; apps/certus-server-yaml/build.rs:447-471; apps/certus-server/src/main.rs:469,529", "severity": "moderate", "cause": "pre-existing wiring left open by 0d3fcde43", "direction": "ALIGN"},
-        {"id": "P-03", "requirement": "FR-051 (+FR-036 after backfill) batch_lookup cold pin", "actual": "batch_lookup releases the classification pin on BlockDevice before evict_and_insert/NVMe read/promote; same race the cold-pin repair closed for lookup_async", "location": "components/dispatcher/src/lib.rs:2433-2434,2562-2717; also promote_to_memory_tier src/lib.rs:3726-3729", "severity": "major", "cause": "repair 1d24ff27f applied to lookup_async only", "direction": "ALIGN"}
+        {"id": "P-06", "requirement": "FR-056 flush_to_ssd (same item as D-19, not counted again)", "gap": "(a) failed-write record keyed by CacheKey outlives its entry: remove + re-reserve -> flush_to_ssd IoError for an entry never written; (b) landed recorded as written.is_some(), convert_to_storage result discarded", "location": "src/background.rs:363-380; src/lib.rs:1401-1403, 1429, 1452, 3183-3232", "severity": "minor", "confidence": "MEDIUM (a) / LOW (b)", "direction": "ALIGN", "proposals": ["A-5"]},
+        {"id": "P-04", "requirement": "FR-018", "location": "src/background.rs:347-351; src/lib.rs:3206-3215, 1214-1221, 3535-3543", "severity": "minor", "direction": "ALIGN", "carried_over": "A-4"},
+        {"id": "P-05", "requirement": "FR-056 vs FR-038", "location": "src/lib.rs:3974-3988, 3635", "severity": "moderate", "direction": "ALIGN", "carried_over": "A-3"},
+        {"id": "P-01", "requirement": "FR-003 / FR-056 phase-3 release", "location": "src/lib.rs:3668-3695", "severity": "moderate", "direction": "ALIGN", "carried_over": "A-05"},
+        {"id": "P-02", "requirement": "FR-042 SSD evictor sender", "location": "src/lib.rs:2111", "severity": "moderate", "direction": "ALIGN", "carried_over": "A-06"},
+        {"id": "P-03", "requirement": "FR-051 batch_lookup cold pin", "location": "src/lib.rs:2488-2489", "severity": "major", "direction": "ALIGN", "carried_over": "A-02"}
       ],
       "not_implemented": [],
-      "not_verifiable": ["SC-012", "SC-014", "US-11 AS4 (wording stale; isolation implemented)", "Edge case: write-ref downgrade allows concurrent lookup"],
-      "removed_not_counted": ["FR-020", "FR-021", "FR-022", "FR-026", "FR-027", "FR-044", "SC-008"]
+      "not_verifiable": ["SC-012", "SC-014", "US11 AS4 (real NVMe errors)", "Edge case: write-ref downgrade lets a concurrent lookup proceed"]
     },
     {
       "id": "002-served-by-tier-attribution",
-      "title": "Serving-Tier Attribution (`served_by`)",
-      "aligned": ["FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007", "FR-009 (concurrent-promotion rewrite; aligned by a7ccc6e48)", "FR-010", "FR-011", "FR-012", "FR-013", "FR-017", "FR-019", "FR-020", "FR-021", "FR-022", "FR-023", "FR-023a", "FR-024", "FR-025", "FR-026", "FR-033", "FR-034", "FR-036", "SC-001", "SC-004"],
+      "title": "Serving-Tier Attribution (served_by)",
+      "aligned": ["FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007", "FR-008", "FR-010", "FR-011", "FR-012", "FR-013", "FR-017", "FR-019", "FR-020", "FR-021", "FR-022", "FR-023", "FR-023a", "FR-024", "FR-025", "FR-026", "FR-033", "FR-034", "FR-036", "SC-001", "SC-004", "US1 AS1", "US1 AS2", "US1 AS4", "US1 AS5", "US4 AS1-AS3"],
       "drifted": [
-        {"id": "D-13", "requirement": "US1 AS3 / FR-009 (warm sync failure)", "spec_text": "every key whose copy was in flight is attributed `ERROR` and none is reported as a hit", "spec_location": "specs/002-served-by-tier-attribution/spec.md:303-305,430-434", "actual": "warm batched stream_synchronize failure is only logged; results stay Ok and tier stays Dram", "location": "components/dispatcher/src/lib.rs:2750-2755", "severity": "major", "cause": "pre-existing", "direction": "ALIGN"},
-        {"id": "D-14", "requirement": "FR-008", "spec_text": "all of its sub-paths — pooled, inline fallback, no-drives, and staging", "spec_location": "specs/002-served-by-tier-attribution/spec.md:475-476", "actual": "inline fallback removed; sub-paths are scatter-gather, no-drives, staging", "location": "components/dispatcher/src/lib.rs:2469-2476,2486-2743", "severity": "minor", "cause": "pre-existing", "direction": "BACKFILL"},
-        {"id": "D-15", "requirement": "FR-027 / SC-009", "spec_text": "Each attribution value MUST have a test that fails if that value is mis-assigned, in both dispatchers.", "spec_location": "specs/002-served-by-tier-attribution/spec.md:554-555", "actual": "value-specific assertions only for Dram and Miss", "location": "components/dispatcher/src/repair_test_served_by.rs:484; src/lib.rs:5927", "severity": "moderate", "cause": "pre-existing", "direction": "ALIGN"}
+        {"id": "D-13", "requirement": "US1 AS3 / FR-009", "spec_text": "every key whose copy was in flight is attributed ERROR and none is reported as a hit", "actual": "warm batched sync failure only logged; keys stay Ok/Dram", "location": "src/lib.rs:2803-2808", "severity": "major", "direction": "ALIGN", "carried_over": "A-01"},
+        {"id": "D-15", "requirement": "FR-027 / SC-009", "spec_text": "Each attribution value MUST have a test that fails if that value is mis-assigned", "actual": "no assertion on ServedBy::{Ssd,Remote,SizeMismatch,Error} in src/", "location": "src/", "severity": "moderate", "direction": "ALIGN", "carried_over": "A-08"}
       ],
-      "partially_implemented": [],
       "not_implemented": [],
       "not_verifiable": ["SC-002", "SC-003", "SC-006", "SC-007", "SC-008"],
-      "notes": ["FR-028 evidenced for this branch's repairs only", "FR-029 integrity-check: mocks compile under the feature; no evidence the suite is run under it"],
-      "out_of_component_scope": ["FR-014", "FR-015", "FR-016 (replacement)", "FR-018", "FR-030", "FR-031", "FR-032", "FR-035", "SC-005"]
+      "out_of_component_scope": ["FR-014", "FR-015", "FR-035", "FR-016 (replacement)", "FR-018", "FR-030", "FR-031", "FR-032", "SC-005"]
     }
   ],
   "unspecced": [
-    {"id": "U-01", "feature": "integrity-check serve-side CRC-32 verify-before-H2D", "location": "components/dispatcher/src/lib.rs:1237-1259,2408-2417,2861-2869,3047-3055,3593-3617", "lines": 70, "suggested_spec": "001-dispatcher-cache-interface (new FR-062)"},
-    {"id": "U-02", "feature": "Remote-delivery stage probe (CERTUS_LOG_REMOTE_DELIVERY)", "location": "components/dispatcher/src/remote_probe.rs", "lines": 160, "suggested_spec": "001-dispatcher-cache-interface (FR-045 note)"},
-    {"id": "U-03", "feature": "Opt-in reserve logging (CERTUS_LOG_RESERVE)", "location": "components/dispatcher/src/lib.rs:3379-3394", "lines": 16, "suggested_spec": "001-dispatcher-cache-interface (FR-056 note)"},
-    {"id": "U-04", "feature": "remove of pinned/write-locked entry returns KeyNotFound; Timeout never returned", "location": "components/dispatcher/src/lib.rs:3140-3155", "lines": 16, "suggested_spec": "001-dispatcher-cache-interface FR-009 + contracts/errors.md:37"},
-    {"id": "U-05", "feature": "SSD evictor emits EvictionEvent Removed", "location": "components/dispatcher/src/background.rs:360-365", "lines": 6, "suggested_spec": "001-dispatcher-cache-interface FR-042/FR-050 (folded into B-05)"}
+    {"id": "U-08", "feature": "per-key failed-write record (record_write / failed_writes) behind flush_to_ssd IoError", "location": "src/background.rs:257-263, 363-380; src/lib.rs:1419-1423, 1429, 4026-4034", "lines": 35, "suggested_spec": "001 FR-017 + FR-056 (B-8)"},
+    {"id": "U-01", "feature": "integrity-check verify-before-serve", "location": "src/lib.rs:1236-1257, 3668-3692", "lines": 70, "suggested_spec": "open item N-01 (align-tasks.md); not re-proposed"}
   ],
   "conflicts": [
-    {"between": ["001 edge case spec.md:231", "001 FR-024", "001 FR-049"], "summary": "remove order: slot-first vs map-first", "finding": "D-10"},
-    {"between": ["001 FR-003", "001 FR-056", "001 FR-037"], "summary": "dma_copy_to_host vs memcpy_d2h_async on store", "finding": "D-12"},
-    {"between": ["001 FR-038", "001 FR-024", "001 FR-049"], "summary": "clear_memory_tier frees slot without pin check", "finding": "D-06"},
-    {"between": ["001 FR-019", "001 FR-053"], "summary": "pipelined_ssd_to_gpu_zero_copy called fallback but is the staging primitive", "finding": "D-08"},
-    {"between": ["002 US1 AS3", "001 FR-039 step (2)"], "summary": "warm-sync failure semantics unspecified in 001, ERROR required by 002, code does neither", "finding": "D-13"}
+    "001 SC-003 vs 001 FR-009: SSD extent of a persisted resident entry (D-17, A-2)",
+    "001 FR-056 vs FR-038: clear_memory_tier frees reserved slots (P-05, A-3)",
+    "001 Assumption / interfaces FR-031a vs code: schedule_write_through job holds no pin (D-16, A-1)",
+    "001 FR-017 'silently drops' vs 001 FR-056 flush_to_ssd reports the failure (D-20, B-8)",
+    "cross-component: interfaces IDispatcher::flush_to_ssd contract (idispatcher.rs:824-838) vs dispatcher-p2p implementation (components/dispatcher-p2p/src/lib.rs:2889-2902) and shm-queue reply name jobs_flushed (lib/shmq-dispatcher/src/wire.rs:46-47)",
+    "carried over: interfaces clear_memory_tier doc comment (idispatcher.rs:806-810) predates FR-038 as amended"
   ]
 }
