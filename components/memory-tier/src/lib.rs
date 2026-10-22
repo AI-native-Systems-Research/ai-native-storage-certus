@@ -91,7 +91,8 @@ struct Bounce {
 struct MemoryTierState {
     pool_ptr: *mut u8,
     pool_size: usize,
-    /// Bytes of the pool the cache may use: `pool_size` less the reserve.
+    /// Bytes of the pool the cache may use: `pool_size` less the reserve,
+    /// rounded down to a page so the reserve starts on one.
     cache_size: usize,
     /// What `set_bounce_reserve` asked for; applied at `initialize`.
     bounce_request: usize,
@@ -344,8 +345,15 @@ impl IMemoryTier for MemoryTierComponent {
         // The bounce reserve comes quietly out of the top of the pool: small
         // next to any real cache, and inside the pool so whatever registers
         // the pool for DMA or RDMA covers it too.
+        // The cache ends where the reserve starts, on a page boundary: a pool
+        // that is not whole pages leaves its tail unused rather than start
+        // the reserve mid-page.
         let reserve = bounce_reserve_bytes(state.bounce_request, pool_size);
-        let cache_size = pool_size - reserve;
+        let cache_size = if reserve == 0 {
+            pool_size
+        } else {
+            (pool_size - reserve) / 4096 * 4096
+        };
 
         state.pool_ptr = ptr;
         state.pool_size = pool_size;
@@ -686,7 +694,7 @@ impl IMemoryTier for MemoryTierComponent {
         if !state.initialized.load(Ordering::Acquire) {
             return Err(BounceError::NotInitialized("pool not initialized".into()));
         }
-        let reserve = state.pool_size - state.cache_size;
+        let reserve = state.bounce.lock().unwrap().allocator.capacity();
         #[cfg(test)]
         let dma = state.spdk_allocated || state.pretend_dma;
         #[cfg(not(test))]
@@ -973,6 +981,31 @@ mod tests {
         assert!(mt.contains(1), "nothing evicted");
         assert_eq!(mt.used(), cap, "the cache's own count is untouched");
         assert_eq!(mt.bounce_usage(), (8 * 4096, 4 * 4096));
+    }
+
+    /// A pool that is not a whole number of pages still puts the reserve on
+    /// page boundaries, inside the pool: a device writes a buffer in whole
+    /// blocks from its start.
+    #[test]
+    fn the_reserve_starts_on_a_page_when_the_pool_does_not_end_on_one() {
+        let c = fresh();
+        let mt = query_interface!(c, IMemoryTier).unwrap();
+        let pool_size = 64 * 4096 + 100;
+        mt.initialize(pool_size, None).unwrap();
+        c.state.write().unwrap().pretend_dma = true;
+        let (base, len) = mt.pool_info().unwrap();
+        assert_eq!(len, pool_size);
+        let (reserve, _) = mt.bounce_usage();
+        assert_eq!(reserve, 8 * 4096);
+        let all = mt.bounce_alloc(reserve as u32).unwrap();
+        let off = all.ptr as usize - base as usize;
+        assert_eq!(off % 4096, 0, "the reserve starts at pool offset {off}");
+        assert!(off + reserve <= pool_size, "and ends inside the pool");
+        assert!(
+            mt.capacity() <= off,
+            "the cache ends where the reserve starts"
+        );
+        mt.bounce_free(all);
     }
 
     #[test]
