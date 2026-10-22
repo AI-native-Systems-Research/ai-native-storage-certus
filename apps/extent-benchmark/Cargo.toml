@@ -14,3 +14,6 @@ interfaces = { workspace = true, features = ["spdk"] }
 spdk-env.workspace = true
 extent-manager = { path = "../../components/extent-manager", features = ["testing"] }
 clap = { version = "4", features = ["derive"] }
+
+[lints]
+workspace = true

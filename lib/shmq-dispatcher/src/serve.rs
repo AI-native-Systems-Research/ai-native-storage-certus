@@ -278,9 +278,7 @@ pub fn serve(
                         // occupied and starving the replacement pod.
                         let m = tr.reap_expired_ipc_mappings();
                         if m > 0 {
-                            logger.info(&format!(
-                                "shmq: closed {m} expired CUDA-IPC mapping(s)"
-                            ));
+                            logger.info(&format!("shmq: closed {m} expired CUDA-IPC mapping(s)"));
                         }
                     }
                 }

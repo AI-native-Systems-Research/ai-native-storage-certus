@@ -1158,7 +1158,7 @@ mod tests {
     use super::*;
 
     fn parse(yaml: &str) -> Distribution {
-        serde_yaml::from_str(yaml).expect("parses")
+        serde_norway::from_str(yaml).expect("parses")
     }
 
     #[test]
@@ -1229,12 +1229,12 @@ mod tests {
 
     #[test]
     fn rejects_unknown_kinds_and_stray_fields() {
-        assert!(serde_yaml::from_str::<Distribution>("{pareto: {alpha: 1}}").is_err());
+        assert!(serde_norway::from_str::<Distribution>("{pareto: {alpha: 1}}").is_err());
         assert!(
-            serde_yaml::from_str::<Distribution>("{uniform: {min: 1, max: 2, gain: 3}}").is_err()
+            serde_norway::from_str::<Distribution>("{uniform: {min: 1, max: 2, gain: 3}}").is_err()
         );
         assert!(
-            serde_yaml::from_str::<Distribution>("{constant: 1, uniform: {min: 0, max: 1}}")
+            serde_norway::from_str::<Distribution>("{constant: 1, uniform: {min: 0, max: 1}}")
                 .is_err()
         );
     }

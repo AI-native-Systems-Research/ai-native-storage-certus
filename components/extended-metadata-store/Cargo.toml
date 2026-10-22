@@ -18,3 +18,6 @@ block-device-spdk-nvme = { workspace = true, optional = true }
 disk-partition-manager = { workspace = true, optional = true }
 spdk-env = { workspace = true, optional = true }
 logger = { workspace = true, optional = true }
+
+[lints]
+workspace = true

@@ -102,7 +102,7 @@ specify extension add spec-kit-sync --from https://github.com/bgervin/spec-kit-s
 ### Prerequisites
 
 - Linux (tested on RHEL 9 / Fedora), x86_64.
-- Rust stable, edition 2021, MSRV 1.75 (`deps/install_rust.sh`).
+- Rust stable, edition 2021, MSRV 1.81 (`deps/install_rust.sh`).
 - For the full server: NVMe SSDs, an NVIDIA GPU with CUDA, and SPDK.
   `full-remote` also needs RDMA NICs and Zyre. RHEL 9 driver install scripts
   are in [deploy/rhel9](deploy/rhel9/README.md).

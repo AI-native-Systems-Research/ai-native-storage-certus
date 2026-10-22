@@ -13,3 +13,6 @@ interfaces = { workspace = true, features = ["spdk"] }
 spdk-env.workspace = true
 clap = { version = "4", features = ["derive"] }
 rand = "0.8"
+
+[lints]
+workspace = true

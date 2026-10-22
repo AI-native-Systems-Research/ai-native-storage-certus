@@ -13,3 +13,6 @@ interfaces = { workspace = true, features = ["spdk"] }
 crc32fast = "1"
 
 [dev-dependencies]
+
+[lints]
+workspace = true

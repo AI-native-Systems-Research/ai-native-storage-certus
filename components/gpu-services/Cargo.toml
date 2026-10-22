@@ -45,3 +45,6 @@ required-features = ["p2p"]
 [[test]]
 name = "gpu_nvme_p2p"
 required-features = ["p2p"]
+
+[lints]
+workspace = true

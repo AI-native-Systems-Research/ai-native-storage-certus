@@ -56,4 +56,7 @@ rw-telemetry = ["dispatcher/rw-telemetry"]
 
 [build-dependencies]
 serde = { version = "1", features = ["derive"] }
-serde_yaml = "0.9"
+serde_norway = "0.9"
+
+[lints]
+workspace = true

@@ -645,7 +645,10 @@ fn the_reported_deadline_is_the_configured_one() {
     c.submit(&turn(1, &[1])).expect("submit");
 
     let started = Instant::now();
-    match c.recv_outcome().expect_err("a silent peer must not read as success") {
+    match c
+        .recv_outcome()
+        .expect_err("a silent peer must not read as success")
+    {
         ClientError::TimedOut { after } => {
             assert_eq!(
                 after, configured,

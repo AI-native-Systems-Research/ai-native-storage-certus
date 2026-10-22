@@ -57,7 +57,10 @@ fn main() {
         eprintln!();
         if build_script.exists() {
             eprintln!("  To build it, run:");
-            eprintln!("    cd {} && bash deps/build_zyre.sh", workspace_root.display());
+            eprintln!(
+                "    cd {} && bash deps/build_zyre.sh",
+                workspace_root.display()
+            );
         } else {
             eprintln!("  Set ZYRE_BUILD_DIR to the directory containing include/zyre.h");
         }

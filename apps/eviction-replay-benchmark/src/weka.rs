@@ -90,7 +90,11 @@ pub fn load(path: &Path, max_conversations: Option<usize>) -> io::Result<Trace> 
         let conv: Conversation = serde_json::from_str(line).map_err(|e| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("{}:{}: malformed Weka trace line: {e}", path.display(), lineno + 1),
+                format!(
+                    "{}:{}: malformed Weka trace line: {e}",
+                    path.display(),
+                    lineno + 1
+                ),
             )
         })?;
 

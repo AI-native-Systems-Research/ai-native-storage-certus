@@ -101,8 +101,26 @@ resolver = "2"
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.81"
 license = "MIT"
+
+# Lint levels for every member (each opts in with `[lints] workspace = true`).
+# Everything is at warn by choice: the set is visible but non-blocking until
+# the backlog is paid down. Knobs (msrv, test carve-outs) live in clippy.toml.
+# Posture is recorded in docs/agents/rust.md.
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "warn"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "warn"
+missing_safety_doc = "warn"
+allow_attributes_without_reason = "warn"
+unwrap_used = "warn"
+expect_used = "warn"
+pedantic = { level = "warn", priority = -1 }
 
 [workspace.dependencies]
 component-core = { path = "lib/component-framework/crates/component-core" }

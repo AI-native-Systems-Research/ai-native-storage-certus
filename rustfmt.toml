@@ -1,0 +1,10 @@
+# Stable — honored by `cargo fmt` on a stable toolchain. Both keys match
+# rustfmt's defaults; they are pinned so the house style is stated, not assumed.
+edition = "2021"
+max_width = 100
+
+# Nightly-only — left commented out: the repo does not pin a nightly
+# rust-toolchain.toml, and stable rustfmt ignores these with a warning.
+# group_imports = "StdExternalCrate"
+# format_code_in_doc_comments = true
+# wrap_comments = true
