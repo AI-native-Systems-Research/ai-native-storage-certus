@@ -240,9 +240,8 @@ someone else. It holds a pin on the entry (its `BlockDevice { offset }` lookup) 
 reserve (outside the cache), reads the extent into it from the drive the key is placed on, and
 returns the buffer. The caller writes from it and returns it with `release_bounce`.
 
-**Why this priority**: block-tier serving is a completeness path — measured SSD hit rates are
-single-digit percent — but done in the wrong layer it reads the wrong drive and reports the
-result as a hit.
+**Why this priority**: block-tier serving completes a peer's fetch rather than adding a new
+one, but done in the wrong layer it reads the wrong drive and reports the result as a hit.
 
 **Independent Test**: two mock drives with distinct byte patterns; for a key placed on each,
 `read_to_bounce` returns a buffer holding that drive's bytes at that LBA.
