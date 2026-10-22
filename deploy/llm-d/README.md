@@ -1,11 +1,11 @@
-# llm-d deployment (A30 cluster, optional certus KV offload)
+# llm-d deployment (per-GPU profiles, optional certus KV offload or P/D split)
 
-Deploys [llm-d](https://github.com/llm-d/llm-d) on this cluster and, optionally,
-points its vLLM modelservers at certus as a KV-cache offload tier.
+Deploys [llm-d](https://github.com/llm-d/llm-d) and, optionally, points its vLLM
+modelservers at certus as a KV-cache offload tier, or splits prefill from decode.
 
 **This repo holds the sources; the llm-d checkout is a disposable build area.**
-Nothing here is pushed to the llm-d project — the tuning is site-specific (A30
-memory sizing, this cluster's NUMA layout, our registry). The checkout is pinned
+Nothing here is pushed to the llm-d project — the tuning is specific to our GPU
+types and to the certus integration. The checkout is pinned
 to `llm-d.ref` and re-materialized on every run, so a stale hand-edit inside it
 cannot survive.
 
@@ -13,23 +13,60 @@ cannot survive.
 
 ```
 deploy/llm-d/
-  install.sh                  end-to-end deploy (was ~/llm-d-install.sh)
+  install.sh                  end-to-end deploy; hardware-independent
   llm-d.ref                   pinned upstream llm-d revision
-  a30/
-    kustomization.yaml        overlay on llm-d's ../base
-    patch-a30.yaml            A30 retuning (replicas, args, resources, cache)
-  publish-image.sh            build + push the modelserver image
-  a30-certus/
-    kustomization.yaml        overlay layered on ../a30 (apply-time)
-    patch-certus.yaml         hostIPC, entrypoint, cache env, mailbox mount
-    entrypoint-certus.sh      derives the mailbox from the GPU's NUMA domain
+  site.env.example            template for the private site file
+  publish-image.sh            build + push the certus modelserver image
+  bench/                      multi-turn benchmark driver
+  profiles/
+    a30/                      tuning for one NVIDIA A30 (24Gi) per engine
+      agg/                    aggregated serving
+        kustomization.yaml    overlay on llm-d's optimized-baseline base
+        patch.yaml            model, args, resources, model cache
+      certus/                 certus KV offload
+        kustomization.yaml    overlay layered on ../agg
+        patch.yaml            hostIPC, entrypoint, cache env, mailbox mount
+        entrypoint-certus.sh  derives the mailbox from the GPU's NUMA domain
+      pd/                     prefill/decode disaggregation
+        kustomization.yaml    overlay on llm-d's pd-disaggregation base
+        patch.yaml            prefill + decode engines, NIXL over TCP
 ```
 
-`a30/` and `a30-certus/` here are **sources**. `install.sh` copies them into
-`<llm-d>/guides/optimized-baseline/modelserver/gpu/vllm/`, because `a30` consumes
-llm-d's `../base` and `a30-certus` consumes `../a30` — kustomize will not resolve
-a relative resource outside its own root, so the overlays have to live next to
-what they extend. Do not hand-edit them there; change the sources here.
+## Profiles and the private site file
+
+Configuration comes in two layers, split by what is safe to publish:
+
+- **`profiles/<gpu>/` is committed.** It holds tuning for a GPU type: model,
+  memory sizing, TP, KV transport. It knows nothing about any particular machine.
+  Adding a GPU type means adding a profile with whichever roles (`agg`, `certus`,
+  `pd`) it supports.
+- **The site file is not committed.** It is the only place that names real
+  infrastructure: which profile the cluster uses, replica counts (i.e. how many
+  GPUs there are), node names for P/D placement, and the image registry.
+  `install.sh` reads `${XDG_CONFIG_HOME:-~/.config}/certus/llm-d-site.env`, or
+  `SITE_ENV=<path>`. Start from `site.env.example`. The default location is
+  outside the repo, so the file cannot be committed by accident. It is sourced as
+  bash and sets defaults only (`: "${VAR:=value}"`), so a variable set in the
+  caller's environment still wins for a one-off run.
+
+Replica counts are required. `install.sh` stops rather than defaulting them,
+because a silent default of 1 would leave GPUs idle. They are stamped onto the
+applied overlay's `replicas:` field, which is why the committed profiles carry a
+placeholder of 1.
+
+The overlays are **sources**. `install.sh` copies them into the llm-d checkout,
+beside the base each one consumes: `agg` and `certus` into
+`<llm-d>/guides/optimized-baseline/modelserver/gpu/vllm/`, and `pd` into
+`<llm-d>/guides/pd-disaggregation/modelserver/gpu/vllm/`. kustomize will not
+resolve a relative resource outside its own root, so an overlay has to sit next
+to what it extends. `install.sh` refuses to overwrite a directory llm-d itself
+ships under the same name.
+
+The checkout is a scratch area. By default `install.sh` makes a fresh blobless
+clone in a `mktemp -d /tmp/llm-d.XXXXXX` directory (~40MB, a few seconds) and
+deletes it on exit. `KEEP_LLMD=1` keeps it and prints its path, so you can
+inspect what was applied. `LLMD_DIR=<path>` reuses a persistent checkout
+instead; it is reset to `llm-d.ref` on every run.
 
 Both are ordinary kustomize overlays. An earlier version instead copied `base/*`
 and replayed two `ex` scripts over it, which failed **silently** whenever
@@ -38,7 +75,7 @@ the overlay stayed byte-identical to base, with nothing to notice. That happened
 once already. Now upstream changes flow through, and structural breakage surfaces
 at the `kubectl kustomize` step.
 
-Two kustomize details worth knowing if you edit `patch-a30.yaml`:
+Two kustomize details worth knowing if you edit a site's `patch.yaml`:
 
 - `env` merges by name, so dropping base's `HF_TOKEN` entry needs an explicit
   `$patch: delete` — omitting it is not enough.
@@ -59,22 +96,71 @@ silently on the next deploy. After a bump, re-run `install.sh` — the
 ## Usage
 
 ```bash
-deploy/llm-d/install.sh                 # plain A30 deployment
+deploy/llm-d/install.sh                 # aggregated serving
 WITH_CERTUS=1 deploy/llm-d/install.sh   # + certus KV-cache offload
+PD=1 deploy/llm-d/install.sh            # prefill/decode disaggregation
 ```
+
+Switching between the aggregated and P/D layouts deletes the other layout's
+Deployments first, because each is sized to every GPU. That is an outage for the
+length of the switch.
+
+## Prefill/decode disaggregation (`PD=1`)
+
+`profiles/a30/pd` runs prefill and decode engines of one A30 each at TP=1, with
+vLLM's `NixlConnector` handing KV from prefill to decode. The site file sets how
+many of each (`PD_PREFILL_REPLICAS`, `PD_DECODE_REPLICAS`) and which nodes they
+run on. It is a testbed
+for P/D routing, not a tuned deployment.
+
+- **Choosing the ratio.** For long multi-turn chat, favour decode. Once KV is
+  handed over, every in-flight sequence lives on a decode GPU, and one A30 holds
+  only ~30k tokens of KV, so decode capacity runs out first. For
+  long-prompt/short-output traffic the ratio goes the other way.
+- **Placement is by label, not node name.** Prefill selects
+  `llm-d.ai/pd-prefill=true` and decode selects `llm-d.ai/pd-decode=true`.
+  `install.sh` applies them from `PD_PREFILL_NODES` / `PD_DECODE_NODES`, or
+  fails if neither the variables nor existing labels name a node. Set them in
+  the site file.
+- **Transport is UCX over TCP on the pod network, with a host staging buffer**
+  (`kv_buffer_device: cpu`, `UCX_TLS=tcp`). It proves the handoff works but is
+  too slow to measure it: a 4k-token prompt carries ~600MB of Qwen3-8B KV,
+  which takes seconds at pod-network speeds. A RoCE NIC is not enough to do
+  better from an ordinary pod. With the shared RDMA device plugin, a pod outside
+  the host network namespace sees `/dev/infiniband` but an empty GID table, so
+  RDMA needs a Multus side-network on the RoCE port or `hostNetwork`. GPU-direct
+  transfers also need `nvidia-peermem` loaded on the host.
+- **Request path.** The EPP's `pd-disaggregation` profile picks a prefill and a
+  decode endpoint. The request goes to the decode pod's routing sidecar on :8000,
+  which sends the prompt to prefill, then forwards to its local vLLM on :8200,
+  which pulls the KV over NIXL. `llm_d_epp_pd_decision_total` on the EPP shows
+  whether requests are really being split.
+- **`peakPrefillThroughput` is upstream's value** (33821 tok/s, gpt-oss-120b on
+  H200). It sets when the prefix-affinity filter gives way to load, so on A30s
+  it is effectively "never". Re-measure with llm-d's
+  `guides/recipes/router/calibration` before trusting any affinity behaviour.
+- **Not combinable with `WITH_CERTUS` yet.** Both set `--kv-transfer-config`.
+  Running both means wrapping them in vLLM's `MultiConnector`.
+- **Restarting the prefill pod: restart decode too.** NIXL's decode side caches
+  the prefill agent. With the vLLM 0.30 image a restarted prefill can segfault
+  decode, or leave it failing every handoff for up to an hour (llm-d's
+  `docs/operations/disaggregation/vllm.md`, "Stale NIXL Agent Cache"):
+  ```bash
+  kubectl delete pod -n llm-d-quickstart -l llm-d.ai/role=decode
+  ```
 
 ## What the A30 tuning does
 
-llm-d's `base` targets Qwen3-32B on 2 GPUs. `patch-a30.yaml` retunes it for one
-A30: model `Qwen3-8B`, `--tensor-parallel-size=1`, `nvidia.com/gpu: 1`,
-`replicas: 3`, halved cpu/memory, and three changes worth calling out:
+llm-d's `base` targets Qwen3-32B on 2 GPUs. `profiles/a30/agg/patch.yaml` retunes
+it for one A30 per replica: model `Qwen3-8B`, `--tensor-parallel-size=1`,
+`nvidia.com/gpu: 1`, halved cpu/memory, and three changes worth calling out:
 
 - **`--max-model-len=16384`.** An A30 is 24Gi; ~15.3Gi of bf16 weights plus
   activations and CUDA graphs leave only ~4.11Gi for KV cache, while Qwen3-8B
   advertises a 40960 context needing 5.62Gi — vLLM refuses to start. 16384 needs
   ~2.25Gi, giving `Maximum concurrency ... 1.83x`.
-- **`maxSurge: 0, maxUnavailable: 1`.** 3 replicas on exactly 3 GPUs leaves no
-  spare for a surge pod. With the default 25% surge a rolling update deadlocks:
+- **`maxSurge: 0, maxUnavailable: 1`.** One replica per GPU leaves no spare for
+  a surge pod. With the default 25% surge a rolling update deadlocks:
   the old ReplicaSet holds every GPU and never goes Ready, so it is never scaled
   down.
 - **`HF_HOME` / `VLLM_CACHE_ROOT` into a `/home/llm-d-cache` hostPath.** The
