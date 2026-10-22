@@ -323,7 +323,7 @@ impl BackgroundEvictor {
         extent_mgrs: Vec<Arc<dyn IExtentManager + Send + Sync>>,
         config: EvictorConfig,
         logger: Option<Arc<dyn ILogger + Send + Sync>>,
-        eviction_tx: Option<Sender<EvictionEvent>>,
+        eviction_tx: Arc<Mutex<Option<Sender<EvictionEvent>>>>,
         eviction_dropped: Arc<AtomicU64>,
     ) -> Self {
         let shutdown = Arc::new(AtomicBool::new(false));
@@ -339,7 +339,7 @@ impl BackgroundEvictor {
                     &extent_mgrs,
                     &config,
                     logger.as_deref(),
-                    eviction_tx.as_ref(),
+                    &eviction_tx,
                     &eviction_dropped,
                 );
             })
@@ -365,7 +365,7 @@ impl BackgroundEvictor {
         extent_mgrs: &[Arc<dyn IExtentManager + Send + Sync>],
         config: &EvictorConfig,
         logger: Option<&(dyn ILogger + Send + Sync)>,
-        eviction_tx: Option<&Sender<EvictionEvent>>,
+        eviction_tx: &Mutex<Option<Sender<EvictionEvent>>>,
         eviction_dropped: &AtomicU64,
     ) {
         loop {
@@ -415,7 +415,7 @@ impl BackgroundEvictor {
                 }
 
                 publish_eviction(
-                    eviction_tx,
+                    eviction_tx.lock().unwrap().as_ref(),
                     Some(eviction_dropped),
                     key,
                     EvictionReason::Removed,

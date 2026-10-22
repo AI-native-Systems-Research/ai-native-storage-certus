@@ -671,7 +671,8 @@ def test_prepare_store_drops_lookup_cache(w):
 def test_take_events_removed_drops_lookup_cache():
     ring = FakeRing()
     ring.exists[U(1)] = True
-    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096, events_enabled=True)
+    mgr._key_reverse[U(1)] = K(1)
     mgr.touch([K(1)])
     ring.events = [(200, REASON_DEMOTED)]  # still loadable: answers are kept
     assert list(mgr.take_events()) == []
@@ -1064,19 +1065,48 @@ def test_prepare_load_pins_no_promote_and_complete_load_unpins():
 # ── manager: take_events ──
 
 
+def _store_keys(mgr, ring, keys):
+    out = mgr.prepare_store(keys)
+    assert out is not None
+    return out
+
+
 def test_take_events_surfaces_removed_not_demoted():
     ring = FakeRing()
-    ring.events = [
-        (100, REASON_REMOVED),
-        (200, REASON_DEMOTED),
-    ]
-    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096, events_enabled=True)
+    key = b"\x01" * 36
+    _store_keys(mgr, ring, [key])
+    from certus_shmq_connector.manager import _key_to_u64
+
+    k = _key_to_u64(key)
+    ring.events = [(k, REASON_REMOVED), (200, REASON_DEMOTED)]
     events = list(mgr.take_events())
     assert len(events) == 1
     assert events[0].removed is True
-    assert events[0].keys == [(100).to_bytes(8, "big")]
+    # real OffloadKey round-trips, not the folded u64
+    assert events[0].keys == [key]
+    assert events[0].medium == "STORAGE"
     # second call drains the buffer
     assert list(mgr.take_events()) == []
+
+
+def test_take_events_unknown_key_skipped():
+    ring = FakeRing()
+    ring.events = [(100, REASON_REMOVED)]
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096, events_enabled=True)
+    assert list(mgr.take_events()) == []
+
+
+def test_take_events_disabled_yields_nothing_but_drains():
+    ring = FakeRing()
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    key = b"\x02" * 36
+    _store_keys(mgr, ring, [key])
+    from certus_shmq_connector.manager import _key_to_u64
+
+    ring.events = [(_key_to_u64(key), REASON_REMOVED)]
+    assert list(mgr.take_events()) == []
+    assert ring.events == []
 
 
 # ── handler offset wiring ──

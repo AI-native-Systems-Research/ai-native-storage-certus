@@ -31,6 +31,7 @@ from .compat import (
     block_bytes_from_offloading_config,
     extract_gpu_ptrs,
     kv_cache_layout_name,
+    kv_events_enabled,
 )
 from .gpu import current_device, ipc_for_tensor
 from .handler import worker_class
@@ -168,6 +169,7 @@ class CertusShmqOffloadingSpec(OffloadingSpec):
                 )
         else:
             vllm_config, kv_cache_config = args
+            self._vllm_config = vllm_config
             super().__init__(vllm_config, kv_cache_config)
             assert len(self.gpu_block_size) == 1, (
                 "CertusShmqOffloadingSpec requires exactly one KV cache group"
@@ -231,6 +233,9 @@ class CertusShmqOffloadingSpec(OffloadingSpec):
                 self._get_ring(claim_slot=self._dp_slot_base),
                 block_size_bytes=size,
                 world_size=self._world_size,
+                events_enabled=kv_events_enabled(
+                    self, getattr(self, "config", None), getattr(self, "_vllm_config", None)
+                ),
             )
         return self._manager
 

@@ -1525,7 +1525,6 @@ impl IDispatcher for DispatcherP2pComponent {
             let evictor_logger = self.logger.get().ok();
 
             if !evictor_extent_mgrs.is_empty() {
-                let evictor_eviction_tx = self.eviction_tx.lock().unwrap().clone();
                 let evictor = BackgroundEvictor::start(
                     dm_for_evictor,
                     mt_for_evictor,
@@ -1537,7 +1536,7 @@ impl IDispatcher for DispatcherP2pComponent {
                         interval: std::time::Duration::from_secs(config.ssd_eviction_interval_secs),
                     },
                     evictor_logger,
-                    evictor_eviction_tx,
+                    Arc::clone(&self.eviction_tx),
                     Arc::clone(&self.eviction_dropped),
                 );
                 *self.bg_evictor.lock().unwrap() = Some(evictor);
@@ -5569,7 +5568,7 @@ mod tests {
                 interval: std::time::Duration::from_millis(50),
             },
             None,
-            None,
+            Arc::new(std::sync::Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
         );
 
