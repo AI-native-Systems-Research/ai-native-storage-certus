@@ -1329,6 +1329,15 @@ pub unsafe fn pipelined_ssd_to_dram_only(
 /// arithmetic.
 pub const BOUNCE_READ_TIMEOUT_MS: u64 = u32::MAX as u64;
 
+/// How [`read_into_bounce`] failed: whether its buffer may be freed.
+#[derive(Debug)]
+pub enum BounceReadError {
+    /// Every read submitted has completed; `dst` is free.
+    Settled(String),
+    /// A read may still be writing `dst`.
+    Unsettled(String),
+}
+
 /// Read `total_bytes` from `start_lba` into `dst`, which must lie in a bounce
 /// buffer, keeping up to `max_queue_depth` segments in flight.
 ///
@@ -1343,14 +1352,6 @@ pub const BOUNCE_READ_TIMEOUT_MS: u64 = u32::MAX as u64;
 /// # Safety
 /// - `dst` must be valid, DMA-capable memory for `total_bytes` rounded up to the
 ///   block size, untouched by anyone else until this returns.
-#[derive(Debug)]
-pub enum BounceReadError {
-    /// Every read submitted has completed; `dst` is free.
-    Settled(String),
-    /// A read may still be writing `dst`.
-    Unsettled(String),
-}
-
 pub unsafe fn read_into_bounce(
     drive: &dyn IBlockDevice,
     channels: &ClientChannels,

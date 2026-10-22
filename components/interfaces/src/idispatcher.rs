@@ -911,8 +911,12 @@ component_macros::define_interface! {
         /// A hung device surfaces as the peer's own reply deadline.
         ///
         /// Errors: `NoSpace` (the reserve is full now — retry later),
-        /// `NeverFits` (it never can be satisfied), `Io` (the read failed; the
-        /// buffer has been freed).
+        /// `NeverFits` (it never can be satisfied: larger than the reserve, no
+        /// data drives, or a drive block that does not divide the reserve's
+        /// 4 KiB pages), `Io` (the read failed; the buffer has been freed).
+        ///
+        /// The read holds no dispatcher-wide lock while it waits on the
+        /// device, so a hung read does not hold up `shutdown`.
         fn read_to_bounce(
             &self,
             key: CacheKey,

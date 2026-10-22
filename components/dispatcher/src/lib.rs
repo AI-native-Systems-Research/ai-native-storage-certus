@@ -288,7 +288,8 @@ struct DataDrive {
     block_dev_iface: Arc<dyn IBlockDevice + Send + Sync>,
     _extent_mgr_component: Arc<dyn component_core::IUnknown + Send + Sync>,
     extent_mgr: Arc<dyn IExtentManager + Send + Sync>,
-    channel_pool: ChannelPool,
+    /// Shared so a bounce read can hold it without holding the drive list.
+    channel_pool: Arc<ChannelPool>,
 }
 
 /// A pool of per-drive client channels for the read pipeline.
@@ -1967,7 +1968,7 @@ impl DispatcherComponent {
                 "dispatcher: data drive {i} initialized at {addr_str}{cpu_msg}"
             ));
 
-            let channel_pool = ChannelPool::new(Arc::clone(&ibd));
+            let channel_pool = Arc::new(ChannelPool::new(Arc::clone(&ibd)));
 
             drives.push(DataDrive {
                 _block_dev: block_dev_component,
@@ -4208,18 +4209,32 @@ impl IDispatcher for DispatcherComponent {
             .memory_tier
             .get()
             .map_err(|_| BounceError::NotInitialized("memory_tier not bound".into()))?;
-        let drives = self.data_drives.read();
-        if drives.is_empty() {
-            return Err(BounceError::NeverFits("no data drives".into()));
-        }
-        let buf = mt.bounce_alloc(len)?;
         // The same placement hash as the write path: the extent is on this
         // drive, and reading another drive's offset reads someone else's data.
-        let drive = &drives[Self::drive_index(key, drives.len())];
-        let block_size = drive.block_dev_iface.block_size() as u64;
-        let chunk_size = (drive.block_dev_iface.max_transfer_size() as usize).max(4096);
-        let read = drive
-            .channel_pool
+        // Its handles are cloned out so the drive list is not held across a
+        // read with no timeout: shutdown's write lock would wait on the drive.
+        let (dev, pool) = {
+            let drives = self.data_drives.read();
+            if drives.is_empty() {
+                return Err(BounceError::NeverFits("no data drives".into()));
+            }
+            let drive = &drives[Self::drive_index(key, drives.len())];
+            (
+                Arc::clone(&drive.block_dev_iface),
+                Arc::clone(&drive.channel_pool),
+            )
+        };
+        // The read is rounded up to whole blocks and the buffer to whole pages,
+        // so a block that does not divide a page reads past the buffer's end.
+        let block_size = dev.block_size() as u64;
+        if block_size == 0 || 4096 % block_size != 0 {
+            return Err(BounceError::NeverFits(format!(
+                "drive block size {block_size} does not divide the reserve's 4 KiB pages"
+            )));
+        }
+        let buf = mt.bounce_alloc(len)?;
+        let chunk_size = (dev.max_transfer_size() as usize).max(4096);
+        let read = pool
             .checkout()
             .map_err(|e| pipeline::BounceReadError::Settled(e.to_string()))
             .and_then(|channels| {
@@ -4229,7 +4244,7 @@ impl IDispatcher for DispatcherComponent {
                 // caller's pin keeps the extent at `offset` from being reused.
                 unsafe {
                     pipeline::read_into_bounce(
-                        &*drive.block_dev_iface,
+                        &*dev,
                         channels.channels(),
                         buf.ptr,
                         offset / block_size,
@@ -7595,6 +7610,7 @@ mod tests {
     struct BounceDisk {
         state: Arc<DiskState>,
         max_transfer: u32,
+        block: u32,
     }
 
     #[derive(Default)]
@@ -7619,6 +7635,7 @@ mod tests {
                     ..Default::default()
                 }),
                 max_transfer,
+                block: 4096,
             })
         }
     }
@@ -7698,7 +7715,7 @@ mod tests {
             self.max_transfer
         }
         fn block_size(&self) -> u32 {
-            4096
+            self.block
         }
         fn numa_node(&self) -> i32 {
             -1
@@ -7752,7 +7769,7 @@ mod tests {
                     _extent_mgr_component: Arc::clone(&em)
                         as Arc<dyn component_core::IUnknown + Send + Sync>,
                     extent_mgr: em as Arc<dyn IExtentManager + Send + Sync>,
-                    channel_pool: ChannelPool::new(iface),
+                    channel_pool: Arc::new(ChannelPool::new(iface)),
                 }
             })
             .collect();
@@ -7812,7 +7829,7 @@ mod tests {
     /// A failed read frees its buffer and reports Io; nothing is promoted and
     /// the cache is untouched.
     #[test]
-    fn a_failed_read_returns_its_lease() {
+    fn a_failed_read_returns_its_buffer() {
         let disks = [pattern_disk(16, 0, 4096)];
         let (c, mt) = bounce_dispatcher(&disks, 1, 16384);
         *disks[0].fail_lba.lock().unwrap() = Some(2);
@@ -7881,6 +7898,54 @@ mod tests {
         assert_eq!(disks[0].lbas.lock().unwrap().len(), n, "no read was issued");
         d.release_bounce(held);
         assert!(d.read_to_bounce(2, 0, 4096).is_ok(), "room again");
+    }
+
+    /// A read in progress does not hold up shutdown: the drive list is not
+    /// held across the device read, so shutdown's write lock is not stuck
+    /// behind a drive that never answers.
+    #[test]
+    fn a_hung_read_does_not_block_shutdown() {
+        let disks = [pattern_disk(16, 0, 4096)];
+        let (c, _mt) = bounce_dispatcher(&disks, 1, 8192);
+        *disks[0].hold.lock().unwrap() = true;
+        let d = query_interface!(c, IDispatcher).unwrap();
+        let d2 = Arc::clone(&d);
+        let reader = thread::spawn(move || d2.read_to_bounce(1, 0, 4096));
+        let t0 = std::time::Instant::now();
+        while disks[0].in_flight.load(Ordering::SeqCst) == 0 {
+            assert!(t0.elapsed() < std::time::Duration::from_secs(5));
+            thread::yield_now();
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        thread::spawn(move || tx.send(d.shutdown()).unwrap());
+        let r = rx.recv_timeout(std::time::Duration::from_secs(5));
+        disks[0].release();
+        assert!(
+            matches!(r, Ok(Ok(()))),
+            "shutdown waited on the read: {r:?}"
+        );
+        let _ = reader.join().unwrap();
+    }
+
+    /// A drive whose blocks are larger than the reserve's 4 KiB pages would
+    /// read past the end of a buffer rounded to a page, so it is refused,
+    /// before any buffer is taken or read issued.
+    #[test]
+    fn a_block_larger_than_a_page_never_fits() {
+        let disk = Arc::new(BounceDisk {
+            state: Arc::clone(&pattern_disk(16, 0, 1 << 20).state),
+            max_transfer: 1 << 20,
+            block: 8192,
+        });
+        let (c, mt) = bounce_dispatcher(std::slice::from_ref(&disk), 1, 16384);
+        let d = query_interface!(c, IDispatcher).unwrap();
+        let r = d.read_to_bounce(1, 0, 4096);
+        assert!(
+            matches!(r, Err(interfaces::BounceError::NeverFits(_))),
+            "{r:?}"
+        );
+        assert!(disk.lbas.lock().unwrap().is_empty(), "no read was issued");
+        assert_eq!(mt.bounce_free_count(), 1, "no buffer was taken");
     }
 
     /// No drives, no reserve, not initialized: never a buffer.
