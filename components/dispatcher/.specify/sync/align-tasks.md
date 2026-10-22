@@ -141,10 +141,10 @@ changed.** Line numbers refer to HEAD `4f8b5554b`.
 - **Option BACKFILL**: in FR-058, replace "reserves refused because the key was already cached" with "`mt.insert` calls refused because the key was already resident, on the store path (a refused reserve) and on the load path (a lost concurrent promotion, FR-051)". Interfaces FR-018a then needs the matching change.
 - Related: DISP-RESERVE-REASON above.
 
-### OPEN N-01 — new 001/FR-062 `integrity-check` verify-before-serve (MEDIUM confidence)
+### OPEN N-01 — new 001 FR (next free number; FR-062 is `read_to_bounce`) `integrity-check` verify-before-serve (MEDIUM confidence)
 > Approval note: *"MEDIUM confidence new requirement: record as an open item in align-tasks.md (Cornel's rule)"*
 
-- Draft FR-062 text: see `proposals.md` § N-01. CRC-32 is computed after the store D2H (`src/lib.rs:3593-3617`) and checked before every warm, remote and single-key H2D. A mismatch returns `IoError` and is attributed `ERROR`. Cold SSD promotions are not verified.
+- Draft text: see `proposals.md` § N-01. CRC-32 is computed after the store D2H (`src/lib.rs:3593-3617`) and checked before every warm, remote and single-key H2D. A mismatch returns `IoError` and is attributed `ERROR`. Cold SSD promotions are not verified.
 
 ### ✅ RESOLVED N-04 — 001/FR-009 + `contracts/errors.md`: `remove` on a pinned entry (MEDIUM confidence)
 
@@ -267,3 +267,10 @@ A-1, A-2, A-3 (decision recorded), A-4 (2026-10-14 apply); A-01, A-02, A-04, A-0
 
 - `dispatcher-p2p` still has the pre-repair `remove` / `clear_memory_tier` / `flush_to_ssd` behaviour. That task is interfaces proposal 7 (TRACK) and is recorded in `components/interfaces/.specify/sync/align-tasks.md`, for the component `dispatcher-p2p`.
 
+## Open items from branch `001-rdma-cache-transfer` (2026-10-22)
+
+### OPEN RH-03 — 002 Assumption, `contracts/idispatcher.md`, SC-003: a responder promotes before writing
+> Approval note: *"defer to the PR that wires the endpoint in; record in align-tasks.md"* (2026-10-22)
+
+- Spec 002 says a responder promotes a disk-resident key into DRAM before the RDMA write, and `peer_triggered_promotions` measures it. True of remote-lookup; not of certus-transfer-endpoint, which serves through `read_to_bounce` without promoting, so that counter does not move for it.
+- When the endpoint is wired into an app: make the Assumption and SC-003 remote-lookup-specific, and decide whether the responder-side cold-work counter should also count bounce reads.
