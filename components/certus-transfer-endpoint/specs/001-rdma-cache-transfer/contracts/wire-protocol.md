@@ -16,19 +16,26 @@ into the opcode (research D21).
 
 | name | `opcode` | |
 |---|---|---|
-| `OP_FETCH` | `0x0000_0001` | kind 1 |
-| `OP_FETCH_REPLY` | `0x0000_0002` | kind 2 |
-| `OP_HELLO_REPLY` | `0x0000_FFFD` | kind 0xFFFD, **unversioned** |
-| `OP_HELLO` | `0x0000_FFFE` | kind 0xFFFE, **unversioned** |
-| `OP_ERROR` | `0x0000_FFFF` | kind 0xFFFF, **unversioned** |
+| `OP_FETCH` | `0x0000_0002` | request |
+| `OP_FETCH_REPLY` | `0x0000_0003` | its reply |
+| `OP_HELLO` | `0x0000_FFFC` | request, **unversioned** |
+| `OP_HELLO_REPLY` | `0x0000_FFFD` | its reply, **unversioned** |
+| `OP_ERROR` | `0x0000_FFFF` | the reply to any request, **unversioned** |
+
+These values are frozen: they are on the wire.
 
 **Requests and replies.** `OP_FETCH` and `OP_HELLO` are **requests**; `OP_FETCH_REPLY`,
 `OP_HELLO_REPLY` and `OP_ERROR` are **replies**. Every request costs one message credit and
 draws exactly one reply — its success reply, or `OP_ERROR` in its place — which lands in the
 requester's reply reserve (*Receive-buffer partitioning*). **A reply is never answered**, not
-even a malformed one; see *Bad replies*. A message of unknown kind is treated as a request
-and answered with `OP_ERROR`: this end only sends requests whose replies it understands, so
-an unknown kind cannot legitimately be a reply to us.
+even a malformed one; see *Bad replies*.
+
+**The low bit of the opcode says which**: a request's opcode is even, and its success reply
+is the same opcode with the low bit set; `OP_ERROR` is odd. So a receiver knows the side of an
+exchange even for an opcode it does not recognise. An unknown **even** opcode is a request:
+it is answered with `OP_ERROR` reason 1 and the connection stays. An unknown **odd** opcode is
+a reply this end cannot read, and may or may not return a message credit, so the credits are
+in doubt: it is a bad reply (*Bad replies*), never answered.
 
 The high 16 bits of `opcode` MUST be zero and are reserved for future kinds. Two kinds carry
 the data plane; everything it needs — chunking, credits, tier attribution — rides in the
@@ -72,7 +79,7 @@ per kind per version.
 | 16 | 4 | `n_entries` | entries in *this* message |
 | 20 | 4 | reserved | MUST be zero; keeps the entry vector 8-byte aligned |
 
-### `OP_FETCH` (`0x0000_0001`)
+### `OP_FETCH` (`0x0000_0002`)
 
 Header, then `n_entries` × 24-byte entries. **Nothing else** — no base address, no rkey, no
 uniform entry size in the header.
@@ -106,7 +113,7 @@ would have been 8 bytes per entry. Addresses cost nothing in practice (see sizin
 `rkey` rides in what would otherwise be padding, so per-entry regions are supported for
 free — the requester may land entries across several registered regions.
 
-### `OP_FETCH_REPLY` (`0x0000_0002`)
+### `OP_FETCH_REPLY` (`0x0000_0003`)
 
 Header, then one outcome byte per entry in request order, zero-padded to an 8-byte boundary.
 
@@ -120,7 +127,7 @@ before the reply is sent. The requester may therefore treat reply arrival as the
 signal for the whole message and needs no per-entry completion notification. This is what
 makes the one-sided WRITE safe without `WRITE_WITH_IMM`.
 
-### `OP_HELLO` (`0x0000_FFFE`)
+### `OP_HELLO` (`0x0000_FFFC`)
 
 Sent by **both** ends immediately on connection establishment — the endpoint is symmetric, so
 neither side is the client (D5). Neither end sends a data message until the peer's `OP_HELLO`
@@ -226,7 +233,8 @@ an error-for-an-error loop; not answering them rules it out by construction.
 
 Instead the receiver **reports loudly and tears the connection down** through the FR-023
 path — queue pair to ERROR, drain, *then* reclaim, aborting every context on the connection —
-and counts it as a protocol fault. This is the third case, and it deliberately differs from
+and counts it as a protocol fault (`TransferStats::protocol_faults`, which counts every
+`OP_ERROR` sent or received and every teardown an inbound message causes). This is the third case, and it deliberately differs from
 `OP_ERROR` received for our own request. There the peer *acted on nothing*, so failing one
 context is safe. A bad reply comes from a peer that *did* process our request and may have
 posted writes into our landing slots, and whose ordering guarantee (*every write completes

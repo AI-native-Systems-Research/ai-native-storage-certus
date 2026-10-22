@@ -131,7 +131,19 @@ relative LRU order of its memory-tier entries are unchanged.
   posted buffer can hold. It MUST NOT be used for a miss (an outcome) or for resource
   shortage (which chunks, FR-015). Receiving one MUST fail that one context and **leave the
   connection usable**: the peer is healthy and acted on nothing, so the FR-023 teardown path
-  MUST NOT run. A message of unknown kind MUST be treated as a request and answered.
+  MUST NOT run. A request's opcode is even and its reply's is the same with the low bit set,
+  so a message of unknown kind is classified by that bit: an even one MUST be answered as a
+  request; an odd one is a reply (below).
+
+  The endpoint MUST tear a connection down only when it must: (i) the queue pair went to
+  ERROR; (ii) a write may still land in memory about to be reclaimed (a reply deadline, a
+  bad reply); (iii) its credit accounting is in doubt (a reply nobody asked for, an unknown
+  reply, an `OP_ERROR` naming a request never sent, a request beyond the advertised quota, a
+  receive that failed unread); or (iv) the peer's version or framing cannot be trusted (a
+  failed capability exchange, which fails waiting fetches with `IncompatiblePeer`). Anything
+  else a request does wrong — before `OP_HELLO`, a duplicate `OP_HELLO`, malformed, unknown —
+  MUST be answered with `OP_ERROR` and the connection kept. Every `OP_ERROR` sent or received,
+  and every teardown an inbound message causes, MUST be counted as a protocol fault.
 
   The endpoint MUST NOT answer a **reply** (a success reply or a protocol error reply), even
   one it cannot process: the replier holds no state to act on, and answering replies would
