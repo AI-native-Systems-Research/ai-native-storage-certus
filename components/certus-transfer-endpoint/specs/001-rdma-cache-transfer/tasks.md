@@ -914,15 +914,17 @@ agree with themselves.
 
 ---
 
-## Phase 11: Cutover and retirement (OUT OF SCOPE — do not start)
+## Phase 11: Cutover and retirement (DEFERRED — designed in `cutover.md`)
 
-plan.md Phase 7. Listed for completeness only: **FR-020 explicitly forbids** modifying
-`remote-lookup` as part of delivering P1, and no P1 success criterion depends on any of
-this. It is a separate change, after the engine is proven.
+plan.md Phase 7. **FR-020** keeps `remote-lookup` unchanged while P1 is delivered, and no P1
+success criterion depends on any of this. T065 and T066 are fully designed, with every
+decision taken, in [cutover.md](./cutover.md), and deferred until explicit cache transfer
+works through llm-d and vLLM. T067 is a separate design task.
 
-- [ ] T065 [US2] Re-point `remote-lookup`'s receptacle at `ITransferEndpoint`, collapsing
-  `EntryOutcome` to `PushStatus` at the boundary if the widening is unwanted (the legacy
-  caller does not use the tier information)
+- [ ] T065 [US2] Re-point `remote-lookup` at `ITransferEndpoint` (`transfer`,
+  `transfer_admin` receptacles), mapping `EntryOutcome` to the wire `RdmaStatusCode` at the
+  boundary; teardown by `disconnect("host:port")`; warm-up by a new `connect`; a configured
+  `CERTUS_RDMA_PORT`. See cutover.md
 - [ ] T066 [US2] Delete `components/remote-lookup-rdma-initiator` and
   `components/remote-lookup-rdma-responder`; remove them from workspace `members`
 - [ ] T067 Specify the shared-memory queue message from the connector into the destination
@@ -951,7 +953,7 @@ this. It is a separate change, after the engine is proven.
 - **Phase 8 (deadline)**: depends on Phase 5's context table.
 - **Phase 9 (hardware)**: depends only on the T010 seam contract; do it after the MVP.
 - **Phase 10 (polish)**: after the phases you intend to ship.
-- **Phase 11**: out of scope.
+- **Phase 11**: deferred; designed in cutover.md.
 
 ### Story dependencies
 
