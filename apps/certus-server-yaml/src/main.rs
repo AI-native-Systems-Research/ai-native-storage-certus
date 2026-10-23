@@ -355,6 +355,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let counters = ServiceCounters::new();
+    // FETCH: only a profile with a transfer endpoint fetches; elsewhere it is
+    // answered "no endpoint". Built here so metrics can read its counters.
+    let fetcher = stack
+        .transfer_endpoint()
+        .map(|ep| shmq_dispatcher::Fetcher::new(Arc::clone(&stack.dispatcher), ep, fetch_limits()));
 
     // Start Prometheus metrics HTTP endpoint
     if cli.metrics_port > 0 {
@@ -362,7 +367,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let disp = Arc::clone(&stack.dispatcher);
         let rl = Arc::clone(&stack.remote_lookup);
         let port = cli.metrics_port;
-        tokio::spawn(metrics::serve_metrics(port, mt, disp, rl, counters.clone()));
+        tokio::spawn(metrics::serve_metrics(
+            port,
+            mt,
+            disp,
+            rl,
+            counters.clone(),
+            fetcher.clone(),
+        ));
         logger.info(&format!(
             "certus-server-yaml: metrics endpoint on port {port}"
         ));
@@ -379,6 +391,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Arc::clone(&stack.dispatcher),
                 Arc::clone(&stack.remote_lookup),
                 counters.clone(),
+                fetcher.clone(),
             )
             .map_err(|e| format!("otel init failed: {e}"))?;
             logger.info(&format!(
@@ -414,17 +427,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::time::Duration::from_millis(cli.store_backpressure_ms),
     )
     .with_observer(Arc::new(CountersObserver::new(counters)));
-    // FETCH: only a profile with a transfer endpoint fetches; elsewhere it is
-    // answered "no endpoint".
-    let translator = match stack.transfer_endpoint() {
-        Some(ep) => translator.with_fetcher(shmq_dispatcher::Fetcher::new(
-            Arc::clone(&stack.dispatcher),
-            ep,
-            fetch_limits(),
-        )),
+    let translator = match fetcher.clone() {
+        Some(f) => translator.with_fetcher(f),
         None => translator,
     };
-    let fetch_stats = translator.clone();
 
     // Create the shared-memory mailbox.
     let server = Arc::new(shm_queue::Server::create(
@@ -520,8 +526,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
     ));
 
-    if let Some(f) = fetch_stats.fetch_stats() {
-        logger.info(&format!("certus-server-yaml: FINAL fetch {f:?}"));
+    if let Some(f) = &fetcher {
+        logger.info(&format!("certus-server-yaml: FINAL fetch {:?}", f.stats()));
     }
     if let Some(ep) = stack.transfer_endpoint() {
         logger.info(&format!(

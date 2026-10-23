@@ -111,7 +111,13 @@ different mechanisms, decided by different parties, with different costs.
   entry is evicted (the eviction events the translator already drains) or removed, and after
   `fetch_mark_ttl` (default 30 s) — so a stale mark can never re-attribute a later, unrelated
   entry under the same key.
-- **Counted, not inferred**, beside the tier counters (Prometheus):
+- **Counted, not inferred**, beside the tier counters. Prometheus names are
+  `certus_<counter>_total` (`certus_fetch_keys_pending` and `certus_fetch_marks_live` are
+  gauges), OTel `certus.fetch.<name>`; exported only by a server that fetches, so a profile
+  without an endpoint shows no fetch series rather than zeros. The exported
+  `certus_lookup_hits_dram_total` is **net** of `lookup_hits_fetched`: the dispatcher counted
+  each fetched first serve as `Dram`, and the translator re-attributed it, so the route
+  partition `dram + ssd + fetched + remote = lookup_hits` holds:
 
 | counter | meaning |
 |---|---|
