@@ -55,14 +55,14 @@ vLLM isn't installed on the host, so the bench runs inside the stock vLLM image 
 From the repo root:
 
 ```bash
-tools/cputier-connector-bench/run-in-container.sh                # default 4 phases
-tools/cputier-connector-bench/run-in-container.sh --verify       # data round-trip check first
-tools/cputier-connector-bench/run-in-container.sh --mode all --csv bench-results/cputier.csv --tag cputier
-tools/cputier-connector-bench/run-in-container.sh --spec cpu     # CPU tier only, no disk tier
+benchmarks/cputier-connector-bench/run-in-container.sh                # default 4 phases
+benchmarks/cputier-connector-bench/run-in-container.sh --verify       # data round-trip check first
+benchmarks/cputier-connector-bench/run-in-container.sh --mode all --csv bench-results/cputier.csv --tag cputier
+benchmarks/cputier-connector-bench/run-in-container.sh --spec cpu     # CPU tier only, no disk tier
 
 # Different GPU, disk-tier location and CPU tier size:
 GPU=1 FS_TIER_HOST=/path/on/fast/disk CPU_BYTES=13G \
-  tools/cputier-connector-bench/run-in-container.sh --cpu-bytes 13G --min-duration 10
+  benchmarks/cputier-connector-bench/run-in-container.sh --cpu-bytes 13G --min-duration 10
 ```
 
 All arguments are passed through to the bench. If you change `--cpu-bytes`, set `CPU_BYTES` to the same value so the container's `/dev/shm` is big enough.
@@ -84,7 +84,7 @@ podman run --rm --pull=never \
   -w /certus \
   --entrypoint python3 \
   docker.io/vllm/vllm-openai:v0.30.0 \
-  tools/cputier-connector-bench/bench_cputier_lifecycle.py --fs-root /fs-tier --verify
+  benchmarks/cputier-connector-bench/bench_cputier_lifecycle.py --fs-root /fs-tier --verify
 ```
 
 - `--security-opt label=disable` lets the container read the bind mounts under SELinux without relabelling the repo.
@@ -101,8 +101,8 @@ podman run --rm -it --pull=never --security-opt label=disable --shm-size 8g \
   -w /certus --entrypoint bash docker.io/vllm/vllm-openai:v0.30.0
 
 # then, inside the container:
-python3 tools/cputier-connector-bench/bench_cputier_lifecycle.py --fs-root /fs-tier --help
-python3 tools/cputier-connector-bench/bench_cputier_lifecycle.py --fs-root /fs-tier --mode pipelined
+python3 benchmarks/cputier-connector-bench/bench_cputier_lifecycle.py --fs-root /fs-tier --help
+python3 benchmarks/cputier-connector-bench/bench_cputier_lifecycle.py --fs-root /fs-tier --mode pipelined
 ```
 
 Edits you make to the script on the host show up in the container straight away, because the repo is mounted.
@@ -112,7 +112,7 @@ Edits you make to the script on the host show up in the container straight away,
 If you have vLLM ≥ 0.30 in a Python environment, run the script directly:
 
 ```bash
-python tools/cputier-connector-bench/bench_cputier_lifecycle.py --fs-root /path/on/nvme
+python benchmarks/cputier-connector-bench/bench_cputier_lifecycle.py --fs-root /path/on/nvme
 ```
 
 ### Wrapper environment
@@ -169,7 +169,7 @@ rank `i` must run on a device whose index maps to slot `i`; the benchmark
 rejects other orders. With the wrapper, expose the GPUs and number them from 0:
 
 ```bash
-GPU=0,1 tools/cputier-connector-bench/run-in-container.sh --tp 2 --mode scheduler-step
+GPU=0,1 benchmarks/cputier-connector-bench/run-in-container.sh --tp 2 --mode scheduler-step
 ```
 
 `--verify` checks rank 0's data only.
@@ -177,7 +177,7 @@ GPU=0,1 tools/cputier-connector-bench/run-in-container.sh --tp 2 --mode schedule
 ## Modes
 
 ```bash
-B=tools/cputier-connector-bench/run-in-container.sh
+B=benchmarks/cputier-connector-bench/run-in-container.sh
 $B                                         # default: store, warm load, cold load, mixed eviction
 $B --mode pipelined --pipeline-depth 4     # N batches in flight before reaping
 $B --mode prefix-miss --hit-ratio 0.5      # maximal-prefix lookup cost
@@ -204,8 +204,8 @@ $B --spec cpu                              # CPU-only offload baseline
 Run the two benches with matching sizes. Set `--cpu-bytes` to the certus server's `--memory-tier-size`, and use the same `--bs`, `--num-blocks`, `--block-bytes` and `--working-set`. Then join the CSVs on `label`. Rows are labelled identically, but cputier adds columns for its extra phases, so use separate files; appending to one CSV keeps only the first writer's header columns.
 
 ```bash
-python tools/certus-connector-bench/bench_connector_lifecycle.py --mode all \
+python benchmarks/certus-connector-bench/bench_connector_lifecycle.py --mode all \
     --csv bench-results/connector-certus.csv --tag certus
-tools/cputier-connector-bench/run-in-container.sh --cpu-bytes 4G --mode all \
+benchmarks/cputier-connector-bench/run-in-container.sh --cpu-bytes 4G --mode all \
     --csv bench-results/connector-cputier.csv --tag cputier
 ```

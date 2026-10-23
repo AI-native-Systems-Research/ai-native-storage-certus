@@ -37,7 +37,7 @@ for drives in 1 2 4; do
     sudo target/release/certus-server --drive-count $drives --channels 16 \
         --memory-tier-size 4G --memory-tier-eviction-threshold 0.7 --format &
     sleep 3
-    python tools/certus-connector-bench/bench_connector_lifecycle.py \
+    python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
         --mode all --min-duration 5 --csv bench-results/drive_sweep.csv \
         --tag "${drives}-drive"
     sudo kill %1; wait
@@ -62,11 +62,11 @@ Four serial phases:
 4. **Mixed Eviction**: interleaved store + load under memory-tier pressure, with `take_events` drain
 
 ```bash
-python tools/certus-connector-bench/bench_connector_lifecycle.py \
+python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
     --shm-path /dev/shm/certus-shmq
 
 # Longer run with larger working set
-python tools/certus-connector-bench/bench_connector_lifecycle.py \
+python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
     --min-duration 30 --working-set 2048
 ```
 
@@ -76,11 +76,11 @@ Submits multiple batches before reaping to saturate the ThreadPoolExecutor. Reve
 
 ```bash
 # Store + load, 4 batches in-flight
-python tools/certus-connector-bench/bench_connector_lifecycle.py \
+python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
     --mode pipelined --pipeline-depth 4
 
 # Store only, deeper pipeline
-python tools/certus-connector-bench/bench_connector_lifecycle.py \
+python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
     --mode pipelined --pipeline-depth 8 --direction store
 ```
 
@@ -92,13 +92,13 @@ Measures the cost curve of vLLM's `_maximal_prefix_lookup` at varying hit ratios
 
 ```bash
 # 75% prefix hit ratio (default)
-python tools/certus-connector-bench/bench_connector_lifecycle.py \
+python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
     --mode prefix-miss --hit-ratio 0.75
 
 # Compare: all-miss vs all-hit
-python tools/certus-connector-bench/bench_connector_lifecycle.py \
+python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
     --mode prefix-miss --hit-ratio 0.0
-python tools/certus-connector-bench/bench_connector_lifecycle.py \
+python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
     --mode prefix-miss --hit-ratio 1.0
 ```
 
@@ -109,7 +109,7 @@ Reports the latency of lookups answering hit and miss separately (`lookup_hit`, 
 Runs store and load streams from separate threads against the same ring. Reveals server-side contention (reserve vs pin, copy_to_store vs lookup, write-through vs promote).
 
 ```bash
-python tools/certus-connector-bench/bench_connector_lifecycle.py \
+python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
     --mode contention --min-duration 10 --working-set 1024
 ```
 
@@ -125,18 +125,18 @@ Simulates continuous-batching scheduler steps with the production vLLM call patt
 - Stores are submitted after the load drain and drained, untimed, at the start of the next step. `drain_workers` therefore measures only load completion, as vLLM never blocks a step on its stores.
 
 ```bash
-python tools/certus-connector-bench/bench_connector_lifecycle.py \
+python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
     --mode scheduler-step --requests-per-step 8 --num-sessions 32
 
 # Heavier load
-python tools/certus-connector-bench/bench_connector_lifecycle.py \
+python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
     --mode scheduler-step --requests-per-step 16 --num-sessions 64 \
     --min-duration 30
 
 # vLLM <= 0.20 call order, and no prefix shared between requests
-python tools/certus-connector-bench/bench_connector_lifecycle.py \
+python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
     --mode scheduler-step --lookup-order touch-first
-python tools/certus-connector-bench/bench_connector_lifecycle.py \
+python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
     --mode scheduler-step --prefix-sharing private
 ```
 
@@ -147,17 +147,17 @@ Reports steps/sec, per-step phase times (touch_lookup = all of the step's lookup
 Runs a certus-fio YAML workload pattern through the connector lifecycle.
 
 ```bash
-python tools/certus-connector-bench/bench_connector_lifecycle.py \
+python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
     --pattern cold_prefill_store
 
-python tools/certus-connector-bench/bench_connector_lifecycle.py \
+python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
     --pattern warm_prefill_load_and_suffix_store
 ```
 
 #### Run all modes
 
 ```bash
-python tools/certus-connector-bench/bench_connector_lifecycle.py --mode all --min-duration 5
+python benchmarks/certus-connector-bench/bench_connector_lifecycle.py --mode all --min-duration 5
 ```
 
 #### Common options
@@ -202,7 +202,7 @@ not comparable with real-TP results.
 ```bash
 sudo target/release/certus-server --drive-count 4 --channels 32 \
     --memory-tier-size 4G --memory-tier-eviction-threshold 0.8 --format
-python tools/certus-connector-bench/bench_connector_lifecycle.py \
+python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
     --tp 2 --mode scheduler-step --block-bytes 1048576
 ```
 
@@ -222,7 +222,7 @@ python tools/certus-connector-bench/bench_connector_lifecycle.py \
 Measures the connector's 3-phase store and check→pin→lookup load paths at the `Ring` level with connector overhead (reserve → copy_to_store → commit_store for stores; check → pin → lookup for loads).
 
 ```bash
-python tools/certus-connector-bench/bench_connector_path.py \
+python benchmarks/certus-connector-bench/bench_connector_path.py \
     --shm-path /dev/shm/certus-shmq --bs 16 --num-blocks 128
 ```
 
@@ -231,7 +231,7 @@ python tools/certus-connector-bench/bench_connector_path.py \
 Reproduces and validates the check→pin→lookup eviction race. Two threads run concurrently: a storer that fills the memory tier forcing eviction, and a loader that uses `check_and_pin` to atomically verify+protect keys. Validates that pinned keys see zero load failures.
 
 ```bash
-python tools/certus-connector-bench/bench_connector_race.py \
+python benchmarks/certus-connector-bench/bench_connector_race.py \
     --shm-path /dev/shm/certus-shmq --duration 30
 ```
 

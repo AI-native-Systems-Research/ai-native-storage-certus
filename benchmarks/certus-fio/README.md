@@ -16,19 +16,19 @@ sudo rm -f /var/tmp/spdk_pci_lock*
   --memory-tier-size 4G
 
 # List available patterns
-python3 tools/certus-fio/certus_fio.py list
+python3 benchmarks/certus-fio/certus_fio.py list
 
 # Run a single pattern
-python3 tools/certus-fio/certus_fio.py run --pattern cold_prefill_store
+python3 benchmarks/certus-fio/certus_fio.py run --pattern cold_prefill_store
 
 # Override parameters
-python3 tools/certus-fio/certus_fio.py run --pattern cold_prefill_store --override batch_size=1
+python3 benchmarks/certus-fio/certus_fio.py run --pattern cold_prefill_store --override batch_size=1
 
 # Run the cold SSD path individually
-python3 tools/certus-fio/certus_fio.py run --pattern hot_vs_cold_load_paths
+python3 benchmarks/certus-fio/certus_fio.py run --pattern hot_vs_cold_load_paths
 
 # Quick run (1 iteration, no auto-repeat)
-python3 tools/certus-fio/certus_fio.py run --pattern decode_block_store --min-duration 0
+python3 benchmarks/certus-fio/certus_fio.py run --pattern decode_block_store --min-duration 0
 ```
 
 ## CLI Reference
@@ -63,7 +63,7 @@ Full/Report options:
 Run after code changes to verify no regressions (~25 seconds):
 
 ```bash
-python3 tools/certus-fio/certus_fio.py quick
+python3 benchmarks/certus-fio/certus_fio.py quick
 ```
 
 Runs 5 key patterns at Llama-70B object size (5 MiB) with their natural batch sizes:
@@ -97,13 +97,13 @@ The `full` and `report` commands run 11 core patterns (8 warm + 3 cold) across o
 
 ```bash
 # Full sweep with CSV output (~9 min)
-python3 tools/certus-fio/certus_fio.py full --output results.csv
+python3 benchmarks/certus-fio/certus_fio.py full --output results.csv
 
 # Generate HTML report with optimization analysis
-python3 tools/certus-fio/certus_fio.py report --output report.html --csv results.csv
+python3 benchmarks/certus-fio/certus_fio.py report --output report.html --csv results.csv
 
 # Regenerate report from existing data (no server needed)
-python3 tools/certus-fio/certus_fio.py report --from-csv results.csv --output report.html
+python3 benchmarks/certus-fio/certus_fio.py report --from-csv results.csv --output report.html
 ```
 
 **Sweep dimensions:**

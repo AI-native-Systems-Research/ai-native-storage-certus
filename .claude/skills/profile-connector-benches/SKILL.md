@@ -11,8 +11,8 @@ them side by side:
 
 | Arm | Bench | Backend |
 |---|---|---|
-| certus | `tools/certus-connector-bench/bench_connector_lifecycle.py` (host) | `certus-server` over `/dev/shm/certus-shmq`, SPDK NVMe |
-| cputier | `tools/cputier-connector-bench/run-in-container.sh` (vLLM ≥ 0.30 image) | vLLM `TieringOffloadingSpec`: pinned CPU tier + `fs` disk tier |
+| certus | `benchmarks/certus-connector-bench/bench_connector_lifecycle.py` (host) | `certus-server` over `/dev/shm/certus-shmq`, SPDK NVMe |
+| cputier | `benchmarks/cputier-connector-bench/run-in-container.sh` (vLLM ≥ 0.30 image) | vLLM `TieringOffloadingSpec`: pinned CPU tier + `fs` disk tier |
 
 All work is done by `run_compare.sh` in this skill's directory. It takes every
 workload flag **once** and forwards the same list to both benches, so the arms
@@ -131,4 +131,4 @@ gives (see `run_compare.sh --help`): `--mode` (default `all`), `--bs`,
   behaves); cputier `--layers`, `--blocks-per-chunk`, fs thread counts (left at
   their defaults). The report lists these under "Backend-specific settings".
 - Read cputier store throughput with care: it excludes the per-pass fs
-  write-through drain (see `tools/cputier-connector-bench/README.md`).
+  write-through drain (see `benchmarks/cputier-connector-bench/README.md`).

@@ -5,7 +5,7 @@
 #
 # It runs the exact client invocation:
 #
-#     python tools/certus-connector-bench/bench_connector_lifecycle.py \
+#     python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
 #         --num-sessions 64 --min-duration 3
 #
 # orchestrating a three-step pipeline and always tearing everything down:
@@ -18,7 +18,7 @@
 #                 --store-backpressure-ms 5000 --channels 32 \
 #                 --poller-base-cpu 2 --shmq-poller-cpu 6 --format
 #               (backgrounded; we wait for the shmq mailbox to appear)
-#   3. CLIENT   python3 tools/certus-connector-bench/bench_connector_lifecycle.py \
+#   3. CLIENT   python3 benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
 #                 --num-sessions 64 --min-duration 3 \
 #                 --shm-path /dev/shm/certus-shmq --csv <results>.csv --tag full-optimized
 #
@@ -46,7 +46,7 @@ set -uo pipefail
 # ── Paths ────────────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
-BENCH_SCRIPT="${BENCH_SCRIPT:-${REPO_ROOT}/tools/certus-connector-bench/bench_connector_lifecycle.py}"
+BENCH_SCRIPT="${BENCH_SCRIPT:-${REPO_ROOT}/benchmarks/certus-connector-bench/bench_connector_lifecycle.py}"
 
 # ── Run configuration ──────────────────────────────────────────────────────────
 CERTUS_PROFILE="${CERTUS_PROFILE:-full-optimized}"
