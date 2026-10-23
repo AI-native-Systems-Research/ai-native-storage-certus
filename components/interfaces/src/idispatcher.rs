@@ -262,6 +262,17 @@ pub enum ServedBy {
     /// of hits. The peer's own disk work is counted on the peer instead, by
     /// `IRemoteLookup::serve_stats`.
     Remote,
+    /// Fetched from a named peer ahead of this lookup, by an explicit transfer
+    /// (the shm-queue `FETCH` op over `ITransferEndpoint`), and served from the
+    /// local memory tier it landed in. Distinct from [`Remote`](Self::Remote):
+    /// remote lookup is the dispatcher forwarding a miss inside one lookup;
+    /// this is a fetch someone else requested earlier, by a different mechanism.
+    ///
+    /// A dispatcher never reports it — the block is a memory-tier entry by the
+    /// time it is looked up, so the dispatcher says `Dram`. The control plane
+    /// that ran the fetch re-attributes the block's **first** serve, after which
+    /// it is an ordinary local entry and its hits are honestly `Dram`.
+    Fetched,
     /// Not found in any tier, local or remote.
     Miss,
     /// Present, but at a different size than requested. Distinct from `Miss`: the key
@@ -275,12 +286,12 @@ pub enum ServedBy {
 }
 
 impl ServedBy {
-    /// True for the three values in which data reached the caller's destination.
+    /// True for the four values in which data reached the caller's destination.
     ///
     /// A hit is reported if and only if the lookup succeeded, so a consumer can
     /// compute a hit rate as `hits / total` without knowing the error taxonomy.
     pub fn is_hit(&self) -> bool {
-        matches!(self, Self::Dram | Self::Ssd | Self::Remote)
+        matches!(self, Self::Dram | Self::Ssd | Self::Remote | Self::Fetched)
     }
 }
 
