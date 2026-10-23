@@ -231,6 +231,14 @@ impl std::fmt::Display for OpError {
 }
 
 /// Lifted from service.rs:156-167 (returns a plain message, not a tonic Status).
+/// The shape of a transfer-endpoint name, `"host:port"` with a non-zero port.
+/// The endpoint parses it fully and refuses anything finer-grained wrong; this
+/// only keeps an obviously bad name from reaching it.
+fn valid_peer(peer: &str) -> bool {
+    peer.rsplit_once(':')
+        .is_some_and(|(host, port)| !host.is_empty() && port.parse::<u16>().is_ok_and(|p| p != 0))
+}
+
 fn check_duplicate_keys(keys: &[u64]) -> Result<(), OpError> {
     let mut seen = HashSet::with_capacity(keys.len());
     for &key in keys {
@@ -302,6 +310,9 @@ pub struct Translator {
     /// Total store-backpressure budget shared across ALL keys in one OP_RESERVE
     /// batch (not per key). See `op_reserve`.
     store_backpressure: Duration,
+    /// Explicit fetches from a peer (op FETCH); `None` without a transfer
+    /// endpoint, when FETCH answers `NO_ENDPOINT`.
+    fetcher: Option<crate::fetch::Fetcher>,
 }
 
 impl std::fmt::Debug for Translator {
@@ -331,7 +342,19 @@ impl Translator {
             eviction_dropped,
             observer: None,
             store_backpressure,
+            fetcher: None,
         }
+    }
+
+    /// Serve FETCH through `fetcher`, over this server's transfer endpoint.
+    pub fn with_fetcher(mut self, fetcher: crate::fetch::Fetcher) -> Self {
+        self.fetcher = Some(fetcher);
+        self
+    }
+
+    /// Fetch counters, if this server fetches.
+    pub fn fetch_stats(&self) -> Option<crate::fetch::FetchStats> {
+        self.fetcher.as_ref().map(crate::fetch::Fetcher::stats)
     }
 
     /// Attach a metrics observer. Used by the YAML server to preserve its
@@ -362,6 +385,7 @@ impl Translator {
             op::FLUSH_TO_SSD => self.op_flush_to_ssd(&mut r),
             op::GET_IO_STATS => self.op_get_io_stats(&mut r),
             op::TOUCH_CHECK => self.op_touch_check(&mut r),
+            op::FETCH => self.op_fetch(&mut r),
             other => Err(OpError::Msg(format!("unknown opcode {other}"))),
         }
     }
@@ -375,6 +399,15 @@ impl Translator {
     /// server's lifetime. See `ipc_cache_reap_expired`.
     pub fn reap_expired_ipc_mappings(&self) -> usize {
         ipc_cache_reap_expired(&self.ipc_cache)
+    }
+
+    /// Drop `Fetched` attribution marks no lookup claimed in time, counting
+    /// each as unused. Called by the reaper. Never touches a fetch's slots:
+    /// only a fetch's completion reclaims those.
+    pub fn expire_fetch_marks(&self) -> usize {
+        self.fetcher
+            .as_ref()
+            .map_or(0, crate::fetch::Fetcher::expire_marks)
     }
 
     pub fn reap_stale_reservations(&self, timeout: Duration) -> usize {
@@ -414,7 +447,28 @@ impl Translator {
 
     /// Snapshot which of `keys` are reserved-but-uncommitted (one lock, not one
     /// per key). Shared by Check and TouchCheck.
+    ///
+    /// A key a fetch is landing is pending too: it is coming, but not yet
+    /// loadable, exactly like a store in flight.
     fn pending_snapshot(&self, keys: &[u64]) -> HashSet<u64> {
+        let mut pending: HashSet<u64> = {
+            let map = self
+                .pending_stores
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            keys.iter()
+                .copied()
+                .filter(|k| map.contains_key(k))
+                .collect()
+        };
+        if let Some(f) = &self.fetcher {
+            pending.extend(f.pending(keys));
+        }
+        pending
+    }
+
+    /// Only the store side: what the stale-reservation reaper may reclaim.
+    fn stores_pending(&self, keys: &[u64]) -> HashSet<u64> {
         let map = self
             .pending_stores
             .lock()
@@ -423,6 +477,43 @@ impl Translator {
             .copied()
             .filter(|k| map.contains_key(k))
             .collect()
+    }
+
+    /// Fetch a leading miss run from a peer. See `crate::fetch` and the wire
+    /// docs; never waits for the transfer.
+    fn op_fetch(&self, r: &mut Reader<'_>) -> Result<Vec<u8>, OpError> {
+        use wire::fetch_status::{BAD_PEER, NO_ENDPOINT, OK, TOO_MANY};
+        let peer_len = r.u16()? as usize;
+        let peer = std::str::from_utf8(r.bytes(peer_len)?)
+            .map_err(|_| OpError::Msg("fetch peer is not UTF-8".into()))?
+            .to_string();
+        let n = r.u32()? as usize;
+        let mut entries = Vec::with_capacity(n.min(1 << 16));
+        for _ in 0..n {
+            let key = r.u64()?;
+            let size = r.u32()?;
+            entries.push((key, size));
+        }
+        let keys: Vec<u64> = entries.iter().map(|(k, _)| *k).collect();
+        check_duplicate_keys(&keys)?;
+        let Some(fetcher) = &self.fetcher else {
+            return Ok(vec![NO_ENDPOINT]);
+        };
+        if !valid_peer(&peer) {
+            return Ok(vec![BAD_PEER]);
+        }
+        let pending = self.stores_pending(&keys);
+        match fetcher.start(&peer, &entries, &pending) {
+            Ok(started) => {
+                let mut w = Writer::with_capacity(1 + started.len());
+                w.u8(OK);
+                for s in started {
+                    w.u8(u8::from(s));
+                }
+                Ok(w.into_bytes())
+            }
+            Err(crate::fetch::FetchRefused::TooMany) => Ok(vec![TOO_MANY]),
+        }
     }
 
     fn op_check(&self, r: &mut Reader<'_>) -> Result<Vec<u8>, OpError> {
@@ -709,6 +800,7 @@ impl Translator {
             S::Dram => 1,
             S::Ssd => 2,
             S::Remote => 3,
+            S::Fetched => 4,
             // The three not-served values collapse to `0`: the counters need the
             // distinction between them, the client only needs "was it served".
             S::Miss | S::SizeMismatch | S::Error => 0,
@@ -759,7 +851,14 @@ impl Translator {
             }
         }
 
-        let results = self.dispatcher.batch_lookup(&valid_batch);
+        let mut results = self.dispatcher.batch_lookup(&valid_batch);
+        // The first serve of a fetched block is `Fetched`, which the dispatcher
+        // cannot see: to it the block is a memory-tier entry like any other.
+        if let Some(f) = &self.fetcher {
+            for ((key, _), outcome) in valid_batch.iter().zip(results.iter_mut()) {
+                outcome.served_by = f.attribute(*key, outcome.served_by);
+            }
+        }
         let (hits, misses, errors) = Self::tally_lookup(batch.entries.len(), &results);
         let mut gpu_bytes = 0u64;
         for ((slot, res), (_, regions)) in valid_indices
@@ -798,6 +897,9 @@ impl Translator {
                 dispatcher::EvictionReason::Demoted => REASON_DEMOTED,
                 dispatcher::EvictionReason::Removed => REASON_REMOVED,
             };
+            if let Some(f) = &self.fetcher {
+                f.evicted(ev.key);
+            }
             events.push((ev.key, reason));
             if max > 0 && events.len() >= max {
                 break;
@@ -955,6 +1057,11 @@ mod tests {
         block_until_deadline: Mutex<bool>,
         touch_fail: Mutex<HashSet<u64>>,
         promoted: Mutex<Vec<u64>>,
+        /// Keys whose slot is reserved and neither published nor released.
+        reserved: Mutex<HashSet<u64>>,
+        released: Mutex<Vec<u64>>,
+        /// Report `Miss` for keys not resident, instead of always `Dram`.
+        lookup_by_residency: Mutex<bool>,
     }
 
     impl IDispatcher for MockDispatcher {
@@ -978,15 +1085,25 @@ mod tests {
             &self,
             entries: &[(CacheKey, Vec<IpcHandle>)],
         ) -> Vec<interfaces::LookupOutcome> {
+            let by_residency = *self.lookup_by_residency.lock().unwrap();
             entries
                 .iter()
-                .map(|_| interfaces::LookupOutcome {
-                    // This mock simulates a cache that always serves locally from DRAM,
-                    // so `Dram` is what it models rather than a convenient constant. A
-                    // mock reporting one tier regardless of what it simulates would make
-                    // every attribution assertion vacuous (FR-028).
-                    served_by: interfaces::ServedBy::Dram,
-                    result: Ok(()),
+                .map(|(key, _)| {
+                    if by_residency && !self.resident.lock().unwrap().contains(key) {
+                        return interfaces::LookupOutcome {
+                            served_by: interfaces::ServedBy::Miss,
+                            result: Err(DispatcherError::KeyNotFound(*key)),
+                        };
+                    }
+                    interfaces::LookupOutcome {
+                        // This mock simulates a cache that always serves locally from
+                        // DRAM, so `Dram` is what it models rather than a convenient
+                        // constant. A mock reporting one tier regardless of what it
+                        // simulates would make every attribution assertion vacuous
+                        // (FR-028).
+                        served_by: interfaces::ServedBy::Dram,
+                        result: Ok(()),
+                    }
                 })
                 .collect()
         }
@@ -1029,7 +1146,9 @@ mod tests {
             if self.reserve_fail.lock().unwrap().contains(&key) {
                 Err(DispatcherError::AllocationFailed("test".into()))
             } else {
-                Ok(std::ptr::NonNull::<u8>::dangling().as_ptr())
+                self.reserved.lock().unwrap().insert(key);
+                // A distinct, recognisable address per key.
+                Ok((0x1000_0000 + key * 0x1_0000) as *mut u8)
             }
         }
         fn copy_gpu_to_memory_async(
@@ -1045,10 +1164,13 @@ mod tests {
             key: CacheKey,
             _size: u32,
         ) -> Result<(), DispatcherError> {
+            self.reserved.lock().unwrap().remove(&key);
             self.resident.lock().unwrap().insert(key);
             Ok(())
         }
-        fn release_memory(&self, _key: CacheKey) -> Result<(), DispatcherError> {
+        fn release_memory(&self, key: CacheKey) -> Result<(), DispatcherError> {
+            self.reserved.lock().unwrap().remove(&key);
+            self.released.lock().unwrap().push(key);
             Ok(())
         }
         fn pin(&self, _key: CacheKey) -> Result<(), DispatcherError> {
@@ -1116,7 +1238,7 @@ mod tests {
         Translator::new(disp, rx, Arc::new(AtomicU64::new(0)), Duration::ZERO)
     }
 
-    /// T110: a conforming server emits only `0..=3`, and every served value is non-zero.
+    /// T110: a conforming server emits only `0..=4`, and every served value is non-zero.
     ///
     /// Exhaustive over the taxonomy rather than sampled, so a seventh value added later
     /// cannot slip through unmapped -- the `match` in `wire_tier` would fail to compile,
@@ -1125,11 +1247,11 @@ mod tests {
     fn the_wire_byte_stays_in_range_and_zero_still_means_not_served() {
         use interfaces::ServedBy as S;
 
-        for served in [S::Dram, S::Ssd, S::Remote] {
+        for served in [S::Dram, S::Ssd, S::Remote, S::Fetched] {
             let b = Translator::wire_tier(served);
             assert!(
-                (1..=3).contains(&b),
-                "{served:?} must be a non-zero value in 1..=3, got {b}"
+                (1..=4).contains(&b),
+                "{served:?} must be a non-zero value in 1..=4, got {b}"
             );
         }
         for not_served in [S::Miss, S::SizeMismatch, S::Error] {
@@ -1141,8 +1263,8 @@ mod tests {
             );
         }
 
-        // The three served values are distinct, or the byte carries no tier at all.
-        let tiers: Vec<u8> = [S::Dram, S::Ssd, S::Remote]
+        // The served values are distinct, or the byte carries no tier at all.
+        let tiers: Vec<u8> = [S::Dram, S::Ssd, S::Remote, S::Fetched]
             .iter()
             .map(|s| Translator::wire_tier(*s))
             .collect();
@@ -1151,7 +1273,7 @@ mod tests {
         sorted.dedup();
         assert_eq!(
             sorted.len(),
-            3,
+            4,
             "served tiers must be distinguishable: {tiers:?}"
         );
     }
@@ -1458,5 +1580,477 @@ mod tests {
             elapsed < Duration::from_millis(500),
             "batch must be bounded by one budget, not per-key budgets (elapsed {elapsed:?})"
         );
+    }
+
+    // --- FETCH (T084) ---------------------------------------------------------
+
+    use crate::fetch::{FetchLimits, Fetcher};
+    use interfaces::{
+        EntryOutcome, FetchCompletion, ITransferEndpoint, LandingRegion, LocalSlot, RemoteRegion,
+        TransferContextId, TransferEndpointError, TransferStats,
+    };
+    use std::collections::VecDeque;
+
+    /// One `fetch` call the test has not answered yet.
+    struct Call {
+        peer: String,
+        items: Vec<(u64, LocalSlot)>,
+        done: FetchCompletion,
+    }
+
+    /// A transfer endpoint whose fetches complete only when the test says so,
+    /// so a run's window can be stepped one completion at a time.
+    #[derive(Default)]
+    struct ScriptedEndpoint {
+        calls: Mutex<VecDeque<Call>>,
+        refuse: Mutex<bool>,
+    }
+
+    impl ScriptedEndpoint {
+        /// The keys of every unanswered call, oldest first.
+        fn open(&self) -> Vec<Vec<u64>> {
+            self.calls
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|c| c.items.iter().map(|(k, _)| *k).collect())
+                .collect()
+        }
+
+        /// Answer the oldest call, with `outcome(key)` per key.
+        fn answer(&self, outcome: impl Fn(u64) -> EntryOutcome) {
+            let call = self.calls.lock().unwrap().pop_front().expect("a call");
+            let r = call.items.iter().map(|(k, _)| outcome(*k)).collect();
+            (call.done)(Ok(r));
+        }
+
+        fn fail_oldest(&self) {
+            let call = self.calls.lock().unwrap().pop_front().expect("a call");
+            (call.done)(Err(TransferEndpointError::Transport("lost".into())));
+        }
+    }
+
+    impl ITransferEndpoint for ScriptedEndpoint {
+        fn fetch(
+            &self,
+            peer: &str,
+            items: &[(CacheKey, LocalSlot)],
+            on_complete: FetchCompletion,
+        ) -> Result<TransferContextId, TransferEndpointError> {
+            if *self.refuse.lock().unwrap() {
+                return Err(TransferEndpointError::NotInitialized("down".into()));
+            }
+            self.calls.lock().unwrap().push_back(Call {
+                peer: peer.to_string(),
+                items: items.to_vec(),
+                done: on_complete,
+            });
+            Ok(TransferContextId(0))
+        }
+        fn landing_region(&self) -> Result<LandingRegion, TransferEndpointError> {
+            unimplemented!()
+        }
+        fn push_async(
+            &self,
+            _: &str,
+            _: &[(CacheKey, RemoteRegion)],
+            _: FetchCompletion,
+        ) -> Result<(), TransferEndpointError> {
+            unimplemented!()
+        }
+        fn push(
+            &self,
+            _: &str,
+            _: &[(CacheKey, RemoteRegion)],
+        ) -> Result<Vec<EntryOutcome>, TransferEndpointError> {
+            unimplemented!()
+        }
+        fn disconnect(&self, _: &str) -> Result<(), TransferEndpointError> {
+            unimplemented!()
+        }
+        fn stats(&self) -> TransferStats {
+            TransferStats::default()
+        }
+    }
+
+    const PEER: &str = "10.0.0.105:7481";
+    const BLOCK: u32 = 1 << 20;
+
+    /// A translator that fetches through `ep`, with `limits`.
+    fn fetching(limits: FetchLimits) -> (Translator, Arc<MockDispatcher>, Arc<ScriptedEndpoint>) {
+        let (t, disp, ep, _) = fetching_with_events(limits);
+        (t, disp, ep)
+    }
+
+    /// [`fetching`], keeping the eviction sender, to deliver evictions through
+    /// TAKE_EVENTS as the dispatcher does.
+    fn fetching_with_events(
+        limits: FetchLimits,
+    ) -> (
+        Translator,
+        Arc<MockDispatcher>,
+        Arc<ScriptedEndpoint>,
+        crossbeam_channel::Sender<interfaces::EvictionEvent>,
+    ) {
+        let disp = Arc::new(MockDispatcher::default());
+        *disp.lookup_by_residency.lock().unwrap() = true;
+        let ep = Arc::new(ScriptedEndpoint::default());
+        let f = Fetcher::new(disp.clone(), ep.clone(), limits);
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let t = Translator::new(
+            disp.clone(),
+            rx,
+            Arc::new(AtomicU64::new(0)),
+            Duration::ZERO,
+        )
+        .with_fetcher(f);
+        (t, disp, ep, tx)
+    }
+
+    fn fetch_req(peer: &str, keys: &[u64]) -> Vec<u8> {
+        let mut w = Writer::default();
+        w.buf.extend_from_slice(&(peer.len() as u16).to_le_bytes());
+        w.buf.extend_from_slice(peer.as_bytes());
+        w.u32(keys.len() as u32);
+        for &k in keys {
+            w.u64(k);
+            w.u32(BLOCK);
+        }
+        w.into_bytes()
+    }
+
+    fn check_req(keys: &[u64]) -> Vec<u8> {
+        let mut w = Writer::default();
+        w.u32(keys.len() as u32);
+        for &k in keys {
+            w.u64(k);
+        }
+        w.into_bytes()
+    }
+
+    fn states(t: &Translator, keys: &[u64]) -> Vec<u8> {
+        t.dispatch(op::CHECK, &check_req(keys)).unwrap()
+    }
+
+    /// The tier byte LOOKUP would return for each of `keys`, through the same
+    /// attribution step; these tests read the attribution, not the copy.
+    fn lookup(t: &Translator, keys: &[u64]) -> Vec<u8> {
+        let tiers: Vec<_> = keys
+            .iter()
+            .map(|&k| {
+                let o = t.dispatcher.batch_lookup(&[(k, vec![])]).remove(0);
+                let served = match &t.fetcher {
+                    Some(f) => f.attribute(k, o.served_by),
+                    None => o.served_by,
+                };
+                Translator::wire_tier(served)
+            })
+            .collect();
+        tiers
+    }
+
+    fn small_window() -> FetchLimits {
+        FetchLimits {
+            window_bytes: 2 * u64::from(BLOCK),
+            ..FetchLimits::default()
+        }
+    }
+
+    /// The whole run in one op; the server paces it in a window of two blocks.
+    /// Every key reads PENDING until it lands, then RESIDENT; the response says
+    /// all four started; the window advances on each completion.
+    #[test]
+    fn a_run_is_paced_by_its_window_and_lands_in_order() {
+        use wire::check_state::{PENDING, RESIDENT};
+        let (t, disp, ep) = fetching(small_window());
+        let resp = t
+            .dispatch(op::FETCH, &fetch_req(PEER, &[1, 2, 3, 4]))
+            .unwrap();
+        assert_eq!(resp, [wire::fetch_status::OK, 1, 1, 1, 1]);
+        assert_eq!(ep.open(), [vec![1, 2]], "two blocks fill the window");
+        assert_eq!(ep.calls.lock().unwrap()[0].peer, PEER);
+        assert_eq!(states(&t, &[1, 2, 3, 4]), [PENDING; 4]);
+        assert_eq!(
+            disp.reserved.lock().unwrap().len(),
+            2,
+            "only the window is reserved"
+        );
+        ep.answer(|_| EntryOutcome::HitMemoryTier);
+        assert_eq!(
+            states(&t, &[1, 2, 3, 4]),
+            [RESIDENT, RESIDENT, PENDING, PENDING]
+        );
+        assert_eq!(ep.open(), [vec![3, 4]], "the window advanced");
+        ep.answer(|_| EntryOutcome::HitBlockTier);
+        assert_eq!(states(&t, &[1, 2, 3, 4]), [RESIDENT; 4]);
+        let s = t.fetch_stats().unwrap();
+        assert_eq!(
+            (
+                s.keys_started,
+                s.hits,
+                s.bytes,
+                s.keys_pending,
+                s.marks_live
+            ),
+            (4, 4, 4 * u64::from(BLOCK), 0, 4)
+        );
+        assert!(
+            disp.reserved.lock().unwrap().is_empty(),
+            "every slot settled"
+        );
+    }
+
+    /// The run stops at its first miss: the miss is released, the queued keys
+    /// are never fetched and read MISS, and a hit beside the miss stays.
+    #[test]
+    fn a_miss_cuts_the_run() {
+        use wire::check_state::{MISS, RESIDENT};
+        let (t, disp, ep) = fetching(small_window());
+        t.dispatch(op::FETCH, &fetch_req(PEER, &[1, 2, 3, 4, 5]))
+            .unwrap();
+        ep.answer(|k| {
+            if k == 2 {
+                EntryOutcome::Miss
+            } else {
+                EntryOutcome::HitMemoryTier
+            }
+        });
+        assert!(ep.open().is_empty(), "nothing after a miss is fetched");
+        assert_eq!(
+            states(&t, &[1, 2, 3, 4, 5]),
+            [RESIDENT, MISS, MISS, MISS, MISS]
+        );
+        assert_eq!(*disp.released.lock().unwrap(), [2]);
+        let s = t.fetch_stats().unwrap();
+        assert_eq!(
+            (s.hits, s.misses, s.truncated, s.keys_pending),
+            (1, 1, 3, 0)
+        );
+        assert_eq!(
+            s.keys_started,
+            s.hits + s.misses + s.failed + s.truncated,
+            "every started key is accounted for"
+        );
+    }
+
+    /// A failed fetch releases every slot it held and ends the run: none of its
+    /// keys is published, all read MISS.
+    #[test]
+    fn a_failed_fetch_releases_its_slots() {
+        use wire::check_state::MISS;
+        let (t, disp, ep) = fetching(small_window());
+        t.dispatch(op::FETCH, &fetch_req(PEER, &[1, 2, 3])).unwrap();
+        ep.fail_oldest();
+        assert_eq!(states(&t, &[1, 2, 3]), [MISS; 3]);
+        let mut rel = disp.released.lock().unwrap().clone();
+        rel.sort_unstable();
+        assert_eq!(rel, [1, 2]);
+        let s = t.fetch_stats().unwrap();
+        assert_eq!((s.failed, s.truncated, s.hits), (2, 1, 0));
+        assert!(disp.reserved.lock().unwrap().is_empty());
+    }
+
+    /// An endpoint that refuses the call outright is a failure of the window,
+    /// settled at once: nothing is left reserved.
+    #[test]
+    fn a_refused_fetch_settles_at_once() {
+        let (t, disp, ep) = fetching(small_window());
+        *ep.refuse.lock().unwrap() = true;
+        let resp = t.dispatch(op::FETCH, &fetch_req(PEER, &[1, 2])).unwrap();
+        assert_eq!(resp, [wire::fetch_status::OK, 1, 1]);
+        assert_eq!(states(&t, &[1, 2]), [wire::check_state::MISS; 2]);
+        assert!(disp.reserved.lock().unwrap().is_empty());
+        assert_eq!(t.fetch_stats().unwrap().failed, 2);
+    }
+
+    /// The run is the leading keys not already here: a resident or pending key
+    /// ends it, and nothing after it is fetched.
+    #[test]
+    fn the_run_stops_at_a_key_already_here() {
+        let (t, disp, ep) = fetching(FetchLimits::default());
+        disp.resident.lock().unwrap().insert(3);
+        let resp = t
+            .dispatch(op::FETCH, &fetch_req(PEER, &[1, 2, 3, 4]))
+            .unwrap();
+        assert_eq!(resp, [wire::fetch_status::OK, 1, 1, 0, 0]);
+        assert_eq!(ep.open(), [vec![1, 2]]);
+        // A second fetch naming a key the first is landing starts nothing.
+        let resp = t.dispatch(op::FETCH, &fetch_req(PEER, &[2, 9])).unwrap();
+        assert_eq!(resp, [wire::fetch_status::OK, 0, 0]);
+        // A store in flight ends a run the same way.
+        let mut w = Writer::default();
+        w.u32(1);
+        w.u64(7);
+        w.u32(BLOCK);
+        w.u64(0);
+        t.dispatch(op::RESERVE, &w.into_bytes()).unwrap();
+        let resp = t.dispatch(op::FETCH, &fetch_req(PEER, &[7, 8])).unwrap();
+        assert_eq!(resp, [wire::fetch_status::OK, 0, 0]);
+        let s = t.fetch_stats().unwrap();
+        assert_eq!((s.keys_requested, s.keys_started, s.not_started), (8, 2, 6));
+    }
+
+    /// The global cap holds back a second run's window until the first frees
+    /// room, then hands it over; nothing past the cap is ever reserved.
+    #[test]
+    fn the_global_cap_holds_a_window_back_and_hands_it_over() {
+        let (t, disp, ep) = fetching(FetchLimits {
+            window_bytes: 2 * u64::from(BLOCK),
+            inflight_bytes: 2 * u64::from(BLOCK),
+            ..FetchLimits::default()
+        });
+        t.dispatch(op::FETCH, &fetch_req(PEER, &[1, 2])).unwrap();
+        t.dispatch(op::FETCH, &fetch_req(PEER, &[10, 11])).unwrap();
+        assert_eq!(ep.open(), [vec![1, 2]], "the second run waits");
+        assert_eq!(disp.reserved.lock().unwrap().len(), 2);
+        assert_eq!(t.fetch_stats().unwrap().window_waits, 1);
+        ep.answer(|_| EntryOutcome::HitMemoryTier);
+        assert_eq!(
+            ep.open(),
+            [vec![10, 11]],
+            "the freed room went to the waiter"
+        );
+        ep.answer(|_| EntryOutcome::HitMemoryTier);
+        assert_eq!(t.fetch_stats().unwrap().hits, 4);
+    }
+
+    /// A full tier ends the run where the reservation was refused: what was
+    /// reserved is fetched, the rest reads MISS. No deadline is spent waiting
+    /// for the tier to make room.
+    #[test]
+    fn a_full_tier_cuts_the_run_without_waiting() {
+        let (t, disp, ep) = fetching(FetchLimits::default());
+        disp.reserve_fail.lock().unwrap().insert(3);
+        t.dispatch(op::FETCH, &fetch_req(PEER, &[1, 2, 3, 4]))
+            .unwrap();
+        assert_eq!(ep.open(), [vec![1, 2]]);
+        let deadlines = disp.reserve_deadlines.lock().unwrap().clone();
+        assert!(
+            deadlines
+                .iter()
+                .all(|d| d.is_some_and(|d| d <= Instant::now())),
+            "a fetch takes only free space: {deadlines:?}"
+        );
+        ep.answer(|_| EntryOutcome::HitMemoryTier);
+        let s = t.fetch_stats().unwrap();
+        assert_eq!((s.hits, s.truncated, s.keys_pending), (2, 2, 0));
+    }
+
+    /// Only a completion reclaims a fetch's slot: the stale-reservation reaper,
+    /// however short its timeout, never releases one the peer may be writing.
+    #[test]
+    fn the_reaper_never_reclaims_a_fetch_slot() {
+        let (t, disp, ep) = fetching(FetchLimits::default());
+        t.dispatch(op::FETCH, &fetch_req(PEER, &[1, 2])).unwrap();
+        assert_eq!(t.reap_stale_reservations(Duration::ZERO), 0);
+        assert!(disp.released.lock().unwrap().is_empty());
+        assert_eq!(disp.reserved.lock().unwrap().len(), 2, "still the fetch's");
+        ep.answer(|_| EntryOutcome::HitMemoryTier);
+        assert_eq!(t.fetch_stats().unwrap().hits, 2);
+    }
+
+    /// Attribution: a fetched block's first serve is FETCHED (wire 4), not the
+    /// DRAM the dispatcher sees; after that it is a local entry and reads DRAM.
+    /// An evicted or expired mark is counted unused and never misattributes.
+    #[test]
+    fn a_fetched_blocks_first_serve_is_attributed_fetched() {
+        let (t, disp, ep, evictions) = fetching_with_events(FetchLimits {
+            mark_ttl: Duration::from_millis(50),
+            ..FetchLimits::default()
+        });
+        t.dispatch(op::FETCH, &fetch_req(PEER, &[1, 2, 3, 4]))
+            .unwrap();
+        ep.answer(|_| EntryOutcome::HitMemoryTier);
+        disp.resident.lock().unwrap().insert(9); // a local entry, never fetched
+        assert_eq!(lookup(&t, &[1, 9]), [4, 1], "fetched vs local");
+        assert_eq!(lookup(&t, &[1]), [1], "only the first serve is the fetch's");
+        // Key 2 is evicted (seen through TAKE_EVENTS, as the connector drains
+        // them) and re-cached locally before any fetch-attributed read.
+        evictions
+            .send(interfaces::EvictionEvent {
+                key: 2,
+                reason: interfaces::EvictionReason::Removed,
+            })
+            .unwrap();
+        let mut w = Writer::default();
+        w.u32(0);
+        t.dispatch(op::TAKE_EVENTS, &w.into_bytes()).unwrap();
+        assert_eq!(lookup(&t, &[2]), [1], "an evicted block's mark is gone");
+        std::thread::sleep(Duration::from_millis(60));
+        // Key 3's mark has expired but the reaper has not run: still not FETCHED.
+        assert_eq!(lookup(&t, &[3]), [1], "an expired mark never attributes");
+        assert_eq!(t.expire_fetch_marks(), 1, "key 4 aged out");
+        assert_eq!(lookup(&t, &[4]), [1]);
+        let s = t.fetch_stats().unwrap();
+        assert_eq!(
+            (s.lookup_hits_fetched, s.fetched_unused, s.marks_live),
+            (1, 3, 0)
+        );
+        assert_eq!(
+            s.hits,
+            s.lookup_hits_fetched + s.fetched_unused + s.marks_live,
+            "every fetched block is served, wasted, or still marked"
+        );
+    }
+
+    /// Refusals: no endpoint, a peer that is not host:port, too many keys, a
+    /// duplicate key.
+    #[test]
+    fn fetch_refuses_what_it_cannot_serve() {
+        use wire::fetch_status::{BAD_PEER, NO_ENDPOINT, TOO_MANY};
+        let plain = translator(Arc::new(MockDispatcher::default()));
+        assert_eq!(
+            plain.dispatch(op::FETCH, &fetch_req(PEER, &[1])).unwrap(),
+            [NO_ENDPOINT]
+        );
+        let (t, _, ep) = fetching(FetchLimits {
+            max_keys: 2,
+            ..FetchLimits::default()
+        });
+        for bad in ["10.0.0.105", "10.0.0.105:0", ":7481", "10.0.0.105:x"] {
+            assert_eq!(
+                t.dispatch(op::FETCH, &fetch_req(bad, &[1])).unwrap(),
+                [BAD_PEER],
+                "{bad}"
+            );
+        }
+        assert_eq!(
+            t.dispatch(op::FETCH, &fetch_req(PEER, &[1, 2, 3])).unwrap(),
+            [TOO_MANY]
+        );
+        assert!(t.dispatch(op::FETCH, &fetch_req(PEER, &[1, 1])).is_err());
+        assert!(ep.open().is_empty());
+    }
+
+    /// A completion that arrives on the endpoint's thread while another thread
+    /// is starting a run must not deadlock or double-issue.
+    #[test]
+    fn completions_and_starts_race_safely() {
+        let (t, disp, ep) = fetching(FetchLimits {
+            window_bytes: u64::from(BLOCK),
+            ..FetchLimits::default()
+        });
+        let keys: Vec<u64> = (1..=64).collect();
+        t.dispatch(op::FETCH, &fetch_req(PEER, &keys)).unwrap();
+        let ep2 = ep.clone();
+        let answerer = std::thread::spawn(move || {
+            let mut n = 0;
+            while n < 64 {
+                if !ep2.open().is_empty() {
+                    ep2.answer(|_| EntryOutcome::HitMemoryTier);
+                    n += 1;
+                }
+            }
+        });
+        for k in 100..164u64 {
+            t.dispatch(op::FETCH, &fetch_req(PEER, &[k])).unwrap();
+        }
+        answerer.join().unwrap();
+        while !ep.open().is_empty() {
+            ep.answer(|_| EntryOutcome::HitMemoryTier);
+        }
+        let s = t.fetch_stats().unwrap();
+        assert_eq!((s.hits, s.keys_pending), (128, 0));
+        assert!(disp.reserved.lock().unwrap().is_empty());
     }
 }
