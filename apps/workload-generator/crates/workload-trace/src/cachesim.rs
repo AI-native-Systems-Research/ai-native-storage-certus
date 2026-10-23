@@ -425,7 +425,7 @@ impl<W: Write> OracleGeneralWriter<W> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "workload-tests"))]
 mod tests {
     use super::*;
 

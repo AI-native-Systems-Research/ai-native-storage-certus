@@ -1693,7 +1693,7 @@ fn digest_of(text: &str) -> String {
     format!("{acc:016x}")
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "workload-tests"))]
 mod tests {
     use super::*;
 

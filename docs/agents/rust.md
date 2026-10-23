@@ -45,6 +45,11 @@ you touch. Jenkins does not run clippy.
 SPDK/CUDA builds, and `ci-fast` / `otel` change test behaviour. Build named
 features per crate (see the Jenkinsfile test stages).
 
+The workload-generator crates' tests are opt-in: each crate has a
+`workload-tests` feature (off by default), so `cargo test --workspace` skips
+them. Run them with e.g. `cargo test -p workload-gen --features
+workload-gen/workload-tests`. Doctests still run, since cargo cannot gate them.
+
 Tooling: `cargo audit` — not run. `cargo hack --feature-powerset check` — not
 run; worth a scheduled job for `interfaces` (`spdk`/`gpu` gating). `cargo udeps`
 — not run. `cargo miri test` — not run; the candidates are the pure-Rust

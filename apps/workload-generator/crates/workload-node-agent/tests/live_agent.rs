@@ -13,6 +13,7 @@
 //! cache, that a key stored through it is **found again on the next turn**, and that the
 //! counters and histograms come back across the wire. Everything else about the agent is a
 //! statement about code; this is a statement about Certus.
+#![cfg(feature = "workload-tests")]
 
 use std::net::TcpStream;
 

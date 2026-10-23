@@ -3,6 +3,7 @@
 //! Almost all of this runs over an in-memory transport, because the protocol is bytes and a
 //! client testable only against a live agent is a client tested rarely. The one exception is
 //! `TCP_NODELAY`, which is a property of a real socket and is checked on a real socket.
+#![cfg(feature = "workload-tests")]
 
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};

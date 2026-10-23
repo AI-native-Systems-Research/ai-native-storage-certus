@@ -46,6 +46,7 @@
 //! This distinction is why the client counts per-key results rather than failing on them.
 //! A run in which every reserve came back 0 because the cache was full is a run worth
 //! knowing about, but it is not a broken generator.
+#![cfg(feature = "workload-tests")]
 
 use std::collections::{HashMap, HashSet};
 

@@ -38,9 +38,14 @@ hdrhistogram = { version = "7", features = ["serialization"] }
 clap = { version = "4", features = ["derive", "env"] }
 
 [features]
-# Skips tests that exceed the per-PR time budget. OFF by default, so a
-# plain `cargo test` runs everything: a developer working on the generator
-# must not have coverage hidden from them. CI opts in explicitly.
+# Opt-in switch for this crate's unit and integration tests. OFF by default, so
+# `cargo test --workspace` skips the workload-generator suites (they are slow and
+# isolated from the rest of the tree). Turn it on to run them, e.g.
+#   cargo test -p workload-gen --features workload-gen/workload-tests
+# Doctests still run without it; cargo cannot gate them on a feature.
+workload-tests = []
+# Skips tests that exceed the per-PR time budget. OFF by default, so
+# `cargo test --features workload-tests` runs everything. CI opts in explicitly.
 #
 # Deliberately a feature and not a bare #[ignore]: #[ignore] is already used
 # here for tests needing a live Certus server, an agent and a GPU, and

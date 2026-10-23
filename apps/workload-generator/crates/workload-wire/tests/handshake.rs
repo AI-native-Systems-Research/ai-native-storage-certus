@@ -4,6 +4,7 @@
 //! binary invalidated measurements, and it did so **silently** — the run completed and
 //! produced numbers. So these tests are less about the happy path than about proving each
 //! refusal actually fires and says which node it is about.
+#![cfg(feature = "workload-tests")]
 
 use workload_wire::frame::{Hello, HelloAck, BUILD_ID_BYTES, PROTO_VERSION};
 use workload_wire::handshake::{

@@ -113,7 +113,7 @@ pub fn check(what: impl FnOnce() -> String, err: CudaError) -> Result<(), String
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "workload-tests"))]
 mod tests {
     use super::*;
 

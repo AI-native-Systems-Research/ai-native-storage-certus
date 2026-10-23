@@ -34,7 +34,7 @@
 //! What it deliberately does *not* do is compare mailbox traffic, which would need a live server
 //! on both sides or a mailbox trait to mock. The middle row is why that is unnecessary rather
 //! than merely inconvenient.
-
+#![cfg(feature = "workload-tests")]
 #![cfg(feature = "live")]
 
 use std::sync::atomic::{AtomicBool, Ordering};

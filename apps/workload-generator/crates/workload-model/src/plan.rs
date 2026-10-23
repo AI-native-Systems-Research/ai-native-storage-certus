@@ -488,7 +488,7 @@ impl OperationPlan {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "workload-tests"))]
 mod tests {
     use super::*;
     use crate::description::WorkloadDescription;

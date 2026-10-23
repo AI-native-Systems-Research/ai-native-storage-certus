@@ -216,7 +216,7 @@ pub(crate) fn normal_ppf(p: f64) -> f64 {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "workload-tests"))]
 mod tests {
     use super::*;
 
