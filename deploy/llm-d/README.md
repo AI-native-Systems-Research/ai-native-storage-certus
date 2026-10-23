@@ -135,6 +135,7 @@ filled in:
 | `PD_PREFILL_REPLICAS`, `PD_DECODE_REPLICAS` | `PD=1` | split of the total GPUs |
 | `PD_PREFILL_NODES`, `PD_DECODE_NODES` | `PD=1` | space-separated node names whose GPUs cover each role |
 | `CERTUS_REGISTRY`, `CERTUS_REPO` | `WITH_CERTUS=1` | where `publish-image.sh` pushed the image |
+| `ROUTER_NODEPORT` | optional | expose the router at this port (30000-32767) on every node; see [Driving a workload through the router](#driving-a-workload-through-the-router) |
 
 The rules that tie them together:
 
@@ -293,6 +294,40 @@ one, and `LLMD_REF` to try another llm-d revision.
 Switching between the aggregated and P/D layouts deletes the other layout's
 Deployments first, because each is sized to every GPU. That is an outage for the
 length of the switch.
+
+## Driving a workload through the router
+
+The router is the instance's front door: an OpenAI-compatible endpoint in front
+of the scheduler, the same API as a single vLLM (`/v1/completions`,
+`/v1/chat/completions`), so a load generator built for one vLLM needs only a new
+base URL.
+
+- **From a cluster node**: the router's ClusterIP, port 80 --
+  `http://$(kubectl get svc -n llm-d-quickstart quickstart-epp -o jsonpath='{.spec.clusterIP}')/v1`.
+  The address changes if the router is reinstalled, so look it up, do not
+  hard-code it. (`*.svc.cluster.local` resolves only inside pods.)
+- **From outside the cluster**: `ROUTER_NODEPORT=30080 deploy/llm-d/install.sh`
+  (with your usual `PD=1` / `WITH_CERTUS=1`) adds a NodePort Service, so
+  `http://<any node>:30080/v1` reaches the router. A re-run without it removes
+  it. For a quick look without one: `kubectl port-forward -n llm-d-quickstart
+  svc/quickstart-epp 8000:80` -- fine for a few requests, a bottleneck for load.
+
+**Counting hits across the fleet.** Through the router a request's counts land on
+several servers, not one. `benchmarks/synthetic-agentic/scrape_prom.py --k8s`
+finds them all -- every model-server pod and every certus server -- and writes
+the usual `[prom] round` lines with the SUM under the usual keys (so
+`render_kvprofile` reads the fleet as one server) and each source's own values
+as `<label>.<key>`: `prefill.*`, `decode0.*`, `decode1.*`,
+`certus-<node>-numa<N>.*`. Under P/D read per-request counters per role: a
+request runs on both engines, so `request_success` and `prefix_cache_queries`
+are counted twice in the sum. Discovery runs once at start; restart the scraper
+after restarting pods.
+
+```bash
+benchmarks/synthetic-agentic/scrape_prom.py --k8s --interval 10 --out run.prom.log &
+# ... drive the workload at the router ...
+kill %1      # one final sample, then exits
+```
 
 ## Prefill/decode disaggregation (`PD=1`)
 

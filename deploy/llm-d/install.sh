@@ -71,6 +71,11 @@
 #                space-separated node names to label llm-d.ai/pd-prefill=true /
 #                llm-d.ai/pd-decode=true. Belongs in SITE_ENV. Optional if this
 #                instance's nodes already carry the role labels.
+#   ROUTER_NODEPORT
+#                expose the router's OpenAI endpoint on every node at this
+#                port (30000-32767), for clients outside the cluster. Unset:
+#                none, and an earlier one is removed. The router's own Service
+#                stays ClusterIP; this adds <GUIDE_NAME>-epp-nodeport beside it.
 #   CERTUS_REGISTRY, CERTUS_REPO
 #                where publish-image.sh pushed the connector image
 #                (WITH_CERTUS). Belongs in SITE_ENV.
@@ -114,6 +119,13 @@ PD="${PD:-0}"
 DRY_RUN="${DRY_RUN:-0}"
 KEEP_LLMD="${KEEP_LLMD:-0}"
 GUIDE_NAME="${GUIDE_NAME:-quickstart}"
+ROUTER_NODEPORT="${ROUTER_NODEPORT:-}"
+if [ -n "${ROUTER_NODEPORT}" ] && ! { [[ "${ROUTER_NODEPORT}" =~ ^[0-9]+$ ]] \
+        && [ "${ROUTER_NODEPORT}" -ge 30000 ] && [ "${ROUTER_NODEPORT}" -le 32767 ]; }; then
+    echo "ERROR: ROUTER_NODEPORT='${ROUTER_NODEPORT}' is not a port in 30000-32767." >&2
+    exit 1
+fi
+NODEPORT_SVC="${GUIDE_NAME}-epp-nodeport"
 
 if [ -z "${LLMD_REF:-}" ]; then
     LLMD_REF="$(grep -vE '^[[:space:]]*(#|$)' "${SCRIPT_DIR}/llm-d.ref" \
@@ -145,6 +157,7 @@ if [ "${UNINSTALL:-0}" != "0" ]; then
     for d in "${AGG_DEPLOYS[@]}" "${PD_DEPLOYS[@]}"; do
         kubectl delete "${d}" -n "${NAMESPACE}" --ignore-not-found --wait=true
     done
+    kubectl delete service "${NODEPORT_SVC}" -n "${NAMESPACE}" --ignore-not-found >/dev/null
     helm uninstall "${GUIDE_NAME}" -n "${NAMESPACE}" --wait 2>/dev/null \
         || echo "[uninstall] no helm release ${GUIDE_NAME} in ${NAMESPACE}"
     for n in ${held}; do
@@ -510,6 +523,35 @@ helm upgrade --install "${GUIDE_NAME}" \
   -f "${GUIDE_VALUES}" \
   -n "${NAMESPACE}" \
   --version "${ROUTER_CHART_VERSION}"
+
+# --- Optional NodePort to the router, for clients outside the cluster. The
+# chart's Service is fixed at ClusterIP, so this is a second Service selecting
+# the same proxy pods; it follows the chart's port 80 -> proxy targetPort. ---
+if [ -n "${ROUTER_NODEPORT}" ]; then
+    rsvc="${GUIDE_NAME}-epp"
+    sel="$(kubectl get service "${rsvc}" -n "${NAMESPACE}" -o jsonpath='{.spec.selector}')"
+    tport="$(kubectl get service "${rsvc}" -n "${NAMESPACE}" \
+             -o jsonpath='{.spec.ports[?(@.port==80)].targetPort}')"
+    if [ -z "${sel}" ] || [ -z "${tport}" ]; then
+        echo "ERROR: router Service ${rsvc} has no selector or port 80; cannot add a NodePort." >&2
+        exit 1
+    fi
+    kubectl apply -n "${NAMESPACE}" -f - <<NODEPORT
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${NODEPORT_SVC}
+  labels: {app.kubernetes.io/managed-by: llm-d-install-sh}
+spec:
+  type: NodePort
+  selector: ${sel}
+  ports:
+    - {name: http, port: 80, targetPort: ${tport}, nodePort: ${ROUTER_NODEPORT}, protocol: TCP}
+NODEPORT
+    echo "[install] router on every node at :${ROUTER_NODEPORT} (OpenAI API at http://<node>:${ROUTER_NODEPORT}/v1)"
+else
+    kubectl delete service "${NODEPORT_SVC}" -n "${NAMESPACE}" --ignore-not-found >/dev/null
+fi
 
 # The aggregated and P/D layouts each size themselves to every GPU, so whichever
 # is not being deployed has to give its GPUs back first or the new pods sit
