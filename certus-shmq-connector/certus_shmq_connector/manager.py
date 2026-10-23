@@ -467,8 +467,9 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         stored_ints = [k for _, k in stored_pairs]
         for orig, k in stored_pairs:
             if isinstance(orig, (bytes, bytearray)):
-                self._key_reverse[k] = bytes(orig)
-                self._key_reverse.move_to_end(k)
+                logical = denamespace_key(k, self._world_size)
+                self._key_reverse[logical] = bytes(orig)
+                self._key_reverse.move_to_end(logical)
         while len(self._key_reverse) > _KEY_REVERSE_MAX:
             self._key_reverse.popitem(last=False)
         locations = [BlockLocation(key=k) for k in stored_ints]
