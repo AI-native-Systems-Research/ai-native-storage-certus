@@ -73,6 +73,10 @@ mod remote_probe;
 #[path = "repair_test_eviction_events_dropped.rs"]
 mod repair_test_eviction_events_dropped;
 
+#[cfg(test)]
+#[path = "repair_test_failed_promotion_releases_slot.rs"]
+mod repair_test_failed_promotion_releases_slot;
+
 use parking_lot::RwLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -842,7 +846,18 @@ impl DispatcherComponent {
         // Check out an exclusive channel for this read. A single shared SPSC
         // channel across concurrent readers lets one thread dequeue another's
         // completions (completion theft → permanent hang); see ChannelPool.
-        let lease = drive.channel_pool.checkout()?;
+        let lease = match drive.channel_pool.checkout() {
+            Ok(lease) => lease,
+            Err(e) => {
+                // No I/O ran: release the reserved slot — the dispatch map
+                // still points the key at the SSD (a staged serve uses a pool
+                // buffer the dropping lease returns, not a tier slot).
+                if !staged {
+                    let _ = mt.remove(key);
+                }
+                return Err(e);
+            }
+        };
 
         // Zero-copy pipelined reader: NVMe → memory-tier slot → GPU (no intermediate ring copy).
         // SAFETY: mem_ptr is a valid, CUDA-pinned, SPDK-registered memory-tier slot.
@@ -864,9 +879,18 @@ impl DispatcherComponent {
             ],
             None => {
                 let ring_guard = self.pipeline_ring.read();
-                let ring_ref = ring_guard.as_ref().ok_or_else(|| {
-                    DispatcherError::NotInitialized("pipeline ring not allocated".into())
-                })?;
+                let ring_ref = match ring_guard.as_ref() {
+                    Some(r) => r,
+                    None => {
+                        // No I/O ran: release the reserved slot as above.
+                        if !staged {
+                            let _ = mt.remove(key);
+                        }
+                        return Err(DispatcherError::NotInitialized(
+                            "pipeline ring not allocated".into(),
+                        ));
+                    }
+                };
                 ring_ref.streams
             }
         };
@@ -895,6 +919,12 @@ impl DispatcherComponent {
                 )
             };
             if let Some(Err(e)) = results.into_iter().next() {
+                // The SSD read (or its GPU delivery) failed: release the
+                // reserved slot — the dispatch map still points the key at
+                // the SSD, so keeping it would strand dead tier capacity.
+                if !staged {
+                    let _ = mt.remove(key);
+                }
                 return Err(e);
             }
         }
@@ -915,8 +945,15 @@ impl DispatcherComponent {
         // when the entry is pinned (read_ref > 0) by an in-flight load — remove
         // rejects pinned entries, which crashed the load path.
         let _ = offset; // offset retained inside promote_block_to_memory_tier
-        dm.promote_block_to_memory_tier(key, mem_ptr, ipc_handle.size)
-            .map_err(|e| DispatcherError::IoError(format!("promote transition failed: {e}")))?;
+        if let Err(e) = dm.promote_block_to_memory_tier(key, mem_ptr, ipc_handle.size) {
+            // The in-place transition did not land: release the reserved
+            // slot so the memory tier holds nothing the dispatch map does
+            // not point to (the key stays SSD resident).
+            let _ = mt.remove(key);
+            return Err(DispatcherError::IoError(format!(
+                "promote transition failed: {e}"
+            )));
+        }
         self.tier_counters.record_promotion_to_memory();
 
         Ok(())
@@ -2569,6 +2606,11 @@ impl IDispatcher for DispatcherComponent {
                                 .is_ok()
                             {
                                 self.tier_counters.record_promotion_to_memory();
+                            } else {
+                                // The promotion did not land: release the
+                                // slot — the dispatch map still points the
+                                // key at the SSD.
+                                let _ = mt.remove(entry.key);
                             }
                         })
                         .map_err(|e| match e {
@@ -2695,6 +2737,10 @@ impl IDispatcher for DispatcherComponent {
                                     // Cannot get streams — fail all jobs.
                                     for djs in &drive_job_sets {
                                         for &ci in &djs.job_ci {
+                                            // No I/O ran: release the
+                                            // reserved slot — the dispatch map
+                                            // still points the key at the SSD.
+                                            let _ = mt.remove(cold_entries[ci].key);
                                             results[cold_entries[ci].idx] =
                                                 Some(Err(DispatcherError::IoError(
                                                     "create_stream failed for scatter-gather"
@@ -2720,6 +2766,15 @@ impl IDispatcher for DispatcherComponent {
                                     channel_leases.push(lease);
                                 }
                                 Err(e) => {
+                                    // The scatter-gather cannot run for any
+                                    // drive: release every reserved slot —
+                                    // the dispatch map still points these
+                                    // keys at the SSD.
+                                    for djs2 in &drive_job_sets {
+                                        for &ci in &djs2.job_ci {
+                                            let _ = mt.remove(cold_entries[ci].key);
+                                        }
+                                    }
                                     for &ci in &djs.job_ci {
                                         results[cold_entries[ci].idx] = Some(Err(e.clone()));
                                     }
@@ -2755,36 +2810,46 @@ impl IDispatcher for DispatcherComponent {
                                     let ci = djs.job_ci[job_idx];
                                     let entry = &cold_entries[ci];
                                     let res = match result {
-                                        Ok(()) => dm
-                                            .promote_block_to_memory_tier(
+                                        Ok(()) => {
+                                            match dm.promote_block_to_memory_tier(
                                                 entry.key,
                                                 djs.mem_ptrs[job_idx],
                                                 entry.total_size,
-                                            )
-                                            .map_err(|e| {
-                                                DispatcherError::IoError(format!(
-                                                    "promote transition failed: {e}"
-                                                ))
-                                            })
-                                            .and_then(|()| {
-                                                self.tier_counters.record_promotion_to_memory();
-                                                // The warm-stream sync here also waits
-                                                // for the warm-hit copies still queued
-                                                // on it: correct, and intentional.
-                                                if entry.regions.len() > 1 {
-                                                    self.serve_memory_tier_to_gpu(
-                                                        &gpu,
-                                                        djs.mem_ptrs[job_idx],
-                                                        entry.total_size,
-                                                        &entry.regions,
-                                                        warm_raw,
-                                                        true,
-                                                    )
-                                                } else {
-                                                    Ok(())
+                                            ) {
+                                                Ok(()) => {
+                                                    self.tier_counters.record_promotion_to_memory();
+                                                    // The warm-stream sync here also waits
+                                                    // for the warm-hit copies still queued
+                                                    // on it: correct, and intentional.
+                                                    if entry.regions.len() > 1 {
+                                                        self.serve_memory_tier_to_gpu(
+                                                            &gpu,
+                                                            djs.mem_ptrs[job_idx],
+                                                            entry.total_size,
+                                                            &entry.regions,
+                                                            warm_raw,
+                                                            true,
+                                                        )
+                                                    } else {
+                                                        Ok(())
+                                                    }
                                                 }
-                                            }),
-                                        Err(e) => Err(e.clone()),
+                                                Err(e) => {
+                                                    // The promotion did not land: release
+                                                    // the reserved slot — the dispatch map
+                                                    // still points the key at the SSD.
+                                                    let _ = mt.remove(entry.key);
+                                                    Err(DispatcherError::IoError(format!(
+                                                        "promote transition failed: {e}"
+                                                    )))
+                                                }
+                                            }
+                                        }
+                                        // The NVMe read failed: same release.
+                                        Err(e) => {
+                                            let _ = mt.remove(entry.key);
+                                            Err(e.clone())
+                                        }
                                     };
                                     results[cold_entries[ci].idx] = Some(res);
                                 }
@@ -3860,6 +3925,10 @@ impl IDispatcher for DispatcherComponent {
                         .is_ok()
                     {
                         self.tier_counters.record_promotion_to_memory();
+                    } else {
+                        // The promotion did not land: release the slot —
+                        // the dispatch map still points the key at the SSD.
+                        let _ = mt.remove(entry.key);
                     }
                 }
             }
@@ -3950,6 +4019,11 @@ impl IDispatcher for DispatcherComponent {
                             .is_ok()
                         {
                             self.tier_counters.record_promotion_to_memory();
+                        } else {
+                            // The promotion did not land: release the slot —
+                            // the dispatch map still points the key at the
+                            // SSD (the read-failure exit above does the same).
+                            let _ = mt.remove(entry.key);
                         }
                     }
                 });

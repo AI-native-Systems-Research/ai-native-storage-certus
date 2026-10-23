@@ -267,3 +267,11 @@ A-1, A-2, A-3 (decision recorded), A-4 (2026-10-14 apply); A-01, A-02, A-04, A-0
 
 - `dispatcher-p2p` still has the pre-repair `remove` / `clear_memory_tier` / `flush_to_ssd` behaviour. That task is interfaces proposal 7 (TRACK) and is recorded in `components/interfaces/.specify/sync/align-tasks.md`, for the component `dispatcher-p2p`.
 
+
+### OPEN A-10 — Align 001-dispatcher-cache-interface/FR-039 (6): `batch_lookup` returns one result per entry when a channel checkout fails (moderate; HIGH confidence; pre-existing)
+> Approval note: *"TRACK (Cornel 2026-10-23): pre-existing, not caused by this branch; repair later with a test first."*
+
+- **Spec** (`specs/001-dispatcher-cache-interface/spec.md`, FR-039 step (6)): "merges results back in input order. Returns one `Result` per input entry."
+- **Code**: in the scatter-gather setup, a channel checkout failure for drive *d* sets `results` only for the jobs of that drive and then `break`s. Since this branch the slots of all drives are released, but their results stay `None`. Neither the remote pass nor the recovery pass fills a `None`, and `r.unwrap()` then panics on the request thread. Needs at least 2 active drives and a `connect_client` failure.
+- **Required change**: in the `Err(e)` arm, set `results[...] = Some(Err(e.clone()))` for every job of every drive (the loop that already releases their slots); optionally replace `r.unwrap()` with a fallback.
+- **Test first**: two mock drives, the second drive's `connect_client` fails, one cold key per drive: both outcomes are `Err`, no panic, both slots released.
