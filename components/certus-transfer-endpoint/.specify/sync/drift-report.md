@@ -1,11 +1,13 @@
 ---
 spec_sync_component: certus-transfer-endpoint
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-22T22:39:40Z
-spec_sync_git_commit: ef6b84c3
-spec_sync_inputs_sha256: aaa1d5d32c252b24689c5c9e5f92ca96e37144f41cbc611dda7d251769e32315
+spec_sync_synced_at: 2026-10-23T01:19:00Z
+spec_sync_git_commit: 8e7ccab7
+spec_sync_inputs_sha256: 0921d3f8bd9b6c8d054dbe28a2daf9a3f549484387f58f03a66ffbc02e0831a7
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-22 (specs only).** Phase 11 is designed and deferred: `cutover.md` added, and tasks.md / plan.md point at it. No code changed; nothing else in the analysis below changes.
+
 > **Sync 2026-10-22 (branch `001-rdma-cache-transfer`) — full analysis, resolved.** The analysis below found 26 items (P01-P26 in `proposals.md`); all are resolved. Code defects fixed, each with a test that fails without the fix: the two request gauges were never written (P07); `IncompatiblePeer` was never constructed (P10); bad-reply teardowns were uncounted, and `protocol_faults` now counts every `OP_ERROR` sent or received and every inbound-caused teardown (P15); a destination could not land in its own memory tier — `fetch` now takes `LocalSlot`s in the pool, `register_landing_region` is gone (P12, P11); an outside-pool lookup is `Failed`, not `Miss` (P25); receives were posted on `Up`, racing the peer's first `OP_HELLO` — they now go with the connect or accept (P18). On review, also: teardown only when it must be (FR-024's four cases), with a request before `OP_HELLO` and a duplicate `OP_HELLO` answered instead (P05); opcodes renumbered so the low bit marks a reply. Every BACKFILL applied to spec.md, the contracts, wire-protocol.md, plan.md, tasks.md and CLAUDE.md (`9e018edb` and the commits above). No actionable drift remains.
 
 > **Sync 2026-10-22 (branch `001-rdma-cache-transfer`) — full analysis, resolved.** The analysis below found 26 items (P01-P26 in `proposals.md`); all are resolved. Code defects fixed, each with a test that fails without the fix: the two request gauges were never written (P07); `IncompatiblePeer` was never constructed (P10); bad-reply teardowns were uncounted, and `protocol_faults` now counts every `OP_ERROR` sent or received and every inbound-caused teardown (P15); a destination could not land in its own memory tier — `fetch` now takes `LocalSlot`s in the pool, `register_landing_region` is gone (P12, P11); an outside-pool lookup is `Failed`, not `Miss` (P25); receives were posted on `Up`, racing the peer's first `OP_HELLO` — they now go with the connect or accept (P18). On review, also: teardown only when it must be (FR-024's four cases), with a request before `OP_HELLO` and a duplicate `OP_HELLO` answered instead (P05); opcodes renumbered so the low bit marks a reply. Every BACKFILL applied to spec.md, the contracts, wire-protocol.md, plan.md, tasks.md and CLAUDE.md (`9e018edb` and the commits above). No actionable drift remains.

@@ -172,8 +172,9 @@ reclaim, then lazy reconnect, with the peer-wide abort logged (D18).
 
 **Phase 7 (later, separate change) — cutover.**
 Re-point `remote-lookup` at this component; delete
-`remote-lookup-rdma-initiator` and `remote-lookup-rdma-responder`. Explicitly **out of
-scope** for FR-020 and not required for any P1 success criterion.
+`remote-lookup-rdma-initiator` and `remote-lookup-rdma-responder`. Out of scope for FR-020
+and not required for any P1 success criterion; designed and deferred in
+[cutover.md](./cutover.md).
 
 ## Complexity Tracking
 
@@ -227,5 +228,5 @@ version exists.
 ## Next Step
 
 Phases 1–10 of `tasks.md` (T001–T083) are complete; Phase 11 (cutover and retirement,
-T065–T067) is out of scope.
+T065–T067) is deferred: T065/T066 designed in cutover.md, T067 a separate design task.
 
