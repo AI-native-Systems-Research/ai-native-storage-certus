@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 #
-# Bring llm-d up in the llm-d-quickstart namespace, using one site's overlays.
+# Bring up one llm-d instance: a namespace, its router, and model servers
+# confined to the instance's own nodes. Several instances can share a cluster
+# on disjoint node sets; each has its own site file (SITE_ENV) and namespace.
 #
 # This script is hardware-independent. Configuration comes in two layers:
 #
@@ -28,6 +30,7 @@
 #   WITH_CERTUS=1 deploy/llm-d/install.sh   # + certus KV-cache offload
 #   PD=1 deploy/llm-d/install.sh            # prefill/decode disaggregation
 #   DRY_RUN=1 PD=1 deploy/llm-d/install.sh  # check settings; change nothing
+#   UNINSTALL=1 deploy/llm-d/install.sh     # remove the instance, free its nodes
 #
 # Env:
 #   SITE_ENV     private site file (default:
@@ -41,19 +44,31 @@
 #   KEEP_LLMD    1 to keep the temporary checkout and print its path, e.g. to
 #                inspect what was applied (default: 0)
 #   LLMD_REF     override the pin in llm-d.ref
-#   NAMESPACE    target namespace (default: llm-d-quickstart)
+#   NAMESPACE    target namespace, and the instance's identity (default:
+#                llm-d-quickstart). One instance per namespace: install.sh labels
+#                the instance's nodes llm-d.ai/instance=<NAMESPACE>, confines its
+#                pods to them, and refuses a node another instance holds.
+#   UNINSTALL    1 to remove this instance instead: its model servers, its
+#                router release and its node labels. The namespace is kept, since
+#                it may hold secrets created by hand. Honours DRY_RUN.
+#   RELEASE_NODES
+#                1 to remove this instance's claim from nodes it holds but no
+#                longer lists, instead of refusing (default: 0)
 #   WITH_CERTUS  1 to apply profiles/<PROFILE>/certus (default: 0)
 #   PD           1 to apply profiles/<PROFILE>/pd instead of agg (default: 0).
 #                Not combinable with WITH_CERTUS.
+#   AGG_NODES    space-separated nodes for aggregated serving (default and
+#                WITH_CERTUS). Belongs in SITE_ENV. Optional if the nodes
+#                already carry this instance's label.
 #   AGG_REPLICAS
-#                aggregated replicas, normally one per GPU. Belongs in SITE_ENV.
+#                aggregated replicas, normally one per GPU of AGG_NODES.
+#                Belongs in SITE_ENV.
 #   PD_PREFILL_REPLICAS, PD_DECODE_REPLICAS
 #                prefill / decode replicas (PD=1). Belongs in SITE_ENV.
 #   PD_PREFILL_NODES, PD_DECODE_NODES
 #                space-separated node names to label llm-d.ai/pd-prefill=true /
-#                llm-d.ai/pd-decode=true. Belongs in SITE_ENV. Optional if the
-#                labels already exist; labels on nodes not listed are left
-#                alone.
+#                llm-d.ai/pd-decode=true. Belongs in SITE_ENV. Optional if this
+#                instance's nodes already carry the role labels.
 #   CERTUS_REGISTRY, CERTUS_REPO
 #                where publish-image.sh pushed the connector image
 #                (WITH_CERTUS). Belongs in SITE_ENV.
@@ -86,6 +101,12 @@ PROFILE_DIR="${SCRIPT_DIR}/profiles/${PROFILE}"
 }
 
 NAMESPACE="${NAMESPACE:-llm-d-quickstart}"
+# The namespace is the instance: everything install.sh manages lives in it, and
+# the layout switch deletes Deployments by name within it, so two instances
+# sharing one would delete each other's. A namespace name is always a valid
+# label value, so it doubles as the node-ownership label.
+INSTANCE="${NAMESPACE}"
+RELEASE_NODES="${RELEASE_NODES:-0}"
 WITH_CERTUS="${WITH_CERTUS:-0}"
 PD="${PD:-0}"
 DRY_RUN="${DRY_RUN:-0}"
@@ -97,6 +118,39 @@ if [ -z "${LLMD_REF:-}" ]; then
                 | head -1 | tr -d '[:space:]')"
 fi
 [ -n "${LLMD_REF}" ] || { echo "ERROR: no llm-d revision in ${SCRIPT_DIR}/llm-d.ref" >&2; exit 1; }
+
+if ! [[ "${NAMESPACE}" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]]; then
+    echo "ERROR: NAMESPACE='${NAMESPACE}' is not a valid namespace name." >&2
+    exit 1
+fi
+
+AGG_DEPLOYS=(deploy/optimized-baseline-nvidia-gpu-vllm-decode)
+PD_DEPLOYS=(deploy/pd-disaggregation-nvidia-gpu-vllm-prefill
+            deploy/pd-disaggregation-nvidia-gpu-vllm-decode)
+
+# --- Uninstall: needs neither a profile check nor the llm-d checkout. ---
+if [ "${UNINSTALL:-0}" != "0" ]; then
+    held="$(kubectl get nodes -l "llm-d.ai/instance=${INSTANCE}" -o name | sed 's|node/||' | tr '\n' ' ')"
+    echo "[uninstall] instance ${INSTANCE} in namespace ${NAMESPACE}; holds: ${held:-no nodes}"
+    if [ "${DRY_RUN}" != "0" ]; then
+        for d in "${AGG_DEPLOYS[@]}" "${PD_DEPLOYS[@]}"; do
+            kubectl get "${d}" -n "${NAMESPACE}" >/dev/null 2>&1 && echo "[dry-run] would delete ${d}"
+        done
+        echo "[dry-run] would uninstall helm release ${GUIDE_NAME} and release: ${held:-nothing}"
+        echo "[dry-run] nothing was changed."
+        exit 0
+    fi
+    for d in "${AGG_DEPLOYS[@]}" "${PD_DEPLOYS[@]}"; do
+        kubectl delete "${d}" -n "${NAMESPACE}" --ignore-not-found --wait=true
+    done
+    helm uninstall "${GUIDE_NAME}" -n "${NAMESPACE}" --wait 2>/dev/null \
+        || echo "[uninstall] no helm release ${GUIDE_NAME} in ${NAMESPACE}"
+    for n in ${held}; do
+        kubectl label node "${n}" llm-d.ai/instance- llm-d.ai/pd-prefill- llm-d.ai/pd-decode- >/dev/null
+    done
+    echo "[uninstall] done; namespace ${NAMESPACE} kept (delete it by hand if unused)."
+    exit 0
+fi
 
 if [ "${PD}" != "0" ] && [ "${WITH_CERTUS}" != "0" ]; then
     # Both want --kv-transfer-config. Combining them means wrapping NIXL and the
@@ -166,9 +220,6 @@ export NAMESPACE GUIDE_NAME
 
 VLLM_DIR="${REPO_ROOT}/guides/optimized-baseline/modelserver/gpu/vllm"
 PD_VLLM_DIR="${REPO_ROOT}/guides/pd-disaggregation/modelserver/gpu/vllm"
-AGG_DEPLOYS=(deploy/optimized-baseline-nvidia-gpu-vllm-decode)
-PD_DEPLOYS=(deploy/pd-disaggregation-nvidia-gpu-vllm-prefill
-            deploy/pd-disaggregation-nvidia-gpu-vllm-decode)
 
 if [ "${PD}" != "0" ]; then
     GUIDE_VALUES="${REPO_ROOT}/guides/pd-disaggregation/router/pd-disaggregation.values.yaml"
@@ -180,77 +231,101 @@ else
     OTHER_DEPLOYS=("${PD_DEPLOYS[@]}")
 fi
 
-# --- Capacity check (read-only). Catches a typo'd node name or a replica count
-# larger than the GPUs available, which would otherwise surface only as pods
-# stuck Pending. Skipped when no cluster is reachable, which is fine for a
-# DRY_RUN on a laptop. ---
+# --- Node ownership and capacity (read-only). ---
+# Each instance owns a set of nodes, recorded as llm-d.ai/instance=<INSTANCE>.
+# Its pods select on that label, so two instances cannot land on each other's
+# GPUs, and a node another instance holds is refused rather than shared. Checks
+# here catch a typo'd node name, a stolen node, or more replicas than GPUs --
+# all of which would otherwise surface only as pods stuck Pending. Skipped when
+# no cluster is reachable, which is fine for a DRY_RUN on a laptop.
 CLUSTER_OK=0
 if kubectl get nodes -o name >/dev/null 2>&1; then CLUSTER_OK=1; fi
+INST_LABEL="llm-d.ai/instance"
 
-gpus_on() {                   # gpus_on <node>: allocatable nvidia.com/gpu, or "missing"
-    kubectl get node "$1" -o jsonpath='{.status.allocatable.nvidia\.com/gpu}' 2>/dev/null \
-        || echo "missing"
-}
-check_gpus() {                # check_gpus <role> <replicas> <nodes...>
-    local role="$1" want="$2"; shift 2
-    local n g have=0
-    # No list: the nodes already labelled from an earlier run are the ones used.
-    # shellcheck disable=SC2046
-    [ $# -gt 0 ] || set -- $(kubectl get nodes -l "llm-d.ai/pd-${role}=true" -o name | sed 's|node/||')
-    for n in "$@"; do
-        g="$(gpus_on "${n}")"
-        if [ "${g}" = "missing" ]; then
-            echo "ERROR: ${role} node '${n}' does not exist in this cluster." >&2
+if [ "${PD}" != "0" ]; then ROLES=(prefill decode); else ROLES=(agg); fi
+role_var() { echo "PD_$(echo "$1" | tr a-z A-Z)"; }   # prefill -> PD_PREFILL
+nodes_var() { if [ "$1" = agg ]; then echo AGG_NODES; else echo "$(role_var "$1")_NODES"; fi; }
+count_var() { if [ "$1" = agg ]; then echo AGG_REPLICAS; else echo "$(role_var "$1")_REPLICAS"; fi; }
+# P/D roles also carry a role label; aggregated pods need only the instance.
+role_sel() { if [ "$1" = agg ]; then echo "${INST_LABEL}=${INSTANCE}"; else echo "${INST_LABEL}=${INSTANCE},llm-d.ai/pd-$1=true"; fi; }
+
+node_list() { kubectl get nodes -l "$1" -o name | sed 's|node/||'; }
+owner_of() { kubectl get node "$1" -o jsonpath="{.metadata.labels.llm-d\.ai/instance}"; }
+
+# Resolve each role's nodes: the site's list, or -- if it is empty -- the nodes
+# that already carry this instance's labels from an earlier run.
+declare -A ROLE_NODES
+for role in "${ROLES[@]}"; do
+    v="$(nodes_var "${role}")"
+    ROLE_NODES[${role}]="${!v:-}"
+    if [ -z "${ROLE_NODES[${role}]}" ] && [ "${CLUSTER_OK}" = 1 ]; then
+        ROLE_NODES[${role}]="$(node_list "$(role_sel "${role}")" | tr '\n' ' ')"
+    fi
+    if [ -z "${ROLE_NODES[${role}]// }" ]; then
+        echo "ERROR: no node to run ${role} on. Set ${v} in ${SITE_ENV}" >&2
+        echo "       (see site.env.example)." >&2
+        exit 1
+    fi
+done
+# shellcheck disable=SC2086  # word-splitting the node lists is intended
+WANT_NODES="$(printf '%s\n' ${ROLE_NODES[*]} | sort -u | tr '\n' ' ')"
+
+if [ "${CLUSTER_OK}" = 1 ]; then
+    # Every node exists and belongs to no other instance.
+    for n in ${WANT_NODES}; do
+        if ! kubectl get node "${n}" >/dev/null 2>&1; then
+            echo "ERROR: node '${n}' does not exist in this cluster." >&2
             echo "       Node names: $(kubectl get nodes -o name | sed 's|node/||' | tr '\n' ' ')" >&2
             exit 1
         fi
-        echo "[install]   ${role}: ${n} has ${g:-0} allocatable GPU(s)"
-        have=$((have + ${g:-0}))
-    done
-    # Allocatable, not free: GPUs held by the layout this run replaces are
-    # counted, since that layout is deleted first.
-    if [ $# -gt 0 ] && [ "${have}" -lt "${want}" ]; then
-        echo "WARNING: ${want} ${role} replica(s) but only ${have} GPU(s) on $*;" >&2
-        echo "         $((want - have)) pod(s) will stay Pending." >&2
-    fi
-}
-# P/D needs somewhere to put each role: the site's node list, or nodes that
-# already carry the label from an earlier run.
-need_nodes() {                # need_nodes <role> <nodes...>
-    local role="$1"; shift
-    [ $# -gt 0 ] && return
-    if [ "${CLUSTER_OK}" = 1 ] \
-        && [ -n "$(kubectl get nodes -l "llm-d.ai/pd-${role}=true" -o name)" ]; then
-        return
-    fi
-    echo "ERROR: no node to run ${role} on. Set PD_$(echo "${role}" | tr a-z A-Z)_NODES" >&2
-    echo "       in ${SITE_ENV} (see site.env.example)." >&2
-    exit 1
-}
-if [ "${PD}" != "0" ]; then
-    # shellcheck disable=SC2086
-    need_nodes prefill ${PD_PREFILL_NODES:-}
-    # shellcheck disable=SC2086
-    need_nodes decode ${PD_DECODE_NODES:-}
-fi
-
-if [ "${CLUSTER_OK}" = 1 ]; then
-    if [ "${PD}" != "0" ]; then
-        # shellcheck disable=SC2086
-        check_gpus prefill "${PD_PREFILL_REPLICAS}" ${PD_PREFILL_NODES:-}
-        # shellcheck disable=SC2086
-        check_gpus decode "${PD_DECODE_REPLICAS}" ${PD_DECODE_NODES:-}
-    else
-        total="$(kubectl get nodes -o jsonpath='{range .items[*]}{.status.allocatable.nvidia\.com/gpu}{"\n"}{end}' \
-                 | awk '{s += $1} END {print s + 0}')"
-        echo "[install]   cluster has ${total} allocatable GPU(s) for ${AGG_REPLICAS} replica(s)"
-        if [ "${total}" -lt "${AGG_REPLICAS}" ]; then
-            echo "WARNING: AGG_REPLICAS=${AGG_REPLICAS} exceeds the cluster's ${total} GPU(s);" >&2
-            echo "         $((AGG_REPLICAS - total)) pod(s) will stay Pending." >&2
+        owner="$(owner_of "${n}")"
+        if [ -n "${owner}" ] && [ "${owner}" != "${INSTANCE}" ]; then
+            echo "ERROR: node '${n}' belongs to llm-d instance '${owner}'." >&2
+            echo "       Remove it from that instance's site file and re-run it with" >&2
+            echo "       RELEASE_NODES=1, or pick another node." >&2
+            exit 1
         fi
+    done
+    # Nodes this instance holds but no longer lists: refuse, unless told to
+    # release them. Silently keeping them would leave pods where the site file
+    # says they should not be; silently dropping them could strand a running
+    # layout of this instance.
+    STALE_NODES=""
+    for n in $(node_list "${INST_LABEL}=${INSTANCE}"); do
+        case " ${WANT_NODES} " in *" ${n} "*) ;; *) STALE_NODES+="${n} " ;; esac
+    done
+    if [ -n "${STALE_NODES}" ] && [ "${RELEASE_NODES}" = "0" ]; then
+        echo "ERROR: instance '${INSTANCE}' holds node(s) its site file no longer lists:" >&2
+        echo "       ${STALE_NODES}" >&2
+        echo "       Re-run with RELEASE_NODES=1 to release them, or list them again." >&2
+        exit 1
     fi
+
+    # Capacity, per role. Allocatable, not free: GPUs held by the layout this run
+    # replaces are counted, since that layout is deleted first. A node in two
+    # roles counts toward both, so a shared node can still over-commit; the
+    # README recommends disjoint role lists for that reason.
+    for role in "${ROLES[@]}"; do
+        cv="$(count_var "${role}")"; want="${!cv}"; have=0
+        for n in ${ROLE_NODES[${role}]}; do
+            g="$(kubectl get node "${n}" -o jsonpath='{.status.allocatable.nvidia\.com/gpu}')"
+            echo "[install]   ${role}: ${n} has ${g:-0} allocatable GPU(s)"
+            have=$((have + ${g:-0}))
+        done
+        if [ "${have}" -lt "${want}" ]; then
+            echo "WARNING: ${cv}=${want} but ${role} nodes have only ${have} GPU(s);" >&2
+            echo "         $((want - have)) pod(s) will stay Pending." >&2
+        fi
+    done
+
+    # The InferencePool CRD is cluster-wide and shared by every instance;
+    # re-applying it from a different GAIE release changes it under all of them.
+    have_crd="$(kubectl get crd inferencepools.inference.networking.k8s.io \
+        -o jsonpath='{.metadata.annotations.inference\.networking\.k8s\.io/bundle-version}' 2>/dev/null || true)"
+    others="$(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.labels.llm-d\.ai/instance}{"\n"}{end}' \
+              | grep -v -x -e '' -e "${INSTANCE}" | sort -u | tr '\n' ' ' || true)"
 elif [ "${DRY_RUN}" != "0" ]; then
-    echo "[dry-run] no cluster reachable; skipping node and GPU checks"
+    echo "[dry-run] no cluster reachable; skipping node, ownership and GPU checks"
 else
     echo "ERROR: kubectl cannot reach a cluster." >&2
     exit 1
@@ -307,21 +382,55 @@ elif [ "${PD}" = "0" ]; then
     echo "[install] aggregated serving (WITH_CERTUS=1 for certus offload, PD=1 for P/D)"
 fi
 
-# Stamp the site's replica counts onto the top overlay, so they take effect
-# whichever overlay is applied. Names are post-namePrefix.
+# Wrap the profile in a generated overlay carrying what belongs to the site, not
+# the GPU type: replica counts, and the nodeSelector that confines every model
+# server to this instance's nodes (merged with the profile's own selector, e.g.
+# the P/D role labels, not replacing it). A wrapper rather than an append, so the
+# profile's kustomization stays as committed. It sits beside the overlay it
+# wraps, as kustomize requires. Names are post-namePrefix.
+#
+# The placement annotation is a hash of which nodes hold which role. Node labels
+# alone never move a running pod: re-labelling node A from prefill to decode
+# leaves the old prefill pod on A, holding the GPU a new decode pod needs, with
+# the Deployment reporting nothing wrong. Changing the hash changes the pod
+# template, so any placement change rolls the model servers.
+placement="$(for role in "${ROLES[@]}"; do
+                 # shellcheck disable=SC2086
+                 echo "${role}=$(printf '%s\n' ${ROLE_NODES[${role}]} | sort | tr '\n' ',')"
+             done | sha256sum | cut -c1-16)"
+SITE_OVERLAY="$(dirname "${OVERLAY}")/site-${INSTANCE}"
+rm -rf "${SITE_OVERLAY}"
+mkdir -p "${SITE_OVERLAY}"
 {
-    echo
-    echo "# Added by install.sh from the site settings."
+    echo "# Generated by install.sh from the site settings; not a source."
+    echo "apiVersion: kustomize.config.k8s.io/v1beta1"
+    echo "kind: Kustomization"
+    echo "resources:"
+    echo "  - ../$(basename "${OVERLAY}")"
     echo "replicas:"
     if [ "${PD}" != "0" ]; then
         echo "  - {name: pd-disaggregation-nvidia-gpu-vllm-prefill, count: ${PD_PREFILL_REPLICAS}}"
         echo "  - {name: pd-disaggregation-nvidia-gpu-vllm-decode, count: ${PD_DECODE_REPLICAS}}"
-        echo "[install] replicas: ${PD_PREFILL_REPLICAS} prefill, ${PD_DECODE_REPLICAS} decode" >&2
     else
         echo "  - {name: optimized-baseline-nvidia-gpu-vllm-decode, count: ${AGG_REPLICAS}}"
-        echo "[install] replicas: ${AGG_REPLICAS}" >&2
     fi
-} >> "${OVERLAY}/kustomization.yaml"
+    echo "patches:"
+    echo "  - target: {kind: Deployment}"
+    echo "    patch: |-"
+    echo "      apiVersion: apps/v1"
+    echo "      kind: Deployment"
+    echo "      metadata: {name: any}"
+    echo "      spec:"
+    echo "        template:"
+    echo "          metadata: {annotations: {llm-d.ai/placement: \"${placement}\"}}"
+    echo "          spec: {nodeSelector: {${INST_LABEL}: \"${INSTANCE}\"}}"
+} > "${SITE_OVERLAY}/kustomization.yaml"
+OVERLAY="${SITE_OVERLAY}"
+if [ "${PD}" != "0" ]; then
+    echo "[install] instance ${INSTANCE}: ${PD_PREFILL_REPLICAS} prefill, ${PD_DECODE_REPLICAS} decode"
+else
+    echo "[install] instance ${INSTANCE}: ${AGG_REPLICAS} replica(s)"
+fi
 
 # Fail here rather than letting a malformed overlay reach the cluster. This is
 # also where an upstream base restructuring shows up after a llm-d.ref bump.
@@ -340,10 +449,12 @@ if [ "${DRY_RUN}" != "0" ]; then
             echo "[dry-run]   would DELETE ${d} (outage)"
         fi
     done
+    echo "[dry-run]   instance     ${INSTANCE} on: ${WANT_NODES:-(unchecked)}"
     if [ "${PD}" != "0" ]; then
-        echo "[dry-run]   would label  llm-d.ai/pd-prefill=true on: ${PD_PREFILL_NODES:-(none; existing labels)}"
-        echo "[dry-run]   would label  llm-d.ai/pd-decode=true on: ${PD_DECODE_NODES:-(none; existing labels)}"
+        echo "[dry-run]   would label  llm-d.ai/pd-prefill=true on: ${ROLE_NODES[prefill]:-(unchecked)}"
+        echo "[dry-run]   would label  llm-d.ai/pd-decode=true on: ${ROLE_NODES[decode]:-(unchecked)}"
     fi
+    [ -z "${STALE_NODES:-}" ] || echo "[dry-run]   would RELEASE ${STALE_NODES}"
     echo "[dry-run]   would apply  ${DEPLOYS[*]}"
     DRY_RUN_OUT="${DRY_RUN_OUT:-$(mktemp --suffix=.yaml /tmp/llm-d-dry-run.XXXXXX)}"
     cp "${RENDERED}" "${DRY_RUN_OUT}"
@@ -352,24 +463,34 @@ if [ "${DRY_RUN}" != "0" ]; then
     exit 0
 fi
 
-# --- P/D placement. The overlay selects on node labels, not node names, so it
-# stays site-neutral; the site's choice of nodes is made here. Done after the
-# DRY_RUN exit because it writes to the cluster. ---
+# --- Node placement. Done after the DRY_RUN exit because it writes to the
+# cluster. Claim this instance's nodes, then set the P/D role labels on them.
+# Role labels are cleared first on every node this instance holds, so a node
+# moved from decode to prefill does not keep both. ---
+for n in ${STALE_NODES:-}; do
+    echo "[install] releasing ${n} from instance ${INSTANCE}"
+    kubectl label node "${n}" "${INST_LABEL}-" llm-d.ai/pd-prefill- llm-d.ai/pd-decode- >/dev/null
+done
+for n in ${WANT_NODES}; do
+    kubectl label node "${n}" "${INST_LABEL}=${INSTANCE}" --overwrite >/dev/null
+    kubectl label node "${n}" llm-d.ai/pd-prefill- llm-d.ai/pd-decode- >/dev/null
+done
 if [ "${PD}" != "0" ]; then
-    label_role() {            # label_role <role> <nodes...>
-        local role="$1"; shift
-        local n
-        for n in "$@"; do
-            kubectl label node "${n}" "llm-d.ai/pd-${role}=true" --overwrite
+    for role in prefill decode; do
+        for n in ${ROLE_NODES[${role}]}; do
+            kubectl label node "${n}" "llm-d.ai/pd-${role}=true" --overwrite >/dev/null
         done
-    }
-    # shellcheck disable=SC2086  # word-splitting the node lists is intended
-    label_role prefill ${PD_PREFILL_NODES:-}
-    # shellcheck disable=SC2086
-    label_role decode ${PD_DECODE_NODES:-}
+    done
 fi
+echo "[install] instance ${INSTANCE} holds: ${WANT_NODES}"
 
 # --- Gateway API Inference Extension CRDs ---
+# Cluster-wide, so shared with every other instance. GAIE_VERSION=latest (llm-d's
+# default) follows upstream; say so when that would change the CRD under them.
+if [ -n "${others:-}" ]; then
+    echo "[install] note: re-applying the shared InferencePool CRD (now ${have_crd:-unknown};"
+    echo "          GAIE ${GAIE_VERSION}) also affects instance(s): ${others}"
+fi
 kubectl apply -f \
   "https://github.com/kubernetes-sigs/gateway-api-inference-extension/${GAIE_URL}/v1-manifests.yaml"
 

@@ -50,9 +50,11 @@ Configuration comes in two layers, split by what is safe to publish:
   caller's environment still wins for a one-off run.
 
 Replica counts are required. `install.sh` stops rather than defaulting them,
-because a silent default of 1 would leave GPUs idle. They are stamped onto the
-applied overlay's `replicas:` field, which is why the committed profiles carry a
-placeholder of 1.
+because a silent default of 1 would leave GPUs idle. `install.sh` wraps the
+profile in a generated overlay (`site-<NAMESPACE>/`, beside it in the llm-d
+checkout). That overlay sets the replica counts and the nodeSelector that
+confines pods to the instance's nodes, so the committed profile files are applied
+unmodified. This is also why the profiles carry a placeholder of 1 replica.
 
 The overlays are **sources**. `install.sh` copies them into the llm-d checkout,
 beside the base each one consumes: `agg` and `certus` into
@@ -123,14 +125,17 @@ filled in:
 | Variable | Needed for | Value |
 |---|---|---|
 | `PROFILE` | always | directory under `profiles/` for your GPU type |
-| `AGG_REPLICAS` | default, `WITH_CERTUS=1` | total GPUs |
+| `NAMESPACE` | always | the instance's name; default `llm-d-quickstart` |
+| `AGG_NODES` | default, `WITH_CERTUS=1` | space-separated node names to serve on |
+| `AGG_REPLICAS` | default, `WITH_CERTUS=1` | total GPUs on `AGG_NODES` |
 | `PD_PREFILL_REPLICAS`, `PD_DECODE_REPLICAS` | `PD=1` | split of the total GPUs |
 | `PD_PREFILL_NODES`, `PD_DECODE_NODES` | `PD=1` | space-separated node names whose GPUs cover each role |
 | `CERTUS_REGISTRY`, `CERTUS_REPO` | `WITH_CERTUS=1` | where `publish-image.sh` pushed the image |
-| `NAMESPACE` | optional | default `llm-d-quickstart` |
 
 The rules that tie them together:
 
+- Every model-server pod is confined to the nodes its site file lists. Nothing
+  lands on an unlisted GPU node, even an idle one.
 - Prefill + decode replicas should equal the GPU total. Fewer leaves GPUs idle;
   more leaves pods `Pending`.
 - Each role's nodes need at least as many GPUs as that role's replicas.
@@ -146,6 +151,7 @@ Worked examples, with made-up node names:
 
 ```bash
 : "${PROFILE:=a30}"
+: "${AGG_NODES:=gpu-0}"
 : "${AGG_REPLICAS:=4}"
 # PD: 1 prefill + 3 decode on the same node.
 : "${PD_PREFILL_REPLICAS:=1}"
@@ -161,6 +167,7 @@ Worked examples, with made-up node names:
 
 ```bash
 : "${PROFILE:=a30}"
+: "${AGG_NODES:=gpu-a gpu-b}"
 : "${AGG_REPLICAS:=4}"
 : "${PD_PREFILL_REPLICAS:=2}"
 : "${PD_DECODE_REPLICAS:=2}"
@@ -175,6 +182,7 @@ Worked examples, with made-up node names:
 
 ```bash
 : "${PROFILE:=a30}"
+: "${AGG_NODES:=gpu-small gpu-big-1 gpu-big-2}"
 : "${AGG_REPLICAS:=5}"
 : "${PD_PREFILL_REPLICAS:=1}"
 : "${PD_DECODE_REPLICAS:=4}"
@@ -194,15 +202,65 @@ DRY_RUN=1 PD=1 deploy/llm-d/install.sh   # or without PD=1 for aggregated
 
 A dry run makes no changes to the cluster. It loads the site file, renders the
 manifests against the pinned llm-d, and, if a cluster is reachable, checks
-read-only that every named node exists and has the GPUs for its replicas. Then it
-prints the plan: profile, images, node labels it would apply, any Deployments it
-would delete, and the path of the rendered YAML. A typo'd node name is an error;
+read-only that every named node exists, has the GPUs for its replicas, and is not
+held by another instance. Then it prints the plan: profile, images, the nodes the
+instance would hold, node labels it would apply, any Deployments it would delete,
+and the path of the rendered YAML. A typo'd node name is an error;
 too few GPUs is a warning, since those pods would only sit `Pending`. With no
 cluster reachable, the node and GPU checks are skipped, so you can still check a
 site file on a laptop.
 
 When the plan looks right, run the same command without `DRY_RUN=1`. The first
 start downloads the model weights, so allow several minutes per node.
+
+## Several instances in one cluster
+
+Instances can share a cluster as long as their nodes don't overlap. Each
+instance is one namespace: its own router, InferencePool, model servers and
+service address. Give each its own site file with a distinct `NAMESPACE` and
+node lists:
+
+```bash
+SITE_ENV=~/.config/certus/llm-d-site-a.env PD=1 deploy/llm-d/install.sh
+SITE_ENV=~/.config/certus/llm-d-site-b.env      deploy/llm-d/install.sh
+```
+
+How the separation is enforced:
+
+- **Nodes are owned.** `install.sh` labels each node the instance uses
+  `llm-d.ai/instance=<NAMESPACE>`. Every model-server pod selects on that label
+  as well as on its P/D role label. The rendered manifests carry it, so it holds
+  even if someone applies them by hand.
+- **Claims are checked before anything is written.** Naming a node another
+  instance holds is an error. So is still holding a node your own site file no
+  longer lists. Re-run with `RELEASE_NODES=1` to give it up; this also clears its
+  P/D role labels. Moving a node between instances means releasing it from the
+  first, then claiming it in the second.
+- **Placement changes roll the pods.** Changing a node label never moves a
+  running pod. So the pod template carries a hash of which nodes hold which role
+  (`llm-d.ai/placement`), and any change to it restarts the model servers onto
+  the new placement.
+- **Traffic stays inside the instance.** Each router's InferencePool only matches
+  pods in its own namespace. Send each instance's clients to its own service
+  (`kubectl get svc -n <NAMESPACE> quickstart-epp`). For the benchmark, use
+  `bench/multiturn_http.py --namespace <NAMESPACE>`.
+- **`UNINSTALL=1`** removes an instance's model servers and router, and releases
+  its nodes. The namespace is kept, since secrets such as `artifactory-creds` may
+  have been created in it by hand.
+
+What is still shared:
+
+- **The InferencePool CRD** is cluster-wide, and every run re-applies it from
+  llm-d's `GAIE_VERSION` (default `latest`). `install.sh` prints a note when other
+  instances exist. To stop instances from changing the CRD under each other,
+  export the same pinned `GAIE_VERSION` for all of them.
+- **certus is per node, and remote lookup can cross instances.** Each node's
+  certus servers serve whichever instance holds the node, and nothing here
+  changes that. If certus remote lookup is on, instances whose nodes are in one
+  lookup group can serve each other's cached KV. Use separate certus `rl-group`s
+  to keep measurements apart.
+- **The model cache** is a hostPath on each node, which is safe: it holds weights,
+  not per-instance state.
 
 ## Upstream pinning
 
@@ -219,10 +277,12 @@ deploy/llm-d/install.sh                 # aggregated serving
 WITH_CERTUS=1 deploy/llm-d/install.sh   # + certus KV-cache offload
 PD=1 deploy/llm-d/install.sh            # prefill/decode disaggregation
 DRY_RUN=1 PD=1 deploy/llm-d/install.sh  # show the plan; change nothing
+UNINSTALL=1 deploy/llm-d/install.sh     # remove the instance; free its nodes
 ```
 
-Other knobs (see the header of `install.sh`): `SITE_ENV` for a site file
-elsewhere, `KEEP_LLMD=1` to keep the scratch llm-d checkout, `LLMD_DIR` to reuse
+Other knobs (see the header of `install.sh`): `SITE_ENV` to pick a site file
+(one per instance), `RELEASE_NODES=1` to give up nodes the site file no longer
+lists, `KEEP_LLMD=1` to keep the scratch llm-d checkout, `LLMD_DIR` to reuse
 one, and `LLMD_REF` to try another llm-d revision.
 
 Switching between the aggregated and P/D layouts deletes the other layout's
@@ -242,7 +302,9 @@ for P/D routing, not a tuned deployment.
   only ~30k tokens of KV, so decode capacity runs out first. For
   long-prompt/short-output traffic the ratio goes the other way.
 - **Placement is by label, not node name.** Prefill selects
-  `llm-d.ai/pd-prefill=true` and decode selects `llm-d.ai/pd-decode=true`.
+  `llm-d.ai/pd-prefill=true` and decode selects `llm-d.ai/pd-decode=true`, both
+  combined with the instance label (see
+  [Several instances in one cluster](#several-instances-in-one-cluster)).
   `install.sh` applies them from `PD_PREFILL_NODES` / `PD_DECODE_NODES`, or
   fails if neither the variables nor existing labels name a node. Set them in
   the site file.
