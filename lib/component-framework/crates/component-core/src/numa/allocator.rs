@@ -147,12 +147,14 @@ impl NumaAllocator {
     ///   allocator (or any `NumaAllocator` — the deallocation is size-based).
     /// - `layout` must match the layout used for the original allocation.
     /// - The pointer must not have been deallocated already.
-    pub unsafe fn dealloc(&self, ptr: NonNull<u8>, layout: Layout) { unsafe {
-        let page_size = libc::sysconf(libc::_SC_PAGESIZE) as usize;
-        let alloc_size = (layout.size() + page_size - 1) & !(page_size - 1);
-        // SAFETY: caller guarantees ptr was returned by our alloc() and layout matches.
-        libc::munmap(ptr.as_ptr() as *mut libc::c_void, alloc_size);
-    }}
+    pub unsafe fn dealloc(&self, ptr: NonNull<u8>, layout: Layout) {
+        unsafe {
+            let page_size = libc::sysconf(libc::_SC_PAGESIZE) as usize;
+            let alloc_size = (layout.size() + page_size - 1) & !(page_size - 1);
+            // SAFETY: caller guarantees ptr was returned by our alloc() and layout matches.
+            libc::munmap(ptr.as_ptr() as *mut libc::c_void, alloc_size);
+        }
+    }
 }
 
 #[cfg(test)]

@@ -78,7 +78,10 @@ mod cuda {
         pub(crate) fn cudaSetDevice(device: c_int) -> CudaError;
         pub(crate) fn cudaMalloc(devptr: *mut *mut c_void, size: usize) -> CudaError;
         pub(crate) fn cudaFree(devptr: *mut c_void) -> CudaError;
-        pub(crate) fn cudaIpcGetMemHandle(handle: *mut IpcMemHandle, devptr: *mut c_void) -> CudaError;
+        pub(crate) fn cudaIpcGetMemHandle(
+            handle: *mut IpcMemHandle,
+            devptr: *mut c_void,
+        ) -> CudaError;
         pub(crate) fn cudaMemcpy(
             dst: *mut c_void,
             src: *const c_void,

@@ -143,7 +143,7 @@ Every site in `batch_lookup` that assigns a result must assign an attribution. F
 | Concurrent-promotion recovery (overwrite) | :2615-2620 | `Dram` on success |
 | Init / receptacle failure, whole batch | :2017-2042 | `Error` |
 
-`components/dispatcher-p2p` mirrors this at `dispatcher-p2p/src/lib.rs:1618-2041`, with two
+`components/dispatcher-p2p` mirrors this at `dispatcher-p2p/src/lib.rs:1620-2043`, with two
 differences: its cold path is SSD → GPU BAR1 ring → D2D with **no synchronous DRAM
 promotion** (still `Ssd` — see spec FR-014), and it rejects multi-region N>1 requests at
 `:1624` (`Error` — see spec FR-015).
@@ -170,8 +170,8 @@ removal (`97e26738`) and an upstream rework of `dispatcher/src/lib.rs`, so both 
 numbers and the set of call sites must be re-counted at plan time. It is kept because the
 *shape* of the blast radius — a handful of implementors, a couple of production call sites,
 a tail of test call sites — is still the useful fact. Implementors:
-`components/dispatcher/src/lib.rs:1631`, `components/dispatcher-p2p/src/lib.rs:1121`,
-`components/remote-lookup/src/seams.rs:629` (`unimplemented!`),
+`components/dispatcher/src/lib.rs:1631`, `components/dispatcher-p2p/src/lib.rs:1123`,
+`components/remote-lookup/src/seams.rs:655` (`unimplemented!`),
 `apps/certus-server/src/service.rs:1093` (test mock). Production call sites:
 `apps/certus-server-yaml/src/service.rs:420`, `apps/certus-server/src/service.rs:441`. Plus
 roughly fourteen call sites in the two dispatchers' own test suites.

@@ -135,65 +135,67 @@ impl NvmeController {
     pub(crate) unsafe fn attach(
         ctrlr_ptr: *mut spdk_sys::spdk_nvme_ctrlr,
         numa_node: i32,
-    ) -> Result<Self, NvmeBlockError> { unsafe {
-        if ctrlr_ptr.is_null() {
-            return Err(NvmeBlockError::NotInitialized(
-                "null controller pointer — SPDK probe/attach may have failed".into(),
-            ));
+    ) -> Result<Self, NvmeBlockError> {
+        unsafe {
+            if ctrlr_ptr.is_null() {
+                return Err(NvmeBlockError::NotInitialized(
+                    "null controller pointer — SPDK probe/attach may have failed".into(),
+                ));
+            }
+
+            // Get default controller opts to extract queue config.
+            // SAFETY: ctrlr_ptr is non-null and was obtained from SPDK probe.
+            let mut opts: spdk_sys::spdk_nvme_ctrlr_opts = std::mem::zeroed();
+            spdk_sys::spdk_nvme_ctrlr_get_default_ctrlr_opts(
+                &mut opts,
+                std::mem::size_of::<spdk_sys::spdk_nvme_ctrlr_opts>(),
+            );
+
+            let num_io_queues = opts.num_io_queues;
+            let max_queue_depth = opts.io_queue_size;
+
+            // Default version (not available from minimal bindings).
+            let version = NvmeVersion {
+                major: 1,
+                minor: 0,
+                tertiary: 0,
+            };
+
+            // Auto-detect the maximum data transfer size from the controller's MDTS
+            // so I/O is fragmented to the device's real limit (e.g. 1 MiB) rather
+            // than a conservative fixed default. The helper folds MDTS together with
+            // the minimum memory page size and returns the limit directly in bytes.
+            // SAFETY: ctrlr_ptr is non-null (checked at entry) and obtained from
+            // SPDK probe; the helper only reads controller data.
+            const DEFAULT_MAX_TRANSFER_SIZE: u32 = 131072; // 128 KiB fallback
+            let detected_max_transfer =
+                spdk_sys::spdk_nvme_ctrlr_get_max_xfer_size(ctrlr_ptr as *const _);
+            let max_transfer_size = if detected_max_transfer == 0 {
+                // MDTS == 0 means "no limit"; keep a sane, conservative default.
+                DEFAULT_MAX_TRANSFER_SIZE
+            } else {
+                detected_max_transfer
+            };
+
+            // Discover namespaces using available API.
+            let namespaces = Self::discover_namespaces(ctrlr_ptr);
+
+            // Allocate queue pair pool with varying depths.
+            // SAFETY: ctrlr_ptr is valid; checked non-null at function entry.
+            let qpairs = QueuePairPool::allocate(ctrlr_ptr, max_queue_depth)?;
+
+            Ok(Self {
+                ctrlr_ptr,
+                qpairs,
+                namespaces,
+                numa_node,
+                version,
+                max_transfer_size,
+                max_queue_depth,
+                num_io_queues,
+            })
         }
-
-        // Get default controller opts to extract queue config.
-        // SAFETY: ctrlr_ptr is non-null and was obtained from SPDK probe.
-        let mut opts: spdk_sys::spdk_nvme_ctrlr_opts = std::mem::zeroed();
-        spdk_sys::spdk_nvme_ctrlr_get_default_ctrlr_opts(
-            &mut opts,
-            std::mem::size_of::<spdk_sys::spdk_nvme_ctrlr_opts>(),
-        );
-
-        let num_io_queues = opts.num_io_queues;
-        let max_queue_depth = opts.io_queue_size;
-
-        // Default version (not available from minimal bindings).
-        let version = NvmeVersion {
-            major: 1,
-            minor: 0,
-            tertiary: 0,
-        };
-
-        // Auto-detect the maximum data transfer size from the controller's MDTS
-        // so I/O is fragmented to the device's real limit (e.g. 1 MiB) rather
-        // than a conservative fixed default. The helper folds MDTS together with
-        // the minimum memory page size and returns the limit directly in bytes.
-        // SAFETY: ctrlr_ptr is non-null (checked at entry) and obtained from
-        // SPDK probe; the helper only reads controller data.
-        const DEFAULT_MAX_TRANSFER_SIZE: u32 = 131072; // 128 KiB fallback
-        let detected_max_transfer =
-            spdk_sys::spdk_nvme_ctrlr_get_max_xfer_size(ctrlr_ptr as *const _);
-        let max_transfer_size = if detected_max_transfer == 0 {
-            // MDTS == 0 means "no limit"; keep a sane, conservative default.
-            DEFAULT_MAX_TRANSFER_SIZE
-        } else {
-            detected_max_transfer
-        };
-
-        // Discover namespaces using available API.
-        let namespaces = Self::discover_namespaces(ctrlr_ptr);
-
-        // Allocate queue pair pool with varying depths.
-        // SAFETY: ctrlr_ptr is valid; checked non-null at function entry.
-        let qpairs = QueuePairPool::allocate(ctrlr_ptr, max_queue_depth)?;
-
-        Ok(Self {
-            ctrlr_ptr,
-            qpairs,
-            namespaces,
-            numa_node,
-            version,
-            max_transfer_size,
-            max_queue_depth,
-            num_io_queues,
-        })
-    }}
+    }
 
     /// Discover all active namespaces on the controller.
     ///

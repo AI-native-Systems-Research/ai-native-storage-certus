@@ -16,7 +16,7 @@ reading is wrong: **the counter does not have to be incremented by the server.**
 
 **Corrected 2026-09-25**: an earlier draft of this section said three sites. There are three
 `self.remote_lookup.get()` guards, but only one is a lookup — `:1986` is `join_cluster` and
-`:2070` is `leave_cluster`. The fetch path is **`components/dispatcher/src/lib.rs:2575`
+`:2070` is `leave_cluster`. The fetch path is **`components/dispatcher/src/lib.rs:2577`
 alone**, which is simpler than the draft claimed.
 
 There, the dispatcher collects the `KeyNotFound` indices, calls `rl.batch_lookup`, and zips
@@ -47,7 +47,7 @@ defects, the third is open.
 
 `op_lookup` resolves each entry's regions first, and entries whose handles fail to open are
 **held back from the batch** and reported as `ok = 0`
-(`lib/shmq-dispatcher/src/translate.rs:571-583`). The counting loop runs only over the
+(`lib/shmq-dispatcher/src/translate.rs:749-760`). The counting loop runs only over the
 entries that *were* dispatched, so a held-back entry increments neither `hits` nor `misses`.
 
 It is reported to the client as not-served and is invisible to the counters. That is exactly
@@ -76,7 +76,7 @@ ordinarily-absent key should be counted.
 This began as a hypothesis about the remote path and is now settled **by reading the code**,
 not by inference.
 
-At `components/dispatcher/src/lib.rs:2624-2627`, when the peer does not have the key:
+At `components/dispatcher/src/lib.rs:2626-2629`, when the peer does not have the key:
 
 ```rust
 if let Err(e) = remote_res {
@@ -114,7 +114,7 @@ into `IoError` and throws the distinction away. Preserving it maps `NotFound` ba
 **The prediction failed because the experiment chose the wrong variable, not because the
 mechanism was wrong.** `--rl-group` selects which cluster a server joins; it does not decide
 whether remote lookup is *wired*. The `full-remote` profile connects the receptacle either
-way, so `remote_lookup.get()` succeeds and `lib.rs:2575` executes in both arms — the solo
+way, so `remote_lookup.get()` succeeds and `lib.rs:2577` executes in both arms — the solo
 server's log even shows `remote-lookup-rdma-initiator: connected`. Only `minimal.yaml` leaves
 it unconnected, and that profile has neither SPDK nor GPU, so the generator cannot drive it.
 

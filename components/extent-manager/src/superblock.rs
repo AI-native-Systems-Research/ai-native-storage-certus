@@ -6,7 +6,11 @@ pub(crate) const SUPERBLOCK_MAGIC: u64 = 0x4345_5254_5553_5634; // "CERTUSV4"
 pub(crate) const FORMAT_VERSION: u32 = 6;
 
 #[derive(Debug, Clone)]
-pub(crate) struct Superblock {
+#[allow(
+    unreachable_pub,
+    reason = "re-exported as `pub` under `cfg(any(test, feature = \"testing\"))` for tests/checkpoint.rs"
+)]
+pub struct Superblock {
     pub magic: u64,
     pub version: u32,
     pub data_disk_size: u64,
@@ -96,7 +100,11 @@ impl Superblock {
         buf
     }
 
-    pub(crate) fn deserialize(buf: &[u8]) -> Result<Self, ExtentManagerError> {
+    #[allow(
+        unreachable_pub,
+        reason = "re-exported as `pub` under `cfg(any(test, feature = \"testing\"))` for tests/checkpoint.rs"
+    )]
+    pub fn deserialize(buf: &[u8]) -> Result<Self, ExtentManagerError> {
         if buf.len() < SUPERBLOCK_SIZE {
             return Err(error::corrupt_metadata("superblock too short"));
         }

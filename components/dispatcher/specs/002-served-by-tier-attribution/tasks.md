@@ -52,7 +52,7 @@ below states what it must be shown to fail against.
   **Must be shown to fail** against today's code, which maps both to `IoError`. A test that
   passes before the fix is testing nothing.
 
-- [x] **T004** Preserve the distinction at `components/dispatcher/src/lib.rs:2624-2627`: map
+- [x] **T004** Preserve the distinction at `components/dispatcher/src/lib.rs:2626-2629`: map
   `RemoteLookupError::NotFound` → `DispatcherError::KeyNotFound(key)` and leave
   `TransportError` → `IoError`. The interface already carries the distinction
   (`iremote_lookup.rs:102-106`); the dispatcher collapses it.
@@ -78,7 +78,7 @@ below states what it must be shown to fail against.
   The plan assumed the observer because it assumed the server had to be *told*; it only had
   to *ask*. Recorded rather than ticked, so the plan's wrong assumption stays visible.
 
-- [x] **T007** Count per batch at `components/dispatcher/src/lib.rs:2575`, where the dispatcher
+- [x] **T007** Count per batch at `components/dispatcher/src/lib.rs:2577`, where the dispatcher
   zips `remote_results` back and already knows each key's outcome. Requester-side: what this
   node *obtained from* peers.
 
@@ -138,7 +138,7 @@ unanswerable, which it was not before the counter existed.
 ## Phase 1d: Close the two accounting holes (FR-024)
 
 - [x] **T012** Count held-back entries. Entries whose handles fail to open are excluded from
-  the batch and reported `ok = 0` (`translate.rs:571-583`), so the counting loop never sees
+  the batch and reported `ok = 0` (`translate.rs:749-760`), so the counting loop never sees
   them. They must be counted — as misses or as a third category, decided in T013.
 
 - [x] **T013** Decide and record whether a handle-resolution failure is a *miss* or an

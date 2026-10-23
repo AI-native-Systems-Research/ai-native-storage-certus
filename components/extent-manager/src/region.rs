@@ -38,7 +38,10 @@ impl RegionState {
         (size + sector_size - 1) / sector_size * sector_size
     }
 
-    pub(crate) fn alloc_extent(&mut self, size: u32) -> Result<(u64, usize, u64), ExtentManagerError> {
+    pub(crate) fn alloc_extent(
+        &mut self,
+        size: u32,
+    ) -> Result<(u64, usize, u64), ExtentManagerError> {
         let element_size = self.align_to_sector_size(size, self.format_params.sector_size);
 
         // The SizeClassManager invariant: only non-full slabs appear in the list.
@@ -118,7 +121,10 @@ impl RegionState {
         self.dirty = true;
     }
 
-    pub(crate) fn remove_extent_by_offset(&mut self, offset: u64) -> Result<(), ExtentManagerError> {
+    pub(crate) fn remove_extent_by_offset(
+        &mut self,
+        offset: u64,
+    ) -> Result<(), ExtentManagerError> {
         let slab_start = self
             .slabs
             .range(..=offset)

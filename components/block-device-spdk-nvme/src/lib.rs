@@ -275,70 +275,74 @@ impl BlockDeviceSpdkNvmeComponent {
     /// SPDK environment must be initialized.
     unsafe fn probe_controller(
         &self,
-    ) -> Result<(*mut spdk_sys::spdk_nvme_ctrlr, i32), NvmeBlockError> { unsafe {
-        // Build the transport ID for our PCI address.
-        let mut trid: spdk_sys::spdk_nvme_transport_id = std::mem::zeroed();
-        trid.trtype = spdk_sys::spdk_nvme_transport_type_SPDK_NVME_TRANSPORT_PCIE;
+    ) -> Result<(*mut spdk_sys::spdk_nvme_ctrlr, i32), NvmeBlockError> {
+        unsafe {
+            // Build the transport ID for our PCI address.
+            let mut trid: spdk_sys::spdk_nvme_transport_id = std::mem::zeroed();
+            trid.trtype = spdk_sys::spdk_nvme_transport_type_SPDK_NVME_TRANSPORT_PCIE;
 
-        let guard = self.pci_address.read().expect("pci_address lock poisoned");
-        let pci_addr = guard.as_ref().ok_or_else(|| {
-            NvmeBlockError::NotInitialized(
-                "PCI address not set — call set_pci_address() before initialize()".into(),
-            )
-        })?;
-        let addr_str = format!("{}", pci_addr);
-        let addr_bytes = addr_str.as_bytes();
-        let len = addr_bytes.len().min(trid.traddr.len() - 1);
-        for (i, &b) in addr_bytes[..len].iter().enumerate() {
-            trid.traddr[i] = b as i8;
+            let guard = self.pci_address.read().expect("pci_address lock poisoned");
+            let pci_addr = guard.as_ref().ok_or_else(|| {
+                NvmeBlockError::NotInitialized(
+                    "PCI address not set — call set_pci_address() before initialize()".into(),
+                )
+            })?;
+            let addr_str = format!("{}", pci_addr);
+            let addr_bytes = addr_str.as_bytes();
+            let len = addr_bytes.len().min(trid.traddr.len() - 1);
+            for (i, &b) in addr_bytes[..len].iter().enumerate() {
+                trid.traddr[i] = b as i8;
+            }
+
+            struct ProbeCtx {
+                ctrlr_ptr: *mut spdk_sys::spdk_nvme_ctrlr,
+            }
+
+            let mut ctx = ProbeCtx {
+                ctrlr_ptr: std::ptr::null_mut(),
+            };
+
+            unsafe extern "C" fn probe_cb(
+                _cb_ctx: *mut std::ffi::c_void,
+                _trid: *const spdk_sys::spdk_nvme_transport_id,
+                _opts: *mut spdk_sys::spdk_nvme_ctrlr_opts,
+            ) -> bool {
+                true // Attach to all discovered controllers.
+            }
+
+            unsafe extern "C" fn attach_cb(
+                cb_ctx: *mut std::ffi::c_void,
+                _trid: *const spdk_sys::spdk_nvme_transport_id,
+                ctrlr: *mut spdk_sys::spdk_nvme_ctrlr,
+                _opts: *const spdk_sys::spdk_nvme_ctrlr_opts,
+            ) {
+                unsafe {
+                    let ctx = &mut *(cb_ctx as *mut ProbeCtx);
+                    ctx.ctrlr_ptr = ctrlr;
+                }
+            }
+
+            let rc = spdk_sys::spdk_nvme_probe(
+                &trid,
+                &mut ctx as *mut ProbeCtx as *mut std::ffi::c_void,
+                Some(probe_cb),
+                Some(attach_cb),
+                None,
+            );
+
+            if rc != 0 || ctx.ctrlr_ptr.is_null() {
+                return Err(NvmeBlockError::BlockDevice(
+                    interfaces::BlockDeviceError::ProbeFailure(format!(
+                        "spdk_nvme_probe for {} failed (rc={rc})",
+                        pci_addr,
+                    )),
+                ));
+            }
+
+            // NUMA node is not available from minimal bindings; default to 0.
+            Ok((ctx.ctrlr_ptr, 0))
         }
-
-        struct ProbeCtx {
-            ctrlr_ptr: *mut spdk_sys::spdk_nvme_ctrlr,
-        }
-
-        let mut ctx = ProbeCtx {
-            ctrlr_ptr: std::ptr::null_mut(),
-        };
-
-        unsafe extern "C" fn probe_cb(
-            _cb_ctx: *mut std::ffi::c_void,
-            _trid: *const spdk_sys::spdk_nvme_transport_id,
-            _opts: *mut spdk_sys::spdk_nvme_ctrlr_opts,
-        ) -> bool {
-            true // Attach to all discovered controllers.
-        }
-
-        unsafe extern "C" fn attach_cb(
-            cb_ctx: *mut std::ffi::c_void,
-            _trid: *const spdk_sys::spdk_nvme_transport_id,
-            ctrlr: *mut spdk_sys::spdk_nvme_ctrlr,
-            _opts: *const spdk_sys::spdk_nvme_ctrlr_opts,
-        ) { unsafe {
-            let ctx = &mut *(cb_ctx as *mut ProbeCtx);
-            ctx.ctrlr_ptr = ctrlr;
-        }}
-
-        let rc = spdk_sys::spdk_nvme_probe(
-            &trid,
-            &mut ctx as *mut ProbeCtx as *mut std::ffi::c_void,
-            Some(probe_cb),
-            Some(attach_cb),
-            None,
-        );
-
-        if rc != 0 || ctx.ctrlr_ptr.is_null() {
-            return Err(NvmeBlockError::BlockDevice(
-                interfaces::BlockDeviceError::ProbeFailure(format!(
-                    "spdk_nvme_probe for {} failed (rc={rc})",
-                    pci_addr,
-                )),
-            ));
-        }
-
-        // NUMA node is not available from minimal bindings; default to 0.
-        Ok((ctx.ctrlr_ptr, 0))
-    }}
+    }
 
     /// Get the controller snapshot, or return NotInitialized error.
     fn controller_snapshot(&self) -> Result<ControllerSnapshot, NvmeBlockError> {
