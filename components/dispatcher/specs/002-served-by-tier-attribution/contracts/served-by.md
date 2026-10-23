@@ -295,6 +295,7 @@ dispatcher returned, and it MUST NOT invent a wire value for a not-served key.
 | `Dram` | `1` | yes | `lookup_hits`, `lookup_hits_dram` |
 | `Ssd` | `2` | yes | `lookup_hits`, `lookup_hits_ssd` |
 | `Remote` | `3` | yes | `lookup_hits`, `remote_lookup_hits` |
+| `Fetched` | `4` | yes | `lookup_hits`, `lookup_hits_fetched` (not `lookup_hits_dram`: the dispatcher counted it `Dram`, and the server's exported DRAM count is net of it) |
 | `Miss` | `0` | no | `lookup_misses` |
 | `SizeMismatch` | `0` | no | `lookup_misses` (see below) |
 | `Error` | `0` | no | `lookup_errors` |
