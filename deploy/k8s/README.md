@@ -404,8 +404,10 @@ creation, so it does not propagate to running pods. That is desirable here — y
 want a deliberate restart between two measurement runs, not a rollout landing
 mid-run.
 
-The image is built `full-remote` either way, so it always carries zyre and the
-RDMA initiator/responder. Flipping this changes cluster membership and nothing
+This switch applies to a `full-remote` image only (4.1.5); the default
+`full-transfer` image has no remote-lookup transport, so it accepts `rl-group` and
+ignores it. A `full-remote` image always carries zyre and the RDMA
+initiator/responder, so flipping this changes cluster membership and nothing
 else, so an A/B pair differs only in remote-lookup rather than in which binary
 is running. Cross-instance fill only pays off when a parallel workload is spread
 across nodes, NUMA domains and GPUs; for a single instance there are no peers
@@ -479,28 +481,29 @@ A complete private stack on your claimed nodes:
 ```bash
 deploy/k8s/certus-nodes.sh claim scott node5
 CERTUS_NAMESPACE=certus-scott CERTUS_NODE_SELECTOR_VALUE=scott \
-  deploy/k8s/build-image-and-push.sh --profile full-transfer
+  deploy/k8s/build-image-and-push.sh
 kubectl create namespace certus-scott    # plus the pull secret, as in 4.3
 kubectl apply -f deploy/k8s/certus-server-numa.yaml
-
-# llm-d on the same nodes, in a namespace of your own
-WITH_CERTUS=1 NAMESPACE=llm-d-scott CERTUS_NODE_SELECTOR_VALUE=scott \
-  deploy/llm-d/install.sh
 ```
 
-The llm-d overlay selects the same label value, so its pods land only on your
-nodes and offload only into your certus. Use a remote-lookup group
-(`CERTUS_RL_GROUP`) of your own too, or none.
+A vLLM pod reaches certus through its node's `/dev/shm` mailbox, so an llm-d
+stack of your own must also be confined to your claimed nodes (select on the
+same `certus.ai/worker` value) or it will offload into whoever owns the node it
+lands on. Use a remote-lookup group (`CERTUS_RL_GROUP`) of your own too, or none.
 
 ### 4.1.5 Choosing the build profile
 
 `build-image-and-push.sh --profile <name>` (or `CERTUS_PROFILE`) selects what the
-image runs. The default is unchanged.
+image runs.
 
 | profile | what it adds | features |
 | --- | --- | --- |
-| `full-remote` (default) | remote lookup over zyre + RDMA | `spdk,rdma,remote-lookup-rdma-initiator/rdma,remote-lookup-rdma-responder/rdma` |
-| `full-transfer` | the certus-to-certus transfer endpoint behind shm-queue `FETCH` | `spdk,rdma` |
+| `full-transfer` (default) | the certus-to-certus transfer endpoint behind shm-queue `FETCH` | `spdk,rdma` |
+| `full-remote` | remote lookup over zyre + RDMA | `spdk,rdma,remote-lookup-rdma-initiator/rdma,remote-lookup-rdma-responder/rdma` |
+
+`full-remote` is expected to be retired: vLLM's hit decision is the local CHECK,
+which never consults remote lookup, so through the vLLM connector a remote-only
+key always reads as a miss. Explicit fetch is the path vLLM can use.
 
 Any other `profiles/<name>.yaml` needs `CERTUS_FEATURES` set as well. A
 `full-transfer` instance listens on the node's RoCE address (`CERTUS_RDMA_BIND_IP`,
