@@ -120,7 +120,7 @@
 
 - [ ] T029 [P] [US4] Create Criterion benchmark in benches/cold_path_benchmark.rs: measure pipeline throughput for P2P path (requires hardware feature gate) in benches/cold_path_benchmark.rs
 - [ ] T030 [P] [US4] Create Criterion benchmark for DRAM fallback path in same bench file for comparison in benches/cold_path_benchmark.rs
-- [ ] T031 [US4] Verify certus-api-bench_v2.py works end-to-end with the full-p2p.yaml profile: start server, populate, evict, measure cold throughput in apps/python/certus-api-bench_v2.py (validation only, no code changes expected)
+- [ ] T031 [US4] Verify certus-api-bench_v2.py works end-to-end with the full-p2p.yaml profile: start server, populate, evict, measure cold throughput in benchmarks/python/certus-api-bench_v2.py (validation only, no code changes expected)
 
 **Checkpoint**: Throughput is measurable for both paths; operator can compare results
 

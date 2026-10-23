@@ -1,11 +1,13 @@
 ---
 spec_sync_component: dispatcher-p2p
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-23T18:33:22Z
-spec_sync_git_commit: a70da5cc
-spec_sync_inputs_sha256: 9298a3009257cd6a8cc936180caf2eba4b4b22e145855131b34199ea3bbde482
+spec_sync_synced_at: 2026-10-23T20:21:38Z
+spec_sync_git_commit: 33c49be4
+spec_sync_inputs_sha256: 2786ca7af02bf361c13681dbf90876c089718023e58fa6314f6d15e61f2605d4
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-23 (directory relocation, branch `chore/tidy-directory-layout`).** The Python benchmarks moved from `apps/python/` to `benchmarks/python/`. Doc-only path update in `specs/001-gpudirect-cold-path/quickstart.md` (4 command lines) and `tasks.md` (T031): `apps/python/certus-api-bench_v2.py` → `benchmarks/python/certus-api-bench_v2.py`. No FR/SC, acceptance scenario or `src/` change; no spec citation into `src/` moves. Status stays `clean`.
+
 > **Re-stamp 2026-10-23 (test-compile fixes, on top of `a70da5cc`).** Test-only fix: the test `MockDispatchMap` in `src/lib.rs` did not implement `IDispatchMap::set_checksum`/`get_checksum`, so the crate's tests did not compile whenever `interfaces/integrity-check` was enabled (for example in a `--all-features` workspace build). Added `#[cfg(feature = "integrity-check")]` no-op stubs, and an `integrity-check` feature in `Cargo.toml` that forwards `interfaces/integrity-check`, the same pattern as `components/remote-lookup`. The component itself does not compute or verify checksums, so no FR changes. Lib tests pass 77/77 with and without the feature. No spec citation into `src/lib.rs` is past the inserted lines. Status stays `clean`.
 
 > **Merge 2026-10-23: PR #568 (`copilot/fix-eviction-events-connector`) merged into `unstable` on top of `772885d9`.** The PR makes the background SSD evictor take the shared `Arc<Mutex<Option<Sender>>>` and read the sender when it publishes, so a `create_eviction_channel` call made after `initialize` now receives `Removed` events. Before, the evictor kept a copy of the sender taken at start-up. Changed lines: `src/background.rs:360,376,402,452` and `src/lib.rs:1541`; FR-017 and data-model §Channel ("a later call replaces the previous sender") already describe this, so the old snapshot taken in `initialize` was code drift, now fixed. The one line removed from `src/lib.rs` moved the `lib.rs` citations past that point back by one line; they were updated and re-verified by diff mapping. The PR's own one-line stamp edit was superseded by this restamp. The other PR files (`certus-shmq-connector/**`) are outside this component's hashed inputs. Dispatcher and dispatcher-p2p lib tests pass (102/102 and 77/77). Status stays `clean`.
