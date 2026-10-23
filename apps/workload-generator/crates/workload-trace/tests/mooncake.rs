@@ -15,6 +15,7 @@
 //! The upstream figures the conformance checks are drawn from were read from
 //! `kvcache-ai/Mooncake` @ `main:FAST25-release/traces/conversation_trace.jsonl`, 2 328
 //! rows, and are recorded in `contracts/trace-interop.md`.
+#![cfg(feature = "workload-tests")]
 
 use std::collections::{BTreeMap, BTreeSet};
 

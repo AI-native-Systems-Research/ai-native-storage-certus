@@ -18,7 +18,7 @@ const NVME_CLASS_CODE: u32 = 0x010802;
 
 #[cfg(feature = "spdk-mem")]
 #[allow(dead_code)]
-pub fn init_spdk_env_dma_only(
+pub(crate) fn init_spdk_env_dma_only(
     iface: &Arc<dyn spdk_env::ISPDKEnv + Send + Sync>,
     _config: &StackConfig,
 ) -> Result<(), String> {
@@ -27,7 +27,7 @@ pub fn init_spdk_env_dma_only(
 
 #[cfg(feature = "spdk-mem")]
 #[allow(dead_code)]
-pub fn init_spdk_env_stub(
+pub(crate) fn init_spdk_env_stub(
     _iface: &Arc<dyn spdk_env::ISPDKEnv + Send + Sync>,
     _config: &StackConfig,
 ) -> Result<(), String> {
@@ -35,7 +35,7 @@ pub fn init_spdk_env_stub(
 }
 
 #[cfg(feature = "spdk")]
-pub fn init_spdk_env(
+pub(crate) fn init_spdk_env(
     iface: &Arc<dyn spdk_env::ISPDKEnv + Send + Sync>,
     config: &StackConfig,
 ) -> Result<(), String> {
@@ -78,7 +78,7 @@ pub fn init_spdk_env(
     Ok(())
 }
 
-pub fn init_gpu(
+pub(crate) fn init_gpu(
     iface: &Arc<dyn IGpuServices + Send + Sync>,
     _config: &StackConfig,
 ) -> Result<(), String> {
@@ -87,7 +87,7 @@ pub fn init_gpu(
         .map_err(|e| format!("GPU init failed: {e}"))
 }
 
-pub fn init_dispatch_map(
+pub(crate) fn init_dispatch_map(
     iface: &Arc<dyn IDispatchMap + Send + Sync>,
     _config: &StackConfig,
 ) -> Result<(), String> {
@@ -96,7 +96,7 @@ pub fn init_dispatch_map(
         .map_err(|e| format!("DispatchMap init failed: {e}"))
 }
 
-pub fn init_memory_tier(
+pub(crate) fn init_memory_tier(
     iface: &Arc<dyn IMemoryTier + Send + Sync>,
     config: &StackConfig,
 ) -> Result<(), String> {
@@ -127,7 +127,7 @@ pub fn init_memory_tier(
 
 // Only the full-remote profile's generated composition calls this hook.
 #[allow(dead_code)]
-pub fn init_remote_lookup(
+pub(crate) fn init_remote_lookup(
     iface: &Arc<dyn IRemoteLookup + Send + Sync>,
     config: &StackConfig,
 ) -> Result<(), String> {
@@ -225,7 +225,7 @@ fn env_parse<T: std::str::FromStr>(key: &str) -> Option<T> {
     env_str(key).and_then(|v| v.parse::<T>().ok())
 }
 
-pub fn init_dispatcher(
+pub(crate) fn init_dispatcher(
     iface: &Arc<dyn IDispatcher + Send + Sync>,
     config: &StackConfig,
 ) -> Result<(), String> {

@@ -46,7 +46,7 @@ pub(crate) struct GptManager {
 }
 
 impl GptManager {
-    pub fn new(
+    pub(crate) fn new(
         bd: Arc<dyn IBlockDevice + Send + Sync>,
         ns_id: u32,
         sector_size: u32,
@@ -63,7 +63,7 @@ impl GptManager {
         })
     }
 
-    pub fn read_gpt(&self) -> Result<PartitionTable, PartitionTableError> {
+    pub(crate) fn read_gpt(&self) -> Result<PartitionTable, PartitionTableError> {
         // Try primary header at LBA 1
         match self.try_read_gpt_at(1, 2) {
             Ok(table) => return Ok(table),
@@ -149,7 +149,7 @@ impl GptManager {
         })
     }
 
-    pub fn write_gpt(
+    pub(crate) fn write_gpt(
         &self,
         config: &PartitionConfig,
     ) -> Result<PartitionTable, PartitionTableError> {

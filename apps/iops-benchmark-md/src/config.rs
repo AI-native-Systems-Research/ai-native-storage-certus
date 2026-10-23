@@ -4,7 +4,7 @@ use std::fmt;
 
 /// NVMe IO operation type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub enum OpType {
+pub(crate) enum OpType {
     /// All operations are reads.
     Read,
     /// All operations are writes.
@@ -26,7 +26,7 @@ impl fmt::Display for OpType {
 
 /// IO submission mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub enum IoMode {
+pub(crate) enum IoMode {
     /// Synchronous: each command blocks the actor until SPDK completion.
     Sync,
     /// Asynchronous: commands are submitted to SPDK and completed via callback.
@@ -44,7 +44,7 @@ impl fmt::Display for IoMode {
 
 /// IO access pattern.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub enum Pattern {
+pub(crate) enum Pattern {
     /// Uniform random LBA per operation.
     Random,
     /// Contiguous LBAs with per-thread non-overlapping regions.
@@ -66,7 +66,7 @@ impl fmt::Display for Pattern {
     name = "iops-benchmark-md",
     about = "Multi-device NVMe IOPS benchmark using SPDK"
 )]
-pub struct BenchConfig {
+pub(crate) struct BenchConfig {
     /// Operation type: read, write, or rw (mixed).
     #[arg(long, default_value = "read", value_enum)]
     pub op: OpType,
@@ -129,7 +129,7 @@ impl BenchConfig {
     /// Return the namespace ID for a given device index.
     ///
     /// If ns_ids has fewer entries than devices, the last value is reused.
-    pub fn ns_id_for_device(&self, device_idx: usize) -> u32 {
+    pub(crate) fn ns_id_for_device(&self, device_idx: usize) -> u32 {
         if device_idx < self.ns_ids.len() {
             self.ns_ids[device_idx]
         } else {
@@ -138,7 +138,7 @@ impl BenchConfig {
     }
 
     /// Resolve num_devices from explicit --pci-addrs if provided.
-    pub fn resolve_num_devices(&mut self) {
+    pub(crate) fn resolve_num_devices(&mut self) {
         if !self.pci_addrs.is_empty() && self.num_devices == 1 {
             self.num_devices = self.pci_addrs.len() as u32;
         }
@@ -147,7 +147,7 @@ impl BenchConfig {
     /// Validate configuration against device properties for a single device.
     ///
     /// `sector_size` and `max_qd` are from the device with the tightest constraints.
-    pub fn validate(
+    pub(crate) fn validate(
         &self,
         sector_size: u32,
         max_qd: u32,
@@ -198,12 +198,12 @@ impl BenchConfig {
     }
 
     /// Largest block size in the configured set.
-    pub fn max_block_size(&self) -> usize {
+    pub(crate) fn max_block_size(&self) -> usize {
         *self.block_sizes.iter().max().unwrap()
     }
 
     /// Clamp queue depth to device maximum, printing a warning if clamped.
-    pub fn clamp_queue_depth(&mut self, max_qd: u32) {
+    pub(crate) fn clamp_queue_depth(&mut self, max_qd: u32) {
         if self.queue_depth > max_qd {
             eprintln!(
                 "warning: queue-depth {} exceeds device maximum {}, clamping to {}",

@@ -277,7 +277,7 @@ impl<W: Write> MooncakeWriter<W> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "workload-tests"))]
 mod tests {
     use super::*;
 

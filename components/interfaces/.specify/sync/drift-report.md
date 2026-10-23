@@ -1,11 +1,13 @@
 ---
 spec_sync_component: interfaces
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-21T23:04:39Z
-spec_sync_git_commit: efd502331
-spec_sync_inputs_sha256: c550f9c06936fdd8b91090d3dd51e9cdabe3e84f6b97de0e9fa73786c684f673
+spec_sync_synced_at: 2026-10-23T18:00:34Z
+spec_sync_git_commit: d7a24d58
+spec_sync_inputs_sha256: 264ff039015669529d8a92547865bc01994c790536c5548fe33137b76027de2d
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-23 (branch `unstable`, commit `d7a24d58` "Fix workspace build warnings" plus the spec-sync follow-up).** That commit only fixed warnings under the workspace lint posture: it added `Debug` impls, narrowed unreachable `pub` items to `pub(crate)`, wrapped `unsafe fn` bodies in explicit `unsafe {}` blocks, and the follow-up ran `rustfmt`. It also touched `components/interfaces` (a `Debug` impl for `Command`), which changes every component's digest. This component's own `src/` was in that commit. Every changed item was checked: none is part of a provided interface, none is named as public by the spec, and no behaviour changed. Own change: a manual `Debug` impl for `Command` (`src/iblock_device.rs:417-423`, prints the variant discriminant only, since variants hold `Arc<DmaBuffer>`). No variant, field, trait method or documented behaviour changed; every interface FR still holds. All citations were re-verified by diff-mapping each base line to its new position. Status stays `clean`.
+
 > **Apply 2026-10-21 (branch fix/dispatcher-remove-clear-mt, approved by Cornel).** Batch apply of the 12 approved proposals listed in `proposals.json`. Backup: `.specify/sync/backups/20261021T225804Z/`. Details: `apply-report.{md,json}`.
 >
 > - **Applied: 10 BACKFILL proposals** to `specs/001-interfaces/spec.md`, each using the exact old→new text from the proposal. **1** FR-017: `Command` 13 / `Completion` 12 variants, plus the `ReadWriteStats` histograms. **2** FR-018: `DispatcherConfig` 19 fields, plus a new `TierEventStats` bullet. **3** FR-008 / US2: `copy_gpu_to_memory_async(regions: &[IpcHandle])`, plus `batch_populate`, `tier_event_stats` and `schedule_write_through`; the US2 inventory goes from 16 to 22 methods. **4** FR-008: result contracts for `clear_memory_tier` (pinned entries kept, `Timeout`) and `flush_to_ssd` (`IoError`). **8** FR-023: `LookupConfig` 12 fields. **9** FR-021: `FormatParams` 9 fields. **10** Overview / FR-009: three features, `IMemoryTier` ungated. **11** NFR-002: `gpu` gates nothing. **12** Implementation Notes: verified-properties claim corrected. **13** Banner: FR-014 "deferred" marked resolved. A `Last Synced 2026-10-21` banner line was also added.

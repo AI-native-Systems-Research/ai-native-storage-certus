@@ -171,7 +171,7 @@ pub trait RdmaTransport: Send + Sync {
 
 /// One RDMA write: `len` bytes at local pool address `local`, destined for the
 /// remote region (`remote_addr`, `rkey`).
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct WindowWrite {
     /// Local pool address of the value (from `IMemoryTier::peek`).
     pub local: *const u8,
@@ -250,6 +250,7 @@ enum ConnState {
 }
 
 /// A per-item action decided by the caller after the local memory-tier lookup.
+#[derive(Debug)]
 pub enum ItemPlan {
     /// A terminal status decided before any RDMA write is attempted
     /// ([`PushStatus::KeyNotFound`] or [`PushStatus::SizeMismatch`]).
@@ -452,6 +453,12 @@ pub struct ConnectionTable {
     /// Source of batch identities, shared across hosts so a `seq` is unique
     /// process-wide and stays meaningful in logs.
     next_seq: Mutex<u64>,
+}
+
+impl std::fmt::Debug for ConnectionTable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConnectionTable").finish_non_exhaustive()
+    }
 }
 
 impl ConnectionTable {

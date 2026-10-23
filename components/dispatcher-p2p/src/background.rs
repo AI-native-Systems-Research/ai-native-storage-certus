@@ -22,7 +22,7 @@ pub struct WriteJob {
 }
 
 /// Handle to the background writer thread.
-pub struct BackgroundWriter {
+pub(crate) struct BackgroundWriter {
     shutdown: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
     sender: Sender<WriteJob>,
@@ -75,7 +75,7 @@ impl BackgroundWriter {
     }
 
     /// Enqueue a write job for background processing.
-    pub fn enqueue(&self, job: WriteJob) -> Result<(), WriteJob> {
+    pub(crate) fn enqueue(&self, job: WriteJob) -> Result<(), WriteJob> {
         self.in_flight
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.sender.send(job).map_err(|e| {
@@ -86,7 +86,7 @@ impl BackgroundWriter {
     }
 
     /// Return the number of jobs currently in-flight (enqueued but not yet processed).
-    pub fn in_flight(&self) -> usize {
+    pub(crate) fn in_flight(&self) -> usize {
         self.in_flight.load(std::sync::atomic::Ordering::Acquire)
     }
 
@@ -105,7 +105,7 @@ impl BackgroundWriter {
     /// Signal shutdown and wait for the background thread to finish.
     ///
     /// All jobs already in the channel are processed before the thread exits.
-    pub fn shutdown(&mut self) {
+    pub(crate) fn shutdown(&mut self) {
         self.shutdown.store(true, Ordering::Release);
         // Drop a cloned sender to help close the channel for any receivers.
         drop(self.sender.clone());
@@ -162,6 +162,14 @@ impl Drop for BackgroundWriter {
 pub struct ParallelBackgroundWriter {
     writers: Vec<BackgroundWriter>,
     num_drives: usize,
+}
+
+impl std::fmt::Debug for ParallelBackgroundWriter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ParallelBackgroundWriter")
+            .field("num_drives", &self.num_drives)
+            .finish_non_exhaustive()
+    }
 }
 
 impl ParallelBackgroundWriter {
@@ -232,10 +240,27 @@ pub struct DramBackfillJob {
     pub drive_index: usize,
 }
 
+impl std::fmt::Debug for DramBackfillJob {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DramBackfillJob")
+            .field("key", &self.key)
+            .field("drive_index", &self.drive_index)
+            .finish()
+    }
+}
+
 /// Per-drive background worker that reads SSD data into DRAM memory-tier slots.
 pub struct DramBackfillWorker {
     writers: Vec<BackgroundWriter>,
     num_drives: usize,
+}
+
+impl std::fmt::Debug for DramBackfillWorker {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DramBackfillWorker")
+            .field("num_drives", &self.num_drives)
+            .finish_non_exhaustive()
+    }
 }
 
 impl DramBackfillWorker {
@@ -304,6 +329,7 @@ impl Drop for DramBackfillWorker {
 // Background SSD Evictor
 // ---------------------------------------------------------------------------
 
+#[derive(Debug)]
 pub struct EvictorConfig {
     pub threshold: f64,
     pub low_watermark: f64,
@@ -316,6 +342,14 @@ pub struct BackgroundEvictor {
     handle: Option<JoinHandle<()>>,
 }
 
+impl std::fmt::Debug for BackgroundEvictor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BackgroundEvictor")
+            .field("running", &self.handle.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
 impl BackgroundEvictor {
     pub fn start(
         dm: Arc<dyn IDispatchMap + Send + Sync>,
@@ -323,7 +357,7 @@ impl BackgroundEvictor {
         extent_mgrs: Vec<Arc<dyn IExtentManager + Send + Sync>>,
         config: EvictorConfig,
         logger: Option<Arc<dyn ILogger + Send + Sync>>,
-        eviction_tx: Option<Sender<EvictionEvent>>,
+        eviction_tx: Arc<Mutex<Option<Sender<EvictionEvent>>>>,
         eviction_dropped: Arc<AtomicU64>,
     ) -> Self {
         let shutdown = Arc::new(AtomicBool::new(false));
@@ -339,7 +373,7 @@ impl BackgroundEvictor {
                     &extent_mgrs,
                     &config,
                     logger.as_deref(),
-                    eviction_tx.as_ref(),
+                    &eviction_tx,
                     &eviction_dropped,
                 );
             })
@@ -365,7 +399,7 @@ impl BackgroundEvictor {
         extent_mgrs: &[Arc<dyn IExtentManager + Send + Sync>],
         config: &EvictorConfig,
         logger: Option<&(dyn ILogger + Send + Sync)>,
-        eviction_tx: Option<&Sender<EvictionEvent>>,
+        eviction_tx: &Mutex<Option<Sender<EvictionEvent>>>,
         eviction_dropped: &AtomicU64,
     ) {
         loop {
@@ -415,7 +449,7 @@ impl BackgroundEvictor {
                 }
 
                 publish_eviction(
-                    eviction_tx,
+                    eviction_tx.lock().unwrap().as_ref(),
                     Some(eviction_dropped),
                     key,
                     EvictionReason::Removed,
@@ -497,6 +531,7 @@ impl Drop for BackgroundEvictor {
 // Background Memory-Tier Evictor (DRAM → SSD demotion)
 // ---------------------------------------------------------------------------
 
+#[derive(Debug)]
 pub struct MemoryTierEvictorConfig {
     pub threshold: f64,
     pub low_watermark: f64,
@@ -507,6 +542,14 @@ pub struct MemoryTierEvictorConfig {
 pub struct MemoryTierEvictor {
     shutdown: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
+}
+
+impl std::fmt::Debug for MemoryTierEvictor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MemoryTierEvictor")
+            .field("running", &self.handle.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 impl MemoryTierEvictor {

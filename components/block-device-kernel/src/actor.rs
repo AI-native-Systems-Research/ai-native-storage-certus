@@ -38,6 +38,15 @@ pub struct ClientSession {
     pub pending: VecDeque<Completion>,
 }
 
+impl std::fmt::Debug for ClientSession {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClientSession")
+            .field("id", &self.id)
+            .field("pending_count", &self.pending.len())
+            .finish_non_exhaustive()
+    }
+}
+
 impl ClientSession {
     /// Create a session with an empty backlog.
     pub fn new(id: u64, ingress_rx: Receiver<Command>, callback_tx: Sender<Completion>) -> Self {
@@ -83,6 +92,21 @@ pub enum ControlMessage {
     Shutdown,
 }
 
+impl std::fmt::Debug for ControlMessage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ConnectClient { session } => {
+                f.debug_tuple("ConnectClient").field(&session.id).finish()
+            }
+            Self::DisconnectClient { client_id } => f
+                .debug_struct("DisconnectClient")
+                .field("client_id", client_id)
+                .finish(),
+            Self::Shutdown => f.write_str("Shutdown"),
+        }
+    }
+}
+
 // SAFETY: ClientSession contains channel endpoints that are Send.
 unsafe impl Send for ControlMessage {}
 
@@ -100,7 +124,7 @@ struct InflightOp {
 }
 
 /// The actor handler for kernel block device IO via io_uring.
-pub struct KernelHandler {
+pub(crate) struct KernelHandler {
     fd: OwnedFd,
     config: DeviceConfig,
     ring: IoUring,
@@ -119,7 +143,7 @@ pub struct KernelHandler {
 
 impl KernelHandler {
     #[cfg(not(feature = "telemetry"))]
-    pub fn new(
+    pub(crate) fn new(
         fd: OwnedFd,
         config: DeviceConfig,
         ring: IoUring,

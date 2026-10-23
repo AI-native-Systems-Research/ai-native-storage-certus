@@ -17,13 +17,14 @@ pub const CUDA_ERROR_HOST_MEMORY_ALREADY_REGISTERED: cudaError_t = 712;
 
 /// CUDA IPC memory handle — 64 bytes opaque.
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct cudaIpcMemHandle_t {
     pub reserved: [u8; 64],
 }
 
 /// CUDA device properties (matches CUDA 13.0 layout through the fields we read).
 #[repr(C)]
+#[derive(Debug)]
 pub struct cudaDeviceProp {
     pub name: [c_char; 256],
     _uuid: [u8; 16],
@@ -51,6 +52,7 @@ pub const CUDA_MEMORY_TYPE_DEVICE: cudaMemoryType = 2;
 
 /// CUDA pointer attributes.
 #[repr(C)]
+#[derive(Debug)]
 pub struct cudaPointerAttributes {
     pub r#type: cudaMemoryType,
     pub device: c_int,

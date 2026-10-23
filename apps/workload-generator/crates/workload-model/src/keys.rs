@@ -298,7 +298,7 @@ fn session_salt(tag: u64, session_id: u64, block_ordinal: u64) -> u64 {
     (tag << TAG_SHIFT) ^ (session_id << SESSION_SHIFT) ^ block_ordinal
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "workload-tests"))]
 mod tests {
     use super::*;
 

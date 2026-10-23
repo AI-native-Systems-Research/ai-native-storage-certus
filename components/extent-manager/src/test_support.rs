@@ -18,6 +18,7 @@ pub struct FaultConfig {
     pub fail_all_writes: bool,
 }
 
+#[derive(Debug)]
 pub struct MockState {
     pub blocks: HashMap<u64, Vec<u8>>,
     fault_config: FaultConfig,
@@ -25,6 +26,7 @@ pub struct MockState {
     disk_size: u64,
 }
 
+#[derive(Debug)]
 pub struct MockBlockDevice {
     state: Arc<Mutex<MockState>>,
 }
@@ -241,6 +243,7 @@ fn process_command(cmd: Command, state: &Arc<Mutex<MockState>>, handle: OpHandle
     }
 }
 
+#[derive(Debug)]
 pub struct MockLogger;
 
 impl ILogger for MockLogger {

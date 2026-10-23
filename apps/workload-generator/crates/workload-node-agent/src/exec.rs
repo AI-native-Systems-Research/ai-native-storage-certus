@@ -597,7 +597,7 @@ pub fn clear_memory_tier(client: &Client, channel: usize) -> Result<u64, String>
     Ok(r.u64().unwrap_or(0))
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "workload-tests"))]
 mod tests {
     use super::*;
 

@@ -40,7 +40,7 @@ pub(crate) struct TscClock {
 
 impl TscClock {
     /// Create a new clock, calibrating TSC frequency against `clock_gettime`.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let (ns_per_tick_fp32, ticks_per_ms) = Self::calibrate();
         Self {
             ns_per_tick_fp32,
@@ -50,28 +50,28 @@ impl TscClock {
 
     /// Read the current TSC value.
     #[inline(always)]
-    pub fn now(&self) -> u64 {
+    pub(crate) fn now(&self) -> u64 {
         rdtsc()
     }
 
     /// Convert a TSC tick delta to nanoseconds.
     #[inline(always)]
     #[allow(dead_code)]
-    pub fn ticks_to_ns(&self, ticks: u64) -> u64 {
+    pub(crate) fn ticks_to_ns(&self, ticks: u64) -> u64 {
         // Fixed-point multiply: (ticks * ns_per_tick_fp32) >> 32
         ((ticks as u128 * self.ns_per_tick_fp32 as u128) >> 32) as u64
     }
 
     /// Compute a deadline TSC value `ms` milliseconds from `start`.
     #[inline(always)]
-    pub fn deadline_from_ms(&self, start: u64, ms: u64) -> u64 {
+    pub(crate) fn deadline_from_ms(&self, start: u64, ms: u64) -> u64 {
         start + ms * self.ticks_per_ms
     }
 
     /// Check if the current TSC has passed `deadline`.
     #[inline(always)]
     #[allow(dead_code)]
-    pub fn has_elapsed(&self, deadline: u64) -> bool {
+    pub(crate) fn has_elapsed(&self, deadline: u64) -> bool {
         rdtsc() >= deadline
     }
 

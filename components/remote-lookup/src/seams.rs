@@ -155,6 +155,12 @@ impl NodeWorldInner {
 #[derive(Clone)]
 pub struct NodeWorld(Arc<Mutex<NodeWorldInner>>);
 
+impl std::fmt::Debug for NodeWorld {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("NodeWorld").field(&"shared state").finish()
+    }
+}
+
 impl NodeWorld {
     /// Create a world with a `pool_bytes`-byte backing pool and a default
     /// endpoint (`127.0.0.1:0`).
@@ -310,6 +316,7 @@ impl NodeWorld {
 // ---------------------------------------------------------------------------
 
 /// Mock [`IDispatchMap`] backed by a [`NodeWorld`].
+#[derive(Debug)]
 pub struct MockDispatchMap(NodeWorld);
 
 impl MockDispatchMap {
@@ -503,6 +510,7 @@ impl IDispatchMap for MockDispatchMap {
 // ---------------------------------------------------------------------------
 
 /// Mock [`IMemoryTier`] backed by a [`NodeWorld`].
+#[derive(Debug)]
 pub struct MockMemoryTier(NodeWorld);
 
 impl MockMemoryTier {
@@ -617,6 +625,7 @@ impl IMemoryTier for MockMemoryTier {
 // ---------------------------------------------------------------------------
 
 /// Mock [`IDispatcher`] backed by a [`NodeWorld`].
+#[derive(Debug)]
 pub struct MockDispatcher {
     world: NodeWorld,
     /// Keys for which `schedule_write_through` was called, in call order.
@@ -795,6 +804,7 @@ impl IDispatcher for MockDispatcher {
 ///
 /// Records `disconnect`/`disconnect_all` calls and the local [`PeerId`] so
 /// tests can assert on the teardown handshake.
+#[derive(Debug)]
 pub struct MockInitiator {
     world: NodeWorld,
     disconnects: Mutex<Vec<String>>,
@@ -954,6 +964,22 @@ pub struct MockResponder(Arc<ResponderShared>);
 
 /// Mock lifecycle/configuration surface [`IRemoteLookupRdmaResponderAdmin`].
 pub struct MockResponderAdmin(Arc<ResponderShared>);
+
+impl std::fmt::Debug for MockResponder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("MockResponder")
+            .field(&"shared state")
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for MockResponderAdmin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("MockResponderAdmin")
+            .field(&"shared state")
+            .finish()
+    }
+}
 
 impl MockResponder {
     /// Build a responder + admin pair sharing state, backed by `world`.

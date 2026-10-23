@@ -26,6 +26,10 @@ spdk-backend = ["dep:block-device-spdk-nvme"]
 hardware-test = []
 pipeline-telemetry = []
 rw-telemetry = ["block-device-spdk-nvme?/telemetry"]
+# Forwards `interfaces/integrity-check` so the IDispatchMap trait gains the
+# checksum accessors; the test mock in src/lib.rs cfg's its stubs on this
+# feature. dispatcher-p2p does not compute or verify checksums itself.
+integrity-check = ["interfaces/integrity-check"]
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

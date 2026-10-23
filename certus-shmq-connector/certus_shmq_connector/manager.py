@@ -23,6 +23,7 @@ import hashlib
 import os
 import sys
 import time
+from collections import OrderedDict
 from collections.abc import Iterable
 
 from .compat import (
@@ -31,6 +32,7 @@ from .compat import (
     OffloadingManager,
     OffloadKey,
     PrepareStoreOutput,
+    offload_event_medium,
 )
 from . import compat as _compat
 
@@ -100,11 +102,26 @@ def _session_id_to_u64(req_context) -> int:
     return int.from_bytes(digest, "big")
 
 
+_KEY_REVERSE_MAX = 1 << 20
+
+
 class ShmqCertusOffloadingManager(OffloadingManager):
     """Manager delegating to a remote certus-server via a shared-memory ring."""
 
-    def __init__(self, ring, block_size_bytes: int, world_size: int = 1):
+    def __init__(
+        self,
+        ring,
+        block_size_bytes: int,
+        world_size: int = 1,
+        events_enabled: bool = False,
+    ):
         self._ring = ring
+        # take_events() is drained by vLLM's core scheduler every step whether or
+        # not KV events are enabled, so only yield events when they are.
+        self._events_enabled = bool(events_enabled)
+        # bounded reverse map: folded u64 -> original OffloadKey, so REMOVED
+        # events can carry real keys (the fold is not reversible).
+        self._key_reverse: OrderedDict[int, bytes] = OrderedDict()
         self._block_size_bytes = int(block_size_bytes)
         # Number of TP shards. Under TP>1 each logical vLLM block is physically W
         # separate per-rank entries in the shared server (one head-shard each,
@@ -448,6 +465,12 @@ class ShmqCertusOffloadingManager(OffloadingManager):
 
         stored_orig = [orig for orig, _ in stored_pairs]
         stored_ints = [k for _, k in stored_pairs]
+        for orig, k in stored_pairs:
+            if isinstance(orig, (bytes, bytearray)):
+                self._key_reverse[k] = bytes(orig)
+                self._key_reverse.move_to_end(k)
+        while len(self._key_reverse) > _KEY_REVERSE_MAX:
+            self._key_reverse.popitem(last=False)
         locations = [BlockLocation(key=k) for k in stored_ints]
         return PrepareStoreOutput(
             keys_to_store=stored_orig,
@@ -563,13 +586,16 @@ class ShmqCertusOffloadingManager(OffloadingManager):
             if logical in seen:
                 continue
             seen.add(logical)
-            removed.append(logical.to_bytes(8, "big"))
-        if removed:
+            orig = self._key_reverse.pop(logical, None)
+            if orig is not None:
+                removed.append(orig)
+        if seen:
             # A removed block may still be in the kept lookup answers.
             self._drop_lookup_cache()
+        if removed and self._events_enabled:
             yield OffloadingEvent(
                 keys=removed,
-                medium=CertusLoadStoreSpec.medium(),
+                medium=offload_event_medium(),
                 removed=True,
             )
 

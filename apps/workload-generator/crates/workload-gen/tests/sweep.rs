@@ -57,7 +57,7 @@
 //! `the_verdicts_hold_across_seeds`, which is `#[ignore]`d for runtime. Worth doing rather than
 //! assuming: recorded history on this hardware includes n=3 sampling producing conclusions that
 //! later measurement reversed.
-
+#![cfg(feature = "workload-tests")]
 #![cfg(feature = "live")]
 
 use std::collections::{BTreeMap, HashMap};

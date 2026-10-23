@@ -1000,7 +1000,9 @@ impl DispatcherP2pComponent {
             } else {
                 // Non-SPDK path: use posix_memalign for DMA buffers
                 unsafe extern "C" fn libc_free(p: *mut std::ffi::c_void) {
-                    libc::free(p);
+                    unsafe {
+                        libc::free(p);
+                    }
                 }
                 Arc::new(move |size, align, _numa| {
                     let mut ptr: *mut std::ffi::c_void = std::ptr::null_mut();
@@ -1525,7 +1527,6 @@ impl IDispatcher for DispatcherP2pComponent {
             let evictor_logger = self.logger.get().ok();
 
             if !evictor_extent_mgrs.is_empty() {
-                let evictor_eviction_tx = self.eviction_tx.lock().unwrap().clone();
                 let evictor = BackgroundEvictor::start(
                     dm_for_evictor,
                     mt_for_evictor,
@@ -1537,7 +1538,7 @@ impl IDispatcher for DispatcherP2pComponent {
                         interval: std::time::Duration::from_secs(config.ssd_eviction_interval_secs),
                     },
                     evictor_logger,
-                    evictor_eviction_tx,
+                    Arc::clone(&self.eviction_tx),
                     Arc::clone(&self.eviction_dropped),
                 );
                 *self.bg_evictor.lock().unwrap() = Some(evictor);
@@ -3193,6 +3194,16 @@ mod tests {
     impl IDispatchMap for MockDispatchMap {
         fn initialize(&self) -> Result<(), DispatchMapError> {
             Ok(())
+        }
+
+        #[cfg(feature = "integrity-check")]
+        fn set_checksum(&self, _key: CacheKey, _checksum: u32) -> Result<(), DispatchMapError> {
+            Ok(())
+        }
+
+        #[cfg(feature = "integrity-check")]
+        fn get_checksum(&self, _key: CacheKey) -> Option<u32> {
+            None
         }
 
         fn lookup(&self, key: CacheKey) -> Result<LookupResult, DispatchMapError> {
@@ -5569,7 +5580,7 @@ mod tests {
                 interval: std::time::Duration::from_millis(50),
             },
             None,
-            None,
+            Arc::new(std::sync::Mutex::new(None)),
             Arc::new(AtomicU64::new(0)),
         );
 

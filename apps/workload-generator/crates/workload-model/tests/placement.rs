@@ -5,6 +5,7 @@
 //! a migration is expressed as a change to one field and nothing else — moving blocks would
 //! model a data migration Certus does not perform, and tracking which node holds each block
 //! would duplicate state the cache owns and would be wrong the moment it evicted one.
+#![cfg(feature = "workload-tests")]
 
 use std::collections::{BTreeMap, BTreeSet};
 

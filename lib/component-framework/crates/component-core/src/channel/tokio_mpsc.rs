@@ -36,6 +36,7 @@ use super::{ChannelError, IReceiver, ISender};
 /// tx.send(42).unwrap();
 /// assert_eq!(rx.recv().unwrap(), 42);
 /// ```
+#[derive(Debug)]
 pub struct TokioSender<T> {
     inner: tokio::sync::mpsc::Sender<T>,
 }
@@ -76,6 +77,7 @@ impl<T: Send + 'static> ISender<T> for TokioSender<T> {
 /// tx.send(99).unwrap();
 /// assert_eq!(rx.recv().unwrap(), 99);
 /// ```
+#[derive(Debug)]
 pub struct TokioReceiver<T> {
     inner: Mutex<tokio::sync::mpsc::Receiver<T>>,
 }
@@ -124,6 +126,12 @@ pub struct TokioMpscChannel<T: Send + 'static> {
     sender_iface: OnceLock<Box<dyn Any + Send + Sync>>,
     receiver_iface: OnceLock<Box<dyn Any + Send + Sync>>,
     interface_info: Vec<InterfaceInfo>,
+}
+
+impl<T: Send + 'static> std::fmt::Debug for TokioMpscChannel<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TokioMpscChannel").finish_non_exhaustive()
+    }
 }
 
 impl<T: Send + 'static> TokioMpscChannel<T> {

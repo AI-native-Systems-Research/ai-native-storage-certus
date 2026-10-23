@@ -22,8 +22,8 @@
 > **Last Synced 2026-08-20** (spec-sync Phase B):
 > - FR-030 backfilled — the cross-crate `volatile_write_cache` compile fix has
 >   **landed**: `Command::FlushSync` and `Completion::FlushDone` are defined in the
->   interfaces crate (`iblock_device.rs:411,501`), and `BlockDeviceClient::flush()`
->   exists (`block_io.rs:168`) and is invoked from the checkpoint path under the
+>   interfaces crate (`iblock_device.rs:411,509`), and `BlockDeviceClient::flush()`
+>   exists (`block_io.rs:157`) and is invoked from the checkpoint path under the
 >   feature gate (`lib.rs:308-310`). The feature now compiles and is functional; the
 >   stale "does not yet compile / fix drafted on branch / add a CI job" status has
 >   been removed from FR-030.
@@ -454,9 +454,9 @@ again to verify the old slot is now reusable.
   returns. When **disabled** (the default), no explicit flush is issued,
   improving performance where the caller accepts the associated
   durability risk. (Implementation status 2026-08-20: implemented and
-  building. `BlockDeviceClient::flush()` (`block_io.rs:168`) sends
+  building. `BlockDeviceClient::flush()` (`block_io.rs:157`) sends
   `Command::FlushSync` and awaits `Completion::FlushDone` — both defined in
-  the interfaces crate (`iblock_device.rs:411,501`) — and is called from the
+  the interfaces crate (`iblock_device.rs:411,509`) — and is called from the
   checkpoint path (`lib.rs:308-310`). Enable with
   `--features volatile_write_cache`.)
 - **FR-036**: The component MUST provide
@@ -520,7 +520,7 @@ and are documented here for completeness (previously unspecced):
   read-only, beyond the `publish()`/`abort()` commit contract of FR-033.
 - **Extended mock helpers**: beyond `FaultConfig` (FR-034), the mock block
   device provides `set_fault_config`, `clear_faults`, `shared_state`,
-  `reboot_from`, and `with_fault_config` (`test_support.rs:55-78`) to support
+  `reboot_from`, and `with_fault_config` (`test_support.rs:57-80`) to support
   reboot/recovery integration tests.
 - **`BuddyAllocator::mark_allocated`**: a recovery-time reconstruction helper
   (`buddy.rs:117-157`) used when rebuilding allocator state from key vectors;

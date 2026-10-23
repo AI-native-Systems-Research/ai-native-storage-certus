@@ -442,7 +442,7 @@ impl std::fmt::Debug for PayloadBuffer {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "workload-tests"))]
 mod tests {
     use super::*;
     use shmq_dispatcher::wire;

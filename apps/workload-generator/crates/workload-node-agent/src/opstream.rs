@@ -451,7 +451,7 @@ fn write_reserve(out: &mut Vec<u8>, keys: &[u64], size: u32, session: u64) {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "workload-tests"))]
 mod tests {
     use super::*;
 

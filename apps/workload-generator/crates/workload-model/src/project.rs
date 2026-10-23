@@ -425,7 +425,7 @@ pub fn span_for_invocations(description: &WorkloadDescription, target: u64) -> R
     Ok(target as f64 / rate)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "workload-tests"))]
 mod tests {
     use super::*;
     use crate::plan::OperationPlan;

@@ -23,7 +23,7 @@ pub struct WriteJob {
 }
 
 /// Handle to the background writer thread.
-pub struct BackgroundWriter {
+pub(crate) struct BackgroundWriter {
     shutdown: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
     sender: Sender<WriteJob>,
@@ -76,7 +76,7 @@ impl BackgroundWriter {
     }
 
     /// Enqueue a write job for background processing.
-    pub fn enqueue(&self, job: WriteJob) -> Result<(), WriteJob> {
+    pub(crate) fn enqueue(&self, job: WriteJob) -> Result<(), WriteJob> {
         self.in_flight
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.sender.send(job).map_err(|e| {
@@ -87,7 +87,7 @@ impl BackgroundWriter {
     }
 
     /// Return the number of jobs currently in-flight (enqueued but not yet processed).
-    pub fn in_flight(&self) -> usize {
+    pub(crate) fn in_flight(&self) -> usize {
         self.in_flight.load(std::sync::atomic::Ordering::Acquire)
     }
 
@@ -106,7 +106,7 @@ impl BackgroundWriter {
     /// Signal shutdown and wait for the background thread to finish.
     ///
     /// All jobs already in the channel are processed before the thread exits.
-    pub fn shutdown(&mut self) {
+    pub(crate) fn shutdown(&mut self) {
         self.shutdown.store(true, Ordering::Release);
         // Drop a cloned sender to help close the channel for any receivers.
         drop(self.sender.clone());
@@ -163,6 +163,14 @@ impl Drop for BackgroundWriter {
 pub struct ParallelBackgroundWriter {
     writers: Vec<BackgroundWriter>,
     num_drives: usize,
+}
+
+impl std::fmt::Debug for ParallelBackgroundWriter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ParallelBackgroundWriter")
+            .field("num_drives", &self.num_drives)
+            .finish_non_exhaustive()
+    }
 }
 
 impl ParallelBackgroundWriter {
@@ -227,7 +235,7 @@ impl Drop for ParallelBackgroundWriter {
 /// dispatcher's dropped-event counter. Every eviction path sends through
 /// [`EvictionSender::emit`], so an event is either queued or counted as dropped
 /// (FR-042) — never lost silently — and the send never blocks.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct EvictionSender {
     pub tx: Sender<EvictionEvent>,
     pub dropped: Arc<AtomicU64>,
@@ -261,6 +269,12 @@ pub struct WriteThroughPins {
     keys: Mutex<HashMap<CacheKey, PinState>>,
     /// Keys whose latest write-through did not land on the block device.
     failed: Mutex<HashSet<CacheKey>>,
+}
+
+impl std::fmt::Debug for WriteThroughPins {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WriteThroughPins").finish_non_exhaustive()
+    }
 }
 
 #[derive(Default)]
@@ -393,6 +407,7 @@ impl WriteThroughPins {
 // Background SSD Evictor
 // ---------------------------------------------------------------------------
 
+#[derive(Debug)]
 pub struct EvictorConfig {
     pub threshold: f64,
     pub low_watermark: f64,
@@ -405,6 +420,14 @@ pub struct BackgroundEvictor {
     handle: Option<JoinHandle<()>>,
 }
 
+impl std::fmt::Debug for BackgroundEvictor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BackgroundEvictor")
+            .field("running", &self.handle.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
 impl BackgroundEvictor {
     pub fn start(
         dm: Arc<dyn IDispatchMap + Send + Sync>,
@@ -412,7 +435,7 @@ impl BackgroundEvictor {
         extent_mgrs: Vec<Arc<dyn IExtentManager + Send + Sync>>,
         config: EvictorConfig,
         logger: Option<Arc<dyn ILogger + Send + Sync>>,
-        eviction_tx: Option<EvictionSender>,
+        eviction_tx: Arc<Mutex<Option<EvictionSender>>>,
         tier_counters: Arc<TierEventCounters>,
     ) -> Self {
         let shutdown = Arc::new(AtomicBool::new(false));
@@ -428,7 +451,7 @@ impl BackgroundEvictor {
                     &extent_mgrs,
                     &config,
                     logger.as_deref(),
-                    eviction_tx.as_ref(),
+                    &eviction_tx,
                     &tier_counters,
                 );
             })
@@ -454,7 +477,7 @@ impl BackgroundEvictor {
         extent_mgrs: &[Arc<dyn IExtentManager + Send + Sync>],
         config: &EvictorConfig,
         logger: Option<&(dyn ILogger + Send + Sync)>,
-        eviction_tx: Option<&EvictionSender>,
+        eviction_tx: &Mutex<Option<EvictionSender>>,
         tier_counters: &TierEventCounters,
     ) {
         loop {
@@ -506,7 +529,7 @@ impl BackgroundEvictor {
                 // Remove from memory-tier (no-op if not present).
                 let _ = mt.remove(key);
 
-                if let Some(tx) = eviction_tx {
+                if let Some(ref tx) = *eviction_tx.lock().unwrap() {
                     tx.emit(EvictionEvent {
                         key,
                         reason: EvictionReason::Removed,
@@ -590,6 +613,7 @@ impl Drop for BackgroundEvictor {
 // Background Memory-Tier Evictor (DRAM → SSD demotion)
 // ---------------------------------------------------------------------------
 
+#[derive(Debug)]
 pub struct MemoryTierEvictorConfig {
     pub threshold: f64,
     pub low_watermark: f64,
@@ -600,6 +624,14 @@ pub struct MemoryTierEvictorConfig {
 pub struct MemoryTierEvictor {
     shutdown: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
+}
+
+impl std::fmt::Debug for MemoryTierEvictor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MemoryTierEvictor")
+            .field("running", &self.handle.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 impl MemoryTierEvictor {

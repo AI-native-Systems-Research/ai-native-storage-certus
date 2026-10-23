@@ -34,6 +34,7 @@ use super::{ChannelError, IReceiver, ISender};
 /// tx.send(42).unwrap();
 /// assert_eq!(rx.recv().unwrap(), 42);
 /// ```
+#[derive(Debug)]
 pub struct CrossbeamUnboundedSender<T> {
     inner: crossbeam_channel::Sender<T>,
 }
@@ -69,6 +70,7 @@ unsafe impl<T: Send> Sync for CrossbeamUnboundedSender<T> {}
 /// tx.send(99).unwrap();
 /// assert_eq!(rx.recv().unwrap(), 99);
 /// ```
+#[derive(Debug)]
 pub struct CrossbeamUnboundedReceiver<T> {
     inner: crossbeam_channel::Receiver<T>,
 }
@@ -119,6 +121,13 @@ pub struct CrossbeamUnboundedChannel<T: Send + 'static> {
     sender_iface: OnceLock<Box<dyn Any + Send + Sync>>,
     receiver_iface: OnceLock<Box<dyn Any + Send + Sync>>,
     interface_info: Vec<InterfaceInfo>,
+}
+
+impl<T: Send + 'static> std::fmt::Debug for CrossbeamUnboundedChannel<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CrossbeamUnboundedChannel")
+            .finish_non_exhaustive()
+    }
 }
 
 impl<T: Send + 'static> CrossbeamUnboundedChannel<T> {

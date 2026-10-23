@@ -215,7 +215,7 @@ mod tests {
     #[test]
     fn stats_record_single_op() {
         let stats = TelemetryStats::new();
-        stats.record(1000, 4096);
+        stats.record(1000, 4096, true);
         let snap = stats.snapshot();
         assert_eq!(snap.total_ops, 1);
         assert_eq!(snap.min_latency_ns, 1000);
@@ -227,9 +227,9 @@ mod tests {
     #[test]
     fn stats_record_multiple_ops() {
         let stats = TelemetryStats::new();
-        stats.record(1000, 4096);
-        stats.record(3000, 4096);
-        stats.record(2000, 4096);
+        stats.record(1000, 4096, true);
+        stats.record(3000, 4096, true);
+        stats.record(2000, 4096, true);
         let snap = stats.snapshot();
         assert_eq!(snap.total_ops, 3);
         assert_eq!(snap.min_latency_ns, 1000);

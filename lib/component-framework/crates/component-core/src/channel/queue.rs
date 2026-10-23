@@ -36,6 +36,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 /// assert_eq!(std::mem::size_of_val(&padded), 128);
 /// ```
 #[repr(C)]
+#[derive(Debug)]
 pub struct CachePadded<T> {
     value: T,
     _pad: [u8; 128 - std::mem::size_of::<usize>()],
@@ -95,6 +96,7 @@ impl<T> std::ops::DerefMut for CachePadded<T> {
 /// assert_eq!(rb.pop(), Some(2));
 /// assert_eq!(rb.pop(), None);
 /// ```
+#[derive(Debug)]
 pub struct RingBuffer<T> {
     buffer: Box<[UnsafeCell<MaybeUninit<T>>]>,
     capacity: usize,
@@ -277,6 +279,7 @@ unsafe impl<T: Send> Sync for RingBuffer<T> {}
 // ---------------------------------------------------------------------------
 
 /// A slot in the MPSC ring buffer, containing a sequence counter and a value.
+#[derive(Debug)]
 struct MpscSlot<T> {
     sequence: AtomicUsize,
     value: UnsafeCell<MaybeUninit<T>>,
@@ -309,6 +312,7 @@ struct MpscSlot<T> {
 /// assert_eq!(rb.pop(), Some(2));
 /// assert_eq!(rb.pop(), None);
 /// ```
+#[derive(Debug)]
 pub struct MpscRingBuffer<T> {
     slots: Box<[MpscSlot<T>]>,
     capacity: usize,

@@ -3,7 +3,7 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
 /// Trait for generating logical block addresses.
-pub trait LbaGenerator {
+pub(crate) trait LbaGenerator {
     /// Return the next LBA to use for an IO operation.
     ///
     /// `blocks_per_io` is the number of sectors this particular IO will touch,
@@ -12,7 +12,7 @@ pub trait LbaGenerator {
 }
 
 /// Uniform random LBA generator.
-pub struct RandomLba {
+pub(crate) struct RandomLba {
     max_lba: u64,
     rng: StdRng,
 }
@@ -23,7 +23,7 @@ impl RandomLba {
     /// `total_sectors` is the namespace size in sectors.
     /// `max_blocks_per_io` is the largest number of sectors any single IO may
     /// touch (derived from the largest configured block size).
-    pub fn new(total_sectors: u64, max_blocks_per_io: u64) -> Self {
+    pub(crate) fn new(total_sectors: u64, max_blocks_per_io: u64) -> Self {
         assert!(
             total_sectors > max_blocks_per_io,
             "namespace too small for block size"
@@ -42,7 +42,7 @@ impl LbaGenerator for RandomLba {
 }
 
 /// Sequential LBA generator with per-thread non-overlapping regions.
-pub struct SequentialLba {
+pub(crate) struct SequentialLba {
     current: u64,
     start: u64,
     end: u64,
@@ -57,7 +57,7 @@ impl SequentialLba {
     ///
     /// `max_blocks_per_io` is used for region boundary calculation (ensures
     /// the largest IO never overflows).
-    pub fn new(
+    pub(crate) fn new(
         thread_index: u32,
         num_threads: u32,
         total_sectors: u64,

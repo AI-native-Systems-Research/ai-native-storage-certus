@@ -4,6 +4,7 @@
 //! normative for the schema, so if it stopped parsing the schema would have
 //! drifted from its own specification, and nothing else in this crate would
 //! notice.
+#![cfg(feature = "workload-tests")]
 
 use std::path::PathBuf;
 

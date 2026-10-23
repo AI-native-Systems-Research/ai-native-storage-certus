@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-pub struct LatencyStats {
+pub(crate) struct LatencyStats {
     pub count: u64,
     pub min: Duration,
     pub max: Duration,
@@ -9,7 +9,7 @@ pub struct LatencyStats {
     pub p99: Duration,
 }
 
-pub fn compute_stats(samples: &mut [Duration]) -> LatencyStats {
+pub(crate) fn compute_stats(samples: &mut [Duration]) -> LatencyStats {
     if samples.is_empty() {
         return LatencyStats {
             count: 0,

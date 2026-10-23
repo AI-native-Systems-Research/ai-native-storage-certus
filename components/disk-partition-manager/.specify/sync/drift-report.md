@@ -1,11 +1,13 @@
 ---
 spec_sync_component: disk-partition-manager
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-21T23:03:30Z
-spec_sync_git_commit: efd502331
-spec_sync_inputs_sha256: 7a07fa91b014c8d394118dbc033b691f0e1420a7129677d1732e8487d949031e
+spec_sync_synced_at: 2026-10-23T18:00:34Z
+spec_sync_git_commit: d7a24d58
+spec_sync_inputs_sha256: 42689bf74294ecfe360ad06bb57e66b058d8f2eb3f7020581a8caf99b104ae50
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-23 (branch `unstable`, commit `d7a24d58` "Fix workspace build warnings" plus the spec-sync follow-up).** That commit only fixed warnings under the workspace lint posture: it added `Debug` impls, narrowed unreachable `pub` items to `pub(crate)`, wrapped `unsafe fn` bodies in explicit `unsafe {}` blocks, and the follow-up ran `rustfmt`. It also touched `components/interfaces` (a `Debug` impl for `Command`), which changes every component's digest. This component's own `src/` was in that commit. Every changed item was checked: none is part of a provided interface, none is named as public by the spec, and no behaviour changed. No spec citation into this component's source moved. All citations were re-verified by diff-mapping each base line to its new position. Status stays `clean`.
+
 > **Re-stamp 2026-10-21 (transitive, `components/interfaces` changed on branch `fix/dispatcher-remove-clear-mt`).** Only `components/interfaces` changed for this component: `IDispatcher` doc comments (`flush_to_ssd` errors, `clear_memory_tier`, `batch_lookup`) and the interfaces spec (FR-008, FR-009, FR-017, FR-018, FR-018a, FR-021, FR-023, Overview, NFR-002, Implementation Notes; text only, no type or signature changed). This component uses some of the named items (3 files), but no type, signature or behaviour of them changed. This component's last full sync below stands; no re-analysis was needed.
 
 > **Re-stamp 2026-10-14 (transitive: `components/interfaces` changed, branch `fix/cold-staging-buf-16mib`).** The spec-sync digest folds `components/interfaces/{src,specs}` into every component's hash, so the single interface change on this branch — `DispatcherConfig::cold_staging_buf_bytes` default 4 MiB → 16 MiB (commit `8e12e49f`) and the matching correction to interfaces FR-027 — invalidates every component's stamp at once; this is the design, not a defect. **No code re-analysis was performed for this component, and none was needed:** its own `src/**` and `specs/**` are unchanged on this branch, and it does not reference `cold_staging_buf_bytes` (consumed only by the dispatcher's host-DRAM cold-staging pool). Digest refreshed to the recomputed value.

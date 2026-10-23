@@ -13,6 +13,7 @@
 //! `slot` a position is hot and each new occupant inherits that heat; under `recency` rank 0 is
 //! the newest instance, so an instance's heat decays as newer ones arrive. Uniformly, those are
 //! the same distribution — which is why `rank_by` was inert by construction until now.
+#![cfg(feature = "workload-tests")]
 
 use std::collections::BTreeMap;
 

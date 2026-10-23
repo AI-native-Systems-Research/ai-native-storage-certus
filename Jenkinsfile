@@ -172,25 +172,24 @@ pipeline {
         }
       }
     }
-    // ci-fast skips the generator's slow tests (~120s of the run, three times
-    // over). It is OFF by default, so `cargo test` still runs them for anyone
-    // working on the generator; only CI opts out. The generator is also the most
-    // isolated part of the tree from the code under continual development, which
-    // is what makes trading its per-PR coverage the cheapest reduction available.
-    // Full coverage belongs in a periodic job: cargo t --workspace (no feature).
+    // The workload-generator suites are opt-in (`workload-tests`, OFF by
+    // default), so a plain `cargo t --workspace` skips them. CI opts back in
+    // and adds `ci-fast` to drop the slow ones (~120s of the run, three times
+    // over). Full generator coverage belongs in a periodic job:
+    //   cargo t --workspace --features <crate>/workload-tests (no ci-fast).
     stage('Hardware-Agnostic Unit Tests') {
       steps {
-        sh '. ~/.cargo/env ; cargo t --workspace --features workload-gen/ci-fast,workload-model/ci-fast,workload-node-agent/ci-fast,workload-trace/ci-fast,workload-wire/ci-fast'
+        sh '. ~/.cargo/env ; cargo t --workspace --features workload-gen/workload-tests,workload-gen/ci-fast,workload-model/workload-tests,workload-model/ci-fast,workload-node-agent/workload-tests,workload-node-agent/ci-fast,workload-trace/workload-tests,workload-trace/ci-fast,workload-wire/workload-tests,workload-wire/ci-fast'
       }
     }
     stage('GPU Unit Tests') {
       steps {
-        sh '. ~/.cargo/env ; cargo t --workspace --features gpu,workload-gen/ci-fast,workload-model/ci-fast,workload-node-agent/ci-fast,workload-trace/ci-fast,workload-wire/ci-fast'
+        sh '. ~/.cargo/env ; cargo t --workspace --features gpu,workload-gen/workload-tests,workload-gen/ci-fast,workload-model/workload-tests,workload-model/ci-fast,workload-node-agent/workload-tests,workload-node-agent/ci-fast,workload-trace/workload-tests,workload-trace/ci-fast,workload-wire/workload-tests,workload-wire/ci-fast'
       }
     }
     stage('SPDK Unit Tests') {
       steps {
-        sh '. ~/.cargo/env ; cargo t --workspace --features spdk,workload-gen/ci-fast,workload-model/ci-fast,workload-node-agent/ci-fast,workload-trace/ci-fast,workload-wire/ci-fast'
+        sh '. ~/.cargo/env ; cargo t --workspace --features spdk,workload-gen/workload-tests,workload-gen/ci-fast,workload-model/workload-tests,workload-model/ci-fast,workload-node-agent/workload-tests,workload-node-agent/ci-fast,workload-trace/workload-tests,workload-trace/ci-fast,workload-wire/workload-tests,workload-wire/ci-fast'
       }
     }
     stage('Benchmarks') {

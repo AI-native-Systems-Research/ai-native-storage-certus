@@ -30,6 +30,14 @@ pub struct PipelineRing {
     pub chunk_size: usize,
 }
 
+impl std::fmt::Debug for PipelineRing {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PipelineRing")
+            .field("chunk_size", &self.chunk_size)
+            .finish_non_exhaustive()
+    }
+}
+
 impl PipelineRing {
     /// Allocate a new pipeline ring with CUDA-pinned, SPDK-registered buffers.
     pub fn new(gpu: &dyn IGpuServices, chunk_size: usize) -> Result<Self, DispatcherError> {
@@ -411,6 +419,15 @@ pub struct ColdReadJob {
     pub total_bytes: usize,
 }
 
+impl std::fmt::Debug for ColdReadJob {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ColdReadJob")
+            .field("start_lba", &self.start_lba)
+            .field("total_bytes", &self.total_bytes)
+            .finish_non_exhaustive()
+    }
+}
+
 // SAFETY: pointers are valid for the duration of the pipeline call.
 unsafe impl Send for ColdReadJob {}
 
@@ -710,154 +727,158 @@ pub unsafe fn pipelined_ssd_to_gpu_p2p(
     start_lba: u64,
     total_bytes: usize,
 ) -> Result<(), DispatcherError> {
-    use gpu_services::cuda_ffi;
+    unsafe {
+        use gpu_services::cuda_ffi;
 
-    let block_size = drive.block_size() as usize;
-    let chunk_size = ring.slot_size;
-    let aligned_bytes = total_bytes.next_multiple_of(block_size);
+        let block_size = drive.block_size() as usize;
+        let chunk_size = ring.slot_size;
+        let aligned_bytes = total_bytes.next_multiple_of(block_size);
 
-    let segments = io_segmenter::segment_io(
-        start_lba,
-        aligned_bytes,
-        chunk_size as u32,
-        block_size as u32,
-    );
-
-    if segments.is_empty() {
-        return Ok(());
-    }
-
-    let num_chunks = segments.len();
-    let all_streams = ring.streams();
-    // Use all available streams for maximum D2D parallelism.
-    let num_streams = all_streams.len();
-
-    let ring_offset = partition.ring_offset;
-    let ring_size = partition.effective_qd.min(num_chunks).max(1);
-
-    // Queue depth: use the full partition size to saturate the NVMe queue.
-    // Don't cap at 16 here — the partition already handles that.
-    let effective_qd = ring_size;
-
-    // Sync interval: sync all streams once per ring_size completions.
-    // This bounds how many D2D ops can be in-flight while ensuring
-    // slots are not recycled before their D2D copy completes.
-    let sync_interval = ring_size.max(1);
-
-    // Prime: submit initial async reads into ring slots.
-    for i in 0..effective_qd {
-        let slot = ring_offset + (i % ring_size);
-        channels
-            .command_tx
-            .send(Command::ReadAsync {
-                ns_id: 1,
-                lba: segments[i].lba,
-                buf: Arc::clone(ring.slot(slot)),
-                timeout_ms: READ_TIMEOUT_MS,
-                tag: i as u64,
-            })
-            .map_err(|e| DispatcherError::IoError(format!("P2P ReadAsync send #{i}: {e}")))?;
-    }
-
-    let mut next_to_submit = effective_qd;
-
-    for completed in 0..num_chunks {
-        match channels.completion_rx.recv() {
-            Ok(Completion::ReadDone { result, .. }) => {
-                result.map_err(|e| {
-                    DispatcherError::IoError(format!("P2P SSD read #{completed}: {e}"))
-                })?;
-            }
-            Ok(Completion::Timeout { handle }) => {
-                return Err(DispatcherError::IoError(format!(
-                    "P2P NVMe read timeout (handle {:?})",
-                    handle
-                )));
-            }
-            Ok(other) => {
-                return Err(DispatcherError::IoError(format!(
-                    "P2P unexpected completion: {other:?}"
-                )));
-            }
-            Err(_) => {
-                return Err(DispatcherError::IoError(
-                    "P2P completion channel disconnected".into(),
-                ));
-            }
-        }
-
-        let slot = ring_offset + (completed % ring_size);
-        let seg = &segments[completed];
-        let copy_len = seg
-            .length
-            .min(total_bytes.saturating_sub(seg.buffer_offset));
-        // Distribute D2D copies across all streams for maximum throughput.
-        let current_stream = all_streams[completed % num_streams];
-
-        // D2D async copy: GPU staging ring slot → final GPU destination.
-        let err = cuda_ffi::cudaMemcpyAsync(
-            (gpu_dst as *mut u8).add(seg.buffer_offset) as *mut std::ffi::c_void,
-            ring.dev_ptrs[slot] as *const std::ffi::c_void,
-            copy_len,
-            cuda_ffi::CUDA_MEMCPY_DEVICE_TO_DEVICE,
-            current_stream.0,
+        let segments = io_segmenter::segment_io(
+            start_lba,
+            aligned_bytes,
+            chunk_size as u32,
+            block_size as u32,
         );
-        if err != cuda_ffi::CUDA_SUCCESS {
-            return Err(DispatcherError::IoError(format!(
-                "P2P D2D cudaMemcpyAsync #{completed}: {}",
-                cuda_ffi::cuda_error_string(err)
-            )));
+
+        if segments.is_empty() {
+            return Ok(());
         }
 
-        // Sync all streams at sync_interval boundaries before recycling slots.
-        // This ensures D2D copies using those slots have completed before NVMe
-        // can write new data into them.
-        let next_completed = completed + 1;
-        if next_to_submit < num_chunks {
-            // We need to sync before recycling if we've wrapped around the ring.
-            let needs_sync = next_completed > 0 && next_completed % sync_interval == 0;
+        let num_chunks = segments.len();
+        let all_streams = ring.streams();
+        // Use all available streams for maximum D2D parallelism.
+        let num_streams = all_streams.len();
 
-            if needs_sync {
-                for s in all_streams {
-                    let err = cuda_ffi::cudaStreamSynchronize(s.0);
-                    if err != cuda_ffi::CUDA_SUCCESS {
-                        return Err(DispatcherError::IoError(format!(
-                            "P2P cudaStreamSynchronize: {}",
-                            cuda_ffi::cuda_error_string(err)
-                        )));
-                    }
-                }
-            }
+        let ring_offset = partition.ring_offset;
+        let ring_size = partition.effective_qd.min(num_chunks).max(1);
 
-            let next_slot = ring_offset + (next_to_submit % ring_size);
+        // Queue depth: use the full partition size to saturate the NVMe queue.
+        // Don't cap at 16 here — the partition already handles that.
+        let effective_qd = ring_size;
+
+        // Sync interval: sync all streams once per ring_size completions.
+        // This bounds how many D2D ops can be in-flight while ensuring
+        // slots are not recycled before their D2D copy completes.
+        let sync_interval = ring_size.max(1);
+
+        // Prime: submit initial async reads into ring slots.
+        for i in 0..effective_qd {
+            let slot = ring_offset + (i % ring_size);
             channels
                 .command_tx
                 .send(Command::ReadAsync {
                     ns_id: 1,
-                    lba: segments[next_to_submit].lba,
-                    buf: Arc::clone(ring.slot(next_slot)),
+                    lba: segments[i].lba,
+                    buf: Arc::clone(ring.slot(slot)),
                     timeout_ms: READ_TIMEOUT_MS,
-                    tag: next_to_submit as u64,
+                    tag: i as u64,
                 })
-                .map_err(|e| {
-                    DispatcherError::IoError(format!("P2P ReadAsync submit #{next_to_submit}: {e}"))
-                })?;
-            next_to_submit += 1;
+                .map_err(|e| DispatcherError::IoError(format!("P2P ReadAsync send #{i}: {e}")))?;
         }
-    }
 
-    // Final sync: ensure all D2D copies are complete before returning.
-    for s in all_streams {
-        let err = cuda_ffi::cudaStreamSynchronize(s.0);
-        if err != cuda_ffi::CUDA_SUCCESS {
-            return Err(DispatcherError::IoError(format!(
-                "P2P final cudaStreamSynchronize: {}",
-                cuda_ffi::cuda_error_string(err)
-            )));
+        let mut next_to_submit = effective_qd;
+
+        for completed in 0..num_chunks {
+            match channels.completion_rx.recv() {
+                Ok(Completion::ReadDone { result, .. }) => {
+                    result.map_err(|e| {
+                        DispatcherError::IoError(format!("P2P SSD read #{completed}: {e}"))
+                    })?;
+                }
+                Ok(Completion::Timeout { handle }) => {
+                    return Err(DispatcherError::IoError(format!(
+                        "P2P NVMe read timeout (handle {:?})",
+                        handle
+                    )));
+                }
+                Ok(other) => {
+                    return Err(DispatcherError::IoError(format!(
+                        "P2P unexpected completion: {other:?}"
+                    )));
+                }
+                Err(_) => {
+                    return Err(DispatcherError::IoError(
+                        "P2P completion channel disconnected".into(),
+                    ));
+                }
+            }
+
+            let slot = ring_offset + (completed % ring_size);
+            let seg = &segments[completed];
+            let copy_len = seg
+                .length
+                .min(total_bytes.saturating_sub(seg.buffer_offset));
+            // Distribute D2D copies across all streams for maximum throughput.
+            let current_stream = all_streams[completed % num_streams];
+
+            // D2D async copy: GPU staging ring slot → final GPU destination.
+            let err = cuda_ffi::cudaMemcpyAsync(
+                (gpu_dst as *mut u8).add(seg.buffer_offset) as *mut std::ffi::c_void,
+                ring.dev_ptrs[slot] as *const std::ffi::c_void,
+                copy_len,
+                cuda_ffi::CUDA_MEMCPY_DEVICE_TO_DEVICE,
+                current_stream.0,
+            );
+            if err != cuda_ffi::CUDA_SUCCESS {
+                return Err(DispatcherError::IoError(format!(
+                    "P2P D2D cudaMemcpyAsync #{completed}: {}",
+                    cuda_ffi::cuda_error_string(err)
+                )));
+            }
+
+            // Sync all streams at sync_interval boundaries before recycling slots.
+            // This ensures D2D copies using those slots have completed before NVMe
+            // can write new data into them.
+            let next_completed = completed + 1;
+            if next_to_submit < num_chunks {
+                // We need to sync before recycling if we've wrapped around the ring.
+                let needs_sync = next_completed > 0 && next_completed % sync_interval == 0;
+
+                if needs_sync {
+                    for s in all_streams {
+                        let err = cuda_ffi::cudaStreamSynchronize(s.0);
+                        if err != cuda_ffi::CUDA_SUCCESS {
+                            return Err(DispatcherError::IoError(format!(
+                                "P2P cudaStreamSynchronize: {}",
+                                cuda_ffi::cuda_error_string(err)
+                            )));
+                        }
+                    }
+                }
+
+                let next_slot = ring_offset + (next_to_submit % ring_size);
+                channels
+                    .command_tx
+                    .send(Command::ReadAsync {
+                        ns_id: 1,
+                        lba: segments[next_to_submit].lba,
+                        buf: Arc::clone(ring.slot(next_slot)),
+                        timeout_ms: READ_TIMEOUT_MS,
+                        tag: next_to_submit as u64,
+                    })
+                    .map_err(|e| {
+                        DispatcherError::IoError(format!(
+                            "P2P ReadAsync submit #{next_to_submit}: {e}"
+                        ))
+                    })?;
+                next_to_submit += 1;
+            }
         }
-    }
 
-    Ok(())
+        // Final sync: ensure all D2D copies are complete before returning.
+        for s in all_streams {
+            let err = cuda_ffi::cudaStreamSynchronize(s.0);
+            if err != cuda_ffi::CUDA_SUCCESS {
+                return Err(DispatcherError::IoError(format!(
+                    "P2P final cudaStreamSynchronize: {}",
+                    cuda_ffi::cuda_error_string(err)
+                )));
+            }
+        }
+
+        Ok(())
+    }
 }
 
 /// Describes a single object to be read from SSD via P2P into a client GPU destination.
@@ -865,6 +886,12 @@ pub struct P2pColdJob {
     pub gpu_dst: *mut std::ffi::c_void,
     pub start_lba: u64,
     pub total_bytes: usize,
+}
+
+impl std::fmt::Debug for P2pColdJob {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("P2pColdJob").finish_non_exhaustive()
+    }
 }
 
 // SAFETY: gpu_dst is a CUDA device pointer valid across threads.
@@ -881,229 +908,233 @@ pub unsafe fn pipelined_multi_object_p2p(
     channels: &ClientChannels,
     jobs: &[P2pColdJob],
 ) -> Vec<Result<(), DispatcherError>> {
-    use gpu_services::cuda_ffi;
+    unsafe {
+        use gpu_services::cuda_ffi;
 
-    let num_jobs = jobs.len();
-    let mut results: Vec<Result<(), DispatcherError>> = vec![Ok(()); num_jobs];
+        let num_jobs = jobs.len();
+        let mut results: Vec<Result<(), DispatcherError>> = vec![Ok(()); num_jobs];
 
-    if num_jobs == 0 {
-        return results;
-    }
-
-    let block_size = drive.block_size() as usize;
-    let chunk_size = ring.slot_size;
-    let all_streams = ring.streams();
-    let num_streams = all_streams.len();
-
-    let ring_offset = partition.ring_offset;
-    let ring_size = partition.effective_qd;
-
-    // Segment all objects upfront.
-    struct ObjSegments {
-        segments: Vec<crate::io_segmenter::IoSegment>,
-    }
-
-    let mut all_objs: Vec<ObjSegments> = Vec::with_capacity(num_jobs);
-    let mut total_segments = 0usize;
-
-    for job in jobs {
-        let aligned_bytes = job.total_bytes.next_multiple_of(block_size);
-        let segments = crate::io_segmenter::segment_io(
-            job.start_lba,
-            aligned_bytes,
-            chunk_size as u32,
-            block_size as u32,
-        );
-        total_segments += segments.len();
-        all_objs.push(ObjSegments { segments });
-    }
-
-    if total_segments == 0 {
-        return results;
-    }
-
-    // Flatten into work queue with tag encoding.
-    let mut work: Vec<(usize, usize)> = Vec::with_capacity(total_segments);
-    for (obj_idx, obj) in all_objs.iter().enumerate() {
-        for seg_idx in 0..obj.segments.len() {
-            work.push((obj_idx, seg_idx));
-        }
-    }
-
-    let max_segments_per_obj = all_objs.iter().map(|o| o.segments.len()).max().unwrap_or(0);
-    let effective_qd = ring_size.min(total_segments).max(1);
-    let sync_interval = ring_size.max(1);
-
-    // Prime: submit initial reads.
-    let mut submitted = 0usize;
-    let mut completed = 0usize;
-
-    while submitted < effective_qd {
-        let (obj_idx, seg_idx) = work[submitted];
-        let slot = ring_offset + (submitted % ring_size);
-        let tag = (obj_idx * max_segments_per_obj + seg_idx) as u64;
-
-        if channels
-            .command_tx
-            .send(Command::ReadAsync {
-                ns_id: 1,
-                lba: all_objs[obj_idx].segments[seg_idx].lba,
-                buf: Arc::clone(ring.slot(slot)),
-                timeout_ms: READ_TIMEOUT_MS,
-                tag,
-            })
-            .is_err()
-        {
-            for r in &mut results {
-                *r = Err(DispatcherError::IoError("channel send failed".into()));
-            }
+        if num_jobs == 0 {
             return results;
         }
-        submitted += 1;
-    }
 
-    // Main pipeline loop.
-    while completed < total_segments {
-        match channels.completion_rx.recv() {
-            Ok(Completion::ReadDone { tag, result, .. }) => {
-                let obj_idx = (tag as usize) / max_segments_per_obj;
-                let seg_idx = (tag as usize) % max_segments_per_obj;
+        let block_size = drive.block_size() as usize;
+        let chunk_size = ring.slot_size;
+        let all_streams = ring.streams();
+        let num_streams = all_streams.len();
 
-                if let Err(e) = result {
-                    results[obj_idx] = Err(DispatcherError::IoError(format!(
-                        "P2P SSD read obj={obj_idx} seg={seg_idx}: {e}"
-                    )));
-                    completed += 1;
-                } else {
-                    completed += 1;
+        let ring_offset = partition.ring_offset;
+        let ring_size = partition.effective_qd;
 
-                    let job = &jobs[obj_idx];
-                    let seg = &all_objs[obj_idx].segments[seg_idx];
-                    let copy_len = seg
-                        .length
-                        .min(job.total_bytes.saturating_sub(seg.buffer_offset));
-                    let slot = ring_offset + ((completed - 1) % ring_size);
-                    let current_stream = all_streams[(completed - 1) % num_streams];
+        // Segment all objects upfront.
+        struct ObjSegments {
+            segments: Vec<crate::io_segmenter::IoSegment>,
+        }
 
-                    // D2D async copy: BAR1 ring slot → client GPU destination.
-                    let err = cuda_ffi::cudaMemcpyAsync(
-                        (job.gpu_dst as *mut u8).add(seg.buffer_offset) as *mut std::ffi::c_void,
-                        ring.dev_ptrs[slot] as *const std::ffi::c_void,
-                        copy_len,
-                        cuda_ffi::CUDA_MEMCPY_DEVICE_TO_DEVICE,
-                        current_stream.0,
-                    );
-                    if err != cuda_ffi::CUDA_SUCCESS {
+        let mut all_objs: Vec<ObjSegments> = Vec::with_capacity(num_jobs);
+        let mut total_segments = 0usize;
+
+        for job in jobs {
+            let aligned_bytes = job.total_bytes.next_multiple_of(block_size);
+            let segments = crate::io_segmenter::segment_io(
+                job.start_lba,
+                aligned_bytes,
+                chunk_size as u32,
+                block_size as u32,
+            );
+            total_segments += segments.len();
+            all_objs.push(ObjSegments { segments });
+        }
+
+        if total_segments == 0 {
+            return results;
+        }
+
+        // Flatten into work queue with tag encoding.
+        let mut work: Vec<(usize, usize)> = Vec::with_capacity(total_segments);
+        for (obj_idx, obj) in all_objs.iter().enumerate() {
+            for seg_idx in 0..obj.segments.len() {
+                work.push((obj_idx, seg_idx));
+            }
+        }
+
+        let max_segments_per_obj = all_objs.iter().map(|o| o.segments.len()).max().unwrap_or(0);
+        let effective_qd = ring_size.min(total_segments).max(1);
+        let sync_interval = ring_size.max(1);
+
+        // Prime: submit initial reads.
+        let mut submitted = 0usize;
+        let mut completed = 0usize;
+
+        while submitted < effective_qd {
+            let (obj_idx, seg_idx) = work[submitted];
+            let slot = ring_offset + (submitted % ring_size);
+            let tag = (obj_idx * max_segments_per_obj + seg_idx) as u64;
+
+            if channels
+                .command_tx
+                .send(Command::ReadAsync {
+                    ns_id: 1,
+                    lba: all_objs[obj_idx].segments[seg_idx].lba,
+                    buf: Arc::clone(ring.slot(slot)),
+                    timeout_ms: READ_TIMEOUT_MS,
+                    tag,
+                })
+                .is_err()
+            {
+                for r in &mut results {
+                    *r = Err(DispatcherError::IoError("channel send failed".into()));
+                }
+                return results;
+            }
+            submitted += 1;
+        }
+
+        // Main pipeline loop.
+        while completed < total_segments {
+            match channels.completion_rx.recv() {
+                Ok(Completion::ReadDone { tag, result, .. }) => {
+                    let obj_idx = (tag as usize) / max_segments_per_obj;
+                    let seg_idx = (tag as usize) % max_segments_per_obj;
+
+                    if let Err(e) = result {
                         results[obj_idx] = Err(DispatcherError::IoError(format!(
-                            "P2P D2D cudaMemcpyAsync obj={obj_idx} seg={seg_idx}: {}",
+                            "P2P SSD read obj={obj_idx} seg={seg_idx}: {e}"
+                        )));
+                        completed += 1;
+                    } else {
+                        completed += 1;
+
+                        let job = &jobs[obj_idx];
+                        let seg = &all_objs[obj_idx].segments[seg_idx];
+                        let copy_len = seg
+                            .length
+                            .min(job.total_bytes.saturating_sub(seg.buffer_offset));
+                        let slot = ring_offset + ((completed - 1) % ring_size);
+                        let current_stream = all_streams[(completed - 1) % num_streams];
+
+                        // D2D async copy: BAR1 ring slot → client GPU destination.
+                        let err = cuda_ffi::cudaMemcpyAsync(
+                            (job.gpu_dst as *mut u8).add(seg.buffer_offset)
+                                as *mut std::ffi::c_void,
+                            ring.dev_ptrs[slot] as *const std::ffi::c_void,
+                            copy_len,
+                            cuda_ffi::CUDA_MEMCPY_DEVICE_TO_DEVICE,
+                            current_stream.0,
+                        );
+                        if err != cuda_ffi::CUDA_SUCCESS {
+                            results[obj_idx] = Err(DispatcherError::IoError(format!(
+                                "P2P D2D cudaMemcpyAsync obj={obj_idx} seg={seg_idx}: {}",
+                                cuda_ffi::cuda_error_string(err)
+                            )));
+                        }
+
+                        // Sync before recycling slots.
+                        if completed % sync_interval == 0 && submitted < total_segments {
+                            for s in all_streams {
+                                let err = cuda_ffi::cudaStreamSynchronize(s.0);
+                                if err != cuda_ffi::CUDA_SUCCESS {
+                                    results[obj_idx] = Err(DispatcherError::IoError(format!(
+                                        "P2P cudaStreamSynchronize: {}",
+                                        cuda_ffi::cuda_error_string(err)
+                                    )));
+                                }
+                            }
+                        }
+
+                        // Submit next read.
+                        if submitted < total_segments {
+                            let (next_obj, next_seg) = work[submitted];
+                            let next_slot = ring_offset + (submitted % ring_size);
+                            let next_tag = (next_obj * max_segments_per_obj + next_seg) as u64;
+
+                            if channels
+                                .command_tx
+                                .send(Command::ReadAsync {
+                                    ns_id: 1,
+                                    lba: all_objs[next_obj].segments[next_seg].lba,
+                                    buf: Arc::clone(ring.slot(next_slot)),
+                                    timeout_ms: READ_TIMEOUT_MS,
+                                    tag: next_tag,
+                                })
+                                .is_err()
+                            {
+                                for r in &mut results {
+                                    if r.is_ok() {
+                                        *r = Err(DispatcherError::IoError(
+                                            "channel send failed".into(),
+                                        ));
+                                    }
+                                }
+                                break;
+                            }
+                            submitted += 1;
+                        }
+                    }
+                }
+                Ok(Completion::Timeout { handle }) => {
+                    return results
+                        .into_iter()
+                        .map(|r| {
+                            if r.is_ok() {
+                                Err(DispatcherError::IoError(format!(
+                                    "P2P NVMe timeout (handle {:?})",
+                                    handle
+                                )))
+                            } else {
+                                r
+                            }
+                        })
+                        .collect();
+                }
+                Ok(other) => {
+                    return results
+                        .into_iter()
+                        .map(|r| {
+                            if r.is_ok() {
+                                Err(DispatcherError::IoError(format!(
+                                    "P2P unexpected completion: {other:?}"
+                                )))
+                            } else {
+                                r
+                            }
+                        })
+                        .collect();
+                }
+                Err(_) => {
+                    return results
+                        .into_iter()
+                        .map(|r| {
+                            if r.is_ok() {
+                                Err(DispatcherError::IoError(
+                                    "P2P completion channel disconnected".into(),
+                                ))
+                            } else {
+                                r
+                            }
+                        })
+                        .collect();
+                }
+            }
+        }
+
+        // Final sync.
+        for s in all_streams {
+            let err = cuda_ffi::cudaStreamSynchronize(s.0);
+            if err != cuda_ffi::CUDA_SUCCESS {
+                for r in &mut results {
+                    if r.is_ok() {
+                        *r = Err(DispatcherError::IoError(format!(
+                            "P2P final cudaStreamSynchronize: {}",
                             cuda_ffi::cuda_error_string(err)
                         )));
                     }
-
-                    // Sync before recycling slots.
-                    if completed % sync_interval == 0 && submitted < total_segments {
-                        for s in all_streams {
-                            let err = cuda_ffi::cudaStreamSynchronize(s.0);
-                            if err != cuda_ffi::CUDA_SUCCESS {
-                                results[obj_idx] = Err(DispatcherError::IoError(format!(
-                                    "P2P cudaStreamSynchronize: {}",
-                                    cuda_ffi::cuda_error_string(err)
-                                )));
-                            }
-                        }
-                    }
-
-                    // Submit next read.
-                    if submitted < total_segments {
-                        let (next_obj, next_seg) = work[submitted];
-                        let next_slot = ring_offset + (submitted % ring_size);
-                        let next_tag = (next_obj * max_segments_per_obj + next_seg) as u64;
-
-                        if channels
-                            .command_tx
-                            .send(Command::ReadAsync {
-                                ns_id: 1,
-                                lba: all_objs[next_obj].segments[next_seg].lba,
-                                buf: Arc::clone(ring.slot(next_slot)),
-                                timeout_ms: READ_TIMEOUT_MS,
-                                tag: next_tag,
-                            })
-                            .is_err()
-                        {
-                            for r in &mut results {
-                                if r.is_ok() {
-                                    *r =
-                                        Err(DispatcherError::IoError("channel send failed".into()));
-                                }
-                            }
-                            break;
-                        }
-                        submitted += 1;
-                    }
-                }
-            }
-            Ok(Completion::Timeout { handle }) => {
-                return results
-                    .into_iter()
-                    .map(|r| {
-                        if r.is_ok() {
-                            Err(DispatcherError::IoError(format!(
-                                "P2P NVMe timeout (handle {:?})",
-                                handle
-                            )))
-                        } else {
-                            r
-                        }
-                    })
-                    .collect();
-            }
-            Ok(other) => {
-                return results
-                    .into_iter()
-                    .map(|r| {
-                        if r.is_ok() {
-                            Err(DispatcherError::IoError(format!(
-                                "P2P unexpected completion: {other:?}"
-                            )))
-                        } else {
-                            r
-                        }
-                    })
-                    .collect();
-            }
-            Err(_) => {
-                return results
-                    .into_iter()
-                    .map(|r| {
-                        if r.is_ok() {
-                            Err(DispatcherError::IoError(
-                                "P2P completion channel disconnected".into(),
-                            ))
-                        } else {
-                            r
-                        }
-                    })
-                    .collect();
-            }
-        }
-    }
-
-    // Final sync.
-    for s in all_streams {
-        let err = cuda_ffi::cudaStreamSynchronize(s.0);
-        if err != cuda_ffi::CUDA_SUCCESS {
-            for r in &mut results {
-                if r.is_ok() {
-                    *r = Err(DispatcherError::IoError(format!(
-                        "P2P final cudaStreamSynchronize: {}",
-                        cuda_ffi::cuda_error_string(err)
-                    )));
                 }
             }
         }
-    }
 
-    results
+        results
+    }
 }
 
 /// Describes a single object to be promoted from SSD into the memory-tier (no GPU).
@@ -1111,6 +1142,15 @@ pub struct DramPromoteJob {
     pub mem_ptr: *mut u8,
     pub start_lba: u64,
     pub total_bytes: usize,
+}
+
+impl std::fmt::Debug for DramPromoteJob {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DramPromoteJob")
+            .field("start_lba", &self.start_lba)
+            .field("total_bytes", &self.total_bytes)
+            .finish_non_exhaustive()
+    }
 }
 
 // SAFETY: pointers are valid for the duration of the pipeline call.

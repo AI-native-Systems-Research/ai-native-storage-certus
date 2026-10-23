@@ -2,7 +2,7 @@
 
 /// Statistics collected by a single worker thread.
 #[derive(Debug, Default)]
-pub struct ThreadResult {
+pub(crate) struct ThreadResult {
     /// Number of successful read completions.
     pub read_ops: u64,
     /// Number of successful write completions.
@@ -19,7 +19,7 @@ pub struct ThreadResult {
 
 /// Aggregated benchmark results from all threads.
 #[derive(Debug)]
-pub struct FinalReport {
+pub(crate) struct FinalReport {
     /// Sum of read_ops across all threads.
     pub total_read_ops: u64,
     /// Sum of write_ops across all threads.
@@ -52,7 +52,7 @@ pub struct FinalReport {
 
 impl FinalReport {
     /// Compute a final report from per-thread results.
-    pub fn from_results(results: &[ThreadResult], duration_secs: f64) -> Self {
+    pub(crate) fn from_results(results: &[ThreadResult], duration_secs: f64) -> Self {
         let total_read_ops: u64 = results.iter().map(|r| r.read_ops).sum();
         let total_write_ops: u64 = results.iter().map(|r| r.write_ops).sum();
         let total_errors: u64 = results.iter().map(|r| r.errors).sum();
