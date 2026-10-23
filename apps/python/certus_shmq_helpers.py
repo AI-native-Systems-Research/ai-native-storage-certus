@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Shared shmq transport helpers for the apps/python benchmark + test scripts.
+"""Shared shmq transport helpers for the apps/python integration-test scripts.
 
 These scripts used to talk to the Certus dispatcher over gRPC (``dispatcher_pb2``
 + ``DispatcherStub``). gRPC has been removed; the sole control transport is now

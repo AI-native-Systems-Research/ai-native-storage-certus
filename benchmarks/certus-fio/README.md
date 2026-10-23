@@ -215,4 +215,4 @@ All 35+ patterns are available as an extended regression suite via `certus-fio l
 - Running `certus-server` (creates `/dev/shm/certus-shmq`)
 - Python 3.9+ with `pyyaml`
 - CUDA GPU and `libcudart.so`
-- `certus_shmq_helpers` module (from `apps/python/`)
+- `certus_shmq_helpers` module (from `benchmarks/python/`)

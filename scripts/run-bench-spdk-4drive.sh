@@ -50,7 +50,7 @@ WRITES_SETTLE=30
 
 PYTHON="${CERTUS_PYTHON:-python3}"
 SERVER_BIN="$REPO_ROOT/target/release/certus-server-yaml"
-BENCH_SCRIPT="$REPO_ROOT/apps/python/certus-api-bench_v2.py"
+BENCH_SCRIPT="$REPO_ROOT/benchmarks/python/certus-api-bench_v2.py"
 
 # --- Parse arguments ---------------------------------------------------------
 while [[ $# -gt 0 ]]; do

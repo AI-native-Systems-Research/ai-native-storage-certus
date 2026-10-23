@@ -79,7 +79,7 @@ If the profile can use `--device-path /dev/null` (no real SSD needed), use that 
   ```
 - Run the benchmark:
   ```bash
-  cd apps/python
+  cd benchmarks/python
   python3 certus-api-bench_v2.py \
       --clients 1 \
       --num-objects 32 \

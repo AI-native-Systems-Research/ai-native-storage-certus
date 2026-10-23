@@ -28,12 +28,12 @@ from pathlib import Path
 
 import yaml
 
-# ── Locate shmq helpers (repo root / apps / python) ──
+# ── Locate shmq helpers (repo root / benchmarks / python) ──
 _THIS_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _THIS_DIR.parent.parent
-_APPS_PYTHON = _REPO_ROOT / "apps" / "python"
-if _APPS_PYTHON.exists():
-    sys.path.insert(0, str(_APPS_PYTHON))
+_BENCH_PYTHON = _REPO_ROOT / "benchmarks" / "python"
+if _BENCH_PYTHON.exists():
+    sys.path.insert(0, str(_BENCH_PYTHON))
 
 from certus_shmq_helpers import (
     Ring,

@@ -53,7 +53,7 @@ Implements `IDispatcher` — same interface as the standard dispatcher. Drop-in 
 
 ## Performance Measurement
 
-End-to-end performance is measured using `certus-api-bench_v2.py` (`apps/python/`), the pipelined benchmark that exercises hot/cold lookup mixes under multi-client concurrency.
+End-to-end performance is measured using `certus-api-bench_v2.py` (`benchmarks/python/`), the pipelined benchmark that exercises hot/cold lookup mixes under multi-client concurrency.
 
 ## Dependencies
 

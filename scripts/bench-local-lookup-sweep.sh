@@ -5,7 +5,7 @@
 #                               --sweep, minus the fabric leg.
 #
 # This exists to make the local number comparable to the remote one. Comparing
-# the remote bench against apps/python/certus-api-bench_v2.py measures two
+# the remote bench against benchmarks/python/certus-api-bench_v2.py measures two
 # different programs: different byte accounting, different timed window, and the
 # python driver re-reads one small key set into one set of buffers while the Rust
 # driver streams a large distinct keyspace. Running THE SAME BINARY with the same

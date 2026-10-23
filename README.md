@@ -156,7 +156,8 @@ deployment material is under [deploy/](deploy/).
 | Location | Purpose |
 |----------|---------|
 | [benchmarks/](benchmarks/BENCHMARKING.md) | Trace replay (policy layer), live-serving KV-offload benchmarks (`vllm-serve`), connector benches, `certus-fio`, hardware-ceiling and RDMA probes |
-| [apps/python](apps/python/README.md) | Direct `certus-server` API benchmarks and integration tests |
+| [benchmarks/python](benchmarks/python/README.md) | Direct `certus-server` API benchmarks |
+| [apps/python](apps/python/README.md) | `certus-server` integration tests over shmq |
 | [apps/iops-benchmark](apps/iops-benchmark/README.md), [apps/extent-benchmark](apps/extent-benchmark/README.md) | Raw NVMe and extent-allocator performance |
 | [apps/workload-generator](apps/workload-generator/README.md) | Multi-node synthetic workload generator |
 | [tools/](tools/) | Diagnostics, system configuration, simulators |

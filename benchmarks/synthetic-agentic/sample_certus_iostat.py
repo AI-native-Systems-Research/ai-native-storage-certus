@@ -40,12 +40,12 @@ import sys
 import time
 
 # The shmq Ring client lives in the certus-shmq-connector package, located via the
-# apps/python helper shim (same mechanism as tools/certus-iostat-poll.py). This
+# benchmarks/python helper shim (same mechanism as tools/certus-iostat-poll.py). This
 # file sits at benchmarks/synthetic-agentic/, so the repo root is three levels up.
 # Override the helper location with CERTUS_PY_HELPERS.
 _helpers = os.environ.get("CERTUS_PY_HELPERS") or os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    "apps", "python",
+    "benchmarks", "python",
 )
 sys.path.insert(0, _helpers)
 

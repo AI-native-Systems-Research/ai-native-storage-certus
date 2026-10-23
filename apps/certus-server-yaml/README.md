@@ -117,7 +117,7 @@ configure).
     --shm-path /dev/shm/certus-shmq --channels 32
 
 # Point the benchmark at the same mailbox
-python3 apps/python/certus-api-bench.py \
+python3 benchmarks/python/certus-api-bench.py \
     --shm-path /dev/shm/certus-shmq \
     --clients 1 --num-objects 32 --iterations 10 --block-size 4M
 ```
