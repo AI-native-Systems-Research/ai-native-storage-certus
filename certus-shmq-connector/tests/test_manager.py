@@ -1191,3 +1191,166 @@ def test_store_handler_never_reports_failure_and_aborts_failed_keys():
     (abort,) = _calls_of(ring, "abort_store")
     assert abort == [70]  # only the failed key rolled back
     executor.shutdown()
+
+
+# ── explicit fetch (T086, contracts/shmq-fetch.md) ──
+
+
+class FetchRing(FakeRing):
+    """A FakeRing whose fetch() puts the started keys in PENDING, as the server
+    does; a test then lands or misses them by editing ``states``."""
+
+    def __init__(self, status=0):
+        super().__init__()
+        self.fetches = []
+        self.fetch_status = status
+
+    def fetch(self, peer, entries):
+        from certus_shmq_connector.ring import CHECK_MISS, CHECK_PENDING
+
+        entries = list(entries)
+        self.fetches.append((peer, entries))
+        if self.fetch_status != 0:
+            return self.fetch_status, [False] * len(entries)
+        started = []
+        for key, _ in entries:
+            ok = self._state_of(key) == CHECK_MISS
+            started.append(ok)
+            if ok:
+                self.states[key] = CHECK_PENDING
+        return 0, started
+
+
+class Ctx:
+    def __init__(self, req_id, peer="10.0.0.105:7481"):
+        self.req_id = req_id
+        self.kv_transfer_params = {"certus_fetch_from": peer} if peer else None
+
+
+@pytest.fixture
+def lr(monkeypatch):
+    """vLLM 0.30's lookup results (MISS/HIT/HIT_PENDING/RETRY): the fake vLLM is
+    rebuilt for 0.30 and compat's CAPS follows; both are restored after."""
+    import importlib
+
+    import conftest
+    from certus_shmq_connector import compat
+
+    monkeypatch.delenv("CERTUS_VLLM_VERSION", raising=False)
+    conftest.build_fake_vllm((0, 30))
+    monkeypatch.setattr(compat, "CAPS", compat.caps_for((0, 30)))
+    yield importlib.import_module("vllm.v1.kv_offload.base").LookupResult
+    conftest.build_fake_vllm((0, 20))
+
+
+def scan(mgr, ctx, keys, lr):
+    """vLLM's prefix scan: lookup each key in order, stop at the first MISS.
+    Returns the answers given."""
+    out = []
+    for k in keys:
+        r = mgr.lookup(K(k), ctx)
+        out.append(r)
+        if r == lr.MISS:
+            break
+    return out
+
+
+def test_a_hinted_miss_run_is_pending_then_fetched_in_one_op(lr):
+    ring = FetchRing()
+    ring.exists = {U(1): True}  # 1 local, 2.. are not
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    ctx = Ctx("r1")
+    # Scan 1: a local hit, then the miss run answered HIT_PENDING so the scan
+    # carries on to the end and the run is known.
+    assert scan(mgr, ctx, [1, 2, 3, 4], lr) == [lr.HIT] + [lr.HIT_PENDING] * 3
+    assert ring.fetches == [], "nothing is sent mid-scan"
+    mgr.on_schedule_end(None)
+    assert ring.fetches == [("10.0.0.105:7481", [(U(2), 4096), (U(3), 4096), (U(4), 4096)])]
+    # Scan 2: in flight.
+    assert scan(mgr, ctx, [1, 2, 3, 4], lr) == [lr.HIT] + [lr.HIT_PENDING] * 3
+    # The peer has 2 and 3, not 4: the fetch lands 2, 3 and cuts at 4.
+    from certus_shmq_connector.ring import CHECK_MISS, CHECK_RESIDENT
+
+    ring.states.update({U(2): CHECK_RESIDENT, U(3): CHECK_RESIDENT, U(4): CHECK_MISS})
+    assert scan(mgr, ctx, [1, 2, 3, 4], lr) == [lr.HIT, lr.HIT, lr.HIT, lr.MISS]
+    mgr.on_schedule_end(None)
+    assert len(ring.fetches) == 1, "a request's run is fetched once"
+    s = mgr.fetch_stats()
+    assert (s["sent"], s["hits_after_fetch"], s["live"]) == (1, 2, 1)
+    mgr.on_request_finished(ctx)
+    assert mgr.fetch_stats()["live"] == 0
+
+
+def test_no_hint_behaves_as_before(lr):
+    ring = FetchRing()
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    assert scan(mgr, Ctx("r", peer=None), [1, 2], lr) == [lr.MISS]
+    mgr.on_schedule_end(None)
+    assert ring.fetches == []
+
+
+def test_the_budget_ends_the_wait(lr, clock, monkeypatch):
+    monkeypatch.setenv("CERTUS_FETCH_BUDGET_MS", "50")
+    ring = FetchRing()
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    ctx = Ctx("r")
+    assert scan(mgr, ctx, [1, 2], lr) == [lr.HIT_PENDING] * 2
+    mgr.on_schedule_end(None)
+    clock.advance_us(51_000)
+    # Still pending on the server, but the request waits no longer.
+    assert scan(mgr, ctx, [1, 2], lr) == [lr.MISS]
+    assert mgr.fetch_stats()["budget_spent"] == 1
+
+
+def test_a_refused_fetch_computes_instead(lr):
+    ring = FetchRing(status=1)  # no endpoint
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    ctx = Ctx("r")
+    scan(mgr, ctx, [1, 2], lr)
+    mgr.on_schedule_end(None)
+    assert scan(mgr, ctx, [1, 2], lr) == [lr.MISS]
+    assert mgr.fetch_stats()["refused"] == 1
+    mgr.on_schedule_end(None)
+    assert len(ring.fetches) == 1, "a refusal is not retried"
+
+
+def test_a_key_already_here_closes_the_run(lr):
+    from certus_shmq_connector.ring import CHECK_PENDING
+
+    ring = FetchRing()
+    ring.states = {U(3): CHECK_PENDING}  # someone else's store of 3 in flight
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    ctx = Ctx("r")
+    # 1, 2 gathered; 3 is not loadable (MISS), which ends vLLM's scan there.
+    assert scan(mgr, ctx, [1, 2, 3, 4], lr) == [lr.HIT_PENDING, lr.HIT_PENDING, lr.MISS]
+    mgr.on_schedule_end(None)
+    assert [k for k, _ in ring.fetches[0][1]] == [U(1), U(2)]
+
+
+def test_tp_fetches_every_shard_and_needs_all_of_them(lr):
+    from certus_shmq_connector.mediums import ns_key
+    from certus_shmq_connector.ring import CHECK_RESIDENT
+
+    ring = FetchRing()
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096, world_size=2)
+    ctx = Ctx("r")
+    scan(mgr, ctx, [1, 2], lr)
+    mgr.on_schedule_end(None)
+    keys = [k for k, _ in ring.fetches[0][1]]
+    assert keys == [ns_key(U(1), r, 2) for r in range(2)] + [ns_key(U(2), r, 2) for r in range(2)]
+    # One shard of block 1 lands: the block is still pending, not a hit.
+    ring.states[ns_key(U(1), 0, 2)] = CHECK_RESIDENT
+    assert mgr.lookup(K(1), ctx) == lr.HIT_PENDING
+
+
+def test_a_closed_run_takes_no_later_keys(lr):
+    """A key already here ends the run being gathered: a miss after it must not
+    join the run even though vLLM's scan reaches it (the scan continues past a
+    HIT), since the fetch's run is the leading misses, in order."""
+    ring = FetchRing()
+    ring.exists = {U(2): True}  # 1 missing, 2 local, 3 missing
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    ctx = Ctx("r")
+    assert scan(mgr, ctx, [1, 2, 3], lr) == [lr.HIT_PENDING, lr.HIT, lr.MISS]
+    mgr.on_schedule_end(None)
+    assert [k for k, _ in ring.fetches[0][1]] == [U(1)]

@@ -138,13 +138,28 @@ different mechanisms, decided by different parties, with different costs.
 
 ## The manager (connector side)
 
-- On `lookup` for a request with a hint: CHECK the request's keys; if the leading miss run
-  is non-empty and no fetch is outstanding for the request, send FETCH and answer
-  `HIT_PENDING`. While any key of the run reads `PENDING`, keep answering `HIT_PENDING`.
-- When none does: answer `HIT` up to the first `MISS`, as for any lookup.
+vLLM 0.30's scan (`offloading/scheduler.py` `_maximal_prefix_lookup`) calls `lookup` once per
+key in prefix order from the first not-yet-computed chunk, counts `HIT` and `HIT_PENDING` as
+hits, and **stops at the first `MISS`**. The manager therefore sees a request's keys one at a
+time, and learns the run by answering:
+
+- **Gathering (first scan).** For a request whose `kv_transfer_params` names a peer, each key
+  that reads `MISS` locally answers `HIT_PENDING` and joins the run, so the scan continues to
+  the end of the leading misses. A key already here (`RESIDENT`, or someone else's store
+  `PENDING`) closes the run; later misses do not join it.
+- **Send.** `on_schedule_end`, called once per scheduler step after scheduling, sends one
+  FETCH per gathered run — all W per-rank keys of each block. A block is in the run only if
+  all its shards started. A refused FETCH (no endpoint, bad peer, too many keys) is not
+  retried; that request then behaves as if it named no peer.
+- **Re-scans.** A run key reads `RESIDENT` (`HIT`), `PENDING` (`HIT_PENDING`), or `MISS` (the
+  fetch ended there); a key outside the run answers from residency alone. A block with any
+  shard missing is not a hit.
+- `on_request_finished` forgets the request.
+
 - **Counts** its side too: `HIT_PENDING` answers, budgets spent, blocks answered `HIT` after
   a fetch — tying vLLM's view (which only ever sees `HIT`) to Certus's counters.
-- **Time budget**: `fetch_budget_ms` (default 200) per request. Once spent, answer from the
+- **Time budget**: `CERTUS_FETCH_BUDGET_MS` (default 200; 0 disables fetching) per request,
+  from its first hinted lookup. Once spent, answer from the
   current state — resident keys `HIT`, the rest `MISS` — so vLLM computes the remainder
   rather than wait on a slow peer. The fetch continues and lands in the cache for later.
 - TP: a logical block is W per-rank keys (`ns_key`); FETCH carries all of them, to the one
@@ -155,7 +170,7 @@ different mechanisms, decided by different parties, with different costs.
 | name | where | default |
 |---|---|---|
 | `certus_fetch_from` | request `kv_transfer_params` | none (no fetch) |
-| `fetch_budget_ms` | connector `extra_config` | 200 |
+| `CERTUS_FETCH_BUDGET_MS` | connector environment | 200 (0: never fetch) |
 | `CERTUS_FETCH_WINDOW_BYTES` | server | 128 MiB |
 | `CERTUS_FETCH_INFLIGHT_BYTES` | server | 1 GiB |
 | `CERTUS_FETCH_MAX_KEYS` | server | 65 536 (a sanity bound on one message) |
