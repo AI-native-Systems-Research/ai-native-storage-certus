@@ -323,6 +323,104 @@ class BenchResult:
         return row
 
 
+# ── structured output (YAML / CSV) ─────────────────────────────────────────
+
+def _yaml_val(v):
+    if v is None:
+        return "null"
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (int, float)):
+        return str(v)
+    s = str(v)
+    if any(c in s for c in ":{}\n#[],%&*?|>!`@'\""):
+        return "'" + s.replace("'", "''") + "'"
+    return s
+
+
+def dump_yaml(data, stream):
+    """Minimal YAML emitter for nested dicts/lists of scalars."""
+    def _dump(obj, indent):
+        prefix = "  " * indent
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                if isinstance(v, (dict, list)):
+                    stream.write(f"{prefix}{k}:\n")
+                    _dump(v, indent + 1)
+                else:
+                    stream.write(f"{prefix}{k}: {_yaml_val(v)}\n")
+        elif isinstance(obj, list):
+            for item in obj:
+                if isinstance(item, dict):
+                    first = True
+                    for k, v in item.items():
+                        mark = "- " if first else "  "
+                        first = False
+                        if isinstance(v, (dict, list)):
+                            stream.write(f"{prefix}{mark}{k}:\n")
+                            _dump(v, indent + 2)
+                        else:
+                            stream.write(f"{prefix}{mark}{k}: {_yaml_val(v)}\n")
+                else:
+                    stream.write(f"{prefix}- {_yaml_val(item)}\n")
+        else:
+            stream.write(f"{prefix}{_yaml_val(obj)}\n")
+    _dump(data, 0)
+
+
+def _results_to_structured(results: list, extra: dict) -> dict:
+    """Convert BenchResult list + extra params to a structured dict."""
+    benchmarks = []
+    for r in results:
+        phases = {}
+        for name, timing in r.phases.items():
+            phases[name] = {
+                "p50_us": round(timing.p50_us, 1),
+                "p99_us": round(timing.p99_us, 1),
+                "mean_us": round(timing.mean_us, 1),
+                "n": len(timing.samples),
+            }
+        benchmarks.append({
+            "label": r.label,
+            "total_blocks": r.total_blocks,
+            "total_bytes": r.total_bytes,
+            "wall_seconds": round(r.wall_seconds, 6),
+            "throughput_gbs": round(r.throughput_gbs, 4),
+            "iops": round(r.iops, 1),
+            "phases": phases,
+        })
+    return {"params": extra, "results": benchmarks}
+
+
+def write_output(path: str, data: dict):
+    """Write structured benchmark results to path (YAML or CSV by extension)."""
+    ext = os.path.splitext(path)[1].lower()
+    with open(path, "w", newline="") as fh:
+        if ext in (".yaml", ".yml"):
+            dump_yaml(data, fh)
+        elif ext == ".csv":
+            rows = []
+            for r in data.get("results", []):
+                row = {k: v for k, v in r.items() if k != "phases"}
+                for pname, pvals in r.get("phases", {}).items():
+                    for stat, val in pvals.items():
+                        row[f"{pname}_{stat}"] = val
+                row.update(data.get("params", {}))
+                rows.append(row)
+            if rows:
+                fieldnames = list(rows[0].keys())
+                for r in rows[1:]:
+                    for k in r:
+                        if k not in fieldnames:
+                            fieldnames.append(k)
+                writer = csv.DictWriter(fh, fieldnames=fieldnames,
+                                        extrasaction="ignore")
+                writer.writeheader()
+                writer.writerows(rows)
+        else:
+            dump_yaml(data, fh)
+
+
 # ── store lifecycle ─────────────────────────────────────────────────────────
 
 def bench_store_lifecycle(
@@ -1959,6 +2057,10 @@ def main():
                         help="Working set size for eviction-pressure mode (blocks)")
     parser.add_argument("--csv", type=str, default=None,
                         help="Append results to CSV file")
+    parser.add_argument("--output", action="append", default=[],
+                        metavar="FILE",
+                        help="Write results to FILE (YAML for .yaml/.yml, CSV "
+                             "for .csv; repeatable)")
     parser.add_argument("--tag", type=str, default="",
                         help="Tag column for CSV (e.g. branch name)")
     parser.add_argument("--no-cold", action="store_true",
@@ -2249,35 +2351,36 @@ def main():
             print(f"{'='*70}")
         all_results.extend(_run_mode(m))
 
+    # ── output params ──
+    extra = {
+        "tag": args.tag,
+        "mode": mode,
+        "lookup_order": args.lookup_order,
+        "shm_path": args.shm_path,
+        "gpu": args.gpu,
+        "gpus": ",".join(map(str, gpus)),
+        "tp": args.tp,
+        "bs": args.bs,
+        "num_blocks": args.num_blocks,
+        "block_bytes": args.block_bytes,
+        "workers": args.workers,
+        "working_set": args.working_set,
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+    }
+    if mode == "pipelined":
+        extra["pipeline_depth"] = args.pipeline_depth
+        extra["direction"] = args.direction
+    elif mode == "prefix-miss":
+        extra["hit_ratio"] = args.hit_ratio
+    elif mode == "scheduler-step":
+        extra["requests_per_step"] = args.requests_per_step
+        extra["num_sessions"] = args.num_sessions
+        extra["prefix_sharing"] = args.prefix_sharing
+    elif mode == "pattern":
+        extra["pattern"] = args.pattern
+
     # ── CSV output ──
     if args.csv and all_results:
-        extra = {
-            "tag": args.tag,
-            "mode": mode,
-            "lookup_order": args.lookup_order,
-            "shm_path": args.shm_path,
-            "gpu": args.gpu,
-            "gpus": ",".join(map(str, gpus)),
-            "tp": args.tp,
-            "bs": args.bs,
-            "num_blocks": args.num_blocks,
-            "block_bytes": args.block_bytes,
-            "workers": args.workers,
-            "working_set": args.working_set,
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        }
-        if mode == "pipelined":
-            extra["pipeline_depth"] = args.pipeline_depth
-            extra["direction"] = args.direction
-        elif mode == "prefix-miss":
-            extra["hit_ratio"] = args.hit_ratio
-        elif mode == "scheduler-step":
-            extra["requests_per_step"] = args.requests_per_step
-            extra["num_sessions"] = args.num_sessions
-            extra["prefix_sharing"] = args.prefix_sharing
-        elif mode == "pattern":
-            extra["pattern"] = args.pattern
-
         rows = [r.csv_row(extra) for r in all_results]
         write_header = not os.path.exists(args.csv)
         fieldnames = list(rows[0].keys())
@@ -2291,6 +2394,13 @@ def main():
                 w.writeheader()
             w.writerows(rows)
         print(f"\nResults appended to {args.csv}")
+
+    # ── structured output (--output) ──
+    if args.output and all_results:
+        out_data = _results_to_structured(all_results, extra)
+        for output_path in args.output:
+            write_output(output_path, out_data)
+            print(f"Results written to {output_path}")
 
     # ── cleanup ──
     if mode not in ("pattern", "contention"):
