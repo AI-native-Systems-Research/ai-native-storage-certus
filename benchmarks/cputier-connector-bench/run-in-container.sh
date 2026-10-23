@@ -80,4 +80,4 @@ exec command podman run --rm --pull=never \
   -w /certus \
   --entrypoint python3 \
   "$IMAGE" \
-  /certus/tools/cputier-connector-bench/bench_cputier_lifecycle.py "${ARGS[@]}"
+  /certus/benchmarks/cputier-connector-bench/bench_cputier_lifecycle.py "${ARGS[@]}"

@@ -891,6 +891,7 @@ Session N: [LOAD shared blocks 0..K] → [STORE unique blocks K+1..K+M_N]
 <p><strong>Not covered</strong>: Shared reads (cohort/prefix), bidirectional contention, per-block latency distribution, temporal mixing of prefill+decode.</p>
 <hr />
 <h3>certus-api-bench_v3</h3>
+<blockquote><p><strong>Removed 2026-10-23.</strong> The script still used the removed gRPC stubs (<code>dispatcher_pb2</code>) and no longer ran; it was deleted from <code>benchmarks/python/</code>. This analysis is kept for reference.</p></blockquote>
 <p><strong>What it does</strong>: Extends v2 with bidirectional phase (concurrent store+load), per-block latency isolation, and region-count sensitivity. Designed to measure CUDA stream overlap and cuMemcpyBatchAsync benefits.</p>
 <table>
 <thead>

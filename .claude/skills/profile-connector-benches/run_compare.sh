@@ -110,13 +110,13 @@ else
   SERVER_ARGS+=(--drive-count "$DRIVE_COUNT")
 fi
 
-CERTUS_CMD=(python3 tools/certus-connector-bench/bench_connector_lifecycle.py "${SHARED[@]}"
+CERTUS_CMD=(python3 benchmarks/certus-connector-bench/bench_connector_lifecycle.py "${SHARED[@]}"
             --gpu "$GPU" --workers "$WORKERS" --shm-path "$SHM_PATH"
             --csv "$ART/certus.csv" --tag certus)
 # --csv is resolved inside the container, where the repo is /certus.
 REL_ART="${ART#"$REPO_ROOT"/}"
 if [[ "$REL_ART" == /* ]]; then CPUTIER_CSV_IN=/fs-tier/cputier.csv; else CPUTIER_CSV_IN="/certus/$REL_ART/cputier.csv"; fi
-CPUTIER_CMD=(tools/cputier-connector-bench/run-in-container.sh "${SHARED[@]}"
+CPUTIER_CMD=(benchmarks/cputier-connector-bench/run-in-container.sh "${SHARED[@]}"
              --gpu 0 --cpu-bytes "$DRAM" --csv "$CPUTIER_CSV_IN" --tag cputier)
 
 python3 - "$ART/params.json" <<EOF

@@ -36,7 +36,7 @@ driving many drives, each drive gets a dedicated server + poller core, and
    scripts/spdk-scripts/show_spdk_devices.sh      # verify
    ```
 3. `tmux`, `numactl`, and `python3.12` with the bench deps
-   (`pip install -r apps/python/requirements.txt`, plus `torch` + a CUDA GPU).
+   (`pip install -r benchmarks/python/requirements.txt`, plus `torch` + a CUDA GPU).
 
 ## Quick start
 
@@ -102,14 +102,14 @@ NVMe controller bound to `vfio-pci` becomes one server instance.
 ### 4. Install the benchmark client deps
 
 ```bash
-pip install -r apps/python/requirements.txt      # shmq connector: stdlib-only, no deps
+pip install -r benchmarks/python/requirements.txt      # shmq connector: stdlib-only, no deps
 pip install torch                                # match your CUDA version
 ```
 
 The shmq wire client is the pure-Python `Ring` in
 `certus-shmq-connector/certus_shmq_connector/ring.py` (stdlib `struct`/`mmap`/
 `ctypes` only — no `grpcio`/`protobuf`), located at runtime by
-`apps/python/certus_shmq_helpers.py`. The client uses CUDA (`torch.cuda` +
+`benchmarks/python/certus_shmq_helpers.py`. The client uses CUDA (`torch.cuda` +
 cudaIpc handles), so a working NVIDIA GPU and driver are still required; install
 `torch` for your CUDA version as shown above.
 

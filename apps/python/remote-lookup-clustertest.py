@@ -51,7 +51,7 @@ from certus_shmq_helpers import RingError, add_shm_arg, connect, single_region  
 
 
 # --------------------------------------------------------------------------
-# CUDA + pattern helpers (mirrors apps/python/certus-api-bench.py).
+# CUDA + pattern helpers (mirrors benchmarks/python/certus-api-bench.py).
 # Raw cudaMalloc is required: cudaIpcGetMemHandle needs the base of an
 # allocation, which PyTorch's caching allocator does not provide.
 # --------------------------------------------------------------------------

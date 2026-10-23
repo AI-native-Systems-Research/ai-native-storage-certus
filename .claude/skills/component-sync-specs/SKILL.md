@@ -22,7 +22,7 @@ freshness stamp that this step writes into each component's committed
 `drift-report.md`. Perform it for every component after its sync is applied.
 
 For a component whose directory is `<dir>` (e.g. `components/memory-tier`,
-`lib/component-framework`, `tools/rdma-test`):
+`lib/component-framework`, `benchmarks/rdma-test`):
 
 1. Compute the input hash over the component's `src/` + `specs/` (with
    `components/interfaces/` folded in), using the committed helper so the value

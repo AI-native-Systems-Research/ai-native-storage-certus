@@ -5,7 +5,7 @@
 # container can bind it in. Built by ./build.sh; started by ./run.sh.
 #
 # The 3FS ref and SHUFFLE_METHOD MUST match the client side baked into
-# localhost/vllm-hf3fs-bench (apps/vllm-serve/Dockerfile.hf3fs): build.sh reads the
+# localhost/vllm-hf3fs-bench (benchmarks/vllm-serve/Dockerfile.hf3fs): build.sh reads the
 # wheel version (hf3fs_py_usrbio 1.2.9+<sha>) out of that image and passes it here.
 #
 # Stages:

@@ -149,7 +149,7 @@ decode (at concurrency ~10–32, decode batches up and stops being purely bandwi
 
 ```bash
 # 1. Start a server (self-contained cputier is simplest)
-cd apps/vllm-serve && PORT=8000 ./run-serve-cputier-multimodal-2gpu.sh
+cd benchmarks/vllm-serve && PORT=8000 ./run-serve-cputier-multimodal-2gpu.sh
 
 # 2. Before/after full-metrics + concurrent GPU sampling around a 120s load
 curl -s localhost:8000/metrics > before.txt

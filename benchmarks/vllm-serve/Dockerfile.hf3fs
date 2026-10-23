@@ -13,8 +13,8 @@
 # Build via the wrapper (selects VLLM_VERSION, tags, store):
 #   ./build_h3fs_container.sh 0.30.0
 # or directly:
-#   podman build -f apps/vllm-serve/Dockerfile.hf3fs \
-#       --build-arg VLLM_VERSION=0.30.0 -t vllm-hf3fs-bench:vllm0.30.0 apps/vllm-serve
+#   podman build -f benchmarks/vllm-serve/Dockerfile.hf3fs \
+#       --build-arg VLLM_VERSION=0.30.0 -t vllm-hf3fs-bench:vllm0.30.0 benchmarks/vllm-serve
 #
 # ── HEADS-UP: heavy, version-sensitive build ─────────────────────────────────────
 # 3FS is a large C++/Rust project (FoundationDB client, libfuse >=3.16.1, clang-14,

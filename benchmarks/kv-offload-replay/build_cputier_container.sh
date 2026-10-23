@@ -19,7 +19,7 @@
 # deferred-finalize overlay (fix#2), but Dockerfile.offload only applies it on a
 # 0.26.x base — on any other version it warns and builds STOCK vLLM. (The
 # _build_store_jobs assert, fix#3, is a separate bug that vLLM fixed upstream:
-# fully from 0.30, partially from 0.27 — see apps/vllm-serve/patches/PROVENANCE.md.)
+# fully from 0.30, partially from 0.27 — see benchmarks/vllm-serve/patches/PROVENANCE.md.)
 #
 # Usage:
 #   ./build_cputier_container.sh <vllm-version>            # e.g. 0.29.0

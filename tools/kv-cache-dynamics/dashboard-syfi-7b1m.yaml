@@ -1,5 +1,5 @@
 # dram_dashboard preset — Qwen2.5-7B-Instruct-1M long-context KV-offload workload.
-# Matches apps/vllm-serve/run-serve-cputier-7b1m-longctx.sh + run-guidellm-synthetic-longctx.sh.
+# Matches benchmarks/vllm-serve/run-serve-cputier-7b1m-longctx.sh + run-guidellm-synthetic-longctx.sh.
 # Load with:  ./dram_dashboard.py --config dashboard-syfi-7b1m.yaml
 # Keys are the dashboard's form field ids (sent verbatim to /api/sweep).
 

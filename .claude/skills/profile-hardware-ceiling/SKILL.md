@@ -203,16 +203,16 @@ write figure to verify SPDK and kernel-mode numbers are consistent.
 
 ## Path 3: GPU PCIe Bandwidth — cudaMemcpy (Step 7)
 
-Source: `tools/hw-ceiling/cuda_bw_test.cu`. Binary output: `/tmp/cuda_bw_test`.
+Source: `benchmarks/hw-ceiling/cuda_bw_test.cu`. Binary output: `/tmp/cuda_bw_test`.
 
 Build step:
 ```
 # Preferred — source already in repo:
-make -C tools/hw-ceiling OUTDIR=/tmp cuda_bw_test
+make -C benchmarks/hw-ceiling OUTDIR=/tmp cuda_bw_test
 
-# If tools/hw-ceiling/ is absent: write the source to tools/hw-ceiling/cuda_bw_test.cu
+# If benchmarks/hw-ceiling/ is absent: write the source to benchmarks/hw-ceiling/cuda_bw_test.cu
 # (creating the directory), then run make as above. Do NOT write to /tmp/ only —
-# saving to tools/hw-ceiling/ means future runs skip the write step entirely.
+# saving to benchmarks/hw-ceiling/ means future runs skip the write step entirely.
 ```
 
 **NUMA locality matters here.** H2D bandwidth depends on where the pinned host buffer
@@ -251,14 +251,14 @@ Note the per-GPU NUMA-local vs cross-NUMA delta — this is the cost of incorrec
 
 ## Path 4: GPU D2D Bandwidth — cudaMemcpyDeviceToDevice (Step 8)
 
-Source: `tools/hw-ceiling/cuda_d2d_test.cu`. Binary output: `/tmp/cuda_d2d_test`.
+Source: `benchmarks/hw-ceiling/cuda_d2d_test.cu`. Binary output: `/tmp/cuda_d2d_test`.
 
 Build step:
 ```
 # Preferred — source already in repo:
-make -C tools/hw-ceiling OUTDIR=/tmp cuda_d2d_test
+make -C benchmarks/hw-ceiling OUTDIR=/tmp cuda_d2d_test
 
-# If tools/hw-ceiling/ is absent: write the source to tools/hw-ceiling/cuda_d2d_test.cu
+# If benchmarks/hw-ceiling/ is absent: write the source to benchmarks/hw-ceiling/cuda_d2d_test.cu
 # (creating the directory if needed), then run make as above.
 ```
 
@@ -351,14 +351,14 @@ Output: Table with (drives, block_size, GPU, topology) → bandwidth GB/s.
 
 ## Path 7: Host RAM Bandwidth — memcpy baseline (Step 11)
 
-Source: `tools/hw-ceiling/memcpy_bench.c`. Binary output: `/tmp/memcpy_bench`.
+Source: `benchmarks/hw-ceiling/memcpy_bench.c`. Binary output: `/tmp/memcpy_bench`.
 
 Build step:
 ```
 # Preferred — source already in repo:
-make -C tools/hw-ceiling OUTDIR=/tmp memcpy_bench
+make -C benchmarks/hw-ceiling OUTDIR=/tmp memcpy_bench
 
-# If tools/hw-ceiling/ is absent: write the source to tools/hw-ceiling/memcpy_bench.c
+# If benchmarks/hw-ceiling/ is absent: write the source to benchmarks/hw-ceiling/memcpy_bench.c
 # (creating the directory if needed), then run make as above.
 ```
 
@@ -813,9 +813,9 @@ Only populate entries where measurements succeeded. Use topology-correct GPU/dri
   skip that path and note in the report with install/build instructions
 - Handle single-GPU and multi-GPU systems
 - Handle single-NUMA and multi-NUMA systems
-- **CUDA/C benchmark sources live in `tools/hw-ceiling/`** (`cuda_bw_test.cu`,
+- **CUDA/C benchmark sources live in `benchmarks/hw-ceiling/`** (`cuda_bw_test.cu`,
   `cuda_d2d_test.cu`, `memcpy_bench.c`, `Makefile`). Always use these.
-  Build with `make -C tools/hw-ceiling OUTDIR=/tmp <target>` — binaries go to `/tmp/`.
+  Build with `make -C benchmarks/hw-ceiling OUTDIR=/tmp <target>` — binaries go to `/tmp/`.
   Only write sources to `/tmp/` if the repo checkout is somehow read-only (rare).
 - The YAML profile must be valid YAML parseable by any standard library
 - `inspect-nvme.py` requires drives bound to the **kernel NVMe driver** (not vfio-pci).
@@ -847,7 +847,7 @@ To run this skill without permission prompts, create `.claude/settings.local.jso
       "Bash(sudo */target/release/certus-server-yaml*)",
       "Bash(sudo python3 tools/inspect-nvme.py*)",
       "Bash(python3 tools/check-amd-proc-features.py*)",
-      "Bash(make -C tools/hw-ceiling*)",
+      "Bash(make -C benchmarks/hw-ceiling*)",
       "Bash(/usr/local/cuda*/bin/nvcc*)",
       "Bash(CUDA_VISIBLE_DEVICES=* /tmp/*)",
       "Bash(/tmp/*)",

@@ -62,7 +62,7 @@
 #                            (default info; set debug for per-write RDMA traces)
 #   CERTUS_TEST_SSH_OPTS     extra ssh options
 #
-# Prerequisites (per node, same as tools/rdma-test/scripts/launch.sh style):
+# Prerequisites (per node, same as benchmarks/rdma-test/scripts/launch.sh style):
 #   - Passwordless SSH to every named node.
 #   - certus-server-yaml built and present at $CERTUS_SERVER_BIN (same path on
 #     every node); build with scripts/build-certus-full-remote-spdk.sh.

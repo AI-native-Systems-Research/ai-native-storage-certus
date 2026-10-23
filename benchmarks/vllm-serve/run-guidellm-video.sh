@@ -41,7 +41,7 @@ HF_HOME=/mnt/certus1/hf-cache
 
 # ── Output location: video runs produce HUGE guidellm JSONs — guidellm serializes
 #    each request's base64 mp4 data URL into the output (GB in minutes). run-guidellm.sh
-#    would default OUTPUT to apps/vllm-serve/ (under /home) and fill the home volume.
+#    would default OUTPUT to benchmarks/vllm-serve/ (under /home) and fill the home volume.
 #    Force it onto /mnt/certus1 (the standing "results on /mnt/certus1, never /home" rule).
 #    Override OUTPUT or OUT_DIR to relocate; never let it land on /home for video.
 OUT_DIR="${OUT_DIR:-/mnt/certus1/vllm-serve-matrix/video}"

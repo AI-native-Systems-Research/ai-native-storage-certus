@@ -1,4 +1,4 @@
-# These benchmark/test scripts talk to certus-server over its /dev/shm mailbox
+# These integration-test scripts talk to certus-server over its /dev/shm mailbox
 # (shmq), not gRPC. The wire client is the pure-Python Ring in
 # ../../certus-shmq-connector/certus_shmq_connector/ring.py, located at runtime
 # via certus_shmq_helpers.py (a sys.path insert) — it is NOT pip-installed here,

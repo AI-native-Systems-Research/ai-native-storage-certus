@@ -1,6 +1,6 @@
 # deploy/3fs — single-node DeepSeek 3FS in one privileged container
 
-This directory stands up a self-contained [3FS](https://github.com/deepseek-ai/3fs) cluster on this host. The cluster is FoundationDB plus mgmtd, meta, storage and the FUSE client. Its mount is exported to the host so that vLLM's `HF3FSKVConnector` can use 3FS as its KV-offload tier. That makes 3FS directly comparable with Certus, through `apps/vllm-serve/run-serve-h3fs0-cc131k.sh` and `run-guidellm-cc131k.sh`.
+This directory stands up a self-contained [3FS](https://github.com/deepseek-ai/3fs) cluster on this host. The cluster is FoundationDB plus mgmtd, meta, storage and the FUSE client. Its mount is exported to the host so that vLLM's `HF3FSKVConnector` can use 3FS as its KV-offload tier. That makes 3FS directly comparable with Certus, through `benchmarks/vllm-serve/run-serve-h3fs0-cc131k.sh` and `run-guidellm-cc131k.sh`.
 
 ```
  host                                       ┌─ certus-3fs (rootful, --privileged,
@@ -38,7 +38,7 @@ sudo ./run.sh                    # first boot initializes the cluster in /cache/
 ./smoke.sh                       # FUSE + USRBIO round trip
 sudo ./admin.sh                  # nodes + chains
 
-# then, from apps/vllm-serve:
+# then, from benchmarks/vllm-serve:
 HF3FS_MOUNT_HOST=/mnt/3fs ./run-serve-h3fs0-cc131k.sh
 ./run-guidellm-cc131k.sh
 ```
@@ -61,7 +61,7 @@ HF3FS_REF=22fca04 ./build.sh
 STORE_DIR=/mnt/certus1/podman HF3FS_REF=22fca04 ./build.sh    # with a custom build store
 ```
 
-You still need the client image for `smoke.sh` and `run-serve-h3fs0-cc131k.sh`. Build it from the **same** commit so the server and client match: `cd apps/vllm-serve && HF3FS_REF=22fca04 ./build_h3fs_container.sh 0.30.0`.
+You still need the client image for `smoke.sh` and `run-serve-h3fs0-cc131k.sh`. Build it from the **same** commit so the server and client match: `cd benchmarks/vllm-serve && HF3FS_REF=22fca04 ./build_h3fs_container.sh 0.30.0`.
 
 ## Where podman stores images (`STORE_DIR`)
 

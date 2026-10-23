@@ -2,7 +2,7 @@
 # run-cc131k-example.sh — kv-cache-dynamics for the cc131k workload.
 #
 # Models block-level LRU KV-cache reuse for the 131K cc-traces replay served by
-# apps/vllm-serve/run-serve-certus-shmq-cc131k.sh: Qwen2.5-14B-Instruct at a
+# benchmarks/vllm-serve/run-serve-certus-shmq-cc131k.sh: Qwen2.5-14B-Instruct at a
 # 131072-token window on 2x A100-40G (TP=2), driven by the inter-arrival turn
 # intervals extracted from the cc-traces-weka-062126 trace.
 #

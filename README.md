@@ -155,11 +155,12 @@ deployment material is under [deploy/](deploy/).
 
 | Location | Purpose |
 |----------|---------|
-| [benchmarks/](benchmarks/BENCHMARKING.md) | Trace replay (policy layer) and live-serving KV-offload benchmarks |
-| [apps/python](apps/python/README.md) | Direct `certus-server` API benchmarks and integration tests |
+| [benchmarks/](benchmarks/BENCHMARKING.md) | Trace replay (policy layer), live-serving KV-offload benchmarks (`vllm-serve`), connector benches, `certus-fio`, hardware-ceiling and RDMA probes |
+| [benchmarks/python](benchmarks/python/README.md) | Direct `certus-server` API benchmarks |
+| [apps/python](apps/python/README.md) | `certus-server` integration tests over shmq |
 | [apps/iops-benchmark](apps/iops-benchmark/README.md), [apps/extent-benchmark](apps/extent-benchmark/README.md) | Raw NVMe and extent-allocator performance |
 | [apps/workload-generator](apps/workload-generator/README.md) | Multi-node synthetic workload generator |
-| [tools/](tools/) | Connector benches, hardware-ceiling probes, `certus-fio`, simulators |
+| [tools/](tools/) | Diagnostics, system configuration, simulators |
 | [profiling/](profiling/) | Recorded hardware ceilings and performance matrices |
 
 Microbenchmarks use Criterion: `cargo bench`, or for example
@@ -171,7 +172,7 @@ Microbenchmarks use Criterion: `cargo bench`, or for example
 |------|----------|
 | `lib/` | Component framework, `spdk-sys` FFI, `shm-queue` mailbox, `shmq-dispatcher` |
 | `components/` | Certus components (dispatcher, memory tier, dispatch map, block devices, extent manager, eviction policies, GPU services, remote lookup/RDMA, Zyre) and shared `interfaces` |
-| `apps/` | `certus-server-yaml` and `certus-server`, benchmarks, test utilities, vLLM serving scripts |
+| `apps/` | `certus-server-yaml` and `certus-server`, benchmarks, test utilities |
 | `certus-shmq-connector/` | vLLM connector |
 | `design/` | Architecture overview and per-profile design artifacts |
 | `knowledge/` | Internal wiki: component architecture, SPDK, KV-cache workload analysis |

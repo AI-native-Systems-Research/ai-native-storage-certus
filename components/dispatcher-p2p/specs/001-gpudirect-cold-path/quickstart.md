@@ -28,7 +28,7 @@ cd apps/certus-server-yaml
 cargo run --release -- --profile profiles/full-p2p.yaml
 
 # In another terminal: populate entries, evict to SSD, then read back
-python apps/python/certus-api-bench_v2.py \
+python benchmarks/python/certus-api-bench_v2.py \
   --mode cold-only \
   --entries 100 \
   --clients 1 \
@@ -49,7 +49,7 @@ sudo rmmod gdrdrv
 cargo run --release -- --profile profiles/full-p2p.yaml
 
 # Run same benchmark
-python apps/python/certus-api-bench_v2.py \
+python benchmarks/python/certus-api-bench_v2.py \
   --mode cold-only \
   --entries 100 \
   --clients 1 \
@@ -63,7 +63,7 @@ python apps/python/certus-api-bench_v2.py \
 **Goal**: Verify 4+ concurrent clients get correct data without corruption.
 
 ```bash
-python apps/python/certus-api-bench_v2.py \
+python benchmarks/python/certus-api-bench_v2.py \
   --mode cold-only \
   --entries 1000 \
   --clients 4 \
@@ -78,7 +78,7 @@ python apps/python/certus-api-bench_v2.py \
 
 ```bash
 # With P2P (gdrdrv loaded):
-python apps/python/certus-api-bench_v2.py \
+python benchmarks/python/certus-api-bench_v2.py \
   --mode mixed \
   --entries 10000 \
   --clients 4 \

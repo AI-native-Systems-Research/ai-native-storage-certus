@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """End-to-end cputier connector benchmark: full vLLM offloading lifecycle.
 
-The cputier counterpart of tools/certus-connector-bench/bench_connector_lifecycle.py.
+The cputier counterpart of benchmarks/certus-connector-bench/bench_connector_lifecycle.py.
 Instead of the Certus-SHMQ connector it drives vLLM's in-tree native offload
 stack -- the same classes ``OffloadingConnector`` builds when vLLM is started
-with ``spec_name=TieringOffloadingSpec`` (see apps/vllm-serve/run-serve-cputier.sh):
+with ``spec_name=TieringOffloadingSpec`` (see benchmarks/vllm-serve/run-serve-cputier.sh):
 
   - TieringOffloadingManager (CPU primary tier + optional "fs" disk tier):
     on_new_request, touch, lookup, prepare_store, complete_store,
@@ -34,7 +34,7 @@ backends can be compared side by side.
 Requires vLLM >= 0.30 (the ``vllm.v1.kv_offload.config.OffloadingConfig`` API)
 and a CUDA GPU. vLLM is not installed on the host; run it in the vLLM image:
 
-    tools/cputier-connector-bench/run-in-container.sh            # default 4 phases
+    benchmarks/cputier-connector-bench/run-in-container.sh            # default 4 phases
 
     # CPU-only offload (CPUOffloadingSpec, no disk tier)
     run-in-container.sh --spec cpu
@@ -113,7 +113,7 @@ except ImportError as _e:
     sys.exit(
         f"error: this benchmark needs vLLM >= 0.30 (native kv_offload API); "
         f"found vllm {_have} ({_e}).\n"
-        f"       Run it in the vLLM image: tools/cputier-connector-bench/run-in-container.sh"
+        f"       Run it in the vLLM image: benchmarks/cputier-connector-bench/run-in-container.sh"
     )
 
 # CPUOffloadingSpec.create_worker() calls a gloo barrier across worker ranks
