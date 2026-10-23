@@ -13,6 +13,7 @@
 //! table copied and then left to drift is a second source of truth; a table copied and pinned is
 //! not, and the failure it prevents is a silent one — the run would complete and report a
 //! `LOOKUP` percentile under the name `RESERVE`.
+#![cfg(feature = "workload-tests")]
 
 use shmq_dispatcher::wire::op;
 use workload_wire::frame::op_kind;

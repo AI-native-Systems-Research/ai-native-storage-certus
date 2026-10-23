@@ -414,6 +414,14 @@ pub enum Command {
     },
 }
 
+impl std::fmt::Debug for Command {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Command")
+            .field(&std::mem::discriminant(self))
+            .finish()
+    }
+}
+
 // Command contains Arc<DmaBuffer> which is Send.
 // SAFETY: All fields in Command are Send (Arc, u32, u64, Vec).
 unsafe impl Send for Command {}

@@ -12,18 +12,7 @@ pub(crate) struct BlockDeviceClient {
 }
 
 impl BlockDeviceClient {
-    #[cfg(any(test, feature = "testing"))]
-    pub fn new(channels: ClientChannels, alloc: DmaAllocFn, sector_size: u32, ns_id: u32) -> Self {
-        Self {
-            channels,
-            alloc,
-            sector_size,
-            ns_id,
-            base_lba: 0,
-        }
-    }
-
-    pub fn with_base_lba(
+    pub(crate) fn with_base_lba(
         channels: ClientChannels,
         alloc: DmaAllocFn,
         sector_size: u32,
@@ -39,14 +28,14 @@ impl BlockDeviceClient {
         }
     }
 
-    pub fn alloc_buffer(&self, size: usize) -> Result<DmaBuffer, NvmeBlockError> {
+    pub(crate) fn alloc_buffer(&self, size: usize) -> Result<DmaBuffer, NvmeBlockError> {
         let align = self.sector_size as usize;
         (self.alloc)(size, align, None).map_err(|e| {
             NvmeBlockError::BlockDevice(interfaces::BlockDeviceError::DmaAllocationFailed(e))
         })
     }
 
-    pub fn write_blocks(
+    pub(crate) fn write_blocks(
         &self,
         lba: u64,
         data: &[u8],
@@ -107,7 +96,7 @@ impl BlockDeviceClient {
         Ok(())
     }
 
-    pub fn read_blocks(
+    pub(crate) fn read_blocks(
         &self,
         lba: u64,
         num_bytes: usize,
@@ -154,7 +143,7 @@ impl BlockDeviceClient {
         Ok(result)
     }
 
-    pub fn sector_size(&self) -> u32 {
+    pub(crate) fn sector_size(&self) -> u32 {
         self.sector_size
     }
 

@@ -153,7 +153,7 @@ already resident.
 (`component-core/src/receptacle.rs:44`) and `dispatcher-p2p` already binds `remote_lookup`
 (`dispatcher-p2p/src/lib.rs:145`). Adding `remote-lookup → dispatcher` closes a strong cycle
 (`dispatcher-p2p ⇄ remote-lookup`) that would leak both components at teardown. Mitigation: the
-mainline MUST call `Receptacle::disconnect()` (`receptacle.rs:110`) on one direction of the pair at
+mainline MUST call `Receptacle::disconnect()` (`receptacle.rs:116`) on one direction of the pair at
 deactivate/shutdown. This is a wiring/lifecycle contract for the integrating app, not a dispatcher
 code change. remote-lookup does **not** take a raw `IBlockDevice` receptacle (that would duplicate
 drive ownership + DMA/pipeline plumbing the dispatcher already owns).

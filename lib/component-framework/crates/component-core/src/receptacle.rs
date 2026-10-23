@@ -44,6 +44,12 @@ pub struct Receptacle<T: ?Sized + Send + Sync + 'static> {
     connection: RwLock<Option<Arc<T>>>,
 }
 
+impl<T: ?Sized + Send + Sync + 'static> std::fmt::Debug for Receptacle<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Receptacle").finish_non_exhaustive()
+    }
+}
+
 impl<T: ?Sized + Send + Sync + 'static> Receptacle<T> {
     /// Creates a new disconnected receptacle.
     ///

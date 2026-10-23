@@ -13,7 +13,7 @@ pub(crate) struct FreeList {
 }
 
 impl FreeList {
-    pub fn new(capacity: usize) -> Self {
+    pub(crate) fn new(capacity: usize) -> Self {
         let mut free_regions = BTreeMap::new();
         if capacity > 0 {
             free_regions.insert(0, capacity);
@@ -25,16 +25,16 @@ impl FreeList {
         }
     }
 
-    pub fn capacity(&self) -> usize {
+    pub(crate) fn capacity(&self) -> usize {
         self.capacity
     }
 
-    pub fn used(&self) -> usize {
+    pub(crate) fn used(&self) -> usize {
         self.used
     }
 
     /// Whether `allocate(size)` would succeed now, without changing anything.
-    pub fn can_allocate(&self, size: usize) -> bool {
+    pub(crate) fn can_allocate(&self, size: usize) -> bool {
         if size == 0 {
             return false;
         }
@@ -44,7 +44,7 @@ impl FreeList {
 
     /// Allocate `size` bytes (rounded up to 4 KiB alignment).
     /// Returns the byte offset into the pool, or `None` if no space.
-    pub fn allocate(&mut self, size: usize) -> Option<usize> {
+    pub(crate) fn allocate(&mut self, size: usize) -> Option<usize> {
         if size == 0 {
             return None;
         }
@@ -65,7 +65,7 @@ impl FreeList {
 
     /// Return a previously allocated region to the free list.
     /// `size` must be the original requested size (will be aligned internally).
-    pub fn deallocate(&mut self, offset: usize, size: usize) {
+    pub(crate) fn deallocate(&mut self, offset: usize, size: usize) {
         let aligned_size = size.next_multiple_of(ALIGNMENT);
         self.used -= aligned_size;
 

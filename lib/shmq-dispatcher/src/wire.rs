@@ -144,6 +144,7 @@ impl std::error::Error for WireError {}
 type WResult<T> = Result<T, WireError>;
 
 /// Sequential little-endian reader over a request blob.
+#[derive(Debug)]
 pub struct Reader<'a> {
     buf: &'a [u8],
     pos: usize,
@@ -206,7 +207,7 @@ impl<'a> Reader<'a> {
 }
 
 /// Sequential little-endian writer for a response blob.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct Writer {
     pub buf: Vec<u8>,
 }

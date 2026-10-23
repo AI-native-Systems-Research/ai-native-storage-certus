@@ -15,6 +15,7 @@
 //!   nothing if an earlier one differs;
 //! - and all of it **with turns taken**, so growth is in the chains and must be
 //!   seen to diverge immediately after the shared run.
+#![cfg(feature = "workload-tests")]
 
 use std::collections::BTreeMap;
 

@@ -32,7 +32,7 @@ pub(crate) struct ComponentInput {
 }
 
 impl Parse for ComponentInput {
-    fn parse(input: ParseStream) -> Result<Self> {
+    fn parse(input: ParseStream<'_>) -> Result<Self> {
         let vis: Visibility = input.parse()?;
         let name: Ident = input.parse()?;
 

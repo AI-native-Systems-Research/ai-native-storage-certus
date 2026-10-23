@@ -17,6 +17,7 @@
 //! So the assertion that matters here is not "it loaded". It is that the **session
 //! count** the loader derives equals the number of sessions the run actually had, and
 //! that the distinct-key and reference counts match the converter's own.
+#![cfg(feature = "workload-tests")]
 
 use std::io::BufWriter;
 

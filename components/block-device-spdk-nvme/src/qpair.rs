@@ -23,6 +23,7 @@ use interfaces::NvmeBlockError;
 /// assert_eq!(qp.in_flight(), 0);
 /// assert_eq!(qp.available(), 32);
 /// ```
+#[derive(Debug)]
 pub struct QueuePair {
     /// Raw SPDK queue pair pointer (null for detached/test instances).
     qpair_ptr: *mut spdk_sys::spdk_nvme_qpair,
@@ -129,6 +130,7 @@ impl QueuePair {
 /// let idx = pool.select_index(32);
 /// assert_eq!(pool.get(idx).unwrap().depth(), 64); // large batch -> deep queue
 /// ```
+#[derive(Debug)]
 pub struct QueuePairPool {
     qpairs: Vec<QueuePair>,
 }

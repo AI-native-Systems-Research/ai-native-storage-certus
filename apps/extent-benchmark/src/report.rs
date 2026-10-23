@@ -3,7 +3,7 @@ use std::time::Duration;
 use crate::config::BenchmarkConfig;
 use crate::worker::PhaseResult;
 
-pub fn print_header(config: &BenchmarkConfig, count: u64, data_disk_size: u64) {
+pub(crate) fn print_header(config: &BenchmarkConfig, count: u64, data_disk_size: u64) {
     println!("=== Extent Manager Benchmark ===");
     match &config.metadata_device {
         Some(addr) => println!(
@@ -23,7 +23,7 @@ pub fn print_header(config: &BenchmarkConfig, count: u64, data_disk_size: u64) {
     println!();
 }
 
-pub fn print_phase(result: &PhaseResult) {
+pub(crate) fn print_phase(result: &PhaseResult) {
     println!("--- {} Phase ---", result.phase_name);
     println!("  Total ops:   {}", result.total_ops);
     println!("  Elapsed:     {:.3}s", result.elapsed.as_secs_f64());
@@ -58,13 +58,13 @@ pub fn print_phase(result: &PhaseResult) {
     println!();
 }
 
-pub fn print_single_op(name: &str, elapsed: Duration) {
+pub(crate) fn print_single_op(name: &str, elapsed: Duration) {
     println!("--- {} ---", name);
     println!("  Elapsed: {:.3}s", elapsed.as_secs_f64());
     println!();
 }
 
-pub fn print_enumerate(recovered: u64, expected: u64, elapsed: Duration) {
+pub(crate) fn print_enumerate(recovered: u64, expected: u64, elapsed: Duration) {
     println!("--- Enumerate ---");
     println!("  Extents: {}/{}", recovered, expected);
     println!("  Elapsed: {:.3}s", elapsed.as_secs_f64());
@@ -74,7 +74,7 @@ pub fn print_enumerate(recovered: u64, expected: u64, elapsed: Duration) {
     println!();
 }
 
-pub fn print_summary(count: u64, create: &PhaseResult, remove: &PhaseResult) {
+pub(crate) fn print_summary(count: u64, create: &PhaseResult, remove: &PhaseResult) {
     println!("=== Summary ===");
     println!(
         "  Create: {} ops at {:.0} ops/sec",

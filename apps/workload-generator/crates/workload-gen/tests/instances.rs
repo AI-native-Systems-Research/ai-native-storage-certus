@@ -6,7 +6,7 @@
 //! working directory is process-global, so a test that changed it would race every other test in
 //! the binary. The implicit-pickup cases therefore run the real binary with `current_dir` set,
 //! and everything that does not need a working directory runs in-process.
-
+#![cfg(feature = "workload-tests")]
 #![cfg(feature = "live")]
 
 use std::path::Path;

@@ -421,6 +421,42 @@ def _lazy_base_attr(name: str):
         raise _import_error(f"{name} (from vllm.v1.kv_offload.base)", _e)
 
 
+def offload_event_medium():
+    """Medium to put on an ``OffloadingEvent``.
+
+    vLLM 0.27+ exports a ``Medium`` enum and its event tracker indexes a dict
+    holding only ``Medium.CPU`` / ``Medium.STORAGE`` — any other value raises
+    ``KeyError``. Feature-detected (not version-gated) because 0.27/0.28 are
+    run without being in ``SUPPORTED_VERSIONS``. On <=0.26 ``medium`` is a plain
+    string; ``"STORAGE"`` matches what later releases report.
+    """
+    import importlib
+
+    try:
+        base = importlib.import_module("vllm.v1.kv_offload.base")
+    except ImportError:
+        return "STORAGE"
+    medium = getattr(base, "Medium", None)
+    if medium is not None:
+        return medium.STORAGE
+    return "STORAGE"
+
+
+def kv_events_enabled(*sources) -> bool:
+    """True if any source (spec, config, vllm_config) has
+    ``kv_events_config.enable_kv_cache_events`` set. Absent on old bases -> False."""
+    for src in sources:
+        cfg = getattr(src, "kv_events_config", None)
+        if cfg is not None and getattr(cfg, "enable_kv_cache_events", False):
+            return True
+        inner = getattr(src, "vllm_config", None)
+        if inner is not None and inner is not src:
+            cfg = getattr(inner, "kv_events_config", None)
+            if cfg is not None and getattr(cfg, "enable_kv_cache_events", False):
+                return True
+    return False
+
+
 def extract_gpu_ptrs(kv_caches) -> list[tuple[int, int]]:
     """(base pointer, per-block stride bytes) for EACH KV-cache tensor.
 

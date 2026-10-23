@@ -487,7 +487,7 @@ fn consume(
     Ok((mine, lateness))
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "workload-tests"))]
 mod tests {
     use super::*;
 

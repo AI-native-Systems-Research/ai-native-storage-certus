@@ -314,7 +314,7 @@ fn ssd_evictor_keeps_slot_when_remove_fails() {
             interval: Duration::from_millis(5),
         },
         None,
-        None,
+        Arc::new(Mutex::new(None)),
         Arc::new(TierEventCounters::default()),
     );
 

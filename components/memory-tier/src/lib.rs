@@ -35,7 +35,7 @@ pub const DEFAULT_POOL_SIZE: usize = 256 * 1024 * 1024;
 
 /// Telemetry counters for the memory-tier (zero-cost when `telemetry` feature is disabled).
 #[cfg(feature = "telemetry")]
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct MemoryTierTelemetry {
     pub evictions: AtomicU64,
     pub write_lock_contentions: AtomicU64,

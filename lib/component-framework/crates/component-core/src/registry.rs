@@ -57,6 +57,12 @@ pub struct ComponentRegistry {
     factories: RwLock<HashMap<String, Box<dyn ComponentFactory>>>,
 }
 
+impl std::fmt::Debug for ComponentRegistry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ComponentRegistry").finish_non_exhaustive()
+    }
+}
+
 impl ComponentRegistry {
     /// Creates an empty registry.
     pub fn new() -> Self {

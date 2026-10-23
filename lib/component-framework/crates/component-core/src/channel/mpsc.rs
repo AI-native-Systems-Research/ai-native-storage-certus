@@ -61,6 +61,12 @@ pub struct MpscChannel<T: Send + 'static> {
     interface_info: Vec<InterfaceInfo>,
 }
 
+impl<T: Send + 'static> std::fmt::Debug for MpscChannel<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MpscChannel").finish_non_exhaustive()
+    }
+}
+
 /// Lock-free MPSC sender that pushes directly to the ring buffer via CAS.
 ///
 /// Multiple `MpscSender` instances can coexist and push concurrently

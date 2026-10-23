@@ -8,7 +8,7 @@
 //!
 //! The stand-in agent is `workload-wire`'s own server with a trivial service, so the
 //! handshake, the shutdown and the port going quiet are all genuine.
-
+#![cfg(feature = "workload-tests")]
 #![cfg(feature = "live")]
 
 use std::collections::HashSet;

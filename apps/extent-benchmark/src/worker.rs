@@ -2,13 +2,13 @@ use std::time::Duration;
 
 use crate::stats::{self, LatencyStats};
 
-pub struct WorkerResult {
+pub(crate) struct WorkerResult {
     pub thread_id: usize,
     pub ops_completed: u64,
     pub latency: LatencyStats,
 }
 
-pub struct PhaseResult {
+pub(crate) struct PhaseResult {
     pub phase_name: String,
     pub total_ops: u64,
     pub elapsed: Duration,
@@ -19,7 +19,7 @@ pub struct PhaseResult {
 
 /// Each entry is `(thread_id, actual_ops_completed, latency_samples)`.
 /// `latency_samples` may be a sub-sample of `actual_ops_completed`.
-pub fn aggregate_results(
+pub(crate) fn aggregate_results(
     phase_name: &str,
     mut worker_data: Vec<(usize, u64, Vec<Duration>)>,
     elapsed: Duration,

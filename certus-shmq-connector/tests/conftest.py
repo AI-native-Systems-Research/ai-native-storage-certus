@@ -149,6 +149,10 @@ def build_fake_vllm(version: tuple[int, int] = (0, 20)) -> None:
 
         from enum import Enum, auto
 
+        class Medium(Enum):
+            CPU = auto()
+            STORAGE = auto()
+
         class LookupResult(Enum):
             MISS = auto()
             HIT = auto()
@@ -219,6 +223,8 @@ def build_fake_vllm(version: tuple[int, int] = (0, 20)) -> None:
             "CanonicalKVCaches": CanonicalKVCaches,
         }.items():
             setattr(base, name, obj)
+        if version >= (0, 27):
+            base.Medium = Medium
         config_mod.OffloadingConfig = OffloadingConfig
     else:
         # ── ≤0.24 layout: split modules (abstract/mediums/spec/worker.worker).

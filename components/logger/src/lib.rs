@@ -107,6 +107,15 @@ pub struct LoggerState {
     use_color: bool,
 }
 
+impl std::fmt::Debug for LoggerState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LoggerState")
+            .field("level", &self.level)
+            .field("use_color", &self.use_color)
+            .finish_non_exhaustive()
+    }
+}
+
 impl Default for LoggerState {
     fn default() -> Self {
         // SAFETY: isatty is a POSIX function that checks if fd 2 (stderr)

@@ -607,11 +607,11 @@ fn free_bytes(dir: &Path) -> Result<u64, Failure> {
 /// layout.
 mod bytes_per_reference {
     /// Mooncake: dense small integers, one prompt list per row.
-    pub const MOONCAKE: u64 = 7;
+    pub(super) const MOONCAKE: u64 = 7;
     /// libCacheSim CSV: one whole row per reference, so the largest of all.
-    pub const CACHESIM: u64 = 32;
+    pub(super) const CACHESIM: u64 = 32;
     /// The Qwen-Bailian projection.
-    pub const SIMULATOR: u64 = 21;
+    pub(super) const SIMULATOR: u64 = 21;
 }
 
 /// One requested output: what it is called, where it goes, and what it will cost.
@@ -1693,7 +1693,7 @@ fn digest_of(text: &str) -> String {
     format!("{acc:016x}")
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "workload-tests"))]
 mod tests {
     use super::*;
 

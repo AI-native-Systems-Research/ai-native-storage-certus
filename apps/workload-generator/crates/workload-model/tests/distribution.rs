@@ -4,6 +4,7 @@
 //! the implementation is careless — each of them looks fine in an aggregate
 //! summary. Reference values were computed with an independent implementation
 //! rather than read off this code.
+#![cfg(feature = "workload-tests")]
 
 use rand::Rng;
 use workload_model::distribution::{Distribution, Kind};

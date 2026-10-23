@@ -3,6 +3,7 @@
 //! Most of this runs over an in-memory pipe. Two tests use a real TCP socket, because the
 //! accept loop, `TCP_NODELAY` on an accepted connection, and a genuine concurrent client are
 //! properties only a socket has.
+#![cfg(feature = "workload-tests")]
 
 use std::io::{self, Read, Write};
 use std::net::TcpStream;

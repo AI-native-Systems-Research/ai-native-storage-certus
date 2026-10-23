@@ -23,7 +23,7 @@ pub(crate) struct LruList {
 }
 
 impl LruList {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             nodes: Vec::new(),
             head: None,
@@ -34,7 +34,7 @@ impl LruList {
     }
 
     /// Insert a key at the front (least recently used). Returns the node index.
-    pub fn push_front(&mut self, key: CacheKey) -> u32 {
+    pub(crate) fn push_front(&mut self, key: CacheKey) -> u32 {
         let idx = if let Some(free_idx) = self.free.pop() {
             self.nodes[free_idx as usize] = Node {
                 key,
@@ -67,12 +67,12 @@ impl LruList {
     }
 
     /// Return the key of the front (LRU head) node without removing it.
-    pub fn peek_front_key(&self) -> Option<CacheKey> {
+    pub(crate) fn peek_front_key(&self) -> Option<CacheKey> {
         self.head.map(|idx| self.nodes[idx as usize].key)
     }
 
     /// Insert a key at the back (most recently used). Returns the node index.
-    pub fn push_back(&mut self, key: CacheKey) -> u32 {
+    pub(crate) fn push_back(&mut self, key: CacheKey) -> u32 {
         let idx = if let Some(free_idx) = self.free.pop() {
             self.nodes[free_idx as usize] = Node {
                 key,
@@ -109,7 +109,7 @@ impl LruList {
     /// Silent no-op for a stale handle (FR-012). The range check comes FIRST: the `active` flag
     /// can only guard a slot that still exists, and `clear` discards the slots, so after a
     /// `clear` every handle the list ever issued names a slot past the end.
-    pub fn move_to_back(&mut self, idx: u32) {
+    pub(crate) fn move_to_back(&mut self, idx: u32) {
         if idx as usize >= self.nodes.len() {
             return;
         }
@@ -141,7 +141,7 @@ impl LruList {
     }
 
     /// Remove and return the front node (least recently used).
-    pub fn pop_front(&mut self) -> Option<CacheKey> {
+    pub(crate) fn pop_front(&mut self) -> Option<CacheKey> {
         let head_idx = self.head?;
         let key = self.nodes[head_idx as usize].key;
         self.remove(head_idx);
@@ -149,7 +149,7 @@ impl LruList {
     }
 
     /// Return up to `n` keys starting from the front (oldest).
-    pub fn peek_front_n(&self, n: usize) -> Vec<CacheKey> {
+    pub(crate) fn peek_front_n(&self, n: usize) -> Vec<CacheKey> {
         let mut result = Vec::with_capacity(n.min(self.len));
         let mut current = self.head;
         while let Some(idx) = current {
@@ -164,7 +164,7 @@ impl LruList {
 
     /// Remove a node by index. Idempotent for already-removed nodes, and for a handle whose slot
     /// no longer exists at all (FR-012) — same range-check-first reason as `move_to_back`.
-    pub fn remove(&mut self, idx: u32) {
+    pub(crate) fn remove(&mut self, idx: u32) {
         if idx as usize >= self.nodes.len() {
             return;
         }
@@ -194,7 +194,7 @@ impl LruList {
     }
 
     /// Reset the list to empty.
-    pub fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.nodes.clear();
         self.head = None;
         self.tail = None;
@@ -203,7 +203,7 @@ impl LruList {
     }
 
     /// Return the number of active entries.
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.len
     }
 }

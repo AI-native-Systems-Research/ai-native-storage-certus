@@ -108,7 +108,9 @@ unsafe extern "C" fn attach_cb(
     ctrlr: *mut spdk_sys::spdk_nvme_ctrlr,
     _opts: *const spdk_sys::spdk_nvme_ctrlr_opts,
 ) {
-    ATTACHED_CTRLRS.push(ctrlr);
+    unsafe {
+        ATTACHED_CTRLRS.push(ctrlr);
+    }
 }
 
 fn initialize_spdk(

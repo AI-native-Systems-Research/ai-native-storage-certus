@@ -1,11 +1,13 @@
 ---
 spec_sync_component: spdk-sys
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-01T00:00:00Z
-spec_sync_git_commit: 72c7182b
-spec_sync_inputs_sha256: 0f3490585fe6569427bd2367ba637009395a6511b65cbeddc60e217b3ff62301
+spec_sync_synced_at: 2026-10-23T18:00:34Z
+spec_sync_git_commit: d7a24d58
+spec_sync_inputs_sha256: ee11ed36198ea488ba5c281259870e120ccde0c76566de09797d9727bb8660cc
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-23 (branch `unstable`, commit `d7a24d58` "Fix workspace build warnings" plus the spec-sync follow-up).** That commit only fixed warnings under the workspace lint posture: it added `Debug` impls, narrowed unreachable `pub` items to `pub(crate)`, wrapped `unsafe fn` bodies in explicit `unsafe {}` blocks, and the follow-up ran `rustfmt`. It also touched `components/interfaces` (a `Debug` impl for `Command`), which changes every component's digest. This component's own `src/` was in that commit. Every changed item was checked: none is part of a provided interface, none is named as public by the spec, and no behaviour changed. No spec citation into this component's source moved. All citations were re-verified by diff-mapping each base line to its new position. Status stays `clean`.
+
 > **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest
 > folds `components/interfaces/{src,specs}` into **every** component's hash, so an interface
 > change invalidates all of them at once -- which is the design, not a defect. The interface

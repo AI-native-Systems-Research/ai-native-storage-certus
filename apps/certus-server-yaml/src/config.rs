@@ -5,6 +5,7 @@ use std::cell::RefCell;
 /// `resolved_pci_addrs` is populated by `init_spdk_env` after device discovery
 /// and consumed by `init_dispatcher`. Uses interior mutability because the
 /// generated composition code passes `&StackConfig` (shared ref) to all hooks.
+#[derive(Debug)]
 pub struct StackConfig {
     pub device_pci: Vec<String>,
     pub device_paths: Vec<String>,

@@ -8,7 +8,7 @@ use std::os::raw::{c_int, c_ulong};
 pub type gdr_t = *mut c_void;
 
 #[repr(C)]
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct gdr_mh_t {
     pub h: c_ulong,
 }

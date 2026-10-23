@@ -38,8 +38,8 @@ interface boundary. `IDispatchMap::lookup` returns exactly the discriminant need
 `LookupResult::{NotExist, MismatchSize, BlockDevice, MemoryTier}`
 (`components/interfaces/src/idispatch_map.rs:11-28`) — and both dispatchers match on it
 throughout `batch_lookup`, but every arm collapses to `Ok(())` or `Err(DispatcherError)`
-(`components/dispatcher/src/lib.rs:2106`,
-`components/dispatcher-p2p/src/lib.rs:1584`). The tier is known one line before it is
+(`components/dispatcher/src/lib.rs:2108`,
+`components/dispatcher-p2p/src/lib.rs:1585`). The tier is known one line before it is
 thrown away.
 
 **This is therefore an interface change, not only a transport change.** No new measurement
@@ -72,7 +72,7 @@ rewritten against the mailbox; the earlier wording is recorded in `## Reconcilia
 rather than silently dropped, because a reader of the git history will find it.
 
 The tier surfaces by **widening a byte that already exists**. `op_lookup` returns one `ok`
-byte per key (`ok_flags`, `lib/shmq-dispatcher/src/translate.rs:567`), currently `0` or
+byte per key (`ok_flags`, `lib/shmq-dispatcher/src/translate.rs:573`), currently `0` or
 `1`. `served_by` replaces that byte's value space, keeping `0` = not served so that any
 reader testing `byte != 0` still sees a served key as served.
 
@@ -155,7 +155,7 @@ earlier wording and a reader deserves to know which parts were re-verified.
 | --- | --- |
 | `LookupResult` carries the four-way discriminant | holds, `idispatch_map.rs:11-28` |
 | `IDispatcher::batch_lookup` discards it | holds, `idispatcher.rs:360-363` |
-| Both dispatchers collapse every arm | holds, `dispatcher/src/lib.rs:2106`, `dispatcher-p2p/src/lib.rs:1584` |
+| Both dispatchers collapse every arm | holds, `dispatcher/src/lib.rs:2108`, `dispatcher-p2p/src/lib.rs:1585` |
 | The peer's tier already crosses the wire | holds, `Avail::{None, Memory, Disk}`, `remote-lookup/src/wire.rs:23-30` |
 | No remote-lookup wire change needed | holds |
 
@@ -223,9 +223,9 @@ rework. They must be re-counted at plan time; the line numbers there are known s
 - Q: How is a size mismatch classified? → A: **Its own bucket, `SIZE_MISMATCH`.** It is
   neither a hit (no data delivered) nor a plain miss (the key *is* present). Giving it a
   distinct value changes no dispatcher behaviour: today `LookupResult::MismatchSize` yields
-  `InvalidParameter` (`components/dispatcher/src/lib.rs:2093-2098`) and such keys are never
+  `InvalidParameter` (`components/dispatcher/src/lib.rs:2095-2100`) and such keys are never
   offered to the remote path, because the remote block selects only `KeyNotFound`
-  (`lib.rs:2469-2476`). Folding it into `MISS` would have required changing that behaviour;
+  (`lib.rs:2470-2477`). Folding it into `MISS` would have required changing that behaviour;
   this decision deliberately does not.
 - Q: Must every request land in exactly one bucket? → A: **Yes, and that forces a seventh
   value, `ERROR`.** Today `hits + misses ≠ requests`: `lookup_misses` increments only on
@@ -236,7 +236,7 @@ rework. They must be re-counted at plan time; the line numbers there are known s
   being attempted (see `## Out of Scope`).
 - Q: Does `served_by` describe the route taken or where the entry ends up? → A: **The route
   taken.** A local SSD hit in `dispatcher` is promoted into DRAM as part of being served
-  (`lib.rs:2128-2137`), so "served from SSD" and "now DRAM-resident" are both true of the
+  (`lib.rs:2130-2138`), so "served from SSD" and "now DRAM-resident" are both true of the
   same request; the former is what a hit-rate measurement means. This distinction is sharper
   in `dispatcher-p2p`, where the cold path does **not** populate DRAM synchronously (FR-014).
 - Q: Which value does a zero byte mean? → A: **`0` means "not served", and nothing else.**
@@ -266,7 +266,7 @@ rework. They must be re-counted at plan time; the line numbers there are known s
    advertised `Avail` out (FR-016), which requires `KeyState` or the result projection to
    gain a tier dimension (`operation.rs:19-27`, `:149-160`) and an `interfaces`-visible type.
    **No wire-protocol change.**
-5. **`lib/shmq-dispatcher`** — widens `LOOKUP`'s per-key `ok` byte (`translate.rs:567`,
+5. **`lib/shmq-dispatcher`** — widens `LOOKUP`'s per-key `ok` byte (`translate.rs:573`,
    `wire.rs:98-110`). It owns no `specs/` directory, so the wire change is documented beside
    `check_state`, which already documents its own widening and its compatibility rule.
 6. **`apps/certus-server` and `apps/certus-server-yaml`** — the counter correction
@@ -430,7 +430,7 @@ assert identical attribution for identical residency, except where FR-014 specif
   remote pass overwrites it. Attribution MUST reflect the final resolution, and MUST NOT
   count the key as both a miss and a remote hit.
 - **A result overwritten after attribution.** A failed batched sync rewrites already-`Ok`
-  results to `IoError` (`components/dispatcher/src/lib.rs:2588-2590`) and the
+  results to `IoError` (`components/dispatcher/src/lib.rs:2589-2591`) and the
   concurrent-promotion recovery pass rewrites `AlreadyExists` (`:2615-2620`). Attribution
   MUST be rewritten in lockstep; an attribution left behind by an overwritten result reports
   a tier for a key that failed.
@@ -524,7 +524,7 @@ assert identical attribution for identical residency, except where FR-014 specif
 `97e26738` removed. The requirements below carry the same intent onto the mailbox.*
 
 - **FR-019**: The taxonomy MUST be expressed by **widening the existing per-key `ok` byte**
-  that `LOOKUP` returns (`lib/shmq-dispatcher/src/translate.rs:567`). The feature MUST NOT
+  that `LOOKUP` returns (`lib/shmq-dispatcher/src/translate.rs:573`). The feature MUST NOT
   add a wire field, change framing, or alter the request encoding.
 - **FR-020**: The byte value `0` MUST continue to mean **not served**. There MUST NOT be an
   "unspecified" value: reserving `0` for unknown would silently reclassify every miss, and an
@@ -719,7 +719,7 @@ Two Phase 1 findings that bear on requirements elsewhere in this spec:
   Recorded as a known limitation for the workload-generator spec's SC-007, which depends on
   it.
 - **Re-deriving the workload generator's 5% `GetIoStats` agreement tolerance.** `GetIoStats`
-  is device-level and drive-aggregated (`components/dispatcher/src/lib.rs:3256-3271`) and
+  is device-level and drive-aggregated (`components/dispatcher/src/lib.rs:3257-3272`) and
   includes background promotion traffic, so exact agreement with critical-path SSD bytes was
   never achievable. Belongs to that spec.
 - **Splitting `certus_evictions_total` into demoted versus removed**, and its dependence on a

@@ -38,6 +38,7 @@ use super::{ChannelError, IReceiver, ISender};
 /// tx.send(42).unwrap();
 /// assert_eq!(rx.recv().unwrap(), 42);
 /// ```
+#[derive(Debug)]
 pub struct RtrbSender<T> {
     inner: Mutex<rtrb::Producer<T>>,
 }
@@ -84,6 +85,7 @@ impl<T: Send + 'static> ISender<T> for RtrbSender<T> {
 /// tx.send(99).unwrap();
 /// assert_eq!(rx.recv().unwrap(), 99);
 /// ```
+#[derive(Debug)]
 pub struct RtrbReceiver<T> {
     inner: Mutex<rtrb::Consumer<T>>,
 }
@@ -144,6 +146,12 @@ pub struct RtrbChannel<T: Send + 'static> {
     sender_iface: OnceLock<Box<dyn Any + Send + Sync>>,
     receiver_iface: OnceLock<Box<dyn Any + Send + Sync>>,
     interface_info: Vec<InterfaceInfo>,
+}
+
+impl<T: Send + 'static> std::fmt::Debug for RtrbChannel<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RtrbChannel").finish_non_exhaustive()
+    }
 }
 
 impl<T: Send + 'static> RtrbChannel<T> {

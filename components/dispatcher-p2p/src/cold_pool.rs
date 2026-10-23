@@ -24,6 +24,12 @@ pub struct P2pColdReadRequest {
     pub result_tx: Sender<Vec<Result<(), DispatcherError>>>,
 }
 
+impl std::fmt::Debug for P2pColdReadRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("P2pColdReadRequest").finish_non_exhaustive()
+    }
+}
+
 // SAFETY: P2pColdJob contains raw pointers valid for the pipeline call duration;
 // ring_ptr is valid for the duration of the request (caller holds RwLock read guard).
 // The caller ensures all pointers remain valid until result_tx is received.
@@ -42,6 +48,12 @@ pub struct P2pColdReadPool {
     workers: Vec<Vec<WorkerHandle>>,
     shutdown: Arc<AtomicBool>,
     num_drives: usize,
+}
+
+impl std::fmt::Debug for P2pColdReadPool {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("P2pColdReadPool").finish_non_exhaustive()
+    }
 }
 
 impl P2pColdReadPool {

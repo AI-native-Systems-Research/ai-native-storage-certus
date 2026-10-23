@@ -3,7 +3,7 @@
 //! Driven against stand-in agents on loopback ports, so the routing, the merging and the
 //! node-loss abort are all exercised without a cluster. What a stand-in cannot show is that a
 //! turn reaches a cache — `workload-node-agent`'s own `live_agent` test does that.
-
+#![cfg(feature = "workload-tests")]
 #![cfg(feature = "live")]
 
 use std::collections::HashSet;

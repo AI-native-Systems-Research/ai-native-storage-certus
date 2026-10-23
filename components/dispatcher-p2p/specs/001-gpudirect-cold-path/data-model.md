@@ -87,7 +87,7 @@ Persistent pool of long-lived per-(drive, queue-slot) worker threads that execut
 
 **P2pColdReadRequest**: `{ jobs: Vec<P2pColdJob>, partition: ThreadPartition, ring_ptr: *const P2pRing, result_tx: Sender<Vec<Result<(), DispatcherError>>> }` — submitted over a bounded (depth-1) channel; the worker runs `pipelined_multi_object_p2p` and returns per-job results via `result_tx`.
 
-**Lifecycle**: Created at initialization once the P2P ring is available and at least one drive is registered (`src/lib.rs:1239-1260`); on creation failure, the component logs a non-fatal warning and every cold `batch_lookup` falls back to the inline per-batch path (connect + run on the calling thread) for the component's remaining lifetime. Signaled to stop via `shutdown()` (sets the `AtomicBool`; each worker checks it before executing the next request and drains its channel with an error result) as part of component `shutdown()`, before the P2P ring is destroyed. Also stopped via `Drop`.
+**Lifecycle**: Created at initialization once the P2P ring is available and at least one drive is registered (`src/lib.rs:1241-1262`); on creation failure, the component logs a non-fatal warning and every cold `batch_lookup` falls back to the inline per-batch path (connect + run on the calling thread) for the component's remaining lifetime. Signaled to stop via `shutdown()` (sets the `AtomicBool`; each worker checks it before executing the next request and drains its channel with an error result) as part of component `shutdown()`, before the P2P ring is destroyed. Also stopped via `Drop`.
 
 **Invariants**:
 - At most one pool instance per component; guarded by `Mutex<Option<P2pColdReadPool>>`

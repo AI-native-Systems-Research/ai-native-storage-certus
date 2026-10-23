@@ -16,7 +16,7 @@ use std::time::Instant;
 
 use component_core::iunknown::query;
 use component_core::query_interface;
-use dispatcher::DispatcherComponent;
+use dispatcher_p2p::DispatcherP2pComponent;
 use gpu_services::cuda_ffi;
 use gpu_services::GpuServicesComponent;
 use interfaces::{
@@ -61,6 +61,16 @@ impl HwDispatchMap {
 impl IDispatchMap for HwDispatchMap {
     fn initialize(&self) -> Result<(), DispatchMapError> {
         Ok(())
+    }
+
+    #[cfg(feature = "integrity-check")]
+    fn set_checksum(&self, _key: CacheKey, _checksum: u32) -> Result<(), DispatchMapError> {
+        Ok(())
+    }
+
+    #[cfg(feature = "integrity-check")]
+    fn get_checksum(&self, _key: CacheKey) -> Option<u32> {
+        None
     }
 
     fn lookup(&self, key: CacheKey) -> Result<LookupResult, DispatchMapError> {
@@ -361,7 +371,7 @@ fn setup_dispatcher(
         Arc<dyn IDispatcher + Send + Sync>,
         Arc<HwDispatchMap>,
         Arc<dyn IMemoryTier + Send + Sync>,
-        Arc<DispatcherComponent>,
+        Arc<DispatcherP2pComponent>,
         Arc<dyn IGpuServices + Send + Sync>,
     ),
     String,
@@ -415,7 +425,7 @@ fn setup_dispatcher(
 
     // Dispatcher component
     let dm = Arc::new(HwDispatchMap::new());
-    let dispatcher = DispatcherComponent::new_default();
+    let dispatcher = DispatcherP2pComponent::new_default();
 
     dispatcher
         .dispatch_map
@@ -441,17 +451,10 @@ fn setup_dispatcher(
     let d: Arc<dyn IDispatcher + Send + Sync> =
         query_interface!(dispatcher, IDispatcher).ok_or("IDispatcher query failed")?;
 
-    // Use first device for metadata only; remaining device(s) for data.
-    // This avoids using a small metadata NVMe as a data drive (its slab_size
-    // may be too small for large extents).
-    let (metadata_addr, data_addrs) = if actual_addrs.len() > 1 {
-        (actual_addrs[0].clone(), actual_addrs[1..].to_vec())
-    } else {
-        (actual_addrs[0].clone(), actual_addrs.clone())
-    };
+    // Every device is a data drive; extent-manager metadata lives in a
+    // partition on each drive (the separate metadata device was removed).
     let config = DispatcherConfig {
-        metadata_pci_addr: metadata_addr,
-        data_pci_addrs: data_addrs,
+        data_pci_addrs: actual_addrs,
         max_cache_entries: 0,
         ..Default::default()
     };

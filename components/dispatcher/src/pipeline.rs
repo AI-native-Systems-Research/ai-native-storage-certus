@@ -84,6 +84,15 @@ pub struct StagingPool {
     cv: std::sync::Condvar,
 }
 
+impl std::fmt::Debug for StagingPool {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StagingPool")
+            .field("buffer_count", &self.ptrs.len())
+            .field("buf_bytes", &self.buf_bytes)
+            .finish_non_exhaustive()
+    }
+}
+
 // SAFETY: the raw pointers refer to CUDA-pinned + SPDK-registered host memory
 // that is valid for cross-thread DMA use for the pool's lifetime; the owning
 // DmaBuffers are never mutated or moved after construction, and free-list access
@@ -146,6 +155,14 @@ pub struct StagingLease {
     ptr: *mut u8,
 }
 
+impl std::fmt::Debug for StagingLease {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StagingLease")
+            .field("index", &self.idx)
+            .finish_non_exhaustive()
+    }
+}
+
 impl StagingLease {
     /// Raw pointer to the leased buffer (registered host memory).
     pub fn ptr(&self) -> *mut u8 {
@@ -168,6 +185,15 @@ pub struct PipelineRing {
     pub chunk_size: usize,
     /// Staging pool for cold loads that can't get a memory-tier slot.
     pub staging: Option<Arc<StagingPool>>,
+}
+
+impl std::fmt::Debug for PipelineRing {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PipelineRing")
+            .field("chunk_size", &self.chunk_size)
+            .field("has_staging_pool", &self.staging.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 impl PipelineRing {
@@ -439,6 +465,15 @@ pub struct ColdReadJob {
     pub gpu_dst: *mut std::ffi::c_void,
     pub start_lba: u64,
     pub total_bytes: usize,
+}
+
+impl std::fmt::Debug for ColdReadJob {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ColdReadJob")
+            .field("start_lba", &self.start_lba)
+            .field("total_bytes", &self.total_bytes)
+            .finish_non_exhaustive()
+    }
 }
 
 // SAFETY: pointers are valid for the duration of the pipeline call.
@@ -747,6 +782,14 @@ pub struct DriveWork<'a> {
     pub channels: &'a ClientChannels,
     pub drive: &'a dyn IBlockDevice,
     pub jobs: &'a [ColdReadJob],
+}
+
+impl std::fmt::Debug for DriveWork<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DriveWork")
+            .field("job_count", &self.jobs.len())
+            .finish_non_exhaustive()
+    }
 }
 
 /// Multi-drive scatter-gather SSD→GPU zero-copy transfer.
@@ -1147,6 +1190,15 @@ pub struct DramPromoteJob {
     pub mem_ptr: *mut u8,
     pub start_lba: u64,
     pub total_bytes: usize,
+}
+
+impl std::fmt::Debug for DramPromoteJob {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DramPromoteJob")
+            .field("start_lba", &self.start_lba)
+            .field("total_bytes", &self.total_bytes)
+            .finish_non_exhaustive()
+    }
 }
 
 // SAFETY: pointers are valid for the duration of the pipeline call.

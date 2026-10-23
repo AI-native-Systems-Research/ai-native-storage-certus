@@ -17,6 +17,7 @@
 //! One of the six is only partly held, and it says which half sits where rather than
 //! claiming the row outright. That is the point of writing the audit down: an audit that
 //! reported six of six without naming a test would be describing the table.
+#![cfg(feature = "workload-tests")]
 
 use workload_model::description::WorkloadDescription;
 use workload_model::plan::OperationPlan;
