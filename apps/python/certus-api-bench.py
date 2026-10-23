@@ -14,6 +14,7 @@ Usage:
 """
 
 import argparse
+import csv
 import ctypes
 import os
 import random
@@ -536,6 +537,100 @@ def run_client(
     # The Ring is shared across all client threads and closed by main().
 
 
+def compute_stats(all_latencies, wall_aggregate_gbps=None):
+    """Compute latency/throughput stats from raw latency samples (seconds).
+
+    Returns a dict with keys: avg_us, p50_us, p99_us, min_us, max_us,
+    per_client_gbps, aggregate_gbps, n.  Returns None when no data.
+    """
+    if not all_latencies:
+        return None
+    avg = statistics.mean(all_latencies)
+    p50 = statistics.median(all_latencies)
+    p99 = (
+        sorted(all_latencies)[int(len(all_latencies) * 0.99)]
+        if len(all_latencies) > 1
+        else all_latencies[0]
+    )
+    mn = min(all_latencies)
+    mx = max(all_latencies)
+    tp_per_client = BLOCK_SIZE / avg if avg > 0 else 0
+    return {
+        "n": len(all_latencies),
+        "avg_us": round(avg * 1e6, 1),
+        "p50_us": round(p50 * 1e6, 1),
+        "p99_us": round(p99 * 1e6, 1),
+        "min_us": round(mn * 1e6, 1),
+        "max_us": round(mx * 1e6, 1),
+        "per_client_gbps": round(tp_per_client / 1e9, 2),
+        "aggregate_gbps": round(wall_aggregate_gbps, 2) if wall_aggregate_gbps is not None else None,
+    }
+
+
+def _yaml_val(v):
+    if v is None:
+        return "null"
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (int, float)):
+        return str(v)
+    s = str(v)
+    if any(c in s for c in ":{}\n#[],%&*?|>!`@'\""):
+        return "'" + s.replace("'", "''") + "'"
+    return s
+
+
+def dump_yaml(data, stream):
+    """Minimal YAML emitter for nested dicts/lists of scalars."""
+    def _dump(obj, indent):
+        prefix = "  " * indent
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                if isinstance(v, (dict, list)):
+                    stream.write(f"{prefix}{k}:\n")
+                    _dump(v, indent + 1)
+                else:
+                    stream.write(f"{prefix}{k}: {_yaml_val(v)}\n")
+        elif isinstance(obj, list):
+            for item in obj:
+                if isinstance(item, dict):
+                    first = True
+                    for k, v in item.items():
+                        mark = "- " if first else "  "
+                        first = False
+                        if isinstance(v, (dict, list)):
+                            stream.write(f"{prefix}{mark}{k}:\n")
+                            _dump(v, indent + 2)
+                        else:
+                            stream.write(f"{prefix}{mark}{k}: {_yaml_val(v)}\n")
+                else:
+                    stream.write(f"{prefix}- {_yaml_val(item)}\n")
+        else:
+            stream.write(f"{prefix}{_yaml_val(obj)}\n")
+    _dump(data, 0)
+
+
+def write_output(path, data):
+    """Write benchmark results to path as YAML or CSV (inferred from extension)."""
+    ext = os.path.splitext(path)[1].lower()
+    with open(path, "w", newline="") as fh:
+        if ext in (".yaml", ".yml"):
+            dump_yaml(data, fh)
+        elif ext == ".csv":
+            phases = data.get("phases", {})
+            fieldnames = ["phase", "n", "avg_us", "p50_us", "p99_us", "min_us",
+                          "max_us", "per_client_gbps", "aggregate_gbps"]
+            writer = csv.DictWriter(fh, fieldnames=fieldnames)
+            writer.writeheader()
+            for phase_name, stats in phases.items():
+                if stats is not None:
+                    row = {"phase": phase_name}
+                    row.update(stats)
+                    writer.writerow(row)
+        else:
+            dump_yaml(data, fh)
+
+
 def print_stats(label, all_latencies, num_clients, wall_aggregate_gbps=None):
     """Print latency and throughput statistics."""
     if not all_latencies:
@@ -640,6 +735,14 @@ def main():
         action="store_true",
         help="Run continuously in a loop. Populate runs once on the first round; "
         "subsequent rounds repeat only the lookup phases. Ctrl-C to stop.",
+    )
+    parser.add_argument(
+        "--output",
+        action="append",
+        default=[],
+        metavar="FILE",
+        help="Write structured results to FILE (repeatable). Format is inferred "
+        "from extension: .yaml/.yml for YAML, .csv for CSV.",
     )
     args = parser.parse_args()
 
@@ -833,6 +936,46 @@ def main():
             )
 
         print()
+
+        # --- Structured output (YAML/CSV) ---
+        if args.output:
+            out_data = {
+                "config": {
+                    "server": args.shm_path,
+                    "clients": num_clients,
+                    "gpus": num_gpus,
+                    "block_size_bytes": BLOCK_SIZE,
+                    "batch_size": batch_size,
+                    "num_objects": num_objects,
+                    "iterations": iterations,
+                    "round": round_num,
+                },
+                "phases": {
+                    "populate": compute_stats(all_populate, pop_wall_agg),
+                    "hot_lookup": compute_stats(all_hot, hot_wall_agg),
+                    "cold_lookup": compute_stats(all_cold, cold_wall_agg),
+                },
+                "wall_time_s": round(t_total_end - t_total_start, 2),
+                "errors": len(all_errors),
+                "per_client": [
+                    {
+                        "client": r.client_id,
+                        "gpu": r.client_id % num_gpus,
+                        "hot_avg_us": round(statistics.mean(r.hot_latencies) * 1e6, 1) if r.hot_latencies else 0,
+                        "cold_avg_us": round(statistics.mean(r.cold_latencies) * 1e6, 1) if r.cold_latencies else 0,
+                        "errors": len(r.errors),
+                    }
+                    for r in results
+                ],
+            }
+            if all_hot and all_cold:
+                hot_avg = statistics.mean(all_hot)
+                cold_avg = statistics.mean(all_cold)
+                if hot_avg > 0:
+                    out_data["cold_hot_ratio"] = round(cold_avg / hot_avg, 1)
+            for output_path in args.output:
+                write_output(output_path, out_data)
+                print(f"  Results written to {output_path}")
 
         # --- Integrity verification (optional, first round only) ---
         integrity_ok = True
