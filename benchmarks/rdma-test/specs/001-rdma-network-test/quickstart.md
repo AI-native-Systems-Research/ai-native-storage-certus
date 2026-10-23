@@ -26,7 +26,7 @@ sudo rdma link add rxe0 type rxe netdev eth0
 ## Build
 
 ```bash
-cd tools/rdma-test
+cd benchmarks/rdma-test
 cargo build --release
 ```
 

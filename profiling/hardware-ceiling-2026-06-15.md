@@ -242,7 +242,7 @@ Actually re-evaluating: 95% of 3.80 = 3.61 GB/s threshold. First QD=32 value mee
 
 ## 7. Path 3 — GPU PCIe Bandwidth (cudaMemcpy)
 
-Source: tools/hw-ceiling/cuda_bw_test.cu. Run NUMA-local and cross-NUMA for each GPU.
+Source: benchmarks/hw-ceiling/cuda_bw_test.cu. Run NUMA-local and cross-NUMA for each GPU.
 
 ### GPU 0 (A30, 0000:41:00.0, NUMA0) — NUMA-local (CPU+mem on NUMA0)
 
@@ -297,7 +297,7 @@ From NUMA-local run (CPU on NUMA0 = cross-NUMA for GPU1):
 
 ## 8. Path 4 — GPU D2D Bandwidth
 
-Source: tools/hw-ceiling/cuda_d2d_test.cu.
+Source: benchmarks/hw-ceiling/cuda_d2d_test.cu.
 
 ### GPU 0 (A30)
 
@@ -350,7 +350,7 @@ To install if missing: `sudo dnf install nvidia-gds nvidia-fs-dkms`
 
 ## 11. Path 7 — Host RAM Bandwidth (memcpy)
 
-Source: tools/hw-ceiling/memcpy_bench.c. Run with `numactl --cpunodebind=0 --membind=0`.
+Source: benchmarks/hw-ceiling/memcpy_bench.c. Run with `numactl --cpunodebind=0 --membind=0`.
 
 | Size | Same-NUMA (GB/s) | Cross-NUMA (GB/s) |
 |------|-----------------|------------------|

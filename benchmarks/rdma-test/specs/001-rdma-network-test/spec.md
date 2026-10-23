@@ -121,7 +121,7 @@ A user runs the tool on a machine where RDMA may not be properly configured. The
 
 ### FR-007: SSH Launch Script
 
-**Location**: `tools/rdma-test/scripts/launch.sh` (106 lines)
+**Location**: `benchmarks/rdma-test/scripts/launch.sh` (106 lines)
 
 **Status**: ✅ Production-ready
 
