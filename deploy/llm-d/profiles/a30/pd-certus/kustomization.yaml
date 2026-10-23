@@ -30,4 +30,4 @@ patches:
 images:
   - name: docker.io/vllm/vllm-openai
     newName: REGISTRY/REPO/llm-d-vllm-certus
-    newTag: vllm0.30.0-a8a6148c
+    newTag: vllm0.30.0-bbe4e3e1
