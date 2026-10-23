@@ -427,17 +427,18 @@ coming back through a ~30GB image build.
 
 Each deployment gets its own namespace, its own value of the node-selector
 label, and its own image — so two people can test their own certus builds side
-by side:
+by side. Claim and release nodes with `certus-nodes.sh` (4.1.4) rather than
+labelling them by hand:
 
 ```bash
 # the nodes you are testing on
-kubectl label node <your-node-a> <your-node-b> certus.ai/worker=foo --overwrite
+deploy/k8s/certus-nodes.sh claim foo <your-node-a> <your-node-b>
 CERTUS_NAMESPACE=certus-foo CERTUS_NODE_SELECTOR_VALUE=foo \
 CERTUS_RL_GROUP=foo CERTUS_IMAGE=certus CERTUS_TAG=$(git rev-parse --short HEAD) \
   deploy/k8s/build-image-and-push.sh
 
 # a colleague's nodes, their own build, their own group
-kubectl label node <their-node-a> <their-node-b> certus.ai/worker=bar --overwrite
+deploy/k8s/certus-nodes.sh claim bar <their-node-a> <their-node-b>
 CERTUS_NAMESPACE=certus-bar CERTUS_NODE_SELECTOR_VALUE=bar \
 CERTUS_RL_GROUP=bar CERTUS_IMAGE=certus CERTUS_TAG=their-sha \
   deploy/k8s/build-image-and-push.sh
@@ -453,6 +454,59 @@ consumed per instance, and the shm mailbox paths (`/dev/shm/certus-shmq-numa*`)
 and metrics ports (9400/9401) are fixed. Two deployments on one node would
 collide on all four. Partitioning by the label *value* keeps that explicit —
 a node carries exactly one deployment's value.
+
+### 4.1.4 Developer subsets: claiming nodes
+
+A deployment owns the nodes whose `certus.ai/worker` label carries its value.
+`deploy/k8s/certus-nodes.sh` changes that label safely:
+
+```bash
+deploy/k8s/certus-nodes.sh list                    # who owns which node
+deploy/k8s/certus-nodes.sh claim scott node5       # refuses a node someone else holds
+deploy/k8s/certus-nodes.sh claim scott node5 --steal   # ...unless you mean it
+deploy/k8s/certus-nodes.sh release scott node5     # back to no one
+deploy/k8s/certus-nodes.sh claim true node5        # back to the shared deployment
+```
+
+`claim` unlabels the node first and waits until the previous owner's certus pods
+have exited before applying the new label, so two instances never hold one
+node's drives, hugepages, mailboxes or ports at once. The owner, who claimed it
+and when are recorded in the `certus.ai/claimed-by` annotation. The shared
+deployment's value is `true` (namespace `certus`).
+
+A complete private stack on your claimed nodes:
+
+```bash
+deploy/k8s/certus-nodes.sh claim scott node5
+CERTUS_NAMESPACE=certus-scott CERTUS_NODE_SELECTOR_VALUE=scott \
+  deploy/k8s/build-image-and-push.sh --profile full-transfer
+kubectl create namespace certus-scott    # plus the pull secret, as in 4.3
+kubectl apply -f deploy/k8s/certus-server-numa.yaml
+
+# llm-d on the same nodes, in a namespace of your own
+WITH_CERTUS=1 NAMESPACE=llm-d-scott CERTUS_NODE_SELECTOR_VALUE=scott \
+  deploy/llm-d/install.sh
+```
+
+The llm-d overlay selects the same label value, so its pods land only on your
+nodes and offload only into your certus. Use a remote-lookup group
+(`CERTUS_RL_GROUP`) of your own too, or none.
+
+### 4.1.5 Choosing the build profile
+
+`build-image-and-push.sh --profile <name>` (or `CERTUS_PROFILE`) selects what the
+image runs. The default is unchanged.
+
+| profile | what it adds | features |
+| --- | --- | --- |
+| `full-remote` (default) | remote lookup over zyre + RDMA | `spdk,rdma,remote-lookup-rdma-initiator/rdma,remote-lookup-rdma-responder/rdma` |
+| `full-transfer` | the certus-to-certus transfer endpoint behind shm-queue `FETCH` | `spdk,rdma` |
+
+Any other `profiles/<name>.yaml` needs `CERTUS_FEATURES` set as well. A
+`full-transfer` instance listens on the node's RoCE address (`CERTUS_RDMA_BIND_IP`,
+unset: auto-detected) and `CERTUS_RDMA_PORT` — 7481 for the NUMA-0 instance,
+7482 for NUMA 1, set in `certus-server-numa.yaml.tpl` — and logs its name,
+`ip:port`, at start; that is what a peer's `certus_fetch_from` hint names.
 
 ### 4.2 Build the container image
 
