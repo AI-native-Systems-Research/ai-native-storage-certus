@@ -1291,6 +1291,7 @@ def test_no_hint_behaves_as_before(lr):
 
 def test_the_budget_ends_the_wait(lr, clock, monkeypatch):
     monkeypatch.setenv("CERTUS_FETCH_BUDGET_MS", "50")
+    monkeypatch.setenv("CERTUS_FETCH_BUDGET_US_PER_BLOCK", "0")
     ring = FetchRing()
     mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
     ctx = Ctx("r")
@@ -1299,6 +1300,46 @@ def test_the_budget_ends_the_wait(lr, clock, monkeypatch):
     clock.advance_us(51_000)
     # Still pending on the server, but the request waits no longer.
     assert scan(mgr, ctx, [1, 2], lr) == [lr.MISS]
+    assert mgr.fetch_stats()["budget_spent"] == 1
+
+
+def test_the_budget_grows_with_the_run(lr, clock, monkeypatch):
+    """A long run gets longer to land: fixed part plus a per-key part, counted
+    from the run actually sent. Measured on node5: 367 blocks fetched but none
+    served under a flat 200 ms, because the wait ended before they landed."""
+    monkeypatch.setenv("CERTUS_FETCH_BUDGET_MS", "50")
+    monkeypatch.setenv("CERTUS_FETCH_BUDGET_US_PER_BLOCK", "10000")
+    ring = FetchRing()
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    ctx = Ctx("r")
+    keys = [1, 2, 3, 4]
+    assert scan(mgr, ctx, keys, lr) == [lr.HIT_PENDING] * 4
+    mgr.on_schedule_end(None)
+    # 50 ms + 4 x 10 ms = 90 ms: past the fixed part, the wait goes on.
+    clock.advance_us(80_000)
+    assert scan(mgr, ctx, keys, lr) == [lr.HIT_PENDING] * 4
+    assert mgr.fetch_stats()["budget_spent"] == 0
+    clock.advance_us(11_000)
+    assert scan(mgr, ctx, keys, lr) == [lr.MISS]
+    assert mgr.fetch_stats()["budget_spent"] == 1
+
+
+def test_only_the_run_sent_extends_the_budget(lr, clock, monkeypatch):
+    """Keys the server would not start (already pending elsewhere) are not part
+    of the run, so they buy no wait."""
+    from certus_shmq_connector.ring import CHECK_PENDING
+
+    monkeypatch.setenv("CERTUS_FETCH_BUDGET_MS", "50")
+    monkeypatch.setenv("CERTUS_FETCH_BUDGET_US_PER_BLOCK", "10000")
+    ring = FetchRing()
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    ctx = Ctx("r")
+    assert scan(mgr, ctx, [1, 2, 3, 4], lr) == [lr.HIT_PENDING] * 4
+    ring.states[U(2)] = CHECK_PENDING  # someone else's store lands on key 2 first
+    mgr.on_schedule_end(None)
+    # Run is [1] only: 50 + 10 = 60 ms.
+    clock.advance_us(61_000)
+    scan(mgr, ctx, [1], lr)
     assert mgr.fetch_stats()["budget_spent"] == 1
 
 

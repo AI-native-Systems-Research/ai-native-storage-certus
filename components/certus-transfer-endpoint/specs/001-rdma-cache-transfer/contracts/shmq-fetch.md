@@ -164,10 +164,18 @@ time, and learns the run by answering:
 
 - **Counts** its side too: `HIT_PENDING` answers, budgets spent, blocks answered `HIT` after
   a fetch — tying vLLM's view (which only ever sees `HIT`) to Certus's counters.
-- **Time budget**: `CERTUS_FETCH_BUDGET_MS` (default 200; 0 disables fetching) per request,
-  from its first hinted lookup. Once spent, answer from the
-  current state — resident keys `HIT`, the rest `MISS` — so vLLM computes the remainder
-  rather than wait on a slow peer. The fetch continues and lands in the cache for later.
+- **Time budget**, per request, from its first hinted lookup:
+  `CERTUS_FETCH_BUDGET_MS` (default 500; 0 disables fetching) plus
+  `CERTUS_FETCH_BUDGET_US_PER_BLOCK` (default 2500) for each key of the run the FETCH
+  started. Both a fetch and the recompute it saves grow with the run, so a flat budget is
+  too short for a long prompt or needlessly long for a short one: on node5 a flat 200 ms
+  fetched all 367 blocks of a 5 872-token prompt and served none, because the wait ended
+  before they landed. The defaults cover a first contact with a peer (~0.5 s, the
+  connection set-up) and about twice the measured warm fetch of a 2.25 MiB block
+  (~1.2 ms), while staying under prefill's measured recompute of one (~3 ms, A30). Once
+  spent, answer from the current state -- resident keys `HIT`, the rest `MISS` -- so vLLM
+  computes the remainder rather than wait on a slow peer. The fetch continues and lands
+  in the cache for later; `fetched_unused` counts what it cost.
 - TP: a logical block is W per-rank keys (`ns_key`); FETCH carries all of them, to the one
   peer. A peer with another TP layout simply misses.
 
@@ -176,7 +184,8 @@ time, and learns the run by answering:
 | name | where | default |
 |---|---|---|
 | `certus_fetch_from` | request `kv_transfer_params` | none (no fetch) |
-| `CERTUS_FETCH_BUDGET_MS` | connector environment | 200 (0: never fetch) |
+| `CERTUS_FETCH_BUDGET_MS` | connector environment | 500 (0: never fetch) |
+| `CERTUS_FETCH_BUDGET_US_PER_BLOCK` | connector environment | 2500 per key of the run |
 | `CERTUS_FETCH_WINDOW_BYTES` | server | 128 MiB |
 | `CERTUS_FETCH_INFLIGHT_BYTES` | server | 1 GiB |
 | `CERTUS_FETCH_MAX_KEYS` | server | 65 536 (a sanity bound on one message) |

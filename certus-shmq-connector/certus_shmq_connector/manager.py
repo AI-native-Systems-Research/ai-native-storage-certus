@@ -59,10 +59,11 @@ def _lookup_cache_ttl_ns() -> int:
 
 
 def _fetch_budget_ns() -> int:
-    """Read ``CERTUS_FETCH_BUDGET_MS`` (default 200): how long a request may wait
-    on an explicit fetch before vLLM is told to compute the rest. 0 disables
-    fetching altogether."""
-    raw = os.environ.get("CERTUS_FETCH_BUDGET_MS", "200")
+    """Read ``CERTUS_FETCH_BUDGET_MS`` (default 500): the fixed part of how long a
+    request may wait on an explicit fetch before vLLM is told to compute the
+    rest -- enough for a first contact with a peer. 0 disables fetching
+    altogether."""
+    raw = os.environ.get("CERTUS_FETCH_BUDGET_MS", "500")
     try:
         ms = int(raw)
     except ValueError:
@@ -70,6 +71,26 @@ def _fetch_budget_ns() -> int:
             f"CERTUS_FETCH_BUDGET_MS must be an integer number of ms, got {raw!r}"
         ) from None
     return max(0, ms) * 1_000_000
+
+
+def _fetch_budget_per_key_ns() -> int:
+    """Read ``CERTUS_FETCH_BUDGET_US_PER_BLOCK`` (default 2500): the part of the
+    budget that grows with the run, per key of the run the request waits on
+    (a block of one rank: under TP=W a logical block is W keys, each 1/W the
+    size). Both a fetch and
+    the recompute it saves grow with the run, so a flat budget is too short for
+    a long prompt or too long for a short one. The default is about twice the
+    measured warm fetch of a 2.25 MiB block (~1.2 ms) and under the measured
+    prefill recompute of one (~3 ms on an A30)."""
+    raw = os.environ.get("CERTUS_FETCH_BUDGET_US_PER_BLOCK", "2500")
+    try:
+        us = int(raw)
+    except ValueError:
+        raise ValueError(
+            f"CERTUS_FETCH_BUDGET_US_PER_BLOCK must be an integer number of "
+            f"microseconds, got {raw!r}"
+        ) from None
+    return max(0, us) * 1000
 
 
 #: The kv_transfer_params key naming the peer to fetch from, "host:port".
@@ -94,11 +115,13 @@ class _Fetch:
     HIT_PENDING). ``done``: the budget ran out or the fetch could not start;
     answer as if there were no hint."""
 
-    __slots__ = ("peer", "started_ns", "run", "keys", "phase", "closed")
+    __slots__ = ("peer", "started_ns", "budget_ns", "run", "keys", "phase", "closed")
 
-    def __init__(self, peer: str, now_ns: int):
+    def __init__(self, peer: str, now_ns: int, budget_ns: int):
         self.peer = peer
         self.started_ns = now_ns
+        # The fixed part until the FETCH is sent; then it grows by the run.
+        self.budget_ns = budget_ns
         self.run: list[int] = []
         self.keys: set[int] = set()
         self.phase = "collecting"
@@ -246,6 +269,7 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         # the rest of the run in the same scan; on_schedule_end, called once per
         # scheduler step after scheduling, sends one FETCH for it.
         self._fetch_budget_ns = _fetch_budget_ns()
+        self._fetch_budget_per_key_ns = _fetch_budget_per_key_ns()
         self._fetches: dict[str, _Fetch] = {}
         # Counters (fetch_stats()): fetches sent, runs refused by the server,
         # HIT_PENDING answers, budgets spent, run keys answered HIT afterwards.
@@ -388,8 +412,8 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         now = _monotonic_ns()
         f = self._fetches.get(req_id)
         if f is None:
-            f = self._fetches[req_id] = _Fetch(peer, now)
-        if f.phase != "done" and now - f.started_ns > self._fetch_budget_ns:
+            f = self._fetches[req_id] = _Fetch(peer, now, self._fetch_budget_ns)
+        if f.phase != "done" and now - f.started_ns > f.budget_ns:
             # The wait is over: vLLM computes what has not landed. The fetch
             # itself carries on and lands in the cache for later requests.
             f.phase = "done"
@@ -453,6 +477,7 @@ class ShmqCertusOffloadingManager(OffloadingManager):
                 run.append(k)
             f.run = run
             f.keys = set(run)
+            f.budget_ns += self._fetch_budget_per_key_ns * len(run) * w
             f.phase = "sent"
             self.fetch_counts["sent"] += 1
 
