@@ -26,6 +26,7 @@ logger.workspace = true
 remote-lookup.workspace = true
 remote-lookup-rdma-initiator = { workspace = true, optional = true }
 remote-lookup-rdma-responder = { workspace = true, optional = true }
+certus-transfer-endpoint = { workspace = true, optional = true }
 zyre = { workspace = true, optional = true }
 shm-queue.workspace = true
 shmq-dispatcher.workspace = true
@@ -47,10 +48,19 @@ spdk-mem = ["dep:spdk-env"]
 filesys = ["dep:block-device-filesys", "spdk-mem"]
 kernel = ["dep:block-device-kernel", "spdk-mem"]
 p2p-native = ["dep:dispatcher-p2p", "spdk", "gpu-services/p2p", "dispatcher-p2p/spdk-backend"]
-# Enables the remote-lookup transport stack (full-remote profile). The
-# initiator/responder crates build in stub mode here; add their own `rdma`
-# features for real hardware RDMA. zyre pulls the native zyre libraries.
-rdma = ["dep:remote-lookup-rdma-initiator", "dep:remote-lookup-rdma-responder", "dep:zyre"]
+# Enables the RDMA transports: the remote-lookup stack (full-remote profile) and
+# the transfer endpoint (full-transfer profile). The initiator/responder crates
+# build in stub mode here; add their own `rdma` features for real hardware
+# RDMA. The transfer endpoint is always built over verbs here: its mock must
+# never serve a real node. zyre pulls the native zyre libraries.
+rdma = [
+    "dep:remote-lookup-rdma-initiator",
+    "dep:remote-lookup-rdma-responder",
+    "dep:zyre",
+    "dep:certus-transfer-endpoint",
+    "certus-transfer-endpoint/rdma",
+    "certus-transfer-endpoint/spdk",
+]
 otel = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp"]
 rw-telemetry = ["dispatcher/rw-telemetry"]
 

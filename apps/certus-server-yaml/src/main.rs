@@ -30,6 +30,31 @@ use shmq_dispatcher::{log_cpu_bindings, serve, ServeConfig, Translator};
 use config::StackConfig;
 use metrics::{CountersObserver, ServiceCounters};
 
+/// Fetch pacing from the environment (shm-queue FETCH): `CERTUS_FETCH_WINDOW_BYTES`,
+/// `CERTUS_FETCH_INFLIGHT_BYTES`, `CERTUS_FETCH_MAX_KEYS`, `CERTUS_FETCH_MARK_TTL_MS`;
+/// unset or unparseable keeps the default.
+fn fetch_limits() -> shmq_dispatcher::FetchLimits {
+    let env = |k: &str| {
+        std::env::var(k)
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+    };
+    let mut l = shmq_dispatcher::FetchLimits::default();
+    if let Some(v) = env("CERTUS_FETCH_WINDOW_BYTES") {
+        l.window_bytes = v;
+    }
+    if let Some(v) = env("CERTUS_FETCH_INFLIGHT_BYTES") {
+        l.inflight_bytes = v;
+    }
+    if let Some(v) = env("CERTUS_FETCH_MAX_KEYS") {
+        l.max_keys = usize::try_from(v).unwrap_or(usize::MAX);
+    }
+    if let Some(v) = env("CERTUS_FETCH_MARK_TTL_MS") {
+        l.mark_ttl = Duration::from_millis(v);
+    }
+    l
+}
+
 /// Set once by the SIGINT/SIGTERM handler; polled by the shmq poller and reaper.
 static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 
@@ -389,6 +414,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::time::Duration::from_millis(cli.store_backpressure_ms),
     )
     .with_observer(Arc::new(CountersObserver::new(counters)));
+    // FETCH: only a profile with a transfer endpoint fetches; elsewhere it is
+    // answered "no endpoint".
+    let translator = match stack.transfer_endpoint() {
+        Some(ep) => translator.with_fetcher(shmq_dispatcher::Fetcher::new(
+            Arc::clone(&stack.dispatcher),
+            ep,
+            fetch_limits(),
+        )),
+        None => translator,
+    };
+    let fetch_stats = translator.clone();
 
     // Create the shared-memory mailbox.
     let server = Arc::new(shm_queue::Server::create(
@@ -483,6 +519,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             &stack.remote_lookup.serve_stats(),
         )
     ));
+
+    if let Some(f) = fetch_stats.fetch_stats() {
+        logger.info(&format!("certus-server-yaml: FINAL fetch {f:?}"));
+    }
+    if let Some(ep) = stack.transfer_endpoint() {
+        logger.info(&format!(
+            "certus-server-yaml: FINAL transfer {:?}",
+            ep.stats()
+        ));
+    }
 
     let _ = stack.dispatcher.shutdown();
     stack.spdk_env.fini();

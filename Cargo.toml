@@ -159,6 +159,7 @@ eviction-policy-optimized = { path = "components/eviction-policy-optimized" }
 remote-lookup = { path = "components/remote-lookup" }
 remote-lookup-rdma-initiator = { path = "components/remote-lookup-rdma-initiator" }
 remote-lookup-rdma-responder = { path = "components/remote-lookup-rdma-responder" }
+certus-transfer-endpoint = { path = "components/certus-transfer-endpoint" }
 zyre = { path = "components/zyre" }
 shm-queue = { path = "lib/shm-queue" }
 shmq-dispatcher = { path = "lib/shmq-dispatcher" }

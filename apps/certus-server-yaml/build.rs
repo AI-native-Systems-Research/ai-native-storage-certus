@@ -491,6 +491,36 @@ fn generate_composition(manifest: &ProfileManifest) -> String {
     writeln!(code, "        eviction_dropped,").unwrap();
     writeln!(code, "    }})").unwrap();
     writeln!(code, "}}").unwrap();
+    writeln!(code).unwrap();
+
+    // The transfer endpoint, if the profile exports one: the shm-queue FETCH op
+    // needs it, and every other profile answers FETCH "no endpoint".
+    let transfer = manifest
+        .exports
+        .iter()
+        .find(|e| e.interface == "ITransferEndpoint");
+    writeln!(code, "impl ComponentStack {{").unwrap();
+    writeln!(
+        code,
+        "    /// This profile's transfer endpoint, if it has one (shm-queue FETCH)."
+    )
+    .unwrap();
+    writeln!(
+        code,
+        "    pub fn transfer_endpoint(&self) -> Option<std::sync::Arc<dyn interfaces::ITransferEndpoint + Send + Sync>> {{"
+    )
+    .unwrap();
+    match transfer {
+        Some(e) => writeln!(
+            code,
+            "        Some(std::sync::Arc::clone(&self.{}))",
+            e.component
+        )
+        .unwrap(),
+        None => writeln!(code, "        None").unwrap(),
+    }
+    writeln!(code, "    }}").unwrap();
+    writeln!(code, "}}").unwrap();
 
     code
 }
@@ -529,6 +559,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                      but the 'spdk' feature is not enabled.\n\
                      Build with: CERTUS_PROFILE={profile} cargo build -p certus-server-yaml \
                      --features spdk"
+                );
+            }
+            // Without `rdma` the endpoint is its in-process mock: it would serve
+            // fetches from no fabric and report plausible numbers (Principle XI).
+            "certus-transfer-endpoint" if env::var("CARGO_FEATURE_RDMA").is_err() => {
+                panic!(
+                    "profile '{profile}' uses certus-transfer-endpoint (component '{name}') \
+                     but the 'rdma' feature is not enabled; without it the endpoint is \
+                     an in-process mock and must not serve a real node.\n\
+                     Build with: CERTUS_PROFILE={profile} cargo build -p certus-server-yaml \
+                     --features spdk,rdma"
                 );
             }
             "block-device-kernel" if env::var("CARGO_FEATURE_KERNEL").is_err() => {
