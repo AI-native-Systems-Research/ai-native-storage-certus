@@ -27,6 +27,7 @@
 #   deploy/llm-d/install.sh                 # aggregated serving
 #   WITH_CERTUS=1 deploy/llm-d/install.sh   # + certus KV-cache offload
 #   PD=1 deploy/llm-d/install.sh            # prefill/decode disaggregation
+#   DRY_RUN=1 PD=1 deploy/llm-d/install.sh  # check settings; change nothing
 #
 # Env:
 #   SITE_ENV     private site file (default:
@@ -34,6 +35,9 @@
 #   PROFILE      profile under profiles/ (default: a30)
 #   LLMD_DIR     llm-d checkout to reuse. Default: a fresh clone in a temporary
 #                directory under /tmp, deleted on exit.
+#   DRY_RUN      1 to stop before the first cluster write: render the
+#                manifests, check the named nodes and their GPUs (read-only,
+#                if a cluster is reachable), and print the plan (default: 0)
 #   KEEP_LLMD    1 to keep the temporary checkout and print its path, e.g. to
 #                inspect what was applied (default: 0)
 #   LLMD_REF     override the pin in llm-d.ref
@@ -84,6 +88,7 @@ PROFILE_DIR="${SCRIPT_DIR}/profiles/${PROFILE}"
 NAMESPACE="${NAMESPACE:-llm-d-quickstart}"
 WITH_CERTUS="${WITH_CERTUS:-0}"
 PD="${PD:-0}"
+DRY_RUN="${DRY_RUN:-0}"
 KEEP_LLMD="${KEEP_LLMD:-0}"
 GUIDE_NAME="${GUIDE_NAME:-quickstart}"
 
@@ -175,43 +180,81 @@ else
     OTHER_DEPLOYS=("${PD_DEPLOYS[@]}")
 fi
 
-# --- P/D placement. The overlay selects on node labels, not node names, so it
-# stays site-neutral; the site's choice of nodes is made here. Check before
-# touching the cluster: with no labelled node the pods would sit Pending. ---
-if [ "${PD}" != "0" ]; then
-    label_role() {            # label_role <role> <nodes...>
-        local role="$1"; shift
-        local n
-        for n in "$@"; do
-            kubectl label node "${n}" "llm-d.ai/pd-${role}=true" --overwrite
-        done
-        if [ -z "$(kubectl get nodes -l "llm-d.ai/pd-${role}=true" -o name)" ]; then
-            echo "ERROR: no node labelled llm-d.ai/pd-${role}=true." >&2
-            echo "       Set PD_$(echo "${role}" | tr a-z A-Z)_NODES (in ${SITE_ENV}) to the" >&2
-            echo "       nodes that should run ${role}." >&2
+# --- Capacity check (read-only). Catches a typo'd node name or a replica count
+# larger than the GPUs available, which would otherwise surface only as pods
+# stuck Pending. Skipped when no cluster is reachable, which is fine for a
+# DRY_RUN on a laptop. ---
+CLUSTER_OK=0
+if kubectl get nodes -o name >/dev/null 2>&1; then CLUSTER_OK=1; fi
+
+gpus_on() {                   # gpus_on <node>: allocatable nvidia.com/gpu, or "missing"
+    kubectl get node "$1" -o jsonpath='{.status.allocatable.nvidia\.com/gpu}' 2>/dev/null \
+        || echo "missing"
+}
+check_gpus() {                # check_gpus <role> <replicas> <nodes...>
+    local role="$1" want="$2"; shift 2
+    local n g have=0
+    # No list: the nodes already labelled from an earlier run are the ones used.
+    # shellcheck disable=SC2046
+    [ $# -gt 0 ] || set -- $(kubectl get nodes -l "llm-d.ai/pd-${role}=true" -o name | sed 's|node/||')
+    for n in "$@"; do
+        g="$(gpus_on "${n}")"
+        if [ "${g}" = "missing" ]; then
+            echo "ERROR: ${role} node '${n}' does not exist in this cluster." >&2
+            echo "       Node names: $(kubectl get nodes -o name | sed 's|node/||' | tr '\n' ' ')" >&2
             exit 1
         fi
-    }
-    # shellcheck disable=SC2086  # word-splitting the node lists is intended
-    label_role prefill ${PD_PREFILL_NODES:-}
+        echo "[install]   ${role}: ${n} has ${g:-0} allocatable GPU(s)"
+        have=$((have + ${g:-0}))
+    done
+    # Allocatable, not free: GPUs held by the layout this run replaces are
+    # counted, since that layout is deleted first.
+    if [ $# -gt 0 ] && [ "${have}" -lt "${want}" ]; then
+        echo "WARNING: ${want} ${role} replica(s) but only ${have} GPU(s) on $*;" >&2
+        echo "         $((want - have)) pod(s) will stay Pending." >&2
+    fi
+}
+# P/D needs somewhere to put each role: the site's node list, or nodes that
+# already carry the label from an earlier run.
+need_nodes() {                # need_nodes <role> <nodes...>
+    local role="$1"; shift
+    [ $# -gt 0 ] && return
+    if [ "${CLUSTER_OK}" = 1 ] \
+        && [ -n "$(kubectl get nodes -l "llm-d.ai/pd-${role}=true" -o name)" ]; then
+        return
+    fi
+    echo "ERROR: no node to run ${role} on. Set PD_$(echo "${role}" | tr a-z A-Z)_NODES" >&2
+    echo "       in ${SITE_ENV} (see site.env.example)." >&2
+    exit 1
+}
+if [ "${PD}" != "0" ]; then
     # shellcheck disable=SC2086
-    label_role decode ${PD_DECODE_NODES:-}
+    need_nodes prefill ${PD_PREFILL_NODES:-}
+    # shellcheck disable=SC2086
+    need_nodes decode ${PD_DECODE_NODES:-}
 fi
 
-# --- Gateway API Inference Extension CRDs ---
-kubectl apply -f \
-  "https://github.com/kubernetes-sigs/gateway-api-inference-extension/${GAIE_URL}/v1-manifests.yaml"
-
-kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
-
-# --- Router / EPP. `upgrade --install` so a re-run updates in place instead of
-# failing with "cannot re-use a name that is still in use". ---
-helm upgrade --install "${GUIDE_NAME}" \
-  "${ROUTER_STANDALONE_CHART}" \
-  -f "${REPO_ROOT}/guides/recipes/router/base.values.yaml" \
-  -f "${GUIDE_VALUES}" \
-  -n "${NAMESPACE}" \
-  --version "${ROUTER_CHART_VERSION}"
+if [ "${CLUSTER_OK}" = 1 ]; then
+    if [ "${PD}" != "0" ]; then
+        # shellcheck disable=SC2086
+        check_gpus prefill "${PD_PREFILL_REPLICAS}" ${PD_PREFILL_NODES:-}
+        # shellcheck disable=SC2086
+        check_gpus decode "${PD_DECODE_REPLICAS}" ${PD_DECODE_NODES:-}
+    else
+        total="$(kubectl get nodes -o jsonpath='{range .items[*]}{.status.allocatable.nvidia\.com/gpu}{"\n"}{end}' \
+                 | awk '{s += $1} END {print s + 0}')"
+        echo "[install]   cluster has ${total} allocatable GPU(s) for ${AGG_REPLICAS} replica(s)"
+        if [ "${total}" -lt "${AGG_REPLICAS}" ]; then
+            echo "WARNING: AGG_REPLICAS=${AGG_REPLICAS} exceeds the cluster's ${total} GPU(s);" >&2
+            echo "         $((AGG_REPLICAS - total)) pod(s) will stay Pending." >&2
+        fi
+    fi
+elif [ "${DRY_RUN}" != "0" ]; then
+    echo "[dry-run] no cluster reachable; skipping node and GPU checks"
+else
+    echo "ERROR: kubectl cannot reach a cluster." >&2
+    exit 1
+fi
 
 # --- Materialize the profile's overlays into the pinned checkout. ---
 # Each lands beside the llm-d base it consumes, under the same name it has in
@@ -282,7 +325,64 @@ fi
 
 # Fail here rather than letting a malformed overlay reach the cluster. This is
 # also where an upstream base restructuring shows up after a llm-d.ref bump.
-kubectl kustomize "${OVERLAY}" >/dev/null
+RENDERED="${LLMD_DIR}/rendered.yaml"
+kubectl kustomize "${OVERLAY}" > "${RENDERED}"
+
+if [ "${DRY_RUN}" != "0" ]; then
+    echo "[dry-run] plan:"
+    echo "[dry-run]   profile      ${PROFILE} (${PROFILE_DIR})"
+    echo "[dry-run]   site file    $([ -f "${SITE_ENV}" ] && echo "${SITE_ENV}" || echo "none (${SITE_ENV} absent)")"
+    echo "[dry-run]   namespace    ${NAMESPACE}"
+    echo "[dry-run]   router       $(basename "${GUIDE_VALUES}")"
+    echo "[dry-run]   images       $(grep -E '^ +image:' "${RENDERED}" | awk '{print $2}' | sort -u | tr '\n' ' ')"
+    for d in "${OTHER_DEPLOYS[@]}"; do
+        if [ "${CLUSTER_OK}" = 1 ] && kubectl get "${d}" -n "${NAMESPACE}" >/dev/null 2>&1; then
+            echo "[dry-run]   would DELETE ${d} (outage)"
+        fi
+    done
+    if [ "${PD}" != "0" ]; then
+        echo "[dry-run]   would label  llm-d.ai/pd-prefill=true on: ${PD_PREFILL_NODES:-(none; existing labels)}"
+        echo "[dry-run]   would label  llm-d.ai/pd-decode=true on: ${PD_DECODE_NODES:-(none; existing labels)}"
+    fi
+    echo "[dry-run]   would apply  ${DEPLOYS[*]}"
+    DRY_RUN_OUT="${DRY_RUN_OUT:-$(mktemp --suffix=.yaml /tmp/llm-d-dry-run.XXXXXX)}"
+    cp "${RENDERED}" "${DRY_RUN_OUT}"
+    echo "[dry-run] rendered manifests: ${DRY_RUN_OUT}"
+    echo "[dry-run] nothing was changed."
+    exit 0
+fi
+
+# --- P/D placement. The overlay selects on node labels, not node names, so it
+# stays site-neutral; the site's choice of nodes is made here. Done after the
+# DRY_RUN exit because it writes to the cluster. ---
+if [ "${PD}" != "0" ]; then
+    label_role() {            # label_role <role> <nodes...>
+        local role="$1"; shift
+        local n
+        for n in "$@"; do
+            kubectl label node "${n}" "llm-d.ai/pd-${role}=true" --overwrite
+        done
+    }
+    # shellcheck disable=SC2086  # word-splitting the node lists is intended
+    label_role prefill ${PD_PREFILL_NODES:-}
+    # shellcheck disable=SC2086
+    label_role decode ${PD_DECODE_NODES:-}
+fi
+
+# --- Gateway API Inference Extension CRDs ---
+kubectl apply -f \
+  "https://github.com/kubernetes-sigs/gateway-api-inference-extension/${GAIE_URL}/v1-manifests.yaml"
+
+kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+
+# --- Router / EPP. `upgrade --install` so a re-run updates in place instead of
+# failing with "cannot re-use a name that is still in use". ---
+helm upgrade --install "${GUIDE_NAME}" \
+  "${ROUTER_STANDALONE_CHART}" \
+  -f "${REPO_ROOT}/guides/recipes/router/base.values.yaml" \
+  -f "${GUIDE_VALUES}" \
+  -n "${NAMESPACE}" \
+  --version "${ROUTER_CHART_VERSION}"
 
 # The aggregated and P/D layouts each size themselves to every GPU, so whichever
 # is not being deployed has to give its GPUs back first or the new pods sit

@@ -75,7 +75,7 @@ the overlay stayed byte-identical to base, with nothing to notice. That happened
 once already. Now upstream changes flow through, and structural breakage surfaces
 at the `kubectl kustomize` step.
 
-Two kustomize details worth knowing if you edit a site's `patch.yaml`:
+Two kustomize details worth knowing if you edit a profile's `patch.yaml`:
 
 - `env` merges by name, so dropping base's `HF_TOKEN` entry needs an explicit
   `$patch: delete` — omitting it is not enough.
@@ -84,6 +84,125 @@ Two kustomize details worth knowing if you edit a site's `patch.yaml`:
   no error. Hence base's `torch-compile-cache` is deleted and a
   differently-named `model-cache` added, with the `/.cache` mount repointed by
   its `mountPath` merge key.
+
+## Setting up a new cluster
+
+### Prerequisites
+
+- `kubectl` with cluster-admin on the target cluster, plus `helm` (v3.8+, for
+  OCI charts) and `git` on the machine you run `install.sh` from. Outbound
+  HTTPS to GitHub, ghcr.io and Hugging Face.
+- NVIDIA GPU operator (or device plugin) installed, so nodes advertise
+  `nvidia.com/gpu`.
+- A profile under `profiles/` for your GPU type. If there isn't one, see
+  [Adding a GPU profile](#adding-a-gpu-profile).
+- For `WITH_CERTUS=1` only: see [certus offload prerequisites](#certus-offload-prerequisites).
+
+### 1. Collect the values
+
+```bash
+kubectl get nodes -o custom-columns='NAME:.metadata.name,GPUS:.status.allocatable.nvidia\.com/gpu'
+ls deploy/llm-d/profiles
+```
+
+The `GPUS` total is your replica budget: every engine in a profile takes one GPU.
+Nodes showing `<none>` have no GPUs and are ignored.
+
+### 2. Write the site file
+
+```bash
+mkdir -p ~/.config/certus
+cp deploy/llm-d/site.env.example ~/.config/certus/llm-d-site.env
+chmod 600 ~/.config/certus/llm-d-site.env
+$EDITOR ~/.config/certus/llm-d-site.env
+```
+
+The required values ship empty, and `install.sh` refuses to run until they are
+filled in:
+
+| Variable | Needed for | Value |
+|---|---|---|
+| `PROFILE` | always | directory under `profiles/` for your GPU type |
+| `AGG_REPLICAS` | default, `WITH_CERTUS=1` | total GPUs |
+| `PD_PREFILL_REPLICAS`, `PD_DECODE_REPLICAS` | `PD=1` | split of the total GPUs |
+| `PD_PREFILL_NODES`, `PD_DECODE_NODES` | `PD=1` | space-separated node names whose GPUs cover each role |
+| `CERTUS_REGISTRY`, `CERTUS_REPO` | `WITH_CERTUS=1` | where `publish-image.sh` pushed the image |
+| `NAMESPACE` | optional | default `llm-d-quickstart` |
+
+The rules that tie them together:
+
+- Prefill + decode replicas should equal the GPU total. Fewer leaves GPUs idle;
+  more leaves pods `Pending`.
+- Each role's nodes need at least as many GPUs as that role's replicas.
+  Placement is per role, not per pod: decode pods go to any `pd-decode` node with
+  a free GPU.
+- A node may appear in both lists. Its GPUs are then shared first come, first
+  served, so prefer disjoint lists when the GPU counts allow it.
+
+Worked examples, with made-up node names:
+
+<details>
+<summary>One node, 4 GPUs</summary>
+
+```bash
+: "${PROFILE:=a30}"
+: "${AGG_REPLICAS:=4}"
+# PD: 1 prefill + 3 decode on the same node.
+: "${PD_PREFILL_REPLICAS:=1}"
+: "${PD_DECODE_REPLICAS:=3}"
+: "${PD_PREFILL_NODES:=gpu-0}"
+: "${PD_DECODE_NODES:=gpu-0}"
+```
+
+</details>
+
+<details>
+<summary>Two nodes, 2 GPUs each, prefill on one node and decode on the other</summary>
+
+```bash
+: "${PROFILE:=a30}"
+: "${AGG_REPLICAS:=4}"
+: "${PD_PREFILL_REPLICAS:=2}"
+: "${PD_DECODE_REPLICAS:=2}"
+: "${PD_PREFILL_NODES:=gpu-a}"
+: "${PD_DECODE_NODES:=gpu-b}"
+```
+
+</details>
+
+<details>
+<summary>Three nodes, 1 + 2 + 2 GPUs, decode-heavy for long chats, with certus</summary>
+
+```bash
+: "${PROFILE:=a30}"
+: "${AGG_REPLICAS:=5}"
+: "${PD_PREFILL_REPLICAS:=1}"
+: "${PD_DECODE_REPLICAS:=4}"
+: "${PD_PREFILL_NODES:=gpu-small}"
+: "${PD_DECODE_NODES:=gpu-big-1 gpu-big-2}"
+: "${CERTUS_REGISTRY:=registry.example.com}"
+: "${CERTUS_REPO:=my-team-docker-local}"
+```
+
+</details>
+
+### 3. Check it, then deploy
+
+```bash
+DRY_RUN=1 PD=1 deploy/llm-d/install.sh   # or without PD=1 for aggregated
+```
+
+A dry run makes no changes to the cluster. It loads the site file, renders the
+manifests against the pinned llm-d, and, if a cluster is reachable, checks
+read-only that every named node exists and has the GPUs for its replicas. Then it
+prints the plan: profile, images, node labels it would apply, any Deployments it
+would delete, and the path of the rendered YAML. A typo'd node name is an error;
+too few GPUs is a warning, since those pods would only sit `Pending`. With no
+cluster reachable, the node and GPU checks are skipped, so you can still check a
+site file on a laptop.
+
+When the plan looks right, run the same command without `DRY_RUN=1`. The first
+start downloads the model weights, so allow several minutes per node.
 
 ## Upstream pinning
 
@@ -99,7 +218,12 @@ silently on the next deploy. After a bump, re-run `install.sh` — the
 deploy/llm-d/install.sh                 # aggregated serving
 WITH_CERTUS=1 deploy/llm-d/install.sh   # + certus KV-cache offload
 PD=1 deploy/llm-d/install.sh            # prefill/decode disaggregation
+DRY_RUN=1 PD=1 deploy/llm-d/install.sh  # show the plan; change nothing
 ```
+
+Other knobs (see the header of `install.sh`): `SITE_ENV` for a site file
+elsewhere, `KEEP_LLMD=1` to keep the scratch llm-d checkout, `LLMD_DIR` to reuse
+one, and `LLMD_REF` to try another llm-d revision.
 
 Switching between the aggregated and P/D layouts deletes the other layout's
 Deployments first, because each is sized to every GPU. That is an outage for the
@@ -175,6 +299,43 @@ it for one A30 per replica: model `Qwen3-8B`, `--tensor-parallel-size=1`,
 The HF token secret is deliberately **not** created: Qwen3-8B is ungated and the
 HF_TOKEN env block is commented out. The "unauthenticated requests to the HF Hub"
 warning only costs download rate limit.
+
+## Adding a GPU profile
+
+A profile is safe to publish: it describes a GPU type, not a cluster. Start from
+the closest existing one:
+
+```bash
+cp -r deploy/llm-d/profiles/a30 deploy/llm-d/profiles/<gpu>
+```
+
+Then edit `agg/patch.yaml` and `pd/patch.yaml`. Keep the two in step: P/D
+hands KV from one engine to another, so both sides must run the same model and
+context length.
+
+- **Model and context length.** The rule is the one in
+  [What the A30 tuning does](#what-the-a30-tuning-does): weights plus activations
+  and CUDA graphs must leave enough GPU memory for one full `--max-model-len`
+  sequence of KV, or vLLM refuses to start. Its startup log prints the KV
+  capacity (`GPU KV cache size: N tokens`) and `Maximum concurrency`. Pick a
+  length below N, and leave headroom if you want more than one request at a time.
+- **One GPU per engine.** The replica arithmetic in the site file assumes every
+  engine takes one GPU (`--tensor-parallel-size=1`, `nvidia.com/gpu: 1`). A
+  model too big for one GPU needs TP>1 and a matching GPU request. Then each
+  replica takes TP GPUs, so document that in the profile's comments for whoever
+  writes the site file. For P/D, decode TP must be >= prefill TP.
+- **cpu/memory requests**, sized to the host RAM a node can spare per GPU.
+- **Gated models** need the `llm-d-hf-token` secret. Drop the
+  `HF_TOKEN` `$patch: delete` entries and create the secret in the namespace.
+- **`certus/`** depends on the certus connector, not on the GPU, so it usually
+  carries over unchanged. Keep `TENSOR_PARALLEL_SIZE` in its patch equal to the
+  TP in `agg`. Delete any role directory the profile does not support;
+  `install.sh` reports a missing role clearly.
+
+Check with `DRY_RUN=1 PROFILE=<gpu> deploy/llm-d/install.sh`, with and
+without `PD=1`. The rendered YAML it prints is exactly what would be applied.
+Only real infrastructure goes in the site file; keep node names, GPU counts and
+registries out of the profile.
 
 ## certus offload prerequisites
 
