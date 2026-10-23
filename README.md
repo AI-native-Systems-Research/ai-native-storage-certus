@@ -134,11 +134,15 @@ instead. For multi-node cooperation, also run `deps/build_zyre.sh`.
 ### Build and run the server
 
 ```bash
-scripts/build-certus-spdk.sh        # = CERTUS_PROFILE=full cargo build -p certus-server-yaml --release
+scripts/build-certus-spdk.sh        # = CERTUS_PROFILE=full-transfer cargo build -p certus-server-yaml --release --features spdk,rdma
 sudo ./target/release/certus-server-yaml --drive-count 4 --format --memory-tier-size 32G
 ```
 
-`--format` erases existing on-disk data. Other profiles have their own build
+The default profile, `full-transfer`, includes the certus-to-certus transfer
+endpoint and needs rdma-core to build and a RoCE NIC to run; it listens on
+`CERTUS_RDMA_BIND_IP` (unset: the first active RoCE port) and `CERTUS_RDMA_PORT`
+(default 7481). `CERTUS_PROFILE=full scripts/build-certus-spdk.sh` builds without
+it. `--format` erases existing on-disk data. Other profiles have their own build
 scripts (`scripts/build-certus-*.sh`). [scripts/run-certus-shmq-server.sh](scripts/run-certus-shmq-server.sh)
 starts the server with NUMA pinning, using the configuration from the benchmark
 runs.
