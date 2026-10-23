@@ -461,7 +461,6 @@ fn create_dispatcher(pci_addrs: &[String]) -> (Arc<DispatcherComponent>, Arc<HwD
 
     let d: Arc<dyn IDispatcher + Send + Sync> = query_interface!(dispatcher, IDispatcher).unwrap();
     let config = DispatcherConfig {
-        metadata_pci_addr: pci_addrs[0].clone(),
         data_pci_addrs: pci_addrs.to_vec(),
         ..Default::default()
     };
@@ -973,7 +972,6 @@ fn hw_data_integrity() {
 
         // Re-initialize for lookup (skip format to preserve on-disk data)
         d.initialize(DispatcherConfig {
-            metadata_pci_addr: pci_addrs[0].clone(),
             data_pci_addrs: pci_addrs[..1].to_vec(),
             format_on_init: false,
             ..Default::default()
@@ -1075,7 +1073,6 @@ fn hw_ssd_readback_integrity() {
     // =======================================================================
     eprintln!("=== Re-initializing for SSD read-back ===");
     d.initialize(DispatcherConfig {
-        metadata_pci_addr: pci_addrs[0].clone(),
         data_pci_addrs: pci_addrs[..1].to_vec(),
         format_on_init: false,
         ..Default::default()

@@ -1,11 +1,13 @@
 ---
 spec_sync_component: block-device-spdk-nvme
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-23T18:00:34Z
-spec_sync_git_commit: d7a24d58
-spec_sync_inputs_sha256: 24b14a0bb1d901ed274e71a8dc0bdab98b21450e84794425f346e59ecb74c28f
+spec_sync_synced_at: 2026-10-23T18:33:22Z
+spec_sync_git_commit: a70da5cc
+spec_sync_inputs_sha256: af9d2d0ba3e8f5126b98d0be002467e03a6dfcb85b29a5cfda52cc79eabd77d6
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-23 (test-compile fixes, on top of `a70da5cc`).** Test-only fix: the `#[cfg(feature = "telemetry")]` unit tests in `src/telemetry.rs` (`stats_record_single_op`, `stats_record_multiple_ops`) still called `TelemetryStats::record` with two arguments after the per-direction counters added `is_read`. They now pass `true` (read). Production code and every FR are unchanged; `cargo test -p block-device-spdk-nvme --features telemetry` passes. The cited `telemetry.rs:150` (`read_write_stats`) is unchanged. Status stays `clean`.
+
 > **Re-stamp 2026-10-23 (branch `unstable`, commit `d7a24d58` "Fix workspace build warnings" plus the spec-sync follow-up).** That commit only fixed warnings under the workspace lint posture: it added `Debug` impls, narrowed unreachable `pub` items to `pub(crate)`, wrapped `unsafe fn` bodies in explicit `unsafe {}` blocks, and the follow-up ran `rustfmt`. It also touched `components/interfaces` (a `Debug` impl for `Command`), which changes every component's digest. This component's own `src/` was in that commit. Every changed item was checked: none is part of a provided interface, none is named as public by the spec, and no behaviour changed. `unsafe fn` bodies are now wrapped in explicit `unsafe {}` blocks (`unsafe_op_in_unsafe_fn`); `NvmeController::attach` and the `tsc` helpers became `pub(crate)` (no caller outside the crate). Spec citations updated: `controller.rs:156-161`→`:157-162`, `:169-177`→`:170-178`, `iblock_device.rs:589`→`:597`, `namespace.rs:20-47`→`:20-49`, and two that were already stale: `lib.rs:525`→`:535` (`read_write_stats` impl) and `lib.rs:333-334`→`:342-343` (NUMA default 0). All citations were re-verified by diff-mapping each base line to its new position. Status stays `clean`.
 
 > **Re-stamp 2026-10-21 (transitive, `components/interfaces` changed on branch `fix/dispatcher-remove-clear-mt`).** Only `components/interfaces` changed for this component: `IDispatcher` doc comments (`flush_to_ssd` errors, `clear_memory_tier`, `batch_lookup`) and the interfaces spec (FR-008, FR-009, FR-017, FR-018, FR-018a, FR-021, FR-023, Overview, NFR-002, Implementation Notes; text only, no type or signature changed). This component uses some of the named items (8 files), but no type, signature or behaviour of them changed. This component's last full sync below stands; no re-analysis was needed.

@@ -1,11 +1,13 @@
 ---
 spec_sync_component: dispatcher-p2p
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-23T18:04:08Z
-spec_sync_git_commit: 772885d9
-spec_sync_inputs_sha256: 476f6fc8b527bef6c91d72b098f21a38527d6f4bec5af7b6c75de6a3e7c045cf
+spec_sync_synced_at: 2026-10-23T18:33:22Z
+spec_sync_git_commit: a70da5cc
+spec_sync_inputs_sha256: 9298a3009257cd6a8cc936180caf2eba4b4b22e145855131b34199ea3bbde482
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-23 (test-compile fixes, on top of `a70da5cc`).** Test-only fix: the test `MockDispatchMap` in `src/lib.rs` did not implement `IDispatchMap::set_checksum`/`get_checksum`, so the crate's tests did not compile whenever `interfaces/integrity-check` was enabled (for example in a `--all-features` workspace build). Added `#[cfg(feature = "integrity-check")]` no-op stubs, and an `integrity-check` feature in `Cargo.toml` that forwards `interfaces/integrity-check`, the same pattern as `components/remote-lookup`. The component itself does not compute or verify checksums, so no FR changes. Lib tests pass 77/77 with and without the feature. No spec citation into `src/lib.rs` is past the inserted lines. Status stays `clean`.
+
 > **Merge 2026-10-23: PR #568 (`copilot/fix-eviction-events-connector`) merged into `unstable` on top of `772885d9`.** The PR makes the background SSD evictor take the shared `Arc<Mutex<Option<Sender>>>` and read the sender when it publishes, so a `create_eviction_channel` call made after `initialize` now receives `Removed` events. Before, the evictor kept a copy of the sender taken at start-up. Changed lines: `src/background.rs:360,376,402,452` and `src/lib.rs:1541`; FR-017 and data-model §Channel ("a later call replaces the previous sender") already describe this, so the old snapshot taken in `initialize` was code drift, now fixed. The one line removed from `src/lib.rs` moved the `lib.rs` citations past that point back by one line; they were updated and re-verified by diff mapping. The PR's own one-line stamp edit was superseded by this restamp. The other PR files (`certus-shmq-connector/**`) are outside this component's hashed inputs. Dispatcher and dispatcher-p2p lib tests pass (102/102 and 77/77). Status stays `clean`.
 
 > **Re-stamp 2026-10-23 (branch `unstable`, commit `d7a24d58` "Fix workspace build warnings" plus the spec-sync follow-up).** That commit only fixed warnings under the workspace lint posture: it added `Debug` impls, narrowed unreachable `pub` items to `pub(crate)`, wrapped `unsafe fn` bodies in explicit `unsafe {}` blocks, and the follow-up ran `rustfmt`. It also touched `components/interfaces` (a `Debug` impl for `Command`), which changes every component's digest. This component's own `src/` was in that commit. Every changed item was checked: none is part of a provided interface, none is named as public by the spec, and no behaviour changed. Spec citations updated: `src/lib.rs:1802`→`:1804`, `:2870`→`:2872`, `:2444-2522`→`:2446-2524`, data-model `:1239-1260`→`:1241-1262`, and `p2p_ring.rs:58`→`:77` (the `cudaMalloc` failure branch; the old line was already stale). The drift tracked as interfaces-7 (below) is unchanged. All citations were re-verified by diff-mapping each base line to its new position. Status stays `clean`.
