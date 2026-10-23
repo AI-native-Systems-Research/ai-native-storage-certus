@@ -5,7 +5,7 @@
 The cputier counterpart of tools/certus-connector-bench/bench_connector_lifecycle.py.
 Instead of the Certus-SHMQ connector it drives vLLM's in-tree native offload
 stack -- the same classes ``OffloadingConnector`` builds when vLLM is started
-with ``spec_name=TieringOffloadingSpec`` (see apps/vllm-serve/run-serve-cputier.sh):
+with ``spec_name=TieringOffloadingSpec`` (see benchmarks/vllm-serve/run-serve-cputier.sh):
 
   - TieringOffloadingManager (CPU primary tier + optional "fs" disk tier):
     on_new_request, touch, lookup, prepare_store, complete_store,

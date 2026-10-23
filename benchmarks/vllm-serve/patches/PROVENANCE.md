@@ -1,4 +1,4 @@
-# apps/vllm-serve/patches — shmq scheduler fix#3 (provenance)
+# benchmarks/vllm-serve/patches — shmq scheduler fix#3 (provenance)
 
 `run-serve-certus-shmq.sh` applies fix#3 to the shmq image's in-container vLLM
 scheduler (env `VLLM_FIX3=1`, the default; set `VLLM_FIX3=0` to run stock).

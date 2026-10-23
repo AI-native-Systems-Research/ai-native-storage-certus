@@ -3,7 +3,7 @@
 Benchmarks for the **cputier** KV-offload backend: vLLM's in-tree
 `OffloadingConnector` with `TieringOffloadingSpec`, which pairs a pinned host-RAM CPU
 primary tier with an optional `fs` disk secondary tier. This is the backend
-`apps/vllm-serve/run-serve-cputier.sh` serves. The benchmark is the counterpart of
+`benchmarks/vllm-serve/run-serve-cputier.sh` serves. The benchmark is the counterpart of
 [`certus-connector-bench`](../certus-connector-bench/README.md). It has the same modes,
 the same report format and the same CSV columns, so the two backends can be compared
 side by side without running vLLM.

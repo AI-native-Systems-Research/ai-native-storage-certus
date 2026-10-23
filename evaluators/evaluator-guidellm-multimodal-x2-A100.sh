@@ -18,16 +18,16 @@
 #       2. SERVER   numactl --cpunodebind=0 --membind=0 certus-server-yaml \
 #                     --device-pci ... x4 --shm-path /dev/shm/certus-shmq \
 #                     --memory-tier-size 30G ... --format   (backgrounded)
-#       3. VLLM     apps/vllm-serve/run-serve-certus-shmq-multimodal-2gpu.sh
-#       4. CLIENT   apps/vllm-serve/run-guidellm-synthetic-multimodal.sh
+#       3. VLLM     benchmarks/vllm-serve/run-serve-certus-shmq-multimodal-2gpu.sh
+#       4. CLIENT   benchmarks/vllm-serve/run-guidellm-synthetic-multimodal.sh
 #     (shmq image lives in the /mnt/certus1 podman store; an external
 #      certus-server publishes the mailbox at SHM_PATH.)
 #
 #   BACKEND=cputier — vLLM-native CPU+fs tiering (OffloadingConnector). Skips
 #     steps 1-2 entirely: cputier is self-contained (no certus-server, no
 #     mailbox, default podman store, image certus-offload-fix026).
-#       3. VLLM     apps/vllm-serve/run-serve-cputier-multimodal-2gpu.sh
-#       4. CLIENT   apps/vllm-serve/run-guidellm-synthetic-multimodal.sh
+#       3. VLLM     benchmarks/vllm-serve/run-serve-cputier-multimodal-2gpu.sh
+#       4. CLIENT   benchmarks/vllm-serve/run-guidellm-synthetic-multimodal.sh
 #
 # Run the two back to back (BACKEND=certus then BACKEND=cputier) to compare the
 # offload backends over an identical synthetic multimodal workload.
@@ -70,7 +70,7 @@ esac
 # ── Paths ────────────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
-VLLM_DIR="${VLLM_DIR:-${REPO_ROOT}/apps/vllm-serve}"
+VLLM_DIR="${VLLM_DIR:-${REPO_ROOT}/benchmarks/vllm-serve}"
 CLIENT_SCRIPT="${CLIENT_SCRIPT:-${VLLM_DIR}/run-guidellm-synthetic-multimodal.sh}"
 if [[ "$BACKEND" == "certus" ]]; then
   SERVE_SCRIPT="${SERVE_SCRIPT:-${VLLM_DIR}/run-serve-certus-shmq-multimodal-2gpu.sh}"
