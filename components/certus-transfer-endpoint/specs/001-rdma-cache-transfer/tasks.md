@@ -927,9 +927,26 @@ works through llm-d and vLLM. T067 is a separate design task.
   `CERTUS_RDMA_PORT`. See cutover.md
 - [ ] T066 [US2] Delete `components/remote-lookup-rdma-initiator` and
   `components/remote-lookup-rdma-responder`; remove them from workspace `members`
-- [ ] T067 Specify the shared-memory queue message from the connector into the destination
+- [X] T067 Specify the shared-memory queue message from the connector into the destination
   endpoint — the next layer up, deliberately designed last in the bottom-up order
-  (transfer mechanism → framing → shm-queue message)
+  (transfer mechanism → framing → shm-queue message). *Specified* in
+  [contracts/shmq-fetch.md](./contracts/shmq-fetch.md): opcode 17 `FETCH`, started from
+  vLLM's lookup and answered `HIT_PENDING` while it runs; one call names the whole leading
+  miss run and the server paces it in a byte-bounded window (`fetch_window_bytes`, a global
+  `fetch_inflight_bytes`), stopping at the first miss; peer hint
+  `kv_transfer_params["certus_fetch_from"]`; a per-request time budget. Built in T084-T087
+- [ ] T084 `FETCH` in `lib/shmq-dispatcher`: wire op 17, a `FetchTable` beside
+  `pending_stores` (CHECK/TOUCH_CHECK read both; the reaper reads only `pending_stores`),
+  the window and both byte caps, publish/release on completion. `Translator` gains an
+  optional `Arc<dyn ITransferEndpoint>`. Tested over a mock endpoint
+- [ ] T085 `certus-server-yaml`: a `full-transfer` profile (the endpoint wired to
+  `dispatch_map`, `memory_tier`, `logger`, `dispatcher`), refused at build without `rdma`;
+  an init hook (`CERTUS_RDMA_BIND_IP` with auto-detect, `CERTUS_RDMA_PORT`), the endpoint
+  passed to the translator, its `host:port` logged
+- [ ] T086 Connector: `ring.fetch()`; the manager's hint path, `HIT_PENDING` while any key
+  of the run is pending, the time budget; tests over the fake ring
+- [ ] T087 Validate: two servers node2 ↔ node5 driven over the ring (store on one, FETCH +
+  CHECK + LOOKUP on the other, bytes compared); then vLLM with the hint set by hand
 
 ---
 
