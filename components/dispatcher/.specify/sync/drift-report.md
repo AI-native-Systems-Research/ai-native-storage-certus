@@ -1,9 +1,9 @@
 ---
 spec_sync_component: dispatcher
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-23T18:04:08Z
-spec_sync_git_commit: 772885d9
-spec_sync_inputs_sha256: 22568d9f5dd2127224fafb9f448bfe1b8cb1ded11ca269b0cf18e68eb6114133
+spec_sync_synced_at: 2026-10-23T20:07:13Z
+spec_sync_git_commit: 6addfb9b5
+spec_sync_inputs_sha256: 0acb065330eb0cae5291d5ccb99b4e68b7b07af4432305a21a97b8521f70da67
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Merge 2026-10-23: unstable `6d2f988ee` (#568, #569) merged into `fix/dispatcher-failed-promotion`.** #568 makes the background SSD evictor take a late-bound eviction-event channel; #569 fixes workspace build warnings and test targets. Neither touches the promotion paths of this branch (`promote_and_serve`, the cold path of `batch_lookup`). The code merged without conflicts; every added line of the repair of root cause #11 is present (922 of 922). Only this report conflicted (both notes kept). Re-stamped below over the merged inputs.
