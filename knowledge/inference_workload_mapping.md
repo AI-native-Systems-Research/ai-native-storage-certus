@@ -511,6 +511,8 @@ These affect inference performance but do NOT produce different certus Store/Loa
 
 ### certus-api-bench_v3
 
+> **Removed 2026-10-23.** The script still used the removed gRPC stubs (`dispatcher_pb2`) and no longer ran; it was deleted from `benchmarks/python/`. This analysis is kept for reference.
+
 **What it does**: Extends v2 with bidirectional phase (concurrent store+load), per-block latency isolation, and region-count sensitivity. Designed to measure CUDA stream overlap and cuMemcpyBatchAsync benefits.
 
 | Phase | Inference Pattern Mapping | Coverage |
