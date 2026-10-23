@@ -4,7 +4,7 @@ use std::fmt;
 
 /// NVMe IO operation type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub enum OpType {
+pub(crate) enum OpType {
     /// All operations are reads.
     Read,
     /// All operations are writes.
@@ -26,7 +26,7 @@ impl fmt::Display for OpType {
 
 /// IO submission mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub enum IoMode {
+pub(crate) enum IoMode {
     /// Synchronous: each command blocks the actor until SPDK completion.
     Sync,
     /// Asynchronous: commands are submitted to SPDK and completed via callback.
@@ -44,7 +44,7 @@ impl fmt::Display for IoMode {
 
 /// IO access pattern.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub enum Pattern {
+pub(crate) enum Pattern {
     /// Uniform random LBA per operation.
     Random,
     /// Contiguous LBAs with per-thread non-overlapping regions.
@@ -63,7 +63,7 @@ impl fmt::Display for Pattern {
 /// Configuration for an IOPS benchmark run.
 #[derive(Debug, Clone, Parser)]
 #[command(name = "iops-benchmark", about = "NVMe IOPS benchmark using SPDK")]
-pub struct BenchConfig {
+pub(crate) struct BenchConfig {
     /// Operation type: read, write, or rw (mixed).
     #[arg(long, default_value = "read", value_enum)]
     pub op: OpType,
@@ -121,7 +121,7 @@ impl BenchConfig {
     /// Validate configuration against device properties.
     ///
     /// Returns `Ok(())` if valid, or `Err(message)` describing the problem.
-    pub fn validate(
+    pub(crate) fn validate(
         &self,
         sector_size: u32,
         max_qd: u32,
@@ -174,12 +174,12 @@ impl BenchConfig {
     }
 
     /// Largest block size in the configured set.
-    pub fn max_block_size(&self) -> usize {
+    pub(crate) fn max_block_size(&self) -> usize {
         *self.block_sizes.iter().max().unwrap()
     }
 
     /// Clamp queue depth to device maximum, printing a warning if clamped.
-    pub fn clamp_queue_depth(&mut self, max_qd: u32) {
+    pub(crate) fn clamp_queue_depth(&mut self, max_qd: u32) {
         if self.queue_depth > max_qd {
             eprintln!(
                 "warning: queue-depth {} exceeds device maximum {}, clamping to {}",

@@ -10,7 +10,7 @@ use tokio::net::TcpListener;
 /// All fields are monotonic; take deltas across two reads to compute rates.
 /// Populated by [`CountersObserver`], which the shmq dispatcher calls on each op.
 #[derive(Clone)]
-pub struct ServiceCounters {
+pub(crate) struct ServiceCounters {
     pub populates: Arc<AtomicU64>,
     pub lookup_hits: Arc<AtomicU64>,
     pub lookup_misses: Arc<AtomicU64>,
@@ -27,7 +27,7 @@ pub struct ServiceCounters {
 }
 
 impl ServiceCounters {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             populates: Arc::new(AtomicU64::new(0)),
             lookup_hits: Arc::new(AtomicU64::new(0)),
@@ -43,12 +43,12 @@ impl ServiceCounters {
 /// [`ServiceCounters`], so the shmq server keeps the same Prometheus/OTel
 /// counters (`certus_populates_total`, `certus_lookup_hits_total`, …) that the
 /// former gRPC service maintained. Installed via `Translator::with_observer`.
-pub struct CountersObserver {
+pub(crate) struct CountersObserver {
     counters: ServiceCounters,
 }
 
 impl CountersObserver {
-    pub fn new(counters: ServiceCounters) -> Self {
+    pub(crate) fn new(counters: ServiceCounters) -> Self {
         Self { counters }
     }
 }
@@ -78,7 +78,7 @@ impl TranslatorObserver for CountersObserver {
     }
 }
 
-pub async fn serve_metrics(
+pub(crate) async fn serve_metrics(
     port: u16,
     mt: Arc<dyn IMemoryTier + Send + Sync>,
     dispatcher: Arc<dyn IDispatcher + Send + Sync>,

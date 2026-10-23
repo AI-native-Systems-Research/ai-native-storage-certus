@@ -23,7 +23,7 @@ pub(crate) struct SharedState {
 }
 
 impl RegionState {
-    pub fn new(buddy: BuddyAllocator, format_params: FormatParams) -> Self {
+    pub(crate) fn new(buddy: BuddyAllocator, format_params: FormatParams) -> Self {
         Self {
             slabs: BTreeMap::new(),
             size_classes: SizeClassManager::new(),
@@ -38,7 +38,7 @@ impl RegionState {
         (size + sector_size - 1) / sector_size * sector_size
     }
 
-    pub fn alloc_extent(&mut self, size: u32) -> Result<(u64, usize, u64), ExtentManagerError> {
+    pub(crate) fn alloc_extent(&mut self, size: u32) -> Result<(u64, usize, u64), ExtentManagerError> {
         let element_size = self.align_to_sector_size(size, self.format_params.sector_size);
 
         // The SizeClassManager invariant: only non-full slabs appear in the list.
@@ -91,7 +91,7 @@ impl RegionState {
         Ok((disk_offset, slot_idx, offset))
     }
 
-    pub fn free_slot(&mut self, slab_start: u64, slot_idx: usize) {
+    pub(crate) fn free_slot(&mut self, slab_start: u64, slot_idx: usize) {
         let (was_full, now_empty, element_size, slab_size) =
             if let Some(slab) = self.slabs.get_mut(&slab_start) {
                 let was_full = slab.is_full();
@@ -111,14 +111,14 @@ impl RegionState {
         }
     }
 
-    pub fn publish_slot(&mut self, slab_start: u64, slot_idx: usize, key: ExtentKey) {
+    pub(crate) fn publish_slot(&mut self, slab_start: u64, slot_idx: usize, key: ExtentKey) {
         if let Some(slab) = self.slabs.get_mut(&slab_start) {
             slab.set_key(slot_idx, key);
         }
         self.dirty = true;
     }
 
-    pub fn remove_extent_by_offset(&mut self, offset: u64) -> Result<(), ExtentManagerError> {
+    pub(crate) fn remove_extent_by_offset(&mut self, offset: u64) -> Result<(), ExtentManagerError> {
         let slab_start = self
             .slabs
             .range(..=offset)
@@ -149,7 +149,7 @@ impl RegionState {
         Ok(())
     }
 
-    pub fn flush_pending_frees(&mut self) {
+    pub(crate) fn flush_pending_frees(&mut self) {
         if self.pending_frees.is_empty() {
             return;
         }

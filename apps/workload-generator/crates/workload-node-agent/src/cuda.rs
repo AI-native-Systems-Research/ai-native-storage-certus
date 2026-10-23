@@ -53,7 +53,7 @@ pub const IPC_HANDLE_BYTES: usize = 64;
 /// table carries per entry — so [`IpcMemHandle::reserved`] goes onto the wire verbatim,
 /// with no reinterpretation.
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct IpcMemHandle {
     /// The opaque bytes, passed through unchanged.
     pub reserved: [u8; IPC_HANDLE_BYTES],

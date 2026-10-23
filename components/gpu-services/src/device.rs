@@ -8,7 +8,7 @@ use crate::cuda_ffi;
 
 /// Discover all NVIDIA GPUs with compute capability >= 7.0.
 #[cfg(feature = "gpu")]
-pub fn discover_devices() -> Result<Vec<GpuDeviceInfo>, String> {
+pub(crate) fn discover_devices() -> Result<Vec<GpuDeviceInfo>, String> {
     let mut count: std::os::raw::c_int = 0;
 
     // SAFETY: count is a valid, aligned pointer to a stack-allocated c_int.

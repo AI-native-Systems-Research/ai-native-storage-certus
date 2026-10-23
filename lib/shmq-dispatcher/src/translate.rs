@@ -255,7 +255,7 @@ struct HandleBatch {
     entries: Vec<BatchEntry>,
 }
 
-fn decode_handle_batch(r: &mut Reader) -> Result<HandleBatch, OpError> {
+fn decode_handle_batch(r: &mut Reader<'_>) -> Result<HandleBatch, OpError> {
     let n_handles = r.u32()? as usize;
     let mut handles = Vec::with_capacity(n_handles);
     for _ in 0..n_handles {
@@ -302,6 +302,12 @@ pub struct Translator {
     /// Total store-backpressure budget shared across ALL keys in one OP_RESERVE
     /// batch (not per key). See `op_reserve`.
     store_backpressure: Duration,
+}
+
+impl std::fmt::Debug for Translator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Translator").finish_non_exhaustive()
+    }
 }
 
 impl Drop for Translator {
@@ -397,7 +403,7 @@ impl Translator {
     // ---- key-only batch helper ----
 
     /// Decode `{ n:u32, [key:u64]*n }`.
-    fn read_keys(r: &mut Reader) -> Result<Vec<u64>, OpError> {
+    fn read_keys(r: &mut Reader<'_>) -> Result<Vec<u64>, OpError> {
         let n = r.u32()? as usize;
         let mut keys = Vec::with_capacity(n);
         for _ in 0..n {
@@ -419,7 +425,7 @@ impl Translator {
             .collect()
     }
 
-    fn op_check(&self, r: &mut Reader) -> Result<Vec<u8>, OpError> {
+    fn op_check(&self, r: &mut Reader<'_>) -> Result<Vec<u8>, OpError> {
         use wire::check_state::{MISS, PENDING, RESIDENT};
         let keys = Self::read_keys(r)?;
         check_duplicate_keys(&keys)?;
@@ -454,7 +460,7 @@ impl Translator {
         Ok(w.into_bytes())
     }
 
-    fn op_touch(&self, r: &mut Reader) -> Result<Vec<u8>, OpError> {
+    fn op_touch(&self, r: &mut Reader<'_>) -> Result<Vec<u8>, OpError> {
         let promote = r.u8()? != 0;
         let keys = Self::read_keys(r)?;
         check_duplicate_keys(&keys)?;
@@ -472,7 +478,7 @@ impl Translator {
     /// tri-state as `op_check`. PENDING comes from the `pending_stores` snapshot
     /// before `dispatcher.check()` is consulted (see `op_check` for why); a key
     /// whose touch failed reads as MISS.
-    fn op_touch_check(&self, r: &mut Reader) -> Result<Vec<u8>, OpError> {
+    fn op_touch_check(&self, r: &mut Reader<'_>) -> Result<Vec<u8>, OpError> {
         use wire::check_state::{MISS, PENDING, RESIDENT};
         let promote = r.u8()? != 0;
         let keys = Self::read_keys(r)?;
@@ -498,7 +504,7 @@ impl Translator {
         Ok(w.into_bytes())
     }
 
-    fn op_reserve(&self, r: &mut Reader) -> Result<Vec<u8>, OpError> {
+    fn op_reserve(&self, r: &mut Reader<'_>) -> Result<Vec<u8>, OpError> {
         let n = r.u32()? as usize;
         let mut entries = Vec::with_capacity(n);
         for _ in 0..n {
@@ -549,7 +555,7 @@ impl Translator {
         Ok(w.into_bytes())
     }
 
-    fn op_commit_store(&self, r: &mut Reader) -> Result<Vec<u8>, OpError> {
+    fn op_commit_store(&self, r: &mut Reader<'_>) -> Result<Vec<u8>, OpError> {
         let keys = Self::read_keys(r)?;
         check_duplicate_keys(&keys)?;
         let mut w = Writer::with_capacity(keys.len());
@@ -579,7 +585,7 @@ impl Translator {
         Ok(w.into_bytes())
     }
 
-    fn op_abort_store(&self, r: &mut Reader) -> Result<Vec<u8>, OpError> {
+    fn op_abort_store(&self, r: &mut Reader<'_>) -> Result<Vec<u8>, OpError> {
         let keys = Self::read_keys(r)?;
         check_duplicate_keys(&keys)?;
         let mut w = Writer::with_capacity(keys.len());
@@ -593,7 +599,7 @@ impl Translator {
         Ok(w.into_bytes())
     }
 
-    fn op_pin(&self, r: &mut Reader) -> Result<Vec<u8>, OpError> {
+    fn op_pin(&self, r: &mut Reader<'_>) -> Result<Vec<u8>, OpError> {
         let promote = r.u8()? != 0;
         let keys = Self::read_keys(r)?;
         check_duplicate_keys(&keys)?;
@@ -607,7 +613,7 @@ impl Translator {
         Ok(w.into_bytes())
     }
 
-    fn op_unpin(&self, r: &mut Reader) -> Result<Vec<u8>, OpError> {
+    fn op_unpin(&self, r: &mut Reader<'_>) -> Result<Vec<u8>, OpError> {
         let keys = Self::read_keys(r)?;
         check_duplicate_keys(&keys)?;
         let mut w = Writer::with_capacity(keys.len());
@@ -656,7 +662,7 @@ impl Translator {
         Some(regions)
     }
 
-    fn op_copy_to_store(&self, r: &mut Reader) -> Result<Vec<u8>, OpError> {
+    fn op_copy_to_store(&self, r: &mut Reader<'_>) -> Result<Vec<u8>, OpError> {
         let batch = decode_handle_batch(r)?;
         let keys: Vec<u64> = batch.entries.iter().map(|(k, _)| *k).collect();
         check_duplicate_keys(&keys)?;
@@ -733,7 +739,7 @@ impl Translator {
         (hits, misses, errors)
     }
 
-    fn op_lookup(&self, r: &mut Reader) -> Result<Vec<u8>, OpError> {
+    fn op_lookup(&self, r: &mut Reader<'_>) -> Result<Vec<u8>, OpError> {
         let batch = decode_handle_batch(r)?;
         let keys: Vec<u64> = batch.entries.iter().map(|(k, _)| *k).collect();
         check_duplicate_keys(&keys)?;
@@ -784,7 +790,7 @@ impl Translator {
         Ok(w.into_bytes())
     }
 
-    fn op_take_events(&self, r: &mut Reader) -> Result<Vec<u8>, OpError> {
+    fn op_take_events(&self, r: &mut Reader<'_>) -> Result<Vec<u8>, OpError> {
         let max = r.u32()? as usize;
         let mut events: Vec<(u64, u32)> = Vec::new();
         while let Ok(ev) = self.eviction_rx.try_recv() {
@@ -817,7 +823,7 @@ impl Translator {
     /// `HandleBatch` (same framing as CopyToStore), but every entry must carry
     /// exactly one region (`nreg == 1`): `populate` takes a single IPC handle.
     /// resp `{ [ok:u8]*n }`. Mirrors service.rs:232 (BatchPopulate).
-    fn op_populate(&self, r: &mut Reader) -> Result<Vec<u8>, OpError> {
+    fn op_populate(&self, r: &mut Reader<'_>) -> Result<Vec<u8>, OpError> {
         let batch = decode_handle_batch(r)?;
         let keys: Vec<u64> = batch.entries.iter().map(|(k, _)| *k).collect();
         check_duplicate_keys(&keys)?;
@@ -876,7 +882,7 @@ impl Translator {
 
     /// Remove entries entirely. req `{ n:u32, [key:u64]*n }`, resp `{ [ok:u8]*n }`.
     /// Mirrors service.rs:513 (BatchRemove).
-    fn op_remove(&self, r: &mut Reader) -> Result<Vec<u8>, OpError> {
+    fn op_remove(&self, r: &mut Reader<'_>) -> Result<Vec<u8>, OpError> {
         let keys = Self::read_keys(r)?;
         check_duplicate_keys(&keys)?;
         let mut w = Writer::with_capacity(keys.len());
@@ -888,7 +894,7 @@ impl Translator {
 
     /// Evict the whole memory-tier. Empty request; resp `{ entries_cleared:u64 }`.
     /// Mirrors service.rs:874 (ClearMemoryTier).
-    fn op_clear_memory_tier(&self, _r: &mut Reader) -> Result<Vec<u8>, OpError> {
+    fn op_clear_memory_tier(&self, _r: &mut Reader<'_>) -> Result<Vec<u8>, OpError> {
         let cleared = self
             .dispatcher
             .clear_memory_tier()
@@ -900,7 +906,7 @@ impl Translator {
 
     /// Drain pending write-through jobs. Empty request; resp `{ jobs_flushed:u64 }`.
     /// Mirrors service.rs:894 (FlushToSsd).
-    fn op_flush_to_ssd(&self, _r: &mut Reader) -> Result<Vec<u8>, OpError> {
+    fn op_flush_to_ssd(&self, _r: &mut Reader<'_>) -> Result<Vec<u8>, OpError> {
         let flushed = self
             .dispatcher
             .flush_to_ssd()
@@ -914,7 +920,7 @@ impl Translator {
     /// order `read_ops, read_bytes, read_latency_ns_sum, write_ops, write_bytes,
     /// write_latency_ns_sum` (matches the gRPC IoStatsResponse — no histogram
     /// buckets). Mirrors service.rs:1010 (GetIoStats).
-    fn op_get_io_stats(&self, _r: &mut Reader) -> Result<Vec<u8>, OpError> {
+    fn op_get_io_stats(&self, _r: &mut Reader<'_>) -> Result<Vec<u8>, OpError> {
         let s = self.dispatcher.read_write_stats();
         let mut w = Writer::with_capacity(48);
         w.u64(s.read_ops);

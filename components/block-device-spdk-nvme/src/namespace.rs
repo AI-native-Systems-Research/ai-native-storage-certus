@@ -17,7 +17,7 @@ use crate::controller::NvmeNamespaceInfo;
 ///
 /// `ctrlr_ptr` must be a valid SPDK NVMe controller pointer.
 #[allow(dead_code)]
-pub(crate) unsafe fn probe(ctrlr_ptr: *mut spdk_sys::spdk_nvme_ctrlr) -> Vec<NamespaceInfo> {
+pub(crate) unsafe fn probe(ctrlr_ptr: *mut spdk_sys::spdk_nvme_ctrlr) -> Vec<NamespaceInfo> { unsafe {
     let mut result = Vec::new();
 
     // SAFETY: ctrlr_ptr is valid.
@@ -44,7 +44,7 @@ pub(crate) unsafe fn probe(ctrlr_ptr: *mut spdk_sys::spdk_nvme_ctrlr) -> Vec<Nam
     }
 
     result
-}
+}}
 
 /// Convert internal namespace info to the client-facing type.
 pub(crate) fn to_namespace_info(ns: &NvmeNamespaceInfo) -> NamespaceInfo {
@@ -74,7 +74,7 @@ pub(crate) unsafe fn create(
     ctrlr_ptr: *mut spdk_sys::spdk_nvme_ctrlr,
     size_sectors: u64,
     current_namespaces: &[NvmeNamespaceInfo],
-) -> Result<u32, NvmeBlockError> {
+) -> Result<u32, NvmeBlockError> { unsafe {
     let sector_size = current_namespaces
         .first()
         .map(|ns| ns.sector_size as u64)
@@ -115,7 +115,7 @@ pub(crate) unsafe fn create(
     }
 
     Ok(ns_id)
-}
+}}
 
 /// Query unallocated NVM capacity and return it as a sector count.
 ///
@@ -130,18 +130,18 @@ const TNVMCAP_OFFSET: usize = 280;
 const UNVMCAP_OFFSET: usize = 296;
 
 /// Read a 128-bit LE value from the Identify Controller data at `offset`.
-unsafe fn read_cdata_u128(cdata: *const spdk_sys::spdk_nvme_ctrlr_data, offset: usize) -> u128 {
+unsafe fn read_cdata_u128(cdata: *const spdk_sys::spdk_nvme_ctrlr_data, offset: usize) -> u128 { unsafe {
     let base = cdata as *const u8;
     let lo = std::ptr::read_unaligned(base.add(offset) as *const u64);
     let hi = std::ptr::read_unaligned(base.add(offset + 8) as *const u64);
     lo as u128 | ((hi as u128) << 64)
-}
+}}
 
 unsafe fn unallocated_sectors(
     ctrlr_ptr: *mut spdk_sys::spdk_nvme_ctrlr,
     current_namespaces: &[NvmeNamespaceInfo],
     target_sector_size: u64,
-) -> Result<u64, NvmeBlockError> {
+) -> Result<u64, NvmeBlockError> { unsafe {
     // SAFETY: ctrlr_ptr is valid; returns a pointer to the 4096-byte Identify Controller data.
     let cdata = spdk_sys::spdk_nvme_ctrlr_get_data(ctrlr_ptr);
     if cdata.is_null() {
@@ -177,7 +177,7 @@ unsafe fn unallocated_sectors(
     Err(NvmeBlockError::NotSupported(
         "controller does not report NVM capacity (tnvmcap/unvmcap both zero)".into(),
     ))
-}
+}}
 
 /// Format an existing namespace (erases all data).
 ///
@@ -193,7 +193,7 @@ pub(crate) unsafe fn format(
     ctrlr_ptr: *mut spdk_sys::spdk_nvme_ctrlr,
     ns_id: u32,
     lbaf: u8,
-) -> Result<(), NvmeBlockError> {
+) -> Result<(), NvmeBlockError> { unsafe {
     // SAFETY: zeroed spdk_nvme_format is a valid default (no secure erase).
     let mut format_opts: spdk_sys::spdk_nvme_format = std::mem::zeroed();
     format_opts.set_lbaf((lbaf & 0x0F) as u32);
@@ -206,7 +206,7 @@ pub(crate) unsafe fn format(
         )));
     }
     Ok(())
-}
+}}
 
 /// Delete an existing namespace.
 ///
@@ -216,7 +216,7 @@ pub(crate) unsafe fn format(
 pub(crate) unsafe fn delete(
     ctrlr_ptr: *mut spdk_sys::spdk_nvme_ctrlr,
     ns_id: u32,
-) -> Result<(), NvmeBlockError> {
+) -> Result<(), NvmeBlockError> { unsafe {
     // SAFETY: ctrlr_ptr is valid.
     let rc = spdk_sys::spdk_nvme_ctrlr_delete_ns(ctrlr_ptr, ns_id);
     if rc != 0 {
@@ -225,7 +225,7 @@ pub(crate) unsafe fn delete(
         )));
     }
     Ok(())
-}
+}}
 
 /// Validate that a namespace ID exists in the given list.
 pub(crate) fn validate_ns_id(

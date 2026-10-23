@@ -39,6 +39,17 @@ pub struct DeviceContext {
     pub actor_cpu: usize,
 }
 
+impl std::fmt::Debug for DeviceContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DeviceContext")
+            .field("pci_addr_str", &self.pci_addr_str)
+            .field("ns_info", &self.ns_info)
+            .field("numa_node", &self.numa_node)
+            .field("actor_cpu", &self.actor_cpu)
+            .finish_non_exhaustive()
+    }
+}
+
 /// Allocate CPUs for actors and workers from available NUMA-local cores.
 ///
 /// Returns `(actor_cpus, worker_cpus)` where each actor and worker gets a

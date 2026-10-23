@@ -60,6 +60,12 @@ pub struct SpscChannel<T: Send + 'static> {
     interface_info: Vec<InterfaceInfo>,
 }
 
+impl<T: Send + 'static> std::fmt::Debug for SpscChannel<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SpscChannel").finish_non_exhaustive()
+    }
+}
+
 impl<T: Send + 'static> SpscChannel<T> {
     /// Create a new SPSC channel with the given capacity.
     ///

@@ -132,10 +132,10 @@ impl NvmeController {
     /// # Safety
     ///
     /// `ctrlr_ptr` must be a valid pointer obtained from `spdk_nvme_probe`.
-    pub unsafe fn attach(
+    pub(crate) unsafe fn attach(
         ctrlr_ptr: *mut spdk_sys::spdk_nvme_ctrlr,
         numa_node: i32,
-    ) -> Result<Self, NvmeBlockError> {
+    ) -> Result<Self, NvmeBlockError> { unsafe {
         if ctrlr_ptr.is_null() {
             return Err(NvmeBlockError::NotInitialized(
                 "null controller pointer — SPDK probe/attach may have failed".into(),
@@ -193,7 +193,7 @@ impl NvmeController {
             max_queue_depth,
             num_io_queues,
         })
-    }
+    }}
 
     /// Discover all active namespaces on the controller.
     ///

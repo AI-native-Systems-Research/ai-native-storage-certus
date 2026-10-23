@@ -32,7 +32,7 @@ impl ClientSession {
     /// Deliver a completion without ever blocking the actor. Fast path is a
     /// single `try_send`; on a full ring (or an existing backlog) the completion
     /// is buffered in FIFO order and retried by [`Self::flush_pending`].
-    pub fn deliver(&mut self, completion: Completion) {
+    pub(crate) fn deliver(&mut self, completion: Completion) {
         if self.pending.is_empty() && self.callback_tx.try_send(completion.clone()).is_ok() {
             return;
         }
@@ -42,7 +42,7 @@ impl ClientSession {
     /// Retry delivering buffered completions, oldest first, stopping at the
     /// first that still can't be sent (ring full) to preserve ordering.
     /// Returns true if any were delivered.
-    pub fn flush_pending(&mut self) -> bool {
+    pub(crate) fn flush_pending(&mut self) -> bool {
         let mut delivered = false;
         while let Some(front) = self.pending.front() {
             if self.callback_tx.try_send(front.clone()).is_ok() {

@@ -15,6 +15,7 @@ use crate::translate::Translator;
 use crate::wire;
 
 /// Tunables for [`serve`]. Populated from the server binary's CLI flags.
+#[derive(Debug)]
 pub struct ServeConfig {
     /// Number of mailbox channels; also the worker-pool size.
     pub channels: usize,
@@ -87,7 +88,7 @@ fn log_poller_stats(prefix: &str, serviced: &[u64], qdepth: usize, max_qdepth: u
 /// Relaxed ordering throughout: these are monotonic observability counters read by a
 /// reporter thread, and no reader depends on seeing them mutually consistent.
 #[derive(Debug, Default)]
-pub struct ServeCounters {
+pub(crate) struct ServeCounters {
     /// Requests the poller took off a mailbox channel.
     pub taken: AtomicU64,
     /// Requests handed to the worker queue.

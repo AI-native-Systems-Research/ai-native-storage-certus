@@ -107,9 +107,9 @@ unsafe extern "C" fn attach_cb(
     _trid: *const spdk_sys::spdk_nvme_transport_id,
     ctrlr: *mut spdk_sys::spdk_nvme_ctrlr,
     _opts: *const spdk_sys::spdk_nvme_ctrlr_opts,
-) {
+) { unsafe {
     ATTACHED_CTRLRS.push(ctrlr);
-}
+}}
 
 fn initialize_spdk(
     pci_addrs: &[String],

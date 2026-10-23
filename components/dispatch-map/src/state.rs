@@ -20,6 +20,12 @@ pub struct DispatchMapState {
     pub(crate) pool_id: Mutex<Option<PoolId>>,
 }
 
+impl std::fmt::Debug for DispatchMapState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DispatchMapState").finish_non_exhaustive()
+    }
+}
+
 impl Default for DispatchMapState {
     fn default() -> Self {
         Self::new()

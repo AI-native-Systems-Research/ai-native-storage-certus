@@ -5,7 +5,7 @@ pub(crate) struct AllocationBitmap {
 }
 
 impl AllocationBitmap {
-    pub fn new(num_slots: u32) -> Self {
+    pub(crate) fn new(num_slots: u32) -> Self {
         let num_words = (num_slots as usize + 63) / 64;
         Self {
             words: vec![0u64; num_words],
@@ -14,7 +14,7 @@ impl AllocationBitmap {
         }
     }
 
-    pub fn set(&mut self, idx: usize) {
+    pub(crate) fn set(&mut self, idx: usize) {
         debug_assert!((idx as u32) < self.num_slots);
         debug_assert!(!self.is_set(idx), "double-set on slot {idx}");
         let word = idx / 64;
@@ -23,7 +23,7 @@ impl AllocationBitmap {
         self.allocated_count += 1;
     }
 
-    pub fn clear(&mut self, idx: usize) {
+    pub(crate) fn clear(&mut self, idx: usize) {
         debug_assert!((idx as u32) < self.num_slots);
         debug_assert!(self.is_set(idx), "double-clear on slot {idx}");
         let word = idx / 64;
@@ -32,14 +32,14 @@ impl AllocationBitmap {
         self.allocated_count -= 1;
     }
 
-    pub fn is_set(&self, idx: usize) -> bool {
+    pub(crate) fn is_set(&self, idx: usize) -> bool {
         debug_assert!((idx as u32) < self.num_slots);
         let word = idx / 64;
         let bit = idx % 64;
         (self.words[word] >> bit) & 1 == 1
     }
 
-    pub fn find_free_from(&self, start: usize) -> Option<usize> {
+    pub(crate) fn find_free_from(&self, start: usize) -> Option<usize> {
         let n = self.num_slots as usize;
         for i in 0..n {
             let idx = (start + i) % n;
@@ -50,15 +50,15 @@ impl AllocationBitmap {
         None
     }
 
-    pub fn is_all_free(&self) -> bool {
+    pub(crate) fn is_all_free(&self) -> bool {
         self.allocated_count == 0
     }
 
-    pub fn count_set(&self) -> usize {
+    pub(crate) fn count_set(&self) -> usize {
         self.allocated_count as usize
     }
 
-    pub fn num_slots(&self) -> u32 {
+    pub(crate) fn num_slots(&self) -> u32 {
         self.num_slots
     }
 }

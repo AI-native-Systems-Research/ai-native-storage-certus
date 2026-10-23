@@ -275,7 +275,7 @@ impl BlockDeviceSpdkNvmeComponent {
     /// SPDK environment must be initialized.
     unsafe fn probe_controller(
         &self,
-    ) -> Result<(*mut spdk_sys::spdk_nvme_ctrlr, i32), NvmeBlockError> {
+    ) -> Result<(*mut spdk_sys::spdk_nvme_ctrlr, i32), NvmeBlockError> { unsafe {
         // Build the transport ID for our PCI address.
         let mut trid: spdk_sys::spdk_nvme_transport_id = std::mem::zeroed();
         trid.trtype = spdk_sys::spdk_nvme_transport_type_SPDK_NVME_TRANSPORT_PCIE;
@@ -314,10 +314,10 @@ impl BlockDeviceSpdkNvmeComponent {
             _trid: *const spdk_sys::spdk_nvme_transport_id,
             ctrlr: *mut spdk_sys::spdk_nvme_ctrlr,
             _opts: *const spdk_sys::spdk_nvme_ctrlr_opts,
-        ) {
+        ) { unsafe {
             let ctx = &mut *(cb_ctx as *mut ProbeCtx);
             ctx.ctrlr_ptr = ctrlr;
-        }
+        }}
 
         let rc = spdk_sys::spdk_nvme_probe(
             &trid,
@@ -338,7 +338,7 @@ impl BlockDeviceSpdkNvmeComponent {
 
         // NUMA node is not available from minimal bindings; default to 0.
         Ok((ctx.ctrlr_ptr, 0))
-    }
+    }}
 
     /// Get the controller snapshot, or return NotInitialized error.
     fn controller_snapshot(&self) -> Result<ControllerSnapshot, NvmeBlockError> {

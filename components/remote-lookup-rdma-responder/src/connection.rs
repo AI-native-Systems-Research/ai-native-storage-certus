@@ -68,6 +68,24 @@ pub enum CmEvent {
     Stop,
 }
 
+impl std::fmt::Debug for CmEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ConnectRequest { private_data, .. } => f
+                .debug_struct("ConnectRequest")
+                .field("private_data", private_data)
+                .field("connection", &"opaque")
+                .finish(),
+            Self::Command(command) => f.debug_tuple("Command").field(command).finish(),
+            Self::AcceptError { message } => f
+                .debug_struct("AcceptError")
+                .field("message", message)
+                .finish(),
+            Self::Stop => f.write_str("Stop"),
+        }
+    }
+}
+
 /// The accept loop's single wait point.
 ///
 /// [`next_events`](CmListener::next_events) blocks until at least one event is
@@ -112,6 +130,12 @@ pub struct ConnectionTable {
     identified: HashMap<PeerId, ConnectionEntry>,
     unidentified: Vec<ConnectionEntry>,
     telemetry: Arc<TelemetryCollector>,
+}
+
+impl std::fmt::Debug for ConnectionTable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConnectionTable").finish_non_exhaustive()
+    }
 }
 
 impl ConnectionTable {
@@ -266,6 +290,12 @@ pub struct MockCmSeam {
     command_rx: Receiver<ResponderCommand>,
     stop: Arc<AtomicBool>,
     pending: Mutex<VecDeque<CmEvent>>,
+}
+
+impl std::fmt::Debug for MockCmSeam {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MockCmSeam").finish_non_exhaustive()
+    }
 }
 
 impl MockCmSeam {

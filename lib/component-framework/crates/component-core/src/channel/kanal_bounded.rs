@@ -33,6 +33,7 @@ use super::{ChannelError, IReceiver, ISender};
 /// tx.send(42).unwrap();
 /// assert_eq!(rx.recv().unwrap(), 42);
 /// ```
+#[derive(Debug)]
 pub struct KanalSender<T> {
     inner: kanal::Sender<T>,
 }
@@ -71,6 +72,7 @@ unsafe impl<T: Send> Sync for KanalSender<T> {}
 /// tx.send(99).unwrap();
 /// assert_eq!(rx.recv().unwrap(), 99);
 /// ```
+#[derive(Debug)]
 pub struct KanalReceiver<T> {
     inner: kanal::Receiver<T>,
 }
@@ -121,6 +123,12 @@ pub struct KanalChannel<T: Send + 'static> {
     sender_iface: OnceLock<Box<dyn Any + Send + Sync>>,
     receiver_iface: OnceLock<Box<dyn Any + Send + Sync>>,
     interface_info: Vec<InterfaceInfo>,
+}
+
+impl<T: Send + 'static> std::fmt::Debug for KanalChannel<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KanalChannel").finish_non_exhaustive()
+    }
 }
 
 impl<T: Send + 'static> KanalChannel<T> {

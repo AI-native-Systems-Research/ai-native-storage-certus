@@ -379,6 +379,16 @@ where
     cpu_affinity: Mutex<Option<CpuSet>>,
 }
 
+impl<M, H> std::fmt::Debug for Actor<M, H>
+where
+    M: Send + 'static,
+    H: ActorHandler<M>,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Actor").finish_non_exhaustive()
+    }
+}
+
 impl<M, H> Actor<M, H>
 where
     M: Send + 'static,

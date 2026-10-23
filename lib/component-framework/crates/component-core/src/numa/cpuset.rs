@@ -264,6 +264,14 @@ pub struct CpuSetIter<'a> {
     pos: usize,
 }
 
+impl std::fmt::Debug for CpuSetIter<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CpuSetIter")
+            .field("position", &self.pos)
+            .finish_non_exhaustive()
+    }
+}
+
 impl<'a> Iterator for CpuSetIter<'a> {
     type Item = usize;
 

@@ -33,6 +33,14 @@ pub struct InterfaceMap {
     info: Vec<InterfaceInfo>,
 }
 
+impl std::fmt::Debug for InterfaceMap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InterfaceMap")
+            .field("interface_count", &self.info.len())
+            .finish_non_exhaustive()
+    }
+}
+
 impl InterfaceMap {
     /// Creates an empty `InterfaceMap`.
     pub fn new() -> Self {

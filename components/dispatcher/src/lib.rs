@@ -1713,9 +1713,9 @@ impl DispatcherComponent {
                 })
             } else {
                 // Non-SPDK path: use posix_memalign for DMA buffers
-                unsafe extern "C" fn libc_free(p: *mut std::ffi::c_void) {
+                unsafe extern "C" fn libc_free(p: *mut std::ffi::c_void) { unsafe {
                     libc::free(p);
-                }
+                }}
                 Arc::new(move |size, align, _numa| {
                     let mut ptr: *mut std::ffi::c_void = std::ptr::null_mut();
                     // SAFETY: posix_memalign is safe with valid align (power of 2, multiple of sizeof(void*))

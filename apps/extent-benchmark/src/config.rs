@@ -5,7 +5,7 @@ use clap::Parser;
     name = "extent-benchmark",
     about = "Benchmark extent manager operations (create/checkpoint/recover/remove)"
 )]
-pub struct BenchmarkConfig {
+pub(crate) struct BenchmarkConfig {
     /// Metadata NVMe device PCI address (e.g., 0000:04:00.0).
     /// When omitted an in-memory mock block device is used instead of real hardware.
     #[arg(long)]
@@ -43,7 +43,7 @@ pub struct BenchmarkConfig {
 }
 
 impl BenchmarkConfig {
-    pub fn effective_count(&self) -> u64 {
+    pub(crate) fn effective_count(&self) -> u64 {
         self.count.unwrap_or_else(|| {
             if self.metadata_device.is_some() {
                 100_000_000

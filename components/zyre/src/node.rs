@@ -386,7 +386,7 @@ impl Drop for ZyreNode {
     }
 }
 
-unsafe fn zlist_to_peer_ids(list: *mut ffi::zlist_t) -> Vec<PeerId> {
+unsafe fn zlist_to_peer_ids(list: *mut ffi::zlist_t) -> Vec<PeerId> { unsafe {
     let mut result = Vec::new();
     if list.is_null() {
         return result;
@@ -400,9 +400,9 @@ unsafe fn zlist_to_peer_ids(list: *mut ffi::zlist_t) -> Vec<PeerId> {
         item = ffi::zlist_next(list);
     }
     result
-}
+}}
 
-unsafe fn zlist_to_strings(list: *mut ffi::zlist_t) -> Vec<String> {
+unsafe fn zlist_to_strings(list: *mut ffi::zlist_t) -> Vec<String> { unsafe {
     let mut result = Vec::new();
     if list.is_null() {
         return result;
@@ -416,7 +416,7 @@ unsafe fn zlist_to_strings(list: *mut ffi::zlist_t) -> Vec<String> {
         item = ffi::zlist_next(list);
     }
     result
-}
+}}
 
 fn parse_event(event_ptr: *mut ffi::zyre_event_t) -> Result<ZyreEvent, ZyreError> {
     let event_type = unsafe {

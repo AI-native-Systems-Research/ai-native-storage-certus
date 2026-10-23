@@ -41,6 +41,16 @@ pub struct P2pRing {
     pub slot_size: usize,
 }
 
+impl std::fmt::Debug for P2pRing {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("P2pRing")
+            .field("buffer_count", &self.ring_bufs.len())
+            .field("stream_count", &self.streams.len())
+            .field("slot_size", &self.slot_size)
+            .finish_non_exhaustive()
+    }
+}
+
 unsafe impl Send for P2pRing {}
 unsafe impl Sync for P2pRing {}
 
@@ -190,6 +200,7 @@ impl P2pRing {
 }
 
 /// Per-thread partition of the P2P ring for lock-free concurrent access.
+#[derive(Debug)]
 pub struct ThreadPartition {
     /// Starting slot index for this thread's partition.
     pub ring_offset: usize,

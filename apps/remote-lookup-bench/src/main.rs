@@ -62,34 +62,34 @@ use shmq_dispatcher::wire::{self, op};
 mod cuda {
     use super::{c_char, c_int, c_void, CStr};
 
-    pub type CudaError = c_int;
-    pub const SUCCESS: CudaError = 0;
-    pub const MEMCPY_HOST_TO_DEVICE: c_int = 1;
-    pub const MEMCPY_DEVICE_TO_HOST: c_int = 2;
+    pub(crate) type CudaError = c_int;
+    pub(crate) const SUCCESS: CudaError = 0;
+    pub(crate) const MEMCPY_HOST_TO_DEVICE: c_int = 1;
+    pub(crate) const MEMCPY_DEVICE_TO_HOST: c_int = 2;
 
     /// Opaque 64-byte CUDA IPC memory handle.
     #[repr(C)]
     #[derive(Clone, Copy)]
-    pub struct IpcMemHandle {
+    pub(crate) struct IpcMemHandle {
         pub reserved: [u8; 64],
     }
 
     extern "C" {
-        pub fn cudaSetDevice(device: c_int) -> CudaError;
-        pub fn cudaMalloc(devptr: *mut *mut c_void, size: usize) -> CudaError;
-        pub fn cudaFree(devptr: *mut c_void) -> CudaError;
-        pub fn cudaIpcGetMemHandle(handle: *mut IpcMemHandle, devptr: *mut c_void) -> CudaError;
-        pub fn cudaMemcpy(
+        pub(crate) fn cudaSetDevice(device: c_int) -> CudaError;
+        pub(crate) fn cudaMalloc(devptr: *mut *mut c_void, size: usize) -> CudaError;
+        pub(crate) fn cudaFree(devptr: *mut c_void) -> CudaError;
+        pub(crate) fn cudaIpcGetMemHandle(handle: *mut IpcMemHandle, devptr: *mut c_void) -> CudaError;
+        pub(crate) fn cudaMemcpy(
             dst: *mut c_void,
             src: *const c_void,
             count: usize,
             kind: c_int,
         ) -> CudaError;
-        pub fn cudaGetErrorString(error: CudaError) -> *const c_char;
+        pub(crate) fn cudaGetErrorString(error: CudaError) -> *const c_char;
     }
 
     /// Human-readable text for a CUDA error code.
-    pub fn error_string(err: CudaError) -> String {
+    pub(crate) fn error_string(err: CudaError) -> String {
         // SAFETY: cudaGetErrorString returns a static NUL-terminated string for
         // any code, including unknown ones.
         unsafe {

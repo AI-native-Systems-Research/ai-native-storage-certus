@@ -7,7 +7,7 @@ pub(crate) struct BuddyAllocator {
 }
 
 impl BuddyAllocator {
-    pub fn new(base_offset: u64, total_usable_size: u64, sector_size: u32) -> Self {
+    pub(crate) fn new(base_offset: u64, total_usable_size: u64, sector_size: u32) -> Self {
         let usable_blocks = total_usable_size / sector_size as u64;
         let max_order = if usable_blocks > 1 {
             63 - usable_blocks.leading_zeros() as usize
@@ -46,15 +46,15 @@ impl BuddyAllocator {
     }
 
     #[allow(dead_code)]
-    pub fn base_offset(&self) -> u64 {
+    pub(crate) fn base_offset(&self) -> u64 {
         self.base_offset
     }
 
-    pub fn total_usable_size(&self) -> u64 {
+    pub(crate) fn total_usable_size(&self) -> u64 {
         self.total_usable_size
     }
 
-    pub fn alloc(&mut self, size: u64) -> Option<u64> {
+    pub(crate) fn alloc(&mut self, size: u64) -> Option<u64> {
         let blocks_needed = (size + self.sector_size as u64 - 1) / self.sector_size as u64;
         let order_needed = if blocks_needed <= 1 {
             0
@@ -81,7 +81,7 @@ impl BuddyAllocator {
         Some(self.base_offset + local_offset)
     }
 
-    pub fn free(&mut self, abs_offset: u64, size: u64) {
+    pub(crate) fn free(&mut self, abs_offset: u64, size: u64) {
         let offset = abs_offset - self.base_offset;
         let blocks = size / self.sector_size as u64;
         let mut order = if blocks <= 1 {
@@ -114,7 +114,7 @@ impl BuddyAllocator {
         self.free_lists[order].push(current_offset);
     }
 
-    pub fn mark_allocated(&mut self, abs_offset: u64, size: u64) {
+    pub(crate) fn mark_allocated(&mut self, abs_offset: u64, size: u64) {
         let offset = abs_offset - self.base_offset;
         let blocks = size / self.sector_size as u64;
         let target_order = if blocks <= 1 {
@@ -157,7 +157,7 @@ impl BuddyAllocator {
     }
 
     #[allow(dead_code)]
-    pub fn total_free(&self) -> u64 {
+    pub(crate) fn total_free(&self) -> u64 {
         let mut total = 0u64;
         for (order, list) in self.free_lists.iter().enumerate() {
             total += list.len() as u64 * (1u64 << order) * self.sector_size as u64;

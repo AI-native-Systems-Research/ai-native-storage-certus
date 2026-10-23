@@ -61,6 +61,7 @@ const fn round_up_cl(x: usize) -> usize {
 /// `control_size`/`channel_stride`/`channels_offset` against its own computed
 /// layout at attach so a struct-layout mismatch fails immediately, not at 3am.
 #[repr(C)]
+#[derive(Debug)]
 pub struct Header {
     /// `0` until ready, then [`MAGIC_READY`] (published last, with `Release`).
     pub magic: AtomicU32,
@@ -192,12 +193,12 @@ impl Mapping {
 
     #[inline]
     unsafe fn u32_at(&self, off: usize) -> *mut u32 {
-        self.ptr.add(off) as *mut u32
+        unsafe { self.ptr.add(off) as *mut u32 }
     }
 
     #[inline]
     unsafe fn atomic_at(&self, off: usize) -> &AtomicU32 {
-        &*(self.ptr.add(off) as *const AtomicU32)
+        unsafe { &*(self.ptr.add(off) as *const AtomicU32) }
     }
 
     /// Read `len` bytes at `off` as an immutable slice into the mapping.
@@ -207,7 +208,7 @@ impl Mapping {
     /// store must have been observed (Acquire) before calling.
     #[inline]
     unsafe fn read_bytes(&self, off: usize, len: usize) -> &[u8] {
-        std::slice::from_raw_parts(self.ptr.add(off), len)
+        unsafe { std::slice::from_raw_parts(self.ptr.add(off), len) }
     }
 
     /// Copy `src` into the mapping at `off`.
@@ -220,7 +221,9 @@ impl Mapping {
     /// `[off, off+src.len())` must lie within the mapping.
     #[inline]
     unsafe fn write_bytes(&self, off: usize, src: &[u8]) {
-        ptr::copy_nonoverlapping(src.as_ptr(), self.ptr.add(off), src.len());
+        unsafe {
+            ptr::copy_nonoverlapping(src.as_ptr(), self.ptr.add(off), src.len());
+        }
     }
 }
 
@@ -245,15 +248,17 @@ impl Drop for Mapping {
 /// `addr` must point to a live, 4-byte-aligned atomic word inside a shared
 /// mapping.
 pub unsafe fn futex_wake(addr: *const AtomicU32, n: i32) -> i64 {
-    libc::syscall(
-        libc::SYS_futex,
-        addr as *const u32,
-        libc::FUTEX_WAKE, // shared (NOT _PRIVATE)
-        n,
-        ptr::null::<libc::timespec>(),
-        ptr::null::<u32>(),
-        0,
-    )
+    unsafe {
+        libc::syscall(
+            libc::SYS_futex,
+            addr as *const u32,
+            libc::FUTEX_WAKE, // shared (NOT _PRIVATE)
+            n,
+            ptr::null::<libc::timespec>(),
+            ptr::null::<u32>(),
+            0,
+        )
+    }
 }
 
 /// Park on the futex word at `addr` while it still equals `expected`.
@@ -265,22 +270,24 @@ pub unsafe fn futex_wake(addr: *const AtomicU32, n: i32) -> i64 {
 /// `addr` must point to a live, 4-byte-aligned atomic word inside a shared
 /// mapping.
 pub unsafe fn futex_wait(addr: *const AtomicU32, expected: u32, timeout: Option<Duration>) -> i64 {
-    let ts = timeout.map(|d| libc::timespec {
-        tv_sec: d.as_secs() as libc::time_t,
-        tv_nsec: d.subsec_nanos() as libc::c_long,
-    });
-    let tsp = ts
-        .as_ref()
-        .map_or(ptr::null::<libc::timespec>(), |t| t as *const _);
-    libc::syscall(
-        libc::SYS_futex,
-        addr as *const u32,
-        libc::FUTEX_WAIT, // shared (NOT _PRIVATE)
-        expected as i32,
-        tsp,
-        ptr::null::<u32>(),
-        0,
-    )
+    unsafe {
+        let ts = timeout.map(|d| libc::timespec {
+            tv_sec: d.as_secs() as libc::time_t,
+            tv_nsec: d.subsec_nanos() as libc::c_long,
+        });
+        let tsp = ts
+            .as_ref()
+            .map_or(ptr::null::<libc::timespec>(), |t| t as *const _);
+        libc::syscall(
+            libc::SYS_futex,
+            addr as *const u32,
+            libc::FUTEX_WAIT, // shared (NOT _PRIVATE)
+            expected as i32,
+            tsp,
+            ptr::null::<u32>(),
+            0,
+        )
+    }
 }
 
 /// A request the server has taken off a channel, ready to dispatch. The payload
@@ -302,6 +309,14 @@ pub struct PolledRequest {
 pub struct Server {
     map: Mapping,
     layout: Layout,
+}
+
+impl std::fmt::Debug for Server {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Server")
+            .field("num_channels", &self.layout.num_channels)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Server {
@@ -443,6 +458,14 @@ pub struct Client {
     map: Mapping,
     layout: Layout,
     seqs: Vec<AtomicU32>,
+}
+
+impl std::fmt::Debug for Client {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Client")
+            .field("num_channels", &self.layout.num_channels)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Client {
