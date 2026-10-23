@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::bitmap::AllocationBitmap;
 
-pub const FREE_KEY: u64 = u64::MAX;
+pub(crate) const FREE_KEY: u64 = u64::MAX;
 
 pub(crate) struct Slab {
     pub start_offset: u64,
@@ -14,7 +14,7 @@ pub(crate) struct Slab {
 }
 
 impl Slab {
-    pub fn new(start_offset: u64, slab_size: u64, element_size: u32) -> Self {
+    pub(crate) fn new(start_offset: u64, slab_size: u64, element_size: u32) -> Self {
         let num_slots = (slab_size / element_size as u64) as u32;
         Self {
             start_offset,
@@ -26,7 +26,7 @@ impl Slab {
         }
     }
 
-    pub fn alloc_slot(&mut self) -> Option<(usize, u64)> {
+    pub(crate) fn alloc_slot(&mut self) -> Option<(usize, u64)> {
         let idx = self.bitmap.find_free_from(self.rover)?;
         self.bitmap.set(idx);
         self.rover = (idx + 1) % self.bitmap.num_slots() as usize;
@@ -34,32 +34,32 @@ impl Slab {
         Some((idx, offset))
     }
 
-    pub fn free_slot(&mut self, slot_index: usize) {
+    pub(crate) fn free_slot(&mut self, slot_index: usize) {
         self.bitmap.clear(slot_index);
         self.keys[slot_index] = FREE_KEY;
     }
 
-    pub fn set_key(&mut self, slot_index: usize, key: u64) {
+    pub(crate) fn set_key(&mut self, slot_index: usize, key: u64) {
         self.keys[slot_index] = key;
     }
 
-    pub fn get_key(&self, slot_index: usize) -> u64 {
+    pub(crate) fn get_key(&self, slot_index: usize) -> u64 {
         self.keys[slot_index]
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.bitmap.is_all_free()
     }
 
-    pub fn is_full(&self) -> bool {
+    pub(crate) fn is_full(&self) -> bool {
         self.bitmap.count_set() == self.bitmap.num_slots() as usize
     }
 
-    pub fn slot_offset(&self, slot_index: usize) -> u64 {
+    pub(crate) fn slot_offset(&self, slot_index: usize) -> u64 {
         self.start_offset + slot_index as u64 * self.element_size as u64
     }
 
-    pub fn slot_for_offset(&self, byte_offset: u64) -> Option<usize> {
+    pub(crate) fn slot_for_offset(&self, byte_offset: u64) -> Option<usize> {
         if byte_offset < self.start_offset {
             return None;
         }
@@ -75,15 +75,15 @@ impl Slab {
         }
     }
 
-    pub fn mark_slot_allocated(&mut self, slot_index: usize) {
+    pub(crate) fn mark_slot_allocated(&mut self, slot_index: usize) {
         self.bitmap.set(slot_index);
     }
 
-    pub fn num_slots(&self) -> u32 {
+    pub(crate) fn num_slots(&self) -> u32 {
         self.bitmap.num_slots()
     }
 
-    pub fn contains_offset(&self, byte_offset: u64) -> bool {
+    pub(crate) fn contains_offset(&self, byte_offset: u64) -> bool {
         byte_offset >= self.start_offset && byte_offset < self.start_offset + self.slab_size
     }
 }
@@ -93,17 +93,17 @@ pub(crate) struct SizeClassManager {
 }
 
 impl SizeClassManager {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             map: HashMap::new(),
         }
     }
 
-    pub fn add_slab(&mut self, element_size: u32, start_offset: u64) {
+    pub(crate) fn add_slab(&mut self, element_size: u32, start_offset: u64) {
         self.map.entry(element_size).or_default().push(start_offset);
     }
 
-    pub fn remove_slab(&mut self, element_size: u32, start_offset: u64) {
+    pub(crate) fn remove_slab(&mut self, element_size: u32, start_offset: u64) {
         if let Some(offsets) = self.map.get_mut(&element_size) {
             offsets.retain(|&o| o != start_offset);
             if offsets.is_empty() {
@@ -112,7 +112,7 @@ impl SizeClassManager {
         }
     }
 
-    pub fn get_slabs(&self, element_size: u32) -> &[u64] {
+    pub(crate) fn get_slabs(&self, element_size: u32) -> &[u64] {
         self.map
             .get(&element_size)
             .map(|v| v.as_slice())

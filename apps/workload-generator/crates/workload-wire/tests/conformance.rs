@@ -8,6 +8,7 @@
 //! Everything here runs with **no agent, no server and no accelerator** — the format is
 //! bytes, and a format that can only be checked against a live peer is a format that will
 //! be checked rarely.
+#![cfg(feature = "workload-tests")]
 
 use workload_wire::frame::{
     opcode, submit_flags, ClearCacheAck, Counters, DrainAck, Header, Hello, HelloAck, OpHistogram,

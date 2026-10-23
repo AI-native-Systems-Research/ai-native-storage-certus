@@ -5,7 +5,7 @@ use crate::cuda_ffi;
 
 /// Verify that a GPU pointer refers to device memory (contiguous, pinned).
 #[cfg(feature = "gpu")]
-pub fn check_memory_attributes(ptr: *mut std::ffi::c_void) -> Result<(), String> {
+pub(crate) fn check_memory_attributes(ptr: *mut std::ffi::c_void) -> Result<(), String> {
     if ptr.is_null() {
         return Err("Null handle pointer".to_string());
     }

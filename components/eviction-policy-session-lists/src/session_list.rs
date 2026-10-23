@@ -87,7 +87,7 @@ impl Pool {
     /// its recency and returns the existing index without allocating a node or
     /// altering lineage. Otherwise a new node is linked as the child (new leaf)
     /// of the session's current leaf, or becomes a head+leaf for a new session.
-    pub fn register(&mut self, key: CacheKey, session: SessionId) -> u32 {
+    pub(crate) fn register(&mut self, key: CacheKey, session: SessionId) -> u32 {
         if let Some(&idx) = self.by_key.get(&key) {
             self.touch(idx);
             return idx;
@@ -120,7 +120,7 @@ impl Pool {
 
     /// Refresh the recency of node `index`. Returns `false` if the handle is
     /// invalid or already removed.
-    pub fn touch(&mut self, index: u32) -> bool {
+    pub(crate) fn touch(&mut self, index: u32) -> bool {
         if !self.is_active(index) {
             return false;
         }
@@ -187,13 +187,13 @@ impl Pool {
     /// Select, remove, and return the oldest-accessed leaf's key across all
     /// sessions in the pool, or `None` if empty. The evicted block is not
     /// recency-refreshed.
-    pub fn evict_oldest(&mut self) -> Option<CacheKey> {
+    pub(crate) fn evict_oldest(&mut self) -> Option<CacheKey> {
         let (_, idx) = *self.leaves.iter().next()?;
         Some(self.unlink(idx))
     }
 
     /// Return up to `n` oldest-leaf keys in eviction order, removing none.
-    pub fn candidates(&self, n: usize) -> Vec<CacheKey> {
+    pub(crate) fn candidates(&self, n: usize) -> Vec<CacheKey> {
         self.leaves
             .iter()
             .take(n)
@@ -203,7 +203,7 @@ impl Pool {
 
     /// Stop tracking node `index`, re-splicing its chain. Returns `false` if the
     /// handle is invalid or already removed.
-    pub fn remove(&mut self, index: u32) -> bool {
+    pub(crate) fn remove(&mut self, index: u32) -> bool {
         if !self.is_active(index) {
             return false;
         }
@@ -212,12 +212,12 @@ impl Pool {
     }
 
     /// Number of active tracked nodes.
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.len
     }
 
     /// Reset the pool to empty.
-    pub fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.nodes.clear();
         self.free.clear();
         self.by_key.clear();

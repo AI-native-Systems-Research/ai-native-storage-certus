@@ -54,7 +54,7 @@ fn main() {
 
     // 2. Look up the Rust-ABI factory function.
     //    No C shim needed — the symbol returns a ComponentRef directly.
-    let create: Symbol<fn() -> ComponentRef> =
+    let create: Symbol<'_, fn() -> ComponentRef> =
         unsafe { lib.get(b"create_component") }.expect("symbol 'create_component' not found");
 
     // 3. Create the component via the factory.

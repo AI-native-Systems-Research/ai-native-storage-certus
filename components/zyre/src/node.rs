@@ -387,35 +387,39 @@ impl Drop for ZyreNode {
 }
 
 unsafe fn zlist_to_peer_ids(list: *mut ffi::zlist_t) -> Vec<PeerId> {
-    let mut result = Vec::new();
-    if list.is_null() {
-        return result;
+    unsafe {
+        let mut result = Vec::new();
+        if list.is_null() {
+            return result;
+        }
+        let mut item = ffi::zlist_first(list);
+        while !item.is_null() {
+            let s = std::ffi::CStr::from_ptr(item as *const libc::c_char)
+                .to_string_lossy()
+                .into_owned();
+            result.push(PeerId::new(s));
+            item = ffi::zlist_next(list);
+        }
+        result
     }
-    let mut item = ffi::zlist_first(list);
-    while !item.is_null() {
-        let s = std::ffi::CStr::from_ptr(item as *const libc::c_char)
-            .to_string_lossy()
-            .into_owned();
-        result.push(PeerId::new(s));
-        item = ffi::zlist_next(list);
-    }
-    result
 }
 
 unsafe fn zlist_to_strings(list: *mut ffi::zlist_t) -> Vec<String> {
-    let mut result = Vec::new();
-    if list.is_null() {
-        return result;
+    unsafe {
+        let mut result = Vec::new();
+        if list.is_null() {
+            return result;
+        }
+        let mut item = ffi::zlist_first(list);
+        while !item.is_null() {
+            let s = std::ffi::CStr::from_ptr(item as *const libc::c_char)
+                .to_string_lossy()
+                .into_owned();
+            result.push(s);
+            item = ffi::zlist_next(list);
+        }
+        result
     }
-    let mut item = ffi::zlist_first(list);
-    while !item.is_null() {
-        let s = std::ffi::CStr::from_ptr(item as *const libc::c_char)
-            .to_string_lossy()
-            .into_owned();
-        result.push(s);
-        item = ffi::zlist_next(list);
-    }
-    result
 }
 
 fn parse_event(event_ptr: *mut ffi::zyre_event_t) -> Result<ZyreEvent, ZyreError> {

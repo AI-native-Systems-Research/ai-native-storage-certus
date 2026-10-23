@@ -45,6 +45,24 @@ HF3FS_MOUNT_HOST=/mnt/3fs ./run-serve-h3fs0-cc131k.sh
 
 Restarting with `sudo ./teardown.sh && sudo ./run.sh` brings the **same** cluster back. FDB, targets and the token persist in `/cache/3fs`. To start fresh, run `sudo ./teardown.sh --wipe`.
 
+### Building before the client image exists
+
+By default `build.sh` starts the client image (`localhost/vllm-hf3fs-bench:vllm0.30.0`, from podman's default store) to read the 3FS commit. If that image hasn't been built on this host, podman tries to pull it from a registry at `localhost` and fails:
+
+```
+Error: unable to copy from source docker://localhost/vllm-hf3fs-bench:vllm0.30.0: ... connection refused
+error: cannot read hf3fs_py_usrbio version from localhost/vllm-hf3fs-bench:vllm0.30.0; set HF3FS_REF
+```
+
+Set the commit yourself to skip the lookup. For the vllm0.30.0 client it is `22fca04`:
+
+```bash
+HF3FS_REF=22fca04 ./build.sh
+STORE_DIR=/mnt/certus1/podman HF3FS_REF=22fca04 ./build.sh    # with a custom build store
+```
+
+You still need the client image for `smoke.sh` and `run-serve-h3fs0-cc131k.sh`. Build it from the **same** commit so the server and client match: `cd apps/vllm-serve && HF3FS_REF=22fca04 ./build_h3fs_container.sh 0.30.0`.
+
 ## Where podman stores images (`STORE_DIR`)
 
 The root filesystem here is 70 GB and nearly full. By default, root's podman store (`/var/lib/containers`) and podman's staging directory (`/var/tmp`) both live on it, so `run.sh` can't copy the 3.2 GB image in. Point the store at a folder on a bigger filesystem. The rootless (build) store and the rootful (run) store must be **different** folders:

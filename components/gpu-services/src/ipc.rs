@@ -8,7 +8,7 @@ use interfaces::GpuIpcHandle;
 
 /// Decode a base64 payload into raw IPC handle bytes and size.
 #[cfg(feature = "gpu")]
-pub fn decode_ipc_payload(base64_str: &str) -> Result<([u8; 64], u64), String> {
+pub(crate) fn decode_ipc_payload(base64_str: &str) -> Result<([u8; 64], u64), String> {
     use base64::Engine;
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(base64_str)
@@ -39,7 +39,7 @@ pub fn decode_ipc_payload(base64_str: &str) -> Result<([u8; 64], u64), String> {
 
 /// Open a CUDA IPC memory handle and return a GpuIpcHandle.
 #[cfg(feature = "gpu")]
-pub fn open_ipc_handle(handle_bytes: [u8; 64], size: u64) -> Result<GpuIpcHandle, String> {
+pub(crate) fn open_ipc_handle(handle_bytes: [u8; 64], size: u64) -> Result<GpuIpcHandle, String> {
     let cuda_handle = cuda_ffi::cudaIpcMemHandle_t {
         reserved: handle_bytes,
     };

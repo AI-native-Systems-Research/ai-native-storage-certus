@@ -2,7 +2,7 @@
 //!
 //! Requires: NVMe SSD bound to SPDK (VFIO), CUDA GPU, hugepages configured.
 //! Run with:
-//!   cargo bench -p dispatcher-v1 --features hardware-test --bench pipeline_hw_benchmark
+//!   cargo bench -p dispatcher-p2p --features hardware-test --bench pipeline_hw_benchmark
 
 #![cfg(feature = "hardware-test")]
 #![allow(clippy::arc_with_non_send_sync)]
@@ -156,7 +156,7 @@ const MEASURED_ITERS: usize = 20;
 
 fn run_pipeline_bench(
     ctx: &HwContext,
-    ring: &dispatcher::pipeline::PipelineRing,
+    ring: &dispatcher_p2p::pipeline::PipelineRing,
     total_bytes: usize,
 ) -> Result<BenchResult, String> {
     let ibd = component_core::iunknown::query::<dyn IBlockDevice + Send + Sync>(&*ctx.block_dev)
@@ -190,7 +190,7 @@ fn run_pipeline_bench(
     // Warmup
     for _ in 0..WARMUP_ITERS {
         unsafe {
-            dispatcher::pipeline::pipelined_ssd_to_gpu(
+            dispatcher_p2p::pipeline::pipelined_ssd_to_gpu(
                 &*ibd,
                 &*igpu,
                 ring,
@@ -208,7 +208,7 @@ fn run_pipeline_bench(
     for i in 0..MEASURED_ITERS {
         let start = Instant::now();
         unsafe {
-            dispatcher::pipeline::pipelined_ssd_to_gpu(
+            dispatcher_p2p::pipeline::pipelined_ssd_to_gpu(
                 &*ibd,
                 &*igpu,
                 ring,
@@ -283,7 +283,7 @@ fn run_zero_copy_bench(
     // Warmup
     for _ in 0..WARMUP_ITERS {
         unsafe {
-            dispatcher::pipeline::pipelined_ssd_to_gpu_zero_copy(
+            dispatcher_p2p::pipeline::pipelined_ssd_to_gpu_zero_copy(
                 &*ibd,
                 &*igpu,
                 streams,
@@ -304,7 +304,7 @@ fn run_zero_copy_bench(
     for i in 0..MEASURED_ITERS {
         let start = Instant::now();
         unsafe {
-            dispatcher::pipeline::pipelined_ssd_to_gpu_zero_copy(
+            dispatcher_p2p::pipeline::pipelined_ssd_to_gpu_zero_copy(
                 &*ibd,
                 &*igpu,
                 streams,
@@ -362,10 +362,10 @@ fn main() {
     let igpu = query_interface!(ctx.gpu_services, IGpuServices).expect("IGpuServices query failed");
     eprintln!(
         "Allocating pipeline ring ({} CUDA-pinned buffers, {} KiB each)...",
-        dispatcher::pipeline::PIPELINE_RING_SIZE,
+        dispatcher_p2p::pipeline::PIPELINE_RING_SIZE,
         ctx.max_transfer / 1024
     );
-    let ring = dispatcher::pipeline::PipelineRing::new(&*igpu, ctx.max_transfer)
+    let ring = dispatcher_p2p::pipeline::PipelineRing::new(&*igpu, ctx.max_transfer)
         .expect("PipelineRing allocation failed");
 
     let stream_sizes: &[usize] = &[
@@ -378,12 +378,12 @@ fn main() {
     ];
 
     println!();
-    println!("=== Pipelined SSD→DRAM→GPU Benchmark (dispatcher::pipeline) ===");
+    println!("=== Pipelined SSD→DRAM→GPU Benchmark (dispatcher_p2p::pipeline) ===");
     println!("  max_transfer: {} KiB", ctx.max_transfer / 1024);
     println!("  sector_size:  {} bytes", ctx.sector_size);
     println!(
         "  ring_size:    {} buffers",
-        dispatcher::pipeline::PIPELINE_RING_SIZE
+        dispatcher_p2p::pipeline::PIPELINE_RING_SIZE
     );
     println!("  warmup:       {} iterations", WARMUP_ITERS);
     println!("  measured:     {} iterations", MEASURED_ITERS);

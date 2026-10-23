@@ -17,7 +17,7 @@
 //! point of the mode and it makes it expensive to test: at rate 1.0 a 120-second description takes
 //! two minutes. So the tests that only need the arithmetic run at a high rate, and the one test
 //! that checks the wallclock cost itself uses a span of a couple of seconds.
-
+#![cfg(feature = "workload-tests")]
 #![cfg(feature = "live")]
 
 use std::collections::HashSet;

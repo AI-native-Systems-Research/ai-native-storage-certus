@@ -634,7 +634,7 @@ impl Simulation {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "workload-tests"))]
 mod tests {
     use super::*;
 

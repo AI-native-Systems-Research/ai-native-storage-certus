@@ -31,6 +31,7 @@ from .compat import (
     block_bytes_from_offloading_config,
     extract_gpu_ptrs,
     kv_cache_layout_name,
+    kv_events_enabled,
 )
 from .gpu import current_device, ipc_for_tensor
 from .handler import worker_class
@@ -168,6 +169,7 @@ class CertusShmqOffloadingSpec(OffloadingSpec):
                 )
         else:
             vllm_config, kv_cache_config = args
+            self._vllm_config = vllm_config
             super().__init__(vllm_config, kv_cache_config)
             assert len(self.gpu_block_size) == 1, (
                 "CertusShmqOffloadingSpec requires exactly one KV cache group"
@@ -182,6 +184,20 @@ class CertusShmqOffloadingSpec(OffloadingSpec):
             )
             # kv_cache_layout is a 0.30+ OffloadingConfig field; absent here.
             self._kv_cache_layout = None
+
+        # The worker pairs GPU block i with key i, so one key must cover exactly one
+        # GPU block. Chunked offload (block_size / blocks_per_chunk > 1) would
+        # silently truncate the transfer and corrupt KV — refuse it.
+        chunk_factor = getattr(self, "blocks_per_chunk", None)
+        if chunk_factor is None:
+            chunk_factor = getattr(self, "block_size_factor", 1)
+        if chunk_factor != 1:
+            raise ValueError(
+                f"Certus shmq connector offloads exactly one GPU block per key; "
+                f"got {chunk_factor} GPU blocks per offload chunk. Unset "
+                f"'block_size' / 'blocks_per_chunk' in kv_connector_extra_config "
+                f"(OFFLOAD_BLOCK_SIZE)."
+            )
 
         self._shm_path = str(self.extra_config.get("shm_path", "/dev/shm/certus-shmq"))
 
@@ -231,6 +247,9 @@ class CertusShmqOffloadingSpec(OffloadingSpec):
                 self._get_ring(claim_slot=self._dp_slot_base),
                 block_size_bytes=size,
                 world_size=self._world_size,
+                events_enabled=kv_events_enabled(
+                    self, getattr(self, "config", None), getattr(self, "_vllm_config", None)
+                ),
             )
         return self._manager
 

@@ -57,6 +57,15 @@ pub struct GreeterHandler {
     logger: Option<Arc<dyn ILogger + Send + Sync>>,
 }
 
+impl std::fmt::Debug for GreeterHandler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GreeterHandler")
+            .field("count", &self.count)
+            .field("has_logger", &self.logger.is_some())
+            .finish()
+    }
+}
+
 impl GreeterHandler {
     /// Create a handler without a logger.
     pub fn new() -> Self {

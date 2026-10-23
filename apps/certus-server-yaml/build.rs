@@ -218,6 +218,7 @@ fn generate_composition(manifest: &ProfileManifest) -> String {
     writeln!(code).unwrap();
 
     // Generate ComponentStack struct
+    writeln!(code, "#[allow(missing_debug_implementations)]").unwrap();
     writeln!(code, "pub struct ComponentStack {{").unwrap();
     for export in &manifest.exports {
         let trait_name = interface_to_trait(&export.interface);

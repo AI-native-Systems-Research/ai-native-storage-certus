@@ -50,8 +50,17 @@ cannot see a mailbox, a device or an output format.
 | `workload-node-agent` | **no** | the per-node daemon, and **everything that touches the mailbox or the GPU**: the turn executor, the opcode mapping, the payload buffer. It holds no simulation state |
 
 **Only the agent is excluded from `default-members`**, so a plain `cargo build`
-or `cargo test` at the repository root covers everything except the one crate
-that needs an accelerator.
+at the repository root covers everything except the one crate that needs an
+accelerator.
+
+**Tests are opt-in.** Each crate's unit and integration tests are gated on its
+`workload-tests` feature (off by default), so `cargo test --workspace` skips
+them; only doctests run. To run them:
+
+```bash
+cargo test -p workload-gen --features workload-gen/workload-tests
+cargo test --workspace --features workload-gen/workload-tests,workload-model/workload-tests,workload-trace/workload-tests,workload-wire/workload-tests
+```
 
 That is a consequence of routing every node through an agent, including the
 local one (FR-079). The generator used to own a second, direct mailbox path and
@@ -259,8 +268,8 @@ the same on either side of the cliff.
 Run the check, which needs no server, no accelerator and no cluster:
 
 ```bash
-cargo test -p workload-gen --features live --test sweep
-cargo test -p workload-gen --features live --test sweep -- --ignored  # 5 seeds
+cargo test -p workload-gen --features live,workload-tests --test sweep
+cargo test -p workload-gen --features live,workload-tests --test sweep -- --ignored  # 5 seeds
 ```
 
 Expect the **cross-session** hit rate to rise monotonically across five

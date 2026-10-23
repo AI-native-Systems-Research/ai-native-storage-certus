@@ -6,7 +6,7 @@ use crate::DeviceContext;
 use crate::config::BenchConfig;
 
 /// Print the configuration summary to stdout.
-pub fn print_config(config: &BenchConfig, device_contexts: &[DeviceContext]) {
+pub(crate) fn print_config(config: &BenchConfig, device_contexts: &[DeviceContext]) {
     println!("=== IOPS Benchmark (Multi-Device) ===");
     println!("Devices:      {}", device_contexts.len());
     for (i, ctx) in device_contexts.iter().enumerate() {
@@ -40,7 +40,7 @@ pub fn print_config(config: &BenchConfig, device_contexts: &[DeviceContext]) {
 /// Print a per-second progress line to stderr.
 ///
 /// Shows per-device aggregate IOPS when multiple devices are in use.
-pub fn print_progress(
+pub(crate) fn print_progress(
     elapsed_secs: u64,
     total_iops: u64,
     per_thread_iops: &[u64],
@@ -87,7 +87,7 @@ pub fn print_progress(
 }
 
 /// Print the final benchmark report to stdout.
-pub fn print_final(
+pub(crate) fn print_final(
     report: &FinalReport,
     op_type: OpType,
     thread_results: &[crate::stats::ThreadResult],

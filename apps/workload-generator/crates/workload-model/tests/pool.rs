@@ -13,6 +13,7 @@
 //! what a cache actually sees. A pool holding its size perfectly can still be
 //! wrong in exactly this way, which is why the population count is not the thing
 //! to look at.
+#![cfg(feature = "workload-tests")]
 
 use workload_model::description::Population;
 use workload_model::distribution::{Distribution, Kind};

@@ -13,7 +13,7 @@ use crate::lba::{LbaGenerator, RandomLba, SequentialLba};
 use crate::stats::ThreadResult;
 
 /// A per-thread IO worker that submits async operations and drains completions.
-pub struct Worker {
+pub(crate) struct Worker {
     config: Arc<BenchConfig>,
     channels: ClientChannels,
     ns_info: NamespaceInfo,
@@ -38,7 +38,7 @@ impl Worker {
     /// `thread_index` is used for sequential LBA region partitioning.
     /// The caller must provide pre-connected `ClientChannels` and the `NamespaceInfo`
     /// for the target namespace.
-    pub fn new(
+    pub(crate) fn new(
         config: Arc<BenchConfig>,
         channels: ClientChannels,
         ns_info: NamespaceInfo,
@@ -100,7 +100,7 @@ impl Worker {
     /// Run the IO loop until the stop flag is set.
     ///
     /// Returns the collected per-thread statistics.
-    pub fn run(&mut self) -> ThreadResult {
+    pub(crate) fn run(&mut self) -> ThreadResult {
         // Wait until all workers and the main thread are ready so that
         // bench_start is set before any IO is issued.
         self.start_barrier.wait();

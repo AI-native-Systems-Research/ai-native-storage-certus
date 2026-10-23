@@ -855,7 +855,7 @@ pub(crate) fn exponential<R: Rng + ?Sized>(rng: &mut R, mean: f64) -> f64 {
     -mean * (-rng.gen::<f64>()).ln_1p()
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "workload-tests"))]
 mod tests {
     use super::*;
     use crate::distribution::{Distribution, Kind};

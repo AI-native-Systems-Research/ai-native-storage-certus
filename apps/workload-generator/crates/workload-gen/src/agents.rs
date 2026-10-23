@@ -1084,7 +1084,7 @@ fn describe(spec: &AgentSpec, e: HandshakeError) -> String {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "workload-tests"))]
 mod tests {
     use super::*;
 

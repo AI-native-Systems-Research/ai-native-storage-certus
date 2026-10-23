@@ -29,9 +29,9 @@ use workload_wire::server::Server;
 /// Exit codes. Non-zero for anything that means the node cannot serve a run.
 mod exit {
     /// Clean stop, asked for by the generator.
-    pub const OK: i32 = 0;
+    pub(crate) const OK: i32 = 0;
     /// The mailbox, the GPU or the port could not be obtained.
-    pub const SETUP: i32 = 2;
+    pub(crate) const SETUP: i32 = 2;
 }
 
 /// The node agent's command line.

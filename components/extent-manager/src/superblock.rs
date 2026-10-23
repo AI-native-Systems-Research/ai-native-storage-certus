@@ -1,11 +1,15 @@
 use crate::error;
 use interfaces::ExtentManagerError;
 
-pub const SUPERBLOCK_SIZE: usize = 4096;
-pub const SUPERBLOCK_MAGIC: u64 = 0x4345_5254_5553_5634; // "CERTUSV4"
-pub const FORMAT_VERSION: u32 = 6;
+pub(crate) const SUPERBLOCK_SIZE: usize = 4096;
+pub(crate) const SUPERBLOCK_MAGIC: u64 = 0x4345_5254_5553_5634; // "CERTUSV4"
+pub(crate) const FORMAT_VERSION: u32 = 6;
 
 #[derive(Debug, Clone)]
+#[allow(
+    unreachable_pub,
+    reason = "re-exported as `pub` under `cfg(any(test, feature = \"testing\"))` for tests/checkpoint.rs"
+)]
 pub struct Superblock {
     pub magic: u64,
     pub version: u32,
@@ -25,7 +29,7 @@ pub struct Superblock {
 
 impl Superblock {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub(crate) fn new(
         data_disk_size: u64,
         sector_size: u32,
         slab_size: u64,
@@ -55,7 +59,7 @@ impl Superblock {
         }
     }
 
-    pub fn serialize(&self) -> Vec<u8> {
+    pub(crate) fn serialize(&self) -> Vec<u8> {
         let mut buf = vec![0u8; SUPERBLOCK_SIZE];
         let mut pos = 0;
 
@@ -96,6 +100,10 @@ impl Superblock {
         buf
     }
 
+    #[allow(
+        unreachable_pub,
+        reason = "re-exported as `pub` under `cfg(any(test, feature = \"testing\"))` for tests/checkpoint.rs"
+    )]
     pub fn deserialize(buf: &[u8]) -> Result<Self, ExtentManagerError> {
         if buf.len() < SUPERBLOCK_SIZE {
             return Err(error::corrupt_metadata("superblock too short"));

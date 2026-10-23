@@ -13,7 +13,7 @@ use crate::lba::{LbaGenerator, RandomLba, SequentialLba};
 use crate::stats::ThreadResult;
 
 /// Parameters for constructing a [`Worker`].
-pub struct WorkerParams {
+pub(crate) struct WorkerParams {
     pub config: Arc<BenchConfig>,
     pub channels: ClientChannels,
     pub ns_info: NamespaceInfo,
@@ -28,7 +28,7 @@ pub struct WorkerParams {
 }
 
 /// A per-thread IO worker that submits async operations and drains completions.
-pub struct Worker {
+pub(crate) struct Worker {
     config: Arc<BenchConfig>,
     channels: ClientChannels,
     sector_size: usize,
@@ -49,7 +49,7 @@ pub struct Worker {
 
 impl Worker {
     /// Create a new worker from the given parameters.
-    pub fn new(params: WorkerParams) -> Result<Self, NvmeBlockError> {
+    pub(crate) fn new(params: WorkerParams) -> Result<Self, NvmeBlockError> {
         let sector_size = params.ns_info.sector_size as usize;
         let max_blocks_per_io = (params.config.max_block_size() / sector_size) as u64;
         let numa = if params.numa_node >= 0 {
@@ -110,7 +110,7 @@ impl Worker {
     /// Run the IO loop until the stop flag is set.
     ///
     /// Returns the collected per-thread statistics.
-    pub fn run(&mut self) -> ThreadResult {
+    pub(crate) fn run(&mut self) -> ThreadResult {
         eprintln!(
             "worker: device={} thread={:?} qd={} bufs={}r+{}w",
             self.device_idx,

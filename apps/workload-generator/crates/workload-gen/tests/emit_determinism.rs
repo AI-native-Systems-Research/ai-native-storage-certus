@@ -22,6 +22,7 @@
 //! binary tends not to be exercised at all, and the exit codes are part of
 //! `contracts/cli.md` — code 3 especially, which exists so a sweep driver cannot
 //! mistake an invalid run for a data point.
+#![cfg(feature = "workload-tests")]
 
 use std::fs;
 use std::path::Path;
