@@ -1,7 +1,65 @@
 # Certus Kubernetes Deployment Guide
 
 This guide documents the full procedure for setting up a bare-metal Kubernetes
-cluster and deploying the Certus server container image.
+cluster and deploying the Certus server container image. If the cluster is
+already set up (sections 1-3), start with the quick start.
+
+## Quick start: your own certus on your own nodes
+
+Certus runs as two DaemonSets per deployment, one per NUMA domain, on the nodes
+whose `certus.ai/worker` label carries the deployment's value. A developer's
+deployment is a namespace, a label value and an image of their own:
+
+```bash
+export CERTUS_REGISTRY=registry.example.com CERTUS_REPO=my-team-docker-local
+OWNER=scott                                         # your deployment's name
+
+deploy/k8s/certus-nodes.sh list                     # who owns which node
+deploy/k8s/certus-nodes.sh claim "$OWNER" node5     # refuses a node someone else holds
+
+# Build (full-transfer by default; ~30GB, tagged with the repo's short SHA),
+# push, and render the manifests for your namespace and nodes.
+CERTUS_NAMESPACE=certus-$OWNER CERTUS_NODE_SELECTOR_VALUE=$OWNER \
+  deploy/k8s/build-image-and-push.sh
+
+kubectl create namespace certus-$OWNER
+kubectl create secret docker-registry artifactory-creds -n certus-$OWNER \
+    --docker-server="$CERTUS_REGISTRY" --docker-username=<user> --docker-password=<api-key>
+kubectl apply -f deploy/k8s/certus-server-numa.yaml
+kubectl -n certus-$OWNER get pods -o wide           # one numa0 + one numa1 pod per node
+```
+
+Each node then serves `/dev/shm/certus-shmq-numa{0,1}` (the mailboxes vLLM
+attaches to), metrics on 9400/9401, and, with `full-transfer`, the transfer
+endpoint on `<node RoCE IP>:7481` / `:7482`. To stop, delete the namespace and
+release the nodes:
+
+```bash
+kubectl delete namespace certus-$OWNER
+deploy/k8s/certus-nodes.sh release "$OWNER" node5   # or: claim true node5, back to the shared deployment
+```
+
+Running certus **by hand** on a node instead (for a debugger, a branch build, a
+benchmark): claim the node for a name no DaemonSet selects, and k8s leaves it
+alone while you start `certus-server-yaml` yourself.
+
+```bash
+deploy/k8s/certus-nodes.sh claim "$OWNER-manual" node2   # the shared pods exit; nothing replaces them
+```
+
+### Two labels, deliberately independent
+
+| label | set by | selects |
+| --- | --- | --- |
+| `certus.ai/worker=<owner>` | `deploy/k8s/certus-nodes.sh` | which certus deployment's DaemonSets run on the node |
+| `llm-d.ai/instance=<namespace>` | `deploy/llm-d/install.sh` | which llm-d instance's model servers run on the node |
+
+They are separate on purpose: llm-d can run under k8s on nodes whose certus is
+started by hand, or certus can run without llm-d. The consequence to keep in
+mind is that **a vLLM pod offloads into whichever certus serves its node's
+mailbox**, whatever either label says — the connector attaches to the node's
+`/dev/shm/certus-shmq-numa*` path. When you pair an llm-d instance with a certus
+deployment, give them the same nodes; nothing checks that for you.
 
 ## Cluster Overview
 
