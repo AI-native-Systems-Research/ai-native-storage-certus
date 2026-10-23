@@ -39,7 +39,7 @@ interface boundary. `IDispatchMap::lookup` returns exactly the discriminant need
 (`components/interfaces/src/idispatch_map.rs:11-28`) — and both dispatchers match on it
 throughout `batch_lookup`, but every arm collapses to `Ok(())` or `Err(DispatcherError)`
 (`components/dispatcher/src/lib.rs:2108`,
-`components/dispatcher-p2p/src/lib.rs:1586`). The tier is known one line before it is
+`components/dispatcher-p2p/src/lib.rs:1585`). The tier is known one line before it is
 thrown away.
 
 **This is therefore an interface change, not only a transport change.** No new measurement
@@ -155,7 +155,7 @@ earlier wording and a reader deserves to know which parts were re-verified.
 | --- | --- |
 | `LookupResult` carries the four-way discriminant | holds, `idispatch_map.rs:11-28` |
 | `IDispatcher::batch_lookup` discards it | holds, `idispatcher.rs:360-363` |
-| Both dispatchers collapse every arm | holds, `dispatcher/src/lib.rs:2108`, `dispatcher-p2p/src/lib.rs:1586` |
+| Both dispatchers collapse every arm | holds, `dispatcher/src/lib.rs:2108`, `dispatcher-p2p/src/lib.rs:1585` |
 | The peer's tier already crosses the wire | holds, `Avail::{None, Memory, Disk}`, `remote-lookup/src/wire.rs:23-30` |
 | No remote-lookup wire change needed | holds |
 
@@ -225,7 +225,7 @@ rework. They must be re-counted at plan time; the line numbers there are known s
   distinct value changes no dispatcher behaviour: today `LookupResult::MismatchSize` yields
   `InvalidParameter` (`components/dispatcher/src/lib.rs:2095-2100`) and such keys are never
   offered to the remote path, because the remote block selects only `KeyNotFound`
-  (`lib.rs:2471-2478`). Folding it into `MISS` would have required changing that behaviour;
+  (`lib.rs:2470-2477`). Folding it into `MISS` would have required changing that behaviour;
   this decision deliberately does not.
 - Q: Must every request land in exactly one bucket? → A: **Yes, and that forces a seventh
   value, `ERROR`.** Today `hits + misses ≠ requests`: `lookup_misses` increments only on
@@ -236,7 +236,7 @@ rework. They must be re-counted at plan time; the line numbers there are known s
   being attempted (see `## Out of Scope`).
 - Q: Does `served_by` describe the route taken or where the entry ends up? → A: **The route
   taken.** A local SSD hit in `dispatcher` is promoted into DRAM as part of being served
-  (`lib.rs:2130-2139`), so "served from SSD" and "now DRAM-resident" are both true of the
+  (`lib.rs:2130-2138`), so "served from SSD" and "now DRAM-resident" are both true of the
   same request; the former is what a hit-rate measurement means. This distinction is sharper
   in `dispatcher-p2p`, where the cold path does **not** populate DRAM synchronously (FR-014).
 - Q: Which value does a zero byte mean? → A: **`0` means "not served", and nothing else.**
@@ -430,7 +430,7 @@ assert identical attribution for identical residency, except where FR-014 specif
   remote pass overwrites it. Attribution MUST reflect the final resolution, and MUST NOT
   count the key as both a miss and a remote hit.
 - **A result overwritten after attribution.** A failed batched sync rewrites already-`Ok`
-  results to `IoError` (`components/dispatcher/src/lib.rs:2590-2592`) and the
+  results to `IoError` (`components/dispatcher/src/lib.rs:2589-2591`) and the
   concurrent-promotion recovery pass rewrites `AlreadyExists` (`:2615-2620`). Attribution
   MUST be rewritten in lockstep; an attribution left behind by an overwritten result reports
   a tier for a key that failed.
@@ -719,7 +719,7 @@ Two Phase 1 findings that bear on requirements elsewhere in this spec:
   Recorded as a known limitation for the workload-generator spec's SC-007, which depends on
   it.
 - **Re-deriving the workload generator's 5% `GetIoStats` agreement tolerance.** `GetIoStats`
-  is device-level and drive-aggregated (`components/dispatcher/src/lib.rs:3258-3273`) and
+  is device-level and drive-aggregated (`components/dispatcher/src/lib.rs:3257-3272`) and
   includes background promotion traffic, so exact agreement with critical-path SSD bytes was
   never achievable. Belongs to that spec.
 - **Splitting `certus_evictions_total` into demoted versus removed**, and its dependence on a

@@ -52,7 +52,7 @@ below states what it must be shown to fail against.
   **Must be shown to fail** against today's code, which maps both to `IoError`. A test that
   passes before the fix is testing nothing.
 
-- [x] **T004** Preserve the distinction at `components/dispatcher/src/lib.rs:2626-2629`: map
+- [x] **T004** Preserve the distinction at `components/dispatcher/src/lib.rs:2625-2628`: map
   `RemoteLookupError::NotFound` → `DispatcherError::KeyNotFound(key)` and leave
   `TransportError` → `IoError`. The interface already carries the distinction
   (`iremote_lookup.rs:102-106`); the dispatcher collapses it.
@@ -78,7 +78,7 @@ below states what it must be shown to fail against.
   The plan assumed the observer because it assumed the server had to be *told*; it only had
   to *ask*. Recorded rather than ticked, so the plan's wrong assumption stays visible.
 
-- [x] **T007** Count per batch at `components/dispatcher/src/lib.rs:2577`, where the dispatcher
+- [x] **T007** Count per batch at `components/dispatcher/src/lib.rs:2576`, where the dispatcher
   zips `remote_results` back and already knows each key's outcome. Requester-side: what this
   node *obtained from* peers.
 

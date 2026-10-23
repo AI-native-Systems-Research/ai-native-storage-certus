@@ -208,7 +208,7 @@ The system keeps both DRAM and SSD tiers within configured utilization bounds wi
     exactly the reasons set out in interfaces `001-interfaces` FR-031a. The defect would be
     identical in this dispatcher; only the profile differs.
   - Contract: interfaces `001-interfaces` FR-031a. Caller: remote-lookup
-    `002-remote-lookup-rdma` FR-039. (`src/lib.rs:2872`.)
+    `002-remote-lookup-rdma` FR-039. (`src/lib.rs:2871`.)
 - **FR-029** *(New 2026-10-05; rewritten 2026-10-09 — BACKFILL.)* This component MUST report,
   through `IDispatcher::tier_event_stats()`, the eviction counters of `dispatcher` spec
   `002-served-by-tier-attribution` FR-033/FR-034 for its **foreground** eviction paths
@@ -271,7 +271,7 @@ The system keeps both DRAM and SSD tiers within configured utilization bounds wi
   `store_backpressure_events` (FR-029). Nothing already stored is dropped on either outcome; a
   store that runs out of budget is simply not cached. The retry loop mirrors `dispatcher`'s
   `reserve_memory` (p2p does not count `store_already_resident`; see FR-029). Test: `reserve_memory_backpressures_until_write_through_lands`.
-  (`src/lib.rs:2446-2524`.)
+  (`src/lib.rs:2445-2523`.)
 - **FR-032** *(New 2026-10-10 — FUTURE, not implemented; MUST NOT be counted as drift.)* If
   repeat cold reads of the same keys matter, cold-to-DRAM promotion SHOULD be **frequency-gated**
   (e.g. promote a key on its second cold hit) instead of FR-009's promote-every-cold-read, as
@@ -295,7 +295,7 @@ appears never to have been exercised.**
 
 > `dispatcher-p2p: P2P ring unavailable, cold reads use DRAM path`
 
-**No such DRAM path exists.** The only cold-path use of the ring (`src/lib.rs:1804`) is
+**No such DRAM path exists.** The only cold-path use of the ring (`src/lib.rs:1803`) is
 `p2p_ring_guard.as_ref().expect("dispatcher-p2p requires P2P ring; use full.yaml profile
 for DRAM path")`. So the component logs a fallback at startup and panics ~12 000 requests
 later when the first cold read arrives. Two contradictory statements about one condition.

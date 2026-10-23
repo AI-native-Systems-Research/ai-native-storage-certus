@@ -20,7 +20,7 @@ Phase 1 delivers three things inside `dispatcher` and `certus-server-yaml`, with
 interface or wire change:
 
 1. A requester-side remote-hit counter, incremented at the one site where the dispatcher
-   already knows the answer (`lib.rs:2577`; the other two `remote_lookup.get()` guards are
+   already knows the answer (`lib.rs:2576`; the other two `remote_lookup.get()` guards are
    `join_cluster` and `leave_cluster`, not lookups).
 2. Closure of the two confirmed accounting holes, so hits plus misses plus errors equals
    entries requested (FR-024).
@@ -104,7 +104,7 @@ components/dispatcher/specs/002-served-by-tier-attribution/
 ### Source Code (repository root)
 
 ```text
-components/dispatcher/src/lib.rs        # count + reclassify at lib.rs:2577
+components/dispatcher/src/lib.rs        # count + reclassify at lib.rs:2576
 lib/shmq-dispatcher/src/translate.rs    # close both accounting holes; new observer method
 apps/certus-server-yaml/src/
 ├── metrics.rs                          # ServiceCounters gains the counters

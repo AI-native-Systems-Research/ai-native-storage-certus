@@ -435,7 +435,7 @@ impl BackgroundEvictor {
         extent_mgrs: Vec<Arc<dyn IExtentManager + Send + Sync>>,
         config: EvictorConfig,
         logger: Option<Arc<dyn ILogger + Send + Sync>>,
-        eviction_tx: Option<EvictionSender>,
+        eviction_tx: Arc<Mutex<Option<EvictionSender>>>,
         tier_counters: Arc<TierEventCounters>,
     ) -> Self {
         let shutdown = Arc::new(AtomicBool::new(false));
@@ -451,7 +451,7 @@ impl BackgroundEvictor {
                     &extent_mgrs,
                     &config,
                     logger.as_deref(),
-                    eviction_tx.as_ref(),
+                    &eviction_tx,
                     &tier_counters,
                 );
             })
@@ -477,7 +477,7 @@ impl BackgroundEvictor {
         extent_mgrs: &[Arc<dyn IExtentManager + Send + Sync>],
         config: &EvictorConfig,
         logger: Option<&(dyn ILogger + Send + Sync)>,
-        eviction_tx: Option<&EvictionSender>,
+        eviction_tx: &Mutex<Option<EvictionSender>>,
         tier_counters: &TierEventCounters,
     ) {
         loop {
@@ -529,7 +529,7 @@ impl BackgroundEvictor {
                 // Remove from memory-tier (no-op if not present).
                 let _ = mt.remove(key);
 
-                if let Some(tx) = eviction_tx {
+                if let Some(ref tx) = *eviction_tx.lock().unwrap() {
                     tx.emit(EvictionEvent {
                         key,
                         reason: EvictionReason::Removed,

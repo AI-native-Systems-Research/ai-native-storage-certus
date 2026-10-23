@@ -143,7 +143,7 @@ Every site in `batch_lookup` that assigns a result must assign an attribution. F
 | Concurrent-promotion recovery (overwrite) | :2615-2620 | `Dram` on success |
 | Init / receptacle failure, whole batch | :2017-2042 | `Error` |
 
-`components/dispatcher-p2p` mirrors this at `dispatcher-p2p/src/lib.rs:1620-2043`, with two
+`components/dispatcher-p2p` mirrors this at `dispatcher-p2p/src/lib.rs:1619-2042`, with two
 differences: its cold path is SSD → GPU BAR1 ring → D2D with **no synchronous DRAM
 promotion** (still `Ssd` — see spec FR-014), and it rejects multi-region N>1 requests at
 `:1624` (`Error` — see spec FR-015).
