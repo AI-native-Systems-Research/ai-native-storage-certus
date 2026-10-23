@@ -26,10 +26,14 @@ deploy/llm-d/
       certus/                 certus KV offload
         kustomization.yaml    overlay layered on ../agg
         patch.yaml            hostIPC, entrypoint, cache env, mailbox mount
-        entrypoint-certus.sh  derives the mailbox from the GPU's NUMA domain
+        entrypoint-certus.sh  derives the mailbox from the GPU's NUMA domain;
+                              wraps an existing --kv-transfer-config
       pd/                     prefill/decode disaggregation
         kustomization.yaml    overlay on llm-d's pd-disaggregation base
         patch.yaml            prefill + decode engines, NIXL over TCP
+      pd-certus/              P/D with certus beside NIXL
+        kustomization.yaml    overlay layered on ../pd
+        patch.yaml            certus/'s wiring, on both roles
 ```
 
 ## Profiles and the private site file
@@ -276,6 +280,7 @@ silently on the next deploy. After a bump, re-run `install.sh` — the
 deploy/llm-d/install.sh                 # aggregated serving
 WITH_CERTUS=1 deploy/llm-d/install.sh   # + certus KV-cache offload
 PD=1 deploy/llm-d/install.sh            # prefill/decode disaggregation
+PD=1 WITH_CERTUS=1 deploy/llm-d/install.sh   # P/D, certus beside NIXL
 DRY_RUN=1 PD=1 deploy/llm-d/install.sh  # show the plan; change nothing
 UNINSTALL=1 deploy/llm-d/install.sh     # remove the instance; free its nodes
 ```
@@ -325,8 +330,22 @@ for P/D routing, not a tuned deployment.
   H200). It sets when the prefix-affinity filter gives way to load, so on A30s
   it is effectively "never". Re-measure with llm-d's
   `guides/recipes/router/calibration` before trusting any affinity behaviour.
-- **Not combinable with `WITH_CERTUS` yet.** Both set `--kv-transfer-config`.
-  Running both means wrapping them in vLLM's `MultiConnector`.
+- **With certus (`WITH_CERTUS=1`): `profiles/a30/pd-certus`.** Each role runs
+  `MultiConnector[NixlConnector, Offloading(certus)]`, NIXL first. The certus
+  entrypoint lifts `pd`'s `--kv-transfer-config` out of the args and wraps it,
+  so the NIXL settings stay in `pd/patch.yaml` alone. MultiConnector loads from
+  the first connector with a hit, and every connector saves:
+  - **decode**: NIXL pulls the prompt GPU->GPU as before; certus only stores.
+  - **prefill**: NIXL claims nothing, so certus serves what its node holds,
+    and with `kv_transfer_params: {"certus_fetch_from": "<ip>:<port>"}` on a
+    request, fetches the prompt's blocks from that certus instance first (its
+    transfer endpoint, as it logs at start; the `full-transfer` server profile).
+  - The outer config carries the first connector's `kv_role` and
+    `kv_load_failure_policy`: the scheduler reads the policy from the outer
+    config only, so decode's `fail` would otherwise silently become the default.
+  - Needs a connector image with the fetch path (`publish-image.sh`) and certus
+    servers on the prefill and decode nodes; see
+    [certus offload prerequisites](#certus-offload-prerequisites).
 - **Restarting the prefill pod: restart decode too.** NIXL's decode side caches
   the prefill agent. With the vLLM 0.30 image a restarted prefill can segfault
   decode, or leave it failing every handoff for up to an hour (llm-d's
