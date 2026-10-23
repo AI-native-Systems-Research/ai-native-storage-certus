@@ -10,13 +10,14 @@ shm-queue control plane. The Rust-side interface delta is `contracts/idispatcher
 
 ## The taxonomy
 
-Six meaningful values. Every looked-up key gets exactly one.
+Seven meaningful values. Every looked-up key gets exactly one.
 
 | Value | Data delivered? | Meaning |
 | --- | --- | --- |
 | `DRAM` | yes | Local memory tier hit; the block was already resident. |
 | `SSD` | yes | A local data drive was read to serve this request. |
 | `REMOTE` | yes | A peer served it. **Not** subdivided by the peer's tier — see below. |
+| `FETCHED` | yes | Fetched from a named peer ahead of this lookup (shm-queue `FETCH`), and this is that block's first serve. See below. |
 | `MISS` | no | Not found in any tier, local or remote. |
 | `SIZE_MISMATCH` | no | Present, but at a different size than requested. |
 | `ERROR` | no | Attempted and failed for some other reason. |
@@ -64,9 +65,22 @@ a responder-side counter of peer-triggered promotions — see
 `components/remote-lookup/specs/002-remote-lookup-rdma` — which needs no wire value, no
 per-key plumbing, and no `IRemoteLookup` tier delta.
 
+### `FETCHED` is not `REMOTE`, and not `DRAM` (decided 2026-10-22)
+
+An explicit fetch (`components/certus-transfer-endpoint/specs/001-rdma-cache-transfer/
+contracts/shmq-fetch.md`) lands a block in the local memory tier *before* the lookup that
+reads it, so the dispatcher sees an ordinary memory-tier entry and says `DRAM` — which would
+silently absorb every remote fetch into the local hit count. It is also kept apart from
+`REMOTE`: remote lookup forwards a miss inside one lookup, a fetch is requested earlier, by
+another party, over another transport. **No dispatcher reports `FETCHED`.** The control plane
+that ran the fetch re-attributes the block's *first* serve and then forgets it, so later hits
+of that block are honestly `DRAM`; a mark is also dropped on eviction and after a TTL, so it
+can never re-attribute an unrelated entry. The fetch counters (`fetch_hits`,
+`lookup_hits_fetched`, `fetched_unused`) close the accounting.
+
 ### Hits versus non-hits
 
-`DRAM`, `SSD`, `REMOTE` are hits. `MISS`, `SIZE_MISMATCH`, `ERROR` are not.
+`DRAM`, `SSD`, `REMOTE`, `FETCHED` are hits. `MISS`, `SIZE_MISMATCH`, `ERROR` are not.
 A hit is reported if and only if the lookup succeeded, so a consumer can compute an object
 hit rate as `hits / total` without needing to know the error taxonomy.
 
@@ -119,6 +133,7 @@ So the byte carries **not-served, or which tier served**:
 1  DRAM                local memory tier hit; already resident
 2  SSD                 a local data drive was read to serve this request
 3  REMOTE              a peer served it
+4  FETCHED             fetched from a named peer ahead of the lookup; its first serve
 ```
 
 and the full six-value `ServedBy` lives in `components/interfaces`, where the dispatcher
@@ -155,7 +170,7 @@ treats a size mismatch as a miss by design (`size-mismatch = cache miss`), so it
   two-valued byte an unexpected value could only mean a key that was never delivered, and
   treating it as a hit would leave a block unstored. That reasoning was right then and is
   wrong now, so the predicate becomes `!= 0` and the test's intent moves to the unassigned
-  range (`4..=255`) where it still holds.
+  range (`5..=255`, since `FETCHED` took `4`) where it still holds.
 
   **A side channel was considered and rejected**, because it does not avoid this. Appending a
   per-key tier array after the `ok` array would be invisible to the connector (it decodes
@@ -168,8 +183,10 @@ treats a size mismatch as a miss by design (`size-mismatch = cache miss`), so it
   proto3 reserves zero as a default and it doubled as version detection. Here `0` is already
   spoken for, and reserving it for "unknown" would silently reclassify every miss as an
   unattributed hit. Version detection belongs to the mailbox's own protocol version.
-- **A conforming server never emits a value outside `0..=3`.** No wire enforcement, so it
-  needs a test. Values `4..=255` are unassigned; a reader MUST treat an unknown non-zero
+- **`FETCHED` is wire value `4`** — the first use of the unassigned range, exactly as the
+  rule below provides for: every reader tests `byte != 0`, so an old reader sees a served key.
+- **A conforming server never emits a value outside `0..=4`.** No wire enforcement, so it
+  needs a test. Values `5..=255` are unassigned; a reader MUST treat an unknown non-zero
   value as *served, tier unknown* rather than as not-served, so that a future split of
   `REMOTE` cannot turn a hit into a miss in an old reader.
 - **The interface change is compiler-enforced; the byte is not.** Widening
