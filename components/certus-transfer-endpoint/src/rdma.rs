@@ -1076,9 +1076,78 @@ pub struct VerbsRecv {
     pub buf: RawSge,
 }
 
+/// The IPv4 address of the first active RDMA port carrying a RoCE v2
+/// (IPv4-mapped) GID: what an endpoint listens on when the operator names no
+/// address. Ports 1 and 2 of each device are probed, devices in enumeration
+/// order.
+pub(crate) fn first_active_rdma_ipv4() -> Result<String, String> {
+    // SAFETY: every enumeration call is null/return checked before use; each
+    // opened device is closed and the device list freed on all paths.
+    unsafe {
+        let mut num: c_int = 0;
+        let list = ffi::ibv_get_device_list(&mut num);
+        if list.is_null() || num <= 0 {
+            return Err("no RDMA devices found".into());
+        }
+        let mut found = None;
+        for i in 0..num as isize {
+            let dev = *list.offset(i);
+            if dev.is_null() {
+                continue;
+            }
+            let ctx = ffi::ibv_open_device(dev);
+            if ctx.is_null() {
+                continue;
+            }
+            'ports: for port in 1u8..=2 {
+                let mut attr: ffi::ibv_port_attr = std::mem::zeroed();
+                if ffi::certus_te_query_port(ctx, port, &mut attr) != 0
+                    || attr.state != ffi::IBV_PORT_ACTIVE
+                {
+                    continue;
+                }
+                for idx in 0..attr.gid_tbl_len.max(0) {
+                    let mut gid: ffi::ibv_gid = std::mem::zeroed();
+                    if ffi::ibv_query_gid(ctx, port, idx, &mut gid) != 0 {
+                        continue;
+                    }
+                    let r = gid.raw;
+                    // RoCE v2 IPv4-mapped GID: ::ffff:a.b.c.d
+                    if r[..10].iter().all(|b| *b == 0) && r[10] == 0xff && r[11] == 0xff {
+                        let ip = std::net::Ipv4Addr::new(r[12], r[13], r[14], r[15]);
+                        if !ip.is_unspecified() {
+                            found = Some(ip.to_string());
+                            break 'ports;
+                        }
+                    }
+                }
+            }
+            ffi::ibv_close_device(ctx);
+            if found.is_some() {
+                break;
+            }
+        }
+        ffi::ibv_free_device_list(list);
+        found.ok_or_else(|| "no active RDMA device with an IPv4 (RoCE v2) GID found".into())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The auto-detected address is a local RoCE v2 address: on the test
+    /// host, the one `CERTUS_RDMA_TEST_IP` names when it is the first device's.
+    #[test]
+    #[ignore = "needs an RDMA device; set CERTUS_RDMA_TEST_IP"]
+    fn auto_detect_finds_the_hosts_roce_address() {
+        let ip = first_active_rdma_ipv4().expect("an active RoCE port");
+        let parsed: std::net::Ipv4Addr = ip.parse().expect("an IPv4 literal");
+        assert!(!parsed.is_unspecified() && !parsed.is_loopback(), "{ip}");
+        if let Ok(want) = std::env::var("CERTUS_RDMA_TEST_IP") {
+            eprintln!("auto-detected {ip}, test IP {want}");
+        }
+    }
 
     #[test]
     fn private_data_over_255_rejected_not_truncated() {

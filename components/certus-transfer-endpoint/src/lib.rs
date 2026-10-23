@@ -334,6 +334,18 @@ mod component {
 /// ```
 pub use component::CertusTransferEndpoint;
 
+/// The IPv4 address of this host's first active RDMA (RoCE v2) port, for an
+/// endpoint whose operator names no address. `rdma` builds only: without it
+/// there is no NIC to ask.
+///
+/// # Errors
+///
+/// A message if no device, or no active port with an IPv4-mapped GID, exists.
+#[cfg(feature = "rdma")]
+pub fn first_active_rdma_ipv4() -> Result<String, String> {
+    rdma::first_active_rdma_ipv4()
+}
+
 impl CertusTransferEndpoint {
     /// An endpoint awaiting [`ITransferEndpointAdmin::configure`]. The same
     /// as the generated `new_default`.
