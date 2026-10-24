@@ -3274,15 +3274,56 @@ impl IDispatcher for DispatcherComponent {
             .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
 
         // Lookup the entry to determine its location (waits for any active writer).
+        // Only a found entry carries this lookup's read reference: `NotExist`
+        // (and `MismatchSize`, which the map never answers from `lookup`)
+        // acquires none, so none may be released either — a blind release
+        // there would decrement a reference held by another caller, e.g. the
+        // write-through pin a concurrent populate leaves on the entry it
+        // registers in the window between this lookup and the release.
         let block_offset = match dm.lookup(key) {
             Ok(LookupResult::BlockDevice { offset }) => {
                 let _ = dm.release_read(key);
                 Some(offset)
             }
-            Ok(_) => {
+            Ok(LookupResult::MemoryTier { .. }) => {
+                // A resident entry may already carry its write-through SSD
+                // copy (`ssd_offset`), which this lookup result does not
+                // expose. Flip the entry to its block-device state — the
+                // transition that records that offset — and look it up once
+                // more to learn which extent to free. Hold this lookup's read
+                // reference across the flip: the memory-tier evictor's
+                // demotion (`try_evict_to_block`) refuses a pinned entry, so
+                // the state cannot change underneath us. `InvalidState` means
+                // no SSD copy exists yet (write-through not landed): nothing
+                // to free — a pending job's extent is freed by the takeover
+                // below or by the job itself.
+                let converted = dm.convert_memory_tier_to_block(key).is_ok();
                 let _ = dm.release_read(key);
-                None
+                if converted {
+                    match dm.lookup(key) {
+                        Ok(LookupResult::BlockDevice { offset }) => {
+                            let _ = dm.release_read(key);
+                            Some(offset)
+                        }
+                        // The entry vanished (a concurrent remove won the
+                        // race) or was re-promoted in place (its extent stays
+                        // the live entry's): the map removal below settles
+                        // the outcome either way.
+                        Ok(LookupResult::MemoryTier { .. }) => {
+                            let _ = dm.release_read(key);
+                            None
+                        }
+                        // NotExist takes no read reference: nothing to release.
+                        Ok(_) => None,
+                        Err(_) => None,
+                    }
+                } else {
+                    None
+                }
             }
+            // NotExist / MismatchSize: this lookup took no read reference, so
+            // there is none of this caller's to release.
+            Ok(_) => None,
             Err(_) => return Err(DispatcherError::KeyNotFound(key)),
         };
 
@@ -7470,3 +7511,7 @@ mod repair_test_store_already_resident;
 #[cfg(test)]
 #[path = "repair_test_eviction_window_tinylfu.rs"]
 mod repair_test_eviction_window_tinylfu;
+
+#[cfg(test)]
+#[path = "repair_test_remove_frees_ssd_extent.rs"]
+mod repair_test_remove_frees_ssd_extent;
