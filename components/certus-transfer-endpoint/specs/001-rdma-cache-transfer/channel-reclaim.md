@@ -1,7 +1,7 @@
 # Design: reclaiming a dead client's shmq channel, and CLEAR_ALL
 
 **Feature**: `001-rdma-cache-transfer` (found during T087) | **Date**: 2026-10-23 |
-**Status**: proposed, not built
+**Status**: Part 1 built (`lib/shm-queue`, `ring.py`; hardware run pending); Part 2 not built
 
 Two changes to the shared-memory control plane (`lib/shm-queue`, `lib/shmq-dispatcher`,
 `certus-shmq-connector/ring.py`): a channel held by a process that died is returned to the
