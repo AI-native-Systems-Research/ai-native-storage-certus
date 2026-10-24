@@ -32,20 +32,59 @@
 //! `FUTEX_WAKE`, *not* the `_PRIVATE` forms `std` defaults to): the shared futex
 //! keys on the underlying tmpfs inode+offset, so it works across unrelated
 //! processes mapping the region at different virtual addresses.
+//!
+//! # Channel claims (ABI 2)
+//!
+//! A client claims a channel by taking an **open-file-description lock**
+//! (`F_OFD_SETLK`) on one byte of the mailbox file, at
+//! `total_size + channel` -- past the mapped region, so the layout is
+//! untouched. The lock is the claim: the kernel releases it when the holding
+//! process exits, however it exits, so a channel whose owner died is free to
+//! the next claimer, which takes it over. The owner word (`OFF_OWNER`) is kept
+//! as a non-zero marker for observability only.
+//!
+//! Each claim uses its own open file description (the mapping's file reopened
+//! through `/proc/self/fd`): OFD locks held by one description do not conflict
+//! with each other, so sharing one would let a thread "claim" a channel a
+//! sibling thread holds. Locks are keyed on the inode, so they are seen across
+//! PID and mount namespaces -- a vLLM pod and a certus pod share only the tmpfs
+//! file. A forked child that inherits a claim's descriptor keeps the claim
+//! alive after its parent dies; the Rust client opens with `O_CLOEXEC` (std's
+//! default) and is not used across `fork`. The Python client closes inherited
+//! claim descriptors in an after-fork hook. Even with `O_CLOEXEC`, a
+//! multithreaded process that spawns a child holds a copy of every claim
+//! between the fork and the exec, so a channel released in that window reads
+//! as held for that moment: a claimer then takes another channel, or finds
+//! none and fails as for a full mailbox. Never a leak.
+//!
+//! A takeover inherits the channel's sequence numbers: the new owner waits until
+//! the dead owner's last request (if any) has been answered, then continues from
+//! that sequence, so the server neither skips its first request nor matches it
+//! against a stale reply. Every claim does this, since a channel's previous
+//! owner may have been another process even after a clean release.
 
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
 use std::io;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::{Path, PathBuf};
 use std::ptr;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::Mutex;
 use std::time::Duration;
 
 /// Magic value written to [`Header::magic`] once the server has finished
 /// initialising the region. Clients spin on this before touching any channel.
 pub const MAGIC_READY: u32 = 0x5148_4d53; // "SMHQ" little-endian-ish
 /// Layout ABI version. Client asserts a match at attach.
-pub const ABI_VERSION: u32 = 1;
+///
+/// 2: channels are claimed by OFD lock (see the module docs). A version-1
+/// client holds no locks, so a version-2 client would take its live channels
+/// for dead ones; the two must never share a mailbox.
+pub const ABI_VERSION: u32 = 2;
+
+/// How long a claim waits for a dead owner's in-flight request to be answered
+/// before giving up on that channel.
+pub const TAKEOVER_TIMEOUT: Duration = Duration::from_secs(30);
 /// Size (bytes) of each control block. One cache line: satisfies the futex
 /// 4-byte alignment requirement and isolates the busy-polled `seq` words so
 /// request/response cells and neighbouring channels never false-share.
@@ -458,6 +497,10 @@ pub struct Client {
     map: Mapping,
     layout: Layout,
     seqs: Vec<AtomicU32>,
+    /// One open file description per claimed channel; dropping it releases
+    /// the claim's lock.
+    claims: Mutex<Vec<Option<File>>>,
+    reclaimed: AtomicU64,
 }
 
 impl std::fmt::Debug for Client {
@@ -513,7 +556,14 @@ impl Client {
         drop(probe);
         let map = Mapping::open(path.as_ref(), layout.total_size, false)?;
         let seqs = (0..num_channels).map(|_| AtomicU32::new(0)).collect();
-        Ok(Client { map, layout, seqs })
+        let claims = Mutex::new((0..num_channels).map(|_| None).collect());
+        Ok(Client {
+            map,
+            layout,
+            seqs,
+            claims,
+            reclaimed: AtomicU64::new(0),
+        })
     }
 
     #[inline]
@@ -526,25 +576,68 @@ impl Client {
         self.layout.cap_req
     }
 
-    /// Claim a free channel via CAS on its owner word. Returns the index, or
-    /// `None` if all channels are taken.
+    /// Claim a free channel: one whose lock no live process holds. Returns the
+    /// index, or `None` if every channel is held by a live client.
+    ///
+    /// A channel taken over from a dead client is counted in
+    /// [`Client::reclaimed`].
+    ///
+    /// # Panics
+    ///
+    /// If the mailbox file cannot be reopened, or the kernel refuses an OFD
+    /// lock for a reason other than a conflict: both mean claims cannot work at
+    /// all, which must not be mistaken for "all channels busy".
+    #[expect(
+        clippy::expect_used,
+        reason = "a mailbox that cannot be reopened or locked cannot be claimed at all; \
+                  reporting it as 'no channel free' would hide the cause"
+    )]
     pub fn claim_channel(&self) -> Option<usize> {
-        let tid = (std::process::id() ^ thread_id()) | 1; // non-zero
+        let mut claims = self
+            .claims
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         for ch in 0..self.layout.num_channels {
+            if claims[ch].is_some() {
+                continue; // ours already: a probe from our own process would succeed
+            }
+            let file = self
+                .reopen()
+                .expect("shmq: reopen mailbox for a channel lock");
+            let locked = ofd_lock(&file, self.lock_offset(ch))
+                .unwrap_or_else(|e| panic!("shmq: OFD lock on channel {ch}: {e}"));
+            if !locked {
+                continue; // a live owner, or a concurrent claimer
+            }
             let base = self.layout.channel_base(ch);
             // SAFETY: aligned atomic owner word inside the mapping.
             let owner = unsafe { self.map.atomic_at(base + OFF_OWNER) };
-            if owner
-                .compare_exchange(0, tid, Ordering::AcqRel, Ordering::Relaxed)
-                .is_ok()
-            {
-                return Some(ch);
+            let previous = owner.swap((std::process::id() ^ thread_id()) | 1, Ordering::AcqRel);
+            let Some(seq) = self.adopt_seq(ch, TAKEOVER_TIMEOUT) else {
+                // The dead owner's request is still unanswered: leave the
+                // channel, it is unusable until the server replies.
+                owner.store(previous, Ordering::Release);
+                continue;
+            };
+            self.seqs[ch].store(seq, Ordering::Relaxed);
+            if previous != 0 {
+                self.reclaimed.fetch_add(1, Ordering::Relaxed);
             }
+            claims[ch] = Some(file);
+            return Some(ch);
         }
         None
     }
 
-    /// Release a previously claimed channel.
+    /// Channels this client has taken over from dead clients.
+    #[must_use]
+    pub fn reclaimed(&self) -> u64 {
+        self.reclaimed.load(Ordering::Relaxed)
+    }
+
+    /// Release a previously claimed channel. The owner word is cleared before
+    /// the lock is dropped, so a claimer that gets the lock never sees a stale
+    /// owner and miscounts a clean release as a takeover.
     pub fn release_channel(&self, ch: usize) {
         let base = self.layout.channel_base(ch);
         // SAFETY: aligned atomic owner word inside the mapping.
@@ -552,6 +645,61 @@ impl Client {
             self.map
                 .atomic_at(base + OFF_OWNER)
                 .store(0, Ordering::Release);
+        }
+        let mut claims = self
+            .claims
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        claims[ch] = None; // closes the description: the lock goes with it
+    }
+
+    /// Byte of the mailbox file whose lock is channel `ch`'s claim.
+    #[expect(
+        clippy::expect_used,
+        reason = "a mailbox is far below i64::MAX bytes; Layout bounds it"
+    )]
+    fn lock_offset(&self, ch: usize) -> i64 {
+        i64::try_from(self.layout.total_size + ch).expect("mailbox offset fits i64")
+    }
+
+    /// A new open file description of the mapped file (same inode, even if the
+    /// path has since been replaced by a restarted server).
+    fn reopen(&self) -> io::Result<File> {
+        OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(format!("/proc/self/fd/{}", self.map.fd))
+    }
+
+    /// Wait until channel `ch`'s last request (if any) has been answered, and
+    /// return that sequence number: the base the new owner continues from.
+    /// `None` if it is still unanswered after `timeout`.
+    fn adopt_seq(&self, ch: usize, timeout: Duration) -> Option<u32> {
+        let base = self.layout.channel_base(ch);
+        let rc = base + self.layout.resp_control_off;
+        let start = std::time::Instant::now();
+        loop {
+            // SAFETY: aligned atomic seq words inside the mapping.
+            let (req, resp) = unsafe {
+                (
+                    self.map.atomic_at(base + OFF_SEQ).load(Ordering::Acquire),
+                    self.map.atomic_at(rc + OFF_SEQ).load(Ordering::Acquire),
+                )
+            };
+            if req == resp {
+                return Some(req);
+            }
+            if start.elapsed() > timeout {
+                return None;
+            }
+            // SAFETY: live aligned atomic word in the mapping.
+            unsafe {
+                futex_wait(
+                    self.map.atomic_at(rc + OFF_SEQ),
+                    resp,
+                    Some(Duration::from_millis(10)),
+                );
+            }
         }
     }
 
@@ -645,6 +793,34 @@ impl Client {
                 .to_vec();
             (status, payload)
         }
+    }
+}
+
+/// Take an OFD write lock on byte `off` of `file`, without waiting. `Ok(false)`
+/// if another open file description holds it.
+fn ofd_lock(file: &File, off: i64) -> io::Result<bool> {
+    // SAFETY: an all-zero flock is a valid value; the fields set below are the
+    // whole request (l_pid must be 0 for OFD locks).
+    let mut fl: libc::flock = unsafe { std::mem::zeroed() };
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "F_WRLCK and SEEK_SET are small constants; struct flock declares them short"
+    )]
+    {
+        fl.l_type = libc::F_WRLCK as libc::c_short;
+        fl.l_whence = libc::SEEK_SET as libc::c_short;
+    }
+    fl.l_start = off;
+    fl.l_len = 1;
+    // SAFETY: fcntl on a valid descriptor with a pointer to a live flock.
+    let rc = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_OFD_SETLK, &fl) };
+    if rc == 0 {
+        return Ok(true);
+    }
+    let e = io::Error::last_os_error();
+    match e.raw_os_error() {
+        Some(libc::EAGAIN | libc::EACCES) => Ok(false),
+        _ => Err(e),
     }
 }
 

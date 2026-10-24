@@ -9,6 +9,11 @@
 //!
 //! # terminal 2: 100k round-trips of a 256-byte payload
 //! shmq-echo bench /dev/shm/certus-shmq-echo 100000 256
+//!
+//! # a client that claims N channels, optionally leaves one request
+//! # unanswered (opcode 0xDEAD, which `serve` does not answer), and waits
+//! # to be killed -- the dead client channel reclaim must recover from
+//! shmq-echo hold /dev/shm/certus-shmq-echo 8 [stuck]
 //! ```
 
 use std::sync::atomic::Ordering;
@@ -21,7 +26,8 @@ fn main() {
     let usage = || -> ! {
         eprintln!(
             "usage:\n  {0} serve <path> [n_channels=8] [cap_req=1048576] [cap_resp=131072]\n  \
-             {0} bench <path> [iters=100000] [payload_bytes=256]",
+             {0} bench <path> [iters=100000] [payload_bytes=256]\n  \
+             {0} hold <path> [n_channels=1] [stuck]",
             args.first().map(String::as_str).unwrap_or("shmq-echo")
         );
         std::process::exit(2);
@@ -35,6 +41,11 @@ fn main() {
             let cap_req = parse_or(&args, 4, 1 << 20);
             let cap_resp = parse_or(&args, 5, 1 << 17);
             serve(&path, n, cap_req, cap_resp);
+        }
+        "hold" => {
+            let n = parse_or(&args, 3, 1);
+            let stuck = args.get(4).is_some_and(|a| a == "stuck");
+            hold(&path, n, stuck);
         }
         "bench" => {
             let iters = parse_or(&args, 3, 100_000);
@@ -61,8 +72,11 @@ fn serve(path: &str, n: usize, cap_req: usize, cap_resp: usize) {
     loop {
         for (ch, seen) in last_seen.iter_mut().enumerate() {
             if let Some(req) = server.take_request(ch, seen) {
-                // Echo payload back, status = opcode.
-                server.reply(req.channel, req.seq, req.opcode, &req.payload);
+                // Echo payload back, status = opcode. STUCK is never answered:
+                // `hold ... stuck` uses it to leave a request in flight.
+                if req.opcode != STUCK {
+                    server.reply(req.channel, req.seq, req.opcode, &req.payload);
+                }
             }
         }
         sweeps = sweeps.wrapping_add(1);
@@ -70,6 +84,37 @@ fn serve(path: &str, n: usize, cap_req: usize, cap_resp: usize) {
             server.heartbeat();
         }
         std::hint::spin_loop();
+    }
+}
+
+/// An opcode `serve` never answers.
+const STUCK: u32 = 0xDEAD;
+
+/// Claim `n` channels, print `held <channels>` and wait to be killed. With
+/// `stuck`, first publish an unanswered request on the first channel (the
+/// request times out client-side after 1 ms; the channel stays in flight).
+#[expect(
+    clippy::expect_used,
+    reason = "a test harness: a failed attach or claim is the failure to report"
+)]
+fn hold(path: &str, n: usize, stuck: bool) {
+    let client = Client::attach(path, Duration::from_secs(10)).expect("attach shmq");
+    let chans: Vec<usize> = (0..n)
+        .map(|_| client.claim_channel().expect("claim channel"))
+        .collect();
+    if stuck {
+        let _ = client.request(
+            chans[0],
+            STUCK,
+            b"stuck",
+            10,
+            Duration::from_millis(1),
+            Duration::from_millis(1),
+        );
+    }
+    println!("held {chans:?}");
+    loop {
+        std::thread::sleep(Duration::from_secs(60));
     }
 }
 
