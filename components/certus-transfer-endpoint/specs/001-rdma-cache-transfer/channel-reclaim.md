@@ -1,7 +1,7 @@
 # Design: reclaiming a dead client's shmq channel, and CLEAR_ALL
 
 **Feature**: `001-rdma-cache-transfer` (found during T087) | **Date**: 2026-10-23 |
-**Status**: Part 1 built (`lib/shm-queue`, `ring.py`; hardware run pending); Part 2 not built
+**Status**: built. Part 1: `lib/shm-queue`, `ring.py` (vLLM-kill hardware run pending). Part 2: `IDispatcher::clear_all`, shm-queue op 18
 
 Two changes to the shared-memory control plane (`lib/shm-queue`, `lib/shmq-dispatcher`,
 `certus-shmq-connector/ring.py`): a channel held by a process that died is returned to the
@@ -200,46 +200,53 @@ already present. In T087 an "empty destination" therefore needed a server restar
 and benchmarks need a cold cache without the restart (and without the orphaned-mailbox
 restart of every engine that a server restart forces).
 
-### Proposal
+### Design
 
-**New op `CLEAR_ALL` (18): remove every entry from both tiers, freeing their extents.**
-Request empty; response `{removed:u64, still_pinned:u64}`.
+**Op `CLEAR_ALL` (18): remove every entry from both tiers, freeing their extents.**
+Request empty; response `{removed:u64, still_pinned:u64, fetch_pending:u64}`. Behind it,
+**`IDispatcher::clear_all() -> ClearAll { removed, still_pinned }`** (dispatcher spec 001
+FR-063).
 
-The dispatcher has no "every key" iterator: the memory tier's eviction policy lists
-memory-tier keys (`oldest_keys`), but nothing lists entries that live only on SSD. So
-`CLEAR_ALL` needs a new `IDispatcher::clear_all`, built on a new
-`IDispatchMap::keys()` (a snapshot of the keys, taken shard by shard), removing each
-with the existing `IDispatcher::remove` path -- which already handles both locations,
-frees the extent, and refuses a pinned entry.
+- **Listing every entry without a new map method.** The dispatch map has no key
+  iterator, and `define_interface!` drops method bodies, so a new `IDispatchMap::keys`
+  could not have a default: all 23 implementations in the workspace would need one. Two
+  sources already cover every entry instead -- the memory tier's `oldest_keys` (every DRAM
+  entry, with or without an SSD copy) and each drive's `IExtentManager::for_each_extent`
+  (every SSD entry, the walk the dispatcher already does at start-up to rebuild the map).
+  An entry is in at least one. So the only interface change is `IDispatcher::clear_all`
+  and the `ClearAll` struct (4 implementations).
+- **Removal** goes through `IDispatcher::remove`, which frees the slot, frees an SSD-only
+  entry's extent, and refuses a pinned entry. It does **not** free the SSD copy of an
+  entry still in DRAM (its lookup reports a memory-tier location, no offset), so
+  `clear_all` frees those extents itself from the listing, once the entry is out of the
+  map and nothing can reach them. Found by the first test run: the extents leaked.
+- **Pinned entries** are retried for 5 s, 1 ms apart; what is still listed then is
+  `still_pinned`, not an error, so a caller can tell "empty" from "nearly".
+- **Eviction events**: `remove` reports nothing, so `clear_all` emits a `Removed` event
+  per entry it removed; the connector forwards them to vLLM through `TAKE_EVENTS`.
+- **Fetch marks and pending fetches**: the translator drops every `Fetched` mark (counted
+  `fetched_unused`, so the attribution identity still closes); a fetch in flight keeps
+  its slots until its completion (FR-017) and lands afterwards. `fetch_pending` says how
+  many keys are still in flight, so a test can wait for zero.
 
-- **Pinned entries** (a lookup in flight, a write-through pending) are retried for a
-  bounded time, like `clear_memory_tier`; what is still pinned at the deadline is
-  reported in `still_pinned`, not an error, so a caller can tell "empty" from "nearly".
-- **Fetch marks and pending fetches**: the translator drops all `Fetched` marks (they
-  would otherwise re-attribute a later, unrelated entry under the same key -- the TTL
-  makes that bounded, but a clear should leave no state); a fetch in flight keeps its
-  slots until its completion, as FR-017 requires, so `CLEAR_ALL` does not touch them and
-  they land afterwards. The response says how many were in flight (`fetch_pending`), so
-  a test can wait for zero.
-- **Eviction events**: each removal produces a REMOVED event, as `remove` does, so vLLM's
-  view of the cache is told.
-- **`--format` already exists** for a clean start; `CLEAR_ALL` is the same end state
-  without the restart.
-
-Interface change: `IDispatcher::clear_all` and `IDispatchMap::keys` -- both
-`components/interfaces`, so **every component's spec-sync stamp moves** (the digest folds
-interfaces into all of them). Re-stamp last, once, with the rest of the branch.
+Interface change: `IDispatcher::clear_all` -- in `components/interfaces`, so every
+component's spec-sync stamp moves. Re-stamp last, once, with the rest of the branch.
 
 ### Tests
 
-- Populate N keys, flush to SSD, clear the memory tier, then `CLEAR_ALL`: every key
-  reads MISS, `removed == N`, extents free (the extent manager's free count returns to
-  its start).
-- A pinned key survives, is reported in `still_pinned`, and is removed by a second call
-  after the unpin.
-- Fetch marks are gone after `CLEAR_ALL`; a fetch in flight still lands.
-- Planted bugs: remove only memory-tier keys; forget the extent; drop a pinned entry --
-  each must fail a test.
+- Dispatcher (`repair_test_clear_all.rs`, one mock drive behind the real background
+  writer): SSD-only and DRAM-with-SSD-copy entries are all removed, extents freed, one
+  `Removed` event each; a DRAM-only entry (its write-through failed) is removed; a pinned
+  entry is kept and reported, and goes with a second call after the unpin. Four planted
+  bugs each caught: list memory-tier keys only; skip freeing the SSD copy's extent; emit no
+  event; release the pin to force removal.
+- Translator: marks dropped, the in-flight fetch reported and still landing, the identity
+  `hits = lookup_hits_fetched + fetched_unused + marks_live` closing; a planted "keep the
+  marks" caught.
+- On a real server (`full-fs-block`, a file as the drive): 64 blocks populated, flushed,
+  cleared from DRAM (still present: on SSD), then `CLEAR_ALL`: removed 64, 0 present, all
+  64 accepted again by populate, 64 `Removed` events drained. A restart after it recovered
+  0 extents; one before it, 64.
 
 ## Out of scope, found on the way
 
@@ -257,7 +264,7 @@ interfaces into all of them). Re-stamp last, once, with the rest of the branch.
 |---|---|---|
 | `lib/shm-queue` | OFD lock per claim, probe-and-take-over, seq resync, wait for in-flight reply; ABI 2 | medium |
 | `certus-shmq-connector/ring.py` | the same in Python (`fcntl.F_OFD_SETLK`); ABI 2 | medium |
-| `lib/shmq-dispatcher` | `CLEAR_ALL` op; drop fetch marks; channels gauges | small |
-| `components/interfaces` | `IDispatcher::clear_all`, `IDispatchMap::keys` | small, restamps all |
-| `components/dispatcher`, `components/dispatch-map` | implement them | small |
+| `lib/shmq-dispatcher` | `CLEAR_ALL` op; drop fetch marks | small |
+| `components/interfaces` | `IDispatcher::clear_all`, `ClearAll` | small, restamps all |
+| `components/dispatcher`, `components/dispatcher-p2p` | implement it | small |
 | deploy | none; server and connector image roll together (ABI 2) | -- |

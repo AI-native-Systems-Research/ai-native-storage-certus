@@ -116,6 +116,7 @@ OP_FLUSH_TO_SSD = 14
 OP_GET_IO_STATS = 15
 OP_TOUCH_CHECK = 16
 OP_FETCH = 17
+OP_CLEAR_ALL = 18
 
 STATUS_OK = 0
 
@@ -966,8 +967,17 @@ class Ring:
         return decode_ok_flags(self._dispatch(OP_REMOVE, encode_keys(keys)), len(keys))
 
     def clear_memory_tier(self) -> int:
-        """Evict the whole memory tier. Returns the number of entries cleared."""
+        """Evict the whole memory tier (entries with an SSD copy stay there).
+        Returns the number of entries cleared."""
         return decode_u64(self._dispatch(OP_CLEAR_MEMORY_TIER, b""))
+
+    def clear_all(self) -> tuple[int, int, int]:
+        """Remove every entry from both tiers: the cache is empty afterwards.
+        Returns ``(removed, still_pinned, fetch_pending)``: entries removed,
+        entries a pin kept, and keys of fetches still in flight (they land after
+        the clear)."""
+        payload = self._dispatch(OP_CLEAR_ALL, b"")
+        return struct.unpack_from("<QQQ", payload)
 
     def flush_to_ssd(self) -> int:
         """Drain pending write-through jobs. Returns the number flushed."""

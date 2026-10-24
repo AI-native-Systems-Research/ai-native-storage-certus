@@ -105,6 +105,7 @@ pub mod op {
     pub const GET_IO_STATS: u32 = 15;
     pub const TOUCH_CHECK: u32 = 16;
     pub const FETCH: u32 = 17;
+    pub const CLEAR_ALL: u32 = 18;
 }
 
 /// The `status` byte heading a Fetch response. Kept in sync with `ring.py`.
@@ -343,6 +344,7 @@ mod tests {
         assert_eq!(op::GET_IO_STATS, 15);
         assert_eq!(op::TOUCH_CHECK, 16);
         assert_eq!(op::FETCH, 17);
+        assert_eq!(op::CLEAR_ALL, 18);
     }
 
     /// The Check response byte is a tri-state wire contract shared with the

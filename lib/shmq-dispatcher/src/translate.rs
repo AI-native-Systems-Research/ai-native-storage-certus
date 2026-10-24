@@ -386,6 +386,7 @@ impl Translator {
             op::GET_IO_STATS => self.op_get_io_stats(&mut r),
             op::TOUCH_CHECK => self.op_touch_check(&mut r),
             op::FETCH => self.op_fetch(&mut r),
+            op::CLEAR_ALL => self.op_clear_all(&mut r),
             other => Err(OpError::Msg(format!("unknown opcode {other}"))),
         }
     }
@@ -994,6 +995,30 @@ impl Translator {
         Ok(w.into_bytes())
     }
 
+    /// Remove every entry from both tiers. Empty request; resp
+    /// `{ removed:u64, still_pinned:u64, fetch_pending:u64 }`.
+    ///
+    /// Fetch attribution marks go with the entries (a later entry under the
+    /// same key must not read as fetched). A fetch in flight is left alone: its
+    /// slots are reclaimed only by its completion (FR-017), so it lands after
+    /// the clear; `fetch_pending` says how many keys are still in flight, so a
+    /// caller can wait for zero.
+    fn op_clear_all(&self, _r: &mut Reader) -> Result<Vec<u8>, OpError> {
+        let c = self
+            .dispatcher
+            .clear_all()
+            .map_err(|e| OpError::Msg(format!("clear_all failed: {e}")))?;
+        let pending = self.fetcher.as_ref().map_or(0, |f| {
+            f.clear_marks();
+            f.stats().keys_pending
+        });
+        let mut w = Writer::with_capacity(24);
+        w.u64(c.removed);
+        w.u64(c.still_pinned);
+        w.u64(pending);
+        Ok(w.into_bytes())
+    }
+
     /// Evict the whole memory-tier. Empty request; resp `{ entries_cleared:u64 }`.
     /// Mirrors service.rs:874 (ClearMemoryTier).
     fn op_clear_memory_tier(&self, _r: &mut Reader<'_>) -> Result<Vec<u8>, OpError> {
@@ -1191,6 +1216,15 @@ mod tests {
         }
         fn clear_memory_tier(&self) -> Result<usize, DispatcherError> {
             Ok(0)
+        }
+        fn clear_all(&self) -> Result<interfaces::ClearAll, DispatcherError> {
+            let mut resident = self.resident.lock().unwrap();
+            let removed = resident.len() as u64;
+            resident.clear();
+            Ok(interfaces::ClearAll {
+                removed,
+                still_pinned: 0,
+            })
         }
         /// No-op: this implementation has no background writer. The real
         /// dispatcher persists the entry so it becomes demotable; nothing here
@@ -2020,6 +2054,39 @@ mod tests {
         );
         assert!(t.dispatch(op::FETCH, &fetch_req(PEER, &[1, 1])).is_err());
         assert!(ep.open().is_empty());
+    }
+
+    /// CLEAR_ALL empties the cache and forgets every fetch mark at once, but a
+    /// fetch in flight keeps its slots and lands afterwards.
+    #[test]
+    fn clear_all_drops_marks_and_reports_fetches_in_flight() {
+        let (t, disp, ep) = fetching(FetchLimits::default());
+        t.dispatch(op::FETCH, &fetch_req(PEER, &[1, 2])).unwrap();
+        ep.answer(|_| EntryOutcome::HitMemoryTier); // 1, 2 land, marked
+        disp.resident.lock().unwrap().insert(9);
+        t.dispatch(op::FETCH, &fetch_req(PEER, &[3])).unwrap(); // in flight
+
+        let resp = t.dispatch(op::CLEAR_ALL, &[]).unwrap();
+        let mut r = Reader::new(&resp);
+        let (removed, pinned, pending) = (r.u64().unwrap(), r.u64().unwrap(), r.u64().unwrap());
+
+        assert_eq!(
+            (removed, pinned, pending),
+            (3, 0, 1),
+            "1, 2, 9 removed; 3 in flight"
+        );
+        assert!(disp.resident.lock().unwrap().is_empty());
+        // Re-cached locally: not a fetch's first serve any more.
+        disp.resident.lock().unwrap().insert(1);
+        assert_eq!(lookup(&t, &[1]), [1], "a mark outlived CLEAR_ALL");
+        ep.answer(|_| EntryOutcome::HitMemoryTier); // the in-flight fetch lands
+        assert_eq!(t.fetch_stats().unwrap().keys_pending, 0);
+        let s = t.fetch_stats().unwrap();
+        assert_eq!(
+            s.hits,
+            s.lookup_hits_fetched + s.fetched_unused + s.marks_live,
+            "the identity still closes"
+        );
     }
 
     /// A completion that arrives on the endpoint's thread while another thread
