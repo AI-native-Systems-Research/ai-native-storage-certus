@@ -3280,12 +3280,17 @@ impl IDispatcher for DispatcherComponent {
         // there would decrement a reference held by another caller, e.g. the
         // write-through pin a concurrent populate leaves on the entry it
         // registers in the window between this lookup and the release.
+        // The memory-tier state this call's pre-pass flips away, to restore if
+        // the removal below is refused: a refused remove (`KeyNotFound`)
+        // frees nothing and changes nothing, so the entry must still be
+        // MemoryTier, with its memory-tier slot and its ssd_offset.
+        let mut flipped_memory_tier: Option<(*mut u8, u32)> = None;
         let block_offset = match dm.lookup(key) {
             Ok(LookupResult::BlockDevice { offset }) => {
                 let _ = dm.release_read(key);
                 Some(offset)
             }
-            Ok(LookupResult::MemoryTier { .. }) => {
+            Ok(LookupResult::MemoryTier { pointer, size }) => {
                 // A resident entry may already carry its write-through SSD
                 // copy (`ssd_offset`), which this lookup result does not
                 // expose. Flip the entry to its block-device state — the
@@ -3303,6 +3308,9 @@ impl IDispatcher for DispatcherComponent {
                     match dm.lookup(key) {
                         Ok(LookupResult::BlockDevice { offset }) => {
                             let _ = dm.release_read(key);
+                            // This call flipped the entry away: remember how
+                            // to put it back if the removal is refused.
+                            flipped_memory_tier = Some((pointer, size));
                             Some(offset)
                         }
                         // The entry vanished (a concurrent remove won the
@@ -3333,10 +3341,25 @@ impl IDispatcher for DispatcherComponent {
             Ok(()) => false,
             // FR-018: the pin of a pending write-through does not hold remove up;
             // remove takes it over instead of waiting for the job.
-            Err(interfaces::DispatchMapError::ActiveReferences(_)) => self
-                .write_through_pins
-                .remove_entry(&*dm, key)
-                .ok_or(DispatcherError::KeyNotFound(key))?,
+            Err(interfaces::DispatchMapError::ActiveReferences(_)) => {
+                match self.write_through_pins.remove_entry(&*dm, key) {
+                    Some(job_frees_slot) => job_frees_slot,
+                    // A reader, a client pin or a concurrent lookup holds the
+                    // entry: the remove is refused. `KeyNotFound` promises that
+                    // nothing was freed and nothing changed, so put the entry back
+                    // the way this call found it — still MemoryTier, with its
+                    // memory-tier slot and its ssd_offset (the in-place promote
+                    // is the convert's inverse and keeps every reference) — and a
+                    // later lookup is served from DRAM again. Once the hold is
+                    // released, a later remove succeeds and frees both.
+                    None => {
+                        if let Some((pointer, size)) = flipped_memory_tier {
+                            let _ = dm.promote_block_to_memory_tier(key, pointer, size);
+                        }
+                        return Err(DispatcherError::KeyNotFound(key));
+                    }
+                }
+            }
             Err(_) => return Err(DispatcherError::KeyNotFound(key)),
         };
 
@@ -7515,3 +7538,7 @@ mod repair_test_eviction_window_tinylfu;
 #[cfg(test)]
 #[path = "repair_test_remove_frees_ssd_extent.rs"]
 mod repair_test_remove_frees_ssd_extent;
+
+#[cfg(test)]
+#[path = "repair_test_remove_refused_leaves_entry_unchanged.rs"]
+mod repair_test_remove_refused_leaves_entry_unchanged;
