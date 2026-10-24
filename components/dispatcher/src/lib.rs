@@ -4098,6 +4098,69 @@ impl IDispatcher for DispatcherComponent {
         Ok(count)
     }
 
+    fn clear_all(&self) -> Result<interfaces::ClearAll, DispatcherError> {
+        self.ensure_initialized()?;
+        let mt = self
+            .memory_tier
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
+
+        // Two sources of keys cover every entry: the memory tier lists what is in
+        // DRAM (with or without an SSD copy), the drives' extent managers what is
+        // on SSD. An entry is in at least one.
+        let listing = |mt: &dyn IMemoryTier| -> (Vec<CacheKey>, Vec<(usize, CacheKey, u64)>) {
+            let mut keys: Vec<CacheKey> = mt.oldest_keys(usize::MAX);
+            let mut extents = Vec::new();
+            for (d, drive) in self.data_drives.read().iter().enumerate() {
+                drive.extent_mgr.for_each_extent(&mut |e| {
+                    keys.push(e.key);
+                    extents.push((d, e.key, e.offset));
+                });
+            }
+            keys.sort_unstable();
+            keys.dedup();
+            (keys, extents)
+        };
+
+        let timeout = std::time::Duration::from_secs(5);
+        let start = std::time::Instant::now();
+        let mut removed = 0u64;
+        loop {
+            let (keys, extents) = listing(&*mt);
+            let mut gone = std::collections::HashSet::new();
+            for key in keys {
+                // Err is a pin (retried below) or an entry gone since the
+                // listing (an eviction, another remove): the re-listing tells.
+                if self.remove(key).is_ok() {
+                    removed += 1;
+                    gone.insert(key);
+                    // `remove` itself reports nothing: a client's cache view
+                    // has to hear that the entry is gone.
+                    self.emit_eviction(key, EvictionReason::Removed);
+                }
+            }
+            // `remove` frees the extent of an SSD-only entry, but not the SSD copy
+            // of one still in DRAM (its lookup reports no offset). Free those here,
+            // from the listing: the entry is gone from the map, so nothing can
+            // reach the extent any more.
+            let drives = self.data_drives.read();
+            for (d, key, offset) in extents {
+                if gone.contains(&key) {
+                    let _ = drives[d].extent_mgr.remove_extent(offset);
+                }
+            }
+            drop(drives);
+            let left = listing(&*mt).0.len() as u64;
+            if left == 0 || start.elapsed() >= timeout {
+                return Ok(interfaces::ClearAll {
+                    removed,
+                    still_pinned: left,
+                });
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+
     fn flush_to_ssd(&self) -> Result<usize, DispatcherError> {
         self.ensure_initialized()?;
 
@@ -4295,6 +4358,10 @@ mod repair_test_clear_mt_pinned;
 #[cfg(test)]
 #[path = "repair_test_flush_failed_write.rs"]
 mod repair_test_flush_failed_write;
+
+#[cfg(test)]
+#[path = "repair_test_clear_all.rs"]
+mod repair_test_clear_all;
 
 #[cfg(test)]
 mod tests {

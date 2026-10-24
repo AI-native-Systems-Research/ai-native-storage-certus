@@ -2864,6 +2864,56 @@ impl IDispatcher for DispatcherP2pComponent {
         Ok(count)
     }
 
+    fn clear_all(&self) -> Result<interfaces::ClearAll, DispatcherError> {
+        self.ensure_initialized()?;
+        let mt = self
+            .memory_tier
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
+
+        // As the main dispatcher: the memory tier lists DRAM entries, the drives'
+        // extent managers SSD ones; every entry is in at least one, and each is
+        // removed through `remove`, which frees its slot and its extent.
+        let keys = |mt: &dyn IMemoryTier| -> Vec<CacheKey> {
+            let mut keys: Vec<CacheKey> = mt.oldest_keys(usize::MAX);
+            for drive in self.data_drives.read().iter() {
+                drive.extent_mgr.for_each_extent(&mut |e| keys.push(e.key));
+            }
+            keys.sort_unstable();
+            keys.dedup();
+            keys
+        };
+        let timeout = std::time::Duration::from_secs(5);
+        let start = std::time::Instant::now();
+        let mut removed = 0u64;
+        loop {
+            for key in keys(&*mt) {
+                if self.remove(key).is_ok() {
+                    removed += 1;
+                    let tx = self
+                        .eviction_tx
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .clone();
+                    publish_eviction(
+                        tx.as_ref(),
+                        Some(&self.eviction_dropped),
+                        key,
+                        EvictionReason::Removed,
+                    );
+                }
+            }
+            let left = keys(&*mt).len() as u64;
+            if left == 0 || start.elapsed() >= timeout {
+                return Ok(interfaces::ClearAll {
+                    removed,
+                    still_pinned: left,
+                });
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+
     fn schedule_write_through(&self, key: CacheKey, size: u32) -> Result<(), DispatcherError> {
         self.ensure_initialized()?;
 
