@@ -948,8 +948,15 @@ works through llm-d and vLLM. T067 is a separate design task.
   gathered by answering `HIT_PENDING` to the hinted request's leading local misses during
   vLLM's scan and sent from `on_schedule_end` (vLLM gives the manager one key per lookup);
   12 tests, 7 planted bugs caught
-- [ ] T087 Validate: two servers node2 ↔ node5 driven over the ring (store on one, FETCH +
-  CHECK + LOOKUP on the other, bytes compared); then vLLM with the hint set by hand
+- [X] T087 Validate: two servers node2 ↔ node5 driven over the ring (store on one, FETCH +
+  CHECK + LOOKUP on the other, bytes compared); then vLLM with the hint set by hand.
+  Ring (`apps/python/test-fetch-cross-node.py`): node2 ← node5, 1024 × 64 KiB byte-exact,
+  first serve FETCHED, second DRAM; 1.81 GiB/s on a warm connection (first contact ~0.5 s).
+  vLLM 0.30 by hand, then in k8s: a 5 872-token prompt cached on node2 fetched into node5's
+  prefill, 366-367/367 blocks served as fetched, 457 ms vs 1 115 ms computed -- once the
+  budget grew with the run (a flat 200 ms fetched all 367 and served none). Through the
+  llm-d router the hint is dropped by the routing sidecar; `peer-selection.md` designs the
+  fix.
 
 ---
 
