@@ -1,9 +1,9 @@
 ---
 spec_sync_component: dispatcher
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-23T20:07:13Z
-spec_sync_git_commit: 6addfb9b5
-spec_sync_inputs_sha256: 0acb065330eb0cae5291d5ccb99b4e68b7b07af4432305a21a97b8521f70da67
+spec_sync_synced_at: 2026-10-25T03:40:00Z
+spec_sync_git_commit: 5f341e07d
+spec_sync_inputs_sha256: b58df99f2b999f5291518605ed1a7727d8ebcf5245839ab997d7390d85137dfe
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Apply 2026-10-24 (branch `fix/dispatcher-remove-ssd-extent`, approved by Cornel 2026-10-24).** This branch carries the two `remove` repairs (`a7444f4ab`: `remove` frees the SSD extent of a persisted resident entry and releases only its own read reference; `765f75ba3`: a refused `remove` leaves the entry unchanged). Applied with the exact proposal text: **B-12** (FR-009 + US-4 + the `remove` doc comment; approved 2026-10-23 on the earlier run and re-checked against this code by the analysis below), **B-14** (the remove edge case + the `remove()` postcondition) and **B-15** (two stale line citations). Spec 001 got a `Last Synced 2026-10-24` header. Recorded in `align-tasks.md`: A-2, A-06 and A-9 closed; **A-11** (the SSD evictor releases a read reference it never took — the defect class of root cause #12, the last such site) and **A-12** (close the flip window of `remove`, A-9's option (a)) tracked with a test-first note.
