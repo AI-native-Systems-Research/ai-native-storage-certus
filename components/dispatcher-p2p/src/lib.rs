@@ -2874,22 +2874,29 @@ impl IDispatcher for DispatcherP2pComponent {
         // As the main dispatcher: the memory tier lists DRAM entries, the drives'
         // extent managers SSD ones; every entry is in at least one, and each is
         // removed through `remove`, which frees its slot and its extent.
-        let keys = |mt: &dyn IMemoryTier| -> Vec<CacheKey> {
+        let listing = |mt: &dyn IMemoryTier| -> (Vec<CacheKey>, Vec<(usize, CacheKey, u64)>) {
             let mut keys: Vec<CacheKey> = mt.oldest_keys(usize::MAX);
-            for drive in self.data_drives.read().iter() {
-                drive.extent_mgr.for_each_extent(&mut |e| keys.push(e.key));
+            let mut extents = Vec::new();
+            for (d, drive) in self.data_drives.read().iter().enumerate() {
+                drive.extent_mgr.for_each_extent(&mut |e| {
+                    keys.push(e.key);
+                    extents.push((d, e.key, e.offset));
+                });
             }
             keys.sort_unstable();
             keys.dedup();
-            keys
+            (keys, extents)
         };
         let timeout = std::time::Duration::from_secs(5);
         let start = std::time::Instant::now();
         let mut removed = 0u64;
         loop {
-            for key in keys(&*mt) {
+            let (keys, extents) = listing(&*mt);
+            let mut gone = std::collections::HashSet::new();
+            for key in keys {
                 if self.remove(key).is_ok() {
                     removed += 1;
+                    gone.insert(key);
                     let tx = self
                         .eviction_tx
                         .lock()
@@ -2903,7 +2910,17 @@ impl IDispatcher for DispatcherP2pComponent {
                     );
                 }
             }
-            let left = keys(&*mt).len() as u64;
+            // `remove` frees an SSD-only entry's extent but not the SSD copy of
+            // one still in DRAM (its lookup reports no offset): free those from
+            // the listing, now that nothing can reach them.
+            let drives = self.data_drives.read();
+            for (d, key, offset) in extents {
+                if gone.contains(&key) {
+                    let _ = drives[d].extent_mgr.remove_extent(offset);
+                }
+            }
+            drop(drives);
+            let left = listing(&*mt).0.len() as u64;
             if left == 0 || start.elapsed() >= timeout {
                 return Ok(interfaces::ClearAll {
                     removed,
