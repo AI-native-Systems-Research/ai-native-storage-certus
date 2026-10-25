@@ -6,6 +6,38 @@ spec_sync_git_commit: 6addfb9b5
 spec_sync_inputs_sha256: 0acb065330eb0cae5291d5ccb99b4e68b7b07af4432305a21a97b8521f70da67
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Apply 2026-10-24 (branch `fix/dispatcher-remove-ssd-extent`, approved by Cornel 2026-10-24).** This branch carries the two `remove` repairs (`a7444f4ab`: `remove` frees the SSD extent of a persisted resident entry and releases only its own read reference; `765f75ba3`: a refused `remove` leaves the entry unchanged). Applied with the exact proposal text: **B-12** (FR-009 + US-4 + the `remove` doc comment; approved 2026-10-23 on the earlier run and re-checked against this code by the analysis below), **B-14** (the remove edge case + the `remove()` postcondition) and **B-15** (two stale line citations). Spec 001 got a `Last Synced 2026-10-24` header. Recorded in `align-tasks.md`: A-2, A-06 and A-9 closed; **A-11** (the SSD evictor releases a read reference it never took — the defect class of root cause #12, the last such site) and **A-12** (close the flip window of `remove`, A-9's option (a)) tracked with a test-first note.
+>
+> **Stamp: clean.** Every drift item of this branch is resolved (B-12, B-14, B-15 applied) or tracked (A-11, A-12, and the earlier open tasks A-1, A-3, A-4, A-5, A-10, A-01, A-02, A-04, A-05, A-08, N-01).
+
+> **Sync 2026-10-23 (branch fix/dispatcher-remove-ssd-extent) — the `remove` repair and its follow-up re-verified, B-12 re-checked against this code, drift OPEN.** Base `origin/unstable` `a905f89be`, HEAD `765f75ba3`, clean working tree. The branch adds two commits to unstable. It changes only `src/lib.rs` (`remove`, `:3268-3381`, and two test-module registrations) and adds two `#[cfg(test)]` modules. `specs/**` and `components/interfaces/**` are unchanged. Since the stamp (`6addfb9b5`, an ancestor of the base), the base changed only this report. Both hunks were re-read against the real dispatch-map semantics:
+> - `convert_memory_tier_to_block` ignores references (`components/dispatch-map/src/lib.rs:441-480`);
+> - `promote_block_to_memory_tier` keeps them (`:482-528`);
+> - `remove` and `try_evict_to_block` refuse them (`:341-343`, `:558-560`);
+> - `convert_to_storage` on a BlockDevice entry fails before it decrements (`:187-196`).
+>
+> They were also checked against every actor that can see the entry while `remove` holds it flipped: cold `lookup_async`, `batch_lookup`, `promote_to_memory_tier`, both evictors, `clear_memory_tier`, a second `remove`, the write-through ledger and a scheduled write-through. Every other verdict of the 2026-10-21 sweep was re-anchored at HEAD, as were those of the 2026-10-23 analysis on `fix/dispatcher-promote-remove`, which carried an earlier form of this repair. 111 items in scope: 90 aligned, 6 drifted, 6 partially implemented, 9 not verifiable here, and 2 unspecced features (1 folded into a BACKFILL). No test was run; the verdicts come from reading the code.
+>
+> - **`a7444f4ab` (root causes #9 and #12) meets SC-003 in the main case.** `remove` frees the extent of a persisted resident entry (`src/lib.rs:3293-3331`, `:3372-3378`; test `src/repair_test_remove_frees_ssd_extent.rs:941`). It releases a read reference only after a lookup that took one (`:3324-3325`, `:3332-3334`; test `:991`). **D-17 / task A-2 is resolved in code.** FR-009, US-4 and the `contracts/idispatcher.md` `remove` doc still say the extent is freed only in BlockDevice state: **D-23, BACKFILL B-12**. Cornel's approved text was re-checked clause by clause against this code and is still exact. Only its italic provenance note changes: it named `b430e4d47` on `fix/dispatcher-promote-remove`, which is not on this branch, and now names `a7444f4ab` and `765f75ba3`.
+> - **`765f75ba3` (proposal A-9 of the earlier run): a refused `remove` restores the entry** with `promote_block_to_memory_tier(key, pointer, size)`, using the pointer and size from its first lookup (`:3287`, `:3313`, `:3355-3360`; test `src/repair_test_remove_refused_leaves_entry_unchanged.rs:875`). The repair took A-9's option (c), not (a). The "remove" edge case (`spec.md:239`) and `contracts/idispatcher.md:171` are met. The code now guarantees more than "frees nothing": the entry's location is unchanged. It also opens a transient window in which other callers see the entry as BlockDevice. Neither is in the spec: **U-10, BACKFILL B-14**.
+> - **New, caused by the flip window (P-07 on SC-003 / FR-038; minor, MEDIUM confidence).** Between the flip and `dm.remove`, the entry is unreferenced and BlockDevice while its slot is still resident.
+>   - A concurrent `clear_memory_tier` gets `InvalidState` from `try_evict_to_block`, so it force-removes the entry and frees the slot (`:4132-4146`).
+>   - `remove` then gets `KeyNotFound` (`:3363`) and never frees the extent. The extent leaks (SC-003), and an entry that has an SSD copy is dropped instead of demoted (FR-038).
+>   - Side effects: the MT evictor counts the entry as `blocked_unpersisted` (`:1128-1135`), and the SSD evictor may remove a hot entry (`src/background.rs:516-527`; benign).
+>   - **ALIGN A-12**: A-9's option (a), one dispatch-map operation that removes the entry and returns its offset, closes the window.
+> - **New, pre-existing, same class as root cause #12 (D-25 on FR-013; moderate, MEDIUM confidence, narrow window).** The SSD evictor's `get_evictable_offset` still releases a read reference after `NotExist` (`src/background.rs:595-598`). If a populate registers and downgrades the key in that window, the release drops the write-through pin. A later `remove` then succeeds without the ledger takeover and frees the slot the job is reading (FR-018). **ALIGN A-11.** It is the last such site in `src/`. The others are correct: `src/lib.rs:3256-3261`, `:3792-3797`, `:3953-3965`.
+> - **Tracker housekeeping:**
+>   - A-06 (FR-042, the SSD evictor's sender snapshot) was resolved in code by #568 (`src/lib.rs:2180`, `src/background.rs:532`), but it is still OPEN in `align-tasks.md`. Close it.
+>   - Close A-2 when B-12 is applied. Its second criterion (a `format_on_init=false` restart does not resurrect the key) has no dedicated test.
+> - **Still open, re-verified at HEAD:** A-1, A-3, A-4, A-5, A-01, A-02, A-04, A-05, A-08, A-10 and N-01. Also J26 P2 (an extent released twice after key reuse), named as open in `a7444f4ab`; the flip adds one more LOW-confidence key-reuse path, a stale restore pointer.
+> - **Stale citations** (stale before this branch; the branch moved them further, +64 lines after `:3276`):
+>   - 001 FR-056 `CERTUS_LOG_RESERVE` cites `src/lib.rs:3380-3395`; the code is at `:3589-3604`.
+>   - The 002 out-of-scope bullet cites `:3257-3272` for `read_write_stats`; the code is at `:4226-4236`.
+>   - **BACKFILL B-15.**
+> - **Cross-component, recorded only:** `dispatcher-p2p::remove` still has both pre-repair defects (`components/dispatcher-p2p/src/lib.rs:2367-2377`). Port A-12's form, not the flip.
+>
+> **5 proposals (3 BACKFILL, 2 ALIGN, 0 other), all `approved: false`.** Nothing was applied. See `proposals.md`. The frontmatter is left exactly as it was, for the stamping script.
+
 > **Merge 2026-10-23: unstable `6d2f988ee` (#568, #569) merged into `fix/dispatcher-failed-promotion`.** #568 makes the background SSD evictor take a late-bound eviction-event channel; #569 fixes workspace build warnings and test targets. Neither touches the promotion paths of this branch (`promote_and_serve`, the cold path of `batch_lookup`). The code merged without conflicts; every added line of the repair of root cause #11 is present (922 of 922). Only this report conflicted (both notes kept). Re-stamped below over the merged inputs.
 
 > **Apply 2026-10-23 (branch `fix/dispatcher-failed-promotion`, approved by Cornel 2026-10-23).** This branch carries only the repair of root cause #11 (`317035c62`): a failed cold promotion releases its memory-tier slot. Applied with the exact proposal text: **B-13** (FR-028, the failure case of a promotion). The analysis of 2026-10-23 (on a branch that also carried the `remove` repair) found two ALIGN items: **A-9** belongs to the `remove` repair, which is NOT on this branch, so it does not apply here; **A-10** (pre-existing; `batch_lookup` leaves a result unset and panics when a channel checkout fails with 2+ drives) is recorded as an open task in `align-tasks.md`. B-12 belongs to the `remove` repair and is not applied here.
@@ -168,7 +200,259 @@ spec_sync_hash_tool: scripts/spec-sync-hash.sh
 > folded in) and matches `spec_sync_inputs_sha256`; the digest here was recomputed
 > over a clean tree (no untracked files under `src/`/`specs/`) after the last edit.
 
-# Spec Drift Report — dispatcher (branch `fix/dispatcher-remove-clear-mt`, second sweep)
+# Spec Drift Report — dispatcher (branch `fix/dispatcher-remove-ssd-extent`)
+
+Generated: 2026-10-23
+Project: `components/dispatcher` (crate `dispatcher`)
+Specs: `specs/001-dispatcher-cache-interface/spec.md` (423 lines), `specs/002-served-by-tier-attribution/spec.md` (779 lines)
+Branch: `fix/dispatcher-remove-ssd-extent`, HEAD `765f75ba3`, base `origin/unstable` `a905f89be`. The working tree is clean.
+Mode: read-only drift analysis, batch (no questions). Nothing outside `.specify/sync/` was edited. No test was run; every verdict comes from reading the code.
+
+## Scope and method
+
+**Inputs that changed against the base** (`git diff origin/unstable.. -- components/dispatcher/src`):
+
+| Commit | Repair | Code change |
+|---|---|---|
+| `a7444f4ab` | 18c4f1f9; root causes #9 and #12 (Spin J26); task A-2 | `remove`, `src/lib.rs:3276-3336`:<br>- On `LookupResult::MemoryTier`, it holds its lookup reference and calls `convert_memory_tier_to_block`. It releases the reference, looks the key up again, and takes the BlockDevice offset (`:3293-3331`).<br>- `NotExist` / `MismatchSize` release nothing (`:3332-3334`, `:3324-3325`).<br>- The extent is freed with `drive_index` (`:3372-3378`).<br>New test module `src/repair_test_remove_frees_ssd_extent.rs` (`:941`, `:991`). |
+| `765f75ba3` | dc705e72; proposal A-9 of the earlier run, option (c) | `remove` remembers `(pointer, size)` from the first lookup when its own flip succeeded (`:3287`, `:3313`). On a refusal after the ledger retry, it calls `promote_block_to_memory_tier(key, pointer, size)` before it returns `KeyNotFound` (`:3344-3361`). New test module `src/repair_test_remove_refused_leaves_entry_unchanged.rs` (`:875`). |
+
+- `specs/**` and `components/interfaces/**` are unchanged against the base.
+- The stamped commit `6addfb9b5` is an ancestor of the base, and between them only this report changed. So the inputs differ from the certified tree only by these two commits.
+- The 2026-10-21 full sweep analysed `efd502331`. Since then the inputs changed through:
+  - #558, the last-chance eviction scan (backfilled);
+  - the lint posture and `cargo fmt` (no behaviour change; re-stamp note above);
+  - #568, the late-bound SSD-evictor channel;
+  - `317035c62`, root cause #11 (B-13 applied);
+  - this branch.
+
+  All of them are in the dated notes above. The earlier 2026-10-23 analysis on `fix/dispatcher-promote-remove` (HEAD `b430e4d47`, which is not an ancestor of this branch) analysed an earlier form of `a7444f4ab`. Its findings were re-derived here rather than copied.
+
+**Method.**
+1. Both hunks were read line by line, against the real `IDispatchMap` semantics:
+   - `convert_memory_tier_to_block` does not look at references (`components/dispatch-map/src/lib.rs:441-480`).
+   - `promote_block_to_memory_tier` flips in place and keeps every reference and the SSD offset (`:482-528`).
+   - `remove` refuses `read_ref > 0 || write_ref > 0` (`:341-343`), and so does `try_evict_to_block` (`:558-560`). `try_evict_to_block` returns `InvalidState` for a BlockDevice entry (`:576-578`).
+   - `convert_to_storage` fails on a BlockDevice entry before it decrements (`:187-196`).
+   - `lookup` takes no reference on `NotExist` (`:142-143`).
+2. The adversarial question: for every actor that can observe the key between the flip (`src/lib.rs:3305`) and `dm.remove` (`:3340`), or between the refusal and the restore (`:3357`), does the outcome still match FR-009, FR-018, FR-038, SC-003, the "remove" edge case and the `remove` postcondition? Actors checked:
+   - cold `lookup_async` (`:3209-3240`) and `serve_concurrently_promoted` (`:1408-1440`);
+   - `batch_lookup` cold prep (`:2542`);
+   - `promote_to_memory_tier` (`:3931-4096`);
+   - the MT evictor (`src/background.rs:737`) and `evict_one_clean` (`src/lib.rs:1102-1160`);
+   - the SSD evictor (`src/background.rs:508-557`, `:581-601`);
+   - `clear_memory_tier` (`src/lib.rs:4098-4162`);
+   - a second `remove`;
+   - the write-through ledger (`src/background.rs:307-375`) and the settle (`src/lib.rs:1465-1514`);
+   - `flush_to_ssd` (`:4164-4200`).
+3. Same-class search: every `dm.lookup` → `release_read` site in `src/` was checked for a release after `NotExist`.
+4. Approved proposal B-12 (Cornel) was re-checked clause by clause against this code.
+5. Every other verdict was re-anchored at HEAD. Offsets in `src/lib.rs` against the base: +64 after `:3276`, and +8 at the end (test registrations). `background.rs` is unchanged. Each anchor cited below was spot-checked.
+
+## Summary
+
+| Category | Count |
+|----------|-------|
+| Specs Analyzed | 2 |
+| Requirements Checked | 120. 111 are in this component's scope (the same set as the 2026-10-21 sweep); the other 9 items of spec 002 belong to other components and are only listed. |
+| ✓ Aligned | 90 (81.1% of 111) |
+| ⚠️ Drifted | 6 (5.4%): D-23 (FR-009 / US-4 / contract text, BACKFILL B-12, approved), D-24/A-10 (FR-039 (6), recorded 2026-10-23), D-16/A-1 (FR-013; the new D-25/ALIGN A-11 is a second finding on the same item and is not counted again), D-07/A-04, D-13/A-01, D-15/A-08 |
+| ◐ Partially implemented | 6 (5.4%): P-07 (new, SC-003, ALIGN A-12), P-06/A-5 (FR-056 `flush_to_ssd`, counted on its own now that D-19 was applied), P-01/A-05, P-03/A-02, P-04/A-4, P-05/A-3 |
+| ✗ Not implemented | 0 |
+| ⧗ Not verifiable here (hardware / cluster / benchmark) | 9 (8.1%) |
+| 🆕 Unspecced Code | 2: U-10 (refused-`remove` restore and flip window; folded into **B-14**) and U-01 (integrity-check, open item N-01) |
+
+Changes since the 2026-10-21 sweep (89 / 8 / 5 / 9 of 111):
+- **Became aligned (+3):**
+  - FR-017 (D-20) and the `contracts/errors.md` `IoError` row (D-21): B-8 and B-9 were applied.
+  - FR-042 (P-02 / A-06): resolved in code by #568. The tracker still lists it as OPEN.
+- **Left aligned (−2):**
+  - FR-009: D-23. The code now frees more than the text says; B-12 fixes the text.
+  - FR-039: D-24 / A-10, recorded on 2026-10-23.
+- **Moved between drifted and partial:**
+  - SC-003 (D-17 / A-2): drifted → partial. `a7444f4ab` meets it for every `remove` that is not raced; P-07 is the race.
+  - FR-056 `flush_to_ssd` (D-19 / P-06): drifted → partial. B-7 was applied; P-06 / A-5 remains.
+- **Unchanged:**
+  - The "remove" edge case and the `remove` postcondition stay aligned; `765f75ba3` now meets them on the new path.
+  - FR-013 stays drifted (D-16). The new D-25 is a second finding on it.
+- **Counted per item:** 90 + 6 + 6 + 9 = 111.
+
+## Detailed Findings
+
+### Spec: 001-dispatcher-cache-interface — Dispatcher Cache Interface (Memory-Tier Architecture)
+
+#### Aligned ✓
+
+*The requirements this branch touches, verified clause by clause (SC-003 is under ◐ P-07):*
+- **Edge case "remove"** (`spec.md:239`): "A `remove` that is refused because a reader or a client `pin` holds the entry … returns `KeyNotFound` and frees nothing."
+  - Refusal: `src/lib.rs:3344-3360`. The ledger retry happens first (`src/background.rs:356-359`).
+  - Nothing is freed: the slot is untouched (the `mt.remove` at `:3368` is not reached), and the extent is untouched (`:3372` is not reached).
+  - Since `765f75ba3` the entry is also put back to MemoryTier (`:3356-3358`).
+  - Test: `refused_remove_leaves_the_entry_unchanged` (`src/repair_test_remove_refused_leaves_entry_unchanged.rs:875`). It checks the pin count, the slot, the extent, a later DRAM-served lookup, and a successful remove after `unpin`.
+  - A refusal by a write lock past the wait: `dm.lookup` returns `Timeout` and `remove` returns `KeyNotFound` before any flip (`:3335`). Today the dispatcher calls no `take_write` in production; only `create_memory_tier_entry` sets `write_ref` (`components/dispatch-map/src/lib.rs:423`).
+- **`contracts/idispatcher.md:171`** (the `remove` postcondition): `Ok` means the entry is removed (`:3340-3341`, `:3345-3346`); `KeyNotFound` means nothing was freed (as above).
+- **FR-018** (`spec.md:303`): the takeover path is unchanged (`:3344-3346` → `src/background.rs:354-375`). For a pending job the flip gets `InvalidState`, so no state changes before the takeover. For a persisted entry whose pin was settled, the ledger retry is a plain `dm.remove` (`:359`).
+- **FR-013, as far as `remove` is concerned:** `remove` no longer releases a reference it did not take (`:3324-3325`, `:3332-3334`). Test: `remove_never_releases_a_foreign_read_reference` (`src/repair_test_remove_frees_ssd_extent.rs:991`). *The same defect remains in the SSD evictor: D-25.*
+- **Contracts `errors.md:33`** (`KeyNotFound` covers `remove` refusals) → `:3335`, `:3359`, `:3363`.
+
+*Earlier verdicts, re-anchored at HEAD and spot-checked (unchanged):*
+- FR-001 → trait `components/interfaces/src/idispatcher.rs`; inherent `create_eviction_channel` / `eviction_dropped_count` `src/lib.rs:576-592`. FR-002.
+- FR-003 → `populate` `src/lib.rs:3388-3470`. FR-004 → `write_through` `:1519` and settle `:1501-1514`. FR-005 → the owned settle never frees the slot (`:1483-1487`).
+- FR-006 → `serve_memory_tier_to_gpu` `:1321`. FR-007 / FR-008 → `lookup_async` `:3140-3245`, `check` `:3247-3266`.
+- FR-010, FR-011, FR-012 → `initialize` `:1998`.
+- FR-014 / SC-006 → `shutdown` `:2226`.
+- FR-015, FR-016.
+- FR-017 (B-8 applied) → ledger `src/background.rs:377-394`; reported by `flush_to_ssd` `:4164-4200`. `contracts/errors.md:36` `IoError` row (B-9 applied). *(The FR-056 `flush_to_ssd` bullet is under ◐ P-06.)*
+- FR-019, FR-023 → `touch` `:3913`.
+- FR-024 → `evict_one_clean` `:1102`, `evict_for_space` `:1183`, `evict_and_insert` `:1239`.
+- FR-025 → recovery `:2037`.
+- FR-028 (B-13 applied) → `promote_and_serve` `:849-860`, `:880-893`, `:921-929`, `:948-956`; `promote_to_memory_tier` `:3993-3996`, `:4069-4091`. *(The no-drives exception is A-04.)*
+- FR-029 – FR-031. FR-032 → `dm.remove` before `mt.remove`, `src/background.rs:525-530`. FR-033 – FR-035.
+- FR-036 → pin held through `promote_and_serve`, `src/lib.rs:3209-3240`.
+- FR-037. FR-039 (1)–(5) → `batch_lookup` `:2342`; deferred warm sync `:2886-2896`. *(FR-039 is counted as drifted because of step (6): D-24/A-10.)*
+- FR-040, FR-041.
+- FR-042 / FR-050 → every eviction path emits through the shared `Arc<Mutex<Option<EvictionSender>>>`: SSD evictor `src/background.rs:532`, wiring `src/lib.rs:2180`; MT evictor `src/background.rs:745`, wiring `src/lib.rs:2210`. **P-02 / A-06 is resolved by #568.**
+- FR-043, FR-045. FR-046 – FR-049 → MT evictor `src/background.rs:737-743`.
+- FR-051 → `serve_concurrently_promoted` `src/lib.rs:1408`.
+- FR-052 – FR-055, FR-057, FR-059 → `batch_populate` `:3473`. FR-060 → `reserve_memory` `:3580`. FR-061.
+- FR-038 → `clear_memory_tier` `:4098-4162`. *(Partial: P-05/A-3; the new P-07 race.)*
+- FR-058 → `tier_event_stats` `:4238`; `store_already_resident` only in `reserve_memory`.
+- User Stories 1–3, 5, 7–12: acceptance scenarios as in the 2026-10-21 sweep. US-4 AS1–AS3 → `remove` as above (AS3: `NotExist` reaches `dm.remove` → `KeyNotFound` → `:3363`).
+- Edge cases as in the 2026-10-21 sweep. SC-001, SC-002, SC-004 – SC-007, SC-009 – SC-011, SC-013, SC-015 – SC-017.
+
+#### Drifted ⚠️
+
+**D-23 · FR-009, US-4 narrative and `contracts/idispatcher.md:46-47`: "free the extent on SSD (if in BlockDevice state)" no longer describes `remove`.** Severity: minor (spec text). Direction: **BACKFILL B-12** (approved by Cornel; re-checked below).
+- Spec:
+  - `spec.md:294`: "free the extent on SSD (if in BlockDevice state)";
+  - `spec.md:92`: "frees the SSD extent (if the entry was in BlockDevice state)";
+  - `contracts/idispatcher.md:46-47`: "If the entry is on a block device, frees the SSD extent via the extent manager."
+- Code: `remove` also frees the extent of a MemoryTier entry whose write-through has landed (`src/lib.rs:3293-3331`, `:3372-3378`). It releases a read reference only when its own lookup took one (`:3324-3325`, `:3332-3334`). This is SC-003's intent, and A-2 asked for exactly this FR-009 amendment.
+- Re-check of the approved B-12 text against HEAD, clause by clause:
+  - "free the memory-tier slot (if present via `mt.remove()`)" → `:3368-3370`. The job frees it instead when `job_frees_slot` is set (FR-018). True.
+  - "free the extent on SSD (if the entry has one: a BlockDevice entry, or a MemoryTier entry whose write-through has landed and recorded its `ssd_offset`)" → BlockDevice `:3289-3292`; persisted MemoryTier `:3305-3314`; unpersisted MemoryTier frees nothing (`:3328-3330`). True on a successful `remove`. Under the P-07 race the extent is leaked and `remove` returns `KeyNotFound` (it does not return `Ok`), so the requirement's success case still holds. P-07 is an ALIGN task, not a reason to change the text.
+  - "remove the dispatch map entry" → `:3340`. True.
+  - "Its own dispatch-map lookup MUST release only a read reference that lookup acquired: a `NotExist` answer takes none, so none is released" → first lookup `:3332-3334`; second lookup `:3324-3325`. True.
+  - The italic provenance names `fix/dispatcher-promote-remove` and commit `b430e4d47`. Neither is on this branch: `b430e4d47` is not an ancestor of HEAD, and the repair landed here as `a7444f4ab`. **Only the provenance note is corrected** to this branch and its two commits; the normative words are kept exactly as approved.
+- `components/interfaces/src/idispatcher.rs:629` ("Frees memory-tier slot and/or SSD extent") already fits. No companion edit is needed.
+
+**D-25 · FR-013 (and FR-018): the SSD evictor releases a read reference it never took.** A second finding on FR-013, which D-16 already counts as drifted. Severity: moderate. Confidence: MEDIUM. The window is narrow and the finding comes from reasoning, not from an executed schedule. Pre-existing; it was not caused by this branch. It is the same defect class as root cause #12, which `a7444f4ab` fixed in `remove`. Direction: **ALIGN A-11**.
+- Code: `get_evictable_offset` (`src/background.rs:581-601`), used for every SSD-evictor candidate (`:516`). Its catch-all arm `Ok(_) => { let _ = dm.release_read(key); None }` (`:595-598`) also runs on `LookupResult::NotExist`, and `lookup` takes no reference then (`components/dispatch-map/src/lib.rs:142-143`).
+- The candidates are a snapshot taken by `dm.oldest_keys` (`src/background.rs:508`), so a candidate removed after the snapshot (by `remove`, `clear_memory_tier` or an eviction) answers `NotExist`. The same is true of a key that is being re-stored.
+- Scenario:
+  1. The evictor's `lookup(K)` returns `NotExist`.
+  2. A concurrent store of K runs `copy_gpu_to_memory_completed`: `create_memory_tier_entry` (`write_ref = 1`), then `downgrade_reference` (`read_ref = 1`, the write-through pin, `src/lib.rs:3843`) and `write_through_pins.pin` (`:3852`).
+  3. The evictor's `release_read(K)` drops that pin to 0.
+- Consequences:
+  - A `remove(K)` while the job runs succeeds directly at `dm.remove` (`src/lib.rs:3340-3341`), without the ledger takeover. It frees the slot (`:3368-3370`) while the job reads it (FR-018: "In that case `remove` MUST NOT free the slot itself"). The job then writes freed memory.
+  - `try_evict_to_block` and `clear_memory_tier` can likewise demote or free the slot early.
+  - When the job settles, `convert_to_storage` finds `read_ref == 0` and does not decrement (`components/dispatch-map/src/lib.rs:194-196`), so the error is silent.
+- Every other `lookup` → `release_read` site in `src/` releases only after a found entry: `check` `src/lib.rs:3256-3261`, `copy_gpu_to_memory_completed` `:3792-3797`, `promote_to_memory_tier` `:3953-3965`, `remove` `:3288-3334`.
+
+**D-16 · FR-013 + Assumption: a `schedule_write_through` job takes no pin, yet settles as if it held one.** Severity: major. Unchanged, task **A-1**: `src/lib.rs:4202-4224`; `JobStart::Untracked` `src/background.rs:300-301`, `:317-318`, `:325-326`; settle `src/lib.rs:1475-1478`, `:1501-1514`.
+- *Interaction with this branch:* an Untracked job that settles while `remove` holds the entry flipped gets `InvalidState` from `convert_to_storage` (`components/dispatch-map/src/lib.rs:187-191`) and decrements nothing. No new harm, but the job's freshly published extent is then referenced by no entry and leaks. This is the A-1 / A-5(b) family.
+
+**D-07 · FR-028 / US-9 AS3: the no-drives `promote_and_serve` never re-registers.** Unchanged, task **A-04**, `src/lib.rs:814-838`.
+
+**D-24 · FR-039 (6): with ≥ 2 drives, a channel-checkout failure leaves the other drives' results unset, and `r.unwrap()` panics.** Unchanged, task **A-10**: `src/lib.rs:2768-2782`, `:3102`.
+
+#### Partially implemented ◐
+
+**P-07 · SC-003 (and FR-038): the flip window of `remove` races `clear_memory_tier`. The extent leaks and a persisted entry is dropped instead of demoted.** Severity: minor. Confidence: MEDIUM; reachable only with a concurrent `clear_memory_tier` (administrative) and no test. New; introduced by `a7444f4ab`. Direction: **ALIGN A-12**.
+- **What is met** (`spec.md:396`, "Cache removal frees all associated resources (memory-tier slots and SSD extents) so that they can be reused"), for every `remove` that is not raced:
+  - persisted resident entry: flip `src/lib.rs:3305`, second lookup `:3308-3314`, extent freed `:3372-3378`, slot freed `:3368-3370`;
+  - BlockDevice entry: `:3289-3292`;
+  - unpersisted resident entry: `InvalidState`, so there is no extent to free (`:3305`, `:3328-3330`);
+  - a pending job's extent is freed by the job (FR-018).
+
+  Test: `remove_frees_ssd_extent_of_written_through_entry` (`src/repair_test_remove_frees_ssd_extent.rs:941`) checks that the slot and the extent are freed and reused. The restart criterion of A-2 (no resurrection after a `format_on_init=false` re-initialize) has no test.
+- **What is not:** between the flip (`src/lib.rs:3305`) and `dm.remove` (`:3340`), the entry is BlockDevice with `read_ref == 0` (the reference is released at `:3306`, and again after the second lookup at `:3310`), while its slot is still in the memory tier.
+- A concurrent `clear_memory_tier` scans `mt.oldest_keys` (`:4125`) and calls `try_evict_to_block(K)`. That returns `InvalidState` ("entry is not in memory-tier state", `components/dispatch-map/src/lib.rs:576-578`), so the code takes the force-remove arm: `dm.remove(K)` succeeds and `mt.remove(K)` frees the slot (`src/lib.rs:4138-4146`).
+- `remove`'s own `dm.remove` then gets `KeyNotFound` and returns `KeyNotFound` (`:3363`) without calling `remove_extent` (`:3372-3378`). Nothing points at the extent any more.
+- Result: the extent leaks until restart; with `format_on_init=false`, `recover_extent` (`:2037`) resurrects the key. FR-038 says an entry with an SSD copy is demoted, not removed. `remove` reports `KeyNotFound` for a key that existed and is now gone.
+- Benign in the same window:
+  - The MT evictor (`src/background.rs:737`) and `evict_one_clean` (`src/lib.rs:1128-1135`) skip the entry and count it as `blocked_unpersisted`, a mis-attribution in the eviction telemetry.
+  - The SSD evictor may see BlockDevice and remove a hot entry (`src/background.rs:516-530`). `remove`'s own `dm.remove` then gets `KeyNotFound`, and the evictor frees the extent, so nothing leaks.
+  - A cold `lookup_async` sees BlockDevice, gets `AlreadyExists` from `mt.insert` (`src/lib.rs:1270-1275`) and polls `serve_concurrently_promoted` (`:1408-1440`). After the restore it is served from DRAM. If the removal won, it is a miss: `KeyNotFound`, which is correct for a removed key. `promote_to_memory_tier` and the `batch_lookup` cold prep behave the same way (`:4051-4053`, `:2542`).
+- `765f75ba3` does not close this window. It only restores after a refusal. A-9's preferred option (a), one dispatch-map operation that removes the entry under one lock and returns its offset, closes it and makes both the flip and the restore unnecessary.
+
+**P-01 · FR-003 / FR-056: phase-3 release.** Unchanged, task **A-05**: the integrity-check failure paths in `copy_gpu_to_memory_completed` call `mt.remove` and leave the dispatch-map entry (`src/lib.rs:3817-3842`).
+
+**P-03 · FR-051 / FR-036: the `batch_lookup` cold path drops its pin before promotion.** Unchanged, task **A-02**: `src/lib.rs:2542-2543`; `promote_to_memory_tier` `:3953-3958`.
+
+**P-04 · FR-018: two residual windows in the remove/write-through handshake.** Unchanged, task **A-4**: the give-back window `src/background.rs:361-365`; re-store during the hand-off `src/lib.rs:1270-1275`.
+
+**P-05 · FR-056 vs FR-038: `clear_memory_tier` frees reserved-but-not-completed slots.** Unchanged, task **A-3**: `src/lib.rs:4132-4146`; the entry is created only at `:3784`.
+
+**P-06 · FR-056 `flush_to_ssd` / FR-017: the failure record is not tied to its entry.** Unchanged, task **A-5**: `src/background.rs:390-394`; `src/lib.rs:1484`. *Unchanged by this branch:* `remove` still does not clear the record.
+
+#### Not Implemented ✗
+None.
+
+#### Not verifiable here ⧗
+- SC-012 (FIFO NVMe correctness; needs hardware).
+- SC-014 (≥ 5× batch-cold throughput; needs a benchmark).
+- User Story 11 AS4 under real NVMe errors.
+- The edge case "write-ref downgrade lets a concurrent lookup proceed" (`src/lib.rs:3843`).
+
+That is 4 items here; with the 5 in spec 002, 9 in total.
+
+### Spec: 002-served-by-tier-attribution — Serving-Tier Attribution (`served_by`)
+
+This branch touches no attribution path. `remove` has no `served_by`. The flip window can make a concurrent cold lookup of the key take the `AlreadyExists` recovery path, which attributes `Dram` (FR-009/FR-010 recovery; `lookup_async` `src/lib.rs:3226-3233`), or a miss once the key is removed. Both are correct for what was served. All verdicts were re-anchored and spot-checked.
+
+#### Aligned ✓
+- FR-001 → `idispatcher.rs` `ServedBy` / `LookupOutcome`.
+- FR-002 / SC-001 → the per-entry outcome assembly `src/lib.rs:3100-3125`.
+- FR-003 → `lib/shmq-dispatcher/src/translate.rs`.
+- FR-004 – FR-008, FR-010 – FR-013, FR-017, FR-019 – FR-026, FR-033, FR-034, FR-036, SC-004.
+- FR-009 / FR-010 recovery.
+- US1 AS1, AS2, AS4, AS5; US4 AS1–AS3; edge cases as in the 2026-10-21 sweep.
+
+#### Drifted ⚠️
+- **D-13 · US1 AS3 / FR-009:** a failed warm batched sync is only logged, and the keys are still reported as `Dram` hits (`src/lib.rs:2886-2891`). Major. Task **A-01**, unchanged.
+- **D-15 · FR-027 / SC-009:** a grep for an `assert` on `ServedBy::{Ssd,Remote,SizeMismatch,Error}` in `src/` still finds nothing. Task **A-08**, unchanged.
+
+#### Not verifiable here ⧗
+SC-002, SC-003, SC-006, SC-007, SC-008.
+
+#### Owned by other components (listed, not judged)
+- dispatcher-p2p: FR-014, FR-015, FR-035.
+- remote-lookup: FR-016 (replacement), FR-018.
+- Documentation process: FR-030 – FR-032.
+- SC-005; US3, US5.
+
+### Unspecced Code 🆕
+
+| # | Feature | Location | Lines | Suggested Spec |
+|---|---------|----------|-------|----------------|
+| U-10 | The refused-`remove` restore, and the transient BlockDevice state other callers can observe while `remove` runs | `src/lib.rs:3283-3287`, `:3305-3314`, `:3347-3360` | ~30 | 001 "remove" edge case + `contracts/idispatcher.md:171` (folded into **B-14**) |
+| U-01 | `integrity-check` verify-before-serve | `src/lib.rs` warm/remote/single-key verify sites (e.g. `:2520-2522`, `:3187-3189`), `copy_gpu_to_memory_completed` `:3817-3842` | ~70 | Open item **N-01** in `align-tasks.md`. Not re-proposed. |
+
+## Inter-Spec Conflicts
+
+1. **Resolved on this branch: 001 SC-003 vs FR-009.** The code meets SC-003. FR-009's text still contradicts it (D-23); B-12 resolves that. P-07 is a residual race in the code, not a text conflict.
+2. **001 FR-056 vs FR-038:** reserved slots (P-05). Still open, A-3.
+3. **001 Assumption / interfaces FR-031a vs code:** the `schedule_write_through` job's pin (D-16). Still open, A-1.
+4. **New: 001 FR-013 vs the SSD evictor (D-25).** No spec text conflicts; the code breaks FR-013 and, through it, FR-018.
+5. **Cross-component (not this component's specs):** `dispatcher-p2p::remove` (`components/dispatcher-p2p/src/lib.rs:2367-2377`) still releases a read reference after `NotExist`, and never frees a resident entry's extent. It implements the same `IDispatcher::remove` contract (`components/interfaces/src/idispatcher.rs:629`, "Frees memory-tier slot and/or SSD extent"). Port A-12's form, not the flip. The p2p port of the earlier repairs is already interfaces proposal 7.
+
+## Recommendations
+
+1. **Apply B-12 in this branch's PR** (approved by Cornel). The text is unchanged except for the provenance note. Add a spec 001 `Last Synced 2026-10-23` header in the same apply. Then close **A-2** in `align-tasks.md`, noting that its restart criterion has no dedicated test.
+2. **BACKFILL B-14** (the refused-`remove` restore and the flip window) and **B-15** (two stale line citations), in the same apply if approved.
+3. **ALIGN A-12 (minor):** replace the flip / second lookup / restore in `remove` with one dispatch-map operation that removes an unreferenced entry and returns its SSD offset, if any (A-9's option (a)). This closes P-07, and the write-through takeover can use the same operation (it also closes A-4(a)).
+4. **ALIGN A-11 (moderate):** in `get_evictable_offset`, release only after a found entry (`BlockDevice` or `MemoryTier`), as `remove` now does. Test first, with the registration-race fixture of `src/repair_test_remove_frees_ssd_extent.rs:991`.
+5. **Close A-06** in `align-tasks.md` (resolved by #568, verified at `src/lib.rs:2180`, `src/background.rs:532`).
+6. Still open, priority unchanged: A-1, A-01, A-02 (major); A-3, A-04, A-05, A-08, A-10 (moderate); A-4, A-5 (minor); N-01 (decision). J26 P2 (an extent freed twice after key reuse) is not verified here.
+7. Re-run `scripts/spec-sync-hash.sh components/dispatcher` only after the spec edits are committed.
+8. *Recorded only:* spec 002's `src/lib.rs` line citations in `spec.md`, `plan.md`, `research.md` and `tasks.md` (e.g. `:2108`, `:2576`, `:2625-2628`) do not match the code at HEAD. They did not match at `772885d93` either, so this branch did not cause it. They are measured references to an earlier layout. A citation refresh of spec 002 is a separate housekeeping task.
+
+---
+
+# Earlier sweeps (retained for history)
+
+## Sweep 2026-10-21 — branch `fix/dispatcher-remove-clear-mt`, second sweep (HEAD `efd502331`; line numbers refer to that commit; its BACKFILL items B-7…B-9 were applied in `dc236dd9a`, and its ALIGN item A-5 is in `align-tasks.md`)
 
 Generated: 2026-10-21
 Project: `components/dispatcher` (crate `dispatcher`)
@@ -406,8 +690,6 @@ SC-002, SC-003, SC-006, SC-007, SC-008.
 6. Re-run `scripts/spec-sync-hash.sh components/dispatcher` only after the spec edits are committed. The frontmatter stamp (`spec_sync_git_commit: cccfb328e`) predates `9bd231d85` and `efd502331`, and the approved working-tree edits are not in it.
 
 ---
-
-# Earlier sweeps (retained for history)
 
 ## Sweep 2026-10-20 — branch `fix/dispatcher-remove-clear-mt` (HEAD `cccfb328e`; line numbers refer to that commit; its BACKFILL items B-1…B-6 were applied in `ec4277c0e`, and its ALIGN items are A-1…A-4 in `align-tasks.md`)
 

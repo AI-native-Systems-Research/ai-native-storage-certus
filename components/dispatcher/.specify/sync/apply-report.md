@@ -1,67 +1,39 @@
 # Sync Apply Report — dispatcher
 
-Applied: 2026-10-21T22:53:16Z (analysis run 2026-10-21) · Branch: `fix/dispatcher-remove-clear-mt` (HEAD `efd502331`, base `origin/unstable` `a25e9be29`) · Mode: batch, no questions
-Approved by: Cornel, 2026-10-21 ("Approved by Cornel 2026-10-21 (groups 1, 3, 4)")
-Backup: `.specify/sync/backups/20261021T225316Z/specs/001-dispatcher-cache-interface/{spec.md,contracts/errors.md}` (the previous `apply-report.{md,json}` of 2026-10-20 are kept in the same folder)
+Applied: 2026-10-24 (analysis run 2026-10-23) · Branch: `fix/dispatcher-remove-ssd-extent` (HEAD `765f75ba3`, base `origin/unstable` `a905f89be`) · Mode: batch, no questions
+Approved by: Cornel, 2026-10-24 ("Yes approve B-14 and B-15"; B-12 approved 2026-10-23 on the earlier run and re-checked against this branch by the analysis)
+Backup: the pre-apply state of every edited file is the branch HEAD `765f75ba3` (all edited files are tracked; `git diff` shows this apply). The previous apply-report (2026-10-21, branch `fix/dispatcher-remove-clear-mt`) is at that HEAD too.
 
 ## Changes Made
 
-### Specs Updated
-
-All BACKFILL edits use the exact old→new text from `proposals.md` / `proposals.json`. Before each replacement, the `old` string was confirmed to occur exactly once in its file.
+All BACKFILL edits use the exact old→new text from `proposals.md` / `proposals.json`. Before
+each replacement, the `old` string was confirmed to occur exactly once in its file.
 
 | Proposal | Spec | Requirement | Change Type |
 |---|---|---|---|
-| B-7 | 001 `spec.md` | FR-056 `flush_to_ssd` bullet: return type `Result<usize, DispatcherError>`; the count is taken after the drain, counts `is_evictable` entries, and is a lower bound; only `Ok` vs `IoError` is the persistence guarantee. The approved sentence and the trailing `*(Sync 2026-10-21 — CODE CHANGE …)*` note are kept. | Modified |
-| B-8 | 001 `spec.md` | FR-017: failed background write-through is no longer "silent": recorded per key, reported by `flush_to_ssd` as `IoError` while the key is resident, cleared by a landed write-through or the key leaving the tier (commit `9bd231d85`) | Modified |
-| B-9 | 001 `contracts/errors.md` | `IoError` row: `flush_to_ssd` added to "Raised by", with its condition | Modified |
-| — | 001 `spec.md` | `**Last Synced**: 2026-10-21` header line for branch `fix/dispatcher-remove-clear-mt` (the proposals' "Priority" asked for it) | Added |
+| B-12 | 001 `spec.md` | FR-009: the extent is freed when the entry has one (BlockDevice, or MemoryTier whose write-through landed); a lookup releases only a read reference it acquired | Modified |
+| B-12 | 001 `spec.md` | US-4 narrative: same widening of the extent rule | Modified |
+| B-12 | 001 `contracts/idispatcher.md` | `remove` doc comment: "If the entry has an SSD copy …" | Modified |
+| B-14 | 001 `spec.md` | remove edge case: a refused `remove` frees nothing AND leaves the entry as it found it (same location, slot, references); the brief BlockDevice window recorded as a known gap (align task A-12) | Modified |
+| B-14 | 001 `contracts/idispatcher.md` | `remove()` postcondition: unchanged entry on a held `KeyNotFound` | Modified |
+| B-15 | 001 `spec.md` | FR-056 `CERTUS_LOG_RESERVE` citation `src/lib.rs:3380-3395` → `:3589-3604` | Modified |
+| B-15 | 002 `spec.md` | `GetIoStats` citation `src/lib.rs:3257-3272` → `:4226-4236` (`read_write_stats`) | Modified |
+| — | 001 `spec.md` | `**Last Synced**: 2026-10-24` header line for branch `fix/dispatcher-remove-ssd-extent` (the proposals' "Order" step 1 asked for it) | Added |
 
-Spec 002 was not touched (no proposal).
+No source files were changed by this apply.
 
-### Applied by hand before this run (recorded, not re-applied)
+## Recorded in `align-tasks.md` (no code change)
 
-The two interfaces proposals that change `src/` doc comments were approved and already applied by hand in the working tree (`git diff -- components/interfaces/src/idispatcher.rs`). This apply did **not** edit `src/`.
+- **Closed**: A-2 (resolved by `a7444f4ab`; restart criterion has no test), A-06 (resolved
+  by PR #568), A-9 (implemented by `765f75ba3`, option (c); option (a) carried as A-12).
+- **New tracked tasks**: A-11 (the SSD evictor releases a read reference it never took —
+  the defect class of root cause #12, the last such site in `src/`; TRACK note, Cornel
+  2026-10-24) and A-12 (close the flip window of `remove` with one dispatch-map operation;
+  TRACK note, Cornel 2026-10-24).
+- Carried over, unchanged: A-1, A-3 (decision), A-4, A-5, A-10, A-01, A-02, A-04, A-05,
+  A-08, N-01.
 
-| Proposal | File | Change |
-|---|---|---|
-| interfaces 5 (ALIGN, doc) | `components/interfaces/src/idispatcher.rs` `clear_memory_tier` doc | "Empty the memory tier …", pinned entries kept and retried, count = demoted or removed, `# Errors` `Timeout` |
-| interfaces 6 (ALIGN, doc) | `components/interfaces/src/idispatcher.rs` `batch_lookup` doc | "Returns one [`LookupOutcome`] per input entry …" |
+## Scratch files
 
-The B-7 companion (`idispatcher.rs` `flush_to_ssd` line "Returns the number of entries that now have a valid SSD offset") is outside `specs/**` and was not part of the BACKFILL; it is not changed.
-
-### New Specs Created
-- None.
-
-### Supersede
-- None proposed.
-
-### Implementation Tasks Generated
-- No new approved ALIGN task: the only ALIGN proposal of this run, A-5, is not approved.
-- Closed in `align-tasks.md` (the proposals' `close_after_apply`):
-  - **A-07** (FR-058 `store_already_resident`): resolved in code by `efd502331`, ALIGN option.
-
-### Open items recorded (not approved, with an `approval_note`)
-- **A-5** (FR-056 + FR-017: tie the failed-write record to the entry it describes, minor) → `align-tasks.md`, quoting *"TRACK (Cornel 2026-10-21): code change for a later repair with a test first; not in this PR."*
-- **interfaces 7** (`dispatcher-p2p` `remove` / `clear_memory_tier` / `flush_to_ssd`, major) → recorded in `components/interfaces/.specify/sync/align-tasks.md` as a task for the component **`dispatcher-p2p`**, quoting *"TRACK (Cornel 2026-10-21): port the 3 dispatcher repairs to dispatcher-p2p in a separate PR with its own Loom tests and spec sync."* A cross-reference is in this component's `align-tasks.md`.
-
-### Not Applied
-| Proposal | Reason |
-|---|---|
-| A-5 | Not approved (TRACK; later repair, test first) |
-| B-7 ALIGN alternative (`IDispatchMap::ssd_offset`) | Not chosen; depends on A-2 |
-
-### Still open (carried over)
-A-1, A-2, A-3 (decision recorded), A-4; A-01, A-02, A-04, A-05, A-06, A-08; N-01 (decision).
-
-### Files modified by this apply
-- `specs/001-dispatcher-cache-interface/spec.md`, `specs/001-dispatcher-cache-interface/contracts/errors.md`
-- `.specify/sync/align-tasks.md`, `.specify/sync/apply-report.{md,json}`, `.specify/sync/drift-report.md` (one note below the frontmatter; `spec_sync_*` frontmatter not touched)
-- `components/interfaces/.specify/sync/align-tasks.md` (interfaces 7, as instructed for this run)
-- No source files.
-
-## Next Steps
-
-1. Review the updated specs (`git diff -- components/dispatcher/specs`).
-2. Commit: `git add components/dispatcher/specs components/dispatcher/.specify/sync && git commit -m "sync(dispatcher): apply B-7, B-8, B-9"`.
-3. Implement A-5 together with A-1 (test first); port the repairs to `dispatcher-p2p` (interfaces 7).
+The analysis left `drift-report.note.part` and `drift-report.body.part` in this folder
+(both empty; their content is already in `drift-report.md`). They can be deleted.

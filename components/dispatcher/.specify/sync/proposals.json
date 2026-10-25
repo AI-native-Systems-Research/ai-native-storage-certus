@@ -1,137 +1,177 @@
 {
-  "generated": "2026-10-21T00:00:00Z",
-  "analysis_run": "2026-10-21",
+  "generated": "2026-10-23T00:00:00Z",
+  "analysis_run": "2026-10-23",
   "project": "dispatcher",
-  "branch": "fix/dispatcher-remove-clear-mt",
-  "head": "efd502331",
-  "based_on": "drift-report.json (same run, 2026-10-21)",
+  "branch": "fix/dispatcher-remove-ssd-extent",
+  "head": "765f75ba3",
+  "base": "origin/unstable a905f89be",
+  "based_on": "drift-report.json (same run, 2026-10-23)",
   "mode": "batch",
-  "applied": false,
+  "applied": true,
+  "applied_at": "2026-10-24",
   "summary": {
-    "proposals": 4,
+    "proposals": 5,
     "backfill": 3,
-    "align": 1,
+    "align": 2,
     "new_spec": 0,
     "supersede": 0,
     "human_decision": 0,
-    "approved": 0
+    "approved": 3
   },
   "close_after_apply": [
-    "A-07 (align-tasks.md; resolved in code by efd502331, ALIGN option)"
+    "A-2 (align-tasks.md; resolved in code by a7444f4ab; close when B-12 is applied; restart criterion untested)",
+    "A-06 (align-tasks.md; resolved in code by #568, src/lib.rs:2180, src/background.rs:532)",
+    "A-9 (earlier run; implemented by 765f75ba3, option c; option a carried as A-12)"
   ],
-  "carried_over_open": [
-    "A-1",
-    "A-2",
-    "A-3",
-    "A-4",
-    "A-01",
-    "A-02",
-    "A-04",
-    "A-05",
-    "A-06",
-    "A-08",
-    "N-01"
-  ],
-  "approved_spec_edits_kept": [
-    "001 FR-056 flush_to_ssd bullet (working tree)",
-    "interfaces FR-018a (working tree)",
-    "interfaces idispatcher.rs flush_to_ssd # Errors (working tree)"
-  ],
+  "carried_over_open": ["A-1", "A-3", "A-4", "A-5", "A-01", "A-02", "A-04", "A-05", "A-08", "A-10", "N-01"],
   "proposals": [
     {
-      "id": "B-7",
-      "finding": "D-19",
-      "requirement": "001/FR-056 flush_to_ssd",
-      "type": "BACKFILL",
-      "confidence": "MEDIUM",
-      "approved": true,
-      "spec_location": "specs/001-dispatcher-cache-interface/spec.md:346",
-      "code_location": "src/lib.rs:4006, 4037-4041; components/dispatch-map/src/lib.rs:530-546",
-      "spec_says": "`flush_to_ssd() -> usize` ... returns the number of memory-tier entries that have an SSD copy, or `IoError` if a write-through to SSD failed for an entry that is still in the memory tier (design invariant P9).",
-      "code_does": "returns Result<usize, DispatcherError>; Ok count = resident keys for which dm.is_evictable (SSD copy AND no read/write reference), so pinned persisted entries are excluded",
-      "edits": [
-        {
-          "file": "specs/001-dispatcher-cache-interface/spec.md",
-          "line": 346,
-          "old": "`flush_to_ssd() -> usize` forces a synchronous write-through flush of pending dirty entries to SSD and returns the number of memory-tier entries that have an SSD copy, or `IoError` if a write-through to SSD failed for an entry that is still in the memory tier (design invariant P9).",
-          "new": "`flush_to_ssd() -> Result<usize, DispatcherError>` forces a synchronous write-through flush of pending dirty entries to SSD and returns the number of memory-tier entries that have an SSD copy, or `IoError` if a write-through to SSD failed for an entry that is still in the memory tier (design invariant P9). The count is taken after the queue has drained. It counts the resident entries that `IDispatchMap::is_evictable` reports: an SSD copy and no reference held at that moment. A persisted entry that a reader or a client `pin` holds while the count is taken is therefore not included, so the count is a lower bound. Only `Ok` versus `IoError` is the persistence guarantee."
-        }
-      ],
-      "alternative": "ALIGN with A-2: add IDispatchMap::ssd_offset(key) and count ssd_offset(key).is_some(); drop the lower-bound sentence.",
-      "companion_outside_specs": "components/interfaces/src/idispatcher.rs:830 doc line gets the same qualifier",
-      "approval_note": "Approved by Cornel 2026-10-21 (groups 1, 3, 4)."
-    },
-    {
-      "id": "B-8",
-      "finding": "D-20, U-08",
-      "requirement": "001/FR-017",
+      "id": "B-12",
+      "finding": "D-23",
+      "requirement": "001/FR-009 + US-4 narrative + contracts/idispatcher.md remove doc",
       "type": "BACKFILL",
       "confidence": "HIGH",
-      "approved": true,
-      "spec_location": "specs/001-dispatcher-cache-interface/spec.md:298",
-      "code_location": "src/lib.rs:1419-1423, 1429, 1454-1456, 4026-4034; src/background.rs:262-263, 363-380",
-      "spec_says": "the background writer silently drops the job. The dispatch map entry remains in MemoryTier state. (Known limitation.)",
-      "code_does": "job dropped without retry, caller not told, entry stays MemoryTier; failure recorded per key and flush_to_ssd returns IoError while the key is resident; cleared by a later landed write-through or when the key leaves the memory tier",
-      "edits": [
-        {
-          "file": "specs/001-dispatcher-cache-interface/spec.md",
-          "line": 298,
-          "old": "When the asynchronous background write-through fails (extent allocation failure or block device I/O error), the background writer silently drops the job. The dispatch map entry remains in MemoryTier state. (Known limitation.)",
-          "new": "When the asynchronous background write-through fails (extent allocation failure or block device I/O error), the background writer drops the job without retrying it, and the caller of the store is not told. The dispatch map entry remains in MemoryTier state with no SSD copy. (Known limitation.) The failure MUST be recorded per key, and `flush_to_ssd` MUST report it as `IoError` while the key is still in the memory tier (FR-056). The record is cleared when a later write-through of the key lands, or when the key is no longer in the memory tier. *(Sync 2026-10-21, branch `fix/dispatcher-remove-clear-mt` — code authoritative, commit `9bd231d85`, repair DIS-FLUSH-REPORTS-FAILED-WRITE. Before it the failure left no trace, so a `flush_to_ssd` followed by `clear_memory_tier` dropped the entry's only copy.)*"
-        }
-      ],
-      "approval_note": "Approved by Cornel 2026-10-21 (groups 1, 3, 4)."
-    },
-    {
-      "id": "B-9",
-      "finding": "D-21",
-      "requirement": "001 contracts/errors.md IoError row",
-      "type": "BACKFILL",
-      "confidence": "HIGH",
-      "approved": true,
-      "spec_location": "specs/001-dispatcher-cache-interface/contracts/errors.md:36",
-      "code_location": "src/lib.rs:4029-4034; components/interfaces/src/idispatcher.rs:832-837",
-      "spec_says": "| `IoError` | `lookup`, `batch_lookup`, `initialize`, `commit_store` | Block device read/write error, device init failure. ...",
-      "code_does": "flush_to_ssd returns IoError when a resident key's latest write-through failed",
-      "edits": [
-        {
-          "file": "specs/001-dispatcher-cache-interface/contracts/errors.md",
-          "line": 36,
-          "old": "| `IoError` | `lookup`, `batch_lookup`, `initialize`, `commit_store` | Block device read/write error, device init failure.",
-          "new": "| `IoError` | `lookup`, `batch_lookup`, `initialize`, `commit_store`, `flush_to_ssd` | Block device read/write error, device init failure. **For `flush_to_ssd`**: a write-through to SSD failed for an entry that is still in the memory tier, so that entry has no SSD copy (001 FR-017, FR-056) *(Sync 2026-10-21, branch `fix/dispatcher-remove-clear-mt`)*."
-        }
-      ],
-      "approval_note": "Approved by Cornel 2026-10-21 (groups 1, 3, 4)."
-    },
-    {
-      "id": "A-5",
-      "finding": "P-06",
-      "requirement": "001/FR-056 flush_to_ssd (+ FR-017 as amended by B-8)",
-      "type": "ALIGN",
-      "confidence": "MEDIUM (a) / LOW (b)",
       "severity": "minor",
+      "approved": true,
+      "approval_note": "applied 2026-10-24; approved by Cornel 2026-10-23 on the earlier run and re-checked against this branch",
+      "prior_approval": "Approved by Cornel 2026-10-23 for the earlier run (fix/dispatcher-promote-remove). Re-checked against HEAD 765f75ba3: normative text unchanged; only the italic provenance note changed (branch and commits).",
+      "spec_location": "specs/001-dispatcher-cache-interface/spec.md:294, :92; specs/001-dispatcher-cache-interface/contracts/idispatcher.md:46-47",
+      "code_location": "src/lib.rs:3289-3292, 3293-3331, 3324-3325, 3332-3334, 3372-3378; tests src/repair_test_remove_frees_ssd_extent.rs:941, :991",
+      "spec_says": "free the extent on SSD (if in BlockDevice state)",
+      "code_does": "remove also frees the extent of a MemoryTier entry whose write-through has landed (flip, second lookup, remove_extent via drive_index); its lookups release a read reference only when they took one",
+      "edits": [
+        {
+          "file": "specs/001-dispatcher-cache-interface/spec.md",
+          "line": 294,
+          "old": "- **FR-009**: The `remove(key)` method MUST free the memory-tier slot (if present via `mt.remove()`), free the extent on SSD (if in BlockDevice state), and remove the dispatch map entry.",
+          "new": "- **FR-009**: The `remove(key)` method MUST free the memory-tier slot (if present via `mt.remove()`), free the extent on SSD (if the entry has one: a BlockDevice entry, or a MemoryTier entry whose write-through has landed and recorded its `ssd_offset`), and remove the dispatch map entry. Its own dispatch-map lookup MUST release only a read reference that lookup acquired: a `NotExist` answer takes none, so none is released. *(Sync 2026-10-23, branch `fix/dispatcher-remove-ssd-extent` — code authoritative, commits `a7444f4ab` and `765f75ba3`, repair of root causes #9 and #12. Before it, `LookupResult::MemoryTier` hid the `ssd_offset`, so the extent of a persisted resident entry leaked and the key came back from SSD after a `format_on_init=false` restart (SC-003); and a lookup that answered `NotExist` still released a read reference, which could decrement the write-through pin of a concurrently registered entry.)*"
+        },
+        {
+          "file": "specs/001-dispatcher-cache-interface/spec.md",
+          "line": 92,
+          "old": "A client application wants to evict a cache entry. The client calls the dispatcher's remove method with a cache key. The dispatcher removes the entry from the memory-tier (if present), removes the dispatch map entry, and frees the SSD extent (if the entry was in BlockDevice state).",
+          "new": "A client application wants to evict a cache entry. The client calls the dispatcher's remove method with a cache key. The dispatcher removes the entry from the memory-tier (if present), removes the dispatch map entry, and frees the SSD extent (if the entry has one: it is in BlockDevice state, or it is memory-tier resident and its write-through has landed)."
+        },
+        {
+          "file": "specs/001-dispatcher-cache-interface/contracts/idispatcher.md",
+          "line": "46-47",
+          "old": "        /// If the entry is on a block device, frees the SSD extent via the\n        /// extent manager.",
+          "new": "        /// If the entry has an SSD copy (it is on a block device, or it is\n        /// resident and its write-through has landed), frees the SSD extent\n        /// via the extent manager."
+        }
+      ],
+      "rationale": "SC-003 always required it; the old FR-009 wording described the leak. Formal-verification repair (Spin J26), Loom tests failed on the old code; task A-2 asked for this amendment. Outcome-level text stays true after A-12."
+    },
+    {
+      "id": "B-14",
+      "finding": "U-10",
+      "requirement": "001 edge case remove + contracts/idispatcher.md remove postcondition",
+      "type": "BACKFILL",
+      "confidence": "HIGH (restore); MEDIUM (window sentence)",
+      "severity": "minor",
+      "approved": true,
+      "approval_note": "applied 2026-10-24; approved by Cornel 2026-10-24",
+      "spec_location": "specs/001-dispatcher-cache-interface/spec.md:239; specs/001-dispatcher-cache-interface/contracts/idispatcher.md:171",
+      "code_location": "src/lib.rs:3287, 3305-3314, 3355-3360; components/dispatch-map/src/lib.rs:498-509; test src/repair_test_remove_refused_leaves_entry_unchanged.rs:875",
+      "spec_says": "A `remove` that is refused ... returns `KeyNotFound` and frees nothing. / When it returns `KeyNotFound`, nothing was freed.",
+      "code_does": "a refused remove restores a flipped entry with promote_block_to_memory_tier(key, pointer, size): still MemoryTier, same slot, ssd_offset kept, references kept; while remove runs, other callers can see the entry as BlockDevice",
+      "edits": [
+        {
+          "file": "specs/001-dispatcher-cache-interface/spec.md",
+          "line": 239,
+          "old": "A `remove` that is refused because a reader or a client `pin` holds the entry, or because the entry stays write-locked past the dispatch-map wait, returns `KeyNotFound` and frees nothing.",
+          "new": "A `remove` that is refused because a reader or a client `pin` holds the entry, or because the entry stays write-locked past the dispatch-map wait, returns `KeyNotFound`, frees nothing and leaves the entry as it found it: a memory-tier resident entry is still MemoryTier, with the same slot and its `ssd_offset`, and keeps every reference, so a later lookup is served from DRAM. *(Sync 2026-10-23, branch `fix/dispatcher-remove-ssd-extent` — code authoritative, commit `765f75ba3`. To learn a resident entry's SSD offset, `remove` briefly flips it to BlockDevice before it tries the removal (FR-009), and restores it with `promote_block_to_memory_tier` if the removal is refused. While `remove` runs, a concurrent caller can therefore see the entry as BlockDevice; a cold lookup in that window takes the concurrent-promotion recovery (FR-051). Known gap, tracked as align task A-12: a concurrent `clear_memory_tier` in that window removes the entry, and the SSD extent is then not freed.)*"
+        },
+        {
+          "file": "specs/001-dispatcher-cache-interface/contracts/idispatcher.md",
+          "line": 171,
+          "old": "- `remove()` guarantees, when it returns `Ok`, that the dispatch map entry is removed, so no new lookup can obtain its memory-tier pointer. When it returns `KeyNotFound`, nothing was freed.",
+          "new": "- `remove()` guarantees, when it returns `Ok`, that the dispatch map entry is removed, so no new lookup can obtain its memory-tier pointer. When it returns `KeyNotFound` because the entry is held, nothing was freed and the entry is unchanged: same location, same slot, same references (001 edge case \"remove\")."
+        }
+      ],
+      "rationale": "Formal-verification repair implementing the earlier ALIGN A-9 intent; Loom test failed on the old code. The window is stated as a known gap (A-12), not a guarantee."
+    },
+    {
+      "id": "B-15",
+      "finding": "stale citations",
+      "requirement": "001 FR-056 CERTUS_LOG_RESERVE note; 002 out-of-scope GetIoStats bullet",
+      "type": "BACKFILL",
+      "confidence": "HIGH",
+      "severity": "trivial",
+      "approved": true,
+      "approval_note": "applied 2026-10-24; approved by Cornel 2026-10-24",
+      "spec_location": "specs/001-dispatcher-cache-interface/spec.md:344; specs/002-served-by-tier-attribution/spec.md:722",
+      "code_location": "src/lib.rs:3589-3604 (CERTUS_LOG_RESERVE in reserve_memory); src/lib.rs:4226-4236 (read_write_stats)",
+      "spec_says": "`src/lib.rs:3380-3395` / `components/dispatcher/src/lib.rs:3257-3272`",
+      "code_does": "the cited code is at src/lib.rs:3589-3604 and :4226-4236; the old ranges now cover unrelated code (check/remove)",
+      "edits": [
+        {
+          "file": "specs/001-dispatcher-cache-interface/spec.md",
+          "line": 344,
+          "old": "*(Sync 2026-10-14 — backfilled note, code authoritative, `src/lib.rs:3380-3395`.)*",
+          "new": "*(Sync 2026-10-14 — backfilled note, code authoritative, `src/lib.rs:3589-3604` as of 2026-10-23.)*"
+        },
+        {
+          "file": "specs/002-served-by-tier-attribution/spec.md",
+          "line": 722,
+          "old": "  is device-level and drive-aggregated (`components/dispatcher/src/lib.rs:3257-3272`) and",
+          "new": "  is device-level and drive-aggregated (`components/dispatcher/src/lib.rs:4226-4236`, `read_write_stats`) and"
+        }
+      ],
+      "rationale": "Citations point at unrelated code. Other spec-002 citations are historical (already off at 772885d93) and left for a separate refresh."
+    },
+    {
+      "id": "A-11",
+      "finding": "D-25",
+      "requirement": "001/FR-013 (and FR-018; FR-009 lookup-release rule as amended by B-12)",
+      "type": "ALIGN",
+      "confidence": "MEDIUM",
+      "severity": "moderate",
+      "pre_existing": true,
       "approved": false,
-      "spec_location": "specs/001-dispatcher-cache-interface/spec.md:346",
-      "code_location": "src/background.rs:363-380; src/lib.rs:1401-1403, 1429, 1452, 3183-3232, 3940-4004",
-      "spec_says": "IoError if a write-through to SSD failed for an entry that is still in the memory tier",
-      "code_does": "(a) record keyed by CacheKey, forgotten only when mt.contains(key) is false at flush time, so remove + re-reserve makes flush_to_ssd fail for a new entry never written; (b) landed = written.is_some(), convert_to_storage result discarded",
-      "required_change": [
-        "Clear the key's failure record in remove (after the dispatch-map entry is gone, src/lib.rs:3206-3215) and in clear_memory_tier where an entry is removed without an SSD copy (:3980-3983), e.g. WriteThroughPins::forget_failure(key).",
-        "settle_write_through returns dm.convert_to_storage(..).is_ok(); pass that to record_write instead of written.is_some(); same in process_write_job.",
-        "Leave the success count to B-7 / A-2."
-      ],
-      "files": [
-        "src/lib.rs",
-        "src/background.rs",
-        "src/repair_test_flush_failed_write.rs"
-      ],
+      "approval_note": "TRACK (Cornel 2026-10-24): code change for a later repair with a test first; not in this PR",
+      "spec_location": "specs/001-dispatcher-cache-interface/spec.md:298, :303",
+      "code_location": "src/background.rs:581-601 (catch-all release at :595-598); caller :516; registration src/lib.rs:3784, 3843, 3852",
+      "spec_says": "The dispatcher MUST use appropriate read/write locking on the dispatch map to ensure thread safety during concurrent operations.",
+      "code_does": "get_evictable_offset releases a read reference after LookupResult::NotExist; a concurrently registered entry loses its write-through pin, so a later remove bypasses the ledger takeover and frees the slot the job is reading",
+      "code_change": "release only after BlockDevice or MemoryTier; NotExist / MismatchSize release nothing",
+      "files": ["src/background.rs", "new or existing repair test module"],
       "acceptance": [
-        "Write fails, remove, re-reserve, flush_to_ssd returns Ok; the test fails on HEAD efd502331.",
-        "A job whose convert_to_storage returns KeyNotFound is recorded as not landed.",
-        "flush_to_ssd_returns_err_when_a_write_through_failed and flush_to_ssd_counts_entries_with_an_ssd_offset still pass."
+        "Registration-race test (fixture of src/repair_test_remove_frees_ssd_extent.rs:991) on get_evictable_offset: foreign_releases() == 0 and the write-through pin survives",
+        "The test fails on HEAD 765f75ba3"
       ],
-      "note": "Do it together with A-1; (b) is reachable only through the A-1/A-4 windows.",
-      "approval_note": "TRACK (Cornel 2026-10-21): code change for a later repair with a test first; not in this PR."
+      "effort": "small"
+    },
+    {
+      "id": "A-12",
+      "finding": "P-07",
+      "requirement": "001/SC-003 + FR-038 (+ FR-009 as amended by B-12)",
+      "type": "ALIGN",
+      "confidence": "MEDIUM",
+      "severity": "minor",
+      "introduced_by": "a7444f4ab",
+      "approved": false,
+      "approval_note": "TRACK (Cornel 2026-10-24): code change for a later repair with a test first; not in this PR",
+      "spec_location": "specs/001-dispatcher-cache-interface/spec.md:396, :323",
+      "code_location": "src/lib.rs:3305-3310, 3340, 3363, 3372-3378, 4132-4146; components/dispatch-map/src/lib.rs:576-578",
+      "spec_says": "Cache removal frees all associated resources (memory-tier slots and SSD extents) so that they can be reused.",
+      "code_does": "in the flip window a concurrent clear_memory_tier force-removes the unreferenced BlockDevice entry and frees its slot; remove returns KeyNotFound and never frees the extent (leak; resurrection after a format_on_init=false restart); FR-038 drops instead of demotes",
+      "code_change": "one dispatch-map operation that removes an unreferenced entry under one lock and returns its SSD offset (e.g. IDispatchMap::remove_returning_offset -> Result<Option<u64>, _>); replace flip/second lookup/restore in remove; reuse in WriteThroughPins::remove_entry (also closes A-4(a))",
+      "files": ["components/interfaces/src/idispatch_map.rs", "components/dispatch-map/src/lib.rs", "src/lib.rs", "src/background.rs", "test mocks"],
+      "acceptance": [
+        "remove vs clear_memory_tier race on a persisted resident entry: exactly one reports the entry, and no extent remains for the key",
+        "The test fails on HEAD 765f75ba3",
+        "src/repair_test_remove_frees_ssd_extent.rs:941,991 and src/repair_test_remove_refused_leaves_entry_unchanged.rs:875 still pass"
+      ],
+      "effort": "medium"
     }
+  ],
+  "not_proposed": [
+    "A-9: implemented by 765f75ba3 (option c); option a carried as A-12",
+    "A-2: close with B-12",
+    "A-06: resolved by #568",
+    "J26 P2: not verified",
+    "dispatcher-p2p::remove (components/dispatcher-p2p/src/lib.rs:2367-2377): both pre-repair defects; port A-12's form",
+    "Spec-002 historical line citations: separate refresh",
+    "Scratch files drift-report.note.part / drift-report.body.part (empty): can be deleted"
   ]
 }

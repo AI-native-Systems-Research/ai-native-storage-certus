@@ -719,7 +719,7 @@ Two Phase 1 findings that bear on requirements elsewhere in this spec:
   Recorded as a known limitation for the workload-generator spec's SC-007, which depends on
   it.
 - **Re-deriving the workload generator's 5% `GetIoStats` agreement tolerance.** `GetIoStats`
-  is device-level and drive-aggregated (`components/dispatcher/src/lib.rs:3257-3272`) and
+  is device-level and drive-aggregated (`components/dispatcher/src/lib.rs:4226-4236`, `read_write_stats`) and
   includes background promotion traffic, so exact agreement with critical-path SSD bytes was
   never achievable. Belongs to that spec.
 - **Splitting `certus_evictions_total` into demoted versus removed**, and its dependence on a
