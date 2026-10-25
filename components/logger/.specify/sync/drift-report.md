@@ -1,11 +1,13 @@
 ---
 spec_sync_component: logger
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-23T18:00:34Z
-spec_sync_git_commit: d7a24d58
-spec_sync_inputs_sha256: 4759816e4e468a375135faa784c4ad797c436478c48113ccbc363208bdee9973
+spec_sync_synced_at: 2026-10-25T09:19:59Z
+spec_sync_git_commit: 4e17bedb
+spec_sync_inputs_sha256: cb388901eb6fc758891b76cd25d37c7b64ed1b2e533e322c8f61838a6b4621ac
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-25 (branch `001-rdma-cache-transfer`, rebased onto unstable `a905f89b`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (`IDispatcher::clear_all`) and the rebase brought unstable's changes. No analysis below changes.
+
 > **Re-stamp 2026-10-23 (branch `unstable`, commit `d7a24d58` "Fix workspace build warnings" plus the spec-sync follow-up).** That commit only fixed warnings under the workspace lint posture: it added `Debug` impls, narrowed unreachable `pub` items to `pub(crate)`, wrapped `unsafe fn` bodies in explicit `unsafe {}` blocks, and the follow-up ran `rustfmt`. It also touched `components/interfaces` (a `Debug` impl for `Command`), which changes every component's digest. This component's own `src/` was in that commit. Every changed item was checked: none is part of a provided interface, none is named as public by the spec, and no behaviour changed. No spec citation into this component's source moved. All citations were re-verified by diff-mapping each base line to its new position. Status stays `clean`.
 
 > **Re-stamp 2026-10-21 (transitive, `components/interfaces` changed on branch `fix/dispatcher-remove-clear-mt`).** Only `components/interfaces` changed for this component: `IDispatcher` doc comments (`flush_to_ssd` errors, `clear_memory_tier`, `batch_lookup`) and the interfaces spec (FR-008, FR-009, FR-017, FR-018, FR-018a, FR-021, FR-023, Overview, NFR-002, Implementation Notes; text only, no type or signature changed). This component uses none of the changed items (grep over its src/ and specs/: 0 hits). This component's last full sync below stands; no re-analysis was needed.

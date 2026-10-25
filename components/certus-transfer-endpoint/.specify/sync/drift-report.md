@@ -1,11 +1,13 @@
 ---
 spec_sync_component: certus-transfer-endpoint
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-23T07:08:30Z
-spec_sync_git_commit: 8544bf4a
-spec_sync_inputs_sha256: eb4db37f45bb594e717eeab14218251827a7a5667e15311fd2a22929713853b8
+spec_sync_synced_at: 2026-10-25T09:19:59Z
+spec_sync_git_commit: 4e17bedb
+spec_sync_inputs_sha256: 47f102f1eb08a856f247005fa312cfa64af4f0391b4341264ffac03b5249a471
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-25 (branch `001-rdma-cache-transfer`, rebased onto unstable `a905f89b`).** Specs only since the last stamp: `channel-reclaim.md` (built: OFD-lock channel claims, ABI 2; `CLEAR_ALL`) and `peer-selection.md` (proposed: llm-d chooses the fetch peer); `contracts/shmq-fetch.md` (Prometheus/OTel names, DRAM net of fetched, the run-scaled budget); T087 marked done in tasks.md. No source changes in this component.
+
 > **Sync 2026-10-23 (branch `001-rdma-cache-transfer`).** Since the last stamp: T067 specified (`contracts/shmq-fetch.md`: the FETCH op, its server-side window and caps, `FETCHED` attribution and its counters, the connector's gathering scheme and time budget, how it combines with NIXL); T084-T086 built in `lib/shmq-dispatcher`, `apps/certus-server-yaml` and `certus-shmq-connector` (outside this component, tested there); in this crate, `first_active_rdma_ipv4` (bind-IP auto-detect, `rdma` only, hardware-tested). Each code claim in shmq-fetch.md was checked against the implementation; tasks.md ticks match. No actionable drift.
 
 > **Re-stamp 2026-10-22 (specs only).** Phase 11 is designed and deferred: `cutover.md` added, and tasks.md / plan.md point at it. No code changed; nothing else in the analysis below changes.

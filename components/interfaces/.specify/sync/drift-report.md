@@ -1,11 +1,13 @@
 ---
 spec_sync_component: interfaces
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-23T18:00:34Z
-spec_sync_git_commit: d7a24d58
-spec_sync_inputs_sha256: 264ff039015669529d8a92547865bc01994c790536c5548fe33137b76027de2d
+spec_sync_synced_at: 2026-10-25T09:19:59Z
+spec_sync_git_commit: 4e17bedb
+spec_sync_inputs_sha256: 1400b9a1e1c8e2bb9c54aa495f43cca4a006afabc44634f300b19c829c9262da
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-25 (branch `001-rdma-cache-transfer`, rebased onto unstable `a905f89b`).** New since the last stamp: `IDispatcher::clear_all` and its `ClearAll { removed, still_pinned }` result, recorded in `specs/001-interfaces/spec.md` (method inventory, method and struct entries). Upstream's changes arrive with the rebase; their own spec updates are upstream's.
+
 > **Re-stamp 2026-10-23 (branch `unstable`, commit `d7a24d58` "Fix workspace build warnings" plus the spec-sync follow-up).** That commit only fixed warnings under the workspace lint posture: it added `Debug` impls, narrowed unreachable `pub` items to `pub(crate)`, wrapped `unsafe fn` bodies in explicit `unsafe {}` blocks, and the follow-up ran `rustfmt`. It also touched `components/interfaces` (a `Debug` impl for `Command`), which changes every component's digest. This component's own `src/` was in that commit. Every changed item was checked: none is part of a provided interface, none is named as public by the spec, and no behaviour changed. Own change: a manual `Debug` impl for `Command` (`src/iblock_device.rs:417-423`, prints the variant discriminant only, since variants hold `Arc<DmaBuffer>`). No variant, field, trait method or documented behaviour changed; every interface FR still holds. All citations were re-verified by diff-mapping each base line to its new position. Status stays `clean`.
 
 > **Apply 2026-10-21 (branch fix/dispatcher-remove-clear-mt, approved by Cornel).** Batch apply of the 12 approved proposals listed in `proposals.json`. Backup: `.specify/sync/backups/20261021T225804Z/`. Details: `apply-report.{md,json}`.
