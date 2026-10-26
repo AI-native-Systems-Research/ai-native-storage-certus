@@ -1,0 +1,72 @@
+# Router values for the pd-certus profile: llm-d's pd-disaggregation router
+# (guides/pd-disaggregation/router/pd-disaggregation.values.yaml at the pinned
+# llm-d.ref), with the p2p-source-producer added for certus peer selection.
+# install.sh applies it after the guide's values when PD=1 WITH_CERTUS=1.
+#
+# pluginsCustomConfig is a single string, so this file carries the WHOLE
+# pd-config.yaml: an llm-d.ref bump must re-check it against upstream's.
+router:
+  epp:
+    flags:
+      # p2p-source-producer is registered Alpha (llm-d-router cmd/epp/runner).
+      allow-experimental-plugins: true
+    pluginsConfigFile: "pd-config.yaml"
+    pluginsCustomConfig:
+      pd-config.yaml: |
+        apiVersion: llm-d.ai/v1alpha1
+        kind: EndpointPickerConfig
+        plugins:
+        - type: always-disagg-pd-decider
+        - type: disagg-profile-handler
+          parameters:
+            deciders:
+              prefill: always-disagg-pd-decider
+        - type: prefill-filter
+        - type: decode-filter
+        - type: approx-prefix-cache-producer
+          parameters:
+            # 5k-ISL gpt-oss-120b reference workload; a modest match window
+            # keeps EPP prefix-matching cheap.
+            maxPrefixTokensToMatch: 131072
+        # Peer selection for certus (peer-selection.md milestone 2): pick the pod
+        # that holds the longest cached prefix of this prompt and name it in the
+        # KV-cache-source header; decode's sidecar (--enable-p2p-pull) turns it
+        # into remote_kv_source on the prefill hop, and the certus connector
+        # fetches from that pod's certus. Fed by the approximate producer
+        # above: it remembers which pod served which prefix, no KV events
+        # needed. That pod's certus keeps the prefix longer than the producer
+        # remembers it, so the view errs toward computing, not toward a miss.
+        - type: p2p-source-producer
+          parameters:
+            prefillProfileName: prefill
+            # Below ~1k tokens a fetch saves little against computing on an A30
+            # (~3 ms per 16-token block computed, ~1.2 ms fetched warm).
+            minCachedTokenDelta: 1024
+        - type: inflight-load-producer
+        - type: prefix-cache-affinity-filter
+          parameters:
+            # Measured with guides/recipes/router/calibration/calibrate.sh
+            # through the full P/D path on the reference fleet (gpt-oss-120b,
+            # 8x prefill TP=1 on H200, chunk 8192). Includes the NIXL KV
+            # transfer + sidecar hop, so it is the operational ceiling the
+            # gate acts on. Re-measure for other hardware/models.
+            peakPrefillThroughput: 33821
+        - type: token-load-scorer
+        - type: active-request-scorer
+        - type: max-score-picker
+        schedulingProfiles:
+        # Prefill does the prompt pass: keep prefix groups on cache-warm pods
+        # (affinity filter) and pick by queued prefill token load.
+        - name: prefill
+          plugins:
+          - pluginRef: prefill-filter
+          - pluginRef: prefix-cache-affinity-filter
+          - pluginRef: token-load-scorer
+          - pluginRef: max-score-picker
+        # Pure decode is bound by concurrent in-flight requests, not prefill
+        # throughput: pick the least-busy endpoint.
+        - name: decode
+          plugins:
+          - pluginRef: decode-filter
+          - pluginRef: active-request-scorer
+          - pluginRef: max-score-picker
