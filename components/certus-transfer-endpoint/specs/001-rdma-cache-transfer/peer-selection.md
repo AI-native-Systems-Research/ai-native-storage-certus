@@ -1,6 +1,6 @@
 # Design: llm-d chooses the peer a request fetches from
 
-**Feature**: `001-rdma-cache-transfer` | **Date**: 2026-10-23 | **Status**: proposed, not built
+**Feature**: `001-rdma-cache-transfer` | **Date**: 2026-10-23 | **Status**: milestone 1 built and verified in k8s (2026-10-26); milestones 2-4 not built
 
 How a request's `FETCH` gets its peer without anyone setting `certus_fetch_from` by hand,
 by riding llm-d's own peer-pull selection. Milestone 3 of
@@ -175,6 +175,27 @@ transfer crosses the NIC twice. On the a30 profile such moves are rare -- upstre
   still leaves the client choosing the peer.
 - Teaching the EPP about certus directly (a certus-specific scorer): duplicates what the
   p2p producer does, and llm-d already has the plumbing.
+
+## Milestone 1, as built
+
+The pod-to-certus mapping changed from the proposal above: the entrypoint cannot read the
+node's RoCE address from inside the pod (no host network; the pod's RoCE GIDs read zero,
+see `deploy/k8s/rdma-secondary-network.md`). Instead **the certus server publishes its own
+name beside its mailbox**, `<mailbox>.endpoint`, and the entrypoint annotates the pod with
+what it reads there -- exact by construction, since the mailbox is the one the pod uses.
+
+Verified on node2/node5 (certus `b9a8af52`, connector `vllm0.30.0-b9a8af52`), the header set
+by hand at decode1's sidecar, `x-llm-d-kv-cache-source-host-port`, prefill on node5:
+
+| source named | outcome |
+|---|---|
+| decode0's pod (its certus, node2 NUMA 0, holds the prompt) | 367/367 blocks fetched into node5 and served as fetched |
+| decode1's pod (its certus lacks the prompt) | fetch sent, 56 misses, computed |
+| an IP with no pod | no fetch; logged "has no certus.ai/transfer-endpoint" |
+
+All three pods annotated themselves at start. The request through decode's sidecar still
+spends ~8 s in the NIXL pull over TCP; that is the secondary-network proposal's subject, not
+this one's.
 
 ## Milestones
 
