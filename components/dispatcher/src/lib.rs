@@ -2534,6 +2534,11 @@ impl IDispatcher for DispatcherComponent {
 
         let mut cold_entries: Vec<ColdEntry> = Vec::new();
         let mut deferred_touch_keys: Vec<CacheKey> = Vec::new();
+        // Indices of the warm hits whose H2D copy is queued on the warm stream
+        // and only completed by the deferred sync below. If that sync fails,
+        // these are the entries whose destination buffers may not hold the
+        // data — each must be reported as an error, never as a hit.
+        let mut warm_inflight: Vec<usize> = Vec::new();
         // Read pins for the warm hits below. The H2D copies are submitted async and
         // synchronized once after the cold scatter-gather, so each pin must survive
         // until *after* that deferred sync: releasing at submission would let the
@@ -2613,6 +2618,12 @@ impl IDispatcher for DispatcherComponent {
                         warm_pins.adopt(key);
                         deferred_touch_keys.push(key);
                         tier[i] = Some(ServedBy::Dram);
+                        // The copy is queued, not complete: it is in flight
+                        // until the deferred sync (warm_raw == 0 means the
+                        // synchronous path ran — nothing is in flight).
+                        if warm_raw != 0 && res.is_ok() {
+                            warm_inflight.push(i);
+                        }
                         results[i] = Some(res);
                     }
                     LookupResult::BlockDevice { offset } => {
@@ -2971,7 +2982,16 @@ impl IDispatcher for DispatcherComponent {
         if !deferred_touch_keys.is_empty() && warm_raw != 0 {
             let s = GpuStream(warm_raw as *mut std::ffi::c_void);
             if let Err(e) = gpu.stream_synchronize(s) {
-                self.log_info(&format!("batch stream_synchronize failed: {e}"));
+                // The destination buffers may not hold the data, so none of
+                // the keys whose copies were in flight can be reported as a
+                // hit — their Ok is only the submission's, not the copy's.
+                // Mirrors the remote-delivery sync below (and spec 002: a
+                // result rewritten by the failed-batched-sync path is Error).
+                let msg = format!("batch stream_synchronize failed: {e}");
+                self.log_warn(&msg);
+                for &i in &warm_inflight {
+                    results[i] = Some(Err(DispatcherError::IoError(msg.clone())));
+                }
             }
         }
         // Every warm copy has completed (or nothing was submitted): only now is it
@@ -7806,3 +7826,7 @@ mod repair_test_remove_refused_leaves_entry_unchanged;
 #[cfg(test)]
 #[path = "repair_test_warm_copy_stops_at_zero_region.rs"]
 mod repair_test_warm_copy_stops_at_zero_region;
+
+#[cfg(test)]
+#[path = "repair_test_sync_failure_error.rs"]
+mod repair_test_sync_failure_error;
