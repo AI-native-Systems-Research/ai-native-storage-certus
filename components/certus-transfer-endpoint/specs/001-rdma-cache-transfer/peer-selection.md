@@ -1,6 +1,6 @@
 # Design: llm-d chooses the peer a request fetches from
 
-**Feature**: `001-rdma-cache-transfer` | **Date**: 2026-10-23 | **Status**: milestone 1 built and verified in k8s (2026-10-26); milestones 2-4 not built
+**Feature**: `001-rdma-cache-transfer` | **Date**: 2026-10-23 | **Status**: milestones 1 and 2 built (2026-10-26); M1 verified in k8s, M2 deployed but not exercised (one prefill pod); 3-4 not built
 
 How a request's `FETCH` gets its peer without anyone setting `certus_fetch_from` by hand,
 by riding llm-d's own peer-pull selection. Milestone 3 of
@@ -196,6 +196,27 @@ by hand at decode1's sidecar, `x-llm-d-kv-cache-source-host-port`, prefill on no
 All three pods annotated themselves at start. The request through decode's sidecar still
 spends ~8 s in the NIXL pull over TCP; that is the secondary-network proposal's subject, not
 this one's.
+
+## Milestone 2, as built
+
+`deploy/llm-d/profiles/a30/pd-certus/router-values.yaml` adds `p2p-source-producer` to the
+P/D router's EPP config, on the approximate prefix producer already there, with
+`minCachedTokenDelta: 1024` and `--allow-experimental-plugins` (the plugin is Alpha).
+`install.sh` layers a profile's router values over the guide's. Rolled out: the EPP loads the
+plugin and logs a decision per request.
+
+**Not exercised on this cluster, by construction.** The plugin names a source only when one
+pod holds at least `minCachedTokenDelta` more of the prompt than *the pod that will compute
+it*. Under P/D the computing pod is the prefill pod, and the approximate producer records
+every request against both the decode pod and the prefill pod it was routed to
+(`approximateprefix` `PreRequest`). With **one** prefill pod -- the node2/node5 testbed --
+that pod has served every prompt, so it always holds at least as much as any decode pod:
+three requests with a 7 858-token shared prefix logged `below-floor`, delta 0, each time.
+
+A source is named when the prompt's prefix was served by a pod that is **not** the prefill
+pod chosen for this request: two or more prefill pods (load spreads a session's turns), or a
+decode pod that kept a session's generated tail. On the testbed that needs another prefill
+GPU. Until then the path is exercised only as M1 was, with the header set by hand.
 
 ## Milestones
 

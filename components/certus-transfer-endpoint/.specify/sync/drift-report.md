@@ -1,11 +1,13 @@
 ---
 spec_sync_component: certus-transfer-endpoint
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-26T21:08:52Z
-spec_sync_git_commit: 09f2232c
-spec_sync_inputs_sha256: e51c3c2bd5322d79432f9d9f5860e624182646219bee7dcdab491a2606b4e752
+spec_sync_synced_at: 2026-10-26T21:25:14Z
+spec_sync_git_commit: 5da2dafd
+spec_sync_inputs_sha256: c082e625545d65c561c01f82788421aab1ea99c91ba8904a909cc0a1f5969c8e
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-26 (specs only).** `peer-selection.md`: milestone 2 built (the router's p2p-source-producer, `pd-certus/router-values.yaml`) and deployed; recorded why one prefill pod never names a peer. No source change in this component.
+
 > **Re-stamp 2026-10-26 (specs only).** `peer-selection.md`: milestone 1 built and verified in k8s, with the pod-to-certus mapping changed to the server publishing `<mailbox>.endpoint` (a pod cannot see the node's RoCE address). No source change in this component.
 
 > **Re-stamp 2026-10-25 (branch `001-rdma-cache-transfer`, rebased onto unstable `a905f89b`).** Specs only since the last stamp: `channel-reclaim.md` (built: OFD-lock channel claims, ABI 2; `CLEAR_ALL`) and `peer-selection.md` (proposed: llm-d chooses the fetch peer); `contracts/shmq-fetch.md` (Prometheus/OTel names, DRAM net of fetched, the run-scaled budget); T087 marked done in tasks.md. No source changes in this component.
