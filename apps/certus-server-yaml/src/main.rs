@@ -55,6 +55,18 @@ fn fetch_limits() -> shmq_dispatcher::FetchLimits {
     l
 }
 
+/// Write `name` to `<shm_path>.endpoint`, atomically (a reader never sees a
+/// partial name): a temporary file, then a rename over the old one. Returns the
+/// path, for removal at shutdown.
+fn publish_endpoint_name(shm_path: &str, name: &str) -> std::io::Result<String> {
+    let path = format!("{shm_path}.endpoint");
+    let tmp = format!("{path}.tmp.{}", std::process::id());
+    std::fs::write(&tmp, format!("{name}\n"))?;
+    std::fs::rename(&tmp, &path)?;
+    eprintln!("transfer endpoint: name published at {path}");
+    Ok(path)
+}
+
 /// Set once by the SIGINT/SIGTERM handler; polled by the shmq poller and reaper.
 static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 
@@ -322,6 +334,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         rl_group: cli.rl_group.clone(),
         resolved_pci_addrs: std::cell::RefCell::new(Vec::new()),
         resolved_numa_node: std::cell::RefCell::new(None),
+        transfer_endpoint_name: std::cell::RefCell::new(None),
     };
 
     // Build the component stack from the YAML-generated composition
@@ -446,6 +459,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         server.cap_req(),
         server.cap_resp()
     ));
+    // Publish the transfer endpoint's name beside the mailbox, for a client of
+    // this mailbox to tell others which instance holds its cache (llm-d peer
+    // selection: the vLLM pod annotates itself with it). Only a client of the
+    // mailbox can read it, and it names exactly this instance -- the pod need not
+    // know the node's RoCE address, which it cannot see outside the host network.
+    let endpoint_file = stack_config
+        .transfer_endpoint_name
+        .borrow()
+        .clone()
+        .map(|name| publish_endpoint_name(&cli.shm_path, &name))
+        .transpose()?;
 
     // Install SIGINT/SIGTERM handlers → flip SHUTDOWN. This replaces tokio's
     // signal handling; the blocking serve loop polls SHUTDOWN directly.
@@ -538,6 +562,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let _ = stack.dispatcher.shutdown();
     stack.spdk_env.fini();
+    if let Some(path) = endpoint_file {
+        let _ = std::fs::remove_file(path);
+    }
     logger.info("certus-server-yaml: shutdown complete");
 
     // Exit immediately rather than waiting on the tokio runtime / SPDK teardown.
@@ -596,6 +623,25 @@ mod tests {
             ),
             "the kvprofile parser scans this prefix; it changed:\n  {line}"
         );
+    }
+
+    /// The endpoint name lands beside the mailbox, whole, and replaces an old
+    /// one: a vLLM pod reads it to tell peers which certus holds its cache.
+    #[test]
+    fn the_endpoint_name_is_published_beside_the_mailbox() {
+        let dir = std::env::temp_dir().join(format!("certus-ep-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let shm = dir.join("certus-shmq-numa1");
+        let shm = shm.to_str().unwrap();
+        std::fs::write(format!("{shm}.endpoint"), "stale\n").unwrap();
+
+        let path = publish_endpoint_name(shm, "10.0.0.102:7482").unwrap();
+
+        assert_eq!(path, format!("{shm}.endpoint"));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "10.0.0.102:7482\n");
+        let left: Vec<_> = std::fs::read_dir(&dir).unwrap().collect();
+        assert_eq!(left.len(), 1, "the temporary file must not be left behind");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     /// The two directions of remote traffic must stay distinguishable in the log.

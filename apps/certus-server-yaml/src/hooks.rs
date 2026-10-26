@@ -268,6 +268,7 @@ pub(crate) fn init_transfer_endpoint(
         .initialize()
         .map_err(|e| format!("transfer endpoint initialize: {e}"))?;
     eprintln!("transfer endpoint: listening as {name}");
+    *_config.transfer_endpoint_name.borrow_mut() = Some(name);
     Ok(())
 }
 
