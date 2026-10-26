@@ -11,6 +11,8 @@ spec:
     spec:
       # The certus server opens vLLM's CUDA IPC handles: same IPC namespace.
       hostIPC: true
+      # Reads and writes pod annotations for peer selection (rbac.yaml).
+      serviceAccountName: certus-peer
       imagePullSecrets:
         - name: artifactory-creds
       containers:
@@ -27,6 +29,11 @@ spec:
               value: "1"
             - name: DP_RANK
               value: "0"
+            # The entrypoint annotates this pod with its certus instance.
+            - name: POD_NAME
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+            - name: POD_NAMESPACE
+              valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
           volumeMounts:
             - mountPath: /certus
               name: certus-entrypoint
@@ -53,8 +60,23 @@ spec:
     spec:
       # The certus server opens vLLM's CUDA IPC handles: same IPC namespace.
       hostIPC: true
+      # Reads and writes pod annotations for peer selection (rbac.yaml).
+      serviceAccountName: certus-peer
       imagePullSecrets:
         - name: artifactory-creds
+      initContainers:
+        # llm-d's routing sidecar. Lists without a merge key are replaced whole,
+        # so this is base's arg vector plus --enable-p2p-pull: with it the
+        # sidecar turns the EPP's (or a client's) KV-cache-source header into
+        # kv_transfer_params.remote_kv_source on the prefill hop, which the
+        # certus connector resolves to the source pod's certus and fetches from.
+        - name: routing-proxy
+          args:
+            - --port=8000
+            - --kv-connector=nixlv2
+            - --zap-log-level=1
+            - --secure-proxy=false
+            - --enable-p2p-pull
       containers:
         - name: modelserver
           # Replaces ["vllm","serve"]; the entrypoint picks the NUMA-local
@@ -69,6 +91,11 @@ spec:
               value: "1"
             - name: DP_RANK
               value: "0"
+            # The entrypoint annotates this pod with its certus instance.
+            - name: POD_NAME
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+            - name: POD_NAMESPACE
+              valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
           volumeMounts:
             - mountPath: /certus
               name: certus-entrypoint

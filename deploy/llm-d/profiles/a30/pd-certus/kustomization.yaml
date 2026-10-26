@@ -13,6 +13,7 @@ kind: Kustomization
 # kv_transfer_params.certus_fetch_from.
 resources:
   - ../pd
+  - rbac.yaml
 
 configMapGenerator:
   - name: certus-entrypoint

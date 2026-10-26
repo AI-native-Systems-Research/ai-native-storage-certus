@@ -124,6 +124,46 @@ fi
 
 log "GPU ${bdf} -> NUMA ${numa} -> ${shm_path}"
 
+# Say which certus instance holds this pod's cache, for peer selection
+# (components/certus-transfer-endpoint/specs/001-rdma-cache-transfer/
+# peer-selection.md): another pod fetching from this one reads the annotation
+# certus.ai/transfer-endpoint to find it. The certus server publishes its name
+# beside the mailbox (<mailbox>.endpoint); this pod cannot work it out itself,
+# being outside the host network (the node's RoCE address is not visible here).
+#
+# Best effort and off the critical path: a server without a transfer endpoint
+# writes no file, and a pod without API access cannot annotate. Either way the
+# pod serves as before; only peers fetching from it lose the way to find its
+# certus, and say so in their logs.
+annotate_endpoint() {
+    local ep_file="${shm_path}.endpoint" tok=/var/run/secrets/kubernetes.io/serviceaccount
+    local i ep=""
+    for i in $(seq 1 30); do   # the server may still be starting
+        [ -s "$ep_file" ] && { ep="$(head -1 "$ep_file" | tr -d '[:space:]')"; break; }
+        sleep 1
+    done
+    if [ -z "$ep" ]; then
+        log "no ${ep_file}: this certus has no transfer endpoint; peers cannot fetch from it"
+        return 0
+    fi
+    if [ -z "${POD_NAME:-}" ] || [ -z "${POD_NAMESPACE:-}" ] || [ ! -r "$tok/token" ]; then
+        log "endpoint ${ep}, but no POD_NAME/POD_NAMESPACE or service-account token: not annotating"
+        return 0
+    fi
+    local body
+    body="$(python3 -c 'import json,sys;print(json.dumps({"metadata":{"annotations":{"certus.ai/transfer-endpoint":sys.argv[1]}}}))' "$ep")"
+    if curl -fsS --max-time 10 --cacert "$tok/ca.crt" \
+            -H "Authorization: Bearer $(cat "$tok/token")" \
+            -H "Content-Type: application/merge-patch+json" -X PATCH -d "$body" \
+            "https://kubernetes.default.svc/api/v1/namespaces/${POD_NAMESPACE}/pods/${POD_NAME}" \
+            >/dev/null; then
+        log "annotated certus.ai/transfer-endpoint=${ep}"
+    else
+        log "endpoint ${ep}: annotating the pod failed; peers cannot fetch from it"
+    fi
+}
+annotate_endpoint &
+
 # --no-async-scheduling: 0.22+ auto-enables async scheduling, which breaks the
 #   OffloadingConnector's per-request transfer serialization (a re-scheduled load
 #   races an in-flight store -> assert -> EngineDeadError).
