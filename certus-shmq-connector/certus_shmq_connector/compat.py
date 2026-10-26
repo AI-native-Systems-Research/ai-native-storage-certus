@@ -429,17 +429,25 @@ def offload_event_medium():
     ``KeyError``. Feature-detected (not version-gated) because 0.27/0.28 are
     run without being in ``SUPPORTED_VERSIONS``. On <=0.26 ``medium`` is a plain
     string; ``"STORAGE"`` matches what later releases report.
+
+    ``CERTUS_EVENT_MEDIUM=cpu`` reports ``CPU`` instead: a bridge for llm-d's
+    p2p-source-producer, which counts only the ``cpu`` tier as one a peer can
+    pull from (peer-selection.md, milestone 3). It misnames the medium, so it is
+    off by default and meant to go once llm-d can be told certus is pullable.
     """
     import importlib
 
+    want = os.environ.get("CERTUS_EVENT_MEDIUM", "storage").strip().upper()
+    if want not in ("STORAGE", "CPU"):
+        raise ValueError(f"CERTUS_EVENT_MEDIUM={want!r}: expected storage or cpu")
     try:
         base = importlib.import_module("vllm.v1.kv_offload.base")
     except ImportError:
-        return "STORAGE"
+        return want
     medium = getattr(base, "Medium", None)
     if medium is not None:
-        return medium.STORAGE
-    return "STORAGE"
+        return getattr(medium, want)
+    return want
 
 
 def kv_events_enabled(*sources) -> bool:

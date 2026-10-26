@@ -1117,6 +1117,62 @@ def test_take_events_medium_matches_vllm_tracker_enum_keys():
         importlib.reload(compat)
 
 
+def test_a_committed_store_is_announced_once_with_its_vllm_keys():
+    # Peer selection M3: a router learns from KV events that this pod's certus
+    # holds a block, so a successful commit must yield a stored event carrying
+    # vLLM's own keys (the tracker looks its metadata up by them).
+    ring = FakeRing()
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096, events_enabled=True)
+    keys = [b"\x05" * 36, b"\x06" * 36]
+    _store_keys(mgr, ring, keys)
+    mgr.complete_store(iter(keys), success=True)  # an iterator: read once only
+    (event,) = mgr.take_events()
+    assert (event.removed, event.keys, event.medium) == (False, keys, "STORAGE")
+    assert list(mgr.take_events()) == [], "announced once"
+
+
+def test_a_failed_store_is_not_announced():
+    ring = FakeRing()
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096, events_enabled=True)
+    keys = [b"\x07" * 36]
+    _store_keys(mgr, ring, keys)
+    mgr.complete_store(keys, success=False)
+    assert list(mgr.take_events()) == []
+
+
+def test_store_events_need_events_enabled():
+    ring = FakeRing()
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    keys = [b"\x08" * 36]
+    _store_keys(mgr, ring, keys)
+    mgr.complete_store(keys, success=True)
+    assert list(mgr.take_events()) == []
+
+
+def test_a_store_precedes_its_removal_in_one_drain():
+    ring = FakeRing()
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096, events_enabled=True)
+    key = b"\x09" * 36
+    _store_keys(mgr, ring, [key])
+    mgr.complete_store([key], success=True)
+    ring.events = [(_key_to_u64(key), REASON_REMOVED)]
+    assert [e.removed for e in mgr.take_events()] == [False, True]
+
+
+def test_the_event_medium_bridge(monkeypatch):
+    # CERTUS_EVENT_MEDIUM=cpu reports certus as CPU, the only tier llm-d's
+    # p2p-source-producer counts as pullable; anything else is refused.
+    from certus_shmq_connector import compat
+
+    monkeypatch.setenv("CERTUS_EVENT_MEDIUM", "cpu")
+    assert compat.offload_event_medium() == "CPU"
+    monkeypatch.setenv("CERTUS_EVENT_MEDIUM", "ssd")
+    with pytest.raises(ValueError):
+        compat.offload_event_medium()
+    monkeypatch.delenv("CERTUS_EVENT_MEDIUM")
+    assert compat.offload_event_medium() == "STORAGE"
+
+
 def test_take_events_unknown_key_skipped():
     ring = FakeRing()
     ring.events = [(100, REASON_REMOVED)]
