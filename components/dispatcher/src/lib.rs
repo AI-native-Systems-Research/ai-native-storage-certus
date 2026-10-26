@@ -1302,6 +1302,22 @@ impl DispatcherComponent {
         size: u32,
         max_attempts: usize,
     ) -> Result<*mut u8, DispatcherError> {
+        // Duplicate check BEFORE any eviction: a key that already has a
+        // memory-tier slot is refused with AlreadyExists immediately. Checking
+        // only at `mt.insert` below is too late when the tier is full, because
+        // `evict_for_space` runs first and does not exclude the key being
+        // inserted: it can demote the very entry being duplicated to make room
+        // for its own replacement slot — destroying the existing entry — and
+        // when nothing is evictable the refusal instead surfaces as
+        // AllocationFailed after the caller's full backpressure budget, not
+        // the immediate AlreadyExists the contract promises.
+        if mt.contains(key) {
+            // Not a capacity refusal: someone else — a concurrent writer, or a
+            // remote fetch's `publish_success` — already put this key in the
+            // tier. Counted by the callers that are stores (`reserve_memory`);
+            // the load paths treat this as a hit.
+            return Err(DispatcherError::AlreadyExists(key));
+        }
         let mut attempts = 0usize;
         loop {
             self.evict_for_space(dm, mt, size, key, max_attempts.saturating_sub(attempts))?;
@@ -1326,11 +1342,15 @@ impl DispatcherComponent {
                     }
                 }
                 Err(interfaces::MemoryTierError::AlreadyExists(k)) => {
-                    // Not a capacity refusal: someone else — a concurrent writer, a
-                    // remote fetch's `publish_success`, or a concurrent promotion —
-                    // already put this key in the tier. Not counted here: this helper
-                    // is shared with the load paths, where a lost promotion race is a
-                    // hit. `reserve_memory` counts the store refusals.
+                    // Not a capacity refusal, and no longer the common path:
+                    // the pre-check above refuses an already-resident key
+                    // before any eviction. This arm is the race — between that
+                    // check and this insert a concurrent writer, or a remote
+                    // fetch's `publish_success`, put the same key in the tier.
+                    // Not counted here: this helper is shared with the load
+                    // paths, where a lost promotion race is a hit
+                    // (DIS-STORE-ALREADY-RESIDENT-COUNTS-STORES-ONLY);
+                    // `reserve_memory` counts the store refusals.
                     return Err(DispatcherError::AlreadyExists(k));
                 }
                 Err(e) => {
@@ -7830,3 +7850,7 @@ mod repair_test_warm_copy_stops_at_zero_region;
 #[cfg(test)]
 #[path = "repair_test_sync_failure_error.rs"]
 mod repair_test_sync_failure_error;
+
+#[cfg(test)]
+#[path = "repair_test_duplicate_check_after_eviction.rs"]
+mod repair_test_duplicate_check_after_eviction;
