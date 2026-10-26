@@ -38,9 +38,10 @@ fetches the prefix from it over RDMA.
 Everything else in the path works with the existing plugins unchanged: the
 `precise-prefix-cache-producer` indexes the `storage` tier from the events, the routing
 sidecar's `--enable-p2p-pull` injects `remote_kv_source`, and the connector acts on it. Only
-the source choice ignores the tier the blocks are in. Today we work around it by reporting
-the external cache as `CPU` in the events, which is false about the medium and would collide
-with a real CPU tier configured beside it.
+the source choice ignores the tier the blocks are in. Today we report the external cache's
+blocks as `CPU`: true when the event is sent (its first tier is host DRAM), but stale once it
+demotes a block to its disk tier, and indistinguishable from vLLM's own CPU tier configured
+beside it.
 
 The case that matters most under P/D: a decode pod that generated a turn's answer stores it
 in its cache; on the next turn the prompt contains that answer, and the router should name
@@ -71,8 +72,9 @@ can serve a split chain.
 
 ### Alternatives considered
 
-- **Report the external cache as `CPU`.** What we do now. It works, but it is false, it
-  mislabels the cache in vLLM's own metrics, and it breaks if a real CPU tier sits beside it.
+- **Report the external cache as `CPU`.** What we do now. It works, and is true of the
+  cache's DRAM tier, but the router cannot tell it from vLLM's own CPU tier beside it, and
+  cannot see the cache's own demotions to disk.
 - **Count every non-GPU, non-speculative tier.** No configuration, but it would name sources
   whose tier the deployment's connector cannot pull from (a disk tier only the local engine
   reads, for example), turning a correct "no source" into a fetch that misses.

@@ -430,10 +430,14 @@ def offload_event_medium():
     run without being in ``SUPPORTED_VERSIONS``. On <=0.26 ``medium`` is a plain
     string; ``"STORAGE"`` matches what later releases report.
 
-    ``CERTUS_EVENT_MEDIUM=cpu`` reports ``CPU`` instead: a bridge for llm-d's
+    ``CERTUS_EVENT_MEDIUM=cpu`` reports ``CPU`` instead, for llm-d's
     p2p-source-producer, which counts only the ``cpu`` tier as one a peer can
-    pull from (peer-selection.md, milestone 3). It misnames the medium, so it is
-    off by default and meant to go once llm-d can be told certus is pullable.
+    pull from (peer-selection.md, milestone 3). Accurate when the event is sent:
+    a store always lands in certus's memory tier, which is host DRAM. It goes
+    stale on demotion -- certus sends no event when it moves a block to SSD,
+    since the block stays fetchable -- so a router counts SSD-resident blocks as
+    CPU. And it cannot be told apart from vLLM's own CPU offload tier, should a
+    deployment run one beside certus.
     """
     import importlib
 

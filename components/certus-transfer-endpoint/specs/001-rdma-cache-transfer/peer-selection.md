@@ -106,8 +106,8 @@ The plugin ranks sources by a prefix-cache producer's per-endpoint match data. T
   2. **The tier name.** With per-tier data the plugin counts only the `"cpu"` tier
      (`producer.go:509`), the one vLLM's p2p tier can serve, so certus's blocks would be
      ignored. Either the plugin learns other pull-servable tiers (an llm-d change: a
-     `pullableTiers` parameter), or certus reports itself as `"cpu"` -- simple, but false
-     about the medium, and confusing beside a real CPU tier.
+     `pullableTiers` parameter), or certus reports itself as `"cpu"` -- simple, and true of
+     its DRAM tier, but ambiguous beside vLLM's own CPU tier.
 
 **Recommendation: start with the approximate producer, which needs nothing from certus.**
 Move to the precise one -- store events, certus's own tier name, `pullableTiers`
@@ -313,7 +313,7 @@ say so in **KV events**.
 
    | option | for | against |
    |---|---|---|
-   | **a. report certus as `CPU`** (`offload_event_medium`) | no llm-d change; works today | false about the medium; collides with a real CPU tier beside certus (none here); and changes what *vLLM's own* KV metrics call certus |
+   | **a. report certus as `CPU`** (`offload_event_medium`) | no llm-d change; works today; true when sent (certus's first tier is host DRAM) | stale once certus demotes a block to SSD; indistinguishable from vLLM's own CPU tier beside certus (none here) |
    | **b. llm-d: a `pullableTiers` parameter** on `p2p-source-producer`, default `[cpu]` | honest; small and general (any tier a deployment's pull path can serve) | an upstream change, and a wait |
    | **c. a certus-local fork of the plugin** | no wait | a fork to carry |
 
@@ -364,9 +364,10 @@ say so in **KV events**.
   missed store just loses a fetch opportunity. Neither is a correctness problem.
 - **Tokenizer drift.** The `render` service must run the same model's tokenizer as the
   engines, or the EPP's block hashes match nothing. Pin it to the same model id.
-- **The bridge's lie.** With `CERTUS_EVENT_MEDIUM=cpu`, vLLM's own metrics and anything else
-  reading the events call certus "CPU". Confined to the testbed by the switch; removed once
-  `pullableTiers` exists.
+- **What `CPU` means.** With `CERTUS_EVENT_MEDIUM=cpu`, everything reading the events calls
+  certus "CPU". True of the store (certus's memory tier is host DRAM), stale after demotion
+  to SSD, and ambiguous beside a vLLM CPU tier; see the constraint under *Milestone 3, as
+  built*.
 
 ### Verification
 
@@ -389,6 +390,21 @@ As designed above, with the bridge (`CERTUS_EVENT_MEDIUM=cpu`), and two findings
   engines' GPU cache. Set to 16, the engines' block size.
 - **The render service needs no image of its own**: `vllm launch render` from the vLLM image
   runs without a GPU given `VLLM_TARGET_DEVICE=cpu`.
+
+**Reporting certus as `CPU` (`CERTUS_EVENT_MEDIUM=cpu`).** Not a misnomer: certus's first tier
+is host DRAM and every store lands there, so each `BlockStored` event names where the block
+is when it is sent; the transfer endpoint serves it over its own RDMA path, not NIXL's. Two
+consequences:
+
+- *Demotion is invisible.* Certus sends no event when it moves a block from DRAM to SSD (the
+  block stays fetchable, so a removal would be wrong), so the router keeps counting it as
+  `cpu`. The fetch still works -- the endpoint serves block-tier entries too -- but costs an
+  SSD read the router's weights do not price.
+- **Constraint: never run vLLM's own CPU offload tier in a pod that also reports certus as
+  `CPU`.** The router indexes blocks per pod per tier and could not tell the two apart: it
+  could name a pod as the source for blocks only its vLLM CPU tier holds, and certus's fetch
+  would miss (a miss, counted, then recomputed -- not a wrong answer). No profile here
+  combines them; the pd-certus patch says so beside the switch.
 
 Verified through the router, node2/node5, connector `vllm0.30.0-f47230bd`, no header from
 the client. Turn 1: 3 081-token prompt, 1 600-token answer (100 blocks) on decode. Turn 2:

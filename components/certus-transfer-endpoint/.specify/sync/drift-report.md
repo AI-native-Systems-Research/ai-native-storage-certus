@@ -1,11 +1,13 @@
 ---
 spec_sync_component: certus-transfer-endpoint
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-26T23:16:45Z
-spec_sync_git_commit: 46b2f3d2
-spec_sync_inputs_sha256: bc4fb5d89952248e5bb2837a7b5976de4d72fc27e36c2a821562792ee812e9c2
+spec_sync_synced_at: 2026-10-26T23:31:06Z
+spec_sync_git_commit: 76cdb8b9
+spec_sync_inputs_sha256: 2b65c69f0620ffda09fbd17a58cc162ace3044b73e0f443c8513532ef9ee88bb
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-26 (specs only).** Reporting certus as `CPU` described as accurate (its first tier is host DRAM), with what it misses (demotion to SSD is not evented) and the constraint (never alongside vLLM's own CPU tier); wording aligned in `peer-selection.md` and `upstream-pullable-tiers.md`. No source change in this component.
+
 > **Re-stamp 2026-10-26 (specs only).** `upstream-pullable-tiers.md` + `.patch`: draft llm-d issue and a tested patch for a `pullableTiers` parameter on `p2p-source-producer`, to retire the `CERTUS_EVENT_MEDIUM=cpu` bridge. Not filed. No source change in this component.
 
 > **Re-stamp 2026-10-26 (specs only).** `peer-selection.md`: milestone 3 built and verified -- through the router with no client header, turn 2's prefill fetched the 100 answer blocks from decode's certus; the router's block size must be 16 (certus stores are one 16-token block per event). No source change in this component.
