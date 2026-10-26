@@ -1,6 +1,6 @@
 # Design: llm-d chooses the peer a request fetches from
 
-**Feature**: `001-rdma-cache-transfer` | **Date**: 2026-10-23 | **Status**: milestones 1 and 2 built (2026-10-26); M1 verified in k8s, M2 deployed but not exercised (one prefill pod); 3-4 not built
+**Feature**: `001-rdma-cache-transfer` | **Date**: 2026-10-23 | **Status**: milestones 1 and 2 built (2026-10-26); M1 and the decode -> prefill fetch verified in k8s by hand; M2 deployed but cannot name decode until M3; 3-4 not built
 
 How a request's `FETCH` gets its peer without anyone setting `certus_fetch_from` by hand,
 by riding llm-d's own peer-pull selection. Milestone 3 of
@@ -213,10 +213,44 @@ every request against both the decode pod and the prefill pod it was routed to
 that pod has served every prompt, so it always holds at least as much as any decode pod:
 three requests with a 7 858-token shared prefix logged `below-floor`, delta 0, each time.
 
-A source is named when the prompt's prefix was served by a pod that is **not** the prefill
-pod chosen for this request: two or more prefill pods (load spreads a session's turns), or a
-decode pod that kept a session's generated tail. On the testbed that needs another prefill
-GPU. Until then the path is exercised only as M1 was, with the header set by hand.
+The case that matters is **decode -> prefill**, not prefill -> prefill. A turn's prompt is
+the previous turn's prompt, plus the model's answer, plus the new message. The previous
+prompt is already in the prefill pod's own cache; the answer's KV was generated on the
+decode pod and exists nowhere else. Prefill -> prefill arises only when a session's turns
+land on different prefill pods, which the affinity filter works against.
+
+Three things stood in its way; the first is fixed:
+
+1. **Decode stored only the prompt.** vLLM's offloading connector defaults to
+   `offload_prompt_only: true` (`vllm/v1/kv_offload/base.py`), so decode's certus held the
+   same blocks as prefill's and the answer's KV lived only in decode's GPU. **Fixed**:
+   `CERTUS_OFFLOAD_PROMPT_ONLY=false` on the decode role (pd-certus patch, read by the
+   certus entrypoint).
+2. **The router cannot see what decode generated.** The approximate producer hashes the
+   prompts it routes; generated tokens never reach it. Naming decode as the source needs the
+   precise producer, fed by KV events, and certus store events from the connector:
+   milestone 3.
+3. **Re-tokenization.** Block keys are chained hashes of token ids, so turn N+1 matches
+   decode's blocks only if it carries exactly the tokens decode generated. Qwen3's chat
+   template strips earlier `<think>` blocks, so a chat-API conversation with thinking
+   diverges after the answer starts; the completions API with the answer's tokens appended
+   does not.
+
+### Decode -> prefill, by hand (2026-10-26)
+
+Turn 1 through decode0's sidecar (prefill on node5): a 3 081-token prompt, a 1 600-token
+answer -- 100 whole blocks generated on decode. Turn 2: the same prompt + the answer's
+token ids + a new question, 4 687 tokens, through the same sidecar.
+
+| turn 2 | prefill node's certus |
+|---|---|
+| source header naming decode0 | 1 FETCH; **100/100 blocks fetched and served as fetched** -- exactly the answer; the prompt's 192 blocks were local |
+| no source header (control) | no fetch: prefill computed the answer's 100 blocks |
+
+The fetched run starts at the first block prefill lacked, which is the first block of the
+answer. Latency is not a clean comparison on this testbed: turn 2's end-to-end time also
+includes decode's NIXL pull over TCP and its own prefix-cache hits; the counters are the
+evidence.
 
 ## Milestones
 

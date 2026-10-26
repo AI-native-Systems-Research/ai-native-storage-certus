@@ -23,6 +23,11 @@ CERTUS_SHM_DIR="${CERTUS_SHM_DIR:-/certus-shm}"
 # deployments, and a mismatch fails fast below rather than silently.
 CERTUS_SHM_PREFIX="${CERTUS_SHM_PREFIX:-certus-shmq-numa}"
 CERTUS_SLAB_SIZE_BYTES="${CERTUS_SLAB_SIZE_BYTES:-131072}"
+# vLLM's offloading connector stores only prompt blocks by default
+# (offload_prompt_only). A decode pod generates the next turn's prefix, so under
+# P/D it should store generated blocks too, for the next turn's prefill to fetch
+# from its certus. Unset: vLLM's default.
+CERTUS_OFFLOAD_PROMPT_ONLY="${CERTUS_OFFLOAD_PROMPT_ONLY:-}"
 
 log() { printf '[certus-entrypoint] %s\n' "$*" >&2; }
 
@@ -86,7 +91,7 @@ while [ $# -gt 0 ]; do
 done
 set -- "${args[@]}"
 
-kv_cfg="$(python3 - "$shm_path" "$CERTUS_SLAB_SIZE_BYTES" "$existing_kv" <<'PY'
+kv_cfg="$(python3 - "$shm_path" "$CERTUS_SLAB_SIZE_BYTES" "$existing_kv" "$CERTUS_OFFLOAD_PROMPT_ONLY" <<'PY'
 import json, sys
 certus = {
     "kv_connector": "OffloadingConnector",
@@ -98,6 +103,11 @@ certus = {
         "slab_size_bytes": int(sys.argv[2]),
     },
 }
+if sys.argv[4]:
+    flag = sys.argv[4].strip().lower()
+    if flag not in ("true", "false"):
+        sys.exit(f"CERTUS_OFFLOAD_PROMPT_ONLY={sys.argv[4]!r}: expected true or false")
+    certus["kv_connector_extra_config"]["offload_prompt_only"] = flag == "true"
 cfg = certus
 if sys.argv[3]:
     first = json.loads(sys.argv[3])

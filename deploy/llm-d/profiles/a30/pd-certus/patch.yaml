@@ -96,6 +96,11 @@ spec:
               valueFrom: {fieldRef: {fieldPath: metadata.name}}
             - name: POD_NAMESPACE
               valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+            # Store generated blocks too, not only the prompt: decode produces
+            # the next turn's prefix, which prefill then fetches from this pod's
+            # certus (peer-selection.md, "decode -> prefill").
+            - name: CERTUS_OFFLOAD_PROMPT_ONLY
+              value: "false"
           volumeMounts:
             - mountPath: /certus
               name: certus-entrypoint

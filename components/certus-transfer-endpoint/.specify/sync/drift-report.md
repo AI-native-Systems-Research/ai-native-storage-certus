@@ -1,11 +1,13 @@
 ---
 spec_sync_component: certus-transfer-endpoint
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-26T21:25:14Z
-spec_sync_git_commit: 5da2dafd
-spec_sync_inputs_sha256: c082e625545d65c561c01f82788421aab1ea99c91ba8904a909cc0a1f5969c8e
+spec_sync_synced_at: 2026-10-26T21:54:05Z
+spec_sync_git_commit: 01055b0f
+spec_sync_inputs_sha256: 018c121f3ef21fef64d1153f5e238a8a6d424e90054fb93ceb265427e21f2648
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-26 (specs only).** `peer-selection.md`: decode -> prefill is the case that matters (corrects the earlier "two prefill pods" lead); `offload_prompt_only` turned off on decode; the by-hand turn-2 test fetched exactly the 100 generated blocks. No source change in this component.
+
 > **Re-stamp 2026-10-26 (specs only).** `peer-selection.md`: milestone 2 built (the router's p2p-source-producer, `pd-certus/router-values.yaml`) and deployed; recorded why one prefill pod never names a peer. No source change in this component.
 
 > **Re-stamp 2026-10-26 (specs only).** `peer-selection.md`: milestone 1 built and verified in k8s, with the pod-to-certus mapping changed to the server publishing `<mailbox>.endpoint` (a pod cannot see the node's RoCE address). No source change in this component.
