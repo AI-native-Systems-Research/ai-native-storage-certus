@@ -14,6 +14,7 @@ kind: Kustomization
 resources:
   - ../pd
   - rbac.yaml
+  - render.yaml
 
 configMapGenerator:
   - name: certus-entrypoint

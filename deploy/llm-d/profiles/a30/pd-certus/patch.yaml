@@ -34,6 +34,19 @@ spec:
               valueFrom: {fieldRef: {fieldPath: metadata.name}}
             - name: POD_NAMESPACE
               valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+            # Peer selection M3: publish KV events for the router's precise
+            # prefix producer (llm-d guides/p2p-kv-cache-sharing). The topic
+            # names the pod by the address the router routes to: pod IP and the
+            # port it serves requests on.
+            - name: POD_IP
+              valueFrom: {fieldRef: {fieldPath: status.podIP}}
+            - name: CERTUS_KV_EVENTS
+              value: "tcp://*:5556"
+            # Report certus blocks as the CPU tier: the only one llm-d's
+            # p2p-source-producer counts as pullable. A bridge until it can be
+            # told otherwise (peer-selection.md, milestone 3).
+            - name: CERTUS_EVENT_MEDIUM
+              value: cpu
           volumeMounts:
             - mountPath: /certus
               name: certus-entrypoint
@@ -96,6 +109,19 @@ spec:
               valueFrom: {fieldRef: {fieldPath: metadata.name}}
             - name: POD_NAMESPACE
               valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+            # Peer selection M3: publish KV events for the router's precise
+            # prefix producer (llm-d guides/p2p-kv-cache-sharing). The topic
+            # names the pod by the address the router routes to: pod IP and the
+            # port it serves requests on.
+            - name: POD_IP
+              valueFrom: {fieldRef: {fieldPath: status.podIP}}
+            - name: CERTUS_KV_EVENTS
+              value: "tcp://*:5556"
+            # Report certus blocks as the CPU tier: the only one llm-d's
+            # p2p-source-producer counts as pullable. A bridge until it can be
+            # told otherwise (peer-selection.md, milestone 3).
+            - name: CERTUS_EVENT_MEDIUM
+              value: cpu
             # Store generated blocks too, not only the prompt: decode produces
             # the next turn's prefix, which prefill then fetches from this pod's
             # certus (peer-selection.md, "decode -> prefill").

@@ -1,0 +1,58 @@
+# The EPP's tokenizer for peer selection milestone 3: the precise prefix
+# producer hashes each request's token ids, so the router needs the model's
+# own tokenizer (llm-d's guides/p2p-kv-cache-sharing/render). `vllm launch
+# render` serves /v1/*/render without a GPU, from the same vLLM image and the
+# same model as the engines -- a different tokenizer would hash to blocks that
+# match nothing. Weights are not loaded; only the tokenizer files are read.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: render
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/component: vllm-render}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/component: vllm-render}
+    spec:
+      automountServiceAccountToken: false
+      # A model-server node holds the model cache; the render server needs
+      # only its tokenizer files and a few CPUs.
+      nodeSelector: {llm-d.ai/pd-decode: "true"}
+      containers:
+        - name: vllm-render
+          # Rewritten to the connector image by kustomization.yaml's `images`,
+          # like the engines: the same vLLM, so the same tokenizer code.
+          image: docker.io/vllm/vllm-openai:v0.30.0
+          imagePullPolicy: IfNotPresent
+          command: ["vllm", "launch", "render"]
+          args: ["Qwen/Qwen3-8B", "--port=8000"]
+          env:
+            # The image is a CUDA build; without a GPU it cannot infer a device.
+            - {name: VLLM_TARGET_DEVICE, value: cpu}
+            - {name: HF_HOME, value: /.cache/huggingface}
+            - {name: HF_HUB_OFFLINE, value: "1"}
+            - {name: DO_NOT_TRACK, value: "1"}
+          ports:
+            - {name: render-http, containerPort: 8000}
+          resources:
+            requests: {cpu: "1", memory: 4Gi}
+            limits: {cpu: "4", memory: 12Gi}
+          readinessProbe:
+            httpGet: {path: /health, port: render-http}
+            initialDelaySeconds: 20
+          volumeMounts:
+            - {name: model-cache, mountPath: /.cache, readOnly: true}
+      volumes:
+        - name: model-cache
+          hostPath: {path: /home/llm-d-cache, type: Directory}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: render
+spec:
+  selector: {app.kubernetes.io/component: vllm-render}
+  ports:
+    - {name: render-http, port: 8000, targetPort: render-http}

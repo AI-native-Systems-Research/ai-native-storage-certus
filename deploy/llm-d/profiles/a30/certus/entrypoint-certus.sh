@@ -28,6 +28,13 @@ CERTUS_SLAB_SIZE_BYTES="${CERTUS_SLAB_SIZE_BYTES:-131072}"
 # P/D it should store generated blocks too, for the next turn's prefill to fetch
 # from its certus. Unset: vLLM's default.
 CERTUS_OFFLOAD_PROMPT_ONLY="${CERTUS_OFFLOAD_PROMPT_ONLY:-}"
+# KV events for llm-d's precise prefix producer (peer selection milestone 3):
+# a zmq endpoint to publish on, e.g. tcp://*:5556. Unset: no events. The topic
+# names this pod as the router routes to it, kv@<POD_IP>:<CERTUS_KV_EVENTS_PORT>
+# @<model>; the port is the one requests reach the pod on (8000: vLLM itself,
+# or decode's routing sidecar).
+CERTUS_KV_EVENTS="${CERTUS_KV_EVENTS:-}"
+CERTUS_KV_EVENTS_PORT="${CERTUS_KV_EVENTS_PORT:-8000}"
 
 log() { printf '[certus-entrypoint] %s\n' "$*" >&2; }
 
@@ -91,7 +98,7 @@ while [ $# -gt 0 ]; do
 done
 set -- "${args[@]}"
 
-kv_cfg="$(python3 - "$shm_path" "$CERTUS_SLAB_SIZE_BYTES" "$existing_kv" "$CERTUS_OFFLOAD_PROMPT_ONLY" <<'PY'
+kv_cfg="$(python3 - "$shm_path" "$CERTUS_SLAB_SIZE_BYTES" "$existing_kv" "$CERTUS_OFFLOAD_PROMPT_ONLY" "$CERTUS_KV_EVENTS" <<'PY'
 import json, sys
 certus = {
     "kv_connector": "OffloadingConnector",
@@ -108,6 +115,10 @@ if sys.argv[4]:
     if flag not in ("true", "false"):
         sys.exit(f"CERTUS_OFFLOAD_PROMPT_ONLY={sys.argv[4]!r}: expected true or false")
     certus["kv_connector_extra_config"]["offload_prompt_only"] = flag == "true"
+if sys.argv[5]:
+    # vLLM's events tracker then publishes certus's stores with their token ids,
+    # not as key-only placeholders the router cannot hash.
+    certus["kv_connector_extra_config"]["self_describing_kv_events"] = True
 cfg = certus
 if sys.argv[3]:
     first = json.loads(sys.argv[3])
@@ -180,7 +191,17 @@ annotate_endpoint &
 # --disable-hybrid-kv-cache-manager: required from 0.26; the connector assumes a
 #   single uniform KV-cache group.
 # Both mirror compat.py's needs_disable_* capability flags.
+events_args=()
+if [ -n "$CERTUS_KV_EVENTS" ]; then
+    [ -n "${POD_IP:-}" ] || { log "FATAL: CERTUS_KV_EVENTS set but POD_IP is not"; exit 1; }
+    model="${args[0]:-}"
+    events_cfg="$(python3 -c 'import json,sys;print(json.dumps({"enable_kv_cache_events":True,"publisher":"zmq","endpoint":sys.argv[1],"topic":f"kv@{sys.argv[2]}:{sys.argv[3]}@{sys.argv[4]}"},separators=(",",":")))' "$CERTUS_KV_EVENTS" "$POD_IP" "$CERTUS_KV_EVENTS_PORT" "$model")"
+    events_args=(--kv-events-config "$events_cfg")
+    log "KV events on ${CERTUS_KV_EVENTS}, topic kv@${POD_IP}:${CERTUS_KV_EVENTS_PORT}@${model}"
+fi
+
 exec vllm serve "$@" \
     --no-async-scheduling \
     --disable-hybrid-kv-cache-manager \
-    --kv-transfer-config "$kv_cfg"
+    --kv-transfer-config "$kv_cfg" \
+    "${events_args[@]}"
