@@ -252,6 +252,131 @@ answer. Latency is not a clean comparison on this testbed: turn 2's end-to-end t
 includes decode's NIXL pull over TCP and its own prefix-cache hits; the counters are the
 evidence.
 
+## Milestone 3: design -- the router names decode by itself
+
+**Status**: proposed (2026-10-26), not built.
+
+### Goal
+
+The router names, as the KV-cache source of a turn, the pod whose certus holds the longest
+prefix of the turn's prompt -- in particular the decode pod that generated the previous
+turn's answer -- with no header set by hand. Measured by: on a multi-turn workload through
+the router, turn N >= 2 prefill fetches the previous answer's blocks
+(`lookup_hits_fetched` on the prefill node), with no client hint.
+
+### Why the approximate producer cannot
+
+It hashes the prompts the router routes and records each against the pods it routed them to.
+A turn's answer is generated on decode and never passes through the router as a prompt, so
+the producer never learns that decode holds it. Only the engines know what they cached; they
+say so in **KV events**.
+
+### What already exists
+
+- **vLLM KV events.** `--kv-events-config '{"enable_kv_cache_events":true,"publisher":"zmq",
+  "endpoint":...,"topic":"kv@<pod-ip>:<port>@<model>"}'` publishes `BlockStored` /
+  `BlockRemoved` per block, with `token_ids`, `parent_block_hash` and a `medium`. llm-d's
+  `p2p-kv-cache-sharing` guide runs exactly this.
+- **Events from an offloading connector.** vLLM's `OffloadingEventsTracker`
+  (`offloading/events.py`) turns a connector's raw `OffloadingEvent`s (keys only) into
+  self-describing `BlockStored`s -- it snapshots each chunk's token ids and parent hash at
+  store time, while the request is alive -- and fans removals out to the same block hashes.
+  Opt-in: `kv_connector_extra_config["self_describing_kv_events"]: true`, and inert unless KV
+  events are enabled.
+- **The certus connector already emits removals** (`manager.take_events`), with medium
+  `STORAGE` (`compat.offload_event_medium`; vLLM's tracker accepts only `CPU` and `STORAGE`),
+  gated on KV events being enabled. It does **not** emit stores.
+- **The precise producer** (`precise-prefix-cache-producer`) subscribes to every pod's
+  events (`kvEventsConfig.discoverPods`), re-hashes block keys from the event token ids
+  (so the engine's hash seed need not match), and indexes each block per pod per **device
+  tier** -- the lower-cased event medium (`gpu`, `cpu`, `storage`, ...).
+- **Tokenization in the EPP.** The precise producer hashes the request's tokens, so the EPP
+  needs a `token-producer`. llm-d's guide uses a small CPU-only vLLM `render` service for
+  exact tokenization; the approximate setup today uses the tokenizer-free `estimate`
+  backend.
+
+### What is missing
+
+1. **Certus store events.** On `complete_store(success=True)`, emit
+   `OffloadingEvent(keys=<logical keys>, medium=STORAGE, removed=False)` once per logical
+   block (under TP=W, after all W shards: the commit is already per logical key), only when
+   events are enabled. The tracker then publishes a `BlockStored` with the chunk's tokens.
+   This is the connector half; small.
+
+   A store's *eviction* is already published as `BlockRemoved` -- but only `REMOVED`, not
+   `DEMOTED` (DRAM -> SSD), which keeps it readable. Correct for this purpose: the block is
+   still fetchable from certus.
+
+2. **The tier the p2p plugin counts.** With per-tier data, `p2p-source-producer` counts
+   only the **`cpu`** tier (`producer.go`: `cpuDeviceTier = "cpu"`) -- the tier vLLM's own
+   P2P can serve. Certus blocks arrive as `storage`; the plugin would see none. Options:
+
+   | option | for | against |
+   |---|---|---|
+   | **a. report certus as `CPU`** (`offload_event_medium`) | no llm-d change; works today | false about the medium; collides with a real CPU tier beside certus (none here); and changes what *vLLM's own* KV metrics call certus |
+   | **b. llm-d: a `pullableTiers` parameter** on `p2p-source-producer`, default `[cpu]` | honest; small and general (any tier a deployment's pull path can serve) | an upstream change, and a wait |
+   | **c. a certus-local fork of the plugin** | no wait | a fork to carry |
+
+   **Recommendation: (b), with (a) as the bridge.** Propose `pullableTiers` upstream; until
+   it lands, a per-deployment switch in the certus connector, `CERTUS_EVENT_MEDIUM=cpu`
+   (default `storage`), so the testbed can run M3 now and drop the switch later. On this
+   testbed no real CPU tier sits beside certus, so (a)'s collision cannot happen here.
+
+3. **GPU vs certus.** The engines also publish their **GPU** prefix cache (`gpu` tier). The
+   plugin uses `cpu` only for the *source* choice, so GPU-only blocks never name a source --
+   correct, since a peer cannot fetch from another pod's GPU. The `prefix-cache-scorer` and
+   affinity filter may use all tiers for *placement*; their weights (`kvCacheBackendConfigs`)
+   decide how much a certus block counts there. Start with llm-d's guide's weights (gpu 1.0,
+   cpu 0.4).
+
+4. **Decode as a source under P/D.** The producer's index is per pod; decode pods publish
+   events like any other, so a decode pod that stored the answer is indexed as holding it.
+   `p2p-source-producer` considers every endpoint as a source (its `Produce` iterates all of
+   them), and compares against the **prefill** pod (`prefillProfileName: prefill`). So decode
+   is named when its certus holds >= `minCachedTokenDelta` more of the prompt than prefill's
+   -- which is the previous answer. No change needed; to be confirmed in the test.
+
+5. **Token-exact turns.** As above: completions-API traffic (or a chat template that keeps
+   earlier answers verbatim) matches; a template that strips `<think>` does not, past the
+   answer's start. A workload property, not a design choice; the workload generator's
+   multi-turn mode sends token-exact turns.
+
+### Changes
+
+| where | change |
+|---|---|
+| connector `manager.py` | store events on successful commit (gated; TP-aware) |
+| connector `compat.py` | `CERTUS_EVENT_MEDIUM` (`storage` default, `cpu` for the bridge) |
+| certus entrypoint | `--kv-events-config` (zmq publisher, the topic llm-d expects: `kv@$(POD_IP):<port>@<model>`), `self_describing_kv_events: true` in the certus connector's extra config |
+| pd-certus patch | `POD_IP`, the events endpoint, `CERTUS_EVENT_MEDIUM=cpu` (bridge) on both roles |
+| pd-certus router values | `token-producer` (the `render` service) + `endpoint-notification-source` + `precise-prefix-cache-producer` (`discoverPods`, socket port), and `p2p-source-producer` pointed at it; `dataLayer` wiring as in llm-d's guide |
+| pd-certus resources | the `render` Deployment + Service (CPU-only vLLM, 4 CPU / 12 GiB as in the guide), on a non-GPU node |
+| llm-d (upstream, later) | `pullableTiers` on `p2p-source-producer` |
+
+### Risks
+
+- **Event volume.** Every stored block is an event, on every pod. llm-d's guide notes events
+  arrive "at many times the inference request rate"; the precise producer is built for it,
+  but the EPP's CPU and memory should be watched (single EPP replica here).
+- **A stale index.** Events are lossy under load (`take_events` already warns when the
+  server drops some). A missed removal names a source whose certus has evicted the block: a
+  fetch that misses and is computed, bounded by the budget and counted (`fetch_misses`). A
+  missed store just loses a fetch opportunity. Neither is a correctness problem.
+- **Tokenizer drift.** The `render` service must run the same model's tokenizer as the
+  engines, or the EPP's block hashes match nothing. Pin it to the same model id.
+- **The bridge's lie.** With `CERTUS_EVENT_MEDIUM=cpu`, vLLM's own metrics and anything else
+  reading the events call certus "CPU". Confined to the testbed by the switch; removed once
+  `pullableTiers` exists.
+
+### Verification
+
+1. Events: on a decode pod, after a turn, the EPP's index holds its stored blocks (EPP debug
+   log, or a router request whose `p2p decision` shows `bestCachedTokens` > prefill's).
+2. End to end: a two-turn session through the router (completions API, turn 2 = turn 1 +
+   answer + question): the EPP logs `outcome=pulled` naming the decode pod; node5's certus
+   counts the answer's blocks in `lookup_hits_fetched`; no header from the client.
+3. Control: the same with `self_describing_kv_events` off -- `below-floor`, no fetch.
+
 ## Milestones
 
 1. Connector accepts `remote_kv_source` with the resolver, `certus_fetch_from`
