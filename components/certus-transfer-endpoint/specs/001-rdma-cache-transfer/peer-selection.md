@@ -1,6 +1,6 @@
 # Design: llm-d chooses the peer a request fetches from
 
-**Feature**: `001-rdma-cache-transfer` | **Date**: 2026-10-23 | **Status**: milestones 1 and 2 built (2026-10-26); M1 and the decode -> prefill fetch verified in k8s by hand; M2 deployed but cannot name decode until M3; 3-4 not built
+**Feature**: `001-rdma-cache-transfer` | **Date**: 2026-10-23 | **Status**: milestones 1-3 built and verified in k8s (2026-10-26; M3 with the `CERTUS_EVENT_MEDIUM=cpu` bridge); milestone 4 not built
 
 How a request's `FETCH` gets its peer without anyone setting `certus_fetch_from` by hand,
 by riding llm-d's own peer-pull selection. Milestone 3 of
@@ -254,7 +254,7 @@ evidence.
 
 ## Milestone 3: design -- the router names decode by itself
 
-**Status**: proposed (2026-10-26), not built.
+**Status**: built and verified (2026-10-26); see *Milestone 3, as built* below.
 
 ### Goal
 
@@ -376,6 +376,28 @@ say so in **KV events**.
    answer + question): the EPP logs `outcome=pulled` naming the decode pod; node5's certus
    counts the answer's blocks in `lookup_hits_fetched`; no header from the client.
 3. Control: the same with `self_describing_kv_events` off -- `below-floor`, no fetch.
+
+## Milestone 3, as built
+
+As designed above, with the bridge (`CERTUS_EVENT_MEDIUM=cpu`), and two findings:
+
+- **The router's block size must not exceed the size of certus's store events.** llm-d's
+  guide sets `tokenProcessorConfig.blockSize: 64` and calls it independent of the engines',
+  but the index drops a stored event with fewer tokens than that
+  (`incomplete_canonical_block`, `pkg/kvevents/pool.go`), and certus's stores arrive one
+  16-token block per event. At 64, every certus store was dropped and the router saw only the
+  engines' GPU cache. Set to 16, the engines' block size.
+- **The render service needs no image of its own**: `vllm launch render` from the vLLM image
+  runs without a GPU given `VLLM_TARGET_DEVICE=cpu`.
+
+Verified through the router, node2/node5, connector `vllm0.30.0-f47230bd`, no header from
+the client. Turn 1: 3 081-token prompt, 1 600-token answer (100 blocks) on decode. Turn 2:
+prompt + answer token ids + a question.
+
+| decode's KV events | router's decision (turn 2) | node5's certus |
+|---|---|---|
+| on | `pulled`: source the decode pod, it holds 4 672 tokens vs prefill's 3 072, delta 1 600 | 1 FETCH, **100/100 fetched and served as fetched** |
+| off (control) | `self`: only prefill's 3 072 known, delta 0 | no fetch |
 
 ## Milestones
 

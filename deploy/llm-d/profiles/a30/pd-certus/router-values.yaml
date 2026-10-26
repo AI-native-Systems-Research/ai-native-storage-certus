@@ -58,8 +58,12 @@ router:
                 # bridge): the only tier p2p-source-producer counts as pullable.
                 - {name: cpu, weight: 0.4}
             tokenProcessorConfig:
-              # Router indexing granularity, independent of the engines'.
-              blockSizeTokens: 64
+              # The engines' block size (vLLM's default, 16). llm-d's guide uses
+              # 64 and calls it independent of the engines', but the index drops
+              # a stored event with fewer tokens than this as an incomplete
+              # block, and certus's stores arrive one 16-token block per event:
+              # at 64, every certus store was dropped.
+              blockSizeTokens: 16
             # Seeding predicted entries on routing decisions would make the
             # router believe a pod holds what it was merely sent; off, so a
             # source is named only for what its events reported.

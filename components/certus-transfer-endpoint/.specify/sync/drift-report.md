@@ -1,11 +1,13 @@
 ---
 spec_sync_component: certus-transfer-endpoint
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-26T22:18:25Z
-spec_sync_git_commit: 7b4e1f6b
-spec_sync_inputs_sha256: 30e74da1040835a4d3eb91c08cbc69930d081a77adcef0f8ea556aeaf7cef9ee
+spec_sync_synced_at: 2026-10-26T23:01:31Z
+spec_sync_git_commit: f47230bd
+spec_sync_inputs_sha256: 8b02ce17466e9f07318f5354b622a097a00271b54e4ac3a032af7efb7fb84d4c
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-26 (specs only).** `peer-selection.md`: milestone 3 built and verified -- through the router with no client header, turn 2's prefill fetched the 100 answer blocks from decode's certus; the router's block size must be 16 (certus stores are one 16-token block per event). No source change in this component.
+
 > **Re-stamp 2026-10-26 (specs only).** `peer-selection.md`: milestone 3 design (proposed) -- certus store events, vLLM's self-describing KV events, the precise producer, and the p2p plugin's cpu-only tier with a `CERTUS_EVENT_MEDIUM` bridge and an upstream `pullableTiers` proposal. No source change.
 
 > **Re-stamp 2026-10-26 (specs only).** `peer-selection.md`: decode -> prefill is the case that matters (corrects the earlier "two prefill pods" lead); `offload_prompt_only` turned off on decode; the by-hand turn-2 test fetched exactly the 100 generated blocks. No source change in this component.

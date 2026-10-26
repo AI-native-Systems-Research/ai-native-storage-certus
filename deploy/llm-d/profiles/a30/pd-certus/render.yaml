@@ -17,6 +17,9 @@ spec:
       labels: {app.kubernetes.io/component: vllm-render}
     spec:
       automountServiceAccountToken: false
+      # The connector image lives in the site registry, like the engines'.
+      imagePullSecrets:
+        - name: artifactory-creds
       # A model-server node holds the model cache; the render server needs
       # only its tokenizer files and a few CPUs.
       nodeSelector: {llm-d.ai/pd-decode: "true"}
