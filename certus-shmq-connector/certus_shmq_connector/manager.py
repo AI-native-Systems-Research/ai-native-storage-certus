@@ -95,14 +95,38 @@ def _fetch_budget_per_key_ns() -> int:
 
 #: The kv_transfer_params key naming the peer to fetch from, "host:port".
 FETCH_HINT_KEY = "certus_fetch_from"
+#: Where llm-d's routing sidecar names a peer pod for a cached-prefix pull.
+LLMD_SOURCE_KEY = "remote_kv_source"
+
+_PEERS: "PeerResolver | None" = None
+
+
+def _peer_resolver():
+    global _PEERS
+    if _PEERS is None:
+        from .peers import PeerResolver
+
+        _PEERS = PeerResolver()
+    return _PEERS
 
 
 def _fetch_peer(req_context) -> str | None:
+    """The certus instance to fetch this request's miss run from, or None.
+
+    ``certus_fetch_from`` (set by a client or proxy) names it directly and wins.
+    Otherwise llm-d's sidecar may name a source pod, ``remote_kv_source``; its
+    certus is resolved from the pod's ``certus.ai/transfer-endpoint`` annotation
+    (``peers.py``)."""
     params = getattr(req_context, "kv_transfer_params", None)
     if not params:
         return None
     peer = params.get(FETCH_HINT_KEY)
-    return str(peer) if peer else None
+    if peer:
+        return str(peer)
+    src = params.get(LLMD_SOURCE_KEY)
+    if isinstance(src, dict) and src.get("remote_host"):
+        return _peer_resolver().resolve(str(src["remote_host"]))
+    return None
 
 
 class _Fetch:
