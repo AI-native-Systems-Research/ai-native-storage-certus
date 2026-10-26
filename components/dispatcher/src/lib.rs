@@ -1389,6 +1389,10 @@ impl DispatcherComponent {
         // regions: region L reads from `slot + sum(sizes[0..L])`. A single-region
         // block (legacy / populate) is just the L==0 case. `size` is the slot's
         // byte length; we never read past it even if the regions sum larger.
+        // A zero-sized region receives zero bytes but does not end the
+        // scatter — the regions after it still get theirs. Only an exhausted
+        // slot (nothing left after the preceding regions' sizes) stops the
+        // loop, since no later region can have bytes left to copy.
         // Use the caller-resolved warm stream for the destination's device; the
         // stream must be on the same GPU as the region address or the async copy
         // fails with "invalid argument" under multi-GPU.
@@ -1397,21 +1401,24 @@ impl DispatcherComponent {
             let s = GpuStream(raw as *mut std::ffi::c_void);
             let mut off: usize = 0;
             for region in regions {
-                let copy_size = (region.size as usize).min((size as usize).saturating_sub(off));
-                if copy_size == 0 {
+                let rest = (size as usize).saturating_sub(off);
+                if rest == 0 {
                     break;
                 }
-                gpu.memcpy_h2d_async(
-                    (pointer as usize + off) as *const std::ffi::c_void,
-                    region.address as *mut std::ffi::c_void,
-                    copy_size,
-                    s,
-                )
-                .map_err(|e| {
-                    DispatcherError::IoError(format!(
-                        "GPU DMA copy (memory-tier→device) failed: {e}"
-                    ))
-                })?;
+                let copy_size = (region.size as usize).min(rest);
+                if copy_size > 0 {
+                    gpu.memcpy_h2d_async(
+                        (pointer as usize + off) as *const std::ffi::c_void,
+                        region.address as *mut std::ffi::c_void,
+                        copy_size,
+                        s,
+                    )
+                    .map_err(|e| {
+                        DispatcherError::IoError(format!(
+                            "GPU DMA copy (memory-tier→device) failed: {e}"
+                        ))
+                    })?;
+                }
                 off += region.size as usize;
             }
             if synchronize {
@@ -1423,29 +1430,34 @@ impl DispatcherComponent {
         } else {
             let mut off: usize = 0;
             for region in regions {
-                let copy_size = (region.size as usize).min((size as usize).saturating_sub(off));
-                if copy_size == 0 {
+                let rest = (size as usize).saturating_sub(off);
+                if rest == 0 {
                     break;
                 }
-                let aligned = copy_size.next_multiple_of(4096).max(4096);
-                let buf = unsafe {
-                    DmaBuffer::from_raw(
-                        (pointer as usize + off) as *mut std::ffi::c_void,
-                        aligned,
-                        noop_free,
-                        -1,
-                    )
-                }
-                .map_err(|e| DispatcherError::IoError(format!("DmaBuffer wrap failed: {e}")))?;
-                let r = gpu
-                    .dma_copy_to_device(&buf, region.address as *mut std::ffi::c_void, copy_size)
+                let copy_size = (region.size as usize).min(rest);
+                if copy_size > 0 {
+                    let aligned = copy_size.next_multiple_of(4096).max(4096);
+                    let buf = unsafe {
+                        DmaBuffer::from_raw(
+                            (pointer as usize + off) as *mut std::ffi::c_void,
+                            aligned,
+                            noop_free,
+                            -1,
+                        )
+                    }
                     .map_err(|e| {
-                        DispatcherError::IoError(format!(
-                            "GPU DMA copy (memory-tier→device) failed: {e}"
-                        ))
-                    });
-                std::mem::forget(buf);
-                r?;
+                        DispatcherError::IoError(format!("DmaBuffer wrap failed: {e}"))
+                    })?;
+                    let r = gpu
+                        .dma_copy_to_device(&buf, region.address as *mut std::ffi::c_void, copy_size)
+                        .map_err(|e| {
+                            DispatcherError::IoError(format!(
+                                "GPU DMA copy (memory-tier→device) failed: {e}"
+                            ))
+                        });
+                    std::mem::forget(buf);
+                    r?;
+                }
                 off += region.size as usize;
             }
             Ok(())
@@ -7790,3 +7802,7 @@ mod repair_test_remove_frees_ssd_extent;
 #[cfg(test)]
 #[path = "repair_test_remove_refused_leaves_entry_unchanged.rs"]
 mod repair_test_remove_refused_leaves_entry_unchanged;
+
+#[cfg(test)]
+#[path = "repair_test_warm_copy_stops_at_zero_region.rs"]
+mod repair_test_warm_copy_stops_at_zero_region;
