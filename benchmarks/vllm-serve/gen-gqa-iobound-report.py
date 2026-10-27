@@ -262,7 +262,10 @@ def main():
     # ── Table ────────────────────────────────────────────────────────────────
     cols = ["Arm", "tokens/s", "out tok/s", "req/s",
             "TTFT p50 (ms)", "TTFT p90 (ms)", "TTFT p99 (ms)",
-            "ok", "errored", "KV load (TiB)", "load time (s)", "ext hit %"]
+            "ok", "errored",
+            "KV load (TiB)", "load time (s)", "load GB/s",
+            "KV store (TiB)", "store time (s)", "store GB/s",
+            "ext hit %"]
     rows_html = []
     for d in data:
         g, kv, e = d["g"], d["kv"], d["ext"]
@@ -270,11 +273,14 @@ def main():
             rows_html.append(f"<tr><td>{d['label']}</td>" + "<td>—</td>" * (len(cols) - 1) + "</tr>")
             continue
         tt = g["ttft_ms"] or {}
+        load_gbs = kv["load_bytes"] / GIB / kv["load_time_s"] if kv["load_time_s"] else None
+        store_gbs = kv["store_bytes"] / GIB / kv["store_time_s"] if kv["store_time_s"] else None
         cells = [
             d["label"], fmt(g["tokens_per_s"], 0), fmt(g["output_tokens_per_s"], 1),
             fmt(g["requests_per_s"], 2), fmt(tt.get("p50")), fmt(tt.get("p90")),
             fmt(tt.get("p99")), fmt(g["ok"], 0), fmt(g["errored"], 0),
-            fmt(kv["load_bytes"] / TIB, 2), fmt(kv["load_time_s"], 0),
+            fmt(kv["load_bytes"] / TIB, 2), fmt(kv["load_time_s"], 0), fmt(load_gbs, 1),
+            fmt(kv["store_bytes"] / TIB, 2), fmt(kv["store_time_s"], 0), fmt(store_gbs, 1),
             fmt(e, 1) if e is not None else "—",
         ]
         rows_html.append("<tr>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>")
@@ -319,8 +325,8 @@ DELAY_SCALE={p_scale} (intervals arms). Source: {rd}</p>
 {img_html}
 {timeline_html}
 <p class="note">Throughput = total tokens/s (higher better). TTFT = time to first token (lower better).
-KV load = bytes reloaded from the offload tier onto the GPU (the I/O the test exercises).
-"errored" counts requests that failed (e.g. HTTP 400 from window overflow on deep turns).</p>
+KV load = bytes reloaded from the offload tier onto the GPU; KV store = bytes offloaded from GPU to the tier.
+GB/s = effective throughput (total bytes / cumulative device-time). "errored" counts requests that failed (e.g. HTTP 400 from window overflow on deep turns).</p>
 </body></html>"""
     out = os.path.join(rd, "report.html")
     open(out, "w").write(html)
