@@ -9,7 +9,9 @@ use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::Resource;
 
-use crate::metrics::ServiceCounters;
+use shmq_dispatcher::Fetcher;
+
+use crate::metrics::{dram_hits, ServiceCounters};
 
 pub struct OtelMetrics {
     _provider: Arc<SdkMeterProvider>,
@@ -23,6 +25,7 @@ impl OtelMetrics {
         dispatcher: Arc<dyn IDispatcher + Send + Sync>,
         remote_lookup: Arc<dyn IRemoteLookup + Send + Sync>,
         counters: ServiceCounters,
+        fetcher: Option<Fetcher>,
     ) -> Result<Self, String> {
         use opentelemetry_otlp::MetricExporter;
         use opentelemetry_sdk::metrics::PeriodicReader;
@@ -156,12 +159,18 @@ impl OtelMetrics {
         // The local half of the route partition. With remote_lookup_hits these three
         // sum to the served count, so a dashboard can show where hits come from rather
         // than only how many there were.
+        // Net of fetched blocks' first serves, as in Prometheus (`dram_hits`).
         let d = Arc::clone(&dispatcher);
+        let f = fetcher.clone();
         meter
             .u64_observable_counter("certus.lookup_hits_dram_total")
             .with_description("Lookups served from the local memory tier")
             .with_callback(move |counter| {
-                counter.observe(d.tier_event_stats().lookup_hits_dram, &[]);
+                let fetch = f.as_ref().map(Fetcher::stats);
+                counter.observe(
+                    dram_hits(d.tier_event_stats().lookup_hits_dram, fetch.as_ref()),
+                    &[],
+                );
             })
             .build();
 
@@ -252,6 +261,100 @@ impl OtelMetrics {
                 counter.observe(d.read_write_stats().write_ops, &[]);
             })
             .build();
+
+        // shm-queue FETCH (contracts/shmq-fetch.md): only a server that fetches
+        // exports them.
+        if let Some(fetcher) = fetcher {
+            type Get = fn(&shmq_dispatcher::FetchStats) -> u64;
+            let counters: [(&str, &str, Get); 12] = [
+                (
+                    "certus.lookup_hits_fetched_total",
+                    "Lookups that served a block fetched from a peer, its first serve",
+                    |s| s.lookup_hits_fetched,
+                ),
+                ("certus.fetch.requests_total", "FETCH ops received", |s| {
+                    s.requests
+                }),
+                (
+                    "certus.fetch.keys_requested_total",
+                    "Keys FETCH ops named",
+                    |s| s.keys_requested,
+                ),
+                (
+                    "certus.fetch.keys_started_total",
+                    "Keys accepted into a fetch run",
+                    |s| s.keys_started,
+                ),
+                (
+                    "certus.fetch.not_started_total",
+                    "Keys refused at once: already resident or pending",
+                    |s| s.not_started,
+                ),
+                (
+                    "certus.fetch.hits_total",
+                    "Blocks published from a peer",
+                    |s| s.hits,
+                ),
+                (
+                    "certus.fetch.bytes_total",
+                    "Bytes of blocks published from a peer",
+                    |s| s.bytes,
+                ),
+                (
+                    "certus.fetch.misses_total",
+                    "Fetched keys the peer does not hold",
+                    |s| s.misses,
+                ),
+                (
+                    "certus.fetch.failed_total",
+                    "Fetched keys lost to a fault",
+                    |s| s.failed,
+                ),
+                (
+                    "certus.fetch.truncated_total",
+                    "Started keys never fetched",
+                    |s| s.truncated,
+                ),
+                (
+                    "certus.fetch.window_waits_total",
+                    "Fetch windows the global cap held back",
+                    |s| s.window_waits,
+                ),
+                (
+                    "certus.fetched_unused_total",
+                    "Fetched blocks evicted or aged out unserved",
+                    |s| s.fetched_unused,
+                ),
+            ];
+            for (name, help, get) in counters {
+                let f = fetcher.clone();
+                meter
+                    .u64_observable_counter(name)
+                    .with_description(help)
+                    .with_callback(move |c| c.observe(get(&f.stats()), &[]))
+                    .build();
+            }
+            let gauges: [(&str, &str, Get); 2] = [
+                (
+                    "certus.fetch.keys_pending",
+                    "Keys in a fetch run now",
+                    |s| s.keys_pending,
+                ),
+                (
+                    "certus.fetch.marks_live",
+                    "Fetched blocks not yet served, still marked",
+                    |s| s.marks_live,
+                ),
+            ];
+            for (name, help, get) in gauges {
+                let f = fetcher.clone();
+                meter
+                    .u64_observable_gauge(name)
+                    .with_description(help)
+                    .with_callback(move |g| g.observe(get(&f.stats()), &[]))
+                    .build();
+            }
+        }
 
         Ok(Self {
             _provider: Arc::new(provider),

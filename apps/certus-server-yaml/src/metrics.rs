@@ -1,8 +1,9 @@
+use std::fmt::Write as _;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use interfaces::{IDispatcher, IMemoryTier, IRemoteLookup};
-use shmq_dispatcher::TranslatorObserver;
+use shmq_dispatcher::{FetchStats, Fetcher, TranslatorObserver};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 
@@ -84,6 +85,7 @@ pub(crate) async fn serve_metrics(
     dispatcher: Arc<dyn IDispatcher + Send + Sync>,
     remote_lookup: Arc<dyn IRemoteLookup + Send + Sync>,
     counters: ServiceCounters,
+    fetcher: Option<Fetcher>,
 ) {
     let listener = match TcpListener::bind(("0.0.0.0", port)).await {
         Ok(l) => l,
@@ -100,7 +102,8 @@ pub(crate) async fn serve_metrics(
             Err(_) => continue,
         };
 
-        let body = render_metrics(&*mt, &*dispatcher, &*remote_lookup, &counters);
+        let fetch = fetcher.as_ref().map(Fetcher::stats);
+        let body = render_metrics(&*mt, &*dispatcher, &*remote_lookup, &counters, fetch);
 
         let (reader, mut writer) = stream.split();
         let mut buf_reader = BufReader::new(reader);
@@ -128,6 +131,7 @@ fn render_metrics(
     dispatcher: &dyn IDispatcher,
     remote_lookup: &dyn IRemoteLookup,
     counters: &ServiceCounters,
+    fetch: Option<FetchStats>,
 ) -> String {
     let snap = mt.telemetry_snapshot();
     let used = mt.used();
@@ -141,8 +145,9 @@ fn render_metrics(
     // what peers caused THIS node to do. Kept adjacent so the naming contrast is
     // visible at the one place a reader compares them.
     let serve = remote_lookup.serve_stats();
+    let dram = dram_hits(tier.lookup_hits_dram, fetch.as_ref());
 
-    format!(
+    let mut body = format!(
         "# HELP certus_memory_tier_write_lock_contentions_total Write-lock contention events\n\
          # TYPE certus_memory_tier_write_lock_contentions_total counter\n\
          certus_memory_tier_write_lock_contentions_total {}\n\
@@ -242,7 +247,7 @@ fn render_metrics(
         counters.lookup_hits.load(Ordering::Relaxed),
         counters.lookup_misses.load(Ordering::Relaxed),
         counters.lookup_errors.load(Ordering::Relaxed),
-        tier.lookup_hits_dram,
+        dram,
         tier.lookup_hits_ssd,
         tier.remote_lookup_hits,
         tier.remote_lookup_misses,
@@ -263,5 +268,184 @@ fn render_metrics(
         tier.store_backpressure_events,
         tier.store_drops_on_full,
         tier.store_already_resident,
-    )
+    );
+    if let Some(f) = fetch {
+        body.push_str(&render_fetch(&f));
+    }
+    body
+}
+
+/// Local memory-tier hits, net of fetched blocks' first serves.
+///
+/// The dispatcher sees a fetched block as an ordinary memory-tier entry and counts
+/// its first serve as `Dram`; the translator then re-attributes exactly that serve as
+/// `Fetched` (it only ever re-marks a `Dram`). Subtracting keeps the route partition
+/// `dram + ssd + fetched + remote = lookup_hits`, so a fetch never reads as a local
+/// hit (dispatcher spec 002 `contracts/served-by.md`).
+#[must_use]
+pub(crate) fn dram_hits(dispatcher_dram: u64, fetch: Option<&FetchStats>) -> u64 {
+    dispatcher_dram.saturating_sub(fetch.map_or(0, |f| f.lookup_hits_fetched))
+}
+
+/// The shm-queue `FETCH` counters (`contracts/shmq-fetch.md`). Rendered only by a
+/// server that fetches, so a profile without a transfer endpoint shows no fetch
+/// series at all rather than zeros that look like an idle, working path.
+fn render_fetch(f: &FetchStats) -> String {
+    let rows: [(&str, &str, &str, u64); 14] = [
+        (
+            "lookup_hits_fetched_total",
+            "counter",
+            "Lookups that served a block fetched from a peer, its first serve",
+            f.lookup_hits_fetched,
+        ),
+        (
+            "fetch_requests_total",
+            "counter",
+            "FETCH ops received",
+            f.requests,
+        ),
+        (
+            "fetch_keys_requested_total",
+            "counter",
+            "Keys FETCH ops named",
+            f.keys_requested,
+        ),
+        (
+            "fetch_keys_started_total",
+            "counter",
+            "Keys accepted into a fetch run",
+            f.keys_started,
+        ),
+        (
+            "fetch_not_started_total",
+            "counter",
+            "Keys refused at once: already resident or pending",
+            f.not_started,
+        ),
+        (
+            "fetch_hits_total",
+            "counter",
+            "Blocks published from a peer",
+            f.hits,
+        ),
+        (
+            "fetch_bytes_total",
+            "counter",
+            "Bytes of blocks published from a peer",
+            f.bytes,
+        ),
+        (
+            "fetch_misses_total",
+            "counter",
+            "Fetched keys the peer does not hold",
+            f.misses,
+        ),
+        (
+            "fetch_failed_total",
+            "counter",
+            "Fetched keys lost to a fault: transport, deadline, refusal",
+            f.failed,
+        ),
+        (
+            "fetch_truncated_total",
+            "counter",
+            "Started keys never fetched: after a miss or a refused reservation",
+            f.truncated,
+        ),
+        (
+            "fetch_window_waits_total",
+            "counter",
+            "Fetch windows the global in-flight cap held back",
+            f.window_waits,
+        ),
+        (
+            "fetched_unused_total",
+            "counter",
+            "Fetched blocks evicted or aged out before any lookup served them",
+            f.fetched_unused,
+        ),
+        (
+            "fetch_keys_pending",
+            "gauge",
+            "Keys in a fetch run now",
+            f.keys_pending,
+        ),
+        (
+            "fetch_marks_live",
+            "gauge",
+            "Fetched blocks not yet served, still marked",
+            f.marks_live,
+        ),
+    ];
+    let mut out = String::new();
+    for (name, kind, help, v) in rows {
+        let _ = write!(
+            out,
+            "# HELP certus_{name} {help}\n# TYPE certus_{name} {kind}\ncertus_{name} {v}\n"
+        );
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A fetched block's first serve is the dispatcher's `Dram` re-attributed: it
+    /// must leave the DRAM count, or every remote fetch reads as a local hit.
+    /// Measured on hardware before this: 739 fetched serves, all in DRAM.
+    #[test]
+    fn fetched_serves_leave_the_dram_count() {
+        let f = FetchStats {
+            lookup_hits_fetched: 739,
+            ..Default::default()
+        };
+        assert_eq!(dram_hits(1000, Some(&f)), 261);
+        assert_eq!(dram_hits(739, Some(&f)), 0);
+        assert_eq!(dram_hits(1000, None), 1000);
+    }
+
+    /// Every counter the contract names is exported, under its contract name.
+    #[test]
+    fn every_fetch_counter_is_rendered() {
+        let f = FetchStats {
+            requests: 1,
+            keys_requested: 2,
+            keys_started: 3,
+            not_started: 4,
+            hits: 5,
+            bytes: 6,
+            misses: 7,
+            failed: 8,
+            truncated: 9,
+            window_waits: 10,
+            lookup_hits_fetched: 11,
+            fetched_unused: 12,
+            keys_pending: 13,
+            marks_live: 14,
+        };
+        let text = render_fetch(&f);
+        for line in [
+            "certus_fetch_requests_total 1",
+            "certus_fetch_keys_requested_total 2",
+            "certus_fetch_keys_started_total 3",
+            "certus_fetch_not_started_total 4",
+            "certus_fetch_hits_total 5",
+            "certus_fetch_bytes_total 6",
+            "certus_fetch_misses_total 7",
+            "certus_fetch_failed_total 8",
+            "certus_fetch_truncated_total 9",
+            "certus_fetch_window_waits_total 10",
+            "certus_lookup_hits_fetched_total 11",
+            "certus_fetched_unused_total 12",
+            "certus_fetch_keys_pending 13",
+            "certus_fetch_marks_live 14",
+        ] {
+            assert!(
+                text.lines().any(|l| l == line),
+                "missing {line:?} in\n{text}"
+            );
+        }
+        assert_eq!(text.matches("# TYPE").count(), 14);
+    }
 }

@@ -5,9 +5,10 @@ kind: Deployment
 metadata:
   name: optimized-baseline-nvidia-gpu-vllm-decode
 spec:
-  # 3 replicas == exactly the 3 A30s of the example cluster (a two-GPU node
-  # plus a one-GPU node). Size this to the GPUs you actually have.
-  replicas: 3
+  # One replica per GPU. 1 is a placeholder: install.sh scales this to
+  # AGG_REPLICAS from the private site file, since the GPU count belongs to the
+  # cluster, not to the GPU type.
+  replicas: 1
   # vLLM's startup probe allows 60 min (120 x 30s) because a cold start downloads
   # ~16Gi of weights and compiles CUDA graphs. progressDeadlineSeconds defaults to
   # 600, so a single slow pod -- or any stall such as a failing image pull -- marks

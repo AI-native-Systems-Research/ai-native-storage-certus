@@ -63,9 +63,32 @@ fi
 # Built with json.dumps so a path containing a shell metacharacter cannot break
 # the argument. kv_role/kv_connector mirror the proven bench driver
 # (run_multiturn_shmq_certus.py: KV_CONFIG).
-kv_cfg="$(python3 - "$shm_path" "$CERTUS_SLAB_SIZE_BYTES" <<'PY'
+#
+# If the container's args already carry a --kv-transfer-config (the P/D overlay's
+# NixlConnector), it is not replaced: it is lifted out and becomes the FIRST
+# connector of a MultiConnector, certus the second. MultiConnector loads from the
+# first connector with a hit, so on decode NIXL's GPU->GPU pull wins and certus
+# only stores; on prefill NIXL claims nothing and certus serves what it holds.
+# Every connector saves. Two --kv-transfer-config flags would leave which one vLLM
+# keeps to its argument parser.
+existing_kv=""
+args=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --kv-transfer-config)
+            [ -z "$existing_kv" ] || { log "FATAL: two --kv-transfer-config in args"; exit 1; }
+            existing_kv="$2"; shift 2 ;;
+        --kv-transfer-config=*)
+            [ -z "$existing_kv" ] || { log "FATAL: two --kv-transfer-config in args"; exit 1; }
+            existing_kv="${1#*=}"; shift ;;
+        *) args+=("$1"); shift ;;
+    esac
+done
+set -- "${args[@]}"
+
+kv_cfg="$(python3 - "$shm_path" "$CERTUS_SLAB_SIZE_BYTES" "$existing_kv" <<'PY'
 import json, sys
-print(json.dumps({
+certus = {
     "kv_connector": "OffloadingConnector",
     "kv_role": "kv_both",
     "kv_connector_extra_config": {
@@ -74,9 +97,30 @@ print(json.dumps({
         "shm_path": sys.argv[1],
         "slab_size_bytes": int(sys.argv[2]),
     },
-}, separators=(",", ":")))
+}
+cfg = certus
+if sys.argv[3]:
+    first = json.loads(sys.argv[3])
+    if first.get("kv_connector") == "MultiConnector":
+        sys.exit("args already name a MultiConnector; not nesting one in another")
+    cfg = {
+        # The outer role is the first connector's: kv_producer on prefill and
+        # kv_consumer on decode is how llm-d's sidecar and NIXL tell them apart.
+        "kv_connector": "MultiConnector",
+        "kv_role": first.get("kv_role", "kv_both"),
+        "kv_connector_extra_config": {"connectors": [first, certus]},
+    }
+    # The scheduler reads the load-failure policy from the OUTER config only,
+    # so decode's "fail" (a broken NIXL pull errors rather than silently
+    # recomputing) has to be lifted or it falls back to the default.
+    if "kv_load_failure_policy" in first:
+        cfg["kv_load_failure_policy"] = first["kv_load_failure_policy"]
+print(json.dumps(cfg, separators=(",", ":")))
 PY
 )"
+if [ -n "$existing_kv" ]; then
+    log "wrapping the args' connector: MultiConnector[$(python3 -c 'import json,sys;print(json.loads(sys.argv[1])["kv_connector"])' "$existing_kv"), certus]"
+fi
 
 log "GPU ${bdf} -> NUMA ${numa} -> ${shm_path}"
 

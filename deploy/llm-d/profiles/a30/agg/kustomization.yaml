@@ -21,4 +21,4 @@ labels:
     includeTemplates: true
 
 patches:
-  - path: patch-a30.yaml
+  - path: patch.yaml

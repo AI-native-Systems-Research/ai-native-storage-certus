@@ -1,0 +1,37 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Prefill/decode disaggregation on A30s: prefill and decode engines of one A30
+# each at TP=1, KV handed over by vLLM's NixlConnector. An overlay on llm-d's
+# own P/D base (guides/pd-disaggregation/modelserver/gpu/vllm/base), so install.sh
+# materializes it beside that base rather than beside ../agg.
+#
+# Replica counts come from the private site file (PD_PREFILL_REPLICAS,
+# PD_DECODE_REPLICAS). For long multi-turn chat, favour decode: after the
+# handoff every in-flight sequence lives on a decode GPU, and one A30 holds only
+# ~30k tokens of KV, so decode capacity is what runs out first.
+#
+# This is a testbed, not a tuned deployment. The NIXL transfer runs UCX over TCP
+# on the pod network (see patch.yaml); it proves the P/D path end to end, but
+# on a typical pod network it is far too slow to measure transfer performance.
+resources:
+  - ../base
+
+# The base deliberately leaves the model-server image unset so each overlay
+# picks one. release == docker.io/vllm/vllm-openai:v0.30.0, the same image the
+# agg overlay runs, whose containerd layers the GPU nodes already hold.
+components:
+  - ../../../../../recipes/modelserver/components/images/gpu-vllm/release
+
+# Overrides base's llm-d.ai/model: gpt-oss-120b. includeSelectors is safe here,
+# unlike in ../agg: base already put the model label in the selectors, and these
+# Deployments are created fresh rather than patched in place, so there is no
+# immutable live selector to stay compatible with.
+labels:
+  - pairs:
+      llm-d.ai/model: Qwen3-8B
+    includeSelectors: true
+    includeTemplates: true
+
+patches:
+  - path: patch.yaml

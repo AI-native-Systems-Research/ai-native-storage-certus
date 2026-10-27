@@ -277,6 +277,7 @@ pub fn serve(
                         // client's last mappings stayed open forever once it went
                         // quiet or died -- holding the GPU memory its KV cache
                         // occupied and starving the replacement pod.
+                        tr.expire_fetch_marks();
                         let m = tr.reap_expired_ipc_mappings();
                         if m > 0 {
                             logger.info(&format!("shmq: closed {m} expired CUDA-IPC mapping(s)"));

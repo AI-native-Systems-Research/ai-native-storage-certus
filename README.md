@@ -138,6 +138,10 @@ scripts/build-certus-spdk.sh        # = CERTUS_PROFILE=full cargo build -p certu
 sudo ./target/release/certus-server-yaml --drive-count 4 --format --memory-tier-size 32G
 ```
 
+`scripts/build-certus-full-transfer.sh` builds the `full-transfer` profile
+instead: `full` plus the certus-to-certus transfer endpoint, which needs
+rdma-core to build and a RoCE NIC to run, and listens on `CERTUS_RDMA_BIND_IP`
+(unset: the first active RoCE port) and `CERTUS_RDMA_PORT` (default 7481).
 `--format` erases existing on-disk data. Other profiles have their own build
 scripts (`scripts/build-certus-*.sh`). [scripts/run-certus-shmq-server.sh](scripts/run-certus-shmq-server.sh)
 starts the server with NUMA pinning, using the configuration from the benchmark
