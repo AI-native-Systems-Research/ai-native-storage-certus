@@ -9,6 +9,7 @@ previous turn generated wherever it was cached.
 | `multiturn_router.py` | the driver: ShareGPT human turns, token-exact prompts (render endpoint + `return_token_ids`), N sessions, M at a time, one JSON line per turn |
 | `run_arm.sh` | one arm: the fleet scraper (`synthetic-agentic/scrape_prom.py --k8s`) beside the driver, then the EPP's p2p decisions for the arm's window |
 | `compare_arms.py` | two arms side by side: fetches, prefix-cache hits, router decisions, TTFT |
+| `prefill_cost.py` | prefill compute for N new tokens over an already-cached context, on the prefill pod directly |
 | `gdr_bw.sh` | RDMA write bandwidth node2 -> node5, host and GPU memory on each end (`ib_write_bw --use_cuda`) |
 
 Each turn's prompt = previous prompt + the model's answer as token ids + the next user
@@ -76,10 +77,25 @@ Results in `results/2026-10-26-rdma-fetch-{on,off}/`.
 - **With the handoff out of the way, the fetch shows.** Fetch on vs off: median TTFT
   0.20 s vs 0.33 s (-38 %), mean 0.40 s vs 0.53 s (-25 %). Under TCP the same fetch was
   -11 % / -16 %, diluted by the transfer both arms paid.
-- **Fetch on, TTFT stays flat across turns** (~0.20 s); fetch off, it climbs (0.31 ->
-  0.37 s). Either arm's prompt, and so the handoff, grows each turn; why only the off arm
-  climbs is not separated here (prefill recomputes ~1 100 tokens of answer per turn in
-  both cases).
+- **The on/off gap is prefill computing the previous answer.** Fetch off, prefill
+  computes ~1 100 answer tokens plus the user message each turn; fetch on, only the
+  message (~40 tokens) and the partial blocks. Timed directly on the prefill pod
+  (`max_tokens: 1`, context already in its GPU cache, median of 5):
+
+  | context already cached | +1 100 tokens | +40 tokens | difference |
+  |---|---|---|---|
+  | 1 229 | 0.185 s | 0.044 s | 0.141 s |
+  | 2 371 | 0.185 s | 0.035 s | 0.150 s |
+  | 3 528 | 0.207 s | 0.050 s | 0.157 s |
+
+  against measured on/off TTFT gaps of 0.13 / 0.09 / 0.16 / 0.17 s on turns 1-4.
+- **Why fetch off climbs with the turn.** Two things grow with the prompt: computing
+  1 100 tokens costs more over a longer context (+0.022 s from 1 229 to 3 528 tokens,
+  above), and decode's pull of the prompt's KV grows (Qwen3-8B: ~147 KB per token, so
+  ~0.18 GB at turn 1 to ~0.69 GB at turn 4, +~0.05 s at ~9 GB/s). Together ~+0.08 s,
+  against +0.054 s measured. Fetch on pays the same handoff growth but its medians move
+  only +0.02 s (0.18 -> 0.20); with 12 sessions per turn that difference is within the
+  spread, so "flat" is not a separate effect worth claiming.
 - Every block fetched was served as fetched (3 301 / 3 301), against 3 092 of 3 299 under
   TCP.
 - **The misses are the new user message, which nobody holds yet.** Turn k's prompt is
