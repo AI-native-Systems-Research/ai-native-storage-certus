@@ -60,7 +60,8 @@
 //!
 //! The store belongs at the generating turn because that is when a real deployment
 //! inserts it: vLLM's offloading connector calls `prepare_store` **after each forward
-//! pass** (`knowledge/kv_IO_pattern.md`), offloading newly-computed blocks rather than
+//! pass** (`knowledge/contracts/vllm-offloading-interface-v030.yaml`,
+//! `calling_sequences.store`), offloading newly-computed blocks rather than
 //! waiting for something to read them. Projecting the prompt alone would move every
 //! generated block's arrival one turn later than it happens, and would omit the last
 //! turn of every session entirely — that output is stored and never read again, so it

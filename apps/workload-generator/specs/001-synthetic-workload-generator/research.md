@@ -33,7 +33,9 @@ trace lacks:
   the argument that a turn's output reappears in the next turn's prefix, so no
   key is lost. Two things defeat that argument. A real deployment stores a
   generated block **when it is generated** — vLLM's offloading connector calls
-  `prepare_store` after each forward pass (`knowledge/kv_IO_pattern.md`) — so
+  `prepare_store` after each forward pass
+  (`knowledge/contracts/vllm-offloading-interface-v030.yaml`,
+  `calling_sequences.store`) — so
   input-only put every store one turn later than it happens. And the **final
   turn of every session** generates output nothing reads again, so input-only
   omitted it entirely while a real cache still held it. Both understate
