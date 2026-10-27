@@ -105,9 +105,10 @@ pub struct Header {
     /// `0` until ready, then [`MAGIC_READY`] (published last, with `Release`).
     pub magic: AtomicU32,
     pub abi_version: u32,
-    /// Bumped by the server on (re)create. Lets a client detect a server
-    /// restart and re-sync its per-channel seq baseline instead of matching a
-    /// stale cell value.
+    /// Distinct for every server start ([`fresh_generation`]), never 0. A
+    /// client whose server has gone quiet compares it with the generation now
+    /// at the mailbox path: a different one means the server restarted and
+    /// this client holds an orphaned mapping ([`Client::server_replaced`]).
     pub generation: u32,
     pub num_channels: u32,
     pub cap_req: u32,
@@ -120,6 +121,63 @@ pub struct Header {
     /// Server liveness counter; bumped each poll sweep so a client can tell a
     /// slow server from a dead one without waiting out its full deadline.
     pub heartbeat: AtomicU64,
+}
+
+/// A generation for a server start: distinct from the previous start's, and
+/// never 0.
+///
+/// It cannot be "the previous value plus one": the server unlinks its mailbox
+/// when it stops, so a restart finds no previous value to read. Wall-clock
+/// nanoseconds folded with the PID instead -- two starts on one path are at
+/// least a process lifetime apart, so a repeat needs a 1-in-2^32 collision.
+#[must_use]
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "folding: the high bits are mixed in before each narrowing cast"
+)]
+pub fn fresh_generation() -> u32 {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let mixed = (nanos as u64) ^ (u64::from(std::process::id()) << 32) ^ ((nanos >> 64) as u64);
+    let folded = (mixed ^ (mixed >> 32)) as u32;
+    if folded == 0 {
+        1
+    } else {
+        folded
+    }
+}
+
+/// How long the heartbeat must stand still before a waiting client looks for a
+/// replacement server at the mailbox path, and the least time between looks.
+pub const QUIET_BEFORE_PROBE: Duration = Duration::from_millis(500);
+
+/// Tracks whether a server's heartbeat has stood still long enough to probe.
+struct Quiet {
+    beat: u64,
+    since: std::time::Instant,
+}
+
+impl Quiet {
+    fn new(beat: u64) -> Self {
+        Quiet {
+            beat,
+            since: std::time::Instant::now(),
+        }
+    }
+
+    /// True once per [`QUIET_BEFORE_PROBE`] of an unmoving heartbeat.
+    fn stood_still(&mut self, beat: u64) -> bool {
+        if beat != self.beat {
+            *self = Quiet::new(beat);
+            return false;
+        }
+        if self.since.elapsed() < QUIET_BEFORE_PROBE {
+            return false;
+        }
+        self.since = std::time::Instant::now();
+        true
+    }
 }
 
 /// Per-channel byte offsets within one channel block, computed from the header.
@@ -378,9 +436,7 @@ impl Server {
             ptr::write_bytes(map.ptr, 0, layout.total_size);
         }
         let hdr = map.header();
-        // Bump generation across restarts so clients re-sync (read prior value
-        // from the on-disk file before we zeroed — best-effort: start at 1).
-        let gen = 1u32;
+        let gen = fresh_generation();
         // SAFETY: single-threaded init before magic is published; plain writes.
         unsafe {
             *map.u32_at(memoffset(&hdr.abi_version, hdr)) = ABI_VERSION;
@@ -635,6 +691,29 @@ impl Client {
         self.reclaimed.load(Ordering::Relaxed)
     }
 
+    /// The server generation this client attached to.
+    #[must_use]
+    pub fn generation(&self) -> u32 {
+        self.map.header().generation
+    }
+
+    /// Whether the mailbox path now holds a different server than the one this
+    /// client mapped: a server that restarted recreated the file as a new
+    /// inode, so this mapping is orphaned and no request on it will ever be
+    /// answered. `Some(gen)` names the new server's generation; `None` means
+    /// the path holds the same server, or no ready one (stopped, or still
+    /// starting) -- a quiet server that may yet answer.
+    #[must_use]
+    pub fn server_replaced(&self) -> Option<u32> {
+        let hdr_len = round_up_cl(std::mem::size_of::<Header>());
+        let now = Mapping::open(&self.map.path, hdr_len, false).ok()?;
+        let hdr = now.header();
+        if hdr.magic.load(Ordering::Acquire) != MAGIC_READY {
+            return None;
+        }
+        (hdr.generation != self.generation()).then_some(hdr.generation)
+    }
+
     /// Release a previously claimed channel. The owner word is cleared before
     /// the lock is dropped, so a claimer that gets the lock never sees a stale
     /// owner and miscounts a clean release as a takeover.
@@ -754,6 +833,7 @@ impl Client {
         // SAFETY: aligned atomic response seq word inside the mapping.
         let resp_seq = unsafe { self.map.atomic_at(rc + OFF_SEQ) };
         let start = std::time::Instant::now();
+        let mut quiet = Quiet::new(self.map.header().heartbeat.load(Ordering::Relaxed));
         loop {
             // Bounded spin first (server busy-polls → replies are often sub-µs).
             for _ in 0..spin_iters {
@@ -766,6 +846,16 @@ impl Client {
             if cur == seq {
                 return Ok(self.read_response(rc));
             }
+            if let Some(gen) = self.replaced_after_quiet(&mut quiet) {
+                return Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    format!(
+                        "shmq server restarted (generation {:#x} -> {gen:#x}); this client's \
+                         mailbox is orphaned and must reattach",
+                        self.generation()
+                    ),
+                ));
+            }
             if start.elapsed() > deadline {
                 return Err(io::Error::new(
                     io::ErrorKind::TimedOut,
@@ -777,6 +867,20 @@ impl Client {
             unsafe {
                 futex_wait(resp_seq, cur, Some(attempt_timeout));
             }
+        }
+    }
+
+    /// Called while waiting for a reply: once the heartbeat has stood still for
+    /// [`QUIET_BEFORE_PROBE`], look at the mailbox path (at most once per that
+    /// interval) for a server that replaced ours. A live server bumps the
+    /// heartbeat every few thousand poll sweeps, so a busy one never triggers
+    /// the probe.
+    fn replaced_after_quiet(&self, quiet: &mut Quiet) -> Option<u32> {
+        let beat = self.map.header().heartbeat.load(Ordering::Relaxed);
+        if quiet.stood_still(beat) {
+            self.server_replaced()
+        } else {
+            None
         }
     }
 

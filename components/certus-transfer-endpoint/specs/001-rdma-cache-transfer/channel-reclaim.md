@@ -254,9 +254,32 @@ component's spec-sync stamp moves. Re-stamp last, once, with the rest of the bra
   holds the entry forever (it can then be neither evicted nor removed). Reclaiming the
   channel does not help: pins are not per channel. Needs a pin owner (a session or
   lease) and a reaper; its own design.
-- **The server does not bump `generation` across restarts** (`create` always writes 1;
-  "best-effort: start at 1"). A client cannot tell a restarted server from the old one,
-  which is part of why the orphaned-mailbox case is silent. Small, separate.
+- **The server does not bump `generation` across restarts** (`create` always wrote 1).
+  A client could not tell a restarted server from the old one, which is part of why the
+  orphaned-mailbox case was silent. **Done 2026-10-27, still ABI 2** (unstable is 1, so
+  no one has seen 2 without it): see *Server restart detection* below.
+
+## Server restart detection (2026-10-27)
+
+A restarted server recreates the mailbox as a new inode; a client still maps the old one,
+where nobody polls, and used to wait out its full deadline (30 s in the connector), which
+`kv_load_failure_policy=fail` turns into an engine death.
+
+- **A generation per start.** `Server::create` writes `fresh_generation()`: wall-clock
+  nanoseconds folded with the PID, never 0. It cannot be "previous + 1": the server
+  unlinks the mailbox when it stops, so a restart finds nothing to read.
+- **Probe only when the server is quiet.** While waiting for a reply, a client watches
+  the header `heartbeat`. The poller never sleeps, so a heartbeat that stands still for
+  `QUIET_BEFORE_PROBE` (0.5 s) means a dead or wedged server; the client then reads the
+  header at the mailbox *path* (at most once per interval). A ready server there with a
+  different generation means this mapping is orphaned: the request fails at once --
+  Rust `ErrorKind::BrokenPipe`, Python `ServerRestartedError` (a `RingError`) -- saying
+  the server restarted and the engine must reattach.
+- **Not a replacement:** the same generation (a slow server), no file, or a file whose
+  magic is not yet ready (a server still starting). Those keep waiting to the deadline.
+- **No reconnect.** Pins, reservations and fetch marks died with the old server; a
+  client that silently switched would hold handles to nothing. Failing fast, with the
+  reason, is the whole change. The engine still restarts.
 
 ## Changes, by component
 

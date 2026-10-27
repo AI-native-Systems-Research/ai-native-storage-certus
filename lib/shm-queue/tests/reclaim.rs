@@ -284,3 +284,97 @@ fn an_old_abi_client_is_refused() {
     assert_eq!(abi, shm_queue::ABI_VERSION);
     assert_ne!(abi, 1, "claims changed meaning; the ABI number must say so");
 }
+
+#[test]
+fn each_server_start_has_its_own_generation() {
+    let path = tmp_path("gen");
+    let mut seen = std::collections::HashSet::new();
+    for _ in 0..8 {
+        let s = Server::create(&path, 1, 4096, 4096).unwrap();
+        let c = Client::attach(&path, Duration::from_secs(1)).unwrap();
+        assert_ne!(c.generation(), 0);
+        assert!(seen.insert(c.generation()), "a generation repeated");
+        drop(c);
+        drop(s);
+    }
+}
+
+#[test]
+fn a_client_of_a_replaced_server_fails_fast_and_says_so() {
+    let path = tmp_path("replaced");
+    let old = Server::create(&path, 1, 4096, 4096).unwrap();
+    let c = Client::attach(&path, Duration::from_secs(1)).unwrap();
+    let ch = c.claim_channel().unwrap();
+    assert_eq!(c.server_replaced(), None, "same server: not replaced");
+
+    // A restart: the old server's file is gone (its drop unlinks it) and a
+    // new one stands at the path. The client still maps the old inode, where
+    // nobody polls: its heartbeat stands still and no reply ever comes.
+    drop(old);
+    let new = Server::create(&path, 1, 4096, 4096).unwrap();
+    let new_gen = Client::attach(&path, Duration::from_secs(1))
+        .unwrap()
+        .generation();
+    assert_eq!(c.server_replaced(), Some(new_gen));
+
+    let t = std::time::Instant::now();
+    let err = c
+        .request(
+            ch,
+            7,
+            b"x",
+            100,
+            Duration::from_millis(50),
+            Duration::from_secs(30),
+        )
+        .expect_err("an orphaned mailbox is never answered");
+    let waited = t.elapsed();
+    assert_eq!(err.kind(), std::io::ErrorKind::BrokenPipe, "{err}");
+    assert!(err.to_string().contains("restarted"), "{err}");
+    assert!(
+        waited < Duration::from_secs(5),
+        "took {waited:?}: should be about QUIET_BEFORE_PROBE, not the 30 s deadline"
+    );
+    drop(new);
+}
+
+#[test]
+fn a_stopped_server_is_not_mistaken_for_a_replaced_one() {
+    let path = tmp_path("stopped");
+    let old = Server::create(&path, 1, 4096, 4096).unwrap();
+    let c = Client::attach(&path, Duration::from_secs(1)).unwrap();
+    let ch = c.claim_channel().unwrap();
+    drop(old); // gone, nothing new: no generation to compare
+    assert_eq!(c.server_replaced(), None);
+    let err = c
+        .request(
+            ch,
+            7,
+            b"x",
+            100,
+            Duration::from_millis(50),
+            Duration::from_secs(1),
+        )
+        .expect_err("nobody answers");
+    assert_eq!(
+        err.kind(),
+        std::io::ErrorKind::TimedOut,
+        "the plain deadline, {err}"
+    );
+}
+
+#[test]
+fn a_server_still_starting_at_the_path_is_not_a_replacement_yet() {
+    let path = tmp_path("starting");
+    let old = Server::create(&path, 1, 4096, 4096).unwrap();
+    let c = Client::attach(&path, Duration::from_secs(1)).unwrap();
+    drop(old);
+    // What a starting server leaves before it publishes: a sized file whose
+    // header holds some generation but not yet the ready magic.
+    let mut hdr = vec![0u8; 64];
+    hdr[4..8].copy_from_slice(&shm_queue::ABI_VERSION.to_le_bytes());
+    hdr[8..12].copy_from_slice(&0x1234_5678u32.to_le_bytes());
+    std::fs::write(&path, &hdr).unwrap();
+    assert_eq!(c.server_replaced(), None, "not ready: it may never come up");
+    let _ = std::fs::remove_file(&path);
+}

@@ -180,3 +180,58 @@ def test_release_frees_the_channel_while_the_process_lives(mailbox):
     assert len(b._claim_fds) == 4, "a released channel stayed locked"
     a.close()
     b.close()
+
+
+def _serve(path):
+    srv = subprocess.Popen([ECHO, "serve", path, "4", "4096", "4096"], stderr=subprocess.DEVNULL)
+    deadline = time.monotonic() + 10
+    while True:
+        try:
+            with open(path, "rb") as f:
+                if int.from_bytes(f.read(4), "little") == 0x5148_4D53:
+                    return srv
+        except FileNotFoundError:
+            pass
+        assert time.monotonic() < deadline, "echo server did not start"
+        time.sleep(0.01)
+
+
+def test_a_restarted_server_fails_an_orphaned_request_fast(mailbox):
+    """The server restarts (new inode, new generation) under a live ring: its
+    next request must say so within about QUIET_BEFORE_PROBE_S, not hang to the
+    deadline -- an engine's 30 s deadline is what killed it before."""
+    from certus_shmq_connector.ring import ServerRestartedError
+    path, Ring = mailbox
+    r = Ring(path, ready_timeout=5, deadline=30)
+    assert r.request(7, b"a")[1] == b"a"
+    old_gen = r.generation
+    assert r.server_replaced() is None
+
+    # The fixture's server, killed: SIGKILL leaves its file, so remove it as
+    # its own drop would; then a new one at the same path.
+    subprocess.run(["pkill", "-KILL", "-f", f"shmq-echo serve {path} "], check=False)
+    time.sleep(0.2)
+    os.unlink(path)
+    new = _serve(path)
+    try:
+        assert r.server_replaced() not in (None, old_gen)
+        t = time.monotonic()
+        with pytest.raises(ServerRestartedError, match="restarted"):
+            r.request(7, b"b")
+        assert time.monotonic() - t < 5
+    finally:
+        new.kill()
+        new.wait()
+
+
+def test_a_stopped_server_is_only_a_deadline(mailbox):
+    from certus_shmq_connector.ring import RingError, ServerRestartedError
+    path, Ring = mailbox
+    r = Ring(path, ready_timeout=5, deadline=1.5)
+    r.request(7, b"a")
+    subprocess.run(["pkill", "-KILL", "-f", f"shmq-echo serve {path} "], check=False)
+    time.sleep(0.2)
+    os.unlink(path)
+    with pytest.raises(RingError, match="deadline") as e:
+        r.request(7, b"b")
+    assert not isinstance(e.value, ServerRestartedError)

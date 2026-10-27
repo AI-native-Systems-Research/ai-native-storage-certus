@@ -160,6 +160,17 @@ class RingError(RuntimeError):
     """A transport-level or server-reported (STATUS_ERROR) failure."""
 
 
+class ServerRestartedError(RingError):
+    """The certus server this ring attached to was replaced by a new one at the
+    same path: the ring's mapping is orphaned, and only reattaching (in practice,
+    restarting the engine) recovers."""
+
+
+# A waiting request probes the mailbox path for a replacement server once the
+# heartbeat has stood still this long (and at most once per interval after).
+QUIET_BEFORE_PROBE_S = 0.5
+
+
 def _require_x86_64() -> None:
     m = platform.machine().lower()
     if m not in ("x86_64", "amd64"):
@@ -583,6 +594,28 @@ class Ring:
     def generation(self) -> int:
         return self._generation
 
+    def server_replaced(self) -> int | None:
+        """The generation of a different, ready server now at this mailbox's
+        path, or ``None``: same server, or none ready there (stopped, or still
+        starting). A restarted server recreates the file as a new inode, so this
+        client's mapping is then orphaned and no request on it is answered."""
+        try:
+            fd = os.open(self._path, os.O_RDONLY | os.O_CLOEXEC)
+        except OSError:
+            return None
+        try:
+            hdr = os.pread(fd, _HEADER_SIZE, 0)
+        except OSError:
+            return None
+        finally:
+            os.close(fd)
+        if len(hdr) < _HDR_GENERATION + 4:
+            return None
+        magic, _abi, gen = struct.unpack_from("<III", hdr, 0)
+        if magic != MAGIC_READY or gen == self._generation:
+            return None
+        return gen
+
     def heartbeat(self) -> int:
         """Current server liveness counter (u64 at header offset 48)."""
         return ctypes.c_uint64.from_address(self._base + 48).value
@@ -759,11 +792,28 @@ class Ring:
                 return self._read_response(rc)
 
         start = time.monotonic()
+        beat, beat_since = self.heartbeat(), start
         while True:
             cur = resp_seq.value
             if cur == seq:
                 return self._read_response(rc)
-            if time.monotonic() - start > self._deadline:
+            now = time.monotonic()
+            b = self.heartbeat()
+            if b != beat:
+                beat, beat_since = b, now
+            elif now - beat_since >= QUIET_BEFORE_PROBE_S:
+                # The poller never sleeps, so a heartbeat that stands still
+                # means a dead or wedged server. Look once per interval for a
+                # server that replaced it: then no reply can ever come here.
+                beat_since = now
+                gen = self.server_replaced()
+                if gen is not None:
+                    raise ServerRestartedError(
+                        f"certus server at {self._path!r} restarted (generation "
+                        f"{self._generation:#x} -> {gen:#x}); this mailbox is orphaned. "
+                        "Restart this engine to attach to the new server."
+                    )
+            if now - start > self._deadline:
                 raise RingError(
                     f"shmq request deadline exceeded after {self._deadline:g}s "
                     "(server dead, or tier saturated and backpressuring longer "
