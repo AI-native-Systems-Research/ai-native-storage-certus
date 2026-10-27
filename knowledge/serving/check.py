@@ -75,6 +75,47 @@ def model_kv(mid: str, m: dict, dtype_bytes: int) -> tuple[int | None, int | Non
     return per_layer, total, kv_layers
 
 
+BENCH = REPO / "benchmarks" / "certus-connector-bench" / "bench_connector_lifecycle.py"
+
+
+def bench_presets() -> dict:
+    """COLD_PRESETS from the connector benchmark, read from its source (importing it
+    needs CUDA). Returns {} if the benchmark or the literal is missing."""
+    import ast
+    if not BENCH.exists():
+        return {}
+    for node in ast.walk(ast.parse(BENCH.read_text())):
+        if isinstance(node, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == "COLD_PRESETS" for t in node.targets):
+            return ast.literal_eval(node.value)
+    return {}
+
+
+def check_bench_presets(obs_by_id: dict, derived_by_dep: dict) -> None:
+    """Each benchmark preset must name an observation and match it: block bytes and
+    pieces per block (via the observation's deployment) and blocks per load job."""
+    for name, preset in bench_presets().items():
+        oid = preset.get("observation")
+        o = obs_by_id.get(oid)
+        if o is None:
+            err(f"benchmark preset {name!r}: observation {oid!r} not in observations.yaml")
+            continue
+        row = derived_by_dep.get(o.get("deployment"))
+        if row:
+            _, _, ppb, _, dv = row
+            if preset.get("pieces_per_block") != ppb:
+                err(f"benchmark preset {name!r}: pieces_per_block {preset.get('pieces_per_block')} "
+                    f"!= {ppb} for {o.get('deployment')}")
+            if preset.get("block_bytes") != dv["block_bytes"]:
+                err(f"benchmark preset {name!r}: block_bytes {preset.get('block_bytes')} "
+                    f"!= {dv['block_bytes']} for {o.get('deployment')}")
+        bpj = ((o.get("values") or {}).get("blocks_per_load_job") or {}).get("value")
+        req, nb = preset.get("requests"), preset.get("num_blocks")
+        if bpj is not None and req and nb is not None and nb // req != bpj:
+            err(f"benchmark preset {name!r}: num_blocks/requests {nb // req} != "
+                f"observation's blocks_per_load_job {bpj}")
+
+
 def main() -> int:
     quiet = "--quiet" in sys.argv
     models = load("models.yaml").get("models", {})
@@ -161,6 +202,8 @@ def main() -> int:
                 err(f"observation {oid}: measured value {key} needs evidence")
             elif v["basis"] == "computed" and not v.get("formula"):
                 err(f"observation {oid}: computed value {key} needs formula")
+
+    check_bench_presets({o.get("id"): o for o in obs}, derived_by_dep)
 
     if not quiet:
         w = max([len("deployment")] + [len(r[0]) for r in rows])

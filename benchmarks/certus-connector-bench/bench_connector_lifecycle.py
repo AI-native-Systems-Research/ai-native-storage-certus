@@ -665,16 +665,20 @@ def bench_load_lifecycle(
 # Named cold-load shapes. Each sets flags whose defaults would otherwise apply;
 # explicit flags override. Sizes the preset cannot know (the tier fill depends
 # on the server's tier size) stay required flags.
+# A preset's "observation" names the knowledge/serving/observations.yaml entry it
+# reproduces; knowledge/serving/check.py fails if the preset's block bytes, pieces
+# per block or blocks per load job disagree with it. It is not a flag.
 COLD_PRESETS = {
-    # LongDocQA, Llama-3-8B, vLLM 0.30 (knowledge/serving/observations.yaml,
-    # longdocqa-llama3-8b-vllm030-2026-10-26): 2 MiB blocks in 32 layer pieces,
-    # one 625-block load job per request, 4 requests in flight, tier full.
+    # LongDocQA, Llama-3-8B, vLLM 0.30 under the default LBHNC layout: 2 MiB blocks
+    # in 32 layer pieces, one 625-block load job per request, 4 requests in flight,
+    # tier full.
     "longdocqa": {
-        "block_bytes": 2 * 1024 * 1024,
+        "observation": "ldq-llama-3-8b-lbhnc-2026-10-26",
+        "block_bytes": 2097152,     # 2 MiB: 16 tokens x 128 KiB/token
         "pieces_per_block": 32,
         "bs": 16,
         "requests": 4,
-        "num_blocks": 4 * 625,
+        "num_blocks": 2500,         # 4 requests x 625 blocks (10,000 tokens / 16)
         "store_order": "interleaved",
         "load_unit": "request",
         "cold_inflight": 4,
@@ -2337,7 +2341,7 @@ def main():
                 given.add_argument(*action.option_strings, **kw)
         explicit = vars(given.parse_known_args()[0])
         for key, val in COLD_PRESETS[args.preset].items():
-            if key not in explicit:
+            if key != "observation" and key not in explicit:
                 setattr(args, key, val)
     if args.cold_tier_state == "full" and args.tier_fill_blocks <= 0:
         parser.error("--cold-tier-state full needs --tier-fill-blocks "
