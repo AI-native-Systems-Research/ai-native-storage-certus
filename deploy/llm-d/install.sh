@@ -59,6 +59,9 @@
 #   WITH_CERTUS  1 to apply profiles/<PROFILE>/certus, or with PD=1
 #                profiles/<PROFILE>/pd-certus (default: 0)
 #   PD           1 to apply profiles/<PROFILE>/pd instead of agg (default: 0)
+#   RDMA         1, with PD=1 WITH_CERTUS=1: profiles/<PROFILE>/pd-certus-rdma,
+#                NIXL GPU to GPU over the `roce` secondary network
+#                (deploy/k8s/rdma-network/, which must be applied) (default: 0)
 #   AGG_NODES    space-separated nodes for aggregated serving (default and
 #                WITH_CERTUS). Belongs in SITE_ENV. Optional if the nodes
 #                already carry this instance's label.
@@ -116,6 +119,7 @@ INSTANCE="${NAMESPACE}"
 RELEASE_NODES="${RELEASE_NODES:-0}"
 WITH_CERTUS="${WITH_CERTUS:-0}"
 PD="${PD:-0}"
+RDMA="${RDMA:-0}"
 DRY_RUN="${DRY_RUN:-0}"
 KEEP_LLMD="${KEEP_LLMD:-0}"
 GUIDE_NAME="${GUIDE_NAME:-quickstart}"
@@ -178,6 +182,13 @@ if [ "${PD}" != "0" ]; then need_overlay pd; else need_overlay agg; fi
 if [ "${WITH_CERTUS}" != "0" ]; then
     need_overlay certus   # pd-certus takes its entrypoint from certus/
     [ "${PD}" = "0" ] || need_overlay pd-certus
+fi
+if [ "${RDMA}" != "0" ]; then
+    if [ "${PD}" = "0" ] || [ "${WITH_CERTUS}" = "0" ]; then
+        echo "ERROR: RDMA=1 needs PD=1 WITH_CERTUS=1 (it layers on pd-certus)." >&2
+        exit 1
+    fi
+    need_overlay pd-certus-rdma
 fi
 
 # Replica counts describe the cluster, not the GPU type, so they come from the
@@ -376,6 +387,17 @@ if [ "${WITH_CERTUS}" != "0" ]; then
         OVERLAY="${PD_VLLM_DIR}/pd-certus"
         OVERLAY_SRC_DIR="${PROFILE_DIR}/pd-certus"
         cp "${PROFILE_DIR}/certus/entrypoint-certus.sh" "${OVERLAY}/"
+        if [ "${RDMA}" != "0" ]; then
+            # Layers on pd-certus, so it sits beside it; the router values
+            # and the image pin stay pd-certus's.
+            install_overlay "${PD_VLLM_DIR}" pd-certus-rdma
+            OVERLAY="${PD_VLLM_DIR}/pd-certus-rdma"
+            if ! kubectl get network-attachment-definitions -n "${NAMESPACE}" roce >/dev/null 2>&1 \
+                    && [ "${DRY_RUN}" = "0" ]; then
+                echo "ERROR: no 'roce' network in ${NAMESPACE}; apply deploy/k8s/rdma-network/ first." >&2
+                exit 1
+            fi
+        fi
     else
         # Consumes ../agg, so it has to sit beside it.
         install_overlay "${VLLM_DIR}" certus
@@ -385,7 +407,9 @@ if [ "${WITH_CERTUS}" != "0" ]; then
     # The committed overlay pins a REGISTRY/REPO placeholder rather than a real
     # registry, so resolve it here against the variables publish-image.sh pushed
     # with. Done on the materialized copy, so the sources stay site-neutral.
-    certus_km="${OVERLAY}/kustomization.yaml"
+    # The image pin lives in pd-certus even when pd-certus-rdma layers on it.
+    certus_km="${PD_VLLM_DIR}/pd-certus/kustomization.yaml"
+    [ "${PD}" != "0" ] || certus_km="${OVERLAY}/kustomization.yaml"
     if grep -q 'REGISTRY/REPO/' "${certus_km}"; then
         if [ -z "${CERTUS_REGISTRY:-}" ] || [ -z "${CERTUS_REPO:-}" ]; then
             echo "ERROR: profiles/${PROFILE}/$(basename "${OVERLAY}")/kustomization.yaml pins the REGISTRY/REPO" >&2
