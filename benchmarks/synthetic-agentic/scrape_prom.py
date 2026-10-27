@@ -27,14 +27,40 @@ A baseline is taken at startup and NOT emitted, so the summed deltas equal
 warmup. On SIGTERM/SIGINT it takes one final sample, flushes, and exits 0 — so
 the teardown in profile_all loses no tail.
 
+Several sources (llm-d, or any fleet of servers): ``--url`` repeats, each
+optionally ``LABEL=URL``. Every source keeps its own baseline and its own
+previous sample, so a source that misses a scrape contributes nothing that
+round and its movement lands, whole, on its next good one -- never a negative
+delta or a double count. The ``[prom] round`` line carries the SUM over sources
+under the usual keys (so render_kvprofile reads a fleet as one server), plus
+each labelled source's own values as ``LABEL.key``, which the renderer ignores
+and a reader can split by role. certus servers' ``certus_*`` counters are kept
+too, under their own names minus ``_total``.
+
+Under P/D a request runs on two engines, so its per-request counters
+(``request_success``, ``prefix_cache_queries``) appear on BOTH prefill and
+decode and the sum counts it twice; read those per role. Where a role's count
+is what you want, ``prefill.request_success`` is the client request count.
+
+``--k8s`` finds the sources instead: every Running llm-d model server in
+``--llm-d-namespace`` (labelled by its ``llm-d.ai/role``: prefill, decode, or
+the pod name for aggregated serving) and every certus server in
+``--certus-namespace`` (labelled ``certus-<node>-<numa>``). Discovery runs once,
+at start; restarting a pod mid-run changes its IP, so restart the scraper too.
+
 Usage:
   scrape_prom.py --url http://localhost:8000/metrics --interval 10 --out run.prom.log
+  scrape_prom.py --url prefill=http://10.244.4.38:8000/metrics \
+                 --url decode=http://10.244.2.131:8200/metrics --out run.prom.log
+  scrape_prom.py --k8s --out run.prom.log      # llm-d-quickstart + certus
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import re
+import subprocess
 import signal
 import sys
 import json
@@ -43,7 +69,9 @@ import urllib.request
 
 # A Prometheus exposition sample line: `name{labels} value` (labels optional).
 # vLLM prefixes every metric with `vllm:`; counters carry a `_total` suffix.
-_SAMPLE_RE = re.compile(r"^(vllm:[A-Za-z_:][A-Za-z0-9_:]*)(\{[^}]*\})?\s+([-+0-9.eEnaN]+)\s*$")
+# certus servers export `certus_*` counters under the same convention.
+_SAMPLE_RE = re.compile(
+    r"^((?:vllm:|certus_)[A-Za-z_:][A-Za-z0-9_:]*)(\{[^}]*\})?\s+([-+0-9.eEnaN]+)\s*$")
 
 
 def _prom_key(name: str) -> str:
@@ -192,13 +220,99 @@ def _handle_stop(signum, _frame):
     _STOP = True
 
 
+def _parse_url(spec: str) -> tuple[str, str]:
+    """``LABEL=URL`` -> (label, url); a bare URL has no label."""
+    head, sep, rest = spec.partition("=")
+    if sep and "://" not in head:
+        return head, rest
+    return "", spec
+
+
+def _kubectl_json(args: list) -> dict:
+    out = subprocess.run(["kubectl", *args, "-o", "json"], check=True,
+                         capture_output=True, text=True).stdout
+    return json.loads(out)
+
+
+def discover_k8s(llmd_ns: str, certus_ns: str) -> list:
+    """[(label, url)] for every Running llm-d model server and certus server."""
+    found = []
+    for p in _kubectl_json(["get", "pods", "-n", llmd_ns])["items"]:
+        if p["status"].get("phase") != "Running" or not p["status"].get("podIP"):
+            continue
+        for c in p["spec"]["containers"]:
+            if c["name"] != "modelserver":
+                continue
+            port = "8000"  # vLLM's default; decode sits behind its sidecar on --port
+            for a in c.get("args", []) + c.get("command", []):
+                if a.startswith("--port="):
+                    port = a.split("=", 1)[1]
+            role = p["metadata"].get("labels", {}).get("llm-d.ai/role") or p["metadata"]["name"]
+            found.append((role, f"http://{p['status']['podIP']}:{port}/metrics"))
+    for p in _kubectl_json(["get", "pods", "-n", certus_ns, "-l", "app=certus-server"])["items"]:
+        if p["status"].get("phase") != "Running":
+            continue
+        env = {e["name"]: e.get("value") for e in p["spec"]["containers"][0].get("env", [])}
+        port, numa = env.get("CERTUS_METRICS_PORT"), env.get("CERTUS_NUMA_ID", "?")
+        if not port:
+            continue
+        node = p["spec"].get("nodeName", "?").split(".")[0]
+        found.append((f"certus-{node}-numa{numa}", f"http://{p['status']['hostIP']}:{port}/metrics"))
+    return found
+
+
+def _unique_labels(sources: list) -> list:
+    """Two decode pods are both "decode": suffix repeats so each is its own."""
+    seen: dict = {}
+    out = []
+    for label, url in sources:
+        if label:
+            n = seen.get(label, 0)
+            seen[label] = n + 1
+            if n:
+                label = f"{label}{n}"
+        out.append((label, url))
+    # The first of a repeated label also gets its index, so a role reads
+    # decode0, decode1 rather than decode, decode1.
+    return [((f"{l}0" if l and seen.get(l, 0) > 1 else l), u) for l, u in out]
+
+
+def _hist_merge(parts: list) -> dict:
+    """Sum windowed histograms across sources (count, sum, each le bucket)."""
+    out: dict = {}
+    for hs in parts:
+        for name, h in hs.items():
+            agg = out.setdefault(name, {"count": 0, "sum": 0.0, "buckets": {}})
+            agg["count"] += h["count"]
+            agg["sum"] += h["sum"]
+            for le, c in h["buckets"].items():
+                agg["buckets"][le] = agg["buckets"].get(le, 0) + c
+    return out
+
+
 def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--url", required=True, help="vLLM /metrics URL")
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--url", action="append", default=[],
+                    help="a /metrics URL, or LABEL=URL; repeat for several sources")
+    ap.add_argument("--k8s", action="store_true",
+                    help="discover llm-d model servers and certus servers with kubectl")
+    ap.add_argument("--llm-d-namespace", default=os.environ.get("NAMESPACE", "llm-d-quickstart"))
+    ap.add_argument("--certus-namespace", default=os.environ.get("CERTUS_NAMESPACE", "certus"))
     ap.add_argument("--interval", type=float, default=10.0, help="seconds between samples")
     ap.add_argument("--out", required=True, help="file to append [prom] lines to")
     ap.add_argument("--timeout", type=float, default=5.0, help="per-scrape HTTP timeout")
     args = ap.parse_args()
+
+    sources = [_parse_url(u) for u in args.url]
+    if args.k8s:
+        sources += discover_k8s(args.llm_d_namespace, args.certus_namespace)
+    if not sources:
+        ap.error("give --url (one or more) or --k8s")
+    sources = _unique_labels(sources)
+    # Per-label keys only when there is more than one source: a single-server
+    # run's lines stay exactly as they were.
+    split = len(sources) > 1
 
     signal.signal(signal.SIGTERM, _handle_stop)
     signal.signal(signal.SIGINT, _handle_stop)
@@ -208,20 +322,24 @@ def main() -> None:
     with open(args.out, "a", encoding="utf-8") as f:
         # Baseline (not emitted): summed deltas then measure the driven window
         # only, excluding whatever the server accrued during warmup/model load.
-        prev = scrape(args.url, args.timeout)
+        prev = [scrape(u, args.timeout) for _, u in sources]
         # Retry the baseline briefly if /metrics wasn't ready yet (empty) — the
         # caller starts us right after readiness, but the connector's counters can
         # register a beat later.
         for _ in range(5):
-            if prev:
+            if all(prev):
                 break
             time.sleep(1.0)
-            prev = scrape(args.url, args.timeout)
+            prev = [p or scrape(u, args.timeout) for p, (_, u) in zip(prev, sources)]
         # Baseline for the latency histograms too, so the final snapshot reflects
         # only the driven window (any warmup requests are subtracted out).
-        prev_h = scrape_histograms(args.url, args.timeout)
-        print(f"[scrape_prom] baseline keys={sorted(prev)} url={args.url}",
-              file=sys.stderr, flush=True)
+        prev_h = [scrape_histograms(u, args.timeout) for _, u in sources]
+        for (label, url), p in zip(sources, prev):
+            print(f"[scrape_prom] baseline {label or 'source'} keys={len(p)} url={url}",
+                  file=sys.stderr, flush=True)
+            if not p:
+                print(f"[scrape_prom] WARNING: no baseline from {url}; its first good "
+                      f"sample becomes its baseline", file=sys.stderr, flush=True)
 
         rnd = 0
         # Sleep in short slices so a stop signal is honoured within ~0.2s rather
@@ -231,16 +349,31 @@ def main() -> None:
             while waited < args.interval and not _STOP:
                 time.sleep(0.2)
                 waited += 0.2
-            cur = scrape(args.url, args.timeout)
-            if cur:
-                delta = {k: cur.get(k, 0.0) - prev.get(k, 0.0) for k in cur}
-                # Clamp tiny negative jitter (a counter reset shouldn't happen on a
-                # live server, but a missed label set can look like a dip).
-                shown = " ".join(f"{k}={fmt(max(0.0, delta[k]))}"
-                                 for k in sorted(delta))
+            total: dict = {}
+            labelled: dict = {}
+            got = False
+            for i, (label, url) in enumerate(sources):
+                cur = scrape(url, args.timeout)
+                if not cur:
+                    continue  # its movement lands on its next good sample
+                got = True
+                if not prev[i]:
+                    prev[i] = cur  # a late baseline: nothing to report yet
+                    continue
+                for k in cur:
+                    # Clamp tiny negative jitter (a counter reset shouldn't happen
+                    # on a live server, but a missed label set can look like a dip).
+                    d = max(0.0, cur[k] - prev[i].get(k, 0.0))
+                    total[k] = total.get(k, 0.0) + d
+                    if split and label:
+                        labelled[f"{label}.{k}"] = d
+                prev[i] = cur
+            if got:
+                shown = " ".join(f"{k}={fmt(v)}" for k, v in sorted(total.items()))
+                if labelled:
+                    shown += " " + " ".join(f"{k}={fmt(v)}" for k, v in sorted(labelled.items()))
                 f.write(f"[prom] round {rnd}: {shown}\n")
                 f.flush()
-                prev = cur
                 rnd += 1
             if _STOP:
                 break
@@ -248,8 +381,9 @@ def main() -> None:
         # Latency histograms are cumulative, so emit ONE windowed snapshot at the
         # end (cur − baseline) rather than per round — the same [prom] hist /
         # histjson form the in-process drivers print, so a downstream parser treats
-        # serve-mode and in-process runs identically.
-        hists = _hist_delta(prev_h, scrape_histograms(args.url, args.timeout))
+        # serve-mode and in-process runs identically. Summed over sources.
+        hists = _hist_merge([_hist_delta(p, scrape_histograms(u, args.timeout))
+                             for p, (_, u) in zip(prev_h, sources)])
         for name, h in sorted(hists.items()):
             cnt, tot = h["count"], h["sum"]
             mean = tot / cnt if cnt else 0.0
