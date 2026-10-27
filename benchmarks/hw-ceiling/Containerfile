@@ -7,7 +7,7 @@
 #   pciutils, kmod           (lspci/lsmod detection)
 #
 # Deliberately does NOT include CUDA, SPDK, or vfio tooling. nvcc absent, so the
-# GPU benches skip; run with --no-nvme (no vfio rebind). Covers detection +
+# GPU benches skip. NVMe is off unless the caller names devices with --nvme. Covers detection +
 # cpu-features + nvme-inspect (fio) + host-RAM memcpy. For the GPU H2D/D2H/D2D
 # benches as well, use Containerfile.cuda via `run-in-container.sh --gpu`.
 #

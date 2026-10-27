@@ -12,34 +12,45 @@
 # tools are present, and SKIPS (never fakes) any path whose tool is missing.
 #
 # ---------------------------------------------------------------------------
-# DESTRUCTIVE: with --nvme (default on if spdk_nvme_perf is found) this script
-#   * kills any running certus-server-yaml (it holds VFIO groups), and
-#   * rebinds ALL NVMe drives to vfio-pci via SPDK setup.sh.
-# Drives are NOT automatically rebound to the kernel driver afterward (matches
-# the skill's Step 15). Run `deps/spdk/scripts/setup.sh reset` to restore.
-# Pass --no-nvme to skip every step that touches drive bindings.
+# NVMe benchmarking is OPT-IN BY DEVICE. The NVMe paths (fio Path F and the
+# SPDK spdk_nvme_perf / nvme-bar1-bench paths) run ONLY against devices you name
+# with --nvme. With no --nvme, every NVMe path is skipped — there is no
+# auto-discovery, so the script can never wander onto a boot drive or a live
+# mount by accident. You pick the scratch devices; nothing else is touched.
+#
+# DESTRUCTIVE steps, all gated behind an explicit device list:
+#   * fio raw-block WRITE (--fio-write) overwrites the named raw devices.
+#   * the SPDK path (--spdk) kills certus-server-yaml and rebinds the named
+#     devices to vfio-pci (NOT rebound to the kernel driver afterward; run
+#     `<spdk>/scripts/setup.sh reset` to restore).
+# NEVER name a mounted device or the OS/boot drive. Check `lsblk` first.
 # ---------------------------------------------------------------------------
 #
 # Usage:
-#   sudo tools/hw-ceiling/profile-hardware-ceiling.sh [outdir]
-#   sudo tools/hw-ceiling/profile-hardware-ceiling.sh --no-nvme profiling/ru10
-#   tools/hw-ceiling/profile-hardware-ceiling.sh --detect-only
+#   profile-hardware-ceiling.sh [outdir]                        # no NVMe; detection + GPU + memcpy
+#   profile-hardware-ceiling.sh --nvme /dev/nvme5n1 [outdir]    # fio read on one scratch drive
+#   profile-hardware-ceiling.sh --nvme /dev/nvme5n1,/dev/nvme6n1 --fio-write [outdir]
+#   profile-hardware-ceiling.sh --nvme /dev/nvme5n1 --spdk [outdir]   # + SPDK (rebinds to vfio!)
+#   profile-hardware-ceiling.sh --detect-only
 #
 # Options:
-#   --no-nvme        Skip the SPDK/vfio Paths 1,2,6,9 and the vfio rebind entirely.
-#   --detect-only    Only Steps 1-3 (platform detect + cpu features + nvme inspect). No benches.
-#   --skip-build     Do not attempt to compile the tools/hw-ceiling CUDA/C benches.
-#   --total-bytes N  nvme-bar1-bench total bytes per drive (default 2147483648 = 2GiB).
-#   --no-fio         Skip the fio kernel-driver NVMe path (Path F) even if fio is present.
-#   --fio-write      ALSO run fio sequential WRITE. DESTRUCTIVE: overwrites raw-device
-#                    data on every /dev/nvme*n1 tested. Omitted by default (read-only).
+#   --nvme LIST      Comma-separated device list (or repeat the flag) to benchmark,
+#                    e.g. --nvme /dev/nvme5n1,/dev/nvme6n1. REQUIRED for any NVMe path;
+#                    omit it to skip all NVMe benchmarking. Only these devices are used.
+#   --spdk           Also run the SPDK paths on the named devices. DESTRUCTIVE: kills
+#                    certus-server-yaml and rebinds the named devices to vfio-pci.
+#   --fio-write      Also run fio sequential WRITE on the named devices. DESTRUCTIVE:
+#                    overwrites their raw contents. Omitted by default (read-only).
 #   --fio-runtime N  Seconds per fio run (default 5).
+#   --detect-only    Only Steps 1-3 (platform detect + cpu features + nvme inspect). No benches.
+#   --skip-build     Do not attempt to compile the CUDA/C benches.
+#   --total-bytes N  nvme-bar1-bench total bytes per drive (default 2147483648 = 2GiB).
 #   -h, --help       This help.
 #
-# fio note: Path F runs fio over the KERNEL driver (/dev/nvme*n1), so it needs NO
-# vfio rebind and is non-destructive by default (reads only). It complements the
-# SPDK paths — a kernel-side NVMe number you can get inside a container without
-# tearing down drive bindings. The skill's inspect-nvme.py (Step 3) also needs fio.
+# fio note: Path F runs fio over the KERNEL driver (the named /dev/nvme*), so it
+# needs NO vfio rebind and is read-only unless --fio-write. The SPDK paths need
+# the devices on vfio-pci and only run with --spdk. The skill's inspect-nvme.py
+# (Step 3) runs against the named devices too.
 #
 # Run from the repo root (it resolves paths relative to the repo).
 
@@ -49,27 +60,35 @@ set -u  # deliberately NOT -e: a failing bench must skip, not abort the run.
 # Arg parsing
 # ---------------------------------------------------------------------------
 OUTDIR="profiling"
-DO_NVME=auto
+NVME_LIST=()         # devices named via --nvme; empty => all NVMe paths skipped
+DO_SPDK=0            # --spdk: run SPDK paths on named devices (destructive rebind)
 DETECT_ONLY=0
 SKIP_BUILD=0
 TOTAL_BYTES=2147483648
-DO_FIO=auto          # fio kernel-driver NVMe path: auto = run if fio + /dev/nvme present
 FIO_WRITE=0          # fio sequential WRITE is destructive to raw devices — opt-in only
 FIO_RUNTIME=5        # seconds per fio run
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --no-nvme)      DO_NVME=0; shift ;;
+    --nvme)         IFS=',' read -r -a _devs <<< "$2"; NVME_LIST+=("${_devs[@]}"); shift 2 ;;
+    --spdk)         DO_SPDK=1; shift ;;
     --detect-only)  DETECT_ONLY=1; shift ;;
     --skip-build)   SKIP_BUILD=1; shift ;;
     --total-bytes)  TOTAL_BYTES="$2"; shift 2 ;;
-    --no-fio)       DO_FIO=0; shift ;;
-    --fio-write)    FIO_WRITE=1; shift ;;   # DESTROYS raw-device data — see note below
+    --fio-write)    FIO_WRITE=1; shift ;;   # DESTROYS raw-device data on named devices
     --fio-runtime)  FIO_RUNTIME="$2"; shift 2 ;;
-    -h|--help)      sed -n '2,52p' "$0"; exit 0 ;;
+    -h|--help)      sed -n '2,60p' "$0"; exit 0 ;;
     -*)             echo "unknown option: $1" >&2; exit 2 ;;
     *)              OUTDIR="$1"; shift ;;
   esac
+done
+
+# Validate every named device exists and is a block device before we touch it.
+for _d in "${NVME_LIST[@]:-}"; do
+  [[ -z "$_d" ]] && continue
+  if [[ ! -b "$_d" ]]; then
+    echo "error: --nvme device '$_d' is not a block device" >&2; exit 2
+  fi
 done
 
 # Privilege prefix: empty when already root (e.g. inside the container) or when
@@ -130,9 +149,11 @@ GDSIO="$(command -v gdsio 2>/dev/null || first_of /usr/local/cuda*/gds/tools/gds
 GDRCOPY_BW="$(command -v gdrcopy_copybw 2>/dev/null || first_of /usr/local/gdrcopy*/bin/gdrcopy_copybw 2>/dev/null)"
 FIO="$(command -v fio 2>/dev/null)"
 
-# Decide whether NVMe (destructive) paths run.
-if [[ "$DO_NVME" == auto ]]; then
-  if [[ -n "$SPDK_PERF" || -n "$BAR1_BENCH" ]]; then DO_NVME=1; else DO_NVME=0; fi
+# NVMe paths run only against explicitly named devices.
+HAVE_NVME=0; [[ ${#NVME_LIST[@]} -gt 0 ]] && HAVE_NVME=1
+# --spdk requires the SPDK tools; warn+disable rather than silently skip later.
+if [[ "$DO_SPDK" == 1 && -z "$SPDK_PERF" && -z "$BAR1_BENCH" ]]; then
+  echo "[hw-ceiling] warning: --spdk given but neither spdk_nvme_perf nor nvme-bar1-bench is built; SPDK path will be skipped" >&2
 fi
 
 # ---------------------------------------------------------------------------
@@ -247,12 +268,13 @@ md ""
 log "Step 3: NVMe device inspection"
 md "## 3. NVMe Device Inspection (inspect-nvme.py, --skip-gc --skip-power)"
 md ""
-NVME_DEVS=( $(ls -1 /dev/nvme*n1 2>/dev/null) )
+# Only the devices named via --nvme — never auto-discovered.
+NVME_DEVS=("${NVME_LIST[@]:-}")
 yml "nvme:"
 yml "  drives:"
-if [[ ${#NVME_DEVS[@]} -eq 0 ]]; then
-  md "_No /dev/nvme*n1 devices present (or all bound to vfio-pci) — skipped._"
-  yml "    []   # none detected on kernel driver"
+if [[ "$HAVE_NVME" != 1 ]]; then
+  md "_No devices named via \`--nvme\` — NVMe inspection skipped (by design)._"
+  yml "    []   # no --nvme devices named"
 elif [[ ! -f tools/inspect-nvme.py ]]; then
   md "_tools/inspect-nvme.py not found — skipped._"
   yml "    []   # inspect-nvme.py missing"
@@ -379,12 +401,13 @@ md ""
 # Runs BEFORE the destructive SPDK rebind so drives are still /dev/nvme*n1.
 # Read is always safe. Write only with --fio-write (it overwrites the raw device).
 md "## 8. NVMe via fio (kernel driver) (Path F)"; md ""
-[[ "$DO_FIO" == auto ]] && { [[ -n "$FIO" ]] && DO_FIO=1 || DO_FIO=0; }
-FIO_DEVS=( $(ls -1 /dev/nvme*n1 2>/dev/null) )
-if [[ "$DO_FIO" != 1 ]]; then
-  md "_Skipped (--no-fio, or fio not found)._"
-elif [[ ${#FIO_DEVS[@]} -eq 0 ]]; then
-  md "_fio present but no /dev/nvme*n1 on the kernel driver (all bound to vfio-pci?) — skipped._"
+# Only the named devices. fio needs them on the kernel driver, so it runs BEFORE
+# any --spdk rebind. Read is always safe; write only with --fio-write.
+FIO_DEVS=("${NVME_LIST[@]:-}")
+if [[ "$HAVE_NVME" != 1 ]]; then
+  md "_No devices named via \`--nvme\` — fio NVMe path skipped (by design)._"
+elif [[ -z "$FIO" ]]; then
+  md "_fio not found — skipped._"
 else
   # Workloads: read always; write only on explicit opt-in.
   FIO_RW=(read)
@@ -435,26 +458,38 @@ md ""
 # NVMe paths (DESTRUCTIVE) — Steps 4,5,6,10,13 => Paths 1,2,6,9
 # ===========================================================================
 md "## 9. NVMe data paths (SPDK / BAR1) (Paths 1,2,6,9)"; md ""
-if [[ "$DO_NVME" != 1 ]]; then
-  md "_Skipped (--no-nvme, or neither spdk_nvme_perf nor nvme-bar1-bench is built)._"
+if [[ "$HAVE_NVME" != 1 || "$DO_SPDK" != 1 ]]; then
+  md "_Skipped (needs \`--nvme <devices>\` AND \`--spdk\`)._"
+  md ""
+elif [[ -z "$SPDK_PERF" && -z "$BAR1_BENCH" ]]; then
+  md "_--spdk given but neither spdk_nvme_perf nor nvme-bar1-bench is built — skipped._"
   md ""
 else
-  log "Step 4: releasing VFIO + binding NVMe to vfio-pci (DESTRUCTIVE)"
+  # Map ONLY the named devices to their PCI BDFs (via sysfs). We rebind exactly
+  # these, never all NVMe in the system.
+  BDFS=()
+  for dev in "${NVME_LIST[@]}"; do
+    ctrl="${dev%n*}"; ctrl="$(basename "$ctrl")"   # /dev/nvme5n1 -> nvme5
+    bdf="$(basename "$(readlink -f "/sys/class/nvme/$ctrl/device" 2>/dev/null)" 2>/dev/null)"
+    [[ "$bdf" =~ ^[0-9a-fA-F]{4}: ]] && BDFS+=("$bdf") || warn "could not resolve BDF for $dev"
+  done
+  md "Named devices: \`${NVME_LIST[*]}\`  ->  BDFs: \`${BDFS[*]:-none}\`"; md ""
+  if [[ ${#BDFS[@]} -eq 0 ]]; then
+    md "_No BDFs resolved for the named devices — SPDK skipped._"; md ""
+  else
+  log "Step 4: unmounting any FS on named devices + binding them to vfio-pci (DESTRUCTIVE)"
   $SUDO pkill -f certus-server-yaml 2>/dev/null || true
   sleep 2
   if [[ -n "$SPDK_SETUP" ]]; then
-    $SUDO "$SPDK_SETUP" > "$RAW/spdk-setup.txt" 2>&1 || warn "SPDK setup.sh returned non-zero"
+    # PCI_ALLOWED restricts setup.sh to ONLY the named BDFs — never all drives.
+    PCI_ALLOWED="${BDFS[*]}" $SUDO env "PCI_ALLOWED=${BDFS[*]}" "$SPDK_SETUP" > "$RAW/spdk-setup.txt" 2>&1 || warn "SPDK setup.sh returned non-zero"
   else
-    warn "SPDK setup.sh not found — cannot bind to vfio-pci; NVMe paths may fail"
+    warn "SPDK setup.sh not found — cannot bind to vfio-pci; SPDK paths may fail"
   fi
-  md "Drives bound via: ${SPDK_SETUP:-<not found>}"
+  md "Bound via: ${SPDK_SETUP:-<not found>} (PCI_ALLOWED=${BDFS[*]})"
   md '```'; cat "$RAW/spdk-setup.txt" 2>/dev/null >> "$MD"; md '```'
   md ""
-
-  # Discover NVMe PCI BDFs now bound to vfio-pci.
-  BDFS=( $(lspci -D 2>/dev/null | awk '/Non-Volatile memory|NVMe/{print $1}') )
-  log "NVMe BDFs: ${BDFS[*]:-none}"
-  md "Detected NVMe BDFs: \`${BDFS[*]:-none}\`"; md ""
+  log "NVMe BDFs (named only): ${BDFS[*]:-none}"
 
   # ---- Path 1 & 2: spdk_nvme_perf read/write matrices ----
   if [[ -n "$SPDK_PERF" && ${#BDFS[@]} -gt 0 ]]; then
@@ -538,6 +573,7 @@ else
     md "_GDS not available (gdsio missing or nvidia_fs not loaded) — skipped._"
   fi
   md ""
+  fi  # end: BDFs resolved
 fi
 
 fi  # end DETECT_ONLY guard (Paths 3-9)

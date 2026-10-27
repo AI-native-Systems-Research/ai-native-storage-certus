@@ -4,34 +4,40 @@
 #
 # Two modes:
 #   (default)  deps-only image (Containerfile): detection, CPU features
-#              (python3.12 + py-cpuinfo), NVMe inspect + fio, host-RAM memcpy.
-#              GPU paths skip (no nvcc). Non-destructive (--no-nvme).
+#              (python3.12 + py-cpuinfo), host-RAM memcpy. GPU paths skip (no nvcc).
 #   --gpu      CUDA image (Containerfile.cuda) + GPU passthrough via CDI, so the
 #              GPU H2D/D2H and D2D benches also run. Requires the host to expose
-#              GPUs to podman (nvidia-ctk + /etc/cdi/nvidia.yaml). Still --no-nvme,
-#              so the destructive SPDK/vfio paths stay a host-side job.
+#              GPUs to podman (nvidia-ctk + /etc/cdi/nvidia.yaml).
 #
-# The container gets /dev (nvme-cli + fio against /dev/nvme*) and the repo mounted
-# read-write at /work so the report lands back on the host.
+# NVMe is OFF unless you name scratch devices with --nvme (passed through to the
+# profiler). fio reads them (add --fio-write for destructive writes); --spdk adds
+# the SPDK paths (destructive rebind). With no --nvme, nothing touches any drive.
+#
+# The container gets /dev and the repo mounted read-write at /work so the report
+# lands back on the host. All args except --gpu pass straight to the profiler.
 #
 # Usage:
-#   <dir>/run-in-container.sh [outdir]            # deps-only, default outdir profiling/
-#   <dir>/run-in-container.sh --gpu [outdir]      # + GPU benches
+#   <dir>/run-in-container.sh [outdir]                              # no NVMe
+#   <dir>/run-in-container.sh --gpu [outdir]                        # + GPU benches
+#   <dir>/run-in-container.sh --gpu --nvme /dev/nvme5n1 [outdir]    # + fio read on a scratch drive
+#   <dir>/run-in-container.sh --nvme /dev/nvme5n1 --fio-write [outdir]
 #
 # Requires podman (present on bootc/ostree hosts). Behind a proxy, export
 # HTTPS_PROXY first so the image build (and GPU-image pull) can reach the registry.
 
 set -euo pipefail
 
+# --gpu is wrapper-only (selects the CUDA image + GPU passthrough). Every other
+# argument — the outdir, --nvme <devs>, --spdk, --fio-write, etc. — passes
+# straight through to the profiler. NVMe is off unless the caller passes --nvme.
 GPU=0
-ARGS=()
+PASS_ARGS=()
 for a in "$@"; do
   case "$a" in
     --gpu) GPU=1 ;;
-    *)     ARGS+=("$a") ;;
+    *)     PASS_ARGS+=("$a") ;;
   esac
 done
-OUTDIR="${ARGS[0]:-profiling}"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Resolve repo root. The `|| ... && pwd` precedence trap: `(A || B) && C` would run
@@ -76,14 +82,22 @@ if [[ "$GPU" == 1 ]]; then
   echo "[run-in-container] GPU:         --device nvidia.com/gpu=all (CDI)"
 fi
 
-echo "[run-in-container] running profiler (--no-nvme) ..."
+# Build the in-container command with each pass-through arg safely quoted.
+CMD="./${SCRIPT_REL}"
+for a in "${PASS_ARGS[@]:-}"; do [[ -n "$a" ]] && CMD+=" $(printf '%q' "$a")"; done
+echo "[run-in-container] running: $CMD"
 
-# --privileged + /dev so nvme-cli/fio can read the drives; no vfio rebind happens
-# because we pass --no-nvme. Repo mounted rw so profiling/ output persists on host.
-# :Z relabels for SELinux (enforced on RHEL/bootc).
-# --hostname: carry the host's short name into the container so the report/YAML
-# is labelled with the real node, not the random container id.
+# --privileged + /dev so nvme-cli/fio can read the named devices. Repo mounted rw
+# so profiling/ output persists on host. :Z relabels for SELinux (enforced on bootc).
+# --hostname carries the host's short name in so the report is labelled with the
+# real node, not the random container id.
 HOST_SHORT="$(hostname -s 2>/dev/null || cat /etc/hostname 2>/dev/null)"; HOST_SHORT="${HOST_SHORT%%.*}"
+# NVMe caveat: raw block I/O (fio --nvme, SPDK) does NOT work from a rootless
+# container — the device maps to nobody:nobody in the user namespace and even the
+# container's root cannot open it (verified: dd and fio both get EACCES; it is the
+# userns mapping, not SELinux). GPU/CPU/memory paths work fine here. For the NVMe
+# paths, run profile-hardware-ceiling.sh directly on the host against scratch
+# devices, e.g.  sudo ./.../profile-hardware-ceiling.sh --nvme /dev/nvmeXn1 ...
 podman run --rm -it \
   --privileged \
   --hostname "${HOST_SHORT:-profiled-host}" \
@@ -92,6 +106,6 @@ podman run --rm -it \
   -v "$REPO_ROOT":/work:Z \
   -w /work \
   "$IMAGE" \
-  -c "./${SCRIPT_REL} --no-nvme '$OUTDIR'"
+  -c "$CMD"
 
-echo "[run-in-container] done. Report + YAML under: $REPO_ROOT/$OUTDIR/"
+echo "[run-in-container] done. Report + YAML under: $REPO_ROOT/"
