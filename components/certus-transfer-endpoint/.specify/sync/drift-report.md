@@ -1,11 +1,12 @@
 ---
 spec_sync_component: certus-transfer-endpoint
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-26T23:31:06Z
-spec_sync_git_commit: 76cdb8b9
-spec_sync_inputs_sha256: 2b65c69f0620ffda09fbd17a58cc162ace3044b73e0f443c8513532ef9ee88bb
+spec_sync_synced_at: 2026-10-27T07:09:25Z
+spec_sync_git_commit: e4f995c9
+spec_sync_inputs_sha256: 511ed68ea30f776522efe0f7710db5090f61fa7575ddb55399ee532fbc018bae
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-27 (specs only).** `channel-reclaim.md`: the generation-bump gap closed (fresh generation per server start, orphaned clients fail fast with the reason, still ABI 2), recorded as a new section; the change is in `lib/shm-queue` and the connector. No source or FR change in this component.
 > **Re-stamp 2026-10-26 (specs only).** Reporting certus as `CPU` described as accurate (its first tier is host DRAM), with what it misses (demotion to SSD is not evented) and the constraint (never alongside vLLM's own CPU tier); wording aligned in `peer-selection.md` and `upstream-pullable-tiers.md`. No source change in this component.
 
 > **Re-stamp 2026-10-26 (specs only).** `upstream-pullable-tiers.md` + `.patch`: draft llm-d issue and a tested patch for a `pullableTiers` parameter on `p2p-source-producer`, to retire the `CERTUS_EVENT_MEDIUM=cpu` bridge. Not filed. No source change in this component.
