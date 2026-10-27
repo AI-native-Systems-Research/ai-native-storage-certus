@@ -24,7 +24,7 @@
 #   none    plain baseline vLLM (no --kv-transfer-config; evicted KV recomputed)
 #   cpu     OffloadingConnector + CPUOffloadingSpec        -> pinned host RAM
 #   tiered  OffloadingConnector + TieringOffloadingSpec    -> CPU primary + fs secondary
-#   certus  OffloadingConnector + CertusShmqOffloadingSpec -> host certus-server via /dev/shm
+#   certus  CertusConnector + CertusShmqOffloadingSpec     -> host certus-server via /dev/shm
 #           (the host certus-server shmq endpoint MUST already be running; this
 #            script does NOT start it — same precondition as long-doc-qa's certus arm)
 set -euo pipefail
@@ -195,7 +195,7 @@ build_flags() {
         certus)
             # shmq OffloadingConnector: the host certus-server owns SHM_PATH and
             # opens the CUDA IPC handles vLLM exports -> needs --ipc=host.
-            kv_cfg="{\"kv_connector\":\"OffloadingConnector\",\"kv_role\":\"kv_both\",\"kv_connector_extra_config\":{\"spec_name\":\"CertusShmqOffloadingSpec\",\"spec_module_path\":\"certus_shmq_connector.spec\",\"shm_path\":\"${SHM_PATH}\",\"slab_size_bytes\":${SLAB_SIZE_BYTES}}}"
+            kv_cfg="{\"kv_connector\":\"CertusConnector\",\"kv_connector_module_path\":\"certus_shmq_connector.connector\",\"kv_role\":\"kv_both\",\"kv_connector_extra_config\":{\"spec_name\":\"CertusShmqOffloadingSpec\",\"spec_module_path\":\"certus_shmq_connector.spec\",\"shm_path\":\"${SHM_PATH}\",\"slab_size_bytes\":${SLAB_SIZE_BYTES}}}"
             server_extra_args+=(--kv-transfer-config "${kv_cfg}")
             server_extra_run+=(--ipc=host)
             log "Certus-shmq — CertusShmqOffloadingSpec, shm_path=${SHM_PATH} slab=${SLAB_SIZE_BYTES}B (host certus-server MUST be up)"
