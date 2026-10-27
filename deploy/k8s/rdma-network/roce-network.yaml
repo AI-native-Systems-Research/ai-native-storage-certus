@@ -1,0 +1,25 @@
+# A second interface on the RoCE port for pods that ask for it, so a pod can do
+# RDMA (NIXL's KV handoff over RC verbs, GPUDirect) without the host network.
+# See ../rdma-secondary-network.md. Cluster-scoped; the NVIDIA network operator
+# renders it into a NetworkAttachmentDefinition named `roce` in
+# networkNamespace.
+#
+# macvlan, not ipvlan: each pod gets its own MAC, which RoCE needs for its own
+# GID. Addresses 10.0.0.160-191 are reserved for pods (hosts hold .100-.108; a
+# DPU holds .201) -- confirmed with the cluster owner 2026-10-26.
+apiVersion: mellanox.com/v1alpha1
+kind: MacvlanNetwork
+metadata:
+  name: roce
+spec:
+  networkNamespace: llm-d-quickstart
+  master: ens3f0np0
+  mode: bridge
+  mtu: 9000
+  ipam: |
+    {
+      "type": "whereabouts",
+      "range": "10.0.0.160/27",
+      "log_file": "/var/log/whereabouts.log",
+      "log_level": "info"
+    }

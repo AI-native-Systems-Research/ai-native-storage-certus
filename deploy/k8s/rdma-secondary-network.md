@@ -1,7 +1,6 @@
 # Proposal: RoCE for the model-server pods (secondary network)
 
-**Status**: proposed, not applied. **Date**: 2026-10-26. Shared-cluster change: needs the
-cluster owner's approval.
+**Status**: applied 2026-10-26 (approved by the cluster owner); manifests in `rdma-network/`. **Date**: 2026-10-26.
 
 ## The problem
 
@@ -91,17 +90,13 @@ spec:
   mode: bridge
   mtu: 9000                  # the port's MTU
   ipam: |
-    {"type": "whereabouts", "range": "10.0.0.0/24",
-     "range_start": "10.0.0.200", "range_end": "10.0.0.239",
-     "exclude": ["10.0.0.0/25"]}
+    {"type": "whereabouts", "range": "10.0.0.160/27"}
 ```
 
 - **macvlan, not ipvlan**: each pod gets its own MAC, which RoCE needs for its own GID;
   ipvlan shares the master's MAC.
-- **The address range must be reserved**: `10.0.0.200-239` is a guess at an unused slice.
-  The hosts hold `10.0.0.102` and `10.0.0.105` (and others for the remaining nodes); the
-  range must not overlap any host, switch or other user of the subnet. **Needs
-  confirmation from whoever owns the 10.0.0.0/24 fabric.**
+- **The address range is `10.0.0.160/27`** (`.160`-`.191`), confirmed free with the
+  cluster owner: the hosts hold `.100`-`.108` and a DPU holds `.201`.
 - **The switch must accept extra MACs** on each host port (macvlan adds one per pod).
   Usually so on a lab fabric; needs checking, since RoCE traffic from an unknown MAC is
   silently dropped and would look like a NIXL hang.
@@ -146,6 +141,18 @@ one, `UCX_NET_DEVICES=mlx5_0:1` pins it.
    `ib_write_bw` between the two pods reaches line rate.
 5. Apply the pd overlay change (a separate profile, `pd-rdma`, so the TCP one stays as the
    baseline), roll out, and measure the decode pull against the 107 MB/s TCP baseline.
+
+## Applied (2026-10-26)
+
+1. `rdma-network/nicclusterpolicy-secondary-network.yaml` merged into the NicClusterPolicy:
+   Multus, CNI plugins and whereabouts DaemonSets came up on node2 and node5; a plain pod
+   still gets only its flannel address.
+2. `rdma-network/roce-network.yaml`: the `roce` MacvlanNetwork, rendered by the operator
+   into a NetworkAttachmentDefinition in `llm-d-quickstart`.
+3. Verified with two throwaway pods (one per node, the `roce` annotation and
+   `rdma/rdma_shared_device_a`, `IPC_LOCK`): each got `net1` with an address from the range
+   and its own RoCE v2 GID on `mlx5_0` (the index varies per pod -- 5, 7, 9, 11 seen), and
+   `ib_write_bw` pod to pod, node2 -> node5, 1 MiB x 4 QPs: **173 Gb/s**, line rate.
 
 ## Pre-existing problems to look at first
 
