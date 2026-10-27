@@ -24,8 +24,8 @@ use std::sync::RwLock;
 
 use component_framework::define_component;
 use interfaces::{
-    BlockSemantics, CacheKey, EvictionHandle, IEvictionPolicy, ILogger, IMemoryTier,
-    MemoryTierError, MemoryTierTelemetrySnapshot, PoolId,
+    BlockSemantics, BounceBuffer, BounceError, CacheKey, EvictionHandle, IEvictionPolicy, ILogger,
+    IMemoryTier, MemoryTierError, MemoryTierTelemetrySnapshot, PoolId,
 };
 
 use crate::allocator::FreeList;
@@ -78,20 +78,41 @@ struct Pool {
     slots: HashMap<CacheKey, Slot>,
 }
 
+/// The bounce reserve: the top of the pool, outside the cache, allocated to
+/// serve block-tier entries to peers (see `IMemoryTier::bounce_alloc`).
+struct Bounce {
+    /// Offsets relative to the reserve's start.
+    allocator: FreeList,
+    /// Live buffers, offset → length asked for: `bounce_free` checks against it,
+    /// because a wrong free would corrupt the free list silently.
+    live: HashMap<usize, u32>,
+}
+
 struct MemoryTierState {
     pool_ptr: *mut u8,
     pool_size: usize,
+    /// Bytes of the pool the cache may use: `pool_size` less the reserve,
+    /// rounded down to a page so the reserve starts on one.
+    cache_size: usize,
+    /// What `set_bounce_reserve` asked for; applied at `initialize`.
+    bounce_request: usize,
+    bounce: std::sync::Mutex<Bounce>,
     pool_id: PoolId,
     pool: RwLock<Pool>,
     initialized: AtomicBool,
     spdk_allocated: bool,
+    /// Tests stand in for SPDK: lets the bounce reserve allocate from an `mmap`
+    /// pool, which no device reads into in a unit test anyway.
+    #[cfg(test)]
+    pretend_dma: bool,
     #[cfg(feature = "telemetry")]
     telemetry: MemoryTierTelemetry,
 }
 
 // SAFETY: pool_ptr points to mmap'd or SPDK-allocated memory accessible from any thread.
-// RwLock<Pool> serializes access. Immutable fields (pool_ptr, pool_size, spdk_allocated)
-// are only written during initialize() which is protected by the outer RwLock on the component.
+// RwLock<Pool> and Mutex<Bounce> serialize access. Immutable fields (pool_ptr, pool_size,
+// cache_size, spdk_allocated) are only written during initialize(), which is protected by the
+// outer RwLock on the component.
 unsafe impl Send for MemoryTierState {}
 unsafe impl Sync for MemoryTierState {}
 
@@ -100,6 +121,12 @@ impl Default for MemoryTierState {
         Self {
             pool_ptr: std::ptr::null_mut(),
             pool_size: 0,
+            cache_size: 0,
+            bounce_request: interfaces::DEFAULT_BOUNCE_RESERVE,
+            bounce: std::sync::Mutex::new(Bounce {
+                allocator: FreeList::new(0),
+                live: HashMap::new(),
+            }),
             pool_id: 0,
             pool: RwLock::new(Pool {
                 allocator: FreeList::new(0),
@@ -107,6 +134,8 @@ impl Default for MemoryTierState {
             }),
             initialized: AtomicBool::new(false),
             spdk_allocated: false,
+            #[cfg(test)]
+            pretend_dma: false,
             #[cfg(feature = "telemetry")]
             telemetry: MemoryTierTelemetry::default(),
         }
@@ -257,6 +286,13 @@ impl MemoryTierComponent {
     }
 }
 
+/// The bounce reserve `initialize` takes for `requested` bytes from a pool of
+/// `pool_size`: at most an eighth of the pool, so a small pool keeps a cache,
+/// and whole 4 KiB pages.
+fn bounce_reserve_bytes(requested: usize, pool_size: usize) -> usize {
+    (requested.min(pool_size / 8) / 4096) * 4096
+}
+
 impl IMemoryTier for MemoryTierComponent {
     fn initialize(&self, pool_size: usize, numa_node: Option<i32>) -> Result<(), MemoryTierError> {
         if pool_size == 0 {
@@ -307,19 +343,39 @@ impl IMemoryTier for MemoryTierComponent {
 
         let pool_id = ep.create_pool();
 
+        // The bounce reserve comes quietly out of the top of the pool: small
+        // next to any real cache, and inside the pool so whatever registers
+        // the pool for DMA or RDMA covers it too.
+        // The cache ends where the reserve starts, on a page boundary: a pool
+        // that is not whole pages leaves its tail unused rather than start
+        // the reserve mid-page.
+        let reserve = bounce_reserve_bytes(state.bounce_request, pool_size);
+        let cache_size = if reserve == 0 {
+            pool_size
+        } else {
+            (pool_size - reserve) / 4096 * 4096
+        };
+
         state.pool_ptr = ptr;
         state.pool_size = pool_size;
+        state.cache_size = cache_size;
+        state.bounce = std::sync::Mutex::new(Bounce {
+            allocator: FreeList::new(reserve),
+            live: HashMap::new(),
+        });
         state.pool_id = pool_id;
         state.pool = RwLock::new(Pool {
-            allocator: FreeList::new(pool_size),
+            allocator: FreeList::new(cache_size),
             slots: HashMap::new(),
         });
         state.spdk_allocated = spdk_allocated;
         state.initialized.store(true, Ordering::Release);
 
         self.log_info(&format!(
-            "memory-tier: initialized with {} MiB pool",
-            pool_size / (1024 * 1024)
+            "memory-tier: initialized with {} MiB pool ({} KiB of it the bounce reserve, \
+             outside the cache)",
+            pool_size / (1024 * 1024),
+            reserve / 1024
         ));
 
         Ok(())
@@ -613,7 +669,7 @@ impl IMemoryTier for MemoryTierComponent {
         let mut pool = state.pool.write().unwrap();
         let count = pool.slots.len();
         pool.slots.clear();
-        pool.allocator = FreeList::new(state.pool_size);
+        pool.allocator = FreeList::new(state.cache_size);
         ep.clear_pool(state.pool_id);
         Ok(count)
     }
@@ -621,6 +677,73 @@ impl IMemoryTier for MemoryTierComponent {
     fn is_dma_capable(&self) -> bool {
         let state = self.state.read().unwrap();
         state.spdk_allocated
+    }
+
+    fn set_bounce_reserve(&self, bytes: usize) -> Result<(), MemoryTierError> {
+        let mut state = self.state.write().unwrap();
+        if state.initialized.load(Ordering::Acquire) {
+            return Err(MemoryTierError::AllocationFailed(
+                "the bounce reserve is taken at initialize; set it before".into(),
+            ));
+        }
+        state.bounce_request = bytes;
+        Ok(())
+    }
+
+    fn bounce_alloc(&self, len: u32) -> Result<BounceBuffer, BounceError> {
+        let state = self.state.read().unwrap();
+        if !state.initialized.load(Ordering::Acquire) {
+            return Err(BounceError::NotInitialized("pool not initialized".into()));
+        }
+        let reserve = state.bounce.lock().unwrap().allocator.capacity();
+        #[cfg(test)]
+        let dma = state.spdk_allocated || state.pretend_dma;
+        #[cfg(not(test))]
+        let dma = state.spdk_allocated;
+        if !dma {
+            // The mmap fallback: a device cannot DMA into it, so a read into a
+            // buffer could never be done in place. Not transient.
+            return Err(BounceError::NeverFits(
+                "the pool is not DMA-capable (no SPDK environment)".into(),
+            ));
+        }
+        let need = (len as usize).next_multiple_of(4096);
+        if len == 0 || need > reserve {
+            return Err(BounceError::NeverFits(format!(
+                "{len} bytes against a bounce reserve of {reserve}"
+            )));
+        }
+        let mut bounce = state.bounce.lock().unwrap();
+        let off = bounce
+            .allocator
+            .allocate(len as usize)
+            .ok_or(BounceError::NoSpace)?;
+        bounce.live.insert(off, len);
+        // SAFETY: `off + need <= reserve`, so the buffer lies inside the
+        // reserve, which is the top `reserve` bytes of the pool allocation.
+        let ptr = unsafe { state.pool_ptr.add(state.cache_size + off) };
+        Ok(BounceBuffer { ptr, len })
+    }
+
+    fn bounce_free(&self, buf: BounceBuffer) {
+        let state = self.state.read().unwrap();
+        let base = state.pool_ptr as usize + state.cache_size;
+        let off = (buf.ptr as usize).wrapping_sub(base);
+        let mut bounce = state.bounce.lock().unwrap();
+        match bounce.live.remove(&off) {
+            Some(len) if len == buf.len => bounce.allocator.deallocate(off, len as usize),
+            // Loud: freeing what was not allocated, or with another length, would
+            // hand bytes in use to the next buffer.
+            other => {
+                panic!("bounce_free of {buf:?}, which is not a live buffer (found {other:?})")
+            }
+        }
+    }
+
+    fn bounce_usage(&self) -> (usize, usize) {
+        let state = self.state.read().unwrap();
+        let bounce = state.bounce.lock().unwrap();
+        (bounce.allocator.capacity(), bounce.allocator.used())
     }
 
     fn telemetry_snapshot(&self) -> MemoryTierTelemetrySnapshot {
@@ -661,6 +784,7 @@ mod tests {
         c.eviction_policy.connect(ep).unwrap();
         let mt = query_interface!(c, IMemoryTier).unwrap();
         mt.initialize(64 * 4096, None).unwrap();
+        c.state.write().unwrap().pretend_dma = true;
         c
     }
 
@@ -724,8 +848,10 @@ mod tests {
     fn pool_full_returns_error() {
         let c = setup();
         let mt = query_interface!(c, IMemoryTier).unwrap();
-        // Pool is 64 * 4096 = 256 KiB. Fill it completely.
-        let total = 64 * 4096;
+        // Pool is 64 * 4096 = 256 KiB, less an eighth for the bounce reserve.
+        // Fill the cache completely.
+        let total = mt.capacity();
+        assert_eq!(total, 56 * 4096);
         mt.insert(0, total as u32).unwrap();
         // Next insert should fail.
         assert!(matches!(mt.insert(1, 4096), Err(MemoryTierError::PoolFull)));
@@ -735,7 +861,7 @@ mod tests {
     fn capacity_and_used() {
         let c = setup();
         let mt = query_interface!(c, IMemoryTier).unwrap();
-        assert_eq!(mt.capacity(), 64 * 4096);
+        assert_eq!(mt.capacity(), 56 * 4096, "the pool less its bounce reserve");
         assert_eq!(mt.used(), 0);
         mt.insert(1, 4096).unwrap();
         assert_eq!(mt.used(), 4096);
@@ -782,6 +908,180 @@ mod tests {
         mt.insert(0, 4096).unwrap();
         let result = mt.peek(0);
         assert!(result.is_some());
+    }
+    // --- the bounce reserve ---------------------------------------------------
+
+    /// A component with its eviction policy bound, not yet initialized.
+    fn fresh() -> Arc<MemoryTierComponent> {
+        let ep_comp = eviction_policy_lru::EvictionPolicyLruComponent::new_default();
+        let ep: Arc<dyn IEvictionPolicy + Send + Sync> =
+            query_interface!(ep_comp, IEvictionPolicy).unwrap();
+        let c = MemoryTierComponent::new(RwLock::new(MemoryTierState::default()));
+        c.eviction_policy.connect(ep).unwrap();
+        c
+    }
+
+    #[test]
+    fn the_default_reserve_is_taken_quietly_and_capped() {
+        // A 1 GiB pool: the full 32 MiB default.
+        let mt = query_interface!(fresh(), IMemoryTier).unwrap();
+        mt.initialize(1 << 30, None).unwrap();
+        assert_eq!(mt.bounce_usage(), (interfaces::DEFAULT_BOUNCE_RESERVE, 0));
+        assert_eq!(
+            mt.capacity(),
+            (1 << 30) - interfaces::DEFAULT_BOUNCE_RESERVE
+        );
+        assert_eq!(
+            mt.pool_info().unwrap().1,
+            1 << 30,
+            "the pool, and so its registration, still covers the reserve"
+        );
+        // A 256 KiB pool: capped at an eighth.
+        let small = query_interface!(fresh(), IMemoryTier).unwrap();
+        small.initialize(64 * 4096, None).unwrap();
+        assert_eq!(small.bounce_usage(), (8 * 4096, 0));
+    }
+
+    #[test]
+    fn the_reserve_is_set_before_initialize_only() {
+        let mt = query_interface!(fresh(), IMemoryTier).unwrap();
+        mt.set_bounce_reserve(3 * 4096 + 100).unwrap();
+        mt.initialize(64 * 4096, None).unwrap();
+        assert_eq!(mt.bounce_usage().0, 3 * 4096, "whole pages");
+        assert!(mt.set_bounce_reserve(4096).is_err(), "too late");
+        let none = query_interface!(fresh(), IMemoryTier).unwrap();
+        none.set_bounce_reserve(0).unwrap();
+        none.initialize(64 * 4096, None).unwrap();
+        assert_eq!(none.capacity(), 64 * 4096, "no reserve, the whole pool");
+        assert!(matches!(
+            none.bounce_alloc(1),
+            Err(BounceError::NeverFits(_))
+        ));
+    }
+
+    /// FR-031 (and certus-transfer-endpoint FR-012): a full cache cannot reach
+    /// the reserve, and allocating never evicts.
+    #[test]
+    fn the_cache_and_the_reserve_never_share_bytes() {
+        let c = setup();
+        let mt = query_interface!(c, IMemoryTier).unwrap();
+        let cap = mt.capacity();
+        let entry = mt.insert(1, cap as u32).unwrap();
+        assert!(matches!(mt.insert(2, 4096), Err(MemoryTierError::PoolFull)));
+        let a = mt.bounce_alloc(4096).unwrap();
+        let b = mt.bounce_alloc(3 * 4096).unwrap();
+        let (base, len) = mt.pool_info().unwrap();
+        for l in [a, b] {
+            let lo = l.ptr as usize;
+            assert!(lo >= entry as usize + cap, "past the cache");
+            assert!(
+                lo + l.len as usize <= base as usize + len,
+                "inside the pool"
+            );
+        }
+        assert_ne!(a.ptr, b.ptr);
+        assert!(mt.contains(1), "nothing evicted");
+        assert_eq!(mt.used(), cap, "the cache's own count is untouched");
+        assert_eq!(mt.bounce_usage(), (8 * 4096, 4 * 4096));
+    }
+
+    /// A pool that is not a whole number of pages still puts the reserve on
+    /// page boundaries, inside the pool: a device writes a buffer in whole
+    /// blocks from its start.
+    #[test]
+    fn the_reserve_starts_on_a_page_when_the_pool_does_not_end_on_one() {
+        let c = fresh();
+        let mt = query_interface!(c, IMemoryTier).unwrap();
+        let pool_size = 64 * 4096 + 100;
+        mt.initialize(pool_size, None).unwrap();
+        c.state.write().unwrap().pretend_dma = true;
+        let (base, len) = mt.pool_info().unwrap();
+        assert_eq!(len, pool_size);
+        let (reserve, _) = mt.bounce_usage();
+        assert_eq!(reserve, 8 * 4096);
+        let all = mt.bounce_alloc(reserve as u32).unwrap();
+        let off = all.ptr as usize - base as usize;
+        assert_eq!(off % 4096, 0, "the reserve starts at pool offset {off}");
+        assert!(off + reserve <= pool_size, "and ends inside the pool");
+        assert!(
+            mt.capacity() <= off,
+            "the cache ends where the reserve starts"
+        );
+        mt.bounce_free(all);
+    }
+
+    #[test]
+    fn leases_are_transient_until_freed_and_coalesce() {
+        let mt = query_interface!(setup(), IMemoryTier).unwrap();
+        // 8 pages of reserve.
+        let buffers: Vec<_> = (0..4).map(|_| mt.bounce_alloc(2 * 4096).unwrap()).collect();
+        assert_eq!(mt.bounce_alloc(1), Err(BounceError::NoSpace), "full now");
+        mt.bounce_free(buffers[1]);
+        mt.bounce_free(buffers[2]);
+        // Two freed neighbours coalesce: a 4-page buffer fits again.
+        let big = mt.bounce_alloc(4 * 4096).unwrap();
+        assert_eq!(big.ptr, buffers[1].ptr);
+        mt.bounce_free(big);
+        mt.bounce_free(buffers[0]);
+        mt.bounce_free(buffers[3]);
+        assert_eq!(mt.bounce_usage().1, 0);
+        assert!(mt.bounce_alloc(8 * 4096).is_ok(), "all of it, in one");
+    }
+
+    /// Without SPDK the pool is mmap'd and no device can DMA into a buffer.
+    #[test]
+    fn a_pool_that_is_not_dma_capable_never_fits() {
+        let c = fresh();
+        let mt = query_interface!(c, IMemoryTier).unwrap();
+        mt.initialize(64 * 4096, None).unwrap();
+        assert!(!mt.is_dma_capable());
+        assert!(matches!(
+            mt.bounce_alloc(4096),
+            Err(BounceError::NeverFits(m)) if m.contains("DMA")
+        ));
+    }
+
+    #[test]
+    fn a_lease_larger_than_the_reserve_never_fits() {
+        let mt = query_interface!(setup(), IMemoryTier).unwrap();
+        assert!(matches!(
+            mt.bounce_alloc(8 * 4096 + 1),
+            Err(BounceError::NeverFits(_))
+        ));
+        assert!(matches!(mt.bounce_alloc(0), Err(BounceError::NeverFits(_))));
+        let uninit = query_interface!(fresh(), IMemoryTier).unwrap();
+        assert!(matches!(
+            uninit.bounce_alloc(4096),
+            Err(BounceError::NotInitialized(_))
+        ));
+    }
+
+    #[test]
+    #[should_panic(expected = "not a live buffer")]
+    fn freeing_a_buffer_twice_is_loud() {
+        let mt = query_interface!(setup(), IMemoryTier).unwrap();
+        let l = mt.bounce_alloc(4096).unwrap();
+        mt.bounce_free(l);
+        mt.bounce_free(l);
+    }
+
+    #[test]
+    #[should_panic(expected = "not a live buffer")]
+    fn freeing_with_the_wrong_length_is_loud() {
+        let mt = query_interface!(setup(), IMemoryTier).unwrap();
+        let l = mt.bounce_alloc(4096).unwrap();
+        mt.bounce_free(BounceBuffer { len: 8192, ..l });
+    }
+
+    #[test]
+    fn clear_empties_the_cache_and_leaves_the_reserve() {
+        let mt = query_interface!(setup(), IMemoryTier).unwrap();
+        let l = mt.bounce_alloc(4096).unwrap();
+        mt.insert(1, 4096).unwrap();
+        mt.clear().unwrap();
+        assert_eq!(mt.capacity(), 56 * 4096);
+        assert_eq!(mt.bounce_usage().1, 4096, "a buffer survives clear");
+        mt.bounce_free(l);
     }
 }
 

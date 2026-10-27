@@ -29,7 +29,7 @@ pub enum DispatcherError {
 
 | Variant | Raised by | Condition |
 |---------|-----------|-----------|
-| `NotInitialized` | all methods except `shutdown` | Receptacles not bound or `initialize()` not called |
+| `NotInitialized` | all methods except `shutdown`, `read_to_bounce` and `release_bounce` | Receptacles not bound or `initialize()` not called. `read_to_bounce` reports the same condition as `BounceError::NotInitialized` (FR-062); `release_bounce` returns nothing |
 | `KeyNotFound` | `lookup`, `batch_lookup`, `remove`, `check`, `commit_store`, `cancel_store`, `touch` | Key does not exist in dispatch map or no pending write. **Also a remote lookup that returned `RemoteLookupError::NotFound`** — no peer holds it either, so the key is absent everywhere, which is a miss *(Sync 2026-09-28)*. **For `remove`, also** an entry held by a reader's or client's pin, or one still write-locked when the dispatch-map wait times out; in both cases nothing is freed. The pin of the key's own pending write-through does not refuse `remove` (001 FR-018) *(Sync 2026-10-14, branch `fix/dispatcher-remove-clear-mt`)* |
 | `AlreadyExists` | `populate`, `prepare_store` | Key already exists in dispatch map |
 | `AllocationFailed` | `populate`, `prepare_store` | DMA staging buffer or extent allocation fails |

@@ -10,8 +10,8 @@
 
 ## Validate Test Coverage
 
-- [ ] Confirm all 12 unit tests in lib.rs and the 1 regression test in `repair_test_insert_track_failure.rs` pass (`cargo test -p memory-tier`)
-- [ ] Confirm all 9 allocator tests pass
+- [x] Confirm all 22 unit tests in lib.rs (10 of them for the bounce reserve) and the 1 regression test in `repair_test_insert_track_failure.rs` pass (`cargo test -p memory-tier`)
+- [x] Confirm all 9 allocator tests pass
 - [ ] Identify and document any untested error paths
 - [~] (superseded 2026-08-20: no shards / no Creusot artifacts) Verify Creusot verification conditions still discharge
 

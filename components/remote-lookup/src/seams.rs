@@ -594,6 +594,21 @@ impl IMemoryTier for MockMemoryTier {
     fn telemetry_snapshot(&self) -> MemoryTierTelemetrySnapshot {
         MemoryTierTelemetrySnapshot::default()
     }
+    // A test double with no bounce reserve.
+    fn set_bounce_reserve(&self, _: usize) -> Result<(), interfaces::MemoryTierError> {
+        Ok(())
+    }
+    fn bounce_alloc(&self, _: u32) -> Result<interfaces::BounceBuffer, interfaces::BounceError> {
+        Err(interfaces::BounceError::NeverFits(
+            "no bounce reserve".into(),
+        ))
+    }
+    fn bounce_free(&self, _: interfaces::BounceBuffer) {
+        unreachable!("no buffer was ever handed out")
+    }
+    fn bounce_usage(&self) -> (usize, usize) {
+        (0, 0)
+    }
 
     fn evict_next(&self) -> Option<CacheKey> {
         unimplemented!("mock: IMemoryTier::evict_next not needed by remote-lookup tests")
@@ -793,6 +808,21 @@ impl IDispatcher for MockDispatcher {
 
     fn tier_event_stats(&self) -> TierEventStats {
         TierEventStats::default()
+    }
+
+    fn read_to_bounce(
+        &self,
+        _key: CacheKey,
+        _offset: u64,
+        _len: u32,
+    ) -> Result<interfaces::BounceBuffer, interfaces::BounceError> {
+        Err(interfaces::BounceError::NeverFits(
+            "block-tier serving is a test double with no bounce reserve".into(),
+        ))
+    }
+
+    fn release_bounce(&self, _buf: interfaces::BounceBuffer) {
+        unreachable!("read_to_bounce never hands out a buffer here")
     }
 }
 
