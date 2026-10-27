@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Cross-node explicit fetch (T087): one certus fetches blocks from another.
 
-Two ``full-transfer`` certus servers, one per node, each started by hand. Run the
-``source`` role on one node and the ``dest`` role on the other:
+Two ``full-transfer`` (or ``full-fs-transfer``) certus servers, one per node, each
+started by hand. Run the ``source`` role on one node and the ``dest`` role on the
+other:
 
   source: POPULATEs ``--keys`` blocks from GPU memory into its certus, block k
-          filled with a byte pattern only it has, then waits.
+          filled with a byte pattern only it has, then waits. With
+          ``--from-disk`` it first flushes them to its drive and clears its
+          DRAM, so every fetch is served from the block tier.
   dest:   asks its own certus to FETCH those keys from the source's transfer
           endpoint (``--peer ip:port``, as the source logged at start), waits
           for CHECK to read every key RESIDENT (or MISS), LOOKUPs them into its
@@ -79,6 +82,14 @@ def source(a):
     print(f"source: populated {sum(ok)}/{len(keys)} blocks of {a.size} B")
     if not all(ok):
         sys.exit("source: populate failed")
+    if a.from_disk:
+        # Every block to the drive, then out of DRAM: the dest's fetch must be
+        # served from the block tier, through the endpoint's bounce reads.
+        flushed = ring.flush_to_ssd()
+        cleared = ring.clear_memory_tier()
+        states = ring.check_states(keys)
+        print(f"source: flushed {flushed}, cleared {cleared} from DRAM; "
+              f"{sum(s == R.CHECK_RESIDENT for s in states)}/{len(keys)} still present (on disk)")
     print("source: serving; Ctrl-C to stop")
     try:
         while True:
@@ -157,6 +168,8 @@ def main():
     p.add_argument("--shm", required=True)
     p.add_argument("--peer", help="dest: the source's transfer endpoint, ip:port")
     p.add_argument("--keys", type=int, default=256)
+    p.add_argument("--from-disk", action="store_true",
+                   help="source: flush to the drive and clear DRAM, so fetches read the block tier")
     p.add_argument("--size", type=lambda s: int(s, 0), default=64 * 1024)
     p.add_argument("--timeout", type=float, default=30.0)
     p.add_argument("--key-base", type=lambda s: int(s, 0), default=KEY_BASE,

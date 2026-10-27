@@ -569,7 +569,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                      but the 'rdma' feature is not enabled; without it the endpoint is \
                      an in-process mock and must not serve a real node.\n\
                      Build with: CERTUS_PROFILE={profile} cargo build -p certus-server-yaml \
-                     --features spdk,rdma"
+                     --features spdk,rdma (or --no-default-features --features filesys,rdma \
+                     for a file-backed drive)"
                 );
             }
             "block-device-kernel" if env::var("CARGO_FEATURE_KERNEL").is_err() => {
