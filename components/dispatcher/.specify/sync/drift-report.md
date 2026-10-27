@@ -1,11 +1,13 @@
 ---
 spec_sync_component: dispatcher
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-23T20:07:13Z
-spec_sync_git_commit: 6addfb9b5
-spec_sync_inputs_sha256: 0acb065330eb0cae5291d5ccb99b4e68b7b07af4432305a21a97b8521f70da67
+spec_sync_synced_at: 2026-10-25T09:19:59Z
+spec_sync_git_commit: 4e17bedb
+spec_sync_inputs_sha256: 43d7740caf9471fc4e438a887b941a349d11189afe8453173d229d54d0f2f761
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-25 (branch `001-rdma-cache-transfer`, rebased onto unstable `a905f89b`).** New since the last stamp: `clear_all` (spec 001 FR-063): both tiers listed (memory tier, every drive's extents), each entry removed through `remove`, the SSD copy of a DRAM entry freed from the listing, a `Removed` event each, pinned entries reported; `repair_test_clear_all` covers it. `contracts/served-by.md` gains `FETCHED`'s counter row. Unstable's new `repair_test_failed_promotion_releases_slot` adapted to this branch's `IMemoryTier` and `Arc<ChannelPool>` (test-only).
+
 > **Merge 2026-10-23: unstable `6d2f988ee` (#568, #569) merged into `fix/dispatcher-failed-promotion`.** #568 makes the background SSD evictor take a late-bound eviction-event channel; #569 fixes workspace build warnings and test targets. Neither touches the promotion paths of this branch (`promote_and_serve`, the cold path of `batch_lookup`). The code merged without conflicts; every added line of the repair of root cause #11 is present (922 of 922). Only this report conflicted (both notes kept). Re-stamped below over the merged inputs.
 
 > **Apply 2026-10-23 (branch `fix/dispatcher-failed-promotion`, approved by Cornel 2026-10-23).** This branch carries only the repair of root cause #11 (`317035c62`): a failed cold promotion releases its memory-tier slot. Applied with the exact proposal text: **B-13** (FR-028, the failure case of a promotion). The analysis of 2026-10-23 (on a branch that also carried the `remove` repair) found two ALIGN items: **A-9** belongs to the `remove` repair, which is NOT on this branch, so it does not apply here; **A-10** (pre-existing; `batch_lookup` leaves a result unset and panics when a channel checkout fails with 2+ drives) is recorded as an open task in `align-tasks.md`. B-12 belongs to the `remove` repair and is not applied here.
