@@ -1,25 +1,44 @@
 # A second interface on the RoCE port for pods that ask for it, so a pod can do
 # RDMA (NIXL's KV handoff over RC verbs, GPUDirect) without the host network.
-# See ../rdma-secondary-network.md. Cluster-scoped; the NVIDIA network operator
-# renders it into a NetworkAttachmentDefinition named `roce` in
-# networkNamespace.
+# See ../rdma-secondary-network.md. Apply in the namespace whose pods use it.
 #
-# macvlan, not ipvlan: each pod gets its own MAC, which RoCE needs for its own
-# GID. Addresses 10.0.0.160-191 are reserved for pods (hosts hold .100-.108; a
-# DPU holds .201) -- confirmed with the cluster owner 2026-10-26.
-apiVersion: mellanox.com/v1alpha1
-kind: MacvlanNetwork
+# ipvlan (L2), not macvlan. Each pod still gets its own address and its own
+# RoCE v2 GID (the kernel adds one per address on any netdev over the port), but
+# every pod shares the port's MAC. Under macvlan each pod had a random MAC, and
+# whereabouts hands a restarted pod its predecessor's address: a long-running
+# UCX peer on the other node kept sending to the old MAC, so a decode or
+# prefill restart broke every NIXL handoff ("Endpoint timeout") until both
+# roles were restarted. With one MAC per host a reused address cannot be stale.
+#
+# Two consequences: a port takes ipvlan or macvlan children, never both; and a
+# host cannot reach its own pods' net1 addresses (pods on other hosts, and other
+# pods on the same host, can). Nothing uses that path.
+#
+# Addresses 10.0.0.160-191 are reserved for pods (hosts hold .100-.108; a DPU
+# holds .201) -- confirmed with the cluster owner 2026-10-26.
+#
+# A plain NetworkAttachmentDefinition: the NVIDIA network operator has
+# MacvlanNetwork and HostDeviceNetwork CRs but none for ipvlan. Multus, the
+# ipvlan plugin and whereabouts come from its NicClusterPolicy
+# (nicclusterpolicy-secondary-network.yaml).
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
 metadata:
   name: roce
+  namespace: llm-d-quickstart
 spec:
-  networkNamespace: llm-d-quickstart
-  master: ens3f0np0
-  mode: bridge
-  mtu: 9000
-  ipam: |
+  config: |
     {
-      "type": "whereabouts",
-      "range": "10.0.0.160/27",
-      "log_file": "/var/log/whereabouts.log",
-      "log_level": "info"
+      "cniVersion": "0.3.1",
+      "name": "roce",
+      "type": "ipvlan",
+      "master": "ens3f0np0",
+      "mode": "l2",
+      "mtu": 9000,
+      "ipam": {
+        "type": "whereabouts",
+        "range": "10.0.0.160/27",
+        "log_file": "/var/log/whereabouts.log",
+        "log_level": "info"
+      }
     }

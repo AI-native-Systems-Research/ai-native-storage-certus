@@ -1,6 +1,6 @@
 # Proposal: RoCE for the model-server pods (secondary network)
 
-**Status**: applied 2026-10-26 (approved by the cluster owner); manifests in `rdma-network/`. **Date**: 2026-10-26.
+**Status**: applied 2026-10-26 (approved by the cluster owner), revised the same day from macvlan to ipvlan; manifests in `rdma-network/`. **Date**: 2026-10-26.
 
 ## The problem
 
@@ -76,33 +76,25 @@ Flannel stays the primary network; nothing changes for pods that do not ask.
 
 ### The attachment
 
-One `NetworkAttachmentDefinition` (a `MacvlanNetwork` CR, which the operator renders into
-one), in the instance's namespace:
+One `NetworkAttachmentDefinition`, `roce`, in the instance's namespace
+(`rdma-network/roce-network.yaml`):
 
-```yaml
-apiVersion: mellanox.com/v1alpha1
-kind: MacvlanNetwork
-metadata:
-  name: roce
-spec:
-  networkNamespace: llm-d-quickstart
-  master: ens3f0np0          # the RoCE port; the same name on node2 and node5
-  mode: bridge
-  mtu: 9000                  # the port's MTU
-  ipam: |
-    {"type": "whereabouts", "range": "10.0.0.160/27"}
+```json
+{"type": "ipvlan", "master": "ens3f0np0", "mode": "l2", "mtu": 9000,
+ "ipam": {"type": "whereabouts", "range": "10.0.0.160/27"}}
 ```
 
-- **macvlan, not ipvlan**: each pod gets its own MAC, which RoCE needs for its own GID;
-  ipvlan shares the master's MAC.
+- **ipvlan, not macvlan** (revised 2026-10-26, see *Revision: macvlan -> ipvlan*). Each pod
+  still gets its own address and its own RoCE v2 GID, but shares the port's MAC. A plain
+  NetworkAttachmentDefinition: the network operator has a `MacvlanNetwork` CR but none for
+  ipvlan.
 - **The address range is `10.0.0.160/27`** (`.160`-`.191`), confirmed free with the
   cluster owner: the hosts hold `.100`-`.108` and a DPU holds `.201`.
-- **The switch must accept extra MACs** on each host port (macvlan adds one per pod).
-  Usually so on a lab fabric; needs checking, since RoCE traffic from an unknown MAC is
-  silently dropped and would look like a NIXL hang.
-- **PFC / ECN**: the RoCE port's QoS configuration applies to the macvlan's traffic, since
-  it leaves through the same port; nothing to add, but worth verifying with a bandwidth
-  test before relying on it.
+- **A port takes ipvlan or macvlan children, never both** ("device or resource busy").
+- **A host cannot reach its own pods' `net1` addresses** (ipvlan). Pod to pod works on
+  the same host and across hosts; nothing uses host to own-pod.
+- **PFC / ECN**: the RoCE port's QoS configuration applies to the pods' traffic, since
+  it leaves through the same port; nothing to add.
 
 ### The pods
 
@@ -132,10 +124,10 @@ one, `UCX_NET_DEVICES=mlx5_0:1` pins it.
 
 ## Rollout
 
-1. Confirm the address range and the switch's MAC policy with the fabric owner.
+1. Confirm the address range with the fabric owner.
 2. Add `secondaryNetwork` to the NicClusterPolicy; wait for the Multus and whereabouts
    DaemonSets on node2 and node5.
-3. Create the `MacvlanNetwork` in `llm-d-quickstart`.
+3. Apply `rdma-network/roce-network.yaml` (the `roce` NetworkAttachmentDefinition).
 4. One throwaway pod with the annotation and the RDMA resource on each node: check it has
    `net1` with an address from the range, a non-zero GID at index 3 on `mlx5_0`, and that
    `ib_write_bw` between the two pods reaches line rate.
@@ -147,12 +139,42 @@ one, `UCX_NET_DEVICES=mlx5_0:1` pins it.
 1. `rdma-network/nicclusterpolicy-secondary-network.yaml` merged into the NicClusterPolicy:
    Multus, CNI plugins and whereabouts DaemonSets came up on node2 and node5; a plain pod
    still gets only its flannel address.
-2. `rdma-network/roce-network.yaml`: the `roce` MacvlanNetwork, rendered by the operator
-   into a NetworkAttachmentDefinition in `llm-d-quickstart`.
+2. `rdma-network/roce-network.yaml`: the `roce` network in `llm-d-quickstart`, first as a
+   macvlan `MacvlanNetwork`, replaced by ipvlan the same day (below).
 3. Verified with two throwaway pods (one per node, the `roce` annotation and
    `rdma/rdma_shared_device_a`, `IPC_LOCK`): each got `net1` with an address from the range
    and its own RoCE v2 GID on `mlx5_0` (the index varies per pod -- 5, 7, 9, 11 seen), and
    `ib_write_bw` pod to pod, node2 -> node5, 1 MiB x 4 QPs: **173 Gb/s**, line rate.
+
+## Revision: macvlan -> ipvlan (2026-10-26)
+
+**The failure.** Under macvlan, restarting decode alone (or prefill alone) broke every
+NIXL handoff: decode's UCX sent its wireup to prefill over UD, never got an acknowledgement,
+and after 32 s failed the endpoint (`UCX AM send failed ... Endpoint timeout`, then
+`NIXL_ERR_REMOTE_DISCONNECT`). Restarting both roles together cured it until the next
+single-role restart.
+
+**What it was not.** Raw RDMA from the live, failing decode pod to the live prefill pod
+ran at 168 Gb/s; every pod's ARP table held the right MAC; UCX picked the IPv4 RoCE v2
+GID in every pod (debug log `using gid_index=... addr_family=2`), so
+`UCX_IB_ROCE_LOCAL_SUBNET` changed nothing.
+
+**What it was.** Whereabouts gives a restarted pod the lowest free address, which is its
+predecessor's; macvlan gives it a new random MAC. Restarting decode onto the *same*
+addresses failed 0/4; holding the old addresses with placeholder pods so decode came back
+on *new* ones passed 4/4. So the surviving peer's UCX keeps a path to the old MAC for an
+address it has seen (inferred from that experiment; not traced in UCX's source).
+
+**The fix.** ipvlan: every pod on a host uses the port's MAC, so a reused address can
+never name a stale one. Checked with two pods before switching: own GID per pod (index 5
+and 7 seen), `ib_write_bw` 169 Gb/s, `ucp_am_bw` 17.0 GB/s -- the same as macvlan (173
+Gb/s, 17.3 GB/s). The earlier belief that ipvlan gets no GID of its own was wrong: the
+kernel adds a RoCE GID for each address on any netdev over the port.
+
+**Checked after switching** (pd-certus-rdma, 2 decode on node2 + 1 prefill on node5):
+three decode-only restarts and two prefill-only restarts, every one landing on its
+predecessor's addresses (`.162`/`.163`, `.161`) -- the case that failed 0/4 under
+macvlan -- each 4/4 requests ok through the router.
 
 ## Pre-existing problems to look at first
 
@@ -163,8 +185,8 @@ one, `UCX_NET_DEVICES=mlx5_0:1` pins it.
 
 ## Not proposed
 
-- **SR-IOV** (a virtual function per pod): better isolation and no macvlan MAC concerns,
+- **SR-IOV** (a virtual function per pod): better isolation and a MAC per pod that the VF keeps,
   but needs VFs configured in firmware and on the hosts, a bigger change; worth it only if
-  macvlan's shared port proves a problem.
+  the shared port proves a problem.
 - Moving the transfer endpoint into the pods: the certus servers run on the host network
   already and own the cache; no reason to.
