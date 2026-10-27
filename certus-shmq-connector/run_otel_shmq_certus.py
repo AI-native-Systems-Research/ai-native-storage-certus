@@ -103,18 +103,20 @@ if __name__ == "__main__":
         "slab_size_bytes": SLAB_SIZE_BYTES,
     }
     if os.environ.get("TRACE_OFFLOAD", "0") != "0":
-        _extra_config["traced_kv_connector"] = "OffloadingConnector"
+        _extra_config["traced_kv_connector"] = "CertusConnector"
+        _extra_config["traced_kv_connector_module_path"] = "certus_shmq_connector.connector"
         KV_CONFIG = {
             "kv_connector": "TracingConnector",
             "kv_connector_module_path": "tracing_connector",
             "kv_role": "kv_both",
             "kv_connector_extra_config": _extra_config,
         }
-        print("[run] TRACE_OFFLOAD=1: TracingConnector wrapping OffloadingConnector",
+        print("[run] TRACE_OFFLOAD=1: TracingConnector wrapping CertusConnector",
               file=sys.stderr)
     else:
         KV_CONFIG = {
-            "kv_connector": "OffloadingConnector",
+            "kv_connector": "CertusConnector",
+            "kv_connector_module_path": "certus_shmq_connector.connector",
             "kv_role": "kv_both",
             "kv_connector_extra_config": _extra_config,
         }

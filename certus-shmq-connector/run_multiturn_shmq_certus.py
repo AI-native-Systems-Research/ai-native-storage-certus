@@ -130,25 +130,27 @@ if __name__ == "__main__":
         "slab_size_bytes": SLAB_SIZE_BYTES,
     }
     # TRACE_OFFLOAD=1 slots the connector-agnostic TracingConnector ABOVE the
-    # OffloadingConnector (which still drives the CertusShmqOffloadingSpec below
+    # CertusConnector (which still drives the CertusShmqOffloadingSpec below
     # it, unchanged): every scheduler<->connector call is logged as
     # offloading_trace_<pid>.jsonl, giving per-request offloaded/loaded block
     # counts on the shmq path. tracing_connector.py lives in the benchmarks dir
     # already on sys.path (_bench_dir above) and is COPY'd into the container
     # image; set TRACE_DIR to a mounted path to export from a --rm container.
     if os.environ.get("TRACE_OFFLOAD", "0") != "0":
-        _extra_config["traced_kv_connector"] = "OffloadingConnector"
+        _extra_config["traced_kv_connector"] = "CertusConnector"
+        _extra_config["traced_kv_connector_module_path"] = "certus_shmq_connector.connector"
         KV_CONFIG = {
             "kv_connector": "TracingConnector",
             "kv_connector_module_path": "tracing_connector",
             "kv_role": "kv_both",
             "kv_connector_extra_config": _extra_config,
         }
-        print("[run] TRACE_OFFLOAD=1: TracingConnector wrapping OffloadingConnector",
+        print("[run] TRACE_OFFLOAD=1: TracingConnector wrapping CertusConnector",
               file=sys.stderr)
     else:
         KV_CONFIG = {
-            "kv_connector": "OffloadingConnector",
+            "kv_connector": "CertusConnector",
+            "kv_connector_module_path": "certus_shmq_connector.connector",
             "kv_role": "kv_both",
             "kv_connector_extra_config": _extra_config,
         }

@@ -9,7 +9,7 @@ knows nothing about certus, offloading internals, etc.
 
 This supersedes the two former connector-specific tracers
 (``tracing_offloading_connector.py`` wrapping ``OffloadingConnector`` and
-``tracing_certus_connector.py`` wrapping the gRPC ``CertusConnector``): both are
+``tracing_certus_connector.py`` wrapping the former gRPC connector): both are
 folded into this one, with the structured block/request summaries kept.
 
 Each process writes to its own file: ``offloading_trace_<pid>.jsonl`` (the

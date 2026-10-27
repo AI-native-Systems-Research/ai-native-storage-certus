@@ -142,7 +142,7 @@ entrypoint_flag=()
 if [ "${CONNECTOR}" = "certus" ]; then
     entrypoint_flag=(--entrypoint '["vllm","serve"]')
     server_extra_run+=(--ipc=host)
-    kv_cfg="{\"kv_connector\":\"OffloadingConnector\",\"kv_role\":\"kv_both\",\"kv_connector_extra_config\":{\"spec_name\":\"CertusShmqOffloadingSpec\",\"spec_module_path\":\"certus_shmq_connector.spec\",\"shm_path\":\"${SHM_PATH}\",\"slab_size_bytes\":${SLAB_SIZE_BYTES}}}"
+    kv_cfg="{\"kv_connector\":\"CertusConnector\",\"kv_connector_module_path\":\"certus_shmq_connector.connector\",\"kv_role\":\"kv_both\",\"kv_connector_extra_config\":{\"spec_name\":\"CertusShmqOffloadingSpec\",\"spec_module_path\":\"certus_shmq_connector.spec\",\"shm_path\":\"${SHM_PATH}\",\"slab_size_bytes\":${SLAB_SIZE_BYTES}}}"
     server_extra_args+=(--kv-transfer-config "${kv_cfg}")
     [ "${ENFORCE_EAGER}" = "1" ] && server_extra_args+=(--enforce-eager)
 fi
