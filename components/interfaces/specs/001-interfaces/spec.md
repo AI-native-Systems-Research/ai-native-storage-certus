@@ -30,7 +30,7 @@
 The `interfaces` crate provides centralized trait definitions for all Certus component interfaces. It allows components to depend on interface definitions without pulling in implementation crates, enforcing low coupling and enabling independent development. Interfaces are defined using the `define_interface!` procedural macro from `component-macros`, and all components implement `IUnknown` for runtime interface discovery.
 
 The crate has three Cargo features:
-- **`spdk`** (optional): Gates SPDK-dependent interfaces and types (`IBlockDevice`, `IBlockDeviceAdmin`, `ISPDKEnv`, `IDispatcher`, `IDispatchMap`, `IExtentManager`, `IPartitionTable`; `IMemoryTier` is deliberately **not** gated, since its signatures use only raw pointers and crate-local types) and supporting types (`DmaBuffer`, `PciAddress`, etc.).
+- **`spdk`** (optional): Gates SPDK-dependent interfaces and types (`IBlockDevice`, `IBlockDeviceAdmin`, `ISPDKEnv`, `IDispatcher`, `IExtentManager`, `IPartitionTable`) and supporting types (`DmaBuffer`, `PciAddress`, etc.). Interfaces that merely carry opaque pointers or plain data are **not** gated even where their implementations need SPDK — `IMemoryTier`, `IDispatchMap`/`LookupResult`, and `ITransferEndpoint`/`ITransferEndpointAdmin` (FR-035) — so a component can consume them as a default workspace member without `spdk-sys`.
 - **`gpu`** (optional): Reserved for GPU-specific conditional compilation.
 - **`integrity-check`** (optional): Adds optional per-entry CRC-32 checksums to `IDispatchMap` (`set_checksum`/`get_checksum`, see FR-007); off by default, with no trait or struct surface change when disabled.
 
@@ -50,7 +50,7 @@ The crate has three Cargo features:
 **As the** dispatcher component, **I want to** use typed interfaces for block devices, extent managers, memory tiers, and GPU services **so that** I can orchestrate data flow without compile-time coupling to specific implementations.
 
 **Acceptance Criteria:**
-- `IDispatcher` provides `initialize`, `shutdown`, `lookup`, `lookup_async`, `batch_lookup`, `check`, `remove`, `populate`, `batch_populate`, `reserve_memory`, `copy_gpu_to_memory_async`, `copy_gpu_to_memory_completed`, `release_memory`, `pin`, `unpin`, `touch`, `promote_to_memory_tier`, `clear_memory_tier`, `flush_to_ssd`, `schedule_write_through`, `read_write_stats`, and `tier_event_stats` methods.
+- `IDispatcher` provides `initialize`, `shutdown`, `lookup`, `lookup_async`, `batch_lookup`, `check`, `remove`, `populate`, `batch_populate`, `reserve_memory`, `copy_gpu_to_memory_async`, `copy_gpu_to_memory_completed`, `release_memory`, `pin`, `unpin`, `touch`, `promote_to_memory_tier`, `clear_memory_tier`, `flush_to_ssd`, `schedule_write_through`, `read_write_stats`, `tier_event_stats`, `read_to_bounce`, and `release_bounce` methods.
 - `IDispatchMap` provides reference-counted cache entry management with read/write locking semantics.
 - `IMemoryTier` provides a DRAM pool with pluggable eviction (via `IEvictionPolicy`), sharded allocation, and NUMA awareness.
 
@@ -149,7 +149,7 @@ The crate has three Cargo features:
 - **Method**: `len(&self, pool: PoolId) -> usize` - Return tracked entry count.
 - **Method**: `clear_pool(&self, pool: PoolId)` - Remove all entries from pool.
 
-#### FR-007: IDispatchMap Interface (feature: spdk)
+#### FR-007: IDispatchMap Interface (ungated; `set_checksum`/`get_checksum` feature: `integrity-check`)
 - **Method**: `initialize(&self) -> Result<(), DispatchMapError>` - Recover committed extents.
 - **Method**: `lookup(&self, key: CacheKey) -> Result<LookupResult, DispatchMapError>` - Look up key, blocking if writer active.
 - **Method**: `convert_to_storage(&self, key: CacheKey, offset: u64) -> Result<(), DispatchMapError>` - Transition memory-tier entry to block-device location.
@@ -185,17 +185,19 @@ The crate has three Cargo features:
 - **Method**: `copy_gpu_to_memory_async(&self, key: CacheKey, regions: &[IpcHandle], stream: GpuStream) -> Result<(), DispatcherError>` - DMA copy into reserved slot. The N regions are gathered contiguously into the one slot (region L lands at `slot + sum of preceding region sizes`), so a block split into N per-layer GPU allocations (vLLM 0.23+) is stored as one unit; `regions.len() == 1` is the legacy single-allocation path.
 - **Method**: `copy_gpu_to_memory_completed(&self, key: CacheKey, size: u32) -> Result<(), DispatcherError>` - Finalize populated slot.
 - **Method**: `release_memory(&self, key: CacheKey) -> Result<(), DispatcherError>` - Release reserved slot (cancellation path).
+- **Method**: `pin(&self, key: CacheKey) -> Result<(), DispatcherError>` - Take an eviction-protection reference on a cache entry; multiple pins on the same key stack (ref-count increments).
+- **Method**: `unpin(&self, key: CacheKey) -> Result<(), DispatcherError>` - Release an eviction-protection reference; the entry becomes evictable again once all pins are released.
 - **Method**: `touch(&self, key: CacheKey) -> Result<(), DispatcherError>` - Refresh eviction timestamp.
 - **Method**: `promote_to_memory_tier(&self, keys: &[CacheKey])` - Promote SSD-resident entries to DRAM.
 - **Method**: `clear_memory_tier(&self) -> Result<usize, DispatcherError>` - Empty the memory tier: entries with an SSD copy are demoted to BlockDevice, entries without one are removed. A **pinned** entry (a lookup, a client `pin`, or the pending write-through's own reference) keeps its slot and is retried; if pinned entries remain when the implementation's bounded wait expires, returns `Timeout` and leaves them resident. `Ok(n)` means the tier was emptied, and `n` counts only entries actually demoted or removed. *(Sync 2026-10-21 — CODE CHANGE, repair `cccfb328e`; behaviour in dispatcher spec 001 FR-038.)*
 - **Method**: `flush_to_ssd(&self) -> Result<usize, DispatcherError>` - Block until every queued write-through has run. Returns `IoError` if a write-through failed for an entry that is still in the memory tier (that entry has no SSD copy, so a later `clear_memory_tier` would drop its only copy); otherwise returns the number of memory-tier entries that now have a valid SSD offset. *(Sync 2026-10-21 — CODE CHANGE, repair `9bd231d85` / DIS-FLUSH-REPORTS-FAILED-WRITE; behaviour in dispatcher spec 001 FR-056.)*
-- **Method**: `pin(&self, key: CacheKey) -> Result<(), DispatcherError>` - Take an eviction-protection reference on a cache entry; multiple pins on the same key stack (ref-count increments).
-- **Method**: `unpin(&self, key: CacheKey) -> Result<(), DispatcherError>` - Release an eviction-protection reference; the entry becomes evictable again once all pins are released.
+- **Method**: `schedule_write_through(&self, key: CacheKey, size: u32) -> Result<(), DispatcherError>` - Non-blocking, best-effort background write-through; contract in FR-031a.
 - **Method**: `read_write_stats(&self) -> ReadWriteStats` - Return cumulative per-direction SSD read/write byte, op, and latency counters aggregated across all data drives (zeroed unless built with the `telemetry` feature; monotonic).
 - **Method**: `tier_event_stats(&self) -> TierEventStats` - Cumulative KV-cache tier-movement counters (see FR-018, FR-018a); always populated (not telemetry-gated); implementations that do no tiering return zeroes.
-- **Method**: `schedule_write_through(&self, key: CacheKey, size: u32) -> Result<(), DispatcherError>` - Non-blocking, best-effort background write-through; contract in FR-031a.
+- **Method**: `read_to_bounce(&self, key: CacheKey, offset: u64, len: u32) -> Result<BounceBuffer, BounceError>` - Read the block-tier entry `key`, `len` bytes at extent `offset`, into a fresh bounce buffer (FR-009) for serving a peer, from the drive the write path's placement hash puts it on. The caller MUST hold a pin on `key` (its `IDispatchMap::lookup` `BlockDevice { offset }` answer) for the whole call; this method takes and releases none. Never promotes and never touches the cache, so serving a peer cannot evict. Blocks until the read completes — deliberately no device timeout, since freeing a buffer the drive may still write is unsafe — and holds no dispatcher-wide lock meanwhile, so a hung read does not hold up `shutdown`. Errors: `NoSpace` (retry), `NeverFits` (never satisfiable: larger than the reserve, no data drives, or a drive block that does not divide 4 KiB), `Io` (read failed; buffer freed, or deliberately leaked if the drive may still write it), `NotInitialized`.
+- **Method**: `release_bounce(&self, buf: BounceBuffer)` - Free a buffer from `read_to_bounce` once nothing can still read it (its write has completed).
 
-#### FR-009: IMemoryTier Interface
+#### FR-009: IMemoryTier Interface (ungated)
 - **Method**: `initialize(&self, pool_size: usize, numa_node: Option<i32>) -> Result<(), MemoryTierError>` - Initialize pool with NUMA binding.
 - **Method**: `insert(&self, key: CacheKey, size: u32) -> Result<*mut u8, MemoryTierError>` - Allocate slot.
 - **Method**: `get(&self, key: CacheKey) -> Option<(*mut u8, u32)>` - Get pointer, refreshing eviction order.
@@ -207,12 +209,16 @@ The crate has three Cargo features:
 - **Method**: `touch(&self, key: CacheKey)` - Update LRU position.
 - **Method**: `batch_touch(&self, keys: &[CacheKey])` - Batch LRU update.
 - **Method**: `contains(&self, key: CacheKey) -> bool` - Check existence.
-- **Method**: `capacity(&self) -> usize` - Return total pool capacity.
+- **Method**: `capacity(&self) -> usize` - Return the bytes the cache may use: the pool less the bounce reserve (zero before `initialize`).
 - **Method**: `used(&self) -> usize` - Return bytes allocated.
-- **Method**: `pool_info(&self) -> Option<(*mut u8, usize)>` - Return pool base pointer and size.
+- **Method**: `pool_info(&self) -> Option<(*mut u8, usize)>` - Return the whole pool's base pointer and size, bounce reserve included, for CUDA host and RDMA registration.
 - **Method**: `is_dma_capable(&self) -> bool` - Check if pool supports direct NVMe DMA.
 - **Method**: `clear(&self) -> Result<usize, MemoryTierError>` - Remove all entries.
 - **Method**: `telemetry_snapshot(&self) -> MemoryTierTelemetrySnapshot` - Return a snapshot of cumulative eviction and lock-contention counters (zeroed unless built with the `telemetry` feature).
+- **Method**: `set_bounce_reserve(&self, bytes: usize) -> Result<(), MemoryTierError>` - Override the bounce-reserve size (default `DEFAULT_BOUNCE_RESERVE`, FR-019). Only before `initialize`, which takes `min(bytes, pool_size / 8)`, in whole 4 KiB pages, from the top of the pool; afterwards an error. `0` means no reserve.
+- **Method**: `bounce_alloc(&self, len: u32) -> Result<BounceBuffer, BounceError>` - Allocate `len` bytes (rounded up to 4 KiB) of the reserve, which lies inside the pool but outside the cache, so a buffer is DMA-able and covered by any whole-pool registration, and taking one never evicts. `NoSpace` if it does not fit now; `NeverFits` if it never can (larger than the reserve, zero, no reserve, or a pool that is not DMA-capable); `NotInitialized` before `initialize`.
+- **Method**: `bounce_free(&self, buf: BounceBuffer)` - Return a buffer, with the `len` it was allocated with; only once no device or NIC can still access its bytes.
+- **Method**: `bounce_usage(&self) -> (usize, usize)` - Reserve size and bytes allocated now, both after 4 KiB rounding.
 
 #### FR-010: IExtentManager Interface (feature: spdk)
 - **Method**: `format(&self, params: FormatParams) -> Result<(), ExtentManagerError>` - Format with validated params.
@@ -343,6 +349,9 @@ The crate has three Cargo features:
 #### FR-019: Supporting Types - Memory Tier
 - `MemoryTierError`: 7-variant error enum.
 - `MemoryTierTelemetrySnapshot`: `Copy + Default` 3-field cumulative counter snapshot (`evictions`, `write_lock_contentions`, `read_lock_contentions`), returned by `IMemoryTier::telemetry_snapshot` (see FR-009); zeroed unless the `telemetry` feature is enabled.
+- `BounceBuffer`: `Copy` 2-field range of the bounce reserve (`ptr: *mut u8`, `len: u32` — the length requested, which must be passed back unchanged when freed); `Send` but not `Sync` (NFR-003).
+- `BounceError`: 4-variant error enum (`NoSpace`, `NeverFits(String)`, `Io(String)`, `NotInitialized(String)`) with `is_transient()` true only for `NoSpace`. Shared by `IMemoryTier::bounce_alloc` and `IDispatcher::read_to_bounce`.
+- `DEFAULT_BOUNCE_RESERVE`: `usize` constant, 32 MiB — four concurrent device reads (the transfer endpoint's default `block_readers`, FR-036) of up to 8 MiB, the per-worker 64-token KV block `DispatcherConfig::cold_staging_buf_bytes` already provides for (FR-027). Taken at `initialize` unless overridden by `set_bounce_reserve`, capped at an eighth of the pool.
 
 #### FR-020: Supporting Types - Eviction Policy
 - `EvictionHandle`: Opaque handle with pool_id and index.
@@ -481,6 +490,29 @@ The crate has three Cargo features:
 - `ResponderEvent`: 3-variant enum (`ConnectionEstablished { node: Option<PeerId> }`, `DisconnectAck { node: PeerId }`, `Error { message: String }`) — events emitted by the responder actor; `DisconnectAck` signals teardown-before-reclaim is complete.
 - `RemoteLookupRdmaResponderError`: 6-variant error enum (`NotInitialized`, `AlreadyInitialized`, `Bind`, `Registration`, `ChannelClosed`, `Internal`).
 
+#### FR-035: ITransferEndpoint / ITransferEndpointAdmin Interfaces
+- Ungated: the implementor's receptacles are `ILogger`, `IDispatchMap` and `IMemoryTier`, all available without `spdk` (plus `IDispatcher` in an `spdk` build of the implementor). The behavioural contract — wire protocol, credits, deadlines, teardown-before-reclaim — is owned by `components/certus-transfer-endpoint/specs/001-rdma-cache-transfer` (spec and `contracts/itransfer_endpoint.md`) and is referenced, not restated, here.
+- `ITransferEndpoint` (6 methods):
+  - `fetch(peer: &str, items: &[(CacheKey, LocalSlot)], on_complete: FetchCompletion) -> Result<TransferContextId, TransferEndpointError>` — destination side: each entry lands in a `LocalSlot` of the endpoint's own memory-tier pool, refused (`Transport`, nothing sent) unless wholly inside it; the endpoint supplies the pool's rkey. Any length is accepted, chunked by the peer's `max_entries`; `on_complete` fires exactly once if this returns `Ok`, never if it returns `Err`. A peer with no version in common is found only at the capability exchange, so it reaches `on_complete` as `IncompatiblePeer`.
+  - `landing_region() -> Result<LandingRegion, TransferEndpointError>` — the pool as peers write into it (address, length, rkey), registered once at `initialize`; what a legacy control plane hands a pusher.
+  - `push_async(endpoint: &str, items: &[(CacheKey, RemoteRegion)], on_complete: FetchCompletion) -> Result<(), TransferEndpointError>` and `push(endpoint, items) -> Result<Vec<EntryOutcome>, TransferEndpointError>` — the legacy source-initiated subset, signature-compatible with `IRemoteLookupRdmaInitiator` but for the per-item outcome type.
+  - `disconnect(peer: &str) -> Result<(), TransferEndpointError>` — teardown-before-reclaim barrier.
+  - `stats() -> TransferStats`.
+  - There is deliberately no `serve` method: the source side is reactive. Every `peer`/`endpoint` is a normalized `"host:port"`; a missing port is `InvalidEndpoint`.
+- `ITransferEndpointAdmin` (3 methods): `configure(config: EndpointConfig)`, `initialize()`, `shutdown()` (the only way to stop a running endpoint; idempotent). Until `initialize` succeeds every `ITransferEndpoint` method that can fail returns `NotInitialized`.
+
+#### FR-036: Supporting Types - Transfer Endpoint
+- `LocalSlot`: `Copy` 2-field destination slot (`addr: u64`, `length: u32`) — a memory-tier buffer the caller has allocated and not published.
+- `LandingRegion`: `Copy` 3-field pool registration (`addr: u64`, `len: u64`, `rkey: u32`; `len` is a `u64` since a pool can exceed 4 GiB) with bounds-checked `region_at(offset: u64, len: u32) -> Option<RemoteRegion>`; valid across reconnects.
+- `EntryOutcome`: `Copy` 4-variant per-entry outcome (`HitMemoryTier`, `HitBlockTier`, `Miss`, `Failed`); `is_hit()` true for the first two. `Failed` is kept apart from `Miss` so a broken path is never read as a cold cache.
+- `TransferContextId`: `Copy + Ord + Hash` newtype over `u64` naming one fetch; a correlation id, not a cancellation handle.
+- `TransferEndpointError`: 6-variant error enum (`NotInitialized`, `InvalidEndpoint`, `Deadline`, `Protocol`, `IncompatiblePeer`, `Transport`), each carrying a `String`. `IncompatiblePeer` covers every failed capability exchange (no version in common, a zero quota or `max_entries`).
+- `FetchResult`: alias `Result<Vec<EntryOutcome>, TransferEndpointError>`; `FetchCompletion`: `Box<dyn FnOnce(FetchResult) + Send>`, run on the endpoint thread and must not block.
+- `TransferStats`: `Copy + Default` 22-field counter snapshot: 5 entry-outcome counters, 3 request/chunk counters, 4 live gauges (send-queue requests in flight and its peak; requests outstanding outbound and in service inbound, read from the connections at each snapshot), 2 bounce-buffer gauges, 4 block-read counters, and `deadline_expiries`, `protocol_faults` (every `OP_ERROR` sent or received, and every teardown an inbound message causes), `version_downgrades`, `duplicate_connections_resolved`.
+- `EndpointConfig`: 10-field start-up configuration (`local`, `max_send_wr`, `max_recv_wr`, `send_credits`, `message_credits`, `inbound_quota`, `actor_cpu`, `fetch_deadline`, `deadline_action`, `block_readers`); `EndpointConfig::new(local)` defaults 128 / 64 / 8 / 4 / 4 / `None` / `Some(5 s)` / `FailLoud` / 4, the credit defaults sized by measurement (certus-transfer-endpoint research D10). `configure` refuses zero `message_credits`, `inbound_quota` or `block_readers`, and `initialize` refuses zero `send_credits`.
+- `DeadlineAction`: 2-variant enum, `FailLoud` (default) and `ReportPartial` (deferred; refused at `configure`, never silently run as `FailLoud`).
+- `RemoteRegion` (FR-033) is reused verbatim, not redefined.
+
 ### Non-Functional Requirements
 
 #### NFR-001: Zero Implementation Coupling
@@ -493,6 +525,7 @@ The crate has three Cargo features:
 #### NFR-003: Thread Safety
 - All types that cross thread boundaries implement `Send` (with documented SAFETY justifications for unsafe impls).
 - `DmaBuffer`, `GpuIpcHandle`, `GpuDmaBuffer`, `GpuStream`, `LookupResult` are `Send + Sync`.
+- `BounceBuffer` is `Send` (hand-written, SAFETY-justified: whoever holds a buffer owns its bytes until it is freed, and the pool outlives every buffer) but deliberately **not** `Sync`.
 - `Command` is `Send`; `Completion` is `Send + Clone` (Clone enables non-blocking completion delivery on a full ring).
 - `IZyreNode` is `Send` but deliberately **not** `Sync` (the underlying zyre C API is not safe for concurrent access to a single node).
 

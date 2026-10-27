@@ -5,6 +5,9 @@
 //! interface definitions without pulling in implementation crates.
 //!
 //! SPDK-dependent interfaces and types are gated behind the `spdk` Cargo feature.
+//! Interfaces that merely carry opaque pointers or plain data are *not* gated,
+//! even where their implementations need SPDK — see `IMemoryTier` and
+//! `IDispatchMap`.
 
 mod idispatch_map;
 mod idispatcher;
@@ -17,13 +20,17 @@ mod ipartition_table;
 mod iremote_lookup;
 mod iremote_lookup_rdma_initiator;
 mod iremote_lookup_rdma_responder;
+mod itransfer_endpoint;
 mod izyre;
 
 pub use idispatch_map::CacheKey;
 pub use idispatch_map::DispatchMapError;
-#[cfg(feature = "spdk")]
+// `IDispatchMap` and `LookupResult` are SPDK-orthogonal: the module references no
+// SPDK type, only raw pointers and plain data. They are ungated so a component can
+// consume tri-state residency (and the dispatch map's atomic lookup-and-pin) without
+// enabling `interfaces/spdk` and thus requiring `spdk-sys` — the same treatment
+// `IMemoryTier` already has.
 pub use idispatch_map::IDispatchMap;
-#[cfg(feature = "spdk")]
 pub use idispatch_map::LookupResult;
 pub use idispatcher::DispatcherConfig;
 pub use idispatcher::DispatcherError;
@@ -51,6 +58,7 @@ pub use ilogger::ILogger;
 pub use imemory_tier::IMemoryTier;
 pub use imemory_tier::MemoryTierError;
 pub use imemory_tier::MemoryTierTelemetrySnapshot;
+pub use imemory_tier::{BounceBuffer, BounceError, DEFAULT_BOUNCE_RESERVE};
 pub use iremote_lookup::IRemoteLookup;
 pub use iremote_lookup::LookupConfig;
 pub use iremote_lookup::RemoteLookupError;
@@ -64,6 +72,21 @@ pub use iremote_lookup_rdma_responder::{
     ControlChannel, Endpoint, IRemoteLookupRdmaResponder, IRemoteLookupRdmaResponderAdmin,
     LocalRegion, RemoteLookupRdmaResponderError, ResponderCommand, ResponderEvent,
 };
+// Ungated: the endpoint's receptacles are ILogger and IDispatchMap, both
+// available without the `spdk` feature, so the component can be a workspace
+// default member.
+pub use itransfer_endpoint::DeadlineAction;
+pub use itransfer_endpoint::EndpointConfig;
+pub use itransfer_endpoint::EntryOutcome;
+pub use itransfer_endpoint::FetchCompletion;
+pub use itransfer_endpoint::FetchResult;
+pub use itransfer_endpoint::ITransferEndpoint;
+pub use itransfer_endpoint::ITransferEndpointAdmin;
+pub use itransfer_endpoint::LandingRegion;
+pub use itransfer_endpoint::LocalSlot;
+pub use itransfer_endpoint::TransferContextId;
+pub use itransfer_endpoint::TransferEndpointError;
+pub use itransfer_endpoint::TransferStats;
 pub use izyre::GossipConfig;
 pub use izyre::IZyre;
 pub use izyre::IZyreNode;

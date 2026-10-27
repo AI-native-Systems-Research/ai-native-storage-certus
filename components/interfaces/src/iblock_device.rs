@@ -240,20 +240,16 @@ impl ReadWriteStats {
 
     /// Mean read latency in nanoseconds (0 if no reads recorded).
     pub fn mean_read_latency_ns(&self) -> u64 {
-        if self.read_ops == 0 {
-            0
-        } else {
-            self.read_latency_ns_sum / self.read_ops
-        }
+        self.read_latency_ns_sum
+            .checked_div(self.read_ops)
+            .unwrap_or(0)
     }
 
     /// Mean write latency in nanoseconds (0 if no writes recorded).
     pub fn mean_write_latency_ns(&self) -> u64 {
-        if self.write_ops == 0 {
-            0
-        } else {
-            self.write_latency_ns_sum / self.write_ops
-        }
+        self.write_latency_ns_sum
+            .checked_div(self.write_ops)
+            .unwrap_or(0)
     }
 }
 

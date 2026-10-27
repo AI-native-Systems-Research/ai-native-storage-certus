@@ -893,6 +893,42 @@ component_macros::define_interface! {
         /// Monotonic since process start; take deltas across two calls to measure
         /// a window. Implementations that do no tiering return zeroed counters.
         fn tier_event_stats(&self) -> crate::TierEventStats;
+
+        /// Read the block-tier entry `key`, `len` bytes at extent `offset`, into
+        /// a fresh bounce buffer from the memory tier, for serving a peer.
+        ///
+        /// The caller MUST hold a pin on `key` — the `BlockDevice { offset }`
+        /// answer of its own `IDispatchMap::lookup` — for the whole call: the
+        /// pin, not this method, keeps the extent from being freed and reused.
+        /// This method neither takes nor releases one. It never promotes and
+        /// never touches the cache, so serving a peer cannot evict a cached
+        /// entry.
+        ///
+        /// Blocks until the read completes, however long the device takes.
+        /// There is deliberately no device timeout: a timed-out read is
+        /// forgotten while the drive may still write its buffer, so freeing
+        /// the buffer then would let a late read land in someone else's bytes.
+        /// A hung device surfaces as the peer's own reply deadline.
+        ///
+        /// Errors: `NoSpace` (the reserve is full now — retry later),
+        /// `NeverFits` (it never can be satisfied: larger than the reserve, no
+        /// data drives, or a drive block that does not divide the reserve's
+        /// 4 KiB pages), `Io` (the read failed; the buffer has been freed, or
+        /// leaked if the drive may still write it), `NotInitialized` (the
+        /// dispatcher or its memory tier is not ready).
+        ///
+        /// The read holds no dispatcher-wide lock while it waits on the
+        /// device, so a hung read does not hold up `shutdown`.
+        fn read_to_bounce(
+            &self,
+            key: CacheKey,
+            offset: u64,
+            len: u32,
+        ) -> Result<crate::BounceBuffer, crate::BounceError>;
+
+        /// Free a buffer from [`read_to_bounce`](Self::read_to_bounce), once
+        /// nothing can still read it (the write from it has completed).
+        fn release_bounce(&self, buf: crate::BounceBuffer);
     }
 }
 

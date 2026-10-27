@@ -91,6 +91,21 @@ impl IMemoryTier for Mt {
     fn telemetry_snapshot(&self) -> MemoryTierTelemetrySnapshot {
         MemoryTierTelemetrySnapshot::default()
     }
+    // A test double with no bounce reserve.
+    fn set_bounce_reserve(&self, _: usize) -> Result<(), MemoryTierError> {
+        Ok(())
+    }
+    fn bounce_alloc(&self, _: u32) -> Result<interfaces::BounceBuffer, interfaces::BounceError> {
+        Err(interfaces::BounceError::NeverFits(
+            "no bounce reserve".into(),
+        ))
+    }
+    fn bounce_free(&self, _: interfaces::BounceBuffer) {
+        unreachable!("no buffer was ever handed out")
+    }
+    fn bounce_usage(&self) -> (usize, usize) {
+        (0, 0)
+    }
 }
 
 // --- dispatch map: one entry, with a client that promotes and pins it ---
