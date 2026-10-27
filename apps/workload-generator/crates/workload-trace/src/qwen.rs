@@ -26,7 +26,8 @@
 //! turn's output reappears in the next turn's prompt so no key is lost. Two things
 //! survive that argument. A real deployment inserts a generated block **when it is
 //! generated** — vLLM's offloading connector calls `prepare_store` after each forward
-//! pass (`knowledge/kv_IO_pattern.md`) — so prompt-only moved every store one turn
+//! pass (`knowledge/contracts/vllm-offloading-interface-v030.yaml`,
+//! `calling_sequences.store`) — so prompt-only moved every store one turn
 //! later than it happens. And the **final turn of every session** generates output that
 //! is never read again, so prompt-only omitted it entirely while the real cache still
 //! held it. The result understated capacity pressure and eviction opportunity, which is

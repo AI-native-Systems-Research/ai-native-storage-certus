@@ -1,0 +1,236 @@
+# Values seen in runs of one workload on one deployment. Each value has a basis:
+# measured (quote the log line), configured (a setting), computed (give the formula).
+# Logs are not committed; they live in the run directories named under `runs`.
+# Medians are over the listed runs. Per-run "summed" values add every vLLM
+# "KV Transfer metrics:" line in server.log (each line reports the interval since the last).
+schema_version: 1
+
+observations:
+  - id: ldq-llama-3-8b-lbhnc-2026-10-26
+    deployment: llama-3-8b@vllm-0.30-bf16-tp1-lbhnc
+    date: 2026-10-26
+    workload:
+      name: long-doc-qa
+      docs: 51
+      doc_tokens: 10000
+      inflight_configured: 4
+      output_tokens: 1
+      model: NousResearch/Meta-Llama-3-8B with RoPE x4 (--hf-overrides rope_scaling linear factor 4.0, --max-model-len 32768)
+      gpu: A30 GPU 0 on NUMA node 0
+    server: base certus-server (bin/certus-server-base), 4 NVMe drives, --memory-tier-size 12G, --channels 32, --format
+    runs:
+      count: 6
+      dirs: (local, not committed; evidence quoted below) /home/nara/certus/plans/realistic-bench/results/ldq-out1-gpu0/base-0 .. base-5
+    reproduction:
+      script: benchmarks/long-doc-qa/run_one.sh (see RUNBOOK-compare-builds.md)
+      command: "CONNECTOR=stock OUTPUT_LEN=1 GPU=0 run_one.sh --server <unstable certus-server> --connector <unstable checkout> --label base --out <dir>"
+      as_run: "a local predecessor of run_one.sh: OUTPUT_LEN=1 GPU=0 ./ldq.sh base <run>"
+      notes: >-
+        vLLM image localhost/certus-shmq-connector:vllm0.30.0, OffloadingConnector with
+        CertusShmqOffloadingSpec, slab_size_bytes 2097152, --enforce-eager,
+        --enable-prefix-caching, --gpu-memory-utilization 0.90, FLASH_ATTN backend.
+    values:
+      kv_cache_layout:
+        value: LBHNC
+        basis: measured
+        evidence: "[certus-shmq] KV cache layout (vLLM 0.30+): LBHNC  /  [utils.py:320] Using LBHNC KV cache layout."
+      regions_per_block:
+        value: 32
+        basis: measured
+        evidence: "[certus-shmq] KV 32 region(s) block_bytes=2097152 slab_size_bytes=2097152 device=0 tp_rank=0/1 per-region strides=[65536, ...]"
+      piece_bytes:
+        value: 65536
+        basis: measured
+        evidence: "[certus-shmq] CanonicalKVCaches: 32 tensor(s); (shape, page_size_bytes)=[((2985, 65536), 65536), ...]; groups=1"
+      block_bytes:
+        value: 2097152
+        basis: measured
+        evidence: "[certus-shmq] per-block Reserve size from OffloadingConfig: worker_kv_bytes_per_block = 2097152 bytes"
+      blocks_per_load_job:
+        value: 625
+        basis: computed
+        formula: "doc_tokens / offload_block_tokens = 10000 / 16 (one load job per document)"
+      query_round_time_s:
+        value: 7.557
+        basis: measured
+        evidence: "client.stdout.log 'Query round time: 8.023s' (base-0); per run 8.023, 7.704, 7.410, 7.749, 7.366, 7.373; median of 6"
+      query_ttft_mean_s:
+        value: 0.557
+        basis: measured
+        evidence: "client.stdout.log 'Query round mean TTFT: 0.586s' (base-0); per run 0.586, 0.576, 0.548, 0.562, 0.551, 0.550; median of 6 = 0.5565"
+      query_successful_prompts:
+        value: 46
+        basis: measured
+        evidence: "client.stdout.log 'Query round successful prompt count: 47' of 'Query round prompt count: 51' (base-0); per run 47, 46, 46, 46, 47, 46; median of 6"
+      load_jobs:
+        value: 51
+        basis: measured
+        evidence: "server.log 'KV Transfer metrics: ... vllm:kv_offload_load_size_count=51' (summed per run; 51 in all 6 runs)"
+      load_bytes:
+        value: 66846720000
+        basis: measured
+        evidence: "server.log 'KV Transfer metrics: ... vllm:kv_offload_load_bytes=66846720000' (summed per run; identical in all 6 runs = 51 x 625 x 2097152)"
+      load_job_time_summed_s:
+        value: 22.10
+        basis: measured
+        evidence: "server.log 'KV Transfer metrics: ... vllm:kv_offload_load_time=24.396561736240983' (base-0); summed per run 24.40, 22.38, 20.82, 22.54, 20.85, 21.81; median of 6 = 22.096"
+      store_job_time_summed_s:
+        value: 59.34
+        basis: measured
+        evidence: "server.log 'KV Transfer metrics: vllm:kv_offload_store_bytes=6822035456, vllm:kv_offload_store_time=2.844010293483734, ...' (first line of base-0); summed per run 58.87, 81.80, 59.81, 55.29, 53.40, 61.72; median of 6 = 59.337. Covers warmup and query rounds."
+      store_bytes:
+        value: 67496837120
+        basis: measured
+        evidence: "sum of vllm:kv_offload_store_bytes over server.log 'KV Transfer metrics:' lines; identical in all 6 runs (306 store jobs)"
+      inflight_configured:
+        value: 4
+        basis: configured
+        evidence: "ldq.sh MAX_INFLIGHT_REQUESTS=4"
+      load_concurrency_measured:
+        value: 2.91
+        basis: computed
+        formula: "load_job_time_summed_s / query_round_time_s, per run then median: 3.04, 2.91, 2.81, 2.91, 2.83, 2.96 -> 2.907 (vs inflight_configured 4)"
+
+  - id: ldq-llama-3-8b-blhnc-2026-10-26
+    deployment: llama-3-8b@vllm-0.30-bf16-tp1-blhnc
+    date: 2026-10-26
+    workload:
+      name: long-doc-qa
+      docs: 51
+      doc_tokens: 10000
+      inflight_configured: 4
+      output_tokens: 1
+      model: NousResearch/Meta-Llama-3-8B with RoPE x4 (--hf-overrides rope_scaling linear factor 4.0, --max-model-len 32768)
+      gpu: A30 GPU 0 on NUMA node 0
+    server: base certus-server (bin/certus-server-base), 4 NVMe drives, --memory-tier-size 12G, --channels 32, --format
+    runs:
+      count: 3
+      dirs: (local, not committed; evidence quoted below) /home/nara/certus/plans/realistic-bench/results/ldq-out1-gpu0-BLHNC/base-1 .. base-3
+      note: run dates in vLLM log lines read 10-27 00:40-00:53 (container clock), same session as the LBHNC runs
+    reproduction:
+      script: benchmarks/long-doc-qa/run_one.sh (see RUNBOOK-compare-builds.md)
+      command: "CONNECTOR=stock KV_LAYOUT=BLHNC OUTPUT_LEN=1 GPU=0 run_one.sh --server <unstable certus-server> --connector <unstable checkout> --label base --out <dir>"
+      as_run: "a local predecessor of run_one.sh: OUTPUT_LEN=1 GPU=0 KV_LAYOUT=BLHNC ./ldq.sh base <run>"
+      notes: >-
+        Same as the LBHNC observation plus -e VLLM_KV_CACHE_LAYOUT=BLHNC on the vLLM
+        container. Same connector code (manager.py sha256 9c0822bc...). FLASH_ATTN backend.
+    values:
+      kv_cache_layout:
+        value: BLHNC
+        basis: measured
+        evidence: "[certus-shmq] KV cache layout (vLLM 0.30+): BLHNC  /  [utils.py:320] Using BLHNC KV cache layout."
+      attention_backend:
+        value: FLASH_ATTN
+        basis: measured
+        evidence: "[cuda.py:538] Using FLASH_ATTN attention backend out of potential backends: ['FLASH_ATTN', 'FLASHINFER', 'TRITON_ATTN', 'FLEX_ATTENTION']."
+      regions_per_block:
+        value: 1
+        basis: measured
+        evidence: "[certus-shmq] KV 1 region(s) block_bytes=2097152 slab_size_bytes=2097152 device=0 tp_rank=0/1 per-region strides=[2097152]"
+      piece_bytes:
+        value: 2097152
+        basis: measured
+        evidence: "[certus-shmq] CanonicalKVCaches: 1 tensor(s); (shape, page_size_bytes)=[((2985, 2097152), 2097152)]; groups=1"
+      blocks_per_load_job:
+        value: 625
+        basis: computed
+        formula: "doc_tokens / offload_block_tokens = 10000 / 16 (one load job per document)"
+      query_round_time_s:
+        value: 3.888
+        basis: measured
+        evidence: "client.stdout.log 'Query round time: 3.888s' (base-1); per run 3.888, 4.126, 3.822; median of 3"
+      query_ttft_mean_s:
+        value: 0.296
+        basis: measured
+        evidence: "client.stdout.log 'Query round mean TTFT: 0.296s' (base-1); per run 0.296, 0.305, 0.288; median of 3"
+      query_successful_prompts:
+        value: 47
+        basis: measured
+        evidence: "client.stdout.log 'Query round successful prompt count: 47' of 51; 47 in all 3 runs"
+      load_jobs:
+        value: 51
+        basis: measured
+        evidence: "server.log 'KV Transfer metrics: ... vllm:kv_offload_load_size_count=51' (51 in all 3 runs)"
+      load_bytes:
+        value: 66846720000
+        basis: measured
+        evidence: "server.log 'KV Transfer metrics: ... vllm:kv_offload_load_bytes=66846720000' (identical in all 3 runs)"
+      load_job_time_summed_s:
+        value: 5.81
+        basis: measured
+        evidence: "server.log 'KV Transfer metrics: ... vllm:kv_offload_load_time=5.813557002693415' (base-1); summed per run 5.81, 5.82, 5.53; median of 3 = 5.814"
+      store_job_time_summed_s:
+        value: 7.76
+        basis: measured
+        evidence: "sum of vllm:kv_offload_store_time over server.log 'KV Transfer metrics:' lines; per run 7.56, 7.82, 7.76; median of 3 = 7.755. Covers warmup and query rounds."
+      store_bytes:
+        value: 67496837120
+        basis: measured
+        evidence: "sum of vllm:kv_offload_store_bytes over server.log 'KV Transfer metrics:' lines; identical in all 3 runs (306 store jobs)"
+      inflight_configured:
+        value: 4
+        basis: configured
+        evidence: "ldq.sh MAX_INFLIGHT_REQUESTS=4"
+      load_concurrency_measured:
+        value: 1.45
+        basis: computed
+        formula: "load_job_time_summed_s / query_round_time_s, per run then median: 1.50, 1.41, 1.45 -> 1.447 (vs inflight_configured 4)"
+
+  - id: ldq-llama-3-8b-blhnc-certusconnector-2026-10-26
+    deployment: llama-3-8b@vllm-0.30-bf16-tp1-blhnc
+    date: 2026-10-26
+    workload:
+      name: long-doc-qa
+      docs: 51
+      doc_tokens: 10000
+      inflight_configured: 4
+      output_tokens: 1
+      model: NousResearch/Meta-Llama-3-8B with RoPE x4 (--hf-overrides rope_scaling linear factor 4.0, --max-model-len 32768)
+      gpu: A30 GPU 0 on NUMA node 0
+    server: base certus-server (unstable a905f89b), 4 NVMe drives, --memory-tier-size 12G, --channels 32, --format
+    runs:
+      count: 3
+      dirs: (local, not committed; evidence quoted below) /home/nara/certus/plans/realistic-bench/results/ldq-out1-gpu0-conncertus/conn-1 .. conn-3
+    reproduction:
+      script: benchmarks/long-doc-qa/run_one.sh (see RUNBOOK-compare-builds.md)
+      command: "CONNECTOR=certus OUTPUT_LEN=1 GPU=0 run_one.sh --server <unstable certus-server> --connector <checkout with CertusConnector> --label conn --out <dir>"
+      as_run: "a local predecessor of run_one.sh: OUTPUT_LEN=1 GPU=0 CONNECTOR_CLASS=certus ./ldq.sh conn <run>"
+      notes: >-
+        No VLLM_KV_CACHE_LAYOUT. The launch config names the Certus connector class
+        (kv_connector_module_path certus_shmq_connector.connector), which requests BLHNC from
+        get_required_kvcache_layout(); vLLM accepted it. The runs used the class under its
+        first name, CertusShmqOffloadingConnector; it was renamed CertusConnector afterwards
+        with no other change (branch connector/blhnc-layout 8ed86264).
+    values:
+      connector_class:
+        value: CertusShmqOffloadingConnector (now CertusConnector)
+        basis: measured
+        evidence: "[factory.py:62] Creating v1 connector with name: CertusShmqOffloadingConnector"
+      kv_cache_layout:
+        value: BLHNC
+        basis: measured
+        evidence: "[certus-shmq] KV cache layout (vLLM 0.30+): BLHNC"
+      regions_per_block:
+        value: 1
+        basis: measured
+        evidence: "[certus-shmq] KV 1 region(s) block_bytes=2097152"
+      query_round_time_s:
+        value: 3.921
+        basis: measured
+        evidence: "client.stdout.log 'Query round time'; per run 3.921, 4.082, 3.817; median of 3"
+      query_ttft_mean_s:
+        value: 0.297
+        basis: measured
+        evidence: "client.stdout.log 'Query round mean TTFT'; per run 0.297, 0.308, 0.283; median of 3"
+      load_job_time_summed_s:
+        value: 5.51
+        basis: measured
+        evidence: "sum of vllm:kv_offload_load_time over 'KV Transfer metrics' lines; per run 5.25, 5.51, 6.36; median of 3"
+      store_job_time_summed_s:
+        value: 7.96
+        basis: measured
+        evidence: "sum of vllm:kv_offload_store_time; per run 7.77, 8.60, 7.96; median of 3"
+      load_bytes:
+        value: 66846720000
+        basis: measured
+        evidence: "sum of vllm:kv_offload_load_bytes, identical in all 3 runs"

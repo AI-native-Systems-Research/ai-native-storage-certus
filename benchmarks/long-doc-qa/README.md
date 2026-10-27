@@ -95,3 +95,12 @@ Output files (`warmup_round.csv`, `query_round.csv`, optional PNGs) land in
   signs that argparse tries to interpret). It only affects `--help`; every real
   run is fine. Use the flag/env table above instead of `--help`. The script is
   fetched verbatim from the pinned upstream commit (not patched here).
+
+## Runbooks
+
+- [`RUNBOOK-certus-iostat.md`](RUNBOOK-certus-iostat.md): one 51-document run over Certus,
+  with SSD I/O captured.
+- [`RUNBOOK-compare-builds.md`](RUNBOOK-compare-builds.md): compare Certus server or
+  connector builds on identical settings (`run_one.sh`, `summarize_runs.py`): image and
+  model setup, building each candidate, reading the results, and the pitfalls (GPU NUMA
+  node, drives still held by the previous server) that invalidate runs.

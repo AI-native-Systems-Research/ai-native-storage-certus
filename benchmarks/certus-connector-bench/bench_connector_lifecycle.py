@@ -36,12 +36,36 @@ Usage (certus-server must be running):
     # vLLM <= 0.20 call order (touch before lookup) instead of the default
     python bench_connector_lifecycle.py --mode scheduler-step --lookup-order touch-first
 
+    # Per-layer KV tensors (vLLM >= 0.29 default LBHNC; 0.23+ for the Certus
+    # connector): each block is 32 regions of block_bytes/32
+    # (Llama-3-8B: --block-bytes 2097152 --pieces-per-block 32 -> 64 KiB per piece)
+    python bench_connector_lifecycle.py --block-bytes 2097152 --pieces-per-block 32
+
+    # LongDocQA's cold-load shape (32 pieces, 625-block request loads, 4 in flight,
+    # tier full); --tier-fill-blocks must match the server's tier (12G x 0.8 / 2 MiB)
+    python bench_connector_lifecycle.py --preset longdocqa --tier-fill-blocks 4915
+
 Call order: wherever a phase both looks up and touches the same keys, it calls
 lookup() first and touch() after by default (--lookup-order lookup-first), as
 vLLM's offloading scheduler does since 0.21 (vLLM PR #41228; still so in 0.30).
 --lookup-order touch-first reproduces vLLM <= 0.20, where touch() came first and
 the connector answered that request's lookups from the touch reply (within its
 CERTUS_LOOKUP_CACHE_TTL_US).
+
+KV layout: under vLLM's default layer-outermost layout (LBHNC; vLLM >= 0.29,
+and from 0.23 for connectors not opted into the cross-layer layout, as the Certus
+connector was not) every attention layer's KV cache is its own GPU allocation,
+so one offloaded block is N per-layer pieces at N different addresses, and the
+connector sends N regions per block.
+--pieces-per-block N reproduces that: N GPU tensors of [blocks, block_bytes / N].
+The default, 1, is one contiguous region per block (vLLM 0.20/0.22).
+
+Cold-load shape (default mode only): --cold-tier-state, --store-order,
+--load-unit, --cold-inflight and --preset change how the cold pass is set up
+and driven, to match serving conditions (see knowledge/serving/). Their
+defaults reproduce the plain cold pass; any non-default value runs the shaped
+pass, reported as "Cold Load Lifecycle (shaped: ...)" so parsers that match
+"Cold Load Lifecycle" still find it, with the settings in the YAML params.
 """
 
 from __future__ import annotations
@@ -221,6 +245,25 @@ def _alloc_base(data_ptr: int) -> int:
     )
     assert err == 0, f"cuMemGetAddressRange failed: {err}"
     return base.value
+
+
+def make_kv_regions(gpu_id: int, block_bytes: int, num_blocks: int = 128,
+                    layers: int = 1) -> tuple[list[KvCacheIpc], list[torch.Tensor]]:
+    """One region per layer, as vLLM presents per-layer KV tensors (LBHNC).
+
+    Each layer is its own allocation of ``num_blocks`` pages of
+    ``block_bytes // layers`` bytes, so a block's bytes are spread over
+    ``layers`` separate tensors. ``layers=1`` is one contiguous region.
+    """
+    if layers < 1 or block_bytes % layers:
+        raise ValueError(f"--block-bytes {block_bytes} is not divisible by "
+                         f"--pieces-per-block {layers}")
+    regions, tensors = [], []
+    for _ in range(layers):
+        region, tensor = make_kv_region(gpu_id, block_bytes // layers, num_blocks)
+        regions.append(region)
+        tensors.append(tensor)
+    return regions, tensors
 
 
 def make_kv_region(gpu_id: int, block_bytes: int, num_blocks: int = 128) -> tuple[KvCacheIpc, torch.Tensor]:
@@ -616,6 +659,180 @@ def bench_load_lifecycle(
         total_blocks=total_blocks,
         total_bytes=total_blocks * block_bytes,
         wall_seconds=wall,
+        phases=phases,
+    )
+
+
+# ── shaped cold load (serving conditions) ──────────────────────────────────
+
+# Named cold-load shapes. Each sets flags whose defaults would otherwise apply;
+# explicit flags override. Sizes the preset cannot know (the tier fill depends
+# on the server's tier size) stay required flags.
+# A preset's "observation" names the knowledge/serving/observations.yaml entry it
+# reproduces; knowledge/serving/check.py fails if the preset's block bytes, pieces
+# per block or blocks per load job disagree with it. It is not a flag.
+COLD_PRESETS = {
+    # LongDocQA, Llama-3-8B, vLLM 0.30 under the default LBHNC layout: 2 MiB blocks
+    # in 32 layer pieces, one 625-block load job per request, 4 requests in flight,
+    # tier full.
+    "longdocqa": {
+        "observation": "ldq-llama-3-8b-lbhnc-2026-10-26",
+        "block_bytes": 2097152,     # 2 MiB: 16 tokens x 128 KiB/token
+        "pieces_per_block": 32,
+        "bs": 16,
+        "requests": 4,
+        "num_blocks": 2500,         # 4 requests x 625 blocks (10,000 tokens / 16)
+        "store_order": "interleaved",
+        "load_unit": "request",
+        "cold_inflight": 4,
+        "cold_tier_state": "full",
+    },
+}
+
+COLD_SHAPE_DEFAULTS = {"cold_tier_state": "empty", "store_order": "batch",
+                       "load_unit": "batch", "cold_inflight": 1}
+
+
+def cold_shape_is_default(args) -> bool:
+    return all(getattr(args, k) == v for k, v in COLD_SHAPE_DEFAULTS.items())
+
+
+def cold_shape_label(args) -> str:
+    return (f"tier={args.cold_tier_state} store={args.store_order} "
+            f"load={args.load_unit} inflight={args.cold_inflight}"
+            + (f" pieces={args.pieces_per_block}" if args.pieces_per_block > 1 else ""))
+
+
+def split_requests(keys: list[bytes], requests: int) -> list[list[bytes]]:
+    """Split keys into `requests` consecutive prefixes of equal length."""
+    per = len(keys) // requests
+    return [keys[r * per:(r + 1) * per] for r in range(requests)]
+
+
+def populate_shaped(manager, worker, keys, batch_size, store_order, requests):
+    """Store keys as batch_size-key calls (batch) or one block per request in turn
+    (interleaved: request r stores its i-th block at step i, as vLLM commits per step)."""
+    if store_order == "batch":
+        _populate_keys(manager, worker, keys, batch_size)
+        return
+    prefixes = split_requests(keys, requests)
+    for step in range(len(prefixes[0])):
+        for p in prefixes:
+            _populate_keys(manager, worker, [p[step]], 1)
+
+
+def bench_cold_load_shaped(
+    manager: ShmqCertusOffloadingManager,
+    worker,
+    ring: Ring,
+    keys: list[bytes],
+    batch_size: int,
+    block_bytes: int,
+    min_duration: float,
+    *,
+    args,
+    world_size: int,
+    lookup_order: str = LOOKUP_FIRST,
+) -> BenchResult:
+    """Cold load under a serving shape: per pass, empty the tier (flush + clear),
+    refill it to the eviction threshold if --cold-tier-state full, then load the
+    keys as --load-unit jobs with up to --cold-inflight outstanding. Fill and
+    removal are outside the timed region; the keys must already be stored."""
+    touch_first = lookup_order == TOUCH_FIRST
+    phases = {name: PhaseTiming(name) for name in
+              ("touch", "lookup", "prepare_load", "submit_load", "get_finished", "complete_load")}
+    rng = random.Random(args.seed)
+    if args.load_unit == "request":
+        units_base = split_requests(keys, args.requests)
+    else:
+        units_base = [keys[i:i + batch_size] for i in range(0, len(keys), batch_size)]
+    unit_len = max(len(u) for u in units_base)
+    job_id = 2_000_000
+    fill_seed = 7_000_000 + args.seed * 1000
+    total_blocks, timed, passes = 0, 0.0, 0
+
+    while timed < min_duration or passes < 2:
+        manager._ring.flush_to_ssd()
+        manager._ring.clear_memory_tier()
+        fill = []
+        if args.cold_tier_state == "full":
+            fill_seed += 1
+            fill = make_content_keys(args.tier_fill_blocks, seed=fill_seed)
+            _populate_keys(manager, worker, fill, batch_size)
+        units = list(units_base)
+        if args.load_unit == "request":
+            rng.shuffle(units)
+
+        pending: dict[int, tuple[list[bytes], float]] = {}
+        slots = list(range(args.cold_inflight))
+        slot_of: dict[int, int] = {}
+        t_pass = time.perf_counter()
+        while units or pending:
+            while units and len(pending) < args.cold_inflight:
+                unit = units.pop(0)
+                if touch_first:
+                    t0 = time.perf_counter(); manager.touch(unit)
+                    phases["touch"].record(time.perf_counter() - t0)
+                t0 = time.perf_counter()
+                hits = []
+                for k in unit:
+                    if not manager.lookup(k):
+                        if args.load_unit == "request":
+                            break          # vLLM stops a prefix at the first miss
+                        continue
+                    hits.append(k)
+                phases["lookup"].record(time.perf_counter() - t0)
+                if not touch_first:
+                    t0 = time.perf_counter(); manager.touch(unit)
+                    phases["touch"].record(time.perf_counter() - t0)
+                if not hits:
+                    continue
+                t0 = time.perf_counter()
+                spec = manager.prepare_load(hits)
+                phases["prepare_load"].record(time.perf_counter() - t0)
+                slot = slots.pop(0)
+                base = slot * unit_len
+                job_id += 1
+                t0 = time.perf_counter()
+                worker.submit_load(job_id, spec, _FakeGPUSpec(list(range(base, base + len(hits)))))
+                phases["submit_load"].record(time.perf_counter() - t0)
+                pending[job_id] = (hits, time.perf_counter())
+                slot_of[job_id] = slot
+            finished = worker.get_finished()
+            if not finished:
+                time.sleep(0.0001)
+                continue
+            failed = []
+            for res in finished:
+                hits, t_sub = pending.pop(res.job_id)
+                phases["get_finished"].record(time.perf_counter() - t_sub)
+                slots.append(slot_of.pop(res.job_id))
+                # Unpin every finished job, failed or not, before raising.
+                t0 = time.perf_counter()
+                manager.complete_load(hits)
+                phases["complete_load"].record(time.perf_counter() - t0)
+                if res.success:
+                    total_blocks += len(hits)
+                else:
+                    failed.append(res.job_id)
+            if failed:
+                # Drain the jobs still in flight so their keys are unpinned too.
+                while pending:
+                    for res in worker.get_finished():
+                        hits, _ = pending.pop(res.job_id)
+                        manager.complete_load(hits)
+                    time.sleep(0.0001)
+                raise RuntimeError(f"cold load job(s) {failed} failed")
+        timed += time.perf_counter() - t_pass
+        passes += 1
+        if fill:
+            _remove_keys(ring, fill, world_size)
+
+    return BenchResult(
+        label=f"Cold Load Lifecycle (shaped: {cold_shape_label(args)})",
+        total_blocks=total_blocks,
+        total_bytes=total_blocks * block_bytes,
+        wall_seconds=timed,
         phases=phases,
     )
 
@@ -1827,7 +2044,7 @@ class _FakeGPUSpec:
 
 
 def _tp_rank_main(conn, rank, world_size, gpu, shm_path, block_bytes,
-                  max_blocks, workers):
+                  max_blocks, workers, layers=1):
     """Entry point of one non-zero TP rank (spawned process)."""
     torch.cuda.set_device(gpu)
     # Each process claims channels only from its own slot, as the production
@@ -1836,10 +2053,10 @@ def _tp_rank_main(conn, rank, world_size, gpu, shm_path, block_bytes,
                 claim_slot=rank, claim_slots=world_size)
     # This thread only relays messages; the pool threads do the ring I/O.
     ring.release_channel()
-    region, _tensor = make_kv_region(gpu, block_bytes, max_blocks)
+    regions, _tensors = make_kv_regions(gpu, block_bytes, max_blocks, layers)
     executor = ThreadPoolExecutor(max_workers=workers,
                                   thread_name_prefix=f"bench-shmq-r{rank}")
-    worker = worker_class()(ring, [region], block_bytes, executor,
+    worker = worker_class()(ring, regions, block_bytes, executor,
                             rank=rank, world_size=world_size)
     conn.send(("ready", rank))
     inflight = 0
@@ -1874,11 +2091,11 @@ class _TPWorkerGroup:
 
     _READY_TIMEOUT_S = 60.0
 
-    def __init__(self, ring, region, block_bytes, executor, *, gpus,
-                 shm_path, max_blocks, workers):
+    def __init__(self, ring, regions, block_bytes, executor, *, gpus,
+                 shm_path, max_blocks, workers, layers=1):
         self._world_size = len(gpus)
         self._block_bytes = block_bytes
-        self._rank0 = worker_class()(ring, [region], block_bytes, executor,
+        self._rank0 = worker_class()(ring, regions, block_bytes, executor,
                                      rank=0, world_size=self._world_size)
         self._pending: dict[int, list] = {}  # job_id -> [remaining, ok, t0, n, type]
         self._done: collections.deque = collections.deque()
@@ -1890,7 +2107,7 @@ class _TPWorkerGroup:
             proc = ctx.Process(
                 target=_tp_rank_main,
                 args=(child, rank, self._world_size, gpus[rank], shm_path,
-                      block_bytes, max_blocks, workers),
+                      block_bytes, max_blocks, workers, layers),
                 daemon=True,
             )
             proc.start()
@@ -2036,6 +2253,38 @@ def main():
                         help="Total blocks per iteration")
     parser.add_argument("--block-bytes", type=int, default=DEFAULT_BLOCK_BYTES,
                         help=f"Per-block size in bytes (default: {DEFAULT_BLOCK_BYTES})")
+    parser.add_argument("--pieces-per-block", type=int, default=1,
+                        help="KV regions per block: N GPU tensors of block_bytes/N "
+                             "each, one per distinct layer view as vLLM lays out KV "
+                             "under its default LBHNC layout (default 1: one "
+                             "contiguous region, as under BLHNC or vLLM 0.20/0.22)")
+    # ── cold-load shape (default mode). Defaults reproduce the plain cold pass. ──
+    parser.add_argument("--cold-tier-state", choices=("empty", "full"), default="empty",
+                        help="memory tier at the start of each cold pass: empty (cleared, "
+                             "the default) or full (refilled with --tier-fill-blocks "
+                             "other blocks, outside the timing, so cold reads must evict)")
+    parser.add_argument("--tier-fill-blocks", type=int, default=0,
+                        help="blocks that fill the tier to its eviction threshold "
+                             "(tier size x threshold / block bytes); required with "
+                             "--cold-tier-state full")
+    parser.add_argument("--store-order", choices=("batch", "interleaved"), default="batch",
+                        help="batch: store --bs blocks per call in key order (default); "
+                             "interleaved: --requests requests store one block per call "
+                             "in turn, as concurrent vLLM requests commit per step")
+    parser.add_argument("--load-unit", choices=("batch", "request"), default="batch",
+                        help="cold load job: batch (the stored --bs batches, in order, the "
+                             "default) or request (one request's whole prefix per job, "
+                             "requests in random order, stopping at the first miss)")
+    parser.add_argument("--requests", type=int, default=16,
+                        help="requests --num-blocks is split into for --store-order "
+                             "interleaved and --load-unit request (default 16)")
+    parser.add_argument("--cold-inflight", type=int, default=1,
+                        help="cold load jobs kept outstanding (default 1); needs "
+                             "--workers and server channels >= N")
+    parser.add_argument("--seed", type=int, default=0,
+                        help="seed for the request order of --load-unit request")
+    parser.add_argument("--preset", choices=sorted(COLD_PRESETS), default=None,
+                        help="named cold-load shape; explicit flags override its values")
     parser.add_argument("--gpu", type=int, default=0,
                         help="CUDA device index")
     parser.add_argument("--tp", type=int, default=1,
@@ -2092,6 +2341,38 @@ def main():
                              "prefix pool (default); private: each session has its own "
                              "prefix blocks, none shared between sessions")
     args = parser.parse_args()
+    if args.preset:
+        # Explicit flags override the preset. Re-parse with every default
+        # suppressed to learn which flags were given (comparing against the
+        # default would miss a flag set to its default value).
+        given = argparse.ArgumentParser(add_help=False)
+        for action in parser._actions:
+            if action.option_strings and action.dest != "help":
+                kw = {"dest": action.dest, "default": argparse.SUPPRESS}
+                if isinstance(action, argparse._StoreTrueAction):
+                    kw["action"] = "store_true"
+                elif action.nargs is not None:
+                    kw["nargs"] = action.nargs
+                given.add_argument(*action.option_strings, **kw)
+        explicit = vars(given.parse_known_args()[0])
+        for key, val in COLD_PRESETS[args.preset].items():
+            if key != "observation" and key not in explicit:
+                setattr(args, key, val)
+    if args.pieces_per_block < 1:
+        parser.error(f"--pieces-per-block must be >= 1, got {args.pieces_per_block}")
+    if args.block_bytes % args.pieces_per_block:
+        parser.error(f"--block-bytes {args.block_bytes} is not divisible by "
+                     f"--pieces-per-block {args.pieces_per_block}")
+    if args.cold_tier_state == "full" and args.tier_fill_blocks <= 0:
+        parser.error("--cold-tier-state full needs --tier-fill-blocks "
+                     "(tier size x eviction threshold / block bytes)")
+    if args.cold_inflight < 1 or args.cold_inflight > args.workers:
+        parser.error(f"--cold-inflight {args.cold_inflight} needs 1 <= N <= --workers "
+                     f"({args.workers}), or jobs would queue in the executor unseen")
+    if (args.store_order == "interleaved" or args.load_unit == "request") and (
+            args.requests < 1 or args.num_blocks % args.requests):
+        parser.error(f"--num-blocks {args.num_blocks} must split evenly into "
+                     f"--requests {args.requests}")
 
     if args.gpus:
         gpus = [int(g) for g in args.gpus.split(",")]
@@ -2119,6 +2400,9 @@ def main():
     print(f"Connector Lifecycle Benchmark")
     print(f"  shm_path={args.shm_path}  gpus={gpus}  tp={args.tp}")
     print(f"  num_blocks={args.num_blocks}  bs={args.bs}  block_bytes={args.block_bytes}"
+          + (f"  pieces_per_block={args.pieces_per_block} "
+             f"({args.block_bytes // args.pieces_per_block} B per piece)"
+             if args.pieces_per_block > 1 else "")
           + (f" per rank ({acct_block_bytes} per logical block)" if real_tp else ""))
     print(f"  min_duration={args.min_duration}s  workers={args.workers}  "
           f"lookup_order={args.lookup_order}")
@@ -2157,6 +2441,15 @@ def main():
                      f"{ring._num_channels} ({per_slot} per rank); start "
                      f"certus-server with --channels {need * args.tp} or more")
 
+    if args.cold_inflight > 1:
+        # Each outstanding job holds one shmq channel on a worker thread; the main
+        # thread holds another. Refuse rather than let jobs queue unseen.
+        need = args.cold_inflight + 1
+        if ring._num_channels < need:
+            sys.exit(f"error: --cold-inflight {args.cold_inflight} needs {need} shmq "
+                     f"channels, the server has {ring._num_channels}; start "
+                     f"certus-server with --channels {need} or more")
+
     manager = ShmqCertusOffloadingManager(
         ring, block_size_bytes=args.block_bytes, world_size=args.tp,
     )
@@ -2164,22 +2457,27 @@ def main():
     # Allocate enough GPU memory for all block_ids the benchmark will use.
     # The eviction mode uses --working-set blocks; use the max of that and num_blocks.
     max_blocks = max(args.num_blocks, args.working_set)
-    store_region, store_tensor = make_kv_region(args.gpu, args.block_bytes, max_blocks)
-    load_region, load_tensor = make_kv_region(args.gpu, args.block_bytes, max_blocks)
+    if not cold_shape_is_default(args):
+        # Tier fill stores --bs keys per call at block ids 0..bs-1; in-flight
+        # slots each take one load unit's range.
+        unit = args.num_blocks // args.requests if args.load_unit == "request" else args.bs
+        max_blocks = max(max_blocks, args.bs, args.cold_inflight * unit)
+    store_regions, store_tensors = make_kv_regions(args.gpu, args.block_bytes, max_blocks, args.pieces_per_block)
+    load_regions, load_tensors = make_kv_regions(args.gpu, args.block_bytes, max_blocks, args.pieces_per_block)
 
     executor = ThreadPoolExecutor(max_workers=args.workers, thread_name_prefix="bench-shmq")
 
-    def make_worker(region, pool):
+    def make_worker(regions, pool):
         if real_tp:
             return _TPWorkerGroup(
-                ring, region, args.block_bytes, pool, gpus=gpus,
+                ring, regions, args.block_bytes, pool, gpus=gpus,
                 shm_path=args.shm_path, max_blocks=max_blocks,
-                workers=args.workers,
+                workers=args.workers, layers=args.pieces_per_block,
             )
-        return worker_class()(ring, [region], args.block_bytes, pool,
+        return worker_class()(ring, regions, args.block_bytes, pool,
                               rank=0, world_size=args.tp)
 
-    worker = make_worker(store_region, executor)
+    worker = make_worker(store_regions, executor)
 
     keys = make_content_keys(args.num_blocks)
 
@@ -2209,7 +2507,7 @@ def main():
             print(f"\nPattern: {pattern.id} ({pattern.name})")
             pattern.describe()
             return bench_pattern(
-                pattern, eval_expr_fn, manager, worker, [store_region],
+                pattern, eval_expr_fn, manager, worker, store_regions,
                 ring, args.bs,
                 args.block_bytes if args.block_bytes != DEFAULT_BLOCK_BYTES else None,
                 args.min_duration, args.tp,
@@ -2221,7 +2519,7 @@ def main():
                   f"direction={args.direction})")
             if args.direction in ("store", "both"):
                 r = bench_pipelined(
-                    manager, worker, [store_region], keys,
+                    manager, worker, store_regions, keys,
                     args.bs, acct_block_bytes, args.min_duration,
                     pipeline_depth=args.pipeline_depth, direction="store",
                 )
@@ -2230,7 +2528,7 @@ def main():
             if args.direction in ("load", "both"):
                 _remove_keys(ring, keys, args.tp)
                 r = bench_pipelined(
-                    manager, worker, [store_region], keys,
+                    manager, worker, store_regions, keys,
                     args.bs, acct_block_bytes, args.min_duration,
                     pipeline_depth=args.pipeline_depth, direction="load",
                     lookup_order=args.lookup_order,
@@ -2241,7 +2539,7 @@ def main():
         elif mode == "prefix-miss":
             print(f"\n  Mode: prefix-miss (hit_ratio={args.hit_ratio})")
             r = bench_prefix_miss(
-                manager, worker, [store_region],
+                manager, worker, store_regions,
                 args.bs, acct_block_bytes, args.min_duration,
                 hit_ratio=args.hit_ratio,
                 num_blocks=args.num_blocks,
@@ -2257,10 +2555,10 @@ def main():
             executor_load = ThreadPoolExecutor(
                 max_workers=args.workers, thread_name_prefix="bench-load",
             )
-            w_load = make_worker(load_region, executor_load)
+            w_load = make_worker(load_regions, executor_load)
             results = bench_contention(
                 manager, manager_load, worker, w_load,
-                [store_region], ring,
+                store_regions, ring,
                 args.bs, acct_block_bytes, args.min_duration,
                 working_set=args.working_set,
                 lookup_order=args.lookup_order,
@@ -2273,7 +2571,7 @@ def main():
             print(f"\n  Mode: scheduler-step (reqs={args.requests_per_step}, "
                   f"sessions={args.num_sessions})")
             r = bench_scheduler_step(
-                manager, worker, [store_region], ring,
+                manager, worker, store_regions, ring,
                 args.bs, acct_block_bytes, args.min_duration,
                 requests_per_step=args.requests_per_step,
                 pipeline_depth=args.pipeline_depth,
@@ -2286,7 +2584,7 @@ def main():
 
         else:  # default
             store_result = bench_store_lifecycle(
-                manager, worker, [store_region], keys,
+                manager, worker, store_regions, keys,
                 args.bs, acct_block_bytes, args.min_duration,
             )
             store_result.print_report()
@@ -2295,18 +2593,30 @@ def main():
             _populate_keys(manager, worker, keys, args.bs)
 
             warm_result = bench_load_lifecycle(
-                manager, worker, [load_region], keys,
+                manager, worker, load_regions, keys,
                 args.bs, acct_block_bytes, args.min_duration,
                 cold=False, lookup_order=args.lookup_order,
             )
             warm_result.print_report()
 
             cold_result = None
-            if not args.no_cold:
+            if not args.no_cold and cold_shape_is_default(args):
                 cold_result = bench_load_lifecycle(
-                    manager, worker, [load_region], keys,
+                    manager, worker, load_regions, keys,
                     args.bs, acct_block_bytes, args.min_duration,
                     cold=True, lookup_order=args.lookup_order,
+                )
+                cold_result.print_report()
+            elif not args.no_cold:
+                # Shaped cold pass: re-store in the requested order, then load
+                # under the requested tier state, job unit and concurrency.
+                _remove_keys(ring, keys, args.tp)
+                populate_shaped(manager, worker, keys, args.bs,
+                                args.store_order, args.requests)
+                cold_result = bench_cold_load_shaped(
+                    manager, worker, ring, keys,
+                    args.bs, acct_block_bytes, args.min_duration,
+                    args=args, world_size=args.tp, lookup_order=args.lookup_order,
                 )
                 cold_result.print_report()
 
@@ -2315,7 +2625,7 @@ def main():
                 _remove_keys(ring, keys, args.tp)
                 ring.clear_memory_tier()
                 eviction_result = bench_mixed_eviction(
-                    manager, worker, [store_region],
+                    manager, worker, store_regions,
                     args.bs, acct_block_bytes, args.min_duration,
                     working_set=args.working_set,
                     load_fraction=0.5,
@@ -2367,6 +2677,21 @@ def main():
         "working_set": args.working_set,
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }
+    # Layout and cold shape: recorded only when not the default, so default
+    # output keeps today's fields.
+    if args.pieces_per_block > 1:
+        extra["pieces_per_block"] = args.pieces_per_block
+    if not cold_shape_is_default(args) or args.preset:
+        extra.update({
+            "preset": args.preset or "",
+            "cold_tier_state": args.cold_tier_state,
+            "tier_fill_blocks": args.tier_fill_blocks,
+            "store_order": args.store_order,
+            "load_unit": args.load_unit,
+            "requests": args.requests,
+            "cold_inflight": args.cold_inflight,
+            "seed": args.seed,
+        })
     if mode == "pipelined":
         extra["pipeline_depth"] = args.pipeline_depth
         extra["direction"] = args.direction
@@ -2382,12 +2707,22 @@ def main():
     # ── CSV output ──
     if args.csv and all_results:
         rows = [r.csv_row(extra) for r in all_results]
-        write_header = not os.path.exists(args.csv)
+        write_header = not os.path.exists(args.csv) or os.path.getsize(args.csv) == 0
         fieldnames = list(rows[0].keys())
         for r in rows[1:]:
             for k in r:
                 if k not in fieldnames:
                     fieldnames.append(k)
+        if not write_header:
+            with open(args.csv, newline="") as f:
+                existing = next(csv.reader(f), [])
+            missing = [k for k in fieldnames if k not in existing]
+            if missing:
+                # Shaped runs add columns (pieces_per_block, cold_*...); appending
+                # them under an older header would silently drop them.
+                sys.exit(f"error: {args.csv} has no columns {missing}; write these "
+                         f"results to a new --csv file")
+            fieldnames = existing
         with open(args.csv, "a", newline="") as f:
             w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
             if write_header:
