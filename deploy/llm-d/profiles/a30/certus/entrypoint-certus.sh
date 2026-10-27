@@ -23,6 +23,18 @@ CERTUS_SHM_DIR="${CERTUS_SHM_DIR:-/certus-shm}"
 # deployments, and a mismatch fails fast below rather than silently.
 CERTUS_SHM_PREFIX="${CERTUS_SHM_PREFIX:-certus-shmq-numa}"
 CERTUS_SLAB_SIZE_BYTES="${CERTUS_SLAB_SIZE_BYTES:-131072}"
+# vLLM's offloading connector stores only prompt blocks by default
+# (offload_prompt_only). A decode pod generates the next turn's prefix, so under
+# P/D it should store generated blocks too, for the next turn's prefill to fetch
+# from its certus. Unset: vLLM's default.
+CERTUS_OFFLOAD_PROMPT_ONLY="${CERTUS_OFFLOAD_PROMPT_ONLY:-}"
+# KV events for llm-d's precise prefix producer (peer selection milestone 3):
+# a zmq endpoint to publish on, e.g. tcp://*:5556. Unset: no events. The topic
+# names this pod as the router routes to it, kv@<POD_IP>:<CERTUS_KV_EVENTS_PORT>
+# @<model>; the port is the one requests reach the pod on (8000: vLLM itself,
+# or decode's routing sidecar).
+CERTUS_KV_EVENTS="${CERTUS_KV_EVENTS:-}"
+CERTUS_KV_EVENTS_PORT="${CERTUS_KV_EVENTS_PORT:-8000}"
 
 log() { printf '[certus-entrypoint] %s\n' "$*" >&2; }
 
@@ -86,7 +98,7 @@ while [ $# -gt 0 ]; do
 done
 set -- "${args[@]}"
 
-kv_cfg="$(python3 - "$shm_path" "$CERTUS_SLAB_SIZE_BYTES" "$existing_kv" <<'PY'
+kv_cfg="$(python3 - "$shm_path" "$CERTUS_SLAB_SIZE_BYTES" "$existing_kv" "$CERTUS_OFFLOAD_PROMPT_ONLY" "$CERTUS_KV_EVENTS" <<'PY'
 import json, sys
 certus = {
     "kv_connector": "OffloadingConnector",
@@ -98,6 +110,15 @@ certus = {
         "slab_size_bytes": int(sys.argv[2]),
     },
 }
+if sys.argv[4]:
+    flag = sys.argv[4].strip().lower()
+    if flag not in ("true", "false"):
+        sys.exit(f"CERTUS_OFFLOAD_PROMPT_ONLY={sys.argv[4]!r}: expected true or false")
+    certus["kv_connector_extra_config"]["offload_prompt_only"] = flag == "true"
+if sys.argv[5]:
+    # vLLM's events tracker then publishes certus's stores with their token ids,
+    # not as key-only placeholders the router cannot hash.
+    certus["kv_connector_extra_config"]["self_describing_kv_events"] = True
 cfg = certus
 if sys.argv[3]:
     first = json.loads(sys.argv[3])
@@ -124,13 +145,63 @@ fi
 
 log "GPU ${bdf} -> NUMA ${numa} -> ${shm_path}"
 
+# Say which certus instance holds this pod's cache, for peer selection
+# (components/certus-transfer-endpoint/specs/001-rdma-cache-transfer/
+# peer-selection.md): another pod fetching from this one reads the annotation
+# certus.ai/transfer-endpoint to find it. The certus server publishes its name
+# beside the mailbox (<mailbox>.endpoint); this pod cannot work it out itself,
+# being outside the host network (the node's RoCE address is not visible here).
+#
+# Best effort and off the critical path: a server without a transfer endpoint
+# writes no file, and a pod without API access cannot annotate. Either way the
+# pod serves as before; only peers fetching from it lose the way to find its
+# certus, and say so in their logs.
+annotate_endpoint() {
+    local ep_file="${shm_path}.endpoint" tok=/var/run/secrets/kubernetes.io/serviceaccount
+    local i ep=""
+    for i in $(seq 1 30); do   # the server may still be starting
+        [ -s "$ep_file" ] && { ep="$(head -1 "$ep_file" | tr -d '[:space:]')"; break; }
+        sleep 1
+    done
+    if [ -z "$ep" ]; then
+        log "no ${ep_file}: this certus has no transfer endpoint; peers cannot fetch from it"
+        return 0
+    fi
+    if [ -z "${POD_NAME:-}" ] || [ -z "${POD_NAMESPACE:-}" ] || [ ! -r "$tok/token" ]; then
+        log "endpoint ${ep}, but no POD_NAME/POD_NAMESPACE or service-account token: not annotating"
+        return 0
+    fi
+    local body
+    body="$(python3 -c 'import json,sys;print(json.dumps({"metadata":{"annotations":{"certus.ai/transfer-endpoint":sys.argv[1]}}}))' "$ep")"
+    if curl -fsS --max-time 10 --cacert "$tok/ca.crt" \
+            -H "Authorization: Bearer $(cat "$tok/token")" \
+            -H "Content-Type: application/merge-patch+json" -X PATCH -d "$body" \
+            "https://kubernetes.default.svc/api/v1/namespaces/${POD_NAMESPACE}/pods/${POD_NAME}" \
+            >/dev/null; then
+        log "annotated certus.ai/transfer-endpoint=${ep}"
+    else
+        log "endpoint ${ep}: annotating the pod failed; peers cannot fetch from it"
+    fi
+}
+annotate_endpoint &
+
 # --no-async-scheduling: 0.22+ auto-enables async scheduling, which breaks the
 #   OffloadingConnector's per-request transfer serialization (a re-scheduled load
 #   races an in-flight store -> assert -> EngineDeadError).
 # --disable-hybrid-kv-cache-manager: required from 0.26; the connector assumes a
 #   single uniform KV-cache group.
 # Both mirror compat.py's needs_disable_* capability flags.
+events_args=()
+if [ -n "$CERTUS_KV_EVENTS" ]; then
+    [ -n "${POD_IP:-}" ] || { log "FATAL: CERTUS_KV_EVENTS set but POD_IP is not"; exit 1; }
+    model="${args[0]:-}"
+    events_cfg="$(python3 -c 'import json,sys;print(json.dumps({"enable_kv_cache_events":True,"publisher":"zmq","endpoint":sys.argv[1],"topic":f"kv@{sys.argv[2]}:{sys.argv[3]}@{sys.argv[4]}"},separators=(",",":")))' "$CERTUS_KV_EVENTS" "$POD_IP" "$CERTUS_KV_EVENTS_PORT" "$model")"
+    events_args=(--kv-events-config "$events_cfg")
+    log "KV events on ${CERTUS_KV_EVENTS}, topic kv@${POD_IP}:${CERTUS_KV_EVENTS_PORT}@${model}"
+fi
+
 exec vllm serve "$@" \
     --no-async-scheduling \
     --disable-hybrid-kv-cache-manager \
-    --kv-transfer-config "$kv_cfg"
+    --kv-transfer-config "$kv_cfg" \
+    "${events_args[@]}"

@@ -374,6 +374,7 @@ if [ "${WITH_CERTUS}" != "0" ]; then
         # copied in because kustomize will not load a file from outside.
         install_overlay "${PD_VLLM_DIR}" pd-certus
         OVERLAY="${PD_VLLM_DIR}/pd-certus"
+        OVERLAY_SRC_DIR="${PROFILE_DIR}/pd-certus"
         cp "${PROFILE_DIR}/certus/entrypoint-certus.sh" "${OVERLAY}/"
     else
         # Consumes ../agg, so it has to sit beside it.
@@ -461,7 +462,7 @@ if [ "${DRY_RUN}" != "0" ]; then
     echo "[dry-run]   profile      ${PROFILE} (${PROFILE_DIR})"
     echo "[dry-run]   site file    $([ -f "${SITE_ENV}" ] && echo "${SITE_ENV}" || echo "none (${SITE_ENV} absent)")"
     echo "[dry-run]   namespace    ${NAMESPACE}"
-    echo "[dry-run]   router       $(basename "${GUIDE_VALUES}")"
+    echo "[dry-run]   router       $(basename "${GUIDE_VALUES}")${OVERLAY_SRC_DIR:+ + ${OVERLAY_SRC_DIR#"${SCRIPT_DIR}/"}/router-values.yaml}"
     echo "[dry-run]   images       $(grep -E '^ +image:' "${RENDERED}" | awk '{print $2}' | sort -u | tr '\n' ' ')"
     for d in "${OTHER_DEPLOYS[@]}"; do
         if [ "${CLUSTER_OK}" = 1 ] && kubectl get "${d}" -n "${NAMESPACE}" >/dev/null 2>&1; then
@@ -517,10 +518,18 @@ kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply
 
 # --- Router / EPP. `upgrade --install` so a re-run updates in place instead of
 # failing with "cannot re-use a name that is still in use". ---
+# A profile overlay may carry router values of its own (router-values.yaml),
+# layered over the guide's: pd-certus adds certus peer selection to the EPP.
+PROFILE_ROUTER_VALUES=()
+if [ -f "${OVERLAY_SRC_DIR:-/nonexistent}/router-values.yaml" ]; then
+    PROFILE_ROUTER_VALUES=(-f "${OVERLAY_SRC_DIR}/router-values.yaml")
+    echo "[install] router values from ${OVERLAY_SRC_DIR#"${SCRIPT_DIR}/"}/router-values.yaml"
+fi
 helm upgrade --install "${GUIDE_NAME}" \
   "${ROUTER_STANDALONE_CHART}" \
   -f "${REPO_ROOT}/guides/recipes/router/base.values.yaml" \
   -f "${GUIDE_VALUES}" \
+  "${PROFILE_ROUTER_VALUES[@]}" \
   -n "${NAMESPACE}" \
   --version "${ROUTER_CHART_VERSION}"
 

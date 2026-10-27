@@ -95,14 +95,38 @@ def _fetch_budget_per_key_ns() -> int:
 
 #: The kv_transfer_params key naming the peer to fetch from, "host:port".
 FETCH_HINT_KEY = "certus_fetch_from"
+#: Where llm-d's routing sidecar names a peer pod for a cached-prefix pull.
+LLMD_SOURCE_KEY = "remote_kv_source"
+
+_PEERS: "PeerResolver | None" = None
+
+
+def _peer_resolver():
+    global _PEERS
+    if _PEERS is None:
+        from .peers import PeerResolver
+
+        _PEERS = PeerResolver()
+    return _PEERS
 
 
 def _fetch_peer(req_context) -> str | None:
+    """The certus instance to fetch this request's miss run from, or None.
+
+    ``certus_fetch_from`` (set by a client or proxy) names it directly and wins.
+    Otherwise llm-d's sidecar may name a source pod, ``remote_kv_source``; its
+    certus is resolved from the pod's ``certus.ai/transfer-endpoint`` annotation
+    (``peers.py``)."""
     params = getattr(req_context, "kv_transfer_params", None)
     if not params:
         return None
     peer = params.get(FETCH_HINT_KEY)
-    return str(peer) if peer else None
+    if peer:
+        return str(peer)
+    src = params.get(LLMD_SOURCE_KEY)
+    if isinstance(src, dict) and src.get("remote_host"):
+        return _peer_resolver().resolve(str(src["remote_host"]))
+    return None
 
 
 class _Fetch:
@@ -190,6 +214,8 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         # take_events() is drained by vLLM's core scheduler every step whether or
         # not KV events are enabled, so only yield events when they are.
         self._events_enabled = bool(events_enabled)
+        # Store events, emitted by complete_store and drained by take_events.
+        self._pending_events: list = []
         # bounded reverse map: folded u64 -> original OffloadKey, so REMOVED
         # events can carry real keys (the fold is not reversible).
         self._key_reverse: OrderedDict[int, bytes] = OrderedDict()
@@ -694,6 +720,7 @@ class ShmqCertusOffloadingManager(OffloadingManager):
     def complete_store(
         self, keys: Iterable[OffloadKey], req_context=None, success: bool = True
     ) -> None:
+        keys = list(keys)  # read twice: the commit, and the store event
         int_keys = _keys_to_u64s(keys)
         if not int_keys:
             return
@@ -701,6 +728,19 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         expanded = [nk for k in int_keys for nk in self._ns_all(k)]
         if success:
             self._ring.commit_store(expanded)
+            if self._events_enabled:
+                # Tell vLLM's events tracker these blocks are now in certus; it
+                # publishes them as BlockStored (with the token ids it took at
+                # store time, when self_describing_kv_events is on), so a router
+                # indexing KV events learns this pod's certus holds them -- the
+                # decode pod that generated an answer, for one
+                # (peer-selection.md, milestone 3). One event per call, logical
+                # keys, as vLLM's own keys: each W-shard commit is one store.
+                self._pending_events.append(
+                    OffloadingEvent(
+                        keys=keys, medium=offload_event_medium(), removed=False
+                    )
+                )
         else:
             self._ring.abort_store(expanded)
 
@@ -788,6 +828,10 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         if seen:
             # A removed block may still be in the kept lookup answers.
             self._drop_lookup_cache()
+        # Stores first: a block stored and evicted between two drains must read
+        # stored-then-removed.
+        stored, self._pending_events = self._pending_events, []
+        yield from stored
         if removed and self._events_enabled:
             yield OffloadingEvent(
                 keys=removed,
