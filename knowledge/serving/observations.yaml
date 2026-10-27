@@ -20,10 +20,11 @@ observations:
     server: base certus-server (bin/certus-server-base), 4 NVMe drives, --memory-tier-size 12G, --channels 32, --format
     runs:
       count: 6
-      dirs: /home/nara/certus/plans/realistic-bench/results/ldq-out1-gpu0/base-0 .. base-5
+      dirs: (local, not committed; evidence quoted below) /home/nara/certus/plans/realistic-bench/results/ldq-out1-gpu0/base-0 .. base-5
     reproduction:
-      script: /home/nara/certus/plans/realistic-bench/ldq.sh
-      command: "OUTPUT_LEN=1 GPU=0 ./ldq.sh base <run>"
+      script: benchmarks/long-doc-qa/run_one.sh (see RUNBOOK-compare-builds.md)
+      command: "CONNECTOR=stock OUTPUT_LEN=1 GPU=0 run_one.sh --server <unstable certus-server> --connector <unstable checkout> --label base --out <dir>"
+      as_run: "a local predecessor of run_one.sh: OUTPUT_LEN=1 GPU=0 ./ldq.sh base <run>"
       notes: >-
         vLLM image localhost/certus-shmq-connector:vllm0.30.0, OffloadingConnector with
         CertusShmqOffloadingSpec, slab_size_bytes 2097152, --enforce-eager,
@@ -104,11 +105,12 @@ observations:
     server: base certus-server (bin/certus-server-base), 4 NVMe drives, --memory-tier-size 12G, --channels 32, --format
     runs:
       count: 3
-      dirs: /home/nara/certus/plans/realistic-bench/results/ldq-out1-gpu0-BLHNC/base-1 .. base-3
+      dirs: (local, not committed; evidence quoted below) /home/nara/certus/plans/realistic-bench/results/ldq-out1-gpu0-BLHNC/base-1 .. base-3
       note: run dates in vLLM log lines read 10-27 00:40-00:53 (container clock), same session as the LBHNC runs
     reproduction:
-      script: /home/nara/certus/plans/realistic-bench/ldq.sh
-      command: "OUTPUT_LEN=1 GPU=0 KV_LAYOUT=BLHNC ./ldq.sh base <run>"
+      script: benchmarks/long-doc-qa/run_one.sh (see RUNBOOK-compare-builds.md)
+      command: "CONNECTOR=stock KV_LAYOUT=BLHNC OUTPUT_LEN=1 GPU=0 run_one.sh --server <unstable certus-server> --connector <unstable checkout> --label base --out <dir>"
+      as_run: "a local predecessor of run_one.sh: OUTPUT_LEN=1 GPU=0 KV_LAYOUT=BLHNC ./ldq.sh base <run>"
       notes: >-
         Same as the LBHNC observation plus -e VLLM_KV_CACHE_LAYOUT=BLHNC on the vLLM
         container. Same connector code (manager.py sha256 9c0822bc...). FLASH_ATTN backend.
@@ -188,10 +190,11 @@ observations:
     server: base certus-server (unstable a905f89b), 4 NVMe drives, --memory-tier-size 12G, --channels 32, --format
     runs:
       count: 3
-      dirs: /home/nara/certus/plans/realistic-bench/results/ldq-out1-gpu0-conncertus/conn-1 .. conn-3
+      dirs: (local, not committed; evidence quoted below) /home/nara/certus/plans/realistic-bench/results/ldq-out1-gpu0-conncertus/conn-1 .. conn-3
     reproduction:
-      script: /home/nara/certus/plans/realistic-bench/ldq.sh
-      command: "OUTPUT_LEN=1 GPU=0 CONNECTOR_CLASS=certus ./ldq.sh conn <run>"
+      script: benchmarks/long-doc-qa/run_one.sh (see RUNBOOK-compare-builds.md)
+      command: "CONNECTOR=certus OUTPUT_LEN=1 GPU=0 run_one.sh --server <unstable certus-server> --connector <checkout with CertusConnector> --label conn --out <dir>"
+      as_run: "a local predecessor of run_one.sh: OUTPUT_LEN=1 GPU=0 CONNECTOR_CLASS=certus ./ldq.sh conn <run>"
       notes: >-
         No VLLM_KV_CACHE_LAYOUT. The launch config names the Certus connector class
         (kv_connector_module_path certus_shmq_connector.connector), which requests BLHNC from
