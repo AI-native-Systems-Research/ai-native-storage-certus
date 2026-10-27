@@ -1,7 +1,65 @@
 # Certus Kubernetes Deployment Guide
 
 This guide documents the full procedure for setting up a bare-metal Kubernetes
-cluster and deploying the Certus server container image.
+cluster and deploying the Certus server container image. If the cluster is
+already set up (sections 1-3), start with the quick start.
+
+## Quick start: your own certus on your own nodes
+
+Certus runs as two DaemonSets per deployment, one per NUMA domain, on the nodes
+whose `certus.ai/worker` label carries the deployment's value. A developer's
+deployment is a namespace, a label value and an image of their own:
+
+```bash
+export CERTUS_REGISTRY=registry.example.com CERTUS_REPO=my-team-docker-local
+OWNER=scott                                         # your deployment's name
+
+deploy/k8s/certus-nodes.sh list                     # who owns which node
+deploy/k8s/certus-nodes.sh claim "$OWNER" node5     # refuses a node someone else holds
+
+# Build (full-transfer by default; ~30GB, tagged with the repo's short SHA),
+# push, and render the manifests for your namespace and nodes.
+CERTUS_NAMESPACE=certus-$OWNER CERTUS_NODE_SELECTOR_VALUE=$OWNER \
+  deploy/k8s/build-image-and-push.sh
+
+kubectl create namespace certus-$OWNER
+kubectl create secret docker-registry artifactory-creds -n certus-$OWNER \
+    --docker-server="$CERTUS_REGISTRY" --docker-username=<user> --docker-password=<api-key>
+kubectl apply -f deploy/k8s/certus-server-numa.yaml
+kubectl -n certus-$OWNER get pods -o wide           # one numa0 + one numa1 pod per node
+```
+
+Each node then serves `/dev/shm/certus-shmq-numa{0,1}` (the mailboxes vLLM
+attaches to), metrics on 9400/9401, and, with `full-transfer`, the transfer
+endpoint on `<node RoCE IP>:7481` / `:7482`. To stop, delete the namespace and
+release the nodes:
+
+```bash
+kubectl delete namespace certus-$OWNER
+deploy/k8s/certus-nodes.sh release "$OWNER" node5   # or: claim true node5, back to the shared deployment
+```
+
+Running certus **by hand** on a node instead (for a debugger, a branch build, a
+benchmark): claim the node for a name no DaemonSet selects, and k8s leaves it
+alone while you start `certus-server-yaml` yourself.
+
+```bash
+deploy/k8s/certus-nodes.sh claim "$OWNER-manual" node2   # the shared pods exit; nothing replaces them
+```
+
+### Two labels, deliberately independent
+
+| label | set by | selects |
+| --- | --- | --- |
+| `certus.ai/worker=<owner>` | `deploy/k8s/certus-nodes.sh` | which certus deployment's DaemonSets run on the node |
+| `llm-d.ai/instance=<namespace>` | `deploy/llm-d/install.sh` | which llm-d instance's model servers run on the node |
+
+They are separate on purpose: llm-d can run under k8s on nodes whose certus is
+started by hand, or certus can run without llm-d. The consequence to keep in
+mind is that **a vLLM pod offloads into whichever certus serves its node's
+mailbox**, whatever either label says — the connector attaches to the node's
+`/dev/shm/certus-shmq-numa*` path. When you pair an llm-d instance with a certus
+deployment, give them the same nodes; nothing checks that for you.
 
 ## Cluster Overview
 
@@ -404,8 +462,10 @@ creation, so it does not propagate to running pods. That is desirable here — y
 want a deliberate restart between two measurement runs, not a rollout landing
 mid-run.
 
-The image is built `full-remote` either way, so it always carries zyre and the
-RDMA initiator/responder. Flipping this changes cluster membership and nothing
+This switch applies to a `full-remote` image only (4.1.5); the default
+`full-transfer` image has no remote-lookup transport, so it accepts `rl-group` and
+ignores it. A `full-remote` image always carries zyre and the RDMA
+initiator/responder, so flipping this changes cluster membership and nothing
 else, so an A/B pair differs only in remote-lookup rather than in which binary
 is running. Cross-instance fill only pays off when a parallel workload is spread
 across nodes, NUMA domains and GPUs; for a single instance there are no peers
@@ -427,17 +487,18 @@ coming back through a ~30GB image build.
 
 Each deployment gets its own namespace, its own value of the node-selector
 label, and its own image — so two people can test their own certus builds side
-by side:
+by side. Claim and release nodes with `certus-nodes.sh` (4.1.4) rather than
+labelling them by hand:
 
 ```bash
 # the nodes you are testing on
-kubectl label node <your-node-a> <your-node-b> certus.ai/worker=foo --overwrite
+deploy/k8s/certus-nodes.sh claim foo <your-node-a> <your-node-b>
 CERTUS_NAMESPACE=certus-foo CERTUS_NODE_SELECTOR_VALUE=foo \
 CERTUS_RL_GROUP=foo CERTUS_IMAGE=certus CERTUS_TAG=$(git rev-parse --short HEAD) \
   deploy/k8s/build-image-and-push.sh
 
 # a colleague's nodes, their own build, their own group
-kubectl label node <their-node-a> <their-node-b> certus.ai/worker=bar --overwrite
+deploy/k8s/certus-nodes.sh claim bar <their-node-a> <their-node-b>
 CERTUS_NAMESPACE=certus-bar CERTUS_NODE_SELECTOR_VALUE=bar \
 CERTUS_RL_GROUP=bar CERTUS_IMAGE=certus CERTUS_TAG=their-sha \
   deploy/k8s/build-image-and-push.sh
@@ -453,6 +514,60 @@ consumed per instance, and the shm mailbox paths (`/dev/shm/certus-shmq-numa*`)
 and metrics ports (9400/9401) are fixed. Two deployments on one node would
 collide on all four. Partitioning by the label *value* keeps that explicit —
 a node carries exactly one deployment's value.
+
+### 4.1.4 Developer subsets: claiming nodes
+
+A deployment owns the nodes whose `certus.ai/worker` label carries its value.
+`deploy/k8s/certus-nodes.sh` changes that label safely:
+
+```bash
+deploy/k8s/certus-nodes.sh list                    # who owns which node
+deploy/k8s/certus-nodes.sh claim scott node5       # refuses a node someone else holds
+deploy/k8s/certus-nodes.sh claim scott node5 --steal   # ...unless you mean it
+deploy/k8s/certus-nodes.sh release scott node5     # back to no one
+deploy/k8s/certus-nodes.sh claim true node5        # back to the shared deployment
+```
+
+`claim` unlabels the node first and waits until the previous owner's certus pods
+have exited before applying the new label, so two instances never hold one
+node's drives, hugepages, mailboxes or ports at once. The owner, who claimed it
+and when are recorded in the `certus.ai/claimed-by` annotation. The shared
+deployment's value is `true` (namespace `certus`).
+
+A complete private stack on your claimed nodes:
+
+```bash
+deploy/k8s/certus-nodes.sh claim scott node5
+CERTUS_NAMESPACE=certus-scott CERTUS_NODE_SELECTOR_VALUE=scott \
+  deploy/k8s/build-image-and-push.sh
+kubectl create namespace certus-scott    # plus the pull secret, as in 4.3
+kubectl apply -f deploy/k8s/certus-server-numa.yaml
+```
+
+A vLLM pod reaches certus through its node's `/dev/shm` mailbox, so an llm-d
+stack of your own must also be confined to your claimed nodes (select on the
+same `certus.ai/worker` value) or it will offload into whoever owns the node it
+lands on. Use a remote-lookup group (`CERTUS_RL_GROUP`) of your own too, or none.
+
+### 4.1.5 Choosing the build profile
+
+`build-image-and-push.sh --profile <name>` (or `CERTUS_PROFILE`) selects what the
+image runs.
+
+| profile | what it adds | features |
+| --- | --- | --- |
+| `full-transfer` (default) | the certus-to-certus transfer endpoint behind shm-queue `FETCH` | `spdk,rdma` |
+| `full-remote` | remote lookup over zyre + RDMA | `spdk,rdma,remote-lookup-rdma-initiator/rdma,remote-lookup-rdma-responder/rdma` |
+
+`full-remote` is expected to be retired: vLLM's hit decision is the local CHECK,
+which never consults remote lookup, so through the vLLM connector a remote-only
+key always reads as a miss. Explicit fetch is the path vLLM can use.
+
+Any other `profiles/<name>.yaml` needs `CERTUS_FEATURES` set as well. A
+`full-transfer` instance listens on the node's RoCE address (`CERTUS_RDMA_BIND_IP`,
+unset: auto-detected) and `CERTUS_RDMA_PORT` — 7481 for the NUMA-0 instance,
+7482 for NUMA 1, set in `certus-server-numa.yaml.tpl` — and logs its name,
+`ip:port`, at start; that is what a peer's `certus_fetch_from` hint names.
 
 ### 4.2 Build the container image
 

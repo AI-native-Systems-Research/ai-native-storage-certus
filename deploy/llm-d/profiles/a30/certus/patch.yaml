@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 # Name is already prefixed here: this patch lives in an overlay that consumes
-# ../a30 as a resource, so kustomize has applied its namePrefix already.
+# ../agg as a resource, so kustomize has applied its namePrefix already.
 metadata:
   name: optimized-baseline-nvidia-gpu-vllm-decode
 spec:
@@ -26,7 +26,7 @@ spec:
       containers:
         - name: modelserver
           # Replaces ["vllm","serve"]. The container's `args` (model + flags from
-          # ../a30) are passed through untouched as "$@"; the script appends the
+          # ../agg) are passed through untouched as "$@"; the script appends the
           # connector flags and the runtime-derived --kv-transfer-config.
           command: ["/certus/entrypoint-certus.sh"]
           # Safe only because build-image-and-push.sh stamps an immutable
@@ -37,12 +37,12 @@ spec:
             # spec.py reads TENSOR_PARALLEL_SIZE from the ENVIRONMENT (not from
             # --tensor-parallel-size) to size its channel-claim slice, because it
             # must be readable in every vLLM subprocess before vLLM's own
-            # distributed state exists. Keep in sync with the arg in ../a30.
+            # distributed state exists. Keep in sync with the arg in ../agg.
             - name: TENSOR_PARALLEL_SIZE
               value: "1"
             # Per-NUMA layout: one vLLM engine per mailbox, so this is the
             # single-replica claim baseline. These MUST become DP_SIZE=2 with a
-            # distinct DP_RANK per pod if you ever point both GPUs of a two-GPU node at
+            # distinct DP_RANK per pod if you ever point two GPUs of one node at
             # one shared instance -- otherwise both engines compute the same
             # claim slice and can collide on the non-atomic owner-word claim.
             - name: DP_SIZE

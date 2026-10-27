@@ -2,9 +2,9 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 # Layered on top of the plain A30 overlay rather than folded into it, so the
-# deployment can still be rolled out without certus by applying ../a30.
+# deployment can still be rolled out without certus by applying ../agg.
 resources:
-  - ../a30
+  - ../agg
 
 configMapGenerator:
   - name: certus-entrypoint
@@ -12,21 +12,21 @@ configMapGenerator:
       - entrypoint-certus.sh
 
 patches:
-  - path: patch-certus.yaml
+  - path: patch.yaml
 
 # Swap the stock vLLM image for the connector-bearing build published by
-# ../publish-image.sh.
+# ../../../publish-image.sh.
 #
 # newName carries a REGISTRY/REPO placeholder so that no particular site's
-# registry is committed here. ../install.sh rewrites it from CERTUS_REGISTRY and
+# registry is committed here. install.sh rewrites it from CERTUS_REGISTRY and
 # CERTUS_REPO -- the same variables publish-image.sh pushes with -- in the copy
 # it materializes under the llm-d checkout, and fails loudly if they are unset.
 #
 # Pin the exact tag after each build rather than editing it by hand:
-#   (cd a30-certus && kustomize edit set image \
+#   (cd profiles/<profile>/certus && kustomize edit set image \
 #      docker.io/vllm/vllm-openai=<registry>/<repo>/llm-d-vllm-certus:<tag>)
 # Tag scheme: vllm<version>-<certus sha of the source the image was built from>.
 images:
   - name: docker.io/vllm/vllm-openai
     newName: REGISTRY/REPO/llm-d-vllm-certus
-    newTag: vllm0.30.0-45b4f2a3
+    newTag: vllm0.30.0-bbe4e3e1

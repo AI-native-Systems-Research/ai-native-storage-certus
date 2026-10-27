@@ -79,6 +79,7 @@ OP_CLEAR_MEMORY_TIER = 13
 OP_FLUSH_TO_SSD = 14
 OP_GET_IO_STATS = 15
 OP_TOUCH_CHECK = 16
+OP_FETCH = 17
 
 STATUS_OK = 0
 
@@ -87,6 +88,12 @@ STATUS_OK = 0
 CHECK_MISS = 0
 CHECK_RESIDENT = 1
 CHECK_PENDING = 2
+
+# Fetch response status (mirror wire.rs `fetch_status`).
+FETCH_OK = 0
+FETCH_NO_ENDPOINT = 1
+FETCH_BAD_PEER = 2
+FETCH_TOO_MANY = 3
 
 # Eviction-reason encoding in the TakeEvents response (mirror translate.rs).
 REASON_DEMOTED = 0
@@ -251,6 +258,28 @@ def chunk_handle_batches(entries, cap_req: int, log=None):
     if cur:
         chunks.append(cur)
     return chunks
+
+
+def encode_fetch(peer: str, entries: Sequence[tuple[int, int]]) -> bytes:
+    """`{ peer_len:u16, peer:[u8], n:u32, [key:u64, size:u32]*n }` — Fetch."""
+    p = peer.encode("utf-8")
+    out = bytearray(struct.pack("<H", len(p)))
+    out += p
+    out += struct.pack("<I", len(entries))
+    for key, size in entries:
+        out += struct.pack("<QI", key & _U64_MASK, size & 0xFFFFFFFF)
+    return bytes(out)
+
+
+def decode_fetch(payload: bytes, n: int) -> tuple[int, list[bool]]:
+    """`{ status:u8, [started:u8]*n }` → (status, started flags). The flags are
+    present only when status is FETCH_OK; otherwise every key reads not started."""
+    if not payload:
+        return FETCH_NO_ENDPOINT, [False] * n
+    status = payload[0]
+    if status != FETCH_OK:
+        return status, [False] * n
+    return status, [i + 1 < len(payload) and payload[i + 1] != 0 for i in range(n)]
 
 
 def decode_ok_flags(payload: bytes, n: int) -> list[bool]:
@@ -723,6 +752,30 @@ class Ring:
             s if s == CHECK_PENDING or (t and s == CHECK_RESIDENT) else CHECK_MISS
             for t, s in zip(touched, states)
         ]
+
+    # Cleared the first time a server rejects Fetch as an unknown opcode: an old
+    # server cannot fetch, which is the same as one with no endpoint.
+    _fetch_supported = True
+
+    def fetch(self, peer: str, entries: Sequence[tuple[int, int]]) -> tuple[int, list[bool]]:
+        """Fetch ``entries`` ``[(key, size)]`` — a leading miss run, in prefix
+        order — from the transfer endpoint ``peer`` ("host:port") into this
+        server's memory tier. Returns ``(status, started)``. Never waits for the
+        transfer: a started key reads ``CHECK_PENDING`` until it is
+        ``CHECK_RESIDENT`` (fetched) or ``CHECK_MISS``."""
+        entries = list(entries)
+        if not entries:
+            return FETCH_OK, []
+        if not self._fetch_supported:
+            return FETCH_NO_ENDPOINT, [False] * len(entries)
+        status, payload = self.request(OP_FETCH, encode_fetch(peer, entries))
+        if status != STATUS_OK:
+            msg = payload.decode("utf-8", "replace")
+            if msg.startswith(f"unknown opcode {OP_FETCH}"):
+                self._fetch_supported = False
+                return FETCH_NO_ENDPOINT, [False] * len(entries)
+            raise RingError(f"server error (op={OP_FETCH}): {msg}")
+        return decode_fetch(payload, len(entries))
 
     def reserve(self, entries: Sequence[tuple[int, int, int]]) -> list[bool]:
         entries = list(entries)

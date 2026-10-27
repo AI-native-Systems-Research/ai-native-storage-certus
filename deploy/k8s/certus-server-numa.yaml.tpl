@@ -191,6 +191,11 @@ spec:
         # must differ. Same ports the host-mode servers used.
         - name: CERTUS_METRICS_PORT
           value: "9400"
+        # The transfer endpoint's port (full-transfer images; ignored by others).
+        # hostNetwork: the two instances share the node's address, so this
+        # differs too. A peer names this instance "<node RoCE IP>:7481".
+        - name: CERTUS_RDMA_PORT
+          value: "7481"
         - name: CERTUS_NUMA_ID
           value: "0"
         # Resolved from the certus-config ConfigMap, not from this spec -- see the
@@ -419,6 +424,11 @@ spec:
         # must differ. Same ports the host-mode servers used.
         - name: CERTUS_METRICS_PORT
           value: "9401"
+        # The transfer endpoint's port (full-transfer images; ignored by others).
+        # hostNetwork: the two instances share the node's address, so this
+        # differs too. A peer names this instance "<node RoCE IP>:7482".
+        - name: CERTUS_RDMA_PORT
+          value: "7482"
         - name: CERTUS_NUMA_ID
           value: "1"
         # Resolved from the certus-config ConfigMap, not from this spec -- see the

@@ -1,0 +1,87 @@
+# Both roles get the same certus wiring as ../certus/patch.yaml; only the
+# Deployment names differ. pd's args, including its --kv-transfer-config, are
+# kept: the entrypoint wraps them rather than this patch replacing them, so the
+# NIXL settings live in one place (../pd/patch.yaml).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pd-disaggregation-nvidia-gpu-vllm-prefill
+spec:
+  template:
+    spec:
+      # The certus server opens vLLM's CUDA IPC handles: same IPC namespace.
+      hostIPC: true
+      imagePullSecrets:
+        - name: artifactory-creds
+      containers:
+        - name: modelserver
+          # Replaces ["vllm","serve"]; the entrypoint picks the NUMA-local
+          # mailbox, wraps pd's NixlConnector config in a MultiConnector and
+          # adds the flags the offloading connector needs.
+          command: ["/certus/entrypoint-certus.sh"]
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: TENSOR_PARALLEL_SIZE
+              value: "1"
+            - name: DP_SIZE
+              value: "1"
+            - name: DP_RANK
+              value: "0"
+          volumeMounts:
+            - mountPath: /certus
+              name: certus-entrypoint
+            # Host /dev/shm at a separate path, as in ../certus: the pod keeps
+            # its own tmpfs /dev/shm for vLLM's internals.
+            - mountPath: /certus-shm
+              name: certus-mailbox
+      volumes:
+        - name: certus-entrypoint
+          configMap:
+            name: certus-entrypoint
+            defaultMode: 0755
+        - name: certus-mailbox
+          hostPath:
+            path: /dev/shm
+            type: Directory
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pd-disaggregation-nvidia-gpu-vllm-decode
+spec:
+  template:
+    spec:
+      # The certus server opens vLLM's CUDA IPC handles: same IPC namespace.
+      hostIPC: true
+      imagePullSecrets:
+        - name: artifactory-creds
+      containers:
+        - name: modelserver
+          # Replaces ["vllm","serve"]; the entrypoint picks the NUMA-local
+          # mailbox, wraps pd's NixlConnector config in a MultiConnector and
+          # adds the flags the offloading connector needs.
+          command: ["/certus/entrypoint-certus.sh"]
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: TENSOR_PARALLEL_SIZE
+              value: "1"
+            - name: DP_SIZE
+              value: "1"
+            - name: DP_RANK
+              value: "0"
+          volumeMounts:
+            - mountPath: /certus
+              name: certus-entrypoint
+            # Host /dev/shm at a separate path, as in ../certus: the pod keeps
+            # its own tmpfs /dev/shm for vLLM's internals.
+            - mountPath: /certus-shm
+              name: certus-mailbox
+      volumes:
+        - name: certus-entrypoint
+          configMap:
+            name: certus-entrypoint
+            defaultMode: 0755
+        - name: certus-mailbox
+          hostPath:
+            path: /dev/shm
+            type: Directory
