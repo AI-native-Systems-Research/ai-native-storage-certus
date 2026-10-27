@@ -48,6 +48,43 @@ events off, so the router cannot see what decode generated; everything else iden
 - GPU prefix-cache hits are identical in both arms: prefill's own GPU cache holds the
   prompts it computed; certus supplies exactly the part it never saw, the answers.
 
+## 2026-10-26: the same, with NIXL GPU to GPU over RDMA
+
+Identical setup and workload, but `pd-certus-rdma`: NIXL with `kv_buffer_device: cuda`
+over UCX RC verbs on the `roce` secondary network (ipvlan, GPUDirect). The prefill->decode
+handoff is RDMA; certus's decode->prefill fetch is unchanged (its own RDMA endpoint).
+Results in `results/2026-10-26-rdma-fetch-{on,off}/`.
+
+| | TCP, fetch on | TCP, fetch off | RDMA, fetch on | RDMA, fetch off |
+|---|---|---|---|---|
+| turns (errors) | 60 (0) | 60 (0) | 60 (0) | 60 (0) |
+| router `pulled` / blocks fetched | 48 / 3 299 | 0 / 0 | 48 / **3 301** | 0 / 0 |
+| ... served as fetched / misses | 3 092 / 133 | - | **3 301** / 132 | - |
+| prefill external prefix-cache hit rate | 88 % | 0 % | **94 %** (52 816 / 55 974) | 0 % |
+| TTFT, later turns: median | 1.93 s | 2.16 s | **0.20 s** | 0.33 s |
+| TTFT, later turns: mean | 2.03 s | 2.40 s | **0.40 s** | 0.53 s |
+| TTFT median by turn 0-4 | 0.25 / 2.01 / 0.49 / 1.44 / 1.30 | 0.26 / 2.45 / 1.37 / 1.74 / 1.74 | 0.14 / 0.18 / 0.22 / 0.20 / 0.20 | 0.12 / 0.31 / 0.31 / 0.36 / 0.37 |
+| end-to-end latency, median | 27.1 s | 27.6 s | 25.9 s | 25.9 s |
+| wall time | 549 s | 552 s | 523 s | 523 s |
+
+"Later turns" are turns 1-4, the ones that can reuse a previous answer (`compare_arms.py`).
+
+**Reading it.**
+- **The handoff was most of TTFT.** Moving NIXL from TCP (~107 MB/s) to GPUDirect RDMA
+  cuts TTFT about 6-10x in both arms; what is left is prefill's compute plus decode's pull
+  of the prompt's KV (up to ~0.7 GB at turn 4, at ~9 GB/s).
+- **With the handoff out of the way, the fetch shows.** Fetch on vs off: median TTFT
+  0.20 s vs 0.33 s (-38 %), mean 0.40 s vs 0.53 s (-25 %). Under TCP the same fetch was
+  -11 % / -16 %, diluted by the transfer both arms paid.
+- **Fetch on, TTFT stays flat across turns** (~0.20 s); fetch off, it climbs (0.31 ->
+  0.37 s). Either arm's prompt, and so the handoff, grows each turn; why only the off arm
+  climbs is not separated here (prefill recomputes ~1 100 tokens of answer per turn in
+  both cases).
+- Every block fetched was served as fetched (3 301 / 3 301), against 3 092 of 3 299 under
+  TCP. The 132 misses (~2.8 per fetch) are not explained yet.
+- End-to-end latency is generating 1 100 tokens and is the same in all four arms within
+  noise; the RDMA arms are ~1.5 s shorter because of the handoff.
+
 ## 2026-10-26: GPUDirect RDMA bandwidth, node2 <-> node5
 
 `gdr_bw.sh`, 1 MiB messages, 4 QPs, mlx5_0 (200 Gb/s RoCE v2), `nvidia-peermem` loaded.
