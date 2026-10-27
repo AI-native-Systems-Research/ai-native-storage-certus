@@ -409,6 +409,23 @@ if [[ "$HAVE_NVME" != 1 ]]; then
 elif [[ -z "$FIO" ]]; then
   md "_fio not found — skipped._"
 else
+  # Pick an ioengine that actually WORKS here, by test-running a 1-op probe — not
+  # by --enghelp, which lists engines that fail at runtime (libaio may be a missing
+  # plugin; io_uring may be disabled via kernel.io_uring_disabled on hardened hosts).
+  # Prefer async (libaio/io_uring) for true QD>1; fall back to psync, which needs no
+  # plugin or special syscall and still gives the sequential bandwidth ceiling.
+  probe_eng() {
+    $SUDO "$FIO" --name=probe --ioengine="$1" --filename=/dev/null --rw=read \
+         --bs=4k --size=4k --loops=1 >/dev/null 2>&1
+  }
+  FIO_ENG=""
+  for cand in libaio io_uring psync; do
+    if probe_eng "$cand"; then FIO_ENG="$cand"; break; fi
+  done
+  FIO_ENG="${FIO_ENG:-psync}"
+  [[ "$FIO_ENG" == psync ]] && FIO_QD=1 || FIO_QD=32   # psync has no real queue depth
+  log "fio ioengine: $FIO_ENG (iodepth $FIO_QD)"
+  md "fio ioengine: \`$FIO_ENG\` (iodepth $FIO_QD)"; md ""
   # Workloads: read always; write only on explicit opt-in.
   FIO_RW=(read)
   [[ "$FIO_WRITE" == 1 ]] && FIO_RW+=(write)
@@ -417,7 +434,7 @@ else
     md ""
     warn "fio WRITE enabled (--fio-write): this overwrites raw data on ${FIO_DEVS[*]}"
   fi
-  md "Devices: \`${FIO_DEVS[*]}\`  |  block sizes: 4k 64k 128k 1M  |  QD 32  |  ${FIO_RUNTIME}s each"
+  md "Devices: \`${FIO_DEVS[*]}\`  |  block sizes: 4k 64k 128k 1M  |  QD ${FIO_QD}  |  ${FIO_RUNTIME}s each"
   md ""
   md "| device | rw | block | GB/s | IOPS | avg lat us |"
   md "|--------|----|------:|-----:|-----:|-----------:|"
@@ -427,7 +444,7 @@ else
         tag="fio_$(basename "$dev")_${rw}_${bs}"
         # --direct=1 bypasses page cache (raw device ceiling); JSON for clean parse.
         if $SUDO "$FIO" --name="$tag" --filename="$dev" --rw="$rw" --bs="$bs" \
-              --direct=1 --ioengine=libaio --iodepth=32 --runtime="$FIO_RUNTIME" \
+              --direct=1 --ioengine="$FIO_ENG" --iodepth="$FIO_QD" --runtime="$FIO_RUNTIME" \
               --time_based --output-format=json > "$RAW/${tag}.json" 2>"$RAW/${tag}.err"; then
           # Parse one job's read or write block from fio JSON (stdlib only).
           read -r gbps iops lat < <(python3 - "$RAW/${tag}.json" "$rw" <<'PY'
