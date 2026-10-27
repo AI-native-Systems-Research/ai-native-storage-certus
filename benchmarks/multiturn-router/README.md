@@ -111,6 +111,42 @@ Results in `results/2026-10-26-rdma-fetch-{on,off}/`.
 - End-to-end latency is generating 1 100 tokens and is the same in all four arms within
   noise; the RDMA arms are ~1.5 s shorter because of the handoff.
 
+## 2026-10-27: how often aggregated serving moves a session (peer selection M4?)
+
+Peer selection milestone 4 -- a routing sidecar in front of aggregated pods, so a session
+the router moves to another pod fetches its prefix from the old pod's certus -- was to be
+built only if moves are frequent. Measured on llm-d's optimized-baseline router
+(`prefix-cache-affinity-filter` + `token-load-scorer`), 3 aggregated pods (2 on node2,
+1 on node5), certus offload on, Qwen3-8B, 12 ShareGPT sessions x 5 turns. A move is a
+later turn served by a different pod than the turn before it. Results and scripts in
+`results/2026-10-27-agg-session-moves/`.
+
+| run | load | turn-0 prompt | later turns | moves | at turn |
+|---|---|---|---|---|---|
+| serial, short system text | 1 turn at a time, 300-token answers | 34-149 tokens | 48 | **8** | all turn 1 |
+| serial, ~600-token system text | same | 629-744 tokens | 48 | **0** | - |
+| concurrent, as the arms above | 3 sessions at a time, 1 100-token answers | 44-60 tokens | 48 | **3** | all turn 1 |
+
+- **Once a session has stayed one turn, it never moved again**: no move at turn 2, 3 or 4
+  in any run. Every move was at turn 1, and only when turn 0's prompt was short.
+- A likely reading, not checked in the router's source: a turn-0 prompt this short fills
+  few or no cache blocks the affinity filter can match, so turn 1 is placed by load
+  alone; by turn 1 the prompt carries turn 0's answer and the affinity holds. With a
+  ~600-token system prompt -- what real deployments send -- there were no moves at all.
+- **A move at turn 1 costs little to recompute**: what the old pod holds is turn 0, under
+  ~1 300 tokens here. The fetch pays where the shared prefix is long, which is exactly
+  where the affinity already keeps the session in place.
+- So at this scale **M4 is not worth a proxy hop on every aggregated request**. Load high
+  enough for the `token-load-scorer` to override affinity was not tried (3 concurrent
+  sessions on 3 A30s); that is the case to measure before revisiting.
+- Attribution: serial runs read each pod's `vllm:request_success_total` around each turn
+  (`session_moves.py`); the concurrent run matched the EPP's picks (`--v=4`, followed live
+  since the log rotates within minutes) to the driver's send times in order
+  (`moves_from_epp.py`). Five send pairs were under 50 ms apart -- two of them the three
+  sessions' simultaneous turn 0 -- so a pairing there could swap two sessions' pods;
+  all three moves involve sessions 0-2's turn 1, so the concurrent count is 3 +/- 2. The
+  serial runs have no such ambiguity.
+
 ## 2026-10-26: GPUDirect RDMA bandwidth, node2 <-> node5
 
 `gdr_bw.sh`, 1 MiB messages, 4 QPs, mlx5_0 (200 Gb/s RoCE v2), `nvidia-peermem` loaded.

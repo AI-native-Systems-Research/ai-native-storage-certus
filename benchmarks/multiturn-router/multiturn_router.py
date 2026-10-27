@@ -102,15 +102,19 @@ def run_session(i, conv, a, tok, out, lock, results):
             break
         body = {"model": a.model, "prompt": prompt, "max_tokens": a.answer_tokens,
                 "temperature": 0, "ignore_eos": True}
+        # Send time (wall clock), so a turn can be matched to the router's log
+        # of the pod it picked; the gateway replaces any client request id.
+        sent = time.time()
         try:
             ans, ttft, total = stream(a.url.rstrip("/") + "/v1/completions", body, a.timeout, headers)
         except Exception as e:  # noqa: BLE001 - a failed turn ends its session, not the run
-            rec = {"session": i, "turn": turn, "error": str(e)}
+            rec = {"session": i, "turn": turn, "sent": round(sent, 4), "error": str(e)}
             with lock:
                 out.write(json.dumps(rec) + "\n")
                 out.flush()
             return
-        rec = {"session": i, "turn": turn, "prompt_tokens": len(prompt), "answer_tokens": len(ans),
+        rec = {"session": i, "turn": turn, "sent": round(sent, 4),
+               "prompt_tokens": len(prompt), "answer_tokens": len(ans),
                "ttft_s": round(ttft or total, 4), "latency_s": round(total, 4)}
         with lock:
             out.write(json.dumps(rec) + "\n")
