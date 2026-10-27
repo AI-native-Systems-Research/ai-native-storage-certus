@@ -1,0 +1,33 @@
+# Containerfile for profile-hardware-ceiling.sh — dependency/detection paths.
+#
+# Carries the userspace deps that keep failing on the read-only bootc host:
+#   python3.12 + py-cpuinfo  (Step 2, check-amd-proc-features.py needs >=3.12)
+#   fio, nvme-cli            (Step 3, inspect-nvme.py shells out to these)
+#   numactl + gcc + make     (Path 7 memcpy_bench build; NUMA-aware runs)
+#   pciutils, kmod           (lspci/lsmod detection)
+#
+# Deliberately does NOT include CUDA, SPDK, or vfio tooling. nvcc absent, so the
+# GPU benches skip; run with --no-nvme (no vfio rebind). Covers detection +
+# cpu-features + nvme-inspect (fio) + host-RAM memcpy. For the GPU H2D/D2H/D2D
+# benches as well, use Containerfile.cuda via `run-in-container.sh --gpu`.
+#
+# Base: Rocky 9 == RHEL 9.6 ABI (matches the host, and no RH subscription).
+FROM docker.io/rockylinux/rockylinux:9
+
+# EPEL not required for any of these; all live in BaseOS/AppStream.
+RUN dnf -y install \
+        python3.12 python3.12-pip \
+        fio nvme-cli numactl numactl-libs numactl-devel \
+        gcc make pciutils kmod util-linux \
+    && dnf clean all
+
+# py-cpuinfo for the 3.12 interpreter specifically (check-amd-proc-features.py
+# imports `cpuinfo`). Pinned so the image is reproducible.
+RUN python3.12 -m pip install --no-cache-dir py-cpuinfo==9.0.0
+
+# The script resolves python3.12 by name; make sure it is on PATH as such.
+# (Rocky installs it as /usr/bin/python3.12 already — this is just explicit.)
+ENV PATH=/usr/bin:$PATH
+
+WORKDIR /work
+ENTRYPOINT ["/bin/bash"]
