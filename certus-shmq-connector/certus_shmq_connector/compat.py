@@ -187,6 +187,14 @@ FEATURES: dict[str, "callable"] = {
     # deltas are intentionally NOT represented here (this connector is a top-level
     # OffloadingSpec, not a SecondaryTierManager) — see vllm-offloading-interface-v030.yaml.
     "kvcache_layout_field": lambda v: v >= (0, 30),  # verified @0.30 (present); conservative floor
+    # 0.29 (PR #51718) replaced the per-connector cross-layer opt-in with one
+    # model-wide ``KVCacheLayout`` (LBHNC, BLHNC, ...), resolved from
+    # VLLM_KV_CACHE_LAYOUT, else the connector class's
+    # ``get_required_kvcache_layout()``, else the backends' default — and a
+    # connector request no backend supports is dropped with a warning. Before
+    # 0.29 that hook took legacy names ("HND"/"NHD") and block-outermost layouts
+    # did not exist, so CertusConnector requests BLHNC only here.
+    "kvcache_layout_enum": lambda v: v >= (0, 29),  # verified @0.30 (vllm/v1/kv_cache_layout.py)
 }
 
 
@@ -204,6 +212,7 @@ class Caps:
     lookup_returns_enum: bool
     canonical_kv_caches: bool
     kvcache_layout_field: bool
+    kvcache_layout_enum: bool
 
 
 def caps_for(v: tuple[int, int]) -> Caps:
