@@ -479,7 +479,7 @@ impl Server {
     ///
     /// [`Server::create`] freshly zeroes the entire region (including every
     /// channel's `seq` word) before publishing `magic`, and clients only ever
-    /// publish `seq >= 1` (see [`Client::next_seq`], which skips 0). So the
+    /// publish `seq >= 1` (see `Client::next_seq`, which skips 0). So the
     /// correct baseline is a constant all-zeros — a value that can never collide
     /// with a real published seq.
     ///
