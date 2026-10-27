@@ -280,10 +280,6 @@ request, 4 in flight, full tier. Flags given explicitly override the preset's va
 still required. `knowledge/serving/check.py` fails if the preset's block size, pieces
 per block or blocks per load job drift from that observation.
 
-These flags exist only in this benchmark. `cputier-connector-bench` has no
-counterpart yet, so a side-by-side comparison of the two backends uses the default
-cold pass.
-
 ```bash
 # vLLM-like cold load on a 4 GiB tier (eviction threshold 0.8)
 python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
