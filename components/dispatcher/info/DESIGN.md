@@ -117,13 +117,14 @@ If the entry is still in staging, the staging buffer is copied directly to GPU w
 
 ### Drive Selection
 
-Deterministic striping by cache key:
+Store-time round-robin placement, recorded with the entry:
 
 ```
-drive_index = key % num_drives
+drive = next_store_drive(num_drives)   // per-thread cursor, seeded from a global atomic
+loc   = (drive << 56) | extent_offset   // drive 0 encodes to the raw offset
 ```
 
-Both reads and writes use the same mapping, ensuring a key always targets the same drive.
+The drive is chosen when a store commits (`copy_gpu_to_memory_completed`, `schedule_write_through`). The shmq CommitStore handler commits one batch's keys back to back on one worker thread, so a batch of `k` keys gets consecutive drives (at most ⌈k/N⌉ per drive). Write-through writes the whole object to that drive's extent and records `loc` via `convert_to_storage`; the dispatch map carries it opaquely. Every read, free and evict site decodes `(drive, offset)` from `loc` rather than recomputing the drive from the key. At restart, recovery re-derives the drive from which drive's extent manager lists the extent. Objects stay whole on one drive.
 
 ### I/O Segmentation (MDTS)
 

@@ -792,6 +792,160 @@ impl std::fmt::Debug for DriveWork<'_> {
     }
 }
 
+/// Per-call span telemetry for [`scatter_gather_multi_drive_zero_copy`].
+///
+/// On only when `OPTIMIZER_ARTIFACTS_DIR` is set (read once): each call then
+/// appends one JSON line to `$OPTIMIZER_ARTIFACTS_DIR/cold_sg_spans.<pid>.jsonl`
+/// through a process-wide buffered writer flushed every 32 lines. When unset,
+/// [`sg_spans::start`] returns `None` and the poll loop only checks the `Option`.
+mod sg_spans {
+    use std::fs::File;
+    use std::io::{BufWriter, Write};
+    use std::sync::{Mutex, OnceLock};
+    use std::time::Instant;
+
+    const FLUSH_EVERY: u32 = 32;
+
+    struct Sink {
+        out: BufWriter<File>,
+        pending: u32,
+    }
+
+    fn sink() -> Option<&'static Mutex<Sink>> {
+        static SINK: OnceLock<Option<Mutex<Sink>>> = OnceLock::new();
+        SINK.get_or_init(|| {
+            let dir = std::env::var_os("OPTIMIZER_ARTIFACTS_DIR")?;
+            let path = std::path::Path::new(&dir)
+                .join(format!("cold_sg_spans.{}.jsonl", std::process::id()));
+            let file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .ok()?;
+            Some(Mutex::new(Sink {
+                out: BufWriter::new(file),
+                pending: 0,
+            }))
+        })
+        .as_ref()
+    }
+
+    #[derive(Default)]
+    struct Drive {
+        objects: usize,
+        bytes: usize,
+        cmds: usize,
+        window_cmds: usize,
+        first_completion_us: Option<u64>,
+        last_completion_us: Option<u64>,
+        first_obj_done_us: Option<u64>,
+    }
+
+    pub(super) struct Spans {
+        t0: Instant,
+        drives: Vec<Drive>,
+        h2d_issue_us: Vec<u64>,
+        loop_end_us: u64,
+    }
+
+    /// Start a span record, or `None` when telemetry is off.
+    pub(super) fn start(num_drives: usize, num_jobs: usize) -> Option<Spans> {
+        sink()?;
+        Some(Spans {
+            t0: Instant::now(),
+            drives: (0..num_drives).map(|_| Drive::default()).collect(),
+            h2d_issue_us: Vec::with_capacity(num_jobs),
+            loop_end_us: 0,
+        })
+    }
+
+    impl Spans {
+        fn now_us(&self) -> u64 {
+            u64::try_from(self.t0.elapsed().as_micros()).unwrap_or(u64::MAX)
+        }
+
+        pub(super) fn set_drive(
+            &mut self,
+            d: usize,
+            objects: usize,
+            bytes: usize,
+            cmds: usize,
+            window_cmds: usize,
+        ) {
+            let dr = &mut self.drives[d];
+            dr.objects = objects;
+            dr.bytes = bytes;
+            dr.cmds = cmds;
+            dr.window_cmds = window_cmds;
+        }
+
+        pub(super) fn completion(&mut self, d: usize, obj_done: bool) {
+            let t = self.now_us();
+            let dr = &mut self.drives[d];
+            dr.first_completion_us.get_or_insert(t);
+            dr.last_completion_us = Some(t);
+            if obj_done {
+                dr.first_obj_done_us.get_or_insert(t);
+            }
+        }
+
+        pub(super) fn h2d_issue(&mut self) {
+            let t = self.now_us();
+            self.h2d_issue_us.push(t);
+        }
+
+        pub(super) fn loop_end(&mut self) {
+            self.loop_end_us = self.now_us();
+        }
+
+        /// Write the line (after the final stream sync).
+        pub(super) fn finish(self) {
+            let Some(sink) = sink() else { return };
+            let final_sync_end_us = self.now_us();
+            let opt = |v: Option<u64>| v.map_or_else(|| "null".to_string(), |x| x.to_string());
+            let cutoff = self.loop_end_us.saturating_sub(400);
+            let h2d_last400_count = self.h2d_issue_us.iter().filter(|&&t| t >= cutoff).count();
+            let drives: Vec<String> = self
+                .drives
+                .iter()
+                .map(|d| {
+                    format!(
+                        "{{\"objects\":{},\"bytes\":{},\"cmds\":{},\"window_cmds\":{},\
+                         \"first_completion_us\":{},\"last_completion_us\":{},\
+                         \"first_obj_done_us\":{}}}",
+                        d.objects,
+                        d.bytes,
+                        d.cmds,
+                        d.window_cmds,
+                        opt(d.first_completion_us),
+                        opt(d.last_completion_us),
+                        opt(d.first_obj_done_us),
+                    )
+                })
+                .collect();
+            let line = format!(
+                "{{\"num_drives\":{},\"loop_end_us\":{},\"final_sync_end_us\":{},\
+                 \"first_h2d_issue_us\":{},\"last_h2d_issue_us\":{},\"h2d_last400_count\":{},\
+                 \"drives\":[{}]}}\n",
+                self.drives.len(),
+                self.loop_end_us,
+                final_sync_end_us,
+                opt(self.h2d_issue_us.first().copied()),
+                opt(self.h2d_issue_us.last().copied()),
+                h2d_last400_count,
+                drives.join(","),
+            );
+            let Ok(mut s) = sink.lock() else { return };
+            let _ = s.out.write_all(line.as_bytes());
+            s.pending += 1;
+            if s.pending >= FLUSH_EVERY {
+                s.pending = 0;
+                let _ = s.out.flush();
+            }
+        }
+    }
+}
+
 /// Multi-drive scatter-gather SSD→GPU zero-copy transfer.
 ///
 /// Fans out NVMe reads to all drives simultaneously and fans in completions
@@ -828,6 +982,8 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
     if num_drives == 0 {
         return all_results;
     }
+
+    let mut spans = sg_spans::start(num_drives, drive_works.iter().map(|dw| dw.jobs.len()).sum());
 
     struct DriveSegments {
         objs: Vec<ObjSegs>,
@@ -913,6 +1069,13 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
             let reduce = remaining.min(*qd - 1);
             *qd -= reduce;
             remaining -= reduce;
+        }
+    }
+
+    if let Some(sp) = spans.as_mut() {
+        for (d, (ds, dw)) in per_drive.iter().zip(drive_works).enumerate() {
+            let bytes = dw.jobs.iter().map(|j| j.total_bytes).sum();
+            sp.set_drive(d, dw.jobs.len(), bytes, ds.total_segments, per_drive_qd[d]);
         }
     }
 
@@ -1037,6 +1200,11 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
                     obj_remaining[d][obj_idx] -= 1;
                 }
 
+                if let Some(sp) = spans.as_mut() {
+                    let obj_done = obj_remaining[d].get(obj_idx) == Some(&0);
+                    sp.completion(d, obj_done);
+                }
+
                 // Resubmit next segment for this drive BEFORE H2D (preserve overlap).
                 if !stop_submitting[d] && submitted[d] < ds.work.len() {
                     let (next_obj, next_seg) = ds.work[submitted[d]];
@@ -1084,6 +1252,9 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
                         )));
                     }
                     t_gpu_ns += tg.elapsed().as_nanos() as u64;
+                    if let Some(sp) = spans.as_mut() {
+                        sp.h2d_issue();
+                    }
 
                     stream_idx += 1;
                 }
@@ -1148,6 +1319,10 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
         }
     }
 
+    if let Some(sp) = spans.as_mut() {
+        sp.loop_end();
+    }
+
     // Mark unsubmitted work as failed.
     for d in 0..num_drives {
         let ds = &per_drive[d];
@@ -1166,6 +1341,9 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
     let _ = gpu.stream_synchronize(streams[1]);
     let t_final_sync_ns = ts_final.elapsed().as_nanos() as u64;
     t_sync_ns += t_final_sync_ns;
+    if let Some(sp) = spans {
+        sp.finish();
+    }
 
     if let Some(m) = metrics {
         m.record_cold_ssd_read(0, t_recv_ns as f64 / 1000.0);
