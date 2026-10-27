@@ -1,0 +1,23 @@
+# Applied 2026-10-26 to the cluster's existing NicClusterPolicy (NVIDIA network
+# operator v23.4.0, which until then ran only the RDMA shared device plugin), as
+# a merge patch: it installs Multus, the reference CNI plugins and whereabouts on
+# every node. Flannel stays the primary network; a pod sees the RoCE network
+# only if it asks for it (roce-network.yaml). Images are the operator chart's
+# own defaults for this version.
+#
+#   kubectl patch nicclusterpolicy nic-cluster-policy --type merge \
+#     --patch-file deploy/k8s/rdma-network/nicclusterpolicy-secondary-network.yaml
+spec:
+  secondaryNetwork:
+    multus:
+      repository: ghcr.io/k8snetworkplumbingwg
+      image: multus-cni
+      version: v3.9.3
+    cniPlugins:
+      repository: ghcr.io/k8snetworkplumbingwg
+      image: plugins
+      version: v1.2.0-amd64
+    ipamPlugin:
+      repository: ghcr.io/k8snetworkplumbingwg
+      image: whereabouts
+      version: v0.6.1-amd64
