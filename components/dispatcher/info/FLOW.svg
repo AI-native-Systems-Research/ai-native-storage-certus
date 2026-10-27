@@ -214,7 +214,7 @@
   <g transform="translate(780, 720)">
     <rect width="250" height="35" fill="#f1f5f9" stroke="#cbd5e1" rx="4"/>
     <text x="125" y="15" text-anchor="middle" font-size="10" font-weight="600" fill="#475569">Drive Selection</text>
-    <text x="125" y="29" text-anchor="middle" font-size="10" fill="#64748b" font-family="monospace">drive_idx = key % num_drives</text>
+    <text x="125" y="29" text-anchor="middle" font-size="10" fill="#64748b" font-family="monospace">drive = loc >> 56 (round-robin at store)</text>
   </g>
 
   <!-- Eviction annotation -->

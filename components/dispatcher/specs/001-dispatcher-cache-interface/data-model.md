@@ -39,7 +39,7 @@
 - **Fields**:
   - `key: CacheKey` — cache entry to write
   - `size: u32` — data size in bytes
-  - `device_index: usize` — which data device to target
+  - `device_index: usize` — which data device to target. Chosen round-robin per committing thread by `next_store_drive` and recorded in the entry's SSD location by the write-through (spec FR-039 step (4)) *(Sync 2026-10-27, commit `4bb69289`; previously a splitmix64 hash of the key)*
 - **Lifecycle**: Created by populate after staging copy completes; consumed by background writer; discarded on success or failure
 
 ### PendingWrite

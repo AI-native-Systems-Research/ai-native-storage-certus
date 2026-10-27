@@ -686,6 +686,239 @@ def test_take_events_removed_drops_lookup_cache():
     assert _calls_of(ring, "check_states") == [[U(1)]]
 
 
+# ── manager: commit-group Check on a lookup miss ──
+
+
+def _commit(mgr, keys):
+    mgr.complete_store(keys, success=True)
+
+
+def test_commit_group_one_check_answers_whole_group(clock):
+    ring = FakeRing()
+    for n in range(1, 17):
+        ring.exists[U(n)] = True
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    _commit(mgr, [K(n) for n in range(1, 17)])
+    ring.calls.clear()
+    assert all(mgr.lookup(K(n)) is True for n in range(1, 17))
+    assert _calls_of(ring, "check_states") == [[U(n) for n in range(1, 17)]]
+
+
+def test_commit_group_looked_up_key_first_exactly_once(clock):
+    ring = FakeRing()
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    _commit(mgr, [K(1), K(2), K(3)])
+    ring.calls.clear()
+    assert mgr.lookup(K(2)) is False
+    assert _calls_of(ring, "check_states") == [[U(2), U(1), U(3)]]
+
+
+def test_commit_group_pending_sibling_reads_as_miss(clock):
+    from certus_shmq_connector.ring import CHECK_PENDING
+
+    ring = FakeRing()
+    for n in range(1, 5):
+        ring.exists[U(n)] = True
+    ring.states[U(2)] = CHECK_PENDING
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    _commit(mgr, [K(n) for n in range(1, 5)])
+    ring.calls.clear()
+    assert mgr.lookup(K(1)) is True
+    assert mgr.lookup(K(2)) is False
+    assert mgr.lookup(K(3)) is True
+    assert len(_calls_of(ring, "check_states")) == 1
+
+
+def test_commit_group_w2_expands_shards_and_ands_ranks(clock):
+    from certus_shmq_connector.mediums import ns_key
+
+    w = 2
+    ring = FakeRing()
+    for n in (1, 2, 3):
+        for r in range(w):
+            ring.exists[ns_key(U(n), r, w)] = True
+    ring.exists[ns_key(U(3), 1, w)] = False  # one shard of K3 missing
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096, world_size=w)
+    _commit(mgr, [K(1), K(2), K(3)])
+    ring.calls.clear()
+    assert mgr.lookup(K(1)) is True
+    assert mgr.lookup(K(2)) is True
+    assert mgr.lookup(K(3)) is False
+    assert _calls_of(ring, "check_states") == [
+        [ns_key(U(n), r, w) for n in (1, 2, 3) for r in range(w)]
+    ]
+
+
+def test_commit_group_answers_expire_after_ttl(clock):
+    ring = FakeRing()
+    for n in (1, 2, 3):
+        ring.exists[U(n)] = True
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    _commit(mgr, [K(1), K(2), K(3)])
+    ring.calls.clear()
+    assert mgr.lookup(K(1)) is True
+    ring.exists[U(2)] = False  # evicted after the group Check
+    clock.advance_us(1000)  # exactly the TTL old: still used
+    assert mgr.lookup(K(3)) is True
+    clock.advance_us(1)
+    assert mgr.lookup(K(2)) is False  # not the stale True
+    assert _calls_of(ring, "check_states") == [
+        [U(1), U(2), U(3)],
+        [U(2), U(1), U(3)],
+    ]
+
+
+def test_commit_group_fresh_maps_keep_older_fill_time(clock):
+    # A group Check into fresh touch-filled maps keeps their older fill time.
+    ring = FakeRing()
+    for n in (1, 2, 9):
+        ring.exists[U(n)] = True
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    _commit(mgr, [K(1), K(2)])
+    mgr.touch([K(9)])
+    filled_at = mgr._lookup_cache_filled_at_ns
+    clock.advance_us(600)
+    assert mgr.lookup(K(1)) is True
+    assert mgr._lookup_cache_filled_at_ns == filled_at
+    clock.advance_us(500)  # 1100 us after the touch: everything expired
+    ring.calls.clear()
+    assert mgr.lookup(K(2)) is True
+    assert _calls_of(ring, "check_states") == [[U(2), U(1)]]
+    assert mgr._lookup_cache_filled_at_ns == clock.now_ns
+
+
+def test_commit_group_answers_dropped_by_prepare_store_and_removed(clock):
+    ring = FakeRing()
+    for n in (1, 2, 3):
+        ring.exists[U(n)] = True
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096, events_enabled=True)
+    _commit(mgr, [K(1), K(2), K(3)])
+    assert mgr.lookup(K(1)) is True
+    mgr.prepare_store([K(7)])
+    assert mgr._lookup_cache == {} and mgr._raw_lookup_cache == {}
+    ring.calls.clear()
+    assert mgr.lookup(K(2)) is True
+    assert _calls_of(ring, "check_states") == [[U(2), U(1), U(3)]]
+
+    ring.events = [(U(3), REASON_REMOVED)]
+    ring.exists[U(3)] = False
+    list(mgr.take_events())
+    assert mgr._lookup_cache == {} and mgr._raw_lookup_cache == {}
+    ring.calls.clear()
+    assert mgr.lookup(K(3)) is False
+    assert _calls_of(ring, "check_states") == [[U(3), U(1), U(2)]]
+
+
+def test_commit_group_answers_replaced_by_following_touch(clock):
+    ring = FakeRing()
+    for n in (1, 2):
+        ring.exists[U(n)] = True
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    _commit(mgr, [K(1), K(2)])
+    assert mgr.lookup(K(1)) is True
+    mgr.touch([K(5)])
+    assert set(mgr._lookup_cache) == {U(5)}
+    assert set(mgr._raw_lookup_cache) == {K(5)}
+
+
+def test_commit_group_ttl_zero_stays_single_key(monkeypatch, clock):
+    monkeypatch.setenv("CERTUS_LOOKUP_CACHE_TTL_US", "0")
+    ring = FakeRing()
+    for n in (1, 2, 3):
+        ring.exists[U(n)] = True
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    _commit(mgr, [K(1), K(2), K(3)])
+    ring.calls.clear()
+    assert [mgr.lookup(K(n)) for n in (1, 2, 3)] == [True, True, True]
+    assert _calls_of(ring, "check_states") == [[U(1)], [U(2)], [U(3)]]
+    assert mgr._lookup_cache == {} and mgr._raw_lookup_cache == {}
+
+
+def test_commit_group_absent_or_single_key_commit_is_single_check(clock):
+    ring = FakeRing()
+    ring.exists[U(5)] = True
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    _commit(mgr, [K(5)])
+    assert len(mgr._commit_groups) == 0
+    ring.calls.clear()
+    assert mgr.lookup(K(5)) is True
+    assert mgr.lookup(K(50)) is False
+    assert _calls_of(ring, "check_states") == [[U(5)], [U(50)]]
+    assert mgr._lookup_cache == {} and mgr._raw_lookup_cache == {}
+
+
+def test_commit_group_failed_store_records_nothing_and_drops_record(clock):
+    ring = FakeRing()
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    mgr.complete_store([K(7), K(8)], success=False)
+    assert len(mgr._commit_groups) == 0
+    _commit(mgr, [K(n) for n in range(1, 5)])
+    mgr.complete_store([K(1), K(2)], success=False)
+    assert set(mgr._commit_groups) == {U(3), U(4)}
+    ring.calls.clear()
+    mgr.lookup(K(1))
+    assert _calls_of(ring, "check_states") == [[U(1)]]
+
+
+def test_commit_group_duplicate_key_not_repeated_in_check(clock):
+    ring = FakeRing()
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    _commit(mgr, [K(1), K(2), K(1), K(3), K(2)])
+    assert len(mgr._commit_groups[U(1)]) == 3
+    ring.calls.clear()
+    mgr.lookup(K(3))
+    assert _calls_of(ring, "check_states") == [[U(3), U(1), U(2)]]
+
+
+def test_commit_group_record_bounded_and_split(monkeypatch, clock):
+    monkeypatch.setattr(manager, "_COMMIT_GROUP_MAX", 4)
+    monkeypatch.setattr(manager, "_COMMIT_GROUP_KEYS_MAX", 6)
+    ring = FakeRing()
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    # Chunks [1-4] [5-8] [9 10]; the 4 oldest keys are dropped to stay at 6.
+    _commit(mgr, [K(n) for n in range(1, 11)])
+    assert list(mgr._commit_groups) == [U(n) for n in range(5, 11)]
+    assert [k for _, k in mgr._commit_groups[U(6)]] == [U(n) for n in range(5, 9)]
+    assert mgr._commit_groups[U(5)] is mgr._commit_groups[U(8)]
+    assert [k for _, k in mgr._commit_groups[U(10)]] == [U(9), U(10)]
+    ring.calls.clear()
+    mgr.lookup(K(1))
+    assert _calls_of(ring, "check_states") == [[U(1)]]
+
+
+def test_lookup_check_log_written_only_when_artifacts_dir_set(
+    monkeypatch, tmp_path, clock
+):
+    import json
+    import os
+
+    monkeypatch.delenv("OPTIMIZER_ARTIFACTS_DIR", raising=False)
+    ring = FakeRing()
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    assert mgr._check_log is None
+    _commit(mgr, [K(1), K(2)])
+    mgr.lookup(K(1))
+    mgr.lookup(K(2))
+    assert list(tmp_path.iterdir()) == []
+
+    monkeypatch.setenv("OPTIMIZER_ARTIFACTS_DIR", str(tmp_path))
+    for n in range(1, 5):
+        ring.exists[U(n)] = True
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    _commit(mgr, [K(n) for n in range(1, 5)])
+    assert [mgr.lookup(K(n)) for n in range(1, 5)] == [True] * 4
+    mgr.lookup(K(50))
+    mgr._check_log.flush()
+    path = tmp_path / f"lookup_checks.{os.getpid()}.jsonl"
+    lines = [json.loads(l) for l in path.read_text().splitlines()]
+    assert [(d["keys"], d["group"], d["hits_before"]) for d in lines] == [
+        (4, True, 0),
+        (1, False, 3),
+    ]
+    assert lines[0]["t_us"] == 0
+    assert all(d["dur_us"] >= 0 for d in lines)
+
+
 # ── manager: raw-key lookup fast path ──
 
 

@@ -536,13 +536,10 @@ impl BackgroundEvictor {
                     });
                 }
 
-                // Free extent on the appropriate drive. Must use the same
-                // splitmix64 placement hash as the write path, or we free an
-                // extent on the wrong extent manager.
-                let drive_idx =
-                    crate::DispatcherComponent::drive_index(key, extent_mgrs.len().max(1));
-                if let Some(em) = extent_mgrs.get(drive_idx) {
-                    let _ = em.remove_extent(offset);
+                // Free the extent on the drive recorded in its SSD location
+                // (an invalid drive frees nothing).
+                if let Some((em, raw)) = crate::select_drive(extent_mgrs, offset) {
+                    let _ = em.remove_extent(raw);
                 }
 
                 evicted += 1;

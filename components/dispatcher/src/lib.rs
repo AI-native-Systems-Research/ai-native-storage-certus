@@ -533,6 +533,45 @@ fn set_batch_device(gpu: &dyn IGpuServices, addr: *mut u8) -> i32 {
     }
 }
 
+/// Bit position of the drive index in an SSD location.
+///
+/// An entry's SSD location is `(drive << DRIVE_SHIFT) | extent_offset`: the
+/// drive is chosen once at store commit and recorded with the entry. The
+/// dispatch map stores the location opaquely and carries it unchanged through
+/// `convert_to_storage`, `promote_block_to_memory_tier`, `try_evict_to_block`
+/// and `convert_memory_tier_to_block`. Drive 0 encodes to the raw offset.
+const DRIVE_SHIFT: u32 = 56;
+
+/// Encode a drive index and a device byte offset into an SSD location.
+pub(crate) fn encode_loc(drive: usize, offset: u64) -> u64 {
+    debug_assert!(drive < 256 && offset < 1 << DRIVE_SHIFT);
+    ((drive as u64) << DRIVE_SHIFT) | offset
+}
+
+/// Split an SSD location into its drive index and device byte offset.
+pub(crate) fn decode_loc(loc: u64) -> (usize, u64) {
+    (
+        (loc >> DRIVE_SHIFT) as usize,
+        loc & ((1u64 << DRIVE_SHIFT) - 1),
+    )
+}
+
+/// Select the per-drive item an SSD location points at, with the raw offset.
+/// `None` if the decoded drive is out of range.
+pub(crate) fn select_drive<T>(items: &[T], loc: u64) -> Option<(&T, u64)> {
+    let (drive, raw) = decode_loc(loc);
+    items.get(drive).map(|item| (item, raw))
+}
+
+/// Seeds each thread's store-drive cursor, so threads start on different drives.
+static STORE_DRIVE_SEED: AtomicUsize = AtomicUsize::new(0);
+
+thread_local! {
+    /// This thread's round-robin store-drive cursor (see `next_store_drive`).
+    static STORE_DRIVE_CURSOR: std::cell::Cell<Option<usize>> =
+        const { std::cell::Cell::new(None) };
+}
+
 impl DispatcherComponent {
     fn log_info(&self, msg: &str) {
         if let Ok(logger) = self.logger.get() {
@@ -597,15 +636,25 @@ impl DispatcherComponent {
         }
     }
 
-    pub(crate) fn drive_index(key: CacheKey, num_drives: usize) -> usize {
-        // splitmix64 finalizer: distributes sequential keys uniformly.
-        let mut h = key;
-        h ^= h >> 30;
-        h = h.wrapping_mul(0xbf58476d1ce4e5b9);
-        h ^= h >> 27;
-        h = h.wrapping_mul(0x94d049bb133111eb);
-        h ^= h >> 31;
-        h as usize % num_drives
+    /// Drive for the next block this thread commits, round-robin over
+    /// `num_drives`.
+    ///
+    /// The shmq `CommitStore` handler commits one batch's keys back to back on
+    /// one worker thread, so a batch gets consecutive drives (at most
+    /// ⌈k/N⌉ per drive). The cursor is per thread rather than one shared
+    /// counter, so concurrent batches on other threads cannot interleave a
+    /// batch's sequence. Each thread's start is seeded from a global counter.
+    pub(crate) fn next_store_drive(num_drives: usize) -> usize {
+        if num_drives <= 1 {
+            return 0;
+        }
+        STORE_DRIVE_CURSOR.with(|c| {
+            let cur = c
+                .get()
+                .unwrap_or_else(|| STORE_DRIVE_SEED.fetch_add(1, Ordering::Relaxed));
+            c.set(Some(cur.wrapping_add(1)));
+            cur % num_drives
+        })
     }
 
     /// Compute per-drive CPU assignments based on NUMA topology.
@@ -837,10 +886,17 @@ impl DispatcherComponent {
             });
         }
 
-        let idx = Self::drive_index(key, drives.len());
-        let drive = &drives[idx];
+        let (idx, raw_offset) = decode_loc(offset);
+        let Some(drive) = drives.get(idx) else {
+            if !staged {
+                let _ = mt.remove(key);
+            }
+            return Err(DispatcherError::IoError(
+                "invalid drive in SSD location".into(),
+            ));
+        };
         let block_size = drive.block_dev_iface.block_size();
-        let start_lba = offset / block_size as u64;
+        let start_lba = raw_offset / u64::from(block_size);
         let block_dev = Arc::clone(&drive.block_dev_iface);
 
         // Check out an exclusive channel for this read. A single shared SPSC
@@ -971,7 +1027,7 @@ impl DispatcherComponent {
     fn serve_cold_staged(
         &self,
         gpu: &Arc<dyn IGpuServices + Send + Sync>,
-        key: CacheKey,
+        _key: CacheKey,
         offset: u64,
         regions: &[IpcHandle],
         total_size: u32,
@@ -999,10 +1055,12 @@ impl DispatcherComponent {
                 "staged cold read requires a data drive".into(),
             ));
         }
-        let idx = Self::drive_index(key, drives.len());
-        let drive = &drives[idx];
+        let (idx, raw_offset) = decode_loc(offset);
+        let drive = drives
+            .get(idx)
+            .ok_or_else(|| DispatcherError::IoError("invalid drive in SSD location".into()))?;
         let block_size = drive.block_dev_iface.block_size();
-        let start_lba = offset / block_size as u64;
+        let start_lba = raw_offset / u64::from(block_size);
         let block_dev = Arc::clone(&drive.block_dev_iface);
         // Exclusive channel for this read (see ChannelPool: sharing one SPSC
         // channel across concurrent readers causes completion theft).
@@ -1489,9 +1547,10 @@ impl DispatcherComponent {
             // `remove` took the entry while we were reading the slot: free the
             // slot, and the extent just written, which nothing points at now.
             let _ = mt.remove(job.key);
-            if let (Some(offset), false) = (written, drives.is_empty()) {
-                let drive_idx = job.device_index % drives.len();
-                let _ = extent_mgrs[drive_idx % extent_mgrs.len()].remove_extent(offset);
+            if let (Some(loc), false) = (written, drives.is_empty()) {
+                if let Some((em, raw)) = select_drive(extent_mgrs, loc) {
+                    let _ = em.remove_extent(raw);
+                }
             }
         });
     }
@@ -1513,9 +1572,9 @@ impl DispatcherComponent {
         }
     }
 
-    /// Copy the entry's DRAM slot to SSD. Returns the offset of the published
-    /// extent (a synthetic one with no block devices), or `None` if nothing was
-    /// written.
+    /// Copy the entry's DRAM slot to SSD. Returns the SSD location of the
+    /// published extent (`encode_loc(drive, offset)`; a synthetic raw offset
+    /// with no block devices), or `None` if nothing was written.
     fn write_through(
         mt: &Arc<dyn IMemoryTier + Send + Sync>,
         drives: &[Arc<dyn IBlockDevice + Send + Sync>],
@@ -1573,7 +1632,7 @@ impl DispatcherComponent {
 
         // Data written successfully — commit the extent metadata.
         let _ = write_handle.publish();
-        Some(block_offset)
+        Some(encode_loc(drive_idx, block_offset))
     }
 }
 
@@ -2032,9 +2091,14 @@ impl IDispatcher for DispatcherComponent {
                 })?;
                 let mut recovered: u64 = 0;
                 let drives_guard = self.data_drives.read();
-                for drive in drives_guard.iter() {
+                for (i, drive) in drives_guard.iter().enumerate() {
+                    // The drive that lists the extent is the one it lives on.
                     drive.extent_mgr.for_each_extent(&mut |extent| {
-                        let _ = dm.recover_extent(extent.key, extent.offset, extent.size);
+                        let _ = dm.recover_extent(
+                            extent.key,
+                            encode_loc(i, extent.offset),
+                            extent.size,
+                        );
                         recovered += 1;
                     });
                 }
@@ -2626,11 +2690,19 @@ impl IDispatcher for DispatcherComponent {
                     results[entry.idx] = Some(res);
                 }
             } else {
-                // Group cold entries by target drive.
+                // Group cold entries by the drive recorded in their SSD location.
+                // An invalid drive fails the entry here, before any slot is reserved.
                 let mut per_drive: Vec<Vec<usize>> = vec![Vec::new(); num_drives];
                 for (ci, entry) in cold_entries.iter().enumerate() {
-                    let drive_idx = Self::drive_index(entry.key, num_drives);
-                    per_drive[drive_idx].push(ci);
+                    let (drive_idx, _) = decode_loc(entry.offset);
+                    match per_drive.get_mut(drive_idx) {
+                        Some(v) => v.push(ci),
+                        None => {
+                            results[entry.idx] = Some(Err(DispatcherError::IoError(
+                                "invalid drive in SSD location".into(),
+                            )));
+                        }
+                    }
                 }
 
                 let queue_depth = 128;
@@ -2686,7 +2758,7 @@ impl IDispatcher for DispatcherComponent {
                                 jobs.push(pipeline::ColdReadJob {
                                     mem_ptr,
                                     gpu_dst,
-                                    start_lba: entry.offset / block_size as u64,
+                                    start_lba: decode_loc(entry.offset).1 / u64::from(block_size),
                                     total_bytes: ipc_size as usize,
                                 });
                                 job_ci.push(ci);
@@ -3305,11 +3377,10 @@ impl IDispatcher for DispatcherComponent {
             let _ = mt.remove(key);
         }
 
-        if let Some(offset) = block_offset {
+        if let Some(loc) = block_offset {
             let drives = self.data_drives.read();
-            let idx = Self::drive_index(key, drives.len().max(1));
-            if let Some(drive) = drives.get(idx) {
-                let _ = drive.extent_mgr.remove_extent(offset);
+            if let Some((drive, raw)) = select_drive(&drives, loc) {
+                let _ = drive.extent_mgr.remove_extent(raw);
             }
         }
 
@@ -3783,6 +3854,9 @@ impl IDispatcher for DispatcherComponent {
             let dd = self.data_drives.read();
             dd.len().max(1)
         };
+        // Round-robin per committing thread: one batch's keys get consecutive
+        // drives (see `next_store_drive`).
+        let device_index = Self::next_store_drive(num_drives);
         let guard = self.bg_writer.lock().unwrap();
         // Record the pin before its job can run, so `remove` can take it over.
         self.write_through_pins.pin(key, || match *guard {
@@ -3790,7 +3864,7 @@ impl IDispatcher for DispatcherComponent {
                 .enqueue(WriteJob {
                     key,
                     size,
-                    device_index: Self::drive_index(key, num_drives),
+                    device_index,
                 })
                 .is_ok(),
             None => false,
@@ -3940,11 +4014,14 @@ impl IDispatcher for DispatcherComponent {
             ring_guard.as_ref().map_or(131072, |r| r.chunk_size)
         };
 
-        // Group cold entries by target drive.
+        // Group cold entries by the drive recorded in their SSD location (an
+        // invalid drive is skipped: best-effort prefetch).
         let mut per_drive: Vec<Vec<usize>> = vec![Vec::new(); num_drives];
         for (i, entry) in cold_entries.iter().enumerate() {
-            let drive_idx = Self::drive_index(entry.key, num_drives);
-            per_drive[drive_idx].push(i);
+            let (drive_idx, _) = decode_loc(entry.offset);
+            if let Some(v) = per_drive.get_mut(drive_idx) {
+                v.push(i);
+            }
         }
 
         let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
@@ -3975,7 +4052,7 @@ impl IDispatcher for DispatcherComponent {
                     for &ci in entry_indices {
                         let entry = &cold[ci];
                         let block_size = block_dev.block_size() as u64;
-                        let start_lba = entry.offset / block_size;
+                        let start_lba = decode_loc(entry.offset).1 / block_size;
 
                         if self
                             .evict_for_space(dm, mt, entry.size, entry.key, max_attempts)
@@ -4146,14 +4223,14 @@ impl IDispatcher for DispatcherComponent {
             let dd = self.data_drives.read();
             dd.len().max(1)
         };
-        // Same drive mapping the store path uses, so a key's data and its write job
-        // always land on the same device.
+        // Same placement the store path uses: round-robin per committing thread.
+        // The chosen drive is recorded in the entry's SSD location by write-through.
         let guard = self.bg_writer.lock().unwrap();
         if let Some(ref writer) = *guard {
             let _ = writer.enqueue(WriteJob {
                 key,
                 size,
-                device_index: Self::drive_index(key, num_drives),
+                device_index: Self::next_store_drive(num_drives),
             });
         }
         Ok(())
@@ -7351,6 +7428,117 @@ mod tests {
         evictor.shutdown();
     }
 
+    /// Extent manager that is always full and records every `remove_extent`.
+    #[derive(Default)]
+    struct RecordingExtentMgr {
+        removed: Mutex<Vec<u64>>,
+    }
+
+    impl IExtentManager for RecordingExtentMgr {
+        fn format(
+            &self,
+            _: interfaces::FormatParams,
+        ) -> Result<(), interfaces::ExtentManagerError> {
+            Ok(())
+        }
+        fn initialize(&self) -> Result<(), interfaces::ExtentManagerError> {
+            Ok(())
+        }
+        fn reserve_extent(
+            &self,
+            _: interfaces::ExtentKey,
+            _: u32,
+        ) -> Result<interfaces::WriteHandle, interfaces::ExtentManagerError> {
+            Err(interfaces::ExtentManagerError::OutOfSpace)
+        }
+        fn get_extents(&self) -> Vec<interfaces::Extent> {
+            Vec::new()
+        }
+        fn for_each_extent(&self, _: &mut dyn FnMut(&interfaces::Extent)) {}
+        fn remove_extent(&self, offset: u64) -> Result<(), interfaces::ExtentManagerError> {
+            self.removed.lock().unwrap().push(offset);
+            Ok(())
+        }
+        fn checkpoint(&self) -> Result<(), interfaces::ExtentManagerError> {
+            Ok(())
+        }
+        fn get_instance_id(&self) -> Result<u64, interfaces::ExtentManagerError> {
+            Ok(0)
+        }
+        fn set_checkpoint_interval(&self, _: Option<std::time::Duration>) {}
+        fn used_bytes(&self) -> u64 {
+            100
+        }
+        fn capacity_bytes(&self) -> u64 {
+            100
+        }
+        fn set_metadata_base_lba(&self, _: u64) {}
+        fn set_data_base_lba(&self, _: u64) {}
+        fn data_base_lba(&self) -> u64 {
+            0
+        }
+    }
+
+    /// Run the SSD evictor over one BlockDevice entry at `loc` with two
+    /// extent managers; return the offsets each one was asked to free.
+    fn run_ssd_evictor_on(loc: u64) -> (Vec<u64>, Vec<u64>) {
+        let dm = Arc::new(MockDispatchMap::new());
+        dm.inner.lock().unwrap().entries.insert(
+            1,
+            MockEntry {
+                location: MockEntryLocation::MemoryTier {
+                    pointer: std::ptr::null_mut(),
+                    size: 4096,
+                    ssd_offset: Some(loc),
+                },
+                write_ref: false,
+                read_refs: 0,
+            },
+        );
+        let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(1024 * 1024));
+        let ems = [
+            Arc::new(RecordingExtentMgr::default()),
+            Arc::new(RecordingExtentMgr::default()),
+        ];
+        let mut evictor = crate::background::BackgroundEvictor::start(
+            Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>,
+            mt,
+            ems.iter()
+                .map(|e| Arc::clone(e) as Arc<dyn IExtentManager + Send + Sync>)
+                .collect(),
+            crate::background::EvictorConfig {
+                threshold: 0.5,
+                low_watermark: 0.1,
+                batch_size: 4,
+                interval: std::time::Duration::from_millis(5),
+            },
+            None,
+            Arc::new(Mutex::new(None)),
+            Arc::new(crate::TierEventCounters::default()),
+        );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while dm.entry_count() > 0 && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        evictor.shutdown();
+        assert_eq!(dm.entry_count(), 0, "the evictor never removed the entry");
+        let removed = |i: usize| ems[i].removed.lock().unwrap().clone();
+        (removed(0), removed(1))
+    }
+
+    #[test]
+    fn ssd_evictor_frees_on_recorded_drive() {
+        let (d0, d1) = run_ssd_evictor_on(crate::encode_loc(1, 0x4000));
+        assert!(d0.is_empty(), "drive 0 freed {d0:?}");
+        assert_eq!(d1, vec![0x4000]);
+    }
+
+    #[test]
+    fn ssd_evictor_skips_invalid_drive() {
+        let (d0, d1) = run_ssd_evictor_on(crate::encode_loc(7, 0x4000));
+        assert!(d0.is_empty() && d1.is_empty(), "freed {d0:?} / {d1:?}");
+    }
+
     // -----------------------------------------------------------------------
     // promote_to_memory_tier tests
     // -----------------------------------------------------------------------
@@ -7444,6 +7632,66 @@ mod tests {
         let _ = dm.release_read(2);
 
         d.shutdown().unwrap();
+    }
+
+    // -----------------------------------------------------------------------
+    // Store-time drive placement tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn ssd_location_round_trips_and_drive_zero_is_identity() {
+        for &(drive, offset) in &[(0usize, 0u64), (1, 0x4000), (3, (1 << 42) - 4096), (255, 7)] {
+            assert_eq!(
+                crate::decode_loc(crate::encode_loc(drive, offset)),
+                (drive, offset)
+            );
+        }
+        for &offset in &[0u64, 4096, 0x1234_5000] {
+            assert_eq!(crate::encode_loc(0, offset), offset);
+            assert_eq!(crate::decode_loc(offset), (0, offset));
+        }
+    }
+
+    fn store_drive_counts(num_drives: usize, calls: usize) -> Vec<usize> {
+        let mut counts = vec![0usize; num_drives];
+        for _ in 0..calls {
+            counts[DispatcherComponent::next_store_drive(num_drives)] += 1;
+        }
+        counts
+    }
+
+    #[test]
+    fn next_store_drive_balances_consecutive_calls() {
+        assert_eq!(store_drive_counts(4, 16), vec![4, 4, 4, 4]);
+        assert_eq!(store_drive_counts(2, 16), vec![8, 8]);
+        assert_eq!(store_drive_counts(1, 16), vec![16]);
+        for _ in 0..16 {
+            assert_eq!(DispatcherComponent::next_store_drive(1), 0);
+        }
+    }
+
+    #[test]
+    fn next_store_drive_balances_each_thread() {
+        let handles: Vec<_> = (0..2)
+            .map(|_| thread::spawn(|| store_drive_counts(4, 16)))
+            .collect();
+        for h in handles {
+            assert_eq!(h.join().unwrap(), vec![4, 4, 4, 4]);
+        }
+    }
+
+    #[test]
+    fn select_drive_uses_recorded_drive() {
+        let drives = ["d0", "d1", "d2"];
+        assert_eq!(
+            crate::select_drive(&drives, crate::encode_loc(1, 0x4000)),
+            Some((&"d1", 0x4000))
+        );
+        assert_eq!(crate::select_drive(&drives, 0x8000), Some((&"d0", 0x8000)));
+        assert_eq!(
+            crate::select_drive(&drives, crate::encode_loc(3, 0x4000)),
+            None
+        );
     }
 }
 
