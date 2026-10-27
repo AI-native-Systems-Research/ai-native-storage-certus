@@ -111,6 +111,30 @@ Results in `results/2026-10-26-rdma-fetch-{on,off}/`.
 - End-to-end latency is generating 1 100 tokens and is the same in all four arms within
   noise; the RDMA arms are ~1.5 s shorter because of the handoff.
 
+## 2026-10-27: after the 5A/6A rollout (per-channel pins, restart detection)
+
+The RDMA fetch-on arm rerun twice on the new images (`results/2026-10-27-rdma-fetch-on-{rollout-check,unused-repro}/`) (`certus:bd510b91`, connector
+`vllm0.30.0-bd510b91`), same workload. Both: 60 turns, 0 errors, 48 pulls, 3 294 blocks
+fetched and 139 misses -- the block-boundary count predicts exactly 3 294 / 139 for these
+prompts -- and a cache-wide CLEAR_ALL after the first left **0 pins** on all four servers.
+
+| | first rerun | second rerun |
+|---|---|---|
+| served as fetched | 3 226 | **3 294** (all) |
+| `fetched_unused` | 68 | 0 |
+| TTFT later turns, median / mean | 0.19 s / 0.23 s | 0.20 s / 0.21 s |
+| slowest later turn | 0.96 s (one session's turn 1) | 0.35 s |
+
+- The 68 are **one turn's whole fetch**: session 3's turn 1 needed exactly 68 blocks; it
+  had the run's slowest TTFT, 0.96 s, against a fetch budget of 0.67 s (500 ms + 68 x
+  2.5 ms); and 68 fetched blocks went unserved in one 10-second scrape window, with no
+  evictions. Reading it: the fetch overran the budget, so prefill computed the turn,
+  the blocks landed afterwards, and the server's 30 s mark expiry counted them unused.
+  That is the budget doing its job, not a lost or leaked block. Not reproduced in the
+  second run, and the slow fetch's own cause was not caught (the logs had rotated with a
+  rollout in between).
+- Pin bookkeeping held: no leaked pins, no refused UNPINs in the connector's logs.
+
 ## 2026-10-27: how often aggregated serving moves a session (peer selection M4?)
 
 Peer selection milestone 4 -- a routing sidecar in front of aggregated pods, so a session
