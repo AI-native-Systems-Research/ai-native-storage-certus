@@ -3376,7 +3376,26 @@ impl IDispatcher for DispatcherComponent {
             .get()
             .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
 
-        match dm.lookup(key) {
+        // A `dm.lookup` that returns Err means *timeout* waiting for a
+        // transient write_ref (a concurrent store-commit / promote) to clear,
+        // NOT a missing key: the entry exists, in memory-tier or block-device
+        // state, while its writer holds it. Collapsing that Err into
+        // `Ok(false)` would answer "not cached" for a key that has a cache
+        // entry, sending the caller to re-populate a live key. Retry the
+        // lookup a few times so a writer holding write_ref past a single 2 s
+        // wait clears before we give up — the same condition `batch_lookup`
+        // retries (FR-039 step 1).
+        const LOOKUP_RETRIES: u32 = 5;
+        let lookup = {
+            let mut lk = dm.lookup(key);
+            let mut retries = 0u32;
+            while matches!(lk, Err(_)) && retries < LOOKUP_RETRIES {
+                retries += 1;
+                lk = dm.lookup(key);
+            }
+            lk
+        };
+        match lookup {
             Ok(result) => {
                 use interfaces::LookupResult;
                 let exists = !matches!(result, LookupResult::NotExist);
@@ -3385,7 +3404,13 @@ impl IDispatcher for DispatcherComponent {
                 }
                 Ok(exists)
             }
-            Err(_) => Ok(false),
+            // Every retry timed out behind a writer (or the read count
+            // overflowed): the key's presence could not be determined. That
+            // is a wait to report, never an absent key.
+            Err(interfaces::DispatchMapError::Timeout(k)) => Err(DispatcherError::Timeout(
+                format!("timeout waiting on key: {k}"),
+            )),
+            Err(other) => Err(DispatcherError::IoError(other.to_string())),
         }
     }
 
@@ -7854,3 +7879,7 @@ mod repair_test_sync_failure_error;
 #[cfg(test)]
 #[path = "repair_test_duplicate_check_after_eviction.rs"]
 mod repair_test_duplicate_check_after_eviction;
+
+#[cfg(test)]
+#[path = "repair_test_check_present_map_timeout.rs"]
+mod repair_test_check_present_map_timeout;
