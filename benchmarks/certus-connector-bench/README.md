@@ -206,6 +206,80 @@ python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
     --tp 2 --mode scheduler-step --block-bytes 1048576
 ```
 
+#### KV layout (`--pieces-per-block`)
+
+`--pieces-per-block N` splits each block into N GPU tensors of `--block-bytes / N`
+bytes, and the connector sends N regions per block. This is how vLLM ≥ 0.23 hands
+KV to an offloading connector under its default layer-outermost layout (`LBHNC`):
+one tensor per layer, so for Llama-3-8B a 2 MiB block arrives as 32 pieces of 64 KiB
+in 32 different allocations, and certus-server copies each piece separately. The
+default, 1, is one contiguous region per block, as under vLLM 0.20/0.22 and under
+the block-outermost `BLHNC` layout that `CertusConnector` requests. It is a count
+of pieces, not of model layers: the same 32-layer model gives 32 pieces under
+`LBHNC` and 1 under `BLHNC`. `--block-bytes` must be divisible by N.
+
+```bash
+# Llama-3-8B under vLLM's default layout
+python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
+    --block-bytes 2097152 --pieces-per-block 32
+```
+
+#### Cold-load shape (default mode)
+
+By default the cold pass empties the memory tier, then loads the keys back in the
+same `--bs` batches and order they were stored, one job at a time. vLLM serving
+differs in four ways; each flag below changes one of them. Every default reproduces
+the plain cold pass. Any non-default value runs a separate shaped cold pass,
+reported as `Cold Load Lifecycle (shaped: tier=… store=… load=… inflight=…)`; the
+label still contains `Cold Load Lifecycle`, so tools that parse that label find it,
+and the settings are written to the YAML `params`. The store and warm phases are
+unchanged.
+
+- **`--cold-tier-state full` with `--tier-fill-blocks N`: a full memory tier.** In
+  production a cold load happens because the tier is full, so serving it means
+  evicting other data. Before every cold pass the benchmark empties the tier, then
+  stores N other blocks to bring it back to its eviction threshold, outside the
+  timed region; the cold reads then evict as they land. Set N to the server's tier
+  size × eviction threshold ÷ block bytes (4 GiB × 0.8 ÷ 4 MiB ≈ 819;
+  12 GiB × 0.8 ÷ 2 MiB ≈ 4915). The benchmark cannot read the tier size, so N is
+  required. Default `empty`: the tier is cleared and not refilled.
+- **`--store-order interleaved`: stores from concurrent requests.** vLLM stores per
+  request per scheduler step, so blocks from several requests are committed in
+  turn. The keys are split into `--requests` requests, and request r's i-th block
+  is stored at step i, one block per store call. Default `batch`: `--bs` keys per
+  call, in key order.
+- **`--load-unit request`: one load job per request.** vLLM loads a request's whole
+  cached prefix as one job (`prepare_load` of its hit blocks), not in the batches it
+  was stored in. Each job is one request's prefix (`--num-blocks / --requests`
+  blocks); requests are loaded in random order (`--seed`), and a prefix lookup stops
+  at its first miss, as vLLM's does. Default `batch`: the stored `--bs` batches, in
+  order.
+- **`--cold-inflight N`: several cold loads at once.** vLLM admits several waiting
+  requests per step, each with its own load job. Up to N cold load jobs are kept
+  outstanding. N must not exceed `--workers`, and the server needs at least N + 1
+  shmq channels; the benchmark refuses otherwise rather than let jobs queue unseen.
+  Default 1.
+
+`--requests R` (default 16) is the request count for `interleaved` and `request`;
+`--num-blocks` must divide evenly by it.
+
+`--preset longdocqa` sets the shape LongDocQA's query round showed on vLLM 0.30 with
+Llama-3-8B (`knowledge/serving/observations.yaml`): 2 MiB blocks in 32 pieces,
+4 requests × 625 blocks (one 10,000-token document each), interleaved stores, one
+load job per request, 4 in flight, full tier. Flags given explicitly override the
+preset's values; `--tier-fill-blocks` is still required.
+
+```bash
+# vLLM-like cold load on a 4 GiB tier (eviction threshold 0.8)
+python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
+    --store-order interleaved --load-unit request --requests 8 \
+    --cold-tier-state full --tier-fill-blocks 819 --cold-inflight 4
+
+# LongDocQA's shape; start certus-server with --memory-tier-size 12G
+python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
+    --preset longdocqa --tier-fill-blocks 4915 --working-set 2500
+```
+
 #### Per-mode options
 
 ```
