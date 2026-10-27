@@ -6,8 +6,9 @@ changes: every ``self._stub.X(pb.Y(...))`` gRPC call becomes a ``self._ring.x``
 call over the ``/dev/shm`` mailbox (``ring.py``). The op → lifecycle mapping is
 unchanged:
 
-    lookup        -> Check (unless answered from a fresh touch reply, see
-                     ``CERTUS_LOOKUP_CACHE_TTL_US``)
+    lookup        -> Check (unless answered from a fresh touch or commit-group
+                     Check reply, see ``CERTUS_LOOKUP_CACHE_TTL_US``); a miss on
+                     a key with a commit-group record Checks its whole group
     prepare_store -> Check (filter) + Reserve (best-effort: store the subset
                      that fits, drop blocks the saturated tier can't reserve)
     complete_store-> CommitStore (success) / AbortStore (failure)
@@ -19,6 +20,7 @@ unchanged:
 
 from __future__ import annotations
 
+import atexit
 import hashlib
 import os
 import sys
@@ -104,6 +106,55 @@ def _session_id_to_u64(req_context) -> int:
 
 _KEY_REVERSE_MAX = 1 << 20
 
+# Bounds of the commit-group record (see ShmqCertusOffloadingManager.__init__):
+# logical keys per group, and logical keys recorded in total.
+_COMMIT_GROUP_MAX = 64
+_COMMIT_GROUP_KEYS_MAX = 1 << 18
+
+
+class _LookupCheckLog:
+    """Diagnostic log of the Checks lookup() sends, one JSON line per Check, in
+    ``$OPTIMIZER_ARTIFACTS_DIR/lookup_checks.<pid>.jsonl``. Exists only when
+    that variable is set. Lines are buffered and written every 64 lines and at
+    interpreter exit; a write error disables the log, it never raises."""
+
+    _FLUSH_LINES = 64
+
+    def __init__(self, directory: str):
+        self._path: str | None = os.path.join(
+            directory, f"lookup_checks.{os.getpid()}.jsonl"
+        )
+        self._lines: list[str] = []
+        self._t0_ns: int | None = None
+        # Lookups answered from the maps since the previous Check line.
+        self.hits = 0
+        atexit.register(self.flush)
+
+    def record(self, keys: int, group: bool, dur_ns: int) -> None:
+        if self._path is None:
+            return
+        now_ns = time.monotonic_ns()
+        if self._t0_ns is None:
+            self._t0_ns = now_ns
+        self._lines.append(
+            f'{{"t_us":{(now_ns - self._t0_ns) // 1000},"keys":{keys},'
+            f'"group":{"true" if group else "false"},'
+            f'"hits_before":{self.hits},"dur_us":{dur_ns / 1000:.1f}}}\n'
+        )
+        self.hits = 0
+        if len(self._lines) >= self._FLUSH_LINES:
+            self.flush()
+
+    def flush(self) -> None:
+        if self._path is None or not self._lines:
+            return
+        lines, self._lines = self._lines, []
+        try:
+            with open(self._path, "a") as f:
+                f.write("".join(lines))
+        except OSError:
+            self._path = None
+
 
 class ShmqCertusOffloadingManager(OffloadingManager):
     """Manager delegating to a remote certus-server via a shared-memory ring."""
@@ -170,6 +221,13 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         # async scheduling the next pass can start right away — so the TTL is
         # the bound, not the step: an answer is at most TTL older than a fresh
         # Check would be, on top of the Check -> Pin gap that exists anyway.
+        # A second fill source is the commit-group record below: a lookup that
+        # misses the maps, for a key committed together with others, Checks its
+        # whole commit group in one round trip and keeps every answer. Those
+        # answers obey the same rules as touch answers — the TTL counts from
+        # just before that Check, only RESIDENT counts, AND across TP ranks, and
+        # the drop rules below and touch-after-lookup apply unchanged.
+        #
         # Evictions this connector can know about drop the maps at once:
         # prepare_store (its Reserve may evict to make room) and a REMOVED event
         # from take_events. Older entries, and keys not in the map, fall back to
@@ -192,6 +250,18 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         self._last_op_was_lookup = False
         self._lookup_cache_ttl_ns = _lookup_cache_ttl_ns()
         self._lookup_cache_filled_at_ns = 0
+        # Commit-group record: logical u64 key -> the (orig_key, u64) pairs
+        # committed with it by one complete_store (de-duplicated by u64, in
+        # commit order, at most _COMMIT_GROUP_MAX per group; one tuple shared by
+        # every key of its group). It is only a hint for which keys one lookup
+        # Check asks about — it never answers a lookup and never changes one,
+        # holds no pin or reservation, and a key without a record (or after a
+        # restart) is a single-key Check. Bounded at _COMMIT_GROUP_KEYS_MAX
+        # keys, oldest dropped first.
+        self._commit_groups: OrderedDict[int, tuple] = OrderedDict()
+        # Diagnostic Check log, only when OPTIMIZER_ARTIFACTS_DIR is set.
+        artifacts_dir = os.environ.get("OPTIMIZER_ARTIFACTS_DIR")
+        self._check_log = _LookupCheckLog(artifacts_dir) if artifacts_dir else None
 
     def set_block_size_bytes(self, block_size_bytes: int) -> None:
         """Update the per-block Reserve size once the true KV-cache tensor
@@ -291,11 +361,66 @@ class ShmqCertusOffloadingManager(OffloadingManager):
             if fresh:
                 cached = self._lookup_cache.get(int_key)
             if cached is None:
-                # AND across all W shards — a load needs every rank's shard present.
-                cached = self._check_all_present(
+                return _compat.lookup_result(self._lookup_check(key, int_key))
+        if self._check_log is not None:
+            self._check_log.hits += 1
+        return _compat.lookup_result(cached)
+
+    def _lookup_check(self, key: OffloadKey, int_key: int) -> bool:
+        """Answer a lookup the maps could not with a server Check. A key with a
+        commit-group record (and the cache enabled) Checks its whole group in
+        one RPC and keeps every answer in the maps; any other key is a single-key
+        Check whose answer is not kept."""
+        ttl_ns = self._lookup_cache_ttl_ns
+        group = self._commit_groups.get(int_key) if ttl_ns else None
+        log = self._check_log
+        if group is None or len(group) < 2:
+            # AND across all W shards — a load needs every rank's shard present.
+            if log is None:
+                return self._check_all_present(
                     [int_key], resident_only=True
                 ).get(int_key, False)
-        return _compat.lookup_result(cached)
+            t0_ns = time.perf_counter_ns()
+            hit = self._check_all_present([int_key], resident_only=True).get(
+                int_key, False
+            )
+            log.record(1, False, time.perf_counter_ns() - t0_ns)
+            return hit
+        # The fill time is taken BEFORE the Check, so no answer is under-aged.
+        # Expired (or empty) maps are dropped and restart the fill time; fresh
+        # ones keep their older fill time (same rule as touch()).
+        now_ns = _monotonic_ns()
+        if (
+            not self._lookup_cache
+            or now_ns - self._lookup_cache_filled_at_ns > ttl_ns
+        ):
+            self._drop_lookup_cache()
+            self._lookup_cache_filled_at_ns = now_ns
+        # The looked-up key first and exactly once: the server rejects a Check
+        # with a duplicate key, and the group is de-duplicated when recorded.
+        u64s = [int_key]
+        u64s.extend(k for _, k in group if k != int_key)
+        if log is None:
+            answers = self._check_all_present(u64s, resident_only=True)
+        else:
+            t0_ns = time.perf_counter_ns()
+            answers = self._check_all_present(u64s, resident_only=True)
+            log.record(len(u64s), True, time.perf_counter_ns() - t0_ns)
+        self._lookup_cache.update(answers)
+        # Raw-key entries copy the final u64-map value, as touch() does.
+        cache = self._lookup_cache
+        try:
+            self._raw_lookup_cache.update(
+                (orig, cache[k]) for orig, k in group
+            )
+        except TypeError:  # unhashable recorded key (e.g. bytearray): fold path
+            self._raw_lookup_cache.clear()
+        hit = cache.get(int_key, False)
+        try:
+            self._raw_lookup_cache[key] = hit
+        except TypeError:  # an unhashable key cannot have a raw entry
+            pass
+        return hit
 
     def _drop_lookup_cache(self) -> None:
         """Forget every kept lookup answer (both maps)."""
@@ -498,6 +623,7 @@ class ShmqCertusOffloadingManager(OffloadingManager):
     def complete_store(
         self, keys: Iterable[OffloadKey], req_context=None, success: bool = True
     ) -> None:
+        keys = list(keys)
         int_keys = _keys_to_u64s(keys)
         if not int_keys:
             return
@@ -505,8 +631,33 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         expanded = [nk for k in int_keys for nk in self._ns_all(k)]
         if success:
             self._ring.commit_store(expanded)
+            self._record_commit_group(keys, int_keys)
         else:
             self._ring.abort_store(expanded)
+            for k in int_keys:
+                self._commit_groups.pop(k, None)
+
+    def _record_commit_group(self, keys: list, int_keys: list[int]) -> None:
+        """Record the keys of one successful commit as commit groups (see
+        __init__): de-duplicated by u64, split into consecutive chunks of at most
+        _COMMIT_GROUP_MAX, each chunk's tuple shared by its keys. A chunk of one
+        key records nothing."""
+        seen: set[int] = set()
+        pairs = []
+        for orig, k in zip(keys, int_keys):
+            if k not in seen:
+                seen.add(k)
+                pairs.append((orig, k))
+        groups = self._commit_groups
+        for i in range(0, len(pairs), _COMMIT_GROUP_MAX):
+            chunk = tuple(pairs[i:i + _COMMIT_GROUP_MAX])
+            if len(chunk) < 2:
+                continue
+            for _, k in chunk:
+                groups[k] = chunk
+                groups.move_to_end(k)
+        while len(groups) > _COMMIT_GROUP_KEYS_MAX:
+            groups.popitem(last=False)
 
     # ── load ──
 
