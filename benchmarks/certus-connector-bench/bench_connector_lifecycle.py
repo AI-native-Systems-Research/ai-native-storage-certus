@@ -36,7 +36,8 @@ Usage (certus-server must be running):
     # vLLM <= 0.20 call order (touch before lookup) instead of the default
     python bench_connector_lifecycle.py --mode scheduler-step --lookup-order touch-first
 
-    # vLLM >= 0.23 per-layer KV tensors: each block is 32 regions of block_bytes/32
+    # Per-layer KV tensors (vLLM >= 0.29 default LBHNC; 0.23+ for the Certus
+    # connector): each block is 32 regions of block_bytes/32
     # (Llama-3-8B: --block-bytes 2097152 --pieces-per-block 32 -> 64 KiB per piece)
     python bench_connector_lifecycle.py --block-bytes 2097152 --pieces-per-block 32
 
@@ -51,9 +52,11 @@ vLLM's offloading scheduler does since 0.21 (vLLM PR #41228; still so in 0.30).
 the connector answered that request's lookups from the touch reply (within its
 CERTUS_LOOKUP_CACHE_TTL_US).
 
-KV layout: since vLLM 0.23 (still so in 0.30) every attention layer's KV cache is
-its own GPU allocation, so one offloaded block is N per-layer pieces at N
-different addresses, and the connector sends N regions per block.
+KV layout: under vLLM's default layer-outermost layout (LBHNC; vLLM >= 0.29,
+and from 0.23 for connectors not opted into the cross-layer layout, as the Certus
+connector was not) every attention layer's KV cache is its own GPU allocation,
+so one offloaded block is N per-layer pieces at N different addresses, and the
+connector sends N regions per block.
 --pieces-per-block N reproduces that: N GPU tensors of [blocks, block_bytes / N].
 The default, 1, is one contiguous region per block (vLLM 0.20/0.22).
 
@@ -246,7 +249,7 @@ def _alloc_base(data_ptr: int) -> int:
 
 def make_kv_regions(gpu_id: int, block_bytes: int, num_blocks: int = 128,
                     layers: int = 1) -> tuple[list[KvCacheIpc], list[torch.Tensor]]:
-    """One region per layer, as vLLM >= 0.23 presents per-layer KV tensors.
+    """One region per layer, as vLLM presents per-layer KV tensors (LBHNC).
 
     Each layer is its own allocation of ``num_blocks`` pages of
     ``block_bytes // layers`` bytes, so a block's bytes are spread over
@@ -799,16 +802,27 @@ def bench_cold_load_shaped(
             if not finished:
                 time.sleep(0.0001)
                 continue
+            failed = []
             for res in finished:
                 hits, t_sub = pending.pop(res.job_id)
                 phases["get_finished"].record(time.perf_counter() - t_sub)
                 slots.append(slot_of.pop(res.job_id))
-                if not res.success:
-                    raise RuntimeError(f"cold load job {res.job_id} failed")
+                # Unpin every finished job, failed or not, before raising.
                 t0 = time.perf_counter()
                 manager.complete_load(hits)
                 phases["complete_load"].record(time.perf_counter() - t0)
-                total_blocks += len(hits)
+                if res.success:
+                    total_blocks += len(hits)
+                else:
+                    failed.append(res.job_id)
+            if failed:
+                # Drain the jobs still in flight so their keys are unpinned too.
+                while pending:
+                    for res in worker.get_finished():
+                        hits, _ = pending.pop(res.job_id)
+                        manager.complete_load(hits)
+                    time.sleep(0.0001)
+                raise RuntimeError(f"cold load job(s) {failed} failed")
         timed += time.perf_counter() - t_pass
         passes += 1
         if fill:
@@ -2241,8 +2255,9 @@ def main():
                         help=f"Per-block size in bytes (default: {DEFAULT_BLOCK_BYTES})")
     parser.add_argument("--pieces-per-block", type=int, default=1,
                         help="KV regions per block: N GPU tensors of block_bytes/N "
-                             "each, one per distinct layer view as vLLM >= 0.23 lays "
-                             "out KV (default 1: one contiguous region, vLLM 0.20/0.22)")
+                             "each, one per distinct layer view as vLLM lays out KV "
+                             "under its default LBHNC layout (default 1: one "
+                             "contiguous region, as under BLHNC or vLLM 0.20/0.22)")
     # ── cold-load shape (default mode). Defaults reproduce the plain cold pass. ──
     parser.add_argument("--cold-tier-state", choices=("empty", "full"), default="empty",
                         help="memory tier at the start of each cold pass: empty (cleared, "
@@ -2343,6 +2358,11 @@ def main():
         for key, val in COLD_PRESETS[args.preset].items():
             if key != "observation" and key not in explicit:
                 setattr(args, key, val)
+    if args.pieces_per_block < 1:
+        parser.error(f"--pieces-per-block must be >= 1, got {args.pieces_per_block}")
+    if args.block_bytes % args.pieces_per_block:
+        parser.error(f"--block-bytes {args.block_bytes} is not divisible by "
+                     f"--pieces-per-block {args.pieces_per_block}")
     if args.cold_tier_state == "full" and args.tier_fill_blocks <= 0:
         parser.error("--cold-tier-state full needs --tier-fill-blocks "
                      "(tier size x eviction threshold / block bytes)")
@@ -2437,9 +2457,11 @@ def main():
     # Allocate enough GPU memory for all block_ids the benchmark will use.
     # The eviction mode uses --working-set blocks; use the max of that and num_blocks.
     max_blocks = max(args.num_blocks, args.working_set)
-    if args.block_bytes % args.pieces_per_block:
-        parser.error(f"--block-bytes {args.block_bytes} is not divisible by "
-                     f"--pieces-per-block {args.pieces_per_block}")
+    if not cold_shape_is_default(args):
+        # Tier fill stores --bs keys per call at block ids 0..bs-1; in-flight
+        # slots each take one load unit's range.
+        unit = args.num_blocks // args.requests if args.load_unit == "request" else args.bs
+        max_blocks = max(max_blocks, args.bs, args.cold_inflight * unit)
     store_regions, store_tensors = make_kv_regions(args.gpu, args.block_bytes, max_blocks, args.pieces_per_block)
     load_regions, load_tensors = make_kv_regions(args.gpu, args.block_bytes, max_blocks, args.pieces_per_block)
 
@@ -2685,12 +2707,22 @@ def main():
     # ── CSV output ──
     if args.csv and all_results:
         rows = [r.csv_row(extra) for r in all_results]
-        write_header = not os.path.exists(args.csv)
+        write_header = not os.path.exists(args.csv) or os.path.getsize(args.csv) == 0
         fieldnames = list(rows[0].keys())
         for r in rows[1:]:
             for k in r:
                 if k not in fieldnames:
                     fieldnames.append(k)
+        if not write_header:
+            with open(args.csv, newline="") as f:
+                existing = next(csv.reader(f), [])
+            missing = [k for k in fieldnames if k not in existing]
+            if missing:
+                # Shaped runs add columns (pieces_per_block, cold_*...); appending
+                # them under an older header would silently drop them.
+                sys.exit(f"error: {args.csv} has no columns {missing}; write these "
+                         f"results to a new --csv file")
+            fieldnames = existing
         with open(args.csv, "a", newline="") as f:
             w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
             if write_header:

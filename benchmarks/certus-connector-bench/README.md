@@ -58,7 +58,7 @@ Four serial phases:
 
 1. **Store**: touch → prepare_store → submit → finish → complete
 2. **Warm Load**: lookup → touch → prepare → submit → finish → complete (DRAM-resident)
-3. **Cold Load**: same path but SSD→DRAM→GPU round-trip. The memory tier is emptied before each pass and the keys are loaded back in the batches they were stored in, one job at a time; the cold-load shape flags below change that.
+3. **Cold Load**: same path but SSD→DRAM→GPU round-trip. Before every pass after the first, the memory tier is flushed to SSD and emptied (the first pass reads what the warm phase left); the keys are loaded back in the batches they were stored in, one job at a time. The cold-load shape flags below change that; the shaped pass empties the tier before every pass, the first included.
 4. **Mixed Eviction**: interleaved store + load under memory-tier pressure, with `take_events` drain
 
 ```bash
@@ -217,10 +217,13 @@ python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
 #### KV layout (`--pieces-per-block`)
 
 `--pieces-per-block N` splits each block into N GPU tensors of `--block-bytes / N`
-bytes, and the connector sends N regions per block. This is how vLLM ≥ 0.23 hands
+bytes, and the connector sends N regions per block. This is how vLLM ≥ 0.29 hands
 KV to an offloading connector under its default layer-outermost layout (`LBHNC`):
 one tensor per layer, so for Llama-3-8B a 2 MiB block arrives as 32 pieces of 64 KiB
-in 32 different allocations, and certus-server copies each piece separately. The
+in 32 different allocations, and certus-server copies each piece separately.
+(vLLM 0.23–0.28 did the same for connectors that did not opt into its cross-layer
+layout, which the Certus connector did not; see
+`knowledge/inference_workload_mapping.md`, "Layout history".) The
 default, 1, is one contiguous region per block, as under vLLM 0.20/0.22 and under
 the block-outermost `BLHNC` layout that `CertusConnector` requests. It is a count
 of pieces, not of model layers: the same 32-layer model gives 32 pieces under

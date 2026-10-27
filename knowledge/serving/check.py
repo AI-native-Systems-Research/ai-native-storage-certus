@@ -80,14 +80,20 @@ BENCH = REPO / "benchmarks" / "certus-connector-bench" / "bench_connector_lifecy
 
 def bench_presets() -> dict:
     """COLD_PRESETS from the connector benchmark, read from its source (importing it
-    needs CUDA). Returns {} if the benchmark or the literal is missing."""
+    needs CUDA). A missing benchmark or literal is an error, not an empty set."""
     import ast
     if not BENCH.exists():
+        err(f"benchmark {BENCH.relative_to(REPO)} not found (needed for the preset check)")
         return {}
     for node in ast.walk(ast.parse(BENCH.read_text())):
         if isinstance(node, ast.Assign) and any(
                 isinstance(t, ast.Name) and t.id == "COLD_PRESETS" for t in node.targets):
-            return ast.literal_eval(node.value)
+            try:
+                return ast.literal_eval(node.value)
+            except ValueError as e:
+                err(f"COLD_PRESETS in {BENCH.name} must be a plain literal: {e}")
+                return {}
+    err(f"COLD_PRESETS not found in {BENCH.name}")
     return {}
 
 
@@ -111,9 +117,10 @@ def check_bench_presets(obs_by_id: dict, derived_by_dep: dict) -> None:
                     f"!= {dv['block_bytes']} for {o.get('deployment')}")
         bpj = ((o.get("values") or {}).get("blocks_per_load_job") or {}).get("value")
         req, nb = preset.get("requests"), preset.get("num_blocks")
-        if bpj is not None and req and nb is not None and nb // req != bpj:
-            err(f"benchmark preset {name!r}: num_blocks/requests {nb // req} != "
-                f"observation's blocks_per_load_job {bpj}")
+        if bpj is not None and req and nb is not None and (nb % req or nb // req != bpj):
+            err(f"benchmark preset {name!r}: num_blocks/requests = {nb}/{req} "
+                f"(remainder {nb % req}) does not give the observation's "
+                f"blocks_per_load_job {bpj}")
 
 
 def main() -> int:
@@ -140,6 +147,9 @@ def main() -> int:
             err(f"deployment {did}: kv_dtype {dt!r} not one of {sorted(DTYPE_BYTES)}")
             continue
         tp = d.get("tensor_parallel") or 1
+        # Each rank holds 1/TP of the KV heads, except under MLA, where the latent is
+        # replicated on every rank (models.yaml deepseek-v3 notes).
+        shard = 1 if m.get("attention") == "mla" else tp
         obt = d.get("offload_block_tokens")
         if obt is None:
             err(f"deployment {did}: missing offload_block_tokens")
@@ -156,7 +166,7 @@ def main() -> int:
             err(f"deployment {did}: pieces_per_block cites unknown observation {ppb.get('observation')!r}")
         if ppb.get("basis") not in ("observed", "assumed"):
             err(f"deployment {did}: pieces_per_block.basis must be observed or assumed")
-        block_bytes = obt * per_token // tp
+        block_bytes = obt * per_token // shard
         ppb_val = ppb.get("value")
         if isinstance(ppb_val, int) and ppb_val > 0:
             # One piece per tensor the block is spread over: per-layer for layer-outermost
@@ -165,10 +175,10 @@ def main() -> int:
                 err(f"deployment {did}: block bytes {block_bytes} not divisible by pieces_per_block {ppb_val}")
             piece_bytes = block_bytes // ppb_val
         else:
-            piece_bytes = obt * per_layer // tp
+            piece_bytes = obt * per_layer // shard
         derived = {
             "kv_bytes_per_token": per_token,
-            "layer_bytes": obt * per_layer // tp,
+            "layer_bytes": obt * per_layer // shard,
             "piece_bytes": piece_bytes,
             "block_bytes": block_bytes,
         }
@@ -176,7 +186,7 @@ def main() -> int:
             stored = lay.get(f"stored_{key}")
             if stored is not None and stored != val:
                 err(f"deployment {did}: stored_{key} {stored} != computed {val}")
-        if (obt * per_token) % tp:
+        if (obt * per_token) % shard:
             err(f"deployment {did}: block bytes not divisible by tensor_parallel {tp}")
         rows.append((did, kv_layers, ppb.get("value"), ppb.get("basis"), derived))
 
