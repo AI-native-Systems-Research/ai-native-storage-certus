@@ -58,7 +58,7 @@ Four serial phases:
 
 1. **Store**: touch → prepare_store → submit → finish → complete
 2. **Warm Load**: lookup → touch → prepare → submit → finish → complete (DRAM-resident)
-3. **Cold Load**: same path but SSD→DRAM→GPU round-trip
+3. **Cold Load**: same path but SSD→DRAM→GPU round-trip. The memory tier is emptied before each pass and the keys are loaded back in the batches they were stored in, one job at a time; the cold-load shape flags below change that.
 4. **Mixed Eviction**: interleaved store + load under memory-tier pressure, with `take_events` drain
 
 ```bash
@@ -176,6 +176,14 @@ python benchmarks/certus-connector-bench/bench_connector_lifecycle.py --mode all
 --csv PATH             Append results to CSV file
 --tag TEXT             Tag column for CSV (e.g. branch name)
 --lookup-order ORDER   lookup-first (default, vLLM >= 0.21) or touch-first (vLLM <= 0.20)
+--pieces-per-block N   GPU tensors per block (default: 1; 32 = Llama-3-8B under LBHNC), see below
+--cold-tier-state S    empty (default) or full, with --tier-fill-blocks N; see "Cold-load shape"
+--store-order O        batch (default) or interleaved
+--load-unit U          batch (default) or request
+--requests R           requests for interleaved/request (default: 16)
+--cold-inflight N      cold load jobs outstanding (default: 1)
+--seed N               request order for --load-unit request (default: 0)
+--preset NAME          named cold-load shape: longdocqa
 ```
 
 #### Tensor parallelism (`--tp`)
@@ -264,10 +272,17 @@ unchanged.
 `--num-blocks` must divide evenly by it.
 
 `--preset longdocqa` sets the shape LongDocQA's query round showed on vLLM 0.30 with
-Llama-3-8B (`knowledge/serving/observations.yaml`): 2 MiB blocks in 32 pieces,
-4 requests × 625 blocks (one 10,000-token document each), interleaved stores, one
-load job per request, 4 in flight, full tier. Flags given explicitly override the
-preset's values; `--tier-fill-blocks` is still required.
+Llama-3-8B under the default `LBHNC` layout (`knowledge/serving/observations.yaml`,
+`ldq-llama-3-8b-lbhnc-2026-10-26`): 2 MiB blocks in 32 pieces, 4 requests × 625
+blocks (one 10,000-token document each), interleaved stores, one load job per
+request, 4 in flight, full tier. Flags given explicitly override the preset's values
+(e.g. add `--pieces-per-block 1` for the `BLHNC` layout); `--tier-fill-blocks` is
+still required. `knowledge/serving/check.py` fails if the preset's block size, pieces
+per block or blocks per load job drift from that observation.
+
+These flags exist only in this benchmark. `cputier-connector-bench` has no
+counterpart yet, so a side-by-side comparison of the two backends uses the default
+cold pass.
 
 ```bash
 # vLLM-like cold load on a 4 GiB tier (eviction threshold 0.8)

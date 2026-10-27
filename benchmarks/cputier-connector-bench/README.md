@@ -28,6 +28,8 @@ No engine, model or HTTP server is started. The benchmark builds the `Offloading
 | "Cold" | `flush_to_ssd` + `clear_memory_tier` | `reset_cache()`: drain fs writes, empty the CPU tier (fs data kept) |
 | Remove keys between passes | `ring.remove` | not possible; each store pass uses a **fresh key set** instead |
 | Extra phases | — | `new_request`, `lookup_wait`, `schedule_end`, `reset`/`demote` |
+| Pieces per block | `--pieces-per-block` (default 1): GPU tensors a block is split into, independent of the model's layer count | `--layers` (default 32): per-layer tensors, which also names the model's layers in the `OffloadingConfig`. Equal to `--pieces-per-block` under vLLM's default `LBHNC` layout; no block-outermost (`BLHNC`) mode |
+| Cold-load shape | `--cold-tier-state`, `--store-order`, `--load-unit`, `--cold-inflight`, `--preset longdocqa` | not available; only the default cold pass |
 
 There is no counterpart to `bench_connector_path.py` or `bench_connector_race.py`. Those scripts exercise the shmq ring, and cputier has no ring.
 
@@ -37,7 +39,7 @@ Things to know when reading cputier numbers:
 - **Store throughput** excludes the per-pass `reset`, which waits for that pass's fs write-through. The headline figure is the GPU→CPU path, which compares with Certus's DRAM store. The `Sustained incl. fs write-through drain` line below it is the disk-bound rate.
 - **A cold lookup takes scheduler steps.** A CPU-tier miss first returns `RETRY` until the async fs probe is flushed. A disk hit then returns `HIT_PENDING` until the promotion lands in the CPU tier. All of this is `lookup_wait`. With an fs tier, even a true miss costs one step (see `prefix-miss`).
 - **CPU-tier space is pinned by write-through.** A stored chunk can't be evicted until its fs write finishes. If the disk falls behind, `prepare_store` returns `None`, which is reported as **store drops**.
-- **The worker submits one copy descriptor per (block, layer).** `submit_*` cost grows with `--layers`; try `--layers 1` versus the default of 32.
+- **The worker submits one copy descriptor per (block, layer).** `submit_*` cost grows with `--layers`; try `--layers 1` versus the default of 32. Comparing with certus-connector-bench, pass the same value as its `--pieces-per-block` (32 for the default layout).
 - `blocks` and `iops` count offload **chunks**. With `--blocks-per-chunk N`, each chunk is N GPU blocks (`N × --block-bytes`).
 - Single rank only: TP is not simulated (certus-connector-bench's `--tp` has no counterpart).
 
