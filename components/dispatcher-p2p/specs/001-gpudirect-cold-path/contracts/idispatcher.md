@@ -24,7 +24,7 @@ All methods have identical signatures to the standard dispatcher, and identical 
 ### Unchanged Methods
 
 All other IDispatcher methods behave identically to the standard dispatcher:
-`check`, `remove`, `populate`, `prepare_store`, `commit_store`, `cancel_store`, `touch`, `clear_memory_tier`, `flush_to_ssd`, `initialize`, `shutdown`.
+`check`, `remove`, `populate`, `prepare_store`, `commit_store`, `cancel_store`, `touch`, `clear_memory_tier`, `clear_all` (as the standard dispatcher's FR-063: both tiers listed, each entry removed through `remove`, a Removed event each, pinned entries reported), `flush_to_ssd`, `initialize`, `shutdown`.
 
 ## Initialization Contract
 

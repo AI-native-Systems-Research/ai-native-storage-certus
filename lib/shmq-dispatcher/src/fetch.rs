@@ -448,6 +448,19 @@ impl Fetcher {
         }
     }
 
+    /// Drop every mark, counting each as unused: the cache was emptied, so no
+    /// marked block can be served. Returns how many were dropped.
+    pub fn clear_marks(&self) -> usize {
+        let mut state = self.lock();
+        let n = state.marks.len();
+        state.marks.clear();
+        self.0
+            .counters
+            .fetched_unused
+            .fetch_add(n as u64, Ordering::Relaxed);
+        n
+    }
+
     /// Drop marks older than the TTL, counting each as unused. Called by the
     /// reaper.
     #[must_use]

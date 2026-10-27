@@ -2864,6 +2864,73 @@ impl IDispatcher for DispatcherP2pComponent {
         Ok(count)
     }
 
+    fn clear_all(&self) -> Result<interfaces::ClearAll, DispatcherError> {
+        self.ensure_initialized()?;
+        let mt = self
+            .memory_tier
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
+
+        // As the main dispatcher: the memory tier lists DRAM entries, the drives'
+        // extent managers SSD ones; every entry is in at least one, and each is
+        // removed through `remove`, which frees its slot and its extent.
+        let listing = |mt: &dyn IMemoryTier| -> (Vec<CacheKey>, Vec<(usize, CacheKey, u64)>) {
+            let mut keys: Vec<CacheKey> = mt.oldest_keys(usize::MAX);
+            let mut extents = Vec::new();
+            for (d, drive) in self.data_drives.read().iter().enumerate() {
+                drive.extent_mgr.for_each_extent(&mut |e| {
+                    keys.push(e.key);
+                    extents.push((d, e.key, e.offset));
+                });
+            }
+            keys.sort_unstable();
+            keys.dedup();
+            (keys, extents)
+        };
+        let timeout = std::time::Duration::from_secs(5);
+        let start = std::time::Instant::now();
+        let mut removed = 0u64;
+        loop {
+            let (keys, extents) = listing(&*mt);
+            let mut gone = std::collections::HashSet::new();
+            for key in keys {
+                if self.remove(key).is_ok() {
+                    removed += 1;
+                    gone.insert(key);
+                    let tx = self
+                        .eviction_tx
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .clone();
+                    publish_eviction(
+                        tx.as_ref(),
+                        Some(&self.eviction_dropped),
+                        key,
+                        EvictionReason::Removed,
+                    );
+                }
+            }
+            // `remove` frees an SSD-only entry's extent but not the SSD copy of
+            // one still in DRAM (its lookup reports no offset): free those from
+            // the listing, now that nothing can reach them.
+            let drives = self.data_drives.read();
+            for (d, key, offset) in extents {
+                if gone.contains(&key) {
+                    let _ = drives[d].extent_mgr.remove_extent(offset);
+                }
+            }
+            drop(drives);
+            let left = listing(&*mt).0.len() as u64;
+            if left == 0 || start.elapsed() >= timeout {
+                return Ok(interfaces::ClearAll {
+                    removed,
+                    still_pinned: left,
+                });
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+
     fn schedule_write_through(&self, key: CacheKey, size: u32) -> Result<(), DispatcherError> {
         self.ensure_initialized()?;
 

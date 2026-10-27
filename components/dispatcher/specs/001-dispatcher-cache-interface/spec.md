@@ -433,6 +433,26 @@ one, but done in the wrong layer it reads the wrong drive and reports the result
     timeout, and `shutdown` takes that lock for writing, so holding it would let one hung
     drive hang `shutdown`.
   `release_bounce(buf)` forwards to `IMemoryTier::bounce_free`.
+- **FR-063**: `clear_all() -> Result<ClearAll, DispatcherError>` MUST remove every entry from
+  both tiers, so that the cache is empty afterwards as after `--format`, without a restart.
+  - It lists keys from both tiers: `IMemoryTier::oldest_keys(usize::MAX)` (every DRAM entry,
+    with or without an SSD copy) and every drive's `IExtentManager::for_each_extent` (every SSD
+    entry). Each entry is in at least one; duplicates are removed.
+  - Each key is removed through `remove` (FR-018), which refuses a pinned entry and frees the
+    slot and, for an SSD-only entry, the extent. An entry in DRAM **with** an SSD copy is
+    reported by `lookup` as memory-tier, so `remove` does not free its extent: `clear_all`
+    frees it from the listing once the entry is gone from the map, when nothing can reach it.
+  - Each removed entry MUST be reported as an `EvictionReason::Removed` event (`remove`
+    itself reports none), so a client's view of the cache follows.
+  - A pinned entry is left in place, never freed under its reader. Passes repeat, 1 ms apart,
+    until nothing is listed or 5 s have passed; then `ClearAll { removed, still_pinned }`
+    returns, `still_pinned` being what is still listed. A pin outlasting the wait is not an
+    error. Fetches in flight are the control plane's (shm-queue `CLEAR_ALL`), not this
+    method's.
+  *(2026-10-24, T087 follow-up: `clear_memory_tier` leaves every entry with an SSD copy on
+  SSD, so an "empty" server needed a restart. Design in
+  `components/certus-transfer-endpoint/specs/001-rdma-cache-transfer/channel-reclaim.md`
+  Part 2.)*
 - **FR-061** *(Sync 2026-09-21 — backfilled; the multi-drive scatter-gather cold path shipped with no requirement. Commit `6f35b13a` "optimizer iter-005: scatter-gather")*: The pipeline module MUST provide a multi-drive scatter-gather cold-read path, `scatter_gather_multi_drive_zero_copy(gpu, streams: &[GpuStream; 2], drive_works: &[DriveWork], chunk_size, max_queue_depth, metrics) -> Vec<Vec<Result<(), DispatcherError>>>`, that `batch_lookup` uses to serve cold (BlockDevice) entries spread across multiple data drives. Each `DriveWork { channels: &ClientChannels, drive: &dyn IBlockDevice, jobs: &[ColdReadJob] }` descriptor names one drive's checked-out client channel and its cold-read jobs. The function MUST:
   - Segment every job's read against its drive's block size (respecting MDTS per FR-019) and, on the **caller thread**, run a **single multiplexed poll loop** that fans NVMe reads out to all drives simultaneously and fans completions in — there are NO spawned per-drive worker threads and NO persistent `ColdReadPool` (FR-044, retired).
   - Distribute the supplied `max_queue_depth` (128 from `batch_lookup`) **proportionally across drives by segment count**, so a drive holding more data gets a deeper share of the shared in-flight budget.

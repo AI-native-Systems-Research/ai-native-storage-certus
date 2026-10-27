@@ -322,6 +322,15 @@ pub struct LookupOutcome {
     pub result: Result<(), DispatcherError>,
 }
 
+/// What `IDispatcher::clear_all` did.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ClearAll {
+    /// Entries removed, from either tier.
+    pub removed: u64,
+    /// Entries left in place because a pin outlasted the bounded wait.
+    pub still_pinned: u64,
+}
+
 /// A cumulative snapshot of the dispatcher's KV-cache tier-movement counters.
 ///
 /// All fields are monotonic since process start; subtract two successive
@@ -843,6 +852,33 @@ component_macros::define_interface! {
         /// # }
         /// ```
         fn clear_memory_tier(&self) -> Result<usize, DispatcherError>;
+
+        /// Remove every entry from both tiers, freeing its memory-tier slot and
+        /// its SSD extent: the cache is empty afterwards, as after a restart with
+        /// `--format`, without one.
+        ///
+        /// Each removed entry is reported as an [`EvictionReason::Removed`]
+        /// event, so a client's view of the cache follows. An entry that is
+        /// pinned -- by a lookup, a client `pin`, or a reservation still being
+        /// written -- is retried for a bounded time and then left in place: it
+        /// is counted in [`ClearAll::still_pinned`], not treated as an error, so
+        /// a caller can tell "empty" from "nearly".
+        ///
+        /// # Errors
+        ///
+        /// Returns [`DispatcherError::NotInitialized`] before `initialize`.
+        ///
+        /// # Examples
+        ///
+        /// ```no_run
+        /// # use interfaces::{IDispatcher, DispatcherError};
+        /// # fn example(dispatcher: &dyn IDispatcher) -> Result<(), DispatcherError> {
+        /// let c = dispatcher.clear_all()?;
+        /// println!("removed {}, {} still pinned", c.removed, c.still_pinned);
+        /// # Ok(())
+        /// # }
+        /// ```
+        fn clear_all(&self) -> Result<ClearAll, DispatcherError>;
 
         /// Flush all pending background write-through jobs to SSD and block until complete.
         ///
