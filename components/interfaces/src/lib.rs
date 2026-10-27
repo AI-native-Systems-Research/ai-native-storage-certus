@@ -32,6 +32,7 @@ pub use idispatch_map::DispatchMapError;
 // `IMemoryTier` already has.
 pub use idispatch_map::IDispatchMap;
 pub use idispatch_map::LookupResult;
+pub use idispatcher::ClearAll;
 pub use idispatcher::DispatcherConfig;
 pub use idispatcher::DispatcherError;
 pub use idispatcher::EvictionEvent;

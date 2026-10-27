@@ -27,6 +27,7 @@ import atexit
 import ctypes
 import errno
 import mmap
+import fcntl
 import os
 import platform
 import struct
@@ -38,14 +39,49 @@ from typing import Iterable, Sequence
 # ── shm-queue layout constants (mirror lib/shm-queue/src/lib.rs) ──────
 
 MAGIC_READY = 0x5148_4D53  # "SMHQ"
-ABI_VERSION = 1
+ABI_VERSION = 2  # 2: channels are claimed by OFD lock (lib/shm-queue module docs)
 CONTROL_SIZE = 64  # one cache line per control block
 
 # Control-block field offsets within a 64-byte control block.
 OFF_SEQ = 0  # request: published last ; response: server echoes (futex word)
 OFF_OPCODE = 4  # request: opcode ; response: status
 OFF_LEN = 8
-OFF_OWNER = 12  # request control only: channel-claim word
+OFF_OWNER = 12  # request control only: non-zero while claimed (observability)
+
+# A claim waits this long for a dead owner's in-flight request to be answered.
+TAKEOVER_TIMEOUT_S = 30.0
+
+# Every live Ring, for the after-fork hook (weak: a closed Ring is forgotten).
+import weakref as _weakref  # noqa: E402
+
+_LIVE_RINGS: "_weakref.WeakSet[Ring]" = _weakref.WeakSet()
+
+
+def _close_inherited_claims() -> None:
+    """In a forked child: close the claim descriptors copied from the parent.
+
+    A claim is an OFD lock held by an open file description; a child holding a
+    copy keeps the parent's channels locked after the parent dies, so they could
+    never be reclaimed. The child's threads never used those channels (threads do
+    not survive fork), so it has nothing to lose."""
+    for ring in list(_LIVE_RINGS):
+        ring._forget_claims_after_fork()
+
+
+os.register_at_fork(after_in_child=_close_inherited_claims)
+
+
+def _ofd_lock(fd: int, off: int) -> bool:
+    """OFD write lock on byte ``off`` of ``fd``, without waiting. False if
+    another open file description holds it."""
+    lk = struct.pack("hhqqi", fcntl.F_WRLCK, os.SEEK_SET, off, 1, 0)
+    try:
+        fcntl.fcntl(fd, fcntl.F_OFD_SETLK, lk)
+    except OSError as e:
+        if e.errno in (errno.EAGAIN, errno.EACCES):
+            return False
+        raise
+    return True
 
 # Fixed header field offsets (repr(C); heartbeat is u64 → 8-aligned at 48).
 _HDR_MAGIC = 0
@@ -80,6 +116,11 @@ OP_FLUSH_TO_SSD = 14
 OP_GET_IO_STATS = 15
 OP_TOUCH_CHECK = 16
 OP_FETCH = 17
+OP_CLEAR_ALL = 18
+
+# An UNPIN key count meaning "release every pin on this channel" (no keys
+# follow); answered with the number released, u64. Mirrors wire::UNPIN_ALL.
+UNPIN_ALL = 0xFFFFFFFF
 
 STATUS_OK = 0
 
@@ -121,6 +162,17 @@ class _timespec(ctypes.Structure):
 
 class RingError(RuntimeError):
     """A transport-level or server-reported (STATUS_ERROR) failure."""
+
+
+class ServerRestartedError(RingError):
+    """The certus server this ring attached to was replaced by a new one at the
+    same path: the ring's mapping is orphaned, and only reattaching (in practice,
+    restarting the engine) recovers."""
+
+
+# A waiting request probes the mailbox path for a replacement server once the
+# heartbeat has stood still this long (and at most once per interval after).
+QUIET_BEFORE_PROBE_S = 0.5
 
 
 def _require_x86_64() -> None:
@@ -428,6 +480,12 @@ class Ring:
 
         self._claim_lock = threading.Lock()
         self._tls = threading.local()
+        # channel -> the open file description whose OFD lock is our claim.
+        self._claim_fds: dict[int, int] = {}
+        # Channels taken over from dead clients.
+        self.reclaimed = 0
+        # Pins a previous owner left on channels this ring claimed (see _my_channel).
+        self.pins_released_on_claim = 0
         # Per-channel client seq counters (each channel is single-threaded).
         self._seqs: list[int] = []
 
@@ -454,7 +512,7 @@ class Ring:
         # Open the file (it may not exist yet if the server is still starting).
         while True:
             try:
-                self._fd = os.open(self._path, os.O_RDWR)
+                self._fd = os.open(self._path, os.O_RDWR | os.O_CLOEXEC)
                 break
             except OSError as e:
                 if e.errno != errno.ENOENT or time.monotonic() > deadline:
@@ -522,6 +580,9 @@ class Ring:
         self._resp_payload_off = resp_payload_off
         self._channel_stride = channel_stride
         self._seqs = [0] * self._num_channels
+        # Claim locks live one byte per channel past the mapped region.
+        self._lock_base = total
+        _LIVE_RINGS.add(self)
 
     @property
     def channel_count(self) -> int:
@@ -538,6 +599,28 @@ class Ring:
     @property
     def generation(self) -> int:
         return self._generation
+
+    def server_replaced(self) -> int | None:
+        """The generation of a different, ready server now at this mailbox's
+        path, or ``None``: same server, or none ready there (stopped, or still
+        starting). A restarted server recreates the file as a new inode, so this
+        client's mapping is then orphaned and no request on it is answered."""
+        try:
+            fd = os.open(self._path, os.O_RDONLY | os.O_CLOEXEC)
+        except OSError:
+            return None
+        try:
+            hdr = os.pread(fd, _HEADER_SIZE, 0)
+        except OSError:
+            return None
+        finally:
+            os.close(fd)
+        if len(hdr) < _HDR_GENERATION + 4:
+            return None
+        magic, _abi, gen = struct.unpack_from("<III", hdr, 0)
+        if magic != MAGIC_READY or gen == self._generation:
+            return None
+        return gen
 
     def heartbeat(self) -> int:
         """Current server liveness counter (u64 at header offset 48)."""
@@ -557,34 +640,92 @@ class Ring:
     # ── channel claim (process-local; sticky per thread) ──
 
     def _claim_channel(self) -> int:
-        # A non-zero owner marks the channel taken. Only this process's threads
-        # claim (the server never touches the owner word), so a Python-lock-
-        # guarded read-then-write is a correct claim among them.
+        """Claim a channel: one whose OFD lock no live process holds.
+
+        The lock (one byte past the mapped region, per channel) is the claim, so
+        a channel whose owner died -- however it died -- is free, and is taken
+        over: the new owner continues the channel's sequence after the dead
+        owner's last request has been answered. Each claim uses its own open file
+        description, since locks of one description do not conflict with each
+        other. The TP>1 slot partition still keeps one engine's processes in
+        disjoint slices."""
         tid = (threading.get_ident() * 2654435761) & 0xFFFFFFFF or 1
-        # Restrict this process's claims to its slot's disjoint channel slice so
-        # the non-atomic owner-word claim can't collide with another process's
-        # (TP>1). The last slot absorbs the remainder so no channel is stranded;
-        # claim_slots==1 → [0, num_channels) = the full-range baseline.
         per = max(1, self._num_channels // self._claim_slots)
         lo = self._claim_slot * per
         hi = self._num_channels if self._claim_slot == self._claim_slots - 1 else lo + per
         with self._claim_lock:
             for ch in range(lo, hi):
+                if ch in self._claim_fds:
+                    continue  # ours: a probe from our own process would succeed
+                fd = os.open(f"/proc/self/fd/{self._fd}", os.O_RDWR | os.O_CLOEXEC)
+                if not _ofd_lock(fd, self._lock_base + ch):
+                    os.close(fd)  # a live owner
+                    continue
                 owner_off = self._channel_base(ch) + OFF_OWNER
-                if self._rd_u32(owner_off) == 0:
-                    self._wr_u32(owner_off, tid)
-                    return ch
+                previous = self._rd_u32(owner_off)
+                self._wr_u32(owner_off, tid)
+                seq = self._adopt_seq(ch, TAKEOVER_TIMEOUT_S)
+                if seq is None:
+                    # The dead owner's request is still unanswered: unusable
+                    # until the server replies. Leave it.
+                    self._wr_u32(owner_off, previous)
+                    os.close(fd)
+                    continue
+                self._seqs[ch] = seq
+                if previous:
+                    self.reclaimed += 1
+                    self._log(f"reclaimed shmq channel {ch} from a dead client")
+                self._claim_fds[ch] = fd
+                return ch
         raise RingError(
             f"no free shmq channel in slot {self._claim_slot}/{self._claim_slots} "
             f"range [{lo},{hi}) of {self._num_channels}"
         )
+
+    def _adopt_seq(self, ch: int, timeout: float) -> int | None:
+        """Wait until channel ``ch``'s last request (if any) has been answered;
+        return that seq, the base to continue from. None after ``timeout``."""
+        base = self._channel_base(ch)
+        rc = base + self._resp_control_off
+        deadline = time.monotonic() + timeout
+        while True:
+            req = self._rd_u32(base + OFF_SEQ)
+            resp = self._rd_u32(rc + OFF_SEQ)
+            if req == resp:
+                return req
+            if time.monotonic() > deadline:
+                return None
+            self._futex_wait(self._base + rc + OFF_SEQ, resp, 0.01)
+
+    def _forget_claims_after_fork(self) -> None:
+        for fd in self._claim_fds.values():
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        self._claim_fds = {}
+        self._tls = threading.local()
 
     def _my_channel(self) -> int:
         ch = getattr(self._tls, "channel", None)
         if ch is None:
             ch = self._claim_channel()
             self._tls.channel = ch
+            # Pins belong to the channel lease: whatever a previous owner left
+            # (a dead one's, or one in flight when it died -- the claim waited
+            # for that reply) is released before this owner's first request.
+            self.pins_released_on_claim += self._unpin_all_on(ch)
         return ch
+
+    def _unpin_all_on(self, ch: int) -> int:
+        """UNPIN-all on channel ``ch`` (this thread's): the server releases
+        every pin recorded on it. Returns the number released."""
+        status, payload = self._request_on(ch, OP_UNPIN, struct.pack("<I", UNPIN_ALL))
+        if status != STATUS_OK:
+            raise RingError(
+                f"server error (op={OP_UNPIN}, unpin-all): {payload.decode('utf-8', 'replace')}"
+            )
+        return decode_u64(payload)
 
     def release_channel(self) -> None:
         """Release this thread's claimed channel back to the free pool.
@@ -593,8 +734,8 @@ class Ring:
         :meth:`_my_channel`) and normally held for the life of the thread. A
         caller that churns threads — a ``ThreadPoolExecutor`` recreated per
         phase, or fresh worker threads per benchmark round — must release before
-        the thread exits, otherwise the owner word stays set and the channel is
-        leaked (a later ``_claim_channel`` scan will never find it free).
+        the thread exits, otherwise the claim is held until this process exits
+        (only a dead process's claims are reclaimed, not a dead thread's).
 
         Safe to call with no channel held (no-op). Releasing is safe even though
         seq counters are *not* reset: ``self._seqs`` is indexed by channel, not
@@ -609,8 +750,19 @@ class Ring:
         if not self._base:
             self._tls.channel = None
             return
+        # Pins end with the lease. Best-effort: a dead server holds none, and
+        # the next claimer of this channel releases them regardless.
+        try:
+            self._unpin_all_on(ch)
+        except RingError:
+            pass
         with self._claim_lock:
+            # Word first, then the lock: a claimer that gets the lock must not
+            # see our id and count a clean release as a takeover.
             self._wr_u32(self._channel_base(ch) + OFF_OWNER, 0)
+            fd = self._claim_fds.pop(ch, None)
+            if fd is not None:
+                os.close(fd)
         self._tls.channel = None
 
     def _next_seq(self, ch: int) -> int:
@@ -639,7 +791,9 @@ class Ring:
         spin-then-futex) for the reply. Returns ``(status, payload)``."""
         if len(data) > self._cap_req:
             raise RingError(f"request payload {len(data)} B exceeds cap_req {self._cap_req} B")
-        ch = self._my_channel()
+        return self._request_on(self._my_channel(), opcode, data)
+
+    def _request_on(self, ch: int, opcode: int, data: bytes) -> tuple[int, bytes]:
         base = self._channel_base(ch)
         rc = base + self._resp_control_off
         seq = self._next_seq(ch)
@@ -666,11 +820,28 @@ class Ring:
                 return self._read_response(rc)
 
         start = time.monotonic()
+        beat, beat_since = self.heartbeat(), start
         while True:
             cur = resp_seq.value
             if cur == seq:
                 return self._read_response(rc)
-            if time.monotonic() - start > self._deadline:
+            now = time.monotonic()
+            b = self.heartbeat()
+            if b != beat:
+                beat, beat_since = b, now
+            elif now - beat_since >= QUIET_BEFORE_PROBE_S:
+                # The poller never sleeps, so a heartbeat that stands still
+                # means a dead or wedged server. Look once per interval for a
+                # server that replaced it: then no reply can ever come here.
+                beat_since = now
+                gen = self.server_replaced()
+                if gen is not None:
+                    raise ServerRestartedError(
+                        f"certus server at {self._path!r} restarted (generation "
+                        f"{self._generation:#x} -> {gen:#x}); this mailbox is orphaned. "
+                        "Restart this engine to attach to the new server."
+                    )
+            if now - start > self._deadline:
                 raise RingError(
                     f"shmq request deadline exceeded after {self._deadline:g}s "
                     "(server dead, or tier saturated and backpressuring longer "
@@ -806,6 +977,8 @@ class Ring:
         )
 
     def unpin(self, keys: Sequence[int]) -> list[bool]:
+        """Release pins this thread's channel took. A key pinned on another
+        channel (another thread) is refused: pin and unpin on one thread."""
         keys = list(keys)
         if not keys:
             return []
@@ -874,8 +1047,17 @@ class Ring:
         return decode_ok_flags(self._dispatch(OP_REMOVE, encode_keys(keys)), len(keys))
 
     def clear_memory_tier(self) -> int:
-        """Evict the whole memory tier. Returns the number of entries cleared."""
+        """Evict the whole memory tier (entries with an SSD copy stay there).
+        Returns the number of entries cleared."""
         return decode_u64(self._dispatch(OP_CLEAR_MEMORY_TIER, b""))
+
+    def clear_all(self) -> tuple[int, int, int]:
+        """Remove every entry from both tiers: the cache is empty afterwards.
+        Returns ``(removed, still_pinned, fetch_pending)``: entries removed,
+        entries a pin kept, and keys of fetches still in flight (they land after
+        the clear)."""
+        payload = self._dispatch(OP_CLEAR_ALL, b"")
+        return struct.unpack_from("<QQQ", payload)
 
     def flush_to_ssd(self) -> int:
         """Drain pending write-through jobs. Returns the number flushed."""
@@ -888,14 +1070,18 @@ class Ring:
     # ── teardown ──
 
     def close(self) -> None:
-        # Release this thread's channel first, while the mapping is still valid.
-        # The owner word lives in the shared /dev/shm segment, so a client that
-        # exits without releasing leaves the channel marked owned on a persistent
-        # server — starving later client processes. Worker threads that outlive
-        # their channel use should call release_channel() directly; close() (run
-        # by the thread that attached) covers the common single-threaded scripts.
+        # Release this thread's channel first, while the mapping is still valid,
+        # then every other claim this ring holds: other threads' channels go when
+        # their descriptions close, as they would at process exit.
         self.release_channel()
         atexit.unregister(self._release_at_exit)  # explicit close: drop the hook
+        with self._claim_lock:
+            for ch, fd in self._claim_fds.items():
+                if self._base:
+                    self._wr_u32(self._channel_base(ch) + OFF_OWNER, 0)
+                os.close(fd)
+            self._claim_fds = {}
+        _LIVE_RINGS.discard(self)
         # Drop the ctypes view before unmapping (mmap.close() errors if exported
         # pointers still reference the buffer).
         self._buf = None

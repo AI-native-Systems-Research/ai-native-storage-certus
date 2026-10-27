@@ -570,6 +570,9 @@ impl interfaces::IDispatcher for DiskDispatcher {
     fn clear_memory_tier(&self) -> Result<usize, interfaces::DispatcherError> {
         unimplemented!()
     }
+    fn clear_all(&self) -> Result<interfaces::ClearAll, interfaces::DispatcherError> {
+        unimplemented!()
+    }
     fn flush_to_ssd(&self) -> Result<usize, interfaces::DispatcherError> {
         unimplemented!()
     }

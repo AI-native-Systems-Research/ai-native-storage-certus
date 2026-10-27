@@ -786,6 +786,10 @@ impl IDispatcher for MockDispatcher {
         unimplemented!("mock: IDispatcher::clear_memory_tier not needed by remote-lookup tests")
     }
 
+    fn clear_all(&self) -> Result<interfaces::ClearAll, DispatcherError> {
+        unimplemented!("mock: IDispatcher::clear_all not needed by remote-lookup tests")
+    }
+
     /// Records the call rather than performing it: there is no background writer
     /// here, and what a test needs to assert is that the scheduling HAPPENED.
     fn schedule_write_through(&self, key: CacheKey, size: u32) -> Result<(), DispatcherError> {

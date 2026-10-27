@@ -552,10 +552,13 @@ orphaned client no matter how much traffic its engine is serving.
 kubectl logs -n certus <certus-pod> --tail=5 | grep shmq-flow
 ```
 
-This is a known gap rather than a configuration error — the connector has no
-reconnect path, and the shm header already carries the `generation` and
-`heartbeat` fields a client would need to detect it. Fixing it properly belongs
-in the connector; until then, order the restarts.
+The connector now detects this on its first request after the restart: once
+the old mailbox's heartbeat has stood still for 0.5 s it finds a different
+server `generation` at the mailbox path and fails the request at once with
+`ServerRestartedError` ("certus server ... restarted ... Restart this engine"),
+instead of after the 30 s deadline. It still does not reconnect -- the old
+server's pins and reservations are gone -- so the engine still dies and the pod
+restarts; ordering the restarts as above avoids even that.
 
 ## GPU / NUMA / mailbox mapping
 

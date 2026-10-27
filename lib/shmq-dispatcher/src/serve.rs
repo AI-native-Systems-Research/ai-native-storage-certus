@@ -186,7 +186,7 @@ pub fn serve(
                         // boundary (`component-core/src/actor.rs`) and does continue.
                         let outcome =
                             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                                tr.dispatch(req.opcode, &req.payload)
+                                tr.dispatch(req.channel, req.opcode, &req.payload)
                             }));
                         match outcome {
                             Ok(Ok(blob)) => {
