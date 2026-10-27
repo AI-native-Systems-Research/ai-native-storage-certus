@@ -1,0 +1,61 @@
+[package]
+name = "certus-transfer-endpoint"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[features]
+# Nothing is on by default: the connection table, framing, credit and pin logic
+# are exercised over an in-process transport seam with neither rdma-core nor SPDK
+# present, and this crate IS a workspace default member (constitution Principle
+# VIII). That is the difference from remote-lookup-rdma-initiator/-responder,
+# which are members but not default members.
+default = []
+
+# Enables the real rdma-core (libibverbs/librdmacm) transport, via a hand-written
+# FFI layer and a C shim built by build.rs. Off by default; build.rs must no-op
+# without it so the default build needs no NIC and no pkg-config entry.
+rdma = []
+
+# Enables block-tier serving: the block-device receptacle plus the bounce-buffer
+# pool. Requires `interfaces/spdk`, because the block-device interface is
+# genuinely SPDK-dependent — unlike IDispatchMap, which is SPDK-orthogonal and
+# therefore ungated. Without this feature a BlockDevice lookup answer is reported
+# as `Miss`, never an error (research D14).
+spdk = ["interfaces/spdk"]
+
+# Metrics collection. Zero-sized no-op when off.
+telemetry = []
+
+[dependencies]
+component-framework.workspace = true
+component-core.workspace = true
+component-macros.workspace = true
+# Deliberately NOT `features = ["spdk"]`. The receptacles of research D13 are
+# ILogger and IDispatchMap, and both are available ungated, so the default build
+# does not pull spdk-sys and can stay in default-members. Only our own `spdk`
+# feature adds `interfaces/spdk`, for the block-device receptacle.
+interfaces.workspace = true
+
+anyhow = "1"
+
+[build-dependencies]
+# Unconditional, as Cargo gives no way to gate build-dependencies by feature;
+# build.rs itself is a no-op unless the `rdma` feature is on.
+cc = "1"
+pkg-config = "0.3"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+# Per-entry push path: one RDMA write per entry is forced by non-contiguous
+# landing slots (FR-008), so this is the path whose cost needs measuring.
+[[bench]]
+name = "entry_push"
+harness = false
+
+# Header + entry-vector encode/decode at the 340-entry message limit.
+[[bench]]
+name = "message_codec"
+harness = false
