@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # agg_moves_arm.sh <name> <concurrency> <sessions> : one multiturn run through the
-# aggregated router, then the EPP's picks for its window, matched by request id.
+# aggregated router, with the EPP log followed for the run (needs EPP --v=4) and its
+# picks matched to the turns by send time (moves_from_epp.py).
 set -u
 cd /home/scooter/ai-native-storage-certus
 ns=llm-d-quickstart; NAME=$1 C=$2 S=$3
@@ -16,4 +17,4 @@ python3 benchmarks/multiturn-router/multiturn_router.py --url http://$R --render
   --conversations data/sharegpt_12turn_450.json --sessions $S --concurrency $C --turns 5 \
   --answer-tokens 1100 --tag "AGG-$NAME-$(date +%s)" --out $OUT/turns.jsonl > $OUT/summary.json 2>$OUT/driver.err
 sleep 5; kill $LP 2>/dev/null; wait $LP 2>/dev/null
-python3 /tmp/moves_from_epp.py $OUT/turns.jsonl $OUT/picks.log | tee $OUT/moves.json
+python3 "$(dirname "$0")/moves_from_epp.py" $OUT/turns.jsonl $OUT/picks.log | tee $OUT/moves.json
