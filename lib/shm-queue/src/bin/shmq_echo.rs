@@ -74,7 +74,12 @@ fn serve(path: &str, n: usize, cap_req: usize, cap_resp: usize) {
             if let Some(req) = server.take_request(ch, seen) {
                 // Echo payload back, status = opcode. STUCK is never answered:
                 // `hold ... stuck` uses it to leave a request in flight.
-                if req.opcode != STUCK {
+                // UNPIN-all, which the Python client sends on every claim and
+                // release, is answered as the certus server answers it -- OK,
+                // zero pins released (this server holds none).
+                if req.opcode == UNPIN && req.payload == UNPIN_ALL.to_le_bytes() {
+                    server.reply(req.channel, req.seq, 0, &0u64.to_le_bytes());
+                } else if req.opcode != STUCK {
                     server.reply(req.channel, req.seq, req.opcode, &req.payload);
                 }
             }
@@ -89,6 +94,11 @@ fn serve(path: &str, n: usize, cap_req: usize, cap_resp: usize) {
 
 /// An opcode `serve` never answers.
 const STUCK: u32 = 0xDEAD;
+
+/// The certus server's UNPIN opcode and its UNPIN-all marker (shmq-dispatcher's
+/// `wire::op::UNPIN` and `wire::UNPIN_ALL`; this crate does not depend on it).
+const UNPIN: u32 = 8;
+const UNPIN_ALL: u32 = u32::MAX;
 
 /// Claim `n` channels, print `held <channels>` and wait to be killed. With
 /// `stuck`, first publish an unanswered request on the first channel (the

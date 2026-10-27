@@ -5,6 +5,7 @@ leak them; a live one must keep them; a forked child must not keep its dead
 parent's. See lib/shm-queue's module docs, "Channel claims"."""
 
 import os
+import struct
 import signal
 import subprocess
 import sys
@@ -235,3 +236,27 @@ def test_a_stopped_server_is_only_a_deadline(mailbox):
     with pytest.raises(RingError, match="deadline") as e:
         r.request(7, b"b")
     assert not isinstance(e.value, ServerRestartedError)
+
+
+def test_a_claim_and_a_release_each_send_unpin_all(mailbox):
+    """Pins belong to the channel lease (5A): the first request on a newly
+    claimed channel is UNPIN-all, and so is the last before a release. The echo
+    server answers UNPIN-all as certus does; what is checked here is that the
+    ring sends it, on that channel, before and after the caller's requests."""
+    from certus_shmq_connector import ring as R
+    path, Ring = mailbox
+    r = Ring(path, ready_timeout=5)
+    sent = []
+    real = r._request_on
+
+    def spy(ch, opcode, data):
+        sent.append((ch, opcode, data))
+        return real(ch, opcode, data)
+
+    r._request_on = spy
+    r.request(7, b"a")
+    r.release_channel()
+    unpin_all = struct.pack("<I", R.UNPIN_ALL)
+    assert [(op, d) for _, op, d in sent] == [
+        (R.OP_UNPIN, unpin_all), (7, b"a"), (R.OP_UNPIN, unpin_all)]
+    assert len({ch for ch, _, _ in sent}) == 1

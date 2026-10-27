@@ -109,9 +109,10 @@ still processes it and writes the reply to the response cell; nobody reads it. E
   then invalid, the copy fails and the key is reported failed): harmless.
 - **RESERVE / store**: the reservation is left unpublished; the existing stale-
   reservation reaper reclaims it by age (`pending_stores`). Harmless.
-- **PIN**: a pin taken for a dead process is never released. **Already a leak today**,
-  independent of channel reclaim; the reaper does not cover pins. Noted under *Out of
-  scope*; reclaim neither causes nor fixes it.
+- **PIN**: a pin taken for a dead process was never released -- a leak independent of
+  channel reclaim. **Closed 2026-10-27** by *Pins belong to the channel lease* below:
+  the takeover's UNPIN-all releases it, the in-flight one included, since the claim
+  waits for that PIN's reply first.
 
 A new owner must not publish until the in-flight request has been answered, or the
 server would see the new request's seq while still writing the old reply. So after
@@ -250,10 +251,9 @@ component's spec-sync stamp moves. Re-stamp last, once, with the rest of the bra
 
 ## Out of scope, found on the way
 
-- **Pins held for a dead client are never released.** A PIN whose UNPIN never comes
-  holds the entry forever (it can then be neither evicted nor removed). Reclaiming the
-  channel does not help: pins are not per channel. Needs a pin owner (a session or
-  lease) and a reaper; its own design.
+- **Pins held for a dead client were never released.** A PIN whose UNPIN never came
+  held the entry forever (it could be neither evicted nor removed). **Closed 2026-10-27**:
+  see *Pins belong to the channel lease*.
 - **The server does not bump `generation` across restarts** (`create` always wrote 1).
   A client could not tell a restarted server from the old one, which is part of why the
   orphaned-mailbox case was silent. **Done 2026-10-27, still ABI 2** (unstable is 1, so
@@ -280,6 +280,42 @@ where nobody polls, and used to wait out its full deadline (30 s in the connecto
 - **No reconnect.** Pins, reservations and fetch marks died with the old server; a
   client that silently switched would hold handles to nothing. Failing fast, with the
   reason, is the whole change. The engine still restarts.
+
+## Pins belong to the channel lease (2026-10-27)
+
+A pin is held by the channel that took it, and ends with that channel's lease.
+
+- **The server records each pin against its channel** (`ChannelPins` in
+  `shmq-dispatcher`, counted: a key pinned twice on a channel is two pins). `dispatch`
+  now takes the channel the request arrived on.
+- **UNPIN is strict.** It releases only a pin recorded on its own channel. A key the
+  channel does not hold a pin on is refused (`0`, counted `refused`), never released:
+  otherwise a late UNPIN, or one from the wrong thread, would decrement another
+  reader's pin -- the double release principle IX forbids.
+- **UNPIN-all**: an UNPIN whose key count is `UNPIN_ALL` (`0xFFFFFFFF`, no keys
+  follow; 0 already means "unpin nothing") releases every pin on its channel and
+  answers the number released, `u64`. No new opcode.
+- **The client sends UNPIN-all on every claim and before every release.** On a claim
+  it releases what a previous owner left -- a dead one's, including a PIN in flight
+  when it died, because the claim already waits for that reply -- before this owner's
+  first request. That closes the takeover corner case: without the per-channel
+  record, a new owner could not tell its predecessor's pins from its own. On a release
+  it ends the lease's pins (best effort; the next claimer releases them regardless).
+- **Pin and unpin on one thread.** A Python ring holds one channel per thread, so an
+  UNPIN from another thread is refused. vLLM's offloading scheduler calls
+  `prepare_load` (PIN) and `complete_load` (UNPIN) on the engine core's busy-loop
+  thread, so the connector already does.
+- **No reaper.** A dead client's pins last until something claims its channel. Under
+  the per-claim UNPIN-all that is the next client on the mailbox to need a channel;
+  only a mailbox nobody uses again keeps them.
+- **Still ABI 2.** Unstable is ABI 1, so no one has run a 2 without this; deployed
+  ABI-2 servers and connectors are replaced together.
+
+Checked on node2 (`full-fs-block`, 8 channels): a child pinned 16 blocks and was
+SIGKILLed; CLEAR_ALL then reported `still_pinned=16`; the next claim of that channel
+released 16 (`pins_released_on_claim`), after which CLEAR_ALL removed 16 with 0 still
+pinned (`apps/python/test-dead-client-pins.py`). With the claim's UNPIN-all removed,
+the same test fails.
 
 ## Changes, by component
 

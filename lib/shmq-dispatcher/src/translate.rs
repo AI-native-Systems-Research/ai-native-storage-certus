@@ -313,6 +313,101 @@ pub struct Translator {
     /// Explicit fetches from a peer (op FETCH); `None` without a transfer
     /// endpoint, when FETCH answers `NO_ENDPOINT`.
     fetcher: Option<crate::fetch::Fetcher>,
+    /// Pins by the channel they were taken on. See [`ChannelPins`].
+    pins: Arc<ChannelPins>,
+}
+
+/// Every pin a client holds, recorded against the channel it arrived on.
+///
+/// A pin belongs to the channel lease that took it: UNPIN releases only pins
+/// recorded on its own channel, and UNPIN-all ([`wire::UNPIN_ALL`]) releases
+/// all of them. A client sends UNPIN-all when it claims a channel -- so pins
+/// a dead previous owner left are released, including one whose PIN was still
+/// in flight when it died (a claim waits for that reply first) -- and before
+/// it releases one. Without the per-channel record a takeover could not tell
+/// its predecessor's pins from its own, and an UNPIN for a key another channel
+/// pinned would decrement that reader's pin.
+///
+/// Counted: one entry per pin, so a key pinned twice on a channel is released
+/// twice.
+#[derive(Debug, Default)]
+pub struct ChannelPins {
+    by_channel: Mutex<HashMap<usize, HashMap<u64, u32>>>,
+    /// UNPINs refused: the key was not pinned on the asking channel.
+    refused: AtomicU64,
+    /// Pins released by UNPIN-all.
+    released_by_unpin_all: AtomicU64,
+}
+
+/// [`ChannelPins`] counters.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PinStats {
+    /// Pins held now, on every channel.
+    pub held: u64,
+    /// UNPINs refused: the key was not pinned on the asking channel.
+    pub refused: u64,
+    /// Pins released by UNPIN-all.
+    pub released_by_unpin_all: u64,
+}
+
+impl ChannelPins {
+    fn record(&self, ch: usize, key: u64) {
+        let mut m = self
+            .by_channel
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *m.entry(ch).or_default().entry(key).or_insert(0) += 1;
+    }
+
+    /// Take one pin on `key` off `ch`'s record; false if it holds none.
+    fn take(&self, ch: usize, key: u64) -> bool {
+        let mut m = self
+            .by_channel
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(keys) = m.get_mut(&ch) else {
+            return false;
+        };
+        let Some(n) = keys.get_mut(&key) else {
+            return false;
+        };
+        *n -= 1;
+        if *n == 0 {
+            keys.remove(&key);
+        }
+        true
+    }
+
+    /// Every pin on `ch`, as one key per pin, leaving `ch` with none.
+    fn take_all(&self, ch: usize) -> Vec<u64> {
+        let mut m = self
+            .by_channel
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        m.remove(&ch)
+            .map(|keys| {
+                keys.into_iter()
+                    .flat_map(|(k, n)| std::iter::repeat_n(k, n as usize))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn stats(&self) -> PinStats {
+        let m = self
+            .by_channel
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        PinStats {
+            held: m
+                .values()
+                .flat_map(HashMap::values)
+                .map(|&n| u64::from(n))
+                .sum(),
+            refused: self.refused.load(Ordering::Relaxed),
+            released_by_unpin_all: self.released_by_unpin_all.load(Ordering::Relaxed),
+        }
+    }
 }
 
 impl std::fmt::Debug for Translator {
@@ -343,7 +438,13 @@ impl Translator {
             observer: None,
             store_backpressure,
             fetcher: None,
+            pins: Arc::new(ChannelPins::default()),
         }
+    }
+
+    /// Pin bookkeeping counters.
+    pub fn pin_stats(&self) -> PinStats {
+        self.pins.stats()
     }
 
     /// Serve FETCH through `fetcher`, over this server's transfer endpoint.
@@ -364,9 +465,16 @@ impl Translator {
         self
     }
 
-    /// Decode `payload` for `opcode`, dispatch, and return the response blob.
-    /// On `Err`, the caller replies with `STATUS_ERROR` + the message bytes.
-    pub fn dispatch(&self, opcode: u32, payload: &[u8]) -> Result<Vec<u8>, OpError> {
+    /// Decode `payload` for `opcode`, which arrived on `channel`, dispatch, and
+    /// return the response blob. On `Err`, the caller replies with
+    /// `STATUS_ERROR` + the message bytes. Only PIN and UNPIN use the channel:
+    /// pins are held per channel (see [`ChannelPins`]).
+    pub fn dispatch(
+        &self,
+        channel: usize,
+        opcode: u32,
+        payload: &[u8],
+    ) -> Result<Vec<u8>, OpError> {
         let mut r = Reader::new(payload);
         match opcode {
             op::CHECK => self.op_check(&mut r),
@@ -375,8 +483,8 @@ impl Translator {
             op::COPY_TO_STORE => self.op_copy_to_store(&mut r),
             op::COMMIT_STORE => self.op_commit_store(&mut r),
             op::ABORT_STORE => self.op_abort_store(&mut r),
-            op::PIN => self.op_pin(&mut r),
-            op::UNPIN => self.op_unpin(&mut r),
+            op::PIN => self.op_pin(channel, &mut r),
+            op::UNPIN => self.op_unpin(channel, &mut r),
             op::LOOKUP => self.op_lookup(&mut r),
             op::TAKE_EVENTS => self.op_take_events(&mut r),
             op::POPULATE => self.op_populate(&mut r),
@@ -691,13 +799,17 @@ impl Translator {
         Ok(w.into_bytes())
     }
 
-    fn op_pin(&self, r: &mut Reader<'_>) -> Result<Vec<u8>, OpError> {
+    fn op_pin(&self, channel: usize, r: &mut Reader<'_>) -> Result<Vec<u8>, OpError> {
         let promote = r.u8()? != 0;
         let keys = Self::read_keys(r)?;
         check_duplicate_keys(&keys)?;
         let mut w = Writer::with_capacity(keys.len());
         for &key in &keys {
-            w.u8(self.dispatcher.pin(key).is_ok() as u8);
+            let ok = self.dispatcher.pin(key).is_ok();
+            if ok {
+                self.pins.record(channel, key);
+            }
+            w.u8(u8::from(ok));
         }
         if promote {
             self.dispatcher.promote_to_memory_tier(&keys);
@@ -705,12 +817,41 @@ impl Translator {
         Ok(w.into_bytes())
     }
 
-    fn op_unpin(&self, r: &mut Reader<'_>) -> Result<Vec<u8>, OpError> {
-        let keys = Self::read_keys(r)?;
+    /// UNPIN `{n, keys}`: release pins this channel holds; a key it does not
+    /// hold a pin on is refused (`0`) and counted, never released. UNPIN-all
+    /// (`n == UNPIN_ALL`, no keys): release every pin on this channel; the
+    /// response is the number released, `u64`.
+    fn op_unpin(&self, channel: usize, r: &mut Reader<'_>) -> Result<Vec<u8>, OpError> {
+        let n = r.u32()?;
+        if n == wire::UNPIN_ALL {
+            let keys = self.pins.take_all(channel);
+            for &key in &keys {
+                // Recorded only on a successful pin, so the dispatcher holds it:
+                // a failure here is the map and this record disagreeing.
+                let _ = self.dispatcher.unpin(key);
+            }
+            let released = keys.len() as u64;
+            self.pins
+                .released_by_unpin_all
+                .fetch_add(released, Ordering::Relaxed);
+            let mut w = Writer::with_capacity(8);
+            w.u64(released);
+            return Ok(w.into_bytes());
+        }
+        let mut keys = Vec::with_capacity(n as usize);
+        for _ in 0..n {
+            keys.push(r.u64()?);
+        }
         check_duplicate_keys(&keys)?;
         let mut w = Writer::with_capacity(keys.len());
         for &key in &keys {
-            w.u8(self.dispatcher.unpin(key).is_ok() as u8);
+            let ok = if self.pins.take(channel, key) {
+                self.dispatcher.unpin(key).is_ok()
+            } else {
+                self.pins.refused.fetch_add(1, Ordering::Relaxed);
+                false
+            };
+            w.u8(u8::from(ok));
         }
         Ok(w.into_bytes())
     }
@@ -1087,6 +1228,9 @@ mod tests {
         released: Mutex<Vec<u64>>,
         /// Report `Miss` for keys not resident, instead of always `Dram`.
         lookup_by_residency: Mutex<bool>,
+        /// Read-refs per key, as the dispatch map counts them: pin adds one
+        /// (resident keys only), unpin takes one and underflows to an error.
+        read_refs: Mutex<HashMap<u64, u32>>,
     }
 
     impl IDispatcher for MockDispatcher {
@@ -1198,11 +1342,22 @@ mod tests {
             self.released.lock().unwrap().push(key);
             Ok(())
         }
-        fn pin(&self, _key: CacheKey) -> Result<(), DispatcherError> {
+        fn pin(&self, key: CacheKey) -> Result<(), DispatcherError> {
+            if !self.resident.lock().unwrap().contains(&key) {
+                return Err(DispatcherError::KeyNotFound(key));
+            }
+            *self.read_refs.lock().unwrap().entry(key).or_insert(0) += 1;
             Ok(())
         }
-        fn unpin(&self, _key: CacheKey) -> Result<(), DispatcherError> {
-            Ok(())
+        fn unpin(&self, key: CacheKey) -> Result<(), DispatcherError> {
+            let mut refs = self.read_refs.lock().unwrap();
+            match refs.get_mut(&key) {
+                Some(n) if *n > 0 => {
+                    *n -= 1;
+                    Ok(())
+                }
+                _ => Err(DispatcherError::KeyNotFound(key)),
+            }
         }
         fn touch(&self, key: CacheKey) -> Result<(), DispatcherError> {
             if self.touch_fail.lock().unwrap().contains(&key) {
@@ -1417,27 +1572,30 @@ mod tests {
         let tr = translator(disp);
 
         // Unknown key -> MISS.
-        assert_eq!(tr.dispatch(op::CHECK, &enc_keys(&[7])).unwrap(), vec![MISS]);
+        assert_eq!(
+            tr.dispatch(0, op::CHECK, &enc_keys(&[7])).unwrap(),
+            vec![MISS]
+        );
 
         // Reserve populates pending_stores -> Check reports PENDING (without
         // blocking on the dispatcher).
         assert_eq!(
-            tr.dispatch(op::RESERVE, &enc_reserve(&[(7, 4096, 0)]))
+            tr.dispatch(0, op::RESERVE, &enc_reserve(&[(7, 4096, 0)]))
                 .unwrap(),
             vec![1]
         );
         assert_eq!(
-            tr.dispatch(op::CHECK, &enc_keys(&[7])).unwrap(),
+            tr.dispatch(0, op::CHECK, &enc_keys(&[7])).unwrap(),
             vec![PENDING]
         );
 
         // Commit clears pending and makes the key resident -> RESIDENT.
         assert_eq!(
-            tr.dispatch(op::COMMIT_STORE, &enc_keys(&[7])).unwrap(),
+            tr.dispatch(0, op::COMMIT_STORE, &enc_keys(&[7])).unwrap(),
             vec![1]
         );
         assert_eq!(
-            tr.dispatch(op::CHECK, &enc_keys(&[7])).unwrap(),
+            tr.dispatch(0, op::CHECK, &enc_keys(&[7])).unwrap(),
             vec![RESIDENT]
         );
     }
@@ -1448,16 +1606,19 @@ mod tests {
         let disp = Arc::new(MockDispatcher::default());
         let tr = translator(disp);
 
-        tr.dispatch(op::RESERVE, &enc_reserve(&[(9, 4096, 0)]))
+        tr.dispatch(0, op::RESERVE, &enc_reserve(&[(9, 4096, 0)]))
             .unwrap();
         assert_eq!(
-            tr.dispatch(op::CHECK, &enc_keys(&[9])).unwrap(),
+            tr.dispatch(0, op::CHECK, &enc_keys(&[9])).unwrap(),
             vec![PENDING]
         );
 
         // Abort drops the pending record; the key never became resident.
-        tr.dispatch(op::ABORT_STORE, &enc_keys(&[9])).unwrap();
-        assert_eq!(tr.dispatch(op::CHECK, &enc_keys(&[9])).unwrap(), vec![MISS]);
+        tr.dispatch(0, op::ABORT_STORE, &enc_keys(&[9])).unwrap();
+        assert_eq!(
+            tr.dispatch(0, op::CHECK, &enc_keys(&[9])).unwrap(),
+            vec![MISS]
+        );
     }
 
     #[test]
@@ -1468,11 +1629,11 @@ mod tests {
 
         // key 1 resident, key 2 pending, key 3 absent.
         disp.resident.lock().unwrap().insert(1);
-        tr.dispatch(op::RESERVE, &enc_reserve(&[(2, 4096, 0)]))
+        tr.dispatch(0, op::RESERVE, &enc_reserve(&[(2, 4096, 0)]))
             .unwrap();
 
         assert_eq!(
-            tr.dispatch(op::CHECK, &enc_keys(&[1, 2, 3])).unwrap(),
+            tr.dispatch(0, op::CHECK, &enc_keys(&[1, 2, 3])).unwrap(),
             vec![RESIDENT, PENDING, MISS]
         );
     }
@@ -1483,17 +1644,20 @@ mod tests {
         let disp = Arc::new(MockDispatcher::default());
         let tr = translator(disp);
 
-        tr.dispatch(op::RESERVE, &enc_reserve(&[(5, 4096, 0)]))
+        tr.dispatch(0, op::RESERVE, &enc_reserve(&[(5, 4096, 0)]))
             .unwrap();
         assert_eq!(
-            tr.dispatch(op::CHECK, &enc_keys(&[5])).unwrap(),
+            tr.dispatch(0, op::CHECK, &enc_keys(&[5])).unwrap(),
             vec![PENDING]
         );
 
         // The reaper reclaims a never-committed reservation; re-check is MISS,
         // never a permanent PENDING.
         assert_eq!(tr.reap_stale_reservations(Duration::from_secs(0)), 1);
-        assert_eq!(tr.dispatch(op::CHECK, &enc_keys(&[5])).unwrap(), vec![MISS]);
+        assert_eq!(
+            tr.dispatch(0, op::CHECK, &enc_keys(&[5])).unwrap(),
+            vec![MISS]
+        );
     }
 
     fn enc_promote_keys(promote: bool, keys: &[u64]) -> Vec<u8> {
@@ -1514,7 +1678,7 @@ mod tests {
 
         disp.resident.lock().unwrap().insert(4);
         assert_eq!(
-            tr.dispatch(op::TOUCH_CHECK, &enc_promote_keys(false, &[4]))
+            tr.dispatch(0, op::TOUCH_CHECK, &enc_promote_keys(false, &[4]))
                 .unwrap(),
             vec![RESIDENT]
         );
@@ -1527,7 +1691,7 @@ mod tests {
         let tr = translator(disp);
 
         assert_eq!(
-            tr.dispatch(op::TOUCH_CHECK, &enc_promote_keys(false, &[8]))
+            tr.dispatch(0, op::TOUCH_CHECK, &enc_promote_keys(false, &[8]))
                 .unwrap(),
             vec![MISS]
         );
@@ -1539,10 +1703,10 @@ mod tests {
         let disp = Arc::new(MockDispatcher::default());
         let tr = translator(disp);
 
-        tr.dispatch(op::RESERVE, &enc_reserve(&[(6, 4096, 0)]))
+        tr.dispatch(0, op::RESERVE, &enc_reserve(&[(6, 4096, 0)]))
             .unwrap();
         assert_eq!(
-            tr.dispatch(op::TOUCH_CHECK, &enc_promote_keys(false, &[6]))
+            tr.dispatch(0, op::TOUCH_CHECK, &enc_promote_keys(false, &[6]))
                 .unwrap(),
             vec![PENDING]
         );
@@ -1558,11 +1722,11 @@ mod tests {
         // touch fails (reads as MISS).
         disp.resident.lock().unwrap().extend([1, 4]);
         disp.touch_fail.lock().unwrap().insert(4);
-        tr.dispatch(op::RESERVE, &enc_reserve(&[(2, 4096, 0)]))
+        tr.dispatch(0, op::RESERVE, &enc_reserve(&[(2, 4096, 0)]))
             .unwrap();
 
         assert_eq!(
-            tr.dispatch(op::TOUCH_CHECK, &enc_promote_keys(true, &[3, 1, 4, 2]))
+            tr.dispatch(0, op::TOUCH_CHECK, &enc_promote_keys(true, &[3, 1, 4, 2]))
                 .unwrap(),
             vec![MISS, RESIDENT, MISS, PENDING]
         );
@@ -1575,10 +1739,10 @@ mod tests {
         let tr = translator(disp.clone());
 
         assert!(tr
-            .dispatch(op::TOUCH_CHECK, &enc_promote_keys(true, &[5, 5]))
+            .dispatch(0, op::TOUCH_CHECK, &enc_promote_keys(true, &[5, 5]))
             .is_err());
         assert!(tr
-            .dispatch(op::TOUCH, &enc_promote_keys(true, &[5, 5]))
+            .dispatch(0, op::TOUCH, &enc_promote_keys(true, &[5, 5]))
             .is_err());
         assert!(disp.promoted.lock().unwrap().is_empty());
     }
@@ -1594,8 +1758,12 @@ mod tests {
 
         let start = std::time::Instant::now();
         assert_eq!(
-            tr.dispatch(op::RESERVE, &enc_reserve(&[(11, 4096, 0), (12, 4096, 0)]))
-                .unwrap(),
+            tr.dispatch(
+                0,
+                op::RESERVE,
+                &enc_reserve(&[(11, 4096, 0), (12, 4096, 0)])
+            )
+            .unwrap(),
             vec![0, 0]
         );
         let elapsed = start.elapsed();
@@ -1763,7 +1931,7 @@ mod tests {
     }
 
     fn states(t: &Translator, keys: &[u64]) -> Vec<u8> {
-        t.dispatch(op::CHECK, &check_req(keys)).unwrap()
+        t.dispatch(0, op::CHECK, &check_req(keys)).unwrap()
     }
 
     /// The tier byte LOOKUP would return for each of `keys`, through the same
@@ -1798,7 +1966,7 @@ mod tests {
         use wire::check_state::{PENDING, RESIDENT};
         let (t, disp, ep) = fetching(small_window());
         let resp = t
-            .dispatch(op::FETCH, &fetch_req(PEER, &[1, 2, 3, 4]))
+            .dispatch(0, op::FETCH, &fetch_req(PEER, &[1, 2, 3, 4]))
             .unwrap();
         assert_eq!(resp, [wire::fetch_status::OK, 1, 1, 1, 1]);
         assert_eq!(ep.open(), [vec![1, 2]], "two blocks fill the window");
@@ -1840,7 +2008,7 @@ mod tests {
     fn a_miss_cuts_the_run() {
         use wire::check_state::{MISS, RESIDENT};
         let (t, disp, ep) = fetching(small_window());
-        t.dispatch(op::FETCH, &fetch_req(PEER, &[1, 2, 3, 4, 5]))
+        t.dispatch(0, op::FETCH, &fetch_req(PEER, &[1, 2, 3, 4, 5]))
             .unwrap();
         ep.answer(|k| {
             if k == 2 {
@@ -1873,7 +2041,8 @@ mod tests {
     fn a_failed_fetch_releases_its_slots() {
         use wire::check_state::MISS;
         let (t, disp, ep) = fetching(small_window());
-        t.dispatch(op::FETCH, &fetch_req(PEER, &[1, 2, 3])).unwrap();
+        t.dispatch(0, op::FETCH, &fetch_req(PEER, &[1, 2, 3]))
+            .unwrap();
         ep.fail_oldest();
         assert_eq!(states(&t, &[1, 2, 3]), [MISS; 3]);
         let mut rel = disp.released.lock().unwrap().clone();
@@ -1890,7 +2059,7 @@ mod tests {
     fn a_refused_fetch_settles_at_once() {
         let (t, disp, ep) = fetching(small_window());
         *ep.refuse.lock().unwrap() = true;
-        let resp = t.dispatch(op::FETCH, &fetch_req(PEER, &[1, 2])).unwrap();
+        let resp = t.dispatch(0, op::FETCH, &fetch_req(PEER, &[1, 2])).unwrap();
         assert_eq!(resp, [wire::fetch_status::OK, 1, 1]);
         assert_eq!(states(&t, &[1, 2]), [wire::check_state::MISS; 2]);
         assert!(disp.reserved.lock().unwrap().is_empty());
@@ -1904,12 +2073,12 @@ mod tests {
         let (t, disp, ep) = fetching(FetchLimits::default());
         disp.resident.lock().unwrap().insert(3);
         let resp = t
-            .dispatch(op::FETCH, &fetch_req(PEER, &[1, 2, 3, 4]))
+            .dispatch(0, op::FETCH, &fetch_req(PEER, &[1, 2, 3, 4]))
             .unwrap();
         assert_eq!(resp, [wire::fetch_status::OK, 1, 1, 0, 0]);
         assert_eq!(ep.open(), [vec![1, 2]]);
         // A second fetch naming a key the first is landing starts nothing.
-        let resp = t.dispatch(op::FETCH, &fetch_req(PEER, &[2, 9])).unwrap();
+        let resp = t.dispatch(0, op::FETCH, &fetch_req(PEER, &[2, 9])).unwrap();
         assert_eq!(resp, [wire::fetch_status::OK, 0, 0]);
         // A store in flight ends a run the same way.
         let mut w = Writer::default();
@@ -1917,8 +2086,8 @@ mod tests {
         w.u64(7);
         w.u32(BLOCK);
         w.u64(0);
-        t.dispatch(op::RESERVE, &w.into_bytes()).unwrap();
-        let resp = t.dispatch(op::FETCH, &fetch_req(PEER, &[7, 8])).unwrap();
+        t.dispatch(0, op::RESERVE, &w.into_bytes()).unwrap();
+        let resp = t.dispatch(0, op::FETCH, &fetch_req(PEER, &[7, 8])).unwrap();
         assert_eq!(resp, [wire::fetch_status::OK, 0, 0]);
         let s = t.fetch_stats().unwrap();
         assert_eq!((s.keys_requested, s.keys_started, s.not_started), (8, 2, 6));
@@ -1933,8 +2102,9 @@ mod tests {
             inflight_bytes: 2 * u64::from(BLOCK),
             ..FetchLimits::default()
         });
-        t.dispatch(op::FETCH, &fetch_req(PEER, &[1, 2])).unwrap();
-        t.dispatch(op::FETCH, &fetch_req(PEER, &[10, 11])).unwrap();
+        t.dispatch(0, op::FETCH, &fetch_req(PEER, &[1, 2])).unwrap();
+        t.dispatch(0, op::FETCH, &fetch_req(PEER, &[10, 11]))
+            .unwrap();
         assert_eq!(ep.open(), [vec![1, 2]], "the second run waits");
         assert_eq!(disp.reserved.lock().unwrap().len(), 2);
         assert_eq!(t.fetch_stats().unwrap().window_waits, 1);
@@ -1955,7 +2125,7 @@ mod tests {
     fn a_full_tier_cuts_the_run_without_waiting() {
         let (t, disp, ep) = fetching(FetchLimits::default());
         disp.reserve_fail.lock().unwrap().insert(3);
-        t.dispatch(op::FETCH, &fetch_req(PEER, &[1, 2, 3, 4]))
+        t.dispatch(0, op::FETCH, &fetch_req(PEER, &[1, 2, 3, 4]))
             .unwrap();
         assert_eq!(ep.open(), [vec![1, 2]]);
         let deadlines = disp.reserve_deadlines.lock().unwrap().clone();
@@ -1975,7 +2145,7 @@ mod tests {
     #[test]
     fn the_reaper_never_reclaims_a_fetch_slot() {
         let (t, disp, ep) = fetching(FetchLimits::default());
-        t.dispatch(op::FETCH, &fetch_req(PEER, &[1, 2])).unwrap();
+        t.dispatch(0, op::FETCH, &fetch_req(PEER, &[1, 2])).unwrap();
         assert_eq!(t.reap_stale_reservations(Duration::ZERO), 0);
         assert!(disp.released.lock().unwrap().is_empty());
         assert_eq!(disp.reserved.lock().unwrap().len(), 2, "still the fetch's");
@@ -1992,7 +2162,7 @@ mod tests {
             mark_ttl: Duration::from_millis(50),
             ..FetchLimits::default()
         });
-        t.dispatch(op::FETCH, &fetch_req(PEER, &[1, 2, 3, 4]))
+        t.dispatch(0, op::FETCH, &fetch_req(PEER, &[1, 2, 3, 4]))
             .unwrap();
         ep.answer(|_| EntryOutcome::HitMemoryTier);
         disp.resident.lock().unwrap().insert(9); // a local entry, never fetched
@@ -2008,7 +2178,7 @@ mod tests {
             .unwrap();
         let mut w = Writer::default();
         w.u32(0);
-        t.dispatch(op::TAKE_EVENTS, &w.into_bytes()).unwrap();
+        t.dispatch(0, op::TAKE_EVENTS, &w.into_bytes()).unwrap();
         assert_eq!(lookup(&t, &[2]), [1], "an evicted block's mark is gone");
         std::thread::sleep(Duration::from_millis(60));
         // Key 3's mark has expired but the reaper has not run: still not FETCHED.
@@ -2034,7 +2204,9 @@ mod tests {
         use wire::fetch_status::{BAD_PEER, NO_ENDPOINT, TOO_MANY};
         let plain = translator(Arc::new(MockDispatcher::default()));
         assert_eq!(
-            plain.dispatch(op::FETCH, &fetch_req(PEER, &[1])).unwrap(),
+            plain
+                .dispatch(0, op::FETCH, &fetch_req(PEER, &[1]))
+                .unwrap(),
             [NO_ENDPOINT]
         );
         let (t, _, ep) = fetching(FetchLimits {
@@ -2043,16 +2215,17 @@ mod tests {
         });
         for bad in ["10.0.0.105", "10.0.0.105:0", ":7481", "10.0.0.105:x"] {
             assert_eq!(
-                t.dispatch(op::FETCH, &fetch_req(bad, &[1])).unwrap(),
+                t.dispatch(0, op::FETCH, &fetch_req(bad, &[1])).unwrap(),
                 [BAD_PEER],
                 "{bad}"
             );
         }
         assert_eq!(
-            t.dispatch(op::FETCH, &fetch_req(PEER, &[1, 2, 3])).unwrap(),
+            t.dispatch(0, op::FETCH, &fetch_req(PEER, &[1, 2, 3]))
+                .unwrap(),
             [TOO_MANY]
         );
-        assert!(t.dispatch(op::FETCH, &fetch_req(PEER, &[1, 1])).is_err());
+        assert!(t.dispatch(0, op::FETCH, &fetch_req(PEER, &[1, 1])).is_err());
         assert!(ep.open().is_empty());
     }
 
@@ -2061,12 +2234,12 @@ mod tests {
     #[test]
     fn clear_all_drops_marks_and_reports_fetches_in_flight() {
         let (t, disp, ep) = fetching(FetchLimits::default());
-        t.dispatch(op::FETCH, &fetch_req(PEER, &[1, 2])).unwrap();
+        t.dispatch(0, op::FETCH, &fetch_req(PEER, &[1, 2])).unwrap();
         ep.answer(|_| EntryOutcome::HitMemoryTier); // 1, 2 land, marked
         disp.resident.lock().unwrap().insert(9);
-        t.dispatch(op::FETCH, &fetch_req(PEER, &[3])).unwrap(); // in flight
+        t.dispatch(0, op::FETCH, &fetch_req(PEER, &[3])).unwrap(); // in flight
 
-        let resp = t.dispatch(op::CLEAR_ALL, &[]).unwrap();
+        let resp = t.dispatch(0, op::CLEAR_ALL, &[]).unwrap();
         let mut r = Reader::new(&resp);
         let (removed, pinned, pending) = (r.u64().unwrap(), r.u64().unwrap(), r.u64().unwrap());
 
@@ -2098,7 +2271,7 @@ mod tests {
             ..FetchLimits::default()
         });
         let keys: Vec<u64> = (1..=64).collect();
-        t.dispatch(op::FETCH, &fetch_req(PEER, &keys)).unwrap();
+        t.dispatch(0, op::FETCH, &fetch_req(PEER, &keys)).unwrap();
         let ep2 = ep.clone();
         let answerer = std::thread::spawn(move || {
             let mut n = 0;
@@ -2110,7 +2283,7 @@ mod tests {
             }
         });
         for k in 100..164u64 {
-            t.dispatch(op::FETCH, &fetch_req(PEER, &[k])).unwrap();
+            t.dispatch(0, op::FETCH, &fetch_req(PEER, &[k])).unwrap();
         }
         answerer.join().unwrap();
         while !ep.open().is_empty() {
@@ -2119,5 +2292,101 @@ mod tests {
         let s = t.fetch_stats().unwrap();
         assert_eq!((s.hits, s.keys_pending), (128, 0));
         assert!(disp.reserved.lock().unwrap().is_empty());
+    }
+
+    // ---- pins belong to the channel that took them -------------------------
+
+    fn refs(disp: &MockDispatcher, key: u64) -> u32 {
+        disp.read_refs
+            .lock()
+            .unwrap()
+            .get(&key)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    fn pin_on(tr: &Translator, ch: usize, keys: &[u64]) -> Vec<u8> {
+        tr.dispatch(ch, op::PIN, &enc_promote_keys(false, keys))
+            .unwrap()
+    }
+
+    fn unpin_all_on(tr: &Translator, ch: usize) -> u64 {
+        let mut w = Writer::default();
+        w.u32(wire::UNPIN_ALL);
+        let out = tr.dispatch(ch, op::UNPIN, &w.into_bytes()).unwrap();
+        u64::from_le_bytes(out.try_into().unwrap())
+    }
+
+    fn resident(keys: &[u64]) -> Arc<MockDispatcher> {
+        let disp = Arc::new(MockDispatcher::default());
+        disp.resident.lock().unwrap().extend(keys.iter().copied());
+        disp
+    }
+
+    #[test]
+    fn unpin_all_releases_exactly_this_channels_pins() {
+        let disp = resident(&[1, 2, 3]);
+        let tr = translator(Arc::clone(&disp));
+        assert_eq!(pin_on(&tr, 0, &[1, 2]), vec![1, 1]);
+        assert_eq!(pin_on(&tr, 1, &[2, 3]), vec![1, 1]);
+        assert_eq!(tr.pin_stats().held, 4);
+
+        // Channel 0's owner died; its next claimer releases what it left.
+        assert_eq!(unpin_all_on(&tr, 0), 2);
+        assert_eq!((refs(&disp, 1), refs(&disp, 2), refs(&disp, 3)), (0, 1, 1));
+        assert_eq!(tr.pin_stats().held, 2, "channel 1's pins are untouched");
+        assert_eq!(unpin_all_on(&tr, 0), 0, "nothing left on channel 0");
+        assert_eq!(tr.pin_stats().released_by_unpin_all, 2);
+    }
+
+    #[test]
+    fn unpin_refuses_a_pin_another_channel_holds() {
+        let disp = resident(&[7]);
+        let tr = translator(Arc::clone(&disp));
+        pin_on(&tr, 1, &[7]);
+        // Channel 0 never pinned 7: decrementing would release channel 1's
+        // reader's pin out from under it.
+        assert_eq!(tr.dispatch(0, op::UNPIN, &enc_keys(&[7])).unwrap(), vec![0]);
+        assert_eq!(refs(&disp, 7), 1);
+        assert_eq!(tr.pin_stats().refused, 1);
+        assert_eq!(tr.dispatch(1, op::UNPIN, &enc_keys(&[7])).unwrap(), vec![1]);
+        assert_eq!(refs(&disp, 7), 0);
+    }
+
+    #[test]
+    fn an_unpin_after_unpin_all_is_refused_not_a_double_release() {
+        let disp = resident(&[5]);
+        let tr = translator(Arc::clone(&disp));
+        pin_on(&tr, 0, &[5]);
+        pin_on(&tr, 2, &[5]); // another reader of the same entry
+        assert_eq!(unpin_all_on(&tr, 0), 1);
+        // A late UNPIN from the lease that ended must not take channel 2's pin.
+        assert_eq!(tr.dispatch(0, op::UNPIN, &enc_keys(&[5])).unwrap(), vec![0]);
+        assert_eq!(refs(&disp, 5), 1);
+    }
+
+    #[test]
+    fn pins_are_counted_per_channel_not_flagged() {
+        let disp = resident(&[9]);
+        let tr = translator(Arc::clone(&disp));
+        pin_on(&tr, 0, &[9]);
+        pin_on(&tr, 0, &[9]);
+        assert_eq!(refs(&disp, 9), 2);
+        assert_eq!(tr.dispatch(0, op::UNPIN, &enc_keys(&[9])).unwrap(), vec![1]);
+        assert_eq!(
+            unpin_all_on(&tr, 0),
+            1,
+            "the second pin is still the channel's"
+        );
+        assert_eq!(refs(&disp, 9), 0);
+    }
+
+    #[test]
+    fn a_failed_pin_is_not_recorded() {
+        let disp = resident(&[]);
+        let tr = translator(Arc::clone(&disp));
+        assert_eq!(pin_on(&tr, 0, &[4]), vec![0], "not resident");
+        assert_eq!(tr.pin_stats().held, 0);
+        assert_eq!(unpin_all_on(&tr, 0), 0);
     }
 }

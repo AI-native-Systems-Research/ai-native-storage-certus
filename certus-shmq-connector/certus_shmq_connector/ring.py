@@ -118,6 +118,10 @@ OP_TOUCH_CHECK = 16
 OP_FETCH = 17
 OP_CLEAR_ALL = 18
 
+# An UNPIN key count meaning "release every pin on this channel" (no keys
+# follow); answered with the number released, u64. Mirrors wire::UNPIN_ALL.
+UNPIN_ALL = 0xFFFFFFFF
+
 STATUS_OK = 0
 
 # Per-key Check response states (mirror wire.rs `check_state`). Widened from a
@@ -480,6 +484,8 @@ class Ring:
         self._claim_fds: dict[int, int] = {}
         # Channels taken over from dead clients.
         self.reclaimed = 0
+        # Pins a previous owner left on channels this ring claimed (see _my_channel).
+        self.pins_released_on_claim = 0
         # Per-channel client seq counters (each channel is single-threaded).
         self._seqs: list[int] = []
 
@@ -705,7 +711,21 @@ class Ring:
         if ch is None:
             ch = self._claim_channel()
             self._tls.channel = ch
+            # Pins belong to the channel lease: whatever a previous owner left
+            # (a dead one's, or one in flight when it died -- the claim waited
+            # for that reply) is released before this owner's first request.
+            self.pins_released_on_claim += self._unpin_all_on(ch)
         return ch
+
+    def _unpin_all_on(self, ch: int) -> int:
+        """UNPIN-all on channel ``ch`` (this thread's): the server releases
+        every pin recorded on it. Returns the number released."""
+        status, payload = self._request_on(ch, OP_UNPIN, struct.pack("<I", UNPIN_ALL))
+        if status != STATUS_OK:
+            raise RingError(
+                f"server error (op={OP_UNPIN}, unpin-all): {payload.decode('utf-8', 'replace')}"
+            )
+        return decode_u64(payload)
 
     def release_channel(self) -> None:
         """Release this thread's claimed channel back to the free pool.
@@ -730,6 +750,12 @@ class Ring:
         if not self._base:
             self._tls.channel = None
             return
+        # Pins end with the lease. Best-effort: a dead server holds none, and
+        # the next claimer of this channel releases them regardless.
+        try:
+            self._unpin_all_on(ch)
+        except RingError:
+            pass
         with self._claim_lock:
             # Word first, then the lock: a claimer that gets the lock must not
             # see our id and count a clean release as a takeover.
@@ -765,7 +791,9 @@ class Ring:
         spin-then-futex) for the reply. Returns ``(status, payload)``."""
         if len(data) > self._cap_req:
             raise RingError(f"request payload {len(data)} B exceeds cap_req {self._cap_req} B")
-        ch = self._my_channel()
+        return self._request_on(self._my_channel(), opcode, data)
+
+    def _request_on(self, ch: int, opcode: int, data: bytes) -> tuple[int, bytes]:
         base = self._channel_base(ch)
         rc = base + self._resp_control_off
         seq = self._next_seq(ch)
@@ -949,6 +977,8 @@ class Ring:
         )
 
     def unpin(self, keys: Sequence[int]) -> list[bool]:
+        """Release pins this thread's channel took. A key pinned on another
+        channel (another thread) is refused: pin and unpin on one thread."""
         keys = list(keys)
         if not keys:
             return []

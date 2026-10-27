@@ -108,6 +108,11 @@ pub mod op {
     pub const CLEAR_ALL: u32 = 18;
 }
 
+/// An UNPIN key count meaning "release every pin held on this channel" (no keys
+/// follow). A count of 0 already means "unpin nothing", so the marker is the one
+/// count no real batch can reach. Kept in sync with `ring.py`.
+pub const UNPIN_ALL: u32 = u32::MAX;
+
 /// The `status` byte heading a Fetch response. Kept in sync with `ring.py`.
 pub mod fetch_status {
     /// Accepted: the per-key `started` bytes follow.
