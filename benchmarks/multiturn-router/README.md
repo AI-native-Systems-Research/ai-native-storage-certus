@@ -81,7 +81,17 @@ Results in `results/2026-10-26-rdma-fetch-{on,off}/`.
   climbs is not separated here (prefill recomputes ~1 100 tokens of answer per turn in
   both cases).
 - Every block fetched was served as fetched (3 301 / 3 301), against 3 092 of 3 299 under
-  TCP. The 132 misses (~2.8 per fetch) are not explained yet.
+  TCP.
+- **The misses are the new user message, which nobody holds yet.** Turn k's prompt is
+  turn k-1's prompt + answer + the next user message. Prefill holds the full 16-token
+  blocks of the old prompt; decode holds those of prompt + answer (`(P+A-1)//16`, since
+  the last token generated has no KV). The connector asks decode for every block prefill
+  lacks, up to `P'//16`, so the blocks past decode's end -- the one straddling the end of
+  the answer and the user's new text -- come back as misses. Counted from `turns.jsonl`
+  alone, that predicts **3 301 hits and 132 misses**, exactly the RDMA arm's numbers (and
+  3 298 / 134 for TCP, against 3 299 / 133 measured: the same 3 432 keys, one block moved
+  across the boundary). Correct behaviour: the source reports what it does not hold, and
+  prefill computes those blocks.
 - End-to-end latency is generating 1 100 tokens and is the same in all four arms within
   noise; the RDMA arms are ~1.5 s shorter because of the handoff.
 
