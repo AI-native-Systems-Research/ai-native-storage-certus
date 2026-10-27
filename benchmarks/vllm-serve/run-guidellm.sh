@@ -214,7 +214,7 @@ METRICS_URL="${TARGET}/metrics"
 METRICS_OUT="${OUTPUT%.json}.metrics.txt"
 # Broad grep: vLLM's offload/prefix counter names vary across versions, so match
 # any that mention prefix cache, the external/offload path, or the KV connector.
-METRICS_RE='prefix_cache|external|offload|kv_transfer|connector|kv_cache_usage'
+METRICS_RE='prefix_cache|external|offload|kv_transfer|connector|kv_cache_usage|prompt_tokens_by_source'
 snap_metrics() {  # $1 = label; prints matching counters (or a note if none)
   local out
   command -v curl >/dev/null 2>&1 || { echo "### ${1}: curl unavailable"; return; }
