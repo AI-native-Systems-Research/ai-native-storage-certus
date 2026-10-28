@@ -1,0 +1,48 @@
+# Containerfile.spdk — build spdk_nvme_perf in a container for Paths 1-2.
+#
+# On a read-only bootc host, SPDK cannot be built against the host toolchain.
+# This image clones + builds SPDK (its own bundled DPDK/isa-l submodules) inside
+# a Rocky 9 container (RHEL 9.6 ABI), producing deps/spdk-build/bin/spdk_nvme_perf.
+# run-spdk-build.sh then extracts that binary PLUS its shared-lib dependencies to
+# a host dir, so the profiler can run Paths 1-2 against a vfio-bound scratch drive.
+#
+# Scope: spdk_nvme_perf only (SPDK read/write matrices). The BAR1 microbench
+# (nvme-bar1-bench) additionally needs CUDA + the gdrdrv kernel module at runtime
+# on the host, so it is out of scope here.
+#
+# Build args: pass https_proxy/http_proxy so the git clone + dnf reach out.
+FROM docker.io/rockylinux/rockylinux:9
+
+ARG https_proxy=
+ARG http_proxy=
+
+# SPDK build dependencies (from deps/install_deps.sh, minus CUDA — not needed for
+# spdk_nvme_perf). crb repo supplies several -devel packages.
+RUN dnf -y install dnf-plugins-core \
+    && dnf config-manager --set-enabled crb \
+    && dnf -y install \
+        git gcc gcc-c++ make pkgconfig patchelf \
+        numactl-libs numactl-devel libuuid-devel libaio-devel \
+        ncurses-devel openssl-devel CUnit CUnit-devel \
+        python3-pip glibc-headers glibc-devel \
+    && pip install meson ninja pyelftools jinja2 \
+    && dnf clean all
+
+# SPDK version pinned to match deps/build_spdk.sh (v26.01.x).
+ARG SPDK_BRANCH=v26.01.x
+RUN git clone https://github.com/spdk/spdk.git /spdk \
+    && cd /spdk \
+    && git checkout -b "${SPDK_BRANCH}" "origin/${SPDK_BRANCH}" \
+    && git submodule update --init
+
+RUN cd /spdk \
+    && ./configure --prefix=/spdk-build --without-crypto \
+    && make -j"$(nproc)" \
+    && make install
+
+# spdk_nvme_perf is an example binary (SPDK builds it as build/examples/perf).
+# run-spdk-build.sh locates it robustly after the build rather than relying on a
+# fixed path here, since the location varies across SPDK versions.
+
+WORKDIR /spdk
+ENTRYPOINT ["/bin/bash"]
