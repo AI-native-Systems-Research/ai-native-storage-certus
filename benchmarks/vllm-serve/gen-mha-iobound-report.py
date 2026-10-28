@@ -134,42 +134,74 @@ def parse_metrics(path):
     store_b = d("kv_offload_store_bytes_total") + d("kv_offload_total_bytes_total|GPU_to_CPU")
     q = d("external_prefix_cache_queries_total")
     h = d("external_prefix_cache_hits_total")
+    # Computed (recompute) share of prompt tokens: of the tokens queried against the
+    # GPU prefix cache, those hit neither there nor in the offload tier. (The
+    # external queries are the local misses, so local hits + external hits = cached.)
+    lq = d("prefix_cache_queries_total")
+    lh = d("prefix_cache_hits_total")
+    computed = (100 * max(lq - lh - h, 0.0) / lq) if lq else None
     return {"load_time_s": load_t, "store_time_s": store_t,
             "load_bytes": load_b, "store_bytes": store_b,
-            "ext_hit": (100 * h / q) if q else None}
+            "ext_hit": (100 * h / q) if q else None, "computed_pct": computed}
 
 
-def timeline_png(rows, title):
-    """GPU compute vs KV load/store IO over wall time (device-seconds per
-    wall-second), from the poll-kv-metrics.sh rows. Robust to a trailing all-zero
-    teardown row and to early truncation: skips intervals where a cumulative
-    counter decreased (the zero row) or dt<=0. Returns base64 PNG, or None."""
-    import numpy as np
-    t, comp, load, store = [], [], [], []
+def timeline_png(rows, title, computed_pct=None):
+    """Prompt tokens/s by source (GPU-computed vs GPU prefix-cache hit vs offload-
+    tier hit) above KV load/store IO device-seconds per wall-second, from the
+    poll-kv-metrics.sh rows. The token split comes from vLLM's
+    prompt_tokens_by_source counter (computed + local_cache_hit +
+    external_kv_transfer = prompt tokens), so it measures real recompute; summed
+    request prefill time does not (it counts every queued stream's wait). CSVs from
+    an older poller lack the split: plot total prompt tok/s and annotate the
+    full-run computed_pct instead. Robust to a trailing all-zero teardown row and
+    to early truncation: skips intervals where a cumulative counter decreased or
+    dt<=0. Returns base64 PNG, or None."""
+    has_src = bool(rows) and "computed_tok" in rows[0]
+    t, comp, lhit, ehit, ptok, load, store = [], [], [], [], [], [], []
     for a, b in zip(rows, rows[1:]):
         try:
             dt = float(b["wall_s"]) - float(a["wall_s"])
             dl = float(b["load_time_s"]) - float(a["load_time_s"])
             ds = float(b["store_time_s"]) - float(a["store_time_s"])
-            dp = float(b["prefill_sum_s"]) - float(a["prefill_sum_s"])
+            dpt = float(b["prompt_tok"]) - float(a["prompt_tok"])
+            if has_src:
+                dc = float(b["computed_tok"]) - float(a["computed_tok"])
+                dlh = float(b["local_hit_tok"]) - float(a["local_hit_tok"])
+                deh = float(b["ext_hit_tok"]) - float(a["ext_hit_tok"])
+            else:
+                dc = dlh = deh = 0.0
         except (KeyError, ValueError):
             continue
-        if dt <= 0 or dl < 0 or ds < 0 or dp < 0:   # skip teardown/zero row
+        if dt <= 0 or min(dl, ds, dpt, dc, dlh, deh) < 0:   # skip teardown/zero row
             continue
         t.append(float(b["wall_s"]))
-        load.append(dl / dt); store.append(ds / dt)
-        comp.append(max(dp - dl, 0.0) / dt)          # compute ≈ prefill window minus reload
+        load.append(dl / dt); store.append(ds / dt); ptok.append(dpt / dt)
+        comp.append(dc / dt); lhit.append(dlh / dt); ehit.append(deh / dt)
     if len(t) < 2:
         return None
-    fig, ax = plt.subplots(figsize=(8, 3.4))
-    ax.stackplot(t, comp, load, store,
-                 labels=["GPU prefill-compute", "KV load IO (CPU→GPU)", "KV store IO (GPU→CPU)"],
-                 colors=["#4C78A8", "#F58518", "#E45756"], alpha=0.85)
+    fig, (ax, ax2) = plt.subplots(2, 1, figsize=(8, 5.2), sharex=True,
+                                  gridspec_kw={"height_ratios": [3, 2]})
+    if has_src:
+        ax.stackplot(t, comp, lhit, ehit,
+                     labels=["GPU-computed (recompute)", "GPU prefix-cache hit", "offload-tier hit (KV load)"],
+                     colors=["#4C78A8", "#54A24B", "#F58518"], alpha=0.85)
+        tot = sum(comp) + sum(lhit) + sum(ehit)
+        if tot:
+            computed_pct = 100 * sum(comp) / tot
+    else:
+        ax.plot(t, ptok, color="#4C78A8", label="prompt tokens (source split not in this kvio.csv)")
+    if computed_pct is not None:
+        title = f"{title} — {computed_pct:.1f}% of prompt tokens computed"
     ax.set_title(title, fontsize=11)
-    ax.set_xlabel("wall time (s)")
-    ax.set_ylabel("device-s / wall-s")
+    ax.set_ylabel("prompt tokens / s")
     ax.legend(loc="upper right", fontsize=8, ncol=3)
     ax.grid(True, alpha=0.3)
+    ax2.stackplot(t, load, store, labels=["KV load IO (CPU→GPU)", "KV store IO (GPU→CPU)"],
+                  colors=["#F58518", "#E45756"], alpha=0.85)
+    ax2.set_xlabel("wall time (s)")
+    ax2.set_ylabel("device-s / wall-s")
+    ax2.legend(loc="upper right", fontsize=8, ncol=2)
+    ax2.grid(True, alpha=0.3)
     return png_b64(fig)
 
 
@@ -213,7 +245,8 @@ def main():
               "load_time_s": mt.get("load_time_s") or (k["load_time_s"] if k else 0),
               "store_time_s": mt.get("store_time_s") or (k["store_time_s"] if k else 0)}
         data.append({"key": key, "label": label, "color": color, "g": g, "k": k,
-                     "kv": kv, "ext": mt.get("ext_hit"), "present": g is not None})
+                     "kv": kv, "ext": mt.get("ext_hit"), "computed": mt.get("computed_pct"),
+                     "present": g is not None})
 
     present = [d for d in data if d["present"]]
     labels = [d["label"] for d in present]
@@ -262,7 +295,7 @@ def main():
     # ── Table ────────────────────────────────────────────────────────────────
     cols = ["Arm", "tokens/s", "out tok/s", "req/s",
             "TTFT p50 (ms)", "TTFT p90 (ms)", "TTFT p99 (ms)",
-            "ok", "errored", "KV load (TiB)", "load time (s)", "ext hit %"]
+            "ok", "errored", "KV load (TiB)", "load time (s)", "ext hit %", "computed %"]
     rows_html = []
     for d in data:
         g, kv, e = d["g"], d["kv"], d["ext"]
@@ -276,6 +309,7 @@ def main():
             fmt(tt.get("p99")), fmt(g["ok"], 0), fmt(g["errored"], 0),
             fmt(kv["load_bytes"] / TIB, 2), fmt(kv["load_time_s"], 0),
             fmt(e, 1) if e is not None else "—",
+            fmt(d["computed"], 1) if d["computed"] is not None else "—",
         ]
         rows_html.append("<tr>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>")
 
@@ -288,15 +322,17 @@ def main():
     tl = []
     for d in data:
         if d["present"] and d["k"] and d["k"].get("rows"):
-            png = timeline_png(d["k"]["rows"], d["label"])
+            png = timeline_png(d["k"]["rows"], d["label"], d["computed"])
             if png:
                 tl.append(f'<figure><img src="data:image/png;base64,{png}"/></figure>')
     timeline_html = ""
     if tl:
-        timeline_html = ("<h2 style='font-size:1.1rem'>Per-arm GPU compute vs KV-IO over time</h2>"
-                         "<p class='note'>Stacked device-seconds per wall-second (≈ concurrent streams active in each "
-                         "activity). GPU compute ≈ prefill window − reload, clamped at 0; the certus arms' reload is a "
-                         "connector-side async transfer that can exceed the prefill window, so their compute band reads low. "
+        timeline_html = ("<h2 style='font-size:1.1rem'>Per-arm prompt-token sources vs KV-IO over time</h2>"
+                         "<p class='note'>Top: prompt tokens/s split by where their KV came from (vLLM "
+                         "prompt_tokens_by_source): GPU-computed = actual recompute, GPU prefix-cache hit, and "
+                         "offload-tier hit (reloaded over the connector). Bottom: KV load/store device-seconds per "
+                         "wall-second. Arms whose kvio.csv predates the source split show total prompt tok/s with the "
+                         "full-run computed % from the /metrics snapshot. "
                          "The certus timelines truncate early (the live poller stopped when /metrics slowed under load).</p>"
                          + "".join(tl))
     thead = "".join(f"<th>{c}</th>" for c in cols)
@@ -320,6 +356,7 @@ DELAY_SCALE={p_scale} (intervals arms). Source: {rd}</p>
 {timeline_html}
 <p class="note">Throughput = total tokens/s (higher better). TTFT = time to first token (lower better).
 KV load = bytes reloaded from the offload tier onto the GPU (the I/O the test exercises).
+computed % = prompt tokens recomputed on the GPU (hit neither the GPU prefix cache nor the offload tier).
 "errored" counts requests that failed (e.g. HTTP 400 from window overflow on deep turns).</p>
 </body></html>"""
     out = os.path.join(rd, "report.html")
