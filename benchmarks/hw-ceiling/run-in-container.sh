@@ -92,6 +92,30 @@ if [[ "$GPU" == 1 ]]; then
   echo "[run-in-container] GPU:         --device nvidia.com/gpu=all (CDI)"
 fi
 
+# If --nvme <BDF[,BDF]> is being passed through, the container's root cannot open
+# a root:disk block device (rootless userns maps it to nobody). Grant access by
+# making ONLY those named devices' block nodes group/other-readable on the host
+# first. Needs sudo; we chmod exactly the named scratch devices, nothing else.
+NVME_ARG=""
+_next_is_nvme=0
+for a in "${PASS_ARGS[@]:-}"; do
+  [[ "$_next_is_nvme" == 1 ]] && { NVME_ARG="$a"; _next_is_nvme=0; continue; }
+  [[ "$a" == "--nvme" ]] && _next_is_nvme=1
+done
+if [[ -n "$NVME_ARG" ]]; then
+  IFS=',' read -r -a _bdfs <<< "$NVME_ARG"
+  for bdf in "${_bdfs[@]}"; do
+    bdf="${bdf,,}"; [[ "$bdf" =~ ^[0-9a-f]{2}:[0-9a-f]{2}\.[0-9a-f]$ ]] && bdf="0000:${bdf}"
+    cdir="$(ls -d "/sys/bus/pci/devices/${bdf}/nvme/"nvme* 2>/dev/null | head -1)"
+    [[ -z "$cdir" ]] && { echo "[run-in-container] WARN: $bdf has no kernel block node (on vfio-pci?)"; continue; }
+    blk="$(ls -d "$cdir"/nvme* 2>/dev/null | grep -E '/nvme[0-9]+n[0-9]+$' | head -1)"
+    [[ -z "$blk" ]] && continue
+    node="/dev/$(basename "$blk")"
+    echo "[run-in-container] granting container access to $node (chmod o+rw; scratch device)"
+    sudo chmod o+rw "$node" || echo "[run-in-container] WARN: chmod $node failed — fio in container may get EACCES"
+  done
+fi
+
 # Build the in-container command with each pass-through arg safely quoted.
 CMD="./${SCRIPT_REL}"
 for a in "${PASS_ARGS[@]:-}"; do [[ -n "$a" ]] && CMD+=" $(printf '%q' "$a")"; done
