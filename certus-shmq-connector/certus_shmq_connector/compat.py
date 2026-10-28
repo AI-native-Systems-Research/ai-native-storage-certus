@@ -583,6 +583,22 @@ def gpu_block_ids(load_store_spec) -> list[int]:
     return [int(b) for b in load_store_spec.block_ids]
 
 
+def gpu_first_block_index(load_store_spec) -> int:
+    """Index in the request of the first GPU block in a single-group
+    ``GPULoadStoreSpec`` (0.26+ ``block_indices[0]``); 0 when the spec carries
+    none. With offload blocks larger than the GPU block, a load can start inside
+    its first offloaded block, at ``index % blocks_per_chunk``."""
+    indices = getattr(load_store_spec, "block_indices", None)
+    if indices is None or len(indices) == 0:
+        return 0
+    sizes = getattr(load_store_spec, "group_sizes", None)
+    if sizes is not None and len(sizes) > 1:
+        raise ValueError(
+            f"Certus shmq connector supports one KV cache group; got {len(sizes)}"
+        )
+    return int(indices[0])
+
+
 def new_request_offloading_context():
     """Default per-request offloading context for ``OffloadingManager.on_new_request``
     (0.24+). Returns ``RequestOffloadingContext()`` — the BLOCK_LEVEL policy: offload

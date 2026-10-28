@@ -27,11 +27,12 @@ from dataclasses import dataclass
 from .compat import (
     GPULoadStoreSpec,
     gpu_block_ids,
+    gpu_first_block_index,
     make_transfer_result,
     worker_base_class,
 )
 
-from .gpu import KvCacheIpc
+from .gpu import KvCacheIpc, scratch_ipc
 from .mediums import CertusLoadStoreSpec, ns_key
 
 # Direction tags. Only used to populate the ≤0.24 ``TransferResult.transfer_type``
@@ -144,6 +145,44 @@ def _regions_for_block(regions: list[KvCacheIpc], block_id: int):
 
 
 # Cache of the built worker class (base resolved once, lazily).
+def _chunk_entries(regions, gpu_block_ids, keys, blocks_per_chunk, skip, scratch):
+    """``(key, regions)`` ring entries for keys of ``blocks_per_chunk`` GPU blocks.
+
+    A key's slot holds its GPU blocks side by side, each as its regions in layer
+    order (block 0's regions, then block 1's, ...), so store and load use the same
+    slot layout. The first key's first ``skip`` GPU blocks are ones a load did not
+    ask for (it starts inside that chunk): their pieces go to ``scratch``, so the
+    load still covers the whole slot. The last key may hold fewer blocks.
+    """
+    expected = len(keys) * blocks_per_chunk - skip
+    if not 0 <= skip < blocks_per_chunk or not (
+        expected - blocks_per_chunk < len(gpu_block_ids) <= expected
+    ):
+        raise AssertionError(
+            f"{len(gpu_block_ids)} GPU blocks do not fill {len(keys)} keys of "
+            f"{blocks_per_chunk} blocks (first {skip} skipped)"
+        )
+    entries = []
+    pos = 0
+    for i, key in enumerate(keys):
+        pieces = []
+        for j in range(skip if i == 0 else 0, blocks_per_chunk):
+            if i == 0 and j < skip:
+                continue
+            if pos == len(gpu_block_ids):
+                break
+            pieces.extend(_regions_for_block(regions, gpu_block_ids[pos]))
+            pos += 1
+        if i == 0 and skip:
+            pieces = [
+                (scratch.handle_bytes, scratch.gpu_device_id, 0, r.stride_bytes)
+                for _ in range(skip)
+                for r in regions
+            ] + pieces
+        entries.append((key, pieces))
+    return entries
+
+
 _WORKER_CLASS = None
 
 
@@ -168,6 +207,7 @@ def _build_worker_class():
             *,
             rank: int = 0,
             world_size: int = 1,
+            blocks_per_chunk: int = 1,
         ):
             self._ring = ring
             self._kv_regions = kv_regions
@@ -179,6 +219,12 @@ def _build_worker_class():
             # in the shared certus-server tier. Identity at world_size==1.
             self._rank = int(rank)
             self._world_size = int(world_size)
+            # GPU blocks per key (vLLM's blocks_per_chunk). A load that starts
+            # inside its first chunk sends the skipped blocks' pieces to a scratch
+            # buffer, allocated on first use.
+            self._blocks_per_chunk = int(blocks_per_chunk)
+            self._scratch: KvCacheIpc | None = None
+            self._scratch_lock = threading.Lock()
 
         # ── shared async plumbing ──
 
@@ -189,6 +235,7 @@ def _build_worker_class():
             keys: list[int],
             fn,
             transfer_type: tuple[str, str],
+            skip: int = 0,
         ) -> bool:
             job = _PendingJob(
                 job_id=job_id,
@@ -203,7 +250,7 @@ def _build_worker_class():
             def run():
                 job.start_time = time.monotonic()
                 try:
-                    return fn(gpu_block_ids, keys)
+                    return fn(gpu_block_ids, keys, skip)
                 finally:
                     job.end_time = time.monotonic()
 
@@ -268,7 +315,8 @@ def _build_worker_class():
             if _SUBMIT_TRACE:
                 _submit_trace("submit_store", job_id, len(block_ids), len(dst_spec.keys))
             return self._submit(
-                job_id, block_ids, dst_spec.keys, self._do_store, _STORE_TYPE
+                job_id, block_ids, dst_spec.keys, self._do_store, _STORE_TYPE,
+                gpu_first_block_index(src_spec) % self._blocks_per_chunk,
             )
 
         def submit_load(self, job_id: int, src_spec, dst_spec) -> bool:
@@ -277,7 +325,8 @@ def _build_worker_class():
             if _SUBMIT_TRACE:
                 _submit_trace("submit_load", job_id, len(block_ids), len(src_spec.keys))
             return self._submit(
-                job_id, block_ids, src_spec.keys, self._do_load, _LOAD_TYPE
+                job_id, block_ids, src_spec.keys, self._do_load, _LOAD_TYPE,
+                gpu_first_block_index(dst_spec) % self._blocks_per_chunk,
             )
 
         # ── ≤0.24 medium-pair interface ──
@@ -296,20 +345,37 @@ def _build_worker_class():
 
         # ── transport bodies (run on the pool; identical across versions) ──
 
-        def _do_store(self, gpu_block_ids: list[int], keys: list[int]) -> bool:
-            if len(gpu_block_ids) != len(keys):
-                raise AssertionError(
-                    f"store: {len(gpu_block_ids)} GPU blocks != {len(keys)} keys "
-                    f"(one key per GPU block required)"
-                )
+        def _entries(self, gpu_block_ids, ns_keys, skip):
+            if self._blocks_per_chunk == 1:
+                if len(gpu_block_ids) != len(ns_keys):
+                    raise AssertionError(
+                        f"{len(gpu_block_ids)} GPU blocks != {len(ns_keys)} keys "
+                        f"(one key per GPU block required)"
+                    )
+                return [
+                    (ns_k, _regions_for_block(self._kv_regions, block_id))
+                    for block_id, ns_k in zip(gpu_block_ids, ns_keys)
+                ]
+            scratch = None
+            if skip:
+                with self._scratch_lock:
+                    if self._scratch is None:
+                        self._scratch = scratch_ipc(
+                            max(r.stride_bytes for r in self._kv_regions),
+                            self._kv_regions[0].gpu_device_id,
+                        )
+                    scratch = self._scratch
+            return _chunk_entries(
+                self._kv_regions, gpu_block_ids, ns_keys, self._blocks_per_chunk,
+                skip, scratch,
+            )
+
+        def _do_store(self, gpu_block_ids: list[int], keys: list[int], skip: int = 0) -> bool:
             # Fold this worker's TP rank into every key: the manager Reserved the
             # matching per-rank namespaced keys (see manager.prepare_store), so the
             # store lands under the same key the pre-load Check/Pin will look up.
             ns_keys = [ns_key(k, self._rank, self._world_size) for k in keys]
-            entries = [
-                (ns_k, _regions_for_block(self._kv_regions, block_id))
-                for block_id, ns_k in zip(gpu_block_ids, ns_keys)
-            ]
+            entries = self._entries(gpu_block_ids, ns_keys, skip)
             try:
                 results = self._ring.copy_to_store(entries)
             except Exception as e:  # noqa: BLE001 - store failure must not crash vLLM
@@ -353,18 +419,10 @@ def _build_worker_class():
                     print(f"[certus-shmq] AbortStore rollback failed: {e}", flush=True)
             return True
 
-        def _do_load(self, gpu_block_ids: list[int], keys: list[int]) -> bool:
-            if len(gpu_block_ids) != len(keys):
-                raise AssertionError(
-                    f"load: {len(gpu_block_ids)} GPU blocks != {len(keys)} keys "
-                    f"(one key per GPU block required)"
-                )
+        def _do_load(self, gpu_block_ids: list[int], keys: list[int], skip: int = 0) -> bool:
             # Same rank fold as the store path — load this worker's own shard.
             ns_keys = [ns_key(k, self._rank, self._world_size) for k in keys]
-            entries = [
-                (ns_k, _regions_for_block(self._kv_regions, block_id))
-                for block_id, ns_k in zip(gpu_block_ids, ns_keys)
-            ]
+            entries = self._entries(gpu_block_ids, ns_keys, skip)
             results = self._ring.lookup(entries)
             # Diagnostic: a load must not fail (vLLM asserts), and it shouldn't be
             # able to — prepare_load pinned these keys. If the server reports any

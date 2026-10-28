@@ -37,7 +37,7 @@
 #   ./run-serve-cputier-gqa-iobound.sh                     # Qwen2.5-7B GQA, TP=1, 32768, 32G CPU + fs tier
 #   CPU_TIER_GB=8 ./run-serve-cputier-gqa-iobound.sh       # smaller DRAM tier -> push the ~28 GiB WS to SSD
 #   FS_TIER=0 ./run-serve-cputier-gqa-iobound.sh           # CPU-only (no SSD tier) — DRAM-bound control
-#   OFFLOAD_BLOCK_SIZE=64 ./run-serve-cputier-gqa-iobound.sh # 64-token offload blocks (not the Certus arm's 16)
+#   OFFLOAD_BLOCK_SIZE=64 ./run-serve-cputier-gqa-iobound.sh # 64-token offload blocks (set it on the Certus arm too)
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -48,8 +48,8 @@ TENSOR_PARALLEL="${TENSOR_PARALLEL:-1}"                # 7B fits one A100-40G
 GPU="${GPU:-0}"                                        # pin one GPU (TP=1); GPU=all exposes both
 GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.9}"
 KV_CACHE_BYTES="${KV_CACHE_BYTES-}"                    # uncapped: ~20G pool >> ~1.75G floor at 32768
-# Default: the GPU block (16 tokens), the only size the Certus arm supports, so both
-# arms offload at the same granularity. OFFLOAD_BLOCK_SIZE=64 for vLLM's larger blocks.
+# Default: the GPU block (16 tokens), as the Certus arm, so both arms offload at the
+# same granularity. Set the same OFFLOAD_BLOCK_SIZE on both arms to compare another size.
 OFFLOAD_BLOCK_SIZE="${OFFLOAD_BLOCK_SIZE-}"
 # DRAM/CPU tier size. Keep EQUAL to the certus-server --memory-tier-size used by the
 # shmq GQA arm (run-serve-certus-shmq-gqa-iobound.sh honors the same CPU_TIER_GB) so
