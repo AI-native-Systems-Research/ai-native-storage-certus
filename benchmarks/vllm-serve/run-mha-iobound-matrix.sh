@@ -138,5 +138,5 @@ log "generating report"
 # Pass the workload knobs through so the report records them (unset => defaults).
 env ${TURNS:+TURNS="$TURNS"} ${CONCURRENT_STREAMS:+CONCURRENT_STREAMS="$CONCURRENT_STREAMS"} \
     ${PREFIX_COUNT:+PREFIX_COUNT="$PREFIX_COUNT"} ${DELAY_SCALE:+DELAY_SCALE="$DELAY_SCALE"} \
-    /usr/bin/python3 "${SCRIPT_DIR}/gen-mha-iobound-report.py" "$RESULTS_DIR" 2>&1 | tee -a "$LOG"
+    /usr/bin/python3 "${SCRIPT_DIR}/gen-iobound-report.py" "$RESULTS_DIR" 2>&1 | tee -a "$LOG"
 log "DONE -> ${RESULTS_DIR}/report.html"
