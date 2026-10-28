@@ -125,7 +125,9 @@ def parse_metrics(path):
             continue
         tt = re.search(r'transfer_type="([^"]+)"', labels)
         src = re.search(r'source="([^"]+)"', labels)
-        key = name + ("|" + tt.group(1) if tt else "") + ("|" + src.group(1) if src else "")
+        tier = re.search(r'tier="([^"]+)"', labels)
+        key = (name + ("|" + tt.group(1) if tt else "") + ("|" + src.group(1) if src else "")
+               + ("|tier" if tier else ""))
         phase[key] = phase.get(key, 0.0) + v
     def d(k):
         return A.get(k, 0.0) - B.get(k, 0.0)
@@ -138,6 +140,15 @@ def parse_metrics(path):
     store_t = xfer("kv_offload_store_time_total", "kv_offload_total_time_total|GPU_to_CPU")
     load_b = xfer("kv_offload_load_bytes_total", "kv_offload_total_bytes_total|CPU_to_GPU")
     store_b = xfer("kv_offload_store_bytes_total", "kv_offload_total_bytes_total|GPU_to_CPU")
+    # cputier copies a block on its SSD tier to its CPU tier as a separate job
+    # before the load, timed only under kv_offload_tiering_read_*; Certus's load
+    # job includes its SSD read. Load time incl. tier reads covers SSD to GPU on
+    # both (0 for Certus).
+    tier_read_t = d("kv_offload_tiering_read_time_total|tier")
+    tier_read_b = d("kv_offload_tiering_read_bytes_total|tier")
+    def mean(name):
+        n = d(name + "_count")
+        return d(name + "_sum") / n if n else None
     q = d("external_prefix_cache_queries_total")
     h = d("external_prefix_cache_hits_total")
     # Computed (recompute) share of prompt tokens, from vLLM's prompt_tokens_by_source
@@ -157,7 +168,13 @@ def parse_metrics(path):
         computed = (100 * max(lq - lh - h, 0.0) / lq) if lq else None
     return {"load_time_s": load_t, "store_time_s": store_t,
             "load_bytes": load_b, "store_bytes": store_b,
-            "ext_hit": (100 * h / q) if q else None, "computed_pct": computed}
+            "ext_hit": (100 * h / q) if q else None, "computed_pct": computed,
+            "tier_read_time_s": tier_read_t, "tier_read_bytes": tier_read_b,
+            # vLLM's per-request timings, measured the same for every backend: a
+            # request whose KV is loading stays queued until the load is done.
+            "queue_s": mean("request_queue_time_seconds"),
+            "prefill_s": mean("request_prefill_time_seconds"),
+            "ttft_s": mean("time_to_first_token_seconds")}
 
 
 def timeline_png(rows, title, computed_pct=None):
@@ -276,6 +293,9 @@ def main():
               "store_time_s": mt.get("store_time_s") or (k["store_time_s"] if k else 0)}
         data.append({"key": key, "label": label, "color": color, "g": g, "k": k,
                      "kv": kv, "ext": mt.get("ext_hit"), "computed": mt.get("computed_pct"),
+                     "tier_read_s": mt.get("tier_read_time_s") or 0.0,
+                     "queue_s": mt.get("queue_s"), "prefill_s": mt.get("prefill_s"),
+                     "srv_ttft_s": mt.get("ttft_s"),
                      "block": sv.get("block"), "tier": sv.get("tier"),
                      "present": g is not None})
 
@@ -326,7 +346,8 @@ def main():
     # ── Table ────────────────────────────────────────────────────────────────
     cols = ["Arm", "offload block (tok)", "DRAM tier", "tokens/s", "out tok/s", "req/s",
             "TTFT p50 (ms)", "TTFT p90 (ms)", "TTFT p99 (ms)",
-            "ok", "errored", "KV load (TiB)", "load time (s)", "ext hit %", "computed %"]
+            "ok", "errored", "KV load (TiB)", "load time (s)", "ext hit %", "computed %",
+            "load+tier read time (s)", "vLLM queue mean (s)", "vLLM prefill mean (s)", "vLLM TTFT mean (s)"]
     rows_html = []
     for d in data:
         g, kv, e = d["g"], d["kv"], d["ext"]
@@ -341,6 +362,8 @@ def main():
             fmt(kv["load_bytes"] / TIB, 2), fmt(kv["load_time_s"], 0),
             fmt(e, 1) if e is not None else "—",
             fmt(d["computed"], 1) if d["computed"] is not None else "—",
+            fmt(kv["load_time_s"] + d["tier_read_s"], 0),
+            fmt(d["queue_s"], 2), fmt(d["prefill_s"], 2), fmt(d["srv_ttft_s"], 2),
         ]
         rows_html.append("<tr>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>")
 
@@ -388,6 +411,10 @@ DELAY_SCALE={p_scale} (intervals arms). Source: {rd}</p>
 <p class="note">Throughput = total tokens/s (higher better). TTFT = time to first token (lower better).
 KV load = bytes reloaded from the offload tier onto the GPU (the I/O the test exercises).
 computed % = prompt tokens recomputed on the GPU (hit neither the GPU prefix cache nor the offload tier).
+load time = summed time of KV load jobs as each backend reports it: Certus, a job's SSD-or-DRAM read and GPU copy;
+cputier, only its CPU→GPU copy. load+tier read time adds cputier's SSD→CPU reads (separate jobs before the load),
+so it covers SSD to GPU on both. vLLM queue / prefill / TTFT = vLLM's per-request means, measured the same on every
+backend: a request whose KV is still loading stays queued, so queue time includes the wait for its load.
 "errored" counts requests that failed (e.g. HTTP 400 from window overflow on deep turns).</p>
 </body></html>"""
     out = os.path.join(rd, "report.html")
