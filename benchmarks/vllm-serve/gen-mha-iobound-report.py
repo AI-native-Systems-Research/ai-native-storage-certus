@@ -124,22 +124,37 @@ def parse_metrics(path):
         except ValueError:
             continue
         tt = re.search(r'transfer_type="([^"]+)"', labels)
-        key = name + ("|" + tt.group(1) if tt else "")
+        src = re.search(r'source="([^"]+)"', labels)
+        key = name + ("|" + tt.group(1) if tt else "") + ("|" + src.group(1) if src else "")
         phase[key] = phase.get(key, 0.0) + v
     def d(k):
         return A.get(k, 0.0) - B.get(k, 0.0)
-    load_t = d("kv_offload_load_time_total") + d("kv_offload_total_time_total|CPU_to_GPU")
-    store_t = d("kv_offload_store_time_total") + d("kv_offload_total_time_total|GPU_to_CPU")
-    load_b = d("kv_offload_load_bytes_total") + d("kv_offload_total_bytes_total|CPU_to_GPU")
-    store_b = d("kv_offload_store_bytes_total") + d("kv_offload_total_bytes_total|GPU_to_CPU")
+    def xfer(flat, labeled):
+        # vLLM 0.30 reports each transfer twice: under the flat name and under the
+        # deprecated transfer_type-labelled one (equal for cputier; the labelled one
+        # stays 0 for Certus). Take the flat one; the labelled one only without it.
+        return d(flat) if flat in A else d(labeled)
+    load_t = xfer("kv_offload_load_time_total", "kv_offload_total_time_total|CPU_to_GPU")
+    store_t = xfer("kv_offload_store_time_total", "kv_offload_total_time_total|GPU_to_CPU")
+    load_b = xfer("kv_offload_load_bytes_total", "kv_offload_total_bytes_total|CPU_to_GPU")
+    store_b = xfer("kv_offload_store_bytes_total", "kv_offload_total_bytes_total|GPU_to_CPU")
     q = d("external_prefix_cache_queries_total")
     h = d("external_prefix_cache_hits_total")
-    # Computed (recompute) share of prompt tokens: of the tokens queried against the
-    # GPU prefix cache, those hit neither there nor in the offload tier. (The
-    # external queries are the local misses, so local hits + external hits = cached.)
+    # Computed (recompute) share of prompt tokens, from vLLM's prompt_tokens_by_source
+    # (computed + local_cache_hit + external_kv_transfer = prompt tokens), the same
+    # counter the timeline plots. Snapshots without it: of the tokens queried against
+    # the GPU prefix cache, those hit neither there nor in the offload tier (counts a
+    # preempted request's lookup again on re-admission). Snapshots from before
+    # run-guidellm.sh matched prompt_tokens_by_source keep only its external line.
+    pc = d("prompt_tokens_by_source_total|local_compute")
+    ptot = pc + d("prompt_tokens_by_source_total|local_cache_hit") \
+        + d("prompt_tokens_by_source_total|external_kv_transfer")
     lq = d("prefix_cache_queries_total")
     lh = d("prefix_cache_hits_total")
-    computed = (100 * max(lq - lh - h, 0.0) / lq) if lq else None
+    if ptot and "prompt_tokens_by_source_total|local_compute" in A:
+        computed = 100 * pc / ptot
+    else:
+        computed = (100 * max(lq - lh - h, 0.0) / lq) if lq else None
     return {"load_time_s": load_t, "store_time_s": store_t,
             "load_bytes": load_b, "store_bytes": store_b,
             "ext_hit": (100 * h / q) if q else None, "computed_pct": computed}
@@ -216,6 +231,20 @@ def fmt(v, nd=1):
     return "—" if v is None else f"{v:,.{nd}f}"
 
 
+def parse_serve_log(path):
+    """Offload block size and DRAM tier size from the serve wrapper's header line
+    ("... offload-block=64 ... DRAM-tier=64G" or "CPU-tier=64G"), or {}."""
+    try:
+        with open(path, errors="replace") as f:
+            head = f.read(65536)
+    except Exception:
+        return {}
+    blk = re.search(r"offload-block=(\S+)", head)
+    tier = re.search(r"(?:DRAM|CPU)-tier=(\S+)", head)
+    return {"block": ("16" if blk.group(1) == "gpu" else blk.group(1)) if blk else None,
+            "tier": tier.group(1) if tier else None}
+
+
 def main():
     if len(sys.argv) < 2:
         sys.exit("usage: gen-mha-iobound-report.py RESULTS_DIR")
@@ -239,6 +268,7 @@ def main():
         g = parse_guidellm(os.path.join(sub, "guidellm.json"))
         k = parse_kvio(os.path.join(sub, "kvio.csv"))
         mt = parse_metrics(os.path.join(sub, "guidellm.metrics.txt")) or {}
+        sv = parse_serve_log(os.path.join(sub, "server.log"))
         # KV totals: prefer the full-run metrics.txt snapshot; fall back to kvio.
         kv = {"load_bytes": mt.get("load_bytes") or (k["load_bytes"] if k else 0),
               "store_bytes": mt.get("store_bytes") or (k["store_bytes"] if k else 0),
@@ -246,6 +276,7 @@ def main():
               "store_time_s": mt.get("store_time_s") or (k["store_time_s"] if k else 0)}
         data.append({"key": key, "label": label, "color": color, "g": g, "k": k,
                      "kv": kv, "ext": mt.get("ext_hit"), "computed": mt.get("computed_pct"),
+                     "block": sv.get("block"), "tier": sv.get("tier"),
                      "present": g is not None})
 
     present = [d for d in data if d["present"]]
@@ -293,7 +324,7 @@ def main():
         imgs["kvio"] = png_b64(fig)
 
     # ── Table ────────────────────────────────────────────────────────────────
-    cols = ["Arm", "tokens/s", "out tok/s", "req/s",
+    cols = ["Arm", "offload block (tok)", "DRAM tier", "tokens/s", "out tok/s", "req/s",
             "TTFT p50 (ms)", "TTFT p90 (ms)", "TTFT p99 (ms)",
             "ok", "errored", "KV load (TiB)", "load time (s)", "ext hit %", "computed %"]
     rows_html = []
@@ -304,7 +335,7 @@ def main():
             continue
         tt = g["ttft_ms"] or {}
         cells = [
-            d["label"], fmt(g["tokens_per_s"], 0), fmt(g["output_tokens_per_s"], 1),
+            d["label"], d["block"] or "—", d["tier"] or "—", fmt(g["tokens_per_s"], 0), fmt(g["output_tokens_per_s"], 1),
             fmt(g["requests_per_s"], 2), fmt(tt.get("p50")), fmt(tt.get("p90")),
             fmt(tt.get("p99")), fmt(g["ok"], 0), fmt(g["errored"], 0),
             fmt(kv["load_bytes"] / TIB, 2), fmt(kv["load_time_s"], 0),
@@ -347,8 +378,8 @@ def main():
  .note{{color:#555;font-size:.85rem}}
 </style></head><body>
 <h1>MHA KV-IO-bound experiment — Certus vs cputier, with/without think-time intervals</h1>
-<p class="note">Qwen1.5-7B-Chat (MHA, 512 KiB/token), TP=1, 32768 window, 64-token offload blocks,
-32 GiB DRAM/CPU tier both arms, vLLM {p_vllm}.
+<p class="note">Qwen1.5-7B-Chat (MHA, 512 KiB/token), TP=1, 32768 window, vLLM {p_vllm};
+offload block size and DRAM/CPU tier per arm in the table (from each arm's server.log).
 Run parameters: TURNS={p_turns}, CONCURRENT_STREAMS={p_streams}, PREFIX_COUNT={p_prefix} ({p_ws} reused working set),
 DELAY_SCALE={p_scale} (intervals arms). Source: {rd}</p>
 <table><thead><tr>{thead}</tr></thead><tbody>{''.join(rows_html)}</tbody></table>

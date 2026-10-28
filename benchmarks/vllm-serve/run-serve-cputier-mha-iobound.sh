@@ -30,7 +30,7 @@
 #   ./run-serve-cputier-mha-iobound.sh                     # Qwen1.5-7B MHA, TP=1, 32768, 32G CPU + fs tier
 #   CPU_TIER_GB=64 ./run-serve-cputier-mha-iobound.sh      # larger DRAM tier (match the shmq arm's server)
 #   FS_TIER=0 ./run-serve-cputier-mha-iobound.sh           # CPU-only (no SSD tier) — DRAM-bound control
-#   OFFLOAD_BLOCK_SIZE= ./run-serve-cputier-mha-iobound.sh # offload at the GPU block size (16)
+#   OFFLOAD_BLOCK_SIZE=64 ./run-serve-cputier-mha-iobound.sh # 64-token offload blocks (not the Certus arm's 16)
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -41,7 +41,9 @@ TENSOR_PARALLEL="${TENSOR_PARALLEL:-1}"                # 7B fits one A100-40G
 GPU="${GPU:-0}"                                        # pin one GPU (TP=1); GPU=all exposes both
 GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.9}"
 KV_CACHE_BYTES="${KV_CACHE_BYTES-}"                    # uncapped: ~20G pool > 16G floor at 32768
-OFFLOAD_BLOCK_SIZE="${OFFLOAD_BLOCK_SIZE-64}"
+# Default: the GPU block (16 tokens), the only size the Certus arm supports, so both
+# arms offload at the same granularity. OFFLOAD_BLOCK_SIZE=64 for vLLM's larger blocks.
+OFFLOAD_BLOCK_SIZE="${OFFLOAD_BLOCK_SIZE-}"
 # DRAM/CPU tier size. Keep EQUAL to the certus-server --memory-tier-size used by the
 # shmq arm (run-serve-certus-shmq-mha-iobound.sh honors the same CPU_TIER_GB) so the
 # two backends get the same host-memory cache for a fair A/B. The ~256 GiB working

@@ -53,24 +53,26 @@ while :; do
   # a pipe would otherwise exit) or append a bogus all-zero row — just skip it.
   raw="$(curl -fsS --max-time 15 "$METRICS_URL" 2>/dev/null || true)"
   if [[ -z "$raw" ]]; then sleep "$INTERVAL"; continue; fi
-  # Two naming schemes across vLLM/connector images, both handled (only one is
-  # nonzero on a given image, so summing is safe):
+  # Two naming schemes across vLLM/connector images:
   #   split  : vllm:kv_offload_load_time_total / _store_time_total / _load_bytes_total / _store_bytes_total
   #   labeled: vllm:kv_offload_total_time_total{transfer_type="CPU_to_GPU"|"GPU_to_CPU"} (+ _bytes_)
+  # vLLM 0.30 emits both for the same transfers (equal for cputier; the labelled one
+  # stays 0 for Certus), so take the split one and the labelled one only without it.
   # The [{ ] boundary stops the name matching the sibling _created series.
   printf '%s\n' "$raw" | awk -v wall="$wall" '
-    /^vllm:kv_offload_load_time_total[{ ]/      { lt+=$NF }
-    /^vllm:kv_offload_store_time_total[{ ]/     { st+=$NF }
-    /^vllm:kv_offload_load_bytes_total[{ ]/     { lb+=$NF }
-    /^vllm:kv_offload_store_bytes_total[{ ]/    { sb+=$NF }
-    /^vllm:kv_offload_total_time_total[{ ]/     { if ($0 ~ /CPU_to_GPU/) lt+=$NF; else if ($0 ~ /GPU_to_CPU/) st+=$NF }
-    /^vllm:kv_offload_total_bytes_total[{ ]/    { if ($0 ~ /CPU_to_GPU/) lb+=$NF; else if ($0 ~ /GPU_to_CPU/) sb+=$NF }
+    /^vllm:kv_offload_load_time_total[{ ]/      { lt+=$NF; split_seen=1 }
+    /^vllm:kv_offload_store_time_total[{ ]/     { st+=$NF; split_seen=1 }
+    /^vllm:kv_offload_load_bytes_total[{ ]/     { lb+=$NF; split_seen=1 }
+    /^vllm:kv_offload_store_bytes_total[{ ]/    { sb+=$NF; split_seen=1 }
+    /^vllm:kv_offload_total_time_total[{ ]/     { if ($0 ~ /CPU_to_GPU/) llt+=$NF; else if ($0 ~ /GPU_to_CPU/) lst+=$NF }
+    /^vllm:kv_offload_total_bytes_total[{ ]/    { if ($0 ~ /CPU_to_GPU/) llb+=$NF; else if ($0 ~ /GPU_to_CPU/) lsb+=$NF }
     /^vllm:request_prefill_time_seconds_sum[{ ]/   { pf+=$NF }
     /^vllm:request_inference_time_seconds_sum[{ ]/ { inf+=$NF }
     /^vllm:prompt_tokens_total[{ ]/              { pt+=$NF }
     /^vllm:generation_tokens_total[{ ]/          { gt+=$NF }
     /^vllm:prompt_tokens_by_source_total[{ ]/    { if ($0 ~ /"local_compute"/) ct+=$NF; else if ($0 ~ /"local_cache_hit"/) lh+=$NF; else if ($0 ~ /"external_kv_transfer"/) eh+=$NF }
-    END { printf "%s,%.6f,%.6f,%.0f,%.0f,%.6f,%.6f,%.0f,%.0f,%.0f,%.0f,%.0f\n", wall, lt, st, lb, sb, pf, inf, pt, gt, ct, lh, eh }
+    END { if (!split_seen) { lt=llt; st=lst; lb=llb; sb=lsb }
+          printf "%s,%.6f,%.6f,%.0f,%.0f,%.6f,%.6f,%.0f,%.0f,%.0f,%.0f,%.0f\n", wall, lt, st, lb, sb, pf, inf, pt, gt, ct, lh, eh }
   ' >> "$OUT"
 
   if [[ "$DURATION" != "0" ]] && awk -v w="$wall" -v d="$DURATION" 'BEGIN{exit !(w>=d)}'; then

@@ -141,25 +141,12 @@ probe_server(){
   log "probe OK: $(grep -m1 -o 'memory-tier: initialized with [0-9]* MiB pool' "$plog")"
 }
 
-# gen-{gqa,mha}-iobound-report.py hardcode "32 GiB DRAM/CPU tier both arms"; record the real size.
-fix_report_header(){
-  /usr/bin/python3 - "$1" "$CPU_TIER_GB" <<'EOF'
-import sys
-p, gb = sys.argv[1], sys.argv[2]
-s = open(p).read()
-old = "32 GiB DRAM/CPU tier both arms"
-if old in s:
-    open(p, "w").write(s.replace(old, f"<b>{gb} GiB</b> DRAM/CPU tier both arms (Certus: certus-server-yaml "
-        "built against a private SPDK with DPDK RTE_MAX_MEM_MB_PER_LIST/PER_TYPE raised)"))
-EOF
-}
-
 # Cross-sweep summary from each report's results table.
 write_summary(){
   /usr/bin/python3 - "$SWEEP_DIR" $STREAMS <<'EOF'
 import html, os, re, sys
 sweep, streams = sys.argv[1], sys.argv[2:]
-cols = ["tokens/s", "req/s", "TTFT p50 (ms)", "TTFT p99 (ms)", "errored", "KV load (TiB)", "load time (s)", "ext hit %"]
+cols = ["offload block (tok)", "tokens/s", "req/s", "TTFT p50 (ms)", "TTFT p99 (ms)", "errored", "KV load (TiB)", "load time (s)", "ext hit %", "computed %"]
 rows = []
 for n in streams:
     p = os.path.join(sweep, f"{n}streams", "report.html")
@@ -204,7 +191,6 @@ for n in $STREAMS; do
     "$MATRIX" >"${SWEEP_DIR}/matrix-${n}streams.log" 2>&1
   failed=$(ls -d "$dir"/*/FAILED 2>/dev/null | wc -l)
   if [[ -f "${dir}/report.html" ]]; then
-    fix_report_header "${dir}/report.html"
     log "${n} streams done -> ${dir}/report.html (${failed} failed arms)"
   else
     log "${n} streams: NO report (see ${SWEEP_DIR}/matrix-${n}streams.log)"
