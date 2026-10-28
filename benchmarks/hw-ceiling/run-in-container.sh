@@ -39,12 +39,16 @@ for a in "$@"; do
   esac
 done
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Use -P everywhere so $HERE and $REPO_ROOT are in the SAME (symlink-resolved)
+# namespace — otherwise the bootc /home -> /var/home symlink makes $HERE start
+# /home/... while $REPO_ROOT is /var/home/..., the prefix-strip below fails, and
+# SCRIPT_REL keeps an absolute path (yielding ".//home/core/..." in the command).
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # Resolve repo root. The `|| ... && pwd` precedence trap: `(A || B) && C` would run
 # pwd even when git succeeds, capturing TWO lines. Keep the fallback self-contained.
 REPO_ROOT="$(git -C "$HERE" rev-parse --show-toplevel 2>/dev/null)"
 if [[ -z "$REPO_ROOT" ]]; then
-  REPO_ROOT="$(cd "$HERE/../.." && pwd)"
+  REPO_ROOT="$(cd "$HERE/../.." && pwd -P)"
 fi
 # Collapse the bootc /home -> /var/home symlink so the bind-mount source is a real
 # path podman can statfs (git may report /var/home while $PWD shows /home).
@@ -53,6 +57,12 @@ REPO_ROOT="$(cd "$REPO_ROOT" && pwd -P)"
 # Script path relative to the repo root — works whether this dir is tools/hw-ceiling
 # (old layout) or benchmarks/hw-ceiling (tidied layout), no hardcoding.
 SCRIPT_REL="${HERE#"$REPO_ROOT"/}/profile-hardware-ceiling.sh"
+# Guard: if the strip failed (still absolute), the mount prefix is wrong — stop
+# rather than emit ".//abs/path" that won't exist inside the container.
+if [[ "$SCRIPT_REL" = /* ]]; then
+  echo "[run-in-container] ERROR: script dir ($HERE) is not under repo root ($REPO_ROOT)" >&2
+  exit 1
+fi
 
 if [[ "$GPU" == 1 ]]; then
   IMAGE="certus-hwceiling:cuda"
