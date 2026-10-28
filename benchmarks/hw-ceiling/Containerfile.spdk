@@ -25,7 +25,7 @@ RUN dnf -y install dnf-plugins-core \
         numactl-libs numactl-devel libuuid-devel libaio-devel \
         ncurses-devel openssl-devel CUnit CUnit-devel \
         python3-pip glibc-headers glibc-devel \
-    && pip install meson ninja pyelftools jinja2 \
+    && pip install meson ninja pyelftools jinja2 uv \
     && dnf clean all
 
 # SPDK version pinned to match deps/build_spdk.sh (v26.01.x).
