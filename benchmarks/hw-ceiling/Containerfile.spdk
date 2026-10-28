@@ -21,7 +21,7 @@ ARG http_proxy=
 RUN dnf -y install dnf-plugins-core \
     && dnf config-manager --set-enabled crb \
     && dnf -y install \
-        git gcc gcc-c++ make pkgconfig patchelf \
+        git gcc gcc-c++ make pkgconfig \
         numactl-libs numactl-devel libuuid-devel libaio-devel \
         ncurses-devel openssl-devel CUnit CUnit-devel \
         python3-pip glibc-headers glibc-devel \
