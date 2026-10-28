@@ -4,6 +4,8 @@
 # {no intervals, intervals} against Qwen2.5-7B-Instruct (GQA) with the SAME DRAM tier
 # size on both backends (CPU_TIER_GB, default 128G), writes one report.html per stream
 # count, then a cross-sweep summary (summary.md / summary.csv) in the sweep dir.
+# FAMILY=mha sweeps run-mha-iobound-matrix.sh (Qwen1.5-7B-Chat, MHA) instead; see
+# run-mha-iobound-stream-sweep.sh.
 #
 # WHY A PRIVATE SPDK BUILD: the Certus DRAM tier is ONE spdk_zmalloc, and stock DPDK caps
 # a single memseg list at 32 GiB (RTE_MAX_MEM_MB_PER_LIST=32768) — a >=32G tier fails
@@ -37,11 +39,12 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
+FAMILY="${FAMILY:-gqa}"   # gqa | mha — selects run-${FAMILY}-iobound-matrix.sh
 STREAMS="${STREAMS:-200 400 600 800 1000}"
 CPU_TIER_GB="${CPU_TIER_GB:-128}"
 CPUNODE="${CPUNODE:-0}"
 DEVICE_PCIS="${DEVICE_PCIS:-0000:61:00.0 0000:62:00.0 0000:63:00.0 0000:64:00.0}"
-SWEEP_DIR="${SWEEP_DIR:-/mnt/certus1/vllm-serve-matrix/gqa-stream-sweep-$(date +%Y%m%d_%H%M%S)}"
+SWEEP_DIR="${SWEEP_DIR:-/mnt/certus1/vllm-serve-matrix/${FAMILY}-stream-sweep-$(date +%Y%m%d_%H%M%S)}"
 SPDK_TIER_DIR="${SPDK_TIER_DIR:-/mnt/certus1/${USER}-spdk-tier128}"
 SPDK_SRC="${SPDK_SRC:-$(readlink -f "${REPO_ROOT}/deps/spdk")}"
 DPDK_TIER_CAP_MB="${DPDK_TIER_CAP_MB:-266240}"
@@ -138,7 +141,7 @@ probe_server(){
   log "probe OK: $(grep -m1 -o 'memory-tier: initialized with [0-9]* MiB pool' "$plog")"
 }
 
-# gen-gqa-iobound-report.py hardcodes "32 GiB DRAM/CPU tier both arms"; record the real size.
+# gen-{gqa,mha}-iobound-report.py hardcode "32 GiB DRAM/CPU tier both arms"; record the real size.
 fix_report_header(){
   /usr/bin/python3 - "$1" "$CPU_TIER_GB" <<'EOF'
 import sys
@@ -179,10 +182,12 @@ EOF
 }
 
 # ── Main ────────────────────────────────────────────────────────────────────────────
+MATRIX="${SCRIPT_DIR}/run-${FAMILY}-iobound-matrix.sh"
+[[ -x "$MATRIX" ]] || die "FAMILY=${FAMILY}: ${MATRIX} not found (use gqa or mha)"
 [[ -n "$PODMAN_STORE" && -n "$PODMAN_RUNROOT" ]] || die "could not determine podman store (set PODMAN_STORE/PODMAN_RUNROOT)"
 mkdir -p "$SWEEP_DIR"
 exec > >(tee -a "${SWEEP_DIR}/sweep.log") 2>&1
-log "sweep -> ${SWEEP_DIR}  streams: ${STREAMS}  tier: ${CPU_TIER_GB}G both backends"
+log "sweep (${FAMILY}) -> ${SWEEP_DIR}  streams: ${STREAMS}  tier: ${CPU_TIER_GB}G both backends"
 
 preflight
 [[ -n "$SERVER_BIN" ]] || build_server
@@ -196,7 +201,7 @@ for n in $STREAMS; do
   log "===== ${n} concurrent streams -> ${dir} ====="
   RESULTS_DIR="$dir" SERVER_BIN="$SERVER_BIN" CONCURRENT_STREAMS="$n" CPU_TIER_GB="$CPU_TIER_GB" \
     DEVICE_PCIS="$DEVICE_PCIS" CPUNODE="$CPUNODE" PODMAN_STORE="$PODMAN_STORE" PODMAN_RUNROOT="$PODMAN_RUNROOT" \
-    "${SCRIPT_DIR}/run-gqa-iobound-matrix.sh" >"${SWEEP_DIR}/matrix-${n}streams.log" 2>&1
+    "$MATRIX" >"${SWEEP_DIR}/matrix-${n}streams.log" 2>&1
   failed=$(ls -d "$dir"/*/FAILED 2>/dev/null | wc -l)
   if [[ -f "${dir}/report.html" ]]; then
     fix_report_header "${dir}/report.html"
