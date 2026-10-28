@@ -330,21 +330,92 @@ Session N: [LOAD shared blocks 0..K] → [STORE unique blocks K+1..K+M_N]
 
 ## 7. Realistic Parameter Summary
 
-From kv_IO_pattern.md, vLLM source analysis, and Xinnor MLPerf Storage 3.0 measurements:
+From `knowledge/serving/` (model facts and per-deployment block sizes), vLLM 0.30 source analysis, and Xinnor MLPerf Storage 3.0 measurements:
 
 | Dimension | Value | Source |
 |-----------|-------|--------|
-| Block size (cross-layer) | 2–5 MB (TP=1), 0.25–0.6 MB (TP=8) | kv_IO_pattern.md formula |
-| Offloaded block (factor=16) | 32–80 MB | 16 GPU blocks bundled |
-| Offloaded block (factor=1) | 2–5 MB | 1 GPU block |
+| Block size (all layers, 16 tokens, bf16) | 2–5 MB (TP=1), 0.25–0.625 MB per rank (TP=8) for Llama 8B–70B | `knowledge/serving/check.py` table (formulas in `knowledge/serving/README.md`) |
+| Pieces per block (vLLM 0.30) | one per layer (default LBHNC: 32 × 64 KB for Llama-3-8B); 1 with BLHNC | `knowledge/serving/deployments.yaml`, observed in `observations.yaml` |
+| Offloaded block (blocks_per_chunk=16) | 32–80 MB | 16 GPU blocks bundled; not the default, and the Certus connector refuses it |
+| Offloaded block (blocks_per_chunk=1, default) | 2–5 MB | 1 GPU block |
 | Tokens per block | 16 (default) | vLLM block_size config |
-| Concurrent readers (llm-d) | 48 threads (64 × 0.75) | kv_IO_pattern.md |
+| Concurrent readers (llm-d fs backend) | 48 threads (64 × 0.75) — not re-checked against llm-d source | earlier llm-d source reading |
+| Concurrent I/O threads (vLLM 0.30 fs tier) | 16 read-priority + 16 write-priority (defaults) | `vllm/v1/kv_offload/tiering/fs/manager.py` |
 | Prefix hit ratio (production) | 60–90% | RadixAttention / SGLang papers |
 | Typical prompt length | 1K–8K tokens | Depends on use case |
 | Typical generation length | 256–4K tokens | Depends on use case |
 | Scheduling step interval | 1–10 ms | Continuous batching cadence |
 | Active requests (continuous batch) | 32–256 | GPU memory dependent |
 | Agent context growth | 10K–200K+ tokens | Xinnor blog (complex agents) |
+
+### KV block layout and transfer facts (vLLM 0.30)
+
+Moved here from the retired KV I/O access-pattern note (deleted 2026-10-26) after re-checking against vLLM v0.30.0
+source. Per-model and per-deployment byte sizes are no longer written out by hand: they are derived
+by `python3 knowledge/serving/check.py` from `knowledge/serving/models.yaml` and
+`deployments.yaml`.
+
+**Layout history.**
+- vLLM 0.12–0.28 (PR #27743): an *opt-in* cross-layer layout, one tensor holding all layers so a
+  block is contiguous. Off by default; used only by connectors that set
+  `prefer_cross_layer_blocks` (the stock OffloadingConnector did) and only for uniform (non-HMA)
+  models.
+- vLLM 0.29 (PR #51718) removed that mechanism in favour of one model-wide `KVCacheLayout`
+  (`LBHNC`, `LBNHC`, `LHBNC`, `BLHNC`, `BLNHC`, `BHLNC`).
+- vLLM 0.30: resolved from `VLLM_KV_CACHE_LAYOUT`, else the connector's
+  `get_required_kvcache_layout()`, else the backends' default (`LBNHC`). The stock
+  OffloadingConnector asks for `LBHNC` (layer-outermost), so by default **each layer is its own
+  piece of every block**; `BLHNC` (block-outermost) gives one contiguous all-layer piece. Rule:
+  `knowledge/contracts/vllm-offloading-interface-v030.yaml` `kv_caches_layout_at_v030`. Both were
+  measured on Llama-3-8B (32 × 65,536 B vs 1 × 2,097,152 B per block;
+  `knowledge/serving/observations.yaml`).
+- In 0.30 a per-layer page holds K and V together (`[H, N, C]`, C = (head_size + head_size_v) ×
+  dtype), so the per-layer piece is the K+V size (64 KB for Llama-8B), not a separate 32 KB K or V
+  half as in the older FlashAttention `(2, num_blocks, ...)` shape.
+
+**Corrections to numbers that note quoted.**
+- Llama-3.1-70B at TP=8 has 1 KV head per rank: the per-layer K-or-V half is **4 KB**, not 8 KB
+  (8 KB is the K+V per-layer page); all 80 layers = 0.625 MB per rank.
+- DeepSeek-V3 (MLA) caches one latent of (kv_lora_rank 512 + qk_rope_head_dim 64) × 2 B =
+  1,152 B per token per layer, with no K/V halves: **18 KB per layer per block, ~1.07 MB
+  (1,124,352 B) for all 61 layers**, not 2.14 MB (which double-counted a K/V factor of 2). The
+  latent is replicated, not sharded, across TP ranks. MLA kernels may require a block size of 64 or
+  128 tokens in vLLM 0.30, which would scale these numbers (unverified).
+- Gemma-2-27B is 23 sliding-window + 23 full layers (transformers default `layer_types`); under
+  vLLM's hybrid KV cache manager these are separate KV cache groups, so a single 46-layer block
+  (5.75 MB) exists only with the hybrid manager disabled.
+
+**Offloaded block = storage I/O unit.** One offloaded block (one key) covers `blocks_per_chunk`
+GPU blocks (`kv_connector_extra_config` `block_size` or `blocks_per_chunk`; default 1). A chunk of
+16 (256 tokens) is a deployment choice, not a default, and the Certus connector refuses any value
+other than 1 (`certus_shmq_connector/spec.py`).
+
+**Store (GPU → offload tier).** `prepare_store` is called in `build_connector_meta` once per
+engine step for newly completed blocks; the worker queues the job and submits it at the start of
+the next step, before the forward pass (`calling_sequences.store` in the contract). Stores are
+write-once and content-addressed (same hash = same data; skipped if present).
+
+**Load (offload tier → GPU).** Triggered when the scheduler finds a prefix hit in the offload tier
+for a waiting request (`calling_sequences.load`); always the longest contiguous prefix; on the
+critical path (blocks the first token).
+
+**vLLM CPU offload copies (`vllm/v1/kv_offload/cpu/gpu_worker.py`, v0.30.0).**
+- GPU→CPU uses `ops.swap_blocks_batch`, which batches all copies through `cuMemcpyBatchAsync`
+  (CUDA 12.8+, resolved at runtime) with a `cudaMemcpyAsync` loop fallback
+  (`csrc/libtorch_stable/cache_kernels.cu`). CPU→GPU uses a Triton copy kernel when every page
+  is below 28 KB and 8-byte aligned, else the same batched call.
+- Each transfer's stream waits on the previous transfer's end event (ordered jobs).
+- CPU eviction policies: `lru` (default) or `arc` (`cpu/policies/factory.py`).
+
+**vLLM 0.30 file-system tier (`vllm/v1/kv_offload/tiering/fs/`).** Writes go to `<path>.tmp` and
+are `os.replace`d into place; existence is checked with `os.path.exists`; a dual-queue thread pool
+(defaults 16 read-priority + 16 write-priority threads, each able to drain either queue).
+
+**llm-d (not re-checked; no llm-d source on hand).** Earlier notes recorded: fs backend file
+layout `<base>_r<rank>/<hhh>/<hh>_g<group_idx>/<hash_hex>.bin`; a `cudaMemcpyAsync` loop with one
+call per tensor per block (so one call per layer under a per-layer layout); 64 I/O threads with a
+0.75 read ratio (~48 read-preferring); no eviction on shared storage (an external `pvc_evictor`
+does GC); optional `gds_mode` (cuFile); scorer tier weights GPU 1.0, CPU 0.8.
 
 ### Measured IO Characteristics (Xinnor MLPerf Storage 3.0)
 
@@ -689,6 +760,7 @@ Steady state with 256 conversations, MAX_NUM_SEQS=64:
 
 ## See Also
 
-- [kv_IO_pattern.md](kv_IO_pattern.md) — Detailed block sizes, DMA patterns, read/write flows
+- [serving/](serving/README.md) — Model facts, per-deployment KV block sizes and layouts, and measured observations (`check.py` derives the sizes)
+- [contracts/vllm-offloading-interface-v030.yaml](contracts/vllm-offloading-interface-v030.yaml) — vLLM 0.30 offloading interface: layout rule, load/store calling sequences
 - [kv_metadata_access.md](kv_metadata_access.md) — Metadata operation sizes and frequencies
 - [vllm-offloading-connector-evolution.md](vllm-offloading-connector-evolution.md) — API evolution across vLLM versions

@@ -66,7 +66,8 @@ fi
 kv_cfg="$(python3 - "$shm_path" "$CERTUS_SLAB_SIZE_BYTES" <<'PY'
 import json, sys
 print(json.dumps({
-    "kv_connector": "OffloadingConnector",
+    "kv_connector": "CertusConnector",
+    "kv_connector_module_path": "certus_shmq_connector.connector",
     "kv_role": "kv_both",
     "kv_connector_extra_config": {
         "spec_name": "CertusShmqOffloadingSpec",

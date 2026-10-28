@@ -1,155 +1,271 @@
 {
-  "generated": "2026-10-23T00:00:00Z",
-  "analysis_run": "2026-10-23",
+  "generated": "2026-10-27T04:27:01Z",
+  "analysis_run": "2026-10-27",
   "project": "dispatcher",
   "component_path": "components/dispatcher",
-  "branch": "fix/dispatcher-remove-ssd-extent",
-  "head": "765f75ba3",
-  "base": "origin/unstable a905f89be",
-  "working_tree": "clean",
-  "baseline": "Stamp commit 6addfb9b5 is an ancestor of the base; between them only drift-report.md changed. The branch adds a7444f4ab and 765f75ba3 (src/lib.rs remove + two #[cfg(test)] modules). specs/** and components/interfaces/** unchanged against the base. The earlier 2026-10-23 analysis on fix/dispatcher-promote-remove (HEAD b430e4d47, not an ancestor of HEAD) analysed an earlier form of a7444f4ab; its findings were re-derived, not copied.",
-  "method": "Both hunks read line by line against the real IDispatchMap semantics (convert_memory_tier_to_block ignores references, dispatch-map/src/lib.rs:441-480; promote_block_to_memory_tier keeps them, :482-528; remove/try_evict_to_block refuse them, :341-343/:558-560; convert_to_storage on BlockDevice fails before decrementing, :187-196; lookup takes no reference on NotExist, :142-143). Every actor that can observe the key during the flip window or the refusal/restore window was checked. Same-class search over every lookup->release_read site in src/. Approved B-12 re-checked clause by clause. Every other verdict re-anchored at HEAD (lib.rs +64 after :3276) and spot-checked. No test was run.",
-  "drift_status": "open",
-  "frontmatter_note": "spec_sync_* frontmatter left unchanged on purpose (a script re-stamps it).",
+  "branch": "spec-sync/coldload-v3-s20261025",
+  "head": "3921112a",
+  "base": "a905f89b (origin/unstable; prior clean stamp 0acb0653...)",
+  "scope": "delta: git diff a905f89b HEAD -- components/dispatcher components/interfaces (only 4bb69289 touches inputs; 3921112a is certus-shmq-connector only). Every spec statement on drive selection/placement, drive_index, key % num_drives, splitmix64, SSD-location encoding, remove/evict/free, recovery, write-through job routing (device_index).",
   "summary": {
     "specs_analyzed": 2,
-    "requirements_checked": 120,
-    "requirements_in_scope": 111,
-    "aligned": 90,
-    "drifted": 6,
-    "partially_implemented": 6,
+    "requirements_checked": 31,
+    "aligned": 18,
+    "drifted": 11,
     "not_implemented": 0,
-    "not_verifiable": 9,
-    "out_of_component_scope": 9,
-    "unspecced_features": 2
+    "out_of_scope": 2,
+    "unspecced_features": 1
   },
-  "branch_commits": [
+  "items": [
     {
-      "commit": "a7444f4ab",
-      "finding": "repair 18c4f1f9, root causes #9 and #12 (Spin J26), task A-2",
-      "effect": "remove frees the SSD extent of a persisted resident entry (flip to BlockDevice while holding its lookup reference, look up again, free that offset via drive_index); NotExist/MismatchSize release no read reference",
-      "locations": ["src/lib.rs:3276-3336", "src/lib.rs:3372-3378"],
-      "tests": ["src/repair_test_remove_frees_ssd_extent.rs:941", "src/repair_test_remove_frees_ssd_extent.rs:991"]
+      "requirement": "FR-039 step (4)",
+      "spec": "spec.md:326",
+      "code": "src/lib.rs:2693-2706, :2761; next_store_drive :647-658; encode/decode :543-556",
+      "verdict": "aligned",
+      "resolution": "none (updated by 4bb69289; verified)"
     },
     {
-      "commit": "765f75ba3",
-      "finding": "repair dc705e72, proposal A-9 of the earlier run (option c)",
-      "effect": "a refused remove restores the entry it flipped with promote_block_to_memory_tier(key, pointer, size) before returning KeyNotFound",
-      "locations": ["src/lib.rs:3287", "src/lib.rs:3313", "src/lib.rs:3344-3361"],
-      "tests": ["src/repair_test_remove_refused_leaves_entry_unchanged.rs:875"]
-    }
-  ],
-  "specs": [
-    {
-      "id": "001-dispatcher-cache-interface",
-      "title": "Dispatcher Cache Interface (Memory-Tier Architecture)",
-      "aligned": [
-        "edge case remove (spec.md:239)", "contracts/idispatcher.md:171 remove postcondition", "contracts/errors.md:33 KeyNotFound", "contracts/errors.md:36 IoError",
-        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007", "FR-008", "FR-010", "FR-011", "FR-012", "FR-014", "FR-015", "FR-016", "FR-017", "FR-018", "FR-019", "FR-023", "FR-024", "FR-025", "FR-028",
-        "FR-029", "FR-030", "FR-031", "FR-032", "FR-033", "FR-034", "FR-035", "FR-036", "FR-037", "FR-038", "FR-040", "FR-041", "FR-042", "FR-043", "FR-045", "FR-046", "FR-047", "FR-048", "FR-049", "FR-050",
-        "FR-052", "FR-053", "FR-054", "FR-055", "FR-057", "FR-058", "FR-059", "FR-060", "FR-061",
-        "SC-001", "SC-002", "SC-004", "SC-005", "SC-006", "SC-007", "SC-009", "SC-010", "SC-011", "SC-013", "SC-015", "SC-016", "SC-017",
-        "US-1..US-5, US-7..US-12 acceptance scenarios as in the 2026-10-21 sweep (US-4 AS1-AS3 re-checked)",
-        "edge cases as in the 2026-10-21 sweep"
-      ],
-      "aligned_note": "FR-038 and FR-051/FR-036 also carry the partial findings P-05/P-07 and P-03, which are counted under partially_implemented by the item they concern (SC-003, FR-056 vs FR-038, FR-051).",
-      "drifted": [
-        {
-          "id": "D-23",
-          "requirement": "FR-009 (+ US-4 narrative, contracts/idispatcher.md:46-47)",
-          "spec_text": "free the extent on SSD (if in BlockDevice state)",
-          "actual": "remove also frees the extent of a MemoryTier entry whose write-through has landed, and its lookup releases only a reference it took",
-          "location": "src/lib.rs:3293-3331, 3372-3378, 3324-3325, 3332-3334",
-          "severity": "minor",
-          "direction": "BACKFILL",
-          "proposal": "B-12",
-          "note": "approved by Cornel; re-checked, normative text exact; provenance note corrected to this branch"
-        },
-        {
-          "id": "D-25",
-          "requirement": "FR-013 (and FR-018)",
-          "spec_text": "The dispatcher MUST use appropriate read/write locking on the dispatch map to ensure thread safety during concurrent operations.",
-          "actual": "the SSD evictor's get_evictable_offset releases a read reference after LookupResult::NotExist, which can drop the write-through pin of a concurrently registered entry; a later remove then frees the slot the job is reading",
-          "location": "src/background.rs:595-598",
-          "severity": "moderate",
-          "confidence": "MEDIUM",
-          "direction": "ALIGN",
-          "proposal": "A-11",
-          "pre_existing": true,
-          "counted": false,
-          "counted_note": "second finding on FR-013, already counted as drifted via D-16"
-        },
-        {"id": "D-16", "requirement": "FR-013 + Assumption", "actual": "schedule_write_through job takes no pin yet settles", "location": "src/lib.rs:4202-4224; src/background.rs:300-301,317-318,325-326; src/lib.rs:1475-1478,1501-1514", "severity": "major", "task": "A-1"},
-        {"id": "D-07", "requirement": "FR-028 / US-9 AS3", "actual": "no-drives promote_and_serve never re-registers", "location": "src/lib.rs:814-838", "severity": "moderate", "task": "A-04"},
-        {"id": "D-24", "requirement": "FR-039 (6)", "actual": "with >=2 drives a channel checkout failure leaves other drives' results None; r.unwrap() panics", "location": "src/lib.rs:2768-2782, 3102", "severity": "moderate", "task": "A-10"}
-      ],
-      "partially_implemented": [
-        {
-          "id": "P-07",
-          "requirement": "SC-003 (and FR-038)",
-          "spec_text": "Cache removal frees all associated resources (memory-tier slots and SSD extents) so that they can be reused.",
-          "actual": "met for every un-raced remove; in the flip window (unreferenced BlockDevice entry with a resident slot) a concurrent clear_memory_tier force-removes the entry and frees the slot, and remove returns KeyNotFound without freeing the extent (leak; resurrected after a format_on_init=false restart); FR-038 drops instead of demotes",
-          "location": "src/lib.rs:3305-3310, 3340, 3363, 4132-4146; components/dispatch-map/src/lib.rs:576-578",
-          "severity": "minor",
-          "confidence": "MEDIUM",
-          "direction": "ALIGN",
-          "proposal": "A-12",
-          "introduced_by": "a7444f4ab"
-        },
-        {"id": "P-06", "requirement": "FR-056 flush_to_ssd / FR-017", "location": "src/background.rs:390-394; src/lib.rs:1484", "task": "A-5"},
-        {"id": "P-01", "requirement": "FR-003 / FR-056 phase-3 release", "location": "src/lib.rs:3817-3842", "task": "A-05"},
-        {"id": "P-03", "requirement": "FR-051 / FR-036 batch_lookup cold pin", "location": "src/lib.rs:2542-2543, 3953-3958", "task": "A-02"},
-        {"id": "P-04", "requirement": "FR-018 residual windows", "location": "src/background.rs:361-365; src/lib.rs:1270-1275", "task": "A-4"},
-        {"id": "P-05", "requirement": "FR-056 vs FR-038 reserved slots", "location": "src/lib.rs:4132-4146, 3784", "task": "A-3"}
-      ],
-      "not_implemented": [],
-      "not_verifiable": ["SC-012", "SC-014", "US-11 AS4 (real NVMe errors)", "edge case write-ref downgrade (src/lib.rs:3843)"]
+      "requirement": "Q&A 2026-05-12 SSD-evictor drive ownership",
+      "spec": "spec.md:261",
+      "code": "src/background.rs:539-543; src/lib.rs:1550-1553, :3380-3385",
+      "verdict": "aligned",
+      "resolution": "none (updated by 4bb69289; verified)"
     },
     {
-      "id": "002-served-by-tier-attribution",
-      "title": "Serving-Tier Attribution (served_by)",
-      "aligned": ["FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007", "FR-008", "FR-009 recovery", "FR-010", "FR-011", "FR-012", "FR-013", "FR-017", "FR-019", "FR-020", "FR-021", "FR-022", "FR-023", "FR-024", "FR-025", "FR-026", "FR-033", "FR-034", "FR-036", "SC-001", "SC-004", "US1 AS1/AS2/AS4/AS5", "US4 AS1-AS3"],
-      "drifted": [
-        {"id": "D-13", "requirement": "US1 AS3 / FR-009", "actual": "failed warm batched sync only logged; keys reported Dram", "location": "src/lib.rs:2886-2891", "severity": "major", "task": "A-01"},
-        {"id": "D-15", "requirement": "FR-027 / SC-009", "actual": "no value-specific assertion for Ssd/Remote/SizeMismatch/Error", "location": "src/", "severity": "moderate", "task": "A-08"}
-      ],
-      "not_implemented": [],
-      "not_verifiable": ["SC-002", "SC-003", "SC-006", "SC-007", "SC-008"],
-      "out_of_scope": ["FR-014", "FR-015", "FR-035 (dispatcher-p2p)", "FR-016", "FR-018 (remote-lookup)", "FR-030", "FR-031", "FR-032 (documentation)", "SC-005", "US3", "US5"]
+      "requirement": "SC-007 key-based drive selection",
+      "spec": "spec.md:402",
+      "code": "src/lib.rs:647-658, :3857-3859, :4226-4233",
+      "verdict": "drifted",
+      "resolution": "B-14"
+    },
+    {
+      "requirement": "FR-004 write-through records SSD offset",
+      "spec": "spec.md:291",
+      "code": "src/lib.rs:1593, :1635",
+      "verdict": "drifted",
+      "resolution": "B-16"
+    },
+    {
+      "requirement": "FR-009 remove frees extent",
+      "spec": "spec.md:296",
+      "code": "src/lib.rs:3380-3385",
+      "verdict": "drifted (incomplete: drive source unstated)",
+      "resolution": "B-17"
+    },
+    {
+      "requirement": "FR-025 recovery recover_extent(key, offset, size)",
+      "spec": "spec.md:312",
+      "code": "src/lib.rs:2093-2101",
+      "verdict": "drifted",
+      "resolution": "B-15"
+    },
+    {
+      "requirement": "FR-028 promotion failure cases",
+      "spec": "spec.md:315",
+      "code": "src/lib.rs:889-897",
+      "verdict": "drifted (new failure case)",
+      "resolution": "B-18"
+    },
+    {
+      "requirement": "FR-040 promote_to_memory_tier",
+      "spec": "spec.md:327",
+      "code": "src/lib.rs:4017-4026, :4055",
+      "verdict": "drifted (new skip case)",
+      "resolution": "B-19"
+    },
+    {
+      "requirement": "US-11 narrative 'grouped by target drive'",
+      "spec": "spec.md:200",
+      "code": "src/lib.rs:2693-2706",
+      "verdict": "drifted (ambiguous)",
+      "resolution": "B-20"
+    },
+    {
+      "requirement": "Key Entity: Dispatch Map Entry ssd_offset",
+      "spec": "spec.md:384",
+      "code": "src/lib.rs:536-543",
+      "verdict": "drifted (encoding unstated)",
+      "resolution": "B-21"
+    },
+    {
+      "requirement": "Key Entity: Background Writer 'a dedicated thread'",
+      "spec": "spec.md:387",
+      "code": "src/background.rs:185-199; src/lib.rs:2201-2211",
+      "verdict": "drifted (per-drive writers, device_index routing)",
+      "resolution": "B-22"
+    },
+    {
+      "requirement": "data-model.md BackgroundWriteJob.device_index",
+      "spec": "data-model.md:42",
+      "code": "src/background.rs:22; src/lib.rs:3859",
+      "verdict": "drifted (selection rule unstated)",
+      "resolution": "B-24"
+    },
+    {
+      "requirement": "US-11 AS1 '20 entries spread across 3 drives'",
+      "spec": "spec.md:208",
+      "code": "src/lib.rs:2693-2706",
+      "verdict": "aligned",
+      "resolution": "none"
+    },
+    {
+      "requirement": "US-11 AS3 'single drive holds 10 cold entries'",
+      "spec": "spec.md:210",
+      "code": "src/pipeline.rs scatter_gather proportional QD",
+      "verdict": "aligned",
+      "resolution": "none"
+    },
+    {
+      "requirement": "SC-014 batch of 20 across 3 drives",
+      "spec": "spec.md:409",
+      "code": "n/a (perf, hardware)",
+      "verdict": "aligned (not verifiable here)",
+      "resolution": "none"
+    },
+    {
+      "requirement": "FR-061 multi-drive scatter-gather",
+      "spec": "spec.md:372-377",
+      "code": "src/pipeline.rs:949-1364 (sg_spans telemetry added, env-gated, no behaviour change)",
+      "verdict": "aligned",
+      "resolution": "none"
+    },
+    {
+      "requirement": "FR-032 SSD evictor order",
+      "spec": "spec.md:319",
+      "code": "src/background.rs:516-543",
+      "verdict": "aligned",
+      "resolution": "none"
+    },
+    {
+      "requirement": "Edge case: SSD evictor removes an entry",
+      "spec": "spec.md:246",
+      "code": "src/background.rs:516-543",
+      "verdict": "aligned",
+      "resolution": "none"
+    },
+    {
+      "requirement": "Edge case: remove order",
+      "spec": "spec.md:241",
+      "code": "src/lib.rs:3349-3385",
+      "verdict": "aligned",
+      "resolution": "none"
+    },
+    {
+      "requirement": "FR-018 remove takeover; job frees slot+extent",
+      "spec": "spec.md:305",
+      "code": "src/lib.rs:1544-1555",
+      "verdict": "aligned",
+      "resolution": "none"
+    },
+    {
+      "requirement": "SC-003 removal frees all resources",
+      "spec": "spec.md:398",
+      "code": "src/lib.rs:3380-3385",
+      "verdict": "aligned (pre-existing A-2 unchanged)",
+      "resolution": "none"
+    },
+    {
+      "requirement": "FR-053 staged cold serve",
+      "spec": "spec.md:340",
+      "code": "src/lib.rs:1058-1063",
+      "verdict": "aligned (location decoded; invalid drive -> IoError, generic)",
+      "resolution": "none"
+    },
+    {
+      "requirement": "FR-015 N drives / N extent managers",
+      "spec": "spec.md:302",
+      "code": "src/lib.rs:2201-2211",
+      "verdict": "aligned",
+      "resolution": "none"
+    },
+    {
+      "requirement": "FR-017 failed write-through",
+      "spec": "spec.md:304",
+      "code": "src/lib.rs:1520-1556",
+      "verdict": "aligned",
+      "resolution": "none"
+    },
+    {
+      "requirement": "Assumption: write-through read reference",
+      "spec": "spec.md:424",
+      "code": "src/lib.rs:3861-3871, :4226-4235",
+      "verdict": "aligned",
+      "resolution": "none"
+    },
+    {
+      "requirement": "FR-001 schedule_write_through (durability list)",
+      "spec": "spec.md:286",
+      "code": "src/lib.rs:4215-4237",
+      "verdict": "aligned",
+      "resolution": "none"
+    },
+    {
+      "requirement": "data-model.md PendingWrite.drive_idx",
+      "spec": "data-model.md:52",
+      "code": "no prepare_store/PendingWrite in src (pre-existing stale, unchanged by 4bb69289)",
+      "verdict": "out of scope",
+      "resolution": "none"
+    },
+    {
+      "requirement": "contracts/idispatcher.md prepare_store 'target data drive'",
+      "spec": "contracts/idispatcher.md:68",
+      "code": "no prepare_store in src (pre-existing stale)",
+      "verdict": "out of scope",
+      "resolution": "none"
+    },
+    {
+      "requirement": "info/DESIGN.md Drive Selection",
+      "spec": "info/DESIGN.md:118-127",
+      "code": "src/lib.rs:536-658",
+      "verdict": "aligned (updated by 4bb69289)",
+      "resolution": "none"
+    },
+    {
+      "requirement": "info/FLOW.svg drive annotation",
+      "spec": "info/FLOW.svg:217",
+      "code": "src/lib.rs:552-556",
+      "verdict": "drifted (doc)",
+      "resolution": "FLOW.svg text updated"
+    },
+    {
+      "requirement": "spec 002 drive/offset mentions",
+      "spec": "002 spec.md / contracts",
+      "code": "n/a",
+      "verdict": "aligned (none name placement)",
+      "resolution": "none"
     }
   ],
   "unspecced": [
     {
-      "id": "U-10",
-      "feature": "Refused-remove restore (promote_block_to_memory_tier with the first lookup's pointer/size) and the transient BlockDevice state other callers can observe while remove runs",
-      "location": "src/lib.rs:3283-3287, 3305-3314, 3347-3360",
-      "lines": 30,
-      "suggested_spec": "001 edge case remove + contracts/idispatcher.md:171 (BACKFILL B-14)"
-    },
-    {
-      "id": "U-01",
-      "feature": "integrity-check verify-before-serve",
-      "location": "src/lib.rs:2520-2522, 3187-3189, 3817-3842",
-      "lines": 70,
-      "suggested_spec": "open item N-01 (not re-proposed)"
+      "feature": "sg_spans cold scatter-gather span telemetry (OPTIMIZER_ARTIFACTS_DIR-gated JSONL)",
+      "location": "src/pipeline.rs:795-947",
+      "lines": 154,
+      "suggested_spec": "none: off unless the env var is set, optimizer instrumentation, no behaviour change; recorded only"
     }
   ],
-  "stale_citations": [
-    {"spec": "specs/001-dispatcher-cache-interface/spec.md:344", "cites": "src/lib.rs:3380-3395", "actual": "src/lib.rs:3589-3604", "what": "CERTUS_LOG_RESERVE", "proposal": "B-15"},
-    {"spec": "specs/002-served-by-tier-attribution/spec.md:722", "cites": "src/lib.rs:3257-3272", "actual": "src/lib.rs:4226-4236", "what": "read_write_stats", "proposal": "B-15"},
-    {"spec": "specs/002-served-by-tier-attribution/{spec,plan,research,tasks}.md", "cites": "src/lib.rs:2108, 2576, 2625-2628, ...", "actual": "not matching at HEAD nor at 772885d93", "what": "measured historical references", "proposal": null}
+  "test_coverage": {
+    "asserted": [
+      "encode/decode round trip + drive 0 identity (src/lib.rs:7642)",
+      "next_store_drive balance per call sequence and per thread (src/lib.rs:7664, :7674)",
+      "select_drive picks recorded drive, None out of range (src/lib.rs:7684)",
+      "SSD evictor frees on recorded drive / skips invalid drive (src/lib.rs:7530, :7537)"
+    ],
+    "not_asserted": [
+      "remove() frees on the recorded drive (FR-009)",
+      "recovery encodes drive i (FR-025)",
+      "write_through returns encode_loc and routes by device_index (FR-004)",
+      "write-through orphan free after remove takeover on the recorded drive (FR-018)",
+      "batch_lookup invalid-drive IoError before slot reservation (FR-039(4))",
+      "promote_and_serve invalid-drive IoError releases slot (FR-028)",
+      "promote_to_memory_tier skips invalid drive (FR-040)",
+      "a CommitStore batch of k keys spreads <= ceil(k/N) per drive end to end (only next_store_drive unit-tested); all repair_test_* fixtures use one drive"
+    ]
+  },
+  "notes": [
+    "components/interfaces/src/idispatch_map.rs:18 documents LookupResult::BlockDevice.offset as 'Byte offset on the block device'; for this dispatcher it is now an encoded SSD location. Interfaces doc comment, outside this component's specs; not edited (no Rust changes). Recorded only.",
+    "encode_loc debug_asserts drive < 256; more than 256 data drives is not supported (release builds would alias). Not stated in the spec; no realistic config reaches it.",
+    "dispatcher-p2p not analysed (separate component)."
   ],
-  "tracker_housekeeping": [
-    "Close A-06 (FR-042 SSD-evictor sender): resolved in code by #568 (src/lib.rs:2180, src/background.rs:532); still OPEN in align-tasks.md",
-    "Close A-2 after B-12 is applied (restart criterion untested)",
-    "Scratch files drift-report.note.part / drift-report.body.part in this folder are leftovers of this run (emptied); they can be deleted"
-  ],
-  "still_open": ["A-1", "A-3", "A-4", "A-5", "A-01", "A-02", "A-04", "A-05", "A-08", "A-10", "N-01", "J26 P2 (not verified)"],
-  "conflicts": [
-    "001 SC-003 vs FR-009: code meets SC-003, FR-009 text stale (D-23, B-12); residual race P-07 (A-12)",
-    "001 FR-056 vs FR-038: reserved slots (P-05, A-3)",
-    "001 Assumption / interfaces FR-031a vs code: schedule_write_through pin (D-16, A-1)",
-    "001 FR-013 vs SSD evictor foreign release (D-25, A-11)",
-    "cross-component: dispatcher-p2p::remove still has both pre-repair defects (components/dispatcher-p2p/src/lib.rs:2367-2377)"
-  ]
+  "conflicts": [],
+  "drift_status": "clean (after apply)"
 }

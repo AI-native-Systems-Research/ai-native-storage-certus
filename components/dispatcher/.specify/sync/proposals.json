@@ -1,177 +1,168 @@
 {
-  "generated": "2026-10-23T00:00:00Z",
-  "analysis_run": "2026-10-23",
+  "generated": "2026-10-27T04:27:01Z",
+  "analysis_run": "2026-10-27",
   "project": "dispatcher",
-  "branch": "fix/dispatcher-remove-ssd-extent",
-  "head": "765f75ba3",
-  "base": "origin/unstable a905f89be",
-  "based_on": "drift-report.json (same run, 2026-10-23)",
-  "mode": "batch",
+  "branch": "spec-sync/coldload-v3-s20261025",
+  "head": "3921112a",
+  "based_on": "drift-report.json (same run)",
+  "mode": "interactive (approval given by the user's sync request, applied non-interactively)",
   "applied": true,
-  "applied_at": "2026-10-24",
   "summary": {
-    "proposals": 5,
-    "backfill": 3,
-    "align": 2,
+    "proposals": 12,
+    "backfill": 12,
+    "align": 0,
     "new_spec": 0,
     "supersede": 0,
     "human_decision": 0,
-    "approved": 3
+    "approved": 12
   },
-  "close_after_apply": [
-    "A-2 (align-tasks.md; resolved in code by a7444f4ab; close when B-12 is applied; restart criterion untested)",
-    "A-06 (align-tasks.md; resolved in code by #568, src/lib.rs:2180, src/background.rs:532)",
-    "A-9 (earlier run; implemented by 765f75ba3, option c; option a carried as A-12)"
+  "carried_over_open": [
+    "A-1",
+    "A-2",
+    "A-3",
+    "A-4",
+    "A-5",
+    "A-01",
+    "A-02",
+    "A-04",
+    "A-05",
+    "A-06",
+    "A-08",
+    "A-10",
+    "N-01"
   ],
-  "carried_over_open": ["A-1", "A-3", "A-4", "A-5", "A-01", "A-02", "A-04", "A-05", "A-08", "A-10", "N-01"],
   "proposals": [
     {
-      "id": "B-12",
-      "finding": "D-23",
-      "requirement": "001/FR-009 + US-4 narrative + contracts/idispatcher.md remove doc",
-      "type": "BACKFILL",
-      "confidence": "HIGH",
-      "severity": "minor",
-      "approved": true,
-      "approval_note": "applied 2026-10-24; approved by Cornel 2026-10-23 on the earlier run and re-checked against this branch",
-      "prior_approval": "Approved by Cornel 2026-10-23 for the earlier run (fix/dispatcher-promote-remove). Re-checked against HEAD 765f75ba3: normative text unchanged; only the italic provenance note changed (branch and commits).",
-      "spec_location": "specs/001-dispatcher-cache-interface/spec.md:294, :92; specs/001-dispatcher-cache-interface/contracts/idispatcher.md:46-47",
-      "code_location": "src/lib.rs:3289-3292, 3293-3331, 3324-3325, 3332-3334, 3372-3378; tests src/repair_test_remove_frees_ssd_extent.rs:941, :991",
-      "spec_says": "free the extent on SSD (if in BlockDevice state)",
-      "code_does": "remove also frees the extent of a MemoryTier entry whose write-through has landed (flip, second lookup, remove_extent via drive_index); its lookups release a read reference only when they took one",
-      "edits": [
-        {
-          "file": "specs/001-dispatcher-cache-interface/spec.md",
-          "line": 294,
-          "old": "- **FR-009**: The `remove(key)` method MUST free the memory-tier slot (if present via `mt.remove()`), free the extent on SSD (if in BlockDevice state), and remove the dispatch map entry.",
-          "new": "- **FR-009**: The `remove(key)` method MUST free the memory-tier slot (if present via `mt.remove()`), free the extent on SSD (if the entry has one: a BlockDevice entry, or a MemoryTier entry whose write-through has landed and recorded its `ssd_offset`), and remove the dispatch map entry. Its own dispatch-map lookup MUST release only a read reference that lookup acquired: a `NotExist` answer takes none, so none is released. *(Sync 2026-10-23, branch `fix/dispatcher-remove-ssd-extent` — code authoritative, commits `a7444f4ab` and `765f75ba3`, repair of root causes #9 and #12. Before it, `LookupResult::MemoryTier` hid the `ssd_offset`, so the extent of a persisted resident entry leaked and the key came back from SSD after a `format_on_init=false` restart (SC-003); and a lookup that answered `NotExist` still released a read reference, which could decrement the write-through pin of a concurrently registered entry.)*"
-        },
-        {
-          "file": "specs/001-dispatcher-cache-interface/spec.md",
-          "line": 92,
-          "old": "A client application wants to evict a cache entry. The client calls the dispatcher's remove method with a cache key. The dispatcher removes the entry from the memory-tier (if present), removes the dispatch map entry, and frees the SSD extent (if the entry was in BlockDevice state).",
-          "new": "A client application wants to evict a cache entry. The client calls the dispatcher's remove method with a cache key. The dispatcher removes the entry from the memory-tier (if present), removes the dispatch map entry, and frees the SSD extent (if the entry has one: it is in BlockDevice state, or it is memory-tier resident and its write-through has landed)."
-        },
-        {
-          "file": "specs/001-dispatcher-cache-interface/contracts/idispatcher.md",
-          "line": "46-47",
-          "old": "        /// If the entry is on a block device, frees the SSD extent via the\n        /// extent manager.",
-          "new": "        /// If the entry has an SSD copy (it is on a block device, or it is\n        /// resident and its write-through has landed), frees the SSD extent\n        /// via the extent manager."
-        }
-      ],
-      "rationale": "SC-003 always required it; the old FR-009 wording described the leak. Formal-verification repair (Spin J26), Loom tests failed on the old code; task A-2 asked for this amendment. Outcome-level text stays true after A-12."
-    },
-    {
       "id": "B-14",
-      "finding": "U-10",
-      "requirement": "001 edge case remove + contracts/idispatcher.md remove postcondition",
-      "type": "BACKFILL",
-      "confidence": "HIGH (restore); MEDIUM (window sentence)",
-      "severity": "minor",
-      "approved": true,
-      "approval_note": "applied 2026-10-24; approved by Cornel 2026-10-24",
-      "spec_location": "specs/001-dispatcher-cache-interface/spec.md:239; specs/001-dispatcher-cache-interface/contracts/idispatcher.md:171",
-      "code_location": "src/lib.rs:3287, 3305-3314, 3355-3360; components/dispatch-map/src/lib.rs:498-509; test src/repair_test_remove_refused_leaves_entry_unchanged.rs:875",
-      "spec_says": "A `remove` that is refused ... returns `KeyNotFound` and frees nothing. / When it returns `KeyNotFound`, nothing was freed.",
-      "code_does": "a refused remove restores a flipped entry with promote_block_to_memory_tier(key, pointer, size): still MemoryTier, same slot, ssd_offset kept, references kept; while remove runs, other callers can see the entry as BlockDevice",
-      "edits": [
-        {
-          "file": "specs/001-dispatcher-cache-interface/spec.md",
-          "line": 239,
-          "old": "A `remove` that is refused because a reader or a client `pin` holds the entry, or because the entry stays write-locked past the dispatch-map wait, returns `KeyNotFound` and frees nothing.",
-          "new": "A `remove` that is refused because a reader or a client `pin` holds the entry, or because the entry stays write-locked past the dispatch-map wait, returns `KeyNotFound`, frees nothing and leaves the entry as it found it: a memory-tier resident entry is still MemoryTier, with the same slot and its `ssd_offset`, and keeps every reference, so a later lookup is served from DRAM. *(Sync 2026-10-23, branch `fix/dispatcher-remove-ssd-extent` — code authoritative, commit `765f75ba3`. To learn a resident entry's SSD offset, `remove` briefly flips it to BlockDevice before it tries the removal (FR-009), and restores it with `promote_block_to_memory_tier` if the removal is refused. While `remove` runs, a concurrent caller can therefore see the entry as BlockDevice; a cold lookup in that window takes the concurrent-promotion recovery (FR-051). Known gap, tracked as align task A-12: a concurrent `clear_memory_tier` in that window removes the entry, and the SSD extent is then not freed.)*"
-        },
-        {
-          "file": "specs/001-dispatcher-cache-interface/contracts/idispatcher.md",
-          "line": 171,
-          "old": "- `remove()` guarantees, when it returns `Ok`, that the dispatch map entry is removed, so no new lookup can obtain its memory-tier pointer. When it returns `KeyNotFound`, nothing was freed.",
-          "new": "- `remove()` guarantees, when it returns `Ok`, that the dispatch map entry is removed, so no new lookup can obtain its memory-tier pointer. When it returns `KeyNotFound` because the entry is held, nothing was freed and the entry is unchanged: same location, same slot, same references (001 edge case \"remove\")."
-        }
-      ],
-      "rationale": "Formal-verification repair implementing the earlier ALIGN A-9 intent; Loom test failed on the old code. The window is stated as a known gap (A-12), not a guarantee."
+      "spec": "001",
+      "requirement": "SC-007",
+      "direction": "BACKFILL",
+      "before": "with key-based drive selection.",
+      "after": "store-time drive selection recorded in each entry's SSD location (+ sync note)",
+      "rationale": "code authoritative: 4bb69289 accepted and measured; placement moved from a key hash to a drive recorded in the SSD location",
+      "confidence": "HIGH",
+      "approved": true
     },
     {
       "id": "B-15",
-      "finding": "stale citations",
-      "requirement": "001 FR-056 CERTUS_LOG_RESERVE note; 002 out-of-scope GetIoStats bullet",
-      "type": "BACKFILL",
+      "spec": "001",
+      "requirement": "FR-025",
+      "direction": "BACKFILL",
+      "before": "recover_extent(key, offset, size)",
+      "after": "recover_extent(key, loc, size), loc = encode_loc(i, extent.offset)",
+      "rationale": "code authoritative: 4bb69289 accepted and measured; placement moved from a key hash to a drive recorded in the SSD location",
       "confidence": "HIGH",
-      "severity": "trivial",
-      "approved": true,
-      "approval_note": "applied 2026-10-24; approved by Cornel 2026-10-24",
-      "spec_location": "specs/001-dispatcher-cache-interface/spec.md:344; specs/002-served-by-tier-attribution/spec.md:722",
-      "code_location": "src/lib.rs:3589-3604 (CERTUS_LOG_RESERVE in reserve_memory); src/lib.rs:4226-4236 (read_write_stats)",
-      "spec_says": "`src/lib.rs:3380-3395` / `components/dispatcher/src/lib.rs:3257-3272`",
-      "code_does": "the cited code is at src/lib.rs:3589-3604 and :4226-4236; the old ranges now cover unrelated code (check/remove)",
-      "edits": [
-        {
-          "file": "specs/001-dispatcher-cache-interface/spec.md",
-          "line": 344,
-          "old": "*(Sync 2026-10-14 — backfilled note, code authoritative, `src/lib.rs:3380-3395`.)*",
-          "new": "*(Sync 2026-10-14 — backfilled note, code authoritative, `src/lib.rs:3589-3604` as of 2026-10-23.)*"
-        },
-        {
-          "file": "specs/002-served-by-tier-attribution/spec.md",
-          "line": 722,
-          "old": "  is device-level and drive-aggregated (`components/dispatcher/src/lib.rs:3257-3272`) and",
-          "new": "  is device-level and drive-aggregated (`components/dispatcher/src/lib.rs:4226-4236`, `read_write_stats`) and"
-        }
-      ],
-      "rationale": "Citations point at unrelated code. Other spec-002 citations are historical (already off at 772885d93) and left for a separate refresh."
+      "approved": true
     },
     {
-      "id": "A-11",
-      "finding": "D-25",
-      "requirement": "001/FR-013 (and FR-018; FR-009 lookup-release rule as amended by B-12)",
-      "type": "ALIGN",
-      "confidence": "MEDIUM",
-      "severity": "moderate",
-      "pre_existing": true,
-      "approved": false,
-      "approval_note": "TRACK (Cornel 2026-10-24): code change for a later repair with a test first; not in this PR",
-      "spec_location": "specs/001-dispatcher-cache-interface/spec.md:298, :303",
-      "code_location": "src/background.rs:581-601 (catch-all release at :595-598); caller :516; registration src/lib.rs:3784, 3843, 3852",
-      "spec_says": "The dispatcher MUST use appropriate read/write locking on the dispatch map to ensure thread safety during concurrent operations.",
-      "code_does": "get_evictable_offset releases a read reference after LookupResult::NotExist; a concurrently registered entry loses its write-through pin, so a later remove bypasses the ledger takeover and frees the slot the job is reading",
-      "code_change": "release only after BlockDevice or MemoryTier; NotExist / MismatchSize release nothing",
-      "files": ["src/background.rs", "new or existing repair test module"],
-      "acceptance": [
-        "Registration-race test (fixture of src/repair_test_remove_frees_ssd_extent.rs:991) on get_evictable_offset: foreign_releases() == 0 and the write-through pin survives",
-        "The test fails on HEAD 765f75ba3"
-      ],
-      "effort": "small"
+      "id": "B-16",
+      "spec": "001",
+      "requirement": "FR-004",
+      "direction": "BACKFILL",
+      "before": "record the SSD offset",
+      "after": "record the entry's SSD location; whole object on drive device_index % N; encode_loc",
+      "rationale": "code authoritative: 4bb69289 accepted and measured; placement moved from a key hash to a drive recorded in the SSD location",
+      "confidence": "HIGH",
+      "approved": true
     },
     {
-      "id": "A-12",
-      "finding": "P-07",
-      "requirement": "001/SC-003 + FR-038 (+ FR-009 as amended by B-12)",
-      "type": "ALIGN",
-      "confidence": "MEDIUM",
-      "severity": "minor",
-      "introduced_by": "a7444f4ab",
-      "approved": false,
-      "approval_note": "TRACK (Cornel 2026-10-24): code change for a later repair with a test first; not in this PR",
-      "spec_location": "specs/001-dispatcher-cache-interface/spec.md:396, :323",
-      "code_location": "src/lib.rs:3305-3310, 3340, 3363, 3372-3378, 4132-4146; components/dispatch-map/src/lib.rs:576-578",
-      "spec_says": "Cache removal frees all associated resources (memory-tier slots and SSD extents) so that they can be reused.",
-      "code_does": "in the flip window a concurrent clear_memory_tier force-removes the unreferenced BlockDevice entry and frees its slot; remove returns KeyNotFound and never frees the extent (leak; resurrection after a format_on_init=false restart); FR-038 drops instead of demotes",
-      "code_change": "one dispatch-map operation that removes an unreferenced entry under one lock and returns its SSD offset (e.g. IDispatchMap::remove_returning_offset -> Result<Option<u64>, _>); replace flip/second lookup/restore in remove; reuse in WriteThroughPins::remove_entry (also closes A-4(a))",
-      "files": ["components/interfaces/src/idispatch_map.rs", "components/dispatch-map/src/lib.rs", "src/lib.rs", "src/background.rs", "test mocks"],
-      "acceptance": [
-        "remove vs clear_memory_tier race on a persisted resident entry: exactly one reports the entry, and no extent remains for the key",
-        "The test fails on HEAD 765f75ba3",
-        "src/repair_test_remove_frees_ssd_extent.rs:941,991 and src/repair_test_remove_refused_leaves_entry_unchanged.rs:875 still pass"
-      ],
-      "effort": "medium"
+      "id": "B-17",
+      "spec": "001",
+      "requirement": "FR-009",
+      "direction": "BACKFILL",
+      "before": "(drive source unstated)",
+      "after": "extent freed on the drive decoded from the location (select_drive); invalid drive frees nothing",
+      "rationale": "code authoritative: 4bb69289 accepted and measured; placement moved from a key hash to a drive recorded in the SSD location",
+      "confidence": "HIGH",
+      "approved": true
+    },
+    {
+      "id": "B-18",
+      "spec": "001",
+      "requirement": "FR-028",
+      "direction": "BACKFILL",
+      "before": "(failure list)",
+      "after": "adds promote_and_serve's invalid-drive IoError; batch_lookup/promote_to_memory_tier reject before reserving",
+      "rationale": "code authoritative: 4bb69289 accepted and measured; placement moved from a key hash to a drive recorded in the SSD location",
+      "confidence": "HIGH",
+      "approved": true
+    },
+    {
+      "id": "B-19",
+      "spec": "001",
+      "requirement": "FR-040",
+      "direction": "BACKFILL",
+      "before": "(grouping unstated)",
+      "after": "grouped by recorded drive; invalid drive skipped silently",
+      "rationale": "code authoritative: 4bb69289 accepted and measured; placement moved from a key hash to a drive recorded in the SSD location",
+      "confidence": "HIGH",
+      "approved": true
+    },
+    {
+      "id": "B-20",
+      "spec": "001",
+      "requirement": "US-11 narrative",
+      "direction": "BACKFILL",
+      "before": "grouped by target drive",
+      "after": "grouped by the drive recorded in their SSD location",
+      "rationale": "code authoritative: 4bb69289 accepted and measured; placement moved from a key hash to a drive recorded in the SSD location",
+      "confidence": "HIGH",
+      "approved": true
+    },
+    {
+      "id": "B-21",
+      "spec": "001",
+      "requirement": "Key Entity Dispatch Map Entry",
+      "direction": "BACKFILL",
+      "before": "ssd_offset",
+      "after": "ssd_offset holds (drive << 56) | extent_offset, carried opaquely",
+      "rationale": "code authoritative: 4bb69289 accepted and measured; placement moved from a key hash to a drive recorded in the SSD location",
+      "confidence": "HIGH",
+      "approved": true
+    },
+    {
+      "id": "B-22",
+      "spec": "001",
+      "requirement": "Key Entity Background Writer",
+      "direction": "BACKFILL",
+      "before": "A dedicated thread",
+      "after": "one writer per drive; job runs on writer device_index % N",
+      "rationale": "code authoritative: 4bb69289 accepted and measured; placement moved from a key hash to a drive recorded in the SSD location",
+      "confidence": "HIGH",
+      "approved": true
+    },
+    {
+      "id": "B-23",
+      "spec": "001",
+      "requirement": "spec header",
+      "direction": "BACKFILL",
+      "before": "-",
+      "after": "Last Synced 2026-10-27 line",
+      "rationale": "code authoritative: 4bb69289 accepted and measured; placement moved from a key hash to a drive recorded in the SSD location",
+      "confidence": "HIGH",
+      "approved": true
+    },
+    {
+      "id": "B-24",
+      "spec": "001",
+      "requirement": "data-model.md device_index",
+      "direction": "BACKFILL",
+      "before": "which data device to target",
+      "after": "+ chosen round-robin by next_store_drive, recorded in the location",
+      "rationale": "code authoritative: 4bb69289 accepted and measured; placement moved from a key hash to a drive recorded in the SSD location",
+      "confidence": "HIGH",
+      "approved": true
+    },
+    {
+      "id": "D-1",
+      "spec": "001",
+      "requirement": "info/FLOW.svg",
+      "direction": "BACKFILL",
+      "before": "drive_idx = key % num_drives",
+      "after": "drive = loc >> 56 (round-robin at store)",
+      "rationale": "code authoritative: 4bb69289 accepted and measured; placement moved from a key hash to a drive recorded in the SSD location",
+      "confidence": "HIGH",
+      "approved": true
     }
-  ],
-  "not_proposed": [
-    "A-9: implemented by 765f75ba3 (option c); option a carried as A-12",
-    "A-2: close with B-12",
-    "A-06: resolved by #568",
-    "J26 P2: not verified",
-    "dispatcher-p2p::remove (components/dispatcher-p2p/src/lib.rs:2367-2377): both pre-repair defects; port A-12's form",
-    "Spec-002 historical line citations: separate refresh",
-    "Scratch files drift-report.note.part / drift-report.body.part (empty): can be deleted"
   ]
 }

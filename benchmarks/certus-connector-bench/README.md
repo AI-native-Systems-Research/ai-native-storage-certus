@@ -50,7 +50,7 @@ done
 
 End-to-end lifecycle benchmark with multiple modes. Without `--mode`, runs the default 4-phase serial benchmark. Each mode targets a different optimization surface.
 
-**Call order.** Wherever a mode both looks up and touches the same keys (warm/cold load, the load side of mixed eviction, pipelined load, prefix-miss, the contention load thread, scheduler-step, pattern loads), it calls `lookup` first and `touch` after, as vLLM's offloading scheduler does since vLLM 0.21 (vLLM PR #41228; still so in 0.30). `--lookup-order touch-first` restores the vLLM ≤ 0.20 order, where `touch` came first and the connector could answer that request's lookups from the touch reply; with the default batch sizes it reproduces the numbers this benchmark gave before the option existed (a lookup more than `CERTUS_LOOKUP_CACHE_TTL_US` after its touch is a Check even in this order, so very large batches can differ). With the default order a request's lookups can only be answered from an earlier request's touch reply (within the connector's `CERTUS_LOOKUP_CACHE_TTL_US`, default 1000 µs); all other lookups are one Check round trip each. Store-only paths touch before `prepare_store`, as before.
+**Call order.** Wherever a mode both looks up and touches the same keys (warm/cold load, the load side of mixed eviction, pipelined load, prefix-miss, the contention load thread, scheduler-step, pattern loads), it calls `lookup` first and `touch` after, as vLLM's offloading scheduler does since vLLM 0.21 (vLLM PR #41228; still so in 0.30). `--lookup-order touch-first` restores the vLLM ≤ 0.20 order, where `touch` came first and the connector could answer that request's lookups from the touch reply; with the default batch sizes it reproduces the numbers this benchmark gave before the option existed (a lookup more than `CERTUS_LOOKUP_CACHE_TTL_US` after its touch is a Check even in this order, so very large batches can differ). With the default order a request's lookups can only be answered from an earlier request's touch reply (within the connector's `CERTUS_LOOKUP_CACHE_TTL_US`, default 1000 µs); all other lookups are one Check round trip each. A lookup that misses the cache also Checks the keys committed with it (in one `complete_store` through the same manager) in that one round trip, and the answers serve the following lookups under the same TTL. Store-only paths touch before `prepare_store`, as before.
 
 #### Default mode (no `--mode` or `--mode default`)
 
@@ -58,7 +58,7 @@ Four serial phases:
 
 1. **Store**: touch → prepare_store → submit → finish → complete
 2. **Warm Load**: lookup → touch → prepare → submit → finish → complete (DRAM-resident)
-3. **Cold Load**: same path but SSD→DRAM→GPU round-trip
+3. **Cold Load**: same path but SSD→DRAM→GPU round-trip. Before every pass after the first, the memory tier is flushed to SSD and emptied (the first pass reads what the warm phase left); the keys are loaded back in the batches they were stored in, one job at a time. The cold-load shape flags below change that; the shaped pass empties the tier before every pass, the first included.
 4. **Mixed Eviction**: interleaved store + load under memory-tier pressure, with `take_events` drain
 
 ```bash
@@ -176,6 +176,14 @@ python benchmarks/certus-connector-bench/bench_connector_lifecycle.py --mode all
 --csv PATH             Append results to CSV file
 --tag TEXT             Tag column for CSV (e.g. branch name)
 --lookup-order ORDER   lookup-first (default, vLLM >= 0.21) or touch-first (vLLM <= 0.20)
+--pieces-per-block N   GPU tensors per block (default: 1; 32 = Llama-3-8B under LBHNC), see below
+--cold-tier-state S    empty (default) or full, with --tier-fill-blocks N; see "Cold-load shape"
+--store-order O        batch (default) or interleaved
+--load-unit U          batch (default) or request
+--requests R           requests for interleaved/request (default: 16)
+--cold-inflight N      cold load jobs outstanding (default: 1)
+--seed N               request order for --load-unit request (default: 0)
+--preset NAME          named cold-load shape: longdocqa
 ```
 
 #### Tensor parallelism (`--tp`)
@@ -204,6 +212,86 @@ sudo target/release/certus-server --drive-count 4 --channels 32 \
     --memory-tier-size 4G --memory-tier-eviction-threshold 0.8 --format
 python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
     --tp 2 --mode scheduler-step --block-bytes 1048576
+```
+
+#### KV layout (`--pieces-per-block`)
+
+`--pieces-per-block N` splits each block into N GPU tensors of `--block-bytes / N`
+bytes, and the connector sends N regions per block. This is how vLLM ≥ 0.29 hands
+KV to an offloading connector under its default layer-outermost layout (`LBHNC`):
+one tensor per layer, so for Llama-3-8B a 2 MiB block arrives as 32 pieces of 64 KiB
+in 32 different allocations, and certus-server copies each piece separately.
+(vLLM 0.23–0.28 did the same for connectors that did not opt into its cross-layer
+layout, which the Certus connector did not; see
+`knowledge/inference_workload_mapping.md`, "Layout history".) The
+default, 1, is one contiguous region per block, as under vLLM 0.20/0.22 and under
+the block-outermost `BLHNC` layout that `CertusConnector` requests. It is a count
+of pieces, not of model layers: the same 32-layer model gives 32 pieces under
+`LBHNC` and 1 under `BLHNC`. `--block-bytes` must be divisible by N.
+
+```bash
+# Llama-3-8B under vLLM's default layout
+python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
+    --block-bytes 2097152 --pieces-per-block 32
+```
+
+#### Cold-load shape (default mode)
+
+By default the cold pass empties the memory tier, then loads the keys back in the
+same `--bs` batches and order they were stored, one job at a time. vLLM serving
+differs in four ways; each flag below changes one of them. Every default reproduces
+the plain cold pass. Any non-default value runs a separate shaped cold pass,
+reported as `Cold Load Lifecycle (shaped: tier=… store=… load=… inflight=…)`; the
+label still contains `Cold Load Lifecycle`, so tools that parse that label find it,
+and the settings are written to the YAML `params`. The store and warm phases are
+unchanged.
+
+- **`--cold-tier-state full` with `--tier-fill-blocks N`: a full memory tier.** In
+  production a cold load happens because the tier is full, so serving it means
+  evicting other data. Before every cold pass the benchmark empties the tier, then
+  stores N other blocks to bring it back to its eviction threshold, outside the
+  timed region; the cold reads then evict as they land. Set N to the server's tier
+  size × eviction threshold ÷ block bytes (4 GiB × 0.8 ÷ 4 MiB ≈ 819;
+  12 GiB × 0.8 ÷ 2 MiB ≈ 4915). The benchmark cannot read the tier size, so N is
+  required. Default `empty`: the tier is cleared and not refilled.
+- **`--store-order interleaved`: stores from concurrent requests.** vLLM stores per
+  request per scheduler step, so blocks from several requests are committed in
+  turn. The keys are split into `--requests` requests, and request r's i-th block
+  is stored at step i, one block per store call. Default `batch`: `--bs` keys per
+  call, in key order.
+- **`--load-unit request`: one load job per request.** vLLM loads a request's whole
+  cached prefix as one job (`prepare_load` of its hit blocks), not in the batches it
+  was stored in. Each job is one request's prefix (`--num-blocks / --requests`
+  blocks); requests are loaded in random order (`--seed`), and a prefix lookup stops
+  at its first miss, as vLLM's does. Default `batch`: the stored `--bs` batches, in
+  order.
+- **`--cold-inflight N`: several cold loads at once.** vLLM admits several waiting
+  requests per step, each with its own load job. Up to N cold load jobs are kept
+  outstanding. N must not exceed `--workers`, and the server needs at least N + 1
+  shmq channels; the benchmark refuses otherwise rather than let jobs queue unseen.
+  Default 1.
+
+`--requests R` (default 16) is the request count for `interleaved` and `request`;
+`--num-blocks` must divide evenly by it.
+
+`--preset longdocqa` sets the shape LongDocQA's query round showed on vLLM 0.30 with
+Llama-3-8B under the default `LBHNC` layout (`knowledge/serving/observations.yaml`,
+`ldq-llama-3-8b-lbhnc-2026-10-26`): 2 MiB blocks in 32 pieces, 4 requests × 625
+blocks (one 10,000-token document each), interleaved stores, one load job per
+request, 4 in flight, full tier. Flags given explicitly override the preset's values
+(e.g. add `--pieces-per-block 1` for the `BLHNC` layout); `--tier-fill-blocks` is
+still required. `knowledge/serving/check.py` fails if the preset's block size, pieces
+per block or blocks per load job drift from that observation.
+
+```bash
+# vLLM-like cold load on a 4 GiB tier (eviction threshold 0.8)
+python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
+    --store-order interleaved --load-unit request --requests 8 \
+    --cold-tier-state full --tier-fill-blocks 819 --cold-inflight 4
+
+# LongDocQA's shape; start certus-server with --memory-tier-size 12G
+python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
+    --preset longdocqa --tier-fill-blocks 4915 --working-set 2500
 ```
 
 #### Per-mode options

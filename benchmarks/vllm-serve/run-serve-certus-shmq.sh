@@ -168,7 +168,9 @@ if [[ ! -e "$SHM_PATH" ]]; then
   exit 1
 fi
 
-# ── KV-transfer config: stock OffloadingConnector + CertusShmqOffloadingSpec ────
+# ── KV-transfer config: CertusConnector + CertusShmqOffloadingSpec ─
+# CertusConnector is vLLM's OffloadingConnector asking for the BLHNC
+# KV layout (one contiguous piece per block); see certus_shmq_connector/connector.py.
 # Same dict the offline shmq driver builds (run_otel_shmq_certus.py), passed here
 # as the `vllm serve --kv-transfer-config` JSON.
 OFFLOAD_BLOCK_JSON=""
@@ -177,7 +179,7 @@ if [[ -n "$OFFLOAD_BLOCK_SIZE" ]]; then
   echo "[serve] offloaded block size ${OFFLOAD_BLOCK_SIZE} tokens"
 fi
 KV_CONFIG=$(cat <<JSON
-{"kv_connector":"OffloadingConnector","kv_role":"kv_both","kv_connector_extra_config":{"spec_name":"CertusShmqOffloadingSpec","spec_module_path":"certus_shmq_connector.spec","shm_path":"${SHM_PATH}","slab_size_bytes":${SLAB_SIZE_BYTES}${OFFLOAD_BLOCK_JSON}}}
+{"kv_connector":"CertusConnector","kv_connector_module_path":"certus_shmq_connector.connector","kv_role":"kv_both","kv_connector_extra_config":{"spec_name":"CertusShmqOffloadingSpec","spec_module_path":"certus_shmq_connector.spec","shm_path":"${SHM_PATH}","slab_size_bytes":${SLAB_SIZE_BYTES}${OFFLOAD_BLOCK_JSON}}}
 JSON
 )
 

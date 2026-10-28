@@ -2,7 +2,9 @@
 """CertusShmqOffloadingSpec — vLLM OffloadingSpec talking to a remote
 certus-server over a shared-memory ring (drop-in for the gRPC spec).
 
-Plugs into vLLM's OffloadingConnector via kv_connector_extra_config:
+Plugs into vLLM's OffloadingConnector, or into CertusConnector
+(certus_shmq_connector/connector.py: the same connector asking for one contiguous
+KV piece per block), via kv_connector_extra_config:
 {
     "spec_name": "CertusShmqOffloadingSpec",
     "spec_module_path": "certus_shmq_connector.spec",

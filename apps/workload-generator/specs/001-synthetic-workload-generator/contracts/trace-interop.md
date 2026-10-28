@@ -144,7 +144,8 @@ turn's own timestamp. The format has no notion of input versus output — to a
 cache a reference is a reference — so nothing needs tagging, and nothing may
 be. The store belongs at the generating turn because that is when a deployment
 inserts it: vLLM's offloading connector calls `prepare_store` **after each
-forward pass** (`knowledge/kv_IO_pattern.md`), offloading newly-computed
+forward pass** (`knowledge/contracts/vllm-offloading-interface-v030.yaml`,
+`calling_sequences.store`), offloading newly-computed
 blocks rather than waiting for a reader. Writing the prompt alone — which this
 projection originally did — put every generated block's arrival one turn late
 and omitted the last turn of every session, whose output is stored and never

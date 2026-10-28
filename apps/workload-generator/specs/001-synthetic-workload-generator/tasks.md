@@ -1615,7 +1615,8 @@ independently confirms the record size against real output.
   **Raised by the user, and the deciding question was "what does a real
   deployment do".** Answer, from our own notes: vLLM's offloading connector
   calls `prepare_store` **after each forward pass**
-  (`knowledge/kv_IO_pattern.md`), offloading newly-computed blocks rather than
+  (`knowledge/contracts/vllm-offloading-interface-v030.yaml`,
+  `calling_sequences.store`), offloading newly-computed blocks rather than
   waiting for a reader. So a generated block is inserted at the turn that
   generated it.
 
