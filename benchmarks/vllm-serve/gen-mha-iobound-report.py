@@ -373,9 +373,10 @@ def main():
     res_cols = ["Arm", "offload block (tok)", "DRAM tier", "run (s)", "tokens/s", "req/s", "ok",
                 "errored", "TTFT p50 (s)", "TTFT p90 (s)", "TTFT p99 (s)", "vLLM queue mean (s)",
                 "vLLM prefill mean (s)", "ext hit %", "computed %"]
-    io_cols = ["Arm", "KV load (TiB)", "load time (s)", "load GB/s",
+    io_cols = ["Arm", "KV load (TiB)", "load time as reported (s)",
+               "load GB/s as reported (cputier: CPU→GPU only)",
                "SSD→CPU tier read (TiB)", "tier read time (s)",
-               "load + tier read time (s)", "SSD→GPU GB/s"]
+               "load + tier read time (s)", "SSD→GPU GB/s (both arms)"]
     if False:
         io_cols += ["KV store (TiB)", "store time (s)", "store GB/s"]
     res_rows, io_rows = [], []
@@ -454,9 +455,11 @@ run = the client's measurement window; compare arms only at the same run length.
 KV load = bytes reloaded from the offload tier onto the GPU (the I/O the test exercises).
 computed % = prompt tokens recomputed on the GPU (hit neither the GPU prefix cache nor the offload tier).
 load time = summed time of KV load jobs as each backend reports it: Certus, a job's SSD-or-DRAM read and GPU copy;
-cputier, only its CPU→GPU copy, so its load GB/s is a DRAM→GPU copy rate. SSD→CPU tier read = cputier's copies from
-its SSD tier into its CPU tier, separate jobs before the load. load + tier read time and SSD→GPU GB/s cover SSD to
-GPU on both. vLLM queue / prefill / TTFT = vLLM's per-request means, measured the same on every
+cputier, only its CPU→GPU copy, so its "load GB/s as reported" is a DRAM→GPU copy rate and not comparable to
+Certus's. SSD→CPU tier read = cputier's copies from
+its SSD tier into its CPU tier, separate jobs before the load. load + tier read time and "SSD→GPU GB/s (both arms)"
+cover SSD to GPU on both, so compare those. Both GB/s columns divide by summed job time, not wall time: jobs overlap,
+so they are not the rate the drives delivered. vLLM queue / prefill / TTFT = vLLM's per-request means, measured the same on every
 backend: a request whose KV is still loading stays queued, so queue time includes the wait for its load.
 "errored" counts requests that failed (e.g. HTTP 400 from window overflow on deep turns).</p>
 </body></html>"""
