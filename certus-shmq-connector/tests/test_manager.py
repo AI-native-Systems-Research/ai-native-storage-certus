@@ -1424,3 +1424,35 @@ def test_store_handler_never_reports_failure_and_aborts_failed_keys():
     (abort,) = _calls_of(ring, "abort_store")
     assert abort == [70]  # only the failed key rolled back
     executor.shutdown()
+
+
+def test_transfer_time_is_the_transfer_not_queue_or_reap_wait(monkeypatch):
+    """transfer_time covers the transfer on its pool thread, as cputier's CUDA-event
+    time covers its copy: not the wait for a pool thread, nor the time until vLLM
+    next calls get_finished."""
+    import certus_shmq_connector.handler as handler
+    from vllm.v1.kv_offload.mediums import GPULoadStoreSpec
+
+    now = [0.0]
+    monkeypatch.setattr(handler.time, "monotonic", lambda: now[0])
+    ring = FakeRing()
+    kv = KvCacheIpc(handle_bytes=b"z" * 64, gpu_device_id=0, stride_bytes=1024, base_delta=0)
+    executor = ThreadPoolExecutor(max_workers=1)   # job 2 queues behind job 1
+    h = handler.worker_class()(ring, [kv], block_size_bytes=1024, executor=executor)
+    copy_to_store = ring.copy_to_store
+
+    def slow_copy(entries):
+        now[0] += 0.25   # each transfer takes 0.25 s
+        return copy_to_store(entries)
+
+    ring.copy_to_store = slow_copy
+    for job_id in (1, 2):
+        src = GPULoadStoreSpec(block_ids=[job_id], group_sizes=[1], block_indices=[0])
+        dst = CertusLoadStoreSpec([BlockLocation(key=job_id)])
+        h.transfer_async(job_id=job_id, spec=(src, dst))
+    h.wait({1, 2})
+    now[0] += 10.0       # vLLM's next get_finished comes much later
+    results = sorted(h.get_finished(), key=lambda r: r.job_id)
+    assert [r.job_id for r in results] == [1, 2]
+    assert [r.transfer_time for r in results] == [0.25, 0.25]
+    executor.shutdown()

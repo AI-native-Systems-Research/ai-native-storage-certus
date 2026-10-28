@@ -115,12 +115,14 @@ def _log_copy_failure(failed_keys: list[int], batch_len: int) -> None:
 @dataclass
 class _PendingJob:
     job_id: int
-    future: Future
-    start_time: float
+    future: Future | None
     num_blocks: int
     # Direction of this job; carried per-job because one deque now holds both
     # store and load jobs (≤0.24 used two separate handler instances).
     transfer_type: tuple[str, str]
+    # Set on the pool thread when the transfer starts and ends.
+    start_time: float | None = None
+    end_time: float | None = None
 
 
 def _regions_for_block(regions: list[KvCacheIpc], block_id: int):
@@ -188,21 +190,29 @@ def _build_worker_class():
             fn,
             transfer_type: tuple[str, str],
         ) -> bool:
-            future = self._executor.submit(fn, gpu_block_ids, keys)
-            self._pending.append(
-                _PendingJob(
-                    job_id=job_id,
-                    future=future,
-                    start_time=time.monotonic(),
-                    num_blocks=len(gpu_block_ids),
-                    transfer_type=transfer_type,
-                )
+            job = _PendingJob(
+                job_id=job_id,
+                future=None,
+                num_blocks=len(gpu_block_ids),
+                transfer_type=transfer_type,
             )
+
+            # transfer_time is the transfer itself, as cputier reports it (CUDA
+            # events around its copy): not the wait for a pool thread, nor the wait
+            # for vLLM's next get_finished call.
+            def run():
+                job.start_time = time.monotonic()
+                try:
+                    return fn(gpu_block_ids, keys)
+                finally:
+                    job.end_time = time.monotonic()
+
+            job.future = self._executor.submit(run)
+            self._pending.append(job)
             return True
 
         def get_finished(self) -> "list":
             results = []
-            now = time.monotonic()
             # Reap EVERY completed job, regardless of its position in the queue —
             # not just a leading FIFO run. The previous version stopped at the
             # first still-running job, so one slow transfer withheld all the
@@ -235,7 +245,7 @@ def _build_worker_class():
                         job_id=job.job_id,
                         success=success,
                         transfer_size=job.num_blocks * self._block_size_bytes,
-                        transfer_time=now - job.start_time,
+                        transfer_time=job.end_time - job.start_time,
                         transfer_type=job.transfer_type,
                     )
                 )
