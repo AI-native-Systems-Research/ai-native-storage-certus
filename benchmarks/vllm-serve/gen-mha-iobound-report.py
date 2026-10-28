@@ -189,13 +189,17 @@ def timeline_png(rows, title, computed_pct=None):
     to early truncation: skips intervals where a cumulative counter decreased or
     dt<=0. Returns base64 PNG, or None."""
     has_src = bool(rows) and "computed_tok" in rows[0]
-    t, comp, lhit, ehit, ptok, load, store = [], [], [], [], [], [], []
+    # cputier's SSD->CPU reads (separate jobs before its CPU->GPU load); CSVs from
+    # an older poller lack the column.
+    has_tier = bool(rows) and "tier_read_s" in rows[0]
+    t, comp, lhit, ehit, ptok, load, store, tier = [], [], [], [], [], [], [], []
     for a, b in zip(rows, rows[1:]):
         try:
             dt = float(b["wall_s"]) - float(a["wall_s"])
             dl = float(b["load_time_s"]) - float(a["load_time_s"])
             ds = float(b["store_time_s"]) - float(a["store_time_s"])
             dpt = float(b["prompt_tok"]) - float(a["prompt_tok"])
+            dtr = (float(b["tier_read_s"]) - float(a["tier_read_s"])) if has_tier else 0.0
             if has_src:
                 dc = float(b["computed_tok"]) - float(a["computed_tok"])
                 dlh = float(b["local_hit_tok"]) - float(a["local_hit_tok"])
@@ -204,10 +208,10 @@ def timeline_png(rows, title, computed_pct=None):
                 dc = dlh = deh = 0.0
         except (KeyError, ValueError):
             continue
-        if dt <= 0 or min(dl, ds, dpt, dc, dlh, deh) < 0:   # skip teardown/zero row
+        if dt <= 0 or min(dl, ds, dpt, dc, dlh, deh, dtr) < 0:   # skip teardown/zero row
             continue
         t.append(float(b["wall_s"]))
-        load.append(dl / dt); store.append(ds / dt); ptok.append(dpt / dt)
+        load.append(dl / dt); store.append(ds / dt); ptok.append(dpt / dt); tier.append(dtr / dt)
         comp.append(dc / dt); lhit.append(dlh / dt); ehit.append(deh / dt)
     if len(t) < 2:
         return None
@@ -228,11 +232,15 @@ def timeline_png(rows, title, computed_pct=None):
     ax.set_ylabel("prompt tokens / s")
     ax.legend(loc="upper right", fontsize=8, ncol=3)
     ax.grid(True, alpha=0.3)
-    ax2.stackplot(t, load, store, labels=["KV load IO (CPU→GPU)", "KV store IO (GPU→CPU)"],
-                  colors=["#F58518", "#E45756"], alpha=0.85)
+    io_series, io_labels, io_colors = [load, store], ["KV load IO (to GPU)", "KV store IO (GPU→tier)"], ["#F58518", "#E45756"]
+    if has_tier and any(tier):
+        io_series.insert(0, tier)
+        io_labels.insert(0, "SSD→CPU tier read (cputier)")
+        io_colors.insert(0, "#9D755D")
+    ax2.stackplot(t, *io_series, labels=io_labels, colors=io_colors, alpha=0.85)
     ax2.set_xlabel("wall time (s)")
     ax2.set_ylabel("device-s / wall-s")
-    ax2.legend(loc="upper right", fontsize=8, ncol=2)
+    ax2.legend(loc="upper right", fontsize=8, ncol=len(io_series))
     ax2.grid(True, alpha=0.3)
     return png_b64(fig)
 
@@ -294,6 +302,7 @@ def main():
         data.append({"key": key, "label": label, "color": color, "g": g, "k": k,
                      "kv": kv, "ext": mt.get("ext_hit"), "computed": mt.get("computed_pct"),
                      "tier_read_s": mt.get("tier_read_time_s") or 0.0,
+                     "tier_read_b": mt.get("tier_read_bytes") or 0.0,
                      "queue_s": mt.get("queue_s"), "prefill_s": mt.get("prefill_s"),
                      "srv_ttft_s": mt.get("ttft_s"),
                      "block": sv.get("block"), "tier": sv.get("tier"),
@@ -322,10 +331,10 @@ def main():
         import numpy as np
         x = np.arange(len(present)); w = 0.25
         for i, p in enumerate(("p50", "p90", "p99")):
-            vals = [((d["g"]["ttft_ms"] or {}).get(p) or 0) for d in present]
+            vals = [((d["g"]["ttft_ms"] or {}).get(p) or 0) / 1000 for d in present]
             ax.bar(x + (i - 1) * w, vals, w, label=p)
         ax.set_xticks(x); ax.set_xticklabels(labels, rotation=15, ha="right")
-        ax.set_ylabel("time to first token (ms)")
+        ax.set_ylabel("time to first token (s)")
         ax.set_title("TTFT (lower is better)")
         ax.legend(); ax.grid(True, axis="y", alpha=0.3)
         imgs["ttft"] = png_b64(fig)
@@ -334,38 +343,70 @@ def main():
         fig, ax = plt.subplots(figsize=(8, 4.2))
         lv = [d["kv"]["load_bytes"] / TIB for d in present]
         sv = [d["kv"]["store_bytes"] / TIB for d in present]
-        x = np.arange(len(present)); w = 0.38
-        ax.bar(x - w / 2, lv, w, label="KV load (CPU→GPU)", color="#F58518")
-        ax.bar(x + w / 2, sv, w, label="KV store (GPU→CPU)", color="#E45756")
+        tv = [d["tier_read_b"] / TIB for d in present]
+        x = np.arange(len(present))
+        if any(tv):
+            w = 0.27
+            ax.bar(x - w, tv, w, label="SSD→CPU tier read (cputier)", color="#9D755D")
+            ax.bar(x, lv, w, label="KV load (to GPU)", color="#F58518")
+            ax.bar(x + w, sv, w, label="KV store (GPU→tier)", color="#E45756")
+        else:
+            w = 0.38
+            ax.bar(x - w / 2, lv, w, label="KV load (to GPU)", color="#F58518")
+            ax.bar(x + w / 2, sv, w, label="KV store (GPU→tier)", color="#E45756")
         ax.set_xticks(x); ax.set_xticklabels(labels, rotation=15, ha="right")
         ax.set_ylabel("KV transferred (TiB)")
         ax.set_title("KV offload traffic")
         ax.legend(); ax.grid(True, axis="y", alpha=0.3)
         imgs["kvio"] = png_b64(fig)
 
-    # ── Table ────────────────────────────────────────────────────────────────
-    cols = ["Arm", "offload block (tok)", "DRAM tier", "tokens/s", "out tok/s", "req/s",
-            "TTFT p50 (ms)", "TTFT p90 (ms)", "TTFT p99 (ms)",
-            "ok", "errored", "KV load (TiB)", "load time (s)", "ext hit %", "computed %",
-            "load+tier read time (s)", "vLLM queue mean (s)", "vLLM prefill mean (s)", "vLLM TTFT mean (s)"]
-    rows_html = []
-    for d in data:
-        g, kv, e = d["g"], d["kv"], d["ext"]
-        if not d["present"]:
-            rows_html.append(f"<tr><td>{d['label']}</td>" + "<td>—</td>" * (len(cols) - 1) + "</tr>")
-            continue
-        tt = g["ttft_ms"] or {}
-        cells = [
-            d["label"], d["block"] or "—", d["tier"] or "—", fmt(g["tokens_per_s"], 0), fmt(g["output_tokens_per_s"], 1),
-            fmt(g["requests_per_s"], 2), fmt(tt.get("p50")), fmt(tt.get("p90")),
-            fmt(tt.get("p99")), fmt(g["ok"], 0), fmt(g["errored"], 0),
-            fmt(kv["load_bytes"] / TIB, 2), fmt(kv["load_time_s"], 0),
-            fmt(e, 1) if e is not None else "—",
+    # ── Tables: results (client + vLLM per-request), then KV I/O ──────────────
+    # Arms that did not run are left out; the note lists them.
+    def table(cols, rows):
+        head = "".join(f"<th>{c}</th>" for c in cols)
+        body = "".join("<tr>" + "".join(f"<td>{c}</td>" for c in r) + "</tr>" for r in rows)
+        return f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
+
+    def sec(ms):
+        return fmt(ms / 1000, 1) if ms is not None else "—"
+
+    res_cols = ["Arm", "offload block (tok)", "DRAM tier", "run (s)", "tokens/s", "req/s", "ok",
+                "errored", "TTFT p50 (s)", "TTFT p90 (s)", "TTFT p99 (s)", "vLLM queue mean (s)",
+                "vLLM prefill mean (s)", "ext hit %", "computed %"]
+    io_cols = ["Arm", "KV load (TiB)", "load time (s)", "load GB/s",
+               "SSD→CPU tier read (TiB)", "tier read time (s)",
+               "load + tier read time (s)", "SSD→GPU GB/s"]
+    if False:
+        io_cols += ["KV store (TiB)", "store time (s)", "store GB/s"]
+    res_rows, io_rows = [], []
+    for d in present:
+        g, kv, tt = d["g"], d["kv"], d["g"]["ttft_ms"] or {}
+        lt, tr = kv["load_time_s"], d["tier_read_s"]
+        res_rows.append([
+            d["label"], d["block"] or "—", d["tier"] or "—", fmt(g.get("duration"), 0),
+            fmt(g["tokens_per_s"], 0), fmt(g["requests_per_s"], 2), fmt(g["ok"], 0),
+            fmt(g["errored"], 0), sec(tt.get("p50")), sec(tt.get("p90")), sec(tt.get("p99")),
+            fmt(d["queue_s"], 1), fmt(d["prefill_s"], 2),
+            fmt(d["ext"], 1) if d["ext"] is not None else "—",
             fmt(d["computed"], 1) if d["computed"] is not None else "—",
-            fmt(kv["load_time_s"] + d["tier_read_s"], 0),
-            fmt(d["queue_s"], 2), fmt(d["prefill_s"], 2), fmt(d["srv_ttft_s"], 2),
+        ])
+        row = [
+            d["label"], fmt(kv["load_bytes"] / TIB, 2), fmt(lt, 0),
+            fmt(kv["load_bytes"] / GIB / lt, 1) if lt else "—",
+            fmt(d["tier_read_b"] / TIB, 2) if tr else "—", fmt(tr, 0) if tr else "—",
+            fmt(lt + tr, 0),
+            # SSD to GPU: what reaches the GPU over the whole path's device time.
+            fmt(kv["load_bytes"] / GIB / (lt + tr), 1) if lt + tr else "—",
         ]
-        rows_html.append("<tr>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>")
+        if False:
+            st = kv["store_time_s"]
+            row += [fmt(kv["store_bytes"] / TIB, 2), fmt(st, 0),
+                    fmt(kv["store_bytes"] / GIB / st, 1) if st else "—"]
+        io_rows.append(row)
+    missing = [d["label"] for d in data if not d["present"]]
+    missing_note = (f'<p class="note">Not run: {", ".join(missing)}.</p>' if missing else "")
+    tables_html = (table(res_cols, res_rows) + missing_note
+                   + "<h2 style='font-size:1.1rem'>KV I/O</h2>" + table(io_cols, io_rows))
 
     img_html = "".join(
         f'<figure><img src="data:image/png;base64,{imgs[k]}"/></figure>'
@@ -385,11 +426,11 @@ def main():
                          "<p class='note'>Top: prompt tokens/s split by where their KV came from (vLLM "
                          "prompt_tokens_by_source): GPU-computed = actual recompute, GPU prefix-cache hit, and "
                          "offload-tier hit (reloaded over the connector). Bottom: KV load/store device-seconds per "
-                         "wall-second. Arms whose kvio.csv predates the source split show total prompt tok/s with the "
-                         "full-run computed % from the /metrics snapshot. "
-                         "The certus timelines truncate early (the live poller stopped when /metrics slowed under load).</p>"
+                         "wall-second; for cputier also its SSD→CPU tier reads, which run as separate jobs before "
+                         "its CPU→GPU load (Certus's load includes its SSD read). Arms whose kvio.csv predates the source split show total prompt tok/s with the "
+                         "full-run computed % from the /metrics snapshot. A timeline that ends before the run "
+                         "does means the live poller missed scrapes when /metrics slowed under load.</p>"
                          + "".join(tl))
-    thead = "".join(f"<th>{c}</th>" for c in cols)
     html = f"""<!doctype html><html><head><meta charset="utf-8">
 <title>MHA KV-IO-bound: Certus vs cputier</title>
 <style>
@@ -405,15 +446,17 @@ def main():
 offload block size and DRAM/CPU tier per arm in the table (from each arm's server.log).
 Run parameters: TURNS={p_turns}, CONCURRENT_STREAMS={p_streams}, PREFIX_COUNT={p_prefix} ({p_ws} reused working set),
 DELAY_SCALE={p_scale} (intervals arms). Source: {rd}</p>
-<table><thead><tr>{thead}</tr></thead><tbody>{''.join(rows_html)}</tbody></table>
+{tables_html}
 {img_html}
 {timeline_html}
-<p class="note">Throughput = total tokens/s (higher better). TTFT = time to first token (lower better).
+<p class="note">Throughput = total tokens/s (higher better). TTFT = time to first token, client side (lower better).
+run = the client's measurement window; compare arms only at the same run length.
 KV load = bytes reloaded from the offload tier onto the GPU (the I/O the test exercises).
 computed % = prompt tokens recomputed on the GPU (hit neither the GPU prefix cache nor the offload tier).
 load time = summed time of KV load jobs as each backend reports it: Certus, a job's SSD-or-DRAM read and GPU copy;
-cputier, only its CPU→GPU copy. load+tier read time adds cputier's SSD→CPU reads (separate jobs before the load),
-so it covers SSD to GPU on both. vLLM queue / prefill / TTFT = vLLM's per-request means, measured the same on every
+cputier, only its CPU→GPU copy, so its load GB/s is a DRAM→GPU copy rate. SSD→CPU tier read = cputier's copies from
+its SSD tier into its CPU tier, separate jobs before the load. load + tier read time and SSD→GPU GB/s cover SSD to
+GPU on both. vLLM queue / prefill / TTFT = vLLM's per-request means, measured the same on every
 backend: a request whose KV is still loading stays queued, so queue time includes the wait for its load.
 "errored" counts requests that failed (e.g. HTTP 400 from window overflow on deep turns).</p>
 </body></html>"""

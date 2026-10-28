@@ -19,6 +19,10 @@
 #   computed_tok  cum. prompt tokens actually computed on the GPU     (prompt_tokens_by_source local_compute)
 #   local_hit_tok cum. prompt tokens served by the GPU prefix cache   (            "           local_cache_hit)
 #   ext_hit_tok   cum. prompt tokens loaded from the offload tier     (            "           external_kv_transfer)
+#   tier_read_s   cum. secondary-tier read time (vllm:kv_offload_tiering_read_time): cputier's
+#                 SSD->CPU copies, separate jobs before the CPU->GPU load (0 for Certus,
+#                 whose load time includes its SSD read)
+#   tier_read_bytes  cum. secondary-tier read bytes
 #
 #   ./poll-kv-metrics.sh                                  # :8000, every 2s, until Ctrl-C
 #   INTERVAL=1 DURATION=1800 ./poll-kv-metrics.sh         # 1s cadence, 30 min then stop
@@ -40,7 +44,7 @@ if ! curl -fsS --max-time 5 "$METRICS_URL" >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "wall_s,load_time_s,store_time_s,load_bytes,store_bytes,prefill_sum_s,infer_sum_s,prompt_tok,gen_tok,computed_tok,local_hit_tok,ext_hit_tok" > "$OUT"
+echo "wall_s,load_time_s,store_time_s,load_bytes,store_bytes,prefill_sum_s,infer_sum_s,prompt_tok,gen_tok,computed_tok,local_hit_tok,ext_hit_tok,tier_read_s,tier_read_bytes" > "$OUT"
 echo "[poll] ${METRICS_URL} every ${INTERVAL}s -> ${OUT}  (Ctrl-C to stop)"
 
 t0="$(date +%s.%N)"
@@ -71,8 +75,10 @@ while :; do
     /^vllm:prompt_tokens_total[{ ]/              { pt+=$NF }
     /^vllm:generation_tokens_total[{ ]/          { gt+=$NF }
     /^vllm:prompt_tokens_by_source_total[{ ]/    { if ($0 ~ /"local_compute"/) ct+=$NF; else if ($0 ~ /"local_cache_hit"/) lh+=$NF; else if ($0 ~ /"external_kv_transfer"/) eh+=$NF }
+    /^vllm:kv_offload_tiering_read_time_total[{ ]/  { trt+=$NF }
+    /^vllm:kv_offload_tiering_read_bytes_total[{ ]/ { trb+=$NF }
     END { if (!split_seen) { lt=llt; st=lst; lb=llb; sb=lsb }
-          printf "%s,%.6f,%.6f,%.0f,%.0f,%.6f,%.6f,%.0f,%.0f,%.0f,%.0f,%.0f\n", wall, lt, st, lb, sb, pf, inf, pt, gt, ct, lh, eh }
+          printf "%s,%.6f,%.6f,%.0f,%.0f,%.6f,%.6f,%.0f,%.0f,%.0f,%.0f,%.0f,%.6f,%.0f\n", wall, lt, st, lb, sb, pf, inf, pt, gt, ct, lh, eh, trt, trb }
   ' >> "$OUT"
 
   if [[ "$DURATION" != "0" ]] && awk -v w="$wall" -v d="$DURATION" 'BEGIN{exit !(w>=d)}'; then
