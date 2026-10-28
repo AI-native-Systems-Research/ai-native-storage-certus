@@ -119,7 +119,12 @@ run_arm(){  # $1 = key
 
   kill -TERM "-$poll_pgid" 2>/dev/null
   stop_vllm
-  [[ "$backend" == certus ]] && stop_certus
+  if [[ "$backend" == certus ]]; then
+    stop_certus
+    # Each Certus arm restarts the server, which overwrites certus-server.log; keep
+    # this arm's copy (its final tier-events line splits its loads by source tier).
+    cp "${RESULTS_DIR}/certus-server.log" "${sub}/certus-server.log" 2>/dev/null || true
+  fi
   log "arm ${key} done -> ${sub}"
 }
 

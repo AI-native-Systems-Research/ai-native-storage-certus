@@ -256,6 +256,55 @@ def fmt(v, nd=1):
     return "—" if v is None else f"{v:,.{nd}f}"
 
 
+def wall_load_rate(rows, window_s=300.0):
+    """Bytes loaded to the GPU per wall-clock second, from poll-kv-metrics.sh rows:
+    over the whole capture and over its busiest ``window_s`` stretch (loads ramp up
+    late in these runs, so the whole-run average hides the loading phase). Returns
+    (whole_gbs, peak_gbs) in GB/s (10^9), or (None, None)."""
+    pts = []
+    for r in rows or []:
+        try:
+            pts.append((float(r["wall_s"]), float(r["load_bytes"])))
+        except (KeyError, ValueError):
+            continue
+    # Drop a trailing all-zero teardown row and anything after a counter reset.
+    clean = []
+    for t, b in pts:
+        if clean and (b < clean[-1][1] or t <= clean[-1][0]):
+            break
+        clean.append((t, b))
+    if len(clean) < 2 or clean[-1][0] - clean[0][0] <= 0:
+        return None, None
+    whole = (clean[-1][1] - clean[0][1]) / (clean[-1][0] - clean[0][0]) / 1e9
+    peak, j = 0.0, 0
+    for i in range(len(clean)):
+        while clean[i][0] - clean[j][0] > window_s:
+            j += 1
+        span = clean[i][0] - clean[j][0]
+        if span >= window_s * 0.9:
+            peak = max(peak, (clean[i][1] - clean[j][1]) / span / 1e9)
+    return whole, (peak or None)
+
+
+def parse_certus_tier_events(path):
+    """Certus's last tier-events line (certus-server.log): blocks served to the GPU
+    and blocks promoted SSD -> memory tier first, so the share of loads read from
+    SSD. Returns {} when the log or the line is absent (cputier arms)."""
+    try:
+        with open(path, errors="replace") as f:
+            lines = [ln for ln in f if "tier-events" in ln]
+    except Exception:
+        return {}
+    if not lines:
+        return {}
+    mo = re.search(r"promotions\[->memory (\d+), ->gpu (\d+)\]", lines[-1])
+    if not mo:
+        return {}
+    to_mem, to_gpu = int(mo.group(1)), int(mo.group(2))
+    return {"to_memory": to_mem, "to_gpu": to_gpu,
+            "ssd_pct": 100.0 * min(to_mem, to_gpu) / to_gpu if to_gpu else None}
+
+
 def parse_serve_log(path):
     """Offload block size and DRAM tier size from the serve wrapper's header line
     ("... offload-block=64 ... DRAM-tier=64G" or "CPU-tier=64G"), or {}."""
@@ -294,6 +343,8 @@ def main():
         k = parse_kvio(os.path.join(sub, "kvio.csv"))
         mt = parse_metrics(os.path.join(sub, "guidellm.metrics.txt")) or {}
         sv = parse_serve_log(os.path.join(sub, "server.log"))
+        te = parse_certus_tier_events(os.path.join(sub, "certus-server.log"))
+        wall_gbs, peak_gbs = wall_load_rate(k["rows"] if k else None)
         # KV totals: prefer the full-run metrics.txt snapshot; fall back to kvio.
         kv = {"load_bytes": mt.get("load_bytes") or (k["load_bytes"] if k else 0),
               "store_bytes": mt.get("store_bytes") or (k["store_bytes"] if k else 0),
@@ -306,6 +357,7 @@ def main():
                      "queue_s": mt.get("queue_s"), "prefill_s": mt.get("prefill_s"),
                      "srv_ttft_s": mt.get("ttft_s"),
                      "block": sv.get("block"), "tier": sv.get("tier"),
+                     "ssd_pct": te.get("ssd_pct"), "wall_gbs": wall_gbs, "peak_gbs": peak_gbs,
                      "present": g is not None})
 
     present = [d for d in data if d["present"]]
@@ -373,10 +425,10 @@ def main():
     res_cols = ["Arm", "offload block (tok)", "DRAM tier", "run (s)", "tokens/s", "req/s", "ok",
                 "errored", "TTFT p50 (s)", "TTFT p90 (s)", "TTFT p99 (s)", "vLLM queue mean (s)",
                 "vLLM prefill mean (s)", "ext hit %", "computed %"]
-    io_cols = ["Arm", "KV load (TiB)", "load time as reported (s)",
-               "load GB/s as reported (cputier: CPU→GPU only)",
-               "SSD→CPU tier read (TiB)", "tier read time (s)",
-               "load + tier read time (s)", "SSD→GPU GB/s (both arms)"]
+    io_cols = ["Arm", "KV load (TiB)", "load GB/s, wall clock (run)",
+               "load GB/s, wall clock (busiest 5 min)", "loads from SSD %",
+               "load time as reported (s)", "SSD→CPU tier read (TiB)", "tier read time (s)",
+               "load + tier read time (s)", "load GB/s per job (summed job time)"]
     if True:
         io_cols += ["KV store (TiB)", "store time (s)", "store GB/s"]
     res_rows, io_rows = [], []
@@ -391,12 +443,26 @@ def main():
             fmt(d["ext"], 1) if d["ext"] is not None else "—",
             fmt(d["computed"], 1) if d["computed"] is not None else "—",
         ])
+        # Share of loaded blocks read from SSD: Certus from its server's promotion
+        # counters; cputier from its SSD->CPU tier read bytes over what it loaded.
+        # cputier can read more from SSD than reaches the GPU (blocks promoted to its
+        # CPU tier and evicted, or loads abandoned): show that ratio instead of a share.
+        if d["ssd_pct"] is not None:
+            ssd_cell = fmt(d["ssd_pct"], 0)
+        elif kv["load_bytes"] and d["tier_read_b"]:
+            ratio = d["tier_read_b"] / kv["load_bytes"]
+            ssd_cell = (fmt(100 * ratio, 0) if ratio <= 1
+                        else f"SSD read {ratio:.1f}× the bytes loaded")
+        else:
+            ssd_cell = "—"
         row = [
-            d["label"], fmt(kv["load_bytes"] / TIB, 2), fmt(lt, 0),
-            fmt(kv["load_bytes"] / GIB / lt, 1) if lt else "—",
+            d["label"], fmt(kv["load_bytes"] / TIB, 2),
+            fmt(d["wall_gbs"], 1), fmt(d["peak_gbs"], 1),
+            ssd_cell,
+            fmt(lt, 0),
             fmt(d["tier_read_b"] / TIB, 2) if tr else "—", fmt(tr, 0) if tr else "—",
             fmt(lt + tr, 0),
-            # SSD to GPU: what reaches the GPU over the whole path's device time.
+            # Per job: bytes over summed SSD-to-GPU job time; jobs overlap.
             fmt(kv["load_bytes"] / GIB / (lt + tr), 1) if lt + tr else "—",
         ]
         if True:
@@ -454,12 +520,14 @@ DELAY_SCALE={p_scale} (intervals arms). Source: {rd}</p>
 run = the client's measurement window; compare arms only at the same run length.
 KV load = bytes reloaded from the offload tier onto the GPU; KV store = bytes offloaded from GPU to the tier.
 computed % = prompt tokens recomputed on the GPU (hit neither the GPU prefix cache nor the offload tier).
-load time = summed time of KV load jobs as each backend reports it: Certus, a job's SSD-or-DRAM read and GPU copy;
-cputier, only its CPU→GPU copy, so its "load GB/s as reported" is a DRAM→GPU copy rate and not comparable to
-Certus's. SSD→CPU tier read = cputier's copies from
-its SSD tier into its CPU tier, separate jobs before the load. load + tier read time and "SSD→GPU GB/s (both arms)"
-cover SSD to GPU on both, so compare those. Both GB/s columns divide by summed job time, not wall time: jobs overlap,
-so they are not the rate the drives delivered. vLLM queue / prefill / TTFT = vLLM's per-request means, measured the same on every
+load GB/s, wall clock = KV bytes delivered to the GPU per second of elapsed time (live poller), over the whole
+capture and over its busiest 5 minutes; this is the load throughput to compare. loads from SSD % = share of loaded
+KV read from SSD (Certus: blocks promoted SSD→memory over blocks served, from certus-server.log; cputier: its SSD→CPU
+tier read bytes over its load bytes; above 1 it read more from SSD than reached the GPU). load time as reported = summed time of KV load jobs as each backend reports it:
+Certus, a job's SSD-or-DRAM read and GPU copy; cputier, only its CPU→GPU copy. SSD→CPU tier read = cputier's copies
+from its SSD tier into its CPU tier, separate jobs before the load. load + tier read time covers SSD to GPU on both.
+load GB/s per job divides by that summed job time: jobs overlap, so it is a per-job rate, not what the system
+delivered. vLLM queue / prefill / TTFT = vLLM's per-request means, measured the same on every
 backend: a request whose KV is still loading stays queued, so queue time includes the wait for its load.
 GB/s = effective throughput (total bytes / cumulative device-time). "errored" counts requests that failed (e.g. HTTP 400 from window overflow on deep turns).</p>
 </body></html>"""
