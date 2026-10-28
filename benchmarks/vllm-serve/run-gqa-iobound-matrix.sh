@@ -69,6 +69,9 @@ stop_vllm(){
     [[ -n "$ids" ]] && podman $st stop -t 5 $ids >/dev/null 2>&1
   done
   for _ in $(seq 1 60); do curl -fsS --max-time 3 http://127.0.0.1:8000/v1/models >/dev/null 2>&1 || break; sleep 1; done
+  # The next arm's container binds port 8000; wait until the old one has released
+  # it ("pasta ... Address already in use" otherwise).
+  for _ in $(seq 1 120); do ss -Htln 'sport = :8000' 2>/dev/null | grep -q . || break; sleep 1; done
   VLLM_PGID=""
 }
 
