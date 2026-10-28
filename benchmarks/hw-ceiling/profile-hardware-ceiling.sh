@@ -200,6 +200,23 @@ if have nvidia-smi; then
              --format=csv,noheader,nounits > "$RAW/gpu-static.csv" 2>/dev/null || true
 fi
 
+# GPU index -> NUMA node of its PCIe root complex, from sysfs. Used for Path 9
+# NUMA pinning and the Path 8 topology matrix. Format: "idx bdf numa" per line.
+# (nvidia-smi bus id is like 00000000:03:00.0; sysfs wants 0000:03:00.0.)
+gpu_numa_of() {  # $1 = full bus id from nvidia-smi
+  local bdf="${1,,}"; bdf="${bdf#0000}"; bdf="0000${bdf}"   # normalize to 0000:xx:yy.z
+  local n; n="$(cat "/sys/bus/pci/devices/${bdf}/numa_node" 2>/dev/null)"
+  [[ -z "$n" || "$n" == "-1" ]] && echo 0 || echo "$n"
+}
+: > "$RAW/gpu-numa.csv"
+if [[ -s "$RAW/gpu-static.csv" ]]; then
+  while IFS=, read -r idx name bus gen width; do
+    idx="${idx// /}"; bus="${bus// /}"
+    [[ -z "$idx" ]] && continue
+    echo "${idx},${bus},$(gpu_numa_of "$bus")" >> "$RAW/gpu-numa.csv"
+  done < "$RAW/gpu-static.csv"
+fi
+
 # PCIe theoretical bandwidth table (GT/s x lanes x 128/130 encoding), skill Step 1.
 md "### PCIe theoretical per-link bandwidth"
 md ""
@@ -552,27 +569,52 @@ else
   fi
 
   # ---- Path 9: nvme-bar1-bench (the headline P2P ceiling) ----
+  # Per the skill: run NUMA-local (pin to the GPU's own NUMA node) AND cross-NUMA
+  # (pin to the opposite node) to quantify the Infinity Fabric penalty, for GPU 0
+  # and GPU 1 (if present). Drive counts capped at the named-device count.
   md "### Path 9: NVMe DMA -> BAR1 microbench (nvme-bar1-bench)"
   md ""
   if [[ -n "$BAR1_BENCH" ]]; then
     NGPU="$( (have nvidia-smi && nvidia-smi -L | wc -l) 2>/dev/null || echo 0)"
-    for nd in 1 4 6; do
-      [[ $nd -gt ${#BDFS[@]} ]] && continue
-      tag="bar1_d${nd}"
-      log "nvme-bar1-bench --drive-count $nd"
-      if $SUDO "$BAR1_BENCH" --drive-count "$nd" --gpu 0 \
+    # GPUs to test: 0, and 1 if present (skill's topology-best second pairing).
+    GPUS=(0); [[ "$NGPU" -ge 2 ]] && GPUS+=(1)
+    # Drive-count rungs within what was named.
+    ND_LIST=(1); [[ ${#BDFS[@]} -ge 4 ]] && ND_LIST+=(4); [[ ${#BDFS[@]} -ge 6 ]] && ND_LIST+=(6)
+    [[ ${#BDFS[@]} -gt 1 && ${#BDFS[@]} -lt 4 ]] && ND_LIST+=(${#BDFS[@]})
+
+    bar1_run() {  # $1=gpu $2=nd $3=numa_mode(local|cross) $4=numa_node_to_pin
+      local g="$1" nd="$2" mode="$3" node="$4" tag="bar1_g${g}_d${nd}_${mode}"
+      local pfx=""
+      if have numactl && [[ -n "$node" ]]; then pfx="numactl --cpunodebind=${node} --membind=${node}"; fi
+      log "nvme-bar1-bench gpu=$g drives=$nd $mode (numa node ${node:-default})"
+      if $SUDO $pfx "$BAR1_BENCH" --drive-count "$nd" --gpu "$g" \
            --chunk-size 131072 --total-bytes "$TOTAL_BYTES" --queue-depth 32 --iterations 3 \
            > "$RAW/${tag}.txt" 2>&1; then
-        md "#### ${nd} drive(s), GPU 0"
+        md "#### GPU ${g}, ${nd} drive(s), ${mode}-NUMA (pinned node ${node:-default})"
         md '```'; cat "$RAW/${tag}.txt" >> "$MD"; md '```'
-        # sidecar: parse "Per-drive: host-ram X GB/s, bar1 Y GB/s" + overhead line
+        local perdrive ovh
         perdrive="$(awk -F'[ ,]+' '/Per-drive:/{print $4","$7}' "$RAW/${tag}.txt")"
         ovh="$(awk '/BAR1 overhead:/{print $3} /BAR1 is .* faster/{print "-"$3}' "$RAW/${tag}.txt" | tr -d '%' | head -1)"
-        echo "${nd},${perdrive:-,},${ovh:-}" >> "$RAW/bar1_results.csv"
+        # sidecar: gpu,drives,mode,host_ram_gbps,bar1_gbps,overhead_pct
+        echo "${g},${nd},${mode},${perdrive:-,},${ovh:-}" >> "$RAW/bar1_results.csv"
       else
-        md "#### ${nd} drive(s) — FAILED"
+        md "#### GPU ${g}, ${nd} drive(s), ${mode}-NUMA — FAILED"
         md '```'; cat "$RAW/${tag}.txt" >> "$MD"; md '```'
-        warn "nvme-bar1-bench d${nd} failed (gdrdrv loaded?)"
+        warn "nvme-bar1-bench g${g} d${nd} ${mode} failed (gdrdrv loaded?)"
+      fi
+    }
+
+    for g in "${GPUS[@]}"; do
+      # NUMA node owning this GPU's root complex, and the opposite node.
+      gnode="$(awk -F, -v i="$g" '$1==i{print $3}' "$RAW/gpu-numa.csv" 2>/dev/null)"; gnode="${gnode:-0}"
+      other=""
+      if [[ "${NUMA_NODES:-1}" -gt 1 ]]; then other=$(( gnode == 0 ? 1 : 0 )); fi
+      for nd in "${ND_LIST[@]}"; do
+        bar1_run "$g" "$nd" local "$gnode"
+      done
+      # Cross-NUMA: one representative drive count (max available in list) for the penalty.
+      if [[ -n "$other" ]]; then
+        bar1_run "$g" "${ND_LIST[-1]}" cross "$other"
       fi
     done
   else
@@ -593,15 +635,50 @@ else
   fi  # end: BDFs resolved
 fi
 
+# ===========================================================================
+# PATH 8 — Topology-aware routing matrix (derived; no benchmark)
+# ===========================================================================
+# For every named drive x GPU pairing, classify the route: same NUMA node =
+# direct PCIe-ish; different node = traverses the inter-socket link. Derived
+# from sysfs numa_node of each device — runs whenever --nvme devices are named,
+# regardless of --spdk, and is non-destructive.
+md "## 8b. Topology-Aware Routing Matrix (Path 8, derived)"
+md ""
+if [[ "$HAVE_NVME" != 1 ]]; then
+  md "_No \`--nvme\` devices named — topology matrix skipped._"
+elif [[ ! -s "$RAW/gpu-numa.csv" ]]; then
+  md "_No GPU NUMA info (nvidia-smi absent?) — topology matrix skipped._"
+else
+  # drive -> numa node sidecar for the named devices
+  : > "$RAW/drive-numa.csv"
+  for dev in "${NVME_LIST[@]}"; do
+    ctrl="${dev%n*}"; ctrl="$(basename "$ctrl")"
+    sys="/sys/class/nvme/$ctrl/device/numa_node"
+    n="$(cat "$sys" 2>/dev/null)"; [[ -z "$n" || "$n" == "-1" ]] && n=0
+    echo "$(basename "$dev"),${n}" >> "$RAW/drive-numa.csv"
+  done
+  md "| drive (NUMA) | GPU (NUMA) | route |"
+  md "|------|------|------|"
+  while IFS=, read -r dname dn; do
+    while IFS=, read -r gidx gbus gn; do
+      [[ -z "$gidx" ]] && continue
+      if [[ "$dn" == "$gn" ]]; then route="same NUMA node ${dn} (direct)"; else route="cross-NUMA (${dn} -> ${gn}, inter-socket)"; fi
+      md "| ${dname} (n${dn}) | GPU ${gidx} (n${gn}) | ${route} |"
+    done < "$RAW/gpu-numa.csv"
+  done < "$RAW/drive-numa.csv"
+fi
+md ""
+
 fi  # end DETECT_ONLY guard (Paths 3-9)
 
 # ===========================================================================
 # YAML: gpus: and host_ram: sections (parsed from bench raw output)
 # ===========================================================================
 log "Emitting gpus: and host_ram: YAML from bench output"
-python3 -I - "$RAW" "$YAML" "${NUMA_NODES:-1}" <<'PY'
+python3 -I - "$RAW" "$YAML" "${NUMA_NODES:-1}" "$MD" <<'PY'
 import os, re, sys, glob
 raw, yaml_path, nnodes = sys.argv[1], sys.argv[2], int(sys.argv[3])
+md_path = sys.argv[4] if len(sys.argv)>4 else None
 
 def smi_q_bar1(qpath):
     """Return list of BAR1 total MiB in GPU order from `nvidia-smi -q`."""
@@ -809,23 +886,38 @@ if os.path.exists(pcsv):
             if k: out.append(f"    optimal_bytes: {k}")
     out.append("")
 
-# --- bar1 from bar1_results.csv (drives,host_ram,bar1,overhead_pct) ---
+# --- bar1 from bar1_results.csv: gpu,drives,mode,host_ram,bar1,overhead_pct ---
 bcsv=os.path.join(raw,"bar1_results.csv")
-bar1_by_d={}
+# bar1[(gpu,mode)][drives] = (host_ram, bar1, overhead)
+bar1={}
 if os.path.exists(bcsv):
-    out.append("bar1:")
-    out.append("  gpu0:")
-    out.append("    numa_local:")
     for ln in open(bcsv):
         f=ln.strip().split(",")
-        if len(f)>=3 and f[0].isdigit():
-            d=int(f[0]); hr=f[1]; b1=f[2]; ov=f[3] if len(f)>3 else ""
-            bar1_by_d[d]=(hr,b1,ov)
-            if hr: out.append(f"      host_ram_{d}drive_gbps: {hr}")
-            if b1: out.append(f"      bar1_{d}drive_gbps: {b1}")
-            if ov: out.append(f"      overhead_{d}drive_pct: {ov}")
-    out.append("  # NOTE: nvme-bar1-bench does not print selected drive BDFs; topology")
-    out.append("  # of the chosen drives is not verified from stdout (see skill Path 9).")
+        if len(f)>=6 and f[0].isdigit():
+            g=int(f[0]); d=int(f[1]); mode=f[2]; hr=f[3]; b1=f[4]; ov=f[5]
+            bar1.setdefault((g,mode),{})[d]=(hr,b1,ov)
+if bar1:
+    out.append("bar1:")
+    for g in sorted({gg for (gg,_) in bar1}):
+        out.append(f"  gpu{g}:")
+        for mode,key in (("local","numa_local"),("cross","cross_numa")):
+            if (g,mode) not in bar1: continue
+            out.append(f"    {key}:")
+            for d in sorted(bar1[(g,mode)]):
+                hr,b1,ov=bar1[(g,mode)][d]
+                if hr: out.append(f"      host_ram_{d}drive_gbps: {hr}")
+                if b1: out.append(f"      bar1_{d}drive_gbps: {b1}")
+                if ov: out.append(f"      overhead_{d}drive_pct: {ov}")
+        # cross-NUMA penalty vs local at the shared drive count
+        if (g,"local") in bar1 and (g,"cross") in bar1:
+            shared=set(bar1[(g,"local")]) & set(bar1[(g,"cross")])
+            for d in sorted(shared):
+                try:
+                    lb=float(bar1[(g,"local")][d][1]); cb=float(bar1[(g,"cross")][d][1])
+                    if lb>0: out.append(f"    cross_numa_penalty_pct_{d}drive: {(1-cb/lb)*100:.1f}")
+                except (ValueError, IndexError): pass
+    out.append("  # NOTE: nvme-bar1-bench does not print selected drive BDFs; the")
+    out.append("  # named --nvme devices are assumed (see skill Path 9).")
     out.append("")
 
 # --- gdrcopy ---
@@ -836,6 +928,25 @@ if os.path.exists(gd):
     out.append("gdrcopy:")
     out.append(f"  raw_present: true  # see report for parsed values ({len(nums)} bw figures found)")
     out.append("")
+
+# --- topology (Path 8, derived): which named drives share a NUMA node w/ each GPU ---
+gnuma=os.path.join(raw,"gpu-numa.csv"); dnuma=os.path.join(raw,"drive-numa.csv")
+if os.path.exists(gnuma) and os.path.exists(dnuma):
+    gpu_node={}
+    for ln in open(gnuma):
+        f=ln.strip().split(",")
+        if len(f)>=3 and f[0].isdigit(): gpu_node[int(f[0])]=f[2]
+    drive_node={}
+    for ln in open(dnuma):
+        f=ln.strip().split(",")
+        if len(f)>=2: drive_node[f[0]]=f[1]
+    if gpu_node and drive_node:
+        out.append("topology:")
+        for g in sorted(gpu_node):
+            same=[d for d,n in drive_node.items() if n==gpu_node[g]]
+            out.append(f"  gpu{g}_numa_node: {gpu_node[g]}")
+            out.append(f"  gpu{g}_same_numa_drives: [{', '.join(repr(d) for d in sorted(same))}]")
+        out.append("")
 
 # --- ceilings (derived per skill Step 14 / SKILL.md:749) ---
 # warm = NUMA-local H2D peak; dispatcher cold = min(nvme_agg, h2d_peak); p2p cold = bar1.
@@ -859,13 +970,71 @@ for d in (1,4,6):
         cap=min(nv,h2d_peak_g0) if h2d_peak_g0 else nv
         bound="h2d" if (h2d_peak_g0 and h2d_peak_g0<nv) else "nvme"
         cl.append(f"  dispatcher_cold_{d}drive_gbps: {cap:.2f}   # bound by {bound}")
-for d in (1,4,6):
-    if d in bar1_by_d and bar1_by_d[d][1]:
-        cl.append(f"  p2p_cold_{d}drive_gpu0_gbps: {bar1_by_d[d][1]}")
+# p2p cold ceiling = NUMA-local BAR1 result (GPU 0).
+g0=bar1.get((0,"local"),{})
+for d in sorted(g0):
+    if g0[d][1]: cl.append(f"  p2p_cold_{d}drive_gpu0_gbps: {g0[d][1]}")
 if len(cl)>1:
     out.extend(cl); out.append("")
 
 open(yaml_path,"a").write("\n".join(out)+"\n")
+
+# ---------------------------------------------------------------------------
+# Summary sub-tables + crossover (skill Step 14) -> appended to the MARKDOWN.
+# Derived entirely from the numbers parsed above. Cells left blank when a path
+# was not measured, rather than fabricated.
+# ---------------------------------------------------------------------------
+def fmt(x): return f"{x:.2f}" if isinstance(x,(int,float)) else (x or "")
+if md_path:
+    m=["", "## Summary", ""]
+    # Sub-table 2: warm path (H2D ceiling), per GPU
+    bw0=parse_bw(numa_files[0] if numa_files else plain)
+    m+=["### Warm path — Memory-Tier (DRAM) --H2D--> GPU", "",
+        "| GPU | Ceiling (GB/s) | Bound by |", "|-----|----------------|----------|"]
+    for g in sorted(bw0):
+        pk=peak_h2d(bw0.get(g,{}).get("rows",{}))[0]
+        if pk: m.append(f"| {g} | {fmt(pk)} | H2D PCIe |")
+    m.append("")
+    # Sub-table 3: dispatcher cold = min(nvme_agg_read, h2d_peak_gpu0)
+    m+=["### `dispatcher` cold path — NVMe --DMA--> DRAM --H2D--> GPU", "",
+        "| Drives | Ceiling (GB/s) | Bound by |", "|--------|----------------|----------|"]
+    any_nvme=False
+    for d in (1,4,6):
+        nv=nvme_best("read",d)
+        if nv is None: continue
+        any_nvme=True
+        cap=min(nv,h2d_peak_g0) if h2d_peak_g0 else nv
+        bound="H2D PCIe" if (h2d_peak_g0 and h2d_peak_g0<nv) else "NVMe aggregate"
+        m.append(f"| {d} | {fmt(cap)} | {bound} |")
+    if not any_nvme: m.append("| _(no SPDK NVMe data)_ | | |")
+    m.append("")
+    # Sub-table 4: dispatcher-p2p cold = NUMA-local BAR1 (gpu0)
+    m+=["### `dispatcher-p2p` cold path — NVMe --DMA--> BAR1 (GPU)", "",
+        "| Drives | BAR1 ceiling (GB/s) | Overhead vs host-ram | NUMA |", "|--------|---------------------|----------------------|------|"]
+    g0l=bar1.get((0,"local"),{})
+    if g0l:
+        for d in sorted(g0l):
+            hr,b1,ov=g0l[d]
+            m.append(f"| {d} | {fmt(b1)} | {ov+'%' if ov else ''} | local |")
+    else:
+        m.append("| _(no nvme-bar1-bench data)_ | | | |")
+    m.append("")
+    # Crossover: dispatcher cold vs p2p cold
+    m+=["### Crossover — `dispatcher` cold vs `dispatcher-p2p` cold", "",
+        "| Drives | dispatcher cold (GB/s) | p2p cold (GB/s) | Winner |",
+        "|--------|------------------------|-----------------|--------|"]
+    rows=0
+    for d in (1,4,6):
+        nv=nvme_best("read",d)
+        disp=(min(nv,h2d_peak_g0) if (nv and h2d_peak_g0) else nv) if nv else None
+        p2p=float(g0l[d][1]) if (d in g0l and g0l[d][1]) else None
+        if disp is None and p2p is None: continue
+        rows+=1
+        win="" if (disp is None or p2p is None) else ("dispatcher" if disp>p2p else ("p2p" if p2p>disp else "~tie"))
+        m.append(f"| {d} | {fmt(disp)} | {fmt(p2p)} | {win} |")
+    if rows==0: m.append("| _(insufficient data — need SPDK and/or BAR1 runs)_ | | | |")
+    m.append("")
+    open(md_path,"a").write("\n".join(m)+"\n")
 PY
 
 # ===========================================================================
@@ -886,8 +1055,7 @@ log "Markdown report : $MD"
 log "YAML profile    : $YAML"
 log "Raw tool output : $RAW/"
 echo
-echo "NOTE: This script fills the measured paths and leaves skipped ones marked."
-echo "The skill's derived summary sub-tables (dispatcher warm/cold, p2p crossover)"
-echo "are best computed from the numbers above — paste this report back to Claude"
-echo "(on a connected machine) to generate those, or compute from the formulas in"
-echo ".claude/skills/profile-hardware-ceiling/SKILL.md (Step 14)."
+echo "NOTE: Measured paths are filled; skipped ones are marked (never faked)."
+echo "The markdown report ends with the skill's derived Summary sub-tables"
+echo "(warm / dispatcher-cold / p2p-cold) and the crossover table, computed from"
+echo "whatever was measured; cells for unmeasured paths are left blank."
