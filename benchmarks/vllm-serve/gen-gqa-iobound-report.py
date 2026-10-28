@@ -124,7 +124,13 @@ def parse_metrics(path):
         except ValueError:
             continue
         tt = re.search(r'transfer_type="([^"]+)"', labels)
-        key = name + ("|" + tt.group(1) if tt else "")
+        tier = re.search(r'tier="([^"]+)"', labels)
+        suffix_parts = []
+        if tt:
+            suffix_parts.append(tt.group(1))
+        if tier:
+            suffix_parts.append(tier.group(1))
+        key = name + ("|" + "|".join(suffix_parts) if suffix_parts else "")
         phase[key] = phase.get(key, 0.0) + v
     def d(k):
         return A.get(k, 0.0) - B.get(k, 0.0)
@@ -140,8 +146,24 @@ def parse_metrics(path):
     lq = d("prefix_cache_queries_total")
     lh = d("prefix_cache_hits_total")
     computed = (100 * max(lq - lh - h, 0.0) / lq) if lq else None
+    # SSD IO: for certus-shmq the load/store counters already reflect NVMe IO
+    # (the shmq connector talks to certus-server which does SPDK). For cputier
+    # the tiering counters track the actual fs/SSD tier separately.
+    ssd_tiers = sorted(set(
+        k.rsplit("|", 1)[-1] for k in A
+        if k.startswith("kv_offload_tiering_read_bytes_total|")
+    ))
+    if ssd_tiers:
+        ssd_rb = sum(d(f"kv_offload_tiering_read_bytes_total|{t}") for t in ssd_tiers)
+        ssd_rt = sum(d(f"kv_offload_tiering_read_time_total|{t}") for t in ssd_tiers)
+        ssd_wb = sum(d(f"kv_offload_tiering_write_bytes_total|{t}") for t in ssd_tiers)
+        ssd_wt = sum(d(f"kv_offload_tiering_write_time_total|{t}") for t in ssd_tiers)
+    else:
+        ssd_rb, ssd_rt, ssd_wb, ssd_wt = load_b, load_t, store_b, store_t
     return {"load_time_s": load_t, "store_time_s": store_t,
             "load_bytes": load_b, "store_bytes": store_b,
+            "ssd_read_bytes": ssd_rb, "ssd_read_time_s": ssd_rt,
+            "ssd_write_bytes": ssd_wb, "ssd_write_time_s": ssd_wt,
             "ext_hit": (100 * h / q) if q else None, "computed_pct": computed}
 
 
@@ -243,7 +265,11 @@ def main():
         kv = {"load_bytes": mt.get("load_bytes") or (k["load_bytes"] if k else 0),
               "store_bytes": mt.get("store_bytes") or (k["store_bytes"] if k else 0),
               "load_time_s": mt.get("load_time_s") or (k["load_time_s"] if k else 0),
-              "store_time_s": mt.get("store_time_s") or (k["store_time_s"] if k else 0)}
+              "store_time_s": mt.get("store_time_s") or (k["store_time_s"] if k else 0),
+              "ssd_read_bytes": mt.get("ssd_read_bytes", 0),
+              "ssd_read_time_s": mt.get("ssd_read_time_s", 0),
+              "ssd_write_bytes": mt.get("ssd_write_bytes", 0),
+              "ssd_write_time_s": mt.get("ssd_write_time_s", 0)}
         data.append({"key": key, "label": label, "color": color, "g": g, "k": k,
                      "kv": kv, "ext": mt.get("ext_hit"), "computed": mt.get("computed_pct"),
                      "present": g is not None})
@@ -296,8 +322,8 @@ def main():
     cols = ["Arm", "tokens/s", "out tok/s", "req/s",
             "TTFT p50 (ms)", "TTFT p90 (ms)", "TTFT p99 (ms)",
             "ok", "errored",
-            "KV load (TiB)", "load time (s)", "load GB/s",
-            "KV store (TiB)", "store time (s)", "store GB/s",
+            "SSD read (GiB)", "SSD read (s)", "SSD read GB/s",
+            "SSD write (GiB)", "SSD write (s)", "SSD write GB/s",
             "ext hit %", "computed %"]
     rows_html = []
     for d in data:
@@ -306,14 +332,14 @@ def main():
             rows_html.append(f"<tr><td>{d['label']}</td>" + "<td>—</td>" * (len(cols) - 1) + "</tr>")
             continue
         tt = g["ttft_ms"] or {}
-        load_gbs = kv["load_bytes"] / GIB / kv["load_time_s"] if kv["load_time_s"] else None
-        store_gbs = kv["store_bytes"] / GIB / kv["store_time_s"] if kv["store_time_s"] else None
+        ssd_rgbs = kv["ssd_read_bytes"] / GIB / kv["ssd_read_time_s"] if kv["ssd_read_time_s"] else None
+        ssd_wgbs = kv["ssd_write_bytes"] / GIB / kv["ssd_write_time_s"] if kv["ssd_write_time_s"] else None
         cells = [
             d["label"], fmt(g["tokens_per_s"], 0), fmt(g["output_tokens_per_s"], 1),
             fmt(g["requests_per_s"], 2), fmt(tt.get("p50")), fmt(tt.get("p90")),
             fmt(tt.get("p99")), fmt(g["ok"], 0), fmt(g["errored"], 0),
-            fmt(kv["load_bytes"] / TIB, 2), fmt(kv["load_time_s"], 0), fmt(load_gbs, 1),
-            fmt(kv["store_bytes"] / TIB, 2), fmt(kv["store_time_s"], 0), fmt(store_gbs, 1),
+            fmt(kv["ssd_read_bytes"] / GIB, 1), fmt(kv["ssd_read_time_s"], 1), fmt(ssd_rgbs, 1),
+            fmt(kv["ssd_write_bytes"] / GIB, 1), fmt(kv["ssd_write_time_s"], 1), fmt(ssd_wgbs, 1),
             fmt(e, 1) if e is not None else "—",
             fmt(d["computed"], 1) if d["computed"] is not None else "—",
         ]
@@ -361,7 +387,8 @@ DELAY_SCALE={p_scale} (intervals arms). Source: {rd}</p>
 {img_html}
 {timeline_html}
 <p class="note">Throughput = total tokens/s (higher better). TTFT = time to first token (lower better).
-KV load = bytes reloaded from the offload tier onto the GPU; KV store = bytes offloaded from GPU to the tier.
+SSD read/write = bytes and time for actual storage-tier IO: for certus-shmq this is the SPDK NVMe path via certus-server;
+for cputier this is the fs secondary tier (kv_offload_tiering counters).
 computed % = prompt tokens recomputed on the GPU (hit neither the GPU prefix cache nor the offload tier).
 GB/s = effective throughput (total bytes / cumulative device-time). "errored" counts requests that failed (e.g. HTTP 400 from window overflow on deep turns).</p>
 </body></html>"""
