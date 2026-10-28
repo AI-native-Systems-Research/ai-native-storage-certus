@@ -494,11 +494,16 @@ else
         if $SUDO "$FIO" --name="$tag" --filename="$dev" --rw="$rw" --bs="$bs" \
               --direct=1 --ioengine="$FIO_ENG" --iodepth="$FIO_QD" --runtime="$FIO_RUNTIME" \
               --time_based --output-format=json > "$RAW/${tag}.json" 2>"$RAW/${tag}.err"; then
-          # Parse one job's read or write block from fio JSON (stdlib only).
+          # Parse one job's read or write block from fio JSON (stdlib only). fio may
+          # print non-JSON warnings (e.g. "cache invalidation ... Permission denied")
+          # before the JSON, so start parsing at the first '{'.
           read -r gbps iops lat < <(python3 - "$RAW/${tag}.json" "$rw" <<'PY'
 import json,sys
 try:
-    d=json.load(open(sys.argv[1])); j=d["jobs"][0][sys.argv[2]]
+    txt=open(sys.argv[1]).read()
+    i=txt.find("{")
+    d=json.loads(txt[i:]) if i>=0 else {}
+    j=d["jobs"][0][sys.argv[2]]
     bw_kibps=j.get("bw",0)                       # fio reports bw in KiB/s
     gbps=bw_kibps*1024/1e9                        # -> decimal GB/s
     lat=j.get("lat_ns",{}).get("mean",0)/1000.0   # ns -> us
