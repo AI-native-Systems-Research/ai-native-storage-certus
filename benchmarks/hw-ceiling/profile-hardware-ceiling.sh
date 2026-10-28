@@ -991,14 +991,34 @@ def nvme_best(workload,d):
                 if int(f[1])==d and int(f[3])==32: xs.append(float(f[4]))
             except ValueError: pass
     return max(xs) if xs else None
+def fio_peak_read():
+    # Best single-device fio READ GB/s (1-drive ceiling) from fio_results.csv.
+    if not os.path.exists(fcsv): return None
+    xs=[]
+    for ln in open(fcsv):
+        f=ln.strip().split(",")
+        if len(f)>=4 and f[1]=="read":
+            try: xs.append(float(f[3]))
+            except ValueError: pass
+    return max(xs) if xs else None
+# NVMe read ceiling at a drive count: prefer SPDK (true multi-drive aggregate);
+# else fall back to the fio single-device read peak (valid only for the 1-drive
+# rung — fio here benches one device, so no aggregate claim beyond that).
+def nvme_read_ceiling(d):
+    nv=nvme_best("read",d)
+    if nv is not None: return (nv,"spdk")
+    if d==1:
+        fp=fio_peak_read()
+        if fp is not None: return (fp,"fio")
+    return (None,None)
 cl=["ceilings:"]
 if h2d_peak_g0: cl.append(f"  warm_gpu0_peak_gbps: {h2d_peak_g0}")
 for d in (1,4,6):
-    nv=nvme_best("read",d)
+    nv,src=nvme_read_ceiling(d)
     if nv is not None:
         cap=min(nv,h2d_peak_g0) if h2d_peak_g0 else nv
         bound="h2d" if (h2d_peak_g0 and h2d_peak_g0<nv) else "nvme"
-        cl.append(f"  dispatcher_cold_{d}drive_gbps: {cap:.2f}   # bound by {bound}")
+        cl.append(f"  dispatcher_cold_{d}drive_gbps: {cap:.2f}   # bound by {bound}, nvme src={src}")
 # p2p cold ceiling = NUMA-local BAR1 result (GPU 0).
 g0=bar1.get((0,"local"),{})
 for d in sorted(g0):
@@ -1029,13 +1049,14 @@ if md_path:
         "| Drives | Ceiling (GB/s) | Bound by |", "|--------|----------------|----------|"]
     any_nvme=False
     for d in (1,4,6):
-        nv=nvme_best("read",d)
+        nv,src=nvme_read_ceiling(d)
         if nv is None: continue
         any_nvme=True
         cap=min(nv,h2d_peak_g0) if h2d_peak_g0 else nv
-        bound="H2D PCIe" if (h2d_peak_g0 and h2d_peak_g0<nv) else "NVMe aggregate"
+        if h2d_peak_g0 and h2d_peak_g0<nv: bound="H2D PCIe"
+        else: bound=("NVMe (fio, 1 dev)" if src=="fio" else "NVMe aggregate")
         m.append(f"| {d} | {fmt(cap)} | {bound} |")
-    if not any_nvme: m.append("| _(no SPDK NVMe data)_ | | |")
+    if not any_nvme: m.append("| _(no NVMe data — run with --nvme, or --spdk)_ | | |")
     m.append("")
     # Sub-table 4: dispatcher-p2p cold = NUMA-local BAR1 (gpu0)
     m+=["### `dispatcher-p2p` cold path — NVMe --DMA--> BAR1 (GPU)", "",
@@ -1054,14 +1075,14 @@ if md_path:
         "|--------|------------------------|-----------------|--------|"]
     rows=0
     for d in (1,4,6):
-        nv=nvme_best("read",d)
+        nv,_=nvme_read_ceiling(d)
         disp=(min(nv,h2d_peak_g0) if (nv and h2d_peak_g0) else nv) if nv else None
         p2p=float(g0l[d][1]) if (d in g0l and g0l[d][1]) else None
         if disp is None and p2p is None: continue
         rows+=1
         win="" if (disp is None or p2p is None) else ("dispatcher" if disp>p2p else ("p2p" if p2p>disp else "~tie"))
         m.append(f"| {d} | {fmt(disp)} | {fmt(p2p)} | {win} |")
-    if rows==0: m.append("| _(insufficient data — need SPDK and/or BAR1 runs)_ | | | |")
+    if rows==0: m.append("| _(insufficient data — need --nvme, --spdk, and/or BAR1 runs)_ | | | |")
     m.append("")
     open(md_path,"a").write("\n".join(m)+"\n")
 PY
