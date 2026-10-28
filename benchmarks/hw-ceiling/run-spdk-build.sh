@@ -56,9 +56,19 @@ trap 'podman rm "$cid" >/dev/null 2>&1 || true' EXIT
 podman cp "$cid:$PERF_PATH" "$OUTDIR/bin/spdk_nvme_perf"
 
 echo "[spdk-build] extracting shared-lib dependencies ..."
-# Resolve ldd inside the container, copy each non-vdso lib out.
+# Resolve ldd inside the container, copy each non-vdso lib out — EXCEPT the core
+# glibc objects (libc, libm, libpthread, libdl, librt, and the dynamic loader).
+# Those must come from the host: mixing the container's libc.so.6 / ld-linux with
+# the host loader yields "undefined symbol __rtld_libc_freeres, GLIBC_PRIVATE".
+# The host is the same RHEL-9 glibc family, so its own copies resolve correctly;
+# we carry only the SPDK-specific libs (libnuma, libaio, libuuid, libssl, ...).
 LIBS="$(podman run --rm "$IMAGE" -c "ldd '$PERF_PATH' 2>/dev/null | awk '/=>/{print \$3} /^\\t\\// {print \$1}'" | grep -E '^/' | sort -u)"
 for lib in $LIBS; do
+  base="$(basename "$lib")"
+  case "$base" in
+    ld-linux*|libc.so.*|libm.so.*|libpthread.so.*|libdl.so.*|librt.so.*)
+      echo "  (host-provided, skip $base)"; continue ;;
+  esac
   podman cp "$cid:$lib" "$OUTDIR/lib/" 2>/dev/null || echo "  (skip $lib)"
 done
 
