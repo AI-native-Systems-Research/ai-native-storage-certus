@@ -368,6 +368,21 @@ def parse_run_facts(sub):
     return f
 
 
+def parse_certus_key_bytes(path):
+    """Bytes per Certus key from the connector's startup line in server.log
+    ("[certus-shmq] KV N region(s) block_bytes=B ... blocks_per_chunk=C"; C is 1 when
+    absent, as before keys could hold several GPU blocks), or None."""
+    try:
+        with open(path, errors="replace") as fh:
+            head = fh.read(400000)
+    except Exception:
+        return None
+    mo = re.search(r"\[certus-shmq\] KV \d+ region\(s\) block_bytes=(\d+)(?:.*?blocks_per_chunk=(\d+))?", head)
+    if not mo:
+        return None
+    return int(mo.group(1)) * int(mo.group(2) or 1)
+
+
 def parse_serve_log(path):
     """Offload block size and DRAM tier size from the serve wrapper's header line
     ("... offload-block=64 ... DRAM-tier=64G" or "CPU-tier=64G"), or {}."""
@@ -424,6 +439,14 @@ def main():
         mt = parse_metrics(os.path.join(sub, "guidellm.metrics.txt")) or {}
         sv = parse_serve_log(os.path.join(sub, "server.log"))
         te = parse_certus_tier_events(os.path.join(sub, "certus-server.log"))
+        certus_ssd_b = None
+        key_b = parse_certus_key_bytes(os.path.join(sub, "server.log"))
+        lb = mt.get("load_bytes") or 0.0
+        if te.get("to_gpu") and key_b and lb:
+            # Only when the server's served-key count reproduces vLLM's load bytes (within
+            # 2%): then each counted key is one key of key_b bytes.
+            if abs(te["to_gpu"] * key_b - lb) <= 0.02 * lb:
+                certus_ssd_b = te["to_memory"] * key_b
         wall_gbs, peak_gbs = wall_load_rate(k["rows"] if k else None)
         st_pts = []
         for r in (k["rows"] if k else []):
@@ -445,6 +468,7 @@ def main():
                      "srv_ttft_s": mt.get("ttft_s"),
                      "block": sv.get("block"), "tier": sv.get("tier"),
                      "ssd_pct": te.get("ssd_pct"), "wall_gbs": wall_gbs, "peak_gbs": peak_gbs,
+                     "certus_ssd_b": certus_ssd_b,
                      "st_wall_gbs": st_wall, "st_peak_gbs": st_peak,
                      "tier_write_s": mt.get("tier_write_time_s") or 0.0,
                      "tier_write_b": mt.get("tier_write_bytes") or 0.0,
@@ -485,11 +509,11 @@ def main():
         fig, ax = plt.subplots(figsize=(8, 4.2))
         lv = [d["kv"]["load_bytes"] / TIB for d in present]
         sv = [d["kv"]["store_bytes"] / TIB for d in present]
-        tv = [d["tier_read_b"] / TIB for d in present]
+        tv = [(d["tier_read_b"] or d["certus_ssd_b"] or 0) / TIB for d in present]
         x = np.arange(len(present))
         if any(tv):
             w = 0.27
-            ax.bar(x - w, tv, w, label="SSD→CPU tier read (cputier)", color="#9D755D")
+            ax.bar(x - w, tv, w, label="SSD read into host memory", color="#9D755D")
             ax.bar(x, lv, w, label="KV load (to GPU)", color="#F58518")
             ax.bar(x + w, sv, w, label="KV store (GPU→tier)", color="#E45756")
         else:
@@ -517,7 +541,7 @@ def main():
                 "vLLM prefill mean (s)", "ext hit %", "computed %"]
     io_cols = ["Arm", "KV load (TiB)", "load GB/s, wall clock (run)",
                "load GB/s, wall clock (busiest 5 min)", "loads from SSD %",
-               "load time as reported (s)", "SSD→CPU tier read (TiB)", "tier read time (s)",
+               "load time as reported (s)", "SSD read into host memory (TiB)", "tier read time (s)",
                "load + tier read time (s)", "load GB/s per job (summed job time)"]
     io_cols += ["KV store (TiB)", "store GB/s, wall clock (run)",
                 "store GB/s, wall clock (busiest 5 min)",
@@ -550,14 +574,15 @@ def main():
         # Certus has no separate tier step (its load reads SSD itself; it writes SSD in
         # the background); a cputier arm without an SSD tier reads and writes none.
         certus = d["key"].startswith("certus")
-        no_tier_read = "n/a (in load)" if certus else "0"
+        no_tier_read = "in load time" if certus else "0"
         no_tier_write = "n/a (background)" if certus else "0"
         row = [
             d["label"], fmt(kv["load_bytes"] / TIB, 2),
             fmt(d["wall_gbs"], 1), fmt(d["peak_gbs"], 1),
             ssd_cell,
             fmt(lt, 0),
-            fmt(d["tier_read_b"] / TIB, 2) if tr else no_tier_read,
+            (fmt(d["tier_read_b"] / TIB, 2) if tr else
+             f'{fmt(d["certus_ssd_b"] / TIB, 2)} (server counters)' if d["certus_ssd_b"] else no_tier_read),
             fmt(tr, 0) if tr else no_tier_read,
             fmt(lt + tr, 0),
             # Per job: bytes over summed SSD-to-GPU job time; jobs overlap.
@@ -623,8 +648,10 @@ load GB/s, wall clock = KV bytes delivered to the GPU per second of elapsed time
 capture and over its busiest 5 minutes; this is the load throughput to compare. loads from SSD % = share of loaded
 KV read from SSD (Certus: blocks promoted SSD→memory over blocks served, from certus-server.log; cputier: its SSD→CPU
 tier read bytes over its load bytes; above 1 it read more from SSD than reached the GPU). load time as reported = summed time of KV load jobs as each backend reports it:
-Certus, a job's SSD-or-DRAM read and GPU copy; cputier, only its CPU→GPU copy. SSD→CPU tier read = cputier's copies
-from its SSD tier into its CPU tier, separate jobs before the load. load + tier read time covers SSD to GPU on both.
+Certus, a job's SSD-or-DRAM read and GPU copy; cputier, only its CPU→GPU copy. SSD read into host memory = bytes read from SSD into host memory before reaching the GPU: cputier's are its separate copies into its CPU tier, timed
+by vLLM; Certus's are keys its server promoted SSD→memory tier times the key size (certus-server.log and the
+connector's line in server.log), read inside its load jobs, so their time is in its load time. load + tier read time
+covers SSD to GPU on both.
 load GB/s per job divides by that summed job time: jobs overlap, so it is a per-job rate, not what the system
 delivered. kvio.csv files from a poller before 2026-10-28 added cputier's flat and transfer_type-labelled load
 counters, so for those runs cputier's wall-clock rates are about twice the true rate (the TiB columns come from the
