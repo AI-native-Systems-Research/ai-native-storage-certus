@@ -61,6 +61,9 @@ stop_vllm(){
     [[ -n "$ids" ]] && podman $st stop -t 5 $ids >/dev/null 2>&1
   done
   for _ in $(seq 1 60); do curl -fsS --max-time 3 http://127.0.0.1:8000/v1/models >/dev/null 2>&1 || break; sleep 1; done
+  # The next arm's container binds port 8000; wait until the old one has released
+  # it ("pasta ... Address already in use" otherwise).
+  for _ in $(seq 1 120); do ss -Htln 'sport = :8000' 2>/dev/null | grep -q . || break; sleep 1; done
   VLLM_PGID=""
 }
 
@@ -116,7 +119,12 @@ run_arm(){  # $1 = key
 
   kill -TERM "-$poll_pgid" 2>/dev/null
   stop_vllm
-  [[ "$backend" == certus ]] && stop_certus
+  if [[ "$backend" == certus ]]; then
+    stop_certus
+    # Each Certus arm restarts the server, which overwrites certus-server.log; keep
+    # this arm's copy (its final tier-events line splits its loads by source tier).
+    cp "${RESULTS_DIR}/certus-server.log" "${sub}/certus-server.log" 2>/dev/null || true
+  fi
   log "arm ${key} done -> ${sub}"
 }
 
@@ -130,5 +138,5 @@ log "generating report"
 # Pass the workload knobs through so the report records them (unset => defaults).
 env ${TURNS:+TURNS="$TURNS"} ${CONCURRENT_STREAMS:+CONCURRENT_STREAMS="$CONCURRENT_STREAMS"} \
     ${PREFIX_COUNT:+PREFIX_COUNT="$PREFIX_COUNT"} ${DELAY_SCALE:+DELAY_SCALE="$DELAY_SCALE"} \
-    /usr/bin/python3 "${SCRIPT_DIR}/gen-mha-iobound-report.py" "$RESULTS_DIR" 2>&1 | tee -a "$LOG"
+    /usr/bin/python3 "${SCRIPT_DIR}/gen-iobound-report.py" "$RESULTS_DIR" 2>&1 | tee -a "$LOG"
 log "DONE -> ${RESULTS_DIR}/report.html"

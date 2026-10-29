@@ -1424,3 +1424,130 @@ def test_store_handler_never_reports_failure_and_aborts_failed_keys():
     (abort,) = _calls_of(ring, "abort_store")
     assert abort == [70]  # only the failed key rolled back
     executor.shutdown()
+
+
+def test_transfer_time_is_the_transfer_not_queue_or_reap_wait(monkeypatch):
+    """transfer_time covers the transfer on its pool thread, as cputier's CUDA-event
+    time covers its copy: not the wait for a pool thread, nor the time until vLLM
+    next calls get_finished."""
+    import certus_shmq_connector.handler as handler
+    from vllm.v1.kv_offload.mediums import GPULoadStoreSpec
+
+    now = [0.0]
+    monkeypatch.setattr(handler.time, "monotonic", lambda: now[0])
+    ring = FakeRing()
+    kv = KvCacheIpc(handle_bytes=b"z" * 64, gpu_device_id=0, stride_bytes=1024, base_delta=0)
+    executor = ThreadPoolExecutor(max_workers=1)   # job 2 queues behind job 1
+    h = handler.worker_class()(ring, [kv], block_size_bytes=1024, executor=executor)
+    copy_to_store = ring.copy_to_store
+
+    def slow_copy(entries):
+        now[0] += 0.25   # each transfer takes 0.25 s
+        return copy_to_store(entries)
+
+    ring.copy_to_store = slow_copy
+    for job_id in (1, 2):
+        src = GPULoadStoreSpec(block_ids=[job_id], group_sizes=[1], block_indices=[0])
+        dst = CertusLoadStoreSpec([BlockLocation(key=job_id)])
+        h.transfer_async(job_id=job_id, spec=(src, dst))
+    h.wait({1, 2})
+    now[0] += 10.0       # vLLM's next get_finished comes much later
+    results = sorted(h.get_finished(), key=lambda r: r.job_id)
+    assert [r.job_id for r in results] == [1, 2]
+    assert [r.transfer_time for r in results] == [0.25, 0.25]
+    executor.shutdown()
+
+
+# ── offload blocks larger than the GPU block (blocks_per_chunk > 1) ──
+
+
+def _chunk_worker(ring, blocks_per_chunk, regions=None):
+    from certus_shmq_connector.handler import worker_class
+
+    regions = regions or [
+        KvCacheIpc(handle_bytes=b"a" * 64, gpu_device_id=0, stride_bytes=100, base_delta=0),
+        KvCacheIpc(handle_bytes=b"b" * 64, gpu_device_id=0, stride_bytes=100, base_delta=7),
+    ]
+    executor = ThreadPoolExecutor(max_workers=1)
+    w = worker_class()(ring, regions, block_size_bytes=200, executor=executor,
+                       blocks_per_chunk=blocks_per_chunk)
+    return w, executor
+
+
+def _gpu_spec(block_ids, first_index=0):
+    from vllm.v1.kv_offload.mediums import GPULoadStoreSpec
+    return GPULoadStoreSpec(block_ids=block_ids, group_sizes=[len(block_ids)],
+                            block_indices=[first_index])
+
+
+def test_chunk_store_puts_each_keys_gpu_blocks_side_by_side():
+    ring = FakeRing()
+    w, ex = _chunk_worker(ring, blocks_per_chunk=3)
+    dst = CertusLoadStoreSpec([BlockLocation(key=10), BlockLocation(key=20)])
+    w.submit_store(1, _gpu_spec([5, 6, 7, 8, 9, 4]), dst)
+    w.wait({1})
+    (entries,) = _calls_of(ring, "copy_to_store")
+    assert [k for k, _ in entries] == [10, 20]
+    # key 10 = GPU blocks 5,6,7; key 20 = 8,9,4; each block's 2 regions in order.
+    want = {10: [5, 6, 7], 20: [8, 9, 4]}
+    for key, pieces in entries:
+        assert [(h[:1], off) for h, _, off, _ in pieces] == [
+            (hb, base + b * 100) for b in want[key] for hb, base in ((b"a", 0), (b"b", 7))
+        ]
+        assert sum(size for *_, size in pieces) == 3 * 200
+    ex.shutdown()
+
+
+def test_chunk_load_from_inside_a_chunk_sends_skipped_blocks_to_scratch(monkeypatch):
+    import certus_shmq_connector.handler as handler
+
+    scratch = KvCacheIpc(handle_bytes=b"s" * 64, gpu_device_id=0, stride_bytes=0, base_delta=0)
+    made = []
+    monkeypatch.setattr(handler, "scratch_ipc", lambda n, dev: made.append(n) or scratch)
+    ring = FakeRing()
+    w, ex = _chunk_worker(ring, blocks_per_chunk=4)
+    # The request's GPU blocks 6.. (block_indices 6): 6 % 4 = 2 skipped in key 30.
+    src = CertusLoadStoreSpec([BlockLocation(key=30), BlockLocation(key=40)])
+    w.submit_load(2, src, _gpu_spec([11, 12, 13, 14, 15, 16], first_index=6))
+    w.wait({2})
+    assert all(r.success for r in w.get_finished())
+    (entries,) = _calls_of(ring, "lookup")
+    k30, k40 = dict(entries)[30], dict(entries)[40]
+    # Whole slot covered: 4 blocks x 2 regions, the first 2 blocks into scratch.
+    assert len(k30) == 8 and sum(s for *_, s in k30) == 4 * 200
+    assert [h[:1] for h, *_ in k30] == [b"s"] * 4 + [b"a", b"b"] * 2
+    assert [off for _, _, off, _ in k30[4:]] == [1100, 1107, 1200, 1207]
+    assert [off for _, _, off, _ in k40] == [1300, 1307, 1400, 1407, 1500, 1507, 1600, 1607]
+    assert made == [100]     # one scratch buffer, the largest region's size
+    ex.shutdown()
+
+
+def test_chunk_load_last_key_may_be_short():
+    ring = FakeRing()
+    w, ex = _chunk_worker(ring, blocks_per_chunk=4)
+    src = CertusLoadStoreSpec([BlockLocation(key=30), BlockLocation(key=40)])
+    w.submit_load(3, src, _gpu_spec([1, 2, 3, 4, 5, 6]))
+    w.wait({3})
+    (entries,) = _calls_of(ring, "lookup")
+    assert [len(p) // 2 for _, p in entries] == [4, 2]
+    ex.shutdown()
+
+
+@pytest.mark.parametrize("blocks,keys,first", [(9, 2, 0), (2, 2, 0), (3, 1, 2)])
+def test_chunk_block_count_must_match_keys(blocks, keys, first):
+    from certus_shmq_connector.handler import _chunk_entries
+
+    regions = [KvCacheIpc(handle_bytes=b"a" * 64, gpu_device_id=0, stride_bytes=1, base_delta=0)]
+    with pytest.raises(AssertionError):
+        _chunk_entries(regions, list(range(blocks)), list(range(keys)), 4, first, None)
+
+
+def test_one_block_per_key_is_unchanged():
+    ring = FakeRing()
+    w, ex = _chunk_worker(ring, blocks_per_chunk=1)
+    dst = CertusLoadStoreSpec([BlockLocation(key=1), BlockLocation(key=2)])
+    w.submit_store(4, _gpu_spec([3, 7]), dst)
+    w.wait({4})
+    (entries,) = _calls_of(ring, "copy_to_store")
+    assert [[off for _, _, off, _ in p] for _, p in entries] == [[300, 307], [700, 707]]
+    ex.shutdown()

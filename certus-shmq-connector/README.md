@@ -28,6 +28,20 @@ vllm serve <model> --kv-transfer-config '{
 `slab_size_bytes` must be at least the KV bytes per block (2 MiB for Llama-3-8B at 16 tokens).
 Run vLLM with `--ipc=host` in a container, so it sees the host's `/dev/shm`.
 
+## Offloaded block size
+
+By default each Certus key holds one GPU block (16 tokens). `"block_size": 64` (or
+`"blocks_per_chunk": 4`) in `kv_connector_extra_config` makes each key hold 64 tokens: vLLM's
+4 GPU blocks for it are stored side by side in one slot, and the slot size scales with them.
+A request then needs 4x fewer keys, so 4x fewer lookups and slot reservations on vLLM's
+scheduler thread. On node4 (Qwen2.5-7B blocks, 477 MB per load, memory tier full), 64-token
+keys loaded at 21.6 GB/s against 16.9 GB/s, and cut the scheduler-thread connector time per
+load from 21 ms to 4.4 ms.
+
+vLLM can start a load inside a key (its first blocks are already on the GPU). The connector
+still reads the whole slot, and sends the blocks vLLM did not ask for to a small scratch GPU
+buffer. Needs vLLM 0.26 or newer; on older versions only the default is accepted.
+
 ## KV cache layout
 
 `CertusConnector` asks vLLM for the `BLHNC` layout. With it, each block's KV for all

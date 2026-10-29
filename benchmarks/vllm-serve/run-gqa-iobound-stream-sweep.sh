@@ -141,36 +141,30 @@ probe_server(){
   log "probe OK: $(grep -m1 -o 'memory-tier: initialized with [0-9]* MiB pool' "$plog")"
 }
 
-# gen-{gqa,mha}-iobound-report.py hardcode "32 GiB DRAM/CPU tier both arms"; record the real size.
-fix_report_header(){
-  /usr/bin/python3 - "$1" "$CPU_TIER_GB" <<'EOF'
-import sys
-p, gb = sys.argv[1], sys.argv[2]
-s = open(p).read()
-old = "32 GiB DRAM/CPU tier both arms"
-if old in s:
-    open(p, "w").write(s.replace(old, f"<b>{gb} GiB</b> DRAM/CPU tier both arms (Certus: certus-server-yaml "
-        "built against a private SPDK with DPDK RTE_MAX_MEM_MB_PER_LIST/PER_TYPE raised)"))
-EOF
-}
-
 # Cross-sweep summary from each report's results table.
 write_summary(){
   /usr/bin/python3 - "$SWEEP_DIR" $STREAMS <<'EOF'
 import html, os, re, sys
 sweep, streams = sys.argv[1], sys.argv[2:]
-cols = ["tokens/s", "req/s", "TTFT p50 (ms)", "TTFT p99 (ms)", "errored", "KV load (TiB)", "load time (s)", "ext hit %"]
+cols = ["offload block (tok)", "run (s)", "tokens/s", "req/s", "TTFT p50 (s)", "TTFT p99 (s)", "errored",
+        "vLLM queue mean (s)", "ext hit %", "computed %", "KV load (TiB)", "load GB/s, wall clock (busiest 5 min)", "SSD read into host memory (TiB)",
+        "SSD read not delivered to GPU, at least (TiB)", "summed load job time, SSD→GPU (s)"]
 rows = []
 for n in streams:
     p = os.path.join(sweep, f"{n}streams", "report.html")
     if not os.path.exists(p):
         rows.append([n, "(no report)"] + [""] * len(cols)); continue
-    t = re.search(r"<table[\s\S]*?</table>", open(p).read()).group(0)
-    trs = [[html.unescape(re.sub(r"<[^>]+>", "", c)).strip() for c in re.findall(r"<t[dh][^>]*>([\s\S]*?)</t[dh]>", tr)]
-           for tr in re.findall(r"<tr[\s\S]*?</tr>", t)]
-    hdr = trs[0]; ai = hdr.index("Arm")
-    for r in trs[1:]:
-        rows.append([n, r[ai]] + [r[hdr.index(c)] if c in hdr else "" for c in cols])
+    # The report has a results table and a KV I/O table, one row per arm in each;
+    # merge them by arm.
+    by_arm = {}
+    for t in re.findall(r"<table[\s\S]*?</table>", open(p).read()):
+        trs = [[html.unescape(re.sub(r"<[^>]+>", "", c)).strip() for c in re.findall(r"<t[dh][^>]*>([\s\S]*?)</t[dh]>", tr)]
+               for tr in re.findall(r"<tr[\s\S]*?</tr>", t)]
+        hdr = trs[0]; ai = hdr.index("Arm")
+        for r in trs[1:]:
+            by_arm.setdefault(r[ai], {}).update(zip(hdr, r))
+    for arm, vals in by_arm.items():
+        rows.append([n, arm] + [vals.get(c, "") for c in cols])
 head = ["streams", "arm"] + cols
 md = ["| " + " | ".join(head) + " |", "|" + "---|" * len(head)] + ["| " + " | ".join(r) + " |" for r in rows]
 open(os.path.join(sweep, "summary.md"), "w").write("\n".join(md) + "\n")
@@ -204,7 +198,6 @@ for n in $STREAMS; do
     "$MATRIX" >"${SWEEP_DIR}/matrix-${n}streams.log" 2>&1
   failed=$(ls -d "$dir"/*/FAILED 2>/dev/null | wc -l)
   if [[ -f "${dir}/report.html" ]]; then
-    fix_report_header "${dir}/report.html"
     log "${n} streams done -> ${dir}/report.html (${failed} failed arms)"
   else
     log "${n} streams: NO report (see ${SWEEP_DIR}/matrix-${n}streams.log)"
