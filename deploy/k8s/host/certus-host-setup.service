@@ -1,0 +1,19 @@
+[Unit]
+Description=Certus host setup: NVMe drives to vfio-pci, SPDK device permissions
+Documentation=file:///usr/local/sbin/certus-host-setup
+Documentation=https://github.com/AI-native-Systems-Research/ai-native-storage-certus/blob/unstable/deploy/k8s/README.md
+# Modules from /etc/modules-load.d/certus.conf are loaded, udev is probing,
+# and fstab's filesystems (with any LVM volumes and MD arrays under them) are
+# up, so the script can see what the host uses. kubelet starts after, so no
+# certus-server pod sees drives still on the kernel driver. A failure here does
+# not hold kubelet back.
+After=systemd-modules-load.service systemd-udevd.service local-fs.target
+Before=kubelet.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/certus-host-setup
+
+[Install]
+WantedBy=multi-user.target

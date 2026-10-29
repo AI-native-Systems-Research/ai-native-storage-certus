@@ -232,6 +232,7 @@ ib_umad
 ib_uverbs
 mlx5_ib
 vfio-pci
+nvidia-peermem
 ```
 
 **Why this is needed:** The NVIDIA Network Operator runs in "pre-installed OFED"
@@ -240,6 +241,50 @@ mode and does not manage driver loading. The RDMA device plugin enumerates
 zero RDMA capacity and certus pods can't be scheduled. Containers cannot
 trigger host-side modprobe. The `vfio-pci` module never auto-loads because no
 hardware matches it by default; SPDK explicitly binds NVMe devices to it.
+`nvidia-peermem` is needed on GPU nodes for GPUDirect RDMA (the `pd-certus-rdma`
+llm-d profile).
+
+`install-host-setup.sh` (section 2.7) writes this file if it is absent, and
+loads the modules immediately.
+
+### 2.7 Per-boot host setup
+
+The NVMe drives' binding to `vfio-pci`, and the permissions SPDK needs on
+`/dev/vfio` and `/dev/hugepages`, are lost on every reboot: after one, the
+drives are back on the kernel `nvme` driver and certus-server exits with
+`SPDK init failed: VFIO not available`. A systemd unit redoes them at boot,
+before kubelet starts. Install it once per node, from a checkout:
+
+```bash
+sudo deploy/k8s/host/install-host-setup.sh
+```
+
+This installs `/usr/local/sbin/certus-host-setup` and enables
+`certus-host-setup.service`, writes `/etc/modules-load.d/certus.conf` if
+absent (2.3) and `/etc/sysctl.d/90-certus.conf` (`net.core.rmem_max`), then
+runs the setup once.
+
+**Which drives it binds.** Every NVMe drive on the `nvme` driver, except one
+the host uses. A drive stays with the kernel when any of its namespaces or
+partitions:
+
+- is mounted, or is active swap (this covers the root filesystem);
+- is named, directly or underneath, by an `/etc/fstab` entry, mounted or not;
+- is held by another block device (an active LVM volume, an assembled MD
+  array, dm-crypt, multipath);
+- carries an LVM physical-volume or RAID-member signature, so a volume group or
+  array that is not active is still left alone.
+
+Preview the decisions without changing anything (no root needed):
+
+```bash
+deploy/k8s/host/certus-host-setup.sh --dry-run
+```
+
+Each drive's decision is logged at boot: `journalctl -b -u certus-host-setup`.
+To return a drive to the kernel, `sudo scripts/spdk-scripts/bind_vfio.sh reset
+<BDF>`; it is rebound at the next boot unless it now holds something on the
+list above.
 
 ### 2.4 Install NVIDIA GPU driver
 
