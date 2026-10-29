@@ -1,11 +1,12 @@
 ---
 spec_sync_component: block-device-spdk-nvme
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-25T09:19:59Z
-spec_sync_git_commit: 4e17bedb
-spec_sync_inputs_sha256: e08956c83c9597e4b4977a0eebe415cabc41462af00191ab565d9dbed51db1f7
+spec_sync_synced_at: 2026-10-29T23:34:02Z
+spec_sync_git_commit: 1de9052f9
+spec_sync_inputs_sha256: 220f47c2d6cb9995f77e5305b31a7f30673627a64d028e9ca362c25743d3f157
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-29 (branch `fix/dispatcher-remove-ssd-extent`, merged with unstable `e35618b2`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (the `IDispatcher::check` doc gains an `# Errors` section, B-17 of the dispatcher sync). No analysis below changes.
 > **Re-stamp 2026-10-25 (branch `001-rdma-cache-transfer`, rebased onto unstable `a905f89b`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (`IDispatcher::clear_all`) and the rebase brought unstable's changes. No analysis below changes.
 
 > **Re-stamp 2026-10-23 (test-compile fixes, on top of `a70da5cc`).** Test-only fix: the `#[cfg(feature = "telemetry")]` unit tests in `src/telemetry.rs` (`stats_record_single_op`, `stats_record_multiple_ops`) still called `TelemetryStats::record` with two arguments after the per-direction counters added `is_read`. They now pass `true` (read). Production code and every FR are unchanged; `cargo test -p block-device-spdk-nvme --features telemetry` passes. The cited `telemetry.rs:150` (`read_write_stats`) is unchanged. Status stays `clean`.

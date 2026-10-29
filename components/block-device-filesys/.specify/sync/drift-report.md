@@ -1,11 +1,12 @@
 ---
 spec_sync_component: block-device-filesys
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-25T09:19:59Z
-spec_sync_git_commit: 4e17bedb
-spec_sync_inputs_sha256: 21685d3aa21a31b452d5071e495e55f9adc3658b40a4058f8b1efee409fe20e3
+spec_sync_synced_at: 2026-10-29T23:34:02Z
+spec_sync_git_commit: 1de9052f9
+spec_sync_inputs_sha256: 91a2568874cfd15e2cd0eba0d85b6087439b8d18b39c2b36c770bf16ee87db0f
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-29 (branch `fix/dispatcher-remove-ssd-extent`, merged with unstable `e35618b2`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (the `IDispatcher::check` doc gains an `# Errors` section, B-17 of the dispatcher sync). No analysis below changes.
 > **Re-stamp 2026-10-25 (branch `001-rdma-cache-transfer`, rebased onto unstable `a905f89b`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (`IDispatcher::clear_all`) and the rebase brought unstable's changes. No analysis below changes.
 
 > **Re-stamp 2026-10-23 (branch `unstable`, commit `d7a24d58` "Fix workspace build warnings" plus the spec-sync follow-up).** That commit only fixed warnings under the workspace lint posture: it added `Debug` impls, narrowed unreachable `pub` items to `pub(crate)`, wrapped `unsafe fn` bodies in explicit `unsafe {}` blocks, and the follow-up ran `rustfmt`. It also touched `components/interfaces` (a `Debug` impl for `Command`), which changes every component's digest. This component's own `src/` was in that commit. Every changed item was checked: none is part of a provided interface, none is named as public by the spec, and no behaviour changed. `FilesysHandler` became `pub(crate)` (it lives in the private `actor` module). Spec citations updated for the io_uring submission-queue-full paths: `src/actor.rs:468-480`→`:492-504` and `:588-601`→`:612-625`. All citations were re-verified by diff-mapping each base line to its new position. Status stays `clean`.

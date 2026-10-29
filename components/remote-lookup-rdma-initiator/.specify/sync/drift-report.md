@@ -1,11 +1,12 @@
 ---
 spec_sync_component: remote-lookup-rdma-initiator
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-25T09:19:59Z
-spec_sync_git_commit: 4e17bedb
-spec_sync_inputs_sha256: d54a39e7f4acd3c5c0025d78046eaae6cb73fefebd9a9f349c2a763b0d5e28f3
+spec_sync_synced_at: 2026-10-29T23:35:11Z
+spec_sync_git_commit: 1de9052f9
+spec_sync_inputs_sha256: bf7bdfb5bdcd3cc1f64a2cebca003dd4cf8c55d8a1727182b1b7c143db33ff94
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-29 (branch `fix/dispatcher-remove-ssd-extent`, merged with unstable `e35618b2`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (the `IDispatcher::check` doc gains an `# Errors` section, B-17 of the dispatcher sync). No analysis below changes.
 > **Re-stamp 2026-10-25 (branch `001-rdma-cache-transfer`, rebased onto unstable `a905f89b`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (`IDispatcher::clear_all`) and the rebase brought unstable's changes. No analysis below changes.
 
 > **Re-stamp 2026-10-23 (branch `unstable`, commit `d7a24d58` "Fix workspace build warnings" plus the spec-sync follow-up).** That commit only fixed warnings under the workspace lint posture: it added `Debug` impls, narrowed unreachable `pub` items to `pub(crate)`, wrapped `unsafe fn` bodies in explicit `unsafe {}` blocks, and the follow-up ran `rustfmt`. It also touched `components/interfaces` (a `Debug` impl for `Command`), which changes every component's digest. This component's own `src/` was in that commit. Every changed item was checked: none is part of a provided interface, none is named as public by the spec, and no behaviour changed. Spec citation updated: telemetry call sites `connection.rs:1025,968,1064,380`→`:1032,975,1071,381`. All citations were re-verified by diff-mapping each base line to its new position. Status stays `clean`.

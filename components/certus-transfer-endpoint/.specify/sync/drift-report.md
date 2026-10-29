@@ -1,11 +1,12 @@
 ---
 spec_sync_component: certus-transfer-endpoint
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-27T08:31:29Z
-spec_sync_git_commit: aef6f26d
-spec_sync_inputs_sha256: 78dcd5f02281a5c901209a36ae9be49c07a0592defd9afdc1761dabfa157695b
+spec_sync_synced_at: 2026-10-29T23:34:02Z
+spec_sync_git_commit: 1de9052f9
+spec_sync_inputs_sha256: b5806c964ea0a91446cfab9adb413139e8f4b3698c3dd31fd92a69cab92ba393
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-29 (branch `fix/dispatcher-remove-ssd-extent`, merged with unstable `e35618b2`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (the `IDispatcher::check` doc gains an `# Errors` section, B-17 of the dispatcher sync). No analysis below changes.
 > **Re-stamp 2026-10-27 (specs only).** `channel-reclaim.md`: pins belong to the channel lease -- per-channel pin record, strict UNPIN, UNPIN-all on claim and release (closing the dead-client pin leak and its takeover corner case); the change is in `lib/shmq-dispatcher` and the connector. No source or FR change in this component.
 > **Re-stamp 2026-10-27 (specs only).** `channel-reclaim.md`: the generation-bump gap closed (fresh generation per server start, orphaned clients fail fast with the reason, still ABI 2), recorded as a new section; the change is in `lib/shm-queue` and the connector. No source or FR change in this component.
 > **Re-stamp 2026-10-26 (specs only).** Reporting certus as `CPU` described as accurate (its first tier is host DRAM), with what it misses (demotion to SSD is not evented) and the constraint (never alongside vLLM's own CPU tier); wording aligned in `peer-selection.md` and `upstream-pullable-tiers.md`. No source change in this component.
