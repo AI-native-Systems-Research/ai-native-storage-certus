@@ -21,7 +21,11 @@ import os
 import re
 import sys
 
-import matplotlib
+try:
+    import matplotlib
+except ImportError:
+    sys.exit(f"{os.path.basename(__file__)}: needs matplotlib for {sys.executable}: "
+             f"{sys.executable} -m pip install --user matplotlib numpy")
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
