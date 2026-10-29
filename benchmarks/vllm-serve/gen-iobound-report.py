@@ -182,7 +182,7 @@ def parse_metrics(path):
             "ttft_s": mean("time_to_first_token_seconds")}
 
 
-def timeline_png(rows, title, computed_pct=None):
+def timeline_png(rows, title, computed_pct=None, tier_read_s=0.0):
     """Prompt tokens/s by source (GPU-computed vs GPU prefix-cache hit vs offload-
     tier hit) above KV load/store IO device-seconds per wall-second, from the
     poll-kv-metrics.sh rows. The token split comes from vLLM's
@@ -226,8 +226,10 @@ def timeline_png(rows, title, computed_pct=None):
         ax.stackplot(t, comp, lhit, ehit,
                      labels=["GPU-computed (recompute)", "GPU prefix-cache hit", "offload-tier hit (KV load)"],
                      colors=["#4C78A8", "#54A24B", "#F58518"], alpha=0.85)
+        # The title uses the full-run /metrics snapshot's computed % (the table's) when
+        # given; the poller's own split only when it is not (it misses scrapes).
         tot = sum(comp) + sum(lhit) + sum(ehit)
-        if tot:
+        if tot and computed_pct is None:
             computed_pct = 100 * sum(comp) / tot
     else:
         ax.plot(t, ptok, color="#4C78A8", label="prompt tokens (source split not in this kvio.csv)")
@@ -243,7 +245,11 @@ def timeline_png(rows, title, computed_pct=None):
         io_labels.insert(0, "SSD→CPU tier read (cputier)")
         io_colors.insert(0, "#9D755D")
     ax2.stackplot(t, *io_series, labels=io_labels, colors=io_colors, alpha=0.85)
-    ax2.set_xlabel("wall time (s)")
+    xlabel = "wall time (s)"
+    if tier_read_s and not has_tier:
+        xlabel += (f"\nnot plotted: {tier_read_s:,.0f} s of SSD→CPU tier reads "
+                   "(older kvio.csv; in the KV I/O table)")
+    ax2.set_xlabel(xlabel)
     ax2.set_ylabel("device-s / wall-s")
     ax2.legend(loc="upper right", fontsize=8, ncol=len(io_series))
     ax2.grid(True, alpha=0.3)
@@ -509,7 +515,8 @@ def main():
                "load GB/s, wall clock (busiest 5 min)", "loads from SSD %",
                "load time as reported (s)", "SSD→CPU tier read (TiB)", "tier read time (s)",
                "load + tier read time (s)", "load GB/s per job (summed job time)"]
-    io_cols += ["KV store (TiB)", "store GB/s, wall clock (busiest 5 min)",
+    io_cols += ["KV store (TiB)", "store GB/s, wall clock (run)",
+                "store GB/s, wall clock (busiest 5 min)",
                 "store GB/s per job (summed job time)",
                 "CPU→SSD tier write (TiB)", "tier write time (s)"]
     res_rows, io_rows = [], []
@@ -536,20 +543,27 @@ def main():
                         else f"SSD read {ratio:.1f}× the bytes loaded")
         else:
             ssd_cell = "—"
+        # Certus has no separate tier step (its load reads SSD itself; it writes SSD in
+        # the background); a cputier arm without an SSD tier reads and writes none.
+        certus = d["key"].startswith("certus")
+        no_tier_read = "n/a (in load)" if certus else "0"
+        no_tier_write = "n/a (background)" if certus else "0"
         row = [
             d["label"], fmt(kv["load_bytes"] / TIB, 2),
             fmt(d["wall_gbs"], 1), fmt(d["peak_gbs"], 1),
             ssd_cell,
             fmt(lt, 0),
-            fmt(d["tier_read_b"] / TIB, 2) if tr else "—", fmt(tr, 0) if tr else "—",
+            fmt(d["tier_read_b"] / TIB, 2) if tr else no_tier_read,
+            fmt(tr, 0) if tr else no_tier_read,
             fmt(lt + tr, 0),
             # Per job: bytes over summed SSD-to-GPU job time; jobs overlap.
             fmt(kv["load_bytes"] / GIB / (lt + tr), 1) if lt + tr else "—",
         ]
         st, tw = kv["store_time_s"], d["tier_write_s"]
-        row += [fmt(kv["store_bytes"] / TIB, 2), fmt(d["st_peak_gbs"], 1),
+        row += [fmt(kv["store_bytes"] / TIB, 2), fmt(d["st_wall_gbs"], 1), fmt(d["st_peak_gbs"], 1),
                 fmt(kv["store_bytes"] / GIB / st, 1) if st else "—",
-                fmt(d["tier_write_b"] / TIB, 2) if tw else "—", fmt(tw, 0) if tw else "—"]
+                fmt(d["tier_write_b"] / TIB, 2) if tw else no_tier_write,
+                fmt(tw, 0) if tw else no_tier_write]
         io_rows.append(row)
     missing = [d["label"] for d in data if not d["present"]]
     missing_note = (f'<p class="note">Not run: {", ".join(missing)}.</p>' if missing else "")
@@ -565,7 +579,7 @@ def main():
     tl = []
     for d in data:
         if d["present"] and d["k"] and d["k"].get("rows"):
-            png = timeline_png(d["k"]["rows"], d["label"], d["computed"])
+            png = timeline_png(d["k"]["rows"], d["label"], d["computed"], d["tier_read_s"])
             if png:
                 tl.append(f'<figure><img src="data:image/png;base64,{png}"/></figure>')
     timeline_html = ""
