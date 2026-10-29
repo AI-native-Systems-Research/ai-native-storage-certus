@@ -47,7 +47,9 @@ Source: `.specify/sync/proposals.json` / `proposals.md` (analysis run 2026-10-18
 an ALIGN task only: record in align-tasks.md, no code change in this PR"*. **No code was
 changed.** Line numbers refer to HEAD `4f8b5554b`.
 
-## Task: Align 002-served-by-tier-attribution/US1 AS3 + FR-009 (A-01, OPEN, major)
+## Task: Align 002-served-by-tier-attribution/US1 AS3 + FR-009 (A-01, CLOSED 2026-10-28, major)
+
+> Closed by commit `55d1d1bc9` (root cause #7, J28 repair, acceptance check PASS). Test: `src/repair_test_sync_failure_error.rs` asserts `ServedBy::Error`, `!is_ok()`, `lookup_hits_dram == 0` and `promotions_to_gpu == 0` after a failed warm stream sync.
 
 **Spec Requirement**: 002 US1 AS3 / FR-009. When the batched GPU sync fails, every key whose copy was in flight is attributed `ERROR`, and none is reported as a hit (002 spec.md:303-305, 430-434).
 **Current Code**: a failed warm `stream_synchronize` is only logged. The warm results stay `Ok` with tier `Dram`, so they are counted as hits and sent as wire byte 1 (`src/lib.rs:2750-2755`).
@@ -56,8 +58,8 @@ changed.** Line numbers refer to HEAD `4f8b5554b`.
 **Estimated Effort**: small
 
 ### Acceptance Criteria
-- [ ] A test using `PinProbe::failing_sync` on warm keys asserts `ServedBy::Error` and `!result.is_ok()`.
-- [ ] Warm keys whose sync failed are not counted in `promotions_to_gpu` / `lookup_hits_dram`.
+- [x] A test on warm keys with a failing sync asserts `ServedBy::Error` and `!result.is_ok()`.
+- [x] Warm keys whose sync failed are not counted in `promotions_to_gpu` / `lookup_hits_dram`.
 
 ## Task: Align 001-dispatcher-cache-interface/FR-051 + FR-036: `batch_lookup` cold pin (A-02, OPEN, major)
 
@@ -298,9 +300,11 @@ were approved and applied to `specs/**` (see `apply-report.md`). A-11 and A-12 a
 
 ## Open items from this run (tracked, not approved for code)
 
-### OPEN A-11 — Align 001 FR-013 (+ FR-018, FR-009 as amended by B-12): the SSD evictor must not release a read reference it never took (moderate; MEDIUM confidence; pre-existing)
+### CLOSED 2026-10-28 A-11 — Align 001 FR-013 (+ FR-018, FR-009 as amended by B-12): the SSD evictor must not release a read reference it never took (moderate; MEDIUM confidence; pre-existing)
 
 > Approval note: *"TRACK (Cornel 2026-10-24): code change for a later repair with a test first; not in this PR."*
+
+> Closed by commit `f43f4833d` (J28c repair, acceptance check PASS: 122 tests x5, 112 proved, 0 lost). `get_evictable_offset` no longer releases in its catch-all arm. Test `src/repair_test_evictor_no_foreign_pin_release.rs` fails on the old code and passes on the fix.
 
 - **Spec**: 001 FR-013 (read/write locking for thread safety), FR-018 (a job reading the
   DRAM slot finishes; `remove` must not free the slot itself), FR-009 as amended by B-12
