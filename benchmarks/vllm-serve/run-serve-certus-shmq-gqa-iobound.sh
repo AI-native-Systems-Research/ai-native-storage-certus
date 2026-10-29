@@ -50,7 +50,7 @@
 #   GPU=all ./run-serve-certus-shmq-gqa-iobound.sh         # expose both GPUs (default pins GPU 0)
 #   KV_CACHE_BYTES=4G ./run-serve-certus-shmq-gqa-iobound.sh    # cap GPU KV to force spill even at 56 KiB/tok
 #   CPU_TIER_GB=8 ./run-serve-certus-shmq-gqa-iobound.sh   # smaller DRAM tier -> push the ~28 GiB WS to SSD
-#   OFFLOAD_BLOCK_SIZE= ./run-serve-certus-shmq-gqa-iobound.sh  # offload at the GPU block size (16)
+#   OFFLOAD_BLOCK_SIZE=64 ./run-serve-certus-shmq-gqa-iobound.sh  # 64-token offloaded keys (4 GPU blocks each)
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -63,7 +63,7 @@ GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.9}"
 # No KV cap by default: ~20G/util pool >> ~1.75G one-sequence floor at 32768, and any
 # I/O is driven by oversubscription, not a cap. KV_CACHE_BYTES=4G to cap and spill more.
 KV_CACHE_BYTES="${KV_CACHE_BYTES-}"
-OFFLOAD_BLOCK_SIZE="${OFFLOAD_BLOCK_SIZE-}"          # must stay empty: the connector offloads one GPU block per key
+OFFLOAD_BLOCK_SIZE="${OFFLOAD_BLOCK_SIZE-}"          # tokens per offloaded key; empty = the GPU block (16)
 # Pin vLLM 0.30 to match the cputier arm (run-serve-cputier-gqa-iobound.sh) for a
 # same-version A/B. This is also the base default, set explicitly here for parity.
 IMAGE="${IMAGE:-localhost/certus-shmq-connector:vllm0.30.0}"

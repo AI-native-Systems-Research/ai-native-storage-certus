@@ -2701,7 +2701,9 @@ def main():
         extra["requests_per_step"] = args.requests_per_step
         extra["num_sessions"] = args.num_sessions
         extra["prefix_sharing"] = args.prefix_sharing
-    elif mode == "pattern":
+    is_private = (mode == "scheduler-step" and args.prefix_sharing == "private")
+    extra["prefix_shared_pools"] = 0 if is_private else 1
+    if mode == "pattern":
         extra["pattern"] = args.pattern
 
     # ── CSV output ──
@@ -2732,7 +2734,8 @@ def main():
 
     # ── structured output (--output) ──
     if args.output and all_results:
-        out_data = _results_to_structured(all_results, extra)
+        yaml_params = {k: v for k, v in extra.items() if k not in ("gpu", "gpus")}
+        out_data = _results_to_structured(all_results, yaml_params)
         for output_path in args.output:
             write_output(output_path, out_data)
             print(f"Results written to {output_path}")

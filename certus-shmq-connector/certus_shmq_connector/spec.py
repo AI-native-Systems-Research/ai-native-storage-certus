@@ -187,18 +187,21 @@ class CertusShmqOffloadingSpec(OffloadingSpec):
             # kv_cache_layout is a 0.30+ OffloadingConfig field; absent here.
             self._kv_cache_layout = None
 
-        # The worker pairs GPU block i with key i, so one key must cover exactly one
-        # GPU block. Chunked offload (block_size / blocks_per_chunk > 1) would
-        # silently truncate the transfer and corrupt KV — refuse it.
-        chunk_factor = getattr(self, "blocks_per_chunk", None)
-        if chunk_factor is None:
-            chunk_factor = getattr(self, "block_size_factor", 1)
-        if chunk_factor != 1:
+        # GPU blocks per offloaded key, from vLLM's config ('block_size' /
+        # 'blocks_per_chunk' in kv_connector_extra_config; 1 when unset). Each key
+        # is one slot holding that many GPU blocks side by side.
+        chunk = getattr(self, "blocks_per_chunk", None)
+        if chunk is None:
+            chunk = getattr(self, "block_size_factor", 1)
+        self._blocks_per_chunk = int(chunk)
+        if self._blocks_per_chunk < 1:
+            raise ValueError(f"blocks_per_chunk must be >= 1, got {self._blocks_per_chunk}")
+        if self._blocks_per_chunk > 1 and not CAPS.spec_config_object:
+            # Before 0.26 the GPU spec carries no block_indices, so a load that starts
+            # inside a chunk cannot be placed.
             raise ValueError(
-                f"Certus shmq connector offloads exactly one GPU block per key; "
-                f"got {chunk_factor} GPU blocks per offload chunk. Unset "
-                f"'block_size' / 'blocks_per_chunk' in kv_connector_extra_config "
-                f"(OFFLOAD_BLOCK_SIZE)."
+                "Certus shmq connector supports offload blocks larger than the GPU "
+                "block only on vLLM >= 0.26; unset 'block_size' / 'blocks_per_chunk'."
             )
 
         self._shm_path = str(self.extra_config.get("shm_path", "/dev/shm/certus-shmq"))
@@ -241,7 +244,11 @@ class CertusShmqOffloadingSpec(OffloadingSpec):
             # size, which is a safe upper bound (Reserve size only needs to be
             # >= the copy size). get_handlers() corrects the manager once the
             # stride is known.
-            size = self._block_bytes if self._block_bytes is not None else self._slab_size_bytes
+            size = (
+                self._block_bytes * self._blocks_per_chunk
+                if self._block_bytes is not None
+                else self._slab_size_bytes
+            )
             # Scheduler role → this replica's base channel slot. The manager
             # mirrors what all W workers physically store, so it operates over
             # every per-rank key.
@@ -305,9 +312,10 @@ class CertusShmqOffloadingSpec(OffloadingSpec):
             # If a manager exists in this instance, keep its Reserve size in sync
             # with the copy size (belt-and-suspenders; the scheduler-role instance
             # already sized itself from the config in __init__).
-            self._manager.set_block_size_bytes(block_bytes)
+            self._manager.set_block_size_bytes(block_bytes * self._blocks_per_chunk)
         print(
             f"[certus-shmq] KV {len(kv_regions)} region(s) block_bytes={block_bytes} "
+            f"blocks_per_chunk={self._blocks_per_chunk} "
             f"slab_size_bytes={self._slab_size_bytes} "
             f"device={kv_regions[0].gpu_device_id} "
             f"tp_rank={rank}/{self._world_size} "
@@ -318,6 +326,7 @@ class CertusShmqOffloadingSpec(OffloadingSpec):
         self._worker = worker_class()(
             ring, kv_regions, block_bytes, executor,
             rank=rank, world_size=self._world_size,
+            blocks_per_chunk=self._blocks_per_chunk,
         )
         return self._worker
 
