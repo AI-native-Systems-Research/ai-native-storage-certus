@@ -5,7 +5,7 @@
 
 ## Summary
 
-The `interfaces` crate is fully implemented and serves as the centralized definition point for all Certus component interface traits. It defines 15 interface traits, 26+ supporting types, and uses feature gates (`spdk`, `gpu`) to allow builds without hardware dependencies. This plan documents the existing architecture for maintenance and evolution purposes.
+The `interfaces` crate is fully implemented and serves as the centralized definition point for all Certus component interface traits. It defines 20 `define_interface!` interface traits (178 methods), their supporting types, and feature gates (`spdk`, `integrity-check`, `gpu`) that allow builds without hardware dependencies. This plan documents the existing architecture for maintenance and evolution purposes.
 
 ## Technical Context
 
@@ -13,46 +13,56 @@ The `interfaces` crate is fully implemented and serves as the centralized defini
 
 ```
 components/interfaces/
-  Cargo.toml           # Features: default=[], spdk=["dep:spdk-sys"], gpu=[]
+  Cargo.toml           # Features: default=[], integrity-check=[], spdk=["dep:spdk-sys"], gpu=[]
   src/
-    lib.rs             # Module declarations, conditional compilation, re-exports
-    igreeter.rs        # IGreeter trait (1 method)
-    ilogger.rs         # ILogger trait (4 methods)
-    ispdk_env.rs       # ISPDKEnv trait (5 methods, spdk-gated)
-    iblock_device.rs   # IBlockDevice (10 methods), IBlockDeviceAdmin (6 methods), + types
-    ieviction_policy.rs # IEvictionPolicy trait (9 methods)
-    idispatch_map.rs   # IDispatchMap trait (16 methods, spdk-gated), + types
-    idispatcher.rs     # IDispatcher trait (16 methods, spdk-gated), + types
-    imemory_tier.rs    # IMemoryTier trait (16 methods, spdk-gated)
-    iextent_manager.rs # IExtentManager trait (14 methods, spdk-gated), + types
-    igpu_services.rs   # IGpuServices trait (22 methods), + types
-    iremote_lookup.rs  # IRemoteLookup trait (5 methods)
-    iremote_request_handler.rs # IRemoteRequestHandler trait (4 methods), + types
-    iextended_metadata_store.rs # IExtendedMetadataStore trait (5 methods)
-    ipartition_table.rs # IPartitionTable trait (4 methods), + types
-    spdk_types.rs      # DmaBuffer, PciAddress, PciId, VfioDevice, error types
+    lib.rs                           # Module declarations, conditional compilation, re-exports
+    igreeter.rs                      # IGreeter (1 method)
+    ilogger.rs                       # ILogger (4 methods)
+    ispdk_env.rs                     # ISPDKEnv (5 methods); module spdk-gated
+    iblock_device.rs                 # IBlockDevice (11), IBlockDeviceAdmin (6), + types; module spdk-gated
+    ieviction_policy.rs              # IEvictionPolicy (9 methods), + types
+    idispatch_map.rs                 # IDispatchMap (20 methods, 2 of them integrity-check-gated), + types
+    idispatcher.rs                   # IDispatcher (24 methods, trait spdk-gated), + ungated types
+    imemory_tier.rs                  # IMemoryTier (21 methods), + bounce-reserve types
+    iextent_manager.rs               # IExtentManager (14 methods, trait spdk-gated), + ungated types
+    igpu_services.rs                 # IGpuServices (24 methods, 10 of them spdk-gated), + types
+    iremote_lookup.rs                # IRemoteLookup (5 methods), + types
+    iremote_lookup_rdma_initiator.rs # IRemoteLookupRdmaInitiator (6 methods), + RemoteRegion, PushStatus
+    iremote_lookup_rdma_responder.rs # IRemoteLookupRdmaResponder (3), IRemoteLookupRdmaResponderAdmin (5), + types
+    itransfer_endpoint.rs            # ITransferEndpoint (6), ITransferEndpointAdmin (3), + types
+    izyre.rs                         # IZyre (2 methods), + the plain IZyreNode trait and types
+    iextended_metadata_store.rs      # IExtendedMetadataStore (5 methods), + error type
+    ipartition_table.rs              # IPartitionTable (4 methods, trait spdk-gated), + ungated types
+    spdk_types.rs                    # DmaBuffer, PciAddress, PciId, VfioDevice, error types; spdk-gated
 ```
 
 ### Interface Count
+
+Counted from the `define_interface!` blocks in `src/`. `IZyreNode` is a plain trait, not a component interface, and is not counted.
 
 | Interface | Methods | Feature Gate |
 |-----------|---------|--------------|
 | IGreeter | 1 | none |
 | ILogger | 4 | none |
 | ISPDKEnv | 5 | spdk |
-| IBlockDevice | 10 | spdk |
+| IBlockDevice | 11 | spdk |
 | IBlockDeviceAdmin | 6 | spdk |
 | IEvictionPolicy | 9 | none |
-| IDispatchMap | 16 | spdk |
-| IDispatcher | 16 | spdk |
-| IMemoryTier | 16 | spdk |
+| IDispatchMap | 20 | none (`set_checksum`/`get_checksum`: integrity-check) |
+| IDispatcher | 24 | spdk |
+| IMemoryTier | 21 | none |
 | IExtentManager | 14 | spdk |
-| IGpuServices | 22 | none (some methods spdk-gated) |
+| IGpuServices | 24 | none (10 DMA methods spdk-gated) |
 | IRemoteLookup | 5 | none |
-| IRemoteRequestHandler | 4 | none |
+| IRemoteLookupRdmaInitiator | 6 | none |
+| IRemoteLookupRdmaResponder | 3 | none |
+| IRemoteLookupRdmaResponderAdmin | 5 | none |
+| ITransferEndpoint | 6 | none |
+| ITransferEndpointAdmin | 3 | none |
+| IZyre | 2 | none |
 | IExtendedMetadataStore | 5 | none |
 | IPartitionTable | 4 | spdk |
-| **Total** | **135** | |
+| **Total** | **178** | |
 
 ## Architecture
 
@@ -79,8 +89,8 @@ implementations (block-device-spdk-nvme, dispatcher, etc.)
 ### Conditional Compilation Strategy
 
 - Module-level `#[cfg(feature = "spdk")]` for entire files (`ispdk_env.rs`, `spdk_types.rs`, `iblock_device.rs`).
-- Item-level `#[cfg(feature = "spdk")]` for individual re-exports in `lib.rs`.
-- Method-level `#[cfg(feature = "spdk")]` within `IGpuServices` for DMA operations requiring `DmaBuffer`.
+- Item-level `#[cfg(feature = "spdk")]` on the `IDispatcher`, `IExtentManager` and `IPartitionTable` traits and their re-exports in `lib.rs`; their supporting types stay ungated.
+- Method-level `#[cfg(feature = "spdk")]` within `IGpuServices` for DMA operations requiring `DmaBuffer`, and `#[cfg(feature = "integrity-check")]` on `IDispatchMap::set_checksum`/`get_checksum`.
 
 ## Dependencies
 
@@ -99,7 +109,8 @@ implementations (block-device-spdk-nvme, dispatcher, etc.)
 - Unit tests in `ieviction_policy.rs`: EvictionHandle accessors, EvictionPolicyError display.
 - Unit tests in `imemory_tier.rs`: MemoryTierError display variants.
 - Unit tests in `iremote_lookup.rs`: RemoteLookupError display.
-- Unit tests in `iremote_request_handler.rs`: Error display variants, LookupRef Send+Sync bounds.
+- Unit tests in `iremote_lookup_rdma_initiator.rs` (error display, PushStatus, RemoteRegion) and `izyre.rs` (ZyreError display, PeerId, ZyreEvent).
+- Doctests on the public types and traits, including `itransfer_endpoint.rs` and the bounce-reserve types in `imemory_tier.rs`.
 
 ### Test Command
 

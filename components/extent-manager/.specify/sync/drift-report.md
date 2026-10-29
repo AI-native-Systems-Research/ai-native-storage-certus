@@ -1,11 +1,13 @@
 ---
 spec_sync_component: extent-manager
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-23T18:00:34Z
-spec_sync_git_commit: d7a24d58
-spec_sync_inputs_sha256: 83b72e2fad73054583019d0aeec370c220c26f64cf3912ff8a10712ee3c634fe
+spec_sync_synced_at: 2026-10-25T09:19:59Z
+spec_sync_git_commit: 4e17bedb
+spec_sync_inputs_sha256: d0d893a0dd349c35f0ca82285ac67028b4fc58e136628223728e99bdef125c5c
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-25 (branch `001-rdma-cache-transfer`, rebased onto unstable `a905f89b`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (`IDispatcher::clear_all`) and the rebase brought unstable's changes. No analysis below changes.
+
 > **Re-stamp 2026-10-23 (branch `unstable`, commit `d7a24d58` "Fix workspace build warnings" plus the spec-sync follow-up).** That commit only fixed warnings under the workspace lint posture: it added `Debug` impls, narrowed unreachable `pub` items to `pub(crate)`, wrapped `unsafe fn` bodies in explicit `unsafe {}` blocks, and the follow-up ran `rustfmt`. It also touched `components/interfaces` (a `Debug` impl for `Command`), which changes every component's digest. This component's own `src/` was in that commit. Every changed item was checked: none is part of a provided interface, none is named as public by the spec, and no behaviour changed. `Superblock` and `Superblock::deserialize` had been made `pub(crate)`, which broke `tests/checkpoint.rs:246` (`corrupt_active_falls_back_to_previous`, the spec's Independent Test for dual-copy fallback). Restored to `pub` with `#[allow(unreachable_pub, reason = ...)]`; the module itself is only `pub` under `cfg(any(test, feature = "testing"))` (`src/lib.rs:11-14`), so production visibility is unchanged. The test now passes (12/12 in `tests/checkpoint.rs`). The testing-only `BlockDeviceClient::new` constructor was removed by the commit; nothing called it. Spec citations updated: `block_io.rs:168`→`:157`, `iblock_device.rs:501`→`:509`, `test_support.rs:55-78`→`:57-80`. All citations were re-verified by diff-mapping each base line to its new position. Status stays `clean`.
 
 > **Re-stamp 2026-10-21 (transitive, `components/interfaces` changed on branch `fix/dispatcher-remove-clear-mt`).** Only `components/interfaces` changed for this component: `IDispatcher` doc comments (`flush_to_ssd` errors, `clear_memory_tier`, `batch_lookup`) and the interfaces spec (FR-008, FR-009, FR-017, FR-018, FR-018a, FR-021, FR-023, Overview, NFR-002, Implementation Notes; text only, no type or signature changed). This component uses some of the named items (7 files), but no type, signature or behaviour of them changed. This component's last full sync below stands; no re-analysis was needed.

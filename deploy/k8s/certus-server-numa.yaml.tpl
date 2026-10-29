@@ -73,7 +73,15 @@ spec:
       hostIPC: true
       initContainers:
       - name: discover-drives
-        image: busybox:latest
+        # Pinned by digest (BusyBox 1.38.0; a multi-arch index), not :latest:
+        # a :latest image defaults to imagePullPolicy Always, so every pod start
+        # asked Docker Hub, and its anonymous rate limit (429) stalled a
+        # rollout. IfNotPresent is set explicitly, not left to the default: a
+        # DaemonSet created with :latest stores the defaulted Always, and apply
+        # keeps it. Now a node pulls the image once.
+        # It only reads /sys and writes a file, so the version barely matters.
+        image: busybox@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e
+        imagePullPolicy: IfNotPresent
         command: ["/bin/sh", "-c"]
         args:
         - |
@@ -191,6 +199,11 @@ spec:
         # must differ. Same ports the host-mode servers used.
         - name: CERTUS_METRICS_PORT
           value: "9400"
+        # The transfer endpoint's port (full-transfer images; ignored by others).
+        # hostNetwork: the two instances share the node's address, so this
+        # differs too. A peer names this instance "<node RoCE IP>:7481".
+        - name: CERTUS_RDMA_PORT
+          value: "7481"
         - name: CERTUS_NUMA_ID
           value: "0"
         # Resolved from the certus-config ConfigMap, not from this spec -- see the
@@ -301,7 +314,9 @@ spec:
       hostIPC: true
       initContainers:
       - name: discover-drives
-        image: busybox:latest
+        # Pinned by digest: see the NUMA-0 DaemonSet above.
+        image: busybox@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e
+        imagePullPolicy: IfNotPresent
         command: ["/bin/sh", "-c"]
         args:
         - |
@@ -419,6 +434,11 @@ spec:
         # must differ. Same ports the host-mode servers used.
         - name: CERTUS_METRICS_PORT
           value: "9401"
+        # The transfer endpoint's port (full-transfer images; ignored by others).
+        # hostNetwork: the two instances share the node's address, so this
+        # differs too. A peer names this instance "<node RoCE IP>:7482".
+        - name: CERTUS_RDMA_PORT
+          value: "7482"
         - name: CERTUS_NUMA_ID
           value: "1"
         # Resolved from the certus-config ConfigMap, not from this spec -- see the

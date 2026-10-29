@@ -186,7 +186,7 @@ pub fn serve(
                         // boundary (`component-core/src/actor.rs`) and does continue.
                         let outcome =
                             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                                tr.dispatch(req.opcode, &req.payload)
+                                tr.dispatch(req.channel, req.opcode, &req.payload)
                             }));
                         match outcome {
                             Ok(Ok(blob)) => {
@@ -277,6 +277,7 @@ pub fn serve(
                         // client's last mappings stayed open forever once it went
                         // quiet or died -- holding the GPU memory its KV cache
                         // occupied and starving the replacement pod.
+                        tr.expire_fetch_marks();
                         let m = tr.reap_expired_ipc_mappings();
                         if m > 0 {
                             logger.info(&format!("shmq: closed {m} expired CUDA-IPC mapping(s)"));

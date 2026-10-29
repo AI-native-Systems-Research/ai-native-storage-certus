@@ -104,6 +104,25 @@ define_interface! {
         /// # Errors
         /// Returns `DispatcherError::KeyNotFound` if the key does not exist.
         fn touch(&self, key: CacheKey) -> Result<(), DispatcherError>;
+
+        /// Read a pinned block-tier entry, `len` bytes at extent `offset`, into a
+        /// fresh bounce buffer from the memory tier, for serving a peer (FR-062).
+        /// The caller holds the pin for the call. Never promotes, never touches
+        /// the cache. Blocks until the read completes — no device timeout.
+        ///
+        /// # Errors
+        /// `NoSpace` (reserve full now), `NeverFits` (never can be: larger than
+        /// the reserve, no data drives, or a drive block that does not divide
+        /// the reserve's 4 KiB pages), `Io` (the read failed; the buffer has
+        /// been freed, or, if a read ended without its completion, leaked and
+        /// logged; either way the caller owns no buffer), `NotInitialized`.
+        /// Holds no dispatcher-wide lock across the device read, so a hung
+        /// read does not hold up `shutdown`.
+        fn read_to_bounce(&self, key: CacheKey, offset: u64, len: u32)
+            -> Result<BounceBuffer, BounceError>;
+
+        /// Free a buffer from `read_to_bounce` once nothing can still read it.
+        fn release_bounce(&self, buf: BounceBuffer);
     }
 }
 ```

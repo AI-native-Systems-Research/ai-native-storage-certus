@@ -52,6 +52,12 @@
 //!                  resp { [state:u8]*n }   // same 0=miss/1=resident/2=pending as Check
 //!                  (Touch + Check fused in one server pass: each key is touched,
 //!                   then classified; a failed touch reads as miss.)
+//! Fetch      (17): req  { peer_len:u16, peer:[u8]*peer_len, n:u32, [key:u64, size:u32]*n }
+//!                  resp { status:u8, [started:u8]*n }   // n bytes only if status == 0
+//!                  (Fetch the keys, a leading miss run in prefix order, from the
+//!                   transfer endpoint `peer` ("host:port") into the memory tier.
+//!                   Never waits for the transfer: a started key reads PENDING on
+//!                   Check until it is RESIDENT or MISS. See `crate::fetch`.)
 //! ```
 //!
 //! ## HandleBatch (CopyToStore / Lookup / Populate)
@@ -98,6 +104,25 @@ pub mod op {
     pub const FLUSH_TO_SSD: u32 = 14;
     pub const GET_IO_STATS: u32 = 15;
     pub const TOUCH_CHECK: u32 = 16;
+    pub const FETCH: u32 = 17;
+    pub const CLEAR_ALL: u32 = 18;
+}
+
+/// An UNPIN key count meaning "release every pin held on this channel" (no keys
+/// follow). A count of 0 already means "unpin nothing", so the marker is the one
+/// count no real batch can reach. Kept in sync with `ring.py`.
+pub const UNPIN_ALL: u32 = u32::MAX;
+
+/// The `status` byte heading a Fetch response. Kept in sync with `ring.py`.
+pub mod fetch_status {
+    /// Accepted: the per-key `started` bytes follow.
+    pub const OK: u8 = 0;
+    /// This server has no transfer endpoint.
+    pub const NO_ENDPOINT: u8 = 1;
+    /// The peer does not parse as `host:port`, or names this instance.
+    pub const BAD_PEER: u8 = 2;
+    /// More keys than the server's `max_fetch_keys`.
+    pub const TOO_MANY: u8 = 3;
 }
 
 /// Per-key states returned by the Check response byte. Widened from a plain
@@ -196,6 +221,10 @@ impl<'a> Reader<'a> {
         Ok(u64::from_le_bytes([
             b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
         ]))
+    }
+
+    pub fn bytes(&mut self, n: usize) -> WResult<&'a [u8]> {
+        self.take(n)
     }
 
     pub fn handle(&mut self) -> WResult<[u8; 64]> {
@@ -319,6 +348,8 @@ mod tests {
         assert_eq!(op::FLUSH_TO_SSD, 14);
         assert_eq!(op::GET_IO_STATS, 15);
         assert_eq!(op::TOUCH_CHECK, 16);
+        assert_eq!(op::FETCH, 17);
+        assert_eq!(op::CLEAR_ALL, 18);
     }
 
     /// The Check response byte is a tri-state wire contract shared with the
