@@ -147,7 +147,8 @@ write_summary(){
 import html, os, re, sys
 sweep, streams = sys.argv[1], sys.argv[2:]
 cols = ["offload block (tok)", "run (s)", "tokens/s", "req/s", "TTFT p50 (s)", "TTFT p99 (s)", "errored",
-        "vLLM queue mean (s)", "ext hit %", "computed %", "KV load (TiB)", "load GB/s, wall clock (busiest 5 min)", "loads from SSD %", "load + tier read time (s)"]
+        "vLLM queue mean (s)", "ext hit %", "computed %", "KV load (TiB)", "load GB/s, wall clock (busiest 5 min)", "SSD read into host memory (TiB)",
+        "SSD read never delivered to GPU (TiB)", "load + tier read time (s)"]
 rows = []
 for n in streams:
     p = os.path.join(sweep, f"{n}streams", "report.html")

@@ -30,6 +30,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
 GIB = 1 << 30
+GB = 1e9      # rates are GB/s (10^9), like the poller's wall-clock rates
 TIB = 1 << 40
 
 # Arm order and display labels. Keys are the subdir names the orchestrator writes.
@@ -540,8 +541,8 @@ def main():
                 "errored", "TTFT p50 (s)", "TTFT p90 (s)", "TTFT p99 (s)", "vLLM queue mean (s)",
                 "vLLM prefill mean (s)", "ext hit %", "computed %"]
     io_cols = ["Arm", "KV load (TiB)", "load GB/s, wall clock (run)",
-               "load GB/s, wall clock (busiest 5 min)", "loads from SSD %",
-               "load time as reported (s)", "SSD read into host memory (TiB)", "tier read time (s)",
+               "load GB/s, wall clock (busiest 5 min)", "SSD read into host memory (TiB)",
+               "SSD read never delivered to GPU (TiB)", "load time as reported (s)",
                "load + tier read time (s)", "load GB/s per job (summed job time)"]
     io_cols += ["KV store (TiB)", "store GB/s, wall clock (run)",
                 "store GB/s, wall clock (busiest 5 min)",
@@ -559,38 +560,34 @@ def main():
             fmt(d["ext"], 1) if d["ext"] is not None else "—",
             fmt(d["computed"], 1) if d["computed"] is not None else "—",
         ])
-        # Share of loaded blocks read from SSD: Certus from its server's promotion
-        # counters; cputier from its SSD->CPU tier read bytes over what it loaded.
-        # cputier can read more from SSD than reaches the GPU (blocks promoted to its
-        # CPU tier and evicted, or loads abandoned): show that ratio instead of a share.
-        if d["ssd_pct"] is not None:
-            ssd_cell = fmt(d["ssd_pct"], 0)
-        elif kv["load_bytes"] and d["tier_read_b"]:
-            ratio = d["tier_read_b"] / kv["load_bytes"]
-            ssd_cell = (fmt(100 * ratio, 0) if ratio <= 1
-                        else f"SSD read {ratio:.1f}× the bytes loaded")
+        # SSD bytes that never reached the GPU: read into host memory, then evicted
+        # before their load, or for requests that recomputed instead. A lower bound:
+        # loads served from memory without an SSD read offset it.
+        ssd_b = d["tier_read_b"] if tr else d["certus_ssd_b"]
+        if ssd_b and kv["load_bytes"]:
+            ssd_cell = fmt(max(ssd_b - kv["load_bytes"], 0.0) / TIB, 2)
         else:
             ssd_cell = "—"
         # Certus has no separate tier step (its load reads SSD itself; it writes SSD in
         # the background); a cputier arm without an SSD tier reads and writes none.
         certus = d["key"].startswith("certus")
-        no_tier_read = "in load time" if certus else "0"
         no_tier_write = "n/a (background)" if certus else "0"
         row = [
             d["label"], fmt(kv["load_bytes"] / TIB, 2),
             fmt(d["wall_gbs"], 1), fmt(d["peak_gbs"], 1),
+            (fmt(d["tier_read_b"] / TIB, 2) if tr else
+             f'{fmt(d["certus_ssd_b"] / TIB, 2)} (server counters)' if d["certus_ssd_b"] else "—"),
             ssd_cell,
             fmt(lt, 0),
-            (fmt(d["tier_read_b"] / TIB, 2) if tr else
-             f'{fmt(d["certus_ssd_b"] / TIB, 2)} (server counters)' if d["certus_ssd_b"] else no_tier_read),
-            fmt(tr, 0) if tr else no_tier_read,
+            # cputier's SSD->CPU copies are separate jobs: add their time. Certus's SSD
+            # read is inside its load jobs, so its load time already covers it.
             fmt(lt + tr, 0),
             # Per job: bytes over summed SSD-to-GPU job time; jobs overlap.
-            fmt(kv["load_bytes"] / GIB / (lt + tr), 1) if lt + tr else "—",
+            fmt(kv["load_bytes"] / GB / (lt + tr), 1) if lt + tr else "—",
         ]
         st, tw = kv["store_time_s"], d["tier_write_s"]
         row += [fmt(kv["store_bytes"] / TIB, 2), fmt(d["st_wall_gbs"], 1), fmt(d["st_peak_gbs"], 1),
-                fmt(kv["store_bytes"] / GIB / st, 1) if st else "—",
+                fmt(kv["store_bytes"] / GB / st, 1) if st else "—",
                 fmt(d["tier_write_b"] / TIB, 2) if tw else no_tier_write,
                 fmt(tw, 0) if tw else no_tier_write]
         io_rows.append(row)
@@ -640,26 +637,32 @@ Run parameters (from the arms' logs): turns={p_turns}, concurrent streams={p_str
 {tables_html}
 {img_html}
 {timeline_html}
-<p class="note">Throughput = total tokens/s (higher better). TTFT = time to first token, client side (lower better).
-run = the client's measurement window; compare arms only at the same run length.
-KV load = bytes reloaded from the offload tier onto the GPU; KV store = bytes offloaded from GPU to the tier.
-computed % = prompt tokens recomputed on the GPU (hit neither the GPU prefix cache nor the offload tier).
-load GB/s, wall clock = KV bytes delivered to the GPU per second of elapsed time (live poller), over the whole
-capture and over its busiest 5 minutes; this is the load throughput to compare. loads from SSD % = share of loaded
-KV read from SSD (Certus: blocks promoted SSD→memory over blocks served, from certus-server.log; cputier: its SSD→CPU
-tier read bytes over its load bytes; above 1 it read more from SSD than reached the GPU). load time as reported = summed time of KV load jobs as each backend reports it:
-Certus, a job's SSD-or-DRAM read and GPU copy; cputier, only its CPU→GPU copy. SSD read into host memory = bytes read from SSD into host memory before reaching the GPU: cputier's are its separate copies into its CPU tier, timed
-by vLLM; Certus's are keys its server promoted SSD→memory tier times the key size (certus-server.log and the
-connector's line in server.log), read inside its load jobs, so their time is in its load time. load + tier read time
-covers SSD to GPU on both.
-load GB/s per job divides by that summed job time: jobs overlap, so it is a per-job rate, not what the system
-delivered. kvio.csv files from a poller before 2026-10-28 added cputier's flat and transfer_type-labelled load
-counters, so for those runs cputier's wall-clock rates are about twice the true rate (the TiB columns come from the
-/metrics snapshot and are right). store GB/s: the same two rates for KV stored from the GPU to the offload tier's
-memory (Certus: memory tier; cputier: CPU tier). Neither includes the SSD write: Certus writes to SSD in the
-background, unreported to vLLM; cputier's CPU→SSD tier writes are separate jobs, shown in their own columns. vLLM queue / prefill / TTFT = vLLM's per-request means, measured the same on every
-backend: a request whose KV is still loading stays queued, so queue time includes the wait for its load.
-GB/s = effective throughput (total bytes / cumulative device-time). "errored" counts requests that failed (e.g. HTTP 400 from window overflow on deep turns).</p>
+<div class="note"><p>How to read the columns:</p><ul>
+<li><b>tokens/s, req/s, TTFT</b>: from the client (guidellm). TTFT is send to first token. <b>run</b> is the client's
+measurement window; compare arms only at the same run length.</li>
+<li><b>vLLM queue / prefill</b>: vLLM's per-request means, measured the same on every backend. A request whose KV is
+still loading stays queued, so queue time includes its load wait.</li>
+<li><b>ext hit %</b>: share of prompt tokens found in the offload tier. <b>computed %</b>: share recomputed on the GPU
+(in neither the GPU prefix cache nor the offload tier).</li>
+<li><b>KV load / KV store</b>: bytes moved offload tier → GPU and GPU → offload tier, from vLLM's counters over the run.</li>
+<li><b>load GB/s, wall clock</b>: KV bytes delivered to the GPU per second of elapsed time (live poller), over the whole
+run and over its busiest 5 minutes. This is the load throughput to compare. The same for store.</li>
+<li><b>SSD read into host memory</b>: KV read from SSD on its way to the GPU. cputier: its separate SSD→CPU-tier copies,
+counted by vLLM. Certus: from its server's counters (keys moved SSD → memory tier × key size), read inside its load
+jobs.</li>
+<li><b>SSD read never delivered to GPU</b>: SSD read minus KV load: bytes fetched from SSD that were evicted before
+their load ran, or belonged to requests that recomputed instead. 0 means everything read was used.</li>
+<li><b>load time as reported</b>: summed time of KV load jobs as each backend reports it. Certus: SSD or memory read
+plus GPU copy. cputier: only its CPU→GPU copy. <b>load + tier read time</b> adds cputier's separate SSD→CPU copy time,
+so it covers SSD to GPU on both (Certus's is already in its load time).</li>
+<li><b>GB/s per job</b>: bytes over summed job time. Jobs overlap, so this is a per-job rate, not what the system
+delivered.</li>
+<li><b>CPU→SSD tier write</b>: cputier's separate copies from its CPU tier to SSD. Certus writes to SSD in the
+background without reporting it to vLLM, so neither arm's store time includes the SSD write.</li>
+<li><b>errored</b>: requests that failed (e.g. HTTP 400 from window overflow on deep turns).</li>
+<li>Runs whose kvio.csv predates the 2026-10-28 poller double-counted cputier's loads, so their cputier wall-clock rates
+are about twice the true rate (the TiB columns come from vLLM's counters and are right).</li>
+</ul></div>
 </body></html>"""
     out = os.path.join(rd, "report.html")
     open(out, "w").write(html)
