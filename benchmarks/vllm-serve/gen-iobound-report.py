@@ -30,7 +30,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
 GIB = 1 << 30
-GB = 1e9      # rates are GB/s (10^9), like the poller's wall-clock rates
 TIB = 1 << 40
 
 # Arm order and display labels. Keys are the subdir names the orchestrator writes.
@@ -542,12 +541,9 @@ def main():
                 "vLLM prefill mean (s)", "ext hit %", "computed %"]
     io_cols = ["Arm", "KV load (TiB)", "load GB/s, wall clock (run)",
                "load GB/s, wall clock (busiest 5 min)", "SSD read into host memory (TiB)",
-               "SSD read never delivered to GPU (TiB)", "load time as reported (s)",
-               "load + tier read time (s)", "load GB/s per job (summed job time)"]
+               "SSD read not delivered to GPU, at least (TiB)", "summed load job time, SSD→GPU (s)"]
     io_cols += ["KV store (TiB)", "store GB/s, wall clock (run)",
-                "store GB/s, wall clock (busiest 5 min)",
-                "store GB/s per job (summed job time)",
-                "CPU→SSD tier write (TiB)", "tier write time (s)"]
+                "store GB/s, wall clock (busiest 5 min)", "CPU→SSD tier write (TiB)"]
     res_rows, io_rows = [], []
     for d in present:
         g, kv, tt = d["g"], d["kv"], d["g"]["ttft_ms"] or {}
@@ -575,21 +571,15 @@ def main():
         row = [
             d["label"], fmt(kv["load_bytes"] / TIB, 2),
             fmt(d["wall_gbs"], 1), fmt(d["peak_gbs"], 1),
-            (fmt(d["tier_read_b"] / TIB, 2) if tr else
-             f'{fmt(d["certus_ssd_b"] / TIB, 2)} (server counters)' if d["certus_ssd_b"] else "—"),
+            fmt(ssd_b / TIB, 2) if ssd_b else "—",
             ssd_cell,
-            fmt(lt, 0),
             # cputier's SSD->CPU copies are separate jobs: add their time. Certus's SSD
             # read is inside its load jobs, so its load time already covers it.
             fmt(lt + tr, 0),
-            # Per job: bytes over summed SSD-to-GPU job time; jobs overlap.
-            fmt(kv["load_bytes"] / GB / (lt + tr), 1) if lt + tr else "—",
         ]
-        st, tw = kv["store_time_s"], d["tier_write_s"]
+        tw = d["tier_write_s"]
         row += [fmt(kv["store_bytes"] / TIB, 2), fmt(d["st_wall_gbs"], 1), fmt(d["st_peak_gbs"], 1),
-                fmt(kv["store_bytes"] / GB / st, 1) if st else "—",
-                fmt(d["tier_write_b"] / TIB, 2) if tw else no_tier_write,
-                fmt(tw, 0) if tw else no_tier_write]
+                fmt(d["tier_write_b"] / TIB, 2) if tw else no_tier_write]
         io_rows.append(row)
     missing = [d["label"] for d in data if not d["present"]]
     missing_note = (f'<p class="note">Not run: {", ".join(missing)}.</p>' if missing else "")
@@ -642,23 +632,24 @@ Run parameters (from the arms' logs): turns={p_turns}, concurrent streams={p_str
 measurement window; compare arms only at the same run length.</li>
 <li><b>vLLM queue / prefill</b>: vLLM's per-request means, measured the same on every backend. A request whose KV is
 still loading stays queued, so queue time includes its load wait.</li>
-<li><b>ext hit %</b>: share of prompt tokens found in the offload tier. <b>computed %</b>: share recomputed on the GPU
-(in neither the GPU prefix cache nor the offload tier).</li>
+<li><b>ext hit %</b>: of the prompt tokens the GPU prefix cache did not hold, the share found in the offload tier.
+<b>computed %</b>: of all prompt tokens, the share recomputed on the GPU (in neither the GPU prefix cache nor the
+offload tier).</li>
 <li><b>KV load / KV store</b>: bytes moved offload tier → GPU and GPU → offload tier, from vLLM's counters over the run.</li>
 <li><b>load GB/s, wall clock</b>: KV bytes delivered to the GPU per second of elapsed time (live poller), over the whole
 run and over its busiest 5 minutes. This is the load throughput to compare. The same for store.</li>
 <li><b>SSD read into host memory</b>: KV read from SSD on its way to the GPU. cputier: its separate SSD→CPU-tier copies,
-counted by vLLM. Certus: from its server's counters (keys moved SSD → memory tier × key size), read inside its load
-jobs.</li>
-<li><b>SSD read never delivered to GPU</b>: SSD read minus KV load: bytes fetched from SSD that were evicted before
-their load ran, or belonged to requests that recomputed instead. 0 means everything read was used.</li>
-<li><b>load time as reported</b>: summed time of KV load jobs as each backend reports it. Certus: SSD or memory read
-plus GPU copy. cputier: only its CPU→GPU copy. <b>load + tier read time</b> adds cputier's separate SSD→CPU copy time,
-so it covers SSD to GPU on both (Certus's is already in its load time).</li>
-<li><b>GB/s per job</b>: bytes over summed job time. Jobs overlap, so this is a per-job rate, not what the system
-delivered.</li>
+counted by vLLM. Certus: from its server's counters (keys moved SSD → memory tier, from certus-server.log, × bytes
+per key, from the connector's line in server.log), read inside its load jobs; shown only when the server's
+served-key count reproduces KV load.</li>
+<li><b>SSD read not delivered to GPU, at least</b>: SSD read minus KV load. At least this much was fetched from SSD
+and then evicted before its load ran, or belonged to requests that recomputed. A lower bound: loads served from
+memory without an SSD read hide some, so 0 does not mean nothing was wasted.</li>
+<li><b>summed load job time, SSD→GPU</b>: the time of all KV load jobs added up, from SSD to GPU. Certus: its load
+jobs, which include the SSD read. cputier: its CPU→GPU load jobs plus its separate SSD→CPU copy jobs (vLLM's own
+load time for cputier covers only the CPU→GPU copy). Jobs overlap, so this is work done, not elapsed time.</li>
 <li><b>CPU→SSD tier write</b>: cputier's separate copies from its CPU tier to SSD. Certus writes to SSD in the
-background without reporting it to vLLM, so neither arm's store time includes the SSD write.</li>
+background without reporting it to vLLM.</li>
 <li><b>errored</b>: requests that failed (e.g. HTTP 400 from window overflow on deep turns).</li>
 <li>Runs whose kvio.csv predates the 2026-10-28 poller double-counted cputier's loads, so their cputier wall-clock rates
 are about twice the true rate (the TiB columns come from vLLM's counters and are right).</li>
