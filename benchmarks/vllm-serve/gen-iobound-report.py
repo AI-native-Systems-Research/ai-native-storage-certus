@@ -341,9 +341,9 @@ def parse_engine_log(path):
         run = re.search(r"Running: (\d+) reqs, Waiting: (\d+) reqs", ln)
         if not run or int(run.group(1)) + int(run.group(2)) == 0:
             continue                      # idle (before the client or after it)
+        # vLLM leaves "Deferred" out of the line when none are deferred: that is 0.
         mo = re.search(r"Deferred: (\d+) reqs", ln)
-        if mo:
-            deferred.append(int(mo.group(1)))
+        deferred.append(int(mo.group(1)) if mo else 0)
         pt = re.search(r"Avg prompt throughput: ([0-9.]+) tokens/s", ln)
         ext = re.search(r"External prefix cache hit rate: ([0-9.]+)%", ln)
         if pt and ext and float(ext.group(1)) < 5.0 and float(pt.group(1)) > 0:
@@ -700,12 +700,14 @@ def main():
 measurement window; compare arms only at the same run length.</li>
 <li><b>vLLM queue / prefill</b>: vLLM's per-request means, measured the same on every backend. A request whose KV is
 still loading stays queued, so queue time includes its load wait.</li>
-<li><b>deferred for KV</b>: requests vLLM held back waiting for their KV to load (vLLM's "Deferred" count, logged
-every 10 s), peak and mean while the client ran.</li>
+<li><b>deferred for KV</b>: requests vLLM held back in its skipped-waiting queue (its "Deferred" count, logged every
+10 s), peak and mean while the client ran. Here that is requests whose KV is still loading, or whose offload-tier
+lookup has not answered yet.</li>
 <li><b>tokens recomputed</b>: prompt tokens the GPU computed (vLLM's prompt_tokens_by_source). <b>GPU time
 recomputing</b>: those tokens at the GPU's prefill rate measured in the same arm before any KV was loaded (vLLM's
 prompt throughput while its external hit rate was under 5%). <b>KV loaded per request</b>: KV load over completed
-requests; a big gap between arms means one recomputed what the other loaded.</li>
+requests; a big gap between arms means one recomputed what the other loaded. It slightly overstates both arms:
+requests still running when the run ends have loaded KV but are not counted as completed.</li>
 <li><b>ext hit %</b>: of the prompt tokens the GPU prefix cache did not hold, the share found in the offload tier.
 <b>computed %</b>: of all prompt tokens, the share recomputed on the GPU (in neither the GPU prefix cache nor the
 offload tier).</li>
