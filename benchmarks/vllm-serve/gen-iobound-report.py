@@ -177,6 +177,7 @@ def parse_metrics(path):
     return {"load_time_s": load_t, "store_time_s": store_t,
             "load_bytes": load_b, "store_bytes": store_b,
             "ext_hit": (100 * h / q) if q else None, "computed_pct": computed,
+            "computed_tok": pc if ptot and "prompt_tokens_by_source_total|local_compute" in A else None,
             "tier_read_time_s": tier_read_t, "tier_read_bytes": tier_read_b,
             "tier_write_time_s": tier_write_t, "tier_write_bytes": tier_write_b,
             # vLLM's per-request timings, measured the same for every backend: a
@@ -324,6 +325,39 @@ def parse_certus_tier_events(path):
             "ssd_pct": 100.0 * min(to_mem, to_gpu) / to_gpu if to_gpu else None}
 
 
+def parse_engine_log(path):
+    """vLLM's periodic "Engine 000:" lines in server.log: requests deferred waiting for
+    KV (peak and mean over the lines with a client running), and the GPU's prefill rate
+    with nothing loaded yet (median prompt tokens/s over lines whose external prefix
+    cache hit rate is still under 5%, i.e. the warm-up when every token is computed).
+    Returns {} when the log has no such lines."""
+    try:
+        with open(path, errors="replace") as fh:
+            lines = [ln for ln in fh if "Engine 000:" in ln]
+    except Exception:
+        return {}
+    deferred, rates = [], []
+    for ln in lines:
+        run = re.search(r"Running: (\d+) reqs, Waiting: (\d+) reqs", ln)
+        if not run or int(run.group(1)) + int(run.group(2)) == 0:
+            continue                      # idle (before the client or after it)
+        mo = re.search(r"Deferred: (\d+) reqs", ln)
+        if mo:
+            deferred.append(int(mo.group(1)))
+        pt = re.search(r"Avg prompt throughput: ([0-9.]+) tokens/s", ln)
+        ext = re.search(r"External prefix cache hit rate: ([0-9.]+)%", ln)
+        if pt and ext and float(ext.group(1)) < 5.0 and float(pt.group(1)) > 0:
+            rates.append(float(pt.group(1)))
+    out = {}
+    if deferred:
+        out["deferred_peak"] = max(deferred)
+        out["deferred_mean"] = sum(deferred) / len(deferred)
+    if rates:
+        rates.sort()
+        out["prefill_rate"] = rates[len(rates) // 2]
+    return out
+
+
 def parse_run_facts(sub):
     """What the arm's own logs say it ran: model, window, TP, KV bytes per token and
     vLLM version (server.log), the client's prefix length/count, turns and think
@@ -425,12 +459,24 @@ def main():
     p_prefix_tok = run_value("prefix_tokens", "PREFIX_TOKENS")
     p_scale = run_value("think_scale", "DELAY_SCALE")
     has_intervals = any(d.endswith("-intervals") and facts[d] for d in facts)
-    scale_note = (f"think-time scale={p_scale} (intervals arms)" if has_intervals
-                  else "no intervals arms")
+    scale_note = (f"intervals arms: real chat think times scaled by {p_scale}" if has_intervals
+                  else "none (no intervals arms ran)")
     try:  # reused working set = prefix count x prefix tokens x KV bytes per token
-        p_ws = f"~{round(int(p_prefix) * int(p_prefix_tok) * int(p_kv) / (1024 * 1024))} GiB"
+        ws_gib = int(p_prefix) * int(p_prefix_tok) * int(p_kv) / (1024 * 1024)
+        p_ws = f"~{round(ws_gib)} GiB"
     except ValueError:
-        p_ws = "?"
+        ws_gib, p_ws = None, "?"
+    tiers = sorted({sv for sv in (parse_serve_log(os.path.join(rd, k, "server.log")).get("tier")
+                                  for k, _, _ in ARMS) if sv})
+    try:
+        tier_gib = float(tiers[0].rstrip("G")) if len(tiers) == 1 else None
+    except ValueError:
+        tier_gib = None
+    if ws_gib and tier_gib:
+        tier_vs_ws = (f"{ws_gib / tier_gib:.1f}× the {tiers[0]} DRAM/CPU tier, so most reloads come from SSD"
+                      if ws_gib > tier_gib else f"fits the {tiers[0]} DRAM/CPU tier")
+    else:
+        tier_vs_ws = "tier size per arm in the results table"
     data = []
     for key, label, color in ARMS:
         sub = os.path.join(rd, key)
@@ -439,6 +485,7 @@ def main():
         mt = parse_metrics(os.path.join(sub, "guidellm.metrics.txt")) or {}
         sv = parse_serve_log(os.path.join(sub, "server.log"))
         te = parse_certus_tier_events(os.path.join(sub, "certus-server.log"))
+        eng = parse_engine_log(os.path.join(sub, "server.log"))
         certus_ssd_b = None
         key_b = parse_certus_key_bytes(os.path.join(sub, "server.log"))
         lb = mt.get("load_bytes") or 0.0
@@ -466,6 +513,9 @@ def main():
                      "tier_read_b": mt.get("tier_read_bytes") or 0.0,
                      "queue_s": mt.get("queue_s"), "prefill_s": mt.get("prefill_s"),
                      "srv_ttft_s": mt.get("ttft_s"),
+                     "computed_tok": mt.get("computed_tok"),
+                     "deferred_peak": eng.get("deferred_peak"), "deferred_mean": eng.get("deferred_mean"),
+                     "prefill_rate": eng.get("prefill_rate"),
                      "block": sv.get("block"), "tier": sv.get("tier"),
                      "ssd_pct": te.get("ssd_pct"), "wall_gbs": wall_gbs, "peak_gbs": peak_gbs,
                      "certus_ssd_b": certus_ssd_b,
@@ -538,7 +588,9 @@ def main():
 
     res_cols = ["Arm", "offload block (tok)", "DRAM tier", "run (s)", "tokens/s", "req/s", "ok",
                 "errored", "TTFT p50 (s)", "TTFT p90 (s)", "TTFT p99 (s)", "vLLM queue mean (s)",
-                "vLLM prefill mean (s)", "ext hit %", "computed %"]
+                "vLLM prefill mean (s)", "deferred for KV, peak / mean (reqs)", "ext hit %",
+                "computed %", "tokens recomputed (M)", "GPU time recomputing (s)",
+                "KV loaded per request (MB)"]
     io_cols = ["Arm", "KV load (TiB)", "load GB/s, wall clock (run)",
                "load GB/s, wall clock (busiest 5 min)", "SSD read into host memory (TiB)",
                "SSD read not delivered to GPU, at least (TiB)", "summed load job time, SSD→GPU (s)"]
@@ -553,8 +605,15 @@ def main():
             fmt(g["tokens_per_s"], 0), fmt(g["requests_per_s"], 2), fmt(g["ok"], 0),
             fmt(g["errored"], 0), sec(tt.get("p50")), sec(tt.get("p90")), sec(tt.get("p99")),
             fmt(d["queue_s"], 1), fmt(d["prefill_s"], 2),
+            (f'{d["deferred_peak"]:,} / {d["deferred_mean"]:,.0f}'
+             if d["deferred_peak"] is not None else "—"),
             fmt(d["ext"], 1) if d["ext"] is not None else "—",
             fmt(d["computed"], 1) if d["computed"] is not None else "—",
+            fmt(d["computed_tok"] / 1e6, 1) if d["computed_tok"] is not None else "—",
+            # Recomputed tokens at the GPU's prefill rate measured before any loads.
+            fmt(d["computed_tok"] / d["prefill_rate"], 0)
+            if d["computed_tok"] is not None and d["prefill_rate"] else "—",
+            fmt(kv["load_bytes"] / 1e6 / g["ok"], 0) if g["ok"] and kv["load_bytes"] else "—",
         ])
         # SSD bytes that never reached the GPU: read into host memory, then evicted
         # before their load, or for requests that recomputed instead. A lower bound:
@@ -618,12 +677,21 @@ def main():
  th{{background:#f3f4f6}} tr:nth-child(even){{background:#fafafa}}
  figure{{margin:1rem 0;text-align:center}} img{{max-width:100%;border:1px solid #eee;border-radius:6px}}
  .note{{color:#555;font-size:.85rem}}
+ table.setup{{width:auto;font-size:.88rem;margin:.6rem 0 1.2rem}}
+ table.setup th,table.setup td{{border:none;text-align:left;padding:.15rem .9rem .15rem 0;background:none}}
+ table.setup th{{color:#555;font-weight:600;white-space:nowrap}}
 </style></head><body>
 <h1>{p_attn} KV-IO-bound experiment — Certus vs cputier</h1>
-<p class="note">{p_model} ({p_attn}, {p_kv} KiB/token), TP={p_tp}, {p_window}-token window, vLLM {p_vllm};
-offload block size and DRAM/CPU tier per arm in the table (from each arm's server.log).
-Run parameters (from the arms' logs): turns={p_turns}, concurrent streams={p_streams}, prefixes={p_prefix} x
-{p_prefix_tok} tokens ({p_ws} reused working set), {scale_note}. Source: {rd}</p>
+<table class="setup"><tbody>
+<tr><th>Model</th><td>{p_model} &middot; {p_attn} &middot; {p_kv} KiB of KV per token</td></tr>
+<tr><th>Serving</th><td>vLLM {p_vllm} &middot; TP={p_tp} &middot; {p_window}-token context window</td></tr>
+<tr><th>Workload</th><td>{p_streams} concurrent streams &middot; {p_turns} turns each &middot;
+{p_prefix} shared prefixes of {p_prefix_tok} tokens</td></tr>
+<tr><th>Working set</th><td>{p_ws} of reused KV ({tier_vs_ws})</td></tr>
+<tr><th>Think time</th><td>{scale_note}</td></tr>
+<tr><th>Per arm</th><td>offload block size and DRAM/CPU tier: first columns of the results table</td></tr>
+<tr><th>Source</th><td><code>{rd}</code></td></tr>
+</tbody></table>
 {tables_html}
 {img_html}
 {timeline_html}
@@ -632,6 +700,12 @@ Run parameters (from the arms' logs): turns={p_turns}, concurrent streams={p_str
 measurement window; compare arms only at the same run length.</li>
 <li><b>vLLM queue / prefill</b>: vLLM's per-request means, measured the same on every backend. A request whose KV is
 still loading stays queued, so queue time includes its load wait.</li>
+<li><b>deferred for KV</b>: requests vLLM held back waiting for their KV to load (vLLM's "Deferred" count, logged
+every 10 s), peak and mean while the client ran.</li>
+<li><b>tokens recomputed</b>: prompt tokens the GPU computed (vLLM's prompt_tokens_by_source). <b>GPU time
+recomputing</b>: those tokens at the GPU's prefill rate measured in the same arm before any KV was loaded (vLLM's
+prompt throughput while its external hit rate was under 5%). <b>KV loaded per request</b>: KV load over completed
+requests; a big gap between arms means one recomputed what the other loaded.</li>
 <li><b>ext hit %</b>: of the prompt tokens the GPU prefix cache did not hold, the share found in the offload tier.
 <b>computed %</b>: of all prompt tokens, the share recomputed on the GPU (in neither the GPU prefix cache nor the
 offload tier).</li>
