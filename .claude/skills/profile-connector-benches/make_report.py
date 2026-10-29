@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Render the certus vs cputier connector-bench comparison as one HTML page.
+"""Render the connector-bench comparison (certus / cputier / lmcache) as one HTML page.
 
-Reads <artifacts>/params.json, certus.csv and cputier.csv (written by
-run_compare.sh), joins result rows by label and writes a self-contained HTML
-report: parameter parity, throughput/IOPS side by side, and per-phase latency.
+Reads <artifacts>/params.json and one CSV per arm (certus.csv, cputier.csv,
+lmcache.csv; written by run_compare.sh), joins result rows by label and writes
+a self-contained HTML report: parameter parity, throughput/IOPS side by side,
+and per-phase latency. An arm with no CSV is shown as having no results.
 """
 from __future__ import annotations
 
@@ -15,18 +16,26 @@ import os
 import re
 from collections import Counter
 
-# Config columns both benches write to their CSV; each must match across arms.
+# Config columns every bench writes to its CSV; each must match across arms.
 PARITY_COLUMNS = ["bs", "num_blocks", "block_bytes", "working_set", "tp", "lookup_order",
                   "pipeline_depth", "direction", "hit_ratio", "requests_per_step",
                   "num_sessions"]
-METRIC_COLUMNS = {"label", "total_blocks", "total_bytes", "wall_seconds", "throughput_gbs", "iops"}
+
+# (key, display name, legend description, CSS colour variable)
+ARMS = [
+    ("certus", "certus", "certus-server, SPDK NVMe", "--c"),
+    ("cputier", "cputier", "vLLM TieringOffloadingSpec, fs tier", "--t"),
+    ("lmcache", "lmcache", "LMCache MP server, L1 + fs_native L2", "--l"),
+]
+# Column holding each arm's DRAM tier size in bytes.
+DRAM_COLUMN = {"cputier": "cpu_bytes", "lmcache": "l1_bytes"}
 
 
 def parse_size(s: str) -> int:
-    m = re.fullmatch(r"(\d+)([KMGT]?)", str(s).strip().upper())
+    m = re.fullmatch(r"(\d+(?:\.\d+)?)([KMGT]?)", str(s).strip().upper())
     if not m:
         return int(s)
-    return int(m.group(1)) << {"": 0, "K": 10, "M": 20, "G": 30, "T": 40}[m.group(2)]
+    return int(float(m.group(1)) * (1 << {"": 0, "K": 10, "M": 20, "G": 30, "T": 40}[m.group(2)]))
 
 
 def load_csv(path: str) -> list[dict]:
@@ -77,104 +86,127 @@ def main() -> None:
     a = ap.parse_args()
 
     params = json.load(open(os.path.join(a.artifacts, "params.json")))
-    certus = load_csv(os.path.join(a.artifacts, "certus.csv"))
-    cputier = load_csv(os.path.join(a.artifacts, "cputier.csv"))
+    data = {k: load_csv(os.path.join(a.artifacts, f"{k}.csv")) for k, *_ in ARMS}
+    present = [arm for arm in ARMS if data[arm[0]]]
+    names = {k: n for k, n, _, _ in ARMS}
 
     # ── parameter parity, checked from what each bench actually recorded ──
-    parity = []
-    if certus and cputier:
+    parity = []   # (column, {arm: value}, same)
+    if len(present) >= 2:
         for col in PARITY_COLUMNS:
-            cvs = _distinct(r.get(col) for r in certus)
-            tvs = _distinct(r.get(col) for r in cputier)
-            if not cvs and not tvs:
+            vals = {k: _distinct(r.get(col) for r in data[k]) for k, *_ in present}
+            if not any(vals.values()):
                 continue
-            same = len(cvs) == 1 and len(tvs) == 1 and (
-                cvs[0] == tvs[0] or _num_eq(cvs[0], tvs[0]))
-            parity.append((col, " / ".join(cvs) or "—", " / ".join(tvs) or "—", same))
+            flat = [v[0] for v in vals.values() if len(v) == 1]
+            same = len(flat) == len(vals) and all(x == flat[0] or _num_eq(x, flat[0]) for x in flat)
+            parity.append((col, {k: " / ".join(v) or "—" for k, v in vals.items()}, same))
         dram = parse_size(params["shared"]["dram"])
-        tvs = _distinct(r.get("cpu_bytes") for r in cputier)
-        parity.append(("DRAM tier bytes (certus --memory-tier-size / cputier cpu_bytes)",
-                       dram, " / ".join(tvs) or "—", tvs == [str(dram)]))
-    mismatches = [p for p in parity if not p[3]]
+        vals = {}
+        for k, *_ in present:
+            if k == "certus":
+                vals[k] = [str(dram)]
+            else:
+                vals[k] = _distinct(r.get(DRAM_COLUMN[k]) for r in data[k])
+        same = all(len(v) == 1 and _num_eq(v[0], dram) for v in vals.values())
+        parity.append(("DRAM tier bytes (certus --memory-tier-size / cputier cpu_bytes / lmcache L1)",
+                       {k: " / ".join(v) or "—" for k, v in vals.items()}, same))
+    mismatches = [p for p in parity if not p[2]]
 
-    # ── join result rows ──
-    ck, tk = row_key(certus), row_key(cputier)
-    by_c = dict(zip(ck, certus))
-    by_t = dict(zip(tk, cputier))
-    order = list(ck) + [k for k in tk if k not in by_c]
-    joined = [(k, by_c.get(k), by_t.get(k)) for k in order]
+    # ── join result rows across arms ──
+    by: dict[str, dict] = {}
+    order: list[tuple[str, int]] = []
+    for k, *_ in ARMS:
+        keys = row_key(data[k])
+        by[k] = dict(zip(keys, data[k]))
+        order += [key for key in keys if key not in order]
 
-    max_gbs = max([float(r["throughput_gbs"]) for r in certus + cputier] + [1e-9])
+    all_rows = [r for k, *_ in ARMS for r in data[k]]
+    max_gbs = max([float(r["throughput_gbs"]) for r in all_rows] + [1e-9])
 
     sh = params["shared"]
     git = params["git"]
 
-    def bar(v, cls):
+    def bar(v, var):
         if v is None:
             return '<div class="bar empty">no result</div>'
         w = max(0.5, 100 * float(v) / max_gbs)
-        return (f'<div class="bar"><span class="fill {cls}" style="width:{w:.1f}%"></span>'
+        return (f'<div class="bar"><span class="fill" style="width:{w:.1f}%;background:var({var})"></span>'
                 f'<span class="val">{f(v)} GB/s</span></div>')
 
-    def ratio(c, t):
-        if not c or not t:
+    def fastest(rows: dict) -> str:
+        got = {k: float(r["throughput_gbs"]) for k, r in rows.items() if r and float(r["throughput_gbs"]) > 0}
+        if len(got) < 2:
             return "—"
-        cg, tg = float(c["throughput_gbs"]), float(t["throughput_gbs"])
-        if cg == 0 or tg == 0:
-            return "—"
-        r = cg / tg
-        return f"certus ×{r:.2f}" if r >= 1 else f"cputier ×{1 / r:.2f}"
+        ranked = sorted(got, key=got.get, reverse=True)
+        return f"{names[ranked[0]]} ×{got[ranked[0]] / got[ranked[1]]:.2f}"
 
-    rows_html = []
-    details_html = []
-    for (base, idx), c, t in joined:
-        name = (c or t)["label"]
-        cg = c["throughput_gbs"] if c else None
-        tg = t["throughput_gbs"] if t else None
-        rows_html.append(
-            f"<tr><td class='lbl'>{esc(name)}</td>"
-            f"<td class='bars'>{bar(cg, 'c')}{bar(tg, 't')}</td>"
-            f"<td class='num'>{f(c and c['iops'], 0)}</td><td class='num'>{f(t and t['iops'], 0)}</td>"
-            f"<td class='num'>{esc(ratio(c, t))}</td></tr>")
-        pc, pt = phases(c) if c else {}, phases(t) if t else {}
-        names = list(pc) + [p for p in pt if p not in pc]
+    rows_html, details_html = [], []
+    for key in order:
+        rows = {k: by[k].get(key) for k, *_ in ARMS}
+        first = next(r for r in rows.values() if r)
+        name = first["label"]
+        bars = "".join(bar(rows[k]["throughput_gbs"] if rows[k] else None, var) for k, _, _, var in ARMS)
+        iops = "".join(f"<td class='num'>{f(rows[k] and rows[k]['iops'], 0)}</td>" for k, *_ in ARMS)
+        rows_html.append(f"<tr><td class='lbl'>{esc(name)}</td><td class='bars'>{bars}</td>"
+                         f"{iops}<td class='num'>{esc(fastest(rows))}</td></tr>")
+
+        ph = {k: phases(r) if r else {} for k, r in rows.items()}
+        pnames: list[str] = []
+        for k, *_ in ARMS:
+            pnames += [p for p in ph[k] if p not in pnames]
         prow = []
-        for p in names:
-            x, y = pc.get(p, {}), pt.get(p, {})
-            prow.append(
-                f"<tr><td>{esc(p)}</td>"
-                f"<td class='num'>{f(x.get('p50'), 1)}</td><td class='num'>{f(x.get('p99'), 1)}</td>"
-                f"<td class='num'>{f(x.get('mean'), 1)}</td>"
-                f"<td class='num sep'>{f(y.get('p50'), 1)}</td><td class='num'>{f(y.get('p99'), 1)}</td>"
-                f"<td class='num'>{f(y.get('mean'), 1)}</td></tr>")
-        labels_differ = c and t and c["label"] != t["label"]
+        for p in pnames:
+            cells = ""
+            for i, (k, *_) in enumerate(ARMS):
+                x = ph[k].get(p, {})
+                sep = " sep" if i else ""
+                cells += (f"<td class='num{sep}'>{f(x.get('p50'), 1)}</td>"
+                          f"<td class='num'>{f(x.get('p99'), 1)}</td><td class='num'>{f(x.get('mean'), 1)}</td>")
+            prow.append(f"<tr><td>{esc(p)}</td>{cells}</tr>")
+        other_labels = "".join(
+            f"<p class='note'>{esc(names[k])} label: {esc(r['label'])}</p>"
+            for k, r in rows.items() if r and r["label"] != name)
+        head1 = "".join(f"<th colspan=3{' class=sep' if i else ''}>{esc(n)} (µs)</th>"
+                        for i, (_, n, _, _) in enumerate(ARMS))
+        head2 = "".join(f"<th{' class=sep' if i else ''}>p50</th><th>p99</th><th>mean</th>"
+                        for i in range(len(ARMS)))
+        totals = " · ".join(
+            f"{esc(names[k])}: {f(r and r['total_blocks'], 0)} blocks, {f(r and r['wall_seconds'], 3)} s"
+            for k, r in rows.items())
         details_html.append(
-            f"<details><summary>{esc(name)}</summary>"
-            + (f"<p class='note'>cputier label: {esc(t['label'])}</p>" if labels_differ else "")
-            + "<div class='scroll'><table class='lat'><thead>"
-            "<tr><th rowspan=2>phase</th><th colspan=3>certus (µs)</th><th colspan=3 class='sep'>cputier (µs)</th></tr>"
-            "<tr><th>p50</th><th>p99</th><th>mean</th><th class='sep'>p50</th><th>p99</th><th>mean</th></tr>"
-            "</thead><tbody>" + "".join(prow) + "</tbody></table></div>"
-            f"<p class='note'>blocks: certus {f(c and c['total_blocks'], 0)}, cputier {f(t and t['total_blocks'], 0)} · "
-            f"wall s: certus {f(c and c['wall_seconds'], 3)}, cputier {f(t and t['wall_seconds'], 3)}</p>"
-            "</details>")
+            f"<details><summary>{esc(name)}</summary>{other_labels}"
+            f"<div class='scroll'><table class='lat'><thead><tr><th rowspan=2>phase</th>{head1}</tr>"
+            f"<tr>{head2}</tr></thead><tbody>{''.join(prow)}</tbody></table></div>"
+            f"<p class='note'>{totals}</p></details>")
 
+    parity_head = "".join(f"<th class='num'>{esc(n)}</th>" for k, n, _, _ in present)
     parity_html = "".join(
-        f"<tr class='{'' if ok else 'bad'}'><td>{esc(col)}</td><td class='num'>{esc(cv)}</td>"
-        f"<td class='num'>{esc(tv)}</td><td>{'✓ same' if ok else '✗ differs'}</td></tr>"
-        for col, cv, tv, ok in parity)
+        f"<tr class='{'' if ok else 'bad'}'><td>{esc(col)}</td>"
+        + "".join(f"<td class='num'>{esc(vals.get(k, '—'))}</td>" for k, *_ in present)
+        + f"<td>{'✓ same' if ok else '✗ differs'}</td></tr>"
+        for col, vals, ok in parity)
 
     status = []
-    if not certus:
-        status.append("certus arm produced no results (see certus-bench.log / server.log).")
-    if not cputier:
-        status.append("cputier arm produced no results (see cputier-bench.log).")
+    logs = {"certus": "certus-bench.log / server.log", "cputier": "cputier-bench.log",
+            "lmcache": "lmcache-bench.log"}
+    for k, n, _, _ in ARMS:
+        if data[k]:
+            continue
+        note = params.get(k, {}).get("note") if isinstance(params.get(k), dict) else None
+        status.append(f"{n} arm: {note}." if note else f"{n} arm produced no results (see {logs[k]}).")
     if mismatches:
         status.append(f"{len(mismatches)} parameter(s) differ between arms — results are not comparable.")
     banner = "".join(f"<div class='warn'>{esc(s)}</div>" for s in status)
 
     shared_html = "".join(f"<tr><td>{esc(k)}</td><td class='num'>{esc(v)}</td></tr>" for k, v in sh.items())
     cp, tp = params["certus"], params["cputier"]
+    lp = params.get("lmcache", {})
+    legend = "".join(f'<span><i class="sw" style="background:var({var})"></i>{esc(n)} ({esc(d)})</span>'
+                     for _, n, d, var in ARMS)
+    iops_head = "".join(f'<th class="num">{esc(n)} IOPS</th>' for _, n, _, _ in ARMS)
+    title_arms = " vs ".join(n for _, n, _, _ in ARMS)
+    lmc_ver = data["lmcache"][0].get("lmcache_version", "—") if data["lmcache"] else "—"
+    lmc_chunk = data["lmcache"][0].get("chunk_tokens", lp.get("chunk_size", "—")) if data["lmcache"] else lp.get("chunk_size", "—")
 
     page = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -182,12 +214,12 @@ def main() -> None:
 <title>Connector Bench Comparison</title>
 <style>
 :root {{ --bg:#fbfaf8; --fg:#1d1c1a; --muted:#6b6862; --line:#e4e1db; --card:#ffffff;
-  --c:#2f6fb5; --t:#c9792b; --bad:#b3261e; --badbg:#fdecea; --warnbg:#fff4e0; }}
+  --c:#2f6fb5; --t:#c9792b; --l:#3f8f5a; --bad:#b3261e; --badbg:#fdecea; --warnbg:#fff4e0; }}
 @media (prefers-color-scheme: dark) {{ :root:not([data-theme="light"]) {{
   --bg:#171614; --fg:#ecebe8; --muted:#a19d96; --line:#34322e; --card:#201f1c;
-  --c:#6aa5e6; --t:#e7a35f; --bad:#f28b82; --badbg:#3a1f1d; --warnbg:#3a2f1a; }} }}
+  --c:#6aa5e6; --t:#e7a35f; --l:#6cc38a; --bad:#f28b82; --badbg:#3a1f1d; --warnbg:#3a2f1a; }} }}
 :root[data-theme="dark"] {{ --bg:#171614; --fg:#ecebe8; --muted:#a19d96; --line:#34322e; --card:#201f1c;
-  --c:#6aa5e6; --t:#e7a35f; --bad:#f28b82; --badbg:#3a1f1d; --warnbg:#3a2f1a; }}
+  --c:#6aa5e6; --t:#e7a35f; --l:#6cc38a; --bad:#f28b82; --badbg:#3a1f1d; --warnbg:#3a2f1a; }}
 * {{ box-sizing:border-box; }}
 body {{ margin:0; background:var(--bg); color:var(--fg);
   font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; }}
@@ -203,14 +235,13 @@ th {{ font-weight:600; color:var(--muted); font-size:12px; }}
 .card {{ background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px; }}
 .legend span {{ display:inline-flex; align-items:center; gap:6px; margin-right:16px; }}
 .sw {{ width:12px; height:12px; border-radius:2px; display:inline-block; }}
-.bars {{ width:45%; min-width:180px; }}
+.bars {{ width:40%; min-width:180px; }}
 .bar {{ position:relative; height:18px; margin:2px 0; }}
 .bar.empty {{ color:var(--muted); font-size:12px; }}
 .fill {{ position:absolute; left:0; top:0; bottom:0; border-radius:2px; }}
-.fill.c {{ background:var(--c); }} .fill.t {{ background:var(--t); }}
 .val {{ position:relative; padding-left:6px; font-size:12px; font-variant-numeric:tabular-nums;
   text-shadow:0 0 3px var(--card); }}
-.lbl {{ max-width:320px; }}
+.lbl {{ max-width:300px; }}
 tr.bad td {{ background:var(--badbg); color:var(--bad); }}
 .warn {{ background:var(--warnbg); border:1px solid var(--line); border-radius:6px; padding:8px 12px; margin:8px 0; }}
 details {{ border:1px solid var(--line); border-radius:6px; margin:6px 0; background:var(--card); }}
@@ -219,30 +250,31 @@ details > .scroll, details > .note {{ padding:0 12px 8px; }}
 .grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:12px; }}
 code {{ font-size:12px; word-break:break-all; }}
 </style></head><body><main>
-<h1>Connector bench: certus vs cputier</h1>
+<h1>Connector bench: {esc(title_arms)}</h1>
 <div class="sub">{esc(params.get('host', ''))} · GPU {esc(sh['gpus'])} {esc(params.get('gpu_name', ''))} ·
 branch {esc(git['branch'])} @ {esc(git['commit'])}{' (dirty)' if git['dirty'] else ''} ·
 mode {esc(sh['mode'])} · lookup order {esc(sh['lookup_order'])}</div>
 {banner}
 
 <h2>Throughput</h2>
-<div class="legend sub"><span><i class="sw" style="background:var(--c)"></i>certus (certus-server, SPDK NVMe)</span>
-<span><i class="sw" style="background:var(--t)"></i>cputier (vLLM TieringOffloadingSpec, fs tier)</span></div>
+<div class="legend sub">{legend}</div>
 <div class="card scroll"><table>
-<thead><tr><th>result</th><th>GB/s</th><th class="num">certus IOPS</th><th class="num">cputier IOPS</th><th class="num">faster</th></tr></thead>
+<thead><tr><th>result</th><th>GB/s</th>{iops_head}<th class="num">fastest</th></tr></thead>
 <tbody>{''.join(rows_html)}</tbody></table></div>
-<p class="note">IOPS counts blocks (cputier: offload chunks). cputier store throughput excludes the per-pass fs write-through drain
-(see its log for the sustained figure); certus stores write through to SSD inside the server.</p>
+<p class="note">IOPS counts blocks (cputier: offload chunks; lmcache: LMCache chunks of {esc(lmc_chunk)} tokens, each
+<code>block_bytes</code>). cputier and lmcache store throughput exclude the per-pass write-through drain to their disk tier
+(see each log for the sustained figure); certus stores write through to SSD inside the server. lmcache's mixed-eviction row
+counts stores the server dropped into a full L1 (its eviction runs on a 1 s tick); see lmcache-bench.log.</p>
 
 <h2>Per-phase latency</h2>
 {''.join(details_html)}
 
 <h2>Parameters</h2>
 <div class="grid">
-<div class="card"><b>Shared (passed identically to both)</b><table>{shared_html}</table></div>
+<div class="card"><b>Shared (passed identically to every arm)</b><table>{shared_html}</table></div>
 <div class="card"><b>Recorded by each bench</b><div class="scroll"><table>
-<thead><tr><th>column</th><th class="num">certus</th><th class="num">cputier</th><th></th></tr></thead>
-<tbody>{parity_html or "<tr><td colspan=4>needs both CSVs</td></tr>"}</tbody></table></div></div>
+<thead><tr><th>column</th>{parity_head}<th></th></tr></thead>
+<tbody>{parity_html or "<tr><td colspan=5>needs at least two CSVs</td></tr>"}</tbody></table></div></div>
 </div>
 <h2>Backend-specific settings</h2>
 <div class="grid">
@@ -257,18 +289,27 @@ mode {esc(sh['mode'])} · lookup order {esc(sh['lookup_order'])}</div>
 <tr><td>image</td><td>{esc(tp['image'])}</td></tr>
 <tr><td>spec</td><td>{esc(tp['spec'])}</td></tr>
 <tr><td>fs tier dir</td><td>{esc(tp['fs_tier'])}</td></tr>
-<tr><td>vLLM</td><td>{esc(cputier[0].get('vllm_version', '—') if cputier else '—')}</td></tr></table>
+<tr><td>vLLM</td><td>{esc(data['cputier'][0].get('vllm_version', '—') if data['cputier'] else '—')}</td></tr></table>
 <p class="note">bench: <code>{esc(tp['bench_cmd'])}</code></p></div>
+<div class="card"><b>lmcache</b><table>
+<tr><td>image</td><td>{esc(lp.get('image', '—'))}</td></tr>
+<tr><td>LMCache</td><td>{esc(lmc_ver)}</td></tr>
+<tr><td>L1 (GiB)</td><td>{esc(lp.get('l1_gb', '—'))}</td></tr>
+<tr><td>L2 dir (fs_native, O_DIRECT)</td><td>{esc(lp.get('l2_dir', '—'))}</td></tr>
+<tr><td>chunk size (tokens)</td><td>{esc(lmc_chunk)}</td></tr></table>
+<p class="note">bench: <code>{esc(lp.get('bench_cmd', '—'))}</code></p></div>
 </div>
-<p class="note">The disk tiers are inherently different: certus drives raw NVMe through SPDK, cputier writes one file per block
-under its fs tier directory. Put the fs tier on comparable NVMe for a fair cold-path comparison.</p>
+<p class="note">The disk tiers are inherently different: certus drives raw NVMe through SPDK; cputier writes one file per block
+under its fs tier directory; lmcache writes one file per chunk under its L2 directory. Put the fs tier and the L2 dir on
+comparable NVMe for a fair cold-path comparison.</p>
 </main></body></html>
 """
     with open(a.out, "w") as fh:
         fh.write(page)
     if mismatches:
         print("WARNING: parameters differ between arms: "
-              + ", ".join(f"{c} ({x} vs {y})" for c, x, y, _ in mismatches))
+              + "; ".join(f"{c} ({', '.join(f'{k}={v}' for k, v in vals.items())})"
+                          for c, vals, _ in mismatches))
 
 
 def _distinct(values) -> list[str]:

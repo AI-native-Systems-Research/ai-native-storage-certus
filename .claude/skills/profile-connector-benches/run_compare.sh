@@ -1,15 +1,22 @@
 #!/bin/bash
-# run_compare.sh — run certus-connector-bench and cputier-connector-bench with
-# one shared parameter set, then render a side-by-side HTML report.
+# run_compare.sh — run certus-connector-bench, cputier-connector-bench and
+# lmcache-connector-bench with one shared parameter set, then render a
+# side-by-side HTML report.
 #
 #   run_compare.sh --out bench-results/connector-compare.html [options]
 #
-# Every workload flag is given ONCE here and forwarded identically to both
-# benches. The DRAM tier size (--dram) becomes certus-server's
-# --memory-tier-size AND cputier's --cpu-bytes (and the container's CPU_BYTES).
+# Every workload flag is given ONCE here and forwarded identically to every
+# bench. The DRAM tier size (--dram) becomes certus-server's
+# --memory-tier-size, cputier's --cpu-bytes (and the container's CPU_BYTES)
+# AND the LMCache server's L1 (--l1-size-gb). The arms run one after the
+# other, since they share the GPU.
+#
+# The lmcache arm has no contention mode and is single-rank: it is skipped
+# for --mode contention and for --tp > 1 (with a note), and runs its own
+# --mode all (default, pipelined, prefix-miss, scheduler-step) for --mode all.
 #
 # Artifacts go to <out-without-.html>.d/: params.json, certus.csv, cputier.csv,
-# certus-bench.log, cputier-bench.log, server.log.
+# lmcache.csv, certus-bench.log, cputier-bench.log, lmcache-bench.log, server.log.
 #
 # Options (defaults in brackets):
 #   --out PATH               HTML report path (required)
@@ -19,7 +26,7 @@
 #   --pipeline-depth N [4]  --direction D [both]  --hit-ratio F [0.75]
 #   --requests-per-step N [8]  --num-sessions N [32]  --lookup-order O [lookup-first]
 #   --gpu N [0]  --tp N [1]
-#   --dram SIZE [4G]         certus --memory-tier-size == cputier --cpu-bytes
+#   --dram SIZE [4G]         certus --memory-tier-size == cputier --cpu-bytes == lmcache L1
 #   --device-pci ADDR        certus NVMe device (repeatable), or
 #   --drive-count N          first N discovered NVMe drives [1 if no --device-pci]
 #   --eviction-threshold F   certus-server --memory-tier-eviction-threshold [0.7]
@@ -28,7 +35,10 @@
 #   --fs-tier DIR            cputier fs tier host dir [$HOME/cputier-bench-fs-tier]
 #   --server-bin PATH        [target/release/certus-server]
 #   --image IMAGE            cputier vLLM image [docker.io/vllm/vllm-openai:v0.30.0]
-#   --skip-certus | --skip-cputier | --report-only
+#   --l2-dir DIR             lmcache L2 (fs_native) host dir [$HOME/lmcache-bench-l2]
+#   --lmcache-image IMAGE    lmcache image [localhost/vllm-lmcache-bench:vllm0.30.0]
+#   --chunk-size N           lmcache server --chunk-size in tokens [256]
+#   --skip-certus | --skip-cputier | --skip-lmcache | --report-only
 set -uo pipefail
 
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -40,7 +50,8 @@ WORKING_SET=512 PIPELINE_DEPTH=4 DIRECTION=both HIT_RATIO=0.75 REQS_PER_STEP=8
 NUM_SESSIONS=32 LOOKUP_ORDER=lookup-first GPU=0 TP=1 DRAM=4G DEVICE_PCI=()
 DRIVE_COUNT="" EVICT_THRESHOLD=0.7 WORKERS=4 CHANNELS="" FS_TIER="$HOME/cputier-bench-fs-tier"
 SERVER_BIN=target/release/certus-server IMAGE=docker.io/vllm/vllm-openai:v0.30.0
-RUN_CERTUS=1 RUN_CPUTIER=1
+L2_DIR="$HOME/lmcache-bench-l2" LMCACHE_IMAGE=localhost/vllm-lmcache-bench:vllm0.30.0 CHUNK_SIZE=256
+RUN_CERTUS=1 RUN_CPUTIER=1 RUN_LMCACHE=1
 SHM_PATH=/dev/shm/certus-shmq
 
 while (($#)); do
@@ -70,10 +81,14 @@ while (($#)); do
     --fs-tier) FS_TIER="$2"; shift ;;
     --server-bin) SERVER_BIN="$2"; shift ;;
     --image) IMAGE="$2"; shift ;;
+    --l2-dir) L2_DIR="$2"; shift ;;
+    --lmcache-image) LMCACHE_IMAGE="$2"; shift ;;
+    --chunk-size) CHUNK_SIZE="$2"; shift ;;
     --skip-certus) RUN_CERTUS=0 ;;
     --skip-cputier) RUN_CPUTIER=0 ;;
-    --report-only) RUN_CERTUS=0; RUN_CPUTIER=0 ;;
-    -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
+    --skip-lmcache) RUN_LMCACHE=0 ;;
+    --report-only) RUN_CERTUS=0; RUN_CPUTIER=0; RUN_LMCACHE=0 ;;
+    -h|--help) sed -n '2,42p' "$0"; exit 0 ;;
     *) echo "error: unknown option $1" >&2; exit 2 ;;
   esac
   shift
@@ -95,7 +110,7 @@ fi
 # renumbers the exposed GPUs 0..tp-1, so cputier always gets --gpu 0.
 GPU_LIST=$(seq -s, "$GPU" $(( GPU + TP - 1 )))
 
-# The one shared workload argument list, passed verbatim to both benches.
+# The one shared workload argument list, passed verbatim to every bench.
 SHARED=(--mode "$MODE" --bs "$BS" --num-blocks "$NUM_BLOCKS" --block-bytes "$BLOCK_BYTES"
         --min-duration "$MIN_DURATION" --warmup "$WARMUP" --working-set "$WORKING_SET"
         --pipeline-depth "$PIPELINE_DEPTH" --direction "$DIRECTION" --hit-ratio "$HIT_RATIO"
@@ -119,6 +134,21 @@ if [[ "$REL_ART" == /* ]]; then CPUTIER_CSV_IN=/fs-tier/cputier.csv; else CPUTIE
 CPUTIER_CMD=(benchmarks/cputier-connector-bench/run-in-container.sh "${SHARED[@]}"
              --gpu 0 --cpu-bytes "$DRAM" --csv "$CPUTIER_CSV_IN" --tag cputier)
 
+# lmcache: one rank, no contention mode; L1 is --dram in GiB.
+LMCACHE_NOTE=""
+if [[ "$MODE" == contention ]]; then
+  LMCACHE_NOTE="skipped: lmcache-connector-bench has no contention mode"
+elif (( TP > 1 )); then
+  LMCACHE_NOTE="skipped: lmcache-connector-bench is single-rank (--tp 1)"
+fi
+[[ -n "$LMCACHE_NOTE" ]] && RUN_LMCACHE=0
+L1_GB=$(python3 -c "
+import re,sys; m=re.fullmatch(r'(\d+(?:\.\d+)?)([KMGT]?)', '$DRAM'.strip().upper())
+print(f'{float(m.group(1)) * (1 << {\"\":0,\"K\":10,\"M\":20,\"G\":30,\"T\":40}[m.group(2)]) / 2**30:g}')")
+if [[ "$REL_ART" == /* ]]; then LMCACHE_CSV_IN=/certus/.lmcache-compare-$$.csv; else LMCACHE_CSV_IN="/certus/$REL_ART/lmcache.csv"; fi
+LMCACHE_CMD=(benchmarks/lmcache-connector-bench/run-in-container.sh "${SHARED[@]}"
+             --gpu 0 --csv "$LMCACHE_CSV_IN" --tag lmcache)
+
 python3 - "$ART/params.json" <<EOF
 import json, sys
 json.dump({
@@ -132,13 +162,16 @@ json.dump({
              "server_args": """${SERVER_ARGS[*]}""", "bench_cmd": """${CERTUS_CMD[*]}"""},
   "cputier": {"image": "$IMAGE", "fs_tier": "$FS_TIER", "spec": "tiering",
               "bench_cmd": """GPU=$GPU_LIST CPU_BYTES=$DRAM FS_TIER_HOST=$FS_TIER IMAGE=$IMAGE ${CPUTIER_CMD[*]}"""},
+  "lmcache": {"image": "$LMCACHE_IMAGE", "l2_dir": "$L2_DIR", "l1_gb": $L1_GB, "chunk_size": $CHUNK_SIZE,
+              "note": "$LMCACHE_NOTE",
+              "bench_cmd": """GPU=$GPU L1_GB=$L1_GB L2_DIR=$L2_DIR CHUNK_SIZE=$CHUNK_SIZE IMAGE=$LMCACHE_IMAGE ${LMCACHE_CMD[*]}"""},
   "git": {"branch": "$(git branch --show-current)", "commit": "$(git rev-parse --short HEAD)",
           "dirty": $( [[ -n "$(git status --porcelain --untracked-files=no)" ]] && echo True || echo False )},
   "host": "$(hostname)", "gpu_name": "$(nvidia-smi -i "$GPU" --query-gpu=name --format=csv,noheader 2>/dev/null | head -1)",
 }, open(sys.argv[1], "w"), indent=2)
 EOF
 
-STATUS_CERTUS=skipped STATUS_CPUTIER=skipped
+STATUS_CERTUS=skipped STATUS_CPUTIER=skipped STATUS_LMCACHE=skipped
 SERVER_PID=""
 
 stop_server() {
@@ -192,7 +225,23 @@ if ((RUN_CPUTIER)); then
   [[ $rc -eq 0 && -s "$ART/cputier.csv" ]] && STATUS_CPUTIER=ok
 fi
 
-echo "[compare] certus=$STATUS_CERTUS cputier=$STATUS_CPUTIER"
+if ((RUN_LMCACHE)); then
+  STATUS_LMCACHE=failed
+  rm -f "$ART/lmcache.csv"
+  mkdir -p "$L2_DIR"
+  echo "[compare] lmcache arm: GPU=$GPU L1_GB=$L1_GB ${LMCACHE_CMD[*]}"
+  GPU="$GPU" L1_GB="$L1_GB" L2_DIR="$L2_DIR" CHUNK_SIZE="$CHUNK_SIZE" IMAGE="$LMCACHE_IMAGE" \
+    "${LMCACHE_CMD[@]}" 2>&1 | grep --line-buffered -vE "LMCache (INFO|WARNING)|slapd|Discovered API|CudaIPCTypes" \
+    | tee "$ART/lmcache-bench.log"
+  rc=${PIPESTATUS[0]}
+  tmp_csv="$REPO_ROOT/${LMCACHE_CSV_IN#/certus/}"
+  [[ "$LMCACHE_CSV_IN" == /certus/.lmcache-compare-* && -f "$tmp_csv" ]] && mv "$tmp_csv" "$ART/lmcache.csv"
+  [[ $rc -eq 0 && -s "$ART/lmcache.csv" ]] && STATUS_LMCACHE=ok
+elif [[ -n "$LMCACHE_NOTE" ]]; then
+  echo "[compare] lmcache arm $LMCACHE_NOTE"
+fi
+
+echo "[compare] certus=$STATUS_CERTUS cputier=$STATUS_CPUTIER lmcache=$STATUS_LMCACHE"
 python3 "$SKILL_DIR/make_report.py" --artifacts "$ART" --out "$OUT"
 echo "[compare] report: $OUT"
-[[ "$STATUS_CERTUS" != failed && "$STATUS_CPUTIER" != failed ]]
+[[ "$STATUS_CERTUS" != failed && "$STATUS_CPUTIER" != failed && "$STATUS_LMCACHE" != failed ]]
