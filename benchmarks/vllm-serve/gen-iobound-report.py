@@ -38,6 +38,8 @@ ARMS = [
     ("certus-intervals", "Certus (intervals)", "#72B7B2"),
     ("cputier-nointervals", "cputier (no intervals)", "#F58518"),
     ("cputier-intervals", "cputier (intervals)", "#E45756"),
+    ("lmcache-nointervals", "LMCache (no intervals)", "#54A24B"),
+    ("lmcache-intervals", "LMCache (intervals)", "#B279A2"),
 ]
 
 
@@ -669,7 +671,7 @@ def main():
                          "does means the live poller missed scrapes when /metrics slowed under load.</p>"
                          + "".join(tl))
     html = f"""<!doctype html><html><head><meta charset="utf-8">
-<title>KV-IO-bound: Certus vs cputier</title>
+<title>KV-IO-bound: Certus vs cputier vs LMCache</title>
 <style>
  body{{font-family:system-ui,Arial,sans-serif;margin:2rem;max-width:1100px;color:#1a1a1a}}
  h1{{font-size:1.4rem}} table{{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.9rem}}
@@ -681,7 +683,7 @@ def main():
  table.setup th,table.setup td{{border:none;text-align:left;padding:.15rem .9rem .15rem 0;background:none}}
  table.setup th{{color:#555;font-weight:600;white-space:nowrap}}
 </style></head><body>
-<h1>{p_attn} KV-IO-bound experiment — Certus vs cputier</h1>
+<h1>{p_attn} KV-IO-bound experiment — Certus vs cputier vs LMCache</h1>
 <table class="setup"><tbody>
 <tr><th>Model</th><td>{p_model} &middot; {p_attn} &middot; {p_kv} KiB of KV per token</td></tr>
 <tr><th>Serving</th><td>vLLM {p_vllm} &middot; TP={p_tp} &middot; {p_window}-token context window</td></tr>
