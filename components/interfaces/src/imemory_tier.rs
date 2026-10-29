@@ -50,6 +50,93 @@ impl fmt::Display for MemoryTierError {
 
 impl std::error::Error for MemoryTierError {}
 
+/// Default size of the bounce reserve: four concurrent device reads (the
+/// transfer endpoint's default reader count) of up to 8 MiB, the largest KV
+/// block `DispatcherConfig::cold_staging_buf_bytes` already provides for (a
+/// 64-token block, per worker). Taken from the pool at `initialize`, capped at
+/// an eighth of it.
+pub const DEFAULT_BOUNCE_RESERVE: usize = 32 * 1024 * 1024;
+
+/// A range of the memory tier's bounce reserve, holding one block-tier entry's
+/// bytes while a peer is served from it.
+///
+/// The reserve lies inside the memory tier's pool but outside its cache, so a
+/// buffer is already DMA-able (when the pool is) and already covered by any
+/// registration of the whole pool, and taking one never evicts a cached entry.
+/// `len` is the length asked for; the reserve allocates it rounded up to
+/// 4 KiB, and must be told the same `len` when the buffer is freed.
+///
+/// # Examples
+///
+/// ```
+/// use interfaces::BounceBuffer;
+///
+/// let mut buf = [0u8; 8];
+/// let bounce = BounceBuffer { ptr: buf.as_mut_ptr(), len: 8 };
+/// assert_eq!(bounce.len, 8);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BounceBuffer {
+    /// Start of the allocated bytes.
+    pub ptr: *mut u8,
+    /// Bytes allocated, as requested.
+    pub len: u32,
+}
+
+// SAFETY: a buffer is an address range handed between threads; whoever holds it
+// owns those bytes until it is freed, and the pool outlives every buffer.
+unsafe impl Send for BounceBuffer {}
+
+/// Why a bounce buffer could not be had, or a read into one failed.
+///
+/// The variants divide on whether retrying can help: [`NoSpace`] is transient,
+/// [`NeverFits`] is permanent.
+///
+/// [`NoSpace`]: BounceError::NoSpace
+/// [`NeverFits`]: BounceError::NeverFits
+///
+/// # Examples
+///
+/// ```
+/// use interfaces::BounceError;
+///
+/// assert!(BounceError::NoSpace.is_transient());
+/// assert!(!BounceError::NeverFits("8 MiB > 4 MiB reserve".into()).is_transient());
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BounceError {
+    /// No room in the reserve right now. Retry after a buffer is freed.
+    NoSpace,
+    /// Can never be satisfied: zero length, larger than the whole reserve, no
+    /// reserve, or a pool the device cannot DMA into. Retrying cannot help.
+    NeverFits(String),
+    /// The device read failed. Any buffer taken for it has been freed.
+    Io(String),
+    /// The component is not initialized.
+    NotInitialized(String),
+}
+
+impl BounceError {
+    /// Whether the same request may succeed later.
+    #[must_use]
+    pub fn is_transient(&self) -> bool {
+        matches!(self, Self::NoSpace)
+    }
+}
+
+impl fmt::Display for BounceError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoSpace => write!(f, "bounce reserve has no room now"),
+            Self::NeverFits(msg) => write!(f, "bounce reserve can never fit this: {msg}"),
+            Self::Io(msg) => write!(f, "read into bounce reserve failed: {msg}"),
+            Self::NotInitialized(msg) => write!(f, "not initialized: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for BounceError {}
+
 component_macros::define_interface! {
     pub IMemoryTier {
         /// Initialize the memory-tier pool with the given size in bytes.
@@ -63,7 +150,9 @@ component_macros::define_interface! {
         /// Allocate a slot for `key` of `size` bytes and return a pointer to it.
         ///
         /// The returned pointer is valid until the slot is evicted or removed.
-        /// Returns `PoolFull` if insufficient contiguous space is available.
+        /// Returns `InvalidSize` for a size of 0, `NotInitialized` before
+        /// `initialize`, and `PoolFull` if insufficient contiguous space is
+        /// available.
         fn insert(&self, key: CacheKey, size: u32) -> Result<*mut u8, MemoryTierError>;
 
         /// Get the pointer and size for an existing slot, refreshing its
@@ -110,13 +199,17 @@ component_macros::define_interface! {
         /// Check whether a slot exists for `key`.
         fn contains(&self, key: CacheKey) -> bool;
 
-        /// Return the total pool capacity in bytes.
+        /// Return the bytes the cache may use: the pool size less the bounce
+        /// reserve (see [`set_bounce_reserve`](Self::set_bounce_reserve)),
+        /// ending on a 4 KiB boundary where the reserve begins. Zero before
+        /// `initialize`.
         fn capacity(&self) -> usize;
 
         /// Return the number of bytes currently allocated.
         fn used(&self) -> usize;
 
-        /// Return the base pointer and size of the pool for CUDA host registration.
+        /// Return the base pointer and size of the whole pool, bounce reserve
+        /// included, for CUDA host and RDMA registration.
         fn pool_info(&self) -> Option<(*mut u8, usize)>;
 
         /// Returns `true` when the pool is backed by SPDK hugepages and pointers
@@ -133,6 +226,26 @@ component_macros::define_interface! {
         /// Returns zeros when the `telemetry` feature is not enabled on the
         /// implementing crate.
         fn telemetry_snapshot(&self) -> MemoryTierTelemetrySnapshot;
+
+        /// Set the bounce reserve's size in bytes, overriding
+        /// [`DEFAULT_BOUNCE_RESERVE`]. Only before `initialize`, which takes
+        /// `min(bytes, pool_size / 8)` from the top of the pool; afterwards
+        /// this is an error. Zero means no reserve.
+        fn set_bounce_reserve(&self, bytes: usize) -> Result<(), MemoryTierError>;
+
+        /// Allocate `len` bytes of the bounce reserve. `NoSpace` if they do not
+        /// fit now; `NeverFits` if they never can — zero, larger than the
+        /// reserve, no reserve, or a pool that is not DMA-capable;
+        /// `NotInitialized` before `initialize`.
+        fn bounce_alloc(&self, len: u32) -> Result<BounceBuffer, BounceError>;
+
+        /// Free a buffer from [`bounce_alloc`](Self::bounce_alloc). Only once no
+        /// device or NIC can still access its bytes.
+        fn bounce_free(&self, buf: BounceBuffer);
+
+        /// The bounce reserve's size and the bytes allocated from it now, both
+        /// after rounding to 4 KiB.
+        fn bounce_usage(&self) -> (usize, usize);
     }
 }
 

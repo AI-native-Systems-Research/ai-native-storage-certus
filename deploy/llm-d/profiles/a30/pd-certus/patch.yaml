@@ -1,0 +1,151 @@
+# Both roles get the same certus wiring as ../certus/patch.yaml; only the
+# Deployment names differ. pd's args, including its --kv-transfer-config, are
+# kept: the entrypoint wraps them rather than this patch replacing them, so the
+# NIXL settings live in one place (../pd/patch.yaml).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pd-disaggregation-nvidia-gpu-vllm-prefill
+spec:
+  template:
+    spec:
+      # The certus server opens vLLM's CUDA IPC handles: same IPC namespace.
+      hostIPC: true
+      # Reads and writes pod annotations for peer selection (rbac.yaml).
+      serviceAccountName: certus-peer
+      imagePullSecrets:
+        - name: artifactory-creds
+      containers:
+        - name: modelserver
+          # Replaces ["vllm","serve"]; the entrypoint picks the NUMA-local
+          # mailbox, wraps pd's NixlConnector config in a MultiConnector and
+          # adds the flags the offloading connector needs.
+          command: ["/certus/entrypoint-certus.sh"]
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: TENSOR_PARALLEL_SIZE
+              value: "1"
+            - name: DP_SIZE
+              value: "1"
+            - name: DP_RANK
+              value: "0"
+            # The entrypoint annotates this pod with its certus instance.
+            - name: POD_NAME
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+            - name: POD_NAMESPACE
+              valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+            # Peer selection M3: publish KV events for the router's precise
+            # prefix producer (llm-d guides/p2p-kv-cache-sharing). The topic
+            # names the pod by the address the router routes to: pod IP and the
+            # port it serves requests on.
+            - name: POD_IP
+              valueFrom: {fieldRef: {fieldPath: status.podIP}}
+            - name: CERTUS_KV_EVENTS
+              value: "tcp://*:5556"
+            # Report certus blocks as the CPU tier: the only one llm-d's
+            # p2p-source-producer counts as pullable. True when sent (a store
+            # lands in certus's DRAM tier first); stale after a demotion to SSD.
+            # DO NOT also give this pod vLLM's own CPU offload tier: the router
+            # could not tell the two apart and would name sources certus lacks
+            # (peer-selection.md, milestone 3, "Constraint").
+            - name: CERTUS_EVENT_MEDIUM
+              value: cpu
+          volumeMounts:
+            - mountPath: /certus
+              name: certus-entrypoint
+            # Host /dev/shm at a separate path, as in ../certus: the pod keeps
+            # its own tmpfs /dev/shm for vLLM's internals.
+            - mountPath: /certus-shm
+              name: certus-mailbox
+      volumes:
+        - name: certus-entrypoint
+          configMap:
+            name: certus-entrypoint
+            defaultMode: 0755
+        - name: certus-mailbox
+          hostPath:
+            path: /dev/shm
+            type: Directory
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pd-disaggregation-nvidia-gpu-vllm-decode
+spec:
+  template:
+    spec:
+      # The certus server opens vLLM's CUDA IPC handles: same IPC namespace.
+      hostIPC: true
+      # Reads and writes pod annotations for peer selection (rbac.yaml).
+      serviceAccountName: certus-peer
+      imagePullSecrets:
+        - name: artifactory-creds
+      initContainers:
+        # llm-d's routing sidecar. Lists without a merge key are replaced whole,
+        # so this is base's arg vector plus --enable-p2p-pull: with it the
+        # sidecar turns the EPP's (or a client's) KV-cache-source header into
+        # kv_transfer_params.remote_kv_source on the prefill hop, which the
+        # certus connector resolves to the source pod's certus and fetches from.
+        - name: routing-proxy
+          args:
+            - --port=8000
+            - --kv-connector=nixlv2
+            - --zap-log-level=1
+            - --secure-proxy=false
+            - --enable-p2p-pull
+      containers:
+        - name: modelserver
+          # Replaces ["vllm","serve"]; the entrypoint picks the NUMA-local
+          # mailbox, wraps pd's NixlConnector config in a MultiConnector and
+          # adds the flags the offloading connector needs.
+          command: ["/certus/entrypoint-certus.sh"]
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: TENSOR_PARALLEL_SIZE
+              value: "1"
+            - name: DP_SIZE
+              value: "1"
+            - name: DP_RANK
+              value: "0"
+            # The entrypoint annotates this pod with its certus instance.
+            - name: POD_NAME
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+            - name: POD_NAMESPACE
+              valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+            # Peer selection M3: publish KV events for the router's precise
+            # prefix producer (llm-d guides/p2p-kv-cache-sharing). The topic
+            # names the pod by the address the router routes to: pod IP and the
+            # port it serves requests on.
+            - name: POD_IP
+              valueFrom: {fieldRef: {fieldPath: status.podIP}}
+            - name: CERTUS_KV_EVENTS
+              value: "tcp://*:5556"
+            # Report certus blocks as the CPU tier: the only one llm-d's
+            # p2p-source-producer counts as pullable. True when sent (a store
+            # lands in certus's DRAM tier first); stale after a demotion to SSD.
+            # DO NOT also give this pod vLLM's own CPU offload tier: the router
+            # could not tell the two apart and would name sources certus lacks
+            # (peer-selection.md, milestone 3, "Constraint").
+            - name: CERTUS_EVENT_MEDIUM
+              value: cpu
+            # Store generated blocks too, not only the prompt: decode produces
+            # the next turn's prefix, which prefill then fetches from this pod's
+            # certus (peer-selection.md, "decode -> prefill").
+            - name: CERTUS_OFFLOAD_PROMPT_ONLY
+              value: "false"
+          volumeMounts:
+            - mountPath: /certus
+              name: certus-entrypoint
+            # Host /dev/shm at a separate path, as in ../certus: the pod keeps
+            # its own tmpfs /dev/shm for vLLM's internals.
+            - mountPath: /certus-shm
+              name: certus-mailbox
+      volumes:
+        - name: certus-entrypoint
+          configMap:
+            name: certus-entrypoint
+            defaultMode: 0755
+        - name: certus-mailbox
+          hostPath:
+            path: /dev/shm
+            type: Directory

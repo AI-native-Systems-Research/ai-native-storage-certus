@@ -15,7 +15,7 @@
 
 The `memory-tier` component provides a high-performance DRAM-resident cache pool for the Certus storage system. It serves as a fast staging area between higher-level dispatch logic and persistent NVMe storage, enabling low-latency reads for cached objects and write-staging for objects destined for disk.
 
-The pool is held as a single, unsharded structure guarded by one `RwLock<Pool>`: a single first-fit free-list allocator and a single `HashMap<CacheKey, Slot>` slot map. Read operations (`get`, `peek`, `contains`, `batch_touch`, `capacity`, `used`) take a shared read lock; mutations (`insert`, `remove`, `evict`, `clear`) take an exclusive write lock. Eviction decisions are delegated to an external `IEvictionPolicy` component via a receptacle binding, which provides pluggable eviction strategies (currently LRU) and its own internal synchronization; eviction-order touches are performed after releasing the pool lock.
+The pool is held as a single, unsharded structure guarded by one `RwLock<Pool>`: a single first-fit free-list allocator and a single `HashMap<CacheKey, Slot>` slot map. Read operations (`get`, `peek`, `contains`, `batch_touch`, `capacity`, `used`) take a shared read lock; mutations (`insert`, `remove`, `evict`, `clear`) take an exclusive write lock. Eviction decisions are delegated to an external `IEvictionPolicy` component via a receptacle binding, which provides pluggable eviction strategies (currently LRU) and its own internal synchronization; eviction-order touches are performed after releasing the pool lock. The top of the pool (by default 32 MiB, at most an eighth, starting on a page boundary) is a bounce reserve outside the cache, with its own allocator behind a mutex, from which buffers are allocated to serve block-tier entries to peers (User Story 8); `capacity()`, `used()`, eviction and `clear()` cover only the cache.
 
 Memory is allocated as a single contiguous region via `mmap` (preferring 2 MiB hugepage backing) or SPDK DMA-capable hugepages when the SPDK environment is active. All internal allocations are 4 KiB-aligned, making returned pointers directly usable for NVMe DMA transfers without additional alignment or pinning.
 
@@ -101,12 +101,42 @@ Memory is allocated as a single contiguous region via `mmap` (preferring 2 MiB h
 **so that** I can track memory pressure and trigger proactive eviction.
 
 **Acceptance Criteria:**
-- `capacity()` returns the total pool size
+- `capacity()` returns the bytes the cache may use: the pool size less the bounce reserve
 - `used()` returns the sum of all currently-allocated bytes (4 KiB-aligned)
-- `pool_info()` returns the base pointer and total pool size for CUDA host registration
+- `pool_info()` returns the base pointer and total pool size — reserve included — for CUDA
+  host and RDMA registration
 
 **Test Coverage:**
 - `capacity_and_used` - verifies accounting correctness
+
+### User Story 8 - Bounce Reserve for Serving Block-Tier Entries to Peers (Priority: P3)
+
+**As** the dispatcher, reading a block-tier entry so a peer can be served from it,
+**I want** a small range of the pool that is outside the cache,
+**so that** the read lands in memory that is already DMA-able and already registered for
+RDMA — and serving a peer can never evict one of this node's own cached entries.
+
+**Acceptance Criteria:**
+- `initialize` sets aside `min(reserve, pool_size / 8)`, in whole 4 KiB pages, at the top of
+  the pool; the reserve defaults to `DEFAULT_BOUNCE_RESERVE` (32 MiB) and the log line names it
+- `set_bounce_reserve(bytes)` overrides it before `initialize` and returns `AllocationFailed` afterwards;
+  zero means no reserve
+- reserve bytes never appear in `capacity()`, `used()` or eviction tracking, and `clear()`
+  leaves buffers alone
+- `bounce_alloc(len)` returns a buffer inside the reserve; `NoSpace` when it does not fit now;
+  `NeverFits` when it never can — larger than the reserve, no reserve, zero length, or a pool
+  that is not DMA-capable; `NotInitialized` before `initialize`
+- `bounce_free(buf)` panics on a buffer that is not live, or whose length differs
+
+**Test Coverage:**
+- `the_default_reserve_is_taken_quietly_and_capped`, `the_reserve_is_set_before_initialize_only`,
+  `the_cache_and_the_reserve_never_share_bytes`,
+  `the_reserve_starts_on_a_page_when_the_pool_does_not_end_on_one`,
+  `leases_are_transient_until_freed_and_coalesce`,
+  `a_lease_larger_than_the_reserve_never_fits`, `a_pool_that_is_not_dma_capable_never_fits`,
+  `freeing_with_the_wrong_length_is_loud`, `freeing_a_buffer_twice_is_loud`, `clear_empties_the_cache_and_leaves_the_reserve`
+- Unit tests run on an mmap pool; a test-only `pretend_dma` flag lets it allocate buffers as
+  if DMA-capable
 
 ### User Story 6 - Batch LRU Touch for Hot-Path Throughput (Priority: P2)
 
@@ -154,7 +184,7 @@ Memory is allocated as a single contiguous region via `mmap` (preferring 2 MiB h
 | FR-004 | All allocations are 4 KiB-aligned for NVMe DMA compatibility | Unit test |
 | FR-005 | Pool state (allocator + slot map) is held as a single, unsharded structure behind one `RwLock<Pool>` (no shards) | Implementation |
 | FR-006 | Concurrency uses one reader-writer lock: read operations (`get`, `peek`, `contains`, `batch_touch`, `capacity`, `used`) take a shared read lock; mutations (`insert`, `remove`, `evict`, `clear`) take an exclusive write lock | Implementation |
-| FR-007 | A single first-fit `FreeList` allocator and a single `HashMap<CacheKey, Slot>` slot map serve the whole pool | Implementation |
+| FR-007 | A single first-fit `FreeList` allocator and a single `HashMap<CacheKey, Slot>` slot map serve the whole cache (the pool less the bounce reserve); the reserve has its own allocator (FR-032) | Implementation |
 | FR-008 | insert() rejects zero size with InvalidSize | Unit test |
 | FR-009 | insert() rejects duplicate keys with AlreadyExists | Unit test |
 | FR-010 | insert() returns PoolFull when the allocator cannot satisfy the request | Unit test |
@@ -165,12 +195,12 @@ Memory is allocated as a single contiguous region via `mmap` (preferring 2 MiB h
 | FR-015 | remove() frees the slot and returns KeyNotFound for absent keys | Unit test |
 | FR-016 | touch() updates the entry's eviction-order position without returning data | Unit test |
 | FR-017 | batch_touch() amortizes lock acquisition for multiple keys | Implementation |
-| FR-018 | clear() removes all entries, resets allocators, returns count | Unit test |
+| FR-018 | clear() removes all entries, resets the cache allocator (the bounce reserve and its buffers are untouched), returns count | Unit test |
 | FR-019 | NUMA binding via mbind with graceful fallback on failure | Implementation |
 | FR-020 | is_dma_capable() returns true only for SPDK-allocated pools | Implementation |
 | FR-021 | oldest_keys(n) returns up to N oldest keys via a single `IEvictionPolicy::get_eviction_candidates(pool_id, n)` call (no per-shard sampling) | Implementation |
 | FR-022 | pool_info() returns base pointer and size for CUDA host registration | Implementation |
-| FR-023 | Every operation that reads or changes pool state checks the initialized flag first, and returns its "not initialized" result when the flag is unset (`NotInitialized` for `insert`/`remove`/`clear`; `None`, `false`, `0`, an empty `Vec`, or a no-op for the others). Exceptions: `insert` rejects `size == 0` with `InvalidSize`, and `batch_touch` returns on an empty slice, before the check; `is_dma_capable()` and `telemetry_snapshot()` do not check the flag (their results are well-defined before initialization); `initialize()` rejects an already-set flag | Implementation |
+| FR-023 | Every operation that reads or changes pool state checks the initialized flag first, and returns its "not initialized" result when the flag is unset (`NotInitialized` for `insert`/`remove`/`clear`; `None`, `false`, `0`, an empty `Vec`, or a no-op for the others). Exceptions: `insert` rejects `size == 0` with `InvalidSize`, and `batch_touch` returns on an empty slice, before the check; `is_dma_capable()`, `telemetry_snapshot()` and `bounce_usage()` do not check the flag (their results are well-defined before initialization; `bounce_usage()` returns `(0, 0)`), and neither does `bounce_free()`, for which no buffer can be live before initialization, so it panics (FR-032); `bounce_alloc()` returns `BounceError::NotInitialized`; `initialize()` and `set_bounce_reserve()` reject an already-set flag | Implementation |
 | FR-024 | Eviction policy is an external receptacle (IEvictionPolicy) | Implementation |
 | FR-025 | Logger is an optional receptacle (ILogger) | Implementation |
 | FR-026 | Free-list allocator coalesces adjacent free regions on deallocation | Unit test |
@@ -178,6 +208,8 @@ Memory is allocated as a single contiguous region via `mmap` (preferring 2 MiB h
 | FR-028 | `telemetry_snapshot()` returns the current telemetry counters (all-zero if the `telemetry` feature is disabled); `telemetry()`/`reset_telemetry()` provide feature-gated inherent access and reset | Implementation *(backfilled)* |
 | FR-029 | `free_capacity()` returns `capacity() - used()` for proactive-eviction triggers | Implementation *(backfilled)* |
 | FR-030 | insert() checks for free space (FR-010, `PoolFull`) before registering the key with the eviction policy. If the policy then refuses to track the key (`IEvictionPolicy::track` returns an error), insert() returns `NotInitialized` with a message naming the key and the policy's error, reserves no pool space, records no slot, does not panic, and leaves the component usable | Unit test *(backfilled)* |
+| FR-031 | `initialize` sets aside a bounce reserve of `min(requested, pool_size / 8)` whole pages at the top of the pool, starting on a 4 KiB boundary (default `DEFAULT_BOUNCE_RESERVE`, 32 MiB; a pool that is not whole pages leaves its tail unused), excluded from `capacity()`, `used()`, eviction and `clear()`, and taken whether or not the pool is DMA-capable (on one that is not, every `bounce_alloc` is `NeverFits`); `set_bounce_reserve` overrides it before `initialize` only | Unit test |
+| FR-032 | The reserve is managed by a second first-fit `FreeList` behind its own mutex; `bounce_alloc` answers `NotInitialized` before `initialize`, then `NoSpace` (transient) or `NeverFits` (oversize, zero, no reserve, or a pool that is not DMA-capable); `bounce_free` checks the buffer against its live set and panics on a mismatch; `bounce_usage` reports (reserve, allocated) | Unit test |
 
 ### Non-Functional Requirements
 
@@ -200,7 +232,9 @@ Memory is allocated as a single contiguous region via `mmap` (preferring 2 MiB h
 | Entity | Type | Description |
 |--------|------|-------------|
 | `MemoryTierComponent` | Component | Main component struct, defined via `define_component!` macro |
-| `MemoryTierState` | Internal struct | Holds pool pointer, pool size, pool id, the `RwLock<Pool>`, initialization flag, and (feature-gated) telemetry |
+| `MemoryTierState` | Internal struct | Holds pool pointer, pool size, cache size (pool less reserve), the requested reserve, the bounce allocator, pool id, the `RwLock<Pool>`, initialization flag, and (feature-gated) telemetry |
+| `Bounce` | Internal struct | The bounce reserve's `FreeList` (offsets relative to the reserve) and its live buffers, offset → length |
+| `BounceBuffer` / `BounceError` | Interface types | A buffer `(ptr, len)` in the reserve, and why one could not be had |
 | `Pool` | Internal struct | The single unsharded allocator + slot map: one `FreeList` and one `HashMap<CacheKey, Slot>`, guarded by `RwLock<Pool>` |
 | `Slot` | Internal struct | Maps a CacheKey to an offset, size, and eviction handle |
 | `FreeList` | Internal struct | BTreeMap-based first-fit allocator with coalescing |
@@ -238,12 +272,13 @@ Memory is allocated as a single contiguous region via `mmap` (preferring 2 MiB h
 
 ## Implementation Notes
 
-- The component uses `RwLock<MemoryTierState>` at the top level. After initialization the immutable state fields (`pool_ptr`, `pool_size`, `pool_id`) do not change; the inner `RwLock<Pool>` guards the allocator and slot map. Data-path reads take the inner read lock; mutations take the inner write lock. When the `telemetry` feature is enabled, the measured paths (`insert`, `remove`, `evict_next` for the write lock; `get`, `batch_touch` for the read lock) first try `try_write`/`try_read` and, if that fails, bump the corresponding lock-contention counter before blocking.
-- `unsafe impl Send/Sync` is justified because the pool pointer references mmap'd/SPDK memory accessible from any thread, and all mutable access is serialized through the `RwLock<Pool>`.
+- The component uses `RwLock<MemoryTierState>` at the top level. After initialization the immutable state fields (`pool_ptr`, `pool_size`, `cache_size`, `pool_id`) do not change; the inner `RwLock<Pool>` guards the allocator and slot map. Data-path reads take the inner read lock; mutations take the inner write lock. When the `telemetry` feature is enabled, the measured paths (`insert`, `remove`, `evict_next` for the write lock; `get`, `batch_touch` for the read lock) first try `try_write`/`try_read` and, if that fails, bump the corresponding lock-contention counter before blocking.
+- `unsafe impl Send/Sync` is justified because the pool pointer references mmap'd/SPDK memory accessible from any thread, and all mutable allocator state is serialized: the cache's through the `RwLock<Pool>`, the bounce reserve's through `Mutex<Bounce>`; the bytes of a bounce buffer belong to its holder until `bounce_free`.
 - Global eviction (`evict_next`) delegates victim choice entirely to the bound `IEvictionPolicy`; there is no internal round-robin counter or shard-selection state.
 - When SPDK has already shut down at Drop time, the pool is intentionally leaked (same pattern as DmaBuffer) to avoid use-after-free in the SPDK allocator.
 - The allocator rounds all sizes up to 4 KiB, which means small objects waste up to 4095 bytes. This is acceptable because the primary use case is large extent-sized allocations (typically 4 KiB or multiples thereof).
 - `oldest_keys()` delegates to `IEvictionPolicy::get_eviction_candidates(pool_id, n)` in a single call; it may return fewer than N keys if the policy tracks fewer live entries.
+- The bounce reserve is carved from the pool rather than allocated beside it: on 1 GiB hugepages a separate 32 MiB allocation costs a whole GiB, and inside the pool it is covered by whatever registers the pool (CUDA host, RDMA). It is small next to any real pool — 32 MiB is 1.6% of the servers' 2 GiB default — so it is taken quietly, and capped at an eighth so a small test pool keeps a cache. Its only consumer is the dispatcher's `read_to_bounce`, serving block-tier entries to peers (certus-transfer-endpoint research D15).
 - `DEFAULT_POOL_SIZE` (256 MiB) is declared as a public constant but is currently unused by any call site — `initialize()` always requires an explicit `pool_size` argument. It is reserved for a future default-constructor path (same reserved-for-future status as the `NotEvictable` error variant below). *(backfilled 2026-07-22)*
 
 ## Spec-Sync Notes (2026-08-20 — backfilled to reality)

@@ -225,6 +225,53 @@ fn env_parse<T: std::str::FromStr>(key: &str) -> Option<T> {
     env_str(key).and_then(|v| v.parse::<T>().ok())
 }
 
+/// The transfer endpoint's listen port when `CERTUS_RDMA_PORT` is unset. Not
+/// 4791 (RoCE v2's UDP port, easily confused with it) and not 7471
+/// (`tools/rdma-test`'s default, which runs on the same nodes).
+#[cfg(feature = "rdma")]
+const DEFAULT_TRANSFER_PORT: u16 = 7481;
+
+/// Configure and start the transfer endpoint (full-transfer profile). It
+/// listens on `CERTUS_RDMA_BIND_IP` (unset or empty: the first active RoCE v2
+/// port's address) and `CERTUS_RDMA_PORT` (default 7481); its name,
+/// `"ip:port"`, is what a peer's `certus_fetch_from` hint must say, exactly.
+/// `CERTUS_TRANSFER_CPU` pins its thread, normally to a core on the NIC's NUMA
+/// node. Runs after the memory tier (whose pool it registers once) and the
+/// dispatcher (which reads block-tier entries for it).
+#[cfg(feature = "rdma")]
+#[allow(
+    dead_code,
+    reason = "only the full-transfer profile's composition calls it"
+)]
+pub(crate) fn init_transfer_endpoint(
+    iface: &Arc<dyn interfaces::ITransferEndpointAdmin + Send + Sync>,
+    _config: &StackConfig,
+) -> Result<(), String> {
+    let ip = match env_str("CERTUS_RDMA_BIND_IP") {
+        Some(ip) => ip,
+        None => certus_transfer_endpoint::first_active_rdma_ipv4()
+            .map_err(|e| format!("transfer endpoint: CERTUS_RDMA_BIND_IP unset and {e}"))?,
+    };
+    let port = match env_str("CERTUS_RDMA_PORT") {
+        Some(p) => p
+            .parse::<u16>()
+            .map_err(|_| format!("CERTUS_RDMA_PORT={p:?} is not a port"))?,
+        None => DEFAULT_TRANSFER_PORT,
+    };
+    let mut cfg = interfaces::EndpointConfig::new(format!("{ip}:{port}"));
+    cfg.actor_cpu = env_parse::<usize>("CERTUS_TRANSFER_CPU");
+    let name = cfg.local.clone();
+    iface
+        .configure(cfg)
+        .map_err(|e| format!("transfer endpoint configure: {e}"))?;
+    iface
+        .initialize()
+        .map_err(|e| format!("transfer endpoint initialize: {e}"))?;
+    eprintln!("transfer endpoint: listening as {name}");
+    *_config.transfer_endpoint_name.borrow_mut() = Some(name);
+    Ok(())
+}
+
 pub(crate) fn init_dispatcher(
     iface: &Arc<dyn IDispatcher + Send + Sync>,
     config: &StackConfig,

@@ -1,0 +1,35 @@
+# Peer selection (components/certus-transfer-endpoint/specs/001-rdma-cache-transfer/
+# peer-selection.md): each model server annotates its own pod with the certus
+# instance that holds its cache, certus.ai/transfer-endpoint; a pod fetching from
+# a peer reads that annotation to find the peer's certus. Both need pods in this
+# namespace and nothing else, so a dedicated account rather than widening the
+# base's `sa` (which mounts no token, deliberately).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: certus-peer
+automountServiceAccountToken: true
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: certus-peer
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    # get/list: find a source pod by IP and read its annotation.
+    # patch: write this pod's own annotation. Kubernetes cannot narrow patch to
+    # "only yourself"; the entrypoint patches only POD_NAME.
+    verbs: ["get", "list", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: certus-peer
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: certus-peer
+subjects:
+  - kind: ServiceAccount
+    name: certus-peer

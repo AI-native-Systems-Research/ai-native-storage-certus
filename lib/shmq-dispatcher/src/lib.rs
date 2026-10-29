@@ -25,11 +25,13 @@
 //! none, for zero overhead.
 
 pub mod cpu_bindings;
+pub mod fetch;
 pub mod translate;
 pub mod wire;
 
 mod serve;
 
 pub use cpu_bindings::{log_cpu_bindings, thread_cpu_bindings, ThreadCpuBinding};
+pub use fetch::{FetchLimits, FetchStats, Fetcher};
 pub use serve::{serve, ServeConfig};
 pub use translate::{OpError, Translator, TranslatorObserver};

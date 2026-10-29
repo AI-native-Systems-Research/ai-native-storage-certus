@@ -183,7 +183,7 @@ impl<M: Send + 'static> ActorHandle<M> {
     /// Signal the actor to stop by closing its channel.
     ///
     /// The actor's poll loop will exit on the next iteration when it sees the
-    /// closed channel. This does NOT join the thread — call [`deactivate`] or
+    /// closed channel. This does NOT join the thread — call [`Self::deactivate`] or
     /// drop the handle afterward to join.
     ///
     /// Use this to stop multiple actors concurrently: signal all, then join all.

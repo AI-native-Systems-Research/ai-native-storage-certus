@@ -1,11 +1,12 @@
 ---
 spec_sync_component: component-framework
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-23T18:00:34Z
-spec_sync_git_commit: d7a24d58
-spec_sync_inputs_sha256: 93ae4475f9d52e5abca829929c3fcbe564596786bbf4b04d4058aeeaa6c3772a
+spec_sync_synced_at: 2026-10-27T17:35:46Z
+spec_sync_git_commit: 7cb4207b
+spec_sync_inputs_sha256: 1af04cdae2bab43a66cfbd06c763f011cb60ba584d87ddd7d127e4c460641b0a
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-27 (transitive).** `components/interfaces` changed on branch `001-rdma-cache-transfer` (`ITransferEndpoint`, `IDispatcher::clear_all`), and the digest folds it in; this crate does not use those items and none of its specs names them. Its own inputs changed only by rustfmt (`numa/allocator.rs`, unstable `772885d9`) and one doc-link fix (`actor.rs`, `[`Self::deactivate`]`). No behaviour or FR change.
 > **Re-stamp 2026-10-23 (branch `unstable`, commit `d7a24d58` "Fix workspace build warnings" plus the spec-sync follow-up).** That commit only fixed warnings under the workspace lint posture: it added `Debug` impls, narrowed unreachable `pub` items to `pub(crate)`, wrapped `unsafe fn` bodies in explicit `unsafe {}` blocks, and the follow-up ran `rustfmt`. It also touched `components/interfaces` (a `Debug` impl for `Command`), which changes every component's digest. This component's own `src/` and `specs/` are unchanged, so no re-analysis was needed. All citations were re-verified by diff-mapping each base line to its new position. Status stays `clean`.
 
 > **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest

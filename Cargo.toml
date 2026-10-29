@@ -37,6 +37,7 @@ members = [
     "components/remote-lookup",
     "components/remote-lookup-rdma-initiator",
     "components/remote-lookup-rdma-responder",
+    "components/certus-transfer-endpoint",
     "apps/dynamic-loading-example",
     "apps/certus-server-yaml",
     "apps/remote-lookup-bench",
@@ -80,6 +81,16 @@ default-members = [
     "components/eviction-policy-optimized",
     "apps/eviction-replay-benchmark",
     "lib/shm-queue",
+    # certus-transfer-endpoint IS a default member, unlike
+    # remote-lookup-rdma-initiator/-responder, which are members but not default
+    # ones because they link rdma-core unconditionally. Here rdma-core sits behind
+    # the `rdma` feature and SPDK behind `spdk`, so the default build needs neither
+    # a NIC nor an NVMe device and exercises the connection-table, framing, credit
+    # and pin logic over an in-process seam. Constitution Principle VIII requires
+    # this. It is only possible because IDispatchMap and LookupResult are ungated
+    # in `interfaces` (they reference no SPDK type), so the dispatch-map receptacle
+    # does not drag in spdk-sys the way remote-lookup's does.
+    "components/certus-transfer-endpoint",
     # Workload generator: four CUDA-free crates, all default members, so
     # `cargo test --all` covers the simulation core, trace writing, wire framing
     # and the generator itself with no accelerator and no server.
@@ -148,6 +159,7 @@ eviction-policy-optimized = { path = "components/eviction-policy-optimized" }
 remote-lookup = { path = "components/remote-lookup" }
 remote-lookup-rdma-initiator = { path = "components/remote-lookup-rdma-initiator" }
 remote-lookup-rdma-responder = { path = "components/remote-lookup-rdma-responder" }
+certus-transfer-endpoint = { path = "components/certus-transfer-endpoint" }
 zyre = { path = "components/zyre" }
 shm-queue = { path = "lib/shm-queue" }
 shmq-dispatcher = { path = "lib/shmq-dispatcher" }

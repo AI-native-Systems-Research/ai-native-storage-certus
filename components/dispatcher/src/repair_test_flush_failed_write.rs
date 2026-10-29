@@ -359,6 +359,21 @@ impl IMemoryTier for PoolMt {
     fn telemetry_snapshot(&self) -> MemoryTierTelemetrySnapshot {
         MemoryTierTelemetrySnapshot::default()
     }
+    // A test double with no bounce reserve.
+    fn set_bounce_reserve(&self, _: usize) -> Result<(), interfaces::MemoryTierError> {
+        Ok(())
+    }
+    fn bounce_alloc(&self, _: u32) -> Result<interfaces::BounceBuffer, interfaces::BounceError> {
+        Err(interfaces::BounceError::NeverFits(
+            "no bounce reserve".into(),
+        ))
+    }
+    fn bounce_free(&self, _: interfaces::BounceBuffer) {
+        unreachable!("no buffer was ever handed out")
+    }
+    fn bounce_usage(&self) -> (usize, usize) {
+        (0, 0)
+    }
 }
 
 // --- NVMe block device: keeps written blocks, fails the writes of chosen LBAs ---
@@ -552,7 +567,7 @@ fn setup(failing_keys: &[CacheKey]) -> Fixture {
         block_dev_iface: Arc::clone(&ibd),
         _extent_mgr_component: placeholder,
         extent_mgr: iem,
-        channel_pool: ChannelPool::new(ibd),
+        channel_pool: Arc::new(ChannelPool::new(ibd)),
     });
     let d = query_interface!(c, IDispatcher).unwrap();
     d.initialize(DispatcherConfig {
