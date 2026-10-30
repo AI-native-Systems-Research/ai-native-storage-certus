@@ -14,13 +14,14 @@
 #               - the greedy output is token-identical to the cold run (KV came back
 #                 intact — the check that catches the in-process connector's corruption)
 #
-#   ./run.sh CPU_GB=2 && ./smoke.sh              # defaults sized for a 2G L1
+#   CPU_GB=2 ./run.sh && ./smoke.sh              # defaults sized for a 2G L1 (CPU_GB is an env var)
 #   PROMPTS=24 PROMPT_TOKENS=12000 ./smoke.sh    # for a bigger L1
 #
 # Sizing: Qwen2.5-7B KV is 56 KiB/token, so a 2G L1 holds ≈ 37K tokens. The
 # default 12 × 8000 = 96K tokens overflows it about 2.5×. If L1 still holds prompt
-# #0, step 4 hits in RAM, the read check fails, and the message says to raise
-# PROMPTS. Prompts are random token IDs (no tokenizer needed; exact lengths).
+# #0, step 4 hits in RAM, the read check fails, and the message gives the L1 size
+# (run.sh defaults to an 8G L1, which these defaults do not overflow). Prompts are
+# random token IDs (no tokenizer needed; exact lengths).
 set -euo pipefail
 
 PORT="${PORT:-8000}"
@@ -116,7 +117,8 @@ fails = []
 if hits < min_frac * ptok:
     fails.append(f"external hits {int(hits)} < {min_frac:.0%} of {ptok}")
 if rd < min_read_mb:
-    fails.append(f"only {rd:.0f} MiB read from {dev} (< {min_read_mb:.0f}) — served from L1? raise PROMPTS")
+    fails.append(f"only {rd:.0f} MiB read from {dev} (< {min_read_mb:.0f}) — served from L1? "
+                 f"L1 is {st['memory_total_bytes']/2**30:.0f} GiB: restart with CPU_GB=2 ./run.sh, or raise PROMPTS")
 if text_w != text_c:
     fails.append(f"output differs (KV corrupted?): cold {text_c!r} vs warm {text_w!r}")
 if fails:
