@@ -26,19 +26,18 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 
 OUTDIR="profiling"
-NVME=""
+PASS_ARGS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --nvme) NVME="$2"; shift 2 ;;
     -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+    --nvme|--tag|--fio-runtime|--total-bytes) PASS_ARGS+=("$1" "$2"); shift 2 ;;
+    --detect-only|--spdk|--fio-write|--skip-build) PASS_ARGS+=("$1"); shift ;;
     -*) echo "unknown option: $1" >&2; exit 2 ;;
     *) OUTDIR="$1"; shift ;;
   esac
 done
 
-# One container pass does it all. Pass --nvme through when given (run-in-container.sh
-# handles the host-side chmod of the named scratch device so fio can read it).
-ARGS=(--gpu "$OUTDIR")
-[[ -n "$NVME" ]] && ARGS+=(--nvme "$NVME")
+# One container pass does it all. All flags pass through to the profiler.
+ARGS=(--gpu "$OUTDIR" "${PASS_ARGS[@]}")
 
 exec "$HERE/run-in-container.sh" "${ARGS[@]}"
