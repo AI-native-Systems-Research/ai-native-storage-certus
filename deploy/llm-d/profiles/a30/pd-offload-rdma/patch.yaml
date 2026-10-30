@@ -34,6 +34,11 @@ spec:
             - "--disable-access-log-for-endpoints=/health,/metrics,/v1/models"
             - "--tensor-parallel-size=1"
             - "--gpu-memory-utilization=0.90"
+            # The GPU KV cache pd-certus-rdma gets from 0.90 on an A30: 37,184
+            # tokens of Qwen3-8B. Left to 0.90, this tier's extra non-torch GPU
+            # memory shrinks it to 29,936 tokens, which would give this arm a
+            # fifth less GPU cache; vLLM reports up to 5.86 GiB still fits.
+            - "--kv-cache-memory-bytes=5483003904"
             - "--max-model-len=24576"
             - "--no-async-scheduling"
             - "--disable-hybrid-kv-cache-manager"
@@ -109,6 +114,11 @@ spec:
             - "--disable-access-log-for-endpoints=/health,/metrics,/v1/models"
             - "--tensor-parallel-size=1"
             - "--gpu-memory-utilization=0.90"
+            # The GPU KV cache pd-certus-rdma gets from 0.90 on an A30: 37,184
+            # tokens of Qwen3-8B. Left to 0.90, this tier's extra non-torch GPU
+            # memory shrinks it to 29,936 tokens, which would give this arm a
+            # fifth less GPU cache; vLLM reports up to 5.86 GiB still fits.
+            - "--kv-cache-memory-bytes=5483003904"
             - "--max-model-len=24576"
             - "--no-async-scheduling"
             - "--disable-hybrid-kv-cache-manager"
