@@ -26,10 +26,10 @@
 #   --pipeline-depth N [4]  --direction D [both]  --hit-ratio F [0.75]
 #   --requests-per-step N [8]  --num-sessions N [32]  --lookup-order O [lookup-first]
 #   --gpu N [0]  --tp N [1]
-#   --layers N [32]          per-layer KV tensors each block is split into, on EVERY arm
-#                            (certus --pieces-per-block, cputier/lmcache --layers): vLLM's
-#                            default layer-outermost LBHNC layout. 1 = one contiguous
-#                            region per block, the BLHNC layout CertusConnector requests
+#   --layers N [1]           GPU tensors each block is split into, on EVERY arm (certus
+#                            --pieces-per-block, cputier/lmcache --layers). 1 = one
+#                            contiguous region per block, the BLHNC layout CertusConnector
+#                            requests; 32 = vLLM's default layer-outermost LBHNC
 #   --io-threads N [16]      disk-tier I/O threads on the file-based arms (cputier fs
 #                            read AND write threads; lmcache fs_native workers)
 #   --numa N [GPU's node]    NUMA node every arm's CPUs and host memory are bound to;
@@ -38,7 +38,7 @@
 #   --device-pci ADDR        certus NVMe device (repeatable) [the 4 vfio NVMe drives
 #                            0000:61:00.0..0000:64:00.0, same as benchmarks/vllm-serve], or
 #   --drive-count N          first N discovered NVMe drives (replaces the default list)
-#   --eviction-threshold F   certus-server --memory-tier-eviction-threshold [0.7]
+#   --eviction-threshold F   certus-server --memory-tier-eviction-threshold [0.9]
 #   --workers N              certus connector ThreadPoolExecutor workers [4]
 #   --channels N             certus-server mailbox channels [auto: max(16, tp*(1+2*workers))]
 #   --fs-tier DIR            cputier fs tier host dir [/raid0/cputier-bench-fs-tier]
@@ -69,8 +69,8 @@ cd "$REPO_ROOT"
 OUT="" MODE=all BS=16 NUM_BLOCKS=128 BLOCK_BYTES=2097152 MIN_DURATION=5 WARMUP=4
 WORKING_SET=512 PIPELINE_DEPTH=4 DIRECTION=both HIT_RATIO=0.75 REQS_PER_STEP=8
 NUM_SESSIONS=32 LOOKUP_ORDER=lookup-first GPU=0 TP=1 DRAM=4G DEVICE_PCI=()
-LAYERS=32 IO_THREADS=16 NUMA=""
-DRIVE_COUNT="" EVICT_THRESHOLD=0.7 WORKERS=4 CHANNELS="" FS_TIER=/raid0/cputier-bench-fs-tier
+LAYERS=1 IO_THREADS=16 NUMA=""
+DRIVE_COUNT="" EVICT_THRESHOLD=0.9 WORKERS=4 CHANNELS="" FS_TIER=/raid0/cputier-bench-fs-tier
 SERVER_BIN="" IMAGE=docker.io/vllm/vllm-openai:v0.30.0
 L2_DIR=/raid0/lmcache-bench-l2 LMCACHE_IMAGE=localhost/vllm-lmcache-bench:vllm0.30.0 CHUNK_SIZE=256
 RUN_CERTUS=1 RUN_CPUTIER=1 RUN_LMCACHE=1

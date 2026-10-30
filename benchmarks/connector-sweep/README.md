@@ -65,7 +65,7 @@ run_compare.sh --help                               # every option and its defau
 |---|---|
 | Workload | Every workload flag is given once and forwarded verbatim to all three benches |
 | Memory tier | `--dram` sets certus `--memory-tier-size`, cputier `--cpu-bytes` and the lmcache L1 |
-| KV layout | `--layers` (default 32, vLLM's default layer-outermost `LBHNC`) splits every block into the same number of GPU tensors on every arm: certus `--pieces-per-block`, cputier and lmcache `--layers`. `--layers 1` gives the contiguous `BLHNC` layout that `CertusConnector` requests |
+| KV layout | `--layers` (default 1, the contiguous `BLHNC` layout that `CertusConnector` requests) splits every block into the same number of GPU tensors on every arm: certus `--pieces-per-block`, cputier and lmcache `--layers`. `--layers 32` gives vLLM's default layer-outermost `LBHNC`, which roughly halves certus load throughput (each piece is copied separately) |
 | NUMA | Every arm's CPUs and memory are bound to the GPU's node (`--numa`, default the GPU's). certus runs under `numactl`. The podman arms inherit its memory policy and pin their CPUs with `taskset` inside the container, because rootless podman has no cpuset controller |
 | Disk hardware | certus: 4 SPDK drives (61–64). cputier fs tier and lmcache L2: `/raid0`, an XFS RAID0 over 4 other NVMe drives, `O_DIRECT` |
 | Disk I/O parallelism | `--io-threads` (default 16) sets cputier's fs read and write threads and lmcache's `fs_native` workers |
