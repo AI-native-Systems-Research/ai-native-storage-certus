@@ -36,7 +36,10 @@ deploy/llm-d/
         patch.yaml            certus/'s wiring, on both roles
       pd-certus-rdma/         pd-certus with NIXL GPU to GPU over RDMA
       pd-offload-rdma/        pd-certus-rdma with vLLM's CPU tier + P2P pull
-                              in place of certus: the comparison arm
+                              in place of certus
+      pd-tiered-rdma/         pd-certus-rdma with vLLM's CPU + fs tiers in
+                              place of certus: the comparison arm
+      agg-tiered/             agg with vLLM's CPU + fs tiers
 ```
 
 ## Profiles and the private site file
@@ -286,7 +289,8 @@ WITH_CERTUS=1 deploy/llm-d/install.sh   # + certus KV-cache offload
 PD=1 deploy/llm-d/install.sh            # prefill/decode disaggregation
 PD=1 WITH_CERTUS=1 deploy/llm-d/install.sh   # P/D, certus beside NIXL
 PD=1 WITH_CERTUS=1 RDMA=1 deploy/llm-d/install.sh   # ... NIXL over RDMA
-PD=1 RDMA=1 OFFLOAD=1 deploy/llm-d/install.sh       # ... vLLM's CPU tier instead
+PD=1 RDMA=1 OFFLOAD=1 deploy/llm-d/install.sh       # ... vLLM's CPU tier + P2P instead
+PD=1 RDMA=1 TIERED=1 deploy/llm-d/install.sh        # ... vLLM's CPU + fs tiers instead
 DRY_RUN=1 PD=1 deploy/llm-d/install.sh  # show the plan; change nothing
 UNINSTALL=1 deploy/llm-d/install.sh     # remove the instance; free its nodes
 ```
@@ -404,6 +408,24 @@ for P/D routing, not a tuned deployment.
   - Stop certus on the nodes first, so its polling threads do not share the
     CPUs: `deploy/k8s/certus-nodes.sh release true <node>...` (it waits for the
     pods to exit), and `claim true <node>...` afterwards.
+- **The generic tiered stack, for comparison (`PD=1 RDMA=1 TIERED=1`):
+  `profiles/a30/pd-tiered-rdma`.** The `pd-certus-rdma` layout with vLLM's
+  documented Multi-Tier Setup in certus's place: each engine runs
+  `MultiConnector[NixlConnector, OffloadingConnector(TieringOffloadingSpec)]`
+  with a CPU tier and a filesystem (`fs`) tier under it, and no P2P tier, so no
+  decode->prefill fetch. llm-d's own P/D router values route it.
+  - Held equal to `pd-certus-rdma`: image, engine flags, model and window, the
+    GPU KV cache (pinned to 37,184 tokens: the tier's non-torch GPU memory would
+    otherwise shrink it), NIXL GPU to GPU over RDMA, placement, decode storing
+    what it generates, and the memory tier per GPU (`cpu_bytes_to_use` is
+    certus's `--memory-tier-size` less its 32 MiB bounce reserve).
+  - The fs tier is XFS on a RAID0 of the GPU's NUMA-local drives, at
+    `/mnt/kv-tier/numa<N>`: `sudo deploy/llm-d/tiered-disks.sh fs` on each node
+    builds them, after `deploy/k8s/certus-nodes.sh release true <node>...`;
+    `tiered-disks.sh certus` and `claim true` hand the drives back. Both wipe the
+    drives.
+  - `TIERED=1` without `PD=1` is `profiles/a30/agg-tiered`: the same tiers under
+    aggregated serving, with llm-d's tiered-prefix-cache router values.
 - **Restarting the prefill pod: restart decode too.** NIXL's decode side caches
   the prefill agent. With the vLLM 0.30 image a restarted prefill can segfault
   decode, or leave it failing every handoff for up to an hour (llm-d's

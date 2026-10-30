@@ -67,13 +67,15 @@
 #                own CPU tier and P2P pull in place of certus -- the comparison
 #                arm. Same image and router values as pd-certus-rdma. Stop
 #                certus on the nodes first (default: 0)
-#   TIERED       1, with PD unset or 0 and WITH_CERTUS unset or 0:
-#                profiles/<PROFILE>/agg-tiered, aggregated serving with vLLM's
-#                native tiered prefix cache (CPU tier + filesystem tier) and
-#                llm-d's tiered-prefix-cache router -- the generic stack certus
-#                is compared against. The fs tier needs /mnt/kv-tier/numa<N>
-#                mounted on every node (deploy/llm-d/tiered-disks.sh), which
-#                means certus stopped there (default: 0)
+#   TIERED       1, with PD=1 RDMA=1 and WITH_CERTUS unset or 0:
+#                profiles/<PROFILE>/pd-tiered-rdma, pd-certus-rdma with vLLM's
+#                native tiered prefix cache (CPU tier + filesystem tier) in
+#                place of certus and llm-d's own P/D router values -- the
+#                generic stack certus is compared against. The fs tier needs
+#                /mnt/kv-tier/numa<N> mounted on every node
+#                (deploy/llm-d/tiered-disks.sh), so certus stopped there.
+#                With PD unset: profiles/<PROFILE>/agg-tiered, the same tiers
+#                under aggregated serving (default: 0)
 #   AGG_NODES    space-separated nodes for aggregated serving (default and
 #                WITH_CERTUS). Belongs in SITE_ENV. Optional if the nodes
 #                already carry this instance's label.
@@ -198,11 +200,17 @@ if [ "${WITH_CERTUS}" != "0" ]; then
     [ "${PD}" = "0" ] || need_overlay pd-certus
 fi
 if [ "${TIERED}" != "0" ]; then
-    if [ "${PD}" != "0" ] || [ "${WITH_CERTUS}" != "0" ] || [ "${RDMA}" != "0" ] || [ "${OFFLOAD}" != "0" ]; then
-        echo "ERROR: TIERED=1 is aggregated serving without certus: no PD, WITH_CERTUS, RDMA or OFFLOAD." >&2
+    if [ "${WITH_CERTUS}" != "0" ] || [ "${OFFLOAD}" != "0" ]; then
+        echo "ERROR: TIERED=1 replaces certus: no WITH_CERTUS or OFFLOAD." >&2
         exit 1
     fi
-    need_overlay agg-tiered
+    if [ "${PD}" != "0" ]; then
+        [ "${RDMA}" != "0" ] || { echo "ERROR: TIERED=1 PD=1 needs RDMA=1 (it is pd-certus-rdma's layout)." >&2; exit 1; }
+        need_overlay pd-tiered-rdma
+    else
+        [ "${RDMA}" = "0" ] || { echo "ERROR: RDMA=1 is P/D only; TIERED=1 without PD is aggregated." >&2; exit 1; }
+        need_overlay agg-tiered
+    fi
 fi
 if [ "${OFFLOAD}" != "0" ]; then
     if [ "${PD}" = "0" ] || [ "${RDMA}" = "0" ] || [ "${WITH_CERTUS}" != "0" ]; then
@@ -212,7 +220,7 @@ if [ "${OFFLOAD}" != "0" ]; then
     # Takes pd-certus's render service and router values, so both arms route alike.
     need_overlay pd-offload-rdma
     need_overlay pd-certus
-elif [ "${RDMA}" != "0" ]; then
+elif [ "${RDMA}" != "0" ] && [ "${TIERED}" = "0" ]; then
     if [ "${PD}" = "0" ] || [ "${WITH_CERTUS}" = "0" ]; then
         echo "ERROR: RDMA=1 needs PD=1 WITH_CERTUS=1 (it layers on pd-certus)," >&2
         echo "       or OFFLOAD=1 for vLLM's CPU tier in place of certus." >&2
@@ -475,14 +483,26 @@ elif [ "${OFFLOAD}" != "0" ]; then
     fi
     echo "[install] vLLM CPU tier + P2P pull ENABLED (no certus)"
 elif [ "${TIERED}" != "0" ]; then
-    # Consumes ../agg, so it sits beside it. The router values are llm-d's own
-    # for this guide, so the generic stack routes as it is meant to.
-    install_overlay "${VLLM_DIR}" agg-tiered
-    OVERLAY="${VLLM_DIR}/agg-tiered"
-    OVERLAY_SRC_DIR="${PROFILE_DIR}/agg-tiered"
+    if [ "${PD}" != "0" ]; then
+        # Consumes ../pd, so it sits beside it. No router-values.yaml: the
+        # guide's own P/D values route it, as llm-d ships them.
+        install_overlay "${PD_VLLM_DIR}" pd-tiered-rdma
+        OVERLAY="${PD_VLLM_DIR}/pd-tiered-rdma"
+        if ! kubectl get network-attachment-definitions -n "${NAMESPACE}" roce >/dev/null 2>&1 \
+                && [ "${DRY_RUN}" = "0" ]; then
+            echo "ERROR: no 'roce' network in ${NAMESPACE}; apply deploy/k8s/rdma-network/ first." >&2
+            exit 1
+        fi
+    else
+        # Consumes ../agg, so it sits beside it. The router values are llm-d's
+        # own for the tiered guide.
+        install_overlay "${VLLM_DIR}" agg-tiered
+        OVERLAY="${VLLM_DIR}/agg-tiered"
+        OVERLAY_SRC_DIR="${PROFILE_DIR}/agg-tiered"
+    fi
     if grep -q 'REGISTRY/REPO/' "${OVERLAY}/kustomization.yaml"; then
         if [ -z "${CERTUS_REGISTRY:-}" ] || [ -z "${CERTUS_REPO:-}" ]; then
-            echo "ERROR: profiles/${PROFILE}/agg-tiered pins the REGISTRY/REPO placeholder;" >&2
+            echo "ERROR: profiles/${PROFILE}/$(basename "${OVERLAY}") pins the REGISTRY/REPO placeholder;" >&2
             echo "       set CERTUS_REGISTRY and CERTUS_REPO in ${SITE_ENV} or the environment." >&2
             exit 1
         fi
