@@ -346,7 +346,12 @@ impl IMemoryTier for PoolMt {
 
 // --- GPU services: host memcpy, one (fake) device, working streams ---
 
-struct HostGpu;
+#[derive(Default)]
+struct HostGpu {
+    /// `stream_synchronize` fails (stands for a CUDA error surfacing at the
+    /// final pipe-stream sync).
+    fail_sync: bool,
+}
 
 fn host_copy(src: *const u8, dst: *mut u8, size: usize) -> Result<(), String> {
     // SAFETY: in this test every src/dst is a live host buffer of at least `size` bytes.
@@ -420,6 +425,9 @@ impl IGpuServices for HostGpu {
         Ok(())
     }
     fn stream_synchronize(&self, _s: GpuStream) -> Result<(), String> {
+        if self.fail_sync {
+            return Err("mock: injected stream_synchronize failure".into());
+        }
         Ok(())
     }
     fn dma_copy_to_device_async(
@@ -483,6 +491,12 @@ impl IGpuServices for HostGpu {
 
 // --- NVMe block device: fails the reads of chosen LBAs ---
 
+/// The byte a read returns at offset `i` of its buffer: position dependent,
+/// so a piece copied from the wrong slot offset is detected.
+fn disk_byte(i: usize) -> u8 {
+    (i % 251) as u8
+}
+
 #[derive(Default)]
 struct Disk {
     /// LBAs whose reads fail with an I/O error.
@@ -512,8 +526,8 @@ impl IBlockDevice for MockNvme {
                         } else {
                             // SAFETY: the buffer is at least one block long.
                             if let Ok(mut b) = buf.lock() {
-                                for byte in b.as_mut_slice().iter_mut() {
-                                    *byte = 0xAB;
+                                for (i, byte) in b.as_mut_slice().iter_mut().enumerate() {
+                                    *byte = disk_byte(i);
                                 }
                             }
                             Ok(())
@@ -652,6 +666,14 @@ struct Fixture {
 /// NVMe reads fail; `fail_promote` makes the dispatch map refuse the in-place
 /// promotion of that key.
 fn setup(failing_reads: &[CacheKey], fail_promote: Option<CacheKey>) -> Fixture {
+    setup_with_gpu(failing_reads, fail_promote, HostGpu::default())
+}
+
+fn setup_with_gpu(
+    failing_reads: &[CacheKey],
+    fail_promote: Option<CacheKey>,
+    gpu: HostGpu,
+) -> Fixture {
     let dm = Arc::new(MapDm {
         entries: Mutex::new(HashMap::new()),
         fail_promote: Mutex::new(fail_promote),
@@ -675,7 +697,7 @@ fn setup(failing_reads: &[CacheKey], fail_promote: Option<CacheKey>) -> Fixture 
         .connect(Arc::clone(&mt) as Arc<dyn IMemoryTier + Send + Sync>)
         .unwrap();
     c.gpu_services
-        .connect(Arc::new(HostGpu) as Arc<dyn IGpuServices + Send + Sync>)
+        .connect(Arc::new(gpu) as Arc<dyn IGpuServices + Send + Sync>)
         .unwrap();
     // A placeholder IUnknown for the drive's component handles; never queried.
     let placeholder: Arc<dyn component_core::IUnknown + Send + Sync> =
@@ -882,5 +904,83 @@ fn batch_lookup_succeeds_when_nothing_fails() {
         f.mt.contains(1),
         "the promoted key must be memory-tier resident"
     );
+    f.d.shutdown().unwrap();
+}
+
+/// Four 1 KiB GPU pieces of one 4 KiB block, each in its own buffer.
+const PIECE: u32 = BLOCK / 4;
+
+fn gpu_pieces() -> (Vec<Vec<u8>>, Vec<IpcHandle>) {
+    let mut bufs: Vec<Vec<u8>> = (0..4).map(|_| vec![0u8; PIECE as usize]).collect();
+    let handles = bufs
+        .iter_mut()
+        .map(|b| IpcHandle {
+            address: b.as_mut_ptr(),
+            size: PIECE,
+        })
+        .collect();
+    (bufs, handles)
+}
+
+/// FR-061: a multi-region cold block is delivered inside the scatter-gather
+/// call — every piece gets the bytes at its own slot offset — and the key ends
+/// memory-tier resident.
+#[test]
+fn batch_lookup_multi_region_cold_delivers_each_piece() {
+    let f = setup(&[], None);
+    seed_cold(&f, 1);
+    let (bufs, handles) = gpu_pieces();
+
+    let out = f.d.batch_lookup(&[(1, handles)]);
+
+    assert_eq!(out.len(), 1);
+    assert!(
+        out[0].result.is_ok(),
+        "multi-region cold batch must succeed, got {:?}",
+        out[0].result
+    );
+    for (l, buf) in bufs.iter().enumerate() {
+        let base = l * PIECE as usize;
+        for (i, &b) in buf.iter().enumerate() {
+            assert_eq!(
+                b,
+                disk_byte(base + i),
+                "piece {l} byte {i} must come from slot offset {}",
+                base + i
+            );
+        }
+    }
+    assert!(
+        f.mt.contains(1),
+        "the promoted key must be memory-tier resident"
+    );
+    assert_eq!(
+        f.dm.loc(1),
+        Some(Loc::Memory {
+            ptr: f.mt.get(1).unwrap().0 as usize,
+            size: BLOCK
+        }),
+        "the dispatch map must point at the promoted slot"
+    );
+    f.d.shutdown().unwrap();
+}
+
+/// FR-061: the final pipe-stream sync fails — the multi-region cold key must
+/// not be reported served or promoted; its slot is released.
+#[test]
+fn batch_lookup_multi_region_cold_fails_when_final_sync_fails() {
+    let f = setup_with_gpu(&[], None, HostGpu { fail_sync: true });
+    let off = seed_cold(&f, 1);
+    let (_bufs, handles) = gpu_pieces();
+
+    let out = f.d.batch_lookup(&[(1, handles)]);
+
+    assert_eq!(out.len(), 1);
+    assert!(
+        out[0].result.is_err(),
+        "a failed final sync must fail the key, got {:?}",
+        out[0].result
+    );
+    assert_released_and_ssd(&f, 1, off);
     f.d.shutdown().unwrap();
 }

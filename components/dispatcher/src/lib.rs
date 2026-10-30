@@ -455,74 +455,6 @@ const EVICT_SCAN_MAX: usize = 1024;
 /// The memory-tier component owns the memory; this wrapper must not free it.
 unsafe extern "C" fn noop_free(_ptr: *mut std::ffi::c_void) {}
 
-/// Most piece copies submitted in one `memcpy_batch_async` call. A block has at
-/// most a few dozen regions; a longer list is submitted in several batches on
-/// the same stream.
-const PIECE_BATCH_MAX: usize = 64;
-
-/// Stack-allocated list of one block's piece copies, submitted with one
-/// `memcpy_batch_async` instead of one async memcpy per piece. A list of one
-/// entry goes through `single` (the per-direction memcpy) unchanged.
-struct PieceBatch {
-    dsts: [*mut std::ffi::c_void; PIECE_BATCH_MAX],
-    srcs: [*const std::ffi::c_void; PIECE_BATCH_MAX],
-    sizes: [usize; PIECE_BATCH_MAX],
-    len: usize,
-}
-
-impl PieceBatch {
-    fn new() -> Self {
-        Self {
-            dsts: [std::ptr::null_mut(); PIECE_BATCH_MAX],
-            srcs: [std::ptr::null(); PIECE_BATCH_MAX],
-            sizes: [0; PIECE_BATCH_MAX],
-            len: 0,
-        }
-    }
-
-    /// Append one copy, first submitting the pending entries if the list is full.
-    fn push<F>(
-        &mut self,
-        gpu: &dyn IGpuServices,
-        stream: GpuStream,
-        single: &F,
-        dst: *mut std::ffi::c_void,
-        src: *const std::ffi::c_void,
-        size: usize,
-    ) -> Result<(), String>
-    where
-        F: Fn(*mut std::ffi::c_void, *const std::ffi::c_void, usize) -> Result<(), String>,
-    {
-        if self.len == PIECE_BATCH_MAX {
-            self.flush(gpu, stream, single)?;
-        }
-        self.dsts[self.len] = dst;
-        self.srcs[self.len] = src;
-        self.sizes[self.len] = size;
-        self.len += 1;
-        Ok(())
-    }
-
-    /// Submit the pending entries on `stream`: one batch call for two or more,
-    /// `single` for exactly one.
-    fn flush<F>(
-        &mut self,
-        gpu: &dyn IGpuServices,
-        stream: GpuStream,
-        single: &F,
-    ) -> Result<(), String>
-    where
-        F: Fn(*mut std::ffi::c_void, *const std::ffi::c_void, usize) -> Result<(), String>,
-    {
-        let n = std::mem::take(&mut self.len);
-        match n {
-            0 => Ok(()),
-            1 => single(self.dsts[0], self.srcs[0], self.sizes[0]),
-            _ => gpu.memcpy_batch_async(&self.dsts[..n], &self.srcs[..n], &self.sizes[..n], stream),
-        }
-    }
-}
-
 /// Per-GPU-device CUDA streams for the load/store DMA paths.
 ///
 /// A CUDA stream is bound to the device that was current when it was created,
@@ -1029,6 +961,7 @@ impl DispatcherComponent {
                 gpu_dst: ipc_handle.address as *mut std::ffi::c_void,
                 start_lba,
                 total_bytes,
+                regions: &[],
             };
             let results = unsafe {
                 pipeline::pipelined_multi_object_zero_copy(
@@ -1466,27 +1399,8 @@ impl DispatcherComponent {
             let map_err = |e: String| {
                 DispatcherError::IoError(format!("GPU DMA copy (memory-tier→device) failed: {e}"))
             };
-            let single = |dst, src, len| gpu.memcpy_h2d_async(src, dst, len, s);
-            let mut batch = PieceBatch::new();
-            let mut off: usize = 0;
-            for region in regions {
-                let copy_size = (region.size as usize).min((size as usize).saturating_sub(off));
-                if copy_size == 0 {
-                    break;
-                }
-                batch
-                    .push(
-                        &**gpu,
-                        s,
-                        &single,
-                        region.address as *mut std::ffi::c_void,
-                        (pointer as usize + off) as *const std::ffi::c_void,
-                        copy_size,
-                    )
-                    .map_err(map_err)?;
-                off += region.size as usize;
-            }
-            batch.flush(&**gpu, s, &single).map_err(map_err)?;
+            pipeline::queue_slot_to_regions(&**gpu, s, pointer, size as usize, regions)
+                .map_err(map_err)?;
             if synchronize {
                 gpu.stream_synchronize(s).map_err(|e| {
                     DispatcherError::IoError(format!("stream_synchronize failed: {e}"))
@@ -2792,13 +2706,13 @@ impl IDispatcher for DispatcherComponent {
                 let mut staged: Vec<usize> = Vec::new();
 
                 // Per-drive cold_prep: evict_and_insert per entry, build ColdReadJobs.
-                struct DriveJobSet {
+                struct DriveJobSet<'a> {
                     drive_idx: usize,
-                    jobs: Vec<pipeline::ColdReadJob>,
+                    jobs: Vec<pipeline::ColdReadJob<'a>>,
                     job_ci: Vec<usize>,
                     mem_ptrs: Vec<*mut u8>,
                 }
-                let mut drive_job_sets: Vec<DriveJobSet> = Vec::new();
+                let mut drive_job_sets: Vec<DriveJobSet<'_>> = Vec::new();
                 let mut prep_failures: Vec<(usize, Result<(), DispatcherError>)> = Vec::new();
 
                 for (drive_idx, entry_indices) in per_drive.iter().enumerate() {
@@ -2809,7 +2723,7 @@ impl IDispatcher for DispatcherComponent {
                     let drive = &drives[drive_idx];
                     let block_size = drive.block_dev_iface.block_size();
 
-                    let mut jobs: Vec<pipeline::ColdReadJob> =
+                    let mut jobs: Vec<pipeline::ColdReadJob<'_>> =
                         Vec::with_capacity(entry_indices.len());
                     let mut job_ci: Vec<usize> = Vec::with_capacity(entry_indices.len());
                     let mut mem_ptrs: Vec<*mut u8> = Vec::with_capacity(entry_indices.len());
@@ -2833,6 +2747,9 @@ impl IDispatcher for DispatcherComponent {
                                     gpu_dst,
                                     start_lba: decode_loc(entry.offset).1 / u64::from(block_size),
                                     total_bytes: ipc_size as usize,
+                                    // A multi-region block is scattered to its
+                                    // pieces inside the scatter-gather loop.
+                                    regions: &entry.regions,
                                 });
                                 job_ci.push(ci);
                                 mem_ptrs.push(mem_ptr);
@@ -2949,7 +2866,10 @@ impl IDispatcher for DispatcherComponent {
                                 )
                             };
 
-                            // Process results: promote and scatter.
+                            // Process results: promote. Every Ok job (single- or
+                            // multi-region) was already delivered to its GPU
+                            // destinations inside the call, behind its checked
+                            // final pipe-stream sync.
                             for (di, djs) in drive_job_sets.iter().enumerate() {
                                 for (job_idx, result) in scatter_results[di].iter().enumerate() {
                                     let ci = djs.job_ci[job_idx];
@@ -2963,21 +2883,7 @@ impl IDispatcher for DispatcherComponent {
                                             ) {
                                                 Ok(()) => {
                                                     self.tier_counters.record_promotion_to_memory();
-                                                    // The warm-stream sync here also waits
-                                                    // for the warm-hit copies still queued
-                                                    // on it: correct, and intentional.
-                                                    if entry.regions.len() > 1 {
-                                                        self.serve_memory_tier_to_gpu(
-                                                            &gpu,
-                                                            djs.mem_ptrs[job_idx],
-                                                            entry.total_size,
-                                                            &entry.regions,
-                                                            warm_raw,
-                                                            true,
-                                                        )
-                                                    } else {
-                                                        Ok(())
-                                                    }
+                                                    Ok(())
                                                 }
                                                 Err(e) => {
                                                     // The promotion did not land: release
@@ -3028,7 +2934,8 @@ impl IDispatcher for DispatcherComponent {
 
         // Deferred batched stream sync: wait for all submitted warm copies at once,
         // now that the cold scatter-gather has run alongside them. Sync the same
-        // per-device warm stream the fast path issued them on.
+        // per-device warm stream the fast path issued them on. Cold piece copies
+        // are not on it: they go on the pipe streams, synced inside the call.
         if !deferred_touch_keys.is_empty() && warm_raw != 0 {
             let s = GpuStream(warm_raw as *mut std::ffi::c_void);
             if let Err(e) = gpu.stream_synchronize(s) {
@@ -3840,7 +3747,7 @@ impl IDispatcher for DispatcherComponent {
             }
         } else {
             let single = |dst, src, len| gpu.memcpy_d2h_async(src, dst, len, effective_stream);
-            let mut batch = PieceBatch::new();
+            let mut batch = pipeline::PieceBatch::new();
             for region in regions {
                 batch
                     .push(

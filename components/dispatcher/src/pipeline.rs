@@ -47,7 +47,7 @@ use std::sync::{Arc, Mutex};
 
 use interfaces::{
     ClientChannels, Command, Completion, DispatcherError, DmaBuffer, GpuStream, IBlockDevice,
-    IGpuServices,
+    IGpuServices, IpcHandle,
 };
 
 use crate::io_segmenter;
@@ -59,6 +59,107 @@ pub const PIPELINE_RING_SIZE: usize = 32;
 
 /// Timeout for async NVMe read operations (ms).
 const READ_TIMEOUT_MS: u64 = 5000;
+
+/// Most piece copies submitted in one `memcpy_batch_async` call. A block has at
+/// most a few dozen regions; a longer list is submitted in several batches on
+/// the same stream.
+const PIECE_BATCH_MAX: usize = 64;
+
+/// Stack-allocated list of one block's piece copies, submitted with one
+/// `memcpy_batch_async` instead of one async memcpy per piece. A list of one
+/// entry goes through `single` (the per-direction memcpy) unchanged.
+pub(crate) struct PieceBatch {
+    dsts: [*mut std::ffi::c_void; PIECE_BATCH_MAX],
+    srcs: [*const std::ffi::c_void; PIECE_BATCH_MAX],
+    sizes: [usize; PIECE_BATCH_MAX],
+    len: usize,
+}
+
+impl PieceBatch {
+    pub(crate) fn new() -> Self {
+        Self {
+            dsts: [std::ptr::null_mut(); PIECE_BATCH_MAX],
+            srcs: [std::ptr::null(); PIECE_BATCH_MAX],
+            sizes: [0; PIECE_BATCH_MAX],
+            len: 0,
+        }
+    }
+
+    /// Append one copy, first submitting the pending entries if the list is full.
+    pub(crate) fn push<F>(
+        &mut self,
+        gpu: &dyn IGpuServices,
+        stream: GpuStream,
+        single: &F,
+        dst: *mut std::ffi::c_void,
+        src: *const std::ffi::c_void,
+        size: usize,
+    ) -> Result<(), String>
+    where
+        F: Fn(*mut std::ffi::c_void, *const std::ffi::c_void, usize) -> Result<(), String>,
+    {
+        if self.len == PIECE_BATCH_MAX {
+            self.flush(gpu, stream, single)?;
+        }
+        self.dsts[self.len] = dst;
+        self.srcs[self.len] = src;
+        self.sizes[self.len] = size;
+        self.len += 1;
+        Ok(())
+    }
+
+    /// Submit the pending entries on `stream`: one batch call for two or more,
+    /// `single` for exactly one.
+    pub(crate) fn flush<F>(
+        &mut self,
+        gpu: &dyn IGpuServices,
+        stream: GpuStream,
+        single: &F,
+    ) -> Result<(), String>
+    where
+        F: Fn(*mut std::ffi::c_void, *const std::ffi::c_void, usize) -> Result<(), String>,
+    {
+        let n = std::mem::take(&mut self.len);
+        match n {
+            0 => Ok(()),
+            1 => single(self.dsts[0], self.srcs[0], self.sizes[0]),
+            _ => gpu.memcpy_batch_async(&self.dsts[..n], &self.srcs[..n], &self.sizes[..n], stream),
+        }
+    }
+}
+
+/// Queue the H2D copies that scatter one contiguous memory-tier slot to its
+/// GPU regions on `stream` (no sync): region L reads from
+/// `slot + sum(sizes[0..L])`, each copy clamped to `slot_size` and the list
+/// stopping at the first zero-size copy. Shared by the warm serve and the
+/// in-loop multi-region delivery of [`scatter_gather_multi_drive_zero_copy`].
+pub(crate) fn queue_slot_to_regions(
+    gpu: &dyn IGpuServices,
+    stream: GpuStream,
+    slot: *const u8,
+    slot_size: usize,
+    regions: &[IpcHandle],
+) -> Result<(), String> {
+    let single = |dst, src, len| gpu.memcpy_h2d_async(src, dst, len, stream);
+    let mut batch = PieceBatch::new();
+    let mut off: usize = 0;
+    for region in regions {
+        let copy_size = (region.size as usize).min(slot_size.saturating_sub(off));
+        if copy_size == 0 {
+            break;
+        }
+        batch.push(
+            gpu,
+            stream,
+            &single,
+            region.address as *mut std::ffi::c_void,
+            (slot as usize + off) as *const std::ffi::c_void,
+            copy_size,
+        )?;
+        off += region.size as usize;
+    }
+    batch.flush(gpu, stream, &single)
+}
 
 /// Fixed pool of pre-registered DMA buffers for staging cold loads when the
 /// memory tier is saturated (all slots pinned by in-flight loads).
@@ -460,24 +561,31 @@ pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
 }
 
 /// Describes a single object to be read from SSD into memory-tier and GPU.
-pub struct ColdReadJob {
+pub struct ColdReadJob<'a> {
     pub mem_ptr: *mut u8,
     pub gpu_dst: *mut std::ffi::c_void,
     pub start_lba: u64,
     pub total_bytes: usize,
+    /// The block's GPU piece destinations in region order. With more than one
+    /// region, [`scatter_gather_multi_drive_zero_copy`] scatters the slot to
+    /// them in its poll loop; empty (or one region) means no multi-region
+    /// delivery. [`pipelined_multi_object_zero_copy`] ignores it.
+    pub regions: &'a [IpcHandle],
 }
 
-impl std::fmt::Debug for ColdReadJob {
+impl std::fmt::Debug for ColdReadJob<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ColdReadJob")
             .field("start_lba", &self.start_lba)
             .field("total_bytes", &self.total_bytes)
+            .field("regions", &self.regions.len())
             .finish_non_exhaustive()
     }
 }
 
-// SAFETY: pointers are valid for the duration of the pipeline call.
-unsafe impl Send for ColdReadJob {}
+// SAFETY: pointers (including the region addresses) are valid for the duration
+// of the pipeline call; region addresses are only passed to CUDA copy APIs.
+unsafe impl Send for ColdReadJob<'_> {}
 
 /// Multi-object pipelined SSD→GPU zero-copy transfer.
 ///
@@ -494,7 +602,7 @@ pub unsafe fn pipelined_multi_object_zero_copy(
     gpu: &dyn IGpuServices,
     streams: &[GpuStream; 2],
     channels: &ClientChannels,
-    jobs: &[ColdReadJob],
+    jobs: &[ColdReadJob<'_>],
     chunk_size: usize,
     max_queue_depth: usize,
     metrics: Option<&dyn crate::metrics::PipelineMetrics>,
@@ -781,7 +889,7 @@ pub unsafe fn pipelined_multi_object_zero_copy(
 pub struct DriveWork<'a> {
     pub channels: &'a ClientChannels,
     pub drive: &'a dyn IBlockDevice,
-    pub jobs: &'a [ColdReadJob],
+    pub jobs: &'a [ColdReadJob<'a>],
 }
 
 impl std::fmt::Debug for DriveWork<'_> {
@@ -925,11 +1033,12 @@ mod sg_spans {
                 .collect();
             let line = format!(
                 "{{\"num_drives\":{},\"loop_end_us\":{},\"final_sync_end_us\":{},\
-                 \"first_h2d_issue_us\":{},\"last_h2d_issue_us\":{},\"h2d_last400_count\":{},\
-                 \"drives\":[{}]}}\n",
+                 \"h2d_issues\":{},\"first_h2d_issue_us\":{},\"last_h2d_issue_us\":{},\
+                 \"h2d_last400_count\":{},\"drives\":[{}]}}\n",
                 self.drives.len(),
                 self.loop_end_us,
                 final_sync_end_us,
+                self.h2d_issue_us.len(),
                 opt(self.h2d_issue_us.first().copied()),
                 opt(self.h2d_issue_us.last().copied()),
                 h2d_last400_count,
@@ -951,12 +1060,16 @@ mod sg_spans {
 /// Fans out NVMe reads to all drives simultaneously and fans in completions
 /// via a multiplexed poll loop on the caller thread. When an object's last
 /// NVMe segment completes, the fused H2D DMA is issued immediately —
-/// preserving the NVMe/H2D overlap that is load-bearing.
+/// preserving the NVMe/H2D overlap that is load-bearing. A multi-region job
+/// (more than one entry in `regions`) instead gets one batch of piece copies
+/// (region L from `slot + sum(sizes[0..L])`) at that point.
 ///
 /// Completions are reaped continuously: H2Ds queue on the pipe streams
 /// without any intermediate host sync, and one final dual sync covers the
 /// whole batch before returning. This is safe because each object's H2D
 /// source is its own memory-tier slot, so there is no buffer reuse to guard.
+/// The final sync is checked: if it fails, every object that issued an H2D
+/// is reported `Err`.
 ///
 /// Returns `Vec<Vec<Result<(), DispatcherError>>>` indexed by drive, then
 /// by job index within that drive.
@@ -1096,6 +1209,12 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
         .map(|dw| vec![false; dw.jobs.len()])
         .collect();
 
+    // Objects whose H2D was issued in the loop; the final sync gates them.
+    let mut h2d_issued: Vec<Vec<bool>> = drive_works
+        .iter()
+        .map(|dw| vec![false; dw.jobs.len()])
+        .collect();
+
     let mut stream_idx: usize = 0;
 
     // Tag encoding: (drive_idx << 32) | (obj_idx * max_segs + seg_idx)
@@ -1230,22 +1349,34 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
                     }
                 }
 
-                // Object fully read: issue ONE coalesced H2D for the entire slot.
+                // Object fully read: issue ONE coalesced H2D for the entire slot,
+                // or, for a multi-region object, ONE batch of its piece copies.
                 if obj_idx < dw.jobs.len()
                     && obj_remaining[d][obj_idx] == 0
                     && !obj_failed[d][obj_idx]
-                    && !dw.jobs[obj_idx].gpu_dst.is_null()
+                    && (dw.jobs[obj_idx].regions.len() > 1 || !dw.jobs[obj_idx].gpu_dst.is_null())
                 {
                     let tg = std::time::Instant::now();
                     let job = &dw.jobs[obj_idx];
                     let current_stream = streams[stream_idx % 2];
 
-                    let dma_result = gpu.memcpy_h2d_async(
-                        job.mem_ptr as *const std::ffi::c_void,
-                        job.gpu_dst,
-                        job.total_bytes,
-                        current_stream,
-                    );
+                    let dma_result = if job.regions.len() > 1 {
+                        queue_slot_to_regions(
+                            gpu,
+                            current_stream,
+                            job.mem_ptr,
+                            job.total_bytes,
+                            job.regions,
+                        )
+                    } else {
+                        gpu.memcpy_h2d_async(
+                            job.mem_ptr as *const std::ffi::c_void,
+                            job.gpu_dst,
+                            job.total_bytes,
+                            current_stream,
+                        )
+                    };
+                    h2d_issued[d][obj_idx] = true;
                     if let Err(e) = dma_result {
                         all_results[d][obj_idx] = Err(DispatcherError::IoError(format!(
                             "GPU H2D drive={d} obj={obj_idx}: {e}"
@@ -1335,12 +1466,24 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
         }
     }
 
-    // Final stream sync.
+    // Final stream sync: the delivery barrier for every H2D issued above. Both
+    // syncs always run; if either fails, no issued object is reported Ok.
     let ts_final = std::time::Instant::now();
-    let _ = gpu.stream_synchronize(streams[0]);
-    let _ = gpu.stream_synchronize(streams[1]);
+    let sync0 = gpu.stream_synchronize(streams[0]);
+    let sync1 = gpu.stream_synchronize(streams[1]);
     let t_final_sync_ns = ts_final.elapsed().as_nanos() as u64;
     t_sync_ns += t_final_sync_ns;
+    if let Some(e) = sync0.err().or(sync1.err()) {
+        for (results, issued) in all_results.iter_mut().zip(&h2d_issued) {
+            for (r, &was_issued) in results.iter_mut().zip(issued) {
+                if was_issued && r.is_ok() {
+                    *r = Err(DispatcherError::IoError(format!(
+                        "final pipe stream_synchronize failed: {e}"
+                    )));
+                }
+            }
+        }
+    }
     if let Some(sp) = spans {
         sp.finish();
     }
